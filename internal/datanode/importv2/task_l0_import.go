@@ -143,7 +143,7 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 		mlog.Any("files", t.req.GetFiles()),
 		mlog.FieldSchema(t.GetSchema()),
 	)...)
-	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
+	t.manager.Update(t, UpdateState(datapb.ImportTaskStateV2_InProgress))
 
 	req := t.req
 
@@ -155,7 +155,7 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 					reason = fmt.Sprintf("error: %v, file: %s", err, t.req.GetFiles()[0].String())
 				}
 				mlog.Warn(t.ctx, "l0 import task execute failed", WrapLogFields(t, mlog.Any("file", t.req.GetFiles()), mlog.String("err", reason))...)
-				t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
+				t.manager.Update(t, UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			}
 		}()
 
@@ -230,7 +230,7 @@ func (t *L0ImportTask) importL0(reader binlog.L0Reader) error {
 		if err != nil {
 			return err
 		}
-		t.manager.Update(t.GetTaskID(), UpdateSegmentInfo(segmentInfo))
+		t.manager.Update(t, UpdateSegmentInfo(segmentInfo))
 		mlog.Info(t.ctx, "sync l0 data done", WrapLogFields(t, mlog.Any("segmentInfo", segmentInfo))...)
 	}
 	return nil

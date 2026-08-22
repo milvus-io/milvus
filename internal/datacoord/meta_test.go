@@ -6915,10 +6915,17 @@ func TestMeta_CleanPartitionStatsInfo(t *testing.T) {
 		SegmentIDs:    []int64{1000},
 	}
 
+	// No MultiRemove expectation, deliberately: CleanPartitionStatsInfo is on the
+	// compaction cleanup path and must only write metadata. Object removal belongs
+	// to garbage collection (recycleUnusedPartitionStatsFiles /
+	// recycleUnusedAnalyzeFiles), because cleanup is what returns a task's input
+	// segments and lifts the channel exclusion -- blocking either on object
+	// storage lets one bucket outage stall compaction on that channel for good.
+	// The mock fails the test on any unexpected call, so this absence is the
+	// assertion.
 	newTestChunkManager := func(t *testing.T) *mocks.ChunkManager {
 		cm := mocks.NewChunkManager(t)
 		cm.EXPECT().RootPath().Return("root").Maybe()
-		cm.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(nil).Once()
 		return cm
 	}
 

@@ -49,3 +49,11 @@ func TestFromCompactionState(t *testing.T) {
 		})
 	}
 }
+
+// A retrying compaction task is over as far as the scheduler is concerned: the
+// inspector owns it, and the rebuild arrives as a separate task with its own
+// ID. Reporting Retry would push this one back through the pending queue for a
+// round it can no longer use, and leave its backoff entry behind.
+func TestRetryingCompactionStateLeavesTheScheduler(t *testing.T) {
+	assert.Equal(t, Failed, FromCompactionState(datapb.CompactionTaskState_retrying))
+}

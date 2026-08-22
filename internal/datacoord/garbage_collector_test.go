@@ -2674,6 +2674,37 @@ func setupDroppedSegmentWithIndexForGC(t *testing.T) (*meta, *SegmentInfo, *mode
 	return m, segment, segIdx, binlogPath
 }
 
+// A StorageV3 segment abandoned before it published anything carries an empty
+// ManifestPath. Treating that as a parse failure stops GC before DropSegment,
+// and the surviving meta entry then makes the binlog orphan scan keep every
+// object under the segment too -- both leak permanently. This is the ordinary
+// shape of an import or restore target dropped mid-flight, so it must retire
+// like any other dropped segment.
+func TestGarbageCollector_recycleDroppedSegments_V3WithoutManifestIsRetired(t *testing.T) {
+	ctx := context.Background()
+	m, segment, _, _ := setupDroppedSegmentWithIndexForGC(t)
+
+	require.NoError(t, m.UpdateSegmentsInfo(ctx,
+		UpdateStorageVersionOperator(segment.GetID(), storage.StorageV3)))
+	require.Equal(t, "", m.GetSegment(ctx, segment.GetID()).GetManifestPath())
+
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("root").Maybe()
+	cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Maybe()
+	// No RemoveWithPrefix expectation: there is no manifest base path to remove,
+	// and asking for one with an empty path would be the bug this guards.
+
+	gc := newGarbageCollector(m, newMockHandler(), GcOption{
+		cli:           cm,
+		dropTolerance: 0,
+	})
+
+	gc.recycleDroppedSegments(ctx, nil)
+
+	assert.Nil(t, m.GetSegment(ctx, segment.GetID()),
+		"a V3 segment with no manifest must still retire, or its objects leak with it")
+}
+
 func TestGarbageCollector_recycleDroppedSegments_RecyclesSegmentIndexMeta(t *testing.T) {
 	ctx := context.Background()
 	m, segment, segIdx, binlogPath := setupDroppedSegmentWithIndexForGC(t)
@@ -4869,4 +4900,138 @@ func TestGarbageCollector_removeDroppedSegmentFiles_JSONStatsV2(t *testing.T) {
 	defer mu.Unlock()
 	assert.Contains(t, removed, expectedJSON)
 	assert.Contains(t, removed, indexFile)
+}
+
+// The only reclaim path clustering partition-stats objects have, and the one
+// place in this PR that deletes data. Every durable owner must hold an object
+// back: an active clustering attempt, a partition-stats record, and a segment
+// carrying the version it was clustered into. The owner snapshot is taken
+// after the object walk so a reference published while the listing is in
+// progress is also honored.
+func TestGarbageCollector_recycleUnusedPartitionStatsFiles(t *testing.T) {
+	const collectionID, partitionID = int64(100), int64(200)
+	vchannel := "by-dev-rootcoord-dml_0_100v0"
+
+	segments := NewSegmentsInfo()
+	segments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:                    1,
+		CollectionID:          collectionID,
+		PartitionID:           partitionID,
+		InsertChannel:         vchannel,
+		PartitionStatsVersion: 20,
+	}})
+	m := &meta{
+		segments: segments,
+		compactionTaskMeta: &compactionTaskMeta{
+			compactionTasks: map[int64]map[int64]*datapb.CompactionTask{
+				1: {
+					30: {
+						PlanID:       30,
+						CollectionID: collectionID,
+						PartitionID:  partitionID,
+						Channel:      vchannel,
+						Type:         datapb.CompactionType_ClusteringCompaction,
+						State:        datapb.CompactionTaskState_executing,
+					},
+					50: {
+						PlanID:       50,
+						CollectionID: collectionID,
+						PartitionID:  partitionID,
+						Channel:      vchannel,
+						Type:         datapb.CompactionType_ClusteringCompaction,
+						State:        datapb.CompactionTaskState_cleaned,
+					},
+				},
+			},
+		},
+		partitionStatsMeta: &partitionStatsMeta{
+			partitionStatsInfos: map[string]map[int64]*partitionStatsInfo{
+				vchannel: {
+					partitionID: {infos: map[int64]*datapb.PartitionStatsInfo{
+						10: {CollectionID: collectionID, PartitionID: partitionID, VChannel: vchannel, Version: 10},
+					}},
+				},
+			},
+		},
+	}
+
+	prefix := "root/part_stats/"
+	object := func(version int64, age time.Duration) *storage.ChunkObjectInfo {
+		return &storage.ChunkObjectInfo{
+			FilePath:   fmt.Sprintf("%s%d/%d/%s/%d", prefix, collectionID, partitionID, vchannel, version),
+			ModifyTime: time.Now().Add(-age),
+		}
+	}
+
+	removed := make([]string, 0)
+	var removedMu sync.Mutex
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("root")
+	cm.EXPECT().WalkWithPrefix(mock.Anything, prefix, true, mock.Anything).RunAndReturn(
+		func(ctx context.Context, s string, b bool, walk storage.ChunkObjectWalkFunc) error {
+			walk(object(10, time.Hour))    // referenced by a partition stats record
+			walk(object(20, time.Hour))    // referenced by a segment's PartitionStatsVersion
+			walk(object(30, time.Hour))    // owned by an active clustering attempt
+			walk(object(40, time.Second))  // unreferenced but too fresh: may still be being written
+			walk(object(50, time.Hour))    // a cleaned task is no longer an owner
+			walk(object(60, time.Hour))    // its owner is published while the walk is in progress
+			walk(object(70, time.Hour))    // referenced by nothing -- the abandoned attempt
+			walk(&storage.ChunkObjectInfo{ // unparseable: never guessed at
+				FilePath:   prefix + "100/200/" + vchannel,
+				ModifyTime: time.Now().Add(-time.Hour),
+			})
+
+			// The owner snapshot must happen after WalkWithPrefix returns. This
+			// models the successful task handoff that publishes downstream
+			// ownership while a slow object listing is still in progress.
+			m.partitionStatsMeta.Lock()
+			m.partitionStatsMeta.partitionStatsInfos[vchannel][partitionID].infos[60] = &datapb.PartitionStatsInfo{
+				CollectionID: collectionID,
+				PartitionID:  partitionID,
+				VChannel:     vchannel,
+				Version:      60,
+			}
+			m.partitionStatsMeta.Unlock()
+			return nil
+		})
+	cm.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) error {
+		removedMu.Lock()
+		defer removedMu.Unlock()
+		removed = append(removed, s)
+		return nil
+	}).Maybe()
+
+	gc := newGarbageCollector(m, nil, GcOption{cli: cm, missingTolerance: time.Minute})
+	defer gc.option.removeObjectPool.Release()
+	gc.recycleUnusedPartitionStatsFiles(context.TODO(), nil)
+	gc.option.removeObjectPool.Release()
+
+	assert.ElementsMatch(t, []string{object(50, 0).FilePath, object(70, 0).FilePath}, removed,
+		"only old versions with no durable owner may be removed")
+}
+
+// This parser decides what gets deleted, so anything that is not exactly the
+// documented shape has to be an error rather than a best guess.
+func TestParsePartitionStatsPath(t *testing.T) {
+	prefix := "root/part_stats/"
+	collectionID, partitionID, vchannel, version, err := parsePartitionStatsPath(prefix, prefix+"1/2/ch-1/3")
+	assert.NoError(t, err)
+	assert.EqualValues(t, 1, collectionID)
+	assert.EqualValues(t, 2, partitionID)
+	assert.Equal(t, "ch-1", vchannel)
+	assert.EqualValues(t, 3, version)
+
+	for name, filePath := range map[string]string{
+		"outside the prefix":      "other/1/2/ch-1/3",
+		"too few components":      prefix + "1/2/ch-1",
+		"too many components":     prefix + "1/2/ch-1/3/4",
+		"collection not a number": prefix + "a/2/ch-1/3",
+		"partition not a number":  prefix + "1/b/ch-1/3",
+		"version not a number":    prefix + "1/2/ch-1/c",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, _, _, err := parsePartitionStatsPath(prefix, filePath)
+			assert.Error(t, err)
+		})
+	}
 }

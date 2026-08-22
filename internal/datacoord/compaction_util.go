@@ -127,18 +127,17 @@ func isMixCompactionSelectable(segment *SegmentInfo) bool {
 		(segment.GetIsSorted() || segment.GetIsSortedByNamespace())
 }
 
-// isCompactionTaskFinished returns true if the task has reached a terminal state
-// (timeout, completed, cleaned, or unknown) and requires no further processing.
+// isCompactionTaskFinished returns true if the task has stopped executing and
+// requires no further processing -- every terminal state, plus unknown.
+//
+// It defers to isTerminalState rather than listing states itself:
+// the reload path uses this to decide whether a record still needs fixing up,
+// and a terminal state missing from the list would be rewritten, discarding
+// whatever it had already settled on. That is how retrying would lose the
+// rebuild it is owed.
 func isCompactionTaskFinished(t *datapb.CompactionTask) bool {
-	switch t.GetState() {
-	case datapb.CompactionTaskState_timeout,
-		datapb.CompactionTaskState_completed,
-		datapb.CompactionTaskState_cleaned,
-		datapb.CompactionTaskState_unknown:
-		return true
-	default:
-		return false
-	}
+	return isTerminalState(t.GetState()) ||
+		t.GetState() == datapb.CompactionTaskState_unknown
 }
 
 // isCompactionTaskCleaned returns true if the task has been cleaned

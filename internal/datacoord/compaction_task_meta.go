@@ -112,6 +112,23 @@ func (csm *compactionTaskMeta) reloadFromKV() error {
 	return nil
 }
 
+// Range calls fn for every persisted compaction task under the read lock,
+// stopping early once fn returns false. Unlike GetCompactionTasks it hands out
+// the live records instead of cloning every one of them, which is what makes it
+// usable on a per-round path: fn must therefore neither retain nor mutate a
+// record, and must clone the few it keeps.
+func (csm *compactionTaskMeta) Range(fn func(task *datapb.CompactionTask) bool) {
+	csm.RLock()
+	defer csm.RUnlock()
+	for _, tasks := range csm.compactionTasks {
+		for _, task := range tasks {
+			if !fn(task) {
+				return
+			}
+		}
+	}
+}
+
 // GetCompactionTasks returns clustering compaction tasks from local cache
 func (csm *compactionTaskMeta) GetCompactionTasks() map[int64][]*datapb.CompactionTask {
 	csm.RLock()

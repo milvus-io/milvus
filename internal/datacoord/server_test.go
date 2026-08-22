@@ -1588,8 +1588,6 @@ func TestGetRecoveryInfo(t *testing.T) {
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
-		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
-		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
 
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
 		assert.NoError(t, err)
@@ -1809,21 +1807,27 @@ func TestGetCompactionState(t *testing.T) {
 				{State: datapb.CompactionTaskState_completed},
 				{State: datapb.CompactionTaskState_completed},
 				{State: datapb.CompactionTaskState_failed, PlanID: 1},
+				// timeout predates the retrying state. Nothing writes it any
+				// more, and a record that carries it is settled -- same as the
+				// old code read it.
 				{State: datapb.CompactionTaskState_timeout, PlanID: 2},
 				{State: datapb.CompactionTaskState_timeout},
-				{State: datapb.CompactionTaskState_timeout},
-				{State: datapb.CompactionTaskState_timeout},
+				// retrying is what keeps a trigger running: the attempt is over
+				// but cleanup still owes it a rebuild under the same trigger ID.
+				{State: datapb.CompactionTaskState_retrying, PlanID: 3},
+				{State: datapb.CompactionTaskState_retrying},
 			})
-		mockHandler := newCompactionInspector(mockMeta, nil, nil, nil, nil, newMockVersionManager())
+		mockHandler := newCompactionInspector(context.Background(), mockMeta, nil, nil, nil, nil, newMockVersionManager())
 		svr.compactionInspector = mockHandler
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{CompactionID: 1})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, commonpb.CompactionState_Executing, resp.GetState())
-		assert.EqualValues(t, 3, resp.GetExecutingPlanNo())
+		assert.EqualValues(t, 5, resp.GetExecutingPlanNo(),
+			"3 executing plus the 2 attempts still owed a rebuild")
 		assert.EqualValues(t, 2, resp.GetCompletedPlanNo())
 		assert.EqualValues(t, 1, resp.GetFailedPlanNo())
-		assert.EqualValues(t, 4, resp.GetTimeoutPlanNo())
+		assert.EqualValues(t, 2, resp.GetTimeoutPlanNo())
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
@@ -1857,7 +1861,7 @@ func TestManualCompaction(t *testing.T) {
 		svr.compactionTriggerManager = mockTriggerManager
 
 		mockHandler := NewMockCompactionInspector(t)
-		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
+		mockHandler.EXPECT().getCompactionTasksNumByTriggerID(mock.Anything).Return(1)
 		svr.compactionInspector = mockHandler
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
@@ -1884,7 +1888,7 @@ func TestManualCompaction(t *testing.T) {
 		})).Return(1, nil)
 
 		mockHandler := NewMockCompactionInspector(t)
-		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
+		mockHandler.EXPECT().getCompactionTasksNumByTriggerID(mock.Anything).Return(1)
 		svr.compactionInspector = mockHandler
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,

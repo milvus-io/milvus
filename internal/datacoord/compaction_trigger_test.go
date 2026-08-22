@@ -57,7 +57,7 @@ func (h *spyCompactionInspector) getCompactionTasksNum(filters ...compactionTask
 	return 0
 }
 
-func (h *spyCompactionInspector) getCompactionTasksNumBySignalID(signalID int64) int {
+func (h *spyCompactionInspector) getCompactionTasksNumByTriggerID(signalID int64) int {
 	return 0
 }
 
@@ -71,7 +71,7 @@ func (h *spyCompactionInspector) removeTasksByChannel(channel string) {}
 
 // enqueueCompaction start to execute plan and return immediately
 func (h *spyCompactionInspector) enqueueCompaction(task *datapb.CompactionTask) error {
-	t := newMixCompactionTask(task, nil, h.meta, newMockVersionManager())
+	t := newMixCompactionTask(context.TODO(), task, nil, h.meta, newMockVersionManager())
 	alloc := newMock0Allocator(h.t)
 	t.allocator = alloc
 	plan, err := t.BuildCompactionRequest()

@@ -46,7 +46,7 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 			Binlogs:       binLogs,
 		}}
 	}).Times(2)
-	task := newMixCompactionTask(&datapb.CompactionTask{
+	task := newMixCompactionTask(context.TODO(), &datapb.CompactionTask{
 		PlanID:         1,
 		TriggerID:      19530,
 		CollectionID:   1,
@@ -107,7 +107,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixFileResources() {
 				mockMeta.EXPECT().GetFileResources(mock.Anything, mock.Anything).Return(expectedResources, nil).Once()
 			}
 
-			task := newMixCompactionTask(&datapb.CompactionTask{
+			task := newMixCompactionTask(context.TODO(), &datapb.CompactionTask{
 				PlanID:        1,
 				TriggerID:     19530,
 				CollectionID:  1,
@@ -141,7 +141,7 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_MixSegmentNotFound() {
 		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
 			return nil
 		}).Once()
-		task := newMixCompactionTask(&datapb.CompactionTask{
+		task := newMixCompactionTask(context.TODO(), &datapb.CompactionTask{
 			PlanID:         1,
 			TriggerID:      19530,
 			CollectionID:   1,
@@ -162,7 +162,7 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_MixSegmentNotFound() {
 
 func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() {
 	s.Run("nil_schema", func() {
-		task := newMixCompactionTask(&datapb.CompactionTask{
+		task := newMixCompactionTask(context.TODO(), &datapb.CompactionTask{
 			PlanID:        1,
 			Type:          datapb.CompactionType_MixCompaction,
 			InputSegments: []int64{200},
@@ -180,7 +180,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 			State:         commonpb.SegmentState_Flushed,
 			SchemaVersion: 3,
 		}}).Once()
-		task := newMixCompactionTask(&datapb.CompactionTask{
+		task := newMixCompactionTask(context.TODO(), &datapb.CompactionTask{
 			PlanID:        1,
 			Type:          datapb.CompactionType_MixCompaction,
 			InputSegments: []int64{200},
@@ -199,7 +199,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 			State:         commonpb.SegmentState_Flushed,
 			SchemaVersion: 3,
 		}}).Once()
-		task := newMixCompactionTask(&datapb.CompactionTask{
+		task := newMixCompactionTask(context.TODO(), &datapb.CompactionTask{
 			PlanID:        1,
 			Type:          datapb.CompactionType_SortCompaction,
 			InputSegments: []int64{200},
@@ -252,7 +252,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 				SchemaVersion: test.inputSchema,
 				Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(101, 1)},
 			}}).Once()
-			task := newMixCompactionTask(&datapb.CompactionTask{
+			task := newMixCompactionTask(context.TODO(), &datapb.CompactionTask{
 				PlanID:        1,
 				Type:          test.compactionType,
 				InputSegments: []int64{200},
@@ -287,7 +287,7 @@ func (s *MixCompactionTaskSuite) TestProcess() {
 		}
 
 		for _, tc := range testCases {
-			task := newMixCompactionTask(&datapb.CompactionTask{
+			task := newMixCompactionTask(context.TODO(), &datapb.CompactionTask{
 				PlanID: 1,
 				State:  tc.state,
 			}, nil, s.mockMeta, newMockVersionManager())
@@ -300,7 +300,7 @@ func (s *MixCompactionTaskSuite) TestProcess() {
 func (s *MixCompactionTaskSuite) TestQueryTaskOnWorker() {
 	cluster := session.NewMockCluster(s.T())
 
-	t1 := newMixCompactionTask(&datapb.CompactionTask{
+	t1 := newMixCompactionTask(context.TODO(), &datapb.CompactionTask{
 		PlanID:    1,
 		Type:      datapb.CompactionType_MixCompaction,
 		StartTime: time.Now().Unix(),
@@ -315,5 +315,168 @@ func (s *MixCompactionTaskSuite) TestQueryTaskOnWorker() {
 
 	t1.QueryTaskOnWorker(cluster)
 
-	s.Equal(taskcommon.Retry, t1.GetTaskState())
+	// The attempt is over and the inspector owns it now; the rebuild arrives as
+	// a separate task with its own ID, so the scheduler is told Failed rather
+	// than Retry -- Retry would push this one back through the pending queue.
+	s.Equal(taskcommon.Failed, t1.GetTaskState())
+}
+
+// What cleanup owes a terminated sort task is the segment lock, and only that.
+// canTriggerSortCompaction requires !isCompacting, so releasing it is what makes
+// the input eligible for another sort. IsInvisible must survive: it means "this
+// segment still owes a sort", and cleanup clearing it would publish an unsorted,
+// unindexable segment on the sealed path instead of letting the trigger retry.
+func (s *MixCompactionTaskSuite) TestCleanReArmsSortInputWithoutPublishingIt() {
+	realMeta, err := newMemoryMeta(s.T())
+	s.Require().NoError(err)
+	collectionID, segmentID := int64(10), int64(100)
+	s.Require().NoError(realMeta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           segmentID,
+		CollectionID: collectionID,
+		State:        commonpb.SegmentState_Flushed,
+		IsInvisible:  true,
+	})))
+	realMeta.SetSegmentsCompacting(context.Background(), []int64{segmentID}, true)
+	s.Require().False(canTriggerSortCompaction(realMeta.GetSegment(context.Background(), segmentID)),
+		"a segment held by a running task is not eligible")
+
+	task := newMixCompactionTask(context.TODO(), &datapb.CompactionTask{
+		PlanID:        1,
+		CollectionID:  collectionID,
+		Type:          datapb.CompactionType_SortCompaction,
+		State:         datapb.CompactionTaskState_failed,
+		InputSegments: []int64{segmentID},
+	}, nil, s.mockMeta, newMockVersionManager())
+
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, saved *datapb.CompactionTask) error {
+			s.Equal(datapb.CompactionTaskState_cleaned, saved.GetState())
+			s.True(realMeta.GetSegment(ctx, segmentID).isCompacting,
+				"the lock is released only after cleaned is durable")
+			return nil
+		}).Once()
+	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, []int64{segmentID}, false).
+		Run(func(ctx context.Context, segmentIDs []int64, compacting bool) {
+			realMeta.SetSegmentsCompacting(ctx, segmentIDs, compacting)
+		}).Once()
+
+	s.True(task.Clean())
+
+	segment := realMeta.GetSegment(context.Background(), segmentID)
+	s.True(segment.GetIsInvisible(), "the input still owes a sort and must not be published")
+	s.False(segment.isCompacting)
+	s.True(canTriggerSortCompaction(segment), "and it must now be eligible for another sort")
+}
+
+// A DataNode leaves the cluster (it deregisters from etcd before tearing down
+// its compactions) while it holds a sort plan. The plan must not be handed to a
+// second node -- both would write the same output segment IDs -- so the attempt
+// is abandoned, and cleanup must hand the input's lock back so the trigger can
+// try again with a fresh plan.
+func (s *MixCompactionTaskSuite) TestNodeGoneAbandonsAttemptAndReArmsInput() {
+	realMeta, err := newMemoryMeta(s.T())
+	s.Require().NoError(err)
+	collectionID, segmentID := int64(10), int64(100)
+	s.Require().NoError(realMeta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           segmentID,
+		CollectionID: collectionID,
+		State:        commonpb.SegmentState_Flushed,
+		IsInvisible:  true,
+	})))
+	realMeta.SetSegmentsCompacting(context.Background(), []int64{segmentID}, true)
+
+	task := newMixCompactionTask(context.TODO(), &datapb.CompactionTask{
+		PlanID:        1,
+		CollectionID:  collectionID,
+		Type:          datapb.CompactionType_SortCompaction,
+		State:         datapb.CompactionTaskState_executing,
+		NodeID:        11,
+		InputSegments: []int64{segmentID},
+	}, nil, s.mockMeta, newMockVersionManager())
+
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().QueryCompaction(int64(11), mock.Anything).
+		Return(nil, merr.WrapErrNodeNotFound(11)).Once()
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, saved *datapb.CompactionTask) error {
+			switch saved.GetState() {
+			case datapb.CompactionTaskState_retrying:
+				s.EqualValues(11, saved.GetNodeID(), "the plan is abandoned, never re-dispatched")
+			case datapb.CompactionTaskState_cleaned:
+			default:
+				s.Fail("unexpected saved compaction state", saved.GetState().String())
+			}
+			return nil
+		}).Twice()
+	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, []int64{segmentID}, false).
+		Run(func(ctx context.Context, segmentIDs []int64, compacting bool) {
+			realMeta.SetSegmentsCompacting(ctx, segmentIDs, compacting)
+		}).Once()
+
+	task.QueryTaskOnWorker(cluster)
+	s.Equal(datapb.CompactionTaskState_retrying, task.GetTask().GetState())
+	s.EqualValues(11, task.GetTask().GetNodeID())
+
+	s.True(task.Process(), "a timed-out task ends the state machine")
+	s.True(task.Clean())
+
+	segment := realMeta.GetSegment(context.Background(), segmentID)
+	s.True(segment.GetIsInvisible(), "the input still owes a sort")
+	s.True(canTriggerSortCompaction(segment), "and is eligible for a fresh plan")
+}
+
+func (s *MixCompactionTaskSuite) TestCleanRetriesWhenCleanedStatePersistenceFails() {
+	realMeta, err := newMemoryMeta(s.T())
+	s.Require().NoError(err)
+	collectionID := int64(10)
+	segmentID := int64(100)
+	s.Require().NoError(realMeta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           segmentID,
+		CollectionID: collectionID,
+		State:        commonpb.SegmentState_Flushed,
+		IsInvisible:  true,
+	})))
+	realMeta.SetSegmentsCompacting(context.Background(), []int64{segmentID}, true)
+
+	task := newMixCompactionTask(context.TODO(), &datapb.CompactionTask{
+		PlanID:        1,
+		CollectionID:  collectionID,
+		Type:          datapb.CompactionType_SortCompaction,
+		State:         datapb.CompactionTaskState_timeout,
+		InputSegments: []int64{segmentID},
+	}, nil, s.mockMeta, newMockVersionManager())
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).
+		Return(merr.WrapErrServiceInternalMsg("mock task persistence failure")).Once()
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
+	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, []int64{segmentID}, false).
+		Run(func(ctx context.Context, segmentIDs []int64, compacting bool) {
+			realMeta.SetSegmentsCompacting(ctx, segmentIDs, compacting)
+		}).Once()
+
+	s.False(task.Clean())
+	s.Equal(datapb.CompactionTaskState_timeout, task.GetTask().GetState())
+	segment := realMeta.GetSegment(context.Background(), segmentID)
+	s.True(segment.isCompacting, "the segment lock must remain held until cleaned is durable")
+
+	s.True(task.Clean())
+	s.Equal(datapb.CompactionTaskState_cleaned, task.GetTask().GetState())
+	segment = realMeta.GetSegment(context.Background(), segmentID)
+	s.True(segment.GetIsInvisible(), "cleanup never publishes an unsorted input")
+	s.False(segment.isCompacting)
+}
+
+func (s *MixCompactionTaskSuite) TestWorkerCallbacksIgnoreCleanedTask() {
+	task := newMixCompactionTask(context.TODO(), &datapb.CompactionTask{
+		PlanID: 1,
+		State:  datapb.CompactionTaskState_cleaned,
+		NodeID: 11,
+	}, nil, s.mockMeta, newMockVersionManager())
+	cluster := session.NewMockCluster(s.T())
+
+	// No cluster or metadata expectations are registered: a stale callback that
+	// performs an RPC or tries to persist a non-terminal state fails this test.
+	task.QueryTaskOnWorker(cluster)
+	task.CreateTaskOnWorker(11, cluster)
+
+	s.Equal(datapb.CompactionTaskState_cleaned, task.GetTask().GetState())
 }

@@ -74,6 +74,18 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			default:
 				return unsupportedAction(action)
 			}
+		case metastore.CopySegmentTaskEntry:
+			if action.Type != metastore.ActionAdd {
+				return unsupportedAction(action)
+			}
+			if e.Task == nil {
+				return merr.WrapErrServiceInternalMsg("datacoord catalog: nil copy segment task in UpdateAction")
+			}
+			value, err := proto.Marshal(e.Task)
+			if err != nil {
+				return err
+			}
+			b.Save(buildCopySegmentTaskKey(e.Task.GetTaskId()), string(value))
 		case metastore.RefreshJobEntry:
 			switch action.Type {
 			case metastore.ActionUpdate:

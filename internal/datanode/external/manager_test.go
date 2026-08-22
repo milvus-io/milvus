@@ -18,6 +18,7 @@ package external
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestExternalCollectionManager_Basic(t *testing.T) {
@@ -79,6 +81,43 @@ func TestExternalCollectionManager_Basic(t *testing.T) {
 	// Verify task is deleted
 	retrievedInfo = manager.Get(clusterID, taskID)
 	assert.Nil(t, retrievedInfo)
+}
+
+func TestExternalCollectionManager_RemoveExpiredTasks(t *testing.T) {
+	manager := NewExternalCollectionManager(context.Background(), 1)
+	defer manager.Close()
+
+	now := time.Now()
+	cutoff := now.Add(-24 * time.Hour)
+	expiredCtx, expiredCancel := context.WithCancel(context.Background())
+	runningCtx, runningCancel := context.WithCancel(context.Background())
+	manager.LoadOrStore("cluster", 1, &TaskInfo{
+		Cancel:    expiredCancel,
+		State:     indexpb.JobState_JobStateFinished,
+		StartedAt: cutoff,
+	})
+	manager.LoadOrStore("cluster", 2, &TaskInfo{
+		State:     indexpb.JobState_JobStateFailed,
+		StartedAt: cutoff.Add(time.Second),
+	})
+	manager.LoadOrStore("cluster", 3, &TaskInfo{
+		Cancel:    runningCancel,
+		State:     indexpb.JobState_JobStateInProgress,
+		StartedAt: cutoff.Add(-time.Hour),
+	})
+
+	assert.Equal(t, 2, manager.RemoveExpiredTasks(context.Background(), cutoff))
+
+	assert.Nil(t, manager.Get("cluster", 1))
+	assert.NotNil(t, manager.Get("cluster", 2))
+	assert.Nil(t, manager.Get("cluster", 3))
+	for _, taskCtx := range []context.Context{expiredCtx, runningCtx} {
+		select {
+		case <-taskCtx.Done():
+		default:
+			t.Fatal("reclaiming an expired task must cancel its context")
+		}
+	}
 }
 
 func TestExternalCollectionManager_SubmitTask_Success(t *testing.T) {
@@ -177,15 +216,18 @@ func TestExternalCollectionManager_SubmitTask_Failure(t *testing.T) {
 	err := manager.SubmitTask(clusterID, req, taskFunc)
 	assert.NoError(t, err) // Submit should succeed
 
+	// An error that does not blame the request is reported as Retry, so
+	// DataCoord spends one of the task's attempts instead of failing the whole
+	// refresh on a fault another node might not hit.
 	require.Eventually(t, func() bool {
 		info := manager.Get(clusterID, taskID)
-		return info != nil && info.State == indexpb.JobState_JobStateFailed
+		return info != nil && info.State == indexpb.JobState_JobStateRetry
 	}, time.Second, 10*time.Millisecond)
 
 	// Task info should still be present with failure state
 	info := manager.Get(clusterID, taskID)
 	assert.NotNil(t, info)
-	assert.Equal(t, indexpb.JobState_JobStateFailed, info.State)
+	assert.Equal(t, indexpb.JobState_JobStateRetry, info.State)
 	assert.Equal(t, expectedError.Error(), info.FailReason)
 }
 
@@ -275,10 +317,12 @@ func TestExternalCollectionManager_CancelTask(t *testing.T) {
 		}
 	}, time.Second, 10*time.Millisecond)
 
+	// A cancellation is a condition of this node, not of the request, so it is
+	// reported as retriable like any other system failure.
 	var info *TaskInfo
 	require.Eventually(t, func() bool {
 		info = manager.Get(clusterID, taskID)
-		return info != nil && info.State == indexpb.JobState_JobStateFailed
+		return info != nil && info.State == indexpb.JobState_JobStateRetry
 	}, time.Second, 10*time.Millisecond)
 
 	require.NotNil(t, info)
@@ -331,6 +375,18 @@ func TestExternalCollectionManager_SubmitTask_Duplicate(t *testing.T) {
 	ctx := context.Background()
 	manager := NewExternalCollectionManager(ctx, 4)
 	defer manager.Close()
+	var contextCount atomic.Int64
+	var duplicateCanceled atomic.Bool
+	manager.newTaskContext = func() (context.Context, context.CancelFunc) {
+		taskCtx, cancel := context.WithCancel(ctx)
+		contextNumber := contextCount.Add(1)
+		return taskCtx, func() {
+			cancel()
+			if contextNumber == 2 {
+				duplicateCanceled.Store(true)
+			}
+		}
+	}
 
 	clusterID := "test-cluster"
 	taskID := int64(4)
@@ -362,6 +418,7 @@ func TestExternalCollectionManager_SubmitTask_Duplicate(t *testing.T) {
 	// Duplicate submit should be idempotent (no error)
 	err = manager.SubmitTask(clusterID, req, taskFunc)
 	assert.NoError(t, err)
+	assert.True(t, duplicateCanceled.Load(), "duplicate Submit must cancel its unregistered child context")
 
 	// Unblock the task
 	close(blockChan)
@@ -370,6 +427,51 @@ func TestExternalCollectionManager_SubmitTask_Duplicate(t *testing.T) {
 		info := manager.Get(clusterID, taskID)
 		return info != nil && info.State == indexpb.JobState_JobStateFinished
 	}, time.Second, 10*time.Millisecond)
+}
+
+func TestExternalCollectionManager_StaleResultCannotOverwriteReplacement(t *testing.T) {
+	manager := NewExternalCollectionManager(context.Background(), 2)
+	defer manager.Close()
+
+	const (
+		clusterID = "test-cluster"
+		taskID    = int64(40)
+	)
+	oldStarted := make(chan struct{})
+	releaseOld := make(chan struct{})
+	req := &datapb.RefreshExternalCollectionTaskRequest{TaskID: taskID, CollectionID: 400}
+	require.NoError(t, manager.SubmitTask(clusterID, req,
+		func(context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+			close(oldStarted)
+			<-releaseOld
+			return &datapb.RefreshExternalCollectionTaskResponse{
+				State:        indexpb.JobState_JobStateFinished,
+				KeptSegments: []int64{1},
+			}, nil
+		}))
+	<-oldStarted
+
+	require.True(t, manager.CancelTask(clusterID, taskID))
+	require.NotNil(t, manager.Delete(clusterID, taskID))
+	require.NoError(t, manager.SubmitTask(clusterID, req,
+		func(context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+			return &datapb.RefreshExternalCollectionTaskResponse{
+				State:        indexpb.JobState_JobStateFinished,
+				KeptSegments: []int64{2},
+			}, nil
+		}))
+	require.Eventually(t, func() bool {
+		info := manager.Get(clusterID, taskID)
+		return info != nil && info.State == indexpb.JobState_JobStateFinished &&
+			len(info.KeptSegments) == 1 && info.KeptSegments[0] == 2
+	}, time.Second, 10*time.Millisecond)
+
+	close(releaseOld)
+	require.Eventually(t, func() bool { return len(manager.slots) == 0 }, time.Second, 10*time.Millisecond)
+	info := manager.Get(clusterID, taskID)
+	require.NotNil(t, info)
+	assert.Equal(t, []int64{2}, info.KeptSegments,
+		"a late result from the dropped owner must not overwrite its replacement")
 }
 
 func TestExternalCollectionManager_MultipleTasksConcurrent(t *testing.T) {
@@ -396,8 +498,12 @@ func TestExternalCollectionManager_MultipleTasksConcurrent(t *testing.T) {
 			}, nil
 		}
 
-		err := manager.SubmitTask(clusterID, req, taskFunc)
-		assert.NoError(t, err)
+		// SubmitTask refuses when all workers are busy; in production DataCoord
+		// retries the dispatch with backoff. Model that here instead of assuming
+		// the old blocking-submit behavior.
+		require.Eventually(t, func() bool {
+			return manager.SubmitTask(clusterID, req, taskFunc) == nil
+		}, 5*time.Second, 10*time.Millisecond)
 	}
 
 	require.Eventually(t, func() bool {
@@ -500,4 +606,112 @@ func TestExternalCollectionManager_DeleteNonExistent(t *testing.T) {
 	// Try to delete non-existent task
 	info := manager.Delete(clusterID, taskID)
 	assert.Nil(t, info)
+}
+
+// A saturated pool is normal operation -- refreshes are long external scans --
+// and the caller is a DataCoord RPC handler. Blocking it past the RPC deadline
+// made DataCoord give up on a task this node would still run later; the manager
+// must refuse instead, with the registration rolled back so the retry can
+// re-register cleanly.
+func TestExternalCollectionManager_SubmitTask_RefusesWhenPoolSaturated(t *testing.T) {
+	ctx := context.Background()
+	manager := NewExternalCollectionManager(ctx, 1)
+	defer manager.Close()
+
+	clusterID := "test-cluster"
+	block := make(chan struct{})
+	started := make(chan struct{})
+
+	// Occupy the single worker with a long-running refresh.
+	err := manager.SubmitTask(clusterID, &datapb.RefreshExternalCollectionTaskRequest{TaskID: 1},
+		func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+			close(started)
+			<-block
+			return &datapb.RefreshExternalCollectionTaskResponse{State: indexpb.JobState_JobStateFinished}, nil
+		})
+	require.NoError(t, err)
+	<-started
+
+	// The next submission must fail fast, not park the RPC handler.
+	returned := make(chan error, 1)
+	go func() {
+		returned <- manager.SubmitTask(clusterID, &datapb.RefreshExternalCollectionTaskRequest{TaskID: 2},
+			func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+				t.Error("the refused task must not run")
+				return nil, nil
+			})
+	}()
+	select {
+	case err := <-returned:
+		require.Error(t, err, "a saturated pool must refuse, not accept")
+	case <-time.After(5 * time.Second):
+		t.Fatal("SubmitTask blocked on a saturated pool")
+	}
+
+	// The refused task's registration must be rolled back, or the retry would
+	// hit the duplicate-dispatch path and be silently treated as running.
+	assert.Nil(t, manager.Get(clusterID, 2),
+		"a refused submission must not leave a registered task behind")
+
+	// Once the worker frees, the retry succeeds end to end.
+	close(block)
+	require.Eventually(t, func() bool {
+		return manager.SubmitTask(clusterID, &datapb.RefreshExternalCollectionTaskRequest{TaskID: 2},
+			func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+				return &datapb.RefreshExternalCollectionTaskResponse{State: indexpb.JobState_JobStateFinished}, nil
+			}) == nil
+	}, 5*time.Second, 20*time.Millisecond, "the retry must succeed once a worker frees")
+}
+
+func TestExternalCollectionManager_ConcurrentDuplicateAdmissionWhileSaturated(t *testing.T) {
+	manager := NewExternalCollectionManager(context.Background(), 1)
+	defer manager.Close()
+
+	const clusterID = "test-cluster"
+	blockWorker := make(chan struct{})
+	workerStarted := make(chan struct{})
+	require.NoError(t, manager.SubmitTask(clusterID,
+		&datapb.RefreshExternalCollectionTaskRequest{TaskID: 1},
+		func(context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+			close(workerStarted)
+			<-blockWorker
+			return &datapb.RefreshExternalCollectionTaskResponse{
+				State: indexpb.JobState_JobStateFinished,
+			}, nil
+		}))
+	<-workerStarted
+
+	const submitters = 64
+	start := make(chan struct{})
+	errs := make(chan error, submitters)
+	var wg sync.WaitGroup
+	var rejectedTaskRuns atomic.Int64
+	for range submitters {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- manager.SubmitTask(clusterID,
+				&datapb.RefreshExternalCollectionTaskRequest{TaskID: 2},
+				func(context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+					rejectedTaskRuns.Add(1)
+					return &datapb.RefreshExternalCollectionTaskResponse{
+						State: indexpb.JobState_JobStateFinished,
+					}, nil
+				})
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		require.ErrorIs(t, err, merr.ErrServiceTooManyRequests,
+			"no duplicate may report success unless an admitted owner exists")
+	}
+	assert.Nil(t, manager.Get(clusterID, 2),
+		"a saturated attempt must never become visible to duplicate submissions")
+	assert.Zero(t, rejectedTaskRuns.Load())
+
+	close(blockWorker)
 }

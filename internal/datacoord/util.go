@@ -588,8 +588,30 @@ func calculateStatsTaskSlot(segmentSize int64) int64 {
 	return max(defaultSlots/8, 1)
 }
 
+// enableSortCompaction reports whether sort compaction runs at all. Sort is
+// always on; the only remaining gate is the global dataCoord.enableCompaction
+// switch, which stops the trigger producers of new compaction work (flush
+// publishing invisible segments, trigger-based sort planning) while still
+// letting already-owed segments drain through the inspector. The import path
+// is not gated: every normal import is sort-planned by its durable job
+// options, and its sort debt is owed to the inspector regardless.
 func enableSortCompaction() bool {
-	return paramtable.Get().DataCoordCfg.EnableSortCompaction.GetAsBool() && paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool()
+	return paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool()
+}
+
+// sortCompactionAllowed reports whether a sort compaction may be planned for
+// this segment right now. The switch gates only new work: a segment already
+// published invisible is owed a sort no switch can disown -- sorting is its
+// only path to being served -- while sorting a visible segment is an
+// optimization the switch controls.
+func sortCompactionAllowed(segment *SegmentInfo) bool {
+	return segment.GetIsInvisible() || enableSortCompaction()
+}
+
+// segmentAwaitsSort reports whether downstream work (indexing) should wait for
+// this segment's sorted replacement instead of taking the segment as it is.
+func segmentAwaitsSort(segment *SegmentInfo) bool {
+	return !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() && sortCompactionAllowed(segment)
 }
 
 // stringifyBinlogs is used for logging, it's not used for other purposes.

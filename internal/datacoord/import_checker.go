@@ -24,9 +24,13 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -68,6 +72,9 @@ type importChecker struct {
 	importMeta ImportMeta
 	ci         CompactionInspector
 	handler    Handler
+	// cluster lets GC retry a worker drop the scheduler could not land. See
+	// checkGC.
+	cluster session.Cluster
 
 	hooks importCheckerHooks
 
@@ -82,6 +89,7 @@ func NewImportChecker(ctx context.Context,
 	importMeta ImportMeta,
 	ci CompactionInspector,
 	handler Handler,
+	cluster session.Cluster,
 	hooks importCheckerHooks,
 ) ImportChecker {
 	return &importChecker{
@@ -92,6 +100,7 @@ func NewImportChecker(ctx context.Context,
 		importMeta: importMeta,
 		ci:         ci,
 		handler:    handler,
+		cluster:    cluster,
 		hooks:      hooks,
 		closeChan:  make(chan struct{}),
 	}
@@ -124,7 +133,7 @@ func (c *importChecker) runStateMachineLoop() {
 			for _, job := range jobs {
 				if !funcutil.SliceSetEqual[string](job.GetVchannels(), job.GetReadyVchannels()) {
 					// wait for all channels to send signals
-					mlog.Info(c.ctx, "waiting for all channels to send signals",
+					mlog.RatedDebug(c.ctx, rate.Limit(30), "waiting for all channels to send signals",
 						mlog.Strings("vchannels", job.GetVchannels()),
 						mlog.Strings("readyVchannels", job.GetReadyVchannels()),
 						mlog.FieldJobID(job.GetJobID()))
@@ -237,21 +246,103 @@ func (c *importChecker) getLackFilesForPreImports(job ImportJob) []*internalpb.I
 	return lo.Values(lacks)
 }
 
-func (c *importChecker) getLackFilesForImports(job ImportJob) []*datapb.ImportFileStats {
-	preimports := c.importMeta.GetTaskBy(c.ctx, WithType(PreImportTaskType), WithJob(job.GetJobID()))
-	lacks := make(map[int64]*datapb.ImportFileStats, 0)
-	for _, t := range preimports {
-		for _, stat := range t.GetFileStats() {
-			lacks[stat.GetImportFile().GetId()] = stat
+// validateImportTaskSet verifies the publication boundary between PreImporting
+// and Importing. Import tasks are persisted one by one, followed by the job
+// state, so a restart can observe a complete task set while the job is still
+// PreImporting. File IDs alone are not sufficient to identify a complete plan:
+// duplicate, foreign, or stale file stats could otherwise hide a missing file.
+//
+// The returned files are precisely the preimport stats not covered by an
+// existing import task. An empty result is safe to use as the commit marker for
+// the already-persisted task plan.
+func validateImportTaskSet(job ImportJob, preimports, imports []ImportTask) ([]*datapb.ImportFileStats, error) {
+	jobFiles := make(map[int64]*internalpb.ImportFile, len(job.GetFiles()))
+	for _, file := range job.GetFiles() {
+		if file == nil {
+			return nil, merr.WrapErrImportSysFailedMsg("invalid import task plan: job %d contains a nil file", job.GetJobID())
+		}
+		if _, ok := jobFiles[file.GetId()]; ok {
+			return nil, merr.WrapErrImportSysFailedMsg(
+				"invalid import task plan: job %d contains duplicate file %d", job.GetJobID(), file.GetId())
+		}
+		jobFiles[file.GetId()] = file
+	}
+
+	expected := make(map[int64]*datapb.ImportFileStats, len(jobFiles))
+	for _, task := range preimports {
+		if task == nil {
+			return nil, merr.WrapErrImportSysFailedMsg("invalid import task plan: job %d contains a nil preimport task", job.GetJobID())
+		}
+		if task.GetCollectionID() != job.GetCollectionID() {
+			return nil, merr.WrapErrImportSysFailedMsg(
+				"invalid import task plan: preimport task %d belongs to collection %d, expected %d",
+				task.GetTaskID(), task.GetCollectionID(), job.GetCollectionID())
+		}
+		for _, stat := range task.GetFileStats() {
+			if stat == nil || stat.GetImportFile() == nil {
+				return nil, merr.WrapErrImportSysFailedMsg(
+					"invalid import task plan: preimport task %d contains nil file stats", task.GetTaskID())
+			}
+			fileID := stat.GetImportFile().GetId()
+			jobFile, ok := jobFiles[fileID]
+			if !ok || !proto.Equal(jobFile, stat.GetImportFile()) {
+				return nil, merr.WrapErrImportSysFailedMsg(
+					"invalid import task plan: preimport task %d contains unknown or stale file %d",
+					task.GetTaskID(), fileID)
+			}
+			if _, ok := expected[fileID]; ok {
+				return nil, merr.WrapErrImportSysFailedMsg(
+					"invalid import task plan: file %d appears in multiple preimport results", fileID)
+			}
+			expected[fileID] = stat
 		}
 	}
-	exists := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskType), WithJob(job.GetJobID()))
-	for _, task := range exists {
-		for _, file := range task.GetFileStats() {
-			delete(lacks, file.GetImportFile().GetId())
+	if len(expected) != len(jobFiles) {
+		return nil, merr.WrapErrImportSysFailedMsg(
+			"invalid import task plan: preimport results cover %d of %d files", len(expected), len(jobFiles))
+	}
+
+	covered := make(map[int64]struct{}, len(expected))
+	for _, task := range imports {
+		if task == nil {
+			return nil, merr.WrapErrImportSysFailedMsg("invalid import task plan: job %d contains a nil import task", job.GetJobID())
+		}
+		if task.GetCollectionID() != job.GetCollectionID() {
+			return nil, merr.WrapErrImportSysFailedMsg(
+				"invalid import task plan: import task %d belongs to collection %d, expected %d",
+				task.GetTaskID(), task.GetCollectionID(), job.GetCollectionID())
+		}
+		if len(task.GetFileStats()) == 0 {
+			return nil, merr.WrapErrImportSysFailedMsg(
+				"invalid import task plan: import task %d contains no files", task.GetTaskID())
+		}
+		for _, stat := range task.GetFileStats() {
+			if stat == nil || stat.GetImportFile() == nil {
+				return nil, merr.WrapErrImportSysFailedMsg(
+					"invalid import task plan: import task %d contains nil file stats", task.GetTaskID())
+			}
+			fileID := stat.GetImportFile().GetId()
+			expectedStat, ok := expected[fileID]
+			if !ok || !proto.Equal(expectedStat, stat) {
+				return nil, merr.WrapErrImportSysFailedMsg(
+					"invalid import task plan: import task %d contains unknown or stale file stats for file %d",
+					task.GetTaskID(), fileID)
+			}
+			if _, ok := covered[fileID]; ok {
+				return nil, merr.WrapErrImportSysFailedMsg(
+					"invalid import task plan: file %d appears in multiple import tasks", fileID)
+			}
+			covered[fileID] = struct{}{}
 		}
 	}
-	return lo.Values(lacks)
+
+	lacks := make([]*datapb.ImportFileStats, 0, len(expected)-len(covered))
+	for fileID, stat := range expected {
+		if _, ok := covered[fileID]; !ok {
+			lacks = append(lacks, stat)
+		}
+	}
+	return lacks, nil
 }
 
 func (c *importChecker) checkPendingJob(job ImportJob) {
@@ -326,8 +417,21 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 		return
 	}
 
-	lacks := c.getLackFilesForImports(job)
-	if len(lacks) == 0 {
+	// A previous process may have persisted only part of this job's import
+	// tasks. Reject corrupt task metadata before creating tasks for the
+	// remaining files; the sort plan itself comes from the durable job options
+	// and needs no inheritance.
+	existingTasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskType), WithJob(job.GetJobID()))
+	if _, err := importSortPlannedForJob(job, existingTasks); err != nil {
+		log.Warn(c.ctx, "invalid existing import sort plan", mlog.Err(err))
+		updateJobState(internalpb.ImportJobState_Failed, UpdateJobReason(err.Error()))
+		return
+	}
+
+	lacks, err := validateImportTaskSet(job, preimports, existingTasks)
+	if err != nil {
+		log.Warn(c.ctx, "invalid existing import task plan", mlog.Err(err))
+		updateJobState(internalpb.ImportJobState_Failed, UpdateJobReason(err.Error()))
 		return
 	}
 
@@ -335,6 +439,13 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 	if err != nil {
 		log.Warn(c.ctx, "import failed, disk quota exceeded", mlog.Err(err))
 		updateJobState(internalpb.ImportJobState_Failed, UpdateJobReason(err.Error()))
+		return
+	}
+	if len(lacks) == 0 {
+		// All import tasks may have been durably added before the final job write
+		// failed. Retrying that write is the idempotent recovery path: do not
+		// allocate another task or another set of segments.
+		updateJobState(internalpb.ImportJobState_Importing, UpdateRequestedDiskSize(requestSize))
 		return
 	}
 
@@ -389,9 +500,18 @@ func (c *importChecker) checkSortingJob(job ImportJob) {
 		log.Info(c.ctx, "import job stats done", mlog.String("state", state.String()), mlog.Duration("jobTimeCost/stats", statsDuration))
 	}
 
-	// Skip stats stage if not enable stats or is l0 import.
-	if !enableSortCompaction() ||
-		importutilv2.IsL0Import(job.GetOptions()) {
+	// Whether this job sorts comes from its durable job options -- every
+	// normal import sorts, L0 never does -- not from a live switch. The sort
+	// stage allocates its own output per origin and the checker discovers it
+	// through the origin's compactionTo edge.
+	tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskType), WithJob(job.GetJobID()))
+	sortPlanned, err := importSortPlannedForJob(job, tasks)
+	if err != nil {
+		log.Warn(c.ctx, "invalid import sort plan", mlog.Err(err))
+		updateJobState(internalpb.ImportJobState_Failed, err.Error())
+		return
+	}
+	if !sortPlanned {
 		updateJobState(internalpb.ImportJobState_IndexBuilding, "")
 		return
 	}
@@ -401,29 +521,35 @@ func (c *importChecker) checkSortingJob(job ImportJob) {
 		taskCnt = 0
 		doneCnt = 0
 	)
-	tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskType), WithJob(job.GetJobID()))
 	for _, task := range tasks {
 		originSegmentIDs := task.(*importTask).GetSegmentIDs()
-		sortSegmentIDs := task.(*importTask).GetSortedSegmentIDs()
 		taskCnt += len(originSegmentIDs)
-		for i, originSegmentID := range originSegmentIDs {
-			logger := mlog.With(WrapTaskLog(task, mlog.Int64("origin", originSegmentID), mlog.Int64("target", sortSegmentIDs[i]))...)
-			originSegment := c.meta.GetHealthySegment(c.ctx, originSegmentID)
-			targetSegment := c.meta.GetHealthySegment(c.ctx, sortSegmentIDs[i])
-			if originSegment == nil {
-				// import zero num rows segment
+		for _, originSegmentID := range originSegmentIDs {
+			logger := mlog.With(WrapTaskLog(task, mlog.Int64("origin", originSegmentID))...)
+			// The sorted output is discovered through the segment's compactionTo
+			// edge, written by CompleteCompactionMutation when the sort stage
+			// committed it -- no preallocated target ID exists in the plan.
+			if outputs, _ := c.meta.GetCompactionTo(originSegmentID); len(outputs) > 0 {
+				// sort compaction is already done
 				doneCnt++
 				continue
 			}
-			if targetSegment != nil {
-				// sort compaction is already done
-				doneCnt++
+			originSegment := c.meta.GetHealthySegment(c.ctx, originSegmentID)
+			if originSegment == nil {
+				// createSortCompactionTask deliberately drops a zero-row origin and
+				// creates no output. Do not treat every missing/unhealthy origin as
+				// completed: only the durable marker written by that branch is valid.
+				if isExplicitZeroRowSortSkip(job, c.meta.GetSegment(c.ctx, originSegmentID)) {
+					doneCnt++
+				} else {
+					logger.Warn(c.ctx, "sort origin and its output are both unavailable")
+				}
 				continue
 			}
 			// if not compacting, trigger sort compaction task
 			isCompacting := c.meta.IsSegmentCompacting(originSegmentID)
 			if !isCompacting {
-				compactionTask, err := createSortCompactionTask(c.ctx, task, originSegment, sortSegmentIDs[i], c.meta, c.handler, c.alloc)
+				compactionTask, err := createSortCompactionTask(c.ctx, task, originSegment, c.meta, c.handler, c.alloc)
 				if err != nil {
 					logger.Warn(c.ctx, "create sort compaction task failed", mlog.Err(err))
 					continue
@@ -449,23 +575,176 @@ func (c *importChecker) checkSortingJob(job ImportJob) {
 	}
 }
 
+// isExplicitZeroRowSortSkip recognizes the durable marker written by
+// createSortCompactionTask when an imported origin received no rows. The
+// origin is dropped without any sorted output being produced.
+func isExplicitZeroRowSortSkip(job ImportJob, origin *SegmentInfo) bool {
+	return job != nil && origin != nil &&
+		origin.GetState() == commonpb.SegmentState_Dropped &&
+		origin.GetNumOfRows() == 0 && origin.GetIsImporting() &&
+		origin.GetCollectionID() == job.GetCollectionID() &&
+		(len(job.GetPartitionIDs()) == 0 || lo.Contains(job.GetPartitionIDs(), origin.GetPartitionID())) &&
+		(len(job.GetVchannels()) == 0 || lo.Contains(job.GetVchannels(), origin.GetInsertChannel()))
+}
+
+func (c *importChecker) getValidatedImportTargets(job ImportJob, tasks []ImportTask, sortPlanned bool) ([]int64, error) {
+	targetSegmentIDs := make([]int64, 0)
+	seen := make(map[int64]struct{})
+	originCount := 0
+	zeroRowSkipCount := 0
+	for _, task := range tasks {
+		importTask := task.(*importTask)
+		originSegmentIDs := importTask.GetSegmentIDs()
+		if !sortPlanned {
+			originCount += len(originSegmentIDs)
+			for _, segmentID := range originSegmentIDs {
+				if err := c.validateImportTarget(job, segmentID, seen, false, 0); err != nil {
+					return nil, err
+				}
+				targetSegmentIDs = append(targetSegmentIDs, segmentID)
+			}
+			continue
+		}
+		// The sorted output is the segment the origin was compacted into,
+		// discovered through the durable compactionTo edge. An origin without
+		// an output is either a completed zero-row skip or durable plan
+		// corruption.
+		for _, originSegmentID := range originSegmentIDs {
+			originCount++
+			outputs, _ := c.meta.GetCompactionTo(originSegmentID)
+			if len(outputs) == 0 {
+				origin := c.meta.GetSegment(c.ctx, originSegmentID)
+				if isExplicitZeroRowSortSkip(job, origin) {
+					zeroRowSkipCount++
+					continue
+				}
+				// A job planned without sort by an older binary (dataCoord.enableCompaction
+				// off at planning time) has healthy, visible, importing origins
+				// and no sorted output: the origin is the final imported
+				// segment. Under this PR a sort-planned origin is always
+				// published invisible, so visibility distinguishes the legacy
+				// shape from a sort job whose output vanished -- which remains
+				// durable plan corruption.
+				if origin != nil && isSegmentHealthy(origin) && !origin.GetIsInvisible() && origin.GetIsImporting() {
+					if err := c.validateImportTarget(job, originSegmentID, seen, false, 0); err != nil {
+						return nil, err
+					}
+					targetSegmentIDs = append(targetSegmentIDs, originSegmentID)
+					continue
+				}
+				return nil, merr.WrapErrImportSysFailedMsg(
+					"invalid import target plan: origin segment %d has no sorted output", originSegmentID)
+			}
+			for _, output := range outputs {
+				segmentID := output.GetID()
+				// A zero-row sorted output is published Dropped (all rows
+				// expired or deleted before the sort): the branch is a
+				// completed empty result, exactly like a zero-row origin
+				// skip. It must not be added as a target, and must not fail
+				// the job. Other drop shapes are unreachable here: importing
+				// segments are excluded from every compaction selector, so no
+				// downstream compaction can consume an output while the job is
+				// still in flight.
+				if output.GetState() == commonpb.SegmentState_Dropped {
+					zeroRowSkipCount++
+					continue
+				}
+				if err := c.validateImportTarget(job, segmentID, seen, true, originSegmentID); err != nil {
+					return nil, err
+				}
+				targetSegmentIDs = append(targetSegmentIDs, segmentID)
+			}
+		}
+	}
+	if len(targetSegmentIDs) == 0 {
+		if sortPlanned && originCount > 0 && zeroRowSkipCount == originCount {
+			// Every origin was an explicitly skipped zero-row branch: a valid
+			// empty result.
+			return targetSegmentIDs, nil
+		}
+		return nil, merr.WrapErrImportSysFailedMsg("invalid import target plan: job %d has no target segments", job.GetJobID())
+	}
+	return targetSegmentIDs, nil
+}
+
+// validateImportTarget checks one target segment against the job's plan and,
+// for a sorted target, against its origin's compaction edge.
+func (c *importChecker) validateImportTarget(job ImportJob, segmentID int64, seen map[int64]struct{}, sortPlanned bool, originSegmentID int64) error {
+	if _, ok := seen[segmentID]; ok {
+		return merr.WrapErrImportSysFailedMsg(
+			"invalid import target plan: segment %d is selected more than once", segmentID)
+	}
+	seen[segmentID] = struct{}{}
+
+	segment := c.meta.GetSegment(c.ctx, segmentID)
+	if segment == nil {
+		return merr.WrapErrImportSysFailedMsg(
+			"invalid import target plan: segment %d is missing", segmentID)
+	}
+	if !isSegmentHealthy(segment) {
+		return merr.WrapErrImportSysFailedMsg(
+			"invalid import target plan: segment %d is unhealthy in state %s",
+			segmentID, segment.GetState().String())
+	}
+	if segment.GetCollectionID() != job.GetCollectionID() {
+		return merr.WrapErrImportSysFailedMsg(
+			"invalid import target plan: segment %d belongs to collection %d, expected %d",
+			segmentID, segment.GetCollectionID(), job.GetCollectionID())
+	}
+	if len(job.GetPartitionIDs()) > 0 && !lo.Contains(job.GetPartitionIDs(), segment.GetPartitionID()) {
+		return merr.WrapErrImportSysFailedMsg(
+			"invalid import target plan: segment %d belongs to partition %d outside job partitions %v",
+			segmentID, segment.GetPartitionID(), job.GetPartitionIDs())
+	}
+	if len(job.GetVchannels()) > 0 && !lo.Contains(job.GetVchannels(), segment.GetInsertChannel()) {
+		return merr.WrapErrImportSysFailedMsg(
+			"invalid import target plan: segment %d belongs to channel %q outside job channels %v",
+			segmentID, segment.GetInsertChannel(), job.GetVchannels())
+	}
+	if !segment.GetIsImporting() {
+		return merr.WrapErrImportSysFailedMsg(
+			"invalid import target plan: segment %d is already published", segmentID)
+	}
+	if sortPlanned {
+		// Namespace-enabled collections mark their output IsSortedByNamespace
+		// instead of IsSorted (sort_compaction sets one or the other).
+		if !(segment.GetIsSorted() || segment.GetIsSortedByNamespace()) || !lo.Contains(segment.GetCompactionFrom(), originSegmentID) {
+			return merr.WrapErrImportSysFailedMsg(
+				"invalid import target plan: sorted segment %d does not derive from origin segment %d",
+				segmentID, originSegmentID)
+		}
+	}
+	return nil
+}
+
 func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
 	tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskType), WithJob(job.GetJobID()))
-	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
-		return t.(*importTask).GetSegmentIDs()
-	})
-	statsSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
-		return t.(*importTask).GetSortedSegmentIDs()
-	})
-
-	targetSegmentIDs := statsSegmentIDs
-	if !enableSortCompaction() {
-		targetSegmentIDs = originSegmentIDs
+	sortPlanned, err := importSortPlannedForJob(job, tasks)
+	if err != nil {
+		log.Warn(c.ctx, "invalid import sort plan", mlog.Err(err))
+		if updateErr := c.importMeta.UpdateJob(c.ctx, job.GetJobID(),
+			UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error())); updateErr != nil {
+			log.Warn(c.ctx, "failed to update invalid import job to Failed", mlog.Err(updateErr))
+		}
+		return
+	}
+	targetSegmentIDs, err := c.getValidatedImportTargets(job, tasks, sortPlanned)
+	if err != nil {
+		// Import completion persists origin metadata before task completion, and
+		// sorting persists its target before advancing the job here. A missing,
+		// dropped, foreign, or already-published target is therefore durable plan
+		// corruption rather than an eventually-ready index; fail immediately
+		// instead of waiting until the job timeout.
+		log.Warn(c.ctx, "invalid import target segments", mlog.Err(err))
+		if updateErr := c.importMeta.UpdateJob(c.ctx, job.GetJobID(),
+			UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error())); updateErr != nil {
+			log.Warn(c.ctx, "failed to update invalid import job to Failed", mlog.Err(updateErr))
+		}
+		return
 	}
 
-	healthySegments := c.meta.GetSegments(targetSegmentIDs, isSegmentHealthy)
-	unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), healthySegments)
+	unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)
 	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 && !importutilv2.IsL0Import(job.GetOptions()) {
 		for _, segmentID := range unindexed {
 			select {
@@ -484,7 +763,7 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	// (is_importing=false) is cleared only by HandleCommitVchannel after the WAL
 	// commit fence is processed per vchannel; auto_commit=true jobs are then
 	// driven through the commit broadcast by checkUncommittedJob.
-	err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Uncommitted))
+	err = c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Uncommitted))
 	if err != nil {
 		log.Warn(c.ctx, "failed to update job state to Uncommitted", mlog.Err(err))
 		return
@@ -567,6 +846,11 @@ func (c *importChecker) tryTimeoutJob(job ImportJob) {
 		job.GetState() == internalpb.ImportJobState_Completed {
 		return
 	}
+	// Legacy or edge records may carry no timeout; mirror the copy-segment
+	// guard and leave them to explicit failure paths.
+	if job.GetTimeoutTs() == 0 {
+		return
+	}
 	timeoutTime := tsoutil.PhysicalTime(job.GetTimeoutTs())
 	if time.Now().After(timeoutTime) {
 		mlog.Warn(c.ctx, "Import timeout, expired the specified time limit",
@@ -613,19 +897,31 @@ func (c *importChecker) checkGC(job ImportJob) {
 	cleanupTime := tsoutil.PhysicalTime(job.GetCleanupTs())
 	if time.Now().After(cleanupTime) {
 		log := mlog.With(mlog.FieldJobID(job.GetJobID()))
-		GCRetention := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
+		gcRetention := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
 		log.Info(c.ctx, "job has reached the GC retention",
-			mlog.Time("cleanupTime", cleanupTime), mlog.Duration("GCRetention", GCRetention))
+			mlog.Time("cleanupTime", cleanupTime), mlog.Duration("gcRetention", gcRetention))
 		tasks := c.importMeta.GetTaskBy(c.ctx, WithJob(job.GetJobID()))
 		shouldRemoveJob := true
 		for _, task := range tasks {
 			if job.GetState() == internalpb.ImportJobState_Failed && task.GetType() == ImportTaskType {
-				if len(task.(*importTask).GetSegmentIDs()) != 0 || len(task.(*importTask).GetSortedSegmentIDs()) != 0 {
+				if len(task.(*importTask).GetSegmentIDs()) != 0 {
 					shouldRemoveJob = false
 					continue
 				}
 			}
 			if task.GetNodeID() != NullNodeID {
+				// The task still names a worker, so its DataNode may still be
+				// holding it -- importv2's taskManager.Sweep is deliberately a
+				// no-op, making this drop the only reclamation there is. The
+				// scheduler sends exactly one drop when it releases a task and
+				// nothing retried a failed one, so the record sat here forever,
+				// blocking its own removal and its job's. Retry it: DropImportTask
+				// releases the assignment on success and on ErrNodeNotFound, and
+				// the next GC round removes the task once it does.
+				if dropErr := DropImportTask(task, c.cluster, c.importMeta); dropErr != nil {
+					log.Warn(c.ctx, "failed to drop import task on its worker during GC, will retry",
+						WrapTaskLog(task, mlog.Err(dropErr))...)
+				}
 				shouldRemoveJob = false
 				continue
 			}

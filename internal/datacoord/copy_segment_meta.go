@@ -18,15 +18,19 @@ package datacoord
 
 import (
 	"context"
+	"sort"
 
 	"golang.org/x/exp/maps"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -83,6 +87,7 @@ type CopySegmentMeta interface {
 	UpdateJob(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error
 	UpdateJobInState(ctx context.Context, jobID int64, expectedState datapb.CopySegmentJobState, actions ...UpdateCopySegmentJobAction) (bool, error)
 	UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error
+	UpdateJobStateAndReleaseRefInState(ctx context.Context, jobID int64, expectedState datapb.CopySegmentJobState, actions ...UpdateCopySegmentJobAction) (bool, error)
 	GetJob(ctx context.Context, jobID int64) CopySegmentJob
 	GetJobBy(ctx context.Context, filters ...CopySegmentJobFilter) []CopySegmentJob
 	CountJobBy(ctx context.Context, filters ...CopySegmentJobFilter) int
@@ -90,8 +95,11 @@ type CopySegmentMeta interface {
 
 	// Task operations
 	AddTask(ctx context.Context, task CopySegmentTask) error
+	PublishReplan(ctx context.Context, task CopySegmentTask, targets []*SegmentInfo) error
 	UpdateTask(ctx context.Context, taskID int64, actions ...UpdateCopySegmentTaskAction) error
+	UpdateTaskInState(ctx context.Context, taskID int64, expectedState datapb.CopySegmentTaskState, actions ...UpdateCopySegmentTaskAction) (bool, error)
 	GetTask(ctx context.Context, taskID int64) CopySegmentTask
+	GetReplacementByPredecessor(ctx context.Context, predecessorTaskID int64) CopySegmentTask
 	GetTasksByJobID(ctx context.Context, jobID int64) []CopySegmentTask
 	GetTasksByCollectionID(ctx context.Context, collectionID int64) []CopySegmentTask
 	GetTaskBy(ctx context.Context, filters ...CopySegmentTaskFilter) []CopySegmentTask
@@ -105,17 +113,19 @@ type CopySegmentMeta interface {
 // copySegmentTasks manages a collection of copy segment tasks with efficient lookup.
 // It maintains secondary indexes for O(1) lookup by jobID and collectionID.
 type copySegmentTasks struct {
-	tasks           map[int64]CopySegmentTask    // Task ID -> Task mapping (primary index)
-	jobIndex        map[int64]map[int64]struct{} // Job ID -> Task IDs (secondary index)
-	collectionIndex map[int64]map[int64]struct{} // Collection ID -> Task IDs (secondary index)
+	tasks            map[int64]CopySegmentTask    // Task ID -> Task mapping (primary index)
+	jobIndex         map[int64]map[int64]struct{} // Job ID -> Task IDs (secondary index)
+	collectionIndex  map[int64]map[int64]struct{} // Collection ID -> Task IDs (secondary index)
+	predecessorIndex map[int64]map[int64]struct{} // Predecessor task ID -> successor Task IDs (secondary index)
 }
 
 // newCopySegmentTasks creates a new empty task collection.
 func newCopySegmentTasks() *copySegmentTasks {
 	return &copySegmentTasks{
-		tasks:           make(map[int64]CopySegmentTask),
-		jobIndex:        make(map[int64]map[int64]struct{}),
-		collectionIndex: make(map[int64]map[int64]struct{}),
+		tasks:            make(map[int64]CopySegmentTask),
+		jobIndex:         make(map[int64]map[int64]struct{}),
+		collectionIndex:  make(map[int64]map[int64]struct{}),
+		predecessorIndex: make(map[int64]map[int64]struct{}),
 	}
 }
 
@@ -144,7 +154,8 @@ func (t *copySegmentTasks) add(task CopySegmentTask) {
 	t.addToIndexes(task)
 }
 
-// addToIndexes adds the task to secondary indexes (jobIndex and collectionIndex).
+// addToIndexes adds the task to secondary indexes (jobIndex, collectionIndex
+// and predecessorIndex).
 func (t *copySegmentTasks) addToIndexes(task CopySegmentTask) {
 	taskID := task.GetTaskId()
 	jobID := task.GetJobId()
@@ -161,6 +172,14 @@ func (t *copySegmentTasks) addToIndexes(task CopySegmentTask) {
 		t.collectionIndex[collectionID] = make(map[int64]struct{})
 	}
 	t.collectionIndex[collectionID][taskID] = struct{}{}
+
+	// Add to predecessor index (replans only; ordinary tasks have no edge)
+	if pred := task.GetPredecessorTaskId(); pred != 0 {
+		if _, ok := t.predecessorIndex[pred]; !ok {
+			t.predecessorIndex[pred] = make(map[int64]struct{})
+		}
+		t.predecessorIndex[pred][taskID] = struct{}{}
+	}
 }
 
 // removeFromIndexes removes the task from secondary indexes.
@@ -184,6 +203,16 @@ func (t *copySegmentTasks) removeFromIndexes(task CopySegmentTask) {
 			delete(t.collectionIndex, collectionID)
 		}
 	}
+
+	// Remove from predecessor index
+	if pred := task.GetPredecessorTaskId(); pred != 0 {
+		if taskIDs, ok := t.predecessorIndex[pred]; ok {
+			delete(taskIDs, taskID)
+			if len(taskIDs) == 0 {
+				delete(t.predecessorIndex, pred)
+			}
+		}
+	}
 }
 
 // remove deletes a task from the collection by ID and cleans up secondary indexes.
@@ -204,6 +233,23 @@ func (t *copySegmentTasks) listTasks() []CopySegmentTask {
 // Time complexity: O(M) where M is the number of tasks for this job.
 func (t *copySegmentTasks) getByJobID(jobID int64) []CopySegmentTask {
 	taskIDs, ok := t.jobIndex[jobID]
+	if !ok {
+		return nil
+	}
+	result := make([]CopySegmentTask, 0, len(taskIDs))
+	for taskID := range taskIDs {
+		if task, exists := t.tasks[taskID]; exists {
+			result = append(result, task)
+		}
+	}
+	return result
+}
+
+// getByPredecessorID retrieves the successor(s) naming this task as their
+// predecessor. Source-side uniqueness in replanUnderFreshIdentity means at
+// most one exists; the slice form keeps the caller honest about the invariant.
+func (t *copySegmentTasks) getByPredecessorID(predecessorID int64) []CopySegmentTask {
+	taskIDs, ok := t.predecessorIndex[predecessorID]
 	if !ok {
 		return nil
 	}
@@ -496,16 +542,32 @@ func (m *copySegmentMeta) CountJobBy(ctx context.Context, filters ...CopySegment
 // prevented because only one caller observes the `!wasTerminal → isTerminal`
 // transition under m.mu; every subsequent caller sees wasTerminal=true.
 func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error {
+	_, err := m.updateJobStateAndReleaseRef(ctx, jobID, nil, actions...)
+	return err
+}
+
+// updateJobStateAndReleaseRef is the shared implementation of
+// UpdateJobStateAndReleaseRef and its CAS variant. When expectedState is
+// non-nil, the transition (and unpin) happens only if the job is currently in
+// that state, with the check and the update under the same write lock.
+func (m *copySegmentMeta) updateJobStateAndReleaseRef(ctx context.Context, jobID int64, expectedState *datapb.CopySegmentJobState, actions ...UpdateCopySegmentJobAction) (bool, error) {
 	m.mu.Lock()
+	if expectedState != nil {
+		job, ok := m.jobs[jobID]
+		if !ok || job.GetState() != *expectedState {
+			m.mu.Unlock()
+			return false, nil
+		}
+	}
 	prevJob, updatedJob, err := m.updateJob(ctx, jobID, actions...)
 	if err != nil {
 		m.mu.Unlock()
-		return err
+		return false, err
 	}
 	if prevJob == nil {
 		m.mu.Unlock()
-		mlog.Warn(ctx, "UpdateJobStateAndReleaseRef: job not found", mlog.FieldJobID(jobID))
-		return nil
+		mlog.Warn(ctx, "updateJobStateAndReleaseRef: job not found", mlog.FieldJobID(jobID))
+		return false, nil
 	}
 
 	previousState := prevJob.GetState()
@@ -525,7 +587,7 @@ func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID
 	m.mu.Unlock()
 
 	if !shouldUnpin {
-		return nil
+		return true, nil
 	}
 
 	unpinCollID, unpinName, remaining, unpinErr := m.snapshotMeta.UnpinSnapshot(ctx, pinID)
@@ -540,7 +602,7 @@ func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID
 			mlog.Int64("sourceCollectionID", sourceCollectionID),
 			mlog.String("snapshot", snapshotName),
 			mlog.Err(unpinErr))
-		return nil
+		return true, nil
 	}
 	if unpinName != "" {
 		setSnapshotActivePinsGauge(unpinCollID, unpinName, remaining)
@@ -552,7 +614,17 @@ func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID
 		mlog.String("snapshot", snapshotName),
 		mlog.String("previousState", previousState.String()),
 		mlog.String("newState", newState.String()))
-	return nil
+	return true, nil
+}
+
+// UpdateJobStateAndReleaseRefInState is the CAS variant of
+// UpdateJobStateAndReleaseRef: the state transition (and the snapshot unpin)
+// happen only when the job is still in expectedState. A caller holding a
+// snapshot taken before slow work must use this for terminal transitions — a
+// concurrent replan or failure path may have moved the job on, and an
+// unconditional write would resurrect it (e.g. Failed -> Completed).
+func (m *copySegmentMeta) UpdateJobStateAndReleaseRefInState(ctx context.Context, jobID int64, expectedState datapb.CopySegmentJobState, actions ...UpdateCopySegmentJobAction) (bool, error) {
+	return m.updateJobStateAndReleaseRef(ctx, jobID, &expectedState, actions...)
 }
 
 // RemoveJob deletes a job from both persistent storage and memory cache.
@@ -629,6 +701,134 @@ func (m *copySegmentMeta) AddTask(ctx context.Context, task CopySegmentTask) err
 	return nil
 }
 
+// PublishReplan publishes a fresh-identity copy task and all of its target
+// segments through one composite catalog write. The task action is deliberately
+// first: if the operation exceeds the backend transaction limit and the
+// ordered fallback is interrupted, recovery sees an exact owner before it sees
+// any replacement target. In-memory visibility is all-or-nothing because both
+// caches are updated only after the full catalog operation succeeds.
+//
+// The method is idempotent for crash recovery. A task or target left by an
+// ambiguous earlier write is accepted only when its persisted value is exactly
+// the value being republished; an ID collision with different metadata is an
+// invariant violation, not an upsert.
+func (m *copySegmentMeta) PublishReplan(ctx context.Context, task CopySegmentTask, targets []*SegmentInfo) error {
+	if m.meta == nil {
+		return merr.WrapErrServiceInternalMsg("cannot publish copy segment replan without segment meta")
+	}
+	incoming, ok := task.(*copySegmentTask)
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("unsupported copy segment task implementation %T", task)
+	}
+	if incoming.GetState() != datapb.CopySegmentTaskState_CopySegmentTaskPending || incoming.GetPredecessorTaskId() == 0 {
+		return merr.WrapErrServiceInternalMsg(
+			"copy segment replan %d must be Pending and name a predecessor", incoming.GetTaskId())
+	}
+
+	expectedTargets := make(map[int64]struct{}, len(incoming.GetIdMappings()))
+	for _, mapping := range incoming.GetIdMappings() {
+		targetID := mapping.GetTargetSegmentId()
+		if targetID == 0 {
+			return merr.WrapErrServiceInternalMsg("copy segment replan %d contains an empty target ID", incoming.GetTaskId())
+		}
+		if _, duplicate := expectedTargets[targetID]; duplicate {
+			return merr.WrapErrServiceInternalMsg(
+				"copy segment replan %d contains duplicate target segment %d", incoming.GetTaskId(), targetID)
+		}
+		expectedTargets[targetID] = struct{}{}
+	}
+	if len(targets) != len(expectedTargets) {
+		return merr.WrapErrServiceInternalMsg(
+			"copy segment replan %d has %d mappings but %d target records",
+			incoming.GetTaskId(), len(expectedTargets), len(targets))
+	}
+	providedTargets := make(map[int64]*SegmentInfo, len(targets))
+	for _, target := range targets {
+		if target == nil || target.SegmentInfo == nil {
+			return merr.WrapErrServiceInternalMsg("copy segment replan %d contains a nil target", incoming.GetTaskId())
+		}
+		if _, expected := expectedTargets[target.GetID()]; !expected {
+			return merr.WrapErrServiceInternalMsg(
+				"copy segment replan %d does not map target segment %d", incoming.GetTaskId(), target.GetID())
+		}
+		if _, duplicate := providedTargets[target.GetID()]; duplicate {
+			return merr.WrapErrServiceInternalMsg(
+				"copy segment replan %d contains duplicate target record %d", incoming.GetTaskId(), target.GetID())
+		}
+		providedTargets[target.GetID()] = target
+	}
+
+	// Lock order is segment meta -> copy meta. No copy-meta operation calls into
+	// segment meta while holding m.mu, so publication cannot invert this order.
+	m.meta.segMu.Lock()
+	defer m.meta.segMu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	existingTask := m.tasks.get(incoming.GetTaskId())
+	if existingTask != nil &&
+		!proto.Equal(existingTask.(*copySegmentTask).task.Load(), incoming.task.Load()) {
+		return merr.WrapErrServiceInternalMsg(
+			"copy segment replan task ID %d is already owned by different metadata", incoming.GetTaskId())
+	}
+
+	missingTargets := make([]*SegmentInfo, 0, len(targets))
+	for targetID, target := range providedTargets {
+		existing := m.meta.segments.GetSegment(targetID)
+		if existing == nil {
+			missingTargets = append(missingTargets, target)
+			continue
+		}
+		if !proto.Equal(existing.SegmentInfo, target.SegmentInfo) {
+			return merr.WrapErrServiceInternalMsg(
+				"copy segment replan target ID %d is already owned by different metadata", targetID)
+		}
+	}
+	if existingTask != nil && len(missingTargets) == 0 {
+		return nil
+	}
+
+	actions := make([]metastore.UpdateAction, 0, len(missingTargets)+1)
+	// Keep the owner first for txn.Commit's ordered over-limit fallback.
+	actions = append(actions, metastore.AddCopySegmentTask(incoming.task.Load()))
+	for _, target := range missingTargets {
+		actions = append(actions, metastore.AddSegment(target.SegmentInfo))
+	}
+	// This is the one fresh-identity composite swap on the copy path: the task
+	// record and all of its fresh targets are published in one write. An
+	// ambiguous failure (etcd committed, response lost) leaves the in-memory
+	// cache on the predecessor while the durable record names the replacement;
+	// continuing could mint a second replacement whose targets collide with
+	// the committed first one. Nothing can safely interpret the error as "not
+	// committed", so the process aborts and restart reloads the authoritative
+	// outcome. Guards: only abort while neither the caller nor the component
+	// is being cancelled -- a write error that merely reflects a cancellation
+	// must not crash the process. (A non-transport error is unreachable here:
+	// every action type this path sends is implemented and the payloads are
+	// marshal-safe protos, so every realistic failure is a storage write whose
+	// outcome is ambiguous.)
+	if err := m.catalog.Update(ctx, actions...); err != nil {
+		if ctx.Err() == nil && m.ctx.Err() == nil {
+			mlog.Fatal(ctx, "copy segment replan publication failed; terminating process", mlog.Err(err))
+		}
+		return err
+	}
+
+	for _, target := range missingTargets {
+		m.meta.segments.SetSegment(target.GetID(), target)
+		metrics.DataCoordNumSegments.WithLabelValues(segmentMetricLabelValues(target)...).Inc()
+	}
+	if existingTask == nil {
+		incoming.ctx = m.ctx
+		incoming.copyMeta = m
+		incoming.meta = m.meta
+		incoming.snapshotMeta = m.snapshotMeta
+		incoming.alloc = m.alloc
+		m.tasks.add(incoming)
+	}
+	return nil
+}
+
 // UpdateTask modifies an existing task using functional update actions.
 //
 // Process flow:
@@ -646,22 +846,47 @@ func (m *copySegmentMeta) AddTask(ctx context.Context, task CopySegmentTask) err
 //
 // Thread safety: Protected by write lock + atomic operations
 // Idempotency: Safe to call with same updates (last write wins)
+// A task that is not in the cache is silently skipped and the call returns nil:
+// callers hold the scheduler's per-task lock, which is what guarantees the task
+// exists, so the no-op path only fires for a record retired out from under an
+// already-lost race.
 func (m *copySegmentMeta) UpdateTask(ctx context.Context, taskID int64, actions ...UpdateCopySegmentTaskAction) error {
+	_, err := m.updateTask(ctx, taskID, nil, actions...)
+	return err
+}
+
+// UpdateTaskInState is the CAS variant of UpdateTask: the actions apply only
+// when the cached task is currently in expectedState, with the check and the
+// update under the same write lock. Used on the dispatch path so a task that
+// a concurrent failure path (checkFailedJob) already marked Failed is not
+// re-dispatched and left InProgress under a terminal job.
+//
+// Returns (false, nil) when the task is missing or not in expectedState.
+func (m *copySegmentMeta) UpdateTaskInState(ctx context.Context, taskID int64, expectedState datapb.CopySegmentTaskState, actions ...UpdateCopySegmentTaskAction) (bool, error) {
+	return m.updateTask(ctx, taskID, &expectedState, actions...)
+}
+
+func (m *copySegmentMeta) updateTask(ctx context.Context, taskID int64, expectedState *datapb.CopySegmentTaskState, actions ...UpdateCopySegmentTaskAction) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if task := m.tasks.get(taskID); task != nil {
-		updatedTask := task.Clone()
-		for _, action := range actions {
-			action(updatedTask)
-		}
-		err := m.catalog.SaveCopySegmentTask(ctx, updatedTask.(*copySegmentTask).task.Load())
-		if err != nil {
-			return err
-		}
-		// update memory task atomically
-		task.(*copySegmentTask).task.Store(updatedTask.(*copySegmentTask).task.Load())
+	task := m.tasks.get(taskID)
+	if task == nil {
+		return false, nil
 	}
-	return nil
+	if expectedState != nil && task.GetState() != *expectedState {
+		return false, nil
+	}
+	updatedTask := task.Clone()
+	for _, action := range actions {
+		action(updatedTask)
+	}
+	err := m.catalog.SaveCopySegmentTask(ctx, updatedTask.(*copySegmentTask).task.Load())
+	if err != nil {
+		return false, err
+	}
+	// update memory task atomically
+	task.(*copySegmentTask).task.Store(updatedTask.(*copySegmentTask).task.Load())
+	return true, nil
 }
 
 // GetTask retrieves a task by ID from in-memory cache.
@@ -672,6 +897,23 @@ func (m *copySegmentMeta) GetTask(ctx context.Context, taskID int64) CopySegment
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.tasks.get(taskID)
+}
+
+// GetReplacementByPredecessor returns the successor naming predecessorTaskID
+// as its predecessor, or nil. replanUnderFreshIdentity adopts an existing
+// successor instead of minting a second identity, so at most one exists.
+func (m *copySegmentMeta) GetReplacementByPredecessor(ctx context.Context, predecessorTaskID int64) CopySegmentTask {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	successors := m.tasks.getByPredecessorID(predecessorTaskID)
+	if len(successors) == 0 {
+		return nil
+	}
+	// Deterministic pick for any pre-uniqueness residue: the earliest attempt.
+	sort.Slice(successors, func(i, j int) bool {
+		return successors[i].GetTaskId() < successors[j].GetTaskId()
+	})
+	return successors[0]
 }
 
 // GetTasksByJobID retrieves all tasks belonging to a specific job using secondary index.
@@ -742,6 +984,8 @@ OUTER:
 //
 // Thread safety: Protected by write lock
 // Use case: Garbage collection of completed/failed tasks after retention period
+// A task that is not in the cache is silently skipped and the call returns nil:
+// removal is idempotent by design, so a double remove is not an error.
 func (m *copySegmentMeta) RemoveTask(ctx context.Context, taskID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

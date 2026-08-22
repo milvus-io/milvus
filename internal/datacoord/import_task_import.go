@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -50,7 +51,9 @@ type importTask struct {
 	importMeta ImportMeta
 	tr         *timerecord.TimeRecorder
 	times      *taskcommon.Times
-	retryTimes int64
+	// retryTimes counts dispatches of this task identity (attempts), read by
+	// the scheduler's metrics pass without the task lock, hence atomic.
+	retryTimes atomic.Int64
 }
 
 func (t *importTask) GetJobID() int64 {
@@ -82,7 +85,7 @@ func (t *importTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
 }
 
 func (t *importTask) GetTaskVersion() int64 {
-	return t.retryTimes
+	return t.retryTimes.Load()
 }
 
 func (t *importTask) GetReason() string {
@@ -121,10 +124,6 @@ func (t *importTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromImportState(t.GetState())
 }
 
-func (t *importTask) GetTaskNodeID() int64 {
-	return t.GetNodeID()
-}
-
 func (t *importTask) GetTaskSlot() int64 {
 	return int64(CalculateTaskSlot(t, t.importMeta))
 }
@@ -137,17 +136,27 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
 		return
 	}
-	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
-	if err != nil {
-		mlog.Warn(context.TODO(), "import failed", WrapTaskLog(t, mlog.Err(err))...)
-		t.retryTimes++
-		return
-	}
+	// Persist the assignment before crossing the at-least-once Create boundary.
+	// Recording it afterwards loses the attempt whenever the worker accepted the
+	// request but its response did not come back: the task stays Pending naming
+	// nobody, so nothing can reclaim that attempt, and the scheduler hands the
+	// same task ID to a second node while the first keeps running it. Failing to
+	// write leaves the task Pending and undispatched, which is the safe side.
 	err = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
 		UpdateState(datapb.ImportTaskStateV2_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
-		mlog.Warn(context.TODO(), "update import task failed", WrapTaskLog(t, mlog.Err(err))...)
+		mlog.Warn(context.TODO(), "failed to persist import assignment, not sending task",
+			WrapTaskLog(t, mlog.Int64("nodeID", nodeID), mlog.Err(err))...)
+		return
+	}
+	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
+	if err != nil {
+		// The outcome is unknown, but the assignment is durable, so the poll
+		// path can reach that node, reclaim the attempt and only then make the
+		// task dispatchable again.
+		mlog.Warn(context.TODO(), "import failed", WrapTaskLog(t, mlog.Err(err))...)
+		t.retryTimes.Add(1)
 		return
 	}
 	pendingDuration := t.GetTR().RecordSpan()
@@ -162,23 +171,53 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 	resp, err := cluster.QueryImport(t.GetNodeID(), req)
 	if err != nil || resp.GetState() == datapb.ImportTaskStateV2_Retry {
-		// Clear partial progress recorded from the failed attempt. Otherwise,
-		// if the retried attempt's PickSegment lands on a different subset of
-		// the preallocated segments, the segments it skips will keep stale
-		// NumOfRows without insert binlogs — causing sort compaction to fail
-		// with "unexpected row count" or EOF.
-		if segmentIDs := t.GetSegmentIDs(); len(segmentIDs) > 0 {
-			if resetErr := t.meta.UpdateSegmentsInfo(context.TODO(), ResetImportingSegmentRows(segmentIDs...)); resetErr != nil {
-				mlog.Warn(context.TODO(), "failed to reset import segment row counts on retry",
-					WrapTaskLog(t, mlog.Err(resetErr))...)
+		ctx := context.TODO()
+		// Take the attempt off its worker before making the task dispatchable
+		// again, and only then. Otherwise the scheduler sends the same task ID
+		// to a second node while the first is still running it. DropImportTask
+		// releases the assignment on success and on ErrNodeNotFound (a node that
+		// is gone took the task with it); anything else leaves the task
+		// InProgress so the next poll retries the drop rather than racing a live
+		// attempt.
+		if dropErr := DropImportTask(t, cluster, t.importMeta); dropErr != nil {
+			mlog.RatedWarn(ctx, rate.Limit(1), "cannot reclaim the import task from its worker, leaving it assigned",
+				WrapTaskLog(t, mlog.Err(dropErr))...)
+			return
+		}
+		// The drop cancels the old attempt but does not wait for writes already
+		// in flight to land, so the next attempt gets a fresh set of output
+		// segments rather than inheriting the abandoned one's. That is what
+		// keeps a straggler write out of the replacement's data (see
+		// rotateImportTaskSegments) and it subsumes the old row-count reset:
+		// nothing carries stale progress forward because nothing is reused.
+		// Rotation also resets the task to Pending; on failure it stays
+		// InProgress with no worker, and the next round retries the whole swap.
+		job := t.importMeta.GetJob(ctx, t.GetJobID())
+		if job == nil {
+			mlog.Warn(ctx, "import job is gone, not rotating segments", WrapTaskLog(t)...)
+			return
+		}
+		if rotateErr := rotateImportTaskSegments(ctx, t, job, t.alloc, t.meta, t.importMeta); rotateErr != nil {
+			mlog.Warn(ctx, "failed to rotate import task segments, retrying next round",
+				WrapTaskLog(t, mlog.Err(rotateErr))...)
+			return
+		}
+		// A task that never produced segments has nothing to rotate; it still
+		// needs the state reset that rotation would have done.
+		if len(t.GetSegmentIDs()) == 0 {
+			if updateErr := t.importMeta.UpdateTask(ctx, t.GetTaskID(),
+				UpdateNodeID(NullNodeID),
+				UpdateState(datapb.ImportTaskStateV2_Pending)); updateErr != nil {
+				mlog.Warn(ctx, "failed to update import task state to pending", WrapTaskLog(t, mlog.Err(updateErr))...)
 				return
 			}
 		}
-		updateErr := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
-		if updateErr != nil {
-			mlog.Warn(context.TODO(), "failed to update import task state to pending", WrapTaskLog(t, mlog.Err(updateErr))...)
+		reason := ""
+		if resp != nil {
+			reason = resp.GetReason()
 		}
-		mlog.Info(context.TODO(), "reset import task state to pending due to error occurs", WrapTaskLog(t, mlog.Err(err), mlog.String("reason", resp.GetReason()))...)
+		mlog.Info(ctx, "reset import task state to pending due to error occurs",
+			WrapTaskLog(t, mlog.Err(err), mlog.String("reason", reason))...)
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Failed {
@@ -199,7 +238,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 	if resp.GetState() == datapb.ImportTaskStateV2_InProgress || resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		for _, info := range resp.GetImportSegmentsInfo() {
 			segment := t.meta.GetSegment(context.TODO(), info.GetSegmentID())
-			if info.GetImportedRows() <= segment.GetNumOfRows() {
+			if segment == nil || info.GetImportedRows() <= segment.GetNumOfRows() {
 				continue // rows not changed, no need to update
 			}
 			diff := info.GetImportedRows() - segment.GetNumOfRows()

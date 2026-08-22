@@ -47,8 +47,11 @@ func newSingleCompactionPolicy(meta *meta, allocator allocator.Allocator, handle
 	return &singleCompactionPolicy{meta: meta, allocator: allocator, handler: handler}
 }
 
+// Enable is always true: sort compaction is always on, so the policy must run
+// to drain segments already published invisible and to re-sort visible ones.
+// The merge half still honors EnableAutoCompaction inside Trigger.
 func (policy *singleCompactionPolicy) Enable() bool {
-	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool()
+	return true
 }
 
 func (policy *singleCompactionPolicy) Name() string {
@@ -92,13 +95,13 @@ func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
 	segmentID int64,
 ) CompactionView {
 	log := mlog.With(mlog.FieldSegmentID(segmentID))
-	if !Params.DataCoordCfg.EnableSortCompaction.GetAsBool() {
-		log.RatedInfo(ctx, rate.Limit(20), "stats task disabled, skip sort compaction")
-		return nil
-	}
 	segment := policy.meta.GetHealthySegment(ctx, segmentID)
 	if segment == nil {
 		log.Warn(ctx, "fail to apply triggerSegmentSortCompaction, segment not healthy")
+		return nil
+	}
+	if !sortCompactionAllowed(segment) {
+		log.RatedInfo(ctx, rate.Limit(1.0/20), "sort compaction disabled, skip sort compaction")
 		return nil
 	}
 
@@ -165,10 +168,6 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 	collectionTTL time.Duration,
 ) ([]CompactionView, error) {
 	log := mlog.With(mlog.FieldCollectionID(collectionID))
-	if !Params.DataCoordCfg.EnableSortCompaction.GetAsBool() {
-		log.RatedInfo(ctx, rate.Limit(20), "stats task disabled, skip sort compaction")
-		return nil, nil
-	}
 	views := make([]CompactionView, 0)
 
 	collection, err := policy.handler.GetCollection(ctx, collectionID)
@@ -191,7 +190,7 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 				!policy.meta.isSegmentCompactionProtected(seg.GetID())
 		}))
 	if len(triggerableSegments) == 0 {
-		log.RatedInfo(ctx, rate.Limit(20), "no triggerable segments")
+		log.RatedInfo(ctx, rate.Limit(1.0/20), "no triggerable segments")
 		return views, nil
 	}
 
@@ -212,8 +211,11 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 		}
 	}
 
+	// The invisible half above is owed work and drains regardless of the
+	// switch. This half is new work -- re-sorting segments that are already
+	// being served -- and is what the switch actually controls.
 	visibleSegments, ok := gbSegments[false]
-	if ok {
+	if ok && enableSortCompaction() {
 		for i, segment := range visibleSegments {
 			if i > Params.DataCoordCfg.SortCompactionTriggerCount.GetAsInt() {
 				break
@@ -269,8 +271,12 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 		log.Warn(ctx, "failed to apply singleCompactionPolicy, trigger sort compaction failed", mlog.Err(err))
 		return nil, nil, 0, err
 	}
+	if !Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() {
+		log.RatedInfo(ctx, rate.Limit(1.0/20), "auto compaction disabled, sort compaction still applies")
+		return nil, sortViews, 0, nil
+	}
 	if !isCollectionAutoCompactionEnabled(collection) {
-		log.RatedInfo(ctx, rate.Limit(20), "collection auto compaction disabled")
+		log.RatedInfo(ctx, rate.Limit(1.0/20), "collection auto compaction disabled")
 		return nil, sortViews, 0, nil
 	}
 

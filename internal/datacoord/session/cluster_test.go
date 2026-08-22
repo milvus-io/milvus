@@ -1172,6 +1172,35 @@ func TestCluster_CopySegment(t *testing.T) {
 		assert.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskInProgress, result.State)
 	})
 
+	// The regression this pins: the wrapper answers a Retry-state poll from
+	// properties alone (no payload parse), so ToCopySegmentState is the only
+	// thing standing between "worker asked for a retry" and "the job is failed".
+	// It used to collapse Retry to Failed, which made every retriable copy
+	// failure permanent and left the coordinator's Retry branch dead code.
+	t.Run("query copy segment - retry state survives the property round-trip", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Retry)
+		properties.AppendReason("SlowDown: please reduce your request rate")
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    nil, // Retry is answered from properties, payload is not parsed
+			Properties: properties,
+		}, nil)
+
+		result, err := cluster.QueryCopySegment(1, &datapb.QueryCopySegmentRequest{TaskID: 123})
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskRetry, result.State,
+			"a worker-reported Retry must reach the coordinator as Retry, not Failed")
+		assert.Equal(t, "SlowDown: please reduce your request rate", result.Reason)
+	})
+
 	t.Run("query copy segment - failed state", func(t *testing.T) {
 		mockNodeManager := NewMockNodeManager(t)
 		cluster := NewCluster(mockNodeManager)

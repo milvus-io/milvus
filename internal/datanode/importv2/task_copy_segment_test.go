@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type crossBucketCopyCall struct {
@@ -287,14 +288,15 @@ func TestCopySegmentTask_CleanupUsesTargetManager(t *testing.T) {
 
 	assert.Empty(t, task.(*CopySegmentTask).copiedFiles)
 	copyTask := manager.Get(task.GetTaskID()).(*CopySegmentTask)
+	// The inventory of what this attempt wrote is kept for diagnostics, but the
+	// task never deletes it: copy targets are a pure function of the target
+	// segment ID, so those keys belong just as much to whichever attempt
+	// replaces this one. DataCoord's GC reclaims them instead.
 	assert.Len(t, copyTask.copiedFiles, 1)
-	copyTask.CleanupCopiedFiles()
 
 	assert.Empty(t, sourceRemovedFiles)
-	assert.Len(t, targetRemovedFiles, 1)
-	assert.Len(t, targetRemovedFiles[0], 1)
+	assert.Empty(t, targetRemovedFiles)
 	assert.Len(t, copyCalls, 2)
-	assert.Equal(t, copyCalls[0].dstObject, targetRemovedFiles[0][0])
 }
 
 func TestCopySegmentTask_CopySingleSegmentAllowsManifestOnlyStorageV3(t *testing.T) {
@@ -658,8 +660,11 @@ func TestCopySegmentTaskExecute(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "copy failed")
 
+		// A copy error that does not blame the request is retriable: object
+		// storage throttling and timeouts land here, and reporting them as
+		// Failed makes DataCoord fail the whole restore job on the first one.
 		latest := mockManager.Get(task.GetTaskID())
-		assert.Equal(t, datapb.ImportTaskStateV2_Failed, latest.GetState())
+		assert.Equal(t, datapb.ImportTaskStateV2_Retry, latest.GetState())
 		assert.Contains(t, latest.GetReason(), "copy failed")
 	})
 
@@ -812,7 +817,7 @@ func TestCopySegmentTaskExecute_FailureWaitsForAllWorkers(t *testing.T) {
 	assert.ErrorIs(t, err, copyErr)
 
 	latest = manager.Get(task.GetTaskID()).(*CopySegmentTask)
-	assert.Equal(t, datapb.ImportTaskStateV2_Failed, latest.GetState())
+	assert.Equal(t, datapb.ImportTaskStateV2_Retry, latest.GetState())
 	assert.Contains(t, latest.GetReason(), "copy failed")
 	assert.ElementsMatch(t, []string{"target/333", "target/444"}, latest.copiedFiles)
 }
@@ -869,7 +874,7 @@ func TestCopySegmentTaskGetSegmentResults(t *testing.T) {
 			},
 		}
 
-		mockManager.Update(task.GetTaskID(), UpdateSegmentResult(newResult))
+		mockManager.Update(task, UpdateSegmentResult(newResult))
 
 		// Verify update
 		updatedTask := mockManager.Get(task.GetTaskID()).(*CopySegmentTask)
@@ -905,14 +910,14 @@ func TestCopySegmentTaskStateManagement(t *testing.T) {
 	})
 
 	t.Run("update state to InProgress", func(t *testing.T) {
-		mockManager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
+		mockManager.Update(task, UpdateState(datapb.ImportTaskStateV2_InProgress))
 		updatedTask := mockManager.Get(task.GetTaskID())
 		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, updatedTask.GetState())
 	})
 
 	t.Run("update state to Failed with reason", func(t *testing.T) {
 		reason := "test failure reason"
-		mockManager.Update(task.GetTaskID(),
+		mockManager.Update(task,
 			UpdateState(datapb.ImportTaskStateV2_Failed),
 			UpdateReason(reason))
 
@@ -922,7 +927,7 @@ func TestCopySegmentTaskStateManagement(t *testing.T) {
 	})
 
 	t.Run("update state to Completed", func(t *testing.T) {
-		mockManager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed))
+		mockManager.Update(task, UpdateState(datapb.ImportTaskStateV2_Completed))
 		updatedTask := mockManager.Get(task.GetTaskID())
 		assert.Equal(t, datapb.ImportTaskStateV2_Completed, updatedTask.GetState())
 	})
@@ -1401,13 +1406,13 @@ func TestCopySegmentTask_UpdateCopiedFiles(t *testing.T) {
 
 	t.Run("preserves files across manager clones", func(t *testing.T) {
 		manager, original := newTask()
-		manager.Update(original.GetTaskID(), UpdateCopiedFiles([]string{"10001", "10002"}))
+		manager.Update(original, UpdateCopiedFiles([]string{"10001", "10002"}))
 		firstSnapshot := manager.Get(original.GetTaskID()).(*CopySegmentTask)
 
 		assert.Empty(t, original.copiedFiles)
 		assert.Equal(t, []string{"10001", "10002"}, firstSnapshot.copiedFiles)
 
-		manager.Update(original.GetTaskID(),
+		manager.Update(original,
 			UpdateCopiedFiles([]string{"10003", "10004"}),
 			UpdateState(datapb.ImportTaskStateV2_Failed),
 		)
@@ -1425,107 +1430,13 @@ func TestCopySegmentTask_UpdateCopiedFiles(t *testing.T) {
 			wg.Add(1)
 			go func(id int) {
 				defer wg.Done()
-				manager.Update(task.GetTaskID(), UpdateCopiedFiles([]string{fmt.Sprintf("file%d.log", id)}))
+				manager.Update(task, UpdateCopiedFiles([]string{fmt.Sprintf("file%d.log", id)}))
 			}(i)
 		}
 		wg.Wait()
 
 		latest := manager.Get(task.GetTaskID()).(*CopySegmentTask)
 		assert.Len(t, latest.copiedFiles, 10)
-	})
-}
-
-func TestCopySegmentTask_CleanupCopiedFiles(t *testing.T) {
-	newTask := func(targetCM storage.ChunkManager) (TaskManager, *CopySegmentTask) {
-		manager := NewTaskManager()
-		req := &datapb.CopySegmentRequest{
-			JobID:  100,
-			TaskID: 1000,
-			Targets: []*datapb.CopySegmentTarget{{
-				CollectionId: 444,
-				PartitionId:  555,
-				SegmentId:    666,
-			}},
-		}
-		task := NewCopySegmentTask(context.Background(), req, manager, nil, targetCM, nil, nil, "", "").(*CopySegmentTask)
-		manager.Add(task)
-		return manager, task
-	}
-
-	t.Run("cleanup with files", func(t *testing.T) {
-		targetCM := &copySegmentChunkManagerTarget{}
-		var removed []string
-		mockRemove := mockey.Mock((*copySegmentChunkManagerTarget).MultiRemove).To(
-			func(_ *copySegmentChunkManagerTarget, _ context.Context, files []string) error {
-				removed = append([]string(nil), files...)
-				return nil
-			},
-		).Build()
-		defer mockRemove.UnPatch()
-
-		manager, original := newTask(targetCM)
-		files := []string{
-			"files/insert_log/444/555/666/1/10001",
-			"files/insert_log/444/555/666/1/10002",
-			"files/insert_log/444/555/666/1/10003",
-		}
-		manager.Update(original.GetTaskID(), UpdateCopiedFiles(files))
-		task := manager.Get(original.GetTaskID()).(*CopySegmentTask)
-		task.CleanupCopiedFiles()
-
-		assert.Equal(t, files, removed)
-	})
-
-	t.Run("cleanup with no files", func(t *testing.T) {
-		targetCM := &copySegmentChunkManagerTarget{}
-		calls := 0
-		mockRemove := mockey.Mock((*copySegmentChunkManagerTarget).MultiRemove).To(
-			func(_ *copySegmentChunkManagerTarget, _ context.Context, _ []string) error {
-				calls++
-				return nil
-			},
-		).Build()
-		defer mockRemove.UnPatch()
-
-		_, task := newTask(targetCM)
-		task.CleanupCopiedFiles()
-
-		assert.Zero(t, calls)
-	})
-
-	t.Run("cleanup failure is logged but doesn't panic", func(t *testing.T) {
-		targetCM := &copySegmentChunkManagerTarget{}
-		mockRemove := mockey.Mock((*copySegmentChunkManagerTarget).MultiRemove).Return(errors.New("cleanup failed")).Build()
-		defer mockRemove.UnPatch()
-
-		manager, original := newTask(targetCM)
-		files := []string{"10001", "10002"}
-		manager.Update(original.GetTaskID(), UpdateCopiedFiles(files))
-		task := manager.Get(original.GetTaskID()).(*CopySegmentTask)
-		assert.NotPanics(t, func() {
-			task.CleanupCopiedFiles()
-		})
-	})
-
-	t.Run("cleanup is idempotent", func(t *testing.T) {
-		targetCM := &copySegmentChunkManagerTarget{}
-		calls := 0
-		mockRemove := mockey.Mock((*copySegmentChunkManagerTarget).MultiRemove).To(
-			func(_ *copySegmentChunkManagerTarget, _ context.Context, _ []string) error {
-				calls++
-				return nil
-			},
-		).Build()
-		defer mockRemove.UnPatch()
-
-		manager, original := newTask(targetCM)
-		files := []string{"10001", "10002"}
-		manager.Update(original.GetTaskID(), UpdateCopiedFiles(files))
-		task := manager.Get(original.GetTaskID()).(*CopySegmentTask)
-		task.CleanupCopiedFiles()
-		task.CleanupCopiedFiles()
-
-		assert.Equal(t, 2, calls)
 	})
 }
 
@@ -1608,5 +1519,40 @@ func TestCopySegmentTask_CopySingleSegment_WithCleanup(t *testing.T) {
 		assert.Equal(t, files, latest.copiedFiles)
 		assert.Equal(t, datapb.ImportTaskStateV2_Pending, latest.GetState())
 		assert.Empty(t, latest.GetReason())
+	})
+}
+
+// A copy failure decides whether the whole restore job dies. DataCoord fails the
+// job on the first permanent failure and replans on a retriable one, so the
+// split has to follow what the error actually blames, not the fact that a copy
+// failed.
+func TestCopySegmentFailureState(t *testing.T) {
+	t.Run("request-blaming errors are permanent", func(t *testing.T) {
+		// A source segment with no binlogs, or a source/target count mismatch:
+		// no worker will ever do better with the same request.
+		assert.Equal(t, datapb.ImportTaskStateV2_Failed,
+			copySegmentFailureState(merr.WrapErrParameterInvalidMsg("no insert/delete binlogs for segment")))
+		// Still permanent through the wrapping the copy path adds.
+		assert.Equal(t, datapb.ImportTaskStateV2_Failed,
+			copySegmentFailureState(merr.Wrap(
+				merr.WrapErrParameterInvalidMsg("no insert/delete binlogs for segment"),
+				"failed to copy segment files")))
+	})
+
+	t.Run("system errors are retriable", func(t *testing.T) {
+		assert.Equal(t, datapb.ImportTaskStateV2_Retry,
+			copySegmentFailureState(merr.WrapErrIoFailedReason("SlowDown: please reduce your request rate")))
+		assert.Equal(t, datapb.ImportTaskStateV2_Retry,
+			copySegmentFailureState(merr.Wrap(
+				merr.WrapErrIoFailedReason("connection reset by peer"),
+				"failed to copy segment files")))
+	})
+
+	t.Run("unclassified errors default to retriable", func(t *testing.T) {
+		// GetErrorType answers SystemError for anything it cannot classify. That
+		// is the safe direction here: at worst an attempt is spent, never a job
+		// wrongly failed.
+		assert.Equal(t, datapb.ImportTaskStateV2_Retry,
+			copySegmentFailureState(errors.New("context deadline exceeded")))
 	})
 }

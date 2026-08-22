@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -257,11 +256,36 @@ func (t *CopySegmentTask) GetSegmentResults() map[int64]*datapb.CopySegmentResul
 //
 // Returns:
 //   - []*conc.Future[any]: A task-level finalizer future (nil if validation fails)
+//
+// copySegmentFailureState decides whether a failed copy attempt is worth
+// another one.
+//
+// Every copy failure used to be reported as Failed, and DataCoord fails the
+// whole restore job on the first one. That makes a single throttled or timed
+// out object-storage read permanently fail a restore that would have succeeded
+// on a retry. Retry is the same distinction ImportTaskStateV2 already draws for
+// imports, and DataCoord answers it by replanning the task under a fresh
+// identity, bounded by dataCoord.copySegmentMaxAttempts.
+//
+// The split is merr's Input-vs-System one, applied to the error the copy
+// actually produced: an InputError blames the request (a source segment with no
+// binlogs, a source/target count mismatch), so no worker will ever do better
+// with it. Everything else -- object storage, network, a bug -- is a System
+// error, which merr treats as retriable, and so do we. GetErrorType defaults to
+// SystemError for an unclassified error, which is the safe direction: at worst
+// the attempt is spent, never a job wrongly failed.
+func copySegmentFailureState(err error) datapb.ImportTaskStateV2 {
+	if merr.GetErrorType(err) == merr.InputError {
+		return datapb.ImportTaskStateV2_Failed
+	}
+	return datapb.ImportTaskStateV2_Retry
+}
+
 func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 	mlog.Info(t.ctx, "start copy segment task", WrapLogFields(t)...)
 
 	// Step 1: Update task state to InProgress
-	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
+	t.manager.Update(t, UpdateState(datapb.ImportTaskStateV2_InProgress))
 
 	sources := t.req.GetSources()
 	targets := t.req.GetTargets()
@@ -269,13 +293,15 @@ func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 	// Step 2: Validate input
 	if len(sources) == 0 {
 		reason := "no source segments to copy"
-		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
+		mlog.Warn(t.ctx, reason, WrapLogFields(t)...)
+		t.manager.Update(t, UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 		return nil
 	}
 	if len(sources) != len(targets) {
 		reason := fmt.Sprintf("source segments count (%d) does not match target segments count (%d)",
 			len(sources), len(targets))
-		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
+		mlog.Warn(t.ctx, reason, WrapLogFields(t)...)
+		t.manager.Update(t, UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 		return nil
 	}
 
@@ -309,8 +335,8 @@ func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 		if firstErr == nil {
 			return nil, nil
 		}
-		t.manager.Update(t.GetTaskID(),
-			UpdateState(datapb.ImportTaskStateV2_Failed),
+		t.manager.Update(t,
+			UpdateState(copySegmentFailureState(firstErr)),
 			UpdateReason(firstErr.Error()),
 		)
 		return nil, firstErr
@@ -390,12 +416,12 @@ func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, ta
 		copyErr := merr.Wrap(err, "failed to copy segment files")
 		mlog.Error(t.ctx,
 			copyErr.Error(), logFields...)
-		t.manager.Update(t.GetTaskID(), UpdateCopiedFiles(copiedFiles))
+		t.manager.Update(t, UpdateCopiedFiles(copiedFiles))
 		return nil, copyErr
 	}
 
 	// Step 3: Publish the copied files and complete segment metadata atomically.
-	t.manager.Update(t.GetTaskID(),
+	t.manager.Update(t,
 		UpdateCopiedFiles(copiedFiles),
 		UpdateSegmentResult(segmentResult),
 	)
@@ -403,67 +429,4 @@ func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, ta
 	mlog.Info(t.ctx, "successfully copied single segment",
 		append(logFields, mlog.Int("copiedFileCount", len(copiedFiles)))...)
 	return nil, nil
-}
-
-// ============================================================================
-// Cleanup on Failure
-// ============================================================================
-
-// CleanupCopiedFiles removes all copied files for failed tasks.
-//
-// This is called by DropCopySegment RPC when DataCoord inspector detects a failed task.
-// It removes all files that were successfully copied before the failure, preventing
-// orphan data in storage that cannot be cleaned by garbage collection.
-//
-// Process flow:
-//  1. Copy the immutable task snapshot's file list
-//  2. Early return if no files to cleanup
-//  3. Use ChunkManager.MultiRemove for batch deletion with timeout
-//  4. Log success/failure (failure is logged but doesn't block task removal)
-//
-// Why cleanup is necessary:
-//   - Failed copy tasks leave files in storage with no metadata references
-//   - Regular GC cannot clean these orphan files (not in any segment metadata)
-//   - Without cleanup, storage leaks accumulate over time
-//
-// Error handling:
-//   - Cleanup failure is logged but doesn't prevent task removal
-//   - Best-effort cleanup: some files may remain if deletion fails
-//   - 30-second timeout prevents cleanup from blocking indefinitely
-//
-// Idempotency:
-//   - Safe to call multiple times (operation is idempotent)
-//   - Subsequent calls will attempt to delete same files again
-func (t *CopySegmentTask) CleanupCopiedFiles() {
-	// Step 1: Copy the manager-owned task snapshot before performing I/O.
-	files := append([]string(nil), t.copiedFiles...)
-
-	// Step 2: Early return if no files to cleanup
-	if len(files) == 0 {
-		mlog.Info(t.ctx, "no files to cleanup", mlog.Int64("taskID", t.taskID))
-		return
-	}
-
-	mlog.Info(t.ctx, "cleaning up copied files for failed task",
-		mlog.Int64("taskID", t.taskID),
-		mlog.Int64("jobID", t.jobID),
-		mlog.Int("fileCount", len(files)))
-
-	// Step 3: Delete all copied files with timeout
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.ctx), 30*time.Second)
-	defer cancel()
-
-	if err := t.targetCM.MultiRemove(ctx, files); err != nil {
-		// Cleanup failure is logged but doesn't block task removal
-		mlog.Error(t.ctx, "failed to cleanup copied files",
-			mlog.Int64("taskID", t.taskID),
-			mlog.Int64("jobID", t.jobID),
-			mlog.Int("fileCount", len(files)),
-			mlog.Err(err))
-	} else {
-		mlog.Info(t.ctx, "successfully cleaned up copied files",
-			mlog.Int64("taskID", t.taskID),
-			mlog.Int64("jobID", t.jobID),
-			mlog.Int("fileCount", len(files)))
-	}
 }

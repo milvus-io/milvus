@@ -22,7 +22,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"path"
 	"sort"
 	"strconv"
 	"time"
@@ -53,7 +52,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -1756,35 +1754,6 @@ func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
 	}
 }
 
-// ResetImportingSegmentRows clears NumOfRows and MaxRowNum on each given
-// segment that is still in the Importing state. Used to discard partial
-// progress reported by a failed import attempt before the task is rescheduled,
-// so segments the retried attempt skips do not keep stale row counts that
-// would break sort compaction.
-func ResetImportingSegmentRows(segmentIDs ...int64) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
-		anyReset := false
-		for _, segmentID := range segmentIDs {
-			segment := modPack.Get(segmentID)
-			if segment == nil {
-				mlog.Warn(modPack.meta.ctx, "meta update: reset importing segment rows failed - segment not found",
-					mlog.Int64("segmentID", segmentID))
-				continue
-			}
-			if segment.GetState() != commonpb.SegmentState_Importing {
-				mlog.Warn(modPack.meta.ctx, "meta update: reset importing segment rows skipped - segment not in Importing state",
-					mlog.Int64("segmentID", segmentID),
-					mlog.String("state", segment.GetState().String()))
-				continue
-			}
-			segment.NumOfRows = 0
-			segment.MaxRowNum = 0
-			anyReset = true
-		}
-		return anyReset
-	}
-}
-
 func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
@@ -3250,42 +3219,29 @@ func (m *meta) GetCompactionTasksByTriggerID(ctx context.Context, triggerID int6
 	return m.compactionTaskMeta.GetCompactionTasksByTriggerID(triggerID)
 }
 
+// CleanPartitionStatsInfo drops the metadata a clustering compaction attempt left
+// behind: the analyze task record, the partition-stats info, and the
+// current-version rollback if the dropped version was the current one.
+//
+// It deliberately does NOT delete the corresponding object-storage files. The
+// object writes are owned by garbage collection, which reclaims them by prefix
+// once the metadata that references them is gone:
+//
+//   - part_stats/{collID}/{partID}/{vchannel}/{version} by
+//     recycleUnusedPartitionStatsFiles, which deletes any version meta no longer
+//     knows about;
+//   - analyze_stats/{taskID}/... by recycleUnusedAnalyzeFiles, which removes the
+//     whole task prefix once CheckCleanAnalyzeTask finds no record for it.
+//
+// This split matters because this function is on the compaction cleanup path,
+// and cleanup is what hands a task's input segments back (resetSegmentCompacting)
+// and lifts the channel/label exclusion that keeps new compactions off that
+// channel. Deleting objects inline made both wait on object storage: a single
+// bucket outage turned a failed MultiRemove into a permanently unfinished
+// cleanup, and with it a channel on which no compaction could ever start again.
+// Cleanup now only writes etcd -- fast, idempotent, and retryable -- exactly like
+// the binlog, text-index and LOB paths, which have always left their files to GC.
 func (m *meta) CleanPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error {
-	removePaths := make([]string, 0)
-	partitionStatsPath := path.Join(m.chunkManager.RootPath(), common.PartitionStatsPath,
-		metautil.JoinIDPath(info.CollectionID, info.PartitionID),
-		info.GetVChannel(), strconv.FormatInt(info.GetVersion(), 10))
-	removePaths = append(removePaths, partitionStatsPath)
-	analyzeT := m.analyzeMeta.GetTask(info.GetAnalyzeTaskID())
-	if analyzeT != nil {
-		centroidsFilePath := path.Join(m.chunkManager.RootPath(), common.AnalyzeStatsPath,
-			metautil.JoinIDPath(analyzeT.GetTaskID(), analyzeT.GetVersion(), analyzeT.GetCollectionID(),
-				analyzeT.GetPartitionID(), analyzeT.GetFieldID()),
-			"centroids",
-		)
-		removePaths = append(removePaths, centroidsFilePath)
-		for _, segID := range info.GetSegmentIDs() {
-			segmentOffsetMappingFilePath := path.Join(m.chunkManager.RootPath(), common.AnalyzeStatsPath,
-				metautil.JoinIDPath(analyzeT.GetTaskID(), analyzeT.GetVersion(), analyzeT.GetCollectionID(),
-					analyzeT.GetPartitionID(), analyzeT.GetFieldID(), segID),
-				"offset_mapping",
-			)
-			removePaths = append(removePaths, segmentOffsetMappingFilePath)
-		}
-	}
-
-	mlog.Debug(ctx, "remove clustering compaction stats files",
-		mlog.Int64("collectionID", info.GetCollectionID()),
-		mlog.Int64("partitionID", info.GetPartitionID()),
-		mlog.String("vChannel", info.GetVChannel()),
-		mlog.Int64("planID", info.GetVersion()),
-		mlog.Strings("removePaths", removePaths))
-	err := m.chunkManager.MultiRemove(context.Background(), removePaths)
-	if err != nil {
-		mlog.Warn(ctx, "remove clustering compaction stats files failed", mlog.Err(err))
-		return err
-	}
-
 	// Persist the analyze task removal, the current-partition-stats-version
 	// rollback (if the dropped version is the current one), and the
 	// partition-stats info removal as a single composite catalog write, with

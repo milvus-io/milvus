@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -47,6 +48,7 @@ type CopySegmentCheckerSuite struct {
 	broker   *broker.MockBroker
 	meta     *meta
 	copyMeta CopySegmentMeta
+	cluster  *session.MockCluster
 	checker  *copySegmentChecker
 }
 
@@ -85,12 +87,14 @@ func (s *CopySegmentCheckerSuite) SetupTest() {
 	s.copyMeta, err = NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, nil, nil)
 	s.NoError(err)
 
+	s.cluster = session.NewMockCluster(s.T())
 	s.checker = NewCopySegmentChecker(
 		context.TODO(),
 		s.meta,
 		s.broker,
 		s.alloc,
 		s.copyMeta,
+		s.cluster,
 	).(*copySegmentChecker)
 }
 
@@ -669,6 +673,68 @@ func (s *CopySegmentCheckerSuite) TestCheckGC_RemoveCompletedJob() {
 
 	removedTask := s.copyMeta.GetTask(context.TODO(), 1001)
 	s.Nil(removedTask)
+}
+
+// The scheduler sends exactly one worker drop when it releases a task, and that
+// drop can fail. Nothing retried it before: the scheduler had already given the
+// task up, and GC refuses to remove a task that still names a node, so the
+// record and its job stayed in meta forever while the worker kept its own copy
+// (importv2 taskManager.Sweep is deliberately a no-op). GC is what makes the
+// drop eventually land, the same as importChecker.checkGC.
+func (s *CopySegmentCheckerSuite) TestCheckGC_RetriesStrandedWorkerDrop() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().DropCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().DropCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+
+	cleanupTs := tsoutil.ComposeTSByTime(time.Now().Add(-1 * time.Hour))
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobCompleted,
+			CleanupTs:    cleanupTs,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	// A completed task whose drop never landed: terminal, but still naming node 7.
+	task := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        s.jobID,
+		CollectionId: s.collectionID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		NodeId:       7,
+	})
+	s.NoError(s.copyMeta.AddTask(context.TODO(), task))
+
+	// First round: the node is still unreachable, so the record has to survive
+	// for a later round to retry.
+	s.cluster.EXPECT().DropCopySegment(int64(7), int64(1001)).
+		Return(errors.New("connection refused")).Once()
+	s.checker.checkGC(job)
+	s.Require().NotNil(s.copyMeta.GetTask(context.TODO(), 1001),
+		"a failed drop must stay retryable, not have the record removed under it")
+	s.EqualValues(7, s.copyMeta.GetTask(context.TODO(), 1001).GetNodeId())
+
+	// Second round: the drop lands and releases the assignment.
+	s.cluster.EXPECT().DropCopySegment(int64(7), int64(1001)).Return(nil).Once()
+	s.checker.checkGC(job)
+	s.Require().NotNil(s.copyMeta.GetTask(context.TODO(), 1001),
+		"the round that lands the drop only releases the assignment")
+	s.EqualValues(NullNodeID, s.copyMeta.GetTask(context.TODO(), 1001).GetNodeId())
+
+	// Third round: nothing names a worker any more, so the task and its job go.
+	// The mock declares no further drops, so it fails if GC keeps re-sending.
+	s.checker.checkGC(job)
+	s.Nil(s.copyMeta.GetTask(context.TODO(), 1001))
+	s.Nil(s.copyMeta.GetJob(context.TODO(), s.jobID))
 }
 
 func (s *CopySegmentCheckerSuite) TestLogJobStats() {

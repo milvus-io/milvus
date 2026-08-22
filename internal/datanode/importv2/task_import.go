@@ -168,7 +168,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		mlog.Any("files", t.req.GetFiles()),
 		mlog.FieldSchema(t.GetSchema()),
 	)...)
-	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
+	t.manager.Update(t, UpdateState(datapb.ImportTaskStateV2_InProgress))
 
 	req := t.req
 
@@ -177,7 +177,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		if err != nil {
 			mlog.Warn(t.ctx, "new reader failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
-			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
+			t.manager.Update(t, UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			return err
 		}
 		defer reader.Close()
@@ -186,7 +186,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		if err != nil {
 			mlog.Warn(t.ctx, "do import failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
-			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
+			t.manager.Update(t, UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			return err
 		}
 		mlog.Info(t.ctx, "import file done", WrapLogFields(t, mlog.Strings("files", file.GetPaths()),
@@ -273,7 +273,7 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 		if err != nil {
 			return err
 		}
-		t.manager.Update(t.GetTaskID(), UpdateSegmentInfo(segmentInfo))
+		t.manager.Update(t, UpdateSegmentInfo(segmentInfo))
 		mlog.Info(t.ctx, "sync import data done", WrapLogFields(t, mlog.Any("segmentInfo", segmentInfo))...)
 	}
 	return nil

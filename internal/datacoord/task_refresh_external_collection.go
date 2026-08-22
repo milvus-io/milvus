@@ -18,9 +18,12 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -38,10 +41,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+// refreshQueryLogRate caps the per-poll logs at one line per second per
+// process. Polls run on the scheduler round (100ms by default) and say the same
+// thing every time; the transitions they lead to are logged separately.
+const refreshQueryLogRate = rate.Limit(1)
+
 // refreshExternalCollectionTask wraps ExternalCollectionRefreshTask for scheduling.
 // This is used by the global task scheduler to dispatch refresh tasks to DataNodes.
 type refreshExternalCollectionTask struct {
 	*datapb.ExternalCollectionRefreshTask
+
+	// stateGuard makes the embedded proto readable by the scheduler without the
+	// per-task key lock. Callbacks replace the whole embedded pointer (meta
+	// re-reads) and mutate State under that key lock, but the scheduler's phase
+	// derivation and metrics pass read GetTaskID/GetTaskState/GetTaskVersion
+	// lock-free on their own goroutines; see statsTask.stateGuard.
+	stateGuard sync.RWMutex
 
 	times *taskcommon.Times
 
@@ -56,6 +71,11 @@ type refreshExternalCollectionTask struct {
 	// net for missed events. Set by the manager during task wrapping; nil in
 	// unit tests.
 	processFinishedJob func(jobID int64)
+	// beginExecution/endExecution form the manager-owned job lease around worker
+	// callbacks. The lease closes the gap between a pending wrapper being popped
+	// from the scheduler queue and acquiring the scheduler's per-task lock.
+	beginExecution func(jobID int64) bool
+	endExecution   func(jobID int64)
 }
 
 var _ globalTask.Task = (*refreshExternalCollectionTask)(nil)
@@ -76,6 +96,8 @@ func newRefreshExternalCollectionTask(
 }
 
 func (t *refreshExternalCollectionTask) GetTaskID() int64 {
+	t.stateGuard.RLock()
+	defer t.stateGuard.RUnlock()
 	return t.TaskId
 }
 
@@ -84,8 +106,17 @@ func (t *refreshExternalCollectionTask) GetTaskType() taskcommon.Type {
 }
 
 func (t *refreshExternalCollectionTask) GetTaskState() taskcommon.State {
+	t.stateGuard.RLock()
+	state := t.GetState()
+	t.stateGuard.RUnlock()
+	if state == indexpb.JobState_JobStateRetry {
+		// Retry is durable replacement debt handled by the inspector. Expose the
+		// old attempt as terminal to the global scheduler so it cannot dispatch
+		// the same task ID again while a fresh replacement is being published.
+		return taskcommon.Failed
+	}
 	// taskcommon.State is a type alias of indexpb.JobState, so this is type-safe.
-	return t.GetState()
+	return state
 }
 
 func (t *refreshExternalCollectionTask) GetTaskSlot() int64 {
@@ -102,7 +133,110 @@ func (t *refreshExternalCollectionTask) GetTaskTime(timeType taskcommon.TimeType
 }
 
 func (t *refreshExternalCollectionTask) GetTaskVersion() int64 {
+	t.stateGuard.RLock()
+	defer t.stateGuard.RUnlock()
 	return t.GetVersion()
+}
+
+// swapTaskProto replaces the embedded proto after a meta re-read, under
+// stateGuard so the scheduler's lock-free readers never observe a torn pointer.
+func (t *refreshExternalCollectionTask) swapTaskProto(updated *datapb.ExternalCollectionRefreshTask) {
+	t.stateGuard.Lock()
+	t.ExternalCollectionRefreshTask = updated
+	t.stateGuard.Unlock()
+}
+
+// retryWorkerFailure records a worker failure that another attempt could still
+// get past, spending one of the task's attempts (issue #52445 tracked the
+// worker-lost-the-task case: the worker now reports that as JobStateRetry with
+// "task result not found", so it lands here and is re-dispatched rather than
+// being mistaken for the work itself failing).
+func (t *refreshExternalCollectionTask) retryWorkerFailure(reason string) error {
+	maxRetryTimes := paramtable.Get().DataCoordCfg.ExternalCollectionMaxRetryTimes.GetAsInt64()
+	if maxRetryTimes < 1 {
+		maxRetryTimes = 1
+	}
+	return t.recordWorkerFailure(reason, maxRetryTimes)
+}
+
+// failWorkerPermanently ends the attempt on the first report.
+//
+// A worker failure that blames the request -- zero total rows in the source, a
+// function field the schema does not have -- cannot be fixed by handing the
+// same request to another node. Spending the retry budget on it only delays the
+// RefreshFailed the caller is waiting for, which is what left permanent input
+// errors sitting in RefreshInProgress. The worker draws the line by reporting
+// Failed rather than Retry (see externalRefreshFailureState); a cap of one
+// attempt is how that decision is honored here.
+func (t *refreshExternalCollectionTask) failWorkerPermanently(reason string) error {
+	return t.recordWorkerFailure(reason, 1)
+}
+
+func (t *refreshExternalCollectionTask) recordWorkerFailure(reason string, maxRetryTimes int64) error {
+	updated, _, applied, err := t.refreshMeta.RecordTaskWorkerFailure(t.GetTaskId(), maxRetryTimes, reason)
+	if err != nil {
+		return err
+	}
+	if updated != nil {
+		t.swapTaskProto(updated)
+	}
+	if applied && updated.GetState() == indexpb.JobState_JobStateFailed && t.processFinishedJob != nil {
+		t.processFinishedJob(t.GetJobId())
+	}
+	return nil
+}
+
+func isTerminalExternalRefreshJob(job *datapb.ExternalCollectionRefreshJob) bool {
+	if job == nil {
+		return true
+	}
+	return job.GetState() == indexpb.JobState_JobStateFinished ||
+		job.GetState() == indexpb.JobState_JobStateFailed
+}
+
+// cancelForTerminalJob closes the scheduler tail race where a pending wrapper
+// has already been popped into an executor future just before GC drains the
+// scheduler maps. A missing or terminal job no longer owns worker work, so the
+// wrapper must become terminal locally even when its task metadata was already
+// removed and the best-effort state persistence cannot succeed.
+func (t *refreshExternalCollectionTask) cancelForTerminalJob(ctx context.Context, cluster session.Cluster) bool {
+	job := t.refreshMeta.GetJob(t.GetJobId())
+	if !isTerminalExternalRefreshJob(job) {
+		return false
+	}
+
+	reason := "job canceled"
+	if job != nil {
+		reason = fmt.Sprintf("job canceled in state %s", job.GetState().String())
+		if job.GetFailReason() != "" {
+			reason += ": " + job.GetFailReason()
+		}
+	}
+	if t.GetNodeId() != 0 {
+		if err := cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId()); err != nil {
+			mlog.Warn(ctx, "failed to drop canceled external refresh task",
+				mlog.FieldTaskID(t.GetTaskId()),
+				mlog.Err(err))
+		}
+	}
+	if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, reason); err != nil {
+		mlog.Warn(ctx, "failed to persist external refresh cancellation; terminating scheduler wrapper locally",
+			mlog.FieldJobID(t.GetJobId()),
+			mlog.FieldTaskID(t.GetTaskId()),
+			mlog.Err(err))
+		t.SetState(indexpb.JobState_JobStateFailed, reason)
+	}
+	return true
+}
+
+// terminateIfOwnershipGone prevents a popped scheduler future from requeueing
+// itself when a concurrent composite DropJob won the metadata lock race after
+// the future's initial job check.
+func (t *refreshExternalCollectionTask) terminateIfOwnershipGone(reason string) {
+	job := t.refreshMeta.GetJob(t.GetJobId())
+	if isTerminalExternalRefreshJob(job) || t.refreshMeta.GetTask(t.GetTaskId()) == nil {
+		t.SetState(indexpb.JobState_JobStateFailed, reason)
+	}
 }
 
 // validateSource checks if this task's external source matches the current collection source
@@ -136,6 +270,8 @@ func (t *refreshExternalCollectionTask) validateSource() error {
 }
 
 func (t *refreshExternalCollectionTask) SetState(state indexpb.JobState, failReason string) {
+	t.stateGuard.Lock()
+	defer t.stateGuard.Unlock()
 	t.State = state
 	t.FailReason = failReason
 }
@@ -639,55 +775,74 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		mlog.FieldCollectionID(t.GetCollectionId()),
 		mlog.FieldNodeID(nodeID),
 	)
-	var err error
-	defer func() {
-		if err != nil {
-			log.Warn(ctx, "failed to create refresh task on worker", mlog.Err(err))
-			if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error()); updateErr != nil {
-				log.Warn(ctx, "failed to persist Failed state after create error", mlog.Err(updateErr))
-			}
+	if t.beginExecution != nil {
+		if !t.beginExecution(t.GetJobId()) {
+			t.SetState(indexpb.JobState_JobStateFailed, "job canceled before worker dispatch")
+			return
 		}
-	}()
+		if t.endExecution != nil {
+			defer t.endExecution(t.GetJobId())
+		}
+	}
+	// A replacement reuses the same immutable manifest range and owned segments,
+	// so it cannot repair a malformed plan or invalid local metadata. Keep those
+	// failures terminal and separate from transient failures that happen before
+	// any worker RPC is sent.
+	failPermanent := func(cause error) {
+		log.Warn(ctx, "external refresh task is not dispatchable", mlog.Err(cause))
+		if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, cause.Error()); updateErr != nil {
+			log.Warn(ctx, "failed to persist Failed state for an invalid refresh task", mlog.Err(updateErr))
+			t.terminateIfOwnershipGone(cause.Error())
+		}
+	}
 
 	log.Info(ctx, "creating refresh task on worker",
 		mlog.Int64("fileIndexBegin", t.GetFileIndexBegin()),
 		mlog.Int64("fileIndexEnd", t.GetFileIndexEnd()),
 		mlog.Int64("fileCount", t.GetFileIndexEnd()-t.GetFileIndexBegin()),
 		mlog.Int("ownedSegments", len(t.GetOwnedSegmentIds())))
+	if t.cancelForTerminalJob(ctx, cluster) {
+		return
+	}
 
 	if t.mt == nil {
-		err = merr.WrapErrServiceInternalMsg("meta is nil, cannot create task on worker")
+		failPermanent(merr.WrapErrServiceInternalMsg("meta is nil, cannot create task on worker"))
 		return
 	}
 	if !isSupportedExternalRefreshOwnershipPlanVersion(t.GetOwnershipPlanVersion()) {
-		err = merr.WrapErrServiceInternalMsg(
+		failPermanent(merr.WrapErrServiceInternalMsg(
 			"external refresh task %d has unsupported ownership plan version %d; retry refresh",
 			t.GetTaskId(),
 			t.GetOwnershipPlanVersion(),
-		)
+		))
 		return
 	}
 
-	// Persist task version and nodeID before dispatching to worker
-	if err = t.refreshMeta.UpdateTaskVersion(t.GetTaskId(), nodeID); err != nil {
-		log.Warn(ctx, "failed to update task version", mlog.Err(err))
+	// No worker has seen the task yet. A catalog failure here is safe to retry
+	// with the same Init task ID; the global scheduler supplies exponential
+	// backoff and no worker-failure attempt is consumed.
+	if err := t.refreshMeta.UpdateTaskVersion(t.GetTaskId(), nodeID); err != nil {
+		log.Warn(ctx, "failed to update task version; keeping task Init for retry", mlog.Err(err))
+		// A concurrent job/task drop is not a transient catalog failure. End the
+		// detached scheduler wrapper locally so it cannot retry work with no owner.
+		t.terminateIfOwnershipGone(err.Error())
 		return
 	}
 
 	// Re-read task from meta to sync in-memory state (nodeID and version)
 	updatedTask := t.refreshMeta.GetTask(t.GetTaskId())
 	if updatedTask == nil {
-		err = merr.WrapErrServiceInternalMsg("task %d not found after version update", t.GetTaskId())
+		failPermanent(merr.WrapErrServiceInternalMsg("task %d not found after version update", t.GetTaskId()))
 		return
 	}
-	t.ExternalCollectionRefreshTask = updatedTask
+	t.swapTaskProto(updatedTask)
 
 	ownedSegmentIDs := t.GetOwnedSegmentIds()
 	currentSegments := make([]*datapb.SegmentInfo, 0, len(ownedSegmentIDs))
 	seenOwnedSegments := make(map[int64]struct{}, len(t.GetOwnedSegmentIds()))
 	for _, segmentID := range ownedSegmentIDs {
 		if _, ok := seenOwnedSegments[segmentID]; ok {
-			err = merr.WrapErrServiceInternalMsg("task %d contains duplicate owned segment %d", t.GetTaskId(), segmentID)
+			failPermanent(merr.WrapErrServiceInternalMsg("task %d contains duplicate owned segment %d", t.GetTaskId(), segmentID))
 			return
 		}
 		seenOwnedSegments[segmentID] = struct{}{}
@@ -697,20 +852,20 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	for i, segmentID := range ownedSegmentIDs {
 		segment := segmentSnapshots[i]
 		if segment == nil {
-			err = merr.WrapErrServiceInternalMsg("owned segment %d not found for task %d", segmentID, t.GetTaskId())
+			failPermanent(merr.WrapErrServiceInternalMsg("owned segment %d not found for task %d", segmentID, t.GetTaskId()))
 			return
 		}
 		if segment.GetCollectionID() != t.GetCollectionId() {
-			err = merr.WrapErrServiceInternalMsg(
+			failPermanent(merr.WrapErrServiceInternalMsg(
 				"owned segment %d belongs to collection %d, expected %d",
 				segmentID,
 				segment.GetCollectionID(),
 				t.GetCollectionId(),
-			)
+			))
 			return
 		}
 		if !isSegmentHealthy(segment) {
-			err = merr.WrapErrServiceInternalMsg("owned segment %d is not active", segmentID)
+			failPermanent(merr.WrapErrServiceInternalMsg("owned segment %d is not active", segmentID))
 			return
 		}
 		currentSegments = append(currentSegments, segment.SegmentInfo)
@@ -723,7 +878,10 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 
 	idBegin, idEnd, err := t.allocator.AllocN(preAllocCount)
 	if err != nil {
-		log.Warn(ctx, "failed to batch allocate segment IDs", mlog.Err(err))
+		// Allocation happens before dispatch. Retrying the same task is safe even
+		// if an allocator consumed a range before returning an ambiguous error:
+		// no worker can reference that range yet.
+		log.Warn(ctx, "failed to batch allocate segment IDs; keeping task Init for retry", mlog.Err(err))
 		return
 	}
 
@@ -746,11 +904,11 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	// lock, before they are supported.
 	collInfo := t.mt.GetCollection(t.GetCollectionId())
 	if collInfo == nil {
-		err = merr.WrapErrServiceInternalMsg("collection %d not found in meta", t.GetCollectionId())
+		failPermanent(merr.WrapErrServiceInternalMsg("collection %d not found in meta", t.GetCollectionId()))
 		return
 	}
 	if len(collInfo.Partitions) != 1 {
-		err = merr.WrapErrServiceInternalMsg("external collection %d expected exactly 1 partition, got %d", t.GetCollectionId(), len(collInfo.Partitions))
+		failPermanent(merr.WrapErrServiceInternalMsg("external collection %d expected exactly 1 partition, got %d", t.GetCollectionId(), len(collInfo.Partitions)))
 		return
 	}
 	partitionID := collInfo.Partitions[0]
@@ -774,15 +932,40 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	}
 
 	// Submit task to worker via unified task system
-	err = cluster.CreateRefreshExternalCollectionTask(nodeID, req)
-	if err != nil {
-		log.Warn(ctx, "failed to create refresh task on worker", mlog.Err(err))
+	if workerErr := cluster.CreateRefreshExternalCollectionTask(nodeID, req); workerErr != nil {
+		if errors.Is(workerErr, merr.ErrServiceTooManyRequests) {
+			// Admission rejection is not an execution attempt.  Keep the same
+			// task ID in Init so the global scheduler's per-task exponential
+			// backoff remains attached and no worker-failure budget is consumed.
+			log.Info(ctx, "external collection worker has no free slot; retrying with scheduler backoff",
+				mlog.Err(workerErr))
+			return
+		}
+		// The create RPC is an at-least-once dispatch boundary. Whether the
+		// worker accepted it and lost the response or failed before acceptance, a
+		// fresh dispatch is safe: only the result selected by DataCoord is
+		// committed, and unreferenced output files are reclaimed by orphan GC.
+		log.Warn(ctx, "failed to create refresh task on worker, recording worker failure", mlog.Err(workerErr))
+		if updateErr := t.retryWorkerFailure(workerErr.Error()); updateErr != nil {
+			log.Warn(ctx, "failed to persist refresh task state after create error", mlog.Err(updateErr))
+			t.terminateIfOwnershipGone(workerErr.Error())
+		}
 		return
 	}
 
-	// Mark task as in progress - QueryTaskOnWorker will check completion
-	if err = t.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, ""); err != nil {
-		log.Warn(ctx, "failed to update task state to InProgress", mlog.Err(err))
+	// Create succeeded, so this is now a real worker attempt even if persisting
+	// InProgress fails. Record exactly one failure through the same durable
+	// Retry/Failed transition used for RPC-unknown and worker-reported failures.
+	// RecordTaskWorkerFailure increments its process-local counter only after the
+	// state write succeeds; if the catalog remains unavailable the wrapper stays
+	// Init and the scheduler safely retries without inventing a consumed attempt.
+	if persistErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, ""); persistErr != nil {
+		attemptErr := merr.Wrap(persistErr, "worker accepted external refresh task but persisting InProgress failed")
+		log.Warn(ctx, "worker accepted refresh task but its InProgress state was not persisted", mlog.Err(attemptErr))
+		if updateErr := t.retryWorkerFailure(attemptErr.Error()); updateErr != nil {
+			log.Warn(ctx, "failed to persist refresh task retry after InProgress persistence failure", mlog.Err(updateErr))
+			t.terminateIfOwnershipGone(attemptErr.Error())
+		}
 		return
 	}
 
@@ -790,39 +973,34 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 }
 
 func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluster) {
-	// Check if job has been canceled/superseded before querying worker
-	job := t.refreshMeta.GetJob(t.GetJobId())
-	if job == nil {
-		mlog.Info(context.TODO(), "job not found, task has been canceled")
-		// Best-effort cleanup: try to drop task on worker if it was assigned
-		if t.GetNodeId() != 0 {
-			_ = cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
+	if t.beginExecution != nil {
+		if !t.beginExecution(t.GetJobId()) {
+			t.SetState(indexpb.JobState_JobStateFailed, "job canceled before worker query")
+			return
 		}
-		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job canceled"); err != nil {
-			mlog.Warn(context.TODO(), "failed to persist Failed state after job cancellation", mlog.Err(err))
+		if t.endExecution != nil {
+			defer t.endExecution(t.GetJobId())
 		}
+	}
+
+	// Check if job has been canceled/superseded before querying worker.
+	if t.cancelForTerminalJob(context.TODO(), cluster) {
 		return
 	}
-	if job.GetState() == indexpb.JobState_JobStateFailed {
-		mlog.Info(context.TODO(), "job has been marked as failed, canceling task",
-			mlog.String("jobFailReason", job.GetFailReason()))
-		// Best-effort cleanup: try to drop task on worker if it was assigned
-		if t.GetNodeId() != 0 {
-			_ = cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
-		}
-		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job canceled: "+job.GetFailReason()); err != nil {
-			mlog.Warn(context.TODO(), "failed to persist Failed state after job cancellation", mlog.Err(err))
-		}
-		return
-	}
+
+	// Every log below names the task: these are lifecycle-terminal events, and
+	// an event without an identity cannot be correlated with anything.
+	log := mlog.With(
+		mlog.FieldJobID(t.GetJobId()),
+		mlog.FieldTaskID(t.GetTaskId()),
+		mlog.FieldNodeID(t.GetNodeId()))
 
 	// Query task status from worker
 	resp, err := cluster.QueryRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
 	if err != nil {
-		mlog.Warn(context.TODO(), "query refresh task result failed", mlog.Err(err))
-		// If query fails, mark task as failed
-		if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, fmt.Sprintf("query task failed: %v", err)); updateErr != nil {
-			mlog.Warn(context.TODO(), "failed to persist Failed state after query error", mlog.Err(updateErr))
+		log.Warn(context.TODO(), "query refresh task result failed", mlog.Err(err))
+		if updateErr := t.retryWorkerFailure(fmt.Sprintf("query task failed: %v", err)); updateErr != nil {
+			log.Warn(context.TODO(), "failed to persist refresh task state after query error", mlog.Err(updateErr))
 		}
 		return
 	}
@@ -830,7 +1008,12 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 	state := resp.GetState()
 	failReason := resp.GetFailReason()
 
-	mlog.Info(context.TODO(), "queried refresh task status",
+	// Rated: this fires on every poll of every running task, and the poll runs
+	// on the scheduler round (100ms by default). The state changes below are
+	// logged at Info/Warn on their own; this one only reports that a poll
+	// happened.
+	mlog.RatedInfo(context.TODO(), refreshQueryLogRate, "queried refresh task status",
+		mlog.FieldTaskID(t.GetTaskId()),
 		mlog.String("state", state.String()),
 		mlog.String("failReason", failReason))
 
@@ -839,8 +1022,10 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 	case indexpb.JobState_JobStateFinished:
 		// Validate source before processing - check if task has been superseded
 		if err := t.validateSource(); err != nil {
-			mlog.Warn(context.TODO(), "task validation failed, task has been superseded", mlog.Err(err))
-			t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error())
+			log.Warn(context.TODO(), "task validation failed, task has been superseded", mlog.Err(err))
+			if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error()); updateErr != nil {
+				log.Warn(context.TODO(), "failed to persist superseded task state", mlog.Err(updateErr))
+			}
 			return
 		}
 
@@ -853,30 +1038,31 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 			resp.GetKeptSegments(),
 			resp.GetUpdatedSegments(),
 		); err != nil {
-			mlog.Warn(context.TODO(), "failed to update task state to Finished", mlog.Err(err))
+			log.Warn(context.TODO(), "failed to update task state to Finished", mlog.Err(err))
 			return
 		}
-		mlog.Info(context.TODO(), "refresh task completed successfully")
+		log.Info(context.TODO(), "refresh task completed successfully")
 
 	case indexpb.JobState_JobStateFailed:
-		// Task failed
-		if err := t.UpdateStateWithMeta(state, failReason); err != nil {
-			mlog.Warn(context.TODO(), "failed to update task state to Failed", mlog.Err(err))
+		// The worker calls this one permanent: the request itself is what it
+		// could not satisfy. Retrying it would only spend the budget that
+		// transient faults need.
+		if err := t.failWorkerPermanently(failReason); err != nil {
+			log.Warn(context.TODO(), "failed to persist refresh task state after worker failure", mlog.Err(err))
 			return
 		}
-		mlog.Warn(context.TODO(), "refresh task failed", mlog.String("reason", failReason))
+		log.Warn(context.TODO(), "refresh task failed permanently on worker", mlog.String("reason", failReason))
 
 	case indexpb.JobState_JobStateInProgress, indexpb.JobState_JobStateNone, indexpb.JobState_JobStateInit:
 		// Task still in progress or not yet picked up by scheduler, no action needed
-		mlog.Info(context.TODO(), "refresh task still in progress",
+		mlog.RatedInfo(context.TODO(), refreshQueryLogRate, "refresh task still in progress",
+			mlog.FieldTaskID(t.GetTaskId()),
 			mlog.String("state", state.String()))
 
 	case indexpb.JobState_JobStateRetry:
-		// Task needs retry - mark as failed
-		mlog.Warn(context.TODO(), "refresh task in unexpected state, marking as failed",
-			mlog.String("state", state.String()))
-		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, fmt.Sprintf("task in unexpected state: %s", state.String())); err != nil {
-			mlog.Warn(context.TODO(), "failed to persist Failed state for retry branch", mlog.Err(err))
+		// A transient fault on the worker. Spend an attempt.
+		if err := t.retryWorkerFailure(failReason); err != nil {
+			log.Warn(context.TODO(), "failed to persist refresh task state requested by worker", mlog.Err(err))
 		}
 
 	default:
@@ -886,12 +1072,19 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 }
 
 func (t *refreshExternalCollectionTask) DropTaskOnWorker(cluster session.Cluster) {
+	// A task that was never dispatched has no worker to tell. NullNodeID (-1)
+	// marks unassigned; legacy records may carry the proto default 0.
+	if t.GetNodeId() == NullNodeID || t.GetNodeId() == 0 {
+		return
+	}
 	// Drop task on worker to cancel execution and clean up resources
 	err := cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to drop refresh task on worker", mlog.Err(err))
+		mlog.Warn(context.TODO(), "failed to drop refresh task on worker",
+			mlog.FieldTaskID(t.GetTaskId()), mlog.FieldNodeID(t.GetNodeId()), mlog.Err(err))
 		return
 	}
 
-	mlog.Info(context.TODO(), "refresh task dropped successfully")
+	mlog.Info(context.TODO(), "refresh task dropped successfully",
+		mlog.FieldTaskID(t.GetTaskId()), mlog.FieldNodeID(t.GetNodeId()))
 }

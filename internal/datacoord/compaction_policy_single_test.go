@@ -47,6 +47,14 @@ type SingleCompactionPolicySuite struct {
 	singlePolicy *singleCompactionPolicy
 }
 
+// Sort compaction is always on, so the policy must always run: its ticker is
+// also the retry path a sort task falls back to once it exhausts
+// dataCoord.compaction.maxAttempts. The merge half still honors
+// EnableAutoCompaction inside Trigger.
+func (s *SingleCompactionPolicySuite) TestEnableAlwaysTrue() {
+	s.True(s.singlePolicy.Enable())
+}
+
 func (s *SingleCompactionPolicySuite) SetupTest() {
 	s.testLabel = &CompactionGroupLabel{
 		CollectionID: 1,
@@ -272,6 +280,50 @@ func (s *SingleCompactionPolicySuite) TestSegmentSortCompaction() {
 
 	sortView = s.singlePolicy.triggerSegmentSortCompaction(context.TODO(), 103)
 	s.Nil(sortView)
+}
+
+// Sort is always on, so both owed (invisible) and new (visible) unsorted
+// segments are sorted: the visible segment is swept up too, not just the
+// invisible one that has no other path to being served.
+func (s *SingleCompactionPolicySuite) TestSortSortsBothOwedAndNewWork() {
+	ctx := context.Background()
+	Params.Save(Params.DataCoordCfg.EnableAutoCompaction.Key, "false")
+	defer Params.Reset(Params.DataCoordCfg.EnableAutoCompaction.Key)
+
+	collID := int64(100)
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID:     collID,
+		Schema: newTestSchema(),
+	}, nil)
+
+	segments := make(map[UniqueID]*SegmentInfo, 0)
+	// owed: published invisible, never sorted
+	segments[101] = buildTestSegment(101, collID, datapb.SegmentLevel_L1, 0, 10000, 1, false, true)
+	// new work: visible and unsorted -- what the switch declines
+	segments[102] = buildTestSegment(102, collID, datapb.SegmentLevel_L1, 0, 10000, 1, false, false)
+	segmentsInfo := &SegmentsInfo{
+		segments: segments,
+		secondaryIndexes: segmentInfoIndexes{
+			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
+				collID: {101: segments[101], 102: segments[102]},
+			},
+		},
+	}
+	s.singlePolicy.meta = &meta{
+		compactionTaskMeta: newTestCompactionTaskMeta(s.T()),
+		segments:           segmentsInfo,
+	}
+
+	_, sortViews, _, err := s.singlePolicy.triggerOneCollection(ctx, collID, false)
+	s.NoError(err)
+	s.Require().Equal(2, len(sortViews), "both the owed and the visible segment are sorted")
+	s.EqualValues(101, sortViews[0].GetSegmentsView()[0].ID)
+	s.EqualValues(102, sortViews[1].GetSegmentsView()[0].ID)
+
+	view := s.singlePolicy.triggerSegmentSortCompaction(ctx, 101)
+	s.NotNil(view, "the single-segment path sorts an owed segment too")
+	view = s.singlePolicy.triggerSegmentSortCompaction(ctx, 102)
+	s.NotNil(view, "and sorts new work too")
 }
 
 func (s *SingleCompactionPolicySuite) TestTriggerOneCollectionSkipExternal() {

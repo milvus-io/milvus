@@ -1362,7 +1362,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	taskCnt := s.compactionInspector.getCompactionTasksNumBySignalID(id)
+	taskCnt := s.compactionInspector.getCompactionTasksNumByTriggerID(id)
 	if taskCnt == 0 {
 		resp.CompactionID = -1
 		resp.CompactionPlanCount = 0
@@ -3228,10 +3228,17 @@ func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64,
 		if !ok {
 			continue
 		}
-		// Collect all candidate segment IDs from this task (safe copies).
-		candidates := make([]int64, 0, len(it.GetSegmentIDs())+len(it.GetSortedSegmentIDs()))
-		candidates = append(candidates, it.GetSegmentIDs()...)
-		candidates = append(candidates, it.GetSortedSegmentIDs()...)
+		// Collect all candidate segment IDs from this task (safe copies):
+		// origins plus their sorted outputs, discovered through the
+		// compactionTo edge.
+		candidates := append([]int64{}, it.GetSegmentIDs()...)
+		for _, originID := range it.GetSegmentIDs() {
+			if outputs, _ := s.meta.GetCompactionTo(originID); len(outputs) > 0 {
+				for _, output := range outputs {
+					candidates = append(candidates, output.GetID())
+				}
+			}
+		}
 		for _, segID := range candidates {
 			seg := s.meta.GetSegment(ctx, segID)
 			if seg == nil {

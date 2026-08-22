@@ -239,7 +239,7 @@ func (s *statsInspectorSuite) SetupTest() {
 	}
 	s.cluster = session.NewMockCluster(s.T())
 
-	gs := task.NewMockGlobalScheduler(s.T())
+	gs := newOwnershipScheduler(s.T())
 	gs.EXPECT().Enqueue(mock.Anything).Return().Maybe()
 	gs.EXPECT().AbortAndRemoveTask(mock.Anything).Return().Maybe()
 	gs.EXPECT().GetPendingTaskCount(taskcommon.Stats).Return(0).Maybe()

@@ -550,6 +550,53 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 	})
 }
 
+func TestExternalCollectionRefreshChecker_RetentionZeroWaitsForSchedulerOwnedSibling(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+	oldRetention := Params.DataCoordCfg.ExternalCollectionJobRetention.GetValue()
+	Params.DataCoordCfg.ExternalCollectionJobRetention.SwapTempValue("0")
+	t.Cleanup(func() {
+		Params.DataCoordCfg.ExternalCollectionJobRetention.SwapTempValue(oldRetention)
+		assert.Equal(t, oldRetention, Params.DataCoordCfg.ExternalCollectionJobRetention.GetValue())
+	})
+
+	job := &datapb.ExternalCollectionRefreshJob{
+		JobId:        1,
+		CollectionId: 100,
+		State:        indexpb.JobState_JobStateFailed,
+		EndTime:      time.Now().Add(-time.Second).UnixMilli(),
+		TaskIds:      []int64{1001, 1002},
+	}
+	tasks := []*datapb.ExternalCollectionRefreshTask{
+		{TaskId: 1001, JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFailed},
+		{TaskId: 1002, JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress},
+	}
+	meta, err := newExternalCollectionRefreshMeta(ctx, &stubCatalog{
+		jobs:  []*datapb.ExternalCollectionRefreshJob{job},
+		tasks: tasks,
+	})
+	assert.NoError(t, err)
+	checker := newRefreshChecker(ctx, meta, make(chan struct{}), nil, nil, nil, nil, nil)
+
+	releaseAttempts := 0
+	checker.releaseJobTasks = func(jobID int64) bool {
+		assert.Equal(t, int64(1), jobID)
+		releaseAttempts++
+		return releaseAttempts > 1
+	}
+
+	checker.checkGC(meta.GetJob(1))
+	assert.NotNil(t, meta.GetJob(1),
+		"retention=0 must not remove a job while a sibling wrapper is scheduler-owned")
+	assert.NotNil(t, meta.GetTask(1001))
+	assert.NotNil(t, meta.GetTask(1002))
+
+	checker.checkGC(meta.GetJob(1))
+	assert.Nil(t, meta.GetJob(1))
+	assert.Nil(t, meta.GetTask(1001))
+	assert.Nil(t, meta.GetTask(1002))
+}
+
 func TestExternalCollectionRefreshChecker_Run(t *testing.T) {
 	ctx := context.Background()
 	paramtable.Init()

@@ -131,7 +131,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 		return nil, 0, nil
 	}
 
-	compacting, triggerID := policy.collectionIsClusteringCompacting(collection.ID)
+	compacting, triggerID := policy.collectionIsClusteringCompacting(ctx, collection.ID)
 	if compacting {
 		log.Info(ctx, "collection is clustering compacting", mlog.Int64("triggerID", triggerID))
 		return nil, triggerID, nil
@@ -202,7 +202,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 	return views, newTriggerID, nil
 }
 
-func (policy *clusteringCompactionPolicy) collectionIsClusteringCompacting(collectionID UniqueID) (bool, int64) {
+func (policy *clusteringCompactionPolicy) collectionIsClusteringCompacting(ctx context.Context, collectionID UniqueID) (bool, int64) {
 	triggers := policy.meta.compactionTaskMeta.GetCompactionTasksByCollection(collectionID)
 	if len(triggers) == 0 {
 		return false, 0
@@ -216,7 +216,7 @@ func (policy *clusteringCompactionPolicy) collectionIsClusteringCompacting(colle
 	tasks := triggers[latestTriggerID]
 	if len(tasks) > 0 {
 		cTasks := tasks
-		summary := summaryCompactionState(latestTriggerID, cTasks)
+		summary := summaryCompactionState(ctx, latestTriggerID, cTasks)
 		return summary.state == commonpb.CompactionState_Executing, cTasks[0].TriggerID
 	}
 	return false, 0

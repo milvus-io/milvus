@@ -31,10 +31,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	dcTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -65,6 +67,53 @@ func createTestRefreshMetaWithJobs(t *testing.T, jobs []*datapb.ExternalCollecti
 	meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 	assert.NoError(t, err)
 	return meta
+}
+
+func TestExternalCollectionRefreshManager_ReleaseJobTasksFencesSchedulerOwnership(t *testing.T) {
+	ctx := context.Background()
+	job := &datapb.ExternalCollectionRefreshJob{
+		JobId:        1,
+		CollectionId: 100,
+		State:        indexpb.JobState_JobStateInProgress,
+	}
+	tasks := []*datapb.ExternalCollectionRefreshTask{
+		{TaskId: 1001, JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress},
+		{TaskId: 1002, JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit},
+	}
+	refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{job}, tasks)
+	scheduler := dcTask.NewMockGlobalScheduler(t)
+	manager := &externalCollectionRefreshManager{
+		ctx:                  ctx,
+		scheduler:            scheduler,
+		refreshMeta:          refreshMeta,
+		gcDrainingJobs:       make(map[int64]struct{}),
+		jobCallbacksInFlight: make(map[int64]int),
+	}
+
+	// Model a dispatch already in flight. The scheduler has released the task,
+	// but the manager lease it took still prevents GC from declaring the drain
+	// complete.
+	assert.True(t, manager.beginTaskExecution(1))
+	scheduler.EXPECT().AbortAndRemoveTask(int64(1001)).Return().Once()
+	scheduler.EXPECT().AbortAndRemoveTask(int64(1002)).Return().Once()
+	assert.False(t, manager.releaseJobTasks(1))
+
+	// The fence is installed before draining: neither a stale inspector snapshot
+	// nor a late popped future may reacquire ownership.
+	lateTask := proto.Clone(tasks[1]).(*datapb.ExternalCollectionRefreshTask)
+	lateWrapper := newRefreshExternalCollectionTask(lateTask, refreshMeta, nil, nil)
+	assert.False(t, manager.enqueueTask(lateWrapper))
+	lateWrapper.beginExecution = manager.beginTaskExecution
+	lateWrapper.endExecution = manager.endTaskExecution
+	cluster := &stubCluster{}
+	lateWrapper.CreateTaskOnWorker(7, cluster)
+	assert.Equal(t, indexpb.JobState_JobStateFailed, lateWrapper.GetState())
+	assert.Nil(t, cluster.refreshReq, "a popped future arriving after the GC fence must not dispatch")
+
+	manager.endTaskExecution(1)
+	scheduler.EXPECT().AbortAndRemoveTask(int64(1001)).Return().Once()
+	scheduler.EXPECT().AbortAndRemoveTask(int64(1002)).Return().Once()
+	assert.True(t, manager.releaseJobTasks(1))
 }
 
 func publishManagerTestTasks(
@@ -1081,13 +1130,15 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		assert.Empty(t, job.GetTaskIds(), "no tasks should be persisted after async failure")
 	})
 
-	t.Run("ffi_explore_error_marks_job_failed_non_retriable", func(t *testing.T) {
-		// Regression for #49233: any FFI failure during explore (NoSuchBucket,
-		// AccessDenied, DNS NXDOMAIN, malformed URI, ...) is wrapped by the
-		// loon FFI layer as ErrLoonTransient. Without classification this
-		// looped forever as RefreshPending. Treat all FFI explore failures
-		// as terminal so the job transitions to RefreshFailed and the user
-		// gets a clear signal.
+	t.Run("loon_explore_error_stays_retriable_bounded_by_job_timeout", func(t *testing.T) {
+		// Any FFI failure during explore (NoSuchBucket, AccessDenied, DNS
+		// NXDOMAIN, S3 throttling, ...) is wrapped by the loon FFI layer as
+		// ErrLoonTransient, which by its own contract cannot distinguish a
+		// permanent source problem from a transient storage fault. It must
+		// therefore stay retriable -- #49233's forever-loop is re-traded for a
+		// bound: ExternalCollectionJobTimeout fails the job with the recorded
+		// cause ("timeout, last failure: ..."), so the user still gets a clear
+		// signal, just after the timeout instead of instantly.
 		refreshMeta := createTestRefreshMeta(t)
 		alloc := &stubAllocator{nextID: 1000}
 		scheduler := newStubScheduler()
@@ -1118,13 +1169,61 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 
 		manager.Stop()
 
+		// ErrLoonTransient does not say the source is permanently broken. packed
+		// declares it as "treat all loon failures as retryable": milvus-storage
+		// can lose the structured detail and fall back to a generic code, so a
+		// throttled read and a missing bucket arrive here as the same sentinel.
+		// Failing the job on it turned a recoverable blip into a dead refresh.
+		// The job stays retriable and ExternalCollectionJobTimeout bounds it.
 		job := refreshMeta.GetJob(1)
 		assert.NotNil(t, job)
-		assert.Equal(t, indexpb.JobState_JobStateFailed, job.GetState(),
-			"FFI explore failure must transition job to Failed, not loop in Init")
-		assert.Contains(t, job.GetFailReason(), "explore external files failed")
+		assert.Equal(t, indexpb.JobState_JobStateInit, job.GetState(),
+			"an indistinguishable loon failure must stay retriable, bounded by the job timeout")
+		// The cause is recorded even though the job stays in Init, so the
+		// eventual timeout can report it instead of a bare "timeout".
 		assert.Contains(t, job.GetFailReason(), "NO_SUCH_BUCKET",
 			"underlying error must be surfaced to operators")
+	})
+
+	t.Run("system_explore_error_stays_retriable", func(t *testing.T) {
+		refreshMeta := createTestRefreshMeta(t)
+		alloc := &stubAllocator{nextID: 1000}
+		scheduler := newStubScheduler()
+
+		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		collections.Insert(100, &collectionInfo{
+			ID: 100,
+			Schema: &schemapb.CollectionSchema{
+				Name:           "test_collection",
+				ExternalSource: "s3://bucket/path",
+				ExternalSpec:   `{"format":"parquet"}`,
+			},
+		})
+		mt := &meta{collections: collections}
+
+		mockIsExternal := mockey.Mock(typeutil.IsExternalCollection).Return(true).Build()
+		defer mockIsExternal.UnPatch()
+
+		// A system failure: object storage was briefly unavailable. Whether the
+		// job may be retried is merr's Input-vs-System question and nothing
+		// else, so this must not end the job the way a bad request does.
+		mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
+			Return(nil, "", merr.WrapErrIoFailedReason("connection reset by peer")).Build()
+		defer mockExplore.UnPatch()
+
+		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil)
+
+		_, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "")
+		assert.NoError(t, err)
+
+		manager.Stop()
+
+		job := refreshMeta.GetJob(1)
+		assert.NotNil(t, job)
+		assert.Equal(t, indexpb.JobState_JobStateInit, job.GetState(),
+			"a system failure must stay retriable, bounded by the job timeout")
+		assert.Contains(t, job.GetFailReason(), "connection reset by peer",
+			"the cause is recorded even while the job stays retriable")
 	})
 
 	t.Run("empty_explore_result_marks_job_failed_without_eager_cleanup", func(t *testing.T) {

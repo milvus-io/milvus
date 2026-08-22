@@ -96,6 +96,14 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 	job ImportJob, alloc allocator.Allocator, meta *meta, importMeta ImportMeta, segmentMaxSize int,
 ) ([]ImportTask, error) {
+	// The sort decision is part of the durable job plan: every normal import
+	// sorts, L0 imports (deletes only) never do. It rides on the persisted job
+	// options rather than a live switch or task metadata, so it is stable
+	// across restarts and retries. Sorted output IDs are no longer
+	// preallocated -- the sort stage allocates its own output per origin and
+	// the checker discovers it through the segment's compactionTo edge.
+	sortPlanned := !importutilv2.IsL0Import(job.GetOptions())
+
 	idBegin, _, err := alloc.AllocN(int64(len(fileGroups)))
 	if err != nil {
 		return nil, err
@@ -119,19 +127,11 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 			times:      taskcommon.NewTimes(),
 		}
 		task.task.Store(taskProto)
-		segments, err := AssignSegments(job, task, alloc, meta, int64(segmentMaxSize))
+		segments, err := assignSegments(job, task, alloc, meta, int64(segmentMaxSize), sortPlanned)
 		if err != nil {
 			return nil, err
 		}
 		taskProto.SegmentIDs = segments
-		if enableSortCompaction() {
-			sortedSegIDBegin, _, err := alloc.AllocN(int64(len(segments)))
-			if err != nil {
-				return nil, err
-			}
-			taskProto.SortedSegmentIDs = lo.RangeFrom(sortedSegIDBegin, len(segments))
-			mlog.Info(context.TODO(), "preallocate sorted segment ids", WrapTaskLog(task, mlog.Int64s("segmentIDs", taskProto.SortedSegmentIDs))...)
-		}
 		tasks = append(tasks, task)
 	}
 	return tasks, nil
@@ -160,6 +160,133 @@ func importUseLoonFFI(isL0Import bool) bool {
 }
 
 func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, meta *meta, segmentMaxSize int64) ([]int64, error) {
+	return assignSegments(job, task, alloc, meta, segmentMaxSize, false)
+}
+
+// rotateImportTaskSegments gives the task a fresh set of output segments so its
+// next attempt cannot write where the abandoned one may still be writing.
+//
+// Why an import retry has to rotate at all. Every other task type in this
+// document satisfies §4's rule -- a retry never writes where its predecessor
+// could still be writing -- by taking an identity the old attempt cannot
+// produce. Import did not: segment IDs live in the persisted plan and were
+// reused across attempts, and only the log IDs rotated. Under StorageV1 that
+// was enough (an object key is a function of the log ID, so a straggler write
+// landed on a key nothing referenced and the orphan scan reclaimed it), but a
+// StorageV3 segment's authority is its manifest chain, addressed by
+// (collection, partition, segment) alone. Two attempts on one segment ID share
+// that chain, and loon commits rebase-merge on conflict rather than reject, so a
+// straggler commit from the abandoned attempt is absorbed into the version the
+// replacement reports -- the segment ends up carrying both attempts' fragments
+// while meta counts only one. Rotating the segment IDs makes the old chain
+// unreferenced: the abandoned attempt may keep writing to it for as long as it
+// likes, and nothing will ever read it.
+//
+// Ordering, and what each crash window leaves behind:
+//
+//  1. allocate and register the new segments in meta;
+//  2. adopt them as the live output and reset the task to Pending, one write;
+//  3. drop the old segments.
+//
+// A crash between 1 and 2 leaves registered-but-unadopted segments -- ownerless
+// Importing segments. They carry no data and are invisible to query, so they are
+// a known harmless residual rather than something recovery hunts down with a
+// scan. A crash between 2 and 3 leaves the old segments to be dropped by a later
+// round, which is harmless -- nothing references them any more.
+//
+// Returns without touching anything when the task has no output segments yet
+// (nothing was dispatched, so nothing can be stale).
+func rotateImportTaskSegments(ctx context.Context, task ImportTask, job ImportJob,
+	alloc allocator.Allocator, meta *meta, importMeta ImportMeta,
+) error {
+	it, ok := task.(*importTask)
+	if !ok {
+		return nil
+	}
+	oldSegmentIDs := it.GetSegmentIDs()
+	if len(oldSegmentIDs) == 0 {
+		return nil
+	}
+
+	// Sorted outputs are not preallocated any more: the sort stage allocates
+	// its own output per origin and the checker discovers it through the
+	// segment's compactionTo edge, so rotating only the origin IDs cannot
+	// break a pairing. The replacement origins are still registered invisible
+	// because every normal import is sort-planned (L0 excepted).
+	sortPlanned := !importutilv2.IsL0Import(job.GetOptions())
+
+	newSegmentIDs, err := assignSegments(job, task, alloc, meta,
+		int64(GetSegmentMaxSize(job, meta)), sortPlanned)
+	if err != nil {
+		return merr.Wrap(err, "failed to allocate replacement import segments")
+	}
+
+	// Adopt the new segments as the live output and reset the task to Pending in
+	// one write.
+	if err := importMeta.UpdateTask(ctx, it.GetTaskID(),
+		UpdateSegmentIDs(newSegmentIDs),
+		UpdateNodeID(NullNodeID),
+		UpdateState(datapb.ImportTaskStateV2_Pending)); err != nil {
+		// The error may be ambiguous: the adopt could have landed in etcd before
+		// the response was lost. Dropping the new segments then would strand the
+		// task on its own Dropped output, hanging every later request assembly
+		// with SegmentNotFound until the job times out. Re-read the record: if it
+		// already references the new segments and is Pending, the adopt is
+		// durable, and only the old segments remain to retire.
+		if persisted := importMeta.GetTask(ctx, it.GetTaskID()); persisted != nil &&
+			persisted.GetState() == datapb.ImportTaskStateV2_Pending &&
+			len(persisted.(*importTask).GetSegmentIDs()) == len(newSegmentIDs) {
+			dropOldSegments(ctx, meta, oldSegmentIDs)
+			mlog.Info(ctx, "import adopt ambiguity resolved: rotation already landed",
+				WrapTaskLog(task,
+					mlog.Int64s("retiredSegmentIDs", oldSegmentIDs),
+					mlog.Int64s("segmentIDs", newSegmentIDs))...)
+			return nil
+		}
+		// The new origin segments are registered but not adopted. Leaving them
+		// strands ownerless Importing segments, and a retry registers yet another
+		// set, so the leak multiplies with every failed adopt. Retire them so the
+		// retry starts clean (best effort, matching the old-segment drop below).
+		dropOldSegments(ctx, meta, newSegmentIDs)
+		return merr.Wrap(err, "failed to adopt replacement import segments")
+	}
+
+	// The old segments are now unreferenced. Dropping them is best effort: a
+	// failure leaves an Importing segment for segment GC, never a correctness
+	// problem, and the task is already safe to re-dispatch.
+	dropOldSegments(ctx, meta, oldSegmentIDs)
+
+	mlog.Info(ctx, "rotated import task output segments for a fresh attempt",
+		WrapTaskLog(task,
+			mlog.Int64s("retiredSegmentIDs", oldSegmentIDs),
+			mlog.Int64s("segmentIDs", newSegmentIDs))...)
+	return nil
+}
+
+// dropOldSegments retires segments a task no longer references. The drop also
+// clears is_importing: the garbage collector skips is_importing segments to
+// protect the in-flight commit marker, so a segment left is_importing after
+// being dropped would never be reclaimed. The durable skip marker itself is
+// already Dropped and short-circuits below, so it is never cleared here.
+func dropOldSegments(ctx context.Context, meta *meta, segmentIDs []int64) {
+	for _, segmentID := range segmentIDs {
+		if segment := meta.GetSegment(ctx, segmentID); segment == nil ||
+			segment.GetState() == commonpb.SegmentState_Dropped {
+			continue
+		}
+		op := UpdateStatusOperator(segmentID, commonpb.SegmentState_Dropped)
+		if err := meta.UpdateSegmentsInfo(ctx, op, UpdateIsImporting(segmentID, false)); err != nil {
+			mlog.Warn(ctx, "failed to drop a retired import segment, leaving it to segment GC",
+				mlog.Int64("segmentID", segmentID), mlog.Err(err))
+		}
+	}
+}
+
+// assignSegments registers the origin (and, when sortPlanned, positional
+// sorted-target) segments for a task. sortPlanned origins are registered
+// invisible: they are never queryable directly, only through their sorted
+// replacement once the job's sort stage commits.
+func assignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, meta *meta, segmentMaxSize int64, sortPlanned bool) ([]int64, error) {
 	pkField, err := typeutil.GetPrimaryFieldSchema(job.GetSchema())
 	if err != nil {
 		return nil, err
@@ -192,9 +319,9 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		for size > 0 {
-			segmentInfo, err := AllocImportSegment(ctx, alloc, meta,
+			segmentInfo, err := allocImportSegment(ctx, alloc, meta,
 				task.GetJobID(), task.GetTaskID(), task.GetCollectionID(),
-				partitionID, vchannel, job.GetDataTs(), segmentLevel, storageVersion)
+				partitionID, vchannel, job.GetDataTs(), segmentLevel, storageVersion, sortPlanned)
 			if err != nil {
 				return err
 			}
@@ -233,7 +360,7 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 	return segments, nil
 }
 
-func AllocImportSegment(ctx context.Context,
+func allocImportSegment(ctx context.Context,
 	alloc allocator.Allocator,
 	meta *meta,
 	jobID int64, taskID int64,
@@ -242,6 +369,7 @@ func AllocImportSegment(ctx context.Context,
 	dataTimestamp uint64,
 	level datapb.SegmentLevel,
 	storageVersion int64,
+	isInvisible bool,
 ) (*SegmentInfo, error) {
 	id, err := alloc.AllocID(ctx)
 	if err != nil {
@@ -249,6 +377,8 @@ func AllocImportSegment(ctx context.Context,
 		return nil, err
 	}
 	if dataTimestamp == 0 {
+		// The allocated timestamp is discarded on purpose: it only advances
+		// the TSO oracle so the segment's own timestamp stays monotonic.
 		_, err = alloc.AllocTimestamp(ctx)
 		if err != nil {
 			return nil, err
@@ -266,6 +396,7 @@ func AllocImportSegment(ctx context.Context,
 		Level:          level,
 		LastExpireTime: math.MaxUint64,
 		StorageVersion: storageVersion,
+		IsInvisible:    isInvisible,
 	}
 	segmentInfo.IsImporting = true
 	segment := NewSegmentInfo(segmentInfo)
@@ -525,46 +656,126 @@ func getImportingProgress(ctx context.Context, jobID int64, importMeta ImportMet
 }
 
 func getStatsProgress(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) float32 {
-	if !enableSortCompaction() {
-		return 1
-	}
 	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
-	targetSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
-		return t.(*importTask).GetSortedSegmentIDs()
-	})
-	if len(targetSegmentIDs) == 0 {
+	sortPlanned, err := importSortPlannedForJob(importMeta.GetJob(ctx, jobID), tasks)
+	if err != nil {
+		// Reporting 0% for a plan we cannot read looks exactly like a job that
+		// has not started, which is the one reading an operator would not
+		// investigate.
+		mlog.Warn(ctx, "cannot read the import sort plan, reporting no stats progress",
+			mlog.FieldJobID(jobID), mlog.Err(err))
+		return 0
+	}
+	if !sortPlanned {
 		return 1
 	}
+	origins := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
+		return t.(*importTask).GetSegmentIDs()
+	})
+	if len(origins) == 0 {
+		return 1
+	}
+	job := importMeta.GetJob(ctx, jobID)
 	doneCnt := 0
-	for _, segID := range targetSegmentIDs {
-		seg := meta.GetHealthySegment(ctx, segID)
-		if seg != nil {
+	for _, originID := range origins {
+		if outputs, _ := meta.GetCompactionTo(originID); len(outputs) > 0 {
+			for _, output := range outputs {
+				if meta.GetHealthySegment(ctx, output.GetID()) != nil {
+					doneCnt++
+				}
+			}
+			continue
+		}
+		// No output yet: either still sorting, or explicitly skipped as a
+		// zero-row origin, which counts as complete.
+		if isExplicitZeroRowSortSkip(job, meta.GetSegment(ctx, originID)) {
 			doneCnt++
 		}
 	}
-	return float32(doneCnt) / float32(len(targetSegmentIDs))
+	return float32(doneCnt) / float32(len(origins))
+}
+
+// concreteImportTasks type-asserts a task slice so corrupt metadata fails
+// closed before any caller touches a concrete *importTask.
+func concreteImportTasks(tasks []ImportTask) ([]*importTask, error) {
+	concreteTasks := make([]*importTask, 0, len(tasks))
+	for _, task := range tasks {
+		importTask, ok := task.(*importTask)
+		if !ok || importTask == nil {
+			return nil, merr.WrapErrImportSysFailedMsg(
+				"invalid import sort plan: task has invalid concrete type %T", task)
+		}
+		concreteTasks = append(concreteTasks, importTask)
+	}
+	return concreteTasks, nil
+}
+
+// importSortPlannedForJob reports whether the job's plan includes the sort
+// stage. The decision is part of the durable job options: every normal import
+// sorts, L0 imports (deletes only) never do. Task records carry no sort plan
+// any more -- sorted outputs are allocated by the sort stage itself and
+// discovered through the segment's compactionTo edge -- so the plan is read
+// from the job and nowhere else.
+func importSortPlannedForJob(job ImportJob, tasks []ImportTask) (bool, error) {
+	// Keep validating the concrete task values so callers can safely
+	// type-assert them after this function returns and corrupt metadata still
+	// fails closed.
+	if _, err := concreteImportTasks(tasks); err != nil {
+		return false, err
+	}
+	if job != nil && importutilv2.IsL0Import(job.GetOptions()) {
+		return false, nil
+	}
+	return true, nil
 }
 
 func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) float32 {
 	job := importMeta.GetJob(ctx, jobID)
+	if job != nil && importutilv2.IsL0Import(job.GetOptions()) {
+		return 1
+	}
 	if !Params.DataCoordCfg.WaitForIndex.GetAsBool() {
 		return 1
 	}
 	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	sortPlanned, err := importSortPlannedForJob(job, tasks)
+	if err != nil {
+		// Same as getStatsProgress: an unreadable plan must not be reported as
+		// "not started yet".
+		mlog.Warn(ctx, "cannot read the import sort plan, reporting no index progress",
+			mlog.FieldJobID(jobID), mlog.Err(err))
+		return 0
+	}
 	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetSegmentIDs()
 	})
-	targetSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
-		return t.(*importTask).GetSortedSegmentIDs()
-	})
-	if len(originSegmentIDs) == 0 {
-		return 1
-	}
-	if !enableSortCompaction() {
+	targetSegmentIDs := importSortedOutputIDs(tasks, meta)
+	if !sortPlanned {
 		targetSegmentIDs = originSegmentIDs
+	}
+	if len(targetSegmentIDs) == 0 {
+		return 1
 	}
 	unindexed := meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)
 	return float32(len(targetSegmentIDs)-len(unindexed)) / float32(len(targetSegmentIDs))
+}
+
+// importSortedOutputIDs returns the sorted output segment IDs of every task,
+// discovered through each origin's durable compactionTo edge. Origins whose
+// sort stage is still pending, or that were skipped as zero-row, contribute
+// nothing.
+func importSortedOutputIDs(tasks []ImportTask, meta *meta) []int64 {
+	outputs := make([]int64, 0)
+	for _, t := range tasks {
+		for _, originID := range t.(*importTask).GetSegmentIDs() {
+			if tos, _ := meta.GetCompactionTo(originID); len(tos) > 0 {
+				for _, to := range tos {
+					outputs = append(outputs, to.GetID())
+				}
+			}
+		}
+	}
+	return outputs
 }
 
 // GetJobProgress calculates the importing job progress.
@@ -798,7 +1009,7 @@ func ListBinlogImportRequestFiles(ctx context.Context, cm storage.ChunkManager,
 	}
 	err := conc.AwaitAll(futures...)
 	if err != nil {
-		return nil, merr.WrapErrServiceUnavailableMsg("list binlogs failed, err=%s", err)
+		return nil, merr.WrapErrServiceUnavailableErr(err, "list binlogs failed")
 	}
 
 	resFiles = lo.Filter(resFiles, func(file *internalpb.ImportFile, _ int) bool {
@@ -871,13 +1082,17 @@ func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
 func createSortCompactionTask(ctx context.Context,
 	t ImportTask,
 	originSegment *SegmentInfo,
-	targetSegmentID int64,
 	meta *meta,
 	handler Handler,
 	alloc allocator.Allocator,
 ) (*datapb.CompactionTask, error) {
 	log := mlog.With(WrapTaskLog(t)...)
 	if originSegment.GetNumOfRows() == 0 {
+		// The zero-row origin is dropped WITHOUT clearing is_importing: the
+		// Dropped + is_importing shape is the durable skip marker
+		// isExplicitZeroRowSortSkip later validates. Clearing the flag here
+		// would destroy the marker and turn a valid empty sort result into
+		// plan corruption.
 		operator := UpdateStatusOperator(originSegment.GetID(), commonpb.SegmentState_Dropped)
 		err := meta.UpdateSegmentsInfo(ctx, operator)
 		if err != nil {
@@ -901,6 +1116,14 @@ func createSortCompactionTask(ctx context.Context,
 	startID, _, err := alloc.AllocN(2)
 	if err != nil {
 		log.Warn(ctx, "Failed to create sort compaction task because allocate id fail", mlog.Err(err))
+		return nil, err
+	}
+	// The sorted output ID is owned by this task, not by the import plan: the
+	// checker discovers the output through the origin's compactionTo edge
+	// written when the sort commits. Replans may rotate it freely.
+	targetSegmentID, _, err := alloc.AllocN(1)
+	if err != nil {
+		log.Warn(ctx, "Failed to create sort compaction task because allocate output id fail", mlog.Err(err))
 		return nil, err
 	}
 

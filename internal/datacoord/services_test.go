@@ -1410,9 +1410,6 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
-		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
-
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, sResp.ErrorCode)
@@ -1476,9 +1473,6 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
-
-		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
-		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
 
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
 		assert.NoError(t, err)

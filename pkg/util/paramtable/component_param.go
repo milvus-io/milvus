@@ -5625,6 +5625,7 @@ type dataCoordConfig struct {
 	IndexBasedCompaction                   ParamItem `refreshable:"true"`
 	CompactionTaskPrioritizer              ParamItem `refreshable:"true"`
 	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
+	CompactionMaxAttempts                  ParamItem `refreshable:"true"`
 	CompactionPreAllocateIDExpansionFactor ParamItem `refreshable:"false"`
 
 	CompactionRPCTimeout                       ParamItem `refreshable:"true"`
@@ -5754,6 +5755,7 @@ type dataCoordConfig struct {
 	CopySegmentCheckInterval        ParamItem `refreshable:"true"`
 	CopySegmentTaskRetention        ParamItem `refreshable:"true"`
 	CopySegmentJobTimeout           ParamItem `refreshable:"true"`
+	CopySegmentMaxAttempts          ParamItem `refreshable:"true"`
 
 	ExternalCollectionCheckInterval    ParamItem `refreshable:"true"`
 	ExternalCollectionJobTimeout       ParamItem `refreshable:"true"`
@@ -5761,6 +5763,7 @@ type dataCoordConfig struct {
 	ExternalCollectionDropRatioWarn    ParamItem `refreshable:"true"` // warn if dropping more than this ratio of segments (0-1)
 	ExternalCollectionPreAllocSegments ParamItem `refreshable:"true"`
 	ExternalCollectionFilesPerTask     ParamItem `refreshable:"true"`
+	ExternalCollectionMaxRetryTimes    ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -5773,7 +5776,6 @@ type dataCoordConfig struct {
 	StatsTaskSlotUsage                   ParamItem `refreshable:"true"`
 	AnalyzeTaskSlotUsage                 ParamItem `refreshable:"true"`
 
-	EnableSortCompaction       ParamItem `refreshable:"true"`
 	TaskCheckInterval          ParamItem `refreshable:"true"`
 	SortCompactionTriggerCount ParamItem `refreshable:"true"`
 	StatsTaskPendingLimit      ParamItem `refreshable:"true"`
@@ -6050,6 +6052,21 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Export:       true,
 	}
 	p.CompactionTaskQueueCapacity.Init(base.mgr)
+
+	p.CompactionMaxAttempts = ParamItem{
+		Key:          "dataCoord.compaction.maxAttempts",
+		Version:      "2.6.0",
+		DefaultValue: "10",
+		Doc: `How many times a compaction may be rebuilt before it is left to the periodic trigger.
+Every compaction that ends without succeeding -- a worker refusal or reported failure, a
+DataCoord-side error, or an outcome that could not be established -- is retried by rebuilding
+the work under a fresh plan ID, so that an execution which may still be running cannot collide
+with the retry. This caps that rebuilding for work which fails for a reason a fresh plan ID
+cannot fix, such as bad input data. Values below 1 are treated as 1: the original attempt
+always runs.`,
+		Export: true,
+	}
+	p.CompactionMaxAttempts.Init(base.mgr)
 
 	p.CompactionPreAllocateIDExpansionFactor = ParamItem{
 		Key:          "dataCoord.compaction.preAllocateIDExpansionFactor",
@@ -7178,6 +7195,20 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	}
 	p.CopySegmentJobTimeout.Init(base.mgr)
 
+	p.CopySegmentMaxAttempts = ParamItem{
+		Key:     "dataCoord.copySegmentMaxAttempts",
+		Version: "2.6.8",
+		Doc: `How many times one copy segment task may be attempted before its job fails.
+
+Each attempt runs under a fresh task ID and a fresh set of target segment IDs, so an
+abandoned attempt can never write where its replacement writes. Past this count the
+work is settled as failed instead of being rebuilt again.`,
+		DefaultValue: "10",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.CopySegmentMaxAttempts.Init(base.mgr)
+
 	p.ExternalCollectionCheckInterval = ParamItem{
 		Key:          "dataCoord.externalCollectionCheckInterval",
 		Version:      "2.6.8",
@@ -7204,6 +7235,16 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		PanicIfEmpty: false,
 	}
 	p.ExternalCollectionJobRetention.Init(base.mgr)
+
+	p.ExternalCollectionMaxRetryTimes = ParamItem{
+		Key:          "dataCoord.externalCollectionMaxRetryTimes",
+		Version:      "2.6.8",
+		Doc:          "Maximum number of in-process worker create, query, or execution failures before an external collection refresh job is marked failed. Each retry replaces only the failed task and reuses its manifest, file range, and owned segments. The counter resets when DataCoord restarts.",
+		DefaultValue: "10",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ExternalCollectionMaxRetryTimes.Init(base.mgr)
 
 	p.ExternalCollectionDropRatioWarn = ParamItem{
 		Key:          "dataCoord.externalCollectionDropRatioWarn",
@@ -7352,18 +7393,6 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	}
 	p.AnalyzeTaskSlotUsage.Init(base.mgr)
 
-	p.EnableSortCompaction = ParamItem{
-		Key:          "dataCoord.sortCompaction.enable",
-		Version:      "2.5.0",
-		Doc:          "enable sort compaction",
-		FallbackKeys: []string{"dataCoord.statsTask.enable"},
-		DefaultValue: "true",
-		PanicIfEmpty: false,
-		Export:       false,
-		Forbidden:    true,
-	}
-	p.EnableSortCompaction.Init(base.mgr)
-
 	p.TaskCheckInterval = ParamItem{
 		Key:          "dataCoord.taskCheckInterval",
 		Version:      "2.5.0",
@@ -7418,10 +7447,17 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	p.JSONStatsTriggerInterval.Init(base.mgr)
 
 	p.RequestTimeoutSeconds = ParamItem{
-		Key:          "dataCoord.requestTimeoutSeconds",
-		Version:      "2.5.5",
-		Doc:          "request timeout interval",
-		DefaultValue: "600",
+		Key:     "dataCoord.requestTimeoutSeconds",
+		Version: "2.5.5",
+		Doc: `Timeout for DataCoord's requests to a worker node.
+
+These are control-plane calls -- create/query/drop a task, query free slots --
+which a healthy node answers in microseconds: creating a task hands it to a
+background queue rather than running it. The timeout therefore only ever
+applies to a node that is already unwell, and there the useful behavior is to
+give up quickly and re-dispatch the task elsewhere. The previous 600s let one
+unresponsive node stall a whole scheduling round instead.`,
+		DefaultValue: "30",
 		PanicIfEmpty: false,
 		Export:       false,
 	}

@@ -1383,20 +1383,13 @@ func (s *DataNodeServicesSuite) TestDropCopySegment() {
 	})
 }
 
-func (s *DataNodeServicesSuite) TestDropCopySegment_CleanupLogic() {
-	s.Run("drop failed task logs cleanup attempt", func() {
-		// The test verifies that DropCopySegment checks task state
-		// and calls CleanupCopiedFiles on failed CopySegmentTask
-
-		// Note: We cannot easily mock the ChunkManager without changing DataNode internals,
-		// but we can verify that the logic path is executed by checking logs
-		// The unit tests in task_copy_segment_test.go thoroughly test the cleanup functionality itself
-
-		// This test mainly verifies integration: that DropCopySegment correctly:
-		// 1. Retrieves the task from the task manager
-		// 2. Checks if it's a CopySegmentTask
-		// 3. Checks if the state is Failed
-		// 4. Calls CleanupCopiedFiles() if conditions are met
+func (s *DataNodeServicesSuite) TestDropCopySegment_RemovesTaskWithoutTouchingObjects() {
+	s.Run("drop removes the task and deletes nothing", func() {
+		// Drop reclaims the worker-side record and nothing else. It must never
+		// delete the objects the attempt wrote: copy targets are a pure function
+		// of the target segment ID, so an abandoned attempt shares every key with
+		// the attempt that replaced it, and deleting "its own" files here would
+		// delete live restored data. DataCoord's GC reclaims them instead.
 
 		// Create a copy task that will be in pending state
 		createReq := &datapb.CopySegmentRequest{
