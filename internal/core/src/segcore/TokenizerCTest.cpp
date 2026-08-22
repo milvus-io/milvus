@@ -86,3 +86,67 @@ TEST(CTokenizer, Default) {
 
     free_tokenizer(tokenizer);
 }
+
+TEST(CTokenizer, StandardUsesUax29Boundaries) {
+    auto analyzer_params = R"({
+        "tokenizer": {
+            "type": "standard",
+            "uax29": true
+        }
+    })";
+    CTokenizer tokenizer;
+    auto status = create_tokenizer(analyzer_params, "", &tokenizer);
+    ASSERT_EQ(milvus::ErrorCode::Success, status.error_code);
+
+    std::string text("dog's 32.3 中文 👩‍🔬");
+    auto token_stream =
+        create_token_stream(tokenizer, text.c_str(), text.length());
+    std::vector<std::string> expected{
+        "dog's", "32.3", "中", "文", "👩‍🔬"};
+
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        ASSERT_TRUE(token_stream_advance(token_stream));
+        auto token = token_stream_get_detailed_token(token_stream);
+        ASSERT_EQ(expected[i], std::string(token.token));
+        ASSERT_EQ(expected[i],
+                  text.substr(token.start_offset,
+                              token.end_offset - token.start_offset));
+        ASSERT_EQ(i, token.position);
+        ASSERT_EQ(1, token.position_length);
+        free_token(const_cast<char*>(token.token));
+    }
+    ASSERT_FALSE(token_stream_advance(token_stream));
+
+    free_token_stream(token_stream);
+    free_tokenizer(tokenizer);
+}
+
+TEST(CTokenizer, IcuSupportsTokenPositionMode) {
+    auto analyzer_params = R"({
+        "tokenizer": {
+            "type": "icu",
+            "position_mode": "token"
+        }
+    })";
+    CTokenizer tokenizer;
+    auto status = create_tokenizer(analyzer_params, "", &tokenizer);
+    ASSERT_EQ(milvus::ErrorCode::Success, status.error_code);
+
+    std::string text("hello world");
+    auto token_stream =
+        create_token_stream(tokenizer, text.c_str(), text.length());
+    std::vector<std::string> expected{"hello", " ", "world"};
+
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        ASSERT_TRUE(token_stream_advance(token_stream));
+        auto token = token_stream_get_detailed_token(token_stream);
+        ASSERT_EQ(expected[i], std::string(token.token));
+        ASSERT_EQ(i, token.position);
+        ASSERT_EQ(1, token.position_length);
+        free_token(const_cast<char*>(token.token));
+    }
+    ASSERT_FALSE(token_stream_advance(token_stream));
+
+    free_token_stream(token_stream);
+    free_tokenizer(tokenizer);
+}
