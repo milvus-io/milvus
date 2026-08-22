@@ -62,6 +62,7 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 	switch expr.GetOp() {
 	case planpb.BinaryExpr_LogicalOr:
 		parts := flattenOr(left, right)
+		parts = combineArrayContains(parts, planpb.JSONContainsExpr_ContainsAny)
 		parts = v.combineOrEqualsToIn(parts)
 		parts = v.combineOrTextMatchToMerged(parts)
 		parts = v.combineOrRangePredicates(parts)
@@ -72,6 +73,7 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 		return foldBinary(planpb.BinaryExpr_LogicalOr, parts)
 	case planpb.BinaryExpr_LogicalAnd:
 		parts := flattenAnd(left, right)
+		parts = combineArrayContains(parts, planpb.JSONContainsExpr_ContainsAll)
 		parts = v.combineAndRangePredicates(parts)
 		parts = v.combineAndBinaryRanges(parts)
 		parts = v.combineAndInWithIn(parts)
