@@ -571,6 +571,11 @@ func (ex *Executor) updatePartStatsVersions(task *LeaderTask, step int) error {
 		ex.removeTask(task, step)
 	}()
 
+	collectionInfo, loadMeta, err := ex.getSyncDistributionMeta(task.Context(), task)
+	if err != nil {
+		return err
+	}
+
 	req := &querypb.SyncDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SyncDistribution),
@@ -578,6 +583,8 @@ func (ex *Executor) updatePartStatsVersions(task *LeaderTask, step int) error {
 		),
 		CollectionID: task.collectionID,
 		Channel:      task.Shard(),
+		Schema:       collectionInfo.GetSchema(),
+		LoadMeta:     loadMeta,
 		ReplicaID:    task.ReplicaID(),
 		Actions: []*querypb.SyncAction{
 			{
@@ -677,6 +684,11 @@ func (ex *Executor) removeDistribution(task *LeaderTask, step int) error {
 		ex.removeTask(task, step)
 	}()
 
+	collectionInfo, loadMeta, err := ex.getSyncDistributionMeta(task.Context(), task)
+	if err != nil {
+		return err
+	}
+
 	req := &querypb.SyncDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SyncDistribution),
@@ -684,6 +696,8 @@ func (ex *Executor) removeDistribution(task *LeaderTask, step int) error {
 		),
 		CollectionID: task.collectionID,
 		Channel:      task.Shard(),
+		Schema:       collectionInfo.GetSchema(),
+		LoadMeta:     loadMeta,
 		ReplicaID:    task.ReplicaID(),
 		Actions: []*querypb.SyncAction{
 			{
@@ -707,6 +721,31 @@ func (ex *Executor) removeDistribution(task *LeaderTask, step int) error {
 	mlog.Info(context.TODO(), "remove distribution done", mlog.Duration("elapsed", elapsed))
 
 	return nil
+}
+
+// getSyncDistributionMeta captures the current full collection schema and
+// barrier for every SyncDistribution action, including remove/statistics
+// actions. QueryNode fences the whole RPC, so a missing payload would otherwise
+// be interpreted as schema/barrier zero after the first schema change.
+func (ex *Executor) getSyncDistributionMeta(ctx context.Context, task Task) (*milvuspb.DescribeCollectionResponse, *querypb.LoadMetaInfo, error) {
+	collectionInfo, err := ex.getCollectionInfo(ctx, task.CollectionID())
+	if err != nil {
+		mlog.Warn(ctx, "failed to get collection info for sync distribution", mlog.Err(err))
+		return nil, nil, err
+	}
+	partitions, err := utils.GetPartitions(ctx, ex.targetMgr, task.CollectionID())
+	if err != nil {
+		mlog.Warn(ctx, "failed to get partitions for sync distribution", mlog.Err(err))
+		return nil, nil, err
+	}
+	loadMeta := packLoadMeta(
+		ex.meta.GetLoadType(ctx, task.CollectionID()),
+		collectionInfo,
+		task.ResourceGroup(),
+		ex.meta.GetLoadFields(ctx, task.CollectionID()),
+		partitions...,
+	)
+	return collectionInfo, loadMeta, nil
 }
 
 func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.DescribeCollectionResponse, *querypb.LoadMetaInfo, *meta.DmChannel, error) {

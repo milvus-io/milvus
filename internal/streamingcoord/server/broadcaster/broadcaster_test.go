@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -492,6 +493,44 @@ func TestGetPendingSchemaFileResources(t *testing.T) {
 
 	require.Len(t, result, 1)
 	assert.ElementsMatch(t, []int64{10, 20, 30}, result[100])
+}
+
+func TestGetPendingSchemaInstallCollectionIDs(t *testing.T) {
+	paramtable.Init()
+
+	metrics := newBroadcasterMetrics()
+	ackScheduler := newAckCallbackScheduler(mlog.With())
+	newAlterTask := func(broadcastID uint64, collectionID int64, schemaChange bool, state streamingpb.BroadcastTaskState) *broadcastTask {
+		paths := []string{message.FieldMaskCollectionProperties}
+		if schemaChange {
+			paths = []string{message.FieldMaskCollectionSchema}
+		}
+		msg := message.NewAlterCollectionMessageBuilderV2().
+			WithHeader(&message.AlterCollectionMessageHeader{
+				CollectionId: collectionID,
+				UpdateMask:   &fieldmaskpb.FieldMask{Paths: paths},
+			}).
+			WithBody(&message.AlterCollectionMessageBody{
+				Updates: &message.AlterCollectionMessageUpdates{Schema: &schemapb.CollectionSchema{}},
+			}).
+			WithBroadcast([]string{"v1"}).
+			MustBuildBroadcast()
+		proto := createNewWaitAckBroadcastTaskFromMessage(msg.WithBroadcastID(broadcastID), state, []byte{0x00})
+		return newBroadcastTaskFromProto(proto, metrics, ackScheduler)
+	}
+
+	bm := &broadcastTaskManager{
+		mu: &sync.Mutex{},
+		tasks: map[uint64]*broadcastTask{
+			1: newAlterTask(1, 100, true, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING),
+			2: newAlterTask(2, 100, true, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_WAIT_ACK),
+			3: newAlterTask(3, 200, false, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING),
+			4: newAlterTask(4, 300, true, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE),
+			5: newAlterTask(5, 400, true, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE),
+		},
+	}
+
+	assert.ElementsMatch(t, []int64{100}, bm.GetPendingSchemaInstallCollectionIDs())
 }
 
 func TestWithSecondaryClusterResourceKey(t *testing.T) {

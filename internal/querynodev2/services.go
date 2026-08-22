@@ -72,6 +72,16 @@ import (
 // mixed-version protocol error.
 const legacyLoadScopeIndex = querypb.LoadScope(2)
 
+type localTopologyMutationKey struct{}
+
+func withLocalTopologyMutation(ctx context.Context) context.Context {
+	return context.WithValue(ctx, localTopologyMutationKey{}, struct{}{})
+}
+
+func isLocalTopologyMutation(ctx context.Context) bool {
+	return ctx != nil && ctx.Value(localTopologyMutationKey{}) != nil
+}
+
 type segmentDetacher interface {
 	DetachStreaming(ctx context.Context, segmentID typeutil.UniqueID) int
 }
@@ -183,6 +193,8 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 // WatchDmChannels create consumers on dmChannels to receive Incremental data，which is the important part of real-time query
 func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (status *commonpb.Status, e error) {
 	defer node.updateDistributionModifyTS()
+	node.topologyMutationLocks.Lock(req.GetCollectionID())
+	defer node.topologyMutationLocks.Unlock(req.GetCollectionID())
 
 	channel := req.GetInfos()[0]
 	log := mlog.With(
@@ -194,6 +206,9 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	log.Info(ctx, "received watch channel request",
 		mlog.Int64("version", req.GetVersion()),
 	)
+	if err := node.manager.Collection.ValidateSchemaBarrier(req.GetCollectionID(), req.GetSchema(), req.GetLoadMeta().GetSchemaBarrierTs()); err != nil {
+		return merr.Status(err), nil
+	}
 
 	// check node healthy
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
@@ -363,10 +378,27 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Status(err), nil
 	}
 
-	// start pipeline
-	pipeline.Start()
-	// delegator after all steps done
-	delegator.Start()
+	collection := node.manager.Collection.Get(req.GetCollectionID())
+	if collection == nil {
+		err = merr.WrapErrCollectionNotFound(req.GetCollectionID())
+		return merr.Status(err), nil
+	}
+	err = collection.WithSchemaBarrierFence(func() error {
+		if err := segments.ValidateCollectionSchemaBarrier(
+			collection,
+			req.GetCollectionID(),
+			req.GetSchema(),
+			req.GetLoadMeta().GetSchemaBarrierTs(),
+		); err != nil {
+			return err
+		}
+		pipeline.Start()
+		delegator.Start()
+		return nil
+	})
+	if err != nil {
+		return merr.Status(err), nil
+	}
 	node.distDeltaTracker.markChannelUpsert(channel.GetChannelName())
 	log.Info(ctx, "watch dml channel success")
 	return merr.Success(), nil
@@ -470,6 +502,13 @@ func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPart
 // LoadSegments load historical data into query node, historical data can be vector data or index
 func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	defer node.updateDistributionModifyTS()
+	if !isLocalTopologyMutation(ctx) {
+		node.topologyMutationLocks.Lock(req.GetCollectionID())
+		defer node.topologyMutationLocks.Unlock(req.GetCollectionID())
+	}
+	if len(req.GetInfos()) == 0 {
+		return merr.Status(merr.WrapErrServiceInternalMsg("empty segment load info")), nil
+	}
 	segment := req.GetInfos()[0]
 
 	log := mlog.With(
@@ -516,8 +555,17 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	// Delegates request to workers
 	if req.GetNeedTransfer() {
-		defer node.markDataDistributionLeaderSegmentLoad(req)
-
+		// A stale-schema rejection is a fenced no-op: node distribution is
+		// unchanged, so QueryCoord keeps its dist snapshot and retries from fresh
+		// metadata. Any other outcome (including a failed worker load) still
+		// reports the channel delta so QueryCoord reconciles with the actual
+		// distribution state.
+		staleRejected := false
+		defer func() {
+			if !staleRejected {
+				node.markDataDistributionLeaderSegmentLoad(req)
+			}
+		}()
 		delegator, ok := node.delegators.Get(segment.GetInsertChannel())
 		if !ok {
 			msg := "failed to load segments, delegator not found"
@@ -539,6 +587,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		err := delegator.LoadSegments(ctx, req)
 		if err != nil {
 			log.Warn(ctx, "delegator failed to load segments", mlog.Err(err))
+			if errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
+				staleRejected = true
+			}
 			return merr.Status(err), nil
 		}
 
@@ -552,19 +603,46 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Status(err), nil
 	}
 	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
+	collection := node.manager.Collection.Get(req.GetCollectionID())
+	if collection == nil {
+		return merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionID())), nil
+	}
 
 	switch req.GetLoadScope() {
 	case querypb.LoadScope_Delta:
-		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
-		return node.loadDeltaLogs(ctx, req), nil
+		err := collection.WithSchemaBarrierFence(func() error {
+			if err := segments.ValidateCollectionSchemaBarrier(collection, req.GetCollectionID(), req.GetSchema(), req.GetLoadMeta().GetSchemaBarrierTs()); err != nil {
+				return err
+			}
+			return merr.Error(node.loadDeltaLogs(ctx, req))
+		})
+		if !errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
+			node.markDataDistributionSegmentLoadInfos(req.GetInfos())
+		}
+		return merr.Status(err), nil
 	case querypb.LoadScope_Stats:
-		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
-		return node.reopenSegments(ctx, req), nil
+		err := collection.WithSchemaBarrierFence(func() error {
+			if err := segments.ValidateCollectionSchemaBarrier(collection, req.GetCollectionID(), req.GetSchema(), req.GetLoadMeta().GetSchemaBarrierTs()); err != nil {
+				return err
+			}
+			return merr.Error(node.reopenSegments(ctx, req))
+		})
+		if !errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
+			node.markDataDistributionSegmentLoadInfos(req.GetInfos())
+		}
+		return merr.Status(err), nil
 	case querypb.LoadScope_Reopen:
-		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
-		return node.reopenSegments(ctx, req), nil
+		err := collection.WithSchemaBarrierFence(func() error {
+			if err := segments.ValidateCollectionSchemaBarrier(collection, req.GetCollectionID(), req.GetSchema(), req.GetLoadMeta().GetSchemaBarrierTs()); err != nil {
+				return err
+			}
+			return merr.Error(node.reopenSegments(ctx, req))
+		})
+		if !errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
+			node.markDataDistributionSegmentLoadInfos(req.GetInfos())
+		}
+		return merr.Status(err), nil
 	case querypb.LoadScope_Full:
-		defer node.markDataDistributionSegmentLoadInfos(req.GetInfos())
 		// Continue with the full segment load below.
 	case legacyLoadScopeIndex:
 		err := merr.WrapErrServiceInternalMsg(
@@ -579,17 +657,38 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	// Actual load segment
 	log.Info(ctx, "start to load segments...")
-	loaded, err := node.loader.Load(ctx,
+	loaded, err := node.loader.LoadWithCommit(ctx,
 		req.GetCollectionID(),
 		segments.SegmentTypeSealed,
 		req.GetVersion(),
+		func(loaded []segments.Segment) error {
+			return collection.WithSchemaBarrierFence(func() error {
+				if err := segments.ValidateCollectionSchemaBarrier(
+					collection,
+					req.GetCollectionID(),
+					req.GetSchema(),
+					req.GetLoadMeta().GetSchemaBarrierTs(),
+				); err != nil {
+					return err
+				}
+				node.manager.Segment.Put(ctx, segments.SegmentTypeSealed, loaded...)
+				return nil
+			})
+		},
 		req.GetInfos()...,
 	)
 	if err != nil {
+		// A stale-schema rejection inside the load commit leaves the segment
+		// manager unchanged; any other failure still reports the segments so
+		// QueryCoord reconciles with the actual distribution state.
+		if !errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
+			node.markDataDistributionSegmentLoadInfos(req.GetInfos())
+		}
 		return merr.Status(err), nil
 	}
 
 	node.manager.Collection.Ref(req.GetCollectionID(), uint32(len(loaded)))
+	node.markDataDistributionSegmentLoadInfos(req.GetInfos())
 
 	log.Info(ctx, "load segments done...",
 		mlog.Int64s("segments", lo.Map(loaded, func(s segments.Segment, _ int) int64 { return s.ID() })))
@@ -604,6 +703,19 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 // UpdateSchema updates the schema of the collection on the querynode.
 func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
 	defer node.updateDistributionModifyTS()
+	// Coordinator-driven installs use an explicit message type and take the
+	// collection topology lock so the update is ordered with
+	// LoadSegments/WatchDmChannels/SyncDistribution. Delegator propagation to a
+	// worker re-enters this RPC (including the local worker) without that message
+	// type, so the internal path deliberately skips the non-reentrant lock; the
+	// delegator's schemaChangeMutex and Collection transition lock provide the
+	// inner ordering. Using MsgType also preserves the legacy behavior of direct
+	// UpdateSchema requests whose Base/SourceID is absent.
+	coordinatorInstall := req.GetBase().GetMsgType() == commonpb.MsgType_AlterCollectionSchema
+	if coordinatorInstall {
+		node.topologyMutationLocks.Lock(req.GetCollectionID())
+		defer node.topologyMutationLocks.Unlock(req.GetCollectionID())
+	}
 
 	// check node healthy
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
@@ -619,14 +731,37 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 
 	log.Info(ctx, "querynode received update schema request")
 
-	// Pass the barrier timestamp through; collectionManager derives the logical
-	// schema version from the schema payload when it is present.
-	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), req.GetSchemaBarrierTs())
-	if err != nil {
-		log.Warn(ctx, "failed to update schema", mlog.Err(err))
+	if coordinatorInstall {
+		var combined error
+		delegatorCount := 0
+		node.delegators.Range(func(_ string, shardDelegator delegator.ShardDelegator) bool {
+			if shardDelegator.Collection() != req.GetCollectionID() {
+				return true
+			}
+			delegatorCount++
+			if err := shardDelegator.InstallSchema(ctx, req.GetSchema(), req.GetSchemaBarrierTs()); err != nil {
+				combined = merr.Combine(combined, err)
+			}
+			return true
+		})
+		if combined != nil {
+			log.Warn(ctx, "failed to update delegator schema", mlog.Err(combined))
+			return merr.Status(combined), nil
+		}
+		if delegatorCount > 0 {
+			return merr.Success(), nil
+		}
 	}
 
-	return merr.Status(err), nil
+	// Worker-only QueryNodes and delegator-forwarded worker requests update the
+	// shared collection directly. For a local worker this avoids recursively
+	// asking every delegator to propagate the same coordinator install again.
+	if err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), req.GetSchemaBarrierTs()); err != nil {
+		log.Warn(ctx, "failed to update schema", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+
+	return merr.Success(), nil
 }
 
 // ReleaseCollection clears all data related to this collection on the querynode
@@ -1467,10 +1602,27 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 
 func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 	defer node.updateDistributionModifyTS()
-	defer node.distDeltaTracker.markChannelUpsert(req.GetChannel())
+	node.topologyMutationLocks.Lock(req.GetCollectionID())
+	defer node.topologyMutationLocks.Unlock(req.GetCollectionID())
 
 	log := mlog.With(mlog.Int64("collectionID", req.GetCollectionID()),
 		mlog.String("channel", req.GetChannel()), mlog.Int64("currentNodeID", node.GetNodeID()))
+	// A stale-schema rejection is a fenced no-op: node distribution is
+	// unchanged, so QueryCoord keeps its dist snapshot and retries from fresh
+	// metadata. Any other outcome (including a failed action) still reports the
+	// channel delta so QueryCoord reconciles with the actual distribution state.
+	staleRejected := false
+	defer func() {
+		if !staleRejected {
+			node.distDeltaTracker.markChannelUpsert(req.GetChannel())
+		}
+	}()
+	if err := node.manager.Collection.ValidateSchemaBarrier(req.GetCollectionID(), req.GetSchema(), req.GetLoadMeta().GetSchemaBarrierTs()); err != nil {
+		if errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
+			staleRejected = true
+		}
+		return merr.Status(err), nil
+	}
 	// check node healthy
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return merr.Status(err), nil
@@ -1487,6 +1639,11 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 
 	// translate segment action
 	removeActions := make([]*querypb.SyncAction, 0)
+	metadataActions := make([]*querypb.SyncAction, 0)
+	// Preserve the caller context for the post-Wait fence: errgroup.WithContext
+	// cancels its derived context unconditionally once Wait returns (even when
+	// every action succeeds), so the metadata actions must not reuse it.
+	requestCtx := ctx
 	group, ctx := errgroup.WithContext(ctx)
 	for _, action := range req.GetActions() {
 		log := mlog.With(mlog.String("Action",
@@ -1540,24 +1697,10 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				mlog.Time("checkPoint", tsoutil.PhysicalTime(action.GetCheckpoint().GetTimestamp())),
 				mlog.Time("deleteCP", tsoutil.PhysicalTime(action.GetDeleteCP().GetTimestamp())),
 				mlog.Int64s("partitions", req.GetLoadMeta().GetPartitionIDs()))
-			droppedInfos := lo.SliceToMap(action.GetDroppedInTarget(), func(id int64) (int64, uint64) {
-				if action.GetCheckpoint() == nil {
-					return id, typeutil.MaxTimestamp
-				}
-				return id, action.GetCheckpoint().Timestamp
-			})
-			shardDelegator.AddExcludedSegments(droppedInfos)
-			flushedInfo := lo.SliceToMap(action.GetSealedInTarget(), func(id int64) (int64, uint64) {
-				if action.GetCheckpoint() == nil {
-					return id, typeutil.MaxTimestamp
-				}
-				return id, action.GetCheckpoint().Timestamp
-			})
-			shardDelegator.AddExcludedSegments(flushedInfo)
-			shardDelegator.SyncTargetVersion(action, req.GetLoadMeta().GetPartitionIDs())
+			metadataActions = append(metadataActions, action)
 		case querypb.SyncType_UpdatePartitionStats:
 			log.Info(ctx, "sync update partition stats versions")
-			shardDelegator.SyncPartitionStats(ctx, action.PartitionStatsVersions)
+			metadataActions = append(metadataActions, action)
 		default:
 			return merr.Status(merr.WrapErrServiceInternal("unknown action type", action.GetType().String())), nil
 		}
@@ -1568,15 +1711,57 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		log.Warn(ctx, "failed to sync distribution", mlog.Err(err))
 		return merr.Status(err), nil
 	}
+	collection := node.manager.Collection.Get(req.GetCollectionID())
+	if collection == nil {
+		return merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionID())), nil
+	}
+	err = collection.WithSchemaBarrierFence(func() error {
+		if err := segments.ValidateCollectionSchemaBarrier(
+			collection,
+			req.GetCollectionID(),
+			req.GetSchema(),
+			req.GetLoadMeta().GetSchemaBarrierTs(),
+		); err != nil {
+			return err
+		}
+		for _, action := range metadataActions {
+			switch action.GetType() {
+			case querypb.SyncType_UpdateVersion:
+				droppedInfos := lo.SliceToMap(action.GetDroppedInTarget(), func(id int64) (int64, uint64) {
+					if action.GetCheckpoint() == nil {
+						return id, typeutil.MaxTimestamp
+					}
+					return id, action.GetCheckpoint().Timestamp
+				})
+				shardDelegator.AddExcludedSegments(droppedInfos)
+				flushedInfo := lo.SliceToMap(action.GetSealedInTarget(), func(id int64) (int64, uint64) {
+					if action.GetCheckpoint() == nil {
+						return id, typeutil.MaxTimestamp
+					}
+					return id, action.GetCheckpoint().Timestamp
+				})
+				shardDelegator.AddExcludedSegments(flushedInfo)
+				shardDelegator.SyncTargetVersion(action, req.GetLoadMeta().GetPartitionIDs())
+			case querypb.SyncType_UpdatePartitionStats:
+				shardDelegator.SyncPartitionStats(requestCtx, action.PartitionStatsVersions)
+			}
+		}
 
-	// in case of target node offline, when try to remove segment from leader's distribution, use wildcardNodeID(-1) to skip nodeID check
-	for _, action := range removeActions {
-		shardDelegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
-			NodeID:       -1,
-			SegmentIDs:   []int64{action.GetSegmentID()},
-			Scope:        querypb.DataScope_Historical,
-			CollectionID: req.GetCollectionID(),
-		}, true)
+		for _, action := range removeActions {
+			shardDelegator.ReleaseSegments(requestCtx, &querypb.ReleaseSegmentsRequest{
+				NodeID:       -1,
+				SegmentIDs:   []int64{action.GetSegmentID()},
+				Scope:        querypb.DataScope_Historical,
+				CollectionID: req.GetCollectionID(),
+			}, true)
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
+			staleRejected = true
+		}
+		return merr.Status(err), nil
 	}
 
 	return merr.Success(), nil

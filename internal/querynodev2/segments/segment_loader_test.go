@@ -27,6 +27,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
@@ -46,8 +47,96 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestLoadWithCommitRejectsWithoutPublication(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterEnabled.Key)
+	ctx := context.Background()
+	collectionID := int64(1000)
+	partitionID := int64(10)
+	segmentID := int64(20)
+	schema := mock_segcore.GenTestCollectionSchema("load-with-commit", schemapb.DataType_Int64, false)
+	manager := NewManager()
+	requireNoError := func(err error) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	requireNoError(manager.Collection.PutOrRef(collectionID, schema, nil, &querypb.LoadMetaInfo{
+		CollectionID:    collectionID,
+		PartitionIDs:    []int64{partitionID},
+		SchemaBarrierTs: 1,
+	}))
+	defer manager.Collection.Unref(collectionID, 1)
+	loader := &segmentLoader{
+		manager:                   manager,
+		loadingSegments:           typeutil.NewConcurrentMap[int64, *loadResult](),
+		committedResourceNotifier: syncutil.NewVersionedNotifier(),
+		duf:                       NewDiskUsageFetcher(ctx),
+	}
+	rejectErr := merr.WrapErrCollectionSchemaVersionNotReady(collectionID, 1, 2)
+	committedSegments := -1
+
+	loaded, err := loader.LoadWithCommit(ctx, collectionID, SegmentTypeSealed, 0, func(staged []Segment) error {
+		committedSegments = len(staged)
+		return rejectErr
+	}, &querypb.SegmentLoadInfo{
+		SegmentID:     segmentID,
+		PartitionID:   partitionID,
+		CollectionID:  collectionID,
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID),
+		Level:         datapb.SegmentLevel_L0,
+	})
+
+	assert.Nil(t, loaded)
+	assert.ErrorIs(t, err, rejectErr)
+	assert.Equal(t, 1, committedSegments)
+	assert.Nil(t, manager.Segment.GetWithType(segmentID, SegmentTypeSealed))
+	assert.False(t, loader.loadingSegments.Contain(segmentID))
+}
+
+func TestLoadKeepsL0OutOfSegmentManager(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterEnabled.Key)
+	ctx := context.Background()
+	collectionID := int64(1001)
+	partitionID := int64(11)
+	segmentID := int64(21)
+	schema := mock_segcore.GenTestCollectionSchema("load-l0", schemapb.DataType_Int64, false)
+	manager := NewManager()
+	require.NoError(t, manager.Collection.PutOrRef(collectionID, schema, nil, &querypb.LoadMetaInfo{
+		CollectionID:    collectionID,
+		PartitionIDs:    []int64{partitionID},
+		SchemaBarrierTs: 1,
+	}))
+	defer manager.Collection.Unref(collectionID, 1)
+	loader := &segmentLoader{
+		manager:                   manager,
+		loadingSegments:           typeutil.NewConcurrentMap[int64, *loadResult](),
+		committedResourceNotifier: syncutil.NewVersionedNotifier(),
+		duf:                       NewDiskUsageFetcher(ctx),
+	}
+
+	loaded, err := loader.Load(ctx, collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+		SegmentID:     segmentID,
+		PartitionID:   partitionID,
+		CollectionID:  collectionID,
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID),
+		Level:         datapb.SegmentLevel_L0,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.Equal(t, segmentID, loaded[0].ID())
+	assert.Nil(t, manager.Segment.GetWithType(segmentID, SegmentTypeSealed))
+	assert.False(t, loader.loadingSegments.Contain(segmentID))
+	loaded[0].Release(ctx)
+}
 
 type SegmentLoaderSuite struct {
 	suite.Suite

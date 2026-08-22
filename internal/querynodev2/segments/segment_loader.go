@@ -80,6 +80,11 @@ type Loader interface {
 	// NOTE: make sure the ref count of the corresponding collection will never go down to 0 during this
 	Load(ctx context.Context, collectionID int64, segmentType SegmentType, version int64, segments ...*querypb.SegmentLoadInfo) ([]Segment, error)
 
+	// LoadWithCommit loads segments without publishing them until commit runs.
+	// The callback owns the final SegmentManager publication boundary and may
+	// reject the load, in which case all newly loaded segments are released.
+	LoadWithCommit(ctx context.Context, collectionID int64, segmentType SegmentType, version int64, commit func([]Segment) error, segments ...*querypb.SegmentLoadInfo) ([]Segment, error)
+
 	// LoadDeltaLogs load deltalog and write delta data into provided segment.
 	// it also executes resource protection logic in case of OOM.
 	LoadDeltaLogs(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error
@@ -228,6 +233,26 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	version int64,
 	segments ...*querypb.SegmentLoadInfo,
 ) ([]Segment, error) {
+	return loader.LoadWithCommit(ctx, collectionID, segmentType, version, func(loaded []Segment) error {
+		// L0 segments are owned by the delegator delete buffer and have never
+		// been published through SegmentManager. Keep that legacy ownership
+		// contract while LoadWithCommit exposes every staged segment to custom
+		// commit callbacks so they can release all resources on rejection.
+		publishable := lo.Filter(loaded, func(segment Segment, _ int) bool {
+			return segment.Level() != datapb.SegmentLevel_L0
+		})
+		loader.manager.Segment.Put(ctx, segmentType, publishable...)
+		return nil
+	}, segments...)
+}
+
+func (loader *segmentLoader) LoadWithCommit(ctx context.Context,
+	collectionID int64,
+	segmentType SegmentType,
+	version int64,
+	commit func([]Segment) error,
+	segments ...*querypb.SegmentLoadInfo,
+) (_ []Segment, err error) {
 	if len(segments) == 0 {
 		mlog.Info(context.TODO(), "no segment to load")
 		return nil, nil
@@ -249,7 +274,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	// continue to wait other task done
 	mlog.Info(context.TODO(), "start loading...", mlog.Int("segmentNum", len(segments)), mlog.Int("afterFilter", len(infos)))
 
-	var err error
 	var requestResourceResult requestResourceResult
 
 	// Check memory & storage limit
@@ -263,6 +287,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 
 	newSegments := typeutil.NewConcurrentMap[int64, Segment]()
 	loaded := typeutil.NewConcurrentMap[int64, Segment]()
+	committed := false
 	defer func() {
 		newSegments.Range(func(segmentID int64, s Segment) bool {
 			mlog.Warn(context.TODO(), "release new segment created due to load failure",
@@ -272,6 +297,16 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			s.Release(context.Background())
 			return true
 		})
+		if err != nil && !committed {
+			loaded.Range(func(segmentID int64, s Segment) bool {
+				mlog.Warn(context.TODO(), "release loaded segment rejected before commit",
+					mlog.Int64("segmentID", segmentID),
+					mlog.Err(err),
+				)
+				s.Release(context.Background())
+				return true
+			})
+		}
 	}()
 
 	for _, info := range infos {
@@ -389,12 +424,8 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			}
 		}
 
-		if segment.Level() != datapb.SegmentLevel_L0 {
-			loader.manager.Segment.Put(ctx, segmentType, segment)
-		}
 		newSegments.GetAndRemove(segmentID)
 		loaded.Insert(segmentID, segment)
-		loader.notifyLoadFinish(loadInfo)
 		if localSegment, ok := segment.(*LocalSegment); ok {
 			localSegment.compactLoadInfoForRuntime()
 		}
@@ -416,19 +447,28 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		return nil, err
 	}
 
-	// Wait for all segments loaded
+	result := make([]Segment, 0, loaded.Len())
+	loaded.Range(func(_ int64, s Segment) bool {
+		result = append(result, s)
+		return true
+	})
+	if commit == nil {
+		return nil, merr.WrapErrServiceInternal("nil segment load commit callback")
+	}
+	if err = commit(result); err != nil {
+		return nil, err
+	}
+	committed = true
+	loader.notifyLoadFinish(infos...)
+
+	// Wait for segments filtered out by prepare because another load owns them.
 	segmentIDs := lo.Map(segments, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })
-	if err := loader.waitSegmentLoadDone(ctx, segmentType, segmentIDs, version); err != nil {
+	if err = loader.waitSegmentLoadDone(ctx, segmentType, segmentIDs, version); err != nil {
 		mlog.Warn(context.TODO(), "failed to wait the filtered out segments load done", mlog.Err(err))
 		return nil, err
 	}
 
 	mlog.Info(context.TODO(), "all segment load done")
-	var result []Segment
-	loaded.Range(func(_ int64, s Segment) bool {
-		result = append(result, s)
-		return true
-	})
 	return result, nil
 }
 

@@ -24,12 +24,13 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type Controller interface {
 	StartDistInstance(ctx context.Context, nodeID int64)
 	Remove(nodeID int64)
-	SyncAll(ctx context.Context)
+	SyncAll(ctx context.Context) error
 	Stop()
 }
 
@@ -65,24 +66,34 @@ func (dc *ControllerImpl) Remove(nodeID int64) {
 	}
 }
 
-func (dc *ControllerImpl) SyncAll(ctx context.Context) {
+func (dc *ControllerImpl) SyncAll(ctx context.Context) error {
 	dc.mu.RLock()
 	defer dc.mu.RUnlock()
 
 	wg := sync.WaitGroup{}
+	errCh := make(chan error, len(dc.handlers))
 	for _, h := range dc.handlers {
 		wg.Add(1)
 		go func(handler *distHandler) {
 			defer wg.Done()
 			resp, err := handler.getDistribution(ctx)
 			if err != nil {
+				err = merr.Wrapf(err, "failed to recover distribution from querynode %d", handler.nodeID)
 				mlog.Warn(ctx, "SyncAll come across err when getting data distribution", mlog.Err(err))
+				errCh <- err
 			} else {
 				handler.handleDistResp(ctx, resp)
 			}
 		}(h)
 	}
 	wg.Wait()
+	close(errCh)
+
+	var combined error
+	for err := range errCh {
+		combined = merr.Combine(combined, err)
+	}
+	return combined
 }
 
 func (dc *ControllerImpl) Stop() {

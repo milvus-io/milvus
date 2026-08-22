@@ -123,7 +123,7 @@ func (suite *LocalWorkerTestSuite) AfterTest(suiteName, testName string) {
 
 func (suite *LocalWorkerTestSuite) TestLoadSegment() {
 	suite.mockLoader.EXPECT().
-		Load(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		LoadWithCommit(mock.Anything, suite.collectionID, segments.SegmentTypeSealed, int64(0), mock.Anything, mock.Anything, mock.Anything).
 		Return([]segments.Segment{}, nil).Once()
 
 	// load empty

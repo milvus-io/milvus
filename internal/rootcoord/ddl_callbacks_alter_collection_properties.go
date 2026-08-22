@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/schemaevolution"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -24,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
@@ -456,9 +458,30 @@ func (c *Core) getAlterLoadConfigOfAlterCollection(oldProps []*commonpb.KeyValue
 func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
 	header := result.Message.Header()
 	body := result.Message.MustBody()
+	isSchemaChange := messageutil.IsSchemaChange(header)
+	if isSchemaChange && c.schemaInstallGate != nil {
+		if err := c.schemaInstallGate.PrepareSchemaInstall(ctx, header.CollectionId); err != nil {
+			return merr.Wrap(err, "failed to recover schema install gate")
+		}
+		// The ACK callback is the target-schema recovery owner. Internal
+		// topology work such as UpdateLoadConfig must be allowed to make
+		// forward progress while ordinary old-epoch admission stays closed.
+		ctx = schemaevolution.WithAdmissionBypass(ctx)
+	}
 	if err := c.meta.AlterCollection(ctx, result); err != nil {
 		if errors.Is(err, errAlterCollectionNotFound) {
 			mlog.Warn(ctx, "alter a non-existent collection, ignore it", mlog.FieldMessage(result.Message))
+			if isSchemaChange && c.schemaInstallGate != nil {
+				// The collection was removed after the durable schema broadcast.
+				// QueryCoord completion treats an absent loaded collection as a
+				// successful terminal state and reopens admission.
+				return c.schemaInstallGate.CompleteSchemaInstall(
+					ctx,
+					header.CollectionId,
+					body.GetUpdates().GetSchema(),
+					result.GetMaxTimeTick(),
+				)
+			}
 			return nil
 		}
 		return merr.Wrap(err, "failed to alter collection")
@@ -487,9 +510,12 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 		if err := merr.CheckRPCCall(resp, err); err != nil {
 			if errors.Is(err, merr.ErrResourceGroupNotFound) {
 				mlog.Warn(ctx, "failed to update load config due to missing resource group, stop retrying", mlog.Err(err))
-				return nil
+				// Keep processing the schema ACK. The invalid load-config part is
+				// intentionally skipped, but a durable schema change must still
+				// expire caches and complete/reopen its install gate.
+			} else {
+				return merr.Wrap(err, "failed to update load config")
 			}
-			return merr.Wrap(err, "failed to update load config")
 		}
 	}
 	if err := c.cascadeDropFieldIndexesInline(ctx, result); err != nil {
@@ -510,7 +536,18 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 		}
 	}
 
-	return c.ExpireCaches(ctx, header)
+	if err := c.ExpireCaches(ctx, header); err != nil {
+		return err
+	}
+	if isSchemaChange && c.schemaInstallGate != nil {
+		return c.schemaInstallGate.CompleteSchemaInstall(
+			ctx,
+			header.CollectionId,
+			body.GetUpdates().GetSchema(),
+			result.GetMaxTimeTick(),
+		)
+	}
+	return nil
 }
 
 // applyBoundFieldIndexesInline creates the index meta bound to a newly added

@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/schemaevolution"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -101,6 +102,16 @@ func (s *Server) balanceSegments(ctx context.Context,
 	sync bool,
 	copyMode bool,
 ) error {
+	var release func()
+	if !schemaevolution.HasAdmissionBypass(ctx) {
+		var err error
+		release, err = s.acquireTopologyLease(ctx, collectionID)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
+
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	policy := balancer.GetAssignPolicy()
 	plans := policy.AssignSegment(ctx, collectionID, segments, dstNodes, true)
@@ -126,7 +137,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 			actions = append(actions, releaseAction)
 		}
 
-		t, err := task.NewSegmentTask(s.ctx,
+		t, err := task.NewSegmentTask(ctx,
 			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 			utils.ManualBalance,
 			collectionID,
@@ -193,6 +204,16 @@ func (s *Server) balanceChannels(ctx context.Context,
 	sync bool,
 	copyMode bool,
 ) error {
+	var release func()
+	if !schemaevolution.HasAdmissionBypass(ctx) {
+		var err error
+		release, err = s.acquireTopologyLease(ctx, collectionID)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
+
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	policy := balancer.GetAssignPolicy()
 	plans := policy.AssignChannel(ctx, collectionID, channels, dstNodes, true)
@@ -218,7 +239,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 			releaseAction := task.NewChannelAction(plan.From, task.ActionTypeReduce, plan.Channel.GetChannelName())
 			actions = append(actions, releaseAction)
 		}
-		t, err := task.NewChannelTask(s.ctx,
+		t, err := task.NewChannelTask(ctx,
 			Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond),
 			utils.ManualBalance,
 			collectionID,

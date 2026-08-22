@@ -6,5 +6,5 @@ import semver "github.com/blang/semver/v4"
 var Version semver.Version
 
 func init() {
-	Version = semver.MustParse("3.0.0-beta")
+	Version = semver.MustParse("3.0.1-dev")
 }

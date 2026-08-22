@@ -70,6 +70,15 @@ func GetPendingSchemaFileResources() map[int64][]int64 {
 	return singleton.Get().GetPendingSchemaFileResources()
 }
 
+// GetPendingSchemaInstallCollectionIDs returns collections whose durable
+// schema-change broadcasts have not completed their ACK callbacks.
+func GetPendingSchemaInstallCollectionIDs() []int64 {
+	if !singleton.Ready() {
+		return nil
+	}
+	return singleton.Get().GetPendingSchemaInstallCollectionIDs()
+}
+
 // Release releases the broadcaster.
 func Release() {
 	if !singleton.Ready() {

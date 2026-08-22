@@ -155,6 +155,7 @@ func (s *mixCoordImpl) activateFunc() error {
 }
 
 func (s *mixCoordImpl) initInternal() error {
+	s.rootcoordServer.SetSchemaInstallGate(s.queryCoordServer)
 	s.rootcoordServer.SetMixCoord(s)
 	s.datacoordServer.SetMixCoord(s)
 	s.queryCoordServer.SetMixCoord(s)

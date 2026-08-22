@@ -113,6 +113,9 @@ func (c *DDLCallback) ExpireCaches(ctx context.Context, expirations any) error {
 	} else {
 		panic(fmt.Sprintf("invalid getter type: %T", expirations))
 	}
+	if cacheExpirations == nil {
+		return nil
+	}
 	for _, cacheExpiration := range cacheExpirations.CacheExpirations {
 		if err := c.expireCache(ctx, cacheExpiration); err != nil {
 			return err
@@ -162,7 +165,7 @@ func startBroadcastWithDatabaseLock(ctx context.Context, dbName string) (broadca
 // startBroadcastWithCollectionLock starts a broadcast with collection lock.
 // CreateCollection and DropCollection can only be called with collection name itself, not alias.
 // So it's safe to use collection name directly for those API.
-func (*Core) startBroadcastWithCollectionLock(ctx context.Context, dbName string, collectionName string) (broadcaster.BroadcastAPI, error) {
+func (c *Core) startBroadcastWithCollectionLock(ctx context.Context, dbName string, collectionName string) (broadcaster.BroadcastAPI, error) {
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
 		message.NewSharedDBNameResourceKey(dbName),
 		message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
@@ -170,7 +173,7 @@ func (*Core) startBroadcastWithCollectionLock(ctx context.Context, dbName string
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to start broadcast with collection lock")
 	}
-	return broadcaster, nil
+	return c.wrapSchemaInstallBroadcaster(broadcaster), nil
 }
 
 func waitUntilSchemaDropReady(ctx context.Context) error {
