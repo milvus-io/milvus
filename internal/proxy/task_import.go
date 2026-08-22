@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -130,7 +131,8 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	// Import privilege that authorized this RPC does not cover that, so require
 	// a cluster-level privilege on top.
 	if isBackup || isL0Import {
-		if err := CheckClusterPrivilege(ctx,
+		if err := CheckClusterPrivilege(ctx, req,
+			milvuspb.MilvusService_Import_FullMethodName,
 			commonpb.ObjectPrivilege_PrivilegeImportBinlog.String()); err != nil {
 			return err
 		}
