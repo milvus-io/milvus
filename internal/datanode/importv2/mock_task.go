@@ -6,6 +6,8 @@ import (
 	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	conc "github.com/milvus-io/milvus/pkg/v3/util/conc"
 
+	taskresource "github.com/milvus-io/milvus/internal/util/taskresource"
+
 	mock "github.com/stretchr/testify/mock"
 
 	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -424,6 +426,51 @@ func (_c *MockTask_GetSchema_Call) RunAndReturn(run func() *schemapb.CollectionS
 	return _c
 }
 
+// GetResourceRequirement provides a mock function with no fields
+func (_m *MockTask) GetResourceRequirement() taskresource.Requirement {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetResourceRequirement")
+	}
+
+	var r0 taskresource.Requirement
+	if rf, ok := ret.Get(0).(func() taskresource.Requirement); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(taskresource.Requirement)
+	}
+
+	return r0
+}
+
+// MockTask_GetResourceRequirement_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetResourceRequirement'
+type MockTask_GetResourceRequirement_Call struct {
+	*mock.Call
+}
+
+// GetResourceRequirement is a helper method to define mock.On call
+func (_e *MockTask_Expecter) GetResourceRequirement() *MockTask_GetResourceRequirement_Call {
+	return &MockTask_GetResourceRequirement_Call{Call: _e.mock.On("GetResourceRequirement")}
+}
+
+func (_c *MockTask_GetResourceRequirement_Call) Run(run func()) *MockTask_GetResourceRequirement_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockTask_GetResourceRequirement_Call) Return(_a0 taskresource.Requirement) *MockTask_GetResourceRequirement_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTask_GetResourceRequirement_Call) RunAndReturn(run func() taskresource.Requirement) *MockTask_GetResourceRequirement_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetSlots provides a mock function with no fields
 func (_m *MockTask) GetSlots() int64 {
 	ret := _m.Called()
@@ -656,7 +703,8 @@ func (_c *MockTask_GetVchannels_Call) RunAndReturn(run func() []string) *MockTas
 func NewMockTask(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockTask {
+},
+) *MockTask {
 	mock := &MockTask{}
 	mock.Mock.Test(t)
 

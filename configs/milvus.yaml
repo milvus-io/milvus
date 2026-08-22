@@ -919,6 +919,21 @@ dataCoord:
   jsonShreddingMaxColumns: 1024 # the max number of columns to shred
   jsonShreddingRatioThreshold: 0.3 # the ratio threshold to shred
   jsonShreddingWriteBatchSize: 81920 # the batch size to write
+  resource:
+    enableCompactionEstimate: true # whether DataCoord derives a compaction task's slot count from its input data. When false, each compaction family reverts to the pricing it used before resource estimation existed: mix compaction to the flat dataCoord.slot.mixCompactionSlotUsage constant, and sort compaction to the step function over segment size (it was never flat). Turn it off during a partial rollout or a rollback: the byte estimate is folded onto the same scalar slot field the wire has always carried but on a different scale, so a new DataCoord talking to a DataNode that has not restarted yet reads that node as full far too early and cluster-wide compaction throughput collapses. This switch affects DataCoord's pricing ONLY. The DataNode's own admission ledger, which is what prevents the out-of-memory kills this feature exists for, stays on and has no switch
+    mixCompactionV3MemoryFactor: 1 # memory per byte of input for storage-v3 mix compaction; empirically ~0.9 from issue #52180, kept at 1.0 as a conservative bound
+    clusteringMemoryFactor: 0.3 # memory per byte of input granted to clustering compaction
+    clusteringMinMemory: 536870912 # lower bound in bytes of the clustering compaction grant
+    clusteringMaxMemory: 8589934592 # upper bound in bytes of the clustering compaction grant
+    arrowExpansionFactor: 1.2 # arrow in-memory expansion over binlog MemorySize, for offsets and validity bitmaps
+    indexBuildMemoryFactorDefault: 1.5 # build-stage memory multiplier over raw field size for index types not in the built-in factor table
+    indexBuildCPU: 1 # CPU cores charged per index build task; knowhere's build parallelism is fixed by its own pool, so this does not scale with data volume
+    indexBuildDecodeWindow: 67108864 # extra in-flight decode window (in bytes) added to storage-v3 index build memory on top of the retained column
+    textIndexMemoryFactor: 2 # memory per byte of touched field for text-index stats sub-jobs
+    jsonKeyIndexMemoryFactor: 2 # memory per byte of touched field for json-key-index stats sub-jobs
+    copySegmentMemory: 67108864 # flat memory in bytes charged for a copy-segment task; the copy is a server-side object-store operation, so no segment bytes pass through this process
+    refreshExternalMemory: 67108864 # flat memory in bytes charged for a refresh-external-collection task
+    importCPUPerFile: 0.5 # CPU cores charged per concurrently in-flight import file
   ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
   grpc:
@@ -991,6 +1006,14 @@ dataNode:
   gracefulStopTimeout: 1800 # seconds. force stop node without graceful stop
   slot:
     slotCap: 16 # The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode
+  resource:
+    cpuRatio: 1 # ratio of node CPU cores usable by scheduled tasks
+    memoryRatio: 0.75 # ratio of node memory usable by scheduled tasks
+    highWatermark: 0.85 # measured memory ratio above which the node stops admitting new tasks
+    lowWatermark: 0.75 # measured memory ratio below which admission resumes
+    nonTaskMemoryFloor: 1073741824 # lower bound in bytes reserved for memory outside the task ledger
+    slowGrowPeriods: 5 # consecutive lower samples required before the non-task memory reservation is allowed to shrink, i.e. before the task budget grows; samples are taken every 3s, so this is that many 3s periods
+    headOfLineReservation: true # reserve budget for the longest-waiting task so large tasks cannot starve
   clusteringCompaction:
     memoryBufferRatio: 0.3 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.
     workPoolSize: 8 # worker pool size for one clustering compaction job.

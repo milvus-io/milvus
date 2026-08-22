@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -51,20 +52,130 @@ func (t *mixCompactionTask) GetTaskState() taskcommon.State {
 }
 
 func (t *mixCompactionTask) GetTaskSlot() int64 {
-	slotUsage := t.slotUsage.Load()
-	if slotUsage == 0 {
-		slotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
-		if t.GetTaskProto().GetType() == datapb.CompactionType_SortCompaction {
-			segment := t.meta.GetHealthySegment(context.Background(), t.GetTaskProto().GetInputSegments()[0])
-			if segment != nil {
-				segSize := segment.getSegmentSize()
-				slotUsage = calculateStatsTaskSlot(segSize)
-				mlog.Info(context.TODO(), "mixCompactionTask get task slot",
-					mlog.Int64("segment size", segSize), mlog.Int64("task slot", slotUsage))
-			}
+	if slotUsage := t.slotUsage.Load(); slotUsage != 0 {
+		return slotUsage
+	}
+
+	// No pre-fetched segments on hand (this is the standalone path, e.g. the
+	// global scheduler sizing the task before a node is even picked), so
+	// resolve them here. BuildCompactionRequest below has its own segments
+	// already in hand by the time it needs a slot count and calls
+	// computeAndCacheTaskSlot directly to avoid fetching them a second time.
+	segments, allResolved := t.resolveInputSegments(context.Background())
+	return t.computeAndCacheTaskSlot(segments, allResolved)
+}
+
+// resolveInputSegments fetches every input segment via meta.GetHealthySegment.
+// It returns the segments that resolved and whether every input segment did;
+// a segment that fails to resolve is logged by ID rather than silently
+// dropped, since it otherwise under-charges the estimate with no signal for
+// an operator to go on.
+func (t *mixCompactionTask) resolveInputSegments(ctx context.Context) ([]*SegmentInfo, bool) {
+	inputSegments := t.GetTaskProto().GetInputSegments()
+	segments := make([]*SegmentInfo, 0, len(inputSegments))
+	allResolved := true
+	for _, segID := range inputSegments {
+		segment := t.meta.GetHealthySegment(ctx, segID)
+		if segment == nil {
+			allResolved = false
+			mlog.Warn(ctx, "mixCompactionTask could not resolve input segment for slot estimation, estimate will under-count it",
+				mlog.Int64("planID", t.GetTaskID()), mlog.Int64("segmentID", segID))
+			continue
 		}
+		segments = append(segments, segment)
+	}
+	return segments, allResolved
+}
+
+// computeAndCacheTaskSlot derives the slot usage from already-resolved
+// segments, so callers that already have the segments in hand (i.e.
+// BuildCompactionRequest) don't pay for a second meta fetch -- and don't
+// race it, since the plan's own SlotUsage would then quietly disagree with
+// which segments the plan actually ships.
+//
+// allResolved must be true only when every one of the task's input segments
+// (not just the ones passed in) resolved: a partial estimate is a real,
+// immediately-usable number, but caching it would turn a transient
+// resolution failure into a permanently wrong slot count for this task
+// instance, since GetTaskSlot short-circuits once t.slotUsage is non-zero.
+func (t *mixCompactionTask) computeAndCacheTaskSlot(segments []*SegmentInfo, allResolved bool) int64 {
+	if slotUsage := t.slotUsage.Load(); slotUsage != 0 {
+		return slotUsage
+	}
+
+	if !paramtable.Get().DataCoordCfg.ResourceEnableCompactionEstimate.GetAsBool() {
+		return t.legacyTaskSlot(segments)
+	}
+
+	var totalMemory, totalRows, maxDelete, storageVersion int64
+	for _, segment := range segments {
+		totalMemory += segment.getSegmentSize()
+		totalRows += segment.GetNumOfRows()
+		if d := segment.getDeltaLogSize(); d > maxDelete {
+			maxDelete = d
+		}
+		// Storage version is per segment, not per task: neither CompactionTask
+		// nor CompactionPlan carries one (only SegmentInfo field 21 and
+		// CompactionSegmentBinlogs field 10 do). Take the max, matching what
+		// RequirementForCompaction does on the DataNode side — a v3 segment in
+		// a mixed plan dominates the memory profile, so the max is the
+		// conservative direction.
+		if v := segment.GetStorageVersion(); v > storageVersion {
+			storageVersion = v
+		}
+	}
+
+	req := taskresource.EstimateCompaction(taskresource.CompactionInput{
+		Type:                  t.GetTaskProto().GetType(),
+		StorageVersion:        storageVersion,
+		TotalMemorySize:       totalMemory,
+		TotalRows:             totalRows,
+		MaxSegmentDeleteBytes: maxDelete,
+	})
+
+	// Phase 0 still speaks the scalar protocol on the wire, so the byte-level
+	// estimate is folded back into slots here. Phase 1 sends the requirement
+	// itself and this fold disappears.
+	slotUsage := memoryToSlots(req.Memory)
+	if allResolved {
 		t.slotUsage.Store(slotUsage)
 	}
+	mlog.Info(context.TODO(), "mixCompactionTask get task slot",
+		mlog.Int64("totalMemorySize", totalMemory),
+		mlog.Int64("storageVersion", storageVersion),
+		mlog.String("requirement", req.String()),
+		mlog.Int64("taskSlot", slotUsage),
+		mlog.Bool("cached", allResolved))
+	return slotUsage
+}
+
+// legacyTaskSlot is what this task reported before resource estimation existed:
+// a flat constant for mix, and the segment-size step function for sort. It is
+// the rollback path for dataCoord.resource.enableCompactionEstimate.
+//
+// The switch is needed because the wire protocol did not change in this phase.
+// The slot field still carries a scalar, but the estimator changed what a slot
+// MEANS for this task family -- a 4.5GiB storage-v3 compaction moves from 4
+// slots to about 36. A DataNode that has not restarted yet still reports its
+// availability on the old CPU-derived scale, so a new DataCoord reads it as
+// full roughly nine times too early, on every compaction rather than on rare
+// ones. That is a cluster-wide throughput collapse with no other way out, and
+// it is reachable by an ordinary partial rollout or a rollback.
+//
+// The switch is named for what it does rather than for the feature, because it
+// turns off exactly this pricing and nothing else. The DataNode's admission
+// ledger -- the half that actually prevents the OOM kills in issue #52180 --
+// keeps running, and deliberately has no switch of its own: one would be a way
+// to re-enable the outage.
+func (t *mixCompactionTask) legacyTaskSlot(segments []*SegmentInfo) int64 {
+	slotUsage := paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
+	if t.GetTaskProto().GetType() == datapb.CompactionType_SortCompaction && len(segments) > 0 {
+		segSize := segments[0].getSegmentSize()
+		slotUsage = calculateStatsTaskSlot(segSize)
+		mlog.Info(context.TODO(), "mixCompactionTask get legacy task slot",
+			mlog.Int64("segmentSize", segSize), mlog.Int64("taskSlot", slotUsage))
+	}
+	t.slotUsage.Store(slotUsage)
 	return slotUsage
 }
 
@@ -364,7 +475,6 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		TotalRows:                 taskProto.GetTotalRows(),
 		Schema:                    taskSchema,
 		PreAllocatedSegmentIDs:    taskProto.GetPreAllocatedSegmentIDs(),
-		SlotUsage:                 t.GetSlotUsage(),
 		MaxSize:                   taskProto.GetMaxSize(),
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
@@ -410,6 +520,12 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		segIDMap[segID] = segInfo.GetDeltalogs()
 		segments = append(segments, segInfo)
 	}
+	// Every input segment above either resolved or the function already
+	// returned, so segments is complete: reuse it here instead of making
+	// GetSlotUsage do its own independent meta fetch, which would both
+	// double the lookups and open a window where the two fetches disagree
+	// about which segments actually exist.
+	plan.SlotUsage = t.computeAndCacheTaskSlot(segments, true)
 
 	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments, taskSchema)
 	if err != nil {

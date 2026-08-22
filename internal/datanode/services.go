@@ -35,12 +35,14 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
+	"github.com/milvus-io/milvus/internal/datanode/resource"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -732,6 +734,175 @@ func (node *DataNode) DropCopySegment(ctx context.Context, req *datapb.DropCopyS
 	return merr.Success(), nil
 }
 
+// legacyAvailableSlots folds the guard's two-dimensional state into the
+// scalar an old DataCoord still reads.
+//
+// It takes the worse of the two utilizations on purpose: the folded value
+// must be conservative, so an old coordinator sees the node as full earlier
+// than it truly is, never later. legacyTotal is left at whatever
+// CalculateNodeSlots reports so the old coordinator's own arithmetic keeps
+// its established meaning.
+//
+// Two states read as a full node (0) regardless of the utilization
+// arithmetic:
+//   - Frozen: the watermark loop has stopped admission outright.
+//   - ExclusiveTaskID != 0: an oversized task is running alone and nothing
+//     else will be admitted until it finishes. The ordinary formula usually
+//     already lands on zero here too, because Reserved equals that one
+//     task's requirement and it does not fit in Total in whichever dimension
+//     made it oversized -- but node capacity is runtime config and can grow
+//     while the task holds the node, which can pull the ratio back under 1.
+//     Checking the flag directly keeps the scalar correct regardless of that
+//     race.
+func legacyAvailableSlots(snap resource.Snapshot, legacyTotal int64) int64 {
+	if snap.Frozen || snap.ExclusiveTaskID != 0 {
+		return 0
+	}
+
+	// The fold is expressed as the FREE fraction rather than as
+	// 1 - utilization, and the minimum of the free fractions is the same
+	// fold as the maximum of the utilizations.
+	//
+	// This is not a stylistic choice. `1 - reserved/total` rounds twice: for a
+	// nine-tenths-consumed dimension, 900/1000 is the double just ABOVE 0.9,
+	// and subtracting it from 1 lands on 0.09999999999999998, just BELOW a
+	// tenth. Multiplying by a legacyTotal that is a multiple of ten then lands
+	// just under an integer, and int64() truncates towards zero, so a node with
+	// exactly a tenth of its budget free reported 7 slots out of 80 instead of
+	// 8. Dividing the free capacity by the total directly is one rounding
+	// instead of two and lands on the nearest double to a tenth.
+	//
+	// The error was always in the same direction -- under-reporting -- so it hid
+	// capacity from DataCoord rather than over-committing the node, but it is
+	// systematic, not noise. See
+	// TestLegacyAvailableSlotsDoesNotLoseASlotToFloatingPoint.
+	free := 1.0
+	if snap.Total.CPU > 0 {
+		free = (snap.Total.CPU - snap.Reserved.CPU) / snap.Total.CPU
+	}
+	if snap.Total.Memory > 0 {
+		if memFree := float64(snap.Total.Memory-snap.Reserved.Memory) / float64(snap.Total.Memory); memFree < free {
+			free = memFree
+		}
+	}
+	if free < 0 {
+		free = 0
+	}
+
+	available := int64(float64(legacyTotal) * free)
+	if available < 0 {
+		available = 0
+	}
+	return available
+}
+
+// queuedSlots is what the three executors have accepted but the ledger does not
+// know about: their own counters are incremented at ENQUEUE, the ledger only at
+// admission.
+func (node *DataNode) queuedSlots() (indexStats, compaction, imports int64) {
+	return node.taskScheduler.TaskQueue.GetUsingSlot(),
+		node.compactionExecutor.Slots(),
+		node.importScheduler.Slots()
+}
+
+// queueUtilization is how full the three executors' own queues say the node is,
+// as a fraction, so it can be compared with the ledger's.
+//
+// A fraction rather than a slot count, because the three counters are NOT all
+// denominated in the same unit and subtracting them from one total is a units
+// error:
+//
+//   - indexStatsUsed and importUsed are on the CalculateNodeSlots scale, the
+//     same scale legacyTotal is on. Their fraction is used/legacyTotal.
+//   - compactionUsed is not. Under this branch DataCoord prices a mix or sort
+//     compaction with memoryToSlots(bytes) = bytes /
+//     taskresource.LegacyMemoryPerSlot(), so the counter is denominated in
+//     units of memory, not in slots of this node. The two denominators
+//     coincide only on a node whose ledger budget happens to be exactly
+//     legacyTotal x LegacyMemoryPerSlot() -- which is what the derived rate
+//     buys on a memory-bound node at full budget, but not on a CPU-bound one,
+//     and not once the guard has subtracted non-task memory from the budget.
+//     Dividing by legacyTotal in those cases makes the node report itself full
+//     before its budget is, a throughput cut with nothing behind it.
+//
+// So the compaction arm is converted back into the currency it came from --
+// slots x LegacyMemoryPerSlot() recovers the memory memoryToSlots divided --
+// and measured against the ledger's own budget. memoryToSlots floors, so the
+// reconstruction understates by up to one slot per task; that direction makes
+// this arm slightly less binding, which is the safe way round for a backstop.
+//
+// Two honest imprecisions, neither fixable here. The executors' counters
+// include tasks that are already ADMITTED as well as queued ones, so this arm
+// double-counts whatever the ledger has already charged; it is a backstop
+// against an empty ledger, not an accounting. And with
+// enableCompactionEstimate off, or against a DataCoord too old to send an
+// estimate, the compaction counter carries flat pre-branch constants instead,
+// which reconstruct to far fewer bytes than the tasks really hold -- in that
+// configuration this arm simply stops binding and the ledger governs alone,
+// which is what that switch is asking for anyway.
+func queueUtilization(snap resource.Snapshot, legacyTotal, indexStatsUsed, compactionUsed, importUsed int64) float64 {
+	var util float64
+	if legacyTotal > 0 {
+		util = float64(indexStatsUsed+importUsed) / float64(legacyTotal)
+	}
+	if compactionUsed <= 0 {
+		return util
+	}
+
+	perSlot := taskresource.LegacyMemoryPerSlot()
+	if snap.Total.Memory <= 0 {
+		// No budget to measure against (a guard that has not reported one).
+		// Fall back to the legacy scale: it is the wrong unit, but it is the
+		// only one available and it errs towards reporting the node busier.
+		if legacyTotal > 0 {
+			if u := float64(compactionUsed) / float64(legacyTotal); u > util {
+				util = u
+			}
+		}
+		return util
+	}
+
+	if u := float64(compactionUsed*perSlot) / float64(snap.Total.Memory); u > util {
+		util = u
+	}
+	return util
+}
+
+// availableSlots is the scalar this node reports to DataCoord.
+//
+// It needs two inputs. legacyAvailableSlots folds the ledger, which is the
+// memory-aware half and the reason this branch exists -- but the ledger counts
+// only ADMITTED tasks. A node holding five hundred queued compactions that have
+// not been admitted yet has an empty ledger and would advertise itself
+// completely free, so DataCoord's water-filling would keep choosing it and one
+// node would hoard the whole cluster's work. The compaction executor's taskCh
+// is capped (maxTaskQueueNum), and once it fills, Enqueue blocks inside the
+// gRPC handler.
+//
+// The executors' own counters are the pre-branch answer to that: they are
+// charged at enqueue and released at completion, so they see the queue. They
+// are not memory-aware, which is why they cannot be the only input either.
+// Whichever of the two currently reports the node busier wins.
+func availableSlots(snap resource.Snapshot, legacyTotal, indexStatsUsed, compactionUsed, importUsed int64) int64 {
+	available := legacyAvailableSlots(snap, legacyTotal)
+	if snap.Frozen || snap.ExclusiveTaskID != 0 {
+		// Already zero, and the queue arm must not be able to raise it.
+		return available
+	}
+
+	util := queueUtilization(snap, legacyTotal, indexStatsUsed, compactionUsed, importUsed)
+	if util > 1 {
+		util = 1
+	}
+	if fromQueue := int64(float64(legacyTotal) * (1 - util)); fromQueue < available {
+		available = fromQueue
+	}
+	if available < 0 {
+		available = 0
+	}
+	return available
+}
+
 func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest) (*datapb.QuerySlotResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &datapb.QuerySlotResponse{
@@ -739,35 +910,51 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		}, nil
 	}
 
-	var (
-		totalSlots     = index.CalculateNodeSlots()
-		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
-		compactionUsed = node.compactionExecutor.Slots()
-		importUsed     = node.importScheduler.Slots()
-	)
+	snap := resource.GetGuard().Snapshot()
+	legacyTotal := index.CalculateNodeSlots()
+	indexStatsUsed, compactionUsed, importUsed := node.queuedSlots()
+	available := availableSlots(snap, legacyTotal, indexStatsUsed, compactionUsed, importUsed)
 
-	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed
-	if availableSlots < 0 {
-		availableSlots = 0
+	// A sustained watermark freeze can leave tasks parked in Acquire
+	// indefinitely (Acquire only returns on ctx cancellation), reporting
+	// nothing to DataCoord. The log line makes that state unmistakable so an
+	// operator does not mistake it for "genuinely busy": both otherwise read
+	// as availableSlots=0.
+	if snap.Frozen {
+		mlog.Warn(ctx, "query slots done: node frozen by memory watermark, reporting zero available slots",
+			mlog.Int64("legacyTotalSlots", legacyTotal),
+			mlog.Float64("reservedCPU", snap.Reserved.CPU),
+			mlog.Int64("reservedMemoryMiB", snap.Reserved.Memory>>20),
+			mlog.Int64("budgetMemoryMiB", snap.Total.Memory>>20),
+			mlog.Int64("nonTaskMemoryMiB", snap.NonTask>>20),
+			mlog.Int64("exclusiveTaskID", snap.ExclusiveTaskID))
+	} else {
+		mlog.Info(ctx, "query slots done",
+			mlog.Int64("legacyTotalSlots", legacyTotal),
+			mlog.Int64("legacyAvailableSlots", available),
+			mlog.Float64("reservedCPU", snap.Reserved.CPU),
+			mlog.Int64("reservedMemoryMiB", snap.Reserved.Memory>>20),
+			mlog.Int64("budgetMemoryMiB", snap.Total.Memory>>20),
+			mlog.Int64("nonTaskMemoryMiB", snap.NonTask>>20),
+			mlog.Int64("exclusiveTaskID", snap.ExclusiveTaskID))
 	}
 
-	mlog.Info(ctx, "query slots done",
-		mlog.Int64("totalSlots", totalSlots),
-		mlog.Int64("availableSlots", availableSlots),
-		mlog.Int64("indexStatsUsed", indexStatsUsed),
-		mlog.Int64("compactionUsed", compactionUsed),
-		mlog.Int64("importUsed", importUsed),
-	)
-
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(availableSlots))
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "total").Set(float64(totalSlots))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(available))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "total").Set(float64(legacyTotal))
+	// The three gauges below report each executor's own bookkeeping, not the
+	// ledger that now governs admission (that's "available"/"total" above,
+	// folded from resource.GetGuard().Snapshot()). They no longer sum to
+	// "total" the way they used to, and a caller relying on them for
+	// admission math is reading stale semantics -- but existing dashboards
+	// and alerts key on these label names, and nothing here replaces them,
+	// so they are kept rather than dropped out from under those consumers.
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "indexStatsUsed").Set(float64(indexStatsUsed))
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsed").Set(float64(compactionUsed))
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(float64(importUsed))
 
 	return &datapb.QuerySlotResponse{
 		Status:         merr.Success(),
-		AvailableSlots: availableSlots,
+		AvailableSlots: available,
 	}, nil
 }
 

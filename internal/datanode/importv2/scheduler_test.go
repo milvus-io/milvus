@@ -25,23 +25,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/resource"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -78,6 +85,7 @@ type SchedulerSuite struct {
 	syncMgr   *syncmgr.MockSyncManager
 	manager   TaskManager
 	scheduler *scheduler
+	guardMock *mockey.Mocker
 }
 
 func (s *SchedulerSuite) SetupSuite() {
@@ -119,10 +127,16 @@ func (s *SchedulerSuite) SetupTest() {
 	s.manager = NewTaskManager()
 	s.syncMgr = syncmgr.NewMockSyncManager(s.T())
 	s.scheduler = NewScheduler(s.manager).(*scheduler)
+
+	// Admission goes through a double rather than the process-wide guard: that
+	// one freezes on the host's live memory reading, which would make these
+	// tests pass or hang depending on what else the machine is doing.
+	s.guardMock = mockey.Mock(resource.GetGuard).Return(resource.NewRecordingGuard()).Build()
 }
 
 func (s *SchedulerSuite) TearDownTest() {
 	s.scheduler.Close()
+	s.guardMock.UnPatch()
 }
 
 func (s *SchedulerSuite) TestScheduler_Slots() {
@@ -555,4 +569,279 @@ func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
 
 func TestScheduler(t *testing.T) {
 	suite.Run(t, new(SchedulerSuite))
+}
+
+// useRecordingGuard routes the scheduler's admission calls at a double for the
+// duration of the test. The process-wide guard is deliberately kept out of the
+// unit tests: it samples the machine's real memory in the background, so a test
+// that reserved from it would pass or hang depending on the host's mood.
+func useRecordingGuard(t *testing.T) *resource.RecordingGuard {
+	g := resource.NewRecordingGuard()
+	mk := mockey.Mock(resource.GetGuard).Return(g).Build()
+	t.Cleanup(func() { mk.UnPatch() })
+	return g
+}
+
+func TestImportSchedulerAdmission(t *testing.T) {
+	paramtable.Init()
+
+	const taskID = int64(5001)
+	req := taskresource.Requirement{CPU: 2, Memory: 3 << 30}
+
+	newTask := func(t *testing.T) *MockTask {
+		task := NewMockTask(t)
+		task.EXPECT().GetTaskID().Return(taskID).Maybe()
+		task.EXPECT().GetJobID().Return(int64(1)).Maybe()
+		task.EXPECT().GetCollectionID().Return(int64(1)).Maybe()
+		task.EXPECT().GetType().Return(ImportTaskType).Maybe()
+		task.EXPECT().GetState().Return(datapb.ImportTaskStateV2_Pending).Maybe()
+		task.EXPECT().GetResourceRequirement().Return(req).Maybe()
+		return task
+	}
+
+	newScheduler := func(t *testing.T, task Task) *scheduler {
+		manager := NewMockTaskManager(t)
+		manager.EXPECT().GetBy(mock.Anything).Return([]Task{task}).Maybe()
+		manager.EXPECT().Update(taskID, mock.Anything).Return().Maybe()
+		return NewScheduler(manager).(*scheduler)
+	}
+
+	t.Run("reserves before executing and releases when the task ends", func(t *testing.T) {
+		g := useRecordingGuard(t)
+		task := newTask(t)
+		task.EXPECT().Execute().RunAndReturn(func() []*conc.Future[any] {
+			g.Note("execute")
+			return nil
+		}).Once()
+
+		newScheduler(t, task).scheduleTasks()
+
+		assert.Equal(t, []string{"acquire", "execute", "release"}, g.Events())
+		acquires := g.Acquires()
+		require.Len(t, acquires, 1)
+		assert.Equal(t, taskID, acquires[0].TaskID)
+		assert.Equal(t, taskcommon.Import, acquires[0].Type)
+		assert.Equal(t, req, acquires[0].Req)
+	})
+
+	t.Run("holds the reservation until the task's work is done", func(t *testing.T) {
+		g := useRecordingGuard(t)
+		gate := make(chan struct{})
+		task := newTask(t)
+		task.EXPECT().Execute().RunAndReturn(func() []*conc.Future[any] {
+			return []*conc.Future[any]{conc.Go(func() (any, error) {
+				<-gate
+				return nil, nil
+			})}
+		}).Once()
+
+		sched := newScheduler(t, task)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			sched.scheduleTasks()
+		}()
+
+		// Execute only dispatches the work; the reading happens afterwards in
+		// the pool. Releasing when Execute returns would hand the budget away
+		// while the task is still holding memory.
+		require.Eventually(t, func() bool { return len(g.Acquires()) == 1 }, time.Second, 10*time.Millisecond)
+		assert.Empty(t, g.Releases())
+
+		close(gate)
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			require.Fail(t, "scheduler never finished the task")
+		}
+		assert.Equal(t, []int64{taskID}, g.Releases())
+	})
+
+	t.Run("does not execute or release when the wait is cut short", func(t *testing.T) {
+		g := useRecordingGuard(t)
+		g.FailAcquire(context.Canceled)
+		task := newTask(t)
+		// Execute is not expected: running it would fail the test outright.
+
+		manager := NewMockTaskManager(t)
+		manager.EXPECT().GetBy(mock.Anything).Return([]Task{task}).Maybe()
+		// Update is not expected either: the task must stay Pending so the next
+		// tick picks it up again.
+		sched := NewScheduler(manager).(*scheduler)
+		sched.scheduleTasks()
+
+		assert.Empty(t, g.Releases(), "a task that never acquired must not release")
+	})
+
+	t.Run("parks in Acquire instead of polling TryAcquire", func(t *testing.T) {
+		g := useRecordingGuard(t)
+		g.Block()
+		task := newTask(t)
+		task.EXPECT().Execute().RunAndReturn(func() []*conc.Future[any] {
+			g.Note("execute")
+			return nil
+		}).Once()
+
+		sched := newScheduler(t, task)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			sched.scheduleTasks()
+		}()
+
+		time.Sleep(100 * time.Millisecond)
+		assert.NotContains(t, g.Events(), "execute", "import started before its reservation was granted")
+		assert.Empty(t, g.TryAcquires(), "waiting must happen in Acquire, where the guard can hold the queue head")
+
+		g.Unblock()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			require.Fail(t, "import never ran after the guard admitted it")
+		}
+		assert.Equal(t, []string{"acquire", "execute", "release"}, g.Events())
+	})
+
+	t.Run("reports each family to the ledger under its own type", func(t *testing.T) {
+		cases := []struct {
+			taskType TaskType
+			expected taskcommon.Type
+		}{
+			{PreImportTaskType, taskcommon.PreImport},
+			{ImportTaskType, taskcommon.Import},
+			{L0PreImportTaskType, taskcommon.PreImport},
+			{L0ImportTaskType, taskcommon.Import},
+			{CopySegmentTaskType, taskcommon.CopySegment},
+			// A kind this package does not know about must not be silently
+			// filed under an existing family: the ledger's logs and metrics
+			// would then attribute it to work it is not.
+			{TaskType(99), taskcommon.TypeNone},
+		}
+		for _, c := range cases {
+			assert.Equal(t, c.expected, ledgerTaskType(c.taskType), c.taskType.String())
+		}
+	})
+}
+
+func TestImportTaskResourceRequirements(t *testing.T) {
+	paramtable.Init()
+
+	// The pool width is CPUs x dataNode.import.concurrencyPerCPUCore, so on a
+	// small build agent it would silently bound the file counts below and the
+	// per-file arithmetic would stop being visible in the answer. Pin it.
+	mkCPU := mockey.Mock(hardware.GetCPUNum).Return(16).Build()
+	defer mkCPU.UnPatch()
+
+	baseBuffer := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
+	deleteBuffer := paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt64()
+	const floor = int64(64) << 20
+
+	t.Run("preimport charges a base buffer per file in flight", func(t *testing.T) {
+		// Eight files x a 16MiB base buffer is 128MiB, clear of the 64MiB
+		// estimator floor. With the three files this subtest used to carry, the
+		// answer was 48MiB and therefore the floor -- which any implementation
+		// returning a constant would also have produced.
+		files := make([]*datapb.ImportFileStats, 12)
+		task := &PreImportTask{
+			PreImportTask: &datapb.PreImportTask{FileStats: files},
+		}
+
+		got := task.GetResourceRequirement()
+		assert.Equal(t, taskresource.EstimateImport(taskresource.ImportInput{
+			IsPreImport: true,
+			FileNum:     12,
+		}), got)
+
+		want := baseBuffer * 12
+		require.Greater(t, want, floor, "setup: the expected value must not be the floor")
+		assert.Equal(t, want, got.Memory)
+
+		// And it really is per-file: half the files, half the charge. Six
+		// rather than four, because four x 16MiB is exactly the 64MiB floor and
+		// the halving would then be satisfied by the clamp instead.
+		half := &PreImportTask{
+			PreImportTask: &datapb.PreImportTask{FileStats: make([]*datapb.ImportFileStats, 6)},
+		}
+		halfGot := half.GetResourceRequirement().Memory
+		require.Greater(t, halfGot, floor, "setup: the halved value must not be the floor either")
+		assert.Equal(t, want/2, halfGot)
+	})
+
+	t.Run("import charges the vchannel and partition fan-out", func(t *testing.T) {
+		task := &ImportTask{
+			ImportTaskV2: &datapb.ImportTaskV2{
+				FileStats: []*datapb.ImportFileStats{{TotalMemorySize: 1 << 30}, {TotalMemorySize: 2 << 30}},
+			},
+			req: &datapb.ImportRequest{
+				Vchannels:    []string{"ch-0", "ch-1"},
+				PartitionIDs: []int64{1, 2, 3},
+			},
+		}
+		expected := taskresource.EstimateImport(taskresource.ImportInput{
+			FileNum:           2,
+			VChannelNum:       2,
+			PartitionNum:      3,
+			MaxFileMemorySize: 2 << 30,
+		})
+		assert.Equal(t, expected, task.GetResourceRequirement())
+		// The fan-out has to reach the estimate: a task charged as if it had one
+		// vchannel and one partition would be six times too cheap here.
+		assert.Greater(t, expected.Memory, taskresource.EstimateImport(taskresource.ImportInput{
+			FileNum:           2,
+			VChannelNum:       1,
+			PartitionNum:      1,
+			MaxFileMemorySize: 2 << 30,
+		}).Memory)
+	})
+
+	t.Run("l0 preimport charges a delete buffer per file", func(t *testing.T) {
+		task := &L0PreImportTask{
+			PreImportTask: &datapb.PreImportTask{
+				FileStats: make([]*datapb.ImportFileStats, 8),
+			},
+		}
+		expected := taskresource.EstimateImport(taskresource.ImportInput{
+			IsL0:        true,
+			IsPreImport: true,
+			FileNum:     8,
+		})
+		assert.Equal(t, expected, task.GetResourceRequirement())
+
+		want := deleteBuffer * 8
+		require.Greater(t, want, floor, "setup: the expected value must not be the floor")
+		assert.Equal(t, want, expected.Memory)
+	})
+
+	t.Run("l0 import charges a delete buffer per file", func(t *testing.T) {
+		task := &L0ImportTask{
+			req: &datapb.ImportRequest{
+				Files: make([]*internalpb.ImportFile, 8),
+			},
+		}
+		expected := taskresource.EstimateImport(taskresource.ImportInput{
+			IsL0:    true,
+			FileNum: 8,
+		})
+		assert.Equal(t, expected, task.GetResourceRequirement())
+
+		want := deleteBuffer * 8
+		require.Greater(t, want, floor, "setup: the expected value must not be the floor")
+		assert.Equal(t, want, expected.Memory)
+	})
+
+	t.Run("copy segment charges no segment bytes", func(t *testing.T) {
+		task := &CopySegmentTask{
+			segmentResults: map[int64]*datapb.CopySegmentResult{1: {}, 2: {}},
+		}
+		got := task.GetResourceRequirement()
+		assert.Equal(t, taskresource.EstimateCopySegment(2), got)
+
+		// This one is genuinely flat -- the copy is server-side in the object
+		// store and no segment bytes pass through this process -- so its memory
+		// really is the configured constant (which happens to equal the floor).
+		// What must still move is CPU, with how many copies can run at once.
+		assert.Equal(t, paramtable.Get().DataCoordCfg.ResourceCopySegmentMemory.GetAsInt64(), got.Memory)
+		assert.Greater(t, taskresource.EstimateCopySegment(8).CPU, got.CPU,
+			"CPU must scale with concurrency even though memory does not")
+	})
 }

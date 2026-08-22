@@ -22,18 +22,63 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/datanode/resource"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+// useRecordingGuard routes the executor's admission calls to a double for the
+// duration of the test. The process-wide guard is deliberately left out of the
+// unit tests: it samples the machine's real memory in the background, so a test
+// that reserved from it would pass or hang depending on what else the host
+// happened to be doing.
+func useRecordingGuard(t *testing.T) *resource.RecordingGuard {
+	g := resource.NewRecordingGuard()
+	mk := mockey.Mock(resource.GetGuard).Return(g).Build()
+	t.Cleanup(func() { mk.UnPatch() })
+	return g
+}
+
+// planWithBinlogs is a compaction plan with enough of a body that its derived
+// requirement is not the estimator's floor, so a test comparing against it
+// cannot be satisfied by any old figure.
+//
+// StorageVersion matters and must be set. Without it RequirementForCompaction
+// takes the v1 branch, which is deliberately input-INDEPENDENT -- a couple of
+// hundred MiB of config constants regardless of the 3GiB and 1M rows below --
+// so the fixture's body would not reach the answer at all, which is the
+// opposite of what this function is for.
+func planWithBinlogs(planID int64) *datapb.CompactionPlan {
+	return &datapb.CompactionPlan{
+		PlanID:  planID,
+		Type:    datapb.CompactionType_MixCompaction,
+		Channel: "ch-0",
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{
+				SegmentID:      1000,
+				StorageVersion: 3,
+				FieldBinlogs: []*datapb.FieldBinlog{
+					{Binlogs: []*datapb.Binlog{{MemorySize: 3 << 30, EntriesNum: 1000000}}},
+				},
+			},
+		},
+	}
+}
+
 func TestCompactionExecutor(t *testing.T) {
 	paramtable.Get().Init(paramtable.NewBaseTable())
+	// Every subtest below that runs a task goes through the guard; route them
+	// all at a double so none of them reserves from the process-wide ledger.
+	useRecordingGuard(t)
 
 	t.Run("Test_Enqueue_Success", func(t *testing.T) {
 		ex := NewExecutor()
@@ -201,10 +246,11 @@ func TestCompactionExecutor(t *testing.T) {
 		}
 
 		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
-		mockC.EXPECT().GetPlanID().Return(planID).Times(3)
+		mockC.EXPECT().GetPlanID().Return(planID).Times(2)
 		mockC.EXPECT().GetCollection().Return(int64(1))
 		mockC.EXPECT().GetChannelName().Return("ch1")
-		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
+		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(3)
+		mockC.EXPECT().GetPlan().Return(nil)
 		mockC.EXPECT().Compact().Return(result, nil)
 		mockC.EXPECT().Complete().Return()
 		mockC.EXPECT().GetStorageConfig().Return(nil)
@@ -213,7 +259,7 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.True(t, succeed)
 		assert.NoError(t, err)
 
-		ex.executeTask(mockC)
+		ex.executeTask(context.Background(), mockC)
 
 		ex.mu.RLock()
 		task, exists := ex.tasks[planID]
@@ -230,10 +276,11 @@ func TestCompactionExecutor(t *testing.T) {
 
 		planID := int64(2)
 		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
-		mockC.EXPECT().GetPlanID().Return(planID).Times(3)
+		mockC.EXPECT().GetPlanID().Return(planID).Times(2)
 		mockC.EXPECT().GetCollection().Return(int64(1))
 		mockC.EXPECT().GetChannelName().Return("ch1")
-		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
+		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(3)
+		mockC.EXPECT().GetPlan().Return(nil)
 		mockC.EXPECT().Compact().Return(nil, errors.New("compaction failed"))
 		mockC.EXPECT().Complete().Return()
 		mockC.EXPECT().GetStorageConfig().Return(nil)
@@ -242,7 +289,7 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.True(t, succeed)
 		assert.NoError(t, err)
 
-		ex.executeTask(mockC)
+		ex.executeTask(context.Background(), mockC)
 
 		ex.mu.RLock()
 		task, exists := ex.tasks[planID]
@@ -504,8 +551,9 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC := NewMockCompactor(t)
 
 		planID := int64(1)
-		mockC.EXPECT().GetPlanID().Return(planID).Times(3)
-		mockC.EXPECT().GetSlotUsage().Return(int64(5)).Times(2)
+		mockC.EXPECT().GetPlanID().Return(planID).Times(2)
+		mockC.EXPECT().GetSlotUsage().Return(int64(5)).Times(3)
+		mockC.EXPECT().GetPlan().Return(nil)
 		mockC.EXPECT().GetCollection().Return(int64(1))
 		mockC.EXPECT().GetChannelName().Return("ch1")
 		mockC.EXPECT().Complete().Return()
@@ -522,7 +570,7 @@ func TestCompactionExecutor(t *testing.T) {
 			State:  datapb.CompactionTaskState_completed,
 		}, nil).Once()
 
-		ex.executeTask(mockC)
+		ex.executeTask(context.Background(), mockC)
 
 		ex.mu.RLock()
 		assert.Equal(t, datapb.CompactionTaskState_completed, ex.tasks[planID].state)
@@ -551,10 +599,11 @@ func TestCompactionExecutor(t *testing.T) {
 		for _, planID := range planIDs {
 			mockC := NewMockCompactor(t)
 			mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
-			mockC.EXPECT().GetPlanID().Return(planID).Times(3)
+			mockC.EXPECT().GetPlanID().Return(planID).Times(2)
 			mockC.EXPECT().GetCollection().Return(int64(100))
 			mockC.EXPECT().GetChannelName().Return("ch1")
-			mockC.EXPECT().GetSlotUsage().Return(int64(4)).Times(2)
+			mockC.EXPECT().GetSlotUsage().Return(int64(4)).Times(3)
+			mockC.EXPECT().GetPlan().Return(nil)
 			mockC.EXPECT().Complete().Return()
 			mockC.EXPECT().GetStorageConfig().Return(nil)
 
@@ -581,7 +630,7 @@ func TestCompactionExecutor(t *testing.T) {
 			require.True(t, succeed)
 			require.NoError(t, err)
 
-			ex.executeTask(mockC)
+			ex.executeTask(context.Background(), mockC)
 		}
 
 		results := ex.GetResults(0)
@@ -621,4 +670,211 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.Equal(t, datapb.CompactionTaskState_completed, task.state)
 		assert.Equal(t, result, task.result)
 	})
+}
+
+func TestExecutorAdmission(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+
+	newMock := func(t *testing.T, planID int64, plan *datapb.CompactionPlan) *MockCompactor {
+		mockC := NewMockCompactor(t)
+		mockC.EXPECT().GetPlanID().Return(planID).Maybe()
+		mockC.EXPECT().GetCollection().Return(int64(1)).Maybe()
+		mockC.EXPECT().GetChannelName().Return("ch1").Maybe()
+		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction).Maybe()
+		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Maybe()
+		mockC.EXPECT().GetPlan().Return(plan).Maybe()
+		mockC.EXPECT().Complete().Return().Maybe()
+		mockC.EXPECT().GetStorageConfig().Return(nil).Maybe()
+		return mockC
+	}
+
+	t.Run("reserves before compacting and releases afterwards", func(t *testing.T) {
+		g := useRecordingGuard(t)
+		planID := int64(4001)
+		plan := planWithBinlogs(planID)
+
+		mockC := newMock(t, planID, plan)
+		mockC.EXPECT().Compact().RunAndReturn(func() (*datapb.CompactionPlanResult, error) {
+			g.Note("compact")
+			return &datapb.CompactionPlanResult{PlanID: planID}, nil
+		}).Once()
+
+		ex := NewExecutor()
+		_, err := ex.Enqueue(mockC)
+		require.NoError(t, err)
+		ex.executeTask(context.Background(), mockC)
+
+		// The reservation must bracket the work: taken before the first byte is
+		// read, returned once the task is over.
+		assert.Equal(t, []string{"acquire", "compact", "release"}, g.Events())
+
+		acquires := g.Acquires()
+		require.Len(t, acquires, 1)
+		assert.Equal(t, planID, acquires[0].TaskID)
+		assert.Equal(t, taskcommon.Compaction, acquires[0].Type)
+		// Priced from the plan's own binlogs, not from anything the plan claims
+		// about slots. Compared against an independently derived figure so a
+		// requirement that is merely non-zero cannot satisfy this.
+		assert.Equal(t, taskresource.RequirementForCompaction(plan), acquires[0].Req)
+		// ...and the figure itself must come from the fixture's 3GiB of input
+		// rather than from the estimator's floor or from config constants,
+		// which is what a plan with no StorageVersion would have produced.
+		assert.GreaterOrEqual(t, acquires[0].Req.Memory, int64(3)<<30,
+			"the charge must scale with the plan's input, not fall back to a constant")
+		assert.Equal(t, []int64{planID}, g.Releases())
+	})
+
+	t.Run("releases when the compaction fails", func(t *testing.T) {
+		g := useRecordingGuard(t)
+		planID := int64(4002)
+
+		mockC := newMock(t, planID, planWithBinlogs(planID))
+		mockC.EXPECT().Compact().Return(nil, errors.New("boom")).Once()
+
+		ex := NewExecutor()
+		_, err := ex.Enqueue(mockC)
+		require.NoError(t, err)
+		ex.executeTask(context.Background(), mockC)
+
+		assert.Equal(t, []int64{planID}, g.Releases(), "a failed task must not leak its reservation")
+
+		ex.mu.RLock()
+		state := ex.tasks[planID].state
+		ex.mu.RUnlock()
+		assert.Equal(t, datapb.CompactionTaskState_failed, state)
+	})
+
+	t.Run("reserves at execution, not at enqueue", func(t *testing.T) {
+		g := useRecordingGuard(t)
+		planID := int64(4003)
+
+		mockC := newMock(t, planID, planWithBinlogs(planID))
+
+		ex := NewExecutor()
+		_, err := ex.Enqueue(mockC)
+		require.NoError(t, err)
+
+		// Enqueue only queues. Reserving here would charge the node for work
+		// that has not started, and would make waiting look like a stalled RPC
+		// instead of a queued task.
+		assert.Empty(t, g.Acquires())
+		assert.Empty(t, g.TryAcquires())
+	})
+
+	t.Run("parks in Acquire instead of polling TryAcquire", func(t *testing.T) {
+		g := useRecordingGuard(t)
+		g.Block()
+		planID := int64(4004)
+
+		compacting := make(chan struct{})
+		mockC := newMock(t, planID, planWithBinlogs(planID))
+		mockC.EXPECT().Compact().RunAndReturn(func() (*datapb.CompactionPlanResult, error) {
+			close(compacting)
+			return &datapb.CompactionPlanResult{PlanID: planID}, nil
+		}).Once()
+
+		ex := NewExecutor()
+		_, err := ex.Enqueue(mockC)
+		require.NoError(t, err)
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			ex.executeTask(context.Background(), mockC)
+		}()
+
+		// While the budget is unavailable no work may start...
+		select {
+		case <-compacting:
+			require.Fail(t, "compaction started before its reservation was granted")
+		case <-time.After(100 * time.Millisecond):
+		}
+		// ...and the wait must happen inside Acquire, where the guard can hold
+		// the queue's head. A TryAcquire poll loop is invisible to that and can
+		// starve a large task forever.
+		assert.Empty(t, g.TryAcquires())
+
+		g.Unblock()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			require.Fail(t, "compaction never ran after the guard admitted it")
+		}
+		assert.Equal(t, []string{"acquire", "release"}, g.Events())
+		assert.Equal(t, []int64{planID}, g.Releases())
+	})
+
+	t.Run("gives up without releasing when the wait is cut short", func(t *testing.T) {
+		g := useRecordingGuard(t)
+		g.FailAcquire(context.Canceled)
+		planID := int64(4005)
+
+		mockC := newMock(t, planID, planWithBinlogs(planID))
+
+		ex := NewExecutor()
+		_, err := ex.Enqueue(mockC)
+		require.NoError(t, err)
+		require.Equal(t, int64(8), ex.Slots())
+
+		ex.executeTask(context.Background(), mockC)
+
+		// Compact is never expected on the mock, so running it would fail the
+		// test outright.
+		assert.Empty(t, g.Releases(), "a task that never acquired must not release")
+		// The executor's own books have to come back to where they started, or
+		// the node permanently believes it is busier than it is.
+		assert.Equal(t, int64(0), ex.Slots())
+		ex.mu.RLock()
+		state := ex.tasks[planID].state
+		ex.mu.RUnlock()
+		assert.Equal(t, datapb.CompactionTaskState_failed, state)
+	})
+
+	t.Run("falls back to the legacy slot when the plan is missing", func(t *testing.T) {
+		g := useRecordingGuard(t)
+		planID := int64(4006)
+
+		mockC := newMock(t, planID, nil)
+		mockC.EXPECT().Compact().Return(&datapb.CompactionPlanResult{PlanID: planID}, nil).Once()
+
+		ex := NewExecutor()
+		_, err := ex.Enqueue(mockC)
+		require.NoError(t, err)
+		ex.executeTask(context.Background(), mockC)
+
+		acquires := g.Acquires()
+		require.Len(t, acquires, 1)
+		// Without a plan there is nothing to recompute from, so the slot the
+		// coordinator sent is folded in -- never zero, which would admit the
+		// task for free.
+		assert.Equal(t, taskresource.LegacySlotToRequirement(8), acquires[0].Req)
+		assert.Greater(t, acquires[0].Req.Memory, int64(0))
+	})
+}
+
+// TestCompactorGetPlanReturnsItsOwnPlan pins the wiring every compactor needs
+// for admission. A GetPlan that returned nil would not fail loudly: pricing
+// would quietly fall back to the coordinator's legacy slot, which is the very
+// number this node stopped trusting.
+func TestCompactorGetPlanReturnsItsOwnPlan(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+
+	plan := planWithBinlogs(7)
+	compactors := map[string]Compactor{
+		"mix":               &mixCompactionTask{plan: plan},
+		"sort":              &sortCompactionTask{plan: plan},
+		"clustering":        &clusteringCompactionTask{plan: plan},
+		"bumpSchemaVersion": &bumpSchemaVersionCompactionTask{plan: plan},
+		"levelZero":         &LevelZeroCompactionTask{plan: plan},
+		"namespace":         &NamespaceCompactor{mixCompactionTask: &mixCompactionTask{plan: plan}},
+	}
+
+	for name, task := range compactors {
+		t.Run(name, func(t *testing.T) {
+			assert.Same(t, plan, task.GetPlan())
+			// And the plan actually reaches pricing, rather than the legacy
+			// slot fallback taking over.
+			assert.Equal(t, taskresource.RequirementForCompaction(plan), taskRequirement(task))
+		})
+	}
 }

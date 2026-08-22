@@ -625,6 +625,10 @@ func (t *mixCompactionTask) GetCollection() typeutil.UniqueID {
 	return t.plan.GetSegmentBinlogs()[0].GetCollectionID()
 }
 
+func (t *mixCompactionTask) GetPlan() *datapb.CompactionPlan {
+	return t.plan
+}
+
 func (t *mixCompactionTask) GetSlotUsage() int64 {
 	return t.plan.GetSlotUsage()
 }

@@ -1013,6 +1013,10 @@ func (t *clusteringCompactionTask) splitClusterByScalarValue(dict map[interface{
 	return t.switchPolicyForScalarPlan(totalRows, notNullKeys, dict), len(keys) > len(notNullKeys)
 }
 
+func (t *clusteringCompactionTask) GetPlan() *datapb.CompactionPlan {
+	return t.plan
+}
+
 func (t *clusteringCompactionTask) GetSlotUsage() int64 {
 	return t.plan.GetSlotUsage()
 }

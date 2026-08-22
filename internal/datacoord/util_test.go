@@ -22,10 +22,13 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -123,6 +126,39 @@ func (suite *UtilSuite) TestVerifyResponse() {
 
 func TestUtil(t *testing.T) {
 	suite.Run(t, new(UtilSuite))
+}
+
+func TestMemoryToSlots(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+
+	// 8GiB / (8192 x 1) = 1MiB raw per slot, x memoryRatio 1.0.
+	oneMiBPerSlot := func(t *testing.T) {
+		t.Helper()
+		pt.Save(pt.DataNodeCfg.WorkerSlotUnit.Key, "8192")
+		t.Cleanup(func() { pt.Reset(pt.DataNodeCfg.WorkerSlotUnit.Key) })
+		pt.Save(pt.DataNodeCfg.ResourceMemoryRatio.Key, "1.0")
+		t.Cleanup(func() { pt.Reset(pt.DataNodeCfg.ResourceMemoryRatio.Key) })
+		require.EqualValues(t, 1024*1024, taskresource.LegacyMemoryPerSlot())
+	}
+
+	t.Run("divides by the derived bytes-per-slot", func(t *testing.T) {
+		oneMiBPerSlot(t)
+
+		assert.EqualValues(t, 10, memoryToSlots(10*1024*1024))
+	})
+
+	t.Run("floors at 1 slot instead of 0", func(t *testing.T) {
+		oneMiBPerSlot(t)
+
+		assert.EqualValues(t, 1, memoryToSlots(0))
+		assert.EqualValues(t, 1, memoryToSlots(1024))
+	})
+
+	t.Run("uses the default derived rate when nothing is configured", func(t *testing.T) {
+		// 384MiB per slot at the defaults, so 768MiB is 2 slots.
+		assert.EqualValues(t, 2, memoryToSlots(768*1024*1024))
+	})
 }
 
 type fixedTSOAllocator struct {

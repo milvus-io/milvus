@@ -39,9 +39,11 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
+	"github.com/milvus-io/milvus/internal/datanode/resource"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
@@ -51,10 +53,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type DataNodeServicesSuite struct {
@@ -63,6 +67,8 @@ type DataNodeServicesSuite struct {
 	node          *DataNode
 	storageConfig *indexpb.StorageConfig
 	etcdCli       *clientv3.Client
+	guardMock     *mockey.Mocker
+	guard         *resource.RecordingGuard
 	ctx           context.Context
 	cancel        context.CancelFunc
 }
@@ -147,6 +153,19 @@ func (s *DataNodeServicesSuite) SetupSuite() {
 }
 
 func (s *DataNodeServicesSuite) SetupTest() {
+	// The node's executors admit every task through the resource guard. Route
+	// that at a double: the process-wide guard freezes admission from the
+	// host's live memory reading, which would make these tests pass, fail or
+	// hang depending on what else the machine is doing.
+	//
+	// Several tests below re-enter SetupTest without a matching TearDownTest,
+	// and mockey panics on a second patch of a function it already holds, so
+	// the patch is installed once and left in place until teardown.
+	if s.guardMock == nil {
+		s.guard = resource.NewRecordingGuard()
+		s.guardMock = mockey.Mock(resource.GetGuard).Return(s.guard).Build()
+	}
+
 	s.node = NewIDLEDataNodeMock(s.ctx, schemapb.DataType_Int64)
 	s.node.SetEtcdClient(s.etcdCli)
 
@@ -181,6 +200,11 @@ func (s *DataNodeServicesSuite) TearDownTest() {
 	if s.node != nil {
 		s.node.Stop()
 		s.node = nil
+	}
+	if s.guardMock != nil {
+		s.guardMock.UnPatch()
+		s.guardMock = nil
+		s.guard = nil
 	}
 }
 
@@ -239,6 +263,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			State:  datapb.CompactionTaskState_completed,
 		}, nil)
 		mockC.EXPECT().GetStorageConfig().Return(s.storageConfig)
+		mockC.EXPECT().GetPlan().Return(nil)
 		s.node.compactionExecutor.Enqueue(mockC)
 
 		mockC2 := compactor.NewMockCompactor(s.T())
@@ -253,6 +278,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			State:  datapb.CompactionTaskState_failed,
 		}, nil)
 		mockC2.EXPECT().GetStorageConfig().Return(s.storageConfig)
+		mockC2.EXPECT().GetPlan().Return(nil)
 		s.node.compactionExecutor.Enqueue(mockC2)
 
 		s.Eventually(func() bool {
@@ -1896,4 +1922,378 @@ func TestChunkManagerFailureDoesNotLogStorageAccessKey(t *testing.T) {
 
 	assert.NotContains(t, logs.String(), accessKey)
 	assert.Contains(t, logs.String(), "audit-bucket")
+}
+
+func TestLegacyAvailableSlotsFoldsWorstDimension(t *testing.T) {
+	paramtable.Init()
+
+	// Memory is 90% consumed while CPU is only 10% consumed. The folded
+	// scalar must follow the worse dimension so an old coordinator sees the
+	// node as full early rather than late.
+	snap := resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 1, Memory: 900},
+	}
+
+	assert.Equal(t, int64(12), legacyAvailableSlots(snap, 128))
+}
+
+// TestLegacyAvailableSlotsFoldsCPUDominant is the mirror of
+// TestLegacyAvailableSlotsFoldsWorstDimension: CPU is 90% consumed while
+// memory is only 1% consumed, so the CPU ratio alone must win the max. The
+// two tests together pin both directions of the fold; without this one, a
+// max-tracker that only ever looked at the memory ratio (or compared them in
+// the wrong order) could still pass every existing test.
+func TestLegacyAvailableSlotsFoldsCPUDominant(t *testing.T) {
+	paramtable.Init()
+
+	snap := resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 9, Memory: 10},
+	}
+
+	assert.Equal(t, int64(12), legacyAvailableSlots(snap, 128))
+}
+
+// TestLegacyAvailableSlotsDoesNotLoseASlotToFloatingPoint pins the exact
+// arithmetic of the fold, which the two tests above cannot see.
+//
+// They both use legacyTotal=128, where the rounding error is invisible: the
+// mathematically correct answer is 12.8, so 12.799999999999997 and 12.8 both
+// truncate to 12. The error only surfaces when legacyTotal * (1 - utilization)
+// lands exactly on an integer, i.e. when legacyTotal is a multiple of 10 for a
+// 90%-consumed dimension.
+//
+// Folding the free fraction as `1 - reserved/total` costs two roundings: 900/1000
+// is the double nearest 0.9 (which is slightly ABOVE 0.9), and subtracting that
+// from 1 lands on 0.09999999999999998, slightly BELOW a tenth. 80 x that is
+// 7.999999999999998, and int64() truncates towards zero -- so a node with exactly
+// one tenth of its budget free advertised 7 slots instead of 8. Computing the
+// free fraction directly as (total-reserved)/total is one rounding instead of
+// two and lands on the double nearest 0.1, which is what this asserts.
+//
+// The lost slot is small but it is not noise: it is a systematic under-report,
+// always in the direction of hiding capacity from DataCoord, and it is exactly
+// what made TestQuerySlotReportsTheLedgersView and
+// TestGetJobStatsReportsTheLedgersView fail in CI (whose legacyTotal is 80)
+// while passing on hardware whose CalculateNodeSlots() is not a multiple of 10.
+func TestLegacyAvailableSlotsDoesNotLoseASlotToFloatingPoint(t *testing.T) {
+	paramtable.Init()
+
+	// Exactly one tenth of the memory budget is free; CPU is nine tenths free,
+	// so memory is the worse dimension and must win the fold.
+	snap := resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 1, Memory: 900},
+	}
+
+	assert.Equal(t, int64(8), legacyAvailableSlots(snap, 80),
+		"one tenth of 80 slots is 8, not 7")
+
+	// The same rounding, on the CPU arm rather than the memory arm.
+	cpuBound := resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 9, Memory: 10},
+	}
+
+	assert.Equal(t, int64(8), legacyAvailableSlots(cpuBound, 80),
+		"one tenth of 80 slots is 8, not 7, whichever dimension is binding")
+}
+
+func TestLegacyAvailableSlotsZeroWhenFrozen(t *testing.T) {
+	paramtable.Init()
+
+	snap := resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 0, Memory: 0},
+		Frozen:   true,
+	}
+
+	assert.Equal(t, int64(0), legacyAvailableSlots(snap, 128))
+}
+
+func TestLegacyAvailableSlotsNeverNegative(t *testing.T) {
+	paramtable.Init()
+
+	snap := resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 50, Memory: 5000},
+	}
+
+	assert.Equal(t, int64(0), legacyAvailableSlots(snap, 128))
+}
+
+// TestLegacyAvailableSlotsZeroWhenExclusive guards Resolution 1: an oversized
+// task running alone must read as a full node even though Reserved is tiny
+// relative to Total here -- the utilization formula alone would report the
+// node as nearly empty (util=0.1, ~115 slots free). Node capacity is runtime
+// config and can grow after the oversized task is admitted, which can pull
+// its ratio back under 1; ExclusiveTaskID must be checked explicitly so the
+// scalar does not depend on that race.
+func TestLegacyAvailableSlotsZeroWhenExclusive(t *testing.T) {
+	paramtable.Init()
+
+	snap := resource.Snapshot{
+		Total:           taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved:        taskresource.Capacity{CPU: 1, Memory: 10},
+		ExclusiveTaskID: 42,
+	}
+
+	assert.Equal(t, int64(0), legacyAvailableSlots(snap, 128))
+}
+
+// availableSlots is the scalar DataCoord actually reads, and until now nothing
+// exercised it end to end: the RecordingGuard's Snapshot() returned the zero
+// value, so Total.CPU and Total.Memory were both 0, legacyAvailableSlots
+// short-circuited, and the answer was legacyTotal -- exactly what the code this
+// branch replaces produced. The fixture made old and new behavior
+// indistinguishable.
+func (s *DataNodeServicesSuite) TestQuerySlotReportsTheLedgersView() {
+	s.SetupTest()
+
+	legacyTotal := index.CalculateNodeSlots()
+	s.Require().Greater(legacyTotal, int64(10), "setup: the fold below needs room to be visible")
+
+	// 90% of memory committed, 10% of CPU: the worse dimension must win.
+	s.guard.SetSnapshot(resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 1, Memory: 900},
+	})
+
+	resp, err := s.node.QuerySlot(context.Background(), nil)
+	s.NoError(err)
+	s.True(merr.Ok(resp.GetStatus()))
+
+	s.Equal(int64(float64(legacyTotal)*0.1), resp.GetAvailableSlots())
+	s.Less(resp.GetAvailableSlots(), legacyTotal,
+		"a loaded ledger must not read as a completely free node")
+}
+
+// The index side reports the same scalar through a different RPC, so it needs
+// the same guard.
+func (s *DataNodeServicesSuite) TestGetJobStatsReportsTheLedgersView() {
+	s.SetupTest()
+
+	legacyTotal := index.CalculateNodeSlots()
+	s.guard.SetSnapshot(resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 1, Memory: 900},
+	})
+
+	resp, err := s.node.GetJobStats(context.Background(), &workerpb.GetJobStatsRequest{})
+	s.NoError(err)
+	s.True(merr.Ok(resp.GetStatus()))
+
+	s.Equal(legacyTotal, resp.GetTotalSlots())
+	s.Equal(int64(float64(legacyTotal)*0.1), resp.GetAvailableSlots())
+	s.Less(resp.GetAvailableSlots(), legacyTotal)
+}
+
+// A frozen node must report zero through the RPC, not merely through the
+// helper. This is also the only driver of the frozen mlog.Warn branch, which
+// was undrivable while the double's snapshot was hard-coded to zero.
+func (s *DataNodeServicesSuite) TestQuerySlotReportsZeroWhenFrozen() {
+	s.SetupTest()
+
+	s.guard.SetSnapshot(resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 0, Memory: 0},
+		Frozen:   true,
+		NonTask:  4 << 30,
+	})
+
+	resp, err := s.node.QuerySlot(context.Background(), nil)
+	s.NoError(err)
+	s.EqualValues(0, resp.GetAvailableSlots())
+
+	jobResp, err := s.node.GetJobStats(context.Background(), &workerpb.GetJobStatsRequest{})
+	s.NoError(err)
+	s.EqualValues(0, jobResp.GetAvailableSlots())
+}
+
+// The incident node from issue #52180: 16 cores, 64GiB, so
+// CalculateNodeSlots reports 128 and the ledger budget is 64GiB x 0.75.
+const (
+	incidentLegacyTotal = int64(128)
+	incidentBudget      = int64(48) << 30
+)
+
+func incidentSnapshot(reservedMemory int64, reservedCPU float64) resource.Snapshot {
+	return resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 16, Memory: incidentBudget},
+		Reserved: taskresource.Capacity{CPU: reservedCPU, Memory: reservedMemory},
+	}
+}
+
+// The scalar slot the wire still carries has to mean the same thing on both
+// sides of it. This node folds its two-dimensional state into
+// CalculateNodeSlots x (1 - budget utilization), so one reported slot stands
+// for exactly one CalculateNodeSlots-th of the ledger budget -- and that is the
+// number DataCoord must divide a byte estimate by
+// (taskresource.LegacyMemoryPerSlot, memoryToSlots) and the node must multiply
+// a received slot back up by (LegacySlotToRequirement).
+//
+// This pins the two against each other on real node shapes, because the
+// derivation is algebra over CalculateNodeSlots and nothing else would notice
+// if a term of it were dropped: it breaks no invariant and fails no other test,
+// it just makes the coordinator dispatch the wrong amount of work forever.
+func TestLegacyMemoryPerSlotMatchesCalculateNodeSlots(t *testing.T) {
+	paramtable.Init()
+
+	withNode := func(t *testing.T, cores int, memory uint64) {
+		t.Helper()
+		cpuMock := mockey.Mock(hardware.GetCPUNum).Return(cores).Build()
+		t.Cleanup(func() { cpuMock.UnPatch() })
+		memMock := mockey.Mock(hardware.GetMemoryCount).Return(memory).Build()
+		t.Cleanup(func() { memMock.UnPatch() })
+	}
+
+	t.Run("memory-bound node: the whole budget is exactly legacyTotal slots", func(t *testing.T) {
+		// The incident node from issue #52180.
+		withNode(t, 16, uint64(64)<<30)
+
+		legacyTotal := index.CalculateNodeSlots()
+		require.EqualValues(t, incidentLegacyTotal, legacyTotal, "setup: min(16/2, 64/8) x 16")
+		budget := taskresource.NodeCapacity().Memory
+		require.EqualValues(t, incidentBudget, budget, "setup: 64GiB x memoryRatio 0.75")
+
+		perSlot := taskresource.LegacyMemoryPerSlot()
+		assert.EqualValues(t, int64(384)<<20, perSlot, "8GiB / 16 x 0.75")
+		assert.Equal(t, budget, legacyTotal*perSlot,
+			"a slot must be worth exactly the slice of the budget legacyAvailableSlots folds it out of")
+	})
+
+	t.Run("standalone: fewer slots, each worth proportionally more", func(t *testing.T) {
+		withNode(t, 16, uint64(64)<<30)
+		paramtable.SetRole(typeutil.StandaloneRole)
+		defer paramtable.SetRole("")
+
+		legacyTotal := index.CalculateNodeSlots()
+		require.EqualValues(t, 32, legacyTotal, "setup: 128 x standaloneSlotRatio 0.25")
+
+		assert.EqualValues(t, int64(1536)<<20, taskresource.LegacyMemoryPerSlot())
+		assert.Equal(t, taskresource.NodeCapacity().Memory, legacyTotal*taskresource.LegacyMemoryPerSlot())
+	})
+
+	t.Run("CPU-bound node: the rate understates a slot, never overstates it", func(t *testing.T) {
+		// 8 cores against 128GiB: the cores, not the memory, set the slot count.
+		withNode(t, 8, uint64(128)<<30)
+
+		legacyTotal := index.CalculateNodeSlots()
+		require.EqualValues(t, 64, legacyTotal, "setup: min(8/2, 128/8) x 16")
+		budget := taskresource.NodeCapacity().Memory
+
+		perSlot := taskresource.LegacyMemoryPerSlot()
+		assert.EqualValues(t, int64(384)<<20, perSlot, "the rate does not depend on the hardware")
+		assert.Less(t, legacyTotal*perSlot, budget,
+			"understating a slot makes DataCoord charge more slots and dispatch less, which is the safe direction")
+	})
+
+	t.Run("dropping the memoryRatio term would overstate every slot", func(t *testing.T) {
+		withNode(t, 16, uint64(64)<<30)
+		pt := paramtable.Get()
+		pt.Save(pt.DataNodeCfg.ResourceMemoryRatio.Key, "0.5")
+		defer pt.Reset(pt.DataNodeCfg.ResourceMemoryRatio.Key)
+
+		// CalculateNodeSlots does not know about memoryRatio, so the whole
+		// difference has to show up in the rate: half the budget, half the
+		// bytes per slot, same slot count.
+		require.EqualValues(t, incidentLegacyTotal, index.CalculateNodeSlots())
+		assert.EqualValues(t, int64(256)<<20, taskresource.LegacyMemoryPerSlot())
+		assert.Equal(t, taskresource.NodeCapacity().Memory,
+			index.CalculateNodeSlots()*taskresource.LegacyMemoryPerSlot())
+	})
+}
+
+// availableSlots takes whichever of the ledger and the executors' queues
+// reports the node busier.
+// The ledger counts only ADMITTED tasks, so a node holding a large queue of
+// accepted-but-not-yet-started work has an empty ledger and would otherwise
+// advertise itself completely free -- DataCoord's water-filling would keep
+// choosing it until the compaction executor's channel filled and Enqueue
+// blocked inside the gRPC handler.
+func TestAvailableSlotsCountsQueuedWorkToo(t *testing.T) {
+	paramtable.Init()
+
+	perSlot := taskresource.LegacyMemoryPerSlot()
+	idle := incidentSnapshot(0, 0)
+
+	// Nothing admitted, nothing queued: the whole node.
+	assert.Equal(t, incidentLegacyTotal, availableSlots(idle, incidentLegacyTotal, 0, 0, 0))
+
+	// Nothing admitted, but index and import have accepted 50 of the node's
+	// 128 slots. The ledger still says "free"; the answer must not.
+	assert.Equal(t, int64(78), availableSlots(idle, incidentLegacyTotal, 40, 0, 10))
+
+	// Same for a compaction backlog. These counters are in units of memory --
+	// LegacyMemoryPerSlot() each, 384MiB at the defaults -- so 100 of them is
+	// 37.5GiB of the 48GiB budget: ~78% full.
+	queuedBytes := 100 * perSlot
+	require.Equal(t, int64(37)<<30+int64(512)<<20, queuedBytes, "setup: 37.5GiB queued")
+	assert.Equal(t, int64(28), availableSlots(idle, incidentLegacyTotal, 0, 100, 0))
+
+	// The ledger stays authoritative when it is the more conservative of the
+	// two: 90% of the budget committed is 12 slots, well below what a small
+	// queue would allow.
+	loaded := incidentSnapshot(incidentBudget/10*9, 1)
+	assert.Equal(t, int64(12), availableSlots(loaded, incidentLegacyTotal, 10, 0, 0))
+
+	// Over-subscribed queues clamp at zero rather than going negative.
+	assert.Equal(t, int64(0), availableSlots(idle, incidentLegacyTotal, 100, 0, 100))
+
+	// And a frozen node is still zero however empty the queues are.
+	frozen := idle
+	frozen.Frozen = true
+	assert.Equal(t, int64(0), availableSlots(frozen, incidentLegacyTotal, 0, 0, 0))
+}
+
+// The queue arm must not be denominated in legacyTotal, because the compaction
+// counter is not on that scale: DataCoord prices a mix compaction as
+// memoryToSlots(bytes) = bytes / LegacyMemoryPerSlot(), so the counter is in
+// units of memory. legacyTotal x LegacyMemoryPerSlot() equals the ledger budget
+// only on a memory-bound node whose guard has taken nothing off the top; on a
+// CPU-bound node CalculateNodeSlots is set by the cores, and the legacy
+// denominator saturates while the budget is nearly empty (see the sub-case
+// below).
+func TestAvailableSlotsDoesNotCapCompactionOnTheLegacySlotScale(t *testing.T) {
+	paramtable.Init()
+
+	perSlot := taskresource.LegacyMemoryPerSlot()
+	const perTask = int64(4608) << 20 // 4.5GiB
+	taskSlots := perTask / perSlot
+	require.Equal(t, int64(12), taskSlots, "setup: memoryToSlots prices this task at 12 slots")
+
+	// Three of them accepted and admitted: 13.5GiB of a 48GiB budget.
+	snap := incidentSnapshot(3*perTask, 3)
+	got := availableSlots(snap, incidentLegacyTotal, 0, 3*taskSlots, 0)
+
+	// The ledger is the honest constraint here (28% committed), so the queue
+	// arm must not bind at all.
+	ledgerOnly := legacyAvailableSlots(snap, incidentLegacyTotal)
+	require.Equal(t, int64(92), ledgerOnly, "setup: 13.5GiB of 48GiB leaves ~72%")
+	assert.Equal(t, ledgerOnly, got,
+		"the queue arm must not report a node busier than its own ledger does")
+
+	// Stated the way DataCoord reads it: it divides the reported availability
+	// by this task's own slot count to decide how many more will fit. The
+	// ledger has room for seven more; the answer must not be zero.
+	assert.GreaterOrEqual(t, got/taskSlots, int64(2),
+		"the node must still claim room for more of the same task")
+
+	// The case where the two denominators visibly disagree: 8 cores and
+	// 128GiB, so CalculateNodeSlots is min(4, 16) x 16 = 64 while the ledger
+	// budget is 96GiB -- four times what those 64 slots are worth. A 24GiB
+	// compaction backlog is 64 counter units, which on the legacy scale is the
+	// whole node and against the budget is a quarter of it.
+	const (
+		cpuBoundLegacyTotal = int64(64)
+		cpuBoundBudget      = int64(96) << 30
+	)
+	cpuBound := resource.Snapshot{
+		Total: taskresource.Capacity{CPU: 8, Memory: cpuBoundBudget},
+	}
+	queued := 24 * (int64(1) << 30) / perSlot
+	require.Equal(t, cpuBoundLegacyTotal, queued, "setup: the backlog is exactly legacyTotal counter units")
+	assert.Equal(t, int64(48), availableSlots(cpuBound, cpuBoundLegacyTotal, 0, queued, 0),
+		"a quarter of the budget must not read as a full node")
 }

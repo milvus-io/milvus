@@ -544,6 +544,10 @@ func (t *sortCompactionTask) GetCollection() typeutil.UniqueID {
 	return t.collectionID
 }
 
+func (t *sortCompactionTask) GetPlan() *datapb.CompactionPlan {
+	return t.plan
+}
+
 func (t *sortCompactionTask) GetSlotUsage() int64 {
 	return t.plan.GetSlotUsage()
 }
