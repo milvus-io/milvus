@@ -1022,7 +1022,8 @@ func TestCheckClusterPrivilege_AuthorizationDisabled(t *testing.T) {
 	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
 	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
 
-	err := CheckClusterPrivilege(context.Background(),
+	err := CheckClusterPrivilege(context.Background(), &internalpb.ImportRequest{},
+		milvuspb.MilvusService_Import_FullMethodName,
 		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
 	assert.NoError(t, err, "authorization disabled must short-circuit to allow")
 }
@@ -1036,7 +1037,9 @@ func TestCheckClusterPrivilege_RootBypass(t *testing.T) {
 
 	ctx := GetContext(context.Background(), "root:123456")
 
-	err := CheckClusterPrivilege(ctx, commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	err := CheckClusterPrivilege(ctx, &internalpb.ImportRequest{},
+		milvuspb.MilvusService_Import_FullMethodName,
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
 	assert.NoError(t, err, "root must bypass when rootShouldBindRole is false; "+
 		"this is what keeps milvus-backup working unchanged")
 }
@@ -1046,7 +1049,8 @@ func TestCheckClusterPrivilege_NoAuthInfo(t *testing.T) {
 	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
 	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
 
-	err := CheckClusterPrivilege(context.Background(),
+	err := CheckClusterPrivilege(context.Background(), &internalpb.ImportRequest{},
+		milvuspb.MilvusService_Import_FullMethodName,
 		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
 	assert.Error(t, err, "a ctx without auth metadata must be refused, not allowed")
 }
@@ -1076,14 +1080,18 @@ func TestCheckClusterPrivilege_GrantedUserIsAllowed(t *testing.T) {
 			},
 		}, nil
 	}
-	require.NoError(t, InitMetaCache(context.Background(), client))
+	// initMetaCache also seeds the privilege cache from ListPolicy, which is
+	// what this test needs; the same helper is used at the top of this file.
+	mustInitMetaCacheForTest(context.Background(), client)
 
 	err := CheckClusterPrivilege(GetContext(context.Background(), "importer:123456"),
+		&internalpb.ImportRequest{}, milvuspb.MilvusService_Import_FullMethodName,
 		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
 	assert.NoError(t, err, "a user holding the granted privilege must be allowed; "+
 		"if this fails the gate is unopenable and binlog import is dead for every non-root user")
 
 	err = CheckClusterPrivilege(GetContext(context.Background(), "alice:123456"),
+		&internalpb.ImportRequest{}, milvuspb.MilvusService_Import_FullMethodName,
 		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
 	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted,
 		"a user without the grant must still be refused")

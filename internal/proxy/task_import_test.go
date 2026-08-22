@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -482,19 +483,19 @@ func newImportTaskForPreExecute(t *testing.T, options []*commonpb.KeyValuePair) 
 				},
 			},
 		}, nil).Maybe()
-	globalMetaCache = mockCache
 
 	// Only reached by the ordinary-import case, which runs past the gate into
 	// partition resolution.
 	mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(int64(200), nil).Maybe()
 
-	chMgr := NewMockChannelsMgr(t)
-	chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"v1"}, nil).Maybe()
+	chMgr := channelmgr.NewMockChannelsMgr(t)
+	chMgr.EXPECT().GetVChannels(mock.Anything).Return([]string{"v1"}, nil).Maybe()
 
 	return &importTask{
-		ctx:  context.Background(),
-		node: &Proxy{chMgr: chMgr},
+		baseTask: baseTask{MetaCache: mockCache},
+		ctx:      context.Background(),
+		node:     &Proxy{chMgr: chMgr},
 		req: &internalpb.ImportRequest{
 			DbName:         "test_db",
 			CollectionName: "test_collection",
@@ -516,9 +517,6 @@ func TestImportTask_PreExecuteRequiresImportBinlogPrivilege(t *testing.T) {
 	paramtable.Get().Save(Params.CommonCfg.RootShouldBindRole.Key, "false")
 	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
 	defer paramtable.Get().Reset(Params.CommonCfg.RootShouldBindRole.Key)
-
-	oldCache := globalMetaCache
-	defer func() { globalMetaCache = oldCache }()
 
 	// CheckClusterPrivilege resolves roles via privilege.GetPrivilegeCache(), a
 	// process-wide singleton normally populated once at Proxy startup. Seed it
@@ -567,9 +565,6 @@ func TestImportTask_PreExecuteRequiresImportBinlogPrivilege(t *testing.T) {
 // broadcast body folds them into a map (last value wins).
 func TestImportTask_PreExecuteRejectsDuplicateOptionKeys(t *testing.T) {
 	paramtable.Init()
-
-	oldCache := globalMetaCache
-	defer func() { globalMetaCache = oldCache }()
 
 	it := newImportTaskForPreExecute(t, []*commonpb.KeyValuePair{
 		{Key: "backup", Value: "false"},
