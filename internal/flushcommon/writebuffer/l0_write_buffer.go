@@ -47,15 +47,19 @@ func NewL0WriteBuffer(channel string, metacache metacache.MetaCache, syncMgr syn
 	}, nil
 }
 
-func (wb *l0WriteBuffer) dispatchDeleteMsgsWithoutFilter(deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) {
+func (wb *l0WriteBuffer) dispatchDeleteMsgsWithoutFilter(deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
 	for _, msg := range deleteMsgs {
 		l0SegmentID := wb.getL0SegmentID(msg.GetPartitionID(), startPos)
-		pks := storage.ParseIDs2PrimaryKeys(msg.GetPrimaryKeys())
+		pks, err := storage.ParseIDs2PrimaryKeys(msg.GetPrimaryKeys())
+		if err != nil {
+			return err
+		}
 		pkTss := msg.GetTimestamps()
 		if len(pks) > 0 {
 			wb.bufferDelete(l0SegmentID, pks, pkTss, startPos, endPos)
 		}
 	}
+	return nil
 }
 
 func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error {
@@ -84,7 +88,10 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 	// In streaming service mode, flushed segments no longer maintain a bloom filter.
 	// So, here we skip generating BF (growing segment's BF will be regenerated during the sync phase)
 	// and also skip filtering delete entries by bf.
-	wb.dispatchDeleteMsgsWithoutFilter(deleteMsgs, startPos, endPos)
+	if err := wb.dispatchDeleteMsgsWithoutFilter(deleteMsgs, startPos, endPos); err != nil {
+		wb.mut.Unlock()
+		return err
+	}
 	// update buffer last checkpoint
 	wb.checkpoint = endPos
 	wb.updateProcessedTsLocked(endPos.GetTimestamp())

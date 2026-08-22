@@ -93,6 +93,9 @@ func ValidateStorageV1InsertWritableSchema(schema *schemapb.CollectionSchema) er
 		if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
 			return merr.WrapErrParameterInvalidMsg("nested Array is not supported in V1 storage format, fieldName=%s", field.GetName())
 		}
+		if field.GetDataType() == schemapb.DataType_UUID {
+			return merr.WrapErrParameterInvalidMsg("UUID field type is not supported in V1 storage format, please use the default storage format, fieldName=%s", field.GetName())
+		}
 		if isNullableArrayOfVectorField(field) {
 			return merr.WrapErrParameterInvalidMsg("nullable ArrayOfVector is not supported in V1 storage format, fieldName=%s", field.GetName())
 		}
@@ -103,6 +106,9 @@ func ValidateStorageV1InsertWritableSchema(schema *schemapb.CollectionSchema) er
 			if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
 				return merr.WrapErrParameterInvalidMsg("nested Array is not supported in V1 storage format, structName=%s, fieldName=%s",
 					structField.GetName(), field.GetName())
+			}
+			if field.GetDataType() == schemapb.DataType_UUID {
+				return merr.WrapErrParameterInvalidMsg("UUID field type is not supported in V1 storage format, please use the default storage format, structName=%s, fieldName=%s", structField.GetName(), field.GetName())
 			}
 			if isNullableArrayOfVectorField(field) {
 				return merr.WrapErrParameterInvalidMsg("nullable ArrayOfVector is not supported in V1 storage format, structName=%s, fieldName=%s",
@@ -874,6 +880,33 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				Nullable:  field.GetNullable(),
 			}
 
+		case schemapb.DataType_UUID:
+			var data [][16]byte
+			if srcField.GetScalars().GetBytesData() != nil {
+				for _, b := range srcField.GetScalars().GetBytesData().GetData() {
+					u, err := typeutil.BytesToUUID(b)
+					if err != nil {
+						return nil, err
+					}
+					data = append(data, u)
+				}
+			} else if srcField.GetScalars().GetStringData() != nil {
+				for _, s := range srcField.GetScalars().GetStringData().GetData() {
+					u, err := typeutil.ParseUUID(s)
+					if err != nil {
+						return nil, err
+					}
+					data = append(data, u)
+				}
+			} else {
+				return nil, merr.WrapErrParameterInvalidMsg("invalid UUID field data: expected BytesData with 16-byte values or StringData with UUID strings")
+			}
+			fieldData = &UUIDFieldData{
+				Data:      data,
+				DataType:  schemapb.DataType_UUID,
+				ValidData: typeutil.GetFieldDataValidData(srcField),
+				Nullable:  field.GetNullable(),
+			}
 		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 			srcData := srcField.GetScalars().GetStringData().GetData()
 			validData := typeutil.GetFieldDataValidData(srcField)
@@ -1346,12 +1379,15 @@ func GetPkFromInsertData(collSchema *schemapb.CollectionSchema, data *InsertData
 		realPfData, ok = pfData.(*Int64FieldData)
 	case schemapb.DataType_VarChar:
 		realPfData, ok = pfData.(*StringFieldData)
+	case schemapb.DataType_UUID:
+		realPfData, ok = pfData.(*UUIDFieldData)
 	default:
 		// TODO
+		ok = false
 	}
 	if !ok {
-		mlog.Warn(context.TODO(), "primary field not in Int64 or VarChar format", mlog.Int64("fieldID", pf.FieldID))
-		return nil, merr.WrapErrServiceInternalMsg("primary field not in Int64 or VarChar format")
+		mlog.Warn(context.TODO(), "primary field not in Int64, VarChar or UUID format", mlog.Int64("fieldID", pf.FieldID))
+		return nil, merr.WrapErrServiceInternalMsg("primary field not in Int64, VarChar or UUID format")
 	}
 
 	return realPfData, nil
@@ -1530,14 +1566,38 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 				},
 			}
 		case *StringFieldData:
+			fieldType := rawData.DataType
+			if fieldType == schemapb.DataType_None {
+				fieldType = schemapb.DataType_VarChar
+			}
 			fieldData = &schemapb.FieldData{
-				Type:    schemapb.DataType_VarChar,
+				Type:    fieldType,
 				FieldId: fieldID,
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_StringData{
 							StringData: &schemapb.StringArray{
 								Data: rawData.Data,
+							},
+						},
+					},
+				},
+			}
+		case *UUIDFieldData:
+			bytesData := make([][]byte, len(rawData.Data))
+			for i, u := range rawData.Data {
+				b := make([]byte, 16)
+				copy(b, u[:])
+				bytesData[i] = b
+			}
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_UUID,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_BytesData{
+							BytesData: &schemapb.BytesArray{
+								Data: bytesData,
 							},
 						},
 					},
@@ -1811,6 +1871,20 @@ func GetDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
 		return fieldSchema.GetDefaultValue().GetDoubleData()
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		return fieldSchema.GetDefaultValue().GetStringData()
+	case schemapb.DataType_UUID:
+		if len(fieldSchema.GetDefaultValue().GetBytesData()) == 16 {
+			var u [16]byte
+			copy(u[:], fieldSchema.GetDefaultValue().GetBytesData())
+			return u
+		}
+		defStr := fieldSchema.GetDefaultValue().GetStringData()
+		if defStr != "" {
+			u, _ := typeutil.ParseUUID(defStr)
+			mlog.Warn(context.TODO(), "legacy String UUID fallback for default value")
+			return u
+		}
+		var zero [16]byte
+		return zero
 	case schemapb.DataType_Timestamptz:
 		return fieldSchema.GetDefaultValue().GetTimestamptzData()
 	case schemapb.DataType_JSON:

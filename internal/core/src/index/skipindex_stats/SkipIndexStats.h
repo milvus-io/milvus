@@ -54,6 +54,7 @@ using Metrics = std::variant<bool,
                              int64_t,
                              float,
                              double,
+                             milvus::UUID,
                              std::string,
                              std::string_view>;
 
@@ -516,8 +517,13 @@ class IntFieldChunkMetrics : public FieldChunkMetrics {
         j["type"] = FieldChunkMetricsTypeToString(GetMetricsType());
 
         if (this->has_value_) {
-            j["min"] = min_;
-            j["max"] = max_;
+            if constexpr (std::is_same_v<T, milvus::UUID>) {
+                j["min"] = min_.ToString();
+                j["max"] = max_.ToString();
+            } else {
+                j["min"] = min_;
+                j["max"] = max_;
+            }
             if (bloom_filter_) {
                 auto bf_data = bloom_filter_->ToJson();
                 j["bloom_filter"] = nlohmann::json::binary(bf_data);
@@ -744,8 +750,15 @@ NewFieldMetrics(const nlohmann::json& data) {
             if (!data.contains("min") || !data.contains("max")) {
                 return none_metrics;
             }
-            T min = data["min"].get<T>();
-            T max = data["max"].get<T>();
+            T min{};
+            T max{};
+            if constexpr (std::is_same_v<T, milvus::UUID>) {
+                min = milvus::UUID::FromString(data["min"].get<std::string>());
+                max = milvus::UUID::FromString(data["max"].get<std::string>());
+            } else {
+                min = data["min"].get<T>();
+                max = data["max"].get<T>();
+            }
             BloomFilterPtr bloom_filter = nullptr;
             if (data.contains("bloom_filter")) {
                 bloom_filter = BloomFilterFromJson(data["bloom_filter"]);

@@ -478,6 +478,8 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 		if err = eventWriter.AddVectorArrayFieldDataToPayload(vectorArrayData); err != nil {
 			return err
 		}
+	case schemapb.DataType_UUID:
+		return merr.WrapErrParameterInvalidMsg("UUID requires StorageV2")
 	default:
 		return merr.WrapErrServiceInternalMsg("undefined data type %d", dataType)
 	}
@@ -901,6 +903,9 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 		vectorArrayFieldData.Data = append(vectorArrayFieldData.Data, singleData...)
 		insertData.Data[fieldID] = vectorArrayFieldData
 		return len(singleData), nil
+
+	case schemapb.DataType_UUID:
+		return 0, merr.WrapErrParameterInvalidMsg("UUID requires StorageV2")
 
 	default:
 		return 0, merr.WrapErrServiceInternalMsg("undefined data type %d", dataType)

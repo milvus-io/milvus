@@ -281,6 +281,38 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 				StringData: &schemapb.StringArray{Data: strData},
 			},
 		}, nil
+	case schemapb.DataType_UUID:
+		bytesData := make([][]byte, len(data))
+		for i, v := range data {
+			switch val := v.(type) {
+			case string:
+				parsed, err := typeutil.ParseUUID(val)
+				if err != nil {
+					return nil, merr.WrapErrImportFailedMsg("expected UUID string for field '%s', got %T at index %d: %v", r.field.GetName(), v, i, err)
+				}
+				b := make([]byte, 16)
+				copy(b, parsed[:])
+				bytesData[i] = b
+			case []byte:
+				if len(val) != 16 {
+					return nil, merr.WrapErrImportFailedMsg("expected 16-byte UUID for field '%s', got %d bytes at index %d", r.field.GetName(), len(val), i)
+				}
+				b := make([]byte, 16)
+				copy(b, val)
+				bytesData[i] = b
+			case [16]byte:
+				b := make([]byte, 16)
+				copy(b, val[:])
+				bytesData[i] = b
+			default:
+				return nil, merr.WrapErrImportFailedMsg("expected UUID for field '%s', got %T at index %d", r.field.GetName(), v, i)
+			}
+		}
+		return &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_BytesData{
+				BytesData: &schemapb.BytesArray{Data: bytesData},
+			},
+		}, nil
 	default:
 		return nil, merr.WrapErrImportFailedMsg("unsupported element type for struct field: %v", r.field.GetElementType())
 	}
@@ -407,6 +439,28 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 							return nil, nil, err
 						}
 						combinedData = append(combinedData, value)
+					case *array.FixedSizeBinary:
+						if field.IsNull(int(structIdx)) {
+							return nil, nil, WrapNullElementErr(r.field)
+						}
+						raw := field.Value(int(structIdx))
+						if len(raw) != 16 {
+							return nil, nil, merr.WrapErrImportFailedMsg("expected 16-byte UUID for field '%s', got %d bytes", r.field.GetName(), len(raw))
+						}
+						b := make([]byte, 16)
+						copy(b, raw)
+						combinedData = append(combinedData, b)
+					case *array.Binary:
+						if field.IsNull(int(structIdx)) {
+							return nil, nil, WrapNullElementErr(r.field)
+						}
+						raw := field.Value(int(structIdx))
+						if len(raw) != 16 {
+							return nil, nil, merr.WrapErrImportFailedMsg("expected 16-byte UUID for field '%s', got %d bytes", r.field.GetName(), len(raw))
+						}
+						b := make([]byte, 16)
+						copy(b, raw)
+						combinedData = append(combinedData, b)
 					default:
 						return nil, nil, WrapTypeErr(r.field, fieldArray.DataType().Name())
 					}

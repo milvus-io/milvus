@@ -695,7 +695,7 @@ func TestCreateCollectionInvalidAutoPkField(t *testing.T) {
 			invalidPkField := entity.NewField().WithName("pk").WithDataType(fieldType).WithIsPrimaryKey(true)
 			schema := entity.NewSchema().WithName(collName).WithField(vecField).WithField(invalidPkField).WithAutoID(autoId)
 			errNonInt64Field := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-			common.CheckErr(t, errNonInt64Field, false, "the data type of primary key should be Int64 or VarChar")
+			common.CheckErr(t, errNonInt64Field, false, "the data type of primary key should be Int64, VarChar, or UUID")
 		}
 	}
 }
@@ -743,7 +743,7 @@ func TestCreateCollectionInvalidPartitionKeyType(t *testing.T) {
 		}
 		schema := entity.NewSchema().WithName(collName).WithField(int64Field).WithField(vecField).WithField(partitionKeyField)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-		common.CheckErr(t, err, false, "the data type of partition key should be Int64 or VarChar")
+		common.CheckErr(t, err, false, "the data type of partition key should be Int64, VarChar, or UUID")
 	}
 }
 
@@ -1147,7 +1147,7 @@ func TestCreateCollectionInvalid(t *testing.T) {
 		{schema: nil, errMsg: "schema does not contain vector field"},
 		{schema: entity.NewSchema().WithField(vecField), errMsg: "primary key is not specified"}, // no pk field
 		{schema: entity.NewSchema().WithField(vecField).WithField(entity.NewField()), errMsg: "primary key is not specified"},
-		{schema: entity.NewSchema().WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true)), errMsg: "the data type of primary key should be Int64 or VarChar"},
+		{schema: entity.NewSchema().WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true)), errMsg: "the data type of primary key should be Int64, VarChar, or UUID"},
 		{schema: entity.NewSchema().WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true).WithDataType(entity.FieldTypeVarChar)), errMsg: "field name should not be empty"},
 	}
 	for _, mSchema := range mSchemaErrs {

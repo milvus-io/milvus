@@ -258,6 +258,7 @@ class ColumnarArrayChunk final : public Chunk {
             case DataType::DOUBLE:
             case DataType::STRING:
             case DataType::VARCHAR:
+            case DataType::UUID:
                 return true;
             default:
                 return false;
@@ -280,6 +281,8 @@ class ColumnarArrayChunk final : public Chunk {
                 return sizeof(float);
             case DataType::DOUBLE:
                 return sizeof(double);
+            case DataType::UUID:
+                return 16;
             default:
                 ThrowInfo(Unsupported,
                           "ArrayValue leaf type {} is not fixed width",
@@ -558,6 +561,16 @@ class ColumnarArrayChunk final : public Chunk {
                 for (auto i = begin; i < end; ++i) {
                     const auto value = chunk[static_cast<int>(i)];
                     data->Add()->assign(value.data(), value.size());
+                }
+                return;
+            }
+            case DataType::UUID: {
+                auto* data = output.mutable_bytes_data()->mutable_data();
+                data->Reserve(ProtoReserveSize(element_count));
+                const auto& chunk = static_cast<const FixedWidthChunk&>(child);
+                const auto* base = static_cast<const char*>(chunk.Data());
+                for (size_t i = begin_index; i < end_index; ++i) {
+                    data->Add()->assign(base + i * 16, 16);
                 }
                 return;
             }

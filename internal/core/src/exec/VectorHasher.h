@@ -62,6 +62,7 @@ class VectorHasher {
             case DataType::INT64:
             case DataType::VARCHAR:
             case DataType::STRING:
+            case DataType::UUID:
                 return true;
             default:
                 return false;

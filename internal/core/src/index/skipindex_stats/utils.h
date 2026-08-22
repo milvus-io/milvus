@@ -39,6 +39,7 @@ SupportsSkipIndex(arrow::Type::type type) {
         case arrow::Type::FLOAT:
         case arrow::Type::DOUBLE:
         case arrow::Type::STRING:
+        case arrow::Type::FIXED_SIZE_BINARY:
             return true;
         default:
             return false;
@@ -57,10 +58,35 @@ SupportsSkipIndex(DataType type) {
         case DataType::DOUBLE:
         case DataType::VARCHAR:
         case DataType::STRING:
+        case DataType::UUID:
         case DataType::TIMESTAMPTZ:
             return true;
         default:
             return false;
+    }
+}
+
+// UUID min/max helpers — byte-wise big-endian lexicographic via memcmp 16B
+// (same as UUID::operator< which does data < other.data).
+inline bool
+LessUUID(const milvus::UUID& a, const milvus::UUID& b) {
+    return std::memcmp(a.data.data(), b.data.data(), 16) < 0;
+}
+
+inline bool
+GreaterUUID(const milvus::UUID& a, const milvus::UUID& b) {
+    return std::memcmp(a.data.data(), b.data.data(), 16) > 0;
+}
+
+inline void
+UpdateUUIDMinMax(milvus::UUID& cur_min,
+                 milvus::UUID& cur_max,
+                 const milvus::UUID& val) {
+    if (std::memcmp(val.data.data(), cur_min.data.data(), 16) < 0) {
+        cur_min = val;
+    }
+    if (std::memcmp(val.data.data(), cur_max.data.data(), 16) > 0) {
+        cur_max = val;
     }
 }
 

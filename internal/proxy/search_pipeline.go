@@ -2401,7 +2401,7 @@ func isSameGroupByValue(field *schemapb.FieldData, i, j int) bool {
 			return false
 		}
 		return data[i] == data[j]
-	case schemapb.DataType_VarChar, schemapb.DataType_String:
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_UUID:
 		data := field.GetScalars().GetStringData().GetData()
 		if i >= len(data) || j >= len(data) {
 			return false
@@ -2475,7 +2475,7 @@ func compareFieldDataAt(field *schemapb.FieldData, i, j int, nullsFirst bool) (i
 			return 1, nil
 		}
 		return 0, nil
-	case schemapb.DataType_VarChar, schemapb.DataType_String:
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_UUID:
 		data := field.GetScalars().GetStringData().GetData()
 		if i >= len(data) || j >= len(data) {
 			return 0, merr.WrapErrServiceInternalMsg("compareFieldDataAt: index out of bounds for String field %s (i=%d, j=%d, len=%d)", field.GetFieldName(), i, j, len(data))
@@ -2760,7 +2760,7 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 			}
 			data.Data = newData
 		}
-	case schemapb.DataType_VarChar, schemapb.DataType_String:
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_UUID:
 		if data := field.GetScalars().GetStringData(); data != nil && len(data.Data) > 0 {
 			newData := make([]string, n)
 			for newIdx, oldIdx := range indices {

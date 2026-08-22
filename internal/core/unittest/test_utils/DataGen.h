@@ -252,6 +252,21 @@ struct GeneratedData {
                                 src_data.begin(), src_data.end(), ret_data);
                             break;
                         }
+                        case DataType::UUID: {
+                            auto ret_data =
+                                reinterpret_cast<milvus::UUID*>(ret.data());
+                            auto& bytes_data =
+                                target_field_data.scalars().bytes_data();
+                            for (int r = 0; r < raw_->num_rows(); ++r) {
+                                const auto& bytes = bytes_data.data(r);
+                                AssertInfo(bytes.size() == 16,
+                                           "UUID bytes must be 16B, got {}",
+                                           bytes.size());
+                                std::memcpy(
+                                    ret_data[r].data.data(), bytes.data(), 16);
+                            }
+                            break;
+                        }
                         case DataType::JSON: {
                             auto ret_data =
                                 reinterpret_cast<std::string*>(ret.data());
@@ -947,6 +962,21 @@ DataGen(SchemaPtr schema,
                     auto str = std::to_string(random());
                     for (int j = 0; j < repeat_count; j++) {
                         data[i * repeat_count + j] = str;
+                    }
+                }
+                std::sort(data.begin(), data.end());
+                insert_cols(data, N, field_meta, random_valid);
+                break;
+            }
+            case DataType::UUID: {
+                vector<milvus::UUID> data(N);
+                for (int i = 0; i < N / repeat_count; ++i) {
+                    milvus::UUID uuid;
+                    for (int b = 0; b < 16; ++b) {
+                        uuid.data[b] = static_cast<uint8_t>(random() % 256);
+                    }
+                    for (int j = 0; j < repeat_count; ++j) {
+                        data[i * repeat_count + j] = uuid;
                     }
                 }
                 std::sort(data.begin(), data.end());

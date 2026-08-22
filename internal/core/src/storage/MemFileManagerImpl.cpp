@@ -329,6 +329,8 @@ GetOptFieldIvfData(const DataType& dt,
             return GetOptFieldIvfDataImpl<DataType::STRING>(field_datas);
         case DataType::VARCHAR:
             return GetOptFieldIvfDataImpl<DataType::VARCHAR>(field_datas);
+        case DataType::UUID:
+            return GetOptFieldIvfDataImpl<DataType::UUID>(field_datas);
         default:
             LOG_WARN("Unsupported data type in optional scalar field: ", dt);
             return {};

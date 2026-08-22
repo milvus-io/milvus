@@ -72,6 +72,23 @@ func (c *PkStatsCollector) Collect(r Record) error {
 			pkArray := r.Column(c.pkstats.FieldID).(*array.String)
 			pk := NewVarCharPrimaryKey(pkArray.Value(i))
 			c.pkstats.Update(pk)
+		case schemapb.DataType_UUID:
+			col := r.Column(c.pkstats.FieldID)
+			if fsb, ok := col.(*array.FixedSizeBinary); ok {
+				pk, err := NewUUIDPrimaryKeyFromBytes(fsb.Value(i))
+				if err != nil {
+					return err
+				}
+				c.pkstats.Update(pk)
+			} else if strArr, ok := col.(*array.String); ok {
+				pk, err := NewUUIDPrimaryKeyFromString(strArr.Value(i))
+				if err != nil {
+					return err
+				}
+				c.pkstats.Update(pk)
+			} else {
+				panic("invalid column array type for UUID pk")
+			}
 		default:
 			panic("invalid data type")
 		}

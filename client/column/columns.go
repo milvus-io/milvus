@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -79,6 +80,39 @@ func IDColumns(schema *entity.Schema, ids *schemapb.IDs, begin, end int) (Column
 			idColumn = NewColumnVarChar(pkField.Name, data[begin:end])
 		} else {
 			idColumn = NewColumnVarChar(pkField.Name, data[begin:])
+		}
+	case entity.FieldTypeUUID:
+		if ids.GetUuidId() != nil {
+			raw := ids.GetUuidId().GetData()
+			if raw == nil {
+				return NewColumnUUID(pkField.Name, nil), nil
+			}
+			var data []string
+			if end >= 0 {
+				raw = raw[begin:end]
+			} else {
+				raw = raw[begin:]
+			}
+			for _, b := range raw {
+				if len(b) == 16 {
+					var u [16]byte
+					copy(u[:], b)
+					data = append(data, uuid.UUID(u).String())
+				} else {
+					data = append(data, string(b))
+				}
+			}
+			idColumn = NewColumnUUID(pkField.Name, data)
+		} else {
+			data := ids.GetStrId().GetData()
+			if data == nil {
+				return NewColumnUUID(pkField.Name, nil), nil
+			}
+			if end >= 0 {
+				idColumn = NewColumnUUID(pkField.Name, data[begin:end])
+			} else {
+				idColumn = NewColumnUUID(pkField.Name, data[begin:])
+			}
 		}
 	default:
 		return nil, fmt.Errorf("unsupported id type %v", pkField.DataType)
@@ -466,6 +500,23 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 
 	case schemapb.DataType_Text:
 		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetStringData().GetData(), begin, end, validData, NewColumnText, NewNullableColumnText)
+
+	case schemapb.DataType_UUID:
+		if fd.GetScalars().GetBytesData() != nil {
+			raw := fd.GetScalars().GetBytesData().GetData()
+			data := make([]string, 0, len(raw))
+			for _, b := range raw {
+				if len(b) == 16 {
+					var u [16]byte
+					copy(u[:], b)
+					data = append(data, uuid.UUID(u).String())
+				} else {
+					data = append(data, "")
+				}
+			}
+			return parseScalarData(fd.GetFieldName(), data, begin, end, validData, NewColumnUUID, NewNullableColumnUUID)
+		}
+		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetStringData().GetData(), begin, end, validData, NewColumnUUID, NewNullableColumnUUID)
 
 	case schemapb.DataType_Array:
 		// handle struct array field (legacy server may use DataType_Array as top-level)

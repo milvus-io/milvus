@@ -338,6 +338,7 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
                     break;
                 case DataType::STRING:
                 case DataType::VARCHAR:
+                case DataType::UUID:
                     array_len = array_data.data(i).string_data().data_size();
                     break;
                 default:
@@ -617,6 +618,10 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage(const Schema& schema) const {
                 case DataType::DOUBLE:
                     field_bytes = num_rows * sizeof(double);
                     break;
+                case DataType::UUID: {
+                    field_bytes = num_rows * 16;
+                    break;
+                }
                 case DataType::VARCHAR:
                 case DataType::TEXT:
                 case DataType::GEOMETRY: {
@@ -2065,6 +2070,24 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                                      ->mutable_data());
             break;
         }
+        case DataType::UUID: {
+            auto dst =
+                result->mutable_scalars()->mutable_bytes_data()->mutable_data();
+            auto vec = dynamic_cast<const ConcurrentVector<UUID>*>(vec_ptr);
+            AssertInfo(vec != nullptr,
+                       "UUID field must use ConcurrentVector<UUID>");
+            for (int64_t i = 0; i < count; ++i) {
+                auto offset = seg_offsets[i];
+                if (offset == INVALID_SEG_OFFSET) {
+                    dst->at(i).assign(16, '\0');
+                    continue;
+                }
+                auto& uuid = (*vec)[offset];
+                dst->at(i).assign(
+                    reinterpret_cast<const char*>(uuid.data.data()), 16);
+            }
+            break;
+        }
         case DataType::TEXT: {
             auto dst = result->mutable_scalars()
                            ->mutable_string_data()
@@ -2433,6 +2456,11 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
         case DataType::VARCHAR: {
             bulk_subscript_ptr_impl<std::string>(
                 vec_ptr, seg_offsets, count, static_cast<std::string*>(data));
+            break;
+        }
+        case DataType::UUID: {
+            bulk_subscript_impl<UUID>(
+                op_ctx, vec_ptr, seg_offsets, count, static_cast<UUID*>(data));
             break;
         }
         case DataType::TEXT: {

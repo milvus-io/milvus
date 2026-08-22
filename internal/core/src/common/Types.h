@@ -18,13 +18,18 @@
 
 #include <boost/align/aligned_allocator.hpp>
 #include <folly/FBVector.h>
+#include <folly/hash/Hash.h>
+#include <folly/hash/SpookyHashV2.h>
 #include <folly/small_vector.h>
 #include <stdint.h>
+#include <array>
 #include <cstddef>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
@@ -40,6 +45,7 @@
 #include "arrow/type.h"
 #include "common/EasyAssert.h"
 #include "fmt/core.h"
+#include "fmt/format.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
@@ -85,6 +91,7 @@ enum class DataType {
     GEOMETRY = 24,
     TEXT = 25,
     TIMESTAMPTZ = 26,  // Timestamp with timezone, stored as int64
+    UUID = 31,
 
     // Some special Data type, start from after 50
     // just for internal use now, may sync proto in future
@@ -110,8 +117,118 @@ using DataArray = proto::schema::FieldData;
 using VectorFieldProto = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
 using InsertRecordProto = proto::segcore::InsertRecord;
-using PkType = std::variant<std::monostate, int64_t, std::string>;
 using DefaultValueType = proto::schema::ValueField;
+
+// Native UUID type: a 128-bit RFC-4122 UUID stored as 16 big-endian bytes.
+// This is the canonical fixed-width representation at the arrow/disk/wire
+// boundary. The 36-char hex-with-dashes form exists only at the user-facing
+// text boundary and is converted exactly twice (insert via FromString, query
+// literal at expression construction). UUID is a scalar value type: trivially
+// copyable, equality/ordering comparable, and hashable.
+struct UUID {
+    std::array<uint8_t, 16> data{};
+
+    UUID() = default;
+
+    // Parse a 36-char RFC-4122 form "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+    // into 16 big-endian bytes. Throws DataTypeInvalid on malformed input.
+    static UUID
+    FromString(std::string_view str);
+
+    // Format back into the 36-char lowercase hex-with-dashes form.
+    std::string
+    ToString() const;
+
+    bool
+    operator==(const UUID& other) const {
+        return data == other.data;
+    }
+
+    bool
+    operator!=(const UUID& other) const {
+        return !(*this == other);
+    }
+
+    // Byte-wise big-endian lexicographic order so UUID ordering matches
+    // RFC-4122 textual ordering.
+    bool
+    operator<(const UUID& other) const {
+        return data < other.data;
+    }
+
+    bool
+    operator>(const UUID& other) const {
+        return other < *this;
+    }
+
+    bool
+    operator<=(const UUID& other) const {
+        return !(other < *this);
+    }
+
+    bool
+    operator>=(const UUID& other) const {
+        return !(*this < other);
+    }
+};
+
+inline UUID
+UUID::FromString(std::string_view str) {
+    if (str.size() != 36) {
+        ThrowInfo(DataTypeInvalid,
+                  "invalid UUID string, expect 36 chars, got {}",
+                  str.size());
+    }
+    UUID uuid{};
+    size_t out = 0;
+    auto hex_val = [](char c) -> int {
+        if (c >= '0' && c <= '9') {
+            return c - '0';
+        }
+        if (c >= 'a' && c <= 'f') {
+            return c - 'a' + 10;
+        }
+        if (c >= 'A' && c <= 'F') {
+            return c - 'A' + 10;
+        }
+        return -1;
+    };
+    for (size_t i = 0; i < str.size();) {
+        if (i == 8 || i == 13 || i == 18 || i == 23) {
+            if (str[i] != '-') {
+                ThrowInfo(DataTypeInvalid, "invalid UUID string: {}", str);
+            }
+            ++i;
+            continue;
+        }
+        int hi = hex_val(str[i]);
+        int lo = hex_val(str[i + 1]);
+        if (hi < 0 || lo < 0) {
+            ThrowInfo(DataTypeInvalid, "invalid UUID string: {}", str);
+        }
+        uuid.data[out++] = static_cast<uint8_t>((hi << 4) | lo);
+        i += 2;
+    }
+    AssertInfo(out == 16, "UUID parsing produced {} bytes, expected 16", out);
+    return uuid;
+}
+
+inline std::string
+UUID::ToString() const {
+    static const char* kHex = "0123456789abcdef";
+    std::string out;
+    out.reserve(36);
+    for (size_t i = 0; i < 16; ++i) {
+        if (i == 4 || i == 6 || i == 8 || i == 10) {
+            out.push_back('-');
+        }
+        out.push_back(kHex[data[i] >> 4]);
+        out.push_back(kHex[data[i] & 0x0F]);
+    }
+    return out;
+}
+
+using PkType = std::variant<std::monostate, int64_t, std::string, UUID>;
 
 struct QueryIteratorCursor {
     PkType last_pk;
@@ -137,6 +254,8 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
             return sizeof(double);
         case DataType::TIMESTAMPTZ:
             return sizeof(int64_t);
+        case DataType::UUID:
+            return 16;
         case DataType::VECTOR_FLOAT:
             return sizeof(float) * dim;
         case DataType::VECTOR_BINARY: {
@@ -195,6 +314,8 @@ ToProtoDataType(DataType data_type) {
             return proto::schema::DataType::Text;
         case DataType::TIMESTAMPTZ:
             return proto::schema::DataType::Timestamptz;
+        case DataType::UUID:
+            return proto::schema::DataType::UUID;
 
         case DataType::VECTOR_BINARY:
             return proto::schema::DataType::BinaryVector;
@@ -245,6 +366,8 @@ GetArrowDataType(DataType data_type, int dim = 1) {
         case DataType::VARCHAR:
         case DataType::TEXT:
             return arrow::utf8();
+        case DataType::UUID:
+            return arrow::fixed_size_binary(16);
         case DataType::ARRAY:
         case DataType::JSON:
             return arrow::binary();
@@ -339,6 +462,8 @@ GetDataTypeName(DataType data_type) {
             return "json";
         case DataType::TEXT:
             return "text";
+        case DataType::UUID:
+            return "uuid";
         case DataType::GEOMETRY:
             return "geometry";
         case DataType::VECTOR_FLOAT:
@@ -378,7 +503,8 @@ using GroupByValueType = std::optional<std::variant<std::monostate,
                                                     int32_t,
                                                     int64_t,
                                                     bool,
-                                                    std::string>>;
+                                                    std::string,
+                                                    UUID>>;
 
 // Hash function for GroupByValueType
 struct GroupByValueHash {
@@ -470,7 +596,8 @@ using GISFunctionType = proto::plan::GISFunctionFilterExpr_GISOp;
 
 inline bool
 IsPrimaryKeyDataType(DataType data_type) {
-    return data_type == DataType::INT64 || data_type == DataType::VARCHAR;
+    return data_type == DataType::INT64 || data_type == DataType::VARCHAR ||
+           data_type == DataType::UUID;
 }
 
 inline bool
@@ -515,6 +642,13 @@ IsStringDataType(DataType data_type) {
     }
 }
 
+// UUID is fixed 16B FixedSizeBinary, not a variable-length string.
+// IsStringDataType(UUID)==false, IsFixedWidth(UUID)==true via TypeTraits, GetDataTypeSize(UUID)==16.
+inline bool
+IsUuidDataType(DataType data_type) {
+    return data_type == DataType::UUID;
+}
+
 inline bool
 IsJsonDataType(DataType data_type) {
     return data_type == DataType::JSON;
@@ -549,6 +683,7 @@ IsPrimitiveType(proto::schema::DataType type) {
         case proto::schema::DataType::String:
         case proto::schema::DataType::VarChar:
         case proto::schema::DataType::Timestamptz:
+        case proto::schema::DataType::UUID:
             return true;
         default:
             return false;
@@ -840,6 +975,15 @@ struct TypeTraits<DataType::TEXT> : public TypeTraits<DataType::VARCHAR> {
 };
 
 template <>
+struct TypeTraits<DataType::UUID> {
+    using NativeType = milvus::UUID;
+    static constexpr DataType TypeKind = DataType::UUID;
+    static constexpr bool IsPrimitiveType = true;
+    static constexpr bool IsFixedWidth = true;
+    static constexpr const char* Name = "UUID";
+};
+
+template <>
 struct TypeTraits<DataType::ARRAY> {
     using NativeType = void;
     static constexpr DataType TypeKind = DataType::ARRAY;
@@ -948,11 +1092,43 @@ FromValCase(milvus::proto::plan::GenericValue::ValCase val_case) {
         case milvus::proto::plan::GenericValue::ValCase::kFloatVal:
             return DataType::DOUBLE;
         case milvus::proto::plan::GenericValue::ValCase::kStringVal:
+            // kStringVal carries both VARCHAR/STRING/TEXT and UUID literals.
+            // Distinguish via schema DataType: UUID literal is 36-char hex
+            // parsed via UUID::FromString (GetValueFromProto<UUID> asserts
+            // kStringVal). No dedicated UUID val case; storage is 16B FixedSizeBinary.
             return DataType::VARCHAR;
         case milvus::proto::plan::GenericValue::ValCase::kArrayVal:
             return DataType::ARRAY;
         default:
             return DataType::NONE;
+    }
+}
+
+// Expected GenericValue ValCase for a given DataType literal.
+// UUID literal is carried as 36-char hex string via kStringVal (parsed to 16B
+// via UUID::FromString at expression construction); no string conversion for storage.
+inline milvus::proto::plan::GenericValue::ValCase
+ExpectedLiteralValCase(DataType data_type) {
+    switch (data_type) {
+        case DataType::BOOL:
+            return milvus::proto::plan::GenericValue::ValCase::kBoolVal;
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+            return milvus::proto::plan::GenericValue::ValCase::kInt64Val;
+        case DataType::FLOAT:
+        case DataType::DOUBLE:
+            return milvus::proto::plan::GenericValue::ValCase::kFloatVal;
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+        case DataType::UUID:
+            return milvus::proto::plan::GenericValue::ValCase::kStringVal;
+        case DataType::ARRAY:
+            return milvus::proto::plan::GenericValue::ValCase::kArrayVal;
+        default:
+            return milvus::proto::plan::GenericValue::ValCase::VAL_NOT_SET;
     }
 }
 
@@ -982,6 +1158,37 @@ bool
 IsFixedSizeType(DataType type);
 
 }  // namespace milvus
+
+namespace std {
+template <>
+struct hash<milvus::UUID> {
+    size_t
+    operator()(const milvus::UUID& uuid) const noexcept {
+        // Avalanching hash over raw 16B FixedSizeBinary via SpookyHashV2.
+        // No string conversion; hashes uuid.data.data() directly.
+        return static_cast<size_t>(folly::hash::SpookyHashV2::Hash64(
+            uuid.data.data(), uuid.data.size(), 0));
+    }
+};
+}  // namespace std
+
+namespace folly {
+template <>
+struct hasher<milvus::UUID> {
+    using folly_is_avalanching = std::true_type;
+    static constexpr bool IsAvalanching = true;
+
+    size_t
+    operator()(const milvus::UUID& uuid) const noexcept {
+        // SpookyHashV2 avalanching hash over raw 16B, mirrors
+        // hasher<std::string> (Hash64 with seed 0) and enables F14
+        // fast-path (skips CRC) via IsAvalanching=true.
+        return static_cast<size_t>(
+            hash::SpookyHashV2::Hash64(uuid.data.data(), uuid.data.size(), 0));
+    }
+};
+}  // namespace folly
+
 template <>
 struct fmt::formatter<milvus::DataType> : formatter<string_view> {
     auto
@@ -1032,6 +1239,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
                 break;
             case milvus::DataType::GEOMETRY:
                 name = "GEOMETRY";
+                break;
+            case milvus::DataType::UUID:
+                name = "UUID";
                 break;
             case milvus::DataType::ROW:
                 name = "ROW";
@@ -1184,6 +1394,9 @@ struct fmt::formatter<milvus::proto::schema::DataType>
                 break;
             case milvus::proto::schema::DataType::Text:
                 name = "Text";
+                break;
+            case milvus::proto::schema::DataType::UUID:
+                name = "UUID";
                 break;
             case milvus::proto::schema::DataType::BinaryVector:
                 name = "BinaryVector";
@@ -1514,6 +1727,14 @@ struct fmt::formatter<milvus::ErrorCode> : fmt::formatter<std::string> {
     }
 };
 
+template <>
+struct fmt::formatter<milvus::UUID> : fmt::formatter<std::string> {
+    auto
+    format(const milvus::UUID& u, fmt::format_context& ctx) const {
+        return fmt::formatter<std::string>::format(u.ToString(), ctx);
+    }
+};
+
 using column_index_t = uint32_t;
 class RowType final {
  public:
@@ -1589,6 +1810,8 @@ using RowTypePtr = std::shared_ptr<const RowType>;
                 return PREFIX<milvus::DataType::VARCHAR> SUFFIX(__VA_ARGS__); \
             case milvus::DataType::STRING:                                    \
                 return PREFIX<milvus::DataType::STRING> SUFFIX(__VA_ARGS__);  \
+            case milvus::DataType::UUID:                                      \
+                return PREFIX<milvus::DataType::UUID> SUFFIX(__VA_ARGS__);    \
             case milvus::DataType::JSON:                                      \
                 return PREFIX<milvus::DataType::JSON> SUFFIX(__VA_ARGS__);    \
             case milvus::DataType::ARRAY:                                     \

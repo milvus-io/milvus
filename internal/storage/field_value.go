@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -27,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type ScalarFieldValue interface {
@@ -970,6 +972,115 @@ func (vcfv *VarCharFieldValue) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+type UUIDFieldValue struct {
+	Value [16]byte `json:"value"`
+}
+
+func NewUUIDFieldValue(v [16]byte) *UUIDFieldValue {
+	return &UUIDFieldValue{
+		Value: v,
+	}
+}
+
+func (ufv *UUIDFieldValue) GT(obj ScalarFieldValue) bool {
+	v, ok := obj.(*UUIDFieldValue)
+	if !ok {
+		mlog.Warn(context.TODO(), "type of compared obj is not UUID")
+		return false
+	}
+	return bytes.Compare(ufv.Value[:], v.Value[:]) > 0
+}
+
+func (ufv *UUIDFieldValue) GE(obj ScalarFieldValue) bool {
+	v, ok := obj.(*UUIDFieldValue)
+	if !ok {
+		mlog.Warn(context.TODO(), "type of compared obj is not UUID")
+		return false
+	}
+	return bytes.Compare(ufv.Value[:], v.Value[:]) >= 0
+}
+
+func (ufv *UUIDFieldValue) LT(obj ScalarFieldValue) bool {
+	v, ok := obj.(*UUIDFieldValue)
+	if !ok {
+		mlog.Warn(context.TODO(), "type of compared obj is not UUID")
+		return false
+	}
+	return bytes.Compare(ufv.Value[:], v.Value[:]) < 0
+}
+
+func (ufv *UUIDFieldValue) LE(obj ScalarFieldValue) bool {
+	v, ok := obj.(*UUIDFieldValue)
+	if !ok {
+		mlog.Warn(context.TODO(), "type of compared obj is not UUID")
+		return false
+	}
+	return bytes.Compare(ufv.Value[:], v.Value[:]) <= 0
+}
+
+func (ufv *UUIDFieldValue) EQ(obj ScalarFieldValue) bool {
+	v, ok := obj.(*UUIDFieldValue)
+	if !ok {
+		mlog.Warn(context.TODO(), "type of compared obj is not UUID")
+		return false
+	}
+	return bytes.Equal(ufv.Value[:], v.Value[:])
+}
+
+func (ufv *UUIDFieldValue) SetValue(data interface{}) error {
+	switch val := data.(type) {
+	case [16]byte:
+		ufv.Value = val
+		return nil
+	case []byte:
+		u, err := typeutil.BytesToUUID(val)
+		if err != nil {
+			return err
+		}
+		ufv.Value = u
+		return nil
+	case string:
+		u, err := typeutil.ParseUUID(val)
+		if err != nil {
+			return err
+		}
+		ufv.Value = u
+		return nil
+	default:
+		return merr.WrapErrServiceInternalMsg("wrong type value when setValue for UUIDFieldValue")
+	}
+}
+
+func (ufv *UUIDFieldValue) GetValue() interface{} {
+	return ufv.Value
+}
+
+func (ufv *UUIDFieldValue) Type() schemapb.DataType {
+	return schemapb.DataType_UUID
+}
+
+func (ufv *UUIDFieldValue) Size() int64 {
+	return 16
+}
+
+func (ufv *UUIDFieldValue) MarshalJSON() ([]byte, error) {
+	return json.Marshal(typeutil.UUIDToString(ufv.Value))
+}
+
+func (ufv *UUIDFieldValue) UnmarshalJSON(data []byte) error {
+	var str string
+	err := json.Unmarshal(data, &str)
+	if err != nil {
+		return err
+	}
+	u, err := typeutil.ParseUUID(str)
+	if err != nil {
+		return err
+	}
+	ufv.Value = u
+	return nil
+}
+
 type VectorFieldValue interface {
 	MarshalJSON() ([]byte, error)
 	UnmarshalJSON(data []byte) error
@@ -1072,6 +1183,13 @@ func NewScalarFieldValueFromGenericValue(dtype schemapb.DataType, gVal *planpb.G
 	case schemapb.DataType_VarChar:
 		strVal := gVal.Val.(*planpb.GenericValue_StringVal)
 		return NewVarCharFieldValue(strVal.StringVal), nil
+	case schemapb.DataType_UUID:
+		strVal := gVal.Val.(*planpb.GenericValue_StringVal)
+		u, err := typeutil.ParseUUID(strVal.StringVal)
+		if err != nil {
+			return nil, err
+		}
+		return NewUUIDFieldValue(u), nil
 	default:
 		// should not be reach
 		panic(fmt.Sprintf("not supported datatype: %s", dtype.String()))
@@ -1098,6 +1216,25 @@ func NewScalarFieldValue(dtype schemapb.DataType, data interface{}) ScalarFieldV
 		return NewStringFieldValue(data.(string))
 	case schemapb.DataType_VarChar:
 		return NewVarCharFieldValue(data.(string))
+	case schemapb.DataType_UUID:
+		switch val := data.(type) {
+		case [16]byte:
+			return NewUUIDFieldValue(val)
+		case string:
+			u, err := typeutil.ParseUUID(val)
+			if err != nil {
+				panic(err)
+			}
+			return NewUUIDFieldValue(u)
+		case []byte:
+			u, err := typeutil.BytesToUUID(val)
+			if err != nil {
+				panic(err)
+			}
+			return NewUUIDFieldValue(u)
+		default:
+			panic("invalid data type for UUID")
+		}
 	default:
 		// should not be reach
 		panic(fmt.Sprintf("not supported datatype: %s", dtype.String()))

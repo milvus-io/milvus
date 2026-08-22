@@ -13,6 +13,7 @@
 
 #include <functional>
 #include <string>
+#include <type_traits>
 
 #include "common/Utils.h"
 #include "common/VectorTrait.h"
@@ -23,7 +24,31 @@ namespace milvus::query {
 template <typename Op, typename T, typename U>
 bool
 RelationalImpl(const T& t, const U& u, FundamentalTag, FundamentalTag) {
-    return Op{}(t, u);
+    // UUID heterogenous guard: UUID only comparable with UUID. For any
+    // cross-type where exactly one side is UUID, the comparison is
+    // heterogeneous and must not instantiate Op{}(UUID, non-UUID) which has
+    // no operator== etc. Return false for equality/ordering, true for
+    // inequality, to keep boost::apply_visitor instantiation valid.
+    if constexpr ((std::is_same_v<T, milvus::UUID> &&
+                   !std::is_same_v<U, milvus::UUID>) ||
+                  (!std::is_same_v<T, milvus::UUID> &&
+                   std::is_same_v<U, milvus::UUID>)) {
+        if constexpr (std::is_same_v<Op, std::equal_to<void>>) {
+            return false;
+        } else if constexpr (std::is_same_v<Op, std::not_equal_to<void>>) {
+            return true;
+        } else if constexpr (std::is_same_v<Op, std::greater<void>> ||
+                             std::is_same_v<Op, std::greater_equal<void>> ||
+                             std::is_same_v<Op, std::less<void>> ||
+                             std::is_same_v<Op, std::less_equal<void>>) {
+            return false;
+        } else {
+            // MatchOp and other non-ordering ops: incompatible with UUID cross-type
+            return false;
+        }
+    } else {
+        return Op{}(t, u);
+    }
 }
 
 template <typename Op, typename T, typename U>

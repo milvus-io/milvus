@@ -105,6 +105,54 @@ func TestSortFieldDataList(t *testing.T) {
 	assert.ElementsMatch(t, []FieldData{f1, f2, f3}, ls.datas)
 }
 
+func TestValidateStorageV1InsertWritableSchema(t *testing.T) {
+	// UUID field is rejected
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  100,
+				Name:     "pk",
+				DataType: schemapb.DataType_UUID,
+			},
+		},
+	}
+	err := ValidateStorageV1InsertWritableSchema(schema)
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "UUID")
+
+	// UUID struct sub-field is rejected
+	schema = &schemapb.CollectionSchema{
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID: 101,
+				Name:    "struct_array",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:  102,
+						Name:     "struct_array[uuid]",
+						DataType: schemapb.DataType_UUID,
+					},
+				},
+			},
+		},
+	}
+	err = ValidateStorageV1InsertWritableSchema(schema)
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "UUID")
+
+	// Schema without UUID passes
+	schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  100,
+				Name:     "pk",
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+	assert.NoError(t, ValidateStorageV1InsertWritableSchema(schema))
+}
+
 func TestTransferColumnBasedInsertDataToRowBased(t *testing.T) {
 	var err error
 

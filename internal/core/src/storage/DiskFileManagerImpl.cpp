@@ -1217,6 +1217,8 @@ WriteOptFieldIvfData(
             return GENERATE_OPT_FIELD_IVF_IMPL(DataType::STRING);
         case DataType::VARCHAR:
             return GENERATE_OPT_FIELD_IVF_IMPL(DataType::VARCHAR);
+        case DataType::UUID:
+            return GENERATE_OPT_FIELD_IVF_IMPL(DataType::UUID);
         default:
             LOG_WARN("Unsupported data type in optional scalar field: ", dt);
             return false;

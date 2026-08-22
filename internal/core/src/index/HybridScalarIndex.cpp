@@ -532,6 +532,7 @@ template class HybridScalarIndex<int64_t>;
 template class HybridScalarIndex<float>;
 template class HybridScalarIndex<double>;
 template class HybridScalarIndex<std::string>;
+template class HybridScalarIndex<milvus::UUID>;
 
 }  // namespace index
 }  // namespace milvus

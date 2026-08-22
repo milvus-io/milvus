@@ -18,6 +18,7 @@ package compactor
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -429,6 +430,71 @@ func (s *SortCompactionTaskSuite) TestSortCompactionFail() {
 	s.Equal(datapb.CompactionTaskState_failed, result.GetState())
 }
 
+func (s *SortCompactionTaskSuite) TestSortCompactionWithUUIDPK() {
+	// UUID-PK collections used to leave the deletion predicate nil and SIGSEGV
+	// inside storage.Sort; UUID values are canonical strings so the predicate
+	// must be built via the VarChar branch.
+	s.meta = genTestCollectionMetaWithUUID()
+	params, err := compaction.GenerateJSONParams(s.meta.GetSchema())
+	s.Require().NoError(err)
+
+	plan := &datapb.CompactionPlan{
+		PlanID: 999,
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
+			SegmentID: 100,
+		}},
+		Type:                   datapb.CompactionType_SortCompaction,
+		Schema:                 s.meta.GetSchema(),
+		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
+		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 9530, End: 19530},
+		MaxSize:                64 * 1024 * 1024,
+		JsonParams:             params,
+		TotalRows:              1000,
+		CollectionTtl:          time.Since(getMilvusBirthday().Add(-time.Hour)).Nanoseconds(),
+	}
+
+	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
+	s.Require().NoError(err)
+	s.Require().Equal(schemapb.DataType_UUID, pk.GetDataType())
+
+	s.task = NewSortCompactionTask(context.Background(), s.mockChunkManager, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
+	s.task.binlogIO = s.mockBinlogIO
+
+	segmentID := int64(1001)
+	alloc := allocator.NewLocalAllocator(100, math.MaxInt64)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
+
+	s.initUUIDSegBuffer(1000, segmentID)
+	kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+	s.Require().NoError(err)
+
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
+		left, right := lo.Difference(keys, lo.Keys(kvs))
+		return len(left) == 0 && len(right) == 0
+	})).Return(lo.Values(kvs), nil).Once()
+
+	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
+		{
+			SegmentID:    segmentID,
+			CollectionID: CollectionID,
+			PartitionID:  PartitionID,
+			FieldBinlogs: lo.Values(fBinlogs),
+		},
+	}
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.NotNil(result)
+	s.Equal(datapb.CompactionTaskState_completed, result.GetState())
+	s.Equal(datapb.CompactionType_SortCompaction, result.GetType())
+	s.Require().Len(result.GetSegments(), 1)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(19531, segment.GetSegmentID())
+	s.True(segment.GetIsSorted())
+	s.EqualValues(1000, segment.GetNumOfRows())
+}
+
 func (s *SortCompactionTaskSuite) TestTaskInterface() {
 	// Test Compactor interface methods
 	s.Equal(int64(999), s.task.GetPlanID())
@@ -450,6 +516,24 @@ func (s *SortCompactionTaskSuite) initSegBuffer(size int, seed int64) {
 			PK:        storage.NewInt64PrimaryKey(seed),
 			Timestamp: int64(tsoutil.ComposeTSByTimeWithLogical(getMilvusBirthday(), int64(i))),
 			Value:     getRow(seed, int64(tsoutil.ComposeTSByTimeWithLogical(getMilvusBirthday(), int64(i)))),
+		}
+		err := s.segWriter.Write(&v)
+		s.Require().NoError(err)
+	}
+	s.segWriter.FlushAndIsFull()
+}
+
+func (s *SortCompactionTaskSuite) initUUIDSegBuffer(size int, seed int64) {
+	s.segWriter, _ = NewSegmentWriter(s.meta.GetSchema(), int64(size), compactionBatchSize, 1, PartitionID, CollectionID, []int64{})
+
+	for i := 0; i < size; i++ {
+		pk := fmt.Sprintf("550e8400-0000-0000-%04x-%012x", seed, i)
+		uuidPK, errPK := storage.NewUUIDPrimaryKeyFromString(pk)
+		s.Require().NoError(errPK)
+		v := storage.Value{
+			PK:        uuidPK,
+			Timestamp: int64(tsoutil.ComposeTSByTimeWithLogical(getMilvusBirthday(), int64(i))),
+			Value:     getUUIDRow(pk, int64(tsoutil.ComposeTSByTimeWithLogical(getMilvusBirthday(), int64(i)))),
 		}
 		err := s.segWriter.Write(&v)
 		s.Require().NoError(err)

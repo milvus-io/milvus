@@ -485,6 +485,10 @@ CreateArrowBuilder(DataType data_type) {
         case DataType::TEXT: {
             return std::make_shared<arrow::StringBuilder>();
         }
+        case DataType::UUID: {
+            return std::make_shared<arrow::FixedSizeBinaryBuilder>(
+                arrow::fixed_size_binary(16));
+        }
         case DataType::ARRAY:
         case DataType::JSON:
         case DataType::GEOMETRY: {
@@ -645,6 +649,14 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
         case DataType::TEXT:
             return std::make_shared<arrow::StringScalar>(
                 default_value.string_data());
+        case DataType::UUID: {
+            auto uuid = UUID::FromString(default_value.string_data());
+            std::string bytes(reinterpret_cast<const char*>(uuid.data.data()),
+                              16);
+            auto buffer = arrow::Buffer::FromString(bytes);
+            return std::make_shared<arrow::FixedSizeBinaryScalar>(
+                buffer, arrow::fixed_size_binary(16));
+        }
         case DataType::JSON:
             return std::make_shared<arrow::BinaryScalar>(
                 default_value.bytes_data());
@@ -695,6 +707,10 @@ CreateArrowSchema(DataType data_type, bool nullable) {
         case DataType::TEXT: {
             return arrow::schema(
                 {arrow::field("val", arrow::utf8(), nullable)});
+        }
+        case DataType::UUID: {
+            return arrow::schema(
+                {arrow::field("val", arrow::fixed_size_binary(16), nullable)});
         }
         case DataType::ARRAY:
         case DataType::JSON:
@@ -1267,6 +1283,9 @@ CreateFieldData(const DataType& type,
         case DataType::VARCHAR:
         case DataType::TEXT:
             return std::make_shared<FieldData<std::string>>(
+                type, nullable, total_num_rows);
+        case DataType::UUID:
+            return std::make_shared<FieldData<milvus::UUID>>(
                 type, nullable, total_num_rows);
         case DataType::JSON:
             return std::make_shared<FieldData<Json>>(

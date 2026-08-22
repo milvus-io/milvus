@@ -1094,6 +1094,18 @@ func (s *MixCompactionTaskStorageV1Suite) TestCompactFail() {
 	})
 }
 
+func getUUIDRow(pk string, ts int64) map[int64]interface{} {
+	if ts == 0 {
+		ts = int64(tsoutil.ComposeTSByTime(getMilvusBirthday()))
+	}
+	return map[int64]interface{}{
+		common.RowIDField:     int64(0),
+		common.TimeStampField: ts, // should be int64 here
+		Int64Field:            pk, // UUID pk column is string-backed
+		VarCharField:          "varchar",
+	}
+}
+
 func getRow(magic int64, ts int64) map[int64]interface{} {
 	if ts == 0 {
 		ts = int64(tsoutil.ComposeTSByTime(getMilvusBirthday()))
@@ -1180,6 +1192,27 @@ func (s *MixCompactionTaskStorageV1Suite) initSegBuffer(size int, seed int64) {
 		s.Require().NoError(err)
 	}
 	segWriter.FlushAndIsFull()
+	s.segWriter = segWriter
+}
+
+func (s *MixCompactionTaskStorageV1Suite) initUUIDSegBuffer(size int, seed int64) {
+	segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 100, compactionBatchSize, seed, PartitionID, CollectionID, []int64{})
+	s.Require().NoError(err)
+
+	for i := 0; i < size; i++ {
+		pk := fmt.Sprintf("550e8400-0000-0000-%04x-%012x", seed, i)
+		uuidPK, errPK := storage.NewUUIDPrimaryKeyFromString(pk)
+		s.Require().NoError(errPK)
+		v := storage.Value{
+			PK:        uuidPK,
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
+			Value:     getUUIDRow(pk, int64(tsoutil.ComposeTSByTime(getMilvusBirthday()))),
+		}
+		err = segWriter.Write(&v)
+		s.Require().NoError(err)
+	}
+	segWriter.FlushAndIsFull()
+
 	s.segWriter = segWriter
 }
 
@@ -1469,6 +1502,46 @@ func genTestCollectionMeta() *etcdpb.CollectionMeta {
 					Description: "sparse_float_vector",
 					DataType:    schemapb.DataType_SparseFloatVector,
 					TypeParams:  []*commonpb.KeyValuePair{},
+				},
+			},
+		},
+	}
+}
+
+func genTestCollectionMetaWithUUID() *etcdpb.CollectionMeta {
+	return &etcdpb.CollectionMeta{
+		ID:            CollectionID,
+		PartitionTags: []string{"partition_0", "partition_1"},
+		Schema: &schemapb.CollectionSchema{
+			Name:        "schema_uuid",
+			Description: "schema_uuid",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  common.RowIDField,
+					Name:     "row_id",
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  common.TimeStampField,
+					Name:     "Timestamp",
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:      Int64Field,
+					Name:         "pk",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_UUID,
+				},
+				{
+					FieldID:  VarCharField,
+					Name:     "field_varchar",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MaxLengthKey,
+							Value: "128",
+						},
+					},
 				},
 			},
 		},

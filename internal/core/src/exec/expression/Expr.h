@@ -2355,6 +2355,9 @@ class SegmentExpr : public Expr {
                         case DataType::VARCHAR: {
                             return ProcessIndexChunksForValid<std::string>();
                         }
+                        case DataType::UUID: {
+                            return ProcessIndexChunksForValid<milvus::UUID>();
+                        }
                         case DataType::GEOMETRY: {
                             return ProcessIndexChunksForValid<std::string>();
                         }
@@ -2435,6 +2438,10 @@ class SegmentExpr : public Expr {
                         case DataType::STRING:
                         case DataType::VARCHAR: {
                             return ProcessChunksForValidByOffsets<std::string>(
+                                use_index, input);
+                        }
+                        case DataType::UUID: {
+                            return ProcessChunksForValidByOffsets<milvus::UUID>(
                                 use_index, input);
                         }
                         default:

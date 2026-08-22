@@ -69,6 +69,7 @@ ValidateTypeSchemaNode(const proto::schema::TypeSchema& type_schema,
         case DataType::FLOAT:
         case DataType::DOUBLE:
         case DataType::VARCHAR:
+        case DataType::UUID:
             break;
         default:
             ThrowInfo(DataTypeInvalid,
@@ -302,13 +303,29 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          local_format()};
     }
 
+    if (IsUuidDataType(data_type)) {
+        AssertInfo(!type_map.count(MAX_LENGTH),
+                   "max_length must not be set for UUID (fixed 16B, "
+                   "IsFixedWidth true, IsStringDataType false)");
+        return FieldMeta{name,
+                         field_id,
+                         data_type,
+                         nullable,
+                         default_value,
+                         external_field_mapping,
+                         local_format()};
+    }
+
     if (IsStringDataType(data_type)) {
+        AssertInfo(!IsUuidDataType(data_type),
+                   "UUID must not use string field path");
         int64_t max_len = 0;
         if (type_map.count(MAX_LENGTH)) {
             max_len = boost::lexical_cast<int64_t>(type_map.at(MAX_LENGTH));
         } else {
             AssertInfo(data_type == DataType::TEXT,
                        "max_length not found for non-Text string field");
+            max_len = 0;
         }
 
         auto get_bool_value = [&](const std::string& key) -> bool {

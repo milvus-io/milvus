@@ -116,6 +116,10 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             }
             break;
         }
+        case DataType::UUID: {
+            result = ExecVisitorImpl<UUID>(context);
+            break;
+        }
         case DataType::JSON: {
             span.GetSpan()->SetAttribute("json_filter_expr_type", "term");
             if (expr_->vals_.size() == 0) {
@@ -225,6 +229,19 @@ PhyTermFilterExpr::InitPkCacheOffset() {
             auto dst_ids = id_array->mutable_str_id();
             for (const auto& id : expr_->vals_) {
                 dst_ids->add_data(GetValueFromProto<std::string>(id));
+            }
+            break;
+        }
+        case DataType::UUID: {
+            if (CanSkipSegment<UUID>()) {
+                return;
+            }
+            auto dst_ids = id_array->mutable_uuid_id();
+            for (const auto& id : expr_->vals_) {
+                auto s = GetValueFromProto<std::string>(id);
+                auto uuid = UUID::FromString(s);
+                dst_ids->add_data()->assign(
+                    reinterpret_cast<const char*>(uuid.data.data()), 16);
             }
             break;
         }
@@ -1078,6 +1095,9 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
         } else if constexpr (std::is_same_v<T, bool>) {
             // Bool: use specialized SetElement<bool> (two flags, O(1)).
             arg_set_ = std::make_shared<SetElement<T>>(vals);
+        } else if constexpr (std::is_same_v<T, milvus::UUID>) {
+            // UUID is 16B fixed, non-numeric — use hash set, not SIMD
+            arg_set_ = std::make_shared<SetElement<T>>(vals);
         } else {
             // All numeric types: SIMD for small IN, hash for large IN.
             // Crossover benchmarked with ankerl hash at load_factor=0.5.
@@ -1100,7 +1120,8 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
         // masks — avoids per-row variant construction entirely.
         if constexpr (!std::is_same_v<T, bool> &&
                       !std::is_same_v<T, std::string> &&
-                      !std::is_same_v<T, std::string_view>) {
+                      !std::is_same_v<T, std::string_view> &&
+                      !std::is_same_v<T, milvus::UUID>) {
             if (auto simd_elem =
                     std::dynamic_pointer_cast<SimdBatchElement<T>>(arg_set_)) {
                 cached_filter_chunk_ = [simd_elem](const void* data,
@@ -1311,7 +1332,8 @@ PhyTermFilterExpr::DetermineExecPath() {
     // it (a term set of exact values is better served by the scan / an equality
     // index), while INVERTED and the others accept it (base default). FMINDEX is
     // VARCHAR-only, so only the string path needs the check.
-    if ((data_type == DataType::VARCHAR || data_type == DataType::TEXT) &&
+    if ((data_type == DataType::VARCHAR || data_type == DataType::TEXT ||
+         data_type == DataType::UUID) &&
         !SegmentExpr::CanUseIndexForOp<std::string>(
             proto::plan::OpType::Equal)) {
         exec_path_ = ExprExecPath::RawData;
@@ -1351,6 +1373,7 @@ PhyTermFilterExpr::PrefetchRawData() {
             PrefetchRawData<double>();
             break;
         case DataType::VARCHAR:
+        case DataType::UUID:
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()
                      .GetMmapConfig()

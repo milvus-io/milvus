@@ -452,6 +452,9 @@ func validateDimension(field *schemapb.FieldSchema) error {
 }
 
 func validateMaxLengthPerRow(collectionName string, fieldName string, dataType schemapb.DataType, typeParams []*commonpb.KeyValuePair) error {
+	if typeutil.IsUUIDType(dataType) {
+		return nil
+	}
 	exist := false
 	for _, param := range typeParams {
 		if param.Key != common.MaxLengthKey {
@@ -585,6 +588,10 @@ func validateNestedArrayTypeParams(collectionName string, fieldName string, type
 				return 0, err
 			}
 		}
+		// UUID is fixed-length (16B), no max_length required
+		if kind.LeafType == schemapb.DataType_UUID {
+			return 0, nil
+		}
 		return 0, nil
 	default:
 		return 0, merr.WrapErrParameterMissingMsg("type should be specified for nested array field %s", fieldName)
@@ -691,6 +698,9 @@ func ValidateFieldAutoID(coll *schemapb.CollectionSchema) error {
 	idx := -1
 	for i, field := range coll.Fields {
 		if field.AutoID {
+			if field.DataType == schemapb.DataType_UUID {
+				return merr.WrapErrParameterInvalidMsg("autoID is not supported for UUID, field name = %s", field.Name)
+			}
 			if idx != -1 {
 				return merr.WrapErrParameterInvalidMsg("only one field can speficy AutoID with true, field name = %s, %s", coll.Fields[idx].Name, field.Name)
 			}
@@ -880,9 +890,9 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 				return merr.WrapErrParameterInvalidMsg("there are more than one primary key, field name = %s, %s", coll.Fields[idx].Name, field.Name)
 			}
 
-			// The type of the primary key field can only be int64 and varchar
-			if field.DataType != schemapb.DataType_Int64 && field.DataType != schemapb.DataType_VarChar {
-				return merr.WrapErrParameterInvalidMsg("the data type of primary key should be Int64 or VarChar")
+			// The type of the primary key field can only be int64, varchar and uuid
+			if field.DataType != schemapb.DataType_Int64 && field.DataType != schemapb.DataType_VarChar && field.DataType != schemapb.DataType_UUID {
+				return merr.WrapErrParameterInvalidMsg("the data type of primary key should be Int64, VarChar, or UUID")
 			}
 
 			// varchar field do not support autoID
@@ -1177,6 +1187,21 @@ func CheckDuplicatePkExist(primaryFieldSchema *schemapb.FieldSchema, fieldsData 
 		case *schemapb.ScalarField_StringData:
 			strIDs := scalarField.GetStringData().GetData()
 			return hasDuplicates(strIDs), nil
+		case *schemapb.ScalarField_BytesData:
+			bytesIDs := scalarField.GetBytesData().GetData()
+			seen := make(map[[16]byte]struct{}, len(bytesIDs))
+			for _, b := range bytesIDs {
+				if len(b) != 16 {
+					return false, merr.WrapErrParameterInvalidMsg("invalid UUID length %d, expected 16", len(b))
+				}
+				var u [16]byte
+				copy(u[:], b)
+				if _, exists := seen[u]; exists {
+					return true, nil
+				}
+				seen[u] = struct{}{}
+			}
+			return false, nil
 		default:
 			return false, merr.WrapErrParameterInvalidMsg("unsupported primary key type")
 		}
