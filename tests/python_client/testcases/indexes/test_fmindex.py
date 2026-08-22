@@ -66,21 +66,31 @@ class TestFMIndexBuildParams(TestMilvusClientV2Base):
                 assert str(value) in idx_info.values()
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_fmindex_on_non_varchar_field_rejected(self):
+    @pytest.mark.parametrize(
+        "field_name, datatype",
+        [
+            ("int_field", DataType.INT64),
+            ("bool_field", DataType.BOOL),
+            ("float_field", DataType.FLOAT),
+            ("double_field", DataType.DOUBLE),
+        ],
+    )
+    def test_fmindex_on_non_varchar_field_rejected(self, field_name, datatype):
         """
-        FMINDEX is VARCHAR-only in this release; building it on an INT64 field
-        (or any non-VARCHAR field such as JSON) must be rejected.
+        FMINDEX is VARCHAR-only in this release; building it on a numeric / bool
+        field (INT64/BOOL/FLOAT/DOUBLE, and JSON separately below) must be
+        rejected.
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         schema, _ = self.create_schema(client)
         schema.add_field(pk_field_name, datatype=DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(vector_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field("int_field", datatype=DataType.INT64)
+        schema.add_field(field_name, datatype=datatype)
         self.create_collection(client, collection_name, schema=schema)
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="int_field", index_name="fm_bad", index_type=index_type, params={})
+        index_params.add_index(field_name=field_name, index_name="fm_bad", index_type=index_type, params={})
         self.create_index(
             client,
             collection_name,
@@ -117,6 +127,42 @@ class TestFMIndexBuildParams(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items={"err_code": 1100, "err_msg": "FM-index can only be created on VARCHAR field"},
         )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_fmindex_on_struct_sub_field_rejected(self):
+        """
+        A struct-array sub-field (e.g. structA[str_val] / structA[int_val]) is an
+        ARRAY field to the checker regardless of the element type; FMINDEX is
+        VARCHAR-only, so building on it must be rejected.
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema, _ = self.create_schema(client)
+        schema.add_field(pk_field_name, datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(vector_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
+
+        struct_schema = self.create_struct_field_schema(client)[0]
+        struct_schema.add_field("str_val", DataType.VARCHAR, max_length=64)
+        struct_schema.add_field("int_val", DataType.INT64)
+        schema.add_field(
+            "structA",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=10,
+        )
+        self.create_collection(client, collection_name, schema=schema)
+
+        for field in ["structA[str_val]", "structA[int_val]"]:
+            index_params = self.prepare_index_params(client)[0]
+            index_params.add_index(field_name=field, index_name="fm_struct", index_type=index_type, params={})
+            self.create_index(
+                client,
+                collection_name,
+                index_params,
+                check_task=CheckTasks.err_res,
+                check_items={"err_code": 1100, "err_msg": "FM-index can only be created on VARCHAR field"},
+            )
 
 
 class TestFMIndexQuery(TestMilvusClientV2Base):
@@ -161,6 +207,37 @@ class TestFMIndexQuery(TestMilvusClientV2Base):
         ids_scan = sorted(r["id"] for r in res_scan)
         assert ids_idx == ids_scan
         return ids_idx
+
+    def _build_twin_collection(self, client, content_fn, max_length=64, total_nb=default_nb):
+        """Create a collection with an FMINDEX field and an identical un-indexed
+        twin field, filled by content_fn(i) -> str, flush (sealed), build indexes
+        and load. Returns the collection name."""
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema, _ = self.create_schema(client)
+        schema.add_field(pk_field_name, datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(vector_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(no_index_field_name, datatype=DataType.VARCHAR, max_length=max_length)
+        schema.add_field(content_field_name, datatype=DataType.VARCHAR, max_length=max_length)
+        self.create_collection(client, collection_name, schema=schema)
+
+        rows = cf.gen_row_data_by_schema(nb=total_nb, schema=schema, start=0)
+        for i, row in enumerate(rows):
+            text = content_fn(i)
+            row[no_index_field_name] = text
+            row[content_field_name] = text
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name=vector_field_name, metric_type="COSINE", index_type="IVF_FLAT", params={"nlist": 128}
+        )
+        index_params.add_index(field_name=content_field_name, index_type=index_type, params={"fm_sa_sample_rate": 32})
+        self.create_index(client, collection_name, index_params)
+        self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
+        self.wait_for_index_ready(client, collection_name, index_name=content_field_name)
+        self.load_collection(client, collection_name)
+        return collection_name
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_fmindex_prefix_infix_suffix(self):
@@ -286,3 +363,118 @@ class TestFMIndexQuery(TestMilvusClientV2Base):
         )
         assert len(ids) == len(marked_ids) > 0
         assert set(ids) == marked_ids
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_fmindex_null_rows_not_matched(self):
+        """
+        Nullable VARCHAR NULL rows are treated as an empty document: no pattern,
+        not even LIKE '%', may match them.
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema, _ = self.create_schema(client)
+        schema.add_field(pk_field_name, datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(vector_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(content_field_name, datatype=DataType.VARCHAR, max_length=64, nullable=True)
+        self.create_collection(client, collection_name, schema=schema)
+
+        total_nb = default_nb
+        rows = cf.gen_row_data_by_schema(nb=total_nb, schema=schema, start=0)
+        non_null = 0
+        for i, row in enumerate(rows):
+            if i % 8 == 7:
+                row[content_field_name] = None
+            else:
+                row[content_field_name] = content_keywords[i % len(content_keywords)]
+                non_null += 1
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name=vector_field_name, metric_type="COSINE", index_type="IVF_FLAT", params={"nlist": 128}
+        )
+        index_params.add_index(field_name=content_field_name, index_type=index_type, params={"fm_sa_sample_rate": 32})
+        self.create_index(client, collection_name, index_params)
+        self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
+        self.wait_for_index_ready(client, collection_name, index_name=content_field_name)
+        self.load_collection(client, collection_name)
+
+        all_rows = self.query(client, collection_name, filter=f'{content_field_name} LIKE "%"', output_fields=["id"])[0]
+        assert len(all_rows) == non_null, "LIKE '%' must return exactly the non-NULL rows"
+
+        sta = self.query(client, collection_name, filter=f'{content_field_name} LIKE "sta%"', output_fields=["id"])[0]
+        assert sta, "LIKE 'sta%' must match non-NULL rows"
+        for r in sta:
+            assert r["id"] % 8 != 7, f"LIKE 'sta%' must never match a NULL row id={r['id']}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_fmindex_non_ascii(self):
+        """
+        Byte-exact substring matching over multi-byte UTF-8 content (CJK / emoji):
+        a byte-level index must not mis-align on multi-byte sequences.
+        """
+        client = self._client()
+        values = ["中文测试数据", "测试中文", "emoji😀测试", "纯英文english", "中文😀中文"]
+        collection_name = self._build_twin_collection(client, lambda i: values[i % len(values)])
+
+        for pattern in ["%测试%", "%😀%", "%中文😀%"]:
+            ids = self._assert_same(
+                client,
+                collection_name,
+                f'{content_field_name} LIKE "{pattern}"',
+                f'{no_index_field_name} LIKE "{pattern}"',
+            )
+            assert ids, f"FMINDEX returned no rows for {pattern}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_fmindex_empty_pattern_and_general_fallback(self):
+        """
+        `LIKE '%'` (empty pattern, == IsNotNull), general LIKE with an interior
+        wildcard, a single-char `_` wildcard, and regex `=~` all fall back to the
+        scan but must stay exact against the twin field.
+        """
+        client = self._client()
+        collection_name = self._build_twin_collection(client, lambda i: f"req-{i % 4}-error-{i % 10}")
+
+        all_rows = self.query(client, collection_name, filter=f'{content_field_name} LIKE "%"', output_fields=["id"])[0]
+        assert len(all_rows) == default_nb
+
+        self._assert_same(
+            client,
+            collection_name,
+            f'{content_field_name} LIKE "req-%error%"',
+            f'{no_index_field_name} LIKE "req-%error%"',
+        )
+        self._assert_same(
+            client,
+            collection_name,
+            f'{content_field_name} LIKE "req-_error-_"',
+            f'{no_index_field_name} LIKE "req-_error-_"',
+        )
+        self._assert_same(
+            client,
+            collection_name,
+            f'{content_field_name} =~ "req-.error-."',
+            f'{no_index_field_name} =~ "req-.error-."',
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_fmindex_escaped_wildcards(self):
+        r"""
+        LIKE escape handling: `\%` matches a literal '%', `\_` a literal '_', and
+        `\\` a literal backslash. Escaped literals are carried in the expression's
+        raw string (r"...") so the backslash reaches the LIKE layer verbatim.
+        """
+        client = self._client()
+        values = ["100%done", "under_score", "back\\slash", "plain", "50%_mixed"]
+        collection_name = self._build_twin_collection(client, lambda i: values[i % len(values)])
+
+        for escaped in [r"%\%%", r"%\_%", r"%\\%"]:
+            ids = self._assert_same(
+                client,
+                collection_name,
+                rf'{content_field_name} LIKE r"{escaped}"',
+                rf'{no_index_field_name} LIKE r"{escaped}"',
+            )
+            assert ids, f"FMINDEX returned no rows for escaped pattern {escaped}"
