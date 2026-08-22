@@ -202,6 +202,27 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	s.Equal(err, io.EOF)
 	err = r.Close()
 	s.NoError(err)
+
+	// Fill-null contract on the packed (StorageV2) path: schema fields absent
+	// from the written files come back as all-null columns — even when a
+	// default is declared, backfilling it is deferred, never done by the
+	// reader.
+	extSchema := typeutil.Clone(s.schema)
+	extSchema.Fields = append(extSchema.Fields,
+		&schemapb.FieldSchema{FieldID: 200, Name: "added_nullable", DataType: schemapb.DataType_Int64, Nullable: true},
+		&schemapb.FieldSchema{
+			FieldID: 201, Name: "added_default", DataType: schemapb.DataType_Int64, Nullable: true,
+			DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}},
+		},
+	)
+	fr, err := NewBinlogRecordReader(s.ctx, binlogs, extSchema, rOption...)
+	s.NoError(err)
+	defer fr.Close()
+	frec, err := fr.Next()
+	s.NoError(err)
+	s.Positive(frec.Len())
+	s.Equal(frec.Len(), frec.Column(200).NullN(), "absent nullable column arrives all-null")
+	s.Equal(frec.Len(), frec.Column(201).NullN(), "absent default-carrying column arrives all-null too")
 }
 
 func (s *PackedBinlogRecordSuite) TestGenerateBM25Stats() {

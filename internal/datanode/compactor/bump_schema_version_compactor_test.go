@@ -18,6 +18,7 @@ package compactor
 
 import (
 	"context"
+	sio "io"
 	"math"
 	"path"
 	"strings"
@@ -27,6 +28,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/bytedance/mockey"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -83,6 +85,33 @@ type fakeBinlogRecordWriter struct {
 	statsBlobSize    int64
 	schema           *schemapb.CollectionSchema
 	writtenTimestamp []int64
+}
+
+type cleanupTrackingBatchWriter struct {
+	closeCount int
+	abortCount int
+	writeRows  []int
+	closeErr   error
+}
+
+type emptyRecordReader struct{}
+
+func (*emptyRecordReader) Next() (storage.Record, error) { return nil, sio.EOF }
+func (*emptyRecordReader) Close() error                  { return nil }
+
+func (w *cleanupTrackingBatchWriter) Write(record storage.Record) error {
+	w.writeRows = append(w.writeRows, record.Len())
+	return nil
+}
+
+func (w *cleanupTrackingBatchWriter) GetWrittenUncompressed() uint64 {
+	return 0
+}
+func (w *cleanupTrackingBatchWriter) AsNewColumnGroups() {}
+func (w *cleanupTrackingBatchWriter) Abort()             { w.abortCount++ }
+func (w *cleanupTrackingBatchWriter) Close() (packed.WriterOutput, error) {
+	w.closeCount++
+	return nil, w.closeErr
 }
 
 func (w *fakeBinlogRecordWriter) Write(r storage.Record) error {
@@ -496,6 +525,379 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionSu
 	}
 }
 
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersistsOrdinaryNullableField() {
+	const ordinaryFieldID = int64(103)
+	s.task.plan.Schema.Functions = nil
+	s.task.plan.Schema.Fields = s.task.plan.Schema.Fields[:4]
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID:  ordinaryFieldID,
+		Name:     "added_nullable",
+		DataType: schemapb.DataType_Int64,
+		Nullable: true,
+	})
+	s.prepareBumpSchemaVersionCompaction()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	segment := result.GetSegments()[0]
+	s.EqualValues(3, segment.GetNumOfRows())
+	s.NotEqual(segment.GetBaseManifest(), segment.GetManifest())
+	s.Require().Len(segment.GetInsertLogs(), 1)
+	s.EqualValues(ordinaryFieldID, segment.GetInsertLogs()[0].GetFieldID())
+	s.EqualValues(3, segment.GetInsertLogs()[0].GetBinlogs()[0].GetEntriesNum())
+	s.EqualValues(3, segment.GetStats().GetNullCounts()[ordinaryFieldID])
+
+	fields, err := packed.GetManifestFieldIDs(segment.GetManifest(), s.task.compactionParams.StorageConfig)
+	s.Require().NoError(err)
+	s.Contains(fields, ordinaryFieldID)
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersistsOrdinaryDefaultField() {
+	const ordinaryFieldID = int64(103)
+	s.task.plan.Schema.Functions = nil
+	s.task.plan.Schema.Fields = s.task.plan.Schema.Fields[:4]
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID:  ordinaryFieldID,
+		Name:     "added_default",
+		DataType: schemapb.DataType_Int64,
+		Nullable: true,
+		DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{
+			LongData: 42,
+		}},
+	})
+	s.prepareBumpSchemaVersionCompaction()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	segment := result.GetSegments()[0]
+	s.Require().Len(segment.GetInsertLogs(), 1)
+	s.EqualValues(ordinaryFieldID, segment.GetInsertLogs()[0].GetFieldID())
+	// Absent fields are backfilled as NULL regardless of a declared default:
+	// the reader layer null-fills, default materialization is deferred.
+	s.EqualValues(3, segment.GetStats().GetNullCounts()[ordinaryFieldID])
+
+	reader, err := storage.NewManifestRecordReader(context.Background(), segment.GetManifest(), &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{typeutil.GetField(s.task.plan.GetSchema(), ordinaryFieldID)},
+	}, storage.WithCollectionID(1), storage.WithVersion(storage.StorageV3), storage.WithStorageConfig(s.task.compactionParams.StorageConfig))
+	s.Require().NoError(err)
+	defer reader.Close()
+	record, err := reader.Next()
+	s.Require().NoError(err)
+	column, ok := record.Column(ordinaryFieldID).(*array.Int64)
+	s.Require().True(ok)
+	s.Equal(3, column.Len())
+	for i := 0; i < column.Len(); i++ {
+		s.True(column.IsNull(i))
+	}
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersistsTTLDefaultWithoutFiltering() {
+	const ttlFieldID = int64(103)
+	expireAt := s.task.currentTime.Add(-time.Hour).UnixMicro()
+	s.task.plan.Schema.Functions = nil
+	s.task.plan.Schema.Fields = s.task.plan.Schema.Fields[:4]
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID:  ttlFieldID,
+		Name:     "expire_at",
+		DataType: schemapb.DataType_Timestamptz,
+		Nullable: true,
+		DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_TimestamptzData{
+			TimestamptzData: expireAt,
+		}},
+	})
+	s.task.plan.Schema.Properties = append(s.task.plan.Schema.Properties, &commonpb.KeyValuePair{
+		Key: common.CollectionTTLFieldKey, Value: "expire_at",
+	})
+	s.prepareBumpSchemaVersionCompaction()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	segment := result.GetSegments()[0]
+	s.EqualValues(3, segment.GetNumOfRows(), "an added TTL field must not filter rows during additive reconciliation")
+	// NULL backfill even with a declared default: null TTL values never expire.
+	s.EqualValues(3, segment.GetStats().GetNullCounts()[ttlFieldID])
+
+	reader, err := storage.NewManifestRecordReader(context.Background(), segment.GetManifest(), &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{typeutil.GetField(s.task.plan.GetSchema(), ttlFieldID)},
+	}, storage.WithCollectionID(1), storage.WithVersion(storage.StorageV3), storage.WithStorageConfig(s.task.compactionParams.StorageConfig))
+	s.Require().NoError(err)
+	defer reader.Close()
+	record, err := reader.Next()
+	s.Require().NoError(err)
+	column := record.Column(ttlFieldID).(*array.Int64)
+	for i := 0; i < column.Len(); i++ {
+		s.True(column.IsNull(i))
+	}
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersistsNullableTTLWithoutFiltering() {
+	const ttlFieldID = int64(103)
+	s.task.plan.Schema.Functions = nil
+	s.task.plan.Schema.Fields = s.task.plan.Schema.Fields[:4]
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID: ttlFieldID, Name: "expire_at", DataType: schemapb.DataType_Timestamptz, Nullable: true,
+	})
+	s.task.plan.Schema.Properties = append(s.task.plan.Schema.Properties, &commonpb.KeyValuePair{
+		Key: common.CollectionTTLFieldKey, Value: "expire_at",
+	})
+	s.prepareBumpSchemaVersionCompaction()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	segment := result.GetSegments()[0]
+	s.EqualValues(3, segment.GetNumOfRows(), "an added nullable TTL field must not filter rows during additive reconciliation")
+	s.EqualValues(3, segment.GetStats().GetNullCounts()[ttlFieldID])
+
+	reader, err := storage.NewManifestRecordReader(context.Background(), segment.GetManifest(), &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{typeutil.GetField(s.task.plan.GetSchema(), ttlFieldID)},
+	}, storage.WithCollectionID(1), storage.WithVersion(storage.StorageV3), storage.WithStorageConfig(s.task.compactionParams.StorageConfig))
+	s.Require().NoError(err)
+	defer reader.Close()
+	record, err := reader.Next()
+	s.Require().NoError(err)
+	column := record.Column(ttlFieldID).(*array.Int64)
+	s.Equal(3, column.Len())
+	s.Equal(3, column.NullN())
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersistsNullableStructChildren() {
+	const structFieldID = int64(200)
+	children := []*schemapb.FieldSchema{
+		{
+			FieldID:     201,
+			Name:        "profile[tags]",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_VarChar,
+			Nullable:    true,
+			TypeParams: []*commonpb.KeyValuePair{{
+				Key: common.MaxCapacityKey, Value: "16",
+			}},
+		},
+		{
+			FieldID:     202,
+			Name:        "profile[scores]",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int64,
+			Nullable:    true,
+			TypeParams: []*commonpb.KeyValuePair{{
+				Key: common.MaxCapacityKey, Value: "16",
+			}},
+		},
+	}
+	s.task.plan.Schema.Functions = nil
+	s.task.plan.Schema.Fields = s.task.plan.Schema.Fields[:4]
+	s.task.plan.Schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{{
+		FieldID:  structFieldID,
+		Name:     "profile",
+		Fields:   children,
+		Nullable: true,
+	}}
+	s.prepareBumpSchemaVersionCompaction()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	segment := result.GetSegments()[0]
+	s.EqualValues(3, segment.GetNumOfRows())
+	s.Require().Len(segment.GetInsertLogs(), 2)
+	s.ElementsMatch([]int64{201, 202}, lo.Map(segment.GetInsertLogs(), func(fb *datapb.FieldBinlog, _ int) int64 {
+		return fb.GetFieldID()
+	}))
+
+	manifestFields, err := packed.GetManifestFieldIDs(segment.GetManifest(), s.task.compactionParams.StorageConfig)
+	s.Require().NoError(err)
+	s.NotContains(manifestFields, structFieldID)
+	for _, child := range children {
+		s.Contains(manifestFields, child.GetFieldID())
+		s.EqualValues(3, segment.GetStats().GetNullCounts()[child.GetFieldID()])
+	}
+
+	readSchema := &schemapb.CollectionSchema{StructArrayFields: s.task.plan.Schema.GetStructArrayFields()}
+	reader, err := storage.NewManifestRecordReader(context.Background(), segment.GetManifest(), readSchema,
+		storage.WithCollectionID(1),
+		storage.WithVersion(storage.StorageV3),
+		storage.WithStorageConfig(s.task.compactionParams.StorageConfig),
+	)
+	s.Require().NoError(err)
+	defer reader.Close()
+	record, err := reader.Next()
+	s.Require().NoError(err)
+	for _, child := range children {
+		column := record.Column(child.GetFieldID())
+		s.Require().NotNil(column)
+		s.Equal(3, column.Len())
+		s.Equal(3, column.NullN())
+	}
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPrefillsMissingFunctionInput() {
+	const addedInputFieldID = int64(103)
+	outputField := typeutil.GetField(s.task.plan.GetSchema(), 102)
+	s.task.plan.Schema.Fields = []*schemapb.FieldSchema{
+		s.task.plan.Schema.Fields[0],
+		s.task.plan.Schema.Fields[1],
+		s.task.plan.Schema.Fields[2],
+		s.task.plan.Schema.Fields[3],
+		{
+			FieldID:  addedInputFieldID,
+			Name:     "added_input",
+			DataType: schemapb.DataType_VarChar,
+			Nullable: true,
+			TypeParams: []*commonpb.KeyValuePair{{
+				Key: common.MaxLengthKey, Value: "128",
+			}},
+		},
+		outputField,
+	}
+	s.task.plan.Schema.Functions[0].InputFieldIds = []int64{addedInputFieldID}
+	s.task.plan.Schema.Functions[0].InputFieldNames = []string{"added_input"}
+	s.prepareBumpSchemaVersionCompaction()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	segment := result.GetSegments()[0]
+	s.Require().Len(segment.GetInsertLogs(), 2)
+	s.ElementsMatch([]int64{102, addedInputFieldID}, lo.Map(segment.GetInsertLogs(), func(fb *datapb.FieldBinlog, _ int) int64 {
+		return fb.GetFieldID()
+	}))
+	s.EqualValues(3, segment.GetStats().GetNullCounts()[addedInputFieldID])
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPrefillsMissingMultiAnalyzerByField() {
+	const byFieldID = int64(103)
+	textField := typeutil.GetField(s.task.plan.GetSchema(), 101)
+	textField.TypeParams = append(textField.GetTypeParams(),
+		&commonpb.KeyValuePair{Key: common.EnableAnalyzerKey, Value: "true"},
+		&commonpb.KeyValuePair{Key: "multi_analyzer_params", Value: `{"by_field":"lang","analyzers":{"default":{"type":"standard"}}}`},
+	)
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID: byFieldID, Name: "lang", DataType: schemapb.DataType_VarChar, Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "32"}},
+	})
+	s.prepareBumpSchemaVersionCompaction()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	segment := result.GetSegments()[0]
+	s.ElementsMatch([]int64{102, byFieldID}, lo.Map(segment.GetInsertLogs(), func(fb *datapb.FieldBinlog, _ int) int64 {
+		return fb.GetFieldID()
+	}))
+	s.EqualValues(3, segment.GetStats().GetNullCounts()[byFieldID])
+	s.EqualValues(3, segment.GetNumOfRows())
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationSkipsPresentFunctionOutput() {
+	const ordinaryFieldID = int64(103)
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID: ordinaryFieldID, Name: "added", DataType: schemapb.DataType_Int64, Nullable: true,
+	})
+	physicalFields := append(schemaBumpBaseFields(), typeutil.GetField(s.task.plan.GetSchema(), 102))
+	s.initSegBufferForSchemaBumpWithFields(100, physicalFields, func(_ int, value map[int64]interface{}) {
+		value[102] = typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{1: 1})
+	})
+	s.finishBumpSchemaVersionSegment()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	segment := result.GetSegments()[0]
+	s.Require().Len(segment.GetInsertLogs(), 1)
+	s.EqualValues(ordinaryFieldID, segment.GetInsertLogs()[0].GetFieldID())
+	s.EqualValues(3, segment.GetStats().GetNullCounts()[ordinaryFieldID])
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersistsNullableTextAsBinary() {
+	const textFieldID = int64(103)
+	s.task.plan.Schema.Functions = nil
+	s.task.plan.Schema.Fields = s.task.plan.Schema.Fields[:4]
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID:  textFieldID,
+		Name:     "added_text",
+		DataType: schemapb.DataType_Text,
+		Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{{
+			Key: common.MaxLengthKey, Value: "65535",
+		}},
+	})
+	s.prepareBumpSchemaVersionCompaction()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	segment := result.GetSegments()[0]
+	s.Require().Len(segment.GetInsertLogs(), 1)
+	s.EqualValues(textFieldID, segment.GetInsertLogs()[0].GetFieldID())
+	s.EqualValues(3, segment.GetStats().GetNullCounts()[textFieldID])
+	s.Empty(segment.GetTextStatsLogs())
+
+	readSchema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		typeutil.GetField(s.task.plan.GetSchema(), textFieldID),
+	}}
+	reader, err := storage.NewManifestRecordReader(context.Background(), segment.GetManifest(), readSchema,
+		storage.WithCollectionID(1),
+		storage.WithVersion(storage.StorageV3),
+		storage.WithStorageConfig(s.task.compactionParams.StorageConfig),
+	)
+	s.Require().NoError(err)
+	defer reader.Close()
+	record, err := reader.Next()
+	s.Require().NoError(err)
+	textColumn, ok := record.Column(textFieldID).(*array.Binary)
+	s.Require().True(ok)
+	s.Equal(3, textColumn.Len())
+	s.Equal(3, textColumn.NullN())
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationRejectsRowCountMismatch() {
+	const ordinaryFieldID = int64(103)
+	s.task.plan.Schema.Functions = nil
+	s.task.plan.Schema.Fields = s.task.plan.Schema.Fields[:4]
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID:  ordinaryFieldID,
+		Name:     "added_nullable",
+		DataType: schemapb.DataType_Int64,
+		Nullable: true,
+	})
+	s.prepareBumpSchemaVersionCompaction()
+	s.task.plan.TotalRows = 4
+
+	_, err := s.task.Compact()
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "read 3 rows, expected 4")
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationAbortsWriterOnRowCountMismatch() {
+	const ordinaryFieldID = int64(103)
+	s.task.plan.Schema.Functions = nil
+	s.task.plan.Schema.Fields = s.task.plan.Schema.Fields[:4]
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID:  ordinaryFieldID,
+		Name:     "added_nullable",
+		DataType: schemapb.DataType_Int64,
+		Nullable: true,
+	})
+	s.prepareBumpSchemaVersionCompaction()
+	s.task.plan.TotalRows = 4
+
+	writer := &cleanupTrackingBatchWriter{}
+	writerPatch := mockey.Mock((*bumpSchemaVersionCompactionTask).setupWriter).Return(
+		&bumpSchemaVersionWriterResult{
+			writer: writer,
+			columnGroups: []storagecommon.ColumnGroup{{
+				GroupID: ordinaryFieldID,
+				Columns: []int{0},
+				Fields:  []int64{ordinaryFieldID},
+			}},
+			storageVersion: storage.StorageV3,
+		}, nil,
+	).Build()
+	defer writerPatch.UnPatch()
+
+	_, err := s.task.Compact()
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.Equal(1, writer.abortCount)
+	s.Zero(writer.closeCount)
+}
+
 // buildTextLOBTask builds a minimal schema-bump task whose schema optionally has a
 // DataType_Text field (the LOB-carrying input of a BM25 function). Only plan +
 // compactionParams are needed to exercise the LOB wiring (the cgo manifest helpers
@@ -887,6 +1289,55 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteFillsMissingNullab
 	s.True(found, "missing nullable TEXT field must be backfilled into the rewritten segment")
 }
 
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteMaterializesAbsentTTLDefaultWithoutSourceProbe() {
+	const ttlFieldID = int64(104)
+	expireAt := s.task.currentTime.Add(-time.Hour).UnixMicro()
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID:  ttlFieldID,
+		Name:     "expire_at",
+		DataType: schemapb.DataType_Timestamptz,
+		Nullable: true,
+		DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_TimestamptzData{
+			TimestamptzData: expireAt,
+		}},
+	})
+	s.task.plan.Schema.Properties = append(s.task.plan.Schema.Properties, &commonpb.KeyValuePair{
+		Key: common.CollectionTTLFieldKey, Value: "expire_at",
+	})
+	params, err := compaction.GenerateJSONParams(s.task.plan.GetSchema())
+	s.Require().NoError(err)
+	s.task.plan.JsonParams = params
+
+	// Field 103 exists only in the source, so the schema bump takes the full
+	// rewrite path while the target TTL field is still absent from that source.
+	s.prepareBumpSchemaVersionCompactionWithDroppedField()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	segment := result.GetSegments()[0]
+	s.EqualValues(3, segment.GetNumOfRows())
+
+	readSchema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		typeutil.GetField(s.task.plan.GetSchema(), ttlFieldID),
+	}}
+	reader, err := storage.NewManifestRecordReader(context.Background(), segment.GetManifest(), readSchema,
+		storage.WithCollectionID(1),
+		storage.WithVersion(storage.StorageV3),
+		storage.WithStorageConfig(s.task.compactionParams.StorageConfig),
+	)
+	s.Require().NoError(err)
+	defer reader.Close()
+	record, err := reader.Next()
+	s.Require().NoError(err)
+	ttlColumn, ok := record.Column(ttlFieldID).(*array.Int64)
+	s.Require().True(ok)
+	s.Equal(3, ttlColumn.Len())
+	// NULL backfill even with a declared default; null TTL values never expire.
+	for i := 0; i < ttlColumn.Len(); i++ {
+		s.True(ttlColumn.IsNull(i))
+	}
+}
+
 // TestFullRewriteMergesLOBRefsBeforeBuildingTextIndex guards the ordering fixed for
 // liliu-z's review. createTextIndex reads the TEXT column through the output segment's
 // manifest, so applyLOBCompaction -- which merges the carried source LOB file references
@@ -948,12 +1399,11 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestSelectFullRewriteRecordDropsD
 	deleteTs := tsoutil.ComposeTSByTime(currentTime.Add(time.Second))
 	entityFilter := compaction.NewEntityFilter(map[any]typeutil.Timestamp{int64(2): deleteTs}, int64(time.Minute), currentTime, 0)
 
-	selection, ttlValues, err := selectFullRewriteRecord(record, pkField, entityFilter, 102, true, nil)
+	selection, err := selectFullRewriteRecord(record, pkField, entityFilter, 102, true)
 	s.Require().NoError(err)
 	s.Require().NotNil(selection)
 	s.Equal(2, selection.Len())
 	s.Equal([]rowRange{{start: 0, end: 1}, {start: 4, end: 5}}, selection.ranges)
-	s.Equal([]int64{keptTTLField, keptTTLField}, ttlValues)
 	s.Equal(1, entityFilter.GetDeletedCount())
 	s.Equal(2, entityFilter.GetExpiredCount())
 }
@@ -989,6 +1439,121 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestSchemaVersionBumpOnlyPreserve
 	s.Equal(expirQuantiles, segment.GetExpirQuantiles())
 }
 
+func (s *BumpSchemaVersionCompactionTaskSuite) TestEmptySegmentWithMissingFieldUsesAdditiveReconciliation() {
+	s.setupTest()
+	s.task.plan.TotalRows = 0
+	existingFields := map[int64]struct{}{
+		common.RowIDField:     {},
+		common.TimeStampField: {},
+		100:                   {},
+		101:                   {},
+	}
+	manifestPatch := mockey.Mock(packed.GetManifestFieldIDs).Return(existingFields, nil).Build()
+	defer manifestPatch.UnPatch()
+
+	additiveCalled := false
+	additivePatch := mockey.Mock((*bumpSchemaVersionCompactionTask).runAdditivePhysicalReconciliation).To(
+		func(_ *bumpSchemaVersionCompactionTask, _ context.Context, diff *schemaBumpPhysicalDiff) (*datapb.CompactionPlanResult, error) {
+			additiveCalled = true
+			s.Equal([]int64{102}, lo.Map(diff.missingOutputFields, func(field *schemapb.FieldSchema, _ int) int64 {
+				return field.GetFieldID()
+			}))
+			return &datapb.CompactionPlanResult{State: datapb.CompactionTaskState_completed}, nil
+		},
+	).Build()
+	defer additivePatch.UnPatch()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.True(additiveCalled)
+	s.Equal(datapb.CompactionTaskState_completed, result.GetState())
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestEmptySegmentWithDroppedFieldStillRoutesFullRewrite() {
+	s.setupTest()
+	s.task.plan.TotalRows = 0
+	const droppedFieldID = int64(103)
+	existingFields := map[int64]struct{}{
+		common.RowIDField:     {},
+		common.TimeStampField: {},
+		100:                   {},
+		101:                   {},
+		102:                   {},
+		droppedFieldID:        {},
+	}
+	manifestPatch := mockey.Mock(packed.GetManifestFieldIDs).Return(existingFields, nil).Build()
+	defer manifestPatch.UnPatch()
+
+	fullRewriteCalled := false
+	rewritePatch := mockey.Mock((*bumpSchemaVersionCompactionTask).runFullSchemaRewrite).To(
+		func(_ *bumpSchemaVersionCompactionTask, got map[int64]struct{}) (*datapb.CompactionPlanResult, error) {
+			fullRewriteCalled = true
+			s.Contains(got, droppedFieldID)
+			return &datapb.CompactionPlanResult{State: datapb.CompactionTaskState_completed}, nil
+		},
+	).Build()
+	defer rewritePatch.UnPatch()
+
+	_, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.True(fullRewriteCalled)
+}
+
+// A zero-row additive reconciliation must not fabricate physical completeness
+// by writing an empty materialized record: it fails as a data-integrity error
+// and the writer lease aborts the partial writer.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestEmptyAdditiveReconciliationFailsAndAbortsWriter() {
+	const ordinaryFieldID = int64(103)
+	s.task.plan.TotalRows = 0
+	s.task.plan.Schema.Functions = nil
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields[:4], &schemapb.FieldSchema{
+		FieldID:  ordinaryFieldID,
+		Name:     "added_nullable",
+		DataType: schemapb.DataType_Int64,
+		Nullable: true,
+	})
+	segment := s.task.plan.GetSegmentBinlogs()[0]
+	segment.StorageVersion = storage.StorageV3
+	segment.Manifest = packed.MarshalManifestPath("/data/segments/1", 10)
+
+	diff := &schemaBumpPhysicalDiff{
+		existingFields: map[int64]struct{}{
+			common.RowIDField:     {},
+			common.TimeStampField: {},
+			100:                   {},
+			101:                   {},
+		},
+		absentOrdinaryFields: []*schemapb.FieldSchema{typeutil.GetField(s.task.plan.GetSchema(), ordinaryFieldID)},
+	}
+	reader := &emptyRecordReader{}
+	readerPatch := mockey.Mock((*bumpSchemaVersionCompactionTask).openRecordReader).Return(reader, diff.existingFields, nil).Build()
+	defer readerPatch.UnPatch()
+
+	writer := &cleanupTrackingBatchWriter{}
+	writerPatch := mockey.Mock((*bumpSchemaVersionCompactionTask).setupWriter).Return(
+		&bumpSchemaVersionWriterResult{
+			writer: writer,
+			columnGroups: []storagecommon.ColumnGroup{{
+				GroupID: ordinaryFieldID,
+				Columns: []int{0},
+				Fields:  []int64{ordinaryFieldID},
+			}},
+			storageVersion: storage.StorageV3,
+			basePath:       "/data/segments/1",
+			baseVersion:    10,
+		}, nil,
+	).Build()
+	defer writerPatch.UnPatch()
+
+	_, err := s.task.runAdditivePhysicalReconciliation(context.Background(), diff)
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "observed zero rows")
+	s.Empty(writer.writeRows)
+	s.Zero(writer.closeCount)
+	s.Equal(1, writer.abortCount)
+}
+
 func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteRequiresPreallocatedSegmentID() {
 	s.task.plan.PreAllocatedSegmentIDs = nil
 	_, err := s.task.fullRewriteSegmentID()
@@ -1007,25 +1572,11 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAppendBM25StatsFromArrowArray
 	s.ErrorContains(err, "arrow binary array")
 }
 
-func (s *BumpSchemaVersionCompactionTaskSuite) TestPreserveDeltaLogsV3CountMismatch() {
-	patch := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return([]string{"delta-1", "delta-2"}, nil).Build()
-	defer patch.UnPatch()
-
-	manifestPath, err := s.task.preserveDeltaLogsV3(&datapb.CompactionSegmentBinlogs{
-		Manifest: "old-manifest",
-		Deltalogs: []*datapb.FieldBinlog{
-			{Binlogs: []*datapb.Binlog{{LogID: 1, EntriesNum: 10}}},
-		},
-	}, packed.MarshalManifestPath("/data/segments/1", 10))
-
-	s.Empty(manifestPath)
-	s.ErrorContains(err, "V3 delta manifest path count 2 does not match segment delta summary count 1")
-}
-
 func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionWithoutFunctions() {
 	s.prepareBumpSchemaVersionCompaction()
 
 	s.task.plan.Schema.Functions = []*schemapb.FunctionSchema{}
+	s.task.plan.Schema.Fields = s.task.plan.Schema.Fields[:4]
 	result, err := s.task.Compact()
 	s.NoError(err)
 	s.NotNil(result)
@@ -1044,24 +1595,46 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionIn
 	}}
 
 	_, err := s.task.Compact()
-	s.Error(err)
-	s.Contains(err.Error(), "input field data type must be varchar")
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "must be VarChar for schema-bump materialization")
+}
+
+// Schema-bump materialization reads persisted inputs, and a sealed StorageV3
+// Text column comes back as encoded LOB references that the runner cannot
+// decode, so the compaction-side contract admits only VarChar inputs even
+// though collection-creation validation admits Text.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestValidateMaterializationInputFieldRejectsTextInput() {
+	textField := &schemapb.FieldSchema{FieldID: 101, Name: "content", DataType: schemapb.DataType_Text}
+	for _, functionType := range []schemapb.FunctionType{schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash} {
+		err := validateMaterializationInputField(&schemapb.FunctionSchema{Name: "f", Type: functionType}, textField)
+		s.Require().Error(err, functionType.String())
+		s.ErrorIs(err, merr.ErrDataIntegrity)
+		s.ErrorContains(err, "must be VarChar for schema-bump materialization")
+	}
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionInvalidOutputField() {
 	s.prepareBumpSchemaVersionCompaction()
 
-	// Test with wrong output field type (VarChar instead of SparseFloatVector)
+	// Test with a missing output whose persisted field has the wrong type.
 	s.task.plan.Schema.Functions = []*schemapb.FunctionSchema{{
 		Name:           "BM25",
 		Type:           schemapb.FunctionType_BM25,
 		InputFieldIds:  []int64{101},
-		OutputFieldIds: []int64{101, 102},
+		OutputFieldIds: []int64{104},
 	}}
+	// The fixture's field 102 is no longer produced by any function; unmark it
+	// so this test exercises output-type validation, not orphan detection.
+	typeutil.GetField(s.task.plan.GetSchema(), 102).IsFunctionOutput = false
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID: 104, Name: "bad_output", DataType: schemapb.DataType_VarChar, IsFunctionOutput: true,
+	})
 
 	_, err := s.task.Compact()
-	s.Error(err)
-	s.Contains(err.Error(), "output field data type must be sparse float vector")
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "must be SparseFloatVector")
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestValidateSupportedMissingFunctionMaterializationAllowsMultipleInputFields() {
@@ -1121,8 +1694,9 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionMi
 	}}
 
 	_, err := s.task.Compact()
-	s.Error(err)
-	s.Contains(err.Error(), "output field not found in schema")
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "output field 114 not found in persisted schema")
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionInputFieldNotFound() {
@@ -1137,8 +1711,9 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionIn
 	}}
 
 	_, err := s.task.Compact()
-	s.Error(err)
-	s.Contains(err.Error(), "input field not found in schema")
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "input field 999 not found in persisted schema")
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionOutputFieldNotFound() {
@@ -1151,10 +1726,14 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionOu
 		InputFieldIds:  []int64{101},
 		OutputFieldIds: []int64{999}, // Non-existent field ID
 	}}
+	// Field 102 is no longer produced by any function; unmark it so this test
+	// exercises the output-not-found path, not orphan detection.
+	typeutil.GetField(s.task.plan.GetSchema(), 102).IsFunctionOutput = false
 
 	_, err := s.task.Compact()
-	s.Error(err)
-	s.Contains(err.Error(), "output field not found in schema")
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "output field 999 not found in persisted schema")
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionUnsupportedFunctionType() {
@@ -1169,8 +1748,9 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionUn
 	}}
 
 	_, err := s.task.Compact()
-	s.Error(err)
-	s.Contains(err.Error(), "unsupported function type")
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "unsupported materialization type")
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionEmptySegmentBinlogs() {
@@ -1309,6 +1889,130 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildNewInsertLogsV3ReturnsOn
 	s.EqualValues(1000, newInsert[0].GetBinlogs()[0].GetEntriesNum())
 }
 
+func (s *BumpSchemaVersionCompactionTaskSuite) TestSchemaBumpPhysicalDiffIncludesOrdinaryAndFunctionOutputFields() {
+	s.setupTest()
+	const ordinaryFieldID = int64(103)
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID:  ordinaryFieldID,
+		Name:     "added",
+		DataType: schemapb.DataType_Int64,
+		Nullable: true,
+	})
+	existingFields := map[int64]struct{}{
+		common.RowIDField:     {},
+		common.TimeStampField: {},
+		100:                   {},
+		101:                   {},
+	}
+	manifestPatch := mockey.Mock(packed.GetManifestFieldIDs).Return(existingFields, nil).Build()
+	defer manifestPatch.UnPatch()
+
+	diff, err := s.task.schemaBumpDecision()
+	s.Require().NoError(err)
+	s.Empty(diff.droppedFieldIDs)
+	s.Require().Len(diff.absentOrdinaryFields, 1)
+	s.EqualValues(ordinaryFieldID, diff.absentOrdinaryFields[0].GetFieldID())
+	s.Require().Len(diff.missingOutputFields, 1)
+	s.EqualValues(102, diff.missingOutputFields[0].GetFieldID())
+	s.Require().Len(diff.missingFunctions, 1)
+	s.Equal(existingFields, diff.existingFields)
+
+	appended := diff.appendedFields()
+	s.Require().Len(appended, 2)
+	s.EqualValues(ordinaryFieldID, appended[0].GetFieldID())
+	s.EqualValues(102, appended[1].GetFieldID())
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestSchemaBumpPhysicalDiffSkipsPresentOutputWhenOrdinaryFieldIsAbsent() {
+	s.setupTest()
+	const ordinaryFieldID = int64(103)
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID: ordinaryFieldID, Name: "added", DataType: schemapb.DataType_Int64, Nullable: true,
+	})
+	existingFields := map[int64]struct{}{
+		common.RowIDField: {}, common.TimeStampField: {}, 100: {}, 101: {}, 102: {},
+	}
+	manifestPatch := mockey.Mock(packed.GetManifestFieldIDs).Return(existingFields, nil).Build()
+	defer manifestPatch.UnPatch()
+
+	diff, err := s.task.schemaBumpDecision()
+	s.Require().NoError(err)
+	s.Require().Len(diff.absentOrdinaryFields, 1)
+	s.EqualValues(ordinaryFieldID, diff.absentOrdinaryFields[0].GetFieldID())
+	s.Empty(diff.missingOutputFields)
+	s.Empty(diff.missingFunctions)
+	s.Equal([]int64{ordinaryFieldID}, lo.Map(diff.appendedFields(), func(field *schemapb.FieldSchema, _ int) int64 {
+		return field.GetFieldID()
+	}))
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReadSchemaAnchorPlusReaderFilledAbsents() {
+	s.setupTest()
+	var absentInput *schemapb.FieldSchema
+	for _, field := range s.task.plan.GetSchema().GetFields() {
+		if field.GetFieldID() == 101 {
+			absentInput = field
+		}
+	}
+	s.Require().NotNil(absentInput)
+	diff := &schemaBumpPhysicalDiff{
+		existingFields: map[int64]struct{}{
+			common.RowIDField:     {},
+			common.TimeStampField: {},
+			100:                   {},
+			// Function input 101 is intentionally absent.
+		},
+		missingFunctions:     s.task.plan.GetSchema().GetFunctions(),
+		absentOrdinaryFields: []*schemapb.FieldSchema{absentInput},
+	}
+
+	readSchema, logicalInputFieldIDs, err := s.task.additiveReadSchema(diff)
+	s.Require().NoError(err)
+	s.Equal([]int64{101}, logicalInputFieldIDs)
+	// The physical anchor is read as-is; the absent ordinary input stays in the
+	// read schema so the reader fills it (default/null) for function execution.
+	s.ElementsMatch([]int64{common.RowIDField, 101}, lo.Map(readSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 {
+		return field.GetFieldID()
+	}))
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReadSchemaRejectsMissingSystemAnchor() {
+	s.setupTest()
+	_, _, err := s.task.additiveReadSchema(&schemaBumpPhysicalDiff{
+		existingFields: map[int64]struct{}{100: {}},
+	})
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "physical RowID or Timestamp anchor")
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestSchemaContainsTextField() {
+	s.False(schemaContainsTextField(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, DataType: schemapb.DataType_Int64},
+	}}))
+	s.True(schemaContainsTextField(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 101, DataType: schemapb.DataType_Text},
+	}}))
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestSchemaBumpPhysicalDiffRejectsOrphanFunctionOutput() {
+	s.setupTest()
+	s.task.plan.Schema.Functions = nil
+	existingFields := map[int64]struct{}{
+		common.RowIDField:     {},
+		common.TimeStampField: {},
+		100:                   {},
+		101:                   {},
+	}
+	manifestPatch := mockey.Mock(packed.GetManifestFieldIDs).Return(existingFields, nil).Build()
+	defer manifestPatch.UnPatch()
+
+	_, err := s.task.schemaBumpDecision()
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "has no producing function")
+}
+
 // TestMaterializationStatsDeltaIgnoresPlanArrays is the regression test for
 // issue #51729: the increment must be identical whether or not the plan
 // carries the input segment's FieldBinlog arrays. After #50410 a recovered
@@ -1333,7 +2037,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestMaterializationStatsDeltaIgno
 	s.EqualValues(0, got.GetDeltaBinlogSize())
 }
 
-func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionOutputFieldsSelectsAllOutputsOnPartialState() {
+func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionMaterializationsRejectsPartialState() {
 	s.setupTest()
 	schema := schemaBumpMultiOutputBM25Schema()
 	s.task.plan.Schema = schema
@@ -1345,29 +2049,10 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionOutputFieldsSe
 		102:                   {},
 	}
 
-	outputFields, outputFieldIDs, err := s.task.missingFunctionOutputFields(schema.GetFunctions(), existingFields)
-	s.NoError(err)
-
-	s.Equal([]int64{102, 103}, outputFieldIDs)
-	s.Require().Len(outputFields, 2)
-	s.Equal(int64(102), outputFields[0].GetFieldID())
-	s.Equal(int64(103), outputFields[1].GetFieldID())
-}
-
-func (s *BumpSchemaVersionCompactionTaskSuite) TestPartialMaterializerExistingFieldsTreatsAllFunctionOutputsAsMissing() {
-	schema := schemaBumpMultiOutputBM25Schema()
-	existingFields := map[int64]struct{}{
-		common.RowIDField:     {},
-		common.TimeStampField: {},
-		100:                   {},
-		101:                   {},
-		102:                   {},
-	}
-
-	materializerFields := partialMaterializerExistingFields(schema, schema.GetFunctions(), existingFields)
-
-	s.NotContains(materializerFields, int64(102))
-	s.NotContains(materializerFields, int64(103))
+	_, _, err := missingFunctionMaterializations(schema, existingFields)
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "partially materialized output fields")
 }
 
 // Existing BM25 fixtures expose one output; these tests need a partial multi-output state.
@@ -1419,11 +2104,9 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestGetStorageConfig() {
 func (s *BumpSchemaVersionCompactionTaskSuite) TestMaterializationRejectsDroppedFields() {
 	s.setupTest()
 
-	_, err := s.task.runMissingFunctionMaterialization(
+	_, err := s.task.runAdditivePhysicalReconciliation(
 		context.Background(),
-		nil,
-		[]int64{101},
-		map[int64]struct{}{},
+		&schemaBumpPhysicalDiff{droppedFieldIDs: []int64{101}},
 	)
 	s.Error(err)
 	s.ErrorIs(err, merr.ErrServiceInternal)
@@ -1476,4 +2159,29 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionInputSchemaByF
 	s.ErrorIs(err, merr.ErrDataIntegrity)
 	s.ErrorContains(err, "references by_field lang of type")
 	s.ErrorContains(err, "only VarChar is allowed")
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionInputSchemaIncludesMultiAnalyzerByField() {
+	functionSchema := &schemapb.FunctionSchema{
+		Name: "BM25", Type: schemapb.FunctionType_BM25,
+		InputFieldIds: []int64{101}, OutputFieldIds: []int64{102},
+	}
+	s.task.plan.Schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.EnableAnalyzerKey, Value: "true"},
+				{Key: "multi_analyzer_params", Value: `{"by_field":"lang"}`},
+			}},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+			{FieldID: 103, Name: "lang", DataType: schemapb.DataType_VarChar, Nullable: true},
+		},
+		Functions: []*schemapb.FunctionSchema{functionSchema},
+	}
+
+	inputSchema, fieldIDs, err := s.task.missingFunctionInputSchema([]*schemapb.FunctionSchema{functionSchema})
+	s.Require().NoError(err)
+	s.Equal([]int64{101, 103}, fieldIDs)
+	s.Equal([]int64{101, 103}, lo.Map(inputSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 {
+		return field.GetFieldID()
+	}))
 }
