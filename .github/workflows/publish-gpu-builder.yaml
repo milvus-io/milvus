@@ -40,7 +40,7 @@ jobs:
       OS: ubuntu22.04
     steps:
       - name: Maximize build space
-        uses: easimon/maximize-build-space@master
+        uses: easimon/maximize-build-space@c28619d8999a147d5e09c1199f84ff6af6ad5794 # master
         with:
           root-reserve-mb: 10240
           overprovision-lvm: 'true'
