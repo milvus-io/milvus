@@ -267,6 +267,10 @@ FileWriter::WriteInternal(const void* data, size_t nbyte) {
 
 void
 FileWriter::Write(const void* data, size_t nbyte) {
+    // a failed write closes the file and frees the aligned buffer, so refuse to
+    // keep going instead of memcpy'ing into the freed buffer below
+    AssertInfo(fd_ != -1, "File is not open: {}", filename_);
+
     // if the data can fit in the aligned buffer, we can just copy it to the aligned buffer
     if (nbyte <= capacity_ - offset_) {
         const char* src = static_cast<const char*>(data);
@@ -283,7 +287,10 @@ FileWriter::Write(const void* data, size_t nbyte) {
 
     auto promise = std::make_shared<folly::Promise<folly::Unit>>();
     auto future = promise->getFuture();
-    auto task = [this, data, nbyte, promise]() {
+    // the queued task has to be the only owner of the promise: if it is
+    // discarded before it runs, destroying it is what publishes BrokenPromise
+    // and wakes the wait below, so no owner may be left on this side
+    auto task = [this, data, nbyte, promise = std::move(promise)]() {
         try {
             WriteInternal(data, nbyte);
             promise->setValue(folly::Unit{});
@@ -295,15 +302,24 @@ FileWriter::Write(const void* data, size_t nbyte) {
 
     // try to add the task to the writer pool
     // fallback to write the data directly if the task cannot be added to the pool
-    if (FileWriteWorkerPool::GetInstance().AddTask(task)) {
-        try {
-            future.wait();
-        } catch (const std::exception& e) {
-            Cleanup();
-            ThrowInfo(ErrorCode::FileWriteFailed,
-                      "Failed to write to file: {}, error: {}",
-                      filename_,
-                      e.what());
+    if (FileWriteWorkerPool::GetInstance().AddTask(std::move(task))) {
+        // folly's Future::wait() only blocks until the future is ready, it does
+        // not rethrow the stored exception, so the result has to be taken out
+        // explicitly. Otherwise a failed write is reported as a success.
+        auto result = std::move(future).getTry();
+        if (result.hasException()) {
+            if (result.exception().is_compatible_with<folly::BrokenPromise>()) {
+                // the task was destroyed before it ran, so nothing was written
+                // and the writer is untouched: do the write on this thread
+                WriteInternal(data, nbyte);
+            } else {
+                auto reason = result.exception().what().toStdString();
+                Cleanup();
+                ThrowInfo(ErrorCode::FileWriteFailed,
+                          "Failed to write to file: {}, error: {}",
+                          filename_,
+                          reason);
+            }
         }
     } else {
         WriteInternal(data, nbyte);
@@ -342,11 +358,16 @@ FileWriter::FlushWithBufferedIO() {
 
 size_t
 FileWriter::Finish() {
+    // an earlier failure closed the file and freed the aligned buffer while
+    // leaving offset_ alone, so finalizing here would either memset the freed
+    // buffer or report a stale file_size_ as a successful finalization
+    AssertInfo(fd_ != -1, "File is not open: {}", filename_);
+
     // if the aligned buffer is not empty, we should flush it to the file
     if (offset_ != 0) {
         auto promise = std::make_shared<folly::Promise<folly::Unit>>();
         auto future = promise->getFuture();
-        auto task = [this, promise]() {
+        auto task = [this, promise = std::move(promise)]() {
             try {
                 if (use_direct_io_) {
                     FlushWithDirectIO();
@@ -360,15 +381,26 @@ FileWriter::Finish() {
             }
         };
 
-        if (FileWriteWorkerPool::GetInstance().AddTask(task)) {
-            try {
-                future.wait();
-            } catch (const std::exception& e) {
-                Cleanup();
-                ThrowInfo(ErrorCode::FileWriteFailed,
-                          "Failed to flush file: {}, error: {}",
-                          filename_,
-                          e.what());
+        if (FileWriteWorkerPool::GetInstance().AddTask(std::move(task))) {
+            // see the notes in Write(): wait() never rethrows, and a broken
+            // promise means the task never ran
+            auto result = std::move(future).getTry();
+            if (result.hasException()) {
+                if (result.exception()
+                        .is_compatible_with<folly::BrokenPromise>()) {
+                    if (use_direct_io_) {
+                        FlushWithDirectIO();
+                    } else {
+                        FlushWithBufferedIO();
+                    }
+                } else {
+                    auto reason = result.exception().what().toStdString();
+                    Cleanup();
+                    ThrowInfo(ErrorCode::FileWriteFailed,
+                              "Failed to flush file: {}, error: {}",
+                              filename_,
+                              reason);
+                }
             }
         } else {
             if (use_direct_io_) {
