@@ -10,13 +10,16 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <roaring/roaring.hh>
 #include <simdjson.h>
 
 #include <algorithm>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "common/Consts.h"
 #include "common/FieldData.h"
 #include "common/Json.h"
 #include "common/JsonCastType.h"
@@ -99,7 +102,138 @@ TEST(JsonPathIndexTest, ConvertDouble_NormalExtraction) {
     for (int i = 0; i < 3; i++) {
         EXPECT_TRUE(fd->is_valid(i));
     }
-    EXPECT_TRUE(result.non_exist_offsets.empty());
+    EXPECT_TRUE(result.non_exist_offsets.isEmpty());
+}
+
+TEST(JsonPathIndexTest, DenseMissingRowsUseCompactRoaringStorage) {
+    constexpr size_t kRowCount = 100000;
+    std::vector<std::string> raw;
+    raw.reserve(kRowCount);
+    for (size_t row = 0; row < kRowCount; ++row) {
+        raw.push_back(row % 100 == 0 ? R"({"a": 1.0})" : R"({"b": 1.0})");
+    }
+
+    auto result = ConvertJsonToTypedFieldData<double>(
+        {MakeJsonFieldData(raw)},
+        MakeJsonSchema(),
+        "/a",
+        JsonCastType::FromString("DOUBLE"),
+        JsonCastFunction::FromString("unknown"));
+
+    EXPECT_EQ(result.non_exist_offsets.cardinality(), 99000);
+    EXPECT_LT(RoaringMemoryBytes(result.non_exist_offsets), kRowCount / 4);
+}
+
+TEST(JsonPathIndexTest, SortExistsKeepsDenseExistsBitmap) {
+    constexpr size_t kRowCount = 100000;
+    std::vector<std::string> raw;
+    raw.reserve(kRowCount);
+    for (size_t row = 0; row < kRowCount; ++row) {
+        raw.push_back(row % 100 == 0 ? R"({"a": 1.0})" : R"({"b": 1.0})");
+    }
+
+    const auto cast_type = JsonCastType::FromString("DOUBLE");
+    const auto cast_function = JsonCastFunction::FromString("unknown");
+    auto typed = ConvertJsonToTypedFieldData<double>({MakeJsonFieldData(raw)},
+                                                     MakeJsonSchema(),
+                                                     "/a",
+                                                     cast_type,
+                                                     cast_function);
+    ScalarIndexSort<double> base_index(
+        MakeJsonCastContext(MakeTestContext(), cast_type));
+    base_index.BuildWithFieldData({typed.field_data});
+
+    JsonScalarIndexWrapper<double, ScalarIndexSort<double>> index(
+        cast_type, "/a", cast_function, MakeJsonSchema(), MakeTestContext());
+    index.BuildWithFieldData({MakeJsonFieldData(raw)});
+
+    const auto bytes_before_exists = index.ByteSize();
+    const auto expected_exists_bytes =
+        TargetBitmap(kRowCount, true).size_in_bytes();
+    EXPECT_EQ(bytes_before_exists,
+              base_index.ByteSize() +
+                  RoaringMemoryBytes(typed.non_exist_offsets) +
+                  expected_exists_bytes);
+
+    auto first_exists = index.Exists();
+    auto second_exists = index.Exists();
+
+    EXPECT_EQ(first_exists.count(), kRowCount / 100);
+    ASSERT_EQ(second_exists.size(), first_exists.size());
+    for (size_t row = 0; row < first_exists.size(); ++row) {
+        EXPECT_EQ(second_exists[row], first_exists[row]) << "row=" << row;
+    }
+    EXPECT_EQ(index.ByteSize(), bytes_before_exists);
+}
+
+TEST(JsonPathIndexTest, LoadResourceIncludesResidentRoaringRowMasks) {
+    constexpr int64_t kRowCount = 65536;
+    constexpr uint64_t kIndexSize = 1024;
+    constexpr uint64_t kOneMaskBudget = kRowCount / 4;
+
+    std::map<std::string, std::string> plain_params{
+        {INDEX_TYPE, INVERTED_INDEX_TYPE},
+        {SCALAR_INDEX_ENGINE_VERSION, "3"},
+    };
+    auto plain = IndexFactory::GetInstance().ScalarIndexLoadResource(
+        DataType::INT64, 0, kIndexSize, plain_params, true, kRowCount);
+    EXPECT_EQ(plain.final_memory_cost, kOneMaskBudget);
+
+    std::map<std::string, std::string> json_params{
+        {INDEX_TYPE, INVERTED_INDEX_TYPE},
+        {SCALAR_INDEX_ENGINE_VERSION, "3"},
+        {JSON_PATH, "/a"},
+        {JSON_CAST_TYPE, "DOUBLE"},
+    };
+    auto json = IndexFactory::GetInstance().ScalarIndexLoadResource(
+        DataType::JSON, 0, kIndexSize, json_params, true, kRowCount);
+    EXPECT_EQ(json.final_memory_cost, 2 * kOneMaskBudget + kRowCount / 8);
+}
+
+TEST(JsonPathIndexTest, LoadResourceSkipsRowMaskForNonNullableScalarField) {
+    constexpr int64_t kRowCount = 65536;
+    constexpr uint64_t kIndexSize = 1024;
+    constexpr uint64_t kOneMaskBudget = kRowCount / 4;
+
+    std::map<std::string, std::string> params{
+        {INDEX_TYPE, INVERTED_INDEX_TYPE},
+        {SCALAR_INDEX_ENGINE_VERSION, "3"},
+    };
+    auto non_nullable = IndexFactory::GetInstance().ScalarIndexLoadResource(
+        DataType::INT64, 0, kIndexSize, params, true, kRowCount, false);
+    auto nullable = IndexFactory::GetInstance().ScalarIndexLoadResource(
+        DataType::INT64, 0, kIndexSize, params, true, kRowCount, true);
+
+    EXPECT_EQ(non_nullable.final_memory_cost, 0);
+    EXPECT_EQ(nullable.final_memory_cost, kOneMaskBudget);
+}
+
+TEST(JsonPathIndexTest, LoadResourceCoversSparseRoaringRowMask) {
+    constexpr int64_t kRowCount = 8192;
+
+    roaring::Roaring sparse_offsets;
+    for (uint32_t row = 0; row < kRowCount; row += 2) {
+        sparse_offsets.add(row);
+    }
+    sparse_offsets.runOptimize();
+    sparse_offsets.shrinkToFit();
+
+    std::map<std::string, std::string> params{
+        {INDEX_TYPE, INVERTED_INDEX_TYPE},
+        {SCALAR_INDEX_ENGINE_VERSION, "3"},
+    };
+    auto request = IndexFactory::GetInstance().ScalarIndexLoadResource(
+        DataType::INT64,
+        0,
+        0,
+        params,
+        true,
+        kRowCount,
+        /*field_nullable=*/true);
+    const auto actual_mask_bytes = RoaringMemoryBytes(sparse_offsets);
+
+    EXPECT_GE(request.final_memory_cost, actual_mask_bytes);
+    EXPECT_GE(request.max_memory_cost, actual_mask_bytes);
 }
 
 TEST(JsonPathIndexTest, ConvertDouble_PathNotExist) {
@@ -123,9 +257,9 @@ TEST(JsonPathIndexTest, ConvertDouble_PathNotExist) {
     EXPECT_FALSE(fd->is_valid(2));  // path not exist
 
     // non_exist_offsets should contain 0 and 2
-    ASSERT_EQ(result.non_exist_offsets.size(), 2);
-    EXPECT_EQ(result.non_exist_offsets[0], 0);
-    EXPECT_EQ(result.non_exist_offsets[1], 2);
+    ASSERT_EQ(result.non_exist_offsets.cardinality(), 2);
+    EXPECT_TRUE(result.non_exist_offsets.contains(0));
+    EXPECT_TRUE(result.non_exist_offsets.contains(2));
 }
 
 TEST(JsonPathIndexTest, ConvertDouble_PathExistsButCastFails) {
@@ -151,7 +285,7 @@ TEST(JsonPathIndexTest, ConvertDouble_PathExistsButCastFails) {
     EXPECT_FALSE(fd->is_valid(3));  // cast fail
 
     // Key: non_exist_offsets should be EMPTY because path exists in all rows
-    EXPECT_TRUE(result.non_exist_offsets.empty());
+    EXPECT_TRUE(result.non_exist_offsets.isEmpty());
 }
 
 TEST(JsonPathIndexTest, ConvertDouble_MixedRows) {
@@ -180,9 +314,9 @@ TEST(JsonPathIndexTest, ConvertDouble_MixedRows) {
 
     // non_exist: only 1 and 4 (path truly missing)
     // offset 2 is NOT in non_exist (path exists but cast fails)
-    ASSERT_EQ(result.non_exist_offsets.size(), 2);
-    EXPECT_EQ(result.non_exist_offsets[0], 1);
-    EXPECT_EQ(result.non_exist_offsets[1], 4);
+    ASSERT_EQ(result.non_exist_offsets.cardinality(), 2);
+    EXPECT_TRUE(result.non_exist_offsets.contains(1));
+    EXPECT_TRUE(result.non_exist_offsets.contains(4));
 }
 
 TEST(JsonPathIndexTest, ConvertVarchar) {
@@ -205,8 +339,8 @@ TEST(JsonPathIndexTest, ConvertVarchar) {
     EXPECT_TRUE(fd->is_valid(1));
     EXPECT_FALSE(fd->is_valid(2));
 
-    ASSERT_EQ(result.non_exist_offsets.size(), 1);
-    EXPECT_EQ(result.non_exist_offsets[0], 2);
+    ASSERT_EQ(result.non_exist_offsets.cardinality(), 1);
+    EXPECT_TRUE(result.non_exist_offsets.contains(2));
 }
 
 // ============================================================
