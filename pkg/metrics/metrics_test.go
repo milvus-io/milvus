@@ -17,6 +17,9 @@
 package metrics
 
 import (
+	"os"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -283,25 +286,40 @@ func proxyCollectionCollectors() []prometheus.Collector {
 	}
 }
 
+// observeProxyCollection emits the label combinations the proxy actually uses
+// (internal/proxy/impl.go), including the ones the pre-#52690 enumeration did
+// not cover. The deprecated per-collection metrics are emitted for search,
+// hybrid_search, query and upsert_query / delete and upsert; the byte/scanned
+// counters for every msg_type including hybrid_search. Observing a single
+// combination per metric cannot catch a stale cleanup enumeration, so this
+// deliberately mirrors the full emitted space.
 func observeProxyCollection(nodeID, db, collection string) {
 	ProxyReceivedNQ.WithLabelValues(nodeID, SearchLabel, db, collection).Add(1)
+	ProxyReceivedNQ.WithLabelValues(nodeID, QueryLabel, db, collection).Add(1)
 	ProxySearchVectors.WithLabelValues(nodeID, db, collection).Add(1)
 	ProxyInsertVectors.WithLabelValues(nodeID, db, collection).Add(1)
 	ProxyUpsertVectors.WithLabelValues(nodeID, db, collection).Add(1)
 	ProxyDeleteVectors.WithLabelValues(nodeID, db, collection).Add(1)
 	ProxySQLatency.WithLabelValues(nodeID, SearchLabel, db, collection).Observe(1)
+	ProxySQLatency.WithLabelValues(nodeID, HybridSearchLabel, db, collection).Observe(1)
 	ProxyCollectionSQLatency.WithLabelValues(nodeID, SearchLabel, db, collection).Observe(1)
+	ProxyCollectionSQLatency.WithLabelValues(nodeID, HybridSearchLabel, db, collection).Observe(1)
 	ProxyMutationLatency.WithLabelValues(nodeID, DeleteLabel, db, collection).Observe(1)
+	ProxyMutationLatency.WithLabelValues(nodeID, UpsertLabel, db, collection).Observe(1)
 	ProxyCollectionMutationLatency.WithLabelValues(nodeID, DeleteLabel, db, collection).Observe(1)
+	ProxyCollectionMutationLatency.WithLabelValues(nodeID, UpsertLabel, db, collection).Observe(1)
 	ProxyFunctionCall.WithLabelValues(nodeID, "x", SuccessLabel, CauseNA, db, collection).Add(1)
 	ProxyReceiveBytes.WithLabelValues(nodeID, DeleteLabel, db, collection).Add(1)
+	ProxyReceiveBytes.WithLabelValues(nodeID, HybridSearchLabel, db, collection).Add(1)
 	ProxyRetrySearchCount.WithLabelValues(nodeID, SearchLabel, db, collection).Add(1)
 	ProxyRetrySearchResultInsufficientCount.WithLabelValues(nodeID, SearchLabel, db, collection).Add(1)
 	ProxyRecallSearchCount.WithLabelValues(nodeID, SearchLabel, db, collection).Add(1)
 	ProxySearchSparseNumNonZeros.WithLabelValues(nodeID, collection, SearchLabel, "1").Observe(1)
 	ProxyFunctionlatency.WithLabelValues(nodeID, collection, "x", "x", "x").Observe(1)
 	ProxyScannedRemoteMB.WithLabelValues(nodeID, DeleteLabel, db, collection).Add(1)
+	ProxyScannedRemoteMB.WithLabelValues(nodeID, HybridSearchLabel, db, collection).Add(1)
 	ProxyScannedTotalMB.WithLabelValues(nodeID, DeleteLabel, db, collection).Add(1)
+	ProxyScannedTotalMB.WithLabelValues(nodeID, HybridSearchLabel, db, collection).Add(1)
 }
 
 func leftoverCollectionSeries(t *testing.T, collectors []prometheus.Collector, label, value string) []string {
@@ -366,4 +384,81 @@ func TestCleanupProxyCollectionMetricsDropsEveryCollectionSeries(t *testing.T) {
 	assert.NotEmpty(t, leftoverCollectionSeries(t, proxyCollectionCollectors(), collectionName, other))
 
 	CleanupProxyCollectionMetrics(nodeID, db, other)
+}
+
+func TestCleanupProxyDBMetricsDropsEveryDBSeries(t *testing.T) {
+	nodeID := int64(7)
+	dbA := "metric_cleanup_dba"
+	dbB := "metric_cleanup_dbb"
+
+	observeProxyCollection("7", dbA, "coll_a")
+	observeProxyCollection("7", dbB, "coll_b")
+
+	before := leftoverCollectionSeries(t, proxyCollectionCollectors(), databaseLabelName, dbA)
+	assert.NotEmpty(t, before)
+
+	CleanupProxyDBMetrics(nodeID, dbA)
+
+	assert.Empty(t, leftoverCollectionSeries(t, proxyCollectionCollectors(), databaseLabelName, dbA))
+	assert.NotEmpty(t, leftoverCollectionSeries(t, proxyCollectionCollectors(), databaseLabelName, dbB))
+
+	CleanupProxyDBMetrics(nodeID, dbB)
+}
+
+// funcBody returns the body (including braces) of the first function with the
+// given name in src, scanning balanced braces so nested { } in Labels{} blocks
+// do not truncate it early.
+func funcBody(src, name string) string {
+	start := strings.Index(src, "func "+name)
+	if start < 0 {
+		return ""
+	}
+	brace := strings.Index(src[start:], "{")
+	if brace < 0 {
+		return ""
+	}
+	brace += start
+	depth := 0
+	for i := brace; i < len(src); i++ {
+		switch src[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return src[brace : i+1]
+			}
+		}
+	}
+	return src[brace:]
+}
+
+// TestProxyCollectionScopedMetricsAreCleanedOnCollectionAndDBDrop is the
+// structural regression guard for #52690 (and the #52682 failure mode): every
+// proxy metric Vec labeled with db_name + collection_name must be cleaned by
+// BOTH cleanup paths. A per-value enumeration that goes stale is caught by the
+// behaviour tests above; a metric that forgets to hook into cleanup at all is
+// only caught here. Both functions are parsed from proxy_metrics.go so the
+// check follows the declarations instead of duplicating the collector list.
+func TestProxyCollectionScopedMetricsAreCleanedOnCollectionAndDBDrop(t *testing.T) {
+	src, err := os.ReadFile("proxy_metrics.go")
+	assert.NoError(t, err)
+	text := string(src)
+
+	collectionBody := funcBody(text, "CleanupProxyCollectionMetrics")
+	dbBody := funcBody(text, "CleanupProxyDBMetrics")
+	assert.NotEmpty(t, collectionBody, "CleanupProxyCollectionMetrics not found in proxy_metrics.go")
+	assert.NotEmpty(t, dbBody, "CleanupProxyDBMetrics not found in proxy_metrics.go")
+
+	vecRe := regexp.MustCompile(`(?s)(\w+)\s*=\s*prometheus\.New\w+Vec\(.*?\[\]string\{([^}]*)\}`)
+	for _, m := range vecRe.FindAllStringSubmatch(text, -1) {
+		metricName, labels := m[1], m[2]
+		if !strings.Contains(labels, "databaseLabelName") || !strings.Contains(labels, "collectionName") {
+			continue // not collection-scoped (e.g. ProxySearchSparseNumNonZeros, ProxyFunctionlatency)
+		}
+		assert.Contains(t, collectionBody, metricName,
+			"collection-scoped metric %s must be cleaned on collection drop", metricName)
+		assert.Contains(t, dbBody, metricName,
+			"collection-scoped metric %s must be cleaned on db drop", metricName)
+	}
 }
