@@ -128,6 +128,7 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, wpCfg.AppendMaxRetries.GetAsInt(), 3)
 		assert.Equal(t, wpCfg.AppendMaxBatchEntries.GetAsInt(), 1000)
 		assert.Equal(t, wpCfg.AppendMaxBatchBytes.GetAsSize(), int64(2000000))
+		assert.Equal(t, wpCfg.MaxMessageSize.GetAsSize(), int64(10*1024*1024))
 		assert.Equal(t, wpCfg.SegmentRollingMaxSize.GetAsSize(), int64(256*1024*1024))
 		assert.Equal(t, wpCfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds(), float64(600))
 		assert.Equal(t, wpCfg.SegmentRollingMaxBlocks.GetAsInt64(), int64(1000))

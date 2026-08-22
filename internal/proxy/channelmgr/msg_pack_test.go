@@ -66,6 +66,8 @@ func TestGenInsertMsgsByPartitionUsesWALSpecificSingleRowLimit(t *testing.T) {
 	defer paramtable.Get().Reset(paramtable.Get().PulsarCfg.MaxMessageSize.Key)
 	assert.NoError(t, paramtable.Get().Save(paramtable.Get().KafkaCfg.ProducerMessageMaxBytes.Key, "2048"))
 	defer paramtable.Get().Reset(paramtable.Get().KafkaCfg.ProducerMessageMaxBytes.Key)
+	assert.NoError(t, paramtable.Get().Save(paramtable.Get().WoodpeckerCfg.MaxMessageSize.Key, "2048"))
+	defer paramtable.Get().Reset(paramtable.Get().WoodpeckerCfg.MaxMessageSize.Key)
 
 	t.Run("kafka allows row above pulsar split threshold", func(t *testing.T) {
 		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
@@ -81,14 +83,26 @@ func TestGenInsertMsgsByPartitionUsesWALSpecificSingleRowLimit(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	})
 
-	for _, walName := range []message.WALName{message.WALNameRocksmq, message.WALNameWoodpecker} {
-		t.Run(walName.String()+" has no single row limit", func(t *testing.T) {
-			insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
-			msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, walName)
-			assert.NoError(t, err)
-			assert.Len(t, msgs, 1)
-		})
-	}
+	t.Run("woodpecker allows row above pulsar split threshold", func(t *testing.T) {
+		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
+		msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNameWoodpecker)
+		assert.NoError(t, err)
+		assert.Len(t, msgs, 1)
+	})
+
+	t.Run("woodpecker rejects row at its own limit", func(t *testing.T) {
+		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 2048))
+		msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNameWoodpecker)
+		assert.Nil(t, msgs)
+		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	})
+
+	t.Run("rocksmq has no single row limit", func(t *testing.T) {
+		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
+		msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNameRocksmq)
+		assert.NoError(t, err)
+		assert.Len(t, msgs, 1)
+	})
 }
 
 func TestGenInsertMsgsByPartitionSplitsMultipleRows(t *testing.T) {
