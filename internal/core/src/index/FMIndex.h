@@ -43,8 +43,9 @@ constexpr const char* FMINDEX_META_NULLABLE = "nullable";
 
 // Scalar-index wrapper around the self-contained byte-exact FM-index library
 // (milvus::index::fmindex::FMIndex). It accelerates LIKE prefix/infix/suffix on
-// VARCHAR exactly (no recheck). General LIKE / regex / range fall back to the
-// raw-data scan (see ShouldUseOp).
+// VARCHAR exactly (no recheck). General LIKE (Match) returns rarest-fragment
+// candidates; ExecFMMatch rechecks those rows on the sealed VARCHAR column.
+// Regex / range / equality fall back to the raw-data scan (see ShouldUseOp).
 class FMIndex : public ScalarIndex<std::string> {
  public:
     using MemFileManager = storage::MemFileManagerImpl;
@@ -175,13 +176,12 @@ class FMIndex : public ScalarIndex<std::string> {
     // 1. Op ALLOWLIST with a false default: declining an op merely downgrades
     //    to the raw-data scan (correct, just slower), while wrongly accepting
     //    one routes it into a method that throws (Range() is Unsupported;
-    //    PatternMatch rejects Match/RegexMatch) and FAILS the query. So the
-    //    safe default for any op not explicitly supported — including future
-    //    enum additions — is false. The allowlist is exactly the three anchored
-    //    pattern ops (PrefixMatch/PostfixMatch/InnerMatch, the LIKE prefix/
-    //    infix/suffix forms), all answered exactly by the FM-index. The equality
-    //    family (Equal/NotEqual, IN/NOT IN) is deliberately NOT in the allowlist
-    //    — see the declines below.
+    //    PatternMatch rejects RegexMatch) and FAILS the query. So the
+    //    safe default for any op not explicitly supported, including future
+    //    enum additions, is false. The allowlist is the three anchored pattern
+    //    ops (PrefixMatch/PostfixMatch/InnerMatch, answered exactly) plus
+    //    general LIKE (Match, candidate plus recheck). The equality family
+    //    (Equal/NotEqual, IN/NOT IN) is deliberately NOT in the allowlist.
     //
     // 2. Count-first guard on the anchored pattern ops, when the caller
     //    passed the concrete literal: enumeration costs occ x sa_sample_rate
@@ -200,7 +200,8 @@ class FMIndex : public ScalarIndex<std::string> {
     //    An empty pattern means EITHER `LIKE '%'` (answered by an O(rows)
     //    bitmap clone, always accelerate) OR a caller without literal
     //    information — both accelerate, so no flag is needed to tell them
-    //    apart.
+    //    apart. Match uses the same locate-only bound: phase 2 rechecks
+    //    candidates on sealed VARCHAR bytes, not Extract.
     bool
     ShouldUseOp(proto::plan::OpType op,
                 const std::string& pattern = "") const override {
@@ -235,14 +236,16 @@ class FMIndex : public ScalarIndex<std::string> {
                            static_cast<double>(fm_.sa_sample_rate()) <
                        ratio * static_cast<double>(TotalTokens());
             }
+            case proto::plan::OpType::Match:
+                return MatchGuardAccepts(pattern);
             // Notable declines (fall back to the scan / another index):
-            // - Equal/NotEqual (and IN/NOT IN via TermExpr): FM equality
-            //   enumerates ALL prefix candidates of the value before the length
-            //   filter, which loses to a scan or an equality-oriented index —
-            //   FMINDEX is a substring index, not an equality index.
-            // - general LIKE (Match) / RegexMatch: not answered exactly in v1.
-            // - lexicographic range (GT/GE/LT/LE): needs forward navigation the
-            //   FM-index does not carry.
+            // Equal/NotEqual (and IN/NOT IN via TermExpr): FM equality
+            // enumerates ALL prefix candidates of the value before the length
+            // filter, which loses to a scan or an equality-oriented index.
+            // FMINDEX is a substring index, not an equality index.
+            // RegexMatch: required-literal extraction is a later follow-up.
+            // Lexicographic range (GT/GE/LT/LE): needs forward navigation the
+            // FM-index does not carry.
             default:
                 return false;
         }
@@ -275,6 +278,17 @@ class FMIndex : public ScalarIndex<std::string> {
     }
 
  private:
+    // Count-first guard for general LIKE (Match). Empty pattern (caller has no
+    // literal yet) stays on the allowlist. A pattern with no literal fragment
+    // (`%`, `%_%`) declines. Otherwise the rarest fragment is scored as
+    // occ x sa_sample_rate < ratio x tokens, the same locate-only bound as
+    // the anchored ops. Phase 2 reads candidate VARCHAR rows sequentially.
+    bool
+    MatchGuardAccepts(const std::string& pattern) const;
+
+    void
+    RefreshResidentSize();
+
     // Occurrence/document count for `pattern` under `op`, answered by backward
     // search ALONE — O(|pattern|), NO suffix-array locate. The guard's input:
     // Prefix/PostfixMatch return the exact matching-document count; InnerMatch

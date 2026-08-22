@@ -4,29 +4,25 @@
 - **Updated:** 2026-07-14 (v2 — scope expanded from `InnerMatch`-only to prefix /
   suffix / equality / general `LIKE` / regex; grounded in the completed core
   implementation and its benchmarks)
-- **Updated:** 2026-07-17 (v3 — this document describes the full FM-index design,
-  but the **shipped PR delivers only `VARCHAR` + the three anchored `LIKE` forms**
-  (prefix/infix/suffix). Equality (`==`/`!=`/`IN`/`NOT IN`), general `LIKE`,
-  regex, occurrence-count API, and `JSON`/`TEXT`/`ARRAY` are deliberate
-  follow-ups — declined at routing or rejected at index creation in this
-  release. See Goals for the delivered-vs-deferred split.)
+- **Updated:** 2026-08-21 (v6 — Match phase 2 rechecks sealed VARCHAR via
+  `ProcessDataByOffsets`. ISA is not materialized at load. Guard is locate-only.)
 - **Author(s):** @xiaofanluan
 - **Status:** Draft
 - **Component:** C++ Core (index, exec/expression), QueryNode, Go index-param-check,
   Storage V3 (LOB)
 - **Core implementation:** [`xiaofan-luan/fm-index-lite`](https://github.com/xiaofan-luan/fm-index-lite)
   (self-contained C++17, complete, benchmarked — this is PR 1 of the original plan)
-- **Related Issues:** TBD
+- **Related Issues:** #51577 (v1 anchored LIKE), #52683 (general Match)
 - **Released:** TBD
 
 ## Summary
 
 Introduce a new scalar index type, **`FMINDEX`**, for `VARCHAR` columns. This
-document describes the full FM-index design; **this PR delivers the first slice
-— VARCHAR columns and the three anchored `LIKE` forms (prefix/infix/suffix)**,
-with the rest of the string-predicate family (equality, general `LIKE`, regex,
-occurrence counting) and other data types (`TEXT`/`JSON`/`ARRAY`) called out
-below as deliberate follow-ups. The structure itself can serve the whole family:
+document describes the full FM-index design; **this PR delivers VARCHAR columns,
+the three anchored `LIKE` forms (prefix/infix/suffix), and general `Match`
+(interior `%`/`_`)**, with equality, regex, occurrence counting, and other data
+types (`TEXT`/`JSON`/`ARRAY`) called out below as deliberate follow-ups. The
+structure itself can serve the whole family:
 
 | predicate | today (no index / NGRAM) | with `FMINDEX` |
 |---|---|---|
@@ -185,6 +181,8 @@ sample rate are tracked follow-ups.
   or proto changes.
 - Cost-guarded execution: the index declines patterns where a scan is cheaper,
   using its own O(|P|) count (`queryNode.fmindexCostRatio`, default 0.001).
+- General `Match` (`LIKE` with interior `%`/`_`): rarest literal fragment
+  produces candidates; `ExecFMMatch` rechecks those rows on sealed VARCHAR.
 - Standard scalar-index lifecycle: per-sealed-segment build, V3 single-file
   serialization, mmap (zero-copy view), caching-layer pinning.
 - Growing segments and any op the index declines fall back to the existing
@@ -201,9 +199,9 @@ sample rate are tracked follow-ups.
   must route the equality family to RawData before either method is reached.
 - **`TEXT`, `JSON` string paths, `ARRAY<VARCHAR>`, struct sub-fields** — other
   data types. Rejected at `create_index` for now (VARCHAR-only checker).
-- **General `Match` (`LIKE` with interior `%`/`_`) and `RegexMatch`** two-phase
-  (candidate + recheck) acceleration — reuses the NGRAM machinery; designed
-  here but not wired in this PR (both stay on the brute-force path).
+- **`RegexMatch`** two-phase (required-literal extraction + recheck)
+  acceleration. Designed here but not wired (stays on the brute-force path).
+  Literal extraction is a harder problem than LIKE fragment splitting.
 - **Occurrence enumeration / count API** (`(pk, offset)` lists, batched
   scoring) surfaced as a user-facing decontamination primitive.
 
@@ -270,7 +268,7 @@ proto, or planner changes**:
 | `PostfixMatch` | `LocateSuffixDocs(P)` | **yes** | exact | none |
 | `InnerMatch` | `MatchingDocs(P)` | **yes** | exact | none |
 | `Equal` / `In` / `NotIn` | *(library can do `LocatePrefixDocs(P)` ∩ length filter, but…)* | **no** — `ShouldUseOp` declines the equality family; routed to scan / `INVERTED` | exact via fallback | n/a |
-| `Match` | literal-factor decomposition → per-factor anchored/infix bitmaps, AND in ascending-count order | **no** (follow-up) — brute-force path | — | — |
+| `Match` | rarest literal fragment `VisitMatchingDocs`; VARCHAR `LikePatternMatcher` recheck | **yes** | exact after recheck | yes, sealed VARCHAR |
 | `RegexMatch` | `extract_literals_from_regex` → per-literal `MatchingDocs`, AND | **no** (follow-up) — brute-force path | — | — |
 | `Range` (lexicographic) | — | **no** — `ShouldUseOp` = false → existing paths | — | n/a |
 
@@ -298,8 +296,8 @@ result.
 Tokenize the pattern with the same escape model as
 `planparserv2.scanLikePattern` / `translate_pattern_match_to_regex`
 (`\` escapes the next byte; unescaped `%`/`_` are wildcards) — the codebase
-already ships this as `split_by_wildcard` (used by
-`NgramInvertedIndex::CanHandleLiteral`); FMINDEX reuses it. The maximal runs
+already ships this as `split_by_wildcard` in `common/RegexQuery`
+(used by `NgramInvertedIndex::CanHandleLiteral`); FMINDEX reuses it. The maximal runs
 of literal bytes between wildcards are the **factors**. Anchoring: no leading
 wildcard → first factor is prefix-anchored; no trailing wildcard → last factor
 suffix-anchored; `_` counts as a wildcard for factor-splitting (its
@@ -308,17 +306,17 @@ handles UTF-8 character-vs-byte width).
 
 ```
 LIKE 'req-2026%GET%_500'
-  factors:  "req-2026" (prefix-anchored)   "GET" (infix)   "500" (suffix-anchored)
-  phase 1:  LocatePrefixDocs("req-2026") ∧ MatchingDocs("GET") ∧ LocateSuffixDocs("500")
-  phase 2:  RE2/LikePatternMatcher on surviving rows only
+  factors:  "req-2026"   "GET"   "500"
+  phase 1:  Count each factor; VisitMatchingDocs on the rarest one
+  phase 2:  LikePatternMatcher on those candidate rows only (sealed VARCHAR)
 ```
 
-Phase-1 evaluation order: `CountBatch` all factors first (one batched backward
-search, ~1 µs/factor), then AND bitmaps in ascending-count order with
-short-circuit — the most selective factor prunes first, and factors whose
-count already exceeds the guard threshold are skipped as non-pruning rather
-than enumerated. A pattern whose factors are all unusable (e.g. `LIKE '%_%'`)
-declines to the scan path.
+`ShouldUseOp` uses a count-first guard on the rarest factor
+(`MatchGuardAccepts`). Locate cost is `occ × sa_sample_rate`. Phase 2 streams
+those candidate VARCHAR rows sequentially, so the bound stays
+`occ × sa_sample_rate < ratio × tokens`, the same locate-only ratio as the
+anchored ops. A pattern with no usable factor (`LIKE '%'`, `LIKE '%_%'`)
+declines to the scan. ISA is not built at load; Match does not call `Extract`.
 
 *Deferred enhancement (measure first):* for `%`-only patterns (no `_`) the
 factor **order** constraint can be verified inside the index from
@@ -368,7 +366,7 @@ the library's `Count`/`CountPrefixDocs`/`CountSuffixDocs` (no suffix-array
 locate). The count-first guard lives INSIDE the single routing gate
 `ShouldUseOp(op, pattern)`: the executor's
 `PhyUnaryRangeFilterExpr::DetermineExecPath` passes the concrete literal for
-the anchored pattern ops, and FMINDEX's override runs the count and declines
+the anchored pattern ops and for general `Match`, and FMINDEX's override runs the count and declines
 when enumeration would lose to a scan (the expr downgrades to the RawData
 path — both paths are exact, the gate only picks the cheaper executor). An
 empty pattern means "no literal information" and is judged on the op alone:
@@ -481,11 +479,12 @@ All integration points verified against master (branch state of 2026-07-14).
     (`exec/expression/UnaryExpr.h:631-686`) then routes
     `PrefixMatch`/`PostfixMatch`/`InnerMatch`/`Match` automatically; the
     `RegexMatch` leg (`UnaryExpr.h:713-738`) likewise.
-  - `ShouldUseOp(op, pattern)`: `true` only for the three anchored pattern ops
-    (`PrefixMatch`/`PostfixMatch`/`InnerMatch`), gated by the count-first cost
-    guard when a literal is supplied; `false` (fall back to the scan / another
-    index) for **everything else, including the `Equal`/`NotEqual`/`IN`/`NOT IN`
-    equality family**, `Match`/`RegexMatch`, and `Range`. The default is `false`
+  - `ShouldUseOp(op, pattern)`: `true` for the three anchored pattern ops
+    (`PrefixMatch`/`PostfixMatch`/`InnerMatch`) and for general `Match`, gated
+    by the count-first cost guard when a literal is supplied (`Match` uses
+    `MatchGuardAccepts` on the rarest factor, locate-only); `false` (fall back to the scan /
+    another index) for **everything else, including the `Equal`/`NotEqual`/`IN`/`NOT IN`
+    equality family**, `RegexMatch`, and `Range`. The default is `false`
     so any unhandled op safely downgrades rather than routing into a method that
     throws.
   - `In`/`NotIn` are required `ScalarIndex` overrides, but the equality family is
@@ -495,12 +494,13 @@ All integration points verified against master (branch state of 2026-07-14).
   - The count-first guard is folded into `ShouldUseOp(op, pattern)` above — there
     is **no** separate `CanAccelerate` method; a future two-phase executor
     (PR 3) would consult it the way NGRAM consults `CanHandleLiteral`.
-  - `HasRawData() = false`; `Reverse_Lookup` unsupported (phase-2 verification
-    reads raw data through the segment, as NGRAM's does; `Extract` could serve
-    this later — Future Work).
-  - (PR 3, **not this PR**) two-phase entry points mirroring
-    `NgramInvertedIndex::ExecutePhase1/2` for `Match`/`RegexMatch` — not
-    implemented here; general `LIKE` / regex currently fall back to the scan.
+  - `HasRawData() = false`; `Reverse_Lookup` unsupported. General `Match`
+    returns candidates from `PatternMatch`. `ExecFMMatch` rechecks them with
+    `ProcessDataByOffsets<std::string_view>` and `LikePatternMatcher` on the
+    sealed VARCHAR column. ISA is not materialized at load/build.
+  - RegexMatch two-phase entry points mirroring
+    `NgramInvertedIndex::ExecutePhase1/2` are still not wired; regex stays on
+    the scan.
 - **Registration**: `ScalarIndexType::FMINDEX` (`ScalarIndex.h:39-49` +
   To/FromString), `FMINDEX_INDEX_TYPE = "FMINDEX"` (`Meta.h`), param key
   `fm_sa_sample_rate` (`Meta.h`), `std::optional<FMIndexParams>` in
@@ -513,12 +513,10 @@ All integration points verified against master (branch state of 2026-07-14).
 
 - Exact ops: **zero changes** — `SupportPatternMatch()`/`PatternMatch()`
   routing is already in place for any `ScalarIndex`.
-- `Match`/`RegexMatch` two-phase: generalize the NGRAM-specific plumbing
-  (`PhyLikeConjunctExpr`, `ExecuteNgramPhase1/2` hooks in `UnaryExpr.h:1089-1099`,
-  the `PinWrapper<NgramInvertedIndex*>` pin at `UnaryExpr.h:1177`) to a
-  candidate-generating-index interface both NGRAM and FMINDEX implement. The
-  phase-1-cached / phase-2-per-batch structure and its conjunction
-  optimization (`LikeConjunctExpr.cpp:61-101`) are reused as-is.
+- `Match` two-phase: `ExecFMMatch` mirrors `ExecNgramMatch`. Phase 1 caches
+  `PatternMatch` candidates. Phase 2 groups sorted candidate offsets by chunk
+  via `ProcessDataByOffsets` and runs `LikePatternMatcher` on the views.
+- `RegexMatch` two-phase remains a follow-up. Regex stays on the scan.
 
 ### Go layer (`internal/util/indexparamcheck/`)
 
@@ -540,11 +538,13 @@ All integration points verified against master (branch state of 2026-07-14).
   wavelet words, sampled bitmaps, sampled-SA values AND doc boundaries are all
   viewed in place (the samples through a narrow/wide-aware accessor, so the
   compact 4-byte on-disk form is served directly); the ISA table (Extract's
-  anchor) is built lazily on first `Extract`, which no Milvus query op calls.
+  anchor) stays lazy. Match does not Extract, so load does not call
+  `ensureIsaSample`. The library still builds ISA if Extract runs.
   What a load DOES rebuild in RAM is the rank directories, whose size is
   controlled by `fm_block_bytes` (at the default 64-byte block, roughly 1/8 of
-  the packed wavelet words), plus small derived metadata — so mmap-resident
-  memory is bounded by and in practice well under the blob size. The
+  the packed wavelet words), plus small derived metadata.
+  mmap-resident memory therefore excludes Extract storage until something
+  actually calls Extract. The
   load-resource estimator keeps the
   full blob as a conservative pre-load admission/peak bound; after `LoadView`
   succeeds the cache cell replaces `memory_bytes` with the measured resident
