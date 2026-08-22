@@ -892,7 +892,7 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 
 			// The type of the primary key field can only be int64, varchar and uuid
 			if field.DataType != schemapb.DataType_Int64 && field.DataType != schemapb.DataType_VarChar && field.DataType != schemapb.DataType_UUID {
-				return merr.WrapErrParameterInvalidMsg("the data type of primary key should be Int64, VarChar or UUID")
+				return merr.WrapErrParameterInvalidMsg("the data type of primary key should be Int64, VarChar, or UUID")
 			}
 
 			// varchar field do not support autoID
