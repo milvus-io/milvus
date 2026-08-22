@@ -31,7 +31,6 @@ default_dim = default_num_hashes * 32
 # ---- shared collection (T2): default-schema MinHash tests share one collection ----
 MINHASH_SHARED_COLLECTION = "test_minhash_shared_" + cf.gen_unique_str("_")
 MINHASH_SHARED_NB = default_nb
-_MINHASH_SHARED_ROWS = None
 
 
 def gen_text_data(nb, min_words=5, max_words=50):
@@ -1128,8 +1127,10 @@ class TestMilvusClientMinHashDefaultShared(TestMilvusClientV2Base):
 
     @pytest.fixture(scope="module", autouse=True)
     def prepare_minhash_shared_collection(self, request):
-        global _MINHASH_SHARED_ROWS
+        cls = self.__class__
         client = self._client()
+        # Reuse one client across the class instead of reconnecting per test.
+        cls.shared_client = client
         collection_name = MINHASH_SHARED_COLLECTION
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
@@ -1165,7 +1166,7 @@ class TestMilvusClientMinHashDefaultShared(TestMilvusClientV2Base):
             {default_primary_key_field_name: i, default_text_field_name: texts[i], "category": i % 5}
             for i in range(MINHASH_SHARED_NB)
         ]
-        _MINHASH_SHARED_ROWS = rows
+        cls.rows = rows
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
@@ -1186,8 +1187,8 @@ class TestMilvusClientMinHashDefaultShared(TestMilvusClientV2Base):
         method: search using text query with MHJACCARD metric
         expected: search returns results with valid distances
         """
-        client = self._client()
-        rows = _MINHASH_SHARED_ROWS
+        client = type(self).shared_client
+        rows = type(self).rows
 
         # search using text
         query_text = rows[0][default_text_field_name]
@@ -1217,8 +1218,8 @@ class TestMilvusClientMinHashDefaultShared(TestMilvusClientV2Base):
         method: search with filter expression
         expected: results satisfy filter condition
         """
-        client = self._client()
-        rows = _MINHASH_SHARED_ROWS
+        client = type(self).shared_client
+        rows = type(self).rows
 
         # search with filter
         query_text = rows[0][default_text_field_name]
@@ -1245,7 +1246,7 @@ class TestMilvusClientMinHashDefaultShared(TestMilvusClientV2Base):
         method: query shared collection by ID
         expected: query returns correct text and MinHash signature
         """
-        client = self._client()
+        client = type(self).shared_client
 
         # query by ID
         query_ids = [0, 1, 2]

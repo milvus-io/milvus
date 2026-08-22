@@ -48,7 +48,6 @@ GEOM_EMPTY_WKT_TYPES = [
 GEOM_SPATIAL_SHARED_COLLECTION_RTREE = "test_geom_spatial_shared_rtree_" + cf.gen_unique_str("_")
 GEOM_SPATIAL_SHARED_COLLECTION_NOINDEX = "test_geom_spatial_shared_noindex_" + cf.gen_unique_str("_")
 GEOM_SPATIAL_BASE_COUNT = 3000
-_GEOM_SPATIAL_BASE_DATA = None
 
 
 def generate_wkt_by_type(wkt_type: str, bounds: tuple = (0, 100, 0, 100), count: int = 10) -> list:
@@ -3076,7 +3075,10 @@ class TestMilvusClientGeometryInsertShared(TestMilvusClientV2Base):
 
     @pytest.fixture(scope="module", autouse=True)
     def prepare_geom_insert_collection(self, request):
+        cls = self.__class__
         client = self._client()
+        # Reuse one client across the class instead of reconnecting per test.
+        cls.shared_client = client
         collection_name = GEOM_INSERT_SHARED_COLLECTION
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
@@ -3090,6 +3092,10 @@ class TestMilvusClientGeometryInsertShared(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema, force_teardown=False)
 
         # Insert all 7 WKT types, ids partitioned per type so each test can filter by range.
+        # NOTE: the original test_insert_wkt_data built no geo index; the shared fixture adds
+        # RTREE on geo for all data. Results are unaffected (tests query by id range), and
+        # RTREE over every WKT type (incl. GEOMETRYCOLLECTION) is also covered by
+        # test_build_geometry_index.
         rows = []
         for t_idx, wkt_type in enumerate(GEOM_WKT_TYPES):
             wkt_data = generate_wkt_by_type(wkt_type, bounds=(0, 1000, 0, 1000), count=GEOM_INSERT_BASE_COUNT)
@@ -3105,6 +3111,10 @@ class TestMilvusClientGeometryInsertShared(TestMilvusClientV2Base):
         self.flush(client, collection_name)
 
         # Insert the valid empty geometries at a distinct id range.
+        # NOTE: these empty geometries now coexist with 21k non-empty rows in the same
+        # RTREE-indexed collection. RTREE-on-empty coverage is retained here (the rows are
+        # indexed and queried by id); if the server ever special-cases empty geometries at
+        # index build time, run a stability pass on this class.
         empty_rows = [
             {
                 "id": GEOM_INSERT_EMPTY_ID_OFFSET + e_idx,
@@ -3139,7 +3149,7 @@ class TestMilvusClientGeometryInsertShared(TestMilvusClientV2Base):
         method: query the shared collection's id-range for this WKT type
         expected: the type's rows are present and round-trip correctly
         """
-        client = self._client()
+        client = type(self).shared_client
         t_idx = GEOM_WKT_TYPES.index(wkt_type)
         lo = t_idx * GEOM_INSERT_BASE_COUNT
         hi = (t_idx + 1) * GEOM_INSERT_BASE_COUNT
@@ -3162,7 +3172,7 @@ class TestMilvusClientGeometryInsertShared(TestMilvusClientV2Base):
         method: query the shared collection for the inserted empty geometry row
         expected: the empty geometry is accepted, stored and round-trips unchanged
         """
-        client = self._client()
+        client = type(self).shared_client
         e_idx = GEOM_EMPTY_WKT_TYPES.index(empty_wkt)
         target_id = GEOM_INSERT_EMPTY_ID_OFFSET + e_idx
 
@@ -3188,8 +3198,10 @@ class TestMilvusClientGeometrySpatialShared(TestMilvusClientV2Base):
 
     @pytest.fixture(scope="module", autouse=True)
     def prepare_geom_spatial_collections(self, request):
-        global _GEOM_SPATIAL_BASE_DATA
+        cls = self.__class__
         client = self._client()
+        # Reuse one client across the class instead of reconnecting per test.
+        cls.shared_client = client
 
         base_data = generate_diverse_base_data(
             count=GEOM_SPATIAL_BASE_COUNT,
@@ -3197,7 +3209,9 @@ class TestMilvusClientGeometrySpatialShared(TestMilvusClientV2Base):
             pk_field_name="id",
             geo_field_name="geo",
         )
-        _GEOM_SPATIAL_BASE_DATA = base_data
+        # Stored on the class (not a module global) so the data stays in the same
+        # worker process that owns the shared collections under xdist.
+        cls.base_data = base_data
 
         rows = []
         for item in base_data:
@@ -3262,8 +3276,8 @@ class TestMilvusClientGeometrySpatialShared(TestMilvusClientV2Base):
         method: query shared geometry data using different spatial operators (RTREE vs scan)
         expected: return correct results based on spatial relationships
         """
-        client = self._client()
-        base_data = _GEOM_SPATIAL_BASE_DATA
+        client = type(self).shared_client
+        base_data = type(self).base_data
 
         query_geom = generate_spatial_query_data_for_function(spatial_func, base_data, "geo")
         expected_ids = generate_gt(spatial_func, base_data, query_geom, "geo", "id")
