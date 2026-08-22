@@ -130,6 +130,26 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		if err := validator.ValidateFunction(schema, plan.Function.GetName(), true); err != nil {
 			return merr.Wrap(err, "invalid function schema")
 		}
+		isExternalCollection := typeutil.IsExternalCollection(schema)
+		// Non-milvus-table external sources expose TEXT as ordinary UTF8 input.
+		// Internal and milvus-table manifests expose TEXT as binary LOB references.
+		if !isExternalCollection || typeutil.NewStorageColumnResolver(schema).IsMilvusTable() {
+			if err := schemautil.ValidateAddFunctionInputNotText(schema, plan.Function); err != nil {
+				return err
+			}
+		}
+		// External collections materialize function outputs during refresh, not
+		// through internal schema-bump/storage-version compaction.
+		if !isExternalCollection {
+			if err := schemautil.ValidateAddFunctionBackfillConfig(
+				Params.DataCoordCfg.EnableCompaction.GetAsBool(),
+				Params.CommonCfg.UseLoonFFI.GetAsBool(),
+				Params.DataCoordCfg.BumpSchemaVersionCompactionEnabled.GetAsBool(),
+				Params.DataCoordCfg.StorageVersionCompactionEnabled.GetAsBool(),
+			); err != nil {
+				return err
+			}
+		}
 	}
 	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
 		return err

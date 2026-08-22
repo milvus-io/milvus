@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestValidateAlterSchemaAddFunctionPlan_StandaloneAddRejected(t *testing.T) {
@@ -53,6 +54,72 @@ func TestValidateAlterSchemaAddFunctionPlan_EmptyIndexParamsAllowed(t *testing.T
 	assert.NoError(t, ValidateAlterSchemaAddFunctionPlan(plan))
 }
 
+func TestValidateAddFunctionBackfillConfig(t *testing.T) {
+	tests := []struct {
+		name                     string
+		compactionEnabled        bool
+		storageV3Enabled         bool
+		bumpSchemaVersionEnabled bool
+		storageVersionEnabled    bool
+		expectedErrorSubstring   string
+	}{
+		{
+			name:                     "compaction disabled",
+			storageV3Enabled:         true,
+			bumpSchemaVersionEnabled: true,
+			storageVersionEnabled:    true,
+			expectedErrorSubstring:   "dataCoord.enableCompaction",
+		},
+		{
+			name:                     "StorageV3 disabled",
+			compactionEnabled:        true,
+			bumpSchemaVersionEnabled: true,
+			storageVersionEnabled:    true,
+			expectedErrorSubstring:   "common.storage.useLoonFFI",
+		},
+		{
+			name:                   "schema-version bump disabled",
+			compactionEnabled:      true,
+			storageV3Enabled:       true,
+			storageVersionEnabled:  true,
+			expectedErrorSubstring: "dataCoord.compaction.bumpSchemaVersion.enabled",
+		},
+		{
+			name:                     "storage-version compaction disabled",
+			compactionEnabled:        true,
+			storageV3Enabled:         true,
+			bumpSchemaVersionEnabled: true,
+			expectedErrorSubstring:   "dataCoord.compaction.storageVersion.enabled",
+		},
+		{
+			name:                     "all enabled",
+			compactionEnabled:        true,
+			storageV3Enabled:         true,
+			bumpSchemaVersionEnabled: true,
+			storageVersionEnabled:    true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateAddFunctionBackfillConfig(
+				test.compactionEnabled,
+				test.storageV3Enabled,
+				test.bumpSchemaVersionEnabled,
+				test.storageVersionEnabled,
+			)
+			if test.expectedErrorSubstring == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+			assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+			assert.True(t, merr.Status(err).GetRetriable())
+			assert.ErrorContains(t, err, test.expectedErrorSubstring)
+		})
+	}
+}
+
 func TestCheckNoFunctionCascade(t *testing.T) {
 	existing := []*schemapb.FunctionSchema{
 		{Name: "bm25", OutputFieldNames: []string{"sparse"}},
@@ -73,4 +140,27 @@ func TestCheckNoFunctionCascade(t *testing.T) {
 	t.Run("nil function -> ok", func(t *testing.T) {
 		assert.NoError(t, CheckNoFunctionCascade(existing, nil))
 	})
+}
+
+func TestValidateAddFunctionInputNotText(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "varchar_in", DataType: schemapb.DataType_VarChar},
+		{FieldID: 101, Name: "text_in", DataType: schemapb.DataType_Text},
+	}}
+	function := func(functionType schemapb.FunctionType, input string) *schemapb.FunctionSchema {
+		return &schemapb.FunctionSchema{
+			Name:            "fn",
+			Type:            functionType,
+			InputFieldNames: []string{input},
+		}
+	}
+
+	for _, functionType := range []schemapb.FunctionType{schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash} {
+		err := ValidateAddFunctionInputNotText(schema, function(functionType, "text_in"))
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+		assert.ErrorContains(t, err, "TEXT input field")
+		assert.NoError(t, ValidateAddFunctionInputNotText(schema, function(functionType, "varchar_in")))
+	}
+	assert.NoError(t, ValidateAddFunctionInputNotText(schema, function(schemapb.FunctionType_TextEmbedding, "text_in")))
 }
