@@ -271,7 +271,11 @@ func resolveCollectionAlias(ctx context.Context, metaCache Cache, dbName, nameOr
 //
 // It must keep the same preconditions as PrivilegeInterceptor: dropping any one
 // of them silently changes who is allowed in.
-func CheckClusterPrivilege(ctx context.Context, objectPrivilege string) error {
+//
+// req and fullMethod are carried only so a denial can be reported on the same
+// hookutil ActionAuthorize channel as every other privilege denial; pass the
+// same fullMethod the RPC reports under elsewhere.
+func CheckClusterPrivilege(ctx context.Context, req interface{}, fullMethod string, objectPrivilege string) error {
 	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		return nil
 	}
@@ -314,5 +318,15 @@ func CheckClusterPrivilege(ctx context.Context, objectPrivilege string) error {
 		mlog.String("username", username),
 		mlog.Strings("roles", roleNames),
 		mlog.String("privilege", objectPrivilege))
-	return merr.WrapErrPrivilegeNotPermitted("%s is required", objectPrivilege)
+	err = merr.WrapErrPrivilegeNotPermitted("%s is required", objectPrivilege)
+	// Same report UnaryServerInterceptor emits when PrivilegeInterceptor
+	// refuses, so a content-driven denial lands in the same audit stream as an
+	// annotation-driven one. The branches above are not reported: an internal
+	// enforcer failure is not an authorization decision, and a request with no
+	// auth info never reaches a task -- GrpcAuthInterceptor already refused it
+	// and reported that refusal itself.
+	hookutil.GetExtension().ReportAction(ctx, req, &milvuspb.BoolResponse{
+		Status: merr.Status(err),
+	}, err, fullMethod, hookutil.ActionAuthorize)
+	return err
 }
