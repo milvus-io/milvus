@@ -157,6 +157,41 @@ func TestMinioObjectStorageCopyObjectCrossBucketUsesComposeForLargeObject(t *tes
 	assert.Equal(t, "dst-object", gotDst.Object)
 }
 
+func TestMinioObjectStorageCopyObjectCrossBucketGCPUsesSingleCopyForLargeObject(t *testing.T) {
+	var gotDst minio.CopyDestOptions
+	var gotSrc minio.CopySrcOptions
+	copyCalled := false
+	composeCalled := false
+	mockStat := mockey.Mock((*minio.Client).StatObject).Return(
+		minio.ObjectInfo{Size: minioSingleCopyObjectMaxSize + 1}, nil).Build()
+	defer mockStat.UnPatch()
+	mockCopy := mockey.Mock((*minio.Client).CopyObject).To(
+		func(_ *minio.Client, _ context.Context, dst minio.CopyDestOptions, src minio.CopySrcOptions) (minio.UploadInfo, error) {
+			copyCalled = true
+			gotDst = dst
+			gotSrc = src
+			return minio.UploadInfo{}, nil
+		}).Build()
+	defer mockCopy.UnPatch()
+	mockCompose := mockey.Mock((*minio.Client).ComposeObject).To(
+		func(_ *minio.Client, _ context.Context, _ minio.CopyDestOptions, _ ...minio.CopySrcOptions) (minio.UploadInfo, error) {
+			composeCalled = true
+			return minio.UploadInfo{}, nil
+		}).Build()
+	defer mockCompose.UnPatch()
+
+	objectStorage := &MinioObjectStorage{Client: &minio.Client{}, cloudProvider: objectstorage.CloudProviderGCP}
+	err := objectStorage.CopyObjectCrossBucket(context.Background(), "src-bucket", "src-object", "dst-bucket", "dst-object")
+	require.NoError(t, err)
+
+	assert.True(t, copyCalled)
+	assert.False(t, composeCalled)
+	assert.Equal(t, "src-bucket", gotSrc.Bucket)
+	assert.Equal(t, "src-object", gotSrc.Object)
+	assert.Equal(t, "dst-bucket", gotDst.Bucket)
+	assert.Equal(t, "dst-object", gotDst.Object)
+}
+
 func TestMinioObjectStorage(t *testing.T) {
 	ctx := context.Background()
 	config := objectstorage.Config{
