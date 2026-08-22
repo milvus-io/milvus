@@ -141,7 +141,8 @@ RustResult tantivy_create_json_key_stats_writer(const char *field_name,
                                                 uint32_t tantivy_index_version,
                                                 uintptr_t num_threads,
                                                 uintptr_t overall_memory_budget_in_bytes,
-                                                bool in_ram);
+                                                bool in_ram,
+                                                bool direct);
 
 RustResult tantivy_create_ngram_writer(const char *field_name,
                                        const char *path,
@@ -149,6 +150,13 @@ RustResult tantivy_create_ngram_writer(const char *field_name,
                                        uintptr_t max_gram,
                                        uintptr_t num_threads,
                                        uintptr_t overall_memory_budget_in_bytes);
+
+RustResult tantivy_index_add_ngram_batch(void *writer,
+                                         const uint8_t *const *ptrs,
+                                         const uintptr_t *lens,
+                                         const int64_t *doc_ids,
+                                         const uint8_t *has_values,
+                                         uintptr_t len);
 
 RustResult tantivy_load_index(const char *path, bool load_in_mmap, SetBitsetFn set_bitset);
 
@@ -411,7 +419,8 @@ RustResult tantivy_create_index(const char *field_name,
                                 uintptr_t num_threads,
                                 uintptr_t overall_memory_budget_in_bytes,
                                 bool enable_user_specified_doc_id,
-                                bool enable_background_merge);
+                                bool enable_background_merge,
+                                bool direct);
 
 RustResult tantivy_create_index_with_single_segment(const char *field_name,
                                                     TantivyDataType data_type,
@@ -420,6 +429,8 @@ RustResult tantivy_create_index_with_single_segment(const char *field_name,
 void tantivy_free_index_writer(void *ptr);
 
 RustResult tantivy_finish_index(void *ptr);
+
+RustResult tantivy_finish_index_and_create_reader(void *ptr, SetBitsetFn set_bitset);
 
 RustResult tantivy_commit_index(void *ptr);
 
@@ -488,11 +499,82 @@ RustResult tantivy_index_add_bools_by_single_segment_writer(void *ptr,
                                                             const bool *array,
                                                             uintptr_t len);
 
+RustResult tantivy_index_add_int8_rows(void *ptr,
+                                       const int8_t *values,
+                                       uintptr_t value_count,
+                                       const uintptr_t *row_offsets,
+                                       const int64_t *doc_ids,
+                                       uintptr_t row_count);
+
+RustResult tantivy_index_add_int16_rows(void *ptr,
+                                        const int16_t *values,
+                                        uintptr_t value_count,
+                                        const uintptr_t *row_offsets,
+                                        const int64_t *doc_ids,
+                                        uintptr_t row_count);
+
+RustResult tantivy_index_add_int32_rows(void *ptr,
+                                        const int32_t *values,
+                                        uintptr_t value_count,
+                                        const uintptr_t *row_offsets,
+                                        const int64_t *doc_ids,
+                                        uintptr_t row_count);
+
+RustResult tantivy_index_add_int64_rows(void *ptr,
+                                        const int64_t *values,
+                                        uintptr_t value_count,
+                                        const uintptr_t *row_offsets,
+                                        const int64_t *doc_ids,
+                                        uintptr_t row_count);
+
+RustResult tantivy_index_add_f32_rows(void *ptr,
+                                      const float *values,
+                                      uintptr_t value_count,
+                                      const uintptr_t *row_offsets,
+                                      const int64_t *doc_ids,
+                                      uintptr_t row_count);
+
+RustResult tantivy_index_add_f64_rows(void *ptr,
+                                      const double *values,
+                                      uintptr_t value_count,
+                                      const uintptr_t *row_offsets,
+                                      const int64_t *doc_ids,
+                                      uintptr_t row_count);
+
+RustResult tantivy_index_add_bool_rows(void *ptr,
+                                       const bool *values,
+                                       uintptr_t value_count,
+                                       const uintptr_t *row_offsets,
+                                       const int64_t *doc_ids,
+                                       uintptr_t row_count);
+
+RustResult tantivy_index_add_string_rows(void *ptr,
+                                         const uint8_t *const *value_ptrs,
+                                         const uintptr_t *value_lens,
+                                         uintptr_t value_count,
+                                         const uintptr_t *row_offsets,
+                                         const int64_t *doc_ids,
+                                         uintptr_t row_count);
+
+RustResult tantivy_index_add_json_rows(void *ptr,
+                                       const uint8_t *const *value_ptrs,
+                                       const uintptr_t *value_lens,
+                                       uintptr_t value_count,
+                                       const uintptr_t *row_offsets,
+                                       const int64_t *doc_ids,
+                                       uintptr_t row_count);
+
 RustResult tantivy_index_add_string(void *ptr, const uint8_t *s, uintptr_t len, int64_t offset);
 
 RustResult tantivy_index_add_string_by_single_segment_writer(void *ptr,
                                                              const uint8_t *s,
                                                              uintptr_t len);
+
+RustResult tantivy_index_add_strings_with_len(void *ptr,
+                                              const uint8_t *const *array,
+                                              const uintptr_t *str_lens,
+                                              uintptr_t len,
+                                              int64_t offset_begin);
 
 RustResult tantivy_index_add_json_key_stats_data_by_batch(void *ptr,
                                                           const char *const *keys,
@@ -595,7 +677,8 @@ RustResult tantivy_create_text_writer(const char *field_name,
                                       uintptr_t num_threads,
                                       uintptr_t overall_memory_budget_in_bytes,
                                       bool in_ram,
-                                      bool enable_background_merge);
+                                      bool enable_background_merge,
+                                      bool direct);
 
 void tantivy_set_log_level(const char *level);
 

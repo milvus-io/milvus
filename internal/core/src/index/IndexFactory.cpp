@@ -341,11 +341,8 @@ IndexFactory::CreatePrimitiveScalarIndex(
     auto index_type = create_index_info.index_type;
     if (index_type == INVERTED_INDEX_TYPE) {
         assert(create_index_info.tantivy_index_version != 0);
-        // scalar_index_engine_version 0 means we should built tantivy index within single segment
         return std::make_unique<InvertedIndexTantivy<T>>(
-            create_index_info.tantivy_index_version,
-            file_manager_context,
-            create_index_info.scalar_index_engine_version == 0);
+            create_index_info.tantivy_index_version, file_manager_context);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
         return std::make_unique<BitmapIndex<T>>(file_manager_context);
@@ -376,11 +373,8 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
                 field_schema.get_analyzer_params().c_str(),
                 create_index_info.analyzer_extra_info.c_str());
         }
-        // scalar_index_engine_version 0 means we should built tantivy index within single segment
         return std::make_unique<InvertedIndexTantivy<std::string>>(
-            create_index_info.tantivy_index_version,
-            file_manager_context,
-            create_index_info.scalar_index_engine_version == 0);
+            create_index_info.tantivy_index_version, file_manager_context);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
         return std::make_unique<BitmapIndex<std::string>>(file_manager_context);
@@ -1205,31 +1199,30 @@ IndexFactory::CreateNestedIndexInverted(
             return std::make_unique<InvertedIndexTantivy<bool>>(
                 tantivy_index_version,
                 file_manager_context,
-                false,  // inverted_index_single_segment
                 true,   // user_specified_doc_id
                 true);  // is_nested_index
         case DataType::INT8:
             return std::make_unique<InvertedIndexTantivy<int8_t>>(
-                tantivy_index_version, file_manager_context, false, true, true);
+                tantivy_index_version, file_manager_context, true, true);
         case DataType::INT16:
             return std::make_unique<InvertedIndexTantivy<int16_t>>(
-                tantivy_index_version, file_manager_context, false, true, true);
+                tantivy_index_version, file_manager_context, true, true);
         case DataType::INT32:
             return std::make_unique<InvertedIndexTantivy<int32_t>>(
-                tantivy_index_version, file_manager_context, false, true, true);
+                tantivy_index_version, file_manager_context, true, true);
         case DataType::INT64:
             return std::make_unique<InvertedIndexTantivy<int64_t>>(
-                tantivy_index_version, file_manager_context, false, true, true);
+                tantivy_index_version, file_manager_context, true, true);
         case DataType::FLOAT:
             return std::make_unique<InvertedIndexTantivy<float>>(
-                tantivy_index_version, file_manager_context, false, true, true);
+                tantivy_index_version, file_manager_context, true, true);
         case DataType::DOUBLE:
             return std::make_unique<InvertedIndexTantivy<double>>(
-                tantivy_index_version, file_manager_context, false, true, true);
+                tantivy_index_version, file_manager_context, true, true);
         case DataType::STRING:
         case DataType::VARCHAR:
             return std::make_unique<InvertedIndexTantivy<std::string>>(
-                tantivy_index_version, file_manager_context, false, true, true);
+                tantivy_index_version, file_manager_context, true, true);
         default:
             ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type);
     }

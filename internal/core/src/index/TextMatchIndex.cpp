@@ -37,7 +37,7 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
                                const char* unique_id,
                                const char* analyzer_name,
                                const char* analyzer_params,
-                               bool enable_background_merge)
+                               InMemoryMode mode)
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
     d_type_ = TantivyDataType::Text;
@@ -47,13 +47,15 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
         "",
         TANTIVY_INDEX_LATEST_VERSION /* Growing segment has no reason to use old version index*/
         ,
+        mode == InMemoryMode::Growing ? milvus::tantivy::WriterBackend::Regular
+                                      : milvus::tantivy::WriterBackend::Direct,
         analyzer_name,
         analyzer_params,
         /*analyzer_extra_info=*/"",
         milvus::tantivy::DEFAULT_NUM_THREADS,
         milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
-        enable_background_merge);
-    set_is_growing(true);
+        /*enable_background_merge=*/mode == InMemoryMode::Growing);
+    set_is_growing(mode == InMemoryMode::Growing);
 }
 
 TextMatchIndex::TextMatchIndex(const std::string& path,
@@ -68,12 +70,18 @@ TextMatchIndex::TextMatchIndex(const std::string& path,
     boost::filesystem::path sub_path = unique_id;
     path_ = (prefix / sub_path).string();
     boost::filesystem::create_directories(path_);
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(unique_id,
-                                                     false,
-                                                     path_.c_str(),
-                                                     tantivy_index_version,
-                                                     analyzer_name,
-                                                     analyzer_params);
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        unique_id,
+        false,
+        path_.c_str(),
+        tantivy_index_version,
+        milvus::tantivy::WriterBackend::Direct,
+        analyzer_name,
+        analyzer_params,
+        /*analyzer_extra_info=*/"",
+        milvus::tantivy::DEFAULT_NUM_THREADS,
+        milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+        /*enable_background_merge=*/false);
 }
 
 TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
@@ -94,13 +102,18 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
     d_type_ = TantivyDataType::Text;
     std::string field_name =
         std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(field_name.c_str(),
-                                                     false,
-                                                     path_.c_str(),
-                                                     tantivy_index_version,
-                                                     analyzer_name,
-                                                     analyzer_params,
-                                                     analyzer_extra_info);
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        field_name.c_str(),
+        false,
+        path_.c_str(),
+        tantivy_index_version,
+        milvus::tantivy::WriterBackend::Direct,
+        analyzer_name,
+        analyzer_params,
+        analyzer_extra_info,
+        milvus::tantivy::DEFAULT_NUM_THREADS,
+        milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+        /*enable_background_merge=*/false);
 }
 
 TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx)
@@ -273,6 +286,57 @@ TextMatchIndex::AddNullSealed(int64_t offset) {
     wrapper_->add_array_data(&empty, 0, offset);
 }
 
+void
+TextMatchIndex::AddTextsSealed(size_t n,
+                               const std::string* texts,
+                               const bool* valids,
+                               int64_t offset_begin) {
+    if (n == 0) {
+        return;
+    }
+
+    FixedVector<std::string> values;
+    std::vector<uintptr_t> row_offsets{0};
+    std::vector<int64_t> doc_ids;
+    size_t value_bytes = 0;
+    values.reserve(std::min(n, kSealedBatchRows));
+    row_offsets.reserve(std::min(n, kSealedBatchRows) + 1);
+    doc_ids.reserve(std::min(n, kSealedBatchRows));
+
+    auto flush = [&]() {
+        if (doc_ids.empty()) {
+            return;
+        }
+        wrapper_->add_rows<std::string>(
+            TantivyIndexWrapper::RowBatchView<std::string>{
+                std::span<const std::string>(values.data(), values.size()),
+                row_offsets,
+                doc_ids});
+        values.clear();
+        row_offsets.assign(1, 0);
+        doc_ids.clear();
+        value_bytes = 0;
+    };
+
+    for (size_t i = 0; i < n; ++i) {
+        auto doc_id = offset_begin + static_cast<int64_t>(i);
+        auto valid = valids == nullptr || valids[i];
+        if (!valid) {
+            null_offset_.push_back(doc_id);
+        } else {
+            value_bytes += texts[i].size();
+            values.push_back(texts[i]);
+        }
+        row_offsets.push_back(values.size());
+        doc_ids.push_back(doc_id);
+        if (doc_ids.size() >= kSealedBatchRows ||
+            value_bytes >= kSealedBatchBytes) {
+            flush();
+        }
+    }
+    flush();
+}
+
 // Add texts for growing segment
 void
 TextMatchIndex::AddTextsGrowing(size_t n,
@@ -299,7 +363,42 @@ void
 TextMatchIndex::BuildIndexFromFieldData(
     const std::vector<FieldDataPtr>& field_datas, bool nullable) {
     int64_t offset = 0;
-    if (nullable) {
+    if (nullable && !is_growing_) {
+        FixedVector<std::string> values;
+        std::vector<uintptr_t> row_offsets{0};
+        std::vector<int64_t> doc_ids;
+        size_t value_bytes = 0;
+        values.reserve(kSealedBatchRows);
+        row_offsets.reserve(kSealedBatchRows + 1);
+        doc_ids.reserve(kSealedBatchRows);
+
+        auto flush = [&]() {
+            SubmitRowBatch(values, row_offsets, doc_ids);
+            value_bytes = 0;
+        };
+
+        for (const auto& data : field_datas) {
+            auto n = data->get_num_rows();
+            for (int64_t i = 0; i < n; ++i) {
+                auto doc_id = offset++;
+                if (!data->is_valid(i)) {
+                    null_offset_.push_back(doc_id);
+                } else {
+                    const auto& value =
+                        *static_cast<const std::string*>(data->RawValue(i));
+                    value_bytes += value.size();
+                    values.push_back(value);
+                }
+                row_offsets.push_back(values.size());
+                doc_ids.push_back(doc_id);
+                if (doc_ids.size() >= kSealedBatchRows ||
+                    value_bytes >= kSealedBatchBytes) {
+                    flush();
+                }
+            }
+        }
+        flush();
+    } else if (nullable) {
         int64_t total = 0;
         for (const auto& data : field_datas) {
             total += data->get_null_count();
@@ -327,11 +426,20 @@ TextMatchIndex::BuildIndexFromFieldData(
                 offset++;
             }
         }
-    } else {
+    } else if (is_growing_) {
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
             wrapper_->add_data(
                 static_cast<const std::string*>(data->Data()), n, offset);
+            offset += n;
+        }
+    } else {
+        for (const auto& data : field_datas) {
+            auto n = data->get_num_rows();
+            AddTextsSealed(n,
+                           static_cast<const std::string*>(data->Data()),
+                           nullptr,
+                           offset);
             offset += n;
         }
     }
@@ -340,6 +448,11 @@ TextMatchIndex::BuildIndexFromFieldData(
 void
 TextMatchIndex::Finish() {
     finish();
+}
+
+void
+TextMatchIndex::FinishAndCreateReader(SetBitsetFn set_bitset) {
+    wrapper_->finish_and_create_reader(set_bitset);
 }
 
 bool

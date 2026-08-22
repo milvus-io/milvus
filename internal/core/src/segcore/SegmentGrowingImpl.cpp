@@ -2650,7 +2650,7 @@ SegmentGrowingImpl::BuildTextIndexForMeta(const FieldMeta& field_meta) {
         unique_id.c_str(),
         "milvus_tokenizer",
         field_meta.get_analyzer_params().c_str(),
-        /*enable_background_merge=*/true);
+        index::TextMatchIndex::InMemoryMode::Growing);
     index->Commit();
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterAnalyzer("milvus_tokenizer",

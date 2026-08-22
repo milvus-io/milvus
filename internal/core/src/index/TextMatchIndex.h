@@ -23,17 +23,19 @@ namespace milvus::index {
 using stdclock = std::chrono::high_resolution_clock;
 class TextMatchIndex : public InvertedIndexTantivy<std::string> {
  public:
-    // for growing segment.
-    // In-memory writer. enable_background_merge must be true only for a
-    // long-lived growing segment (periodic commits would otherwise grow the
-    // segment count unbounded); a sealed interim index passes false so that
-    // finish()'s explicit merge-all is the only merge and cannot race a
-    // background policy merge.
+    enum class InMemoryMode {
+        Growing,
+        Sealed,
+    };
+
+    // In-memory writer. Growing mode is long-lived and supports periodic
+    // commits; sealed mode is finalized once and therefore uses the direct
+    // single-segment writer.
     explicit TextMatchIndex(int64_t commit_interval_in_ms,
                             const char* unique_id,
                             const char* analyzer_name,
                             const char* analyzer_params,
-                            bool enable_background_merge);
+                            InMemoryMode mode);
     // for sealed segment to create index from raw data during loading.
     explicit TextMatchIndex(const std::string& path,
                             const char* unique_id,
@@ -69,6 +71,12 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     AddNullSealed(int64_t offset);
 
     void
+    AddTextsSealed(size_t n,
+                   const std::string* texts,
+                   const bool* valids,
+                   int64_t offset_begin);
+
+    void
     AddTextsGrowing(size_t n,
                     const std::string* texts,
                     const bool* valids,
@@ -80,6 +88,9 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
 
     void
     Finish();
+
+    void
+    FinishAndCreateReader(SetBitsetFn set_bitset);
 
     void
     Commit();
@@ -104,6 +115,9 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     FuzzyMatchQuery(const std::string& query, uint32_t max_edit_distance);
 
  private:
+    static constexpr size_t kSealedBatchRows = 4096;
+    static constexpr size_t kSealedBatchBytes = 8 * 1024 * 1024;
+
     TargetBitmap
     PrepareBitset();
 

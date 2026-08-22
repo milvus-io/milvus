@@ -16,8 +16,11 @@ build_index(size_t n = 1000000) {
     boost::filesystem::remove_all(path);
     boost::filesystem::create_directories(path);
 
-    auto w =
-        TantivyIndexWrapper("test_field_name", TantivyDataType::Keyword, path);
+    auto w = TantivyIndexWrapper("test_field_name",
+                                 TantivyDataType::Keyword,
+                                 path,
+                                 7,
+                                 WriterBackend::Direct);
 
     std::vector<std::string> arr;
     arr.reserve(n);

@@ -121,6 +121,95 @@ CreateNgramIndexForCanHandleLiteral(uintptr_t min_gram = 2,
     return std::make_unique<index::NgramInvertedIndex>(ctx, ngram_params);
 }
 
+FieldDataPtr
+MakeNullableNgramStringFieldData(const std::vector<std::string>& values,
+                                 const std::vector<bool>& valid) {
+    AssertInfo(values.size() == valid.size(),
+               "values and validity must have the same length");
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, true, 1, values.size());
+    std::vector<uint8_t> valid_bytes((values.size() + 7) / 8, 0);
+    for (size_t i = 0; i < valid.size(); ++i) {
+        if (valid[i]) {
+            valid_bytes[i / 8] |= 1U << (i % 8);
+        }
+    }
+    field_data->FillFieldData(
+        values.data(), valid_bytes.data(), values.size(), 0);
+    return field_data;
+}
+
+std::unique_ptr<index::NgramInvertedIndex>
+CreateNgramIndexForFieldDataBuild(bool nullable) {
+    auto file_manager_ctx = storage::FileManagerContext();
+    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+        proto::schema::DataType::VarChar);
+    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(100);
+    file_manager_ctx.fieldDataMeta.field_schema.set_nullable(nullable);
+    file_manager_ctx.fieldDataMeta.field_id = 100;
+
+    return std::make_unique<index::NgramInvertedIndex>(
+        file_manager_ctx, index::NgramParams{false, 2, 3});
+}
+
+TargetBitmap
+QueryNgramPostings(index::NgramInvertedIndex& ngram_index,
+                   const std::string& literal) {
+    TargetBitmap candidates(ngram_index.Count(), true);
+    ngram_index.ExecutePhase1(
+        literal, proto::plan::OpType::InnerMatch, candidates);
+    return candidates;
+}
+
+TEST(NgramIndex, BatchBuildPreservesNullableStringRowsAcrossChunks) {
+    auto batch0 = MakeNullableNgramStringFieldData(
+        {"alpha", "", "beta"}, {true, false, true});
+    auto batch1 = MakeNullableNgramStringFieldData(
+        {"", "gamma", "", ""}, {false, true, true, false});
+
+    auto ngram_index = CreateNgramIndexForFieldDataBuild(true);
+    ngram_index->BuildWithFieldData({batch0, batch1});
+    ngram_index->finish();
+    ngram_index->create_reader(milvus::index::SetBitsetSealed);
+
+    ASSERT_EQ(ngram_index->Count(), 7);
+    const auto nulls = ngram_index->IsNull();
+    ASSERT_EQ(nulls.size(), 7);
+    EXPECT_FALSE(nulls[0]);
+    EXPECT_TRUE(nulls[1]);
+    EXPECT_FALSE(nulls[2]);
+    EXPECT_TRUE(nulls[3]);
+    EXPECT_FALSE(nulls[4]);
+    EXPECT_FALSE(nulls[5]);
+    EXPECT_TRUE(nulls[6]);
+
+    const auto alpha = QueryNgramPostings(*ngram_index, "al");
+    EXPECT_EQ(alpha.count(), 1);
+    EXPECT_TRUE(alpha[0]);
+    const auto beta = QueryNgramPostings(*ngram_index, "be");
+    EXPECT_EQ(beta.count(), 1);
+    EXPECT_TRUE(beta[2]);
+    const auto gamma = QueryNgramPostings(*ngram_index, "ga");
+    EXPECT_EQ(gamma.count(), 1);
+    EXPECT_TRUE(gamma[4]);
+}
+
+TEST(NgramIndex, BatchBuildAcceptsAllNullStringFieldData) {
+    auto field_data = MakeNullableNgramStringFieldData(
+        {"", "", ""}, {false, false, false});
+
+    auto ngram_index = CreateNgramIndexForFieldDataBuild(true);
+    ngram_index->BuildWithFieldData({field_data});
+    ngram_index->finish();
+    ngram_index->create_reader(milvus::index::SetBitsetSealed);
+
+    ASSERT_EQ(ngram_index->Count(), 3);
+    const auto nulls = ngram_index->IsNull();
+    ASSERT_EQ(nulls.size(), 3);
+    EXPECT_TRUE(nulls.all());
+    EXPECT_EQ(QueryNgramPostings(*ngram_index, "al").count(), 0);
+}
+
 void
 test_ngram_with_data(const boost::container::vector<std::string>& data,
                      const std::string& literal,

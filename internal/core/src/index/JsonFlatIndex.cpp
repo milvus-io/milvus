@@ -10,10 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "index/JsonFlatIndex.h"
-#include "common/FastMem.h"
 
 #include <simdjson.h>
-#include <string.h>
+#include <cstddef>
+#include <string>
+#include <vector>
 
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
@@ -21,7 +22,6 @@
 #include "pb/schema.pb.h"
 #include "simdjson/dom/element.h"
 #include "simdjson/error.h"
-#include "simdjson/padded_string.h"
 
 namespace milvus::index {
 
@@ -30,55 +30,60 @@ JsonFlatIndex::build_index_for_json(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
     int64_t offset = 0;
     auto tokens = parse_json_pointer(nested_path_);
-    // Scratch buffer for nested JSON serialization - reused across iterations
-    // to avoid repeated heap allocations
-    simdjson::padded_string scratch_buffer(256);
+    constexpr size_t kBatchRows = 4096;
+    constexpr size_t kBatchBytes = 8 * 1024 * 1024;
+    std::vector<std::string> values;
+    std::vector<uintptr_t> row_offsets{0};
+    std::vector<int64_t> doc_ids;
+    size_t value_bytes = 0;
+    row_offsets.reserve(kBatchRows + 1);
+    doc_ids.reserve(kBatchRows);
+
+    auto flush = [&]() {
+        if (doc_ids.empty()) {
+            return;
+        }
+        wrapper_->add_json_rows(values, row_offsets, doc_ids);
+        values.clear();
+        row_offsets.assign(1, 0);
+        doc_ids.clear();
+        value_bytes = 0;
+    };
+
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         for (int i = 0; i < n; i++) {
+            auto value_count_before = values.size();
             if (schema_.nullable() && !data->is_valid(i)) {
                 null_offset_.push_back(offset);
-                wrapper_->add_json_array_data(nullptr, 0, offset++);
-                continue;
-            }
-            auto json = static_cast<const Json*>(data->RawValue(i));
-            auto exists = path_exists(json->dom_doc(), tokens);
-            if (!exists || !json->exist(nested_path_)) {
-                wrapper_->add_json_array_data(nullptr, 0, offset++);
-                continue;
-            }
-
-            if (nested_path_ == "") {
-                wrapper_->add_json_data(json, 1, offset++);
             } else {
-                auto doc = json->doc();
-                auto res = doc.at_pointer(nested_path_);
-                auto err = res.error();
-                if (err != simdjson::SUCCESS) {
-                    wrapper_->add_json_array_data(nullptr, 0, offset++);
-                } else {
-                    auto str_result = simdjson::to_json_string(res.value());
-                    if (str_result.error() != simdjson::SUCCESS) {
-                        wrapper_->add_json_array_data(nullptr, 0, offset++);
-                        continue;
+                auto json = static_cast<const Json*>(data->RawValue(i));
+                auto exists = path_exists(json->dom_doc(), tokens);
+                if (exists && json->exist(nested_path_)) {
+                    if (nested_path_.empty()) {
+                        values.emplace_back(json->data());
+                    } else {
+                        auto res = json->doc().at_pointer(nested_path_);
+                        if (res.error() == simdjson::SUCCESS) {
+                            auto serialized =
+                                simdjson::to_json_string(res.value());
+                            if (serialized.error() == simdjson::SUCCESS) {
+                                values.emplace_back(serialized.value());
+                            }
+                        }
                     }
-                    std::string_view str = str_result.value();
-                    // Resize scratch buffer if needed (with some growth factor)
-                    // Need space for str.size() + 1 for null terminator
-                    if (scratch_buffer.size() < str.size() + 1) {
-                        scratch_buffer =
-                            simdjson::padded_string((str.size() + 1) * 2);
-                    }
-                    milvus::fastmem::FastMemcpy(
-                        scratch_buffer.data(), str.data(), str.size());
-                    // Add null terminator - required for C string FFI to Rust
-                    scratch_buffer.data()[str.size()] = '\0';
-                    // Create Json referencing scratch buffer (non-owning)
-                    Json subpath_json(scratch_buffer.data(), str.size());
-                    wrapper_->add_json_data(&subpath_json, 1, offset++);
                 }
+            }
+            if (values.size() > value_count_before) {
+                value_bytes += values.back().size();
+            }
+            row_offsets.push_back(values.size());
+            doc_ids.push_back(offset++);
+            if (doc_ids.size() >= kBatchRows || value_bytes >= kBatchBytes) {
+                flush();
             }
         }
     }
+    flush();
 }
 }  // namespace milvus::index

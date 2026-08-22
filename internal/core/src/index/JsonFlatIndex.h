@@ -746,7 +746,7 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
         const std::string& nested_path,
         const int64_t tantivy_index_version = TANTIVY_INDEX_LATEST_VERSION)
         : InvertedIndexTantivy<std::string>(
-              tantivy_index_version, ctx, false, false),
+              tantivy_index_version, ctx, false),
           nested_path_(nested_path) {
     }
 

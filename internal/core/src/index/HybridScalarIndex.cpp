@@ -236,7 +236,6 @@ HybridScalarIndex<T>::GetInternalIndex() {
         internal_index_ = std::make_shared<InvertedIndexTantivy<T>>(
             tantivy_index_version_,
             this->file_manager_context_,
-            false,
             true,
             is_nested_index_);
     } else {
@@ -266,7 +265,6 @@ HybridScalarIndex<std::string>::GetInternalIndex() {
         internal_index_ = std::make_shared<InvertedIndexTantivy<std::string>>(
             tantivy_index_version_,
             this->file_manager_context_,
-            false,
             true,
             is_nested_index_);
     } else {

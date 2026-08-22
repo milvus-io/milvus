@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::index_writer::IndexWriterWrapper;
+use crate::index_writer::{IndexWriterState, IndexWriterWrapper};
 use crate::{index_writer_v5, index_writer_v7, TantivyIndexVersion};
 
 impl IndexWriterWrapper {
@@ -16,10 +16,11 @@ impl IndexWriterWrapper {
         overall_memory_budget_in_bytes: usize,
         in_ram: bool,
         enable_background_merge: bool,
+        direct: bool,
         tanviy_index_version: TantivyIndexVersion,
     ) -> Result<IndexWriterWrapper> {
         match tanviy_index_version {
-            TantivyIndexVersion::V5 => Ok(IndexWriterWrapper::V5(
+            TantivyIndexVersion::V5 => Ok(IndexWriterWrapper::V5(IndexWriterState::new(
                 index_writer_v5::IndexWriterWrapperImpl::create_text_writer(
                     field_name,
                     path,
@@ -29,9 +30,10 @@ impl IndexWriterWrapper {
                     overall_memory_budget_in_bytes,
                     in_ram,
                     enable_background_merge,
+                    direct,
                 )?,
-            )),
-            TantivyIndexVersion::V7 => Ok(IndexWriterWrapper::V7(
+            ))),
+            TantivyIndexVersion::V7 => Ok(IndexWriterWrapper::V7(IndexWriterState::new(
                 index_writer_v7::IndexWriterWrapperImpl::create_text_writer(
                     field_name,
                     path,
@@ -42,8 +44,9 @@ impl IndexWriterWrapper {
                     overall_memory_budget_in_bytes,
                     in_ram,
                     enable_background_merge,
+                    direct,
                 )?,
-            )),
+            ))),
         }
     }
 }
