@@ -23,8 +23,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -51,6 +54,44 @@ func TestRoles(t *testing.T) {
 	_, err = os.Stat(localPath)
 	assert.Error(t, err)
 	assert.Equal(t, true, os.IsNotExist(err))
+}
+
+func TestFilesystemMetricsRegisteredWithRolesRegistry(t *testing.T) {
+	dir := t.TempDir()
+	_, err := storagev2.GetFilesystemMetricsWithConfig(&indexpb.StorageConfig{
+		StorageType: "local",
+		RootPath:    dir,
+	})
+	require.NoError(t, err)
+
+	gathered, err := Registry.GoRegistry.Gather()
+	require.NoError(t, err)
+
+	missingFamilies := map[string]struct{}{
+		"milvus_storage_filesystem_read_count":                 {},
+		"milvus_storage_filesystem_write_count":                {},
+		"milvus_storage_filesystem_read_bytes":                 {},
+		"milvus_storage_filesystem_write_bytes":                {},
+		"milvus_storage_filesystem_get_file_info_count":        {},
+		"milvus_storage_filesystem_failed_count":               {},
+		"milvus_storage_filesystem_multi_part_upload_created":  {},
+		"milvus_storage_filesystem_multi_part_upload_finished": {},
+	}
+	expectedDisplayKeyPrefix := "file://" + dir + "#fs:"
+	for _, family := range gathered {
+		if _, ok := missingFamilies[family.GetName()]; !ok {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "fs" && strings.HasPrefix(label.GetValue(), expectedDisplayKeyPrefix) {
+					delete(missingFamilies, family.GetName())
+					break
+				}
+			}
+		}
+	}
+	require.Empty(t, missingFamilies)
 }
 
 func TestResolveFileResourceMode(t *testing.T) {

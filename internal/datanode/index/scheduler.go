@@ -27,7 +27,6 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/datanode/taskcost"
-	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -286,13 +285,6 @@ func (sched *TaskScheduler) processTask(t Task) {
 	} else {
 		t.SetState(indexpb.JobState_JobStateFinished, "")
 		mlog.Debug(t.Ctx(), "process task completed", mlog.String("task", t.Name()))
-	}
-
-	// Publish filesystem metrics after index task completion
-	if indexTask != nil {
-		if indexTask.req != nil && indexTask.req.GetStorageConfig() != nil {
-			storagev2.PublishFilesystemMetricsWithConfig(indexTask.req.GetStorageConfig())
-		}
 	}
 }
 
