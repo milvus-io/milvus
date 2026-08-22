@@ -21,6 +21,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -36,12 +37,16 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+type mockeyTargetManager struct{ meta.TargetManagerInterface }
 
 type SegmentCheckerTestSuite struct {
 	suite.Suite
@@ -1136,17 +1141,12 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 		utils.CreateTestSegment(collectionID, partitionID, segmentID3, nodeID1, 1, channel),
 	}
 
-	// Setup target to have a current version
-	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: collectionID,
-			ChannelName:  channel,
-		},
-	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
-		channels, []*datapb.SegmentInfo{}, nil).Maybe()
-	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
-	currentTargetVersion := checker.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
+	currentTargetVersion := int64(2)
+	mockTargetVersion := mockey.Mock((*mockeyTargetManager).GetCollectionTargetVersion).
+		Return(currentTargetVersion).
+		Build()
+	defer mockTargetVersion.UnPatch()
+	checker.targetMgr = &mockeyTargetManager{}
 
 	// Helper to get ch2DelegatorList
 	getCh2DelegatorList := func() map[string][]*meta.DmChannel {
@@ -1159,7 +1159,7 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 	// Test case 1: No leader views - should skip releasing segments
 	ch2DelegatorList := getCh2DelegatorList()
 	result := checker.filterOutSegmentInUse(ctx, replica, segments, ch2DelegatorList)
-	suite.Equal(0, len(result), "Should return all segments when no leader views")
+	suite.Equal(0, len(result), "No segment should be releasable when there are no leader views")
 
 	// Test case 2: Leader view with outdated target version - segment should be filtered (still in use)
 	leaderView1 := utils.CreateTestLeaderView(nodeID1, collectionID, channel,
@@ -1198,7 +1198,7 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 	// Test case 4: Leader view with initial target version - segment should not be filtered
 	leaderView3 := utils.CreateTestLeaderView(nodeID2, collectionID, channel,
 		map[int64]int64{}, map[int64]*meta.Segment{})
-	leaderView3.TargetVersion = initialTargetVersion
+	leaderView3.TargetVersion = 0
 	checker.dist.ChannelDistManager.Update(nodeID2, &meta.DmChannel{
 		VchannelInfo: &datapb.VchannelInfo{
 			CollectionID: collectionID,
@@ -1210,9 +1210,26 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 
 	ch2DelegatorList = getCh2DelegatorList()
 	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[1]}, ch2DelegatorList)
-	suite.Len(result, 1, "Segment should not be filtered when leader has initial target version")
+	suite.Len(result, 1, "Segment should not be filtered when leader has no synced target")
 
-	// Test case 5: Multiple leader views with mixed versions - segment should be filtered (still in use)
+	// Test case 5: Leader view ahead of current target - segment should be filtered (still in use)
+	leaderViewAhead := utils.CreateTestLeaderView(nodeID2, collectionID, channel,
+		map[int64]int64{}, map[int64]*meta.Segment{})
+	leaderViewAhead.TargetVersion = currentTargetVersion + 1
+	checker.dist.ChannelDistManager.Update(nodeID2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channel,
+		},
+		Node: nodeID2,
+		View: leaderViewAhead,
+	})
+
+	ch2DelegatorList = getCh2DelegatorList()
+	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[1]}, ch2DelegatorList)
+	suite.Len(result, 0, "Segment should be filtered when leader is ahead of the current target")
+
+	// Test case 6: Multiple leader views with mixed versions - segment should be filtered (still in use)
 	leaderView4 := utils.CreateTestLeaderView(nodeID1, collectionID, channel,
 		map[int64]int64{}, map[int64]*meta.Segment{})
 	leaderView4.TargetVersion = currentTargetVersion - 1 // Outdated
@@ -1244,13 +1261,13 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 
 	ch2DelegatorList = getCh2DelegatorList()
 	result = checker.filterOutSegmentInUse(ctx, replica, testSegments, ch2DelegatorList)
-	suite.Len(result, 0, "Should release all segments when any delegator hasn't updated")
+	suite.Len(result, 0, "No segment should be releasable when any delegator has not updated")
 
-	// Test case 6: Partition is nil - should release all segments (no partition info)
-	checker.meta.RemovePartition(ctx, partitionID)
+	// Test case 7: Partition is nil - should release all segments (no partition info)
+	suite.NoError(checker.meta.RemovePartition(ctx, collectionID, partitionID))
 	ch2DelegatorList = getCh2DelegatorList()
 	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]}, ch2DelegatorList)
-	suite.Len(result, 0, "Should release all segments when partition is nil")
+	suite.Len(result, 1, "Segment should be releasable when partition is nil")
 }
 
 func (suite *SegmentCheckerTestSuite) TestReopenOnStaleDataVersion() {
@@ -1276,10 +1293,11 @@ func (suite *SegmentCheckerTestSuite) TestReopenOnStaleDataVersion() {
 	// target carries a newer DataVersion than the loaded segment in dist
 	segments := []*datapb.SegmentInfo{
 		{
-			ID:            1,
-			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
-			DataVersion:   2,
+			ID:             1,
+			PartitionID:    1,
+			InsertChannel:  "test-insert-channel",
+			DataVersion:    2,
+			StorageVersion: storage.StorageV2,
 		},
 	}
 	channels := []*datapb.VchannelInfo{
@@ -1294,6 +1312,7 @@ func (suite *SegmentCheckerTestSuite) TestReopenOnStaleDataVersion() {
 
 	// dist has the segment loaded with an older DataVersion
 	distSegment := utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel")
+	distSegment.StorageVersion = storage.StorageV2
 	distSegment.DataVersion = proto.Int32(1)
 	checker.dist.SegmentDistManager.Update(2, distSegment)
 	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
@@ -1337,6 +1356,28 @@ func (suite *SegmentCheckerTestSuite) TestReopenOnStaleDataVersion() {
 	// DataVersion must not be used as a Reopen trigger to avoid an infinite loop.
 	addedTasks = nil
 	distSegment.DataVersion = nil
+	checker.dist.SegmentDistManager.Update(2, distSegment)
+	delete(checker.versionCache, int64(1))
+	tasks = checker.Check(context.TODO())
+	suite.Len(tasks, 0)
+	suite.Len(addedTasks, 0)
+
+	// Storage v3 readiness is determined by manifest, so an older DataVersion
+	// alone must not trigger Reopen.
+	addedTasks = nil
+	manifest := packed.MarshalManifestPath("/test/segment", 1)
+	segments[0] = &datapb.SegmentInfo{
+		ID:             1,
+		PartitionID:    1,
+		InsertChannel:  "test-insert-channel",
+		DataVersion:    2,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   manifest,
+	}
+	suite.NoError(checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1)))
+	distSegment.StorageVersion = storage.StorageV3
+	distSegment.ManifestPath = manifest
+	distSegment.DataVersion = proto.Int32(1)
 	checker.dist.SegmentDistManager.Update(2, distSegment)
 	delete(checker.versionCache, int64(1))
 	tasks = checker.Check(context.TODO())
