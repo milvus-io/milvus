@@ -12,17 +12,10 @@
 #include "segcore/tokenizer_c.h"
 
 #include <exception>
-#include <map>
 #include <memory>
 #include <string>
 
-#include "common/EasyAssert.h"
-#include "common/FieldMeta.h"
-#include "common/protobuf_utils.h"
-#include "pb/schema.pb.h"
 #include "tokenizer.h"
-
-using Map = std::map<std::string, std::string>;
 
 CStatus
 set_tokenizer_option(const char* params) {
@@ -79,21 +72,5 @@ validate_tokenizer(const char* params, const char* extra_info) {
         return CValidateResult{ids, count, milvus::SuccessCStatus()};
     } catch (std::exception& e) {
         return CValidateResult{nullptr, 0, milvus::FailureCStatus(&e)};
-    }
-}
-
-CStatus
-validate_text_schema(const uint8_t* field_schema, uint64_t length) {
-    try {
-        auto schema = std::make_unique<milvus::proto::schema::FieldSchema>();
-        AssertInfo(schema->ParseFromArray(field_schema, length),
-                   "failed to create field schema");
-
-        auto type_params = milvus::RepeatedKeyValToMap(schema->type_params());
-        milvus::tantivy::Tokenizer _(milvus::ParseTokenizerParams(type_params));
-
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
 }

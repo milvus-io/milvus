@@ -31,9 +31,6 @@ class SegcoreConfig {
         return config;
     }
 
-    void
-    parse_from(const std::string& string_path);
-
     int64_t
     get_chunk_rows() const {
         return chunk_rows_;

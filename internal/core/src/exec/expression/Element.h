@@ -136,81 +136,6 @@ class MultiElement : public BaseElement {
 };
 
 template <typename T>
-class SortVectorElement : public MultiElement {
- public:
-    explicit SortVectorElement(
-        const std::vector<proto::plan::GenericValue>& values) {
-        for (auto& value : values) {
-            values_.push_back(GetValueWithCastNumber<T>(value));
-        }
-        std::sort(values_.begin(), values_.end());
-        sorted_ = true;
-    }
-
-    explicit SortVectorElement(const std::vector<T>& values) {
-        for (const auto& value : values) {
-            values_.push_back(value);
-        }
-        std::sort(values_.begin(), values_.end());
-        sorted_ = true;
-    }
-
-    bool
-    Empty() const override {
-        return values_.empty();
-    }
-
-    size_t
-    Size() const override {
-        return values_.size();
-    }
-
-    bool
-    In(const ValueType& value) const override {
-        AssertInfo(sorted_, "In() should be sorted before");
-        if constexpr (std::is_same_v<T, std::string>) {
-            if (std::holds_alternative<std::string>(value)) {
-                return std::binary_search(values_.begin(),
-                                          values_.end(),
-                                          std::get<std::string>(value));
-            } else if (std::holds_alternative<std::string_view>(value)) {
-                return std::binary_search(
-                    values_.begin(),
-                    values_.end(),
-                    std::string(std::get<std::string_view>(value)),
-                    [](const std::string& a, std::string_view b) {
-                        return a < b;
-                    });
-            }
-        } else if (std::holds_alternative<T>(value)) {
-            return std::binary_search(
-                values_.begin(), values_.end(), std::get<T>(value));
-        }
-        return false;
-    }
-
-    void
-    Sort() {
-        std::sort(values_.begin(), values_.end());
-        sorted_ = true;
-    }
-
-    void
-    AddElement(const T& value) {
-        values_.push_back(value);
-    }
-
-    std::vector<T>
-    GetElements() const {
-        return values_;
-    }
-
- public:
-    std::vector<T> values_;
-    bool sorted_{false};
-};
-
-template <typename T>
 class FlatVectorElement : public MultiElement {
  public:
     explicit FlatVectorElement(
@@ -541,9 +466,6 @@ GetElementValues(const std::shared_ptr<MultiElement>& ptr) {
         if (auto p = std::dynamic_pointer_cast<SimdBatchElement<T>>(ptr)) {
             return p->GetElements();
         }
-    }
-    if (auto p = std::dynamic_pointer_cast<SortVectorElement<T>>(ptr)) {
-        return p->GetElements();
     }
     return {};
 }

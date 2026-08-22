@@ -13,7 +13,6 @@
 #include "common/FastMem.h"
 #include <fcntl.h>
 #include <sys/mman.h>
-#include <unistd.h>
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -21,7 +20,6 @@
 #include "File.h"
 #include "common/EasyAssert.h"
 
-const uint32_t SYS_PAGE_SIZE = sysconf(_SC_PAGE_SIZE);
 namespace milvus {
 void
 MemChunkTarget::write(const void* data, size_t size) {

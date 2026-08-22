@@ -360,18 +360,6 @@ GetDataTypeName(DataType data_type) {
     }
 }
 
-inline size_t
-CalcPksSize(const PkType* data, size_t n) {
-    size_t size = 0;
-    for (size_t i = 0; i < n; ++i) {
-        size += sizeof(data[i]);
-        if (std::holds_alternative<std::string>(data[i])) {
-            size += std::get<std::string>(data[i]).size();
-        }
-    }
-    return size;
-}
-
 using GroupByValueType = std::optional<std::variant<std::monostate,
                                                     int8_t,
                                                     int16_t,
@@ -556,11 +544,6 @@ IsPrimitiveType(proto::schema::DataType type) {
 }
 
 inline bool
-IsJsonType(proto::schema::DataType type) {
-    return type == proto::schema::DataType::JSON;
-}
-
-inline bool
 IsGeometryType(DataType data_type) {
     return data_type == DataType::GEOMETRY;
 }
@@ -623,9 +606,6 @@ IsVariableDataType(DataType data_type) {
 
 // NOTE: dependent type
 // used at meta-template programming
-template <class...>
-constexpr std::true_type always_true{};
-
 template <class...>
 constexpr std::false_type always_false{};
 
@@ -726,18 +706,9 @@ IsIntVectorMetricType(const MetricType& metric_type) {
            metric_type == knowhere::metric::MAX_SIM_L2;
 }
 
-// Plus 1 because we can't use greater(>) symbol
-constexpr size_t REF_SIZE_THRESHOLD = 16 + 1;
-
 //using BitsetBlockType = BitsetType::block_type;
 //constexpr size_t BITSET_BLOCK_SIZE = sizeof(BitsetType::block_type);
 //constexpr size_t BITSET_BLOCK_BIT_SIZE = sizeof(BitsetType::block_type) * 8;
-template <typename T>
-using MayConstRef = std::conditional_t<std::is_same_v<T, std::string> ||
-                                           std::is_same_v<T, milvus::Json>,
-                                       const T&,
-                                       T>;
-static_assert(std::is_same_v<const std::string&, MayConstRef<std::string>>);
 
 template <DataType T>
 struct TypeTraits {};

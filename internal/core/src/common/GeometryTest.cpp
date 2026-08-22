@@ -50,7 +50,7 @@ TEST_F(GeometryValueSemanticsTest, CopyAssignmentDeepClones) {
 
     ASSERT_TRUE(b.IsValid());
     // Independent underlying geometries, never a shared raw pointer.
-    EXPECT_NE(a.GetRawGeometry(), b.GetRawGeometry());
+    EXPECT_NE(a.GetGeometry(), b.GetGeometry());
     EXPECT_EQ(a.to_wkb_string(), b.to_wkb_string());
     // Both destruct at scope end and must each free exactly once.
 }
@@ -79,7 +79,7 @@ TEST_F(GeometryValueSemanticsTest, CloneDeepClonesIntoCallerContext) {
 
         ASSERT_TRUE(b.IsValid());
         // Independent underlying geometries, never a shared raw pointer.
-        EXPECT_NE(a.GetRawGeometry(), b.GetRawGeometry());
+        EXPECT_NE(a.GetGeometry(), b.GetGeometry());
         EXPECT_EQ(a.to_wkb_string(), b.to_wkb_string());
         // b destructs here, via other_ctx; a destructs later via ctx_. Each
         // must free exactly once.
@@ -93,31 +93,31 @@ TEST_F(GeometryValueSemanticsTest, CloneOfInvalidGeometryIsInvalid) {
     ASSERT_FALSE(a.IsValid());
     Geometry b = a.Clone(ctx_);
     EXPECT_FALSE(b.IsValid());
-    EXPECT_EQ(b.GetRawGeometry(), nullptr);
+    EXPECT_EQ(b.GetGeometry(), nullptr);
 }
 
 TEST_F(GeometryValueSemanticsTest, MoveConstructorTransfersOwnership) {
     Geometry a(ctx_, "POINT (5 6)");
-    GEOSGeometry* raw = a.GetRawGeometry();
+    GEOSGeometry* raw = a.GetGeometry();
 
     Geometry b(std::move(a));
 
     EXPECT_FALSE(a.IsValid());  // moved-from is emptied
-    EXPECT_EQ(a.GetRawGeometry(), nullptr);
+    EXPECT_EQ(a.GetGeometry(), nullptr);
     ASSERT_TRUE(b.IsValid());
-    EXPECT_EQ(b.GetRawGeometry(), raw);  // pointer transferred, not cloned
+    EXPECT_EQ(b.GetGeometry(), raw);  // pointer transferred, not cloned
 }
 
 TEST_F(GeometryValueSemanticsTest, MoveAssignmentReleasesExisting) {
     Geometry a(ctx_, "POINT (5 6)");
-    GEOSGeometry* raw = a.GetRawGeometry();
+    GEOSGeometry* raw = a.GetGeometry();
     Geometry b(ctx_, "POINT (9 9)");
 
     b = std::move(a);  // frees b's old geometry, takes a's
 
     EXPECT_FALSE(a.IsValid());
     ASSERT_TRUE(b.IsValid());
-    EXPECT_EQ(b.GetRawGeometry(), raw);
+    EXPECT_EQ(b.GetGeometry(), raw);
 }
 
 // std::vector reallocation must relocate Geometry elements safely. With the
@@ -133,7 +133,7 @@ TEST_F(GeometryValueSemanticsTest, VectorGrowthDoesNotDoubleFree) {
     ASSERT_EQ(v.size(), 1000u);
     EXPECT_TRUE(v.front().IsValid());
     EXPECT_TRUE(v.back().IsValid());
-    EXPECT_NE(v.front().GetRawGeometry(), v.back().GetRawGeometry());
+    EXPECT_NE(v.front().GetGeometry(), v.back().GetGeometry());
 }
 
 // --- TryParseFromWkb classification boundary (see PR #50951 review) ---
@@ -251,7 +251,7 @@ TEST_F(GeometryValueSemanticsTest, CloneFailureIsClassifiedAsRetriableOOM) {
     ASSERT_FALSE(milvus::GeometryCloneFailureForTesting().load());
     Geometry copy(src);
     ASSERT_TRUE(copy.IsValid());
-    EXPECT_NE(copy.GetRawGeometry(), src.GetRawGeometry());
+    EXPECT_NE(copy.GetGeometry(), src.GetGeometry());
     EXPECT_EQ(copy.to_wkb_string(), src.to_wkb_string());
 }
 

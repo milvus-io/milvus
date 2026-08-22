@@ -158,11 +158,7 @@ TEST_F(ChunkedColumnGroupTest, GroupChunk) {
 
     auto group_chunk = std::make_unique<GroupChunk>(chunks);
 
-    // Has chunk
     EXPECT_EQ(group_chunk->RowNums(), 5);
-    EXPECT_TRUE(group_chunk->HasChunk(FieldId(1)));
-    EXPECT_TRUE(group_chunk->HasChunk(FieldId(2)));
-    EXPECT_FALSE(group_chunk->HasChunk(FieldId(3)));
 
     // Get chunk
     auto retrieved_int64_chunk = group_chunk->GetChunk(FieldId(1));
@@ -170,32 +166,13 @@ TEST_F(ChunkedColumnGroupTest, GroupChunk) {
     EXPECT_EQ(retrieved_int64_chunk->RowNums(), 5);
     EXPECT_EQ(retrieved_string_chunk->RowNums(), 5);
 
-    // Get all chunks
-    auto all_chunks = group_chunk->GetChunks();
-    EXPECT_EQ(all_chunks.size(), 2);
-    EXPECT_EQ(all_chunks[FieldId(1)], int64_chunk);
-    EXPECT_EQ(all_chunks[FieldId(2)], string_chunk);
-
-    // Add chunk
-    auto new_int64_chunk =
-        create_chunk_int64(FixedVector<int64_t>{6, 7, 8, 9, 10});
-    EXPECT_NO_THROW(group_chunk->AddChunk(FieldId(3), new_int64_chunk));
-    EXPECT_TRUE(group_chunk->HasChunk(FieldId(3)));
-    EXPECT_EQ(group_chunk->GetChunk(FieldId(3))->RowNums(), 5);
-    auto another_int64_chunk =
-        create_chunk_int64(FixedVector<int64_t>{11, 12, 13, 14, 15});
-    EXPECT_THROW(group_chunk->AddChunk(FieldId(3), another_int64_chunk),
-                 std::exception);
-
     // Size
-    uint64_t expected_size =
-        int64_chunk->Size() + string_chunk->Size() + new_int64_chunk->Size();
+    uint64_t expected_size = int64_chunk->Size() + string_chunk->Size();
     EXPECT_EQ(group_chunk->Size(), expected_size);
 
     // Cell byte size
     uint64_t expected_cell_size = int64_chunk->CellByteSize().memory_bytes +
-                                  string_chunk->CellByteSize().memory_bytes +
-                                  new_int64_chunk->CellByteSize().memory_bytes;
+                                  string_chunk->CellByteSize().memory_bytes;
     EXPECT_EQ(group_chunk->CellByteSize().memory_bytes, expected_cell_size);
 
     // Test empty group chunk

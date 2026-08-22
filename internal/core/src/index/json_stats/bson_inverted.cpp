@@ -202,28 +202,4 @@ BsonInvertedIndex::TermQuery(
     visitor(row_id_array.data(), offset_array.data(), array_len);
 }
 
-void
-BsonInvertedIndex::TermQueryEach(
-    const std::string& path,
-    const std::function<void(uint32_t row_id, uint32_t offset)>& each) {
-    AssertInfo(wrapper_ != nullptr,
-               "bson inverted index wrapper is not initialized");
-    auto start = std::chrono::steady_clock::now();
-    auto array = wrapper_->term_query_i64(path);
-    auto end = std::chrono::steady_clock::now();
-    LOG_TRACE("term query time:{}",
-              std::chrono::duration_cast<std::chrono::microseconds>(end - start)
-                  .count());
-    auto array_len = array.array_.len;
-    LOG_TRACE("json stats shared column filter size:{} with path:{}",
-              array_len,
-              path);
-
-    for (int64_t i = 0; i < array_len; i++) {
-        auto value = array.array_.array[i];
-        auto [row_id, offset] = DecodeInvertedIndexValue(value);
-        each(row_id, offset);
-    }
-}
-
 }  // namespace milvus::index

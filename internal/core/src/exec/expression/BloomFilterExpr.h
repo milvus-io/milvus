@@ -118,11 +118,6 @@ class SplitBlockBloomFilterView {
         return (domains_ & d) != 0;
     }
 
-    uint8_t
-    domains() const {
-        return domains_;
-    }
-
     // INT8/16/32/64 values are widened to int64 and hashed as their 8-byte
     // little-endian encoding with XXH64(seed=0) — identical to parquet plain
     // encoding for INT64 and to client/sbbf hashInt64.
@@ -162,11 +157,6 @@ class SplitBlockBloomFilterView {
         } else {
             return TestInt64(static_cast<int64_t>(v));
         }
-    }
-
-    uint32_t
-    num_blocks() const {
-        return num_blocks_;
     }
 
  private:

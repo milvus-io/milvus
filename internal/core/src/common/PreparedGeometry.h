@@ -64,24 +64,6 @@ class PreparedGeometry {
                    "Failed to create GEOS prepared geometry");
     }
 
-    /**
-     * Construct PreparedGeometry from a raw GEOS geometry pointer.
-     * The source geometry must remain valid for the lifetime of this PreparedGeometry.
-     *
-     * @param ctx GEOS context handle
-     * @param geom Raw GEOS geometry pointer
-     */
-    explicit PreparedGeometry(GEOSContextHandle_t ctx, const GEOSGeometry* geom)
-        : ctx_(ctx), prepared_(nullptr) {
-        if (geom == nullptr) {
-            return;
-        }
-
-        prepared_ = GEOSPrepare_r(ctx, geom);
-        AssertInfo(prepared_ != nullptr,
-                   "Failed to create GEOS prepared geometry");
-    }
-
     ~PreparedGeometry() {
         if (prepared_ != nullptr) {
             GEOSPreparedGeom_destroy_r(ctx_, prepared_);
@@ -137,16 +119,6 @@ class PreparedGeometry {
             "prepared_intersects");
     }
 
-    bool
-    intersects(const GEOSGeometry* other) const {
-        if (!IsValid() || other == nullptr) {
-            return false;
-        }
-        return GeosPredicateIsTrue(
-            GEOSPreparedIntersects_r(ctx_, prepared_, other),
-            "prepared_intersects");
-    }
-
     /**
      * Tests if the prepared geometry contains the other geometry.
      * Note: For ST_Contains queries, prepare the container (larger geometry).
@@ -158,16 +130,6 @@ class PreparedGeometry {
         }
         return GeosPredicateIsTrue(
             GEOSPreparedContains_r(ctx_, prepared_, other.GetGeometry()),
-            "prepared_contains");
-    }
-
-    bool
-    contains(const GEOSGeometry* other) const {
-        if (!IsValid() || other == nullptr) {
-            return false;
-        }
-        return GeosPredicateIsTrue(
-            GEOSPreparedContains_r(ctx_, prepared_, other),
             "prepared_contains");
     }
 
@@ -185,16 +147,6 @@ class PreparedGeometry {
                                    "prepared_containsproperly");
     }
 
-    bool
-    containsProperly(const GEOSGeometry* other) const {
-        if (!IsValid() || other == nullptr) {
-            return false;
-        }
-        return GeosPredicateIsTrue(
-            GEOSPreparedContainsProperly_r(ctx_, prepared_, other),
-            "prepared_containsproperly");
-    }
-
     /**
      * Tests if the prepared geometry covers the other geometry.
      */
@@ -206,38 +158,6 @@ class PreparedGeometry {
         return GeosPredicateIsTrue(
             GEOSPreparedCovers_r(ctx_, prepared_, other.GetGeometry()),
             "prepared_covers");
-    }
-
-    bool
-    covers(const GEOSGeometry* other) const {
-        if (!IsValid() || other == nullptr) {
-            return false;
-        }
-        return GeosPredicateIsTrue(GEOSPreparedCovers_r(ctx_, prepared_, other),
-                                   "prepared_covers");
-    }
-
-    /**
-     * Tests if the prepared geometry is covered by the other geometry.
-     */
-    bool
-    coveredBy(const Geometry& other) const {
-        if (!IsValid() || !other.IsValid()) {
-            return false;
-        }
-        return GeosPredicateIsTrue(
-            GEOSPreparedCoveredBy_r(ctx_, prepared_, other.GetGeometry()),
-            "prepared_coveredby");
-    }
-
-    bool
-    coveredBy(const GEOSGeometry* other) const {
-        if (!IsValid() || other == nullptr) {
-            return false;
-        }
-        return GeosPredicateIsTrue(
-            GEOSPreparedCoveredBy_r(ctx_, prepared_, other),
-            "prepared_coveredby");
     }
 
     /**
@@ -253,15 +173,6 @@ class PreparedGeometry {
             "prepared_crosses");
     }
 
-    bool
-    crosses(const GEOSGeometry* other) const {
-        if (!IsValid() || other == nullptr) {
-            return false;
-        }
-        return GeosPredicateIsTrue(
-            GEOSPreparedCrosses_r(ctx_, prepared_, other), "prepared_crosses");
-    }
-
     /**
      * Tests if the prepared geometry is disjoint from the other geometry.
      */
@@ -272,16 +183,6 @@ class PreparedGeometry {
         }
         return GeosPredicateIsTrue(
             GEOSPreparedDisjoint_r(ctx_, prepared_, other.GetGeometry()),
-            "prepared_disjoint");
-    }
-
-    bool
-    disjoint(const GEOSGeometry* other) const {
-        if (!IsValid() || other == nullptr) {
-            return false;
-        }
-        return GeosPredicateIsTrue(
-            GEOSPreparedDisjoint_r(ctx_, prepared_, other),
             "prepared_disjoint");
     }
 
@@ -298,16 +199,6 @@ class PreparedGeometry {
             "prepared_overlaps");
     }
 
-    bool
-    overlaps(const GEOSGeometry* other) const {
-        if (!IsValid() || other == nullptr) {
-            return false;
-        }
-        return GeosPredicateIsTrue(
-            GEOSPreparedOverlaps_r(ctx_, prepared_, other),
-            "prepared_overlaps");
-    }
-
     /**
      * Tests if the prepared geometry touches the other geometry.
      */
@@ -319,15 +210,6 @@ class PreparedGeometry {
         return GeosPredicateIsTrue(
             GEOSPreparedTouches_r(ctx_, prepared_, other.GetGeometry()),
             "prepared_touches");
-    }
-
-    bool
-    touches(const GEOSGeometry* other) const {
-        if (!IsValid() || other == nullptr) {
-            return false;
-        }
-        return GeosPredicateIsTrue(
-            GEOSPreparedTouches_r(ctx_, prepared_, other), "prepared_touches");
     }
 
     /**
@@ -343,36 +225,6 @@ class PreparedGeometry {
         return GeosPredicateIsTrue(
             GEOSPreparedWithin_r(ctx_, prepared_, other.GetGeometry()),
             "prepared_within");
-    }
-
-    bool
-    within(const GEOSGeometry* other) const {
-        if (!IsValid() || other == nullptr) {
-            return false;
-        }
-        return GeosPredicateIsTrue(GEOSPreparedWithin_r(ctx_, prepared_, other),
-                                   "prepared_within");
-    }
-
-    // ============================================================================
-    // Non-prepared predicates (no prepared version available in GEOS)
-    // These fall back to regular geometry operations
-    // ============================================================================
-
-    /**
-     * Tests if the prepared geometry equals the other geometry.
-     * Note: GEOS doesn't provide a prepared version of equals, so this requires
-     * the original geometry to be passed.
-     */
-    static bool
-    equals(GEOSContextHandle_t ctx,
-           const GEOSGeometry* geom,
-           const Geometry& other) {
-        if (geom == nullptr || !other.IsValid()) {
-            return false;
-        }
-        return GeosPredicateIsTrue(GEOSEquals_r(ctx, geom, other.GetGeometry()),
-                                   "prepared_equals");
     }
 
  private:

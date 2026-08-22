@@ -303,9 +303,6 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     return schema;
 }
 
-const FieldMeta FieldMeta::RowIdMeta(
-    FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
-
 const ArrowSchemaPtr
 Schema::ConvertToArrowSchema() const {
     arrow::FieldVector arrow_fields;

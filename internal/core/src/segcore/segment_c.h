@@ -251,12 +251,6 @@ DropFieldData(CSegmentInterface c_segment, int64_t field_id);
 
 //////////////////////////////    interfaces for SegmentInterface    //////////////////////////////
 CStatus
-ExistPk(CSegmentInterface c_segment,
-        const uint8_t* raw_ids,
-        const uint64_t size,
-        bool* results);
-
-CStatus
 Delete(CSegmentInterface c_segment,
        int64_t size,
        const uint8_t* ids,

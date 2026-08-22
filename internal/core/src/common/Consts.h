@@ -61,7 +61,6 @@ const char TEXT_LOG_ROOT_PATH[] = "text_log";
 const char ITERATIVE_FILTER[] = "iterative_filter";
 const char HINTS[] = "hints";
 // json stats related
-const char JSON_KEY_INDEX_LOG_ROOT_PATH[] = "json_key_index_log";
 const char NGRAM_LOG_ROOT_PATH[] = "ngram_log";
 constexpr const char* JSON_STATS_ROOT_PATH = "json_stats";
 // Version 3: metadata moved to separate meta.json file (instead of parquet metadata)
@@ -113,8 +112,6 @@ const std::string JSON_PATH = "json_path";
 const std::string JSON_CAST_FUNCTION = "json_cast_function";
 const bool DEFAULT_OPTIMIZE_EXPR_ENABLED = true;
 const bool DEFAULT_ENABLE_DRIVER_PREFETCH = true;
-const int64_t DEFAULT_CONVERT_OR_TO_IN_NUMERIC_LIMIT = 150;
-const int64_t DEFAULT_JSON_INDEX_MEMORY_BUDGET = 16777216;  // bytes, 16MB
 const bool DEFAULT_JSON_KEY_STATS_ENABLED = true;
 const bool DEFAULT_GROWING_JSON_KEY_STATS_ENABLED = false;
 const bool DEFAULT_CONFIG_PARAM_TYPE_CHECK_ENABLED = true;
@@ -134,13 +131,10 @@ const std::string DATA_TYPE_KEY = "data_type";
 const std::string ELEMENT_TYPE_KEY = "element_type";
 const std::string INDEX_NUM_ROWS_KEY = "index_num_rows";
 const std::string SEGMENT_MANIFEST_KEY = "segment_manifest";
-const std::string EXTERNAL_SPEC_KEY = "external_spec";
-const std::string LOON_FFI_PROPERTIES_KEY = "loon_ffi_properties";
 const std::string STATS_BASE_PATH_KEY = "stats_base_path";
 const std::string JSON_STATS_CACHE_SHARD_KEY = "json_stats_cache_shard";
 
 // storage version
-const int64_t STORAGE_V1 = 1;
 const int64_t STORAGE_V2 = 2;
 const int64_t STORAGE_V3 = 3;
 
@@ -157,7 +151,6 @@ const std::string MMAP_ENABLED_KEY = "mmap.enabled";
 constexpr const char* LOCAL_FORMAT_KEY = "local_format";
 constexpr const char* LOCAL_FORMAT_RAW = "raw";
 constexpr const char* LOCAL_FORMAT_VORTEX = "vortex";
-constexpr const char* STORAGE_FORMAT_VORTEX = "vortex";
 
 const int64_t LOGICAL_BITS = 18;
 // Warmup policy keys
