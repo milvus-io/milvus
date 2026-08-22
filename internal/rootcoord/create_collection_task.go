@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -703,6 +704,20 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	} else {
 		if err := t.assignFieldAndFunctionID(t.body.CollectionSchema); err != nil {
 			return err
+		}
+		// Function schema validation for requests entering RootCoord directly —
+		// the proxy validates before forwarding, but nothing else on this path
+		// does. Runs only for newly created schemas: preserveFieldID restores an
+		// existing collection (snapshot/replication), whose historical schema
+		// must not be re-judged by current-version rules. External collections
+		// are exempt too: this schema is the RESOLVED one, not what the user
+		// submitted — e.g. nullability is inferred from the external source, so
+		// judging it by user-schema rules rejects legal external tables (the
+		// proxy already validated the user-submitted form).
+		if !typeutil.IsExternalCollection(t.body.CollectionSchema) {
+			if err := validator.ValidateFunction(t.body.CollectionSchema, "", true); err != nil {
+				return err
+			}
 		}
 	}
 	if err := typeutil.ValidateExternalCollectionResolvedSchema(t.body.CollectionSchema); err != nil {
