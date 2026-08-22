@@ -1,12 +1,12 @@
 package compactor
 
 import (
+	"io"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -53,7 +53,7 @@ func (r *materializerTestReader) Next() (storage.Record, error) {
 		r.current = nil
 	}
 	if r.idx >= len(r.records) {
-		return nil, errors.New("no more records")
+		return nil, io.EOF
 	}
 	record := r.records[r.idx]
 	r.idx++
@@ -80,6 +80,18 @@ func (m selectedColumnMaterializer) Materialize(rec storage.Record) (map[int64]a
 }
 
 func (m selectedColumnMaterializer) Close() {}
+
+type nullCapturingMaterializer struct {
+	fieldID   int64
+	nullCount int
+}
+
+func (m *nullCapturingMaterializer) Materialize(rec storage.Record) (map[int64]arrow.Array, error) {
+	m.nullCount = rec.Column(m.fieldID).NullN()
+	return nil, nil
+}
+
+func (m *nullCapturingMaterializer) Close() {}
 
 type materializerTestFunctionRunner struct {
 	schema       *schemapb.FunctionSchema
@@ -205,7 +217,7 @@ func TestRecordMaterializerWrapWithSelectionMaterializesKeptRowsOnly(t *testing.
 	require.Equal(t, 0, record.releaseCount)
 }
 
-func TestRecordMaterializerWrapWithSelectionReturnsColumnBuildError(t *testing.T) {
+func TestRecordMaterializerWrapWithSelectionPreservesPhysicalSourceColumn(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
 	}}
@@ -221,9 +233,41 @@ func TestRecordMaterializerWrapWithSelectionReturnsColumnBuildError(t *testing.T
 	selection := &recordSelection{ranges: []rowRange{{start: 0, end: 1}}, length: 1}
 
 	wrapped, err := materializer.WrapWithSelection(record, selection)
-	require.Nil(t, wrapped)
-	require.ErrorContains(t, err, "failed to append value")
+	require.NoError(t, err)
+	require.IsType(t, &array.Int64{}, wrapped.Column(100))
+	cleanupMaterializedRecord(wrapped)
 	require.Equal(t, 0, record.releaseCount)
+}
+
+func TestRecordMaterializerSelectionPreservesNullsForFunctionInputs(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		FieldID: 100, Name: "input", DataType: schemapb.DataType_VarChar, Nullable: true,
+		DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: "default"}},
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
+	capture := &nullCapturingMaterializer{fieldID: field.GetFieldID()}
+	materializer := &RecordMaterializer{
+		schema: schema, existingFields: map[int64]struct{}{field.GetFieldID(): {}},
+		materializers: []FunctionMaterializer{capture},
+	}
+
+	builder := array.NewStringBuilder(memory.DefaultAllocator)
+	builder.AppendValues([]string{"drop", "", "keep"}, []bool{true, false, true})
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+	record := &materializerTestRecord{
+		len: 3, columns: map[storage.FieldID]arrow.Array{field.GetFieldID(): input},
+	}
+	selection := &recordSelection{ranges: []rowRange{{start: 1, end: 3}}, length: 2}
+
+	wrapped, err := materializer.WrapWithSelection(record, selection)
+	require.NoError(t, err)
+	require.Equal(t, 1, capture.nullCount, "selection must not apply schema defaults before function materialization")
+	selected := wrapped.Column(field.GetFieldID()).(*array.String)
+	require.True(t, selected.IsNull(0))
+	require.Equal(t, "keep", selected.Value(1))
+	cleanupMaterializedRecord(wrapped)
 }
 
 func TestRecordMaterializerSelectionColumnsFixedBeforeTimestampOverwrite(t *testing.T) {
@@ -294,16 +338,10 @@ func TestRecordMaterializerSelectionColumnLifecycleExact(t *testing.T) {
 	}()
 	alloc.AssertSize(t, 0)
 
-	// a mid-build failure (int64 data under a varchar field) must not leak
-	// the partially built selection columns either
+	// A source metadata mismatch that claims a field without providing its
+	// column must fail without leaking selection arrays.
 	func() {
-		builder := array.NewInt64Builder(alloc)
-		defer builder.Release()
-		builder.AppendValues([]int64{1, 2}, nil)
-		input := builder.NewInt64Array()
-		defer input.Release()
-
-		record := &materializerTestRecord{len: 2, columns: map[storage.FieldID]arrow.Array{100: input}}
+		record := &materializerTestRecord{len: 2, columns: map[storage.FieldID]arrow.Array{}}
 		selection := &recordSelection{ranges: []rowRange{{start: 0, end: 1}}, length: 1}
 
 		wrapped, err := materializer.WrapWithSelection(record, selection)
@@ -334,16 +372,10 @@ func TestRecordMaterializerSelectionPartialBuildFailureReleasesBuiltColumns(t *t
 		goodArr := good.NewStringArray()
 		defer goodArr.Release()
 
-		bad := array.NewInt64Builder(alloc)
-		defer bad.Release()
-		bad.AppendValues([]int64{1, 2}, nil)
-		badArr := bad.NewInt64Array()
-		defer badArr.Release()
-
-		record := &materializerTestRecord{len: 2, columns: map[storage.FieldID]arrow.Array{100: goodArr, 101: badArr}}
+		record := &materializerTestRecord{len: 2, columns: map[storage.FieldID]arrow.Array{100: goodArr}}
 		selection := &recordSelection{ranges: []rowRange{{start: 0, end: 1}}, length: 1}
 
-		// field 100 builds, field 101 fails: the already built column must be
+		// field 100 builds, field 101 is absent: the already built column must be
 		// released by the eager constructor's error path
 		wrapped, err := materializer.WrapWithSelection(record, selection)
 		require.Error(t, err)
@@ -572,6 +604,69 @@ func TestMaterializedRecordReaderReleasesPreviousRecordOnNextAndClose(t *testing
 	require.NoError(t, reader.Close())
 	require.Equal(t, 1, second.releaseCount)
 	require.True(t, base.closed)
+}
+
+func TestSelectedMaterializedRecordReaderFiltersBeforeMaterialization(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
+		{FieldID: 101, Name: "added", DataType: schemapb.DataType_Int64, Nullable: true},
+	}}
+	materializer, err := NewRecordMaterializer(schema, nil, map[int64]struct{}{100: {}})
+	require.NoError(t, err)
+	first := newStringArray(t, []string{"drop", "keep"})
+	defer first.Release()
+	record := &materializerTestRecord{len: 2, columns: map[storage.FieldID]arrow.Array{100: first}}
+	base := &materializerTestReader{records: []*materializerTestRecord{record}}
+	materializedRows := 0
+	reader := newSelectedMaterializedRecordReader(base, materializer, func(rec storage.Record) (*recordSelection, error) {
+		materializedRows += rec.Len()
+		return &recordSelection{ranges: []rowRange{{start: 1, end: 2}}, length: 1}, nil
+	}, false)
+	out, err := reader.Next()
+	require.NoError(t, err)
+	require.Equal(t, 1, out.Len())
+	require.Equal(t, 2, materializedRows)
+	require.Equal(t, "keep", out.Column(100).(*array.String).Value(0))
+	cleanupMaterializedRecord(out)
+	require.NoError(t, reader.Close())
+}
+
+func TestSelectedMaterializedRecordReaderSkipsAllFilteredRecords(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar}}}
+	materializer, err := NewRecordMaterializer(schema, nil, map[int64]struct{}{100: {}})
+	require.NoError(t, err)
+	input := newStringArray(t, []string{"drop"})
+	defer input.Release()
+	record := &materializerTestRecord{len: 1, columns: map[storage.FieldID]arrow.Array{100: input}}
+	base := &materializerTestReader{records: []*materializerTestRecord{record}}
+	reader := newSelectedMaterializedRecordReader(base, materializer, func(storage.Record) (*recordSelection, error) {
+		return &recordSelection{}, nil
+	}, false)
+	_, err = reader.Next()
+	require.Error(t, err)
+	require.False(t, base.closed)
+	require.NoError(t, reader.Close())
+}
+
+func TestSelectedMaterializedRecordReaderActiveFilterDisablesForwardingShape(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+		FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64,
+	}}}
+	input := newInt64Array(t, []int64{1, 2})
+	defer input.Release()
+	record := &materializerTestRecord{len: 2, columns: map[storage.FieldID]arrow.Array{100: input}}
+	base := &materializerTestReader{records: []*materializerTestRecord{record}}
+	materializer, err := NewRecordMaterializer(schema, nil, map[int64]struct{}{100: {}})
+	require.NoError(t, err)
+	reader := newSelectedMaterializedRecordReader(base, materializer, func(storage.Record) (*recordSelection, error) {
+		return nil, nil
+	}, true)
+	out, err := reader.Next()
+	require.NoError(t, err)
+	_, isForwardable := out.(*nonForwardableRecord)
+	require.True(t, isForwardable)
+	cleanupMaterializedRecord(out)
+	require.NoError(t, reader.Close())
 }
 
 // A consumer that keeps a wrapped record across a reader advance must Retain it;

@@ -308,6 +308,27 @@ func TestMixCompactionMergeSortMaterializesMissingBM25Output(t *testing.T) {
 	s.EqualValues(3, fieldBinlogEntriesForTest(segment.GetBm25Logs(), 102))
 }
 
+func TestMixCompactionMergeSortFiltersBeforeMaterializingMissingBM25Output(t *testing.T) {
+	s := newMixCompactionStorageV1SuiteForDirectTest(t)
+	mergeSortKey := paramtable.Get().DataNodeCfg.UseMergeSort.Key
+	paramtable.Get().Save(mergeSortKey, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(mergeSortKey) })
+	s.prepareMissingBM25OutputSegments(true)
+	s.task.compactionParams = compaction.GenParams()
+	s.task.currentTime = getMilvusBirthday().Add(2 * time.Hour)
+	s.task.plan.CollectionTtl = int64(time.Hour)
+	s.task.plan.SegmentBinlogs[0].CommitTimestamp = tsoutil.ComposeTSByTime(getMilvusBirthday().Add(90 * time.Minute))
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(1, segment.GetNumOfRows())
+	s.True(segment.GetIsSorted())
+	s.EqualValues(1, fieldBinlogEntriesForTest(segment.GetBm25Logs(), 102))
+}
+
 type MixCompactionTaskStorageV1Suite struct {
 	suite.Suite
 

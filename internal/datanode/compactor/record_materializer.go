@@ -237,21 +237,30 @@ func newSelectedRecord(base storage.Record, schema *schemapb.CollectionSchema, e
 }
 
 func buildSelectedColumn(base storage.Record, field *schemapb.FieldSchema, selection *recordSelection) (arrow.Array, error) {
-	builder := storage.NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
-	defer builder.Release()
-	for _, rowRange := range selection.ranges {
-		if err := builder.Append(base, rowRange.start, rowRange.end); err != nil {
-			return nil, err
-		}
-	}
-	built := builder.Build()
-	defer built.Release()
-	col := built.Column(field.GetFieldID())
+	col := base.Column(field.GetFieldID())
 	if col == nil {
 		return nil, merr.WrapErrServiceInternalMsg("selected record field %d not found", field.GetFieldID())
 	}
-	col.Retain()
-	return col, nil
+	slices := make([]arrow.Array, 0, len(selection.ranges))
+	for _, rowRange := range selection.ranges {
+		slices = append(slices, array.NewSlice(col, int64(rowRange.start), int64(rowRange.end)))
+	}
+	defer releaseArrowArraysBySlice(slices)
+	if len(slices) == 1 {
+		slices[0].Retain()
+		return slices[0], nil
+	}
+	selected, err := array.Concatenate(slices, memory.DefaultAllocator)
+	if err != nil {
+		return nil, merr.Wrapf(err, "failed to select rows for field %s", field.GetName())
+	}
+	return selected, nil
+}
+
+func releaseArrowArraysBySlice(arrays []arrow.Array) {
+	for _, arr := range arrays {
+		arr.Release()
+	}
 }
 
 func (r *selectedRecord) Column(fieldID storage.FieldID) arrow.Array {
@@ -283,18 +292,21 @@ func (r *selectedRecord) cleanupDerived() {
 }
 
 type materializedRecordReader struct {
-	base         storage.RecordReader
-	materializer *RecordMaterializer
-	current      storage.Record
+	base            storage.RecordReader
+	materializer    *RecordMaterializer
+	selectRecord    func(storage.Record) (*recordSelection, error)
+	forceRebuilding bool
+	current         storage.Record
 }
 
 var _ storage.RecordReader = (*materializedRecordReader)(nil)
 
-func newMaterializedRecordReader(base storage.RecordReader, materializer *RecordMaterializer) storage.RecordReader {
-	if !materializer.hasMaterialization() {
-		return base
+func newSelectedMaterializedRecordReader(base storage.RecordReader, materializer *RecordMaterializer,
+	selectRecord func(storage.Record) (*recordSelection, error), forceRebuilding bool,
+) storage.RecordReader {
+	return &materializedRecordReader{
+		base: base, materializer: materializer, selectRecord: selectRecord, forceRebuilding: forceRebuilding,
 	}
-	return &materializedRecordReader{base: base, materializer: materializer}
 }
 
 func (r *materializedRecordReader) Next() (storage.Record, error) {
@@ -302,18 +314,57 @@ func (r *materializedRecordReader) Next() (storage.Record, error) {
 		cleanupMaterializedRecord(r.current)
 		r.current = nil
 	}
-	rec, err := r.base.Next()
-	if err != nil {
-		return nil, err
+	for {
+		rec, err := r.base.Next()
+		if err != nil {
+			return nil, err
+		}
+		var selection *recordSelection
+		if r.selectRecord != nil {
+			selection, err = r.selectRecord(rec)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if selection != nil && selection.Len() == 0 {
+			continue
+		}
+		wrapped, err := r.materializer.WrapWithSelection(rec, selection)
+		if err != nil {
+			return nil, err
+		}
+		if r.forceRebuilding {
+			wrapped = &nonForwardableRecord{inner: wrapped}
+		}
+		r.current = wrapped
+		return wrapped, nil
 	}
-	wrapped, err := r.materializer.Wrap(rec)
-	if err != nil {
-		// rec stays owned by the base reader; it is released on its next
-		// Next/Close, never here.
-		return nil, err
-	}
-	r.current = wrapped
-	return wrapped, nil
+}
+
+// nonForwardableRecord preserves the borrowed/materialized record lifetime
+// while making active delete/TTL selection fail closed for MergeSort's direct
+// Arrow forwarding path, including records where every row survived.
+type nonForwardableRecord struct {
+	inner storage.Record
+}
+
+var (
+	_ storage.Record = (*nonForwardableRecord)(nil)
+	_ derivedRecord  = (*nonForwardableRecord)(nil)
+)
+
+func (r *nonForwardableRecord) Column(fieldID storage.FieldID) arrow.Array {
+	return r.inner.Column(fieldID)
+}
+
+func (r *nonForwardableRecord) Len() int { return r.inner.Len() }
+
+func (r *nonForwardableRecord) Retain() { r.inner.Retain() }
+
+func (r *nonForwardableRecord) Release() { r.inner.Release() }
+
+func (r *nonForwardableRecord) cleanupDerived() {
+	cleanupMaterializedRecord(r.inner)
 }
 
 func (r *materializedRecordReader) Close() error {
@@ -323,6 +374,13 @@ func (r *materializedRecordReader) Close() error {
 	}
 	r.materializer.Close()
 	return r.base.Close()
+}
+
+func newMaterializedRecordReader(base storage.RecordReader, materializer *RecordMaterializer) storage.RecordReader {
+	if !materializer.hasMaterialization() {
+		return base
+	}
+	return &materializedRecordReader{base: base, materializer: materializer}
 }
 
 type bm25FunctionMaterializer struct {
