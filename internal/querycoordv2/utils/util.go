@@ -260,6 +260,91 @@ func GetShardLeadersWithReplicaFilter(ctx context.Context,
 	return GetShardLeadersWithChannelsAndReplicaFilter(ctx, m, dist, nodeMgr, collectionID, channels, withUnserviceableShards, replicaFilter)
 }
 
+// GetShardLeadersByResourceGroup answers GetShardLeaders restricted to the
+// replicas whose own resource group is resourceGroup. It is a separate entry
+// point rather than a replicaFilter over GetShardLeadersWithReplicaFilter
+// because the scoped question needs a DIFFERENT load gate, not just a
+// different filter:
+//
+//   - The registered-at-all half of checkLoadStatus runs FIRST, before any
+//     resource-group reasoning, so a collection that is not loaded at all
+//     answers ErrCollectionNotLoaded for the scoped shape exactly as for the
+//     unscoped one. The proxy's retry policy branches on that code
+//     (lb_policy.go), so the two shapes must not answer different families
+//     for the same state.
+//   - The full-load half of checkLoadStatus does not run at all: it reads the
+//     collection-wide percentage, which a sibling resource group still
+//     loading keeps below 100 -- the exact state the scope exists to see
+//     through. shouldUpdateCurrentTarget pools ready delegators across
+//     replicas, so the leading group's delegators alone promote the current
+//     target while the collection-wide figure lags; gating on that figure
+//     would refuse the leading group until the laggard finishes, inverting
+//     the scope's purpose and contradicting
+//     ShardLeaderReadinessByResourceGroup, which deliberately bypasses the
+//     same gate. The strict per-channel check below still refuses every
+//     shard this group cannot serve, with the retriable ChannelNotAvailable.
+//
+// The strict form (withUnserviceableShards == false) additionally refuses a
+// resource group that holds no replica of the collection up front, by name.
+// Falling through would fail on the first channel with ChannelNotAvailable,
+// which misleads twice over: the channel is fine (a sibling group may be
+// serving it right now), and the caller retries an answer that will not
+// change until someone loads the collection into this group. This is the
+// shard-leader counterpart of LoadPercentageByResourceGroup's -1. A caller
+// accepting unserviceable shards (the proxy refreshing its cache) wants the
+// empty answer instead.
+func GetShardLeadersByResourceGroup(ctx context.Context,
+	m *meta.Meta,
+	targetMgr meta.TargetManagerInterface,
+	dist *meta.DistributionManager,
+	nodeMgr *session.NodeManager,
+	collectionID int64,
+	resourceGroup string,
+	withUnserviceableShards bool,
+) ([]*querypb.ShardLeadersList, error) {
+	// withUnserviceableShards=true here is "registered-at-all only": see the
+	// gate rationale above.
+	if err := checkLoadStatus(ctx, m, collectionID, true); err != nil {
+		return nil, err
+	}
+
+	if !withUnserviceableShards {
+		holds := false
+		for _, replica := range m.GetByCollection(ctx, collectionID) {
+			if replica.GetResourceGroup() == resourceGroup {
+				holds = true
+				break
+			}
+		}
+		if !holds {
+			// merr.Wrapf rather than WrapErrReplicaNotFound: the latter stamps
+			// its argument as a replica id, and the only id in hand here is
+			// the collection's.
+			err := merr.Wrapf(merr.ErrReplicaNotFound,
+				"collection %d has no replica in resource group %q", collectionID, resourceGroup)
+			mlog.Warn(ctx, "failed to get shard leaders", mlog.Err(err))
+			return nil, err
+		}
+	}
+
+	channels := targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
+	if len(channels) == 0 {
+		msg := "loaded collection do not found any channel in target, may be in recovery"
+		err := merr.WrapErrCollectionOnRecovering(collectionID, msg)
+		mlog.Warn(ctx, "failed to get channels", mlog.Err(err))
+		return nil, err
+	}
+	// A request that names a resource group is asking which leaders THAT group
+	// can serve from, and the answer is not derivable from the unscoped one:
+	// the response flattens every replica into one list per channel, and a
+	// replica may borrow nodes from another resource group, so node-set
+	// membership is not replica membership. The replica is only in hand here.
+	return GetShardLeadersWithChannelsAndReplicaFilter(ctx, m, dist, nodeMgr, collectionID, channels, withUnserviceableShards,
+		func(replica *meta.Replica) bool {
+			return replica.IsQueryVisible() && replica.GetResourceGroup() == resourceGroup
+		})
+}
+
 // CheckCollectionsQueryable check all channels are watched and all segments are loaded for this collection
 func CheckCollectionsQueryable(ctx context.Context, m *meta.Meta, targetMgr meta.TargetManagerInterface, dist *meta.DistributionManager, nodeMgr *session.NodeManager) error {
 	maxInterval := paramtable.Get().QueryCoordCfg.UpdateCollectionLoadStatusInterval.GetAsDuration(time.Minute)
