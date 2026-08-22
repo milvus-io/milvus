@@ -169,6 +169,8 @@ test_run() {
             default_value->set_float_data(20);
         } else if constexpr (std::is_same_v<double, T>) {
             default_value->set_double_data(20);
+        } else if constexpr (std::is_same_v<bool, T>) {
+            default_value->set_bool_data(true);
         }
     }
 
