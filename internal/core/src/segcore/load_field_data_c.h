@@ -64,6 +64,11 @@ EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
            bool enabled);
 
 void
+SetFieldSupportEviction(CLoadFieldDataInfo c_load_field_data_info,
+                        int64_t field_id,
+                        bool support_eviction);
+
+void
 SetFieldWarmupPolicy(CLoadFieldDataInfo c_load_field_data_info,
                      int64_t field_id,
                      CacheWarmupPolicy warmup_policy);

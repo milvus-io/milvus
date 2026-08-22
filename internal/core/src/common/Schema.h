@@ -640,6 +640,16 @@ class Schema {
     std::pair<bool, std::string>
     CollectionWarmupPolicy(bool is_vector, bool is_index) const;
 
+    /**
+     * @brief Get the evictable setting for a specific field or index.
+     *
+     * Checks field-level evictable for field data first. Index
+     * residency uses index-specific metadata and falls back to the collection
+     * scalar/vector index setting.
+     */
+    std::pair<bool, bool>
+    EvictableEnabled(const FieldId& field, bool is_vector, bool is_index) const;
+
     // True if the field carries FieldSchema::is_function_output.
     bool
     is_function_output(const FieldId& field_id) const {
@@ -687,7 +697,7 @@ class Schema {
     std::unordered_set<FieldId> bm25_function_output_fields_;
 
     // schema_version_, currently marked with update timestamp
-    uint64_t schema_version_;
+    uint64_t schema_version_{0};
 
     // mmap settings
     bool has_mmap_setting_ = false;
@@ -706,6 +716,15 @@ class Schema {
     std::optional<std::string> warmup_vector_field_ = std::nullopt;
     // Per-field warmup policy (key: "warmup" in field type_params)
     std::unordered_map<FieldId, std::string> warmup_fields_;
+
+    // evictable settings
+    std::optional<bool> evictable_vector_index_ = std::nullopt;
+    std::optional<bool> evictable_scalar_index_ = std::nullopt;
+    std::optional<bool> evictable_scalar_field_ = std::nullopt;
+    std::optional<bool> evictable_vector_field_ = std::nullopt;
+    // Per-field evictable setting (key: "evictable" in field
+    // type_params)
+    std::unordered_map<FieldId, bool> evictable_fields_;
 
     // External collection properties
     std::string

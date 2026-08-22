@@ -136,6 +136,11 @@ Schema::Schema(const Schema& other)
       warmup_scalar_field_(other.warmup_scalar_field_),
       warmup_vector_field_(other.warmup_vector_field_),
       warmup_fields_(other.warmup_fields_),
+      evictable_vector_index_(other.evictable_vector_index_),
+      evictable_scalar_index_(other.evictable_scalar_index_),
+      evictable_scalar_field_(other.evictable_scalar_field_),
+      evictable_vector_field_(other.evictable_vector_field_),
+      evictable_fields_(other.evictable_fields_),
       external_source_(other.external_source_),
       external_spec_(other.external_spec_),
       function_output_field_ids_(other.function_output_field_ids_),
@@ -171,6 +176,11 @@ Schema::operator=(const Schema& other) {
     std::swap(warmup_scalar_field_, copied.warmup_scalar_field_);
     std::swap(warmup_vector_field_, copied.warmup_vector_field_);
     std::swap(warmup_fields_, copied.warmup_fields_);
+    std::swap(evictable_vector_index_, copied.evictable_vector_index_);
+    std::swap(evictable_scalar_index_, copied.evictable_scalar_index_);
+    std::swap(evictable_scalar_field_, copied.evictable_scalar_field_);
+    std::swap(evictable_vector_field_, copied.evictable_vector_field_);
+    std::swap(evictable_fields_, copied.evictable_fields_);
     std::swap(external_source_, copied.external_source_);
     std::swap(external_spec_, copied.external_spec_);
     std::swap(function_output_field_ids_, copied.function_output_field_ids_);
@@ -216,6 +226,12 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             GetBoolFromRepeatedKVs(child.type_params(), MMAP_ENABLED_KEY);
         if (has_setting) {
             schema->mmap_fields_[field_id] = enabled;
+        }
+
+        auto [has_evictable_setting, evictable_enabled] =
+            GetBoolFromRepeatedKVs(child.type_params(), EVICTABLE_KEY);
+        if (has_evictable_setting) {
+            schema->evictable_fields_[field_id] = evictable_enabled;
         }
 
         // Parse warmup policy for the field (key: "warmup")
@@ -290,6 +306,31 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         schema_proto.properties(), WARMUP_SCALAR_FIELD_KEY);
     schema->warmup_vector_field_ = GetStringFromRepeatedKVs(
         schema_proto.properties(), WARMUP_VECTOR_FIELD_KEY);
+
+    auto [has_evictable_vector_index, evictable_vector_index] =
+        GetBoolFromRepeatedKVs(schema_proto.properties(),
+                               EVICTABLE_VECTOR_INDEX_KEY);
+    if (has_evictable_vector_index) {
+        schema->evictable_vector_index_ = evictable_vector_index;
+    }
+    auto [has_evictable_scalar_index, evictable_scalar_index] =
+        GetBoolFromRepeatedKVs(schema_proto.properties(),
+                               EVICTABLE_SCALAR_INDEX_KEY);
+    if (has_evictable_scalar_index) {
+        schema->evictable_scalar_index_ = evictable_scalar_index;
+    }
+    auto [has_evictable_scalar_field, evictable_scalar_field] =
+        GetBoolFromRepeatedKVs(schema_proto.properties(),
+                               EVICTABLE_SCALAR_FIELD_KEY);
+    if (has_evictable_scalar_field) {
+        schema->evictable_scalar_field_ = evictable_scalar_field;
+    }
+    auto [has_evictable_vector_field, evictable_vector_field] =
+        GetBoolFromRepeatedKVs(schema_proto.properties(),
+                               EVICTABLE_VECTOR_FIELD_KEY);
+    if (has_evictable_vector_field) {
+        schema->evictable_vector_field_ = evictable_vector_field;
+    }
 
     AssertInfo(schema->get_primary_field_id().has_value(),
                "primary key should be specified");
@@ -571,6 +612,33 @@ Schema::CollectionWarmupPolicy(bool is_vector, bool is_index) const {
     }
     return {warmup_scalar_field_.has_value(),
             warmup_scalar_field_.value_or("")};
+}
+
+std::pair<bool, bool>
+Schema::EvictableEnabled(const FieldId& field_id,
+                         bool is_vector,
+                         bool is_index) const {
+    if (!is_index) {
+        auto it = evictable_fields_.find(field_id);
+        if (it != evictable_fields_.end()) {
+            return {true, it->second};
+        }
+    }
+
+    if (is_vector) {
+        if (is_index) {
+            return {evictable_vector_index_.has_value(),
+                    evictable_vector_index_.value_or(false)};
+        }
+        return {evictable_vector_field_.has_value(),
+                evictable_vector_field_.value_or(false)};
+    }
+    if (is_index) {
+        return {evictable_scalar_index_.has_value(),
+                evictable_scalar_index_.value_or(false)};
+    }
+    return {evictable_scalar_field_.has_value(),
+            evictable_scalar_field_.value_or(false)};
 }
 
 }  // namespace milvus

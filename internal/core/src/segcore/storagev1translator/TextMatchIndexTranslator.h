@@ -32,6 +32,7 @@ struct TextMatchIndexLoadInfo {
     std::string
         warmup_policy;  // "disable", "sync", or "async"; empty means use global config
     std::string shard;
+    bool support_eviction{true};
 };
 
 // Translator for TextMatchIndex (non-knowhere index). It loads a single-cell
