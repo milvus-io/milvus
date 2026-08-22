@@ -496,7 +496,7 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 			CollectionName: "coll1",
 			PolicyName:     "reserved_get_value",
 			PolicyType:     rlsutil.PolicyTypePermissive,
-			Actions:        []rlsutil.PolicyAction{rlsutil.PolicyAction(1)},
+			Actions:        []rlsutil.PolicyAction{rlsutil.PolicyAction(99)},
 			UsingExpr:      "dept == $current_principal_tags['dept']",
 		}, 101)
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)

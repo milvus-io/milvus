@@ -1121,6 +1121,38 @@ func (s *Server) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Operat
 	return s.proxy.OperatePrivilegeGroup(ctx, req)
 }
 
+func (s *Server) CreateRowPolicy(ctx context.Context, req *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.proxy.CreateRowPolicy(ctx, req)
+}
+
+func (s *Server) UpdateRowPolicy(ctx context.Context, req *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.proxy.UpdateRowPolicy(ctx, req)
+}
+
+func (s *Server) DropRowPolicy(ctx context.Context, req *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error) {
+	return s.proxy.DropRowPolicy(ctx, req)
+}
+
+func (s *Server) ListRowPolicies(ctx context.Context, req *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error) {
+	return s.proxy.ListRowPolicies(ctx, req)
+}
+
+func (s *Server) SetRLSPrincipalTags(ctx context.Context, req *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.proxy.SetRLSPrincipalTags(ctx, req)
+}
+
+func (s *Server) GetRLSPrincipalTags(ctx context.Context, req *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	return s.proxy.GetRLSPrincipalTags(ctx, req)
+}
+
+func (s *Server) ListRLSPrincipals(ctx context.Context, req *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	return s.proxy.ListRLSPrincipals(ctx, req)
+}
+
+func (s *Server) DeleteRLSPrincipalTags(ctx context.Context, req *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.proxy.DeleteRLSPrincipalTags(ctx, req)
+}
+
 func (s *Server) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
 	return s.proxy.RefreshPolicyInfoCache(ctx, req)
 }

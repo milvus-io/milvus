@@ -6322,6 +6322,165 @@ func TestCollectionNamespaceShardingEnabledValidation(t *testing.T) {
 	})
 }
 
+func TestCollectionRLSEnabledValidation(t *testing.T) {
+	qc := NewMixCoordMock()
+	ctx := context.Background()
+	cache := mustInitMetaCacheForTest(ctx, qc)
+	prefix := "TestRLSEnabled"
+
+	getSchemaBytes := func(colName string) []byte {
+		fieldName2Type := map[string]schemapb.DataType{
+			"fvec_field":  schemapb.DataType_FloatVector,
+			"int64_field": schemapb.DataType_Int64,
+		}
+		schema := constructCollectionSchemaByDataType(colName, fieldName2Type, "int64_field", false)
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		return marshaledSchema
+	}
+
+	createCollection := func(colName string) {
+		createColReq := &milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreateCollection,
+				MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+				Timestamp: Timestamp(time.Now().UnixNano()),
+			},
+			DbName:         dbName,
+			CollectionName: colName,
+			Schema:         getSchemaBytes(colName),
+			ShardsNum:      1,
+		}
+		status, err := qc.CreateCollection(ctx, createColReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	}
+
+	t.Run("create rejects invalid rls.enabled", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createTask := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         "",
+				CollectionName: colName,
+				Schema:         getSchemaBytes(colName),
+				ShardsNum:      1,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "invalid"}},
+			},
+			ctx:      ctx,
+			mixCoord: qc,
+			result:   nil,
+			schema:   nil,
+		}
+		err := createTask.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid rls.enabled")
+	})
+
+	t.Run("alter accepts rls.enabled", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("alter rejects invalid rls.enabled", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "True"}},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid rls.enabled")
+	})
+
+	t.Run("alter accepts deleting rls.enabled", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				DeleteKeys:     []string{common.RLSEnabledKey},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("alter rejects wrong case rls.enabled delete key", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				DeleteKeys:     []string{"RLS.Enabled"},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "did you mean")
+	})
+
+	t.Run("alter accepts rls.force", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "true"}},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("alter rejects wrong case rls.force delete key", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				DeleteKeys:     []string{"RLS.Force"},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "did you mean")
+	})
+}
+
 func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 	qc := NewMixCoordMock()
 	cache, err := initMetaCache(context.Background(), qc)

@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -2351,9 +2352,13 @@ func TestHandleIfSearchByPK_BM25Detection(t *testing.T) {
 	})
 }
 
-func TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery(t *testing.T) {
-	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery", t, func() {
+func TestHandleIfSearchByPK_PreservesNamespaceAndSearchRLS(t *testing.T) {
+	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesNamespaceAndSearchRLS", t, func() {
 		paramtable.Init()
+		ctx := context.Background()
+		const collectionID = int64(987654321)
+		rls.RemoveCollection(ctx, collectionID)
+		defer rls.RemoveCollection(ctx, collectionID)
 
 		namespace := "tenant_a"
 		schema := &schemapb.CollectionSchema{
@@ -2373,12 +2378,32 @@ func TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery(t *testing.T) {
 		cache := NewMockCache(t)
 		cache.EXPECT().
 			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
-			Return(&collectionInfo{Schema: mustNewSchemaInfo(schema)}, nil)
+			Return(&collectionInfo{CollID: collectionID, Schema: mustNewSchemaInfo(schema), RlsEnabled: true}, nil)
 		node := &Proxy{metaCache: cache}
 
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().GetRLSMetadata(mock.Anything, mock.Anything).Return(&rootcoordpb.GetRLSMetadataResponse{
+			Status:       merr.Success(),
+			CollectionId: collectionID,
+			Policies: []*rootcoordpb.RLSPolicyInfo{
+				{
+					PolicyName: "search_by_pk",
+					PolicyType: milvuspb.RowPolicyType_RowPolicyTypePermissive,
+					Actions:    []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Search},
+					UsingExpr:  "id == 1",
+				},
+			},
+		}, nil).Twice()
+		require.NoError(t, rls.DefaultManager().RefreshPolicySnapshot(ctx, mixCoord, "default", "test_collection", collectionID, 1))
+		require.NoError(t, rls.DefaultManager().RefreshPrincipalTagsSnapshot(ctx, mixCoord, "default", "test_collection", collectionID, 1))
+
 		var capturedNamespace *string
+		var capturedSkipRuntimeRLS bool
+		var capturedMergedPredicate bool
 		mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 			capturedNamespace = qt.request.Namespace
+			capturedSkipRuntimeRLS = qt.skipRuntimeRLS
+			capturedMergedPredicate = qt.plan.GetQuery().GetPredicates().GetBinaryExpr() != nil
 			return &milvuspb.QueryResults{
 				Status: merr.Success(),
 				FieldsData: []*schemapb.FieldData{
@@ -2415,6 +2440,7 @@ func TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery(t *testing.T) {
 			DbName:         "default",
 			CollectionName: "test_collection",
 			Namespace:      &namespace,
+			RlsPrincipal:   "alice",
 			SearchInput: &milvuspb.SearchRequest_Ids{
 				Ids: &schemapb.IDs{
 					IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
@@ -2423,10 +2449,61 @@ func TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery(t *testing.T) {
 			SearchParams: []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "vec"}},
 		}
 
-		_, err := node.handleIfSearchByPK(context.Background(), req)
+		_, err := node.handleIfSearchByPK(ctx, req)
 		assert.NoError(t, err)
 		require.NotNil(t, capturedNamespace)
 		assert.Equal(t, namespace, *capturedNamespace)
+		assert.True(t, capturedSkipRuntimeRLS)
+		assert.True(t, capturedMergedPredicate)
+	})
+}
+
+func TestHandleIfSearchByPK_RLSForceRejectsSkip(t *testing.T) {
+	mockey.PatchConvey("TestHandleIfSearchByPK_RLSForceRejectsSkip", t, func() {
+		paramtable.Init()
+		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
+		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+		ctx := context.Background()
+
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{
+					FieldID:    101,
+					Name:       "vec",
+					DataType:   schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}},
+				},
+			},
+		}
+		cache := NewMockCache(t)
+		cache.EXPECT().
+			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
+			Return(&collectionInfo{
+				CollID:     987654322,
+				Schema:     mustNewSchemaInfo(schema),
+				RlsEnabled: true,
+				RlsForce:   true,
+			}, nil)
+		node := &Proxy{metaCache: cache}
+
+		req := &milvuspb.SearchRequest{
+			DbName:         "default",
+			CollectionName: "test_collection",
+			SkipRls:        true,
+			SearchInput: &milvuspb.SearchRequest_Ids{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
+				},
+			},
+			SearchParams: []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "vec"}},
+		}
+
+		_, err := node.handleIfSearchByPK(ctx, req)
+		assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+		assert.Contains(t, err.Error(), "rls.force")
 	})
 }
 

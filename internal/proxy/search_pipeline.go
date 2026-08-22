@@ -1492,6 +1492,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		preferredNodes: preferredNodes,
 		fastSkip:       true,
 		reQuery:        true,
+		skipRuntimeRLS: true,
 		chMgr:          op.node.(*Proxy).chMgr,
 	}
 	queryResult, storageCost, err := op.node.(*Proxy).query(op.traceCtx, qt, span)

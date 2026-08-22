@@ -56,7 +56,7 @@ func (c *Core) broadcastCreateRLSPolicy(ctx context.Context, req *rlsutil.Create
 		}
 	}
 	return broadcastAlterRLSPolicy(ctx, broadcaster, policy, newRLSCacheExpirations(
-		req.GetDbName(), req.GetCollectionName(), policy.CollectionID, rlsutil.MsgTypeCreateRowPolicy))
+		req.GetDbName(), req.GetCollectionName(), policy.CollectionID, commonpb.MsgType_CreateRowPolicy))
 }
 
 func (c *Core) broadcastUpdateRLSPolicy(ctx context.Context, req *rlsutil.UpdateRowPolicyRequest) error {
@@ -71,7 +71,7 @@ func (c *Core) broadcastUpdateRLSPolicy(ctx context.Context, req *rlsutil.Update
 		return err
 	}
 	return broadcastAlterRLSPolicy(ctx, broadcaster, policy, newRLSCacheExpirations(
-		req.GetDbName(), req.GetCollectionName(), policy.CollectionID, rlsutil.MsgTypeUpdateRowPolicy))
+		req.GetDbName(), req.GetCollectionName(), policy.CollectionID, commonpb.MsgType_UpdateRowPolicy))
 }
 
 func broadcastAlterRLSPolicy(ctx context.Context, broadcaster broadcaster.BroadcastAPI, policy *model.RLSPolicy, cacheExpirations *message.CacheExpirations) error {
@@ -107,7 +107,7 @@ func (c *Core) broadcastDropRLSPolicy(ctx context.Context, req *rlsutil.DropRowP
 		WithHeader(&message.DropRLSMetadataMessageHeader{
 			DbId:             policy.DBID,
 			CollectionId:     policy.CollectionID,
-			CacheExpirations: newRLSCacheExpirations(req.GetDbName(), req.GetCollectionName(), policy.CollectionID, rlsutil.MsgTypeDropRowPolicy),
+			CacheExpirations: newRLSCacheExpirations(req.GetDbName(), req.GetCollectionName(), policy.CollectionID, commonpb.MsgType_DropRowPolicy),
 		}).
 		WithBody(&message.DropRLSMetadataMessageBody{
 			Metadata: &messagespb.DropRLSMetadataMessageBody_PolicyName{
@@ -132,7 +132,7 @@ func (c *Core) broadcastSetRLSPrincipalTags(ctx context.Context, req *rlsutil.Se
 		return err
 	}
 	return broadcastAlterRLSPrincipal(ctx, broadcaster, principal, newRLSCacheExpirations(
-		req.GetDbName(), req.GetCollectionName(), principal.CollectionID, rlsutil.MsgTypeSetRLSPrincipalTags))
+		req.GetDbName(), req.GetCollectionName(), principal.CollectionID, commonpb.MsgType_SetRLSPrincipalTags))
 }
 
 func broadcastAlterRLSPrincipal(ctx context.Context, broadcaster broadcaster.BroadcastAPI, principal *model.RLSPrincipal, cacheExpirations *message.CacheExpirations) error {
@@ -166,13 +166,13 @@ func (c *Core) broadcastDeleteRLSPrincipalTags(ctx context.Context, req *rlsutil
 	}
 	if !drop {
 		return broadcastAlterRLSPrincipal(ctx, broadcaster, principal, newRLSCacheExpirations(
-			req.GetDbName(), req.GetCollectionName(), principal.CollectionID, rlsutil.MsgTypeDeleteRLSPrincipalTags))
+			req.GetDbName(), req.GetCollectionName(), principal.CollectionID, commonpb.MsgType_DeleteRLSPrincipalTags))
 	}
 	msg := message.NewDropRLSMetadataMessageBuilderV2().
 		WithHeader(&message.DropRLSMetadataMessageHeader{
 			DbId:             principal.DBID,
 			CollectionId:     principal.CollectionID,
-			CacheExpirations: newRLSCacheExpirations(req.GetDbName(), req.GetCollectionName(), principal.CollectionID, rlsutil.MsgTypeDeleteRLSPrincipalTags),
+			CacheExpirations: newRLSCacheExpirations(req.GetDbName(), req.GetCollectionName(), principal.CollectionID, commonpb.MsgType_DeleteRLSPrincipalTags),
 		}).
 		WithBody(&message.DropRLSMetadataMessageBody{
 			Metadata: &messagespb.DropRLSMetadataMessageBody_PrincipalName{
