@@ -1408,6 +1408,96 @@ func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
 	})
 }
 
+// The staging flag can be set after Validate has already answered and released
+// segMu, and before the commit reacquires it -- CompressCompactionBinlogs runs
+// in that gap, and taking the write lock itself waits for every reader to drain
+// (GenSnapshot is one, scanning a whole collection). Committing a
+// boundary-changing merge afterwards puts post-boundary rows in a segment the
+// snapshot judges to be inside its cut, so the commit has to ask again under
+// the write lock rather than trust the earlier answer.
+func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RechecksSnapshotBlock() {
+	newMeta := func() (*meta, *snapshotMeta) {
+		segments := NewSegmentsInfo()
+		segments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 1, CollectionID: 100, PartitionID: 10, State: commonpb.SegmentState_Flushed,
+		}})
+		sm := createTestSnapshotMetaLoaded(suite.T())
+		return &meta{ctx: context.TODO(), segments: segments, snapshotMeta: sm}, sm
+	}
+
+	mixTask := &datapb.CompactionTask{
+		PlanID:        7001,
+		InputSegments: []UniqueID{1},
+		CollectionID:  100,
+		Type:          datapb.CompactionType_MixCompaction,
+	}
+
+	suite.Run("staging set after validate still blocks the commit", func() {
+		m, sm := newMeta()
+
+		// Validate passes: this is the state the compaction saw before its gap.
+		suite.NoError(m.ValidateSegmentStateBeforeCompleteCompactionMutation(mixTask))
+
+		// The snapshot's ack callback freezes the boundary inside the gap.
+		sm.SetSnapshotStaging(100)
+
+		_, _, err := m.CompleteCompactionMutation(context.TODO(), mixTask, &datapb.CompactionPlanResult{})
+		suite.Error(err)
+		suite.True(errors.Is(err, merr.ErrCompactionBlocked), "got %v", err)
+	})
+
+	suite.Run("pending set after validate still blocks the commit", func() {
+		m, sm := newMeta()
+		suite.NoError(m.ValidateSegmentStateBeforeCompleteCompactionMutation(mixTask))
+		sm.SetSnapshotPending(100)
+
+		_, _, err := m.CompleteCompactionMutation(context.TODO(), mixTask, &datapb.CompactionPlanResult{})
+		suite.Error(err)
+		suite.True(errors.Is(err, merr.ErrCompactionBlocked), "got %v", err)
+	})
+
+	// The two cases above prove the commit path consults the predicate. These two
+	// pin the predicate's exemptions, asked directly: driving them through
+	// CompleteCompactionMutation would run the real mutation machinery, which
+	// needs a fully populated result and tests nothing extra here.
+	suite.Run("sort compaction ignores staging, as the snapshot waits on it", func() {
+		// Staging must not block sort: a staging snapshot is waiting for exactly
+		// these tasks, so blocking them would deadlock the wait against itself.
+		m, sm := newMeta()
+		sm.SetSnapshotStaging(100)
+
+		suite.NoError(m.checkSnapshotBlocksCompaction(&datapb.CompactionTask{
+			PlanID:        7002,
+			InputSegments: []UniqueID{1},
+			CollectionID:  100,
+			Type:          datapb.CompactionType_SortCompaction,
+		}))
+
+		// Pending still blocks sort -- it is held only around the capture, after
+		// the wait has already finished.
+		sm.SetSnapshotPending(100)
+		suite.Error(m.checkSnapshotBlocksCompaction(&datapb.CompactionTask{
+			PlanID:        7003,
+			InputSegments: []UniqueID{1},
+			CollectionID:  100,
+			Type:          datapb.CompactionType_SortCompaction,
+		}))
+	})
+
+	suite.Run("L0 delete compaction is never blocked", func() {
+		m, sm := newMeta()
+		sm.SetSnapshotPending(100)
+		sm.SetSnapshotStaging(100)
+
+		suite.NoError(m.checkSnapshotBlocksCompaction(&datapb.CompactionTask{
+			PlanID:        7004,
+			InputSegments: []UniqueID{1},
+			CollectionID:  100,
+			Type:          datapb.CompactionType_Level0DeleteCompaction,
+		}))
+	})
+}
+
 func (suite *MetaBasicSuite) TestGetMaxPosition() {
 	suite.Run("nil_positions", func() {
 		pos := getMaxPosition(nil)

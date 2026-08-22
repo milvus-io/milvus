@@ -34,8 +34,18 @@ func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result m
 	)
 	log.Info(ctx, "createSnapshotV2AckCallback received")
 
+	// The boundary is where this message landed on each data vchannel. The shard
+	// interceptor sealed the collection's growing segments there, so it is a real
+	// cut in the write order rather than a reading of how far persistence has
+	// got, and it is recomputed identically if this callback is replayed.
+	boundary, err := NewSnapshotBoundary(result.Results)
+	if err != nil {
+		log.Error(ctx, "failed to derive snapshot boundary from broadcast result", mlog.Err(err))
+		return err
+	}
+
 	// Create snapshot - ID is allocated inside CreateSnapshot
-	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds)
+	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds, boundary, header.GetWaitForSortedSegments())
 	if err != nil {
 		log.Error(ctx, "failed to create snapshot via DDL callback", mlog.Err(err))
 		return err

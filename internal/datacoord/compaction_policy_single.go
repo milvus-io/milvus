@@ -47,8 +47,18 @@ func newSingleCompactionPolicy(meta *meta, allocator allocator.Allocator, handle
 	return &singleCompactionPolicy{meta: meta, allocator: allocator, handler: handler}
 }
 
+// Enable is unconditional because this policy owns sort compaction, and sort is
+// not an optimization. A flushed segment is published Flushed+IsInvisible and
+// stays on the growing query path until its sorted replacement is committed, so
+// gating the trigger on an optimization switch strands the segment there for as
+// long as the switch is off -- and now also stalls every snapshot of that
+// collection, since a snapshot waits for exactly these tasks. Sort has its own
+// switch, dataCoord.enableSortCompaction, for turning it off deliberately.
+//
+// The merge half still honors dataCoord.enableAutoCompaction; see
+// triggerOneCollection.
 func (policy *singleCompactionPolicy) Enable() bool {
-	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool()
+	return true
 }
 
 func (policy *singleCompactionPolicy) Name() string {
@@ -69,8 +79,11 @@ func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 			mlog.Info(ctx, "skip single compaction trigger for external collection", mlog.FieldCollectionID(collection.ID))
 			continue
 		}
-		if policy.meta.isCollectionCompactionBlocked(collection.ID) {
-			mlog.Info(ctx, "skip single compaction for collection due to unloaded protected snapshot RefIndex",
+		// Asked for sort: a collection staging a snapshot is waiting for exactly
+		// these tasks, so it must not be skipped here. The merge half is gated
+		// separately, inside triggerOneCollection.
+		if policy.meta.isCompactionBlockedForType(collection.ID, datapb.CompactionType_SortCompaction) {
+			mlog.RatedInfo(ctx, rate.Limit(20), "skip single compaction for collection due to unloaded protected snapshot RefIndex",
 				mlog.FieldCollectionID(collection.ID))
 			continue
 		}
@@ -269,8 +282,20 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 		log.Warn(ctx, "failed to apply singleCompactionPolicy, trigger sort compaction failed", mlog.Err(err))
 		return nil, nil, 0, err
 	}
+	// Both halves of the flag are checked here rather than in Enable(), so that
+	// turning auto compaction off stops merging without also stopping sort.
+	if !Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() {
+		log.RatedInfo(ctx, rate.Limit(20), "auto compaction disabled")
+		return nil, sortViews, 0, nil
+	}
 	if !isCollectionAutoCompactionEnabled(collection) {
 		log.RatedInfo(ctx, rate.Limit(20), "collection auto compaction disabled")
+		return nil, sortViews, 0, nil
+	}
+	// The merge half moves segment boundaries, so it yields to a snapshot that has
+	// already cut one.
+	if policy.meta.isCompactionBlockedForType(collectionID, datapb.CompactionType_MixCompaction) {
+		log.Info(ctx, "skip mix half of single compaction, collection has a snapshot pending or staging")
 		return nil, sortViews, 0, nil
 	}
 

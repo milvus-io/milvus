@@ -1691,6 +1691,16 @@ message CreateSnapshotRequest {
   string description = 3; // user-defined snapshot description
   int64 collection_id= 4; // collection name
   int64 compaction_protection_seconds = 5; // duration in seconds to protect referenced segments from compaction, 0 = no protection
+  // Wait until every segment inside the boundary has been published sorted
+  // before capturing. Off by default: an unsorted segment is still served (as a
+  // growing segment, unindexed), so its rows are in the snapshot either way, and
+  // the wait is expensive -- it holds the collection's DDL resource key and
+  // freezes boundary-changing compaction for its duration.
+  //
+  // Turn it on when the snapshot must pin a stable, backfilled segment layout,
+  // which is what a Spark column backfill reads: an unsorted segment's manifest
+  // predates a schema-evolution backfill and does not carry the added column.
+  bool wait_for_sorted_segments = 6;
 }
 
 message DropSnapshotRequest {
@@ -1779,6 +1789,15 @@ message SnapshotInfo {
   // Per-channel snapshot boundaries. Each position records the seek point used
   // to decide which segments from that channel are included in the snapshot.
   repeated msg.MsgPosition channel_seek_positions = 13;
+  // Whether creation was ASKED to wait for every segment inside the boundary to
+  // be published sorted -- it records the request, not a proof about the result.
+  // A consumer uses it to tell a cut meant to be backfill-ready from an ordinary
+  // one: when false, the snapshot may contain unindexed segments whose manifests
+  // predate a concurrent schema-evolution backfill, and restoring it re-sorts
+  // and re-indexes them in the target. Note the wait is trivially satisfied for
+  // an external collection, which is never sorted at all, so true does not by
+  // itself prove the capture is sorted.
+  bool waited_for_sorted_segments = 14;
 }
 
 // StorageV2SegmentManifest maps a segment ID to its plain manifest object path.

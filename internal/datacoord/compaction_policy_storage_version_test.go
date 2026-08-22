@@ -409,6 +409,7 @@ func (s *StorageVersionUpgradePolicySuite) TestFormatRefreshRespectsSegmentFilte
 	s.policy.meta.snapshotMeta = &snapshotMeta{
 		compactionBlockedCollections: typeutil.NewUniqueSet(),
 		snapshotPendingCollections:   typeutil.NewUniqueSet(),
+		snapshotStagingCollections:   typeutil.NewUniqueSet(),
 		segmentProtectionUntil:       map[int64]uint64{105: uint64(time.Now().Add(time.Hour).Unix())},
 	}
 

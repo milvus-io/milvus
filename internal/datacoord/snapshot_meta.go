@@ -238,6 +238,19 @@ type snapshotMeta struct {
 	// CreateSnapshot and cleared by its defer.
 	snapshotPendingCollections typeutil.UniqueSet
 
+	// snapshotStagingCollections: collections whose snapshot has cut its boundary
+	// and is waiting for the segments inside it to finish sorting.
+	//
+	// It blocks the compactions that can change where segment boundaries lie.
+	// Once a snapshot has declared "everything before this point", a compaction
+	// that merges a segment from before the point with one from after produces a
+	// segment whose StartPosition comes from the earlier input, so it is judged to
+	// be inside the snapshot while carrying rows from outside it. That is not
+	// fixable after the fact -- dropping the segment loses the earlier rows,
+	// keeping it admits the later ones -- so it has to be prevented.
+	// Short-lived, set and cleared by CreateSnapshot, never persisted.
+	snapshotStagingCollections typeutil.UniqueSet
+
 	// pinMu protects the snapshotID2Info pointer swap and pinID2SnapshotID index.
 	// Critical sections are short — no etcd IO is done under this lock. Actual
 	// serialization of concurrent writers on the same snapshot is done via
@@ -306,6 +319,7 @@ func newSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, ch
 		segmentReferencedByGC:        typeutil.NewUniqueSet(),
 		buildIDReferencedByGC:        typeutil.NewUniqueSet(),
 		snapshotPendingCollections:   typeutil.NewUniqueSet(),
+		snapshotStagingCollections:   typeutil.NewUniqueSet(),
 		pinLocks:                     typeutil.NewConcurrentMap[UniqueID, *sync.Mutex](),
 		pinID2SnapshotID:             typeutil.NewConcurrentMap[int64, UniqueID](),
 		loaderCtx:                    loaderCtx,
@@ -1176,12 +1190,62 @@ func (sm *snapshotMeta) removeFromSecondaryIndexes(snapshotInfo *datapb.Snapshot
 // IsCollectionCompactionBlocked checks if compaction is blocked for a collection.
 // Returns true if:
 //   - A protected snapshot's RefIndex hasn't been loaded yet (fail-closed), OR
-//   - The collection is currently in the process of creating a snapshot (intent-based blocking).
+//   - The collection is currently in the process of creating a snapshot (intent-based blocking), OR
+//   - The collection is staging a snapshot, i.e. waiting for its segments to sort.
 func (sm *snapshotMeta) IsCollectionCompactionBlocked(collectionID int64) bool {
 	sm.segmentProtectionMu.RLock()
 	defer sm.segmentProtectionMu.RUnlock()
 	return sm.compactionBlockedCollections.Contain(collectionID) ||
+		sm.snapshotPendingCollections.Contain(collectionID) ||
+		sm.snapshotStagingCollections.Contain(collectionID)
+}
+
+// IsCollectionCompactionBlockedIgnoringStaging is the same question asked by a
+// compaction that cannot move a segment boundary. Staging exists to hold
+// boundaries still while a snapshot waits, so a 1:1 rewrite has no reason to
+// observe it -- and sort compaction in particular must not, being what the
+// staging snapshot is waiting for. Every other reason to block still blocks.
+//
+// It is a separate method rather than a parameter so the three sets are read
+// under one lock, as one answer.
+func (sm *snapshotMeta) IsCollectionCompactionBlockedIgnoringStaging(collectionID int64) bool {
+	sm.segmentProtectionMu.RLock()
+	defer sm.segmentProtectionMu.RUnlock()
+	return sm.compactionBlockedCollections.Contain(collectionID) ||
 		sm.snapshotPendingCollections.Contain(collectionID)
+}
+
+// SetSnapshotStaging freezes segment boundaries for a collection while its
+// snapshot waits for outstanding sort compactions.
+func (sm *snapshotMeta) SetSnapshotStaging(collectionID int64) {
+	sm.segmentProtectionMu.Lock()
+	defer sm.segmentProtectionMu.Unlock()
+	sm.snapshotStagingCollections.Insert(collectionID)
+}
+
+// ClearSnapshotStaging ends the staging window.
+//
+// Called only once the snapshot is saved, NOT from a defer on every failed
+// attempt: the ack callback that creates a snapshot is retried indefinitely and
+// the boundary stays cut across those retries, so releasing the freeze between
+// attempts would leave a window in which a boundary-changing compaction can
+// commit. A snapshot that never completes therefore keeps its collection frozen
+// for the life of the process -- acceptable because the flag is in-memory, the
+// retry can only be abandoned by process shutdown, and CreateSnapshot refuses
+// up front (checkSnapshotVisibilityReachable) the conditions that can never resolve.
+//
+// LIMITATION -- being in-memory cuts the other way across a restart. The
+// boundary is cut when the message is appended, but this flag is set only when
+// the ack callback runs, and after a DataCoord restart that callback is
+// replayed from persisted state minutes or hours later. The whole interval is
+// unprotected: a boundary-changing compaction can commit inside it, and because
+// it retires its inputs, GenSnapshot's lineage walk cannot tell afterwards.
+// Closing this would mean persisting the freeze, or re-deriving it at startup
+// from pending broadcast tasks; neither is attempted here.
+func (sm *snapshotMeta) ClearSnapshotStaging(collectionID int64) {
+	sm.segmentProtectionMu.Lock()
+	defer sm.segmentProtectionMu.Unlock()
+	sm.snapshotStagingCollections.Remove(collectionID)
 }
 
 // GetActiveCollectionIDs returns the set of collection IDs that have non-Deleting snapshots.
@@ -1405,7 +1469,7 @@ func (sm *snapshotMeta) rebuildAllSegmentProtection() {
 	defer sm.segmentProtectionMu.Unlock()
 
 	// Reset all protection state — the rebuild produces a complete, consistent snapshot.
-	// NOTE: snapshotPendingCollections is intentionally NOT reset here. It is a short-lived
+	// NOTE: snapshotPendingCollections and snapshotStagingCollections are intentionally NOT reset here. It is a short-lived
 	// intent flag owned by SetSnapshotPending/ClearSnapshotPending (scoped to a single
 	// CreateSnapshot call), independent from the snapshot→collection state that this
 	// rebuild derives from snapshotID2Info. Clearing it here would let a concurrent

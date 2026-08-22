@@ -18,8 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"math"
-	"sort"
 	"strconv"
 	"time"
 
@@ -58,7 +56,7 @@ type Handler interface {
 	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
 	GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView
 	ListLoadedSegments(ctx context.Context) ([]int64, error)
-	GenSnapshot(ctx context.Context, collectionID UniqueID) (*snapshotstorage.SnapshotData, error)
+	GenSnapshot(ctx context.Context, collectionID UniqueID, boundary *SnapshotBoundary) (*snapshotstorage.SnapshotData, error)
 	GetDeltaLogFromCompactTo(ctx context.Context, segmentID UniqueID) ([]*datapb.FieldBinlog, error)
 }
 
@@ -619,37 +617,14 @@ func (h *ServerHandler) ListLoadedSegments(ctx context.Context) ([]int64, error)
 	return h.s.listLoadedSegments(ctx)
 }
 
-// GetSnapshotSeekPositions returns every channel seek position used to create a snapshot.
-// The returned min timestamp is kept as SnapshotInfo.create_ts for compatibility.
-// Note: if channel has tt lag, the snapshot ts also has tt lag.
-func (h *ServerHandler) GetSnapshotSeekPositions(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
-	channels, err := h.s.getChannelsByCollectionID(ctx, collectionID)
-	if err != nil {
-		return nil, 0, err
+// segmentHasSnapshotData reports whether a segment holds anything a snapshot
+// would capture. Membership and the wait that precedes it share this definition,
+// so the snapshot cannot end up blocked on a segment it would not have taken.
+func segmentHasSnapshotData(info *SegmentInfo) (bool, error) {
+	if len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0 {
+		return true, nil
 	}
-	if len(channels) == 0 {
-		return nil, 0, merr.WrapErrServiceInternal("no channel found for snapshot")
-	}
-
-	positions := make([]*msgpb.MsgPosition, 0, len(channels))
-	minTs := uint64(math.MaxUint64)
-	for _, channel := range channels {
-		seekPosition := h.GetChannelSeekPosition(channel, partitionIDs...)
-		if seekPosition == nil {
-			return nil, 0, merr.WrapErrServiceInternal("no valid channel seek position for snapshot")
-		}
-		cloned := proto.Clone(seekPosition).(*msgpb.MsgPosition)
-		cloned.ChannelName = channel.GetName()
-		if cloned.GetTimestamp() < minTs {
-			minTs = cloned.GetTimestamp()
-		}
-		positions = append(positions, cloned)
-	}
-
-	sort.Slice(positions, func(i, j int) bool {
-		return positions[i].GetChannelName() < positions[j].GetChannelName()
-	})
-	return positions, minTs, nil
+	return hasCommittedManifest(info)
 }
 
 // hasCommittedManifest reports whether a Storage V3 manifest references
@@ -722,7 +697,16 @@ func hasCommittedManifest(info *SegmentInfo) (bool, error) {
 // - Creating backup snapshots for disaster recovery
 // - Point-in-time restore for data rollback
 // - Collection cloning to different database/cluster
-func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*snapshotstorage.SnapshotData, error) {
+func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, boundary *SnapshotBoundary) (*snapshotstorage.SnapshotData, error) {
+	// The boundary is the CreateSnapshot message's own position on each vchannel,
+	// carried here from the broadcast result. There is deliberately no fallback to
+	// deriving one from channel checkpoints: that would move the cut to wherever
+	// persistence happens to have reached, which is both later than the snapshot
+	// and still drifting, and it is what let unsorted segments in.
+	if boundary == nil {
+		return nil, merr.WrapErrServiceInternal("snapshot boundary is required")
+	}
+
 	// get coll info
 	resp, err := h.s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
@@ -740,18 +724,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 		partitionMapping[name] = partitionIDs[idx]
 	}
 
-	// generate snapshot seek positions with current partition ids
-	channelSeekPositions, snapshotTs, err := h.GetSnapshotSeekPositions(ctx, collectionID, partitionIDs...)
-	if err != nil {
-		return nil, err
-	}
-	channelSeekTs := make(map[string]uint64, len(channelSeekPositions))
-	for _, position := range channelSeekPositions {
-		if position.GetChannelName() == "" {
-			return nil, merr.WrapErrServiceInternal("empty snapshot channel seek position")
-		}
-		channelSeekTs[position.GetChannelName()] = position.GetTimestamp()
-	}
+	channelSeekPositions, snapshotTs := boundary.SeekPositions, boundary.SnapshotTs
 
 	indexes := h.s.meta.indexMeta.GetIndexesForCollection(collectionID, "")
 	indexInfos := lo.FilterMap(indexes, func(index *model.Index, _ int) (*indexpb.IndexInfo, bool) {
@@ -769,22 +742,35 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 
 	// get segment info
 	candidateSegments := h.s.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting()
+		if info.GetState() == commonpb.SegmentState_Dropped || info.GetIsImporting() {
+			return false
+		}
+		// Same rule GetQueryVChanPositions applies when building the load set: a
+		// compaction output that has not been published yet is not part of the
+		// collection anyone reads, and its inputs are still serving in its place.
+		//
+		// This is not redundant with dropSupersededByLineage below. That walk
+		// fails open when a parent is missing from meta, and the parent of an
+		// invisible sort output is the clustering tmp segment the sort retired
+		// atomically -- which GC removes once THAT child is indexed, per child,
+		// while its siblings are still building. The lineage then dangles for
+		// hours and the walk keeps both the output and the original inputs.
+		//
+		// Excluding cannot lose rows: invisible means the clustering run has not
+		// published, which means its inputs are still alive and captured.
+		return !info.GetIsInvisible() || !info.GetCreatedByCompaction()
 	}))
 	segments := make([]*SegmentInfo, 0, len(candidateSegments))
 	for _, info := range candidateSegments {
-		segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0
-		if !segmentHasData {
-			segmentHasData, err = hasCommittedManifest(info)
-			if err != nil {
-				return nil, err
-			}
+		segmentHasData, err := segmentHasSnapshotData(info)
+		if err != nil {
+			return nil, err
 		}
 		if !segmentHasData {
 			continue
 		}
 
-		seekTs, ok := channelSeekTs[info.GetInsertChannel()]
+		seekTs, ok := boundary.SeekTs(info.GetInsertChannel())
 		if !ok {
 			return nil, merr.WrapErrServiceInternalMsg(
 				"missing snapshot channel seek position for segment channel %s",
@@ -794,6 +780,11 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 			segments = append(segments, info)
 		}
 	}
+
+	// The tests above are per-segment, but clustering keeps both generations
+	// live across several catalog writes, so inputs and outputs can pass all of
+	// them at once and the snapshot would carry the same rows twice.
+	segments = dropSupersededByLineage(ctx, h.s.meta, segments)
 
 	if len(segments) == 0 {
 		mlog.Info(ctx, "no segments found for collection when generating snapshot",
@@ -815,18 +806,38 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 	}
 
 	// get delta logs from compactTo segments
-	lo.ForEach(segmentInfos, func(segInfo *datapb.SegmentInfo, _ int) {
+	for _, segInfo := range segmentInfos {
+		// Failing here is not optional. Returning early would leave this segment
+		// with its descendants' deletes missing AND its own post-boundary deletes
+		// unfiltered -- both corruptions at once -- while the snapshot still got
+		// saved as complete. The caller retries, which is the correct response to
+		// a segment that moved under us.
 		deltalogs, err := h.GetDeltaLogFromCompactTo(ctx, segInfo.GetID())
 		if err != nil {
-			mlog.Error(ctx, "get delta logs from compactTo failed when generating snapshot",
+			mlog.Warn(ctx, "get delta logs from compactTo failed when generating snapshot",
 				mlog.FieldCollectionID(collectionID),
 				mlog.Uint64("snapshotTs", snapshotTs),
 				mlog.FieldSegmentID(segInfo.GetID()),
 				mlog.Err(err))
-			return
+			return nil, err
 		}
 		segInfo.Deltalogs = append(segInfo.GetDeltalogs(), deltalogs...)
-	})
+
+		// A segment's deltalogs keep accumulating after the boundary, so what is
+		// attached at capture time includes deletes issued after the snapshot. Left
+		// in, the snapshot would carry inserts as of the boundary but deletes as of
+		// capture, and restore would be missing rows that were alive at the point
+		// the snapshot claims to describe.
+		seekTs, ok := boundary.SeekTs(segInfo.GetInsertChannel())
+		if !ok {
+			// Membership was already decided with this channel above, so a miss
+			// here is impossible -- and leaving the deletes unbounded would be a
+			// silently wrong snapshot, so surface it rather than guess.
+			return nil, merr.WrapErrServiceInternalMsg(
+				"missing snapshot channel seek position for segment channel %s", segInfo.GetInsertChannel())
+		}
+		segInfo.Deltalogs = filterDeltalogsBefore(segInfo.GetDeltalogs(), seekTs)
+	}
 
 	segDescList := lo.Map(segmentInfos, func(segInfo *datapb.SegmentInfo, _ int) *datapb.SegmentDescription {
 		segID := segInfo.GetID()
@@ -927,6 +938,85 @@ func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*
 		}
 	}
 	return indexesFiles
+}
+
+// dropSupersededByLineage removes any selected segment that has a selected
+// ancestor, so a compaction lineage contributes exactly one generation.
+//
+// It only removes, unlike the query path's retrieveSegment, which replaces an
+// output with its inputs. Replacement would introduce ids this snapshot never
+// qualified: a Dropped input (whose files GC may already be reclaiming, since
+// snapshot protection is registered later, by SaveSnapshot), or an
+// out-of-boundary one (an output inherits StartPosition from its earliest
+// input, so it can be in-boundary while a later input is not).
+//
+// Keeping the inputs loses no deletes: GenSnapshot separately merges
+// descendants' deltalogs via GetDeltaLogFromCompactTo.
+//
+// Parents resolve against unfiltered meta, because a lineage can run
+// A -> C -> E with C already Dropped. A parent missing entirely (GC'd) ends
+// that branch and the output is kept.
+func dropSupersededByLineage(ctx context.Context, m *meta, selected []*SegmentInfo) []*SegmentInfo {
+	if len(selected) < 2 {
+		return selected
+	}
+
+	selectedIDs := typeutil.NewUniqueSet()
+	for _, info := range selected {
+		selectedIDs.Insert(info.GetID())
+	}
+
+	// Unfiltered on purpose: Dropped segments are needed as waypoints, never as
+	// results. Nothing from this map is emitted.
+	lineage := make(map[int64]*SegmentInfo)
+	for _, info := range m.SelectSegments(ctx, WithCollection(selected[0].GetCollectionID())) {
+		lineage[info.GetID()] = info
+	}
+
+	memo := make(map[int64]bool, len(lineage))
+	var hasSelectedAncestor func(segmentID int64) bool
+	hasSelectedAncestor = func(segmentID int64) bool {
+		if answer, ok := memo[segmentID]; ok {
+			return answer
+		}
+		// Seeding false before recursing terminates on a cycle in
+		// CompactionFrom instead of recursing forever.
+		memo[segmentID] = false
+		info, ok := lineage[segmentID]
+		if !ok {
+			return false
+		}
+		for _, parentID := range info.GetCompactionFrom() {
+			if selectedIDs.Contain(parentID) || hasSelectedAncestor(parentID) {
+				memo[segmentID] = true
+				return true
+			}
+		}
+		return false
+	}
+
+	kept := make([]*SegmentInfo, 0, len(selected))
+	for _, info := range selected {
+		if len(info.GetCompactionFrom()) > 0 && hasSelectedAncestor(info.GetID()) {
+			mlog.Info(ctx, "snapshot skips a compaction output whose inputs it already captures",
+				mlog.FieldSegmentID(info.GetID()),
+				mlog.Int64s("compactionFrom", info.GetCompactionFrom()))
+			continue
+		}
+		kept = append(kept, info)
+	}
+
+	// A DAG always leaves its minimal elements standing, so an empty result
+	// means CompactionFrom has a cycle -- impossible with allocator-issued ids,
+	// but capturing nothing would be silent data loss, which is a far worse way
+	// to be wrong than capturing a duplicate. Keep everything and say so.
+	if len(kept) == 0 {
+		mlog.Error(ctx, "snapshot lineage dedup would drop every segment, keeping all: compaction lineage has a cycle",
+			mlog.Int64("collectionID", selected[0].GetCollectionID()),
+			mlog.Int64s("segmentIDs", selectedIDs.Collect()))
+		return selected
+	}
+	return kept
 }
 
 func (h *ServerHandler) GetDeltaLogFromCompactTo(ctx context.Context, segmentID UniqueID) ([]*datapb.FieldBinlog, error) {

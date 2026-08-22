@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"github.com/samber/lo"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -70,7 +71,7 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 		mlog.FieldCollectionID(collectionID),
 		mlog.Int64("targetSize", targetSize))
 	if policy.meta.isCollectionCompactionBlocked(collectionID) {
-		log.Info(ctx, "skip force merge compaction for collection due to unloaded protected snapshot RefIndex",
+		log.RatedInfo(ctx, rate.Limit(20), "skip force merge compaction for collection due to unloaded protected snapshot RefIndex",
 			mlog.FieldCollectionID(collectionID))
 		return nil, 0, nil
 	}

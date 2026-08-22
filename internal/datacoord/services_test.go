@@ -3780,8 +3780,10 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		defer mockBroadcast.UnPatch()
 
 		fakeBroker := &embeddedBroker{}
-		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).Return(true, nil).Build()
-		defer mockHasCollection.UnPatch()
+		mockDescribeColl := mockey.Mock((*embeddedBroker).DescribeCollectionInternal).Return(
+			&milvuspb.DescribeCollectionResponse{DbName: "default", CollectionName: "test_collection"}, nil,
+		).Build()
+		defer mockDescribeColl.UnPatch()
 
 		server := &Server{
 			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
@@ -3838,13 +3840,13 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 
 		hasCollectionCalled := false
 		fakeBroker := &embeddedBroker{}
-		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).To(
-			func(_ *embeddedBroker, _ context.Context, collectionID int64) (bool, error) {
+		mockDescribeColl := mockey.Mock((*embeddedBroker).DescribeCollectionInternal).To(
+			func(_ *embeddedBroker, _ context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
 				hasCollectionCalled = true
 				assert.Equal(t, int64(100), collectionID)
-				return false, nil
+				return nil, merr.WrapErrCollectionNotFound(collectionID)
 			}).Build()
-		defer mockHasCollection.UnPatch()
+		defer mockDescribeColl.UnPatch()
 
 		server := &Server{
 			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
@@ -3900,10 +3902,10 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		defer mockStartBroadcast.UnPatch()
 
 		fakeBroker := &embeddedBroker{}
-		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).Return(
-			false, errors.New("rootcoord unavailable"),
+		mockDescribeColl := mockey.Mock((*embeddedBroker).DescribeCollectionInternal).Return(
+			nil, errors.New("rootcoord unavailable"),
 		).Build()
-		defer mockHasCollection.UnPatch()
+		defer mockDescribeColl.UnPatch()
 
 		server := &Server{
 			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
@@ -3921,6 +3923,72 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		assert.Error(t, merr.Error(resp))
 		assert.Contains(t, resp.GetReason(), "rootcoord unavailable")
 		assert.False(t, broadcastCalled, "CreateSnapshot must not broadcast if the lock-held collection recheck fails")
+	})
+
+	// The capture always waits for every vchannel's checkpoint to reach the
+	// boundary, whether or not the sort wait was asked for. A vchannel with no
+	// checkpoint at all never satisfies that, and the wait runs in a callback
+	// that retries forever without releasing the collection's DDL key -- so it
+	// has to be refused before the message is appended.
+	t.Run("vchannel_without_checkpoint_is_refused_before_broadcast", func(t *testing.T) {
+		ctx := context.Background()
+
+		mockGet := mockey.Mock((*snapshotManager).GetSnapshot).Return(
+			nil, merr.WrapErrSnapshotNotFound("no_cp_snapshot", "not found"),
+		).Build()
+		defer mockGet.UnPatch()
+
+		fakeHandler := &embeddedHandler{}
+		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
+			&collectionInfo{
+				ID:            100,
+				DatabaseName:  "default",
+				Schema:        &schemapb.CollectionSchema{Name: "test_collection"},
+				VChannelNames: []string{"by-dev-rootcoord-dml_0_100v0"},
+			}, nil,
+		).Build()
+		defer mockGetColl.UnPatch()
+
+		broadcastCalled := false
+		mockBroadcaster := &embeddedBroadcastAPI{}
+		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
+		defer mockClose.UnPatch()
+		mockDoBroadcast := mockey.Mock((*embeddedBroadcastAPI).Broadcast).To(
+			func(_ *embeddedBroadcastAPI, _ context.Context, _ message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+				broadcastCalled = true
+				return &types2.BroadcastAppendResult{}, nil
+			}).Build()
+		defer mockDoBroadcast.UnPatch()
+		mockStartBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				return mockBroadcaster, nil
+			}).Build()
+		defer mockStartBroadcast.UnPatch()
+
+		fakeBroker := &embeddedBroker{}
+		mockDescribeColl := mockey.Mock((*embeddedBroker).DescribeCollectionInternal).Return(
+			&milvuspb.DescribeCollectionResponse{DbName: "default", CollectionName: "test_collection"}, nil,
+		).Build()
+		defer mockDescribeColl.UnPatch()
+
+		// meta with no checkpoint recorded for that vchannel
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			handler:         fakeHandler,
+			broker:          fakeBroker,
+			meta:            &meta{ctx: ctx, segments: NewSegmentsInfo(), channelCPs: newChannelCps()},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{
+			Name:         "no_cp_snapshot",
+			CollectionId: 100,
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+		assert.Contains(t, resp.GetReason(), "has no checkpoint")
+		assert.False(t, broadcastCalled, "must not append a message whose boundary can never be reached")
 	})
 }
 

@@ -813,8 +813,8 @@ dataCoord:
     indexBasedCompaction: true
     # compaction task prioritizer, options: [default, level, mix].
     # default is FIFO.
-    # level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
-    # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
+    # level is prioritized by level: L0 compactions first, then sort compactions, then mix compactions, then clustering compactions.
+    # mix is prioritized by level: mix compactions first, then sort compactions, then L0 compactions, then clustering compactions.
     taskPrioritizer: level
     taskQueueCapacity: 100000 # compaction task queue size
     rpcTimeout: 10
@@ -880,6 +880,8 @@ dataCoord:
   snapshot:
     pendingTimeout: 60 # Timeout in minutes for pending snapshots before GC cleanup
     maxCompactionProtectionSeconds: 604800 # Maximum allowed compaction protection duration in seconds (default 604800 = 7 days)
+    sortWaitTimeoutSeconds: 180 # Budget for one polling attempt of snapshot creation's wait, covering both the wait for every channel checkpoint to reach the snapshot boundary and, when the request asked for it, the wait for its segments to finish sort compaction. Exceeding it does not abandon the snapshot, which is already committed to the WAL, and does not release the collection's DDL lock -- the ack callback simply retries. Default 180.
+    sortWaitPollIntervalSeconds: 1 # How often snapshot creation re-checks whether its segments have finished sort compaction while waiting. Default 1. Values ≤0 and unparseable values are coerced to the default: this feeds time.NewTicker, which panics on a non-positive duration, and the key is refreshable, so the coercion has to happen here rather than at the call site.
     crossBucketEndpointAllowlist:  # Comma/space separated endpoint host[:port] allowlist for snapshot server-side cross-bucket copy with custom object storage endpoints. Canonical cloud endpoints derived from cloud_provider and region are allowed without this list.
     exportCopyConcurrency: 16 # Maximum concurrent provider-side object copy requests for ExportSnapshot. Invalid or non-positive values are coerced to the default value 16.
     exportJobTimeout: 43200 # Maximum lifetime in seconds for an accepted snapshot export job, including queue wait time. Default 12 hours.

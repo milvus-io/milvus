@@ -573,6 +573,18 @@ func (t *clusteringCompactionTask) markInputSegmentsDropped() error {
 
 // indexed is the final state of a clustering compaction task
 // one task should only run this once
+//
+// The swap is overlap-based on purpose: results are published first, inputs
+// retired last, so a crash leaves both generations live rather than neither.
+//
+// Do not move markInputSegmentsDropped earlier to narrow that overlap. It must
+// stay after the completed state is saved: doClean's else branch keys on
+// isInputDropped, and reaching it with the inputs already Dropped runs the
+// v2.4-compat path, which demotes the results to L1 and deletes their partition
+// stats -- discarding the whole clustering run instead of rolling back to the
+// inputs. Readers dedup the overlap by CompactionFrom instead (retrieveSegment,
+// dropSupersededByLineage), which they must do anyway for the far longer
+// invisible-results window before this.
 func (t *clusteringCompactionTask) completeTask() error {
 	var err error
 	// first mark result segments visible

@@ -33,6 +33,12 @@ type MsgHandler interface {
 
 	HandleFlushAll(vchannel string, flushAllMsg message.ImmutableFlushAllMessageV2) error
 
+	// HandleCreateSnapshot seals the vchannel's write buffer at the snapshot's
+	// boundary. The shard interceptor has already fenced segment allocation there;
+	// without this the fenced segments would never be handed to DataCoord, and a
+	// snapshot waiting for them to be flushed and sorted would wait forever.
+	HandleCreateSnapshot(vchannel string, createSnapshotMsg message.ImmutableCreateSnapshotMessageV2) error
+
 	HandleSchemaChange(ctx context.Context, schemaChangeMsg message.ImmutableSchemaChangeMessageV2) error
 
 	HandleAlterCollection(ctx context.Context, alterCollectionMsg message.ImmutableAlterCollectionMessageV2) error

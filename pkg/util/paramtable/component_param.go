@@ -5706,6 +5706,8 @@ type dataCoordConfig struct {
 	SnapshotRefIndexLoadInterval           ParamItem `refreshable:"true"`
 	SnapshotRefIndexLoadTimeout            ParamItem `refreshable:"true"`
 	SnapshotMaxCompactionProtectionSeconds ParamItem `refreshable:"true"`
+	SnapshotSortWaitTimeout                ParamItem `refreshable:"true"`
+	SnapshotSortWaitPollInterval           ParamItem `refreshable:"true"`
 	SnapshotRestorePinTTLSeconds           ParamItem `refreshable:"true"`
 	SnapshotCrossBucketEndpointAllowlist   ParamItem `refreshable:"true"`
 	SnapshotExportCopyConcurrency          ParamItem `refreshable:"true"`
@@ -6036,8 +6038,8 @@ This configuration takes effect only when dataCoord.enableCompaction is set as t
 		DefaultValue: "level",
 		Doc: `compaction task prioritizer, options: [default, level, mix].
 default is FIFO.
-level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
-mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.`,
+level is prioritized by level: L0 compactions first, then sort compactions, then mix compactions, then clustering compactions.
+mix is prioritized by level: mix compactions first, then sort compactions, then L0 compactions, then clustering compactions.`,
 		Export: true,
 	}
 	p.CompactionTaskPrioritizer.Init(base.mgr)
@@ -6693,6 +6695,37 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Export:       true,
 	}
 	p.SnapshotMaxCompactionProtectionSeconds.Init(base.mgr)
+
+	p.SnapshotSortWaitTimeout = ParamItem{
+		Key:          "dataCoord.snapshot.sortWaitTimeoutSeconds",
+		Version:      "2.6.12",
+		DefaultValue: "180",
+		Doc: "Budget for one polling attempt of snapshot creation's wait, covering both the wait for " +
+			"every channel checkpoint to reach the snapshot boundary and, when the request asked for it, " +
+			"the wait for its segments to finish sort compaction. Exceeding it does not abandon the " +
+			"snapshot, which is already committed to the WAL, and does not release the collection's " +
+			"DDL lock -- the ack callback simply retries. Default 180.",
+		Export: true,
+	}
+	p.SnapshotSortWaitTimeout.Init(base.mgr)
+
+	p.SnapshotSortWaitPollInterval = ParamItem{
+		Key:          "dataCoord.snapshot.sortWaitPollIntervalSeconds",
+		Version:      "3.0.1",
+		DefaultValue: "1",
+		Doc: "How often snapshot creation re-checks whether its segments have finished sort compaction while waiting. Default 1. " +
+			"Values ≤0 and unparseable values are coerced to the default: this feeds time.NewTicker, which panics on a " +
+			"non-positive duration, and the key is refreshable, so the coercion has to happen here rather than at the call site.",
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed <= 0 {
+				return "1"
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.SnapshotSortWaitPollInterval.Init(base.mgr)
 
 	p.SnapshotRestorePinTTLSeconds = ParamItem{
 		Key:          "dataCoord.snapshot.restorePinTTLSeconds",

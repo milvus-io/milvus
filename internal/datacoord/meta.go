@@ -2526,7 +2526,14 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 	for _, seg := range compactToInfos {
 		binlogs = append(binlogs, metastore.BinlogsIncrement{Segment: seg})
 	}
-	// only add new segments
+	// Only add new segments. Unlike mix and sort, clustering does not retire its
+	// inputs in this write: the outputs are born IsInvisible and cannot serve
+	// until indexed, so the inputs keep serving until completeTask drops them.
+	//
+	// Readers must therefore expect both generations to be live in between, and
+	// must dedup by CompactionFrom -- IsInvisible only separates them until
+	// markResultSegmentsVisible, after which both are visible. See
+	// retrieveSegment (query) and dropSupersededByLineage (snapshot).
 	if err := m.catalog.AlterSegments(m.ctx, compactToInfos, binlogs...); err != nil {
 		mlog.Warn(m.ctx, "fail to alter compactTo segments", mlog.Err(err))
 		return nil, nil, err
@@ -2683,45 +2690,69 @@ func (m *meta) completeMixCompactionMutation(
 	return compactToSegments, metricMutation, nil
 }
 
-func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.CompactionTask) error {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
-
+// checkSnapshotBlocksCompaction reports whether snapshot state forbids this
+// compaction from committing.
+//
+// Caller must already hold m.segMu, in either mode. This only takes
+// snapshotMeta's own segmentProtectionMu, so it preserves the segMu ->
+// segmentProtectionMu ordering used everywhere else and cannot deadlock against
+// the write-locked commit path.
+//
+// It is deliberately asked twice: once cheaply up front by
+// ValidateSegmentStateBeforeCompleteCompactionMutation, and again by
+// CompleteCompactionMutation under the write lock. The early call releases
+// segMu before the commit reacquires it, and a snapshot can set its staging
+// flag inside that gap -- so the early call alone is an unsynchronized read,
+// not a guarantee.
+func (m *meta) checkSnapshotBlocksCompaction(t *datapb.CompactionTask) error {
 	// Snapshot compaction protection exists to keep the sealed-segment list stable during
 	// backfill — if an L1/L2 segment gets merged away mid-backfill, the backfill breaks.
 	// L0 segments are transient delete-log carriers, not part of that stable list, and
 	// L0 compaction only appends deltalogs to L1/L2 targets without touching L1/L2 binlogs.
 	// So L0 delete compaction is outside the protection's concern and must not be blocked.
-	if t.GetType() != datapb.CompactionType_Level0DeleteCompaction {
-		// Check if compaction is blocked for this collection (snapshot pending or RefIndex not loaded).
-		if m.isCollectionCompactionBlocked(t.GetCollectionID()) {
-			mlog.Info(m.ctx, "compaction rejected: collection has pending snapshot or unloaded RefIndex",
+	if t.GetType() == datapb.CompactionType_Level0DeleteCompaction {
+		return nil
+	}
+
+	// Check if compaction is blocked for this collection (snapshot pending or
+	// staging, or RefIndex not loaded).
+	if m.isCompactionBlockedForType(t.GetCollectionID(), t.GetType()) {
+		mlog.Info(m.ctx, "compaction rejected: collection has pending snapshot or unloaded RefIndex",
+			mlog.Int64("planID", t.GetPlanID()),
+			mlog.String("type", t.GetType().String()),
+			mlog.Int64("collectionID", t.GetCollectionID()),
+			mlog.String("channel", t.GetChannel()),
+			mlog.Int64s("inputSegments", t.GetInputSegments()),
+		)
+		return merr.WrapErrCompactionBlocked(
+			fmt.Sprintf("collection %d has pending snapshot or unloaded snapshot RefIndex",
+				t.GetCollectionID()))
+	}
+
+	// Check if any input segment is protected by a snapshot.
+	for _, segmentID := range t.GetInputSegments() {
+		if m.isSegmentCompactionProtected(segmentID) {
+			mlog.Info(m.ctx, "compaction rejected: input segment is protected by snapshot",
 				mlog.Int64("planID", t.GetPlanID()),
 				mlog.String("type", t.GetType().String()),
 				mlog.Int64("collectionID", t.GetCollectionID()),
 				mlog.String("channel", t.GetChannel()),
+				mlog.Int64("segmentID", segmentID),
 				mlog.Int64s("inputSegments", t.GetInputSegments()),
 			)
 			return merr.WrapErrCompactionBlocked(
-				fmt.Sprintf("collection %d has pending snapshot or unloaded snapshot RefIndex",
-					t.GetCollectionID()))
+				fmt.Sprintf("input segment %d is protected by a snapshot", segmentID))
 		}
+	}
+	return nil
+}
 
-		// Check if any input segment is protected by a snapshot.
-		for _, segmentID := range t.GetInputSegments() {
-			if m.isSegmentCompactionProtected(segmentID) {
-				mlog.Info(m.ctx, "compaction rejected: input segment is protected by snapshot",
-					mlog.Int64("planID", t.GetPlanID()),
-					mlog.String("type", t.GetType().String()),
-					mlog.Int64("collectionID", t.GetCollectionID()),
-					mlog.String("channel", t.GetChannel()),
-					mlog.Int64("segmentID", segmentID),
-					mlog.Int64s("inputSegments", t.GetInputSegments()),
-				)
-				return merr.WrapErrCompactionBlocked(
-					fmt.Sprintf("input segment %d is protected by a snapshot", segmentID))
-			}
-		}
+func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.CompactionTask) error {
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
+
+	if err := m.checkSnapshotBlocksCompaction(t); err != nil {
+		return err
 	}
 
 	for _, segmentID := range t.GetInputSegments() {
@@ -2746,6 +2777,21 @@ func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
+
+	// Re-ask under the write lock. ValidateSegmentStateBeforeCompleteCompactionMutation
+	// answered this earlier, but it dropped segMu before returning and the caller
+	// then did other work (CompressCompactionBinlogs) and waited to acquire the
+	// write lock here -- which itself blocks until every in-flight reader drains,
+	// and GenSnapshot is one such reader scanning a whole collection. A snapshot
+	// can set its staging flag anywhere in that gap. Committing a boundary-changing
+	// merge afterwards produces a segment whose start position predates the
+	// boundary while its rows do not, and the snapshot then captures data written
+	// after its own cut. This is the same precedent as the isSegmentHealthy
+	// re-checks inside each complete*Mutation, for the same reason.
+	if err := m.checkSnapshotBlocksCompaction(t); err != nil {
+		return nil, nil, err
+	}
+
 	switch t.GetType() {
 	case datapb.CompactionType_MixCompaction:
 		return m.completeMixCompactionMutation(t, result)
@@ -3067,6 +3113,34 @@ func (m *meta) isCollectionCompactionBlocked(collectionID int64) bool {
 		return false
 	}
 	return m.snapshotMeta.IsCollectionCompactionBlocked(collectionID)
+}
+
+// isCompactionBlockedForType answers the same question per compaction type.
+// A staging snapshot only blocks compactions that can move a segment boundary,
+// because that is the only thing that can put rows from after the snapshot into
+// a segment the snapshot claims.
+func (m *meta) isCompactionBlockedForType(collectionID int64, compactionType datapb.CompactionType) bool {
+	if m.snapshotMeta == nil {
+		return false
+	}
+	if changesSegmentBoundary(compactionType) {
+		return m.snapshotMeta.IsCollectionCompactionBlocked(collectionID)
+	}
+	return m.snapshotMeta.IsCollectionCompactionBlockedIgnoringStaging(collectionID)
+}
+
+// changesSegmentBoundary reports whether a compaction can produce a segment
+// spanning rows that its inputs did not span together, i.e. whether it can merge
+// across a snapshot boundary.
+//
+// Only the N:M types can. Sort and schema bump rewrite one segment into one
+// segment, so their output covers exactly their input; L0 delete appends delete
+// logs and creates no L1/L2 segment at all. Import is not listed because an
+// import segment sits at a single point on the timeline -- its CommitTimestamp
+// serves as both its start and its end -- so it has no width to span with.
+func changesSegmentBoundary(compactionType datapb.CompactionType) bool {
+	return compactionType == datapb.CompactionType_MixCompaction ||
+		compactionType == datapb.CompactionType_ClusteringCompaction
 }
 
 // GetCompactableSegmentGroupByCollection returns sealed segments grouped by collection.

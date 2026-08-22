@@ -155,6 +155,8 @@ func fromMessageToTsMsgV2(msg message.ImmutableMessage) (msgstream.TsMsg, error)
 		tsMsg, err = NewManualFlushMessageBody(msg)
 	case message.MessageTypeFlushAll:
 		tsMsg, err = NewFlushAllMessageBody(msg)
+	case message.MessageTypeCreateSnapshot:
+		tsMsg, err = NewCreateSnapshotMessageBody(msg)
 	case message.MessageTypeCreateSegment:
 		tsMsg, err = NewCreateSegmentMessageBody(msg)
 	case message.MessageTypeSchemaChange:

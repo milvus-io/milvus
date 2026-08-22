@@ -31,9 +31,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+const snapshotTestVChannel = "by-dev-rootcoord-dml_0_100v0"
+
+// snapshotTestBroadcastResults is the per-vchannel append result a CreateSnapshot
+// broadcast comes back with. The callback derives the snapshot boundary from it,
+// so a result covering at least one data vchannel is now part of a valid fixture.
+func snapshotTestBroadcastResults() map[string]*message.AppendResult {
+	return map[string]*message.AppendResult{
+		"by-dev-rootcoord-dml_0vcchan": {MessageID: rmq.NewRmqID(1), TimeTick: 1000},
+		snapshotTestVChannel:           {MessageID: rmq.NewRmqID(2), TimeTick: 1000},
+	}
+}
 
 // --- Test createSnapshotV2AckCallback ---
 
@@ -50,12 +63,17 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_Success(t *testing.T) {
 		collectionID int64,
 		name, description string,
 		compactionProtectionSeconds int64,
+		boundary *SnapshotBoundary,
+		waitForSortedSegments bool,
 	) (int64, error) {
 		createSnapshotCalled = true
 		assert.Equal(t, int64(100), collectionID)
 		assert.Equal(t, "test_snapshot", name)
 		assert.Equal(t, "test description", description)
 		assert.Equal(t, int64(3600), compactionProtectionSeconds)
+		// The header carries the opt-in through to the callback, since the
+		// request that asked for it is long gone by the time this runs.
+		assert.True(t, waitForSortedSegments)
 		return 1001, nil
 	}).Build()
 	defer mockCreateSnapshot.UnPatch()
@@ -73,9 +91,10 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_Success(t *testing.T) {
 			Name:                        "test_snapshot",
 			Description:                 "test description",
 			CompactionProtectionSeconds: 3600,
+			WaitForSortedSegments:       true,
 		}).
 		WithBody(&message.CreateSnapshotMessageBody{}).
-		WithBroadcast([]string{"control_channel"}).
+		WithBroadcast([]string{"by-dev-rootcoord-dml_0vcchan", snapshotTestVChannel}).
 		MustBuildBroadcast()
 
 	// Convert to typed broadcast message
@@ -83,6 +102,7 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_Success(t *testing.T) {
 
 	result := message.BroadcastResultCreateSnapshotMessageV2{
 		Message: typedMsg,
+		Results: snapshotTestBroadcastResults(),
 	}
 
 	// Execute
@@ -105,6 +125,8 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_CreateError(t *testing.T) {
 		collectionID int64,
 		name, description string,
 		compactionProtectionSeconds int64,
+		boundary *SnapshotBoundary,
+		waitForSortedSegments bool,
 	) (int64, error) {
 		return 0, expectedErr
 	}).Build()
@@ -124,13 +146,14 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_CreateError(t *testing.T) {
 			Description:  "test description",
 		}).
 		WithBody(&message.CreateSnapshotMessageBody{}).
-		WithBroadcast([]string{"control_channel"}).
+		WithBroadcast([]string{"by-dev-rootcoord-dml_0vcchan", snapshotTestVChannel}).
 		MustBuildBroadcast()
 
 	typedMsg := message.MustAsBroadcastCreateSnapshotMessageV2(broadcastMsg)
 
 	result := message.BroadcastResultCreateSnapshotMessageV2{
 		Message: typedMsg,
+		Results: snapshotTestBroadcastResults(),
 	}
 
 	// Execute
@@ -176,7 +199,7 @@ func TestDDLCallbacks_DropSnapshotV2AckCallback_Success(t *testing.T) {
 			CollectionId: 100,
 		}).
 		WithBody(&message.DropSnapshotMessageBody{}).
-		WithBroadcast([]string{"control_channel"}).
+		WithBroadcast([]string{"by-dev-rootcoord-dml_0vcchan", snapshotTestVChannel}).
 		MustBuildBroadcast()
 
 	typedMsg := message.MustAsBroadcastDropSnapshotMessageV2(broadcastMsg)
@@ -222,7 +245,7 @@ func TestDDLCallbacks_DropSnapshotV2AckCallback_DropError(t *testing.T) {
 			CollectionId: 100,
 		}).
 		WithBody(&message.DropSnapshotMessageBody{}).
-		WithBroadcast([]string{"control_channel"}).
+		WithBroadcast([]string{"by-dev-rootcoord-dml_0vcchan", snapshotTestVChannel}).
 		MustBuildBroadcast()
 
 	typedMsg := message.MustAsBroadcastDropSnapshotMessageV2(broadcastMsg)
@@ -268,7 +291,7 @@ func TestDDLCallbacks_DropSnapshotsByCollectionV2AckCallback_Success(t *testing.
 			CollectionId: 100,
 		}).
 		WithBody(&message.DropSnapshotsByCollectionMessageBody{}).
-		WithBroadcast([]string{"control_channel"}).
+		WithBroadcast([]string{"by-dev-rootcoord-dml_0vcchan", snapshotTestVChannel}).
 		MustBuildBroadcast()
 
 	typedMsg := message.MustAsBroadcastDropSnapshotsByCollectionMessageV2(broadcastMsg)
@@ -308,7 +331,7 @@ func TestDDLCallbacks_DropSnapshotsByCollectionV2AckCallback_Error(t *testing.T)
 			CollectionId: 100,
 		}).
 		WithBody(&message.DropSnapshotsByCollectionMessageBody{}).
-		WithBroadcast([]string{"control_channel"}).
+		WithBroadcast([]string{"by-dev-rootcoord-dml_0vcchan", snapshotTestVChannel}).
 		MustBuildBroadcast()
 
 	typedMsg := message.MustAsBroadcastDropSnapshotsByCollectionMessageV2(broadcastMsg)
@@ -396,7 +419,7 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_Success(t *testing.T) {
 			SourceCollectionId: 100,
 		}).
 		WithBody(&message.RestoreSnapshotMessageBody{}).
-		WithBroadcast([]string{"control_channel"}).
+		WithBroadcast([]string{"by-dev-rootcoord-dml_0vcchan", snapshotTestVChannel}).
 		MustBuildBroadcast()
 
 	typedMsg := message.MustAsBroadcastRestoreSnapshotMessageV2(broadcastMsg)
@@ -450,7 +473,7 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_RestoreDataError(t *testing.T
 			SourceCollectionId: 100,
 		}).
 		WithBody(&message.RestoreSnapshotMessageBody{}).
-		WithBroadcast([]string{"control_channel"}).
+		WithBroadcast([]string{"by-dev-rootcoord-dml_0vcchan", snapshotTestVChannel}).
 		MustBuildBroadcast()
 
 	typedMsg := message.MustAsBroadcastRestoreSnapshotMessageV2(broadcastMsg)
