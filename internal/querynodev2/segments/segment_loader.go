@@ -2476,7 +2476,8 @@ func prepareIndexLoadParams(indexInfos []*querypb.FieldIndexInfo) error {
 		indexParams := funcutil.KeyValuePair2Map(indexInfo.GetIndexParams())
 
 		// some build params also exist in indexParams, which are useless during loading process
-		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) {
+		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) ||
+			vecindexmgr.GetVecIndexMgrInstance().IsAISAQ(indexParams["index_type"]) {
 			if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
 				return err
 			}

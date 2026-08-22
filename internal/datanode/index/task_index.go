@@ -281,9 +281,18 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		fieldDataSize = dim * numRows * 2
 	case schemapb.DataType_ArrayOfVector:
 		fieldDataSize = getFieldDataSizeFromBinlogs(it.req.GetInsertLogs(), it.req.GetField().GetFieldID())
+	default:
+		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) ||
+			vecindexmgr.GetVecIndexMgrInstance().IsAISAQ(indexType) {
+			log.Warn(ctx, "unknown or unset field DataType for disk index build, fieldDataSize will be 0; "+
+				"disk_pq_dims and cache budgets may be incorrect (possible coordinator version mismatch)",
+				mlog.String("dataType", it.req.GetField().GetDataType().String()),
+				mlog.Int64("fieldID", it.req.GetField().GetFieldID()))
+		}
 	}
-	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
-		if err := indexparams.SetDiskIndexBuildParams(it.newIndexParams, int64(fieldDataSize)); err != nil {
+	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) ||
+		vecindexmgr.GetVecIndexMgrInstance().IsAISAQ(indexType) {
+		if err := indexparams.SetDiskIndexBuildParams(it.newIndexParams, int64(fieldDataSize), it.req.GetField().GetDataType()); err != nil {
 			log.Warn(ctx, "failed to fill disk index params", mlog.Err(err))
 			return err
 		}
