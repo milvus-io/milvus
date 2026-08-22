@@ -146,12 +146,15 @@ func (bw *BulkPackWriterV3) loadPriorBM25Stats(ctx context.Context, fieldPaths m
 	return combined, nil
 }
 
-// Write executes a SyncPack as do-then-commit:
+// Write executes one Storage V3 write attempt as do-then-commit:
 //
-//  1. Phase 1 (slow, runs once): write all data files — parquet/LOB via the
-//     loon writer, deltalog via the deltalog writer, stat blobs via the
+//  1. Phase 1 (slow, runs once per attempt): write all data files — parquet/LOB
+//     via the loon writer, deltalog via the deltalog writer, stat blobs via the
 //     filesystem FFI — and assemble a single packed.ManifestUpdates payload
-//     describing every change the segment needs to register.
+//     describing every change the segment needs to register. SyncTask creates
+//     a fresh BulkPackWriterV3 and retries this whole attempt when a transient
+//     downstream failure escapes, so a partially consumed FFI writer is never
+//     reused.
 //  2. Phase 2 (fast, retried on transient loon errors): call
 //     packed.CommitManifestUpdates once. The loon transaction handle is
 //     opened, all changes are staged, and the transaction is committed in
@@ -227,7 +230,7 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	err = retry.Do(ctx, func() error {
 		newPath, commitErr := packed.CommitManifestUpdates(basePath, baseVersion, bw.storageConfig, updates)
 		if commitErr != nil {
-			return classifyLoonErr(commitErr)
+			return classifyStorageV3Err(commitErr)
 		}
 		bw.manifestPath = newPath
 		return nil
@@ -244,22 +247,37 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	// V3 feeds the tracked statsBlobSize instead of summing a stats array (it
 	// returns no stats array); finalizeStats produces the cumulative Statistics.
 	segmentStats, err = bw.finalizeStats(pack, digested, inserts, deltas, bw.statsBlobSize)
+	if err != nil {
+		// The manifest is already committed. Never let a later bookkeeping
+		// failure restart phase 1 and publish the same batch a second time.
+		err = stopStorageV3RetryAfterCommit(err)
+	}
 	return
 }
 
-// classifyLoonErr maps loon FFI failures to retryable errors and everything
-// else to retry.Unrecoverable so the outer retry loop terminates immediately.
-//
-// NOTE: today milvus-storage does not reliably preserve structured error codes
-// through every FFI path, so packed.ErrLoonTransient covers ALL loon errors,
-// including non-recoverable IO failures. The bounded retry budget keeps the
-// worst case finite. Once error codes survive end-to-end, narrow the retryable
-// set here.
-func classifyLoonErr(err error) error {
+func stopStorageV3RetryAfterCommit(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, packed.ErrLoonTransient) {
+	return retry.Unrecoverable(err)
+}
+
+// classifyStorageV3Err keeps explicitly transient Storage V3 failures
+// retryable and maps everything else to retry.Unrecoverable so the outer retry
+// loop terminates immediately. Loon FFI calls carry ErrLoonTransient; the
+// older packed writer used by Storage V3 deltalogs carries a retriable merr
+// segcore classification instead.
+//
+// NOTE: today milvus-storage does not reliably preserve structured error codes
+// through every FFI path, so packed.ErrLoonTransient covers ALL loon errors,
+// including non-recoverable IO failures. The existing task policy therefore
+// retries a producer-misclassified permanent loon error until its context
+// ends. Once error codes survive end-to-end, narrow the retryable set here.
+func classifyStorageV3Err(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, packed.ErrLoonTransient) || merr.IsRetryableErr(err) {
 		return err
 	}
 	return retry.Unrecoverable(err)
@@ -437,7 +455,7 @@ func (bw *BulkPackWriterV3) writeDelta(ctx context.Context, pack *SyncPack, base
 		return nil, nil, merr.Wrap(err, "primary key field not found")
 	}
 
-	logID, err := bw.allocator.AllocOne()
+	logID, err := allocOneWithRetry(ctx, bw.allocator, bw.writeRetryOpts...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -552,7 +570,7 @@ func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack, base
 	}
 
 	// Write batch stats blob via filesystem FFI.
-	id, err := bw.allocator.AllocOne()
+	id, err := allocOneWithRetry(ctx, bw.allocator, bw.writeRetryOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -663,7 +681,7 @@ func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack,
 	}
 
 	for fieldID, blob := range bm25Blobs {
-		id, err := bw.allocator.AllocOne()
+		id, err := allocOneWithRetry(ctx, bw.allocator, bw.writeRetryOpts...)
 		if err != nil {
 			return nil, err
 		}

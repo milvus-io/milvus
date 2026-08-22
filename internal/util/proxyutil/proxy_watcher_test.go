@@ -20,15 +20,20 @@ import (
 	"context"
 	"path"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -133,8 +138,9 @@ func TestProxyManager_ErrCompacted(t *testing.T) {
 
 	for i := 1; i < 10; i++ {
 		k := path.Join(sessKey, typeutil.ProxyRole+strconv.FormatInt(int64(i), 10))
-		v := "invalid session: " + strconv.FormatInt(int64(i), 10)
-		_, err = etcdCli.Put(ctx, k, v)
+		value, marshalErr := json.Marshal(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: int64(i)}})
+		assert.NoError(t, marshalErr)
+		_, err = etcdCli.Put(ctx, k, string(value))
 		assert.NoError(t, err)
 	}
 
@@ -156,13 +162,77 @@ func TestProxyManager_ErrCompacted(t *testing.T) {
 		clientv3.WithRev(1),
 	)
 
-	assert.Panics(t, func() {
+	assert.NotPanics(t, func() {
 		pm.startWatchEtcd(ctx, eventCh)
 	})
+	pm.Stop()
 
 	for i := 1; i < 10; i++ {
 		k := path.Join(sessKey, typeutil.ProxyRole+strconv.FormatInt(int64(i), 10))
 		_, err = etcdCli.Delete(ctx, k)
 		assert.NoError(t, err)
+	}
+}
+
+func TestProxyWatcher_RewatchRetriesRecoverableRequestError(t *testing.T) {
+	var calls atomic.Int32
+	patch := mockey.Mock((*ProxyWatcher).WatchProxy).
+		To(func(*ProxyWatcher, context.Context) error {
+			if calls.Add(1) == 1 {
+				return status.Error(codes.Unavailable, "etcd temporarily unavailable")
+			}
+			return nil
+		}).Build()
+	defer patch.UnPatch()
+
+	watcher := NewProxyWatcher(nil)
+	assert.NoError(t, watcher.rewatchProxy(context.Background()))
+	assert.EqualValues(t, 2, calls.Load())
+}
+
+func TestProxyWatcher_ClosedChannelReestablishesWatch(t *testing.T) {
+	var calls atomic.Int32
+	patch := mockey.Mock((*ProxyWatcher).WatchProxy).
+		To(func(*ProxyWatcher, context.Context) error {
+			calls.Add(1)
+			return nil
+		}).Build()
+	defer patch.UnPatch()
+
+	eventCh := make(chan clientv3.WatchResponse)
+	close(eventCh)
+	watcher := &ProxyWatcher{closeCh: lifetime.NewSafeChan()}
+	assert.NotPanics(t, func() {
+		watcher.startWatchEtcd(context.Background(), eventCh)
+	})
+	assert.EqualValues(t, 1, calls.Load())
+}
+
+func TestProxyWatcher_StopInterruptsRecoverableRewatch(t *testing.T) {
+	started := make(chan struct{})
+	patch := mockey.Mock((*ProxyWatcher).WatchProxy).
+		To(func(*ProxyWatcher, context.Context) error {
+			select {
+			case <-started:
+			default:
+				close(started)
+			}
+			return status.Error(codes.Unavailable, "etcd temporarily unavailable")
+		}).Build()
+	defer patch.UnPatch()
+
+	watcher := NewProxyWatcher(nil)
+	done := make(chan error, 1)
+	go func() {
+		done <- watcher.rewatchProxy(context.Background())
+	}()
+	<-started
+	watcher.Stop()
+
+	select {
+	case err := <-done:
+		assert.Error(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not interrupt recoverable rewatch")
 	}
 }
