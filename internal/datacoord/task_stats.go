@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -40,6 +41,12 @@ import (
 
 type statsTask struct {
 	*indexpb.StatsTask
+
+	// stateGuard makes State/Version readable by the scheduler without the
+	// per-task key lock. Callbacks mutate them under that key lock, but the
+	// scheduler's phase derivation and metrics pass read them lock-free on
+	// their own goroutines; without this the reads are a data race.
+	stateGuard sync.RWMutex
 
 	taskSlot int64
 
@@ -85,6 +92,8 @@ func (st *statsTask) GetTaskType() taskcommon.Type {
 }
 
 func (st *statsTask) GetTaskState() taskcommon.State {
+	st.stateGuard.RLock()
+	defer st.stateGuard.RUnlock()
 	return st.GetState()
 }
 
@@ -101,10 +110,14 @@ func (st *statsTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
 }
 
 func (st *statsTask) GetTaskVersion() int64 {
+	st.stateGuard.RLock()
+	defer st.stateGuard.RUnlock()
 	return st.GetVersion()
 }
 
 func (st *statsTask) SetState(state indexpb.JobState, failReason string) {
+	st.stateGuard.Lock()
+	defer st.stateGuard.Unlock()
 	st.State = state
 	st.FailReason = failReason
 }
@@ -124,8 +137,10 @@ func (st *statsTask) UpdateTaskVersion(nodeID int64) error {
 	if err := st.meta.statsTaskMeta.UpdateVersion(st.GetTaskID(), nodeID); err != nil {
 		return err
 	}
+	st.stateGuard.Lock()
 	st.Version++
 	st.NodeID = nodeID
+	st.stateGuard.Unlock()
 	return nil
 }
 

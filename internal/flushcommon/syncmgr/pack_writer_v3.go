@@ -225,6 +225,18 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	// packed.ErrLoonTransient; loon's own optimistic retry covers
 	// manifest-version conflicts within a single attempt.
 	err = retry.Do(ctx, func() error {
+		// Canceled means the owner of this sync has been dropped -- for an
+		// import, the coordinator has reclaimed the attempt and may already be
+		// re-dispatching the SAME segment. Loon commits rebase-merge on
+		// conflict, so a commit sent past this point is not rejected: it is
+		// absorbed into the manifest chain the replacement attempt builds on,
+		// planting this attempt's fragments inside the replacement's reported
+		// version. retry.Do only checks ctx between attempts; this check keeps
+		// a canceled sync from INITIATING a commit at all, shrinking the
+		// stray-commit window to a commit already in flight when cancel landed.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return retry.Unrecoverable(ctxErr)
+		}
 		newPath, commitErr := packed.CommitManifestUpdates(basePath, baseVersion, bw.storageConfig, updates)
 		if commitErr != nil {
 			return classifyLoonErr(commitErr)

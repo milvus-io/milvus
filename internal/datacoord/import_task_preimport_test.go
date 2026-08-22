@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -91,7 +92,11 @@ func TestPreImportTask_CreateTaskOnWorker(t *testing.T) {
 		cluster := session.NewMockCluster(t)
 		cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("test"))
 		task.CreateTaskOnWorker(1, cluster)
-		assert.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+		// A Create error says nothing about whether the worker accepted the
+		// request, so the durable assignment stays: the poll path reclaims the
+		// attempt from that node before the task becomes dispatchable again.
+		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
+		assert.EqualValues(t, 1, task.GetNodeID())
 	})
 
 	t.Run("UpdateTask failed", func(t *testing.T) {
@@ -127,14 +132,18 @@ func TestPreImportTask_CreateTaskOnWorker(t *testing.T) {
 		err = im.AddTask(context.TODO(), task)
 		assert.NoError(t, err)
 
+		// CreatePreImport is deliberately not declared: a task whose assignment
+		// cannot be persisted must not be sent at all, or an accepted request
+		// would leave an attempt nobody can reclaim.
 		cluster := session.NewMockCluster(t)
-		cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		catalog = mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(errors.New("mock err"))
 		task.importMeta.(*importMeta).catalog = catalog
 		task.CreateTaskOnWorker(1, cluster)
 		assert.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+		assert.NotEqualValues(t, 1, task.GetNodeID(),
+			"a task that was never sent must not name the node it would have gone to")
 	})
 
 	t.Run("normal", func(t *testing.T) {
@@ -203,8 +212,23 @@ func TestPreImportTask_QueryTaskOnWorker(t *testing.T) {
 		err = im.AddTask(context.TODO(), task)
 		assert.NoError(t, err)
 
+		// A pre-import attempt allocates nothing a second attempt could collide
+		// with, but it still holds a worker slot, so the task is reclaimed from
+		// its node before it becomes dispatchable again.
 		cluster := session.NewMockCluster(t)
-		cluster.EXPECT().QueryPreImport(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
+		cluster.EXPECT().QueryPreImport(mock.Anything, mock.Anything).Return(nil, errors.New("mock err")).Once()
+		cluster.EXPECT().DropImport(int64(7), int64(2)).Return(nil).Once()
+		task.QueryTaskOnWorker(cluster)
+		assert.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+		assert.EqualValues(t, NullNodeID, task.GetNodeID())
+
+		// And likewise when the node is gone: it took the task with it, so the
+		// reclaim succeeds.
+		taskProto.NodeID = 7
+		task.task.Store(taskProto)
+		cluster.EXPECT().QueryPreImport(mock.Anything, mock.Anything).
+			Return(nil, merr.WrapErrNodeNotFound(7)).Once()
+		cluster.EXPECT().DropImport(int64(7), int64(2)).Return(merr.WrapErrNodeNotFound(7)).Once()
 		task.QueryTaskOnWorker(cluster)
 		assert.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
 	})

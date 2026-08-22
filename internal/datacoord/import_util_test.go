@@ -75,6 +75,11 @@ func TestImportUtil_NewPreImportTasks(t *testing.T) {
 }
 
 func TestImportUtil_NewImportTasks(t *testing.T) {
+	oldCompaction := Params.DataCoordCfg.EnableCompaction.SwapTempValue("true")
+	t.Cleanup(func() {
+		Params.DataCoordCfg.EnableCompaction.SwapTempValue(oldCompaction)
+	})
+
 	dataSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 	fileGroups := [][]*datapb.ImportFileStats{
 		{
@@ -115,11 +120,17 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 		},
 	}
 	alloc := allocator.NewMockAllocator(t)
+	allocNCalls := 0
 	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
+		allocNCalls++
 		id := rand.Int63()
 		return id, id + n, nil
 	})
-	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil)
+	nextSegmentID := int64(1000)
+	alloc.EXPECT().AllocID(mock.Anything).RunAndReturn(func(context.Context) (int64, error) {
+		nextSegmentID++
+		return nextSegmentID, nil
+	})
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(rand.Uint64(), nil)
 
 	catalog := mocks.NewDataCoordCatalog(t)
@@ -147,7 +158,57 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 	for _, task := range tasks {
 		segmentIDs := task.(*importTask).GetSegmentIDs()
 		assert.Equal(t, 3, len(segmentIDs))
+		assert.Empty(t, task.(*importTask).GetSortedSegmentIDs(), "sorted outputs are no longer preallocated")
+		for _, segmentID := range segmentIDs {
+			assert.True(t, meta.GetSegment(context.Background(), segmentID).GetIsInvisible(),
+				"a sort-planned import origin must persist that it awaits its replacement")
+		}
 	}
+	assert.Equal(t, 1, allocNCalls, "only task IDs are preallocated, never sorted targets")
+
+	// A restart replans from the job options alone: every normal import sorts,
+	// so the remaining tasks get the same plan without consulting persisted
+	// task metadata or the previous process's configuration.
+	restartedImportMeta := NewMockImportMeta(t)
+
+	restartedTasks, err := NewImportTasks(fileGroups[:1], job, alloc, meta, restartedImportMeta, 1*1024*1024*1024)
+	assert.NoError(t, err)
+	if assert.Len(t, restartedTasks, 1) {
+		restartedTask := restartedTasks[0].(*importTask)
+		assert.Empty(t, restartedTask.GetSortedSegmentIDs())
+		for _, segmentID := range restartedTask.GetSegmentIDs() {
+			assert.True(t, meta.GetSegment(context.Background(), segmentID).GetIsInvisible())
+		}
+	}
+	assert.Equal(t, 2, allocNCalls)
+
+	// L0 imports never sort: their origins are the final segments and stay
+	// visible, regardless of any legacy sorted IDs older binaries wrote.
+	legacyL0Job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID:        2,
+		CollectionID: job.GetCollectionID(),
+		Schema:       job.GetSchema(),
+		Options: []*commonpb.KeyValuePair{
+			{Key: importutilv2.L0Import, Value: "true"},
+		},
+	}}
+	legacyL0Meta := NewMockImportMeta(t)
+
+	l0Tasks, err := NewImportTasks(fileGroups[:1], legacyL0Job, alloc, meta, legacyL0Meta, 1*1024*1024*1024)
+	assert.NoError(t, err)
+	if assert.Len(t, l0Tasks, 1) {
+		l0Task := l0Tasks[0].(*importTask)
+		assert.Empty(t, l0Task.GetSortedSegmentIDs(), "legacy sorted IDs must not turn an L0 job into a sort plan")
+		for _, segmentID := range l0Task.GetSegmentIDs() {
+			segment := meta.GetSegment(context.Background(), segmentID)
+			if assert.NotNil(t, segment) {
+				assert.Equal(t, datapb.SegmentLevel_L0, segment.GetLevel())
+				assert.False(t, segment.GetIsInvisible(), "L0 origins are the final imported segments")
+			}
+		}
+	}
+	assert.Equal(t, 3, allocNCalls,
+		"L0 recovery allocates task IDs only and must not allocate replacement segment IDs")
 }
 
 func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
@@ -1360,4 +1421,78 @@ func TestImportUtil_ValidateMaxImportJobExceed(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "The number of jobs has reached the limit")
 	})
+}
+
+// The sort decision lives in the durable job options: every normal import
+// sorts, L0 imports never do. Task records carry no sort plan any more, so
+// only the job is consulted -- corrupt task values still fail closed.
+func TestImportSortPlanned(t *testing.T) {
+	mk := func(taskID int64) ImportTask {
+		task := &importTask{}
+		task.task.Store(&datapb.ImportTaskV2{TaskID: taskID, SegmentIDs: []int64{1}})
+		return task
+	}
+
+	normalJob := &importJob{ImportJob: &datapb.ImportJob{JobID: 1}}
+	planned, err := importSortPlannedForJob(normalJob, nil)
+	assert.NoError(t, err)
+	assert.True(t, planned, "every normal import is sort-planned")
+
+	planned, err = importSortPlannedForJob(normalJob, []ImportTask{mk(1)})
+	assert.NoError(t, err)
+	assert.True(t, planned)
+
+	planned, err = importSortPlannedForJob(nil, []ImportTask{mk(1)})
+	assert.NoError(t, err)
+	assert.True(t, planned)
+
+	l0Job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID:   2,
+		Options: []*commonpb.KeyValuePair{{Key: importutilv2.L0Import, Value: "true"}},
+	}}
+	planned, err = importSortPlannedForJob(l0Job, []ImportTask{mk(2)})
+	assert.NoError(t, err)
+	assert.False(t, planned, "L0 imports never sort")
+
+	t.Run("corrupt task values still fail closed", func(t *testing.T) {
+		var typedNil *importTask
+		wrongType := &preImportTask{}
+		wrongType.task.Store(&datapb.PreImportTask{TaskID: 3})
+		for name, corruptTask := range map[string]ImportTask{
+			"nil":        nil,
+			"typed nil":  typedNil,
+			"wrong type": wrongType,
+		} {
+			t.Run(name, func(t *testing.T) {
+				assert.NotPanics(t, func() {
+					_, err := importSortPlannedForJob(normalJob, []ImportTask{corruptTask})
+					assert.ErrorIs(t, err, merr.ErrImportSysFailed)
+				})
+			})
+		}
+	})
+}
+
+func TestImportProgressIgnoresLegacyL0SortedIDs(t *testing.T) {
+	const jobID = int64(100)
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: jobID,
+		Options: []*commonpb.KeyValuePair{
+			{Key: importutilv2.L0Import, Value: "true"},
+		},
+	}}
+	task := &importTask{}
+	task.task.Store(&datapb.ImportTaskV2{
+		JobID:            jobID,
+		TaskID:           101,
+		SegmentIDs:       []int64{102},
+		SortedSegmentIDs: []int64{103},
+	})
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetTaskBy(mock.Anything, mock.Anything, mock.Anything).
+		Return([]ImportTask{task}).Once()
+	importMeta.EXPECT().GetJob(mock.Anything, jobID).Return(job).Twice()
+
+	assert.Equal(t, float32(1), getStatsProgress(context.Background(), jobID, importMeta, nil))
+	assert.Equal(t, float32(1), getIndexBuildingProgress(context.Background(), jobID, importMeta, nil))
 }

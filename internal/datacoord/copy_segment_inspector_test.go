@@ -20,11 +20,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	task2 "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -43,6 +45,7 @@ type CopySegmentInspectorSuite struct {
 	meta      *meta
 	copyMeta  CopySegmentMeta
 	scheduler *task2.MockGlobalScheduler
+	cluster   *session.MockCluster
 	inspector *copySegmentInspector
 }
 
@@ -81,12 +84,14 @@ func (s *CopySegmentInspectorSuite) SetupTest() {
 	s.NoError(err)
 
 	s.scheduler = task2.NewMockGlobalScheduler(s.T())
+	s.cluster = session.NewMockCluster(s.T())
 
 	s.inspector = NewCopySegmentInspector(
 		context.TODO(),
 		s.meta,
 		s.copyMeta,
 		s.scheduler,
+		s.cluster,
 	).(*copySegmentInspector)
 }
 
@@ -342,6 +347,166 @@ func (s *CopySegmentInspectorSuite) TestProcessFailed_NoTargetSegment() {
 	s.NotPanics(func() {
 		s.inspector.processFailed(task)
 	})
+}
+
+func (s *CopySegmentInspectorSuite) TestReconcileReplanRetainsCleanupOwnerUntilTargetsAreDropped() {
+	ctx := context.Background()
+	const (
+		oldTaskID   = int64(1001)
+		newTaskID   = int64(1002)
+		oldTarget   = int64(101)
+		newTarget   = int64(102)
+		sourceID    = int64(1)
+		partitionID = int64(10)
+	)
+
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)
+	newTask := func(taskID, targetID int64, version int64, predecessorID int64) *copySegmentTask {
+		task := &copySegmentTask{tr: timerecord.NewTimeRecorder("task"), times: taskcommon.NewTimes()}
+		task.task.Store(&datapb.CopySegmentTask{
+			TaskId:            taskID,
+			JobId:             s.jobID,
+			CollectionId:      s.collectionID,
+			TaskVersion:       version,
+			State:             datapb.CopySegmentTaskState_CopySegmentTaskPending,
+			PredecessorTaskId: predecessorID,
+			IdMappings: []*datapb.CopySegmentIDMapping{{
+				SourceSegmentId: sourceID,
+				TargetSegmentId: targetID,
+				PartitionId:     partitionID,
+			}},
+		})
+		return task
+	}
+	s.Require().NoError(s.copyMeta.AddTask(ctx, newTask(oldTaskID, oldTarget, 0, 0)))
+	s.Require().NoError(s.copyMeta.AddTask(ctx, newTask(newTaskID, newTarget, 1, oldTaskID)))
+	oldSegment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID: oldTarget, CollectionID: s.collectionID, PartitionID: partitionID,
+		State: commonpb.SegmentState_Importing, IsImporting: true,
+	})
+	s.meta.segments.SetSegment(oldTarget, oldSegment)
+	newSegment := oldSegment.Clone()
+	newSegment.ID = newTarget
+	s.meta.segments.SetSegment(newTarget, newSegment)
+
+	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(errors.New("etcd unavailable")).Once()
+	s.False(s.inspector.reconcileReplannedTasks(s.jobID),
+		"neither side may be scheduled while the old target still needs cleanup")
+	s.Require().NotNil(s.copyMeta.GetTask(ctx, oldTaskID),
+		"failed target cleanup must retain the only durable inventory")
+	s.Equal(commonpb.SegmentState_Importing, s.meta.GetSegment(ctx, oldTarget).GetState())
+
+	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().DropCopySegmentTask(mock.Anything, oldTaskID).Return(nil).Once()
+	s.True(s.inspector.reconcileReplannedTasks(s.jobID),
+		"the replacement becomes schedulable only after cleanup and retirement")
+	s.Nil(s.copyMeta.GetTask(ctx, oldTaskID))
+	s.Require().NotNil(s.copyMeta.GetTask(ctx, newTaskID))
+	s.Equal(commonpb.SegmentState_Dropped, s.meta.GetSegment(ctx, oldTarget).GetState())
+}
+
+func (s *CopySegmentInspectorSuite) TestReconcileOwnerFirstFallbackRegistersTargetsBeforeScheduling() {
+	ctx := context.Background()
+	const (
+		oldTaskID = int64(1001)
+		newTaskID = int64(1002)
+		oldTarget = int64(101)
+		newTarget = int64(102)
+	)
+	oldTask := &copySegmentTask{tr: timerecord.NewTimeRecorder("old"), times: taskcommon.NewTimes()}
+	oldTask.task.Store(&datapb.CopySegmentTask{
+		TaskId: oldTaskID, JobId: s.jobID, CollectionId: s.collectionID,
+		TaskVersion: 0, State: datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		IdMappings: []*datapb.CopySegmentIDMapping{{SourceSegmentId: 1, TargetSegmentId: oldTarget, PartitionId: 10}},
+	})
+	replacement := &copySegmentTask{tr: timerecord.NewTimeRecorder("replacement"), times: taskcommon.NewTimes()}
+	replacement.task.Store(&datapb.CopySegmentTask{
+		TaskId: newTaskID, JobId: s.jobID, CollectionId: s.collectionID,
+		TaskVersion: 1, State: datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		PredecessorTaskId: oldTaskID,
+		IdMappings:        []*datapb.CopySegmentIDMapping{{SourceSegmentId: 1, TargetSegmentId: newTarget, PartitionId: 10}},
+	})
+
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)
+	s.Require().NoError(s.copyMeta.AddTask(ctx, oldTask))
+	s.Require().NoError(s.copyMeta.AddTask(ctx, replacement))
+	s.meta.segments.SetSegment(oldTarget, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: oldTarget, CollectionID: s.collectionID, PartitionID: 10,
+		InsertChannel: "ch-1", State: commonpb.SegmentState_Importing, IsImporting: true, NumOfRows: 100,
+	}))
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().DropCopySegmentTask(mock.Anything, oldTaskID).Return(nil).Once()
+
+	s.True(s.inspector.reconcileReplannedTasks(s.jobID))
+	s.Nil(s.copyMeta.GetTask(ctx, oldTaskID))
+	published := s.copyMeta.GetTask(ctx, newTaskID)
+	s.Require().NotNil(published)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, published.GetState())
+	s.Require().NotNil(s.meta.GetSegment(ctx, newTarget),
+		"reconciliation must fill the target before the Pending owner can be scheduled")
+	s.Equal(commonpb.SegmentState_Dropped, s.meta.GetSegment(ctx, oldTarget).GetState())
+}
+
+func (s *CopySegmentInspectorSuite) TestReconcileDoesNotPairUnrelatedOverlappingTasks() {
+	ctx := context.Background()
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)
+	newTask := func(taskID, targetID int64) *copySegmentTask {
+		task := &copySegmentTask{tr: timerecord.NewTimeRecorder("task"), times: taskcommon.NewTimes()}
+		task.task.Store(&datapb.CopySegmentTask{
+			TaskId: taskID, JobId: s.jobID, CollectionId: s.collectionID,
+			State: datapb.CopySegmentTaskState_CopySegmentTaskPending,
+			IdMappings: []*datapb.CopySegmentIDMapping{{
+				SourceSegmentId: 1, TargetSegmentId: targetID, PartitionId: 10,
+			}},
+		})
+		return task
+	}
+	s.Require().NoError(s.copyMeta.AddTask(ctx, newTask(1001, 101)))
+	s.Require().NoError(s.copyMeta.AddTask(ctx, newTask(1002, 102)))
+
+	s.True(s.inspector.reconcileReplannedTasks(s.jobID))
+	s.NotNil(s.copyMeta.GetTask(ctx, 1001))
+	s.NotNil(s.copyMeta.GetTask(ctx, 1002),
+		"source overlap without predecessor_task_id must not imply ownership handoff")
+}
+
+func (s *CopySegmentInspectorSuite) TestReconcilePrefersFullyPublishedSuccessor() {
+	ctx := context.Background()
+	const (
+		predecessorID    = int64(1000)
+		incompleteID     = int64(1001)
+		completeID       = int64(1002)
+		incompleteTarget = int64(101)
+		completeTarget   = int64(102)
+	)
+	newReplacement := func(taskID, targetID int64) *copySegmentTask {
+		task := &copySegmentTask{tr: timerecord.NewTimeRecorder("replacement"), times: taskcommon.NewTimes()}
+		task.task.Store(&datapb.CopySegmentTask{
+			TaskId: taskID, JobId: s.jobID, CollectionId: s.collectionID,
+			TaskVersion: 1, State: datapb.CopySegmentTaskState_CopySegmentTaskPending,
+			PredecessorTaskId: predecessorID,
+			IdMappings: []*datapb.CopySegmentIDMapping{{
+				SourceSegmentId: 1, TargetSegmentId: targetID, PartitionId: 10,
+			}},
+		})
+		return task
+	}
+
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)
+	s.Require().NoError(s.copyMeta.AddTask(ctx, newReplacement(incompleteID, incompleteTarget)))
+	s.Require().NoError(s.copyMeta.AddTask(ctx, newReplacement(completeID, completeTarget)))
+	s.meta.segments.SetSegment(completeTarget, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: completeTarget, CollectionID: s.collectionID, PartitionID: 10,
+		State: commonpb.SegmentState_Importing, IsImporting: true,
+	}))
+	s.catalog.EXPECT().DropCopySegmentTask(mock.Anything, incompleteID).Return(nil).Once()
+
+	s.True(s.inspector.reconcileReplannedTasks(s.jobID))
+	s.Nil(s.copyMeta.GetTask(ctx, incompleteID),
+		"an incomplete owner-first publication is the duplicate to retire")
+	s.NotNil(s.copyMeta.GetTask(ctx, completeID),
+		"the fully published successor remains runnable after its predecessor is gone")
 }
 
 func (s *CopySegmentInspectorSuite) TestInspect_ProcessPendingAndFailedTasks() {

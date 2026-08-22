@@ -107,7 +107,7 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 			mlog.Info(ctx, "receive create index notify", mlog.FieldCollectionID(collectionID))
 			isExternal := i.isExternalCollection(collectionID)
 			segments := i.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-				return isFlush(info) && (!enableSortCompaction() || info.GetIsSorted() || info.GetIsSortedByNamespace() || isExternal)
+				return isFlush(info) && (isExternal || !segmentAwaitsSortBeforeIndex(info))
 			}))
 			for _, segment := range segments {
 				if err := i.createIndexesForSegment(ctx, segment); err != nil {
@@ -143,7 +143,9 @@ func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentI
 }
 
 func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *SegmentInfo) error {
-	if enableSortCompaction() && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() && !i.isExternalCollection(segment.CollectionID) {
+	// The sorted replacement is what gets indexed; indexing the original here
+	// would be wasted work racing its sort.
+	if segmentAwaitsSortBeforeIndex(segment) && !i.isExternalCollection(segment.CollectionID) {
 		mlog.Debug(ctx, "segment is not sorted by pk, skip create indexes", mlog.FieldSegmentID(segment.GetID()))
 		return nil
 	}
@@ -169,6 +171,18 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 		}
 	}
 	return nil
+}
+
+// segmentAwaitsSortBeforeIndex keeps the index decision tied to persisted
+// segment state for imports. A sort-planned import origin is invisible; a
+// no-sort import origin is visible (while IsImporting still keeps it out of
+// service). After a restart the static sort setting may differ, but it must not
+// retroactively turn that visible no-sort origin into a sort-planned one.
+func segmentAwaitsSortBeforeIndex(segment *SegmentInfo) bool {
+	if segment.GetIsImporting() && !segment.GetIsInvisible() {
+		return false
+	}
+	return segmentAwaitsSort(segment)
 }
 
 // canCreateIndexForSegment reports whether the segment is ready to build the

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/samber/lo"
 
@@ -41,6 +42,7 @@ type Executor interface {
 	Slots() int64
 	RemoveTask(planID int64)                                // Deprecated in 2.6
 	GetResults(planID int64) []*datapb.CompactionPlanResult // Deprecated in 2.6
+	RemoveExpiredTasks(ctx context.Context, cutoff time.Time) int
 }
 
 // taskState represents the state of a compaction task
@@ -53,6 +55,21 @@ type taskState struct {
 	compactor Compactor
 	state     datapb.CompactionTaskState
 	result    *datapb.CompactionPlanResult
+	// failReason is why Compact returned an error, kept so the plan result the
+	// coordinator polls carries something to diagnose with. Empty unless state
+	// is failed.
+	failReason string
+	// dropped records that DataCoord asked to remove this task while it was
+	// still executing. The entry cannot be dropped right then -- the compactor
+	// is running and completeTask still needs it -- so the removal is deferred
+	// to completion instead of being silently ignored.
+	dropped   bool
+	startedAt time.Time
+	// stopRequested records that a sweep already detached a Stop for this task.
+	// A task wedged past the cutoff stays in e.tasks (completeTask owns its
+	// removal), so without this every sweep would spawn another Stop; the extra
+	// Stops all block on the same cap-1 completion channel and leak.
+	stopRequested bool
 }
 
 type executor struct {
@@ -122,6 +139,7 @@ func (e *executor) Enqueue(task Compactor) (bool, error) {
 		compactor: task,
 		state:     datapb.CompactionTaskState_executing,
 		result:    nil,
+		startedAt: time.Now(),
 	}
 	e.mu.Unlock()
 
@@ -136,8 +154,12 @@ func (e *executor) Slots() int64 {
 	return e.usingSlots
 }
 
-// completeTask updates task state to completed and adjusts slot usage
-func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResult) {
+// completeTask updates task state to completed and adjusts slot usage.
+//
+// failErr carries why a failed plan failed. A failure used to be recorded as a
+// bare state, so DataCoord persisted an empty fail_reason and a plan that kept
+// failing left nothing to diagnose it with.
+func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResult, failErr error) {
 	e.mu.Lock()
 
 	if task, exists := e.tasks[planID]; exists {
@@ -147,12 +169,21 @@ func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResul
 			task.result = result
 		} else {
 			task.state = datapb.CompactionTaskState_failed
+			if failErr != nil {
+				task.failReason = failErr.Error()
+			}
 		}
 
 		// Adjust slot usage
 		e.usingSlots -= getTaskSlotUsage(task.compactor)
 		if e.usingSlots < 0 {
 			e.usingSlots = 0
+		}
+		// Honor a drop that arrived while this task was still running.
+		if task.dropped {
+			mlog.Info(context.TODO(), "removing compaction task dropped while it was executing",
+				mlog.Int64("planID", planID))
+			delete(e.tasks, planID)
 		}
 		e.mu.Unlock()
 
@@ -173,16 +204,30 @@ func (e *executor) RemoveTask(planID int64) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if task, exists := e.tasks[planID]; exists {
-		// Only remove completed/failed tasks, not executing ones
-		if task.state != datapb.CompactionTaskState_executing {
-			mlog.Info(context.TODO(), "Compaction task removed",
-				mlog.Int64("planID", planID),
-				mlog.String("channel", task.compactor.GetChannelName()),
-				mlog.String("state", task.state.String()))
-			delete(e.tasks, planID)
-		}
+	task, exists := e.tasks[planID]
+	if !exists {
+		// Either the plan was already collected, or the drop outran its create
+		// (CompactionV2 can still be in chunk-manager setup when DataCoord
+		// abandons the RPC and drops the plan). In the latter case the late
+		// Enqueue installs an entry no drop will ever follow -- the shared
+		// DataNode expiration sweep is what reclaims it.
+		return
 	}
+	if task.state == datapb.CompactionTaskState_executing {
+		// Cannot drop it now, so remember the request. Without this the entry
+		// would stay resident until this DataNode restarts, while DropTask still
+		// reported success -- DataCoord would never ask again.
+		task.dropped = true
+		mlog.Info(context.TODO(), "compaction task drop deferred until it finishes",
+			mlog.Int64("planID", planID),
+			mlog.String("channel", task.compactor.GetChannelName()))
+		return
+	}
+	mlog.Info(context.TODO(), "Compaction task removed",
+		mlog.Int64("planID", planID),
+		mlog.String("channel", task.compactor.GetChannelName()),
+		mlog.String("state", task.state.String()))
+	delete(e.tasks, planID)
 }
 
 func (e *executor) Start(ctx context.Context) {
@@ -199,6 +244,62 @@ func (e *executor) Start(ctx context.Context) {
 	}
 }
 
+// RemoveExpiredTasks removes terminal tasks older than cutoff and stops old
+// executing tasks. An executing entry stays registered with dropped=true until
+// completeTask finishes, because that callback still owns the entry.
+func (e *executor) RemoveExpiredTasks(ctx context.Context, cutoff time.Time) int {
+	type expiredTask struct {
+		planID    int64
+		compactor Compactor
+		state     datapb.CompactionTaskState
+		startedAt time.Time
+		executing bool
+	}
+
+	e.mu.Lock()
+	expired := make([]expiredTask, 0)
+	for planID, task := range e.tasks {
+		if task.startedAt.IsZero() || task.startedAt.After(cutoff) {
+			continue
+		}
+		if task.state == datapb.CompactionTaskState_executing {
+			task.dropped = true
+			// Detach the stop only once: a wedged task is revisited every sweep,
+			// and each repeated Stop would leak a goroutine on the completion
+			// channel.
+			if task.stopRequested {
+				continue
+			}
+			task.stopRequested = true
+			expired = append(expired, expiredTask{
+				planID: planID, compactor: task.compactor, state: task.state,
+				startedAt: task.startedAt, executing: true,
+			})
+			continue
+		}
+		expired = append(expired, expiredTask{
+			planID: planID, compactor: task.compactor, state: task.state, startedAt: task.startedAt,
+		})
+		delete(e.tasks, planID)
+	}
+	e.mu.Unlock()
+
+	for _, expiredTask := range expired {
+		mlog.Info(ctx, "reclaiming uncollected compaction task entry",
+			mlog.Int64("planID", expiredTask.planID),
+			mlog.String("state", expiredTask.state.String()),
+			mlog.Duration("age", time.Since(expiredTask.startedAt)))
+		if expiredTask.executing {
+			// Detach the stop: Stop waits for Compact to exit, and a task wedged
+			// in FFI/syscall would otherwise block this sweep -- and every later
+			// sweep round -- forever. The entry is already marked dropped, so
+			// completeTask still owns its removal.
+			go expiredTask.compactor.Stop()
+		}
+	}
+	return len(expired)
+}
+
 func (e *executor) executeTask(task Compactor) {
 	log := mlog.With(
 		mlog.Int64("planID", task.GetPlanID()),
@@ -212,12 +313,12 @@ func (e *executor) executeTask(task Compactor) {
 	result, err := task.Compact()
 	if err != nil {
 		log.Warn(context.TODO(), "compaction task failed", mlog.Err(err))
-		e.completeTask(task.GetPlanID(), nil)
+		e.completeTask(task.GetPlanID(), nil, err)
 		return
 	}
 
 	// Update task with result
-	e.completeTask(task.GetPlanID(), result)
+	e.completeTask(task.GetPlanID(), result, nil)
 
 	// Emit metrics
 	getDataCount := func(binlogs []*datapb.FieldBinlog) int64 {
@@ -268,6 +369,7 @@ func (e *executor) getCompactionResult(planID int64) *datapb.CompactionPlanResul
 		return &datapb.CompactionPlanResult{
 			State:  task.state,
 			PlanID: planID,
+			Reason: task.failReason,
 		}
 	}
 
@@ -275,6 +377,7 @@ func (e *executor) getCompactionResult(planID int64) *datapb.CompactionPlanResul
 	return &datapb.CompactionPlanResult{
 		PlanID: planID,
 		State:  datapb.CompactionTaskState_failed,
+		Reason: "compaction plan is unknown to this worker",
 	}
 }
 

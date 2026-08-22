@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -108,13 +109,14 @@ func (s *stubAllocator) AllocN(n int64) (typeutil.UniqueID, typeutil.UniqueID, e
 type stubCluster struct {
 	session.Cluster
 	refreshReq    *datapb.RefreshExternalCollectionTaskRequest
+	createErr     error
 	droppedNodeID int64
 	droppedTaskID int64
 }
 
 func (s *stubCluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest) error {
 	s.refreshReq = req
-	return nil
+	return s.createErr
 }
 
 func (s *stubCluster) QueryRefreshExternalCollectionTask(nodeID int64, taskID int64) (*datapb.RefreshExternalCollectionTaskResponse, error) {
@@ -168,6 +170,15 @@ func addOwnershipTestRefreshTask(
 	refreshMeta *externalCollectionRefreshMeta,
 	task *datapb.ExternalCollectionRefreshTask,
 ) {
+	if refreshMeta.GetJob(task.GetJobId()) == nil {
+		assert.NoError(t, refreshMeta.AddJob(&datapb.ExternalCollectionRefreshJob{
+			JobId:          task.GetJobId(),
+			CollectionId:   task.GetCollectionId(),
+			State:          indexpb.JobState_JobStateInProgress,
+			ExternalSource: task.GetExternalSource(),
+			ExternalSpec:   task.GetExternalSpec(),
+		}))
+	}
 	task.OwnershipPlanVersion = externalRefreshOwnershipPlanVersion
 	assert.NoError(t, refreshMeta.AddTask(task))
 }
@@ -214,6 +225,10 @@ func TestRefreshExternalCollectionTask_GetTaskType(t *testing.T) {
 func TestRefreshExternalCollectionTask_GetTaskState(t *testing.T) {
 	task, _ := createTestRefreshTaskWithStubs(t, 1001, 1, 100)
 	assert.Equal(t, indexpb.JobState_JobStateInit, task.GetTaskState())
+
+	task.SetState(indexpb.JobState_JobStateRetry, "retry")
+	assert.Equal(t, taskcommon.Failed, task.GetTaskState(), "Retry must retire the old scheduler attempt before replacement")
+	assert.Equal(t, indexpb.JobState_JobStateRetry, task.GetState(), "the durable task state remains Retry")
 }
 
 func TestRefreshExternalCollectionTask_GetTaskSlot(t *testing.T) {
@@ -464,6 +479,13 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 			OwnershipPlanVersion: planVersion,
 			OwnedSegmentIds:      ownedSegmentIDs,
 		}
+		assert.NoError(t, refreshMeta.AddJob(&datapb.ExternalCollectionRefreshJob{
+			JobId:          protoTask.GetJobId(),
+			CollectionId:   protoTask.GetCollectionId(),
+			State:          indexpb.JobState_JobStateInProgress,
+			ExternalSource: protoTask.GetExternalSource(),
+			ExternalSpec:   protoTask.GetExternalSpec(),
+		}))
 		assert.NoError(t, refreshMeta.AddTask(protoTask))
 
 		segments := NewSegmentsInfo()
@@ -545,7 +567,13 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		cluster := &stubCluster{}
 		task.CreateTaskOnWorker(1, cluster)
 
-		// Task state should remain Init since version update failed
+		// The failure happened before dispatch, so the same Init task is retried
+		// with scheduler backoff and no worker-failure budget is consumed.
+		metaTask := refreshMeta.GetTask(1001)
+		assert.Equal(t, indexpb.JobState_JobStateInit, metaTask.GetState())
+		assert.Nil(t, cluster.refreshReq)
+		counter, ok := refreshMeta.workerFailureCounts.Get(1001)
+		assert.True(t, !ok || counter.Load() == 0)
 	})
 
 	t.Run("alloc_segment_ids_failed", func(t *testing.T) {
@@ -579,10 +607,14 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		cluster := &stubCluster{}
 		task.CreateTaskOnWorker(1, cluster)
 
-		// Task should be marked as failed
+		// Allocation is pre-dispatch infrastructure work. Keep the same task Init
+		// so it can recover without consuming a worker attempt.
 		metaTask := refreshMeta.GetTask(1001)
-		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
-		assert.Contains(t, metaTask.GetFailReason(), "alloc batch failed")
+		assert.Equal(t, indexpb.JobState_JobStateInit, metaTask.GetState())
+		assert.Empty(t, metaTask.GetFailReason())
+		assert.Nil(t, cluster.refreshReq)
+		counter, ok := refreshMeta.workerFailureCounts.Get(1001)
+		assert.True(t, !ok || counter.Load() == 0)
 	})
 
 	t.Run("collection_not_found", func(t *testing.T) {
@@ -650,16 +682,106 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 
 		cluster := &stubCluster{}
 
-		// Mock CreateRefreshExternalCollectionTask to return error
-		mockCreate := mockey.Mock((*stubCluster).CreateRefreshExternalCollectionTask).Return(errors.New("create task failed")).Build()
+		mockCreate := mockey.Mock((*stubCluster).CreateRefreshExternalCollectionTask).
+			Return(merr.WrapErrServiceInternalMsg("create task failed")).Build()
 		defer mockCreate.UnPatch()
 
 		task.CreateTaskOnWorker(1, cluster)
 
-		// Task should be marked as failed
+		metaTask := refreshMeta.GetTask(1001)
+		assert.Equal(t, indexpb.JobState_JobStateRetry, metaTask.GetState())
+		assert.Contains(t, metaTask.GetFailReason(), "create task failed")
+	})
+
+	t.Run("accepted_create_then_in_progress_persist_failure_retries_once", func(t *testing.T) {
+		task, refreshMeta, cluster := newOwnershipTask(t, externalRefreshOwnershipPlanVersion, []int64{1})
+		persistErr := errors.New("catalog unavailable after create")
+		saveCalls := 0
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).
+			To(func(context.Context, *datapb.ExternalCollectionRefreshTask) error {
+				saveCalls++
+				// 1: persist version/node before dispatch; 2: persist InProgress;
+				// 3: persist the worker-failure Retry transition.
+				if saveCalls == 2 {
+					return persistErr
+				}
+				return nil
+			}).Build()
+		defer mockSave.UnPatch()
+
+		task.CreateTaskOnWorker(1, cluster)
+
+		assert.NotNil(t, cluster.refreshReq, "the worker accepted this attempt")
+		assert.Equal(t, 3, saveCalls, "the failed InProgress write must be followed by one Retry write")
+		metaTask := refreshMeta.GetTask(1001)
+		assert.Equal(t, indexpb.JobState_JobStateRetry, metaTask.GetState())
+		assert.Equal(t, indexpb.JobState_JobStateRetry, task.GetState())
+		assert.Contains(t, metaTask.GetFailReason(), "worker failure 1/10")
+		assert.Contains(t, metaTask.GetFailReason(), persistErr.Error())
+		counter, ok := refreshMeta.workerFailureCounts.Get(1001)
+		assert.True(t, ok)
+		assert.Equal(t, int64(1), counter.Load())
+	})
+
+	t.Run("accepted_create_then_in_progress_persist_failure_honors_limit", func(t *testing.T) {
+		const maxRetryKey = "dataCoord.externalCollectionMaxRetryTimes"
+		paramtable.Get().Save(maxRetryKey, "1")
+		defer paramtable.Get().Reset(maxRetryKey)
+
+		task, refreshMeta, cluster := newOwnershipTask(t, externalRefreshOwnershipPlanVersion, []int64{1})
+		persistErr := errors.New("catalog unavailable after create")
+		saveCalls := 0
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).
+			To(func(context.Context, *datapb.ExternalCollectionRefreshTask) error {
+				saveCalls++
+				if saveCalls == 2 {
+					return persistErr
+				}
+				return nil
+			}).Build()
+		defer mockSave.UnPatch()
+		finishedCalls := 0
+		task.processFinishedJob = func(jobID int64) {
+			assert.Equal(t, int64(1), jobID)
+			finishedCalls++
+		}
+
+		task.CreateTaskOnWorker(1, cluster)
+
+		assert.NotNil(t, cluster.refreshReq)
+		assert.Equal(t, 3, saveCalls)
 		metaTask := refreshMeta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
-		assert.Contains(t, metaTask.GetFailReason(), "create task failed")
+		assert.Contains(t, metaTask.GetFailReason(), "worker failure 1/1")
+		assert.Equal(t, 1, finishedCalls)
+		counter, ok := refreshMeta.workerFailureCounts.Get(1001)
+		assert.True(t, ok)
+		assert.Equal(t, int64(1), counter.Load())
+	})
+
+	t.Run("accepted_create_retry_persist_failure_does_not_consume_budget", func(t *testing.T) {
+		task, refreshMeta, cluster := newOwnershipTask(t, externalRefreshOwnershipPlanVersion, []int64{1})
+		persistErr := errors.New("catalog unavailable after create")
+		saveCalls := 0
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).
+			To(func(context.Context, *datapb.ExternalCollectionRefreshTask) error {
+				saveCalls++
+				if saveCalls == 2 || saveCalls == 3 {
+					return persistErr
+				}
+				return nil
+			}).Build()
+		defer mockSave.UnPatch()
+
+		task.CreateTaskOnWorker(1, cluster)
+
+		assert.NotNil(t, cluster.refreshReq)
+		assert.Equal(t, 3, saveCalls)
+		assert.Equal(t, indexpb.JobState_JobStateInit, refreshMeta.GetTask(1001).GetState())
+		assert.Equal(t, indexpb.JobState_JobStateInit, task.GetState())
+		counter, ok := refreshMeta.workerFailureCounts.Get(1001)
+		assert.True(t, ok)
+		assert.Zero(t, counter.Load())
 	})
 
 	t.Run("success", func(t *testing.T) {
@@ -690,6 +812,87 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
 		assert.Contains(t, metaTask.GetFailReason(), "unsupported ownership plan version 0")
 		assert.Nil(t, cluster.refreshReq)
+		counter, ok := refreshMeta.workerFailureCounts.Get(1001)
+		assert.True(t, !ok || counter.Load() == 0,
+			"an immutable-plan validation failure is terminal, not a worker attempt")
+	})
+
+	t.Run("worker_pool_saturated_stays_retryable", func(t *testing.T) {
+		task, refreshMeta, cluster := newOwnershipTask(t, externalRefreshOwnershipPlanVersion, []int64{1})
+		cluster.createErr = merr.WrapErrTooManyRequests(8, "external collection worker pool saturated")
+
+		for range 12 {
+			task.CreateTaskOnWorker(1, cluster)
+		}
+
+		metaTask := refreshMeta.GetTask(1001)
+		assert.Equal(t, indexpb.JobState_JobStateInit, metaTask.GetState())
+		assert.Empty(t, metaTask.GetFailReason())
+		assert.Equal(t, taskcommon.Init, task.GetTaskState())
+		counter, ok := refreshMeta.workerFailureCounts.Get(1001)
+		assert.True(t, !ok || counter.Load() == 0,
+			"capacity backoff must not consume the execution-failure budget")
+	})
+
+	t.Run("create_outcome_unknown_retries", func(t *testing.T) {
+		task, refreshMeta, cluster := newOwnershipTask(t, externalRefreshOwnershipPlanVersion, []int64{1})
+		cluster.createErr = context.DeadlineExceeded
+
+		task.CreateTaskOnWorker(1, cluster)
+
+		metaTask := refreshMeta.GetTask(1001)
+		assert.Equal(t, indexpb.JobState_JobStateRetry, metaTask.GetState())
+		assert.Contains(t, metaTask.GetFailReason(), context.DeadlineExceeded.Error())
+	})
+
+	t.Run("create_errors_fail_at_configured_limit", func(t *testing.T) {
+		const maxRetryKey = "dataCoord.externalCollectionMaxRetryTimes"
+		paramtable.Get().Save(maxRetryKey, "2")
+		defer paramtable.Get().Reset(maxRetryKey)
+
+		task, refreshMeta, cluster := newOwnershipTask(t, externalRefreshOwnershipPlanVersion, []int64{1})
+		cluster.createErr = merr.WrapErrServiceInternalMsg("worker exploded")
+
+		task.CreateTaskOnWorker(1, cluster)
+		metaTask := refreshMeta.GetTask(1001)
+		assert.Equal(t, indexpb.JobState_JobStateRetry, metaTask.GetState())
+		assert.Contains(t, metaTask.GetFailReason(), "worker failure 1/2")
+
+		// Stand in for the inspector's fresh Init replacement. Inspector tests
+		// separately prove that the counter transfers across the new task ID.
+		assert.NoError(t, refreshMeta.UpdateTaskState(1001, indexpb.JobState_JobStateInit, ""))
+		retryTask := newRefreshExternalCollectionTask(metaTask, refreshMeta, task.mt, task.allocator)
+		retryTask.ExternalCollectionRefreshTask = refreshMeta.GetTask(1001)
+		retryTask.CreateTaskOnWorker(2, cluster)
+		metaTask = refreshMeta.GetTask(1001)
+		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
+		assert.Contains(t, metaTask.GetFailReason(), "worker failure 2/2")
+		assert.Contains(t, metaTask.GetFailReason(), "worker exploded")
+	})
+
+	t.Run("catalog_failure_does_not_consume_worker_failure_budget", func(t *testing.T) {
+		task, refreshMeta, _ := newOwnershipTask(t, externalRefreshOwnershipPlanVersion, []int64{1})
+		saveFails := true
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).
+			To(func(context.Context, *datapb.ExternalCollectionRefreshTask) error {
+				if saveFails {
+					return errors.New("catalog unavailable")
+				}
+				return nil
+			}).Build()
+		defer mockSave.UnPatch()
+
+		assert.Error(t, task.retryWorkerFailure("worker failed"))
+		assert.Error(t, task.retryWorkerFailure("worker failed"))
+		counter, ok := refreshMeta.workerFailureCounts.Get(task.GetTaskId())
+		assert.True(t, ok)
+		assert.Zero(t, counter.Load())
+		assert.Equal(t, indexpb.JobState_JobStateInit, refreshMeta.GetTask(task.GetTaskId()).GetState())
+
+		saveFails = false
+		assert.NoError(t, task.retryWorkerFailure("worker failed"))
+		assert.Equal(t, int64(1), counter.Load())
+		assert.Contains(t, refreshMeta.GetTask(task.GetTaskId()).GetFailReason(), "worker failure 1/10")
 	})
 
 	for _, test := range []struct {
@@ -858,16 +1061,51 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 
 		cluster := &stubCluster{}
 
-		// Mock QueryRefreshExternalCollectionTask to return error
-		mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(nil, errors.New("query failed")).Build()
+		mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).
+			Return(nil, merr.WrapErrNodeNotFound(1, "query failed")).Build()
 		defer mockQuery.UnPatch()
 
 		task.QueryTaskOnWorker(cluster)
 
-		// Task should be marked as failed
 		metaTask := refreshMeta.GetTask(1001)
-		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
+		assert.Equal(t, indexpb.JobState_JobStateRetry, metaTask.GetState())
 		assert.Contains(t, metaTask.GetFailReason(), "query task failed")
+	})
+
+	t.Run("query_outcome_unknown_retries_task", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		assert.NoError(t, err)
+
+		assert.NoError(t, refreshMeta.AddJob(&datapb.ExternalCollectionRefreshJob{
+			JobId:          1,
+			CollectionId:   100,
+			State:          indexpb.JobState_JobStateInProgress,
+			ExternalSource: "s3://bucket/path",
+			ExternalSpec:   "iceberg",
+		}))
+		protoTask := &datapb.ExternalCollectionRefreshTask{
+			TaskId:         1001,
+			JobId:          1,
+			CollectionId:   100,
+			NodeId:         1,
+			State:          indexpb.JobState_JobStateInProgress,
+			ExternalSource: "s3://bucket/path",
+			ExternalSpec:   "iceberg",
+		}
+		assert.NoError(t, refreshMeta.AddTask(protoTask))
+
+		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, nil, &stubAllocator{nextID: 99999})
+		mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).
+			Return(nil, context.DeadlineExceeded).Build()
+		defer mockQuery.UnPatch()
+
+		cluster := &stubCluster{}
+		task.QueryTaskOnWorker(cluster)
+
+		metaTask := refreshMeta.GetTask(1001)
+		assert.Equal(t, indexpb.JobState_JobStateRetry, metaTask.GetState())
+		assert.Contains(t, metaTask.GetFailReason(), context.DeadlineExceeded.Error())
 	})
 
 	t.Run("task_in_progress", func(t *testing.T) {
@@ -945,7 +1183,10 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 
 		cluster := &stubCluster{}
 
-		// Mock QueryRefreshExternalCollectionTask to return failed state
+		// A worker reporting Failed has classified the failure as permanent --
+		// the request is what it could not satisfy. Spending the retry budget on
+		// it only delays the RefreshFailed the caller is waiting for, which is
+		// what left permanent input errors sitting in RefreshInProgress.
 		mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(&datapb.RefreshExternalCollectionTaskResponse{
 			State:      indexpb.JobState_JobStateFailed,
 			FailReason: "worker error",
@@ -954,10 +1195,50 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 
 		task.QueryTaskOnWorker(cluster)
 
-		// Task should be marked as failed
 		metaTask := refreshMeta.GetTask(1001)
-		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
+		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState(),
+			"a permanent worker failure must end the task on the first report")
 		assert.Contains(t, metaTask.GetFailReason(), "worker error")
+	})
+
+	t.Run("task_retry_requested_by_worker", func(t *testing.T) {
+		refreshMeta := createTestRefreshMeta(t)
+		job := &datapb.ExternalCollectionRefreshJob{
+			JobId:        1,
+			CollectionId: 100,
+			State:        indexpb.JobState_JobStateInProgress,
+			TaskIds:      []int64{1002},
+		}
+		assert.NoError(t, refreshMeta.AddJob(job))
+
+		protoTask := &datapb.ExternalCollectionRefreshTask{
+			TaskId:         1002,
+			JobId:          1,
+			CollectionId:   100,
+			NodeId:         1,
+			State:          indexpb.JobState_JobStateInProgress,
+			ExternalSource: "s3://bucket/path",
+			ExternalSpec:   "iceberg",
+		}
+		assert.NoError(t, refreshMeta.AddTask(protoTask))
+
+		alloc := &stubAllocator{nextID: 99999}
+		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, nil, alloc)
+		cluster := &stubCluster{}
+
+		// A transient fault on the worker: this is what the retry budget is for.
+		mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(&datapb.RefreshExternalCollectionTaskResponse{
+			State:      indexpb.JobState_JobStateRetry,
+			FailReason: "SlowDown: please reduce your request rate",
+		}, nil).Build()
+		defer mockQuery.UnPatch()
+
+		task.QueryTaskOnWorker(cluster)
+
+		metaTask := refreshMeta.GetTask(1002)
+		assert.Equal(t, indexpb.JobState_JobStateRetry, metaTask.GetState(),
+			"a retriable worker failure spends one attempt and stays retriable")
+		assert.Contains(t, metaTask.GetFailReason(), "SlowDown")
 	})
 
 	t.Run("task_finished_success", func(t *testing.T) {
@@ -1086,8 +1367,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 
 	// Part 8 cross-bucket relaxed JobStateNone/JobStateInit to mean "not yet
 	// picked up by the worker scheduler" (benign no-op) instead of "task not
-	// found" (failure). JobStateRetry is the only state still treated as
-	// unexpected and forces Failed.
+	// found" (failure).
 	t.Run("task_state_none_no_op", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -1183,7 +1463,11 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		assert.Empty(t, metaTask.GetFailReason())
 	})
 
-	t.Run("task_state_retry_marks_failed", func(t *testing.T) {
+	t.Run("task_state_retry_honors_configured_limit", func(t *testing.T) {
+		const maxRetryKey = "dataCoord.externalCollectionMaxRetryTimes"
+		paramtable.Get().Save(maxRetryKey, "2")
+		defer paramtable.Get().Reset(maxRetryKey)
+
 		catalog := &stubCatalog{}
 		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
@@ -1215,17 +1499,24 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 
 		cluster := &stubCluster{}
 
-		// JobStateRetry is the only state still considered unexpected.
 		mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(&datapb.RefreshExternalCollectionTaskResponse{
-			State: indexpb.JobState_JobStateRetry,
+			State:      indexpb.JobState_JobStateRetry,
+			FailReason: "worker requested retry",
 		}, nil).Build()
 		defer mockQuery.UnPatch()
 
 		task.QueryTaskOnWorker(cluster)
 
 		metaTask := refreshMeta.GetTask(1001)
-		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
-		assert.Contains(t, metaTask.GetFailReason(), "unexpected state")
+		assert.Equal(t, indexpb.JobState_JobStateRetry, metaTask.GetState())
+		assert.Contains(t, metaTask.GetFailReason(), "worker failure 1/2")
+
+		// A persisted Retry response is idempotent until the inspector publishes
+		// its replacement; polling the same attempt again cannot spend budget.
+		task.QueryTaskOnWorker(cluster)
+		metaTask = refreshMeta.GetTask(1001)
+		assert.Equal(t, indexpb.JobState_JobStateRetry, metaTask.GetState())
+		assert.Contains(t, metaTask.GetFailReason(), "worker failure 1/2")
 	})
 }
 
@@ -2140,6 +2431,13 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker_TaskNotFoundAfterVersi
 	catalog := &stubCatalog{}
 	refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 	assert.NoError(t, err)
+	assert.NoError(t, refreshMeta.AddJob(&datapb.ExternalCollectionRefreshJob{
+		JobId:          1,
+		CollectionId:   100,
+		State:          indexpb.JobState_JobStateInProgress,
+		ExternalSource: "s3://bucket/path",
+		ExternalSpec:   "iceberg",
+	}))
 
 	protoTask := &datapb.ExternalCollectionRefreshTask{
 		TaskId:         1001,

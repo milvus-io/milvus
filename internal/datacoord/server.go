@@ -320,7 +320,9 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
-	s.initCompaction()
+	if err = s.initCompaction(); err != nil {
+		return err
+	}
 	mlog.Info(s.ctx, "init compaction done")
 
 	s.initAnalyzeInspector()
@@ -344,7 +346,7 @@ func (s *Server) initDataCoord() error {
 
 	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler)
 
-	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, importCheckerHooks{
+	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.cluster2, importCheckerHooks{
 		commitImport:         s.broadcastCommitImportMessage,
 		rollbackImport:       s.broadcastRollbackImportMessage,
 		isReplicatingCluster: s.isReplicatingClusterNow,
@@ -365,6 +367,7 @@ func (s *Server) initDataCoord() error {
 		s.meta,
 		s.copySegmentMeta,
 		s.globalScheduler,
+		s.cluster2,
 	)
 
 	s.copySegmentChecker = NewCopySegmentChecker(
@@ -373,6 +376,7 @@ func (s *Server) initDataCoord() error {
 		s.broker,
 		s.allocator,
 		s.copySegmentMeta,
+		s.cluster2,
 	)
 	mlog.Info(s.ctx, "init copy segment inspector and checker done")
 
@@ -681,13 +685,16 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 	}
 }
 
-func (s *Server) initCompaction() {
-	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
-	cph.loadMeta()
+func (s *Server) initCompaction() error {
+	cph := newCompactionInspector(s.ctx, s.meta, s.allocator, s.handler, s.cluster2, s.globalScheduler, s.indexEngineVersionManager)
+	if err := cph.loadMeta(); err != nil {
+		return err
+	}
 	s.compactionInspector = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexEngineVersionManager)
 	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
 	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
+	return nil
 }
 
 func (s *Server) stopCompaction() {
@@ -703,11 +710,14 @@ func (s *Server) stopCompaction() {
 	}
 }
 
+// startCompaction starts the parts that produce brand-new compaction work.
+// compactionInspector is not among them: it always runs (see startServerLoop),
+// since recovery -- releasing worker-side plan entries, finishing cleanup that
+// still owes input segments their visibility back -- must not depend on
+// dataCoord.enableCompaction. Tying either to the switch would leak plan
+// entries until the DataNode restarts, or leave sort inputs invisible for as
+// long as compaction stays off.
 func (s *Server) startCompaction() {
-	if s.compactionInspector != nil {
-		s.compactionInspector.start()
-	}
-
 	if s.compactionTrigger != nil {
 		s.compactionTrigger.start()
 	}
@@ -718,6 +728,11 @@ func (s *Server) startCompaction() {
 }
 
 func (s *Server) startServerLoop() {
+	// Unconditional: see startCompaction's doc comment. stopCompaction stops
+	// this unconditionally too, so shutdown is symmetric.
+	if s.compactionInspector != nil {
+		s.compactionInspector.start()
+	}
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.startCompaction()
 	}

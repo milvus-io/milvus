@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -90,6 +91,7 @@ type copySegmentChecker struct {
 	broker   broker.Broker       // Broker for coordinator communication
 	alloc    allocator.Allocator // ID allocator for creating tasks
 	copyMeta CopySegmentMeta     // Copy segment job/task metadata store
+	cluster  session.Cluster     // Worker cluster, for retrying a drop the scheduler could not land
 
 	closeOnce sync.Once     // Ensures Close is called only once
 	closeChan chan struct{} // Channel for signaling shutdown
@@ -115,6 +117,7 @@ func NewCopySegmentChecker(
 	broker broker.Broker,
 	alloc allocator.Allocator,
 	copyMeta CopySegmentMeta,
+	cluster session.Cluster,
 ) CopySegmentChecker {
 	return &copySegmentChecker{
 		ctx:       ctx,
@@ -122,6 +125,7 @@ func NewCopySegmentChecker(
 		broker:    broker,
 		alloc:     alloc,
 		copyMeta:  copyMeta,
+		cluster:   cluster,
 		closeChan: make(chan struct{}),
 	}
 }
@@ -146,6 +150,30 @@ func NewCopySegmentChecker(
 func (c *copySegmentChecker) Start() {
 	checkInterval := Params.DataCoordCfg.CopySegmentCheckInterval.GetAsDuration(time.Second)
 	mlog.Info(c.ctx, "start copy segment checker", mlog.Duration("checkInterval", checkInterval))
+
+	// GC runs on its own goroutine, exactly as importChecker splits runGCLoop
+	// from runStateMachineLoop, and for the same reason: checkGC retries worker
+	// drops, and each drop is a synchronous RPC bounded only by
+	// dataCoord.requestTimeoutSeconds. On the shared loop, one hung (registered
+	// but unresponsive) DataNode with N stranded tasks blocked every job's
+	// state-machine progression -- and every job timeout -- for N x 30s per
+	// tick, for as long as the node stayed wedged. Isolated here, it delays
+	// only GC itself, which has a 3h retention head start anyway.
+	go func() {
+		gcTicker := time.NewTicker(checkInterval)
+		defer gcTicker.Stop()
+		for {
+			select {
+			case <-c.closeChan:
+				return
+			case <-gcTicker.C:
+				for _, job := range c.copyMeta.GetJobBy(c.ctx) {
+					c.checkGC(job)
+				}
+			}
+		}
+	}()
+
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
@@ -170,8 +198,6 @@ func (c *copySegmentChecker) Start() {
 				}
 				// Check timeout for all states
 				c.tryTimeoutJob(job)
-				// Check GC for terminal states (Completed/Failed)
-				c.checkGC(job)
 			}
 
 			// Report statistics and metrics
@@ -217,7 +243,7 @@ func (c *copySegmentChecker) LogJobStats(jobs []CopySegmentJob) {
 		metrics.CopySegmentJobs.WithLabelValues(state).Set(float64(num))
 	}
 	if len(jobs) > 0 {
-		mlog.Info(c.ctx, "copy segment job stats", mlog.Any("stateNum", stateNum))
+		mlog.Debug(c.ctx, "copy segment job stats", mlog.Any("stateNum", stateNum))
 	}
 }
 
@@ -515,7 +541,7 @@ func (c *copySegmentChecker) checkCopyingJob(job CopySegmentJob) {
 		}
 	}
 
-	c.finishJob(job, totalRows)
+	c.finishJob(job, totalRows, tasks)
 	log.Info(c.ctx, "all copy segment tasks completed, job finished")
 }
 
@@ -538,11 +564,16 @@ func (c *copySegmentChecker) checkCopyingJob(job CopySegmentJob) {
 // Parameters:
 //   - job: The job to finish
 //   - totalRows: Total row count across all copied segments
-func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
+//   - tasks: the task snapshot checkCopyingJob verified as all-Completed. The
+//     snapshot is not re-read: a replan can swap the task set between the
+//     check and here, and re-reading could flush a Dropped predecessor's
+//     targets. Both terminal transitions below are CAS on
+//     CopySegmentJobExecuting so a concurrent failure/replan that moved the
+//     job on wins and this path becomes a no-op.
+func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64, tasks []CopySegmentTask) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobId()))
 
-	// Step 1: Collect all target segment IDs from task ID mappings
-	tasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
+	// Step 1: Collect all target segment IDs from the verified task snapshot
 	targetSegmentIDs := make([]int64, 0)
 	for _, task := range tasks {
 		for _, mapping := range task.GetIdMappings() {
@@ -576,17 +607,22 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 		log.Error(c.ctx, "finishJob: failing job due to segment flush failures",
 			mlog.Int("flushFailures", flushFailures),
 			mlog.Int("totalSegments", len(targetSegmentIDs)))
-		if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
+		applied, err := c.copyMeta.UpdateJobStateAndReleaseRefInState(c.ctx, job.GetJobId(),
+			datapb.CopySegmentJobState_CopySegmentJobExecuting,
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-			UpdateCopyJobReason(reason)); err != nil {
+			UpdateCopyJobReason(reason))
+		if err != nil {
 			log.Error(c.ctx, "failed to update job state to Failed after flush failures", mlog.Err(err))
+		} else if !applied {
+			log.Warn(c.ctx, "job left CopySegmentJobExecuting while finishing; skipping terminal transition")
 		}
 		return
 	}
 
 	// Step 4: Update job state to Completed
 	completeTs := uint64(time.Now().UnixNano())
-	err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
+	applied, err := c.copyMeta.UpdateJobStateAndReleaseRefInState(c.ctx, job.GetJobId(),
+		datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted),
 		UpdateCopyJobCompleteTs(completeTs),
 		UpdateCopyJobTotalRows(totalRows))
@@ -594,8 +630,12 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 		log.Error(c.ctx, "failed to update job state to Completed", mlog.Err(err))
 		return
 	}
+	if !applied {
+		log.Warn(c.ctx, "job left CopySegmentJobExecuting while finishing; skipping terminal transition")
+		return
+	}
 
-	// Step 4: Record metrics
+	// Step 5: Record metrics
 	totalDuration := job.GetTR().ElapseSpan()
 	metrics.CopySegmentJobLatency.Observe(float64(totalDuration.Milliseconds()))
 	log.Info(c.ctx, "copy segment job completed",
@@ -721,9 +761,9 @@ func (c *copySegmentChecker) checkGC(job CopySegmentJob) {
 	cleanupTime := tsoutil.PhysicalTime(job.GetCleanupTs())
 	if time.Now().After(cleanupTime) {
 		log := mlog.With(mlog.FieldJobID(job.GetJobId()))
-		GCRetention := Params.DataCoordCfg.CopySegmentTaskRetention.GetAsDuration(time.Second)
+		gcRetention := Params.DataCoordCfg.CopySegmentTaskRetention.GetAsDuration(time.Second)
 		log.Info(c.ctx, "copy segment job has reached GC retention",
-			mlog.Time("cleanupTime", cleanupTime), mlog.Duration("GCRetention", GCRetention))
+			mlog.Time("cleanupTime", cleanupTime), mlog.Duration("gcRetention", gcRetention))
 
 		tasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
 		shouldRemoveJob := true
@@ -746,9 +786,15 @@ func (c *copySegmentChecker) checkGC(job CopySegmentJob) {
 				}
 			}
 
-			// If task is still assigned to a node, don't remove yet
-			// (wait for inspector to unassign)
-			if task.GetNodeId() != NullNodeID {
+			// The task still names a worker, so its DataNode may still be
+			// holding it. The scheduler sends exactly one drop when it releases
+			// a task and nothing retried a failed one, so the record sat here
+			// forever, blocking its own removal and its job's. Retry it:
+			// DropTaskOnWorker releases the assignment on success and on
+			// ErrNodeNotFound, and the next GC round removes the task once it
+			// does. This mirrors importChecker.checkGC.
+			if isNodeAssigned(task.GetNodeId()) {
+				task.DropTaskOnWorker(c.cluster)
 				shouldRemoveJob = false
 				continue
 			}

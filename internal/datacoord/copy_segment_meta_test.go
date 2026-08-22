@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -566,6 +567,51 @@ func (s *CopySegmentMetaSuite) TestAddTask_CatalogError() {
 	// Verify task is not added
 	retrievedTask := s.copyMeta.GetTask(context.TODO(), 1001)
 	s.Nil(retrievedTask)
+}
+
+func (s *CopySegmentMetaSuite) TestPublishReplanPublishesTaskAndTargetsTogether() {
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+
+	task := &copySegmentTask{tr: timerecord.NewTimeRecorder("replan"), times: taskcommon.NewTimes()}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId: 1002, JobId: 100, CollectionId: s.collectionID,
+		State: datapb.CopySegmentTaskState_CopySegmentTaskPending, PredecessorTaskId: 1001,
+		IdMappings: []*datapb.CopySegmentIDMapping{{
+			SourceSegmentId: 10, TargetSegmentId: 102, PartitionId: 20,
+		}},
+	})
+	target := NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 102, CollectionID: s.collectionID, PartitionID: 20,
+		State: commonpb.SegmentState_Importing, IsImporting: true,
+	})
+
+	err := s.copyMeta.PublishReplan(context.TODO(), task, []*SegmentInfo{target})
+	s.NoError(err)
+	s.Same(task, s.copyMeta.GetTask(context.TODO(), task.GetTaskId()))
+	s.Same(target, s.meta.GetSegment(context.TODO(), target.GetID()))
+}
+
+func (s *CopySegmentMetaSuite) TestPublishReplanFailureLeavesBothCachesUnchanged() {
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).
+		Return(errors.New("ambiguous catalog result")).Once()
+
+	task := &copySegmentTask{tr: timerecord.NewTimeRecorder("replan"), times: taskcommon.NewTimes()}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId: 1002, JobId: 100, CollectionId: s.collectionID,
+		State: datapb.CopySegmentTaskState_CopySegmentTaskPending, PredecessorTaskId: 1001,
+		IdMappings: []*datapb.CopySegmentIDMapping{{
+			SourceSegmentId: 10, TargetSegmentId: 102, PartitionId: 20,
+		}},
+	})
+	target := NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 102, CollectionID: s.collectionID, PartitionID: 20,
+		State: commonpb.SegmentState_Importing, IsImporting: true,
+	})
+
+	err := s.copyMeta.PublishReplan(context.TODO(), task, []*SegmentInfo{target})
+	s.Error(err)
+	s.Nil(s.copyMeta.GetTask(context.TODO(), task.GetTaskId()))
+	s.Nil(s.meta.GetSegment(context.TODO(), target.GetID()))
 }
 
 func (s *CopySegmentMetaSuite) TestUpdateTask_Success() {

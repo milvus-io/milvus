@@ -269,6 +269,13 @@ func NewAzureObjectStorageClient(ctx context.Context, c *Config) (*service.Clien
 }
 
 func NewGcpObjectStorageClient(ctx context.Context, c *Config) (*storage.Client, error) {
+	// The credentials and the client capture the context they are created with
+	// and keep using it for token refresh long after this call returns
+	// (google.CredentialsFromJSON / FindDefaultCredentials store it in the
+	// TokenSource). Callers pass a request-scoped context to bound the bucket
+	// probe below, so the client must be built on a detached context or every
+	// token refresh after the request ends fails with "context canceled".
+	clientCtx := context.WithoutCancel(ctx)
 	var err error
 
 	var opts []option.ClientOption
@@ -293,7 +300,7 @@ func NewGcpObjectStorageClient(ctx context.Context, c *Config) (*storage.Client,
 			opts = append(opts, option.WithHTTPClient(httpClient))
 		}
 	} else if c.GcpCredentialJSON != "" {
-		creds, err := google.CredentialsFromJSON(ctx, []byte(c.GcpCredentialJSON), storage.ScopeReadWrite)
+		creds, err := google.CredentialsFromJSON(clientCtx, []byte(c.GcpCredentialJSON), storage.ScopeReadWrite)
 		if err != nil {
 			return nil, err
 		}
@@ -318,7 +325,7 @@ func NewGcpObjectStorageClient(ctx context.Context, c *Config) (*storage.Client,
 		}
 	} else if c.UseIAM {
 		// IAM mode: use Application Default Credentials (ADC).
-		creds, err := google.FindDefaultCredentials(ctx, storage.ScopeReadWrite)
+		creds, err := google.FindDefaultCredentials(clientCtx, storage.ScopeReadWrite)
 		if err != nil {
 			return nil, err
 		}
@@ -342,7 +349,7 @@ func NewGcpObjectStorageClient(ctx context.Context, c *Config) (*storage.Client,
 		return nil, merr.WrapErrParameterInvalidMsg("gcpnative requires GcpCredentialJSON or UseIAM")
 	}
 
-	client, err := storage.NewClient(ctx, opts...)
+	client, err := storage.NewClient(clientCtx, opts...)
 	if err != nil {
 		return nil, err
 	}

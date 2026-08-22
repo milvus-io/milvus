@@ -336,6 +336,121 @@ func TestCatalog_Update_AddRefreshTasksAndSaveJobEncodingMatchesLegacy(t *testin
 	assert.Len(t, compositeSaves, 3)
 }
 
+func TestCatalog_Update_ReplaceRefreshTask(t *testing.T) {
+	newTask := &datapb.ExternalCollectionRefreshTask{TaskId: 2001, JobId: 7, CollectionId: 3}
+	job := &datapb.ExternalCollectionRefreshJob{JobId: 7, CollectionId: 3, TaskIds: []int64{2001}}
+
+	var saves map[string]string
+	var removals []string
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, actualSaves map[string]string, actualRemovals []string, _ ...predicates.Predicate) error {
+			saves = actualSaves
+			removals = actualRemovals
+			return nil
+		}).Once()
+	c := NewCatalog(metakv, "", "")
+
+	err := c.Update(context.TODO(),
+		metastore.AddRefreshTask(newTask),
+		metastore.SaveRefreshJob(job))
+	assert.NoError(t, err)
+	assert.Contains(t, saves, buildExternalCollectionRefreshTaskKey(2001))
+	assert.Contains(t, saves, buildExternalCollectionRefreshJobKey(7))
+	assert.Empty(t, removals)
+}
+
+func TestCatalog_Update_ReplaceRefreshTaskFallbackKeepsCommitMarkerLast(t *testing.T) {
+	newTask := &datapb.ExternalCollectionRefreshTask{TaskId: 2001, JobId: 7, CollectionId: 3}
+	job := &datapb.ExternalCollectionRefreshJob{JobId: 7, CollectionId: 3, TaskIds: []int64{2001}}
+
+	events := make([]string, 0, 2)
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(1).Maybe()
+	metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string) error {
+			events = append(events, "task")
+			assert.Contains(t, saves, buildExternalCollectionRefreshTaskKey(2001))
+			return nil
+		}).Once()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string, removals []string, _ ...predicates.Predicate) error {
+			events = append(events, "job")
+			assert.Contains(t, saves, buildExternalCollectionRefreshJobKey(7))
+			assert.Empty(t, removals)
+			return nil
+		}).Once()
+	c := NewCatalog(metakv, "", "")
+
+	err := c.Update(context.TODO(),
+		metastore.AddRefreshTask(newTask),
+		metastore.SaveRefreshJob(job))
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"task", "job"}, events)
+}
+
+func TestCatalog_Update_PublishCopySegmentReplan(t *testing.T) {
+	task := &datapb.CopySegmentTask{TaskId: 2001, JobId: 7, CollectionId: 3}
+	segment := &datapb.SegmentInfo{
+		ID: 3001, CollectionID: 3, PartitionID: 4,
+		State: commonpb.SegmentState_Importing,
+	}
+
+	var saves map[string]string
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, actual map[string]string, removals []string, _ ...predicates.Predicate) error {
+			saves = actual
+			assert.Empty(t, removals)
+			return nil
+		}).Once()
+	c := NewCatalog(metakv, "", "")
+
+	err := c.Update(context.TODO(),
+		metastore.AddCopySegmentTask(task),
+		metastore.AddSegment(segment))
+	assert.NoError(t, err)
+	assert.Contains(t, saves, buildCopySegmentTaskKey(task.GetTaskId()))
+	assert.Contains(t, saves, buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID()))
+}
+
+// When the composite exceeds the backend transaction limit, the task must land
+// before any target segment. A crash between chunks can then reconstruct the
+// missing targets from predecessor_task_id instead of leaking ownerless
+// Importing segments.
+func TestCatalog_Update_CopySegmentReplanFallbackKeepsOwnerFirst(t *testing.T) {
+	task := &datapb.CopySegmentTask{TaskId: 2001, JobId: 7, CollectionId: 3, PredecessorTaskId: 1001}
+	segment := &datapb.SegmentInfo{
+		ID: 3001, CollectionID: 3, PartitionID: 4,
+		State: commonpb.SegmentState_Importing,
+	}
+
+	events := make([]string, 0, 2)
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(1).Maybe()
+	metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string) error {
+			switch {
+			case saves[buildCopySegmentTaskKey(task.GetTaskId())] != "":
+				events = append(events, "task")
+			case saves[buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())] != "":
+				events = append(events, "segment")
+			default:
+				assert.Fail(t, "unexpected composite update chunk")
+			}
+			return nil
+		}).Times(2)
+	c := NewCatalog(metakv, "", "")
+
+	err := c.Update(context.TODO(),
+		metastore.AddCopySegmentTask(task),
+		metastore.AddSegment(segment))
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"task", "segment"}, events)
+}
+
 // TestCatalog_Update_DropPartitionStatsAndAnalyzeTask proves the composite
 // partition-stats-and-analyze-task cleanup issues: a Remove for the analyze
 // task, a Save for the current-partition-stats-version rollback (when

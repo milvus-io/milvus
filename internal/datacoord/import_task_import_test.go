@@ -27,13 +27,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -154,7 +157,11 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 		cluster := session.NewMockCluster(t)
 		cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
 		task.CreateTaskOnWorker(1, cluster)
-		assert.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+		// A Create error says nothing about whether the worker accepted the
+		// request, so the durable assignment stays: the poll path reclaims the
+		// attempt from that node before the task becomes dispatchable again.
+		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
+		assert.EqualValues(t, 1, task.GetNodeID())
 	})
 
 	t.Run("UpdateTask failed", func(t *testing.T) {
@@ -196,8 +203,10 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 		err = im.AddTask(context.TODO(), task)
 		assert.NoError(t, err)
 
+		// CreateImport is deliberately not declared: a task whose assignment
+		// cannot be persisted must not be sent at all, or an accepted request
+		// would leave an attempt nobody can reclaim.
 		cluster := session.NewMockCluster(t)
-		cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		catalog = mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(errors.New("mock err"))
@@ -205,6 +214,8 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 
 		task.CreateTaskOnWorker(1, cluster)
 		assert.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+		assert.NotEqualValues(t, 1, task.GetNodeID(),
+			"a task that was never sent must not name the node it would have gone to")
 	})
 
 	t.Run("normal", func(t *testing.T) {
@@ -261,8 +272,13 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 
+		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
+		catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Maybe()
+		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
+
 		im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
 		assert.NoError(t, err)
+		assert.NoError(t, im.AddJob(context.TODO(), newRotationTestJob()))
 
 		taskProto := &datapb.ImportTaskV2{
 			JobID:        1,
@@ -271,12 +287,17 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 			SegmentIDs:   []int64{5, 6},
 			NodeID:       7,
 			State:        datapb.ImportTaskStateV2_InProgress,
+			FileStats:    newRotationTestFileStats(),
 		}
 		task := &importTask{
-			alloc: nil,
+			alloc: newRotationTestAllocator(t, 9000),
 			meta: &meta{
+				catalog:     catalog,
 				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 				segments:    NewSegmentsInfo(),
+				// GetSegmentMaxSize consults index meta (DISKANN sizing) while
+				// the rotation re-plans the replacement segments.
+				indexMeta: &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)},
 			},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
@@ -285,8 +306,27 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		err = im.AddTask(context.TODO(), task)
 		assert.NoError(t, err)
 
+		// A reclaimed attempt is not re-dispatched onto its own output: the drop
+		// cancels the worker but does not wait for in-flight writes, so the task
+		// gets a fresh set of output segments before it becomes dispatchable.
 		cluster := session.NewMockCluster(t)
-		cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
+		cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(nil, errors.New("mock err")).Once()
+		cluster.EXPECT().DropImport(int64(7), int64(2)).Return(nil).Once()
+		task.QueryTaskOnWorker(cluster)
+		assert.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+		assert.EqualValues(t, NullNodeID, task.GetNodeID(),
+			"a reclaimed attempt releases its assignment")
+		assert.NotSubset(t, []int64{5, 6}, task.GetSegmentIDs(),
+			"the retry must not inherit the abandoned attempt's output segments")
+
+		// The reset is best effort: when persisting it fails the in-memory state
+		// is left alone and the next round tries again.
+		taskProto.State = datapb.ImportTaskStateV2_InProgress
+		taskProto.NodeID = 7
+		task.task.Store(taskProto)
+		cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).
+			Return(nil, merr.WrapErrNodeNotFound(7)).Once()
+		cluster.EXPECT().DropImport(int64(7), int64(2)).Return(nil).Once()
 		catalog = mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(errors.New("mock err"))
 		im.(*importMeta).catalog = catalog
@@ -294,16 +334,22 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
 	})
 
-	t.Run("QueryImport rpc failed resets NumOfRows", func(t *testing.T) {
+	// Superseded by segment rotation: a retry no longer reuses the abandoned
+	// attempt's segments, so there is no stale row count to reset -- the old
+	// segments are retired outright and the task gets a fresh set. This pins
+	// that, plus the retirement, in place of the old row-reset assertion.
+	t.Run("QueryImport rpc failed retires the old segments", func(t *testing.T) {
 		catalog := mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 		im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
 		assert.NoError(t, err)
 
+		assert.NoError(t, im.AddJob(context.TODO(), newRotationTestJob()))
 		taskProto := &datapb.ImportTaskV2{
 			JobID:        1,
 			TaskID:       2,
@@ -311,15 +357,18 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 			SegmentIDs:   []int64{5, 6},
 			NodeID:       7,
 			State:        datapb.ImportTaskStateV2_InProgress,
+			FileStats:    newRotationTestFileStats(),
 		}
 		segCatalog := mocks.NewDataCoordCatalog(t)
-		segCatalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+		segCatalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
+		segCatalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Maybe()
 		task := &importTask{
-			alloc: nil,
+			alloc: newRotationTestAllocator(t, 9100),
 			meta: &meta{
 				catalog:     segCatalog,
 				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 				segments:    NewSegmentsInfo(),
+				indexMeta:   &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)},
 			},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
@@ -346,12 +395,19 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		})
 
 		cluster := session.NewMockCluster(t)
-		cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
+		cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(nil, merr.WrapErrNodeNotFound(7))
+		// A node that is gone took the task with it, so the reclaim succeeds and
+		// the task becomes dispatchable again.
+		cluster.EXPECT().DropImport(int64(7), mock.Anything).Return(merr.WrapErrNodeNotFound(7)).Once()
 		task.QueryTaskOnWorker(cluster)
 
 		assert.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
-		assert.EqualValues(t, 0, task.meta.segments.GetSegment(5).GetNumOfRows())
-		assert.EqualValues(t, 0, task.meta.segments.GetSegment(6).GetNumOfRows())
+		// The old segments are retired, not reused -- so whatever rows the
+		// abandoned attempt wrote into them go with them.
+		assert.Equal(t, commonpb.SegmentState_Dropped, task.meta.segments.GetSegment(5).GetState())
+		assert.Equal(t, commonpb.SegmentState_Dropped, task.meta.segments.GetSegment(6).GetState())
+		assert.NotSubset(t, []int64{5, 6}, task.GetSegmentIDs())
+		assert.NotEmpty(t, task.GetSegmentIDs(), "the retry has a fresh set to write into")
 	})
 
 	t.Run("import failed", func(t *testing.T) {
@@ -804,4 +860,49 @@ func TestImportTask_DropTaskOnWorker(t *testing.T) {
 		assert.Equal(t, datapb.ImportTaskStateV2_Completed, task.GetState())
 		assert.Equal(t, int64(NullNodeID), task.GetNodeID())
 	})
+}
+
+// --- helpers for the segment-rotation retry path ---
+
+// newRotationTestJob is the minimum job a retry needs to re-plan its output
+// segments: rotateImportTaskSegments re-runs assignSegments, which reads the
+// schema (for the primary field) and the job options.
+func newRotationTestJob() ImportJob {
+	return &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        1,
+			CollectionID: 3,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				},
+			},
+		},
+	}
+}
+
+// newRotationTestFileStats gives assignSegments a hashed size to place, so the
+// rotation actually allocates segments instead of returning an empty set.
+func newRotationTestFileStats() []*datapb.ImportFileStats {
+	return []*datapb.ImportFileStats{{
+		HashedStats: map[string]*datapb.PartitionImportStats{
+			"ch-0": {PartitionDataSize: map[int64]int64{10: 1}},
+		},
+	}}
+}
+
+func newRotationTestAllocator(t *testing.T, next int64) allocator.Allocator {
+	alloc := allocator.NewMockAllocator(t)
+	counter := next
+	alloc.EXPECT().AllocID(mock.Anything).RunAndReturn(func(context.Context) (int64, error) {
+		counter++
+		return counter, nil
+	}).Maybe()
+	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
+		begin := counter + 1
+		counter += n
+		return begin, counter + 1, nil
+	}).Maybe()
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(1000, nil).Maybe()
+	return alloc
 }

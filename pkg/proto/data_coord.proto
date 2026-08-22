@@ -893,6 +893,11 @@ message CompactionPlanResult {
   repeated CompactionSegment segments = 3;
   string channel = 4;
   CompactionType type = 5;
+  // Why the plan failed, when state is failed. Without it a worker-reported
+  // failure reaches DataCoord as a bare state and the task's fail_reason is
+  // persisted empty, so a plan that fails ten times in a row leaves nothing to
+  // diagnose it with. Empty for every other state.
+  string reason = 6;
 }
 
 message CompactionStateResponse {
@@ -1292,6 +1297,9 @@ message CopySegmentTask {
   repeated CopySegmentIDMapping id_mappings = 9;
   uint64 created_ts = 10;   // Unix timestamp in nanoseconds
   uint64 complete_ts = 11;  // Unix timestamp in nanoseconds
+  // Exact durable owner handoff for a fresh-identity replan. A non-zero value
+  // names the attempt whose work and target-segment cleanup this task replaces.
+  int64 predecessor_task_id = 12;
 }
 
 // CopySegmentJobState defines the state machine for copy segment jobs
@@ -1309,7 +1317,14 @@ enum CopySegmentTaskState {
   CopySegmentTaskPending = 1;      // Task created, waiting to be scheduled
   CopySegmentTaskInProgress = 2;   // Task is being executed on DataNode
   CopySegmentTaskCompleted = 3;    // Task successfully completed, segment copied
-  CopySegmentTaskFailed = 4;       // Task failed, requires manual handling
+  CopySegmentTaskFailed = 4;       // Task failed permanently, the job cannot succeed
+  // Worker-reported only, never persisted: the attempt hit a transient fault
+  // (object storage throttling, a timeout) and the coordinator must replan it
+  // under a fresh identity instead of failing the job. It mirrors the
+  // Failed/Retry split ImportTaskStateV2 already makes; collapsing the two here
+  // is what used to turn one throttled read into a permanently failed restore.
+  // An old DataNode never sends it.
+  CopySegmentTaskRetry = 5;
 }
 
 // SnapshotState defines the state for snapshot 2PC commit
@@ -1490,6 +1505,11 @@ enum CompactionTaskState {
   cleaned = 8;
   meta_saved = 9;
   statistic = 10;
+  // This attempt ended without succeeding and the work is owed a rebuild under
+  // a fresh plan ID. Terminal for the attempt, not for the trigger: cleanup
+  // releases the inputs and then replans. `failed` is the outcome instead once
+  // dataCoord.compaction.maxAttempts is spent.
+  retrying = 11;
 }
 
 enum TargetState {

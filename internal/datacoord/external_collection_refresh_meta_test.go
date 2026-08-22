@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"path"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,6 +52,29 @@ func createMetaTestRefreshMeta(t *testing.T, jobs []*datapb.ExternalCollectionRe
 func createMetaTestRefreshResultStore(t *testing.T) (*externalCollectionRefreshResultStore, *storage.LocalChunkManager) {
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	return newExternalCollectionRefreshResultStore(chunkManager), chunkManager
+}
+
+type controlledRefreshCatalog struct {
+	*stubCatalog
+	onUpdate   func()
+	onTaskSave func()
+}
+
+func (c *controlledRefreshCatalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
+	if c.onUpdate != nil {
+		c.onUpdate()
+	}
+	return c.stubCatalog.Update(ctx, actions...)
+}
+
+func (c *controlledRefreshCatalog) SaveExternalCollectionRefreshTask(
+	ctx context.Context,
+	task *datapb.ExternalCollectionRefreshTask,
+) error {
+	if c.onTaskSave != nil {
+		c.onTaskSave()
+	}
+	return nil
 }
 
 // ==================== Test Functions ====================
@@ -728,6 +752,149 @@ func TestExternalCollectionRefreshMeta_AddTasksToJob(t *testing.T) {
 	})
 }
 
+func TestExternalCollectionRefreshMeta_ReplaceRetryTask(t *testing.T) {
+	oldTask := func() *datapb.ExternalCollectionRefreshTask {
+		return &datapb.ExternalCollectionRefreshTask{
+			TaskId:               1001,
+			JobId:                1,
+			CollectionId:         100,
+			Version:              3,
+			NodeId:               10,
+			State:                indexpb.JobState_JobStateRetry,
+			FailReason:           "worker failure 1/10",
+			ExternalSource:       "s3://bucket/path",
+			ExternalSpec:         "iceberg",
+			Progress:             40,
+			ExploreManifestPath:  "manifests/1.pb",
+			FileIndexBegin:       3,
+			FileIndexEnd:         8,
+			OwnershipPlanVersion: externalRefreshOwnershipPlanVersion,
+			OwnedSegmentIds:      []int64{10, 20},
+		}
+	}
+	replacement := func(task *datapb.ExternalCollectionRefreshTask) *datapb.ExternalCollectionRefreshTask {
+		cloned := proto.Clone(task).(*datapb.ExternalCollectionRefreshTask)
+		cloned.TaskId = 2001
+		cloned.Version = 0
+		cloned.NodeId = 0
+		cloned.State = indexpb.JobState_JobStateInit
+		cloned.FailReason = ""
+		cloned.Progress = 0
+		cloned.KeptSegments = nil
+		cloned.UpdatedSegments = nil
+		cloned.ResultReady = false
+		cloned.ResultStorageVersion = 0
+		cloned.ResultPath = ""
+		cloned.ResultChecksum = nil
+		return cloned
+	}
+	newMeta := func(t *testing.T, catalog *stubCatalog) *externalCollectionRefreshMeta {
+		t.Helper()
+		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		assert.NoError(t, err)
+		return meta
+	}
+
+	t.Run("success_is_one_composite_publication", func(t *testing.T) {
+		old := oldTask()
+		catalog := &stubCatalog{
+			jobs: []*datapb.ExternalCollectionRefreshJob{{
+				JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, TaskIds: []int64{1001},
+			}},
+			tasks: []*datapb.ExternalCollectionRefreshTask{old},
+		}
+		meta := newMeta(t, catalog)
+		counter := &atomic.Int64{}
+		counter.Store(1)
+		meta.workerFailureCounts.Insert(1001, counter)
+
+		replaced, err := meta.ReplaceRetryTask(1001, replacement(old))
+		assert.NoError(t, err)
+		assert.True(t, replaced)
+		assert.Equal(t, indexpb.JobState_JobStateRetry, meta.GetTask(1001).GetState())
+		newTask := meta.GetTask(2001)
+		assert.NotNil(t, newTask)
+		assert.Equal(t, "manifests/1.pb", newTask.GetExploreManifestPath())
+		assert.Equal(t, int64(3), newTask.GetFileIndexBegin())
+		assert.Equal(t, int64(8), newTask.GetFileIndexEnd())
+		assert.Equal(t, []int64{10, 20}, newTask.GetOwnedSegmentIds())
+		assert.Equal(t, []int64{2001}, meta.GetJob(1).GetTaskIds())
+		movedCounter, ok := meta.workerFailureCounts.Get(2001)
+		assert.True(t, ok)
+		assert.Equal(t, int64(1), movedCounter.Load())
+		assert.Equal(t, int64(2), movedCounter.Add(1))
+
+		if assert.Len(t, catalog.updateActions, 1) && assert.Len(t, catalog.updateActions[0], 2) {
+			actions := catalog.updateActions[0]
+			assert.Equal(t, metastore.ActionAdd, actions[0].Type)
+			assert.Equal(t, int64(2001), actions[0].Entry.(metastore.RefreshTaskEntry).Task.GetTaskId())
+			assert.Equal(t, metastore.ActionUpdate, actions[1].Type)
+			assert.Equal(t, []int64{2001}, actions[1].Entry.(metastore.RefreshJobEntry).Job.GetTaskIds())
+		}
+
+		assert.NoError(t, meta.DropJob(context.Background(), 1))
+		assert.Nil(t, meta.GetTask(1001))
+		assert.Nil(t, meta.GetTask(2001))
+		if assert.Len(t, catalog.updateActions, 2) {
+			assert.Len(t, catalog.updateActions[1], 3, "job GC removes both retired and committed task records")
+		}
+	})
+
+	t.Run("catalog_failure_keeps_old_publication", func(t *testing.T) {
+		old := oldTask()
+		catalog := &stubCatalog{
+			jobs: []*datapb.ExternalCollectionRefreshJob{{
+				JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, TaskIds: []int64{1001},
+			}},
+			tasks:     []*datapb.ExternalCollectionRefreshTask{old},
+			updateErr: errors.New("replace failed"),
+		}
+		meta := newMeta(t, catalog)
+
+		replaced, err := meta.ReplaceRetryTask(1001, replacement(old))
+		assert.ErrorContains(t, err, "replace failed")
+		assert.False(t, replaced)
+		assert.NotNil(t, meta.GetTask(1001))
+		assert.Nil(t, meta.GetTask(2001))
+		assert.Equal(t, []int64{1001}, meta.GetJob(1).GetTaskIds())
+	})
+
+	t.Run("terminal_job_is_noop", func(t *testing.T) {
+		old := oldTask()
+		catalog := &stubCatalog{
+			jobs: []*datapb.ExternalCollectionRefreshJob{{
+				JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFailed, TaskIds: []int64{1001},
+			}},
+			tasks: []*datapb.ExternalCollectionRefreshTask{old},
+		}
+		meta := newMeta(t, catalog)
+
+		replaced, err := meta.ReplaceRetryTask(1001, replacement(old))
+		assert.NoError(t, err)
+		assert.False(t, replaced)
+		assert.Empty(t, catalog.updateActions)
+		assert.NotNil(t, meta.GetTask(1001))
+	})
+
+	t.Run("changed_execution_plan_is_rejected", func(t *testing.T) {
+		old := oldTask()
+		catalog := &stubCatalog{
+			jobs: []*datapb.ExternalCollectionRefreshJob{{
+				JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, TaskIds: []int64{1001},
+			}},
+			tasks: []*datapb.ExternalCollectionRefreshTask{old},
+		}
+		meta := newMeta(t, catalog)
+		changed := replacement(old)
+		changed.FileIndexEnd++
+
+		replaced, err := meta.ReplaceRetryTask(1001, changed)
+		assert.ErrorContains(t, err, "changed the execution plan")
+		assert.False(t, replaced)
+		assert.Empty(t, catalog.updateActions)
+	})
+}
+
 func TestExternalCollectionRefreshMeta_GetCommittedTasksByJobIDMissingTask(t *testing.T) {
 	meta := createMetaTestRefreshMeta(t, []*datapb.ExternalCollectionRefreshJob{{
 		JobId:        1,
@@ -968,6 +1135,122 @@ func TestExternalCollectionRefreshMeta_DropJob(t *testing.T) {
 
 		assert.NoError(t, meta.DropJob(ctx, 1))
 		assert.Nil(t, meta.GetJob(1))
+	})
+}
+
+func TestExternalCollectionRefreshMeta_DropJobSerializesTaskMutation(t *testing.T) {
+	newMeta := func(t *testing.T, catalog *controlledRefreshCatalog) *externalCollectionRefreshMeta {
+		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		assert.NoError(t, err)
+		return meta
+	}
+	newCatalog := func() *controlledRefreshCatalog {
+		return &controlledRefreshCatalog{stubCatalog: &stubCatalog{
+			jobs: []*datapb.ExternalCollectionRefreshJob{
+				{JobId: 1, CollectionId: 100, TaskIds: []int64{1001}},
+			},
+			tasks: []*datapb.ExternalCollectionRefreshTask{
+				{TaskId: 1001, JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress},
+			},
+		}}
+	}
+
+	t.Run("mutation_commits_before_drop", func(t *testing.T) {
+		catalog := newCatalog()
+		meta := newMeta(t, catalog)
+		saveStarted := make(chan struct{})
+		releaseSave := make(chan struct{})
+		dropEnteredCatalog := make(chan struct{})
+		var jobLockHeldAtSave atomic.Bool
+		var taskLockHeldAtSave atomic.Bool
+		catalog.onTaskSave = func() {
+			if meta.jobLock.TryLock(int64(100)) {
+				meta.jobLock.Unlock(int64(100))
+			} else {
+				jobLockHeldAtSave.Store(true)
+			}
+			if meta.taskLock.TryLock(int64(1)) {
+				meta.taskLock.Unlock(int64(1))
+			} else {
+				taskLockHeldAtSave.Store(true)
+			}
+			close(saveStarted)
+			<-releaseSave
+		}
+		catalog.onUpdate = func() { close(dropEnteredCatalog) }
+
+		mutateDone := make(chan error, 1)
+		go func() {
+			mutateDone <- meta.UpdateTaskProgress(1001, 50)
+		}()
+		<-saveStarted
+
+		dropDone := make(chan error, 1)
+		go func() {
+			dropDone <- meta.DropJob(context.Background(), 1)
+		}()
+		select {
+		case <-dropEnteredCatalog:
+			t.Fatal("DropJob entered its catalog transaction while task Save held the ownership locks")
+		default:
+		}
+
+		close(releaseSave)
+		assert.NoError(t, <-mutateDone)
+		assert.NoError(t, <-dropDone)
+		assert.True(t, jobLockHeldAtSave.Load())
+		assert.True(t, taskLockHeldAtSave.Load())
+		assert.Nil(t, meta.GetJob(1))
+		assert.Nil(t, meta.GetTask(1001))
+	})
+
+	t.Run("drop_commits_before_mutation", func(t *testing.T) {
+		catalog := newCatalog()
+		meta := newMeta(t, catalog)
+		dropStarted := make(chan struct{})
+		releaseDrop := make(chan struct{})
+		var jobLockHeldAtDrop atomic.Bool
+		var taskLockHeldAtDrop atomic.Bool
+		var taskSaveCalls atomic.Int32
+		catalog.onUpdate = func() {
+			if meta.jobLock.TryLock(int64(100)) {
+				meta.jobLock.Unlock(int64(100))
+			} else {
+				jobLockHeldAtDrop.Store(true)
+			}
+			if meta.taskLock.TryLock(int64(1)) {
+				meta.taskLock.Unlock(int64(1))
+			} else {
+				taskLockHeldAtDrop.Store(true)
+			}
+			close(dropStarted)
+			<-releaseDrop
+		}
+		catalog.onTaskSave = func() { taskSaveCalls.Add(1) }
+
+		dropDone := make(chan error, 1)
+		go func() {
+			dropDone <- meta.DropJob(context.Background(), 1)
+		}()
+		<-dropStarted
+
+		mutateInvoked := make(chan struct{})
+		mutateDone := make(chan error, 1)
+		go func() {
+			close(mutateInvoked)
+			mutateDone <- meta.UpdateTaskProgress(1001, 50)
+		}()
+		<-mutateInvoked
+		close(releaseDrop)
+
+		assert.NoError(t, <-dropDone)
+		assert.Error(t, <-mutateDone)
+		assert.True(t, jobLockHeldAtDrop.Load())
+		assert.True(t, taskLockHeldAtDrop.Load())
+		assert.Equal(t, int32(0), taskSaveCalls.Load(),
+			"a task Save must never land after the composite job drop")
+		assert.Nil(t, meta.GetJob(1))
+		assert.Nil(t, meta.GetTask(1001))
 	})
 }
 
@@ -1603,6 +1886,59 @@ func TestExternalCollectionRefreshMeta_UpdateTaskVersion(t *testing.T) {
 		err := meta.UpdateTaskVersion(9999, 10)
 		assert.Error(t, err)
 	})
+}
+
+func TestExternalCollectionRefreshMeta_WorkerFailureCountIsProcessLocal(t *testing.T) {
+	tasks := []*datapb.ExternalCollectionRefreshTask{{
+		TaskId: 1001,
+		JobId:  1,
+		State:  indexpb.JobState_JobStateInProgress,
+	}}
+	meta, err := newExternalCollectionRefreshMeta(context.Background(), &stubCatalog{tasks: tasks})
+	assert.NoError(t, err)
+	_, count, applied, err := meta.RecordTaskWorkerFailure(1001, 10, "failed")
+	assert.NoError(t, err)
+	assert.True(t, applied)
+	assert.Equal(t, int64(1), count)
+	assert.NoError(t, meta.UpdateTaskState(1001, indexpb.JobState_JobStateInProgress, ""))
+	_, count, applied, err = meta.RecordTaskWorkerFailure(1001, 10, "failed again")
+	assert.NoError(t, err)
+	assert.True(t, applied)
+	assert.Equal(t, int64(2), count)
+
+	// A new meta instance models DataCoord restart: retry history is not loaded
+	// from catalog and the task receives a fresh in-process retry budget.
+	restarted, err := newExternalCollectionRefreshMeta(context.Background(), &stubCatalog{tasks: tasks})
+	assert.NoError(t, err)
+	_, count, applied, err = restarted.RecordTaskWorkerFailure(1001, 10, "failed")
+	assert.NoError(t, err)
+	assert.True(t, applied)
+	assert.Equal(t, int64(1), count)
+}
+
+func TestExternalCollectionRefreshMeta_StaleWorkerFailureDoesNotReopenTerminalTask(t *testing.T) {
+	for _, state := range []indexpb.JobState{
+		indexpb.JobState_JobStateFinished,
+		indexpb.JobState_JobStateFailed,
+		indexpb.JobState_JobStateRetry,
+	} {
+		t.Run(state.String(), func(t *testing.T) {
+			task := &datapb.ExternalCollectionRefreshTask{
+				TaskId: 1001,
+				JobId:  1,
+				State:  state,
+			}
+			meta, err := newExternalCollectionRefreshMeta(context.Background(), &stubCatalog{tasks: []*datapb.ExternalCollectionRefreshTask{task}})
+			assert.NoError(t, err)
+
+			updated, count, applied, err := meta.RecordTaskWorkerFailure(task.GetTaskId(), 10, "stale failure")
+			assert.NoError(t, err)
+			assert.False(t, applied)
+			assert.Zero(t, count)
+			assert.Equal(t, state, updated.GetState())
+			assert.Equal(t, state, meta.GetTask(task.GetTaskId()).GetState())
+		})
+	}
 }
 
 func TestExternalCollectionRefreshMeta_AggregateJobStateFromTasks(t *testing.T) {

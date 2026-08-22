@@ -828,8 +828,6 @@ func TestComponentParam(t *testing.T) {
 		params.Save("datacoord.scheduler.taskSlowThreshold", "1000")
 		assert.Equal(t, 1000*time.Second, Params.TaskSlowThreshold.GetAsDuration(time.Second))
 
-		params.Save("datacoord.statsTask.enable", "true")
-		assert.True(t, Params.EnableSortCompaction.GetAsBool())
 		params.Save("datacoord.taskCheckInterval", "500")
 		assert.Equal(t, 500*time.Second, Params.TaskCheckInterval.GetAsDuration(time.Second))
 		params.Save("datacoord.statsTaskTriggerCount", "3")
@@ -1218,9 +1216,15 @@ func TestCachedParam(t *testing.T) {
 }
 
 func TestFallbackParam(t *testing.T) {
-	Init()
-	params := Get()
-	params.Save("common.chanNamePrefix.cluster", "foo")
+	manager := config.NewManager()
+	manager.SetConfig("common.chanNamePrefix.cluster", "foo")
+	param := &ParamItem{
+		Key:          "msgChannel.chanNamePrefix.cluster",
+		FallbackKeys: []string{"common.chanNamePrefix.cluster"},
+		DefaultValue: "by-dev",
+		Forbidden:    true,
+	}
+	param.Init(manager)
 
-	assert.Equal(t, "foo", params.CommonCfg.ClusterPrefix.GetValue())
+	assert.Equal(t, "foo", param.GetValue())
 }

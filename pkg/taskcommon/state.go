@@ -75,6 +75,13 @@ func FromCompactionState(s datapb.CompactionTaskState) State {
 		return Finished
 	case datapb.CompactionTaskState_failed:
 		return Failed
+	case datapb.CompactionTaskState_retrying:
+		// The attempt is over as far as the scheduler is concerned: the
+		// inspector owns the task from here, and the rebuild arrives as a
+		// separate task with its own ID. Reporting Retry instead would push
+		// this one back through the pending queue for a round it can no longer
+		// use, and leave its backoff entry behind.
+		return Failed
 	case datapb.CompactionTaskState_timeout:
 		return Retry
 	}
@@ -107,6 +114,11 @@ func FromCopySegmentState(s datapb.CopySegmentTaskState) State {
 		return Finished
 	case datapb.CopySegmentTaskState_CopySegmentTaskFailed:
 		return Failed
+	case datapb.CopySegmentTaskState_CopySegmentTaskRetry:
+		// Worker-reported only; DataCoord turns it into a replan on the spot and
+		// never persists it. Mapped anyway so a record that somehow carries it
+		// gets polled again rather than silently released as an unknown state.
+		return Retry
 	}
 	return None
 }
@@ -122,8 +134,13 @@ func ToCopySegmentState(s State) datapb.CopySegmentTaskState {
 	case Failed:
 		return datapb.CopySegmentTaskState_CopySegmentTaskFailed
 	case Retry:
-		// CopySegmentTask does not support Retry state, map to Failed
-		return datapb.CopySegmentTaskState_CopySegmentTaskFailed
+		// Worker-reported transient failure. This mapping is the wire the
+		// classification rides on: the coordinator's QueryCopySegment wrapper
+		// answers a Retry-state poll with ToCopySegmentState(state) and never
+		// parses the payload for it, so collapsing Retry to Failed here silently
+		// turns every retriable copy failure into a permanent job failure -- the
+		// exact inversion CopySegmentTaskRetry exists to prevent.
+		return datapb.CopySegmentTaskState_CopySegmentTaskRetry
 	}
 	return datapb.CopySegmentTaskState_CopySegmentTaskNone
 }

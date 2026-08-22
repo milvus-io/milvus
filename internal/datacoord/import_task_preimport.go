@@ -21,6 +21,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -41,7 +43,9 @@ type preImportTask struct {
 	importMeta ImportMeta
 	tr         *timerecord.TimeRecorder
 	times      *taskcommon.Times
-	retryTimes int64
+	// retryTimes counts dispatches of this task identity (attempts), read by
+	// the scheduler's metrics pass without the task lock, hence atomic.
+	retryTimes atomic.Int64
 }
 
 func (p *preImportTask) GetJobID() int64 {
@@ -101,7 +105,7 @@ func (p *preImportTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
 }
 
 func (p *preImportTask) GetTaskVersion() int64 {
-	return p.retryTimes
+	return p.retryTimes.Load()
 }
 
 func (p *preImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
@@ -109,17 +113,27 @@ func (p *preImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster
 	job := p.importMeta.GetJob(context.TODO(), p.GetJobID())
 	req := AssemblePreImportRequest(p, job)
 
-	err := cluster.CreatePreImport(nodeID, req, p.GetTaskSlot())
-	if err != nil {
-		mlog.Warn(context.TODO(), "preimport failed", WrapTaskLog(p, mlog.Err(err))...)
-		p.retryTimes++
-		return
-	}
-	err = p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(),
+	// Persist the assignment before crossing the at-least-once Create boundary.
+	// Recording it afterwards loses the attempt whenever the worker accepted the
+	// request but its response did not come back: the task stays Pending naming
+	// nobody, so nothing can reclaim that attempt, and the scheduler hands the
+	// same task ID to a second node while the first keeps running it. Failing to
+	// write leaves the task Pending and undispatched, which is the safe side.
+	err := p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(),
 		UpdateState(datapb.ImportTaskStateV2_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
-		mlog.Warn(context.TODO(), "update import task failed", WrapTaskLog(p, mlog.Err(err))...)
+		mlog.Warn(context.TODO(), "failed to persist preimport assignment, not sending task",
+			WrapTaskLog(p, mlog.Int64("nodeID", nodeID), mlog.Err(err))...)
+		return
+	}
+	err = cluster.CreatePreImport(nodeID, req, p.GetTaskSlot())
+	if err != nil {
+		// The outcome is unknown, but the assignment is durable, so the poll
+		// path can reach that node, reclaim the attempt and only then make the
+		// task dispatchable again.
+		mlog.Warn(context.TODO(), "preimport failed", WrapTaskLog(p, mlog.Err(err))...)
+		p.retryTimes.Add(1)
 		return
 	}
 	pendingDuration := p.GetTR().RecordSpan()
@@ -134,11 +148,27 @@ func (p *preImportTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 	resp, err := cluster.QueryPreImport(p.GetNodeID(), req)
 	if err != nil || resp.GetState() == datapb.ImportTaskStateV2_Retry {
+		// Take the attempt off its worker before making the task dispatchable
+		// again, and only then. Otherwise the scheduler sends the same task ID
+		// to a second node while the first is still running it. DropImportTask
+		// releases the assignment on success and on ErrNodeNotFound (a node that
+		// is gone took the task with it); anything else leaves the task
+		// InProgress so the next poll retries the drop rather than racing a live
+		// attempt.
+		if dropErr := DropImportTask(p, cluster, p.importMeta); dropErr != nil {
+			mlog.RatedWarn(context.TODO(), rate.Limit(1), "cannot reclaim the preimport task from its worker, leaving it assigned",
+				WrapTaskLog(p, mlog.Err(dropErr))...)
+			return
+		}
 		updateErr := p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
 		if updateErr != nil {
 			mlog.Warn(context.TODO(), "failed to update preimport task state to pending", WrapTaskLog(p, mlog.Err(updateErr))...)
 		}
-		mlog.Info(context.TODO(), "reset preimport task state to pending due to error occurs", WrapTaskLog(p, mlog.Err(err), mlog.String("reason", resp.GetReason()))...)
+		reason := ""
+		if resp != nil {
+			reason = resp.GetReason()
+		}
+		mlog.Info(context.TODO(), "reset preimport task state to pending due to error occurs", WrapTaskLog(p, mlog.Err(err), mlog.String("reason", reason))...)
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Failed {

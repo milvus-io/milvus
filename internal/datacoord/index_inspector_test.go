@@ -46,7 +46,7 @@ func TestIndexInspector_inspect(t *testing.T) {
 	t.Run("normal test", func(t *testing.T) {
 		ctx := context.Background()
 		notifyChan := make(chan int64, 1)
-		scheduler := task.NewMockGlobalScheduler(t)
+		scheduler := newOwnershipScheduler(t)
 		alloc := allocator.NewMockAllocator(t)
 		handler := NewNMockHandler(t)
 		storage := mocks.NewChunkManager(t)
@@ -139,7 +139,7 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
-	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler := newOwnershipScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
 	storage := mocks.NewChunkManager(t)
@@ -211,7 +211,7 @@ func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *tes
 	defer pt.Reset(scalarKey)
 
 	ctx := context.Background()
-	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler := newOwnershipScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
 	storage := mocks.NewChunkManager(t)
@@ -266,7 +266,7 @@ func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *tes
 func TestIndexInspector_isExternalCollection(t *testing.T) {
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
-	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler := newOwnershipScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
 	storageCli := mocks.NewChunkManager(t)
@@ -316,16 +316,12 @@ func TestIndexInspector_isExternalCollection(t *testing.T) {
 
 func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key, "true")
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "true")
-	defer func() {
-		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key)
-		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableCompaction.Key)
-	}()
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableCompaction.Key)
 
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
-	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler := newOwnershipScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
 	storageCli := mocks.NewChunkManager(t)
@@ -381,6 +377,86 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 		assert.True(t, m.indexMeta.IsUnIndexedSegment(2, 1))
 	})
 
+	t.Run("invisible unsorted segment waits for its sort", func(t *testing.T) {
+		// The segment was published invisible: it is owed a sort, and the sorted
+		// replacement is what gets indexed. Indexing the original here would be
+		// wasted work racing that sort.
+
+		m.collections.Insert(3, &collectionInfo{
+			ID: 3,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{Name: "pk", FieldID: 100, DataType: schemapb.DataType_Int64},
+				},
+			},
+		})
+		m.indexMeta.indexes[3] = map[UniqueID]*model.Index{
+			7: {
+				CollectionID: 3,
+				FieldID:      100,
+				IndexID:      7,
+				IndexName:    indexName,
+			},
+		}
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           4,
+				CollectionID: 3,
+				State:        commonpb.SegmentState_Flushed,
+				IsSorted:     false,
+				IsImporting:  true,
+				IsInvisible:  true,
+			},
+		}
+		m.segments.SetSegment(segment.GetID(), segment)
+
+		err := inspector.createIndexesForSegment(ctx, segment)
+		assert.NoError(t, err)
+		assert.True(t, m.indexMeta.IsUnIndexedSegment(3, 4),
+			"no index may be created for a segment whose sort is still owed")
+	})
+
+	t.Run("no-sort import origin remains indexable after restart with sort enabled", func(t *testing.T) {
+		// This task was planned while sort compaction was disabled. IsImporting
+		// keeps it unpublished until commit, while IsInvisible=false persists
+		// that the origin itself (rather than a sorted replacement) is the
+		// index target. A different startup config must not reinterpret it.
+		m.collections.Insert(2, &collectionInfo{
+			ID: 2,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{Name: "id", FieldID: 101, DataType: schemapb.DataType_Int64},
+				},
+			},
+		})
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           6,
+				CollectionID: 2,
+				State:        commonpb.SegmentState_Flushed,
+				IsImporting:  true,
+				IsInvisible:  false,
+				IsSorted:     false,
+				Binlogs:      []*datapb.FieldBinlog{{FieldID: 101}},
+			},
+		}
+		m.segments.SetSegment(segment.GetID(), segment)
+
+		handler.EXPECT().GetCollection(mock.Anything, int64(2)).Return(&collectionInfo{
+			ID: 2,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{{Name: "id", FieldID: 101, DataType: schemapb.DataType_Int64}},
+			},
+		}, nil).Once()
+		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12344), nil).Once()
+		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
+		scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
+
+		err := inspector.createIndexesForSegment(ctx, segment)
+		assert.NoError(t, err)
+		assert.False(t, m.indexMeta.IsUnIndexedSegment(2, 6))
+	})
+
 	t.Run("external unsorted segment is not skipped", func(t *testing.T) {
 		m.collections.Insert(2, &collectionInfo{
 			ID: 2,
@@ -409,10 +485,10 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{{Name: "id", FieldID: 101, DataType: schemapb.DataType_Int64, ExternalField: "id"}},
 			},
-		}, nil).Maybe()
-		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12345), nil)
-		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
-		scheduler.EXPECT().Enqueue(mock.Anything).Return()
+		}, nil).Once()
+		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12345), nil).Once()
+		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
+		scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
@@ -422,7 +498,7 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
-	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler := newOwnershipScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
 	storage := mocks.NewChunkManager(t)
@@ -484,12 +560,10 @@ func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 
 func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key, "false")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key)
 
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
-	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler := newOwnershipScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
 	storageCli := mocks.NewChunkManager(t)

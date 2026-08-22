@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -38,6 +39,10 @@ import (
 
 type analyzeTask struct {
 	*indexpb.AnalyzeTask
+
+	// stateGuard makes the fields below readable by the scheduler without the
+	// per-task key lock; see statsTask.stateGuard.
+	stateGuard sync.RWMutex
 
 	times *taskcommon.Times
 
@@ -70,6 +75,8 @@ func (at *analyzeTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
 }
 
 func (at *analyzeTask) GetTaskVersion() int64 {
+	at.stateGuard.RLock()
+	defer at.stateGuard.RUnlock()
 	return at.GetVersion()
 }
 
@@ -78,6 +85,8 @@ func (at *analyzeTask) GetTaskType() taskcommon.Type {
 }
 
 func (at *analyzeTask) GetTaskState() taskcommon.State {
+	at.stateGuard.RLock()
+	defer at.stateGuard.RUnlock()
 	return at.State
 }
 
@@ -86,6 +95,8 @@ func (at *analyzeTask) GetTaskSlot() int64 {
 }
 
 func (at *analyzeTask) SetState(state indexpb.JobState, failReason string) {
+	at.stateGuard.Lock()
+	defer at.stateGuard.Unlock()
 	at.State = state
 	at.FailReason = failReason
 }
@@ -102,8 +113,10 @@ func (at *analyzeTask) UpdateVersion(nodeID int64) error {
 	if err := at.meta.analyzeMeta.UpdateVersion(at.GetTaskID(), nodeID); err != nil {
 		return err
 	}
+	at.stateGuard.Lock()
 	at.Version++
 	at.NodeID = nodeID
+	at.stateGuard.Unlock()
 	return nil
 }
 

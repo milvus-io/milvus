@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -38,20 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-// nonRetriableJobError marks a refresh-job submission failure that must NOT
-// be retried by the checker tick (e.g. empty source, zero-row source, bucket
-// not found). ensureTasksForInitJob recognizes it and transitions the job
-// straight to Failed instead of leaving it in Init for endless retry.
-type nonRetriableJobError struct {
-	reason string
-}
-
-func (e *nonRetriableJobError) Error() string { return e.reason }
-
-func newNonRetriableJobError(format string, args ...interface{}) error {
-	return &nonRetriableJobError{reason: fmt.Sprintf(format, args...)}
-}
 
 var errMilvusTableRefreshSchemaInvalid = errors.New("milvus-table refresh schema invalid")
 
@@ -181,6 +168,15 @@ type externalCollectionRefreshManager struct {
 	// at most one explore is in flight per jobID at any moment.
 	initMu           sync.Mutex
 	initJobsInFlight map[int64]struct{}
+
+	// schedulerOwnershipMu closes the enqueue/dispatch-vs-GC races. Once a
+	// terminal job enters gcDrainingJobs, no stale inspector snapshot may enqueue
+	// another wrapper and no already-popped scheduler future may start a worker
+	// callback. GC keeps the fence installed until DropJob succeeds and waits for
+	// jobCallbacksInFlight to reach zero before removing task metadata.
+	schedulerOwnershipMu sync.Mutex
+	gcDrainingJobs       map[int64]struct{}
+	jobCallbacksInFlight map[int64]int
 }
 
 // NewExternalCollectionRefreshManager creates a new external table refresh manager.
@@ -199,18 +195,20 @@ func NewExternalCollectionRefreshManager(
 	closeChan := make(chan struct{})
 
 	m := &externalCollectionRefreshManager{
-		ctx:              ctx,
-		mt:               mt,
-		scheduler:        scheduler,
-		allocator:        allocator,
-		cluster:          cluster,
-		refreshMeta:      refreshMeta,
-		collectionGetter: collectionGetter,
-		schemaUpdater:    schemaUpdater,
-		chunkManager:     chunkManager,
-		closeChan:        closeChan,
-		notifiedJobs:     make(map[int64]struct{}),
-		initJobsInFlight: make(map[int64]struct{}),
+		ctx:                  ctx,
+		mt:                   mt,
+		scheduler:            scheduler,
+		allocator:            allocator,
+		cluster:              cluster,
+		refreshMeta:          refreshMeta,
+		collectionGetter:     collectionGetter,
+		schemaUpdater:        schemaUpdater,
+		chunkManager:         chunkManager,
+		closeChan:            closeChan,
+		notifiedJobs:         make(map[int64]struct{}),
+		initJobsInFlight:     make(map[int64]struct{}),
+		gcDrainingJobs:       make(map[int64]struct{}),
+		jobCallbacksInFlight: make(map[int64]int),
 	}
 
 	// Create internal components with shared refreshMeta. The checker owns
@@ -224,7 +222,10 @@ func NewExternalCollectionRefreshManager(
 	// a job, preventing unbounded growth.
 	m.inspector = newRefreshInspector(ctx, refreshMeta, scheduler, closeChan)
 	m.checker = newRefreshChecker(ctx, refreshMeta, closeChan, m.handleJobFinished, m.applyFinishedJobSegments, m.handleJobFailed, m.forgetJob, m.ensureTasksForInitJob)
+	m.inspector.allocateTaskID = m.allocator.AllocID
 	m.inspector.wrapTask = m.wrapTask
+	m.inspector.enqueueTask = m.enqueueTask
+	m.checker.releaseJobTasks = m.releaseJobTasks
 
 	return m
 }
@@ -241,6 +242,14 @@ func (m *externalCollectionRefreshManager) forgetJob(jobID int64) {
 	_, alreadyCleaned := m.notifiedJobs[jobID]
 	delete(m.notifiedJobs, jobID)
 	m.notifiedMu.Unlock()
+
+	// DropJob has already removed the durable ownership root before this callback
+	// runs. Removing the process-local fence is therefore safe: enqueueTask also
+	// requires the job record to still exist.
+	m.schedulerOwnershipMu.Lock()
+	delete(m.gcDrainingJobs, jobID)
+	delete(m.jobCallbacksInFlight, jobID)
+	m.schedulerOwnershipMu.Unlock()
 
 	if alreadyCleaned {
 		return
@@ -485,7 +494,94 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 func (m *externalCollectionRefreshManager) wrapTask(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 	taskWrapper := newRefreshExternalCollectionTask(t, m.refreshMeta, m.mt, m.allocator)
 	taskWrapper.processFinishedJob = m.checker.processJobByID
+	taskWrapper.beginExecution = m.beginTaskExecution
+	taskWrapper.endExecution = m.endTaskExecution
 	return taskWrapper
+}
+
+// beginTaskExecution acquires a short process-local lease for one scheduler
+// callback. The lease is published before any metadata mutation or worker RPC,
+// so GC cannot remove the callback's ownership root while it is executing.
+func (m *externalCollectionRefreshManager) beginTaskExecution(jobID int64) bool {
+	m.schedulerOwnershipMu.Lock()
+	defer m.schedulerOwnershipMu.Unlock()
+
+	if m.jobCallbacksInFlight == nil {
+		m.jobCallbacksInFlight = make(map[int64]int)
+	}
+	if _, draining := m.gcDrainingJobs[jobID]; draining {
+		return false
+	}
+	job := m.refreshMeta.GetJob(jobID)
+	if isTerminalExternalRefreshJob(job) {
+		return false
+	}
+	m.jobCallbacksInFlight[jobID]++
+	return true
+}
+
+func (m *externalCollectionRefreshManager) endTaskExecution(jobID int64) {
+	m.schedulerOwnershipMu.Lock()
+	defer m.schedulerOwnershipMu.Unlock()
+
+	remaining := m.jobCallbacksInFlight[jobID] - 1
+	if remaining <= 0 {
+		delete(m.jobCallbacksInFlight, jobID)
+		return
+	}
+	m.jobCallbacksInFlight[jobID] = remaining
+}
+
+// enqueueTask publishes one external-refresh wrapper to the global scheduler
+// while holding the same job-level runtime fence that GC uses. A stale inspector
+// pass can therefore finish enqueueing before GC starts draining, or observe the
+// fence and stop; it cannot enqueue after the drain and recreate scheduler
+// ownership for metadata that is about to be removed.
+func (m *externalCollectionRefreshManager) enqueueTask(t *refreshExternalCollectionTask) bool {
+	if t == nil {
+		return false
+	}
+
+	jobID := t.GetJobId()
+	m.schedulerOwnershipMu.Lock()
+	defer m.schedulerOwnershipMu.Unlock()
+	if _, draining := m.gcDrainingJobs[jobID]; draining {
+		mlog.Info(m.ctx, "skip enqueue for external refresh job being garbage-collected",
+			mlog.FieldJobID(jobID),
+			mlog.FieldTaskID(t.GetTaskId()))
+		return false
+	}
+	if m.refreshMeta.GetJob(jobID) == nil {
+		mlog.Info(m.ctx, "skip enqueue for removed external refresh job",
+			mlog.FieldJobID(jobID),
+			mlog.FieldTaskID(t.GetTaskId()))
+		return false
+	}
+
+	m.scheduler.Enqueue(t)
+	return true
+}
+
+// releaseJobTasks transfers every scheduler-owned wrapper back to job GC. The
+// enqueue fence is installed first and retained on a partial drain or catalog
+// failure. GC runs only from the periodic checker tick, never from a worker
+// callback (see processJobEager), so the aborts below can wait for an in-flight
+// callback rather than having to skip it.
+func (m *externalCollectionRefreshManager) releaseJobTasks(jobID int64) bool {
+	m.schedulerOwnershipMu.Lock()
+	if m.gcDrainingJobs == nil {
+		m.gcDrainingJobs = make(map[int64]struct{})
+	}
+	m.gcDrainingJobs[jobID] = struct{}{}
+	callbacksInFlight := m.jobCallbacksInFlight[jobID]
+	m.schedulerOwnershipMu.Unlock()
+
+	for _, refreshTask := range m.refreshMeta.GetTasksByJobID(jobID) {
+		m.scheduler.AbortAndRemoveTask(refreshTask.GetTaskId())
+	}
+	// The scheduler side is fully drained by here; what can still be outstanding
+	// is a manager lease taken by a dispatch that is already past the scheduler.
+	return callbacksInFlight == 0
 }
 
 // Start begins all internal component loops (inspector and checker).
@@ -554,6 +650,12 @@ func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context
 			mlog.FieldJobID(job.GetJobId()),
 			mlog.FieldCollectionID(job.GetCollectionId()),
 			mlog.Err(err))
+		// Remove the dedup entry so the next checker tick retries: the entry
+		// would otherwise survive until job GC, after which the job is gone and
+		// the schema update is suppressed permanently.
+		m.notifiedMu.Lock()
+		delete(m.notifiedJobs, job.GetJobId())
+		m.notifiedMu.Unlock()
 		return
 	}
 
@@ -777,16 +879,21 @@ func (m *externalCollectionRefreshManager) ensureTasksForInitJob(jobID int64) {
 					mlog.Err(err))
 				return
 			}
-			// Non-retriable failures (empty source, zero-row source, etc.)
-			// must transition the job to Failed immediately. Otherwise the
-			// checker tick keeps re-running the same explore that will fail
-			// the same way forever, giving operators no signal to act on.
-			var perm *nonRetriableJobError
-			if errors.As(err, &perm) {
+			// An InputError blames the request: the source the caller named
+			// is empty, or its schema/manifest cannot be read as the requested
+			// format. No retry changes that, so the job goes to Failed at once
+			// instead of having the checker tick re-run the same explore
+			// forever with no signal for operators to act on.
+			//
+			// This is merr's own Input-vs-System split, the same one the
+			// DataNode uses to decide Failed vs Retry for a refresh task. There
+			// is deliberately no separate "non-retriable" error type: a second
+			// taxonomy alongside merr's is one more thing to keep in agreement.
+			if merr.GetErrorType(err) == merr.InputError {
 				log.Warn(m.ctx, "non-retriable error in task creation, marking job failed",
 					mlog.Err(err))
 				if _, uerr := m.refreshMeta.UpdateJobState(jobID,
-					indexpb.JobState_JobStateFailed, perm.Error()); uerr != nil {
+					indexpb.JobState_JobStateFailed, err.Error()); uerr != nil {
 					log.Warn(m.ctx, "failed to mark job failed", mlog.Err(uerr))
 				}
 				return
@@ -794,14 +901,32 @@ func (m *externalCollectionRefreshManager) ensureTasksForInitJob(jobID int64) {
 			// Transient failures (e.g. S3 blip) — leave in Init so the
 			// checker tick / WAL redelivery path retries. tryTimeoutJob
 			// bounds how long a stuck job can linger.
-			log.Warn(m.ctx, "async task creation failed, will retry on next checker tick",
+			//
+			// Record why on the job while leaving it in Init. Without this the
+			// only thing a caller ever sees for a source that never comes back
+			// is the checker's bare "timeout", with the actual error (a bad
+			// bucket, a denied credential) buried in DataNode logs.
+			//
+			// First cause only: explore errors embed the attempt-scoped
+			// manifest path, so re-recording each attempt would defeat the
+			// identical-write guard in UpdateJobState and cost one catalog
+			// write per checker tick for the job's whole stuck lifetime. The
+			// first cause is what an operator needs; the per-attempt detail
+			// stays in this Warn.
+			log.RatedWarn(m.ctx, rate.Limit(1.0/60), "async task creation failed, will retry on next checker tick",
 				mlog.Err(err))
+			if job := m.refreshMeta.GetJob(jobID); job != nil && job.GetFailReason() == "" {
+				if _, uerr := m.refreshMeta.UpdateJobState(jobID,
+					indexpb.JobState_JobStateInit, err.Error()); uerr != nil {
+					log.Warn(m.ctx, "failed to record the transient task creation failure", mlog.Err(uerr))
+				}
+			}
 			return
 		}
 
 		// Enqueue all created tasks for scheduling.
 		for _, t := range tasks {
-			m.scheduler.Enqueue(t)
+			m.enqueueTask(t)
 		}
 		log.Info(m.ctx, "async task creation completed",
 			mlog.Int("taskCount", len(tasks)))
@@ -827,22 +952,36 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 	// in the resulting plan can read their assigned ranges.
 	allFiles, manifestPath, err := m.exploreExternalFiles(ctx, job)
 	if err != nil {
-		// Hard explore failures are terminal for this job: the source is
-		// unreachable, denied, malformed, absent, or its snapshot metadata
-		// is incompatible with the requested external format. Surface them
-		// as non-retriable so the user gets a clear RefreshFailed signal
-		// and can re-issue refresh after fixing the source. Pure
-		// in-process errors (ctx cancel, etcd unavailable, etc.) keep the
-		// existing transient path so a real outage still gets retried.
+		// Hard explore failures are terminal for this job: the source's
+		// snapshot metadata is malformed, absent, or incompatible with the
+		// requested external format. Surface them as non-retriable so the
+		// user gets a clear RefreshFailed signal and can re-issue refresh
+		// after fixing the source. Pure in-process errors (ctx cancel, etcd
+		// unavailable, etc.) keep the existing transient path so a real
+		// outage still gets retried.
+		//
+		// ErrLoonTransient is deliberately not in this set. packed declares it
+		// as "treat all loon failures as retryable for now" precisely because
+		// milvus-storage can lose the structured error detail and fall back to
+		// a generic code, so a transient object-storage fault is
+		// indistinguishable from a permanent one at this boundary. Calling it
+		// terminal here inverted that contract and failed refreshes that a
+		// retry would have completed.
 		if errors.Is(err, errMilvusTableRefreshSchemaInvalid) ||
-			errors.Is(err, packed.ErrLoonTransient) ||
 			packed.IsMilvusTableStorageV2ManifestListMissing(err) {
-			return nil, newNonRetriableJobError("explore external files failed: %v", err)
+			// Marked rather than re-originated: WrapErrAsInputError relabels the
+			// classification and nothing else, so errors.Is still finds
+			// errMilvusTableRefreshSchemaInvalid underneath.
+			return nil, merr.WrapErrAsInputError(merr.Wrap(err, "explore external files failed"))
 		}
 		return nil, merr.WrapErrServiceInternalErr(err, "failed to explore external files")
 	}
 	if len(allFiles) == 0 {
-		return nil, newNonRetriableJobError("no files found in external source: %s", job.GetExternalSource())
+		// ErrParameterInvalid is baked InputError, which is the whole
+		// classification: the source the request named has nothing to refresh
+		// from, and no retry changes that. The DataNode's sibling check on a
+		// zero-row source uses the same factory.
+		return nil, merr.WrapErrParameterInvalidMsg("no files found in external source: %s", job.GetExternalSource())
 	}
 	// NOTE: zero-total-rows cannot be detected here. PlainFormat::explore
 	// hardcodes start_index/end_index to -1 as sentinels and never reads

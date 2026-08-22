@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
@@ -46,92 +47,72 @@ func TestCompactionQueue(t *testing.T) {
 
 	t.Run("default prioritizer", func(t *testing.T) {
 		cq := NewCompactionQueue(3, DefaultPrioritizer)
-		err := cq.Enqueue(t1)
-		assert.NoError(t, err)
-		err = cq.Enqueue(t2)
-		assert.NoError(t, err)
-		err = cq.Enqueue(t3)
-		assert.NoError(t, err)
-		err = cq.Enqueue(&mixCompactionTask{})
-		assert.Error(t, err)
+		cq.Enqueue(t1)
+		cq.Enqueue(t2)
+		cq.Enqueue(t3)
 
 		task, err := cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, int64(1), task.GetTaskProto().GetPlanID())
+		assert.Equal(t, int64(1), task.GetTask().GetPlanID())
 		task, err = cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, int64(2), task.GetTaskProto().GetPlanID())
+		assert.Equal(t, int64(2), task.GetTask().GetPlanID())
 		task, err = cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, int64(3), task.GetTaskProto().GetPlanID())
+		assert.Equal(t, int64(3), task.GetTask().GetPlanID())
 	})
 
 	t.Run("level prioritizer", func(t *testing.T) {
 		cq := NewCompactionQueue(3, LevelPrioritizer)
-		err := cq.Enqueue(t1)
-		assert.NoError(t, err)
-		err = cq.Enqueue(t2)
-		assert.NoError(t, err)
-		err = cq.Enqueue(t3)
-		assert.NoError(t, err)
-		err = cq.Enqueue(&mixCompactionTask{})
-		assert.Error(t, err)
+		cq.Enqueue(t1)
+		cq.Enqueue(t2)
+		cq.Enqueue(t3)
 
 		task, err := cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetTaskProto().GetType())
+		assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetTask().GetType())
 		task, err = cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, datapb.CompactionType_MixCompaction, task.GetTaskProto().GetType())
+		assert.Equal(t, datapb.CompactionType_MixCompaction, task.GetTask().GetType())
 		task, err = cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, datapb.CompactionType_ClusteringCompaction, task.GetTaskProto().GetType())
+		assert.Equal(t, datapb.CompactionType_ClusteringCompaction, task.GetTask().GetType())
 	})
 
 	t.Run("mix first prioritizer", func(t *testing.T) {
 		cq := NewCompactionQueue(3, MixFirstPrioritizer)
-		err := cq.Enqueue(t1)
-		assert.NoError(t, err)
-		err = cq.Enqueue(t2)
-		assert.NoError(t, err)
-		err = cq.Enqueue(t3)
-		assert.NoError(t, err)
-		err = cq.Enqueue(&mixCompactionTask{})
-		assert.Error(t, err)
+		cq.Enqueue(t1)
+		cq.Enqueue(t2)
+		cq.Enqueue(t3)
 
 		task, err := cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, datapb.CompactionType_MixCompaction, task.GetTaskProto().GetType())
+		assert.Equal(t, datapb.CompactionType_MixCompaction, task.GetTask().GetType())
 		task, err = cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetTaskProto().GetType())
+		assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetTask().GetType())
 		task, err = cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, datapb.CompactionType_ClusteringCompaction, task.GetTaskProto().GetType())
+		assert.Equal(t, datapb.CompactionType_ClusteringCompaction, task.GetTask().GetType())
 	})
 
 	t.Run("update prioritizer", func(t *testing.T) {
 		cq := NewCompactionQueue(3, LevelPrioritizer)
-		err := cq.Enqueue(t1)
-		assert.NoError(t, err)
-		err = cq.Enqueue(t2)
-		assert.NoError(t, err)
-		err = cq.Enqueue(t3)
-		assert.NoError(t, err)
-		err = cq.Enqueue(&mixCompactionTask{})
-		assert.Error(t, err)
+		cq.Enqueue(t1)
+		cq.Enqueue(t2)
+		cq.Enqueue(t3)
 
 		task, err := cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetTaskProto().GetType())
+		assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetTask().GetType())
 
 		cq.UpdatePrioritizer(DefaultPrioritizer)
 		task, err = cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, int64(2), task.GetTaskProto().GetPlanID())
+		assert.Equal(t, int64(2), task.GetTask().GetPlanID())
 		task, err = cq.Dequeue()
 		assert.NoError(t, err)
-		assert.Equal(t, int64(3), task.GetTaskProto().GetPlanID())
+		assert.Equal(t, int64(3), task.GetTask().GetPlanID())
 	})
 }
 
@@ -157,8 +138,7 @@ func TestConcurrency(t *testing.T) {
 			Type:   datapb.CompactionType_MixCompaction,
 		})
 		go func() {
-			err := cq.Enqueue(t1)
-			assert.NoError(t, err)
+			cq.Enqueue(t1)
 			wg.Done()
 		}()
 	}
@@ -174,6 +154,50 @@ func TestConcurrency(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// The queue limit is advisory: it is consulted before work is created and never
+// enforced at Enqueue. Refusing a task there would strand a record that is
+// already persisted, with nothing in memory driving it until the next restart.
+func TestCompactionQueueLimitIsAdvisory(t *testing.T) {
+	first := &mixCompactionTask{}
+	first.SetTask(&datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_MixCompaction})
+	second := &mixCompactionTask{}
+	second.SetTask(&datapb.CompactionTask{PlanID: 2, Type: datapb.CompactionType_MixCompaction})
+
+	q := NewCompactionQueue(1, DefaultPrioritizer)
+	q.Enqueue(first)
+	assert.True(t, q.IsFull(), "producers are told to stop creating work")
+
+	// Two producers that both passed IsFull before either enqueued. Both tasks
+	// are durable by now, so both are accepted and the queue overshoots.
+	q.Enqueue(second)
+	assert.Equal(t, 2, q.Len(), "an already-persisted task is never refused")
+
+	q.Dequeue()
+	q.Dequeue()
+	assert.False(t, q.IsFull())
+}
+
+// The scheduler pops a task to decide whether it is dispatchable and puts back
+// the ones it excludes. That put-back must always succeed, whatever producers
+// did to the queue in the meantime.
+func TestCompactionQueueExcludedTaskAlwaysGoesBack(t *testing.T) {
+	task := &mixCompactionTask{}
+	task.SetTask(&datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_MixCompaction})
+	racing := &mixCompactionTask{}
+	racing.SetTask(&datapb.CompactionTask{PlanID: 2, Type: datapb.CompactionType_MixCompaction})
+
+	q := NewCompactionQueue(1, DefaultPrioritizer)
+	q.Enqueue(task)
+
+	dequeued, err := q.Dequeue()
+	require.NoError(t, err)
+	// A producer fills the queue while the exclusion decision is being made.
+	q.Enqueue(racing)
+
+	q.Enqueue(dequeued)
+	assert.Equal(t, 2, q.Len(), "an excluded task goes back even over the limit")
 }
 
 // TestCompactionQueue_SyncPrioritizer guards against re-prioritizing the whole
@@ -202,7 +226,7 @@ func TestCompactionQueue_SyncPrioritizer(t *testing.T) {
 		task.SetTask(&datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_MixCompaction})
 
 		cq := NewCompactionQueue(10, DefaultPrioritizer)
-		assert.NoError(t, cq.Enqueue(task))
+		cq.Enqueue(task)
 
 		// First sync adopts the configured prioritizer and primes the priority.
 		cq.SyncPrioritizer("default")
@@ -252,7 +276,7 @@ func TestCompactionQueue_SyncPrioritizer(t *testing.T) {
 
 		task := &mixCompactionTask{}
 		task.SetTask(&datapb.CompactionTask{PlanID: 7, Type: datapb.CompactionType_MixCompaction})
-		assert.NoError(t, cq.Enqueue(task))
+		cq.Enqueue(task)
 
 		cq.lock.RLock()
 		adopted := cq.pq[0].priority
@@ -278,7 +302,7 @@ func TestCompactionQueue_SyncPrioritizer(t *testing.T) {
 		cq.SyncPrioritizer("level")
 		task := &mixCompactionTask{}
 		task.SetTask(&datapb.CompactionTask{PlanID: 7, Type: datapb.CompactionType_MixCompaction})
-		assert.NoError(t, cq.Enqueue(task))
+		cq.Enqueue(task)
 		cq.lock.RLock()
 		adopted := cq.pq[0].priority
 		cq.lock.RUnlock()
@@ -287,7 +311,7 @@ func TestCompactionQueue_SyncPrioritizer(t *testing.T) {
 
 	t.Run("changed name does re-prioritize", func(t *testing.T) {
 		cq := NewCompactionQueue(10, DefaultPrioritizer)
-		assert.NoError(t, cq.Enqueue(t1))
+		cq.Enqueue(t1)
 
 		cq.SyncPrioritizer("level")
 		cq.lock.RLock()
@@ -320,7 +344,7 @@ func TestCompactionQueue_SyncPrioritizer(t *testing.T) {
 			for i := 0; i < 500; i++ {
 				task := &mixCompactionTask{}
 				task.SetTask(&datapb.CompactionTask{PlanID: int64(i), Type: datapb.CompactionType_MixCompaction})
-				_ = cq.Enqueue(task)
+				cq.Enqueue(task)
 				_, _ = cq.Dequeue()
 			}
 		}()

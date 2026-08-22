@@ -103,6 +103,14 @@ type RefreshTaskEntry struct {
 	TaskID int64
 }
 
+// CopySegmentTaskEntry targets a single copy-segment task. A replan composes
+// this entry before its replacement SegmentEntry values: when the write is too
+// large for one storage transaction, the task lands first as the recovery
+// owner for any target segments written by later chunks.
+type CopySegmentTaskEntry struct {
+	Task *datapb.CopySegmentTask
+}
+
 // RefreshJobEntry targets an external-collection-refresh job. The job is the
 // failover anchor for its tasks: a SaveRefreshJob action must be composed
 // after every AddRefreshTask action for the job (so a persisted job records
@@ -156,6 +164,7 @@ func (SegmentEntry) isEntry()               {}
 func (ChannelEntry) isEntry()               {}
 func (CollectionEntry) isEntry()            {}
 func (RefreshTaskEntry) isEntry()           {}
+func (CopySegmentTaskEntry) isEntry()       {}
 func (RefreshJobEntry) isEntry()            {}
 func (AnalyzeTaskEntry) isEntry()           {}
 func (PartitionStatsEntry) isEntry()        {}
@@ -221,6 +230,14 @@ func DropCollection(coll *model.Collection) UpdateAction {
 // collection-refresh task record.
 func AddRefreshTask(task *datapb.ExternalCollectionRefreshTask) UpdateAction {
 	return UpdateAction{Type: ActionAdd, Entry: RefreshTaskEntry{Task: task}}
+}
+
+// AddCopySegmentTask returns an UpdateAction that persists a copy-segment task
+// record. Compose it before AddSegment actions during fresh-identity replan so
+// the task remains the durable owner if an over-limit chunked write is
+// interrupted before all replacement targets land.
+func AddCopySegmentTask(task *datapb.CopySegmentTask) UpdateAction {
+	return UpdateAction{Type: ActionAdd, Entry: CopySegmentTaskEntry{Task: task}}
 }
 
 // SaveRefreshJob returns an UpdateAction that persists job's record (an

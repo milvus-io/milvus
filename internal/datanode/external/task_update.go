@@ -998,26 +998,34 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 		}
 		// If every sample failed, fail the task rather than emitting
 		// zero-MemorySize fake binlogs that would collapse QueryNode's
-		// resource estimator and risk OOM on load. We prefer a loud
-		// failure (retry-eligible via the task state machine) over a
-		// silent success that corrupts downstream accounting.
+		// resource estimator and risk OOM on load.
 		//
-		// Embed firstSampleErr (issue #48637) so the client-facing
-		// RefreshFailed reason names the root cause (e.g. column not
-		// found in parquet) rather than forcing the operator to SSH
-		// into datanode logs.
+		// The classification MUST come from the underlying error, so wrap
+		// with merr.Wrap -- never bake the cause into an InputError format
+		// string. Sampling reads sampled rows from object storage, and the
+		// FFI layer cannot reliably tell a schema typo (issue #48637, "column
+		// not found") from an S3 throttle -- both surface as segcore errors
+		// that default to SystemError. Flattening them into ParameterInvalid
+		// reported every one of them as the worker's permanent verdict,
+		// ending the whole refresh on the first transient blip after hours of
+		// work. Preserving the chain keeps them retriable; a deterministic
+		// typo then costs the bounded retry budget instead of the refresh --
+		// the safe direction.
 		if fallbackAvg == 0 {
-			rootCause := "unknown (no sample attempted)"
-			if firstSampleErr != nil {
-				rootCause = firstSampleErr.Error()
+			if firstSampleErr == nil {
+				// Nothing was even attempted: the work list itself is
+				// degenerate, which is a request problem.
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"external field size sampling failed for all %d segment(s): no sample attempted",
+					len(manifestPaths))
 			}
 			hint := ""
-			if strings.Contains(rootCause, "not found in schema") {
+			if strings.Contains(firstSampleErr.Error(), "not found in schema") {
 				hint = "; check external_field mappings in collection schema against actual parquet columns"
 			}
-			return nil, merr.WrapErrParameterInvalidMsg(
-				"external field size sampling failed for all %d segment(s): %s%s",
-				len(manifestPaths), rootCause, hint)
+			return nil, merr.Wrapf(firstSampleErr,
+				"external field size sampling failed for all %d segment(s)%s",
+				len(manifestPaths), hint)
 		}
 		// Fill any zero slots (sampling failed mid-loop) with the first
 		// successful average so every segment gets a non-zero MemorySize.

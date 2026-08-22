@@ -26,14 +26,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -51,6 +54,19 @@ type ImportCheckerSuite struct {
 	importMeta ImportMeta
 	checker    *importChecker
 	alloc      *allocator.MockAllocator
+	cluster    *session.MockCluster
+}
+
+func completedPreImportFileStats(task ImportTask, totalRows, totalMemorySize int64) []*datapb.ImportFileStats {
+	stats := make([]*datapb.ImportFileStats, 0, len(task.GetFileStats()))
+	for _, pendingStat := range task.GetFileStats() {
+		stats = append(stats, &datapb.ImportFileStats{
+			ImportFile:      pendingStat.GetImportFile(),
+			TotalRows:       totalRows,
+			TotalMemorySize: totalMemorySize,
+		})
+	}
+	return stats
 }
 
 func (s *ImportCheckerSuite) SetupTest() {
@@ -91,7 +107,8 @@ func (s *ImportCheckerSuite) SetupTest() {
 		}, nil
 	}).Maybe()
 
-	checker := NewImportChecker(context.TODO(), meta, broker, s.alloc, importMeta, ci, handler, importCheckerHooks{}).(*importChecker)
+	s.cluster = session.NewMockCluster(s.T())
+	checker := NewImportChecker(context.TODO(), meta, broker, s.alloc, importMeta, ci, handler, s.cluster, importCheckerHooks{}).(*importChecker)
 	s.checker = checker
 
 	job := &importJob{
@@ -192,15 +209,11 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	// test checkPreImportingJob
-	fileStats := []*datapb.ImportFileStats{
-		{
-			TotalRows: 100,
-		},
-	}
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 	for _, t := range preimportTasks {
 		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
-			UpdateState(datapb.ImportTaskStateV2_Completed), UpdateFileStats(fileStats))
+			UpdateState(datapb.ImportTaskStateV2_Completed),
+			UpdateFileStats(completedPreImportFileStats(t, 100, 0)))
 		s.NoError(err)
 	}
 
@@ -233,6 +246,8 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:            rand.Int63(),
+				CollectionID:  job.GetCollectionID(),
+				PartitionID:   job.GetPartitionIDs()[0],
 				State:         commonpb.SegmentState_Flushed,
 				IsImporting:   true,
 				InsertChannel: "ch0",
@@ -260,14 +275,18 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	s.checker.checkSortingJob(job)
 	s.Equal(internalpb.ImportJobState_Sorting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
-	for _, segmentID := range targetSegmentIDs {
+	for i, segmentID := range targetSegmentIDs {
+		originSegmentID := importTasks[i].(*importTask).GetSegmentIDs()[0]
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:            segmentID,
-				State:         commonpb.SegmentState_Flushed,
-				IsImporting:   true,
-				InsertChannel: "ch0",
-				IsSorted:      true,
+				ID:             segmentID,
+				CollectionID:   job.GetCollectionID(),
+				PartitionID:    job.GetPartitionIDs()[0],
+				State:          commonpb.SegmentState_Flushed,
+				IsImporting:    true,
+				InsertChannel:  "ch0",
+				IsSorted:       true,
+				CompactionFrom: []int64{originSegmentID},
 			},
 		}
 		err := s.checker.meta.AddSegment(context.Background(), segment)
@@ -288,6 +307,507 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 		}
 	}
 	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
+}
+
+func (s *ImportCheckerSuite) TestCheckPreImportingRecoversCompleteTaskSetAfterRestart() {
+	oldDiskProtection := Params.QuotaConfig.DiskProtectionEnabled.SwapTempValue("true")
+	s.T().Cleanup(func() {
+		Params.QuotaConfig.DiskProtectionEnabled.SwapTempValue(oldDiskProtection)
+	})
+
+	s.manuallyUpdateJob(s.jobID, UpdateJobState(internalpb.ImportJobState_PreImporting))
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+	stats := make([]*datapb.ImportFileStats, 0, len(job.GetFiles()))
+	var expectedRequestSize int64
+	for i, file := range job.GetFiles() {
+		memorySize := int64((i + 1) * 100)
+		expectedRequestSize += memorySize
+		stats = append(stats, &datapb.ImportFileStats{
+			ImportFile:      file,
+			TotalRows:       10,
+			TotalMemorySize: memorySize,
+			HashedStats: map[string]*datapb.PartitionImportStats{
+				"ch0": {
+					PartitionDataSize: map[int64]int64{2: 1},
+				},
+			},
+		})
+	}
+
+	preimportProto := &datapb.PreImportTask{
+		JobID:        s.jobID,
+		TaskID:       100,
+		CollectionID: job.GetCollectionID(),
+		State:        datapb.ImportTaskStateV2_Completed,
+		FileStats:    stats,
+	}
+	preimport := &preImportTask{tr: timerecord.NewTimeRecorder("preimport task")}
+	preimport.task.Store(preimportProto)
+
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil).Once()
+	s.NoError(s.importMeta.AddTask(context.TODO(), preimport))
+	// SetupTest's broad SaveImportJob expectation was used to add the job. Drop
+	// it before installing the one-shot failure that models the publication
+	// boundary under test.
+	catalog.ExpectedCalls = nil
+
+	s.alloc.EXPECT().AllocN(int64(1)).Return(int64(200), int64(201), nil).Once()
+	s.alloc.EXPECT().AllocID(mock.Anything).Return(int64(300), nil).Once()
+	s.alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(400), nil).Once()
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
+
+	var persistedImportTask *datapb.ImportTaskV2
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).
+		Run(func(_ context.Context, task *datapb.ImportTaskV2) {
+			persistedImportTask = proto.Clone(task).(*datapb.ImportTaskV2)
+		}).
+		Return(nil).
+		Once()
+	persistErr := errors.New("failed to persist Importing state")
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).
+		Run(func(_ context.Context, updated *datapb.ImportJob) {
+			s.Equal(internalpb.ImportJobState_Importing, updated.GetState())
+			s.Equal(expectedRequestSize, updated.GetRequestedDiskSize())
+		}).
+		Return(persistErr).
+		Once()
+
+	// Every import task is durable, but the final job write fails. The in-memory
+	// job must remain PreImporting, matching what a restarted process reloads.
+	s.checker.checkPreImportingJob(job)
+	s.NotNil(persistedImportTask)
+	s.Equal(internalpb.ImportJobState_PreImporting,
+		s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+	s.Zero(s.importMeta.GetJob(context.TODO(), s.jobID).GetRequestedDiskSize())
+	s.Len(s.importMeta.GetTaskBy(context.TODO(), WithJob(s.jobID), WithType(ImportTaskType)), 1)
+
+	persistedJob := proto.Clone(s.importMeta.GetJob(context.TODO(), s.jobID).(*importJob).ImportJob).(*datapb.ImportJob)
+	restartCatalog := mocks.NewDataCoordCatalog(s.T())
+	restartCatalog.EXPECT().ListPreImportTasks(mock.Anything).
+		Return([]*datapb.PreImportTask{proto.Clone(preimportProto).(*datapb.PreImportTask)}, nil).
+		Once()
+	restartCatalog.EXPECT().ListImportTasks(mock.Anything).
+		Return([]*datapb.ImportTaskV2{persistedImportTask}, nil).
+		Once()
+	restartCatalog.EXPECT().ListImportJobs(mock.Anything).
+		Return([]*datapb.ImportJob{persistedJob}, nil).
+		Once()
+
+	restartedMeta, err := NewImportMeta(context.TODO(), restartCatalog, s.alloc, s.checker.meta)
+	s.NoError(err)
+	restartCatalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).
+		Run(func(_ context.Context, updated *datapb.ImportJob) {
+			s.Equal(internalpb.ImportJobState_Importing, updated.GetState())
+			s.Equal(expectedRequestSize, updated.GetRequestedDiskSize())
+		}).
+		Return(nil).
+		Once()
+
+	restartedChecker := *s.checker
+	restartedChecker.importMeta = restartedMeta
+	restartedChecker.checkPreImportingJob(restartedMeta.GetJob(context.TODO(), s.jobID))
+
+	recovered := restartedMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(internalpb.ImportJobState_Importing, recovered.GetState())
+	s.Equal(expectedRequestSize, recovered.GetRequestedDiskSize())
+	s.Len(restartedMeta.GetTaskBy(context.TODO(), WithJob(s.jobID), WithType(ImportTaskType)), 1,
+		"recovery must reuse the complete persisted task set")
+}
+
+func (s *ImportCheckerSuite) TestValidateImportTaskSetRejectsFalseCompleteCoverage() {
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+	stats := make([]*datapb.ImportFileStats, 0, len(job.GetFiles()))
+	for _, file := range job.GetFiles() {
+		stats = append(stats, &datapb.ImportFileStats{ImportFile: file, TotalRows: 1})
+	}
+	preimport := &preImportTask{}
+	preimport.task.Store(&datapb.PreImportTask{
+		JobID:        job.GetJobID(),
+		TaskID:       100,
+		CollectionID: job.GetCollectionID(),
+		State:        datapb.ImportTaskStateV2_Completed,
+		FileStats:    stats,
+	})
+	newImportTask := func(taskID int64, taskStats ...*datapb.ImportFileStats) ImportTask {
+		task := &importTask{}
+		task.task.Store(&datapb.ImportTaskV2{
+			JobID:        job.GetJobID(),
+			TaskID:       taskID,
+			CollectionID: job.GetCollectionID(),
+			FileStats:    taskStats,
+		})
+		return task
+	}
+
+	// Every requested file appears at least once, so the former delete-from-map
+	// check reported lacks == 0. The duplicate means this is not a legal task
+	// partition and must not be used to commit the job state.
+	lacks, err := validateImportTaskSet(job, []ImportTask{preimport}, []ImportTask{
+		newImportTask(200, stats[0], stats[1]),
+		newImportTask(201, stats[0], stats[2]),
+	})
+	s.Error(err)
+	s.Nil(lacks)
+	s.Contains(err.Error(), "appears in multiple import tasks")
+}
+
+func (s *ImportCheckerSuite) TestCheckSortingJobRejectsInvalidSortPlan() {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+	task := &importTask{tr: timerecord.NewTimeRecorder("import task")}
+	task.task.Store(&datapb.ImportTaskV2{
+		JobID:            s.jobID,
+		TaskID:           10,
+		State:            datapb.ImportTaskStateV2_Completed,
+		SegmentIDs:       []int64{100, 101},
+		SortedSegmentIDs: []int64{200},
+	})
+	s.NoError(s.importMeta.AddTask(context.TODO(), task))
+	s.manuallyUpdateJob(s.jobID, UpdateJobState(internalpb.ImportJobState_Sorting))
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+
+	s.NotPanics(func() {
+		s.checker.checkSortingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	})
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(internalpb.ImportJobState_Failed, job.GetState())
+	s.Contains(job.GetReason(), "2 origin segments and 1 sorted segments")
+}
+
+func (s *ImportCheckerSuite) TestCheckIndexBuildingJobRejectsMixedSortPlan() {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Twice()
+
+	newTask := func(taskID, originID int64, sortedIDs []int64) *importTask {
+		task := &importTask{tr: timerecord.NewTimeRecorder("import task")}
+		task.task.Store(&datapb.ImportTaskV2{
+			JobID:            s.jobID,
+			TaskID:           taskID,
+			State:            datapb.ImportTaskStateV2_Completed,
+			SegmentIDs:       []int64{originID},
+			SortedSegmentIDs: sortedIDs,
+		})
+		return task
+	}
+	s.NoError(s.importMeta.AddTask(context.TODO(), newTask(10, 100, nil)))
+	s.NoError(s.importMeta.AddTask(context.TODO(), newTask(11, 101, []int64{201})))
+	s.manuallyUpdateJob(s.jobID, UpdateJobState(internalpb.ImportJobState_IndexBuilding))
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+
+	s.NotPanics(func() {
+		s.checker.checkIndexBuildingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	})
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(internalpb.ImportJobState_Failed, job.GetState())
+	s.Contains(job.GetReason(), "both sorted and unsorted tasks")
+}
+
+func (s *ImportCheckerSuite) assertIndexBuildingRejectsTarget(target *datapb.SegmentInfo, reason string) {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
+	task := &importTask{tr: timerecord.NewTimeRecorder("import task")}
+	task.task.Store(&datapb.ImportTaskV2{
+		JobID:        s.jobID,
+		TaskID:       10,
+		CollectionID: 1,
+		State:        datapb.ImportTaskStateV2_Completed,
+		SegmentIDs:   []int64{100},
+	})
+	s.NoError(s.importMeta.AddTask(context.TODO(), task))
+
+	// The origin is the sort-planned shape: invisible, so its sorted output
+	// must be discovered through the compactionTo edge.
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
+	s.NoError(s.checker.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            100,
+		CollectionID:  1,
+		PartitionID:   2,
+		InsertChannel: "ch0",
+		State:         commonpb.SegmentState_Flushed,
+		IsImporting:   true,
+		IsInvisible:   true,
+	})))
+	if target != nil {
+		catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
+		s.NoError(s.checker.meta.AddSegment(context.TODO(), NewSegmentInfo(target)))
+	}
+
+	s.manuallyUpdateJob(s.jobID, UpdateJobState(internalpb.ImportJobState_IndexBuilding))
+	catalog.ExpectedCalls = nil
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
+	s.checker.checkIndexBuildingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(internalpb.ImportJobState_Failed, job.GetState())
+	s.Contains(job.GetReason(), reason)
+}
+
+func (s *ImportCheckerSuite) TestCheckIndexBuildingJobRejectsMissingTarget() {
+	s.assertIndexBuildingRejectsTarget(nil, "origin segment 100 has no sorted output")
+}
+
+// A job planned without sort by an older binary (dataCoord.enableCompaction
+// off at planning time) has healthy, visible, importing origins and no sorted
+// output: rolling upgrade must treat the origin as the final imported segment
+// instead of failing the job and dropping the data.
+func (s *ImportCheckerSuite) TestIndexBuildingAcceptsLegacyUnsortedOrigins() {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
+	task := &importTask{tr: timerecord.NewTimeRecorder("legacy unsorted import task")}
+	task.task.Store(&datapb.ImportTaskV2{
+		JobID:        s.jobID,
+		TaskID:       10,
+		CollectionID: 1,
+		State:        datapb.ImportTaskStateV2_Completed,
+		SegmentIDs:   []int64{100},
+	})
+	s.NoError(s.importMeta.AddTask(context.TODO(), task))
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
+	s.NoError(s.checker.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            100,
+		CollectionID:  1,
+		PartitionID:   2,
+		InsertChannel: "ch0",
+		State:         commonpb.SegmentState_Flushed,
+		IsImporting:   true,
+		IsInvisible:   false,
+	})))
+
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+	tasks := s.importMeta.GetTaskBy(context.TODO(), WithType(ImportTaskType), WithJob(s.jobID))
+	targets, err := s.checker.getValidatedImportTargets(job, tasks, true)
+	s.NoError(err)
+	s.Equal([]int64{100}, targets)
+}
+
+func (s *ImportCheckerSuite) TestCheckIndexBuildingJobAllowsExplicitZeroRowSortSkip() {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
+	task := &importTask{tr: timerecord.NewTimeRecorder("zero-row sorted import task")}
+	task.task.Store(&datapb.ImportTaskV2{
+		JobID:            s.jobID,
+		TaskID:           10,
+		CollectionID:     1,
+		State:            datapb.ImportTaskStateV2_Completed,
+		SegmentIDs:       []int64{100},
+		SortedSegmentIDs: []int64{200},
+	})
+	s.NoError(s.importMeta.AddTask(context.TODO(), task))
+
+	// Start with the exact zero-row origin produced by import. Sorting must
+	// persist its Dropped marker and intentionally create no target 200.
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
+	s.NoError(s.checker.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            100,
+		CollectionID:  1,
+		PartitionID:   2,
+		InsertChannel: "ch0",
+		State:         commonpb.SegmentState_Flushed,
+		NumOfRows:     0,
+		IsImporting:   true,
+	})))
+
+	s.manuallyUpdateJob(s.jobID, UpdateJobState(internalpb.ImportJobState_Sorting))
+	catalog.ExpectedCalls = nil
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Once()
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
+	s.checker.checkSortingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(commonpb.SegmentState_Dropped, s.checker.meta.GetSegment(context.TODO(), 100).GetState())
+	s.Equal(internalpb.ImportJobState_IndexBuilding, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+
+	catalog.ExpectedCalls = nil
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
+	s.checker.checkIndexBuildingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(internalpb.ImportJobState_Uncommitted, job.GetState())
+}
+
+func (s *ImportCheckerSuite) TestCheckIndexBuildingJobRejectsForeignTarget() {
+	s.assertIndexBuildingRejectsTarget(&datapb.SegmentInfo{
+		ID:             200,
+		CollectionID:   2,
+		PartitionID:    2,
+		InsertChannel:  "ch0",
+		State:          commonpb.SegmentState_Flushed,
+		IsImporting:    true,
+		IsSorted:       true,
+		CompactionFrom: []int64{100},
+	}, "belongs to collection 2, expected 1")
+}
+
+// A zero-row sorted output is published Dropped (all rows expired or deleted
+// before the sort): the branch is a completed empty result, not corruption --
+// the job must skip it rather than fail and drop the other origins' data.
+func (s *ImportCheckerSuite) TestCheckIndexBuildingJobSkipsDroppedSortedOutput() {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
+	task := &importTask{tr: timerecord.NewTimeRecorder("zero-row sorted output task")}
+	task.task.Store(&datapb.ImportTaskV2{
+		JobID:        s.jobID,
+		TaskID:       10,
+		CollectionID: 1,
+		State:        datapb.ImportTaskStateV2_Completed,
+		SegmentIDs:   []int64{100},
+	})
+	s.NoError(s.importMeta.AddTask(context.TODO(), task))
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
+	s.NoError(s.checker.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            100,
+		CollectionID:  1,
+		PartitionID:   2,
+		InsertChannel: "ch0",
+		State:         commonpb.SegmentState_Flushed,
+		IsImporting:   true,
+		IsInvisible:   true,
+	})))
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
+	s.NoError(s.checker.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             200,
+		CollectionID:   1,
+		PartitionID:    2,
+		InsertChannel:  "ch0",
+		State:          commonpb.SegmentState_Dropped,
+		NumOfRows:      0,
+		IsImporting:    true,
+		IsSorted:       true,
+		CompactionFrom: []int64{100},
+	})))
+
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+	tasks := s.importMeta.GetTaskBy(context.TODO(), WithType(ImportTaskType), WithJob(s.jobID))
+	targets, err := s.checker.getValidatedImportTargets(job, tasks, true)
+	s.NoError(err)
+	s.Empty(targets, "a dropped zero-row output is a completed empty branch, not a target or a failure")
+}
+
+// Namespace-enabled collections mark their sorted output IsSortedByNamespace
+// instead of IsSorted; validation must accept either flag.
+func (s *ImportCheckerSuite) TestIndexBuildingAcceptsNamespaceSortedTarget() {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
+	task := &importTask{tr: timerecord.NewTimeRecorder("namespace sorted import task")}
+	task.task.Store(&datapb.ImportTaskV2{
+		JobID:        s.jobID,
+		TaskID:       10,
+		CollectionID: 1,
+		State:        datapb.ImportTaskStateV2_Completed,
+		SegmentIDs:   []int64{100},
+	})
+	s.NoError(s.importMeta.AddTask(context.TODO(), task))
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
+	s.NoError(s.checker.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            100,
+		CollectionID:  1,
+		PartitionID:   2,
+		InsertChannel: "ch0",
+		State:         commonpb.SegmentState_Flushed,
+		IsImporting:   true,
+		IsInvisible:   true,
+	})))
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
+	s.NoError(s.checker.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:                  200,
+		CollectionID:        1,
+		PartitionID:         2,
+		InsertChannel:       "ch0",
+		State:               commonpb.SegmentState_Flushed,
+		IsImporting:         true,
+		IsSorted:            false,
+		IsSortedByNamespace: true,
+		CompactionFrom:      []int64{100},
+	})))
+
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+	tasks := s.importMeta.GetTaskBy(context.TODO(), WithType(ImportTaskType), WithJob(s.jobID))
+	targets, err := s.checker.getValidatedImportTargets(job, tasks, true)
+	s.NoError(err)
+	s.Equal([]int64{200}, targets)
+}
+
+func (s *ImportCheckerSuite) TestCheckIndexBuildingJobRejectsPublishedTarget() {
+	s.assertIndexBuildingRejectsTarget(&datapb.SegmentInfo{
+		ID:             200,
+		CollectionID:   1,
+		PartitionID:    2,
+		InsertChannel:  "ch0",
+		State:          commonpb.SegmentState_Flushed,
+		IsImporting:    false,
+		IsSorted:       true,
+		CompactionFrom: []int64{100},
+	}, "segment 200 is already published")
+}
+
+func (s *ImportCheckerSuite) TestLegacyL0SortMetadataUsesOriginPlan() {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	task := &importTask{tr: timerecord.NewTimeRecorder("legacy l0 import task")}
+	task.task.Store(&datapb.ImportTaskV2{
+		JobID:            s.jobID,
+		TaskID:           10,
+		CollectionID:     1,
+		State:            datapb.ImportTaskStateV2_Completed,
+		SegmentIDs:       []int64{100},
+		SortedSegmentIDs: []int64{200},
+	})
+	s.NoError(s.importMeta.AddTask(context.TODO(), task))
+	s.NoError(s.checker.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            100,
+		CollectionID:  1,
+		PartitionID:   2,
+		InsertChannel: "ch0",
+		State:         commonpb.SegmentState_Flushed,
+		Level:         datapb.SegmentLevel_L0,
+		IsImporting:   true,
+	})))
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+		legacyL0Job := job.(*importJob)
+		legacyL0Job.Options = []*commonpb.KeyValuePair{
+			{Key: importutilv2.L0Import, Value: "true"},
+		}
+		legacyL0Job.State = internalpb.ImportJobState_Sorting
+	})
+	catalog.ExpectedCalls = nil
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Twice()
+
+	s.checker.checkSortingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(internalpb.ImportJobState_IndexBuilding,
+		s.importMeta.GetJob(context.TODO(), s.jobID).GetState(),
+		"L0 must skip sorting even when a legacy task contains sorted IDs")
+
+	s.checker.checkIndexBuildingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(internalpb.ImportJobState_Uncommitted,
+		s.importMeta.GetJob(context.TODO(), s.jobID).GetState(),
+		"L0 index completion must use origin segments and ignore legacy sorted targets")
+}
+
+func (s *ImportCheckerSuite) TestCorruptL0TaskFailsClosedWithoutPanic() {
+	job := s.importMeta.GetJob(context.TODO(), s.jobID).Clone().(*importJob)
+	job.Options = []*commonpb.KeyValuePair{
+		{Key: importutilv2.L0Import, Value: "true"},
+	}
+	job.State = internalpb.ImportJobState_Sorting
+
+	corruptMeta := NewMockImportMeta(s.T())
+	corruptMeta.EXPECT().GetTaskBy(mock.Anything, mock.Anything, mock.Anything).
+		Return([]ImportTask{nil})
+	corruptMeta.EXPECT().UpdateJob(mock.Anything, job.GetJobID(), mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ int64, actions ...UpdateJobAction) error {
+			for _, action := range actions {
+				action(job)
+			}
+			return nil
+		})
+	checker := *s.checker
+	checker.importMeta = corruptMeta
+
+	s.NotPanics(func() {
+		checker.checkSortingJob(job)
+	})
+	s.Equal(internalpb.ImportJobState_Failed, job.GetState())
+	s.Contains(job.GetReason(), "invalid concrete type")
 }
 
 func (s *ImportCheckerSuite) manuallyUpdateJob(jobID int64, actions ...UpdateJobAction) {
@@ -335,14 +855,10 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	// test checkPreImportingJob
-	fileStats := []*datapb.ImportFileStats{
-		{
-			TotalRows: 100,
-		},
-	}
 	for _, t := range preimportTasks {
 		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
-			UpdateState(datapb.ImportTaskStateV2_Completed), UpdateFileStats(fileStats))
+			UpdateState(datapb.ImportTaskStateV2_Completed),
+			UpdateFileStats(completedPreImportFileStats(t, 100, 0)))
 		s.NoError(err)
 	}
 
@@ -482,7 +998,10 @@ func (s *ImportCheckerSuite) TestCheckGC() {
 	err = s.importMeta.UpdateTask(context.TODO(), task.GetTaskID(), UpdateStatsSegmentIDs([]int64{}))
 	s.NoError(err)
 
-	// task is not dropped
+	// task is not dropped: it still names a worker, so GC retries the drop the
+	// scheduler could not land instead of waiting for someone else to do it.
+	s.cluster.EXPECT().DropImport(mock.Anything, mock.Anything).
+		Return(errors.New("connection refused")).Once()
 	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(1, len(s.importMeta.GetTaskBy(context.TODO(), WithJob(s.jobID))))
 	s.Equal(1, len(s.importMeta.GetJobBy(context.TODO())))
@@ -878,7 +1397,7 @@ func TestImportCheckerCompaction(t *testing.T) {
 	cim := NewMockCompactionInspector(t)
 	handler := NewNMockHandler(t)
 
-	checker := NewImportChecker(context.TODO(), meta, broker, alloc, importMeta, cim, handler, importCheckerHooks{}).(*importChecker)
+	checker := NewImportChecker(context.TODO(), meta, broker, alloc, importMeta, cim, handler, session.NewMockCluster(t), importCheckerHooks{}).(*importChecker)
 
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
@@ -991,14 +1510,10 @@ func TestImportCheckerCompaction(t *testing.T) {
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil).Twice()
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
 	preimportTasks := importMeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(PreImportTaskType))
-	fileStats := []*datapb.ImportFileStats{
-		{
-			TotalRows: 100,
-		},
-	}
 	for _, pt := range preimportTasks {
 		err := importMeta.UpdateTask(context.TODO(), pt.GetTaskID(),
-			UpdateState(datapb.ImportTaskStateV2_Completed), UpdateFileStats(fileStats))
+			UpdateState(datapb.ImportTaskStateV2_Completed),
+			UpdateFileStats(completedPreImportFileStats(pt, 100, 0)))
 		assert.NoError(t, err)
 	}
 	assert.Eventually(t, func() bool {
@@ -1022,6 +1537,8 @@ func TestImportCheckerCompaction(t *testing.T) {
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:            rand.Int63(),
+				CollectionID:  job.GetCollectionID(),
+				PartitionID:   job.GetPartitionIDs()[0],
 				State:         commonpb.SegmentState_Flushed,
 				IsImporting:   true,
 				InsertChannel: "ch0",
@@ -1045,14 +1562,18 @@ func TestImportCheckerCompaction(t *testing.T) {
 
 	// check stats
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
-	for _, targetSegmentID := range targetSegmentIDs {
+	for i, targetSegmentID := range targetSegmentIDs {
+		originSegmentID := importTasks[i].(*importTask).GetSegmentIDs()[0]
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:            targetSegmentID,
-				State:         commonpb.SegmentState_Flushed,
-				IsImporting:   true,
-				InsertChannel: "ch0",
-				IsSorted:      true,
+				ID:             targetSegmentID,
+				CollectionID:   job.GetCollectionID(),
+				PartitionID:    job.GetPartitionIDs()[0],
+				State:          commonpb.SegmentState_Flushed,
+				IsImporting:    true,
+				InsertChannel:  "ch0",
+				IsSorted:       true,
+				CompactionFrom: []int64{originSegmentID},
 			},
 		}
 		err := checker.meta.AddSegment(context.Background(), segment)

@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/samber/lo"
@@ -83,6 +84,10 @@ type externalCollectionRefreshChecker struct {
 	// MUST be non-blocking — the manager's implementation dedups concurrent
 	// invocations and runs the actual work in a background goroutine.
 	onInitJobPending func(jobID int64)
+	// releaseJobTasks establishes the scheduler-to-GC ownership handoff. It
+	// returns false while any wrapper is inside a worker callback, in which case
+	// this checker pass must retain both job and task metadata and retry later.
+	releaseJobTasks func(jobID int64) bool
 }
 
 func newRefreshChecker(
@@ -149,7 +154,19 @@ func (c *externalCollectionRefreshChecker) processJobs() {
 // and the eager task path call this so the same code drives every job
 // state transition. Idempotent — repeated calls short-circuit on terminal
 // state and source/spec equality.
+// processJob runs one inspection pass over a job. The periodic tick calls it;
+// the eager task path goes through processJobEager, which skips GC -- see the
+// checkGC call below.
 func (c *externalCollectionRefreshChecker) processJob(job *datapb.ExternalCollectionRefreshJob) {
+	c.processJobWithGC(job, true)
+}
+
+// processJobEager is the eager task path: same pass, minus GC.
+func (c *externalCollectionRefreshChecker) processJobEager(job *datapb.ExternalCollectionRefreshJob) {
+	c.processJobWithGC(job, false)
+}
+
+func (c *externalCollectionRefreshChecker) processJobWithGC(job *datapb.ExternalCollectionRefreshJob, runGC bool) {
 	// Retry Phase B task creation for jobs that are still in Init with no
 	// tasks (i.e. the async submission attempt did not land tasks yet).
 	// This is the safety-net retry path: the WAL ack callback already kicked
@@ -190,8 +207,17 @@ func (c *externalCollectionRefreshChecker) processJob(job *datapb.ExternalCollec
 	// cycles before GC is harmless).
 	c.ensureJobFinishedNotified(latestJob)
 
-	// Check GC for terminal states (Finished/Failed)
-	c.checkGC(latestJob)
+	if runGC {
+		// Check GC for terminal states (Finished/Failed).
+		//
+		// Only on the periodic tick. GC hands every task of the job back from
+		// the scheduler, and the eager caller is a worker callback that already
+		// holds one of those tasks' scheduler locks -- taking it again would
+		// deadlock on itself. Nothing here is latency-sensitive: GC only drops
+		// metadata for a job that already reached a terminal state, so waiting
+		// for the next tick costs nothing a caller can observe.
+		c.checkGC(latestJob)
+	}
 }
 
 // processJobByID looks up a job and runs one inspection pass for it
@@ -204,7 +230,7 @@ func (c *externalCollectionRefreshChecker) processJobByID(jobID int64) {
 	if job == nil {
 		return
 	}
-	c.processJob(job)
+	c.processJobEager(job)
 }
 
 // aggregateJobState updates job state based on its tasks.
@@ -383,7 +409,7 @@ func (c *externalCollectionRefreshChecker) logJobStats(jobs map[int64]*datapb.Ex
 	}
 
 	if len(jobs) > 0 {
-		mlog.Info(c.ctx, "external collection job stats", mlog.Any("stateNum", stateNum))
+		mlog.Debug(c.ctx, "external collection job stats", mlog.Any("stateNum", stateNum))
 	}
 }
 
@@ -408,10 +434,18 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 			mlog.Duration("age", age),
 			mlog.Duration("timeout", timeout))
 
+		// Keep whatever the job last recorded. A job that timed out while
+		// retrying a transient explore failure carries the real cause (bad
+		// bucket, denied credential); reporting a bare "timeout" would throw
+		// away the only thing that tells an operator what to fix.
+		reason := "timeout"
+		if last := job.GetFailReason(); last != "" {
+			reason = fmt.Sprintf("timeout, last failure: %s", last)
+		}
 		applied, err := c.refreshMeta.UpdateJobState(
 			job.GetJobId(),
 			indexpb.JobState_JobStateFailed,
-			"timeout")
+			reason)
 		if err != nil {
 			mlog.Warn(c.ctx, "failed to mark job as timed out",
 				mlog.FieldJobID(job.GetJobId()),
@@ -442,7 +476,10 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 			if task.GetState() == indexpb.JobState_JobStateInit ||
 				task.GetState() == indexpb.JobState_JobStateRetry ||
 				task.GetState() == indexpb.JobState_JobStateInProgress {
-				_ = c.refreshMeta.UpdateTaskState(task.GetTaskId(), indexpb.JobState_JobStateFailed, "job timeout")
+				if err := c.refreshMeta.UpdateTaskState(task.GetTaskId(), indexpb.JobState_JobStateFailed, "job timeout"); err != nil {
+					mlog.Warn(c.ctx, "failed to mark task failed on job timeout",
+						mlog.FieldTaskID(task.GetTaskId()), mlog.Err(err))
+				}
 			}
 		}
 
@@ -480,6 +517,17 @@ func (c *externalCollectionRefreshChecker) checkGC(job *datapb.ExternalCollectio
 			mlog.FieldCollectionID(job.GetCollectionId()),
 			mlog.Duration("age", age),
 			mlog.Duration("retention", retention))
+
+		// A task wrapper may still be owned by the global scheduler even though a
+		// sibling already made the job terminal. Drain that runtime ownership before
+		// removing the metadata its callbacks need. The callback is non-blocking for
+		// busy task locks, which also avoids self-deadlock when this path is reached
+		// synchronously from QueryTaskOnWorker.
+		if c.releaseJobTasks != nil && !c.releaseJobTasks(job.GetJobId()) {
+			mlog.Info(c.ctx, "external collection job GC waiting for scheduler task ownership",
+				mlog.FieldJobID(job.GetJobId()))
+			return
+		}
 
 		// DropJob drops job and associated tasks. No in-loop retry: checkGC runs periodically,
 		// so the next tick will naturally retry if etcd was temporarily unavailable.

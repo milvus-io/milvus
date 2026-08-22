@@ -281,26 +281,33 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionCompacting() {
 func (s *ClusteringCompactionPolicySuite) TestCollectionIsClusteringCompacting() {
 	ctx := context.Background()
 	s.Run("no collection is compacting", func() {
-		compacting, triggerID := s.clusteringCompactionPolicy.collectionIsClusteringCompacting(collID)
+		compacting, triggerID := s.clusteringCompactionPolicy.collectionIsClusteringCompacting(context.Background(), collID)
 		s.False(compacting)
 		s.Equal(int64(0), triggerID)
 	})
 
 	s.Run("collection is compacting, different state", func() {
+		// An attempt that ended owing a rebuild still counts as compacting: the
+		// trigger keeps its ID across the replan, so letting a new one start
+		// here would run two clustering compactions on the same collection.
+		// timeout is settled -- nothing writes it any more, and a record that
+		// carries it predates the retrying state.
 		tests := []struct {
 			state        datapb.CompactionTaskState
+			retryTimes   int32
 			isCompacting bool
 			triggerID    int64
 		}{
-			{datapb.CompactionTaskState_pipelining, true, 1},
-			{datapb.CompactionTaskState_executing, true, 1},
-			{datapb.CompactionTaskState_completed, false, 1},
-			{datapb.CompactionTaskState_failed, false, 1},
-			{datapb.CompactionTaskState_timeout, false, 1},
-			{datapb.CompactionTaskState_analyzing, true, 1},
-			{datapb.CompactionTaskState_indexing, true, 1},
-			{datapb.CompactionTaskState_cleaned, false, 1},
-			{datapb.CompactionTaskState_meta_saved, true, 1},
+			{datapb.CompactionTaskState_pipelining, 0, true, 1},
+			{datapb.CompactionTaskState_executing, 0, true, 1},
+			{datapb.CompactionTaskState_completed, 0, false, 1},
+			{datapb.CompactionTaskState_failed, 0, false, 1},
+			{datapb.CompactionTaskState_retrying, 0, true, 1},
+			{datapb.CompactionTaskState_timeout, 0, false, 1},
+			{datapb.CompactionTaskState_analyzing, 0, true, 1},
+			{datapb.CompactionTaskState_indexing, 0, true, 1},
+			{datapb.CompactionTaskState_cleaned, 0, false, 1},
+			{datapb.CompactionTaskState_meta_saved, 0, true, 1},
 		}
 
 		for _, test := range tests {
@@ -315,9 +322,10 @@ func (s *ClusteringCompactionPolicySuite) TestCollectionIsClusteringCompacting()
 					PlanID:       10,
 					CollectionID: collID,
 					State:        test.state,
+					RetryTimes:   test.retryTimes,
 				})
 
-				compacting, triggerID := s.clusteringCompactionPolicy.collectionIsClusteringCompacting(collID)
+				compacting, triggerID := s.clusteringCompactionPolicy.collectionIsClusteringCompacting(context.Background(), collID)
 				s.Equal(test.isCompacting, compacting)
 				s.Equal(test.triggerID, triggerID)
 			})

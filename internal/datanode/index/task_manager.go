@@ -36,6 +36,7 @@ import (
 
 type IndexTaskInfo struct {
 	Cancel                    context.CancelFunc
+	StartedAt                 time.Time
 	State                     commonpb.IndexState
 	FileKeys                  []string
 	SerializedSize            uint64
@@ -56,6 +57,7 @@ type IndexTaskInfo struct {
 func (i *IndexTaskInfo) Clone() *IndexTaskInfo {
 	return &IndexTaskInfo{
 		Cancel:                    i.Cancel,
+		StartedAt:                 i.StartedAt,
 		State:                     i.State,
 		FileKeys:                  common.CloneStringList(i.FileKeys),
 		SerializedSize:            i.SerializedSize,
@@ -110,6 +112,9 @@ func (m *TaskManager) LoadOrStoreIndexTask(ClusterID string, buildID typeutil.Un
 	oldInfo, ok := m.indexTasks[key]
 	if ok {
 		return oldInfo
+	}
+	if info.StartedAt.IsZero() {
+		info.StartedAt = time.Now()
 	}
 	m.indexTasks[key] = info
 	return nil
@@ -242,6 +247,7 @@ func (m *TaskManager) deleteAllIndexTasks() []*IndexTaskInfo {
 
 type AnalyzeTaskInfo struct {
 	Cancel        context.CancelFunc
+	StartedAt     time.Time
 	State         indexpb.JobState
 	FailReason    string
 	CentroidsFile string
@@ -254,6 +260,9 @@ func (m *TaskManager) LoadOrStoreAnalyzeTask(clusterID string, taskID typeutil.U
 	oldInfo, ok := m.analyzeTasks[key]
 	if ok {
 		return oldInfo
+	}
+	if info.StartedAt.IsZero() {
+		info.StartedAt = time.Now()
 	}
 	m.analyzeTasks[key] = info
 	return nil
@@ -303,6 +312,7 @@ func (m *TaskManager) GetAnalyzeTaskInfo(clusterID string, taskID typeutil.Uniqu
 	if info, ok := m.analyzeTasks[Key{ClusterID: clusterID, TaskID: taskID}]; ok {
 		return &AnalyzeTaskInfo{
 			Cancel:        info.Cancel,
+			StartedAt:     info.StartedAt,
 			State:         info.State,
 			FailReason:    info.FailReason,
 			CentroidsFile: info.CentroidsFile,
@@ -393,6 +403,7 @@ func (m *TaskManager) WaitTaskFinish() {
 
 type StatsTaskInfo struct {
 	Cancel           context.CancelFunc
+	StartedAt        time.Time
 	State            indexpb.JobState
 	FailReason       string
 	CollID           typeutil.UniqueID
@@ -413,6 +424,7 @@ type StatsTaskInfo struct {
 func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
 	return &StatsTaskInfo{
 		Cancel:           s.Cancel,
+		StartedAt:        s.StartedAt,
 		State:            s.State,
 		FailReason:       s.FailReason,
 		CollID:           s.CollID,
@@ -506,6 +518,9 @@ func (m *TaskManager) LoadOrStoreStatsTask(clusterID string, taskID typeutil.Uni
 	oldInfo, ok := m.statsTasks[key]
 	if ok {
 		return oldInfo
+	}
+	if info.StartedAt.IsZero() {
+		info.StartedAt = time.Now()
 	}
 	m.statsTasks[key] = info
 	return nil
@@ -651,6 +666,62 @@ func (m *TaskManager) deleteAllStatsTasks() []*StatsTaskInfo {
 		deleted = append(deleted, info)
 	}
 	return deleted
+}
+
+// RemoveExpiredTasks cancels and removes index, analyze, and stats tasks older
+// than cutoff. State updates after removal are harmless no-ops.
+func (m *TaskManager) RemoveExpiredTasks(ctx context.Context, cutoff time.Time) int {
+	type expiredTask struct {
+		key       Key
+		taskType  string
+		state     string
+		startedAt time.Time
+		cancel    context.CancelFunc
+	}
+
+	m.stateLock.Lock()
+	expired := make([]expiredTask, 0)
+	for key, info := range m.indexTasks {
+		if info.StartedAt.IsZero() || info.StartedAt.After(cutoff) {
+			continue
+		}
+		expired = append(expired, expiredTask{
+			key: key, taskType: "index", state: info.State.String(), startedAt: info.StartedAt, cancel: info.Cancel,
+		})
+		delete(m.indexTasks, key)
+	}
+	for key, info := range m.analyzeTasks {
+		if info.StartedAt.IsZero() || info.StartedAt.After(cutoff) {
+			continue
+		}
+		expired = append(expired, expiredTask{
+			key: key, taskType: "analyze", state: info.State.String(), startedAt: info.StartedAt, cancel: info.Cancel,
+		})
+		delete(m.analyzeTasks, key)
+	}
+	for key, info := range m.statsTasks {
+		if info.StartedAt.IsZero() || info.StartedAt.After(cutoff) {
+			continue
+		}
+		expired = append(expired, expiredTask{
+			key: key, taskType: "stats", state: info.State.String(), startedAt: info.StartedAt, cancel: info.Cancel,
+		})
+		delete(m.statsTasks, key)
+	}
+	m.stateLock.Unlock()
+
+	for _, task := range expired {
+		if task.cancel != nil {
+			task.cancel()
+		}
+		mlog.Info(ctx, "reclaiming expired datanode worker task",
+			mlog.FieldTaskID(task.key.TaskID),
+			mlog.String("clusterID", task.key.ClusterID),
+			mlog.String("taskType", task.taskType),
+			mlog.String("state", task.state),
+			mlog.Duration("age", time.Since(task.startedAt)))
+	}
+	return len(expired)
 }
 
 func (m *TaskManager) DeleteAllTasks() {

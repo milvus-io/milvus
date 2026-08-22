@@ -20,6 +20,7 @@ import (
 	"context"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -47,6 +48,10 @@ import (
 
 type indexBuildTask struct {
 	*model.SegmentIndex
+
+	// stateGuard makes the fields below readable by the scheduler without the
+	// per-task key lock; see statsTask.stateGuard.
+	stateGuard sync.RWMutex
 
 	taskSlot int64
 
@@ -108,6 +113,8 @@ func (it *indexBuildTask) GetTaskSlot() int64 {
 }
 
 func (it *indexBuildTask) GetTaskState() taskcommon.State {
+	it.stateGuard.RLock()
+	defer it.stateGuard.RUnlock()
 	return taskcommon.State(it.IndexState)
 }
 
@@ -124,10 +131,14 @@ func (it *indexBuildTask) GetTaskType() taskcommon.Type {
 }
 
 func (it *indexBuildTask) GetTaskVersion() int64 {
+	it.stateGuard.RLock()
+	defer it.stateGuard.RUnlock()
 	return it.IndexVersion
 }
 
 func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
+	it.stateGuard.Lock()
+	defer it.stateGuard.Unlock()
 	it.IndexState = commonpb.IndexState(state)
 	it.FailReason = failReason
 }
@@ -144,8 +155,10 @@ func (it *indexBuildTask) UpdateTaskVersion(nodeID int64) error {
 	if err := it.meta.indexMeta.UpdateVersion(it.BuildID, nodeID); err != nil {
 		return err
 	}
+	it.stateGuard.Lock()
 	it.IndexVersion++
 	it.NodeID = nodeID
+	it.stateGuard.Unlock()
 	return nil
 }
 

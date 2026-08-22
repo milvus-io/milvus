@@ -19,6 +19,7 @@ package index
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
@@ -155,6 +156,51 @@ func (s *statsTaskInfoSuite) TestIndexTaskInfoReturnsIndexStorePathVersion() {
 
 	cloned := info.Clone()
 	s.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, cloned.IndexStorePathVersion)
+}
+
+func (s *statsTaskInfoSuite) Test_RemoveExpiredTasks() {
+	manager := NewTaskManager(context.Background())
+	now := time.Now()
+	cutoff := now.Add(-24 * time.Hour)
+
+	indexCtx, indexCancel := context.WithCancel(context.Background())
+	analyzeCtx, analyzeCancel := context.WithCancel(context.Background())
+	statsCtx, statsCancel := context.WithCancel(context.Background())
+	_, freshCancel := context.WithCancel(context.Background())
+	defer freshCancel()
+	runningCtx, runningCancel := context.WithCancel(context.Background())
+	defer runningCancel()
+
+	manager.LoadOrStoreIndexTask("cluster", 1, &IndexTaskInfo{
+		Cancel: indexCancel, StartedAt: cutoff, State: commonpb.IndexState_Finished,
+	})
+	manager.LoadOrStoreAnalyzeTask("cluster", 2, &AnalyzeTaskInfo{
+		Cancel: analyzeCancel, StartedAt: cutoff, State: indexpb.JobState_JobStateFailed,
+	})
+	manager.LoadOrStoreStatsTask("cluster", 3, &StatsTaskInfo{
+		Cancel: statsCancel, StartedAt: cutoff, State: indexpb.JobState_JobStateRetry,
+	})
+	manager.LoadOrStoreIndexTask("cluster", 4, &IndexTaskInfo{
+		Cancel: freshCancel, StartedAt: cutoff.Add(time.Second), State: commonpb.IndexState_Finished,
+	})
+	manager.LoadOrStoreAnalyzeTask("cluster", 5, &AnalyzeTaskInfo{
+		Cancel: runningCancel, StartedAt: cutoff.Add(-time.Hour), State: indexpb.JobState_JobStateInProgress,
+	})
+
+	s.Equal(4, manager.RemoveExpiredTasks(context.Background(), cutoff))
+	s.Nil(manager.GetIndexTaskInfo("cluster", 1))
+	s.Nil(manager.GetAnalyzeTaskInfo("cluster", 2))
+	s.Nil(manager.GetStatsTaskInfo("cluster", 3))
+	s.NotNil(manager.GetIndexTaskInfo("cluster", 4))
+	s.Nil(manager.GetAnalyzeTaskInfo("cluster", 5))
+
+	for _, ctx := range []context.Context{indexCtx, analyzeCtx, statsCtx, runningCtx} {
+		select {
+		case <-ctx.Done():
+		default:
+			s.Fail("reclaiming an expired task must cancel its context")
+		}
+	}
 }
 
 func (s *statsTaskInfoSuite) Test_IndexTaskCostMethods() {

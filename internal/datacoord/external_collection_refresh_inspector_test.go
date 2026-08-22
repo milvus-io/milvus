@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -50,8 +51,20 @@ func (s *stubScheduler) Enqueue(t task.Task) {
 	s.enqueueCount.Add(1)
 }
 
+func (s *stubScheduler) Finalize(_ int64, fn func()) {
+	fn()
+}
+
 func (s *stubScheduler) GetEnqueueCount() int {
 	return int(s.enqueueCount.Load())
+}
+
+func setInspectorTaskAllocator(inspector *externalCollectionRefreshInspector, lastID int64) {
+	var nextID atomic.Int64
+	nextID.Store(lastID)
+	inspector.allocateTaskID = func(context.Context) (int64, error) {
+		return nextID.Add(1), nil
+	}
 }
 
 // ==================== Test Functions ====================
@@ -105,12 +118,37 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 	})
 
 	t.Run("enqueue_retry_tasks", func(t *testing.T) {
+		const maxRetryKey = "dataCoord.externalCollectionMaxRetryTimes"
+		paramtable.Get().Save(maxRetryKey, "2")
+		defer paramtable.Get().Reset(maxRetryKey)
+
 		catalog := &stubCatalog{}
 		tasks := []*datapb.ExternalCollectionRefreshTask{
-			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateRetry},
+			{
+				TaskId:               1001,
+				JobId:                1,
+				CollectionId:         100,
+				Version:              3,
+				NodeId:               10,
+				State:                indexpb.JobState_JobStateRetry,
+				FailReason:           "worker failure 1/10",
+				ExternalSource:       "s3://bucket/path",
+				ExternalSpec:         "iceberg",
+				Progress:             50,
+				ExploreManifestPath:  "manifests/1.pb",
+				FileIndexBegin:       3,
+				FileIndexEnd:         8,
+				OwnershipPlanVersion: externalRefreshOwnershipPlanVersion,
+				OwnedSegmentIds:      []int64{10, 20},
+				KeptSegments:         []int64{10},
+				ResultReady:          true,
+				ResultStorageVersion: externalRefreshTaskResultStorageVersion,
+				ResultPath:           "results/old.pb",
+				ResultChecksum:       []byte{1, 2, 3},
+			},
 		}
 
-		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return([]*datapb.ExternalCollectionRefreshJob{{JobId: 1, State: indexpb.JobState_JobStateInit, TaskIds: []int64{1001}}}, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return([]*datapb.ExternalCollectionRefreshJob{{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit, TaskIds: []int64{1001}}}, nil).Build()
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
@@ -121,12 +159,37 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 
 		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
-			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
+			return &refreshExternalCollectionTask{
+				ExternalCollectionRefreshTask: t,
+				refreshMeta:                   refreshMeta,
+			}
 		}
+		counter := &atomic.Int64{}
+		counter.Store(1)
+		refreshMeta.workerFailureCounts.Insert(1001, counter)
+		setInspectorTaskAllocator(inspector, 2000)
 		inspector.inspect()
 
-		// Should have called Enqueue for Retry task
+		// Retry is replaced by a fresh Init task, not directly re-enqueued.
 		assert.Equal(t, 1, scheduler.GetEnqueueCount())
+		if !assert.Len(t, scheduler.enqueuedTasks, 1) {
+			return
+		}
+		replacement := scheduler.enqueuedTasks[0].(*refreshExternalCollectionTask)
+		assert.Equal(t, int64(2001), replacement.GetTaskID())
+		assert.Equal(t, taskcommon.Init, replacement.GetTaskState())
+		assert.Equal(t, "manifests/1.pb", replacement.GetExploreManifestPath())
+		assert.Equal(t, int64(3), replacement.GetFileIndexBegin())
+		assert.Equal(t, int64(8), replacement.GetFileIndexEnd())
+		assert.Equal(t, []int64{10, 20}, replacement.GetOwnedSegmentIds())
+		assert.Zero(t, replacement.GetVersion())
+		assert.Zero(t, replacement.GetNodeId())
+		assert.False(t, replacement.GetResultReady())
+		assert.Empty(t, replacement.GetResultPath())
+		assert.Equal(t, indexpb.JobState_JobStateRetry, refreshMeta.GetTask(1001).GetState(), "retired record remains for job GC")
+		assert.Equal(t, []int64{2001}, refreshMeta.GetJob(1).GetTaskIds())
+		assert.NoError(t, replacement.retryWorkerFailure("worker failed again"))
+		assert.Equal(t, indexpb.JobState_JobStateFailed, refreshMeta.GetTask(2001).GetState(), "replacement inherits the first failure and spends the configured limit")
 	})
 
 	t.Run("skip_in_progress_tasks", func(t *testing.T) {
@@ -226,9 +289,10 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
+		setInspectorTaskAllocator(inspector, 2000)
 		inspector.inspect()
 
-		// Should be called twice: once for Init and once for Retry
+		// Init is enqueued as-is; Retry is enqueued through its replacement.
 		assert.Equal(t, 2, scheduler.GetEnqueueCount())
 	})
 
@@ -308,10 +372,14 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
+		setInspectorTaskAllocator(inspector, 2000)
 		inspector.reloadFromMeta()
 
-		// Should have called Enqueue for Retry task
+		// Startup recovery replaces Retry before scheduling it.
 		assert.Equal(t, 1, scheduler.GetEnqueueCount())
+		if assert.Len(t, scheduler.enqueuedTasks, 1) {
+			assert.Equal(t, int64(2001), scheduler.enqueuedTasks[0].GetTaskID())
+		}
 	})
 
 	t.Run("reload_in_progress_tasks", func(t *testing.T) {
@@ -426,9 +494,10 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
+		setInspectorTaskAllocator(inspector, 2000)
 		inspector.reloadFromMeta()
 
-		// Should be called 3 times: Init, Retry, InProgress
+		// Init, replacement Init, and recovered InProgress are scheduled.
 		assert.Equal(t, 3, scheduler.GetEnqueueCount())
 	})
 
