@@ -454,6 +454,10 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 	}
 	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime, segment.GetCommitTimestamp())
 	ttlFieldID := getTTLFieldID(t.plan.GetSchema())
+	var preserveNullFields map[int64]struct{}
+	if ttlFieldID >= common.StartOfUserFieldID {
+		preserveNullFields = map[int64]struct{}{ttlFieldID: {}}
+	}
 	reader, _, err := newCompactionSegmentRecordReaderWithFields(t.ctx, segment, t.plan.GetSchema(), t.compactionParams.StorageConfig, existingFields,
 		storage.WithCollectionID(collectionID),
 		storage.WithVersion(segment.GetStorageVersion()),
@@ -465,7 +469,7 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 	}
 	defer reader.Close()
 
-	materializer, err := NewRecordMaterializer(t.plan.GetSchema(), t.plan.GetSchema().GetFunctions(), existingFields)
+	materializer, err := newRecordMaterializer(t.plan.GetSchema(), t.plan.GetSchema().GetFunctions(), existingFields, preserveNullFields)
 	if err != nil {
 		return nil, err
 	}
@@ -514,6 +518,11 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		}
 	}()
 
+	// Source TTL presence is decided from existingFields, never by probing the
+	// record: V2/V3 records panic on Column for a field they do not carry.
+	_, sourceHasTTL := existingFields[ttlFieldID]
+	sourceHasTTLField := ttlFieldID >= common.StartOfUserFieldID && sourceHasTTL
+	preMaterializeFilter := len(delta) > 0 || t.plan.GetCollectionTtl() > 0 || sourceHasTTLField
 	var totalRows int64
 	for {
 		record, err := reader.Next()
@@ -524,8 +533,6 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 			return nil, err
 		}
 
-		sourceHasTTLField := ttlFieldID >= common.StartOfUserFieldID && record.Column(ttlFieldID) != nil
-		preMaterializeFilter := len(delta) > 0 || t.plan.GetCollectionTtl() > 0 || sourceHasTTLField
 		var selection *recordSelection
 		if preMaterializeFilter {
 			selection, _, err = selectFullRewriteRecord(record, pkField, entityFilter, ttlFieldID, sourceHasTTLField, nil)

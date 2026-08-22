@@ -151,6 +151,95 @@ func TestRecordMaterializerWrapFillsNullableMissingFields(t *testing.T) {
 	require.Equal(t, 0, record.releaseCount)
 }
 
+func TestRecordMaterializerPreservesMissingProtectedFieldAsNull(t *testing.T) {
+	ttlDefault := &schemapb.ValueField{
+		Data: &schemapb.ValueField_TimestamptzData{TimestamptzData: 123},
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "ttl", DataType: schemapb.DataType_Timestamptz, Nullable: true, DefaultValue: ttlDefault},
+		{
+			FieldID: 102, Name: "regular_default", DataType: schemapb.DataType_Int64, Nullable: true,
+			DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 7}},
+		},
+	}}
+	materializer, err := newRecordMaterializer(
+		schema,
+		nil,
+		map[int64]struct{}{100: {}},
+		map[int64]struct{}{101: {}},
+	)
+	require.NoError(t, err)
+	defer materializer.Close()
+
+	record := &materializerTestRecord{len: 3}
+	wrapped, err := materializer.Wrap(record)
+	require.NoError(t, err)
+
+	ttlColumn := wrapped.Column(101).(*array.Int64)
+	require.Equal(t, 3, ttlColumn.NullN())
+	regularColumn := wrapped.Column(102).(*array.Int64)
+	require.Zero(t, regularColumn.NullN())
+	require.Equal(t, []int64{7, 7, 7}, regularColumn.Int64Values())
+	require.Same(t, ttlDefault, schema.GetFields()[1].GetDefaultValue())
+
+	cleanupMaterializedRecord(wrapped)
+	require.Equal(t, 0, record.releaseCount)
+
+	defaultMaterializer, err := NewRecordMaterializer(schema, nil, map[int64]struct{}{100: {}})
+	require.NoError(t, err)
+	defer defaultMaterializer.Close()
+	defaultWrapped, err := defaultMaterializer.Wrap(record)
+	require.NoError(t, err)
+	defaultTTLColumn := defaultWrapped.Column(101).(*array.Int64)
+	require.Zero(t, defaultTTLColumn.NullN())
+	require.Equal(t, []int64{123, 123, 123}, defaultTTLColumn.Int64Values())
+	cleanupMaterializedRecord(defaultWrapped)
+	require.Equal(t, 0, record.releaseCount)
+}
+
+func TestRecordMaterializerSelectionPreservesProtectedNulls(t *testing.T) {
+	futureTTL := int64(456)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+		{
+			FieldID: 101, Name: "ttl", DataType: schemapb.DataType_Timestamptz, Nullable: true,
+			DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_TimestamptzData{TimestamptzData: 123}},
+		},
+	}}
+	materializer, err := newRecordMaterializer(
+		schema,
+		nil,
+		map[int64]struct{}{100: {}, 101: {}},
+		map[int64]struct{}{101: {}},
+	)
+	require.NoError(t, err)
+	defer materializer.Close()
+
+	pk := newInt64Array(t, []int64{1, 2, 3})
+	defer pk.Release()
+	ttl := newNullableInt64Array(t, []int64{futureTTL, 0, 789}, []bool{true, false, true})
+	defer ttl.Release()
+	record := &materializerTestRecord{
+		len: 3,
+		columns: map[storage.FieldID]arrow.Array{
+			100: pk,
+			101: ttl,
+		},
+	}
+	selection := &recordSelection{ranges: []rowRange{{start: 0, end: 2}}, length: 2}
+
+	wrapper, err := materializer.WrapWithSelection(record, selection)
+	require.NoError(t, err)
+	selectedTTL := wrapper.Column(101).(*array.Int64)
+	require.True(t, selectedTTL.IsValid(0))
+	require.Equal(t, futureTTL, selectedTTL.Value(0))
+	require.True(t, selectedTTL.IsNull(1))
+
+	cleanupMaterializedRecord(wrapper)
+	require.Equal(t, 0, record.releaseCount)
+}
+
 func TestRecordMaterializerWrapFillsNullableMissingTextFieldAsBinary(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
@@ -833,5 +922,12 @@ func newInt64Array(t *testing.T, values []int64) *array.Int64 {
 	builder := array.NewInt64Builder(memory.DefaultAllocator)
 	t.Cleanup(builder.Release)
 	builder.AppendValues(values, nil)
+	return builder.NewInt64Array()
+}
+
+func newNullableInt64Array(t *testing.T, values []int64, valid []bool) *array.Int64 {
+	builder := array.NewInt64Builder(memory.DefaultAllocator)
+	t.Cleanup(builder.Release)
+	builder.AppendValues(values, valid)
 	return builder.NewInt64Array()
 }

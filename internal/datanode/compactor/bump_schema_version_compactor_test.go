@@ -1477,3 +1477,104 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionInputSchemaByF
 	s.ErrorContains(err, "references by_field lang of type")
 	s.ErrorContains(err, "only VarChar is allowed")
 }
+
+// TestFullRewriteMissingTTLFieldDoesNotProbeRecord is the real-cgo regression
+// for the source-TTL presence check: the target schema designates a TTL field that
+// old segments do not carry, and a dropped field routes them through full rewrite.
+// Presence must be decided from existingFields; probing record.Column(ttlFieldID)
+// panics on V3 records ("no such field") before the materializer can fill the null
+// TTL column.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteMissingTTLFieldDoesNotProbeRecord() {
+	const newTTLFieldID = int64(105)
+	s.task.currentTime = getMilvusBirthday().Add(time.Hour)
+	expiredDefault := s.task.currentTime.Add(-time.Minute).UnixMicro()
+	// Target schema gains a nullable Timestamptz field absent from the source
+	// segment and designates it as the collection TTL field.
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID:  newTTLFieldID,
+		Name:     "expire_at",
+		DataType: schemapb.DataType_Timestamptz,
+		Nullable: true,
+		DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_TimestamptzData{
+			TimestamptzData: expiredDefault,
+		}},
+	})
+	s.task.plan.Schema.Properties = append(s.task.plan.Schema.Properties, &commonpb.KeyValuePair{
+		Key:   common.CollectionTTLFieldKey,
+		Value: "expire_at",
+	})
+	params, err := compaction.GenerateJSONParams(s.task.plan.GetSchema())
+	s.Require().NoError(err)
+	s.task.plan.JsonParams = params
+
+	// Source segment carries a dropped field (103) -> droppedFieldIDs>0 -> full rewrite.
+	s.prepareBumpSchemaVersionCompactionWithDroppedField()
+
+	// Attach a real V3 manifest deltalog so the full rewrite filters one row and
+	// exercises selection/newSelectedRecord against the packed source record.
+	sourceSegment := s.task.plan.GetSegmentBinlogs()[0]
+	const deltaLogID = int64(20000)
+	basePath, _, err := packed.UnmarshalManifestPath(sourceSegment.GetManifest())
+	s.Require().NoError(err)
+	deltaPath := metautil.BuildDeltaLogPathV3(basePath, deltaLogID)
+	deleteRecord, _, _, err := storage.BuildDeleteRecord(
+		[]storage.PrimaryKey{storage.NewInt64PrimaryKey(sourceSegment.GetSegmentID())},
+		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second))},
+	)
+	s.Require().NoError(err)
+	defer deleteRecord.Release()
+	deltaWriter, err := storage.NewDeltalogWriter(
+		context.Background(),
+		sourceSegment.GetCollectionID(),
+		sourceSegment.GetPartitionID(),
+		sourceSegment.GetSegmentID(),
+		deltaLogID,
+		schemapb.DataType_Int64,
+		deltaPath,
+		storage.WithVersion(storage.StorageV2),
+		storage.WithStorageConfig(s.task.compactionParams.StorageConfig),
+	)
+	s.Require().NoError(err)
+	s.Require().NoError(deltaWriter.Write(deleteRecord))
+	s.Require().NoError(deltaWriter.Close())
+	sourceSegment.Manifest, err = packed.AddDeltaLogsToManifest(
+		sourceSegment.GetManifest(),
+		s.task.compactionParams.StorageConfig,
+		[]packed.DeltaLogEntry{{Path: deltaPath, NumEntries: 1}},
+	)
+	s.Require().NoError(err)
+	sourceSegment.Deltalogs = []*datapb.FieldBinlog{{
+		FieldID: 100,
+		Binlogs: []*datapb.Binlog{{
+			LogID:      deltaLogID,
+			LogPath:    deltaPath,
+			EntriesNum: 1,
+		}},
+	}}
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+	s.Equal(datapb.CompactionTaskState_completed, result.GetState())
+	s.Require().Len(result.GetSegments(), 1)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(2, segment.GetNumOfRows())
+
+	reader, err := storage.NewManifestRecordReader(
+		context.Background(),
+		segment.GetManifest(),
+		s.task.plan.GetSchema(),
+		storage.WithCollectionID(s.task.plan.GetSegmentBinlogs()[0].GetCollectionID()),
+		storage.WithVersion(segment.GetStorageVersion()),
+		storage.WithStorageConfig(s.task.compactionParams.StorageConfig),
+	)
+	s.Require().NoError(err)
+	defer reader.Close()
+
+	record, err := reader.Next()
+	s.Require().NoError(err)
+	ttlColumn, ok := record.Column(newTTLFieldID).(*array.Int64)
+	s.Require().True(ok)
+	s.Equal(2, ttlColumn.NullN())
+}
