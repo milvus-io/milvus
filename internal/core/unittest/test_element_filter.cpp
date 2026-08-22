@@ -2493,7 +2493,7 @@ TEST_P(ElementFilterZeroElementBatch, FullModeAdvancesPastZeroElementBatches) {
         target_values->Add(7);
         target_values->Add(9);
 
-        auto* valid_data = MutableFieldDataRowValidData(field_data);
+        auto* valid_data = field_data->mutable_valid_data();
         valid_data->Clear();
         for (size_t row = 0; row < kTargetRow; ++row) {
             valid_data->Add(row >= 4);
