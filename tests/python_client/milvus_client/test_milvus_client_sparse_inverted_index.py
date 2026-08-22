@@ -1124,7 +1124,10 @@ class TestSparseInvertedIndexV3Negative(_SparseInvertedIndexV3Base):
             "bad_codec",
             "IP",
             {"inverted_index_algo": "DAAT_MAXSCORE", "inverted_index_codec": "invalid_codec"},
-            "inverted_index_codec invalid_codec not found or not supported, supported: [block_streamvbyte block_maskedvbyte]: invalid parameter",
+            # The trailing ", supported: [...]" list is generated from the knowhere
+            # codec registry and grows with every knowhere upgrade, so only assert the
+            # version-independent rejection prefix here.
+            "inverted_index_codec invalid_codec not found or not supported",
         )
 
     @pytest.mark.parametrize(
