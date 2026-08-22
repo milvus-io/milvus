@@ -178,6 +178,7 @@ func (s *TEITextEmbeddingProviderSuite) TestNewTEIEmbeddingProvider() {
 		functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: models.TruncationDirectionParamKey, Value: "Invalid"})
 		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 		s.Error(err)
+		s.ErrorContains(err, "[truncation_direction param's value: Invalid] is invalid, only supports [Left/Right]")
 	}
 
 	// truncationDirection
