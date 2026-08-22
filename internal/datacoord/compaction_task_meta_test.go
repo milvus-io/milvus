@@ -129,6 +129,50 @@ func (suite *CompactionTaskMetaSuite) TestTaskStatsJSON() {
 	suite.JSONEq(string(expectedJSON), actualJSON)
 }
 
+func (suite *CompactionTaskMetaSuite) TestFailureHistoryJSON() {
+	// empty history returns an empty JSON array, matching TaskStatsJSON's convention.
+	suite.Equal("[]", suite.meta.FailureHistoryJSON())
+
+	failedTask := &datapb.CompactionTask{
+		PlanID:       1,
+		CollectionID: 100,
+		Type:         datapb.CompactionType_MixCompaction,
+		State:        datapb.CompactionTaskState_failed,
+		FailReason:   "segment integrity check failed",
+		StartTime:    time.Now().Unix(),
+		EndTime:      time.Now().Add(time.Minute).Unix(),
+	}
+	suite.meta.RecordTerminalFailure(failedTask)
+
+	expectedJSON, err := json.Marshal([]*metricsinfo.CompactionTask{newCompactionTaskStats(failedTask)})
+	suite.NoError(err)
+	suite.JSONEq(string(expectedJSON), suite.meta.FailureHistoryJSON())
+}
+
+// TestFailureHistorySurvivesTaskMetaDrop is the core regression test for the issue this
+// history exists to fix: today, once a failed task's regular meta is dropped (see
+// compactionInspector.cleanCompactionTaskMeta), its FailReason is gone for good. The
+// failure history must keep it independently queryable.
+func (suite *CompactionTaskMetaSuite) TestFailureHistorySurvivesTaskMetaDrop() {
+	failedTask := &datapb.CompactionTask{
+		PlanID:       1,
+		CollectionID: 100,
+		Type:         datapb.CompactionType_BumpSchemaVersionCompaction,
+		State:        datapb.CompactionTaskState_failed,
+		FailReason:   "row count mismatch after schema bump",
+	}
+	suite.NoError(suite.meta.SaveCompactionTask(context.TODO(), failedTask))
+	suite.meta.RecordTerminalFailure(failedTask)
+
+	suite.catalog.EXPECT().DropCompactionTask(mock.Anything, mock.Anything).Return(nil)
+	suite.NoError(suite.meta.DropCompactionTask(context.TODO(), failedTask))
+
+	// The regular task meta is gone...
+	suite.Empty(suite.meta.GetCompactionTasksByTriggerID(failedTask.GetTriggerID()))
+	// ...but the failure history still has it.
+	suite.Contains(suite.meta.FailureHistoryJSON(), "row count mismatch after schema bump")
+}
+
 // TestReloadFromKV_PreAllocatedSegmentIDsCompatibility verifies that compatibility
 // logic in reloadFromKV does NOT mark Level0DeleteCompaction tasks as failed when
 // PreAllocatedSegmentIDs is nil, while still failing other unfinished tasks that
