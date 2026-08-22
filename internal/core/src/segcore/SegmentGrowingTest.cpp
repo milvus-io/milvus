@@ -63,6 +63,7 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
+#include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/ManifestTestUtil.h"
 #include "test_utils/SegcoreConfigUtils.h"
@@ -647,6 +648,144 @@ TEST_P(GrowingTest, FillData) {
         EXPECT_EQ(GetFieldDataRowValidData(*double_array_result).size(), 0);
         EXPECT_EQ(GetFieldDataRowValidData(*float_array_result).size(), 0);
     }
+}
+
+// load_field_data_common addresses column data, the interim index, timestamps
+// and row ids by the offset PreInsert reserved. Validity has to use the same
+// offset: ConcurrentVectorImpl::set_data_raw reads the range back through
+// bulk_is_valid_range(element_offset, ...) to lay out a compact nullable
+// column, so the two schemes disagreeing puts the null flags on the wrong rows.
+//
+// Appending at the bitmap's current length happens to agree with the reserved
+// offset whenever the two coincide, which is every production caller today
+// (Load runs one PreInsert against an empty bitmap). These two cases are the
+// ones where they do not.
+TEST(Growing, LoadFieldDataAddressesValidityByReservedOffset) {
+    constexpr int64_t row_count = 4;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto nullable = schema->AddDebugField("nullable", DataType::INT64, true);
+    const auto& field_meta = (*schema)[nullable];
+
+    const std::array<int64_t, row_count> values = {10, 11, 12, 13};
+    auto make_batch = [&](const std::array<bool, row_count>& valid) {
+        auto array = CreateDataArrayFrom(
+            values.data(), valid.data(), row_count, field_meta);
+        return CreateFieldDataFromDataArray(row_count, array.get(), field_meta);
+    };
+    const std::array<bool, row_count> first = {true, false, true, false};
+    const std::array<bool, row_count> second = {false, true, false, true};
+
+    auto bits_of = [](const SegmentGrowingImpl& segment, FieldId field_id) {
+        auto bits =
+            segment.get_insert_record().get_valid_data(field_id)->get_data();
+        return std::vector<bool>(bits.begin(), bits.end());
+    };
+
+    // A reload of a range already written rewrites it in place. Appending would
+    // put the second batch at [row_count, 2 * row_count) instead, doubling the
+    // bitmap and leaving the rows themselves flagged by the stale batch.
+    {
+        auto owned = CreateGrowingSegment(schema, empty_index_meta);
+        auto* segment = dynamic_cast<SegmentGrowingImpl*>(owned.get());
+        ASSERT_NE(segment, nullptr);
+
+        ASSERT_EQ(segment->PreInsert(row_count), 0);
+        segment->load_field_data_common(
+            nullable, 0, {make_batch(first)}, pk, row_count);
+        EXPECT_EQ(bits_of(*segment, nullable),
+                  (std::vector<bool>{true, false, true, false}));
+
+        segment->load_field_data_common(
+            nullable, 0, {make_batch(second)}, pk, row_count);
+        EXPECT_EQ(bits_of(*segment, nullable),
+                  (std::vector<bool>{false, true, false, true}));
+    }
+
+    // A batch whose reserved offset runs past the bitmap fails where the
+    // misalignment happens. Appending would silently write this batch's flags
+    // over the earlier rows and shift every row after them.
+    {
+        auto owned = CreateGrowingSegment(schema, empty_index_meta);
+        auto* segment = dynamic_cast<SegmentGrowingImpl*>(owned.get());
+        ASSERT_NE(segment, nullptr);
+
+        // Reserve a range and never write it, so the bitmap falls behind.
+        ASSERT_EQ(segment->PreInsert(row_count), 0);
+        ASSERT_EQ(segment->PreInsert(row_count), row_count);
+        EXPECT_THROW(
+            segment->load_field_data_common(
+                nullable, row_count, {make_batch(first)}, pk, row_count),
+            SegcoreError);
+        EXPECT_TRUE(
+            segment->get_insert_record().get_valid_data(nullable)->empty());
+    }
+}
+
+// pk2offset_ maps a primary key to the row offset every other growing
+// structure addresses that row by. A batch loaded at a reserved offset has to
+// register its rows there. Indexing from 0 instead would point queries and
+// deletes at rows belonging to an earlier batch -- silently, with no assert to
+// catch it, which is why this one is worth a test of its own.
+TEST(Growing, LoadFieldDataAddressesPkOffsetsByReservedOffset) {
+    constexpr int64_t batch_rows = 2;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    auto owned = CreateGrowingSegment(schema, empty_index_meta);
+    auto* segment = dynamic_cast<SegmentGrowingImpl*>(owned.get());
+    ASSERT_NE(segment, nullptr);
+
+    auto make_int64_batch = [](const std::vector<int64_t>& values) {
+        auto field_data = milvus::storage::CreateFieldData(
+            DataType::INT64,
+            DataType::NONE,
+            false,
+            1,
+            static_cast<int64_t>(values.size()));
+        field_data->FillFieldData(values.data(),
+                                  static_cast<ssize_t>(values.size()));
+        return field_data;
+    };
+
+    // Two loads, each reserving its own logical range. Timestamps go through
+    // the same entry point so search_pk has something to compare against.
+    const std::vector<std::vector<int64_t>> pk_batches = {{100, 101},
+                                                          {200, 201}};
+    for (int64_t batch = 0; batch < 2; ++batch) {
+        auto reserved = segment->PreInsert(batch_rows);
+        ASSERT_EQ(reserved, batch * batch_rows);
+        segment->load_field_data_common(TimestampFieldID,
+                                        reserved,
+                                        {make_int64_batch({1, 1})},
+                                        pk,
+                                        batch_rows);
+        segment->load_field_data_common(pk,
+                                        reserved,
+                                        {make_int64_batch(pk_batches[batch])},
+                                        pk,
+                                        batch_rows);
+    }
+
+    auto offsets_for = [&](int64_t pk_value) {
+        std::vector<int64_t> out;
+        for (auto offset : segment->get_insert_record().search_pk(
+                 PkType(pk_value), Timestamp(100))) {
+            out.push_back(offset.get());
+        }
+        return out;
+    };
+
+    // The second batch owns rows 2 and 3. Appending from 0 would hand it rows
+    // 0 and 1, which the first batch already owns.
+    EXPECT_EQ(offsets_for(100), (std::vector<int64_t>{0}));
+    EXPECT_EQ(offsets_for(101), (std::vector<int64_t>{1}));
+    EXPECT_EQ(offsets_for(200), (std::vector<int64_t>{2}));
+    EXPECT_EQ(offsets_for(201), (std::vector<int64_t>{3}));
 }
 
 TEST(Growing, FillNullableData) {

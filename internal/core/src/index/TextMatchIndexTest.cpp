@@ -139,7 +139,7 @@ BuildTextMatchIndexForUpload(const storage::FileManagerContext& ctx) {
         storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
     field_data->FillFieldData(texts.data(), texts.size());
 
-    index->BuildIndexFromFieldData({field_data}, false);
+    index->BuildIndexFromFieldData({field_data}, false, 0);
     return index;
 }
 
@@ -467,7 +467,7 @@ TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterAnalyzer("milvus_tokenizer", "{}");
 
-    index->BuildIndexFromFieldData(field_datas, true /* nullable */);
+    index->BuildIndexFromFieldData(field_datas, true /* nullable */, 0);
     index->Commit();
     index->Reload();
 
@@ -530,6 +530,106 @@ TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
     }
 }
 
+// Regression test: a growing segment loads each batch at the offset PreInsert
+// reserved. BuildIndexFromFieldData has to place that batch's doc ids there,
+// the same doc-id space AddTextsGrowing writes into -- starting at 0 would
+// stack the loaded batch on top of doc ids the index already owns.
+TEST(TextMatch, BuildIndexFromFieldDataAtOffsetBegin) {
+    using Index = index::TextMatchIndex;
+
+    auto index = std::make_unique<Index>(200,
+                                         "test_offset_begin",
+                                         "milvus_tokenizer",
+                                         "{}",
+                                         /*enable_background_merge=*/true);
+    index->CreateReader(milvus::index::SetBitsetGrowing);
+    index->RegisterAnalyzer("milvus_tokenizer", "{}");
+
+    // Rows [0, 3) arrive through the insert path, which is already
+    // offset-addressed.
+    const std::vector<std::string> inserted = {"alpha", "beta", "gamma"};
+    index->AddTextsGrowing(
+        inserted.size(), inserted.data(), nullptr, /*offset_begin=*/0);
+
+    // Rows [3, 5) arrive through the load path, at the offset it reserved.
+    const std::vector<std::string> loaded = {"delta", "epsilon"};
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, false, 1, loaded.size());
+    field_data->FillFieldData(loaded.data(), loaded.size());
+    index->BuildIndexFromFieldData({field_data}, false, /*offset_begin=*/3);
+    index->Commit();
+    index->Reload();
+
+    auto expect_only_hit = [&](const std::string& term, int64_t expected) {
+        auto res = index->MatchQuery(term, 1);
+        ASSERT_EQ(res.size(), 5) << term;
+        for (int64_t i = 0; i < 5; ++i) {
+            EXPECT_EQ(static_cast<bool>(res[i]), i == expected)
+                << term << " unexpected at offset " << i;
+        }
+    };
+
+    expect_only_hit("alpha", 0);
+    expect_only_hit("gamma", 2);
+    expect_only_hit("delta", 3);
+    expect_only_hit("epsilon", 4);
+}
+
+// The wiring, not the index: BuildIndexFromFieldDataAtOffsetBegin covers the
+// index honouring offset_begin, this covers load_field_data_common actually
+// handing it the offset PreInsert reserved. Insert fills rows [0, 2), a load
+// fills [2, 4); on a build that indexes from 0 the loaded rows land on top of
+// the inserted ones and the term queries below hit the wrong offsets.
+TEST(TextMatch, GrowingLoadBuildsTextIndexAtReservedOffset) {
+    auto schema = GenTestSchema();
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    auto* seg_impl = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    ASSERT_NE(seg_impl, nullptr);
+    const auto pk_field = FieldId(100);
+    const auto str_field = FieldId(101);
+
+    constexpr int64_t inserted_rows = 2;
+    auto data = DataGen(schema, inserted_rows);
+    auto* str_col = data.raw_->mutable_fields_data()
+                        ->at(1)
+                        .mutable_scalars()
+                        ->mutable_string_data()
+                        ->mutable_data();
+    str_col->at(0) = "football basketball";
+    str_col->at(1) = "swimming tennis";
+    ASSERT_EQ(seg->PreInsert(inserted_rows), 0);
+    seg->Insert(0,
+                inserted_rows,
+                data.row_ids_.data(),
+                data.timestamps_.data(),
+                data.raw_);
+
+    const std::vector<std::string> loaded = {"cricket rugby", "hockey curling"};
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, false, 1, loaded.size());
+    field_data->FillFieldData(loaded.data(), loaded.size());
+    auto reserved = seg->PreInsert(loaded.size());
+    ASSERT_EQ(reserved, inserted_rows);
+    seg_impl->load_field_data_common(
+        str_field, reserved, {field_data}, pk_field, loaded.size());
+
+    auto pinned = seg_impl->GetTextIndex(nullptr, str_field);
+    auto* index = pinned.get();
+    auto expect_only_hit = [&](const std::string& term, int64_t expected) {
+        auto res = index->MatchQuery(term, 1);
+        ASSERT_EQ(res.size(), 4) << term;
+        for (int64_t i = 0; i < 4; ++i) {
+            EXPECT_EQ(static_cast<bool>(res[i]), i == expected)
+                << term << " unexpected at offset " << i;
+        }
+    };
+
+    expect_only_hit("football", 0);
+    expect_only_hit("tennis", 1);
+    expect_only_hit("cricket", 2);
+    expect_only_hit("curling", 3);
+}
+
 TEST(TextMatch, BuildIndexFromTextFieldData) {
     auto ctx = CreateTextMatchTestFileManagerContext(
         1002, proto::schema::DataType::Text);
@@ -542,7 +642,7 @@ TEST(TextMatch, BuildIndexFromTextFieldData) {
         storage::CreateFieldData(DataType::TEXT, DataType::NONE, false);
     field_data->FillFieldData(texts.data(), texts.size());
 
-    ASSERT_NO_THROW(index->BuildIndexFromFieldData({field_data}, false));
+    ASSERT_NO_THROW(index->BuildIndexFromFieldData({field_data}, false, 0));
 }
 
 TEST(TextMatch, SealedCreateTextIndexDecodesTextLobRefs) {
@@ -797,7 +897,7 @@ TEST(TextMatch, BuildIndexFromFieldDataSingleBatchNullable) {
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterAnalyzer("milvus_tokenizer", "{}");
 
-    index->BuildIndexFromFieldData(field_datas, true);
+    index->BuildIndexFromFieldData(field_datas, true, 0);
     index->Commit();
     index->Reload();
 

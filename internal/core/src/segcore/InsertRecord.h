@@ -1527,10 +1527,16 @@ class InsertRecordGrowing {
         pk2offset_->find_range(pk, op, bitset, condition);
     }
 
+    // `start_offset` is the logical offset PreInsert reserved for this batch.
+    // pk2offset_ maps a pk to the row offset every other growing structure
+    // addresses that row by, so a batch that starts anywhere but 0 has to say
+    // so -- indexing from 0 would silently point queries and deletes at the
+    // wrong rows.
     void
-    insert_pks(const std::vector<FieldDataPtr>& field_datas) {
+    insert_pks(int64_t start_offset,
+               const std::vector<FieldDataPtr>& field_datas) {
         std::lock_guard lck(shared_mutex_);
-        int64_t offset = 0;
+        int64_t offset = start_offset;
         for (auto& data : field_datas) {
             int64_t row_count = data->get_num_rows();
             auto data_type = data->get_data_type();
