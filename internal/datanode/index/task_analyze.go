@@ -22,9 +22,12 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/util"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -118,18 +121,21 @@ func buildAnalyzeInfo(req *workerpb.AnalyzeRequest) *clusteringpb.AnalyzeInfo {
 	n := len(req.GetSegmentStats())
 	numRowsMap := make(map[int64]int64, n)
 	segmentInsertFilesMap := make(map[int64]*clusteringpb.InsertFiles, n)
+	segmentInsertFilesMapV2 := make(map[int64]*indexcgopb.SegmentInsertFiles)
 	manifestPathsMap := make(map[int64]string, n)
-
+	var numRows int64
 	for segID, stats := range req.GetSegmentStats() {
 		numRowsMap[segID] = stats.GetNumRows()
 
 		if manifest := stats.GetManifestPath(); manifest != "" {
 			// StorageV3: forward the manifest string; C++ resolves files via loon.
+			numRows = stats.GetNumRows()
+			numRowsMap[segID] = numRows
 			manifestPathsMap[segID] = manifest
 			continue
 		}
 
-		// V1: reconstruct insert-log paths from logIDs.
+		mlog.Info(context.TODO(), "append segment rows", mlog.FieldSegmentID(segID), mlog.Int64("rows", stats.GetNumRows()))
 		insertFiles := make([]string, 0, len(stats.GetLogIDs()))
 		for _, id := range stats.GetLogIDs() {
 			path := metautil.BuildInsertLogPath(req.GetStorageConfig().RootPath,
@@ -137,6 +143,40 @@ func buildAnalyzeInfo(req *workerpb.AnalyzeRequest) *clusteringpb.AnalyzeInfo {
 			insertFiles = append(insertFiles, path)
 		}
 		segmentInsertFilesMap[segID] = &clusteringpb.InsertFiles{InsertFiles: insertFiles}
+
+		if req.StorageVersion == storage.StorageV2 || req.StorageVersion == storage.StorageV3 {
+			fieldBinLogs := make([]*datapb.FieldBinlog, 0)
+			for _, binlog := range req.InsertFiles[segID].BinLogs {
+				requestFieldID := req.GetFieldID()
+				if binlog.FieldID == requestFieldID {
+					fieldBinLogs = append(fieldBinLogs, binlog)
+				} else {
+					isFieldBinlogOfFieldID := IsFieldBinlogOfFieldID(binlog, requestFieldID)
+					mlog.Info(context.TODO(), "look for binlog", mlog.Int64("requestFieldID", requestFieldID), mlog.Int64("binlog.FieldID", binlog.FieldID))
+					if isFieldBinlogOfFieldID {
+						mlog.Info(context.TODO(), "binlog found ", mlog.String("theBinLog", binlog.String()))
+						fieldBinLogs = append(fieldBinLogs, binlog)
+					}
+				}
+			}
+			if len(fieldBinLogs) > 0 {
+				mlog.Info(context.TODO(), "Found binlog via child ids")
+				segmentInsertFilesMapV2[segID] = util.GetSegmentInsertFiles(
+					fieldBinLogs,
+					req.GetStorageConfig(),
+					req.GetCollectionID(),
+					req.GetPartitionID(),
+					segID)
+			} else {
+				mlog.Info(context.TODO(), "Use single binlog")
+				segmentInsertFilesMapV2[segID] = util.GetSegmentInsertFiles(
+					req.GetInsertFiles()[segID].BinLogs,
+					req.GetStorageConfig(),
+					req.GetCollectionID(),
+					req.GetPartitionID(),
+					segID)
+			}
+		}
 	}
 
 	field := req.GetField()
@@ -148,23 +188,34 @@ func buildAnalyzeInfo(req *workerpb.AnalyzeRequest) *clusteringpb.AnalyzeInfo {
 		}
 	}
 
+	// When manifest paths are present the C++ side must use the V3 code path
+	// to resolve files via loon, even if the request originally carried V2.
+	storageVersion := req.GetStorageVersion()
+	if len(manifestPathsMap) > 0 && storageVersion < storage.StorageV3 {
+		storageVersion = storage.StorageV3
+	}
+
 	return &clusteringpb.AnalyzeInfo{
-		ClusterID:       req.GetClusterID(),
-		BuildID:         req.GetTaskID(),
-		CollectionID:    req.GetCollectionID(),
-		PartitionID:     req.GetPartitionID(),
-		Version:         req.GetVersion(),
-		Dim:             req.GetDim(),
-		StorageConfig:   storageConfig,
-		NumClusters:     req.GetNumClusters(),
-		TrainSize:       int64(float64(hardware.GetMemoryCount()) * req.GetMaxTrainSizeRatio()),
-		MinClusterRatio: req.GetMinClusterSizeRatio(),
-		MaxClusterRatio: req.GetMaxClusterSizeRatio(),
-		MaxClusterSize:  req.GetMaxClusterSize(),
-		NumRows:         numRowsMap,
-		InsertFiles:     segmentInsertFilesMap,
-		FieldSchema:     field,
-		ManifestPaths:   manifestPathsMap,
+		ClusterID:          req.GetClusterID(),
+		BuildID:            req.GetTaskID(),
+		CollectionID:       req.GetCollectionID(),
+		PartitionID:        req.GetPartitionID(),
+		Version:            req.GetVersion(),
+		Dim:                req.GetDim(),
+		StorageConfig:      storageConfig,
+		NumClusters:        req.GetNumClusters(),
+		TrainSize:          int64(float64(hardware.GetMemoryCount()) * req.GetMaxTrainSizeRatio()),
+		MinClusterRatio:    req.GetMinClusterSizeRatio(),
+		MaxClusterRatio:    req.GetMaxClusterSizeRatio(),
+		MaxClusterSize:     req.GetMaxClusterSize(),
+		NumRows:            numRowsMap,
+		InsertFiles:        segmentInsertFilesMap,
+		FieldSchema:        field,
+		ManifestPaths:      manifestPathsMap,
+		StorageVersion:     storageVersion,
+		SegmentInsertFiles: segmentInsertFilesMapV2,
+		TrainBufferSize:    req.GetTrainBufferSize(),
+		AssignBufferSize:   req.GetAssignBufferSize(),
 	}
 }
 
@@ -178,7 +229,9 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 	log.Info(ctx, "Begin to build analyze task")
 
 	analyzeInfo := buildAnalyzeInfo(at.req)
-
+	mlog.Info(context.TODO(), "analyze buffer sizes", mlog.Int64("train_buffer_size", analyzeInfo.TrainBufferSize),
+		mlog.Int64("assign_buffer_size", analyzeInfo.AssignBufferSize))
+	mlog.Info(context.TODO(), "starting analyze", mlog.Any("analyzeInfo", analyzeInfo))
 	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo, at.pluginContext)
 	if err != nil {
 		log.Error(ctx, "failed to analyze data", mlog.Err(err))

@@ -13,7 +13,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
+#pragma once
 #include <map>
 #include <stdint.h>
 #include <string>
@@ -38,4 +38,6 @@ struct AnalyzeInfo {
     std::map<int64_t, int64_t> num_rows;
     milvus::storage::StorageConfig storage_config;
     milvus::Config config;
+    int64_t train_buffer_size;
+    int64_t assign_buffer_size;
 };
