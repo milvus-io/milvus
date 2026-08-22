@@ -160,16 +160,6 @@ class PluginLoader {
         return it != plugins_.end() ? it->second : nullptr;
     }
 
-    std::vector<std::string>
-    listPlugins() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        std::vector<std::string> names;
-        for (const auto& pair : plugins_) {
-            names.push_back(pair.first);
-        }
-        return names;
-    }
-
 #ifdef MILVUS_UNIT_TEST
     void
     addPluginForTest(std::shared_ptr<milvus::storage::plugin::IPlugin> plugin) {

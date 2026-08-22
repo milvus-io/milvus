@@ -1591,15 +1591,6 @@ DiskFileManagerImpl::GetLocalJsonStatsSharedIndexPrefix() {
 }
 
 std::string
-DiskFileManagerImpl::GetLocalJsonStatsShreddingPath(
-    const std::string& file_name) {
-    namespace fs = std::filesystem;
-    fs::path prefix = GetLocalJsonStatsShreddingPrefix();
-    fs::path file = file_name;
-    return (prefix / file).string();
-}
-
-std::string
 DiskFileManagerImpl::GetLocalNgramIndexPrefix() {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();

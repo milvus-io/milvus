@@ -646,11 +646,6 @@ class Schema {
         return function_output_field_ids_.count(field_id) > 0;
     }
 
-    const std::unordered_set<FieldId>&
-    function_output_field_ids() const {
-        return function_output_field_ids_;
-    }
-
     void
     add_function_output_field_id(const FieldId& field_id) {
         function_output_field_ids_.insert(field_id);
@@ -722,5 +717,4 @@ class Schema {
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;
-using SafeSchemaPtr = std::atomic<SchemaPtr*>;
 }  // namespace milvus

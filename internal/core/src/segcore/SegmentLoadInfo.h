@@ -150,11 +150,6 @@ struct LoadDiff {
                load_external_manifest;
     }
 
-    [[nodiscard]] bool
-    HasManifestChange() const {
-        return manifest_updated;
-    }
-
     [[nodiscard]] std::string
     ToString() const {
         std::ostringstream oss;
@@ -643,17 +638,6 @@ class SegmentLoadInfo {
         return info_.index_infos_size();
     }
 
-    [[nodiscard]] const proto::segcore::FieldIndexInfo&
-    GetIndexInfo(int index) const {
-        return info_.index_infos(index);
-    }
-
-    [[nodiscard]] const google::protobuf::RepeatedPtrField<
-        proto::segcore::FieldIndexInfo>&
-    GetIndexInfos() const {
-        return info_.index_infos();
-    }
-
     /**
      * @brief Check if a field has index info
      * @param field_id The field ID to check
@@ -702,12 +686,6 @@ class SegmentLoadInfo {
     [[nodiscard]] const proto::segcore::FieldBinlog&
     GetBinlogPath(int index) const {
         return info_.binlog_paths(index);
-    }
-
-    [[nodiscard]] const google::protobuf::RepeatedPtrField<
-        proto::segcore::FieldBinlog>&
-    GetBinlogPaths() const {
-        return info_.binlog_paths();
     }
 
     /**
@@ -854,12 +832,6 @@ class SegmentLoadInfo {
         return info_.statslogs(index);
     }
 
-    [[nodiscard]] const google::protobuf::RepeatedPtrField<
-        proto::segcore::FieldBinlog>&
-    GetStatslogs() const {
-        return info_.statslogs();
-    }
-
     [[nodiscard]] int
     GetDeltalogCount() const {
         return info_.deltalogs_size();
@@ -868,12 +840,6 @@ class SegmentLoadInfo {
     [[nodiscard]] const proto::segcore::FieldBinlog&
     GetDeltalog(int index) const {
         return info_.deltalogs(index);
-    }
-
-    [[nodiscard]] const google::protobuf::RepeatedPtrField<
-        proto::segcore::FieldBinlog>&
-    GetDeltalogs() const {
-        return info_.deltalogs();
     }
 
     // ==================== Text Index Stats ====================
@@ -911,12 +877,6 @@ class SegmentLoadInfo {
         return info_.bm25logs(index);
     }
 
-    [[nodiscard]] const google::protobuf::RepeatedPtrField<
-        proto::segcore::FieldBinlog>&
-    GetBm25logs() const {
-        return info_.bm25logs();
-    }
-
     // ==================== JSON Key Stats ====================
 
     [[nodiscard]] bool
@@ -945,11 +905,6 @@ class SegmentLoadInfo {
     void
     SetFieldFilledWithDefault(FieldId field_id) {
         fields_filled_with_default_.insert(field_id);
-    }
-
-    void
-    ClearFieldFilledWithDefault(FieldId field_id) {
-        fields_filled_with_default_.erase(field_id);
     }
 
     [[nodiscard]] bool

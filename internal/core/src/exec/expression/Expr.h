@@ -2420,24 +2420,6 @@ class SegmentExpr : public Expr {
         return valid_result;
     }
 
-    template <typename T, typename FUNC, typename... ValTypes>
-    void
-    ProcessIndexChunksV2(FUNC func, const ValTypes&... values) {
-        typedef std::
-            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-                IndexInnerType;
-        using Index = index::ScalarIndex<IndexInnerType>;
-
-        // For scalar index, num_index_chunk_ can only be 1
-        AssertInfo(num_index_chunk_ == 1,
-                   "scalar index should have exactly 1 chunk, got {}",
-                   num_index_chunk_);
-
-        auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
-        auto* index_ptr = const_cast<Index*>(scalar_index);
-        func(index_ptr, values...);
-    }
-
  protected:
     // Check if a compatible scalar index exists for this expression.
     // Only called internally by DetermineExecPath().
@@ -3030,19 +3012,14 @@ class ExprSet {
         exprs_.clear();
     }
 
-    ExecContext*
-    get_exec_context() const {
-        return exec_ctx_;
+    const std::vector<std::shared_ptr<Expr>>&
+    exprs() const {
+        return exprs_;
     }
 
     size_t
     size() const {
         return exprs_.size();
-    }
-
-    const std::vector<std::shared_ptr<Expr>>&
-    exprs() const {
-        return exprs_;
     }
 
     const std::shared_ptr<Expr>&

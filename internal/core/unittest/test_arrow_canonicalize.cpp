@@ -27,8 +27,6 @@
 #include "storage/Util.h"
 
 using milvus::storage::CanonicalizeArrowVariants;
-using milvus::storage::CoerceToBinary;
-using milvus::storage::CoerceToList;
 
 namespace {
 
@@ -237,39 +235,6 @@ TEST(CanonicalizeArrowVariants, EmptyArray) {
     auto out = CanonicalizeArrowVariants(in);
     ASSERT_EQ(out->type_id(), arrow::Type::STRING);
     EXPECT_EQ(out->length(), 0);
-}
-
-// ===== CoerceToBinary =====
-
-TEST(CoerceToBinary, StringToBinaryZeroCopy) {
-    arrow::StringBuilder b;
-    ASSERT_TRUE(b.Append("hello").ok());
-    std::shared_ptr<arrow::Array> in;
-    ASSERT_TRUE(b.Finish(&in).ok());
-    auto out = CoerceToBinary({in})[0];
-    ASSERT_EQ(out->type_id(), arrow::Type::BINARY);
-    auto ba = std::static_pointer_cast<arrow::BinaryArray>(out);
-    EXPECT_EQ(ba->GetString(0), "hello");
-}
-
-TEST(CoerceToBinary, BinaryPassthrough) {
-    arrow::BinaryBuilder b;
-    ASSERT_TRUE(b.Append(reinterpret_cast<const uint8_t*>("xy"), 2).ok());
-    std::shared_ptr<arrow::Array> in;
-    ASSERT_TRUE(b.Finish(&in).ok());
-    auto out = CoerceToBinary({in})[0];
-    EXPECT_EQ(out.get(), in.get());
-}
-
-TEST(CoerceToBinary, AllVariantsToBinary) {
-    auto sv = MakeStringViewArray({"a"}, {true});
-    auto ls = MakeLargeStringArray({"bb"}, {true});
-    auto bv = MakeBinaryViewArray({"ccc"}, {true});
-    auto lb = MakeLargeBinaryArray({"dddd"}, {true});
-    for (const auto& in : {sv, ls, bv, lb}) {
-        auto out = CoerceToBinary({in})[0];
-        ASSERT_EQ(out->type_id(), arrow::Type::BINARY);
-    }
 }
 
 namespace {
@@ -979,28 +944,6 @@ TEST(NormalizeExternalArrow, ArrayVarcharAcceptsStringList) {
     EXPECT_FALSE(out->IsNull(0));
 }
 
-// ===== CoerceToList =====
-
-TEST(CoerceToList, LargeListToList) {
-    arrow::Int32Builder vb;
-    ASSERT_TRUE(vb.AppendValues({1, 2, 3, 4}).ok());
-    std::shared_ptr<arrow::Array> values;
-    ASSERT_TRUE(vb.Finish(&values).ok());
-
-    arrow::Int64Builder ob;
-    ASSERT_TRUE(ob.AppendValues({0, 2, 4}).ok());
-    std::shared_ptr<arrow::Array> offsets;
-    ASSERT_TRUE(ob.Finish(&offsets).ok());
-    auto large_list = *arrow::LargeListArray::FromArrays(*offsets, *values);
-
-    auto out = CoerceToList({large_list})[0];
-    ASSERT_EQ(out->type_id(), arrow::Type::LIST);
-    auto la = std::static_pointer_cast<arrow::ListArray>(out);
-    EXPECT_EQ(la->length(), 2);
-    EXPECT_EQ(la->value_length(0), 2);
-    EXPECT_EQ(la->value_length(1), 2);
-}
-
 // ===== Sliced-input nullability =====
 
 TEST(CanonicalizeArrowVariants, SlicedLargeListNullsPreserved) {
@@ -1075,40 +1018,6 @@ TEST(CanonicalizeArrowVariants, SlicedFixedSizeListNullsPreserved) {
     EXPECT_EQ(fsla->values()->type_id(), arrow::Type::STRING);
 }
 
-TEST(CoerceToList, SlicedLargeListNullsPreserved) {
-    arrow::Int32Builder vb;
-    ASSERT_TRUE(vb.AppendValues({1, 2, 3, 4, 5, 6}).ok());
-    std::shared_ptr<arrow::Array> values;
-    ASSERT_TRUE(vb.Finish(&values).ok());
-    arrow::Int64Builder ob;
-    ASSERT_TRUE(ob.AppendValues({0, 2, 2, 4, 6}).ok());
-    std::shared_ptr<arrow::Array> offsets;
-    ASSERT_TRUE(ob.Finish(&offsets).ok());
-    arrow::TypedBufferBuilder<bool> nb;
-    ASSERT_TRUE(nb.Reserve(4).ok());
-    nb.UnsafeAppend(true);
-    nb.UnsafeAppend(false);
-    nb.UnsafeAppend(true);
-    nb.UnsafeAppend(true);
-    std::shared_ptr<arrow::Buffer> null_buf;
-    ASSERT_TRUE(nb.Finish(&null_buf).ok());
-    auto ll = std::make_shared<arrow::LargeListArray>(
-        arrow::large_list(values->type()),
-        4,
-        std::static_pointer_cast<arrow::Int64Array>(offsets)->values(),
-        values,
-        null_buf,
-        1,
-        0);
-    auto sliced = ll->Slice(1, 3);
-
-    auto out = CoerceToList({sliced})[0];
-    ASSERT_EQ(out->type_id(), arrow::Type::LIST);
-    EXPECT_EQ(out->length(), 3);
-    EXPECT_EQ(out->null_count(), 1);
-    EXPECT_TRUE(out->IsNull(0));
-}
-
 TEST(CanonicalizeArrowVariants, AllNullStringView) {
     auto in = MakeStringViewArray({"x", "y", "z"}, {false, false, false});
     auto out = CanonicalizeArrowVariants(in);
@@ -1117,18 +1026,4 @@ TEST(CanonicalizeArrowVariants, AllNullStringView) {
     EXPECT_TRUE(out->IsNull(0));
     EXPECT_TRUE(out->IsNull(1));
     EXPECT_TRUE(out->IsNull(2));
-}
-
-TEST(CoerceToList, ListPassthrough) {
-    arrow::Int32Builder vb;
-    ASSERT_TRUE(vb.AppendValues({1, 2}).ok());
-    std::shared_ptr<arrow::Array> values;
-    ASSERT_TRUE(vb.Finish(&values).ok());
-    arrow::Int32Builder ob;
-    ASSERT_TRUE(ob.AppendValues({0, 2}).ok());
-    std::shared_ptr<arrow::Array> offsets;
-    ASSERT_TRUE(ob.Finish(&offsets).ok());
-    auto in = *arrow::ListArray::FromArrays(*offsets, *values);
-    auto out = CoerceToList({in})[0];
-    EXPECT_EQ(out.get(), in.get());
 }

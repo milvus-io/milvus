@@ -52,22 +52,6 @@ class VectorHasher {
 
     static constexpr uint64_t kNullHash = 1;
 
-    static bool
-    typeSupportValueIds(DataType type) {
-        switch (type) {
-            case DataType::BOOL:
-            case DataType::INT8:
-            case DataType::INT16:
-            case DataType::INT32:
-            case DataType::INT64:
-            case DataType::VARCHAR:
-            case DataType::STRING:
-                return true;
-            default:
-                return false;
-        }
-    }
-
     template <DataType type>
     void
     hashValues(const ColumnVectorPtr& column_data, bool mix, uint64_t* result);

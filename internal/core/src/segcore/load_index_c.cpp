@@ -28,7 +28,6 @@
 #include <vector>
 
 #include "cachinglayer/Manager.h"
-#include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -43,7 +42,6 @@
 #include "index/IndexInfo.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
-#include "knowhere/binaryset.h"
 #include "knowhere/utils.h"
 #include "log/Log.h"
 #include "monitor/scope_metric.h"
@@ -53,8 +51,6 @@
 #include "pb/schema.pb.h"
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
-#include "segcore/storagev1translator/V1SealedIndexTranslator.h"
-#include "storage/FileManager.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
@@ -95,56 +91,6 @@ DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info) {
 
     auto info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
     delete info;
-}
-
-CStatus
-appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto load_index_info =
-            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        auto field_type = load_index_info->field_type;
-        auto binary_set = (knowhere::BinarySet*)c_binary_set;
-        auto& index_params = load_index_info->index_params;
-        bool find_index_type =
-            index_params.count("index_type") > 0 ? true : false;
-        AssertInfo(find_index_type == true,
-                   "Can't find index type in index_params");
-
-        milvus::index::CreateIndexInfo index_info;
-        index_info.field_type = milvus::DataType(field_type);
-        index_info.index_type = index_params["index_type"];
-
-        auto config = milvus::index::ParseConfigFromIndexParams(
-            load_index_info->index_params);
-
-        // Config should have value for milvus::index::SCALAR_INDEX_ENGINE_VERSION for production calling chain.
-        // Use value_or(1) for unit test without setting this value
-        index_info.scalar_index_engine_version =
-            milvus::index::GetValueFromConfig<int32_t>(
-                config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
-                .value_or(1);
-
-        index_info.tantivy_index_version =
-            index_info.scalar_index_engine_version <= 1
-                ? milvus::index::TANTIVY_INDEX_MINIMUM_VERSION
-                : milvus::index::TANTIVY_INDEX_LATEST_VERSION;
-
-        load_index_info->index =
-            milvus::index::IndexFactory::GetInstance().CreateIndex(
-                index_info, milvus::storage::FileManagerContext());
-        load_index_info->index->Load(*binary_set);
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
-    }
 }
 
 LoadResourceRequest
@@ -213,38 +159,6 @@ RefundLoadedResource(CResourceUsage size) {
     milvus::cachinglayer::Manager::GetInstance().RefundLoadedResource(
         milvus::cachinglayer::ResourceUsage(size.memory_bytes,
                                             size.disk_bytes));
-}
-
-CStatus
-AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto load_index_info =
-            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-
-        // json index is not handled, fallback to the old interface
-        if (load_index_info->field_type == milvus::DataType::JSON) {
-            return appendScalarIndex(c_load_index_info, c_binary_set);
-        }
-        std::unique_ptr<
-            milvus::cachinglayer::Translator<milvus::index::IndexBase>>
-            translator = std::make_unique<
-                milvus::segcore::storagev1translator::V1SealedIndexTranslator>(
-                load_index_info, (knowhere::BinarySet*)c_binary_set);
-        load_index_info->cache_index =
-            milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
-                std::move(translator));
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
-    }
 }
 
 CStatus

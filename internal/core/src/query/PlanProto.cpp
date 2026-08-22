@@ -1091,17 +1091,6 @@ ProtoParser::ParseTimestamptzArithCompareExprs(
 }
 
 expr::TypedExprPtr
-ProtoParser::ParseElementFilterExprs(
-    const proto::plan::ElementFilterExpr& expr_pb) {
-    // ElementFilterExpr is not a regular expression that can be evaluated directly.
-    // It should be handled at the PlanNode level (in PlanNodeFromProto).
-    // This method should never be called.
-    ThrowInfo(ExprInvalid,
-              "ParseElementFilterExprs should not be called directly. "
-              "ElementFilterExpr must be handled at PlanNode level.");
-}
-
-expr::TypedExprPtr
 ProtoParser::ParseMatchExprs(const proto::plan::MatchExpr& expr_pb) {
     auto struct_name = expr_pb.struct_name();
     auto match_type = expr_pb.match_type();

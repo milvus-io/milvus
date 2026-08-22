@@ -50,11 +50,6 @@ FieldMeta::enable_match() const {
 }
 
 bool
-FieldMeta::enable_growing_jsonStats() const {
-    return IsJsonDataType(type_) && GROWING_JSON_KEY_STATS_ENABLED;
-}
-
-bool
 FieldMeta::enable_analyzer() const {
     if (!IsStringDataType(type_)) {
         return false;

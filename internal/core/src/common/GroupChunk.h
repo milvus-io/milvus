@@ -60,17 +60,6 @@ class GroupChunk {
         return it->second.get();
     }
 
-    // Add a chunk for a specific field
-    void
-    AddChunk(FieldId field_id, std::shared_ptr<Chunk> chunk) {
-        if (chunks_.find(field_id) != chunks_.end()) {
-            ThrowInfo(ErrorCode::FieldAlreadyExist,
-                      "Field {} already exists in GroupChunk",
-                      field_id.get());
-        }
-        chunks_[field_id] = std::move(chunk);
-    }
-
     uint64_t
     Size() const {
         uint64_t total_size = 0;
@@ -78,12 +67,6 @@ class GroupChunk {
             total_size += chunk.second->Size();
         }
         return total_size;
-    }
-
-    // Get all chunks
-    const std::unordered_map<FieldId, std::shared_ptr<Chunk>>&
-    GetChunks() const {
-        return chunks_;
     }
 
     cachinglayer::ResourceUsage
@@ -102,12 +85,6 @@ class GroupChunk {
             return 0;
         }
         return chunks_.begin()->second->RowNums();
-    }
-
-    // Check if the chunk for a specific field exists
-    bool
-    HasChunk(FieldId field_id) const {
-        return chunks_.find(field_id) != chunks_.end();
     }
 
  private:

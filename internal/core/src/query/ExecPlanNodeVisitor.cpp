@@ -110,18 +110,6 @@ ExecPlanNodeVisitor::ExecuteTask(
     return ret;
 }
 
-std::unique_ptr<RetrieveResult>
-wrap_num_entities(int64_t cnt) {
-    auto retrieve_result = std::make_unique<RetrieveResult>();
-    DataArray arr;
-    arr.set_type(milvus::proto::schema::Int64);
-    auto scalar = arr.mutable_scalars();
-    scalar->mutable_long_data()->mutable_data()->Add(cnt);
-    retrieve_result->field_data_ = {arr};
-    retrieve_result->total_data_cnt_ = 0;
-    return retrieve_result;
-}
-
 template <typename S, typename T>
 void
 fillTypedDataArray(void* src_raw_data, int64_t count, T* dst) {

@@ -481,11 +481,6 @@ ChunkedSegmentSealedImpl::Contain(const PkType& pk) const {
     return false;
 }
 
-bool
-ChunkedSegmentSealedImpl::is_system_field_ready() const {
-    return CapturePublishedState()->system_field_ready;
-}
-
 void
 ChunkedSegmentSealedImpl::init_storage_v2_timestamp_index(
     const std::shared_ptr<ChunkedColumnInterface>& column,
@@ -1103,12 +1098,6 @@ ChunkedSegmentSealedImpl::CaptureReaderSnapshot() const {
     return runtime != nullptr ? runtime->reader : nullptr;
 }
 
-std::shared_ptr<const TimestampData>
-ChunkedSegmentSealedImpl::CaptureTimestampSnapshot() const {
-    auto runtime = CaptureRuntimeResourceState();
-    return runtime != nullptr ? runtime->timestamps : nullptr;
-}
-
 SealedIndexingEntryPtr
 ChunkedSegmentSealedImpl::BuildVectorIndexEntry(
     const MetricType& metric_type, index::CacheIndexBasePtr indexing) {
@@ -1477,32 +1466,11 @@ ChunkedSegmentSealedImpl::CloneLoadInfoWithTextIndexCreated(
     return std::const_pointer_cast<const SegmentLoadInfo>(load_info_copy);
 }
 
-std::shared_ptr<const SegmentLoadInfo>
-ChunkedSegmentSealedImpl::CloneLoadInfoForReopen(
-    const SegmentLoadInfo& load_info, const SchemaPtr& schema_snapshot) {
-    return std::make_shared<const SegmentLoadInfo>(load_info.GetProto(),
-                                                   schema_snapshot);
-}
-
 bool
 ChunkedSegmentSealedImpl::HasIndexRawDataFromState(
     const PublishedSegmentState& state, FieldId field_id) {
     auto it = state.index_has_raw_data.find(field_id);
     return it != state.index_has_raw_data.end() && it->second;
-}
-
-void
-ChunkedSegmentSealedImpl::SetIndexRawDataInState(PublishedSegmentState& state,
-                                                 FieldId field_id,
-                                                 bool has_raw_data) {
-    state.index_has_raw_data[field_id] = has_raw_data;
-}
-
-bool
-ChunkedSegmentSealedImpl::HasPublishedIndexRawDataFromState(
-    const PublishedSegmentState& state, FieldId field_id) {
-    auto it = state.published_index_has_raw_data.find(field_id);
-    return it != state.published_index_has_raw_data.end() && it->second;
 }
 
 void
@@ -1715,64 +1683,6 @@ ChunkedSegmentSealedImpl::MarkSystemFieldReadyLocked(bool value) {
 }
 
 void
-ChunkedSegmentSealedImpl::MarkFieldDataReadyLocked(FieldId field_id,
-                                                   bool value) {
-    MutatePublishedStateLocked([&](PublishedSegmentState& state) {
-        if (value) {
-            set_bit(state.field_data_ready_bitset, field_id, true);
-        } else {
-            clear_bit_if_present(state.field_data_ready_bitset, field_id);
-        }
-    });
-}
-
-void
-ChunkedSegmentSealedImpl::MarkIndexReadyLocked(FieldId field_id, bool value) {
-    MutatePublishedStateLocked([&](PublishedSegmentState& state) {
-        if (value) {
-            set_bit(state.published_index_ready_bitset, field_id, true);
-        } else {
-            clear_bit_if_present(state.published_index_ready_bitset, field_id);
-            if (!get_bit(state.published_binlog_index_ready_bitset, field_id)) {
-                ClearPublishedIndexRawDataInState(state, field_id);
-            }
-        }
-    });
-}
-
-void
-ChunkedSegmentSealedImpl::MarkBinlogIndexReadyLocked(FieldId field_id,
-                                                     bool value) {
-    MutatePublishedStateLocked([&](PublishedSegmentState& state) {
-        if (value) {
-            set_bit(state.published_binlog_index_ready_bitset, field_id, true);
-        } else {
-            clear_bit_if_present(state.published_binlog_index_ready_bitset,
-                                 field_id);
-            if (!get_bit(state.published_index_ready_bitset, field_id)) {
-                ClearPublishedIndexRawDataInState(state, field_id);
-            }
-        }
-    });
-}
-
-void
-ChunkedSegmentSealedImpl::MarkIndexHasRawDataLocked(FieldId field_id,
-                                                    bool has_raw_data) {
-    MutatePublishedStateLocked([&](PublishedSegmentState& state) {
-        SetPublishedIndexRawDataInState(state, field_id, has_raw_data);
-    });
-}
-
-void
-ChunkedSegmentSealedImpl::ClearIndexHasRawDataLocked(FieldId field_id) {
-    MutatePublishedStateLocked([&](PublishedSegmentState& state) {
-        ClearPublishedIndexRawDataInState(state, field_id);
-        ClearIndexRawDataInState(state, field_id);
-    });
-}
-
-void
 ChunkedSegmentSealedImpl::ResizeStateBitsetsLocked(
     const SchemaPtr& schema_snapshot) {
     MutatePublishedStateLocked([&](PublishedSegmentState& state) {
@@ -1957,46 +1867,6 @@ ChunkedSegmentSealedImpl::GetJsonStats(milvus::OpContext* op_ctx,
         return nullptr;
     }
     return iter->second;
-}
-
-void
-ChunkedSegmentSealedImpl::RefreshPublishedLoadInfoLocked(
-    const std::shared_ptr<const SegmentLoadInfo>& load_info,
-    Timestamp commit_ts) {
-    auto current = CapturePublishedState();
-    PublishStateOnline(BuildNextPublishedState(
-        current, MakeStateDelta(current->schema, load_info, commit_ts)));
-}
-
-void
-ChunkedSegmentSealedImpl::RefreshPublishedSchemaLocked(
-    const SchemaPtr& schema_snapshot) {
-    auto current = CapturePublishedState();
-    PublishStateOnline(BuildNextPublishedState(
-        current,
-        MakeStateDelta(
-            schema_snapshot, current->load_info, current->commit_ts)));
-}
-
-void
-ChunkedSegmentSealedImpl::RefreshPublishedStateLocked(
-    const SchemaPtr& schema_snapshot,
-    const std::shared_ptr<const SegmentLoadInfo>& load_info,
-    Timestamp commit_ts) {
-    auto current = CapturePublishedState();
-    PublishStateOnline(BuildNextPublishedState(
-        current, MakeStateDelta(schema_snapshot, load_info, commit_ts)));
-}
-
-void
-ChunkedSegmentSealedImpl::PrepareMutableStateForPublish(
-    const SchemaPtr& schema_snapshot,
-    Timestamp commit_ts,
-    std::shared_ptr<PublishedSegmentState>& next) const {
-    auto current = CapturePublishedState();
-    next = BuildNextPublishedState(
-        current,
-        MakeStateDelta(schema_snapshot, current->load_info, commit_ts));
 }
 
 void
@@ -5584,13 +5454,6 @@ ChunkedSegmentSealedImpl::RecordDefaultFieldsFilledLocked(
 }
 
 void
-ChunkedSegmentSealedImpl::RecordDefaultFieldsFilled(
-    const std::vector<FieldId>& field_ids) {
-    std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
-    RecordDefaultFieldsFilledLocked(field_ids);
-}
-
-void
 ChunkedSegmentSealedImpl::RecordTextIndexCreated(
     SegmentLoadInfo& segment_load_info, FieldId field_id) {
     segment_load_info.SetTextIndexCreated(field_id);
@@ -6355,27 +6218,6 @@ ChunkedSegmentSealedImpl::HasColumnInLoadedManifest(
         return true;
     }
     return load_info->HasManifestColumn(column_name);
-}
-
-std::pair<std::shared_ptr<ChunkedColumnInterface>, bool>
-ChunkedSegmentSealedImpl::GetFieldDataIfExist(FieldId field_id) const {
-    auto snapshot = CapturePublishedState();
-    auto runtime = snapshot->runtime != nullptr ? snapshot->runtime
-                                                : BuildRuntimeResourceState();
-    auto it = runtime->fields.find(field_id);
-    auto column = it != runtime->fields.end() ? it->second : nullptr;
-    bool exists;
-    if (SystemProperty::Instance().IsSystem(field_id)) {
-        exists = snapshot->system_field_ready && column != nullptr;
-    } else {
-        exists =
-            get_bit_if_present(snapshot->field_data_ready_bitset, field_id) &&
-            column != nullptr;
-    }
-    if (!exists) {
-        return {nullptr, false};
-    }
-    return {column, true};
 }
 
 bool
@@ -7233,12 +7075,6 @@ ChunkedSegmentSealedImpl::PrepareSchemaForReopen(const SchemaPtr& sch) {
 }
 
 void
-ChunkedSegmentSealedImpl::ApplySchemaForReopen(SchemaPtr sch) {
-    PrepareSchemaForReopen(sch);
-    PublishReopenState(sch, nullptr);
-}
-
-void
 ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
     milvus::OpContext* op_ctx,
     SegmentLoadInfo& segment_load_info,
@@ -8046,12 +7882,6 @@ ChunkedSegmentSealedImpl::SetCommitTimestamp(uint64_t ts) {
 uint64_t
 ChunkedSegmentSealedImpl::GetCommitTimestamp() const {
     return CapturePublishedState()->commit_ts;
-}
-
-std::optional<Timestamp>
-ChunkedSegmentSealedImpl::EffectiveCommitTs() const {
-    auto commit_ts = CapturePublishedState()->commit_ts;
-    return commit_ts != 0 ? std::optional<Timestamp>{commit_ts} : std::nullopt;
 }
 
 void
