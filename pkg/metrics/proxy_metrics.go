@@ -586,6 +586,46 @@ func CleanupProxyDBMetrics(nodeID int64, dbName string) {
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
 	})
+	// The collection-scoped metrics below carry db_name + collection_name, so a
+	// whole database being dropped must clean them too (see #52690). They are
+	// deleted by (node_id, db_name) via DeletePartialMatch, which removes every
+	// collection under the database in one shot.
+	ProxyCollectionSQLatency.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
+	ProxyCollectionMutationLatency.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
+	ProxyReceivedNQ.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
+	ProxyReceiveBytes.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
+	ProxyRetrySearchCount.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
+	ProxyRetrySearchResultInsufficientCount.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
+	ProxyRecallSearchCount.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
+	ProxyScannedRemoteMB.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
+	ProxyScannedTotalMB.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
 }
 
 func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection string) {
@@ -625,153 +665,54 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 		collectionName:    collection,
 	})
 
-	ProxyCollectionSQLatency.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: SearchLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyCollectionSQLatency.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: QueryLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyCollectionSQLatency.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: UpsertQueryLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyCollectionMutationLatency.Delete(prometheus.Labels{
+	// DeletePartialMatch removes every series carrying this (node, db, collection)
+	// regardless of the msg_type / query_type value the metric can hold. The
+	// previous per-value enumeration went stale every time a new type started
+	// being emitted (see #52690): hybrid_search and upsert series were left
+	// behind because the enumeration predated them. DeletePartialMatch owns the
+	// whole series space of the label set, so it cannot go stale.
+	ProxyCollectionSQLatency.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  InsertLabel,
 		databaseLabelName: dbName,
 		collectionName:    collection,
 	})
-	ProxyCollectionMutationLatency.Delete(prometheus.Labels{
+	ProxyCollectionMutationLatency.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  DeleteLabel,
 		databaseLabelName: dbName,
 		collectionName:    collection,
 	})
-	ProxyReceivedNQ.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: SearchLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyReceivedNQ.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: QueryLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyReceiveBytes.Delete(prometheus.Labels{
+	ProxyReceivedNQ.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  SearchLabel,
 		databaseLabelName: dbName,
 		collectionName:    collection,
 	})
-	ProxyReceiveBytes.Delete(prometheus.Labels{
+	ProxyReceiveBytes.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  QueryLabel,
 		databaseLabelName: dbName,
 		collectionName:    collection,
 	})
-	ProxyReceiveBytes.Delete(prometheus.Labels{
+	ProxyRetrySearchCount.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  InsertLabel,
 		databaseLabelName: dbName,
 		collectionName:    collection,
 	})
-	ProxyReceiveBytes.Delete(prometheus.Labels{
+	ProxyRetrySearchResultInsufficientCount.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  DeleteLabel,
 		databaseLabelName: dbName,
 		collectionName:    collection,
 	})
-	ProxyReceiveBytes.Delete(prometheus.Labels{
+	ProxyRecallSearchCount.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  UpsertLabel,
 		databaseLabelName: dbName,
 		collectionName:    collection,
 	})
-	ProxyRetrySearchCount.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: SearchLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyRetrySearchCount.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: HybridSearchLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyRetrySearchResultInsufficientCount.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: SearchLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyRetrySearchResultInsufficientCount.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: HybridSearchLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyRecallSearchCount.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: SearchLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyScannedRemoteMB.Delete(prometheus.Labels{
+	ProxyScannedRemoteMB.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  SearchLabel,
 		databaseLabelName: dbName,
 		collectionName:    collection,
 	})
-	ProxyScannedRemoteMB.Delete(prometheus.Labels{
+	ProxyScannedTotalMB.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  QueryLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedRemoteMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  UpsertLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedRemoteMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  DeleteLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedTotalMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  SearchLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedTotalMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  QueryLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedTotalMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  UpsertLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedTotalMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  DeleteLabel,
 		databaseLabelName: dbName,
 		collectionName:    collection,
 	})
