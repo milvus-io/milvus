@@ -23,7 +23,9 @@
 #include "common/Span.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "common/ValidityView.h"
 #include "common/VectorTrait.h"
+#include "exec/expression/Expr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
@@ -34,6 +36,12 @@
 #include "test_utils/DataGen.h"
 
 const int64_t ROW_COUNT = 100 * 1000;
+
+template <typename T>
+concept HasMaterializeValidity =
+    requires(T validity) { validity.Materialize(int64_t{1}); };
+
+static_assert(!HasMaterializeValidity<milvus::ValidityView>);
 
 TEST(Common, Span) {
     using namespace milvus;
@@ -48,6 +56,80 @@ TEST(Common, Span) {
     ASSERT_EQ(r1.row_count(), 100);
     ASSERT_EQ(r2.row_count(), 10);
     ASSERT_EQ(r2.element_sizeof(), 16 * sizeof(float));
+}
+
+TEST(Span, ValidityViewSupportsExpandedAndPackedData) {
+    using namespace milvus;
+
+    const bool expanded[] = {true, false, true, false, true};
+    const uint8_t packed[] = {0x15};
+    const auto expanded_view = ValidityView::FromExpanded(expanded);
+    const auto packed_view = ValidityView::FromPacked(packed);
+
+    EXPECT_TRUE(expanded_view);
+    EXPECT_FALSE(expanded_view.is_packed());
+    EXPECT_EQ(expanded_view.expanded_data(), expanded);
+    EXPECT_TRUE(packed_view);
+    EXPECT_TRUE(packed_view.is_packed());
+    EXPECT_EQ(packed_view.expanded_data(), nullptr);
+    for (int64_t i = 0; i < 5; ++i) {
+        EXPECT_EQ(expanded_view[i], expanded[i]);
+        EXPECT_EQ(packed_view[i], expanded[i]);
+    }
+
+    const auto subview = packed_view.Subview(1);
+    EXPECT_FALSE(subview[0]);
+    EXPECT_TRUE(subview[1]);
+    EXPECT_FALSE(subview[2]);
+    EXPECT_EQ(expanded_view.Subview(1).expanded_data(), expanded + 1);
+}
+
+TEST(Span, PackedValidityMasksBitmapsWithoutLosingOffsets) {
+    using namespace milvus;
+    using namespace milvus::exec;
+
+    constexpr int64_t validity_offset = 3;
+    constexpr int64_t result_offset = 5;
+    constexpr int64_t size = 70;
+    const uint8_t packed[] = {
+        0b10110101,
+        0b01011010,
+        0b11110000,
+        0b00111100,
+        0b11000011,
+        0b10011001,
+        0b01100110,
+        0b11111111,
+        0b00010101,
+        0b00011110,
+    };
+    const auto validity =
+        ValidityView::FromPacked(packed).Subview(validity_offset);
+
+    EXPECT_EQ(validity.packed_data(), packed);
+    EXPECT_EQ(validity.bit_offset(), validity_offset);
+
+    TargetBitmap result(size + result_offset + 3, false);
+    TargetBitmap valid_result(size + result_offset + 3, true);
+    for (int64_t i = 0; i < size; ++i) {
+        result[result_offset + i] = (i % 3) != 0;
+    }
+    ApplyValidMask(validity,
+                   TargetBitmapView(result).view(result_offset),
+                   TargetBitmapView(valid_result).view(result_offset),
+                   size);
+
+    for (int64_t i = 0; i < size; ++i) {
+        const bool expected_valid = validity[i];
+        EXPECT_EQ(result[result_offset + i], ((i % 3) != 0) && expected_valid)
+            << "row " << i;
+        EXPECT_EQ(valid_result[result_offset + i], expected_valid)
+            << "row " << i;
+    }
+    for (int64_t i = 0; i < result_offset; ++i) {
+        EXPECT_FALSE(result[i]);
+        EXPECT_TRUE(valid_result[i]);
+    }
 }
 
 TEST(Span, Naive) {
@@ -96,7 +178,7 @@ TEST(Span, Naive) {
         auto begin = chunk_id * size_per_chunk;
         auto end = std::min((chunk_id + 1) * size_per_chunk, N);
         auto size_of_chunk = end - begin;
-        ASSERT_EQ(age_span.get().valid_data(), nullptr);
+        ASSERT_FALSE(age_span.get().validity());
         for (int i = 0; i < size_of_chunk * 512 / 8; ++i) {
             ASSERT_EQ(vec_span.get().data()[i], vec_ptr[i + begin * 512 / 8]);
         }
@@ -111,7 +193,7 @@ TEST(Span, Naive) {
                       nullable_data_ptr[i + begin]);
         }
         for (int i = 0; i < size_of_chunk; ++i) {
-            ASSERT_EQ(null_field_span.get().valid_data()[i],
+            ASSERT_EQ(null_field_span.get().is_valid(i),
                       nullable_valid_data_ptr[i + begin]);
         }
     }

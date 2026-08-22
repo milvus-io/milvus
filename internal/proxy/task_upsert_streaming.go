@@ -211,7 +211,7 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 	getCacheDur := tr.RecordSpan()
 
 	getMsgStreamDur := tr.RecordSpan()
-	channelNames, err := ut.chMgr.getVChannels(collID)
+	channelNames, err := ut.chMgr.GetVChannels(collID)
 	if err != nil {
 		log.Warn(ctx, "get vChannels failed when insertExecute",
 			mlog.Err(err))
@@ -253,7 +253,7 @@ func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherC
 	log := mlog.With(
 		mlog.FieldCollectionID(collID))
 	// hash primary keys to channels
-	vChannels, err := ut.chMgr.getVChannels(collID)
+	vChannels, err := ut.chMgr.GetVChannels(collID)
 	if err != nil {
 		log.Warn(ctx, "get vChannels failed when deleteExecute", mlog.Err(err))
 		ut.result.Status = merr.Status(err)
@@ -400,7 +400,7 @@ func (ut *upsertTask) buildPartialUpdateCASGroups() (map[string]*messagespb.Part
 	if ut.chMgr == nil {
 		return nil, merr.WrapErrServiceInternalMsg("partial update channel manager is unavailable")
 	}
-	vchannels, err := ut.chMgr.getVChannels(ut.collectionID)
+	vchannels, err := ut.chMgr.GetVChannels(ut.collectionID)
 	if err != nil {
 		return nil, err
 	}

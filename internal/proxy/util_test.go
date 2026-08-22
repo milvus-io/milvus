@@ -1139,6 +1139,9 @@ func TestVerifyAPIKeyDoesNotExposeSecret(t *testing.T) {
 	logs := captureProxyLogs(t)
 	rawToken := "API_KEY_SENTINEL_DO_NOT_LOG"
 	encodedToken := crypto.Base64Encode(rawToken)
+	// initHook() installs the default hook, so consume it before installing the
+	// mock, otherwise the mock is clobbered on the first GetHook() call.
+	hookutil.InitOnceHook()
 	hookutil.SetMockAPIHook("", errors.New("API key provider unavailable"))
 	t.Cleanup(func() {
 		hookutil.SetTestHook(hookutil.DefaultHook{})
@@ -1148,11 +1151,7 @@ func TestVerifyAPIKeyDoesNotExposeSecret(t *testing.T) {
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), rawToken)
 
-	oldMetaCache := globalMetaCache
-	globalMetaCache = &MetaCache{}
-	t.Cleanup(func() {
-		globalMetaCache = oldMetaCache
-	})
+	metaCache := InitEmptyMetaCacheForTest()
 	require.NoError(t, paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true"))
 	t.Cleanup(func() {
 		paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
@@ -1161,7 +1160,7 @@ func TestVerifyAPIKeyDoesNotExposeSecret(t *testing.T) {
 		util.HeaderAuthorize,
 		encodedToken,
 	))
-	_, err = AuthenticationInterceptor(ctx)
+	_, err = AuthenticationInterceptorWithMetaCache(func() Cache { return metaCache })(ctx)
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), rawToken)
 	assert.NotContains(t, err.Error(), encodedToken)

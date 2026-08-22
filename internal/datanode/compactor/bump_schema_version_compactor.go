@@ -869,9 +869,9 @@ func (t *bumpSchemaVersionCompactionTask) addV3Stats(prefix string, fieldID int6
 // SegmentInfo, and for a StorageV3 segment recovered after a DataCoord restart
 // they are empty (#50410 stopped persisting per-field binlog KVs for V3).
 // The receiver (completeBumpSchemaVersionCompactionMutation in
-// internal/datacoord/meta.go) merges this array onto SegmentInfo.Binlogs; it
-// is the sole input to getSegmentBinlogFields, which canCreateIndexForSegment
-// uses to decide whether a function-output field is eligible for an index.
+// internal/datacoord/meta.go) merges this array onto SegmentInfo.Binlogs,
+// which is where the materialized field's data becomes visible to the rest of
+// DataCoord — including index building.
 // This result is therefore load-bearing: dropping it silently makes the
 // materialized field permanently un-indexable.
 func (t *bumpSchemaVersionCompactionTask) buildNewInsertLogsV3(writerResult *bumpSchemaVersionWriterResult, sparseFieldMemorySizes map[int64]int, totalRows int64) ([]*datapb.FieldBinlog, error) {

@@ -41,6 +41,8 @@
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentSealed.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/external_spec_c.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
@@ -88,6 +90,25 @@ class ScopedTakeForOutputResultCountLimit {
 
  private:
     int64_t old_value_;
+};
+
+class ScopedExternalIopsConfig {
+ public:
+    ScopedExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate)
+        : old_config_(milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                          .GetExternalIopsConfig()) {
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .SetExternalIopsConfig(initial_rate, max_rate);
+    }
+
+    ~ScopedExternalIopsConfig() {
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .SetExternalIopsConfig(old_config_.initial_rate,
+                                   old_config_.max_rate);
+    }
+
+ private:
+    milvus::storage::ExternalIopsConfig old_config_;
 };
 
 std::string
@@ -3312,6 +3333,57 @@ TEST(InjectExtfsInheritedFields, MaxConnectionsNotOverridableBySpec) {
 
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.max_connections")),
               "100");
+}
+
+TEST(InjectExtfsInheritedFields, ExternalIopsDefaults) {
+    ScopedExternalIopsConfig config(2000, 5000);
+    milvus_storage::api::Properties props;
+
+    ::InjectExternalSpecProperties(props, 42, "s3://my-bucket/key", "");
+
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.iops_initial_rate")),
+              "2000");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.iops_max_rate")),
+              "5000");
+    EXPECT_EQ(props.count("fs.iops_initial_rate"), 0u);
+    EXPECT_EQ(props.count("fs.iops_max_rate"), 0u);
+}
+
+TEST(InjectExtfsInheritedFields, ExternalIopsConfiguredAndNotOverridable) {
+    ScopedExternalIopsConfig config(3000, 0);
+    milvus_storage::api::Properties props;
+    std::string spec =
+        R"({"format":"parquet","extfs":{"iops_initial_rate":"9000","iops_max_rate":"10000"}})";
+
+    ::InjectExternalSpecProperties(props, 7, "s3://my-bucket/key", spec);
+
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.7.iops_initial_rate")),
+              "3000");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.7.iops_max_rate")), "0");
+}
+
+TEST(InjectExtfsInheritedFields, CAbiIopsConfigIsCallLocal) {
+    ScopedExternalIopsConfig singleton_config(7000, 8000);
+    LoonProperties properties{};
+
+    auto result = loon_properties_inject_external_spec(
+        &properties, 42, "s3://my-bucket/key", "", 3000, 0);
+    const std::string error = result.message != nullptr ? result.message : "";
+    EXPECT_EQ(result.err_code, loon_errcode_success) << error;
+    loon_ffi_free_result(&result);
+
+    EXPECT_STREQ(loon_properties_get(&properties, "extfs.42.iops_initial_rate"),
+                 "3000");
+    EXPECT_STREQ(loon_properties_get(&properties, "extfs.42.iops_max_rate"),
+                 "0");
+
+    const auto singleton_after =
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .GetExternalIopsConfig();
+    EXPECT_EQ(singleton_after.initial_rate, 7000);
+    EXPECT_EQ(singleton_after.max_rate, 8000);
+
+    loon_properties_free(&properties);
 }
 
 // Azure endpoint derivation: AWS-form URI with cp=azure + region resolves via

@@ -1082,6 +1082,63 @@ class FileResourceClient(Requests):
         return self.post(url, headers=self.update_headers(), data={}).json()
 
 
+class SnapshotClient(Requests):
+    def __init__(self, endpoint, token):
+        super().__init__(url=endpoint, api_key=token)
+        self.endpoint = endpoint
+        self.api_key = token
+
+    def snapshot_create(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/snapshots/create"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def snapshot_drop(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/snapshots/drop"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def snapshot_list(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/snapshots/list"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def snapshot_describe(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/snapshots/describe"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def snapshot_restore(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/snapshots/restore"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def snapshot_pin(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/snapshots/pin"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def snapshot_unpin(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/snapshots/unpin"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def get_restore_snapshot_state(self, job_id):
+        url = f"{self.endpoint}/v2/vectordb/jobs/snapshot/describe"
+        payload = {"jobId": str(job_id)}
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def list_restore_snapshot_jobs(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/jobs/snapshot/list"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def snapshot_export(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/jobs/snapshot/export"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def get_export_snapshot_state(self, job_id):
+        url = f"{self.endpoint}/v2/vectordb/jobs/snapshot/export/describe"
+        payload = {"jobId": str(job_id)}
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def snapshot_restore_external(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/jobs/snapshot/restore_external"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+
 class StorageClient:
     def __init__(self, endpoint, access_key, secret_key, bucket_name, root_path="file"):
         self.endpoint = endpoint
