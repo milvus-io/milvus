@@ -5591,10 +5591,13 @@ type dataCoordConfig struct {
 	StatsTaskSlotUsage                   ParamItem `refreshable:"true"`
 	AnalyzeTaskSlotUsage                 ParamItem `refreshable:"true"`
 
-	EnableSortCompaction             ParamItem `refreshable:"true"`
-	TaskCheckInterval                ParamItem `refreshable:"true"`
-	SortCompactionTriggerCount       ParamItem `refreshable:"true"`
-	JSONStatsTriggerCount            ParamItem `refreshable:"true"`
+	EnableSortCompaction       ParamItem `refreshable:"true"`
+	TaskCheckInterval          ParamItem `refreshable:"true"`
+	SortCompactionTriggerCount ParamItem `refreshable:"true"`
+	StatsTaskPendingLimit      ParamItem `refreshable:"true"`
+	// Deprecated: JSON stats tasks are throttled by StatsTaskPendingLimit.
+	JSONStatsTriggerCount ParamItem `refreshable:"true"`
+	// Deprecated: JSON stats tasks now run on TaskCheckInterval.
 	JSONStatsTriggerInterval         ParamItem `refreshable:"true"`
 	JSONStatsMaxShreddingColumns     ParamItem `refreshable:"true"`
 	JSONStatsShreddingRatioThreshold ParamItem `refreshable:"true"`
@@ -7173,25 +7176,35 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	}
 	p.SortCompactionTriggerCount.Init(base.mgr)
 
+	p.StatsTaskPendingLimit = ParamItem{
+		Key:          "dataCoord.statsTaskPendingLimit",
+		Version:      "3.0.0",
+		Doc:          "skip submitting new stats tasks when the global scheduler holds more pending tasks than this limit",
+		DefaultValue: "100",
+		PanicIfEmpty: false,
+		Export:       false,
+	}
+	p.StatsTaskPendingLimit.Init(base.mgr)
+
 	p.JSONStatsTriggerCount = ParamItem{
 		Key:          "dataCoord.jsonShreddingTriggerCount",
 		Version:      "2.6.5",
-		Doc:          "jsonkey stats task count per trigger",
+		Doc:          "Deprecated: JSON stats tasks are throttled by dataCoord.statsTaskPendingLimit.",
 		DefaultValue: "10",
 		FallbackKeys: []string{"dataCoord.jsonStatsTriggerCount"},
 		PanicIfEmpty: false,
-		Export:       true,
+		Export:       false,
 	}
 	p.JSONStatsTriggerCount.Init(base.mgr)
 
 	p.JSONStatsTriggerInterval = ParamItem{
 		Key:          "dataCoord.jsonShreddingTriggerInterval",
 		Version:      "2.6.5",
-		Doc:          "jsonkey task interval per trigger",
+		Doc:          "Deprecated: JSON stats tasks now run on dataCoord.taskCheckInterval.",
 		DefaultValue: "10",
 		FallbackKeys: []string{"dataCoord.jsonStatsTriggerInterval"},
 		PanicIfEmpty: false,
-		Export:       true,
+		Export:       false,
 	}
 	p.JSONStatsTriggerInterval.Init(base.mgr)
 

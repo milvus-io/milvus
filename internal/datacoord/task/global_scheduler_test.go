@@ -45,8 +45,10 @@ func TestGlobalScheduler_Enqueue(t *testing.T) {
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, len(scheduler.(*globalTaskScheduler).pendingTasks.TaskIDs()))
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount())
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, len(scheduler.(*globalTaskScheduler).pendingTasks.TaskIDs()))
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount())
 
 	task = NewMockTask(t)
 	task.EXPECT().GetTaskID().Return(2)
@@ -55,8 +57,36 @@ func TestGlobalScheduler_Enqueue(t *testing.T) {
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, scheduler.(*globalTaskScheduler).runningTasks.Len())
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount())
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, scheduler.(*globalTaskScheduler).runningTasks.Len())
+}
+
+func TestGlobalScheduler_GetPendingTaskCountExcludesBackoff(t *testing.T) {
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.TaskRetryBackoffInterval.Key, "60")
+	defer pt.Reset(pt.DataCoordCfg.TaskRetryBackoffInterval.Key)
+
+	cluster := session.NewMockCluster(t)
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster)
+	globalScheduler := scheduler.(*globalTaskScheduler)
+
+	tasks := make(map[int64]Task)
+	for taskID := int64(1); taskID <= 2; taskID++ {
+		task := NewMockTask(t)
+		task.EXPECT().GetTaskID().Return(taskID)
+		task.EXPECT().GetTaskState().Return(taskcommon.Init)
+		task.EXPECT().GetTaskType().Return(taskcommon.Compaction)
+		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
+		scheduler.Enqueue(task)
+		tasks[taskID] = task
+	}
+
+	globalScheduler.recordTaskFailure(tasks[2])
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount())
+
+	globalScheduler.backoffs.Insert(2, &taskBackoff{notBefore: time.Now().Add(-time.Minute)})
+	assert.Equal(t, 2, scheduler.GetPendingTaskCount())
 }
 
 func TestGlobalScheduler_AbortAndRemoveTask(t *testing.T) {
