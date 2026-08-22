@@ -253,78 +253,32 @@ func retrieveSegment(validSegmentInfos map[int64]*SegmentInfo,
 ) (typeutil.UniqueSet, typeutil.UniqueSet) {
 	newFlushedIDs := make(typeutil.UniqueSet)
 
-	isConditionMet := func(condition func(seg *SegmentInfo) bool, ids ...UniqueID) bool {
+	allParentsReady := func(ids ...UniqueID) bool {
 		for _, id := range ids {
-			if seg, ok := validSegmentInfos[id]; !ok || seg == nil || !condition(seg) {
+			seg, ok := validSegmentInfos[id]
+			if !ok || seg == nil || seg.GetIsInvisible() || !segmentIndexed(id) {
 				return false
 			}
 		}
 		return true
 	}
 
-	isValid := func(ids ...UniqueID) bool {
-		return isConditionMet(func(seg *SegmentInfo) bool {
-			return true
-		}, ids...)
-	}
-
-	isVisible := func(ids ...UniqueID) bool {
-		return isConditionMet(func(seg *SegmentInfo) bool {
-			return !seg.GetIsInvisible()
-		}, ids...)
-	}
-
-	compactionFromExistWithCache := func(segID UniqueID) bool {
-		var compactionFromExist func(segID UniqueID) bool
-		compactionFromExistMap := make(map[UniqueID]bool)
-
-		compactionFromExist = func(segID UniqueID) bool {
-			if exist, ok := compactionFromExistMap[segID]; ok {
-				return exist
-			}
-			compactionFrom := validSegmentInfos[segID].GetCompactionFrom()
-			if len(compactionFrom) == 0 || !isValid(compactionFrom...) {
-				compactionFromExistMap[segID] = false
-				return false
-			}
-			for _, fromID := range compactionFrom {
-				if flushedIDs.Contain(fromID) || newFlushedIDs.Contain(fromID) {
-					compactionFromExistMap[segID] = true
-					return true
-				}
-				if compactionFromExist(fromID) {
-					compactionFromExistMap[segID] = true
-					return true
-				}
-			}
-			compactionFromExistMap[segID] = false
-			return false
+	for id := range flushedIDs {
+		segment := validSegmentInfos[id]
+		compactionFrom := segment.GetCompactionFrom()
+		if len(compactionFrom) == 0 || segmentIndexed(id) || !allParentsReady(compactionFrom...) {
+			newFlushedIDs.Insert(id)
+			continue
 		}
-		return compactionFromExist(segID)
-	}
 
-	retrieve := func() bool {
-		continueRetrieve := false
-		for id := range flushedIDs {
-			compactionFrom := validSegmentInfos[id].GetCompactionFrom()
-			if len(compactionFrom) == 0 {
-				newFlushedIDs.Insert(id)
-			} else if !compactionFromExistWithCache(id) && (segmentIndexed(id) || !isVisible(compactionFrom...)) {
-				newFlushedIDs.Insert(id)
-			} else {
-				for _, fromID := range compactionFrom {
-					newFlushedIDs.Insert(fromID)
-					continueRetrieve = true
-					droppedIDs.Remove(fromID)
-				}
-			}
+		// Fall back by exactly one compaction generation. If any direct parent
+		// cannot satisfy the current index requirements, keep the child in the
+		// data view for unindexed sealed loading instead of walking further back
+		// to an ancestor built for an older schema.
+		for _, fromID := range compactionFrom {
+			newFlushedIDs.Insert(fromID)
+			droppedIDs.Remove(fromID)
 		}
-		return continueRetrieve
-	}
-
-	for retrieve() {
-		flushedIDs = newFlushedIDs
-		newFlushedIDs = make(typeutil.UniqueSet)
 	}
 
 	return newFlushedIDs, droppedIDs
