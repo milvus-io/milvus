@@ -86,6 +86,71 @@ def pytest_addoption(parser):
         "--tei_endpoint_2", action="store", default="", help="second tei embedding endpoint for alter tests"
     )
 
+    spark_backfill = parser.getgroup("spark-backfill")
+    spark_backfill.addoption(
+        "--run-spark-backfill",
+        action="store_true",
+        default=False,
+        help="collect and run the Spark-Milvus Backfill suite",
+    )
+    spark_backfill.addoption(
+        "--spark-runner-mode",
+        action="store",
+        choices=("job", "toolbox"),
+        default="job",
+        help="run Spark in one-shot Kubernetes Jobs or an existing Toolbox Pod",
+    )
+    spark_backfill.addoption("--management-endpoint", action="store", default="")
+    spark_backfill.addoption("--spark-k8s-context", action="store", default="")
+    spark_backfill.addoption("--spark-k8s-namespace", action="store", default="")
+    spark_backfill.addoption(
+        "--spark-image",
+        action="store",
+        default=(
+            "apache/spark:4.0.1-scala2.13-java21-python3-ubuntu"
+            "@sha256:fb5c5e61e7bb1be94b7f3a31afe1f73c5b4d20b6008f4ffa7278fc085da08a9e"
+        ),
+    )
+    spark_backfill.addoption("--spark-connector-url", action="store", default="")
+    spark_backfill.addoption("--spark-connector-sha256", action="store", default="")
+    spark_backfill.addoption("--spark-toolbox-pod", action="store", default="")
+    spark_backfill.addoption(
+        "--spark-toolbox-label",
+        action="store",
+        default="app=spark-milvus-toolbox",
+    )
+    spark_backfill.addoption("--spark-toolbox-container", action="store", default="spark-toolbox")
+    spark_backfill.addoption(
+        "--spark-toolbox-wrapper",
+        action="store",
+        default="/usr/local/bin/spark-submit-milvus",
+    )
+    spark_backfill.addoption(
+        "--spark-toolbox-workspace",
+        action="store",
+        default="/workspace/spark-backfill-pytest",
+    )
+    spark_backfill.addoption("--spark-milvus-uri", action="store", default="")
+    spark_backfill.addoption("--spark-minio-endpoint", action="store", default="")
+    spark_backfill.addoption("--spark-storage-secret-name", action="store", default="")
+    spark_backfill.addoption("--spark-service-account-name", action="store", default="")
+    spark_backfill.addoption("--spark-job-timeout", action="store", type=int, default=1800)
+    spark_backfill.addoption("--spark-keep-failed-job", action="store_true", default=False)
+    spark_backfill.addoption(
+        "--spark-evidence-root",
+        action="store",
+        default=os.path.join(os.getenv("CI_LOG_PATH", "/tmp/ci_logs"), "spark_backfill"),
+    )
+
+
+def pytest_ignore_collect(collection_path, config):
+    """Keep Spark Backfill tests completely out of regular PR/E2E collection."""
+    from spark_backfill.config import is_spark_backfill_path
+
+    if is_spark_backfill_path(collection_path) and not config.getoption("--run-spark-backfill"):
+        return True
+    return None
+
 
 @pytest.fixture
 def host(request):
@@ -326,6 +391,10 @@ def get_invalid_vector_dict(request):
 def pytest_configure(config):
     # register an additional marker
     config.addinivalue_line("markers", "tag(name): mark test to run only matching the tag")
+    if config.getoption("--run-spark-backfill"):
+        from spark_backfill.config import ensure_serial_execution
+
+        ensure_serial_execution(getattr(config.option, "numprocesses", None))
 
 
 def pytest_runtest_setup(item):
