@@ -62,7 +62,7 @@ func TestFlowGraphManager(t *testing.T) {
 	mockBroker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	wbm := writebuffer.NewMockBufferManager(t)
-	wbm.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	wbm.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	dispClient := msgdispatcher.NewMockClient(t)
 	dispClient.EXPECT().Register(mock.Anything, mock.Anything).Return(make(chan *msgstream.MsgPack), nil)
@@ -148,7 +148,7 @@ func newFlowGraphManager(t *testing.T) (string, FlowgraphManager) {
 	mockBroker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{}, nil).Maybe()
 
 	wbm := writebuffer.NewMockBufferManager(t)
-	wbm.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	wbm.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	dispClient := msgdispatcher.NewMockClient(t)
 	dispClient.EXPECT().Register(mock.Anything, mock.Anything).Return(make(chan *msgstream.MsgPack), nil)
