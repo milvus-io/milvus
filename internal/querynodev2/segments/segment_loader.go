@@ -2459,6 +2459,32 @@ func SupportInterimIndexDataType(dataType schemapb.DataType) bool {
 		dataType == schemapb.DataType_BFloat16Vector
 }
 
+// buildIndexLoadParams returns the QueryNode-local runtime configuration for a
+// single index without mutating the FieldIndexInfo owned by the caller. Full
+// Load, Reopen, and resource estimation must all use this builder so they cannot
+// drift when a new runtime parameter is introduced.
+func buildIndexLoadParams(indexInfo *querypb.FieldIndexInfo) (map[string]string, error) {
+	indexParams := funcutil.KeyValuePair2Map(indexInfo.GetIndexParams())
+
+	// Some build params also exist in indexParams, which are useless during loading process.
+	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams[common.IndexTypeKey]) {
+		if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
+			return nil, err
+		}
+	}
+
+	// Set whether to enable the offset cache for bitmap indexes.
+	if indexParams[common.IndexTypeKey] == indexparamcheck.IndexBitmap {
+		indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
+	}
+
+	if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
+		return nil, err
+	}
+
+	return indexParams, nil
+}
+
 // prepareIndexLoadParams injects QueryNode-local index load parameters into each
 // index's IndexParams in place. These params (e.g. DISKANN num_load_thread) are
 // derived from local QueryNode resources/config and are never persisted in the
@@ -2471,21 +2497,8 @@ func prepareIndexLoadParams(indexInfos []*querypb.FieldIndexInfo) error {
 		if indexInfo == nil {
 			continue
 		}
-		indexParams := funcutil.KeyValuePair2Map(indexInfo.GetIndexParams())
-
-		// some build params also exist in indexParams, which are useless during loading process
-		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) {
-			if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
-				return err
-			}
-		}
-
-		// set whether enable offset cache for bitmap index
-		if indexParams["index_type"] == indexparamcheck.IndexBitmap {
-			indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
-		}
-
-		if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
+		indexParams, err := buildIndexLoadParams(indexInfo)
+		if err != nil {
 			return err
 		}
 
