@@ -101,6 +101,11 @@ struct TableStatsInfo {
     std::map<JsonKey, JsonKeyLayoutType> column_map;
 };
 
+arrow::Status
+AppendJsonStatsValueToBuilder(
+    const std::string& value,
+    const std::shared_ptr<arrow::ArrayBuilder>& builder);
+
 class ColumnGroupingStrategy {
  public:
     virtual ~ColumnGroupingStrategy() = default;
@@ -199,6 +204,9 @@ class JsonStatsParquetWriter {
     AppendSharedRow(const uint8_t* data, size_t length);
 
     arrow::Status
+    AppendRecordBatch(const std::shared_ptr<arrow::RecordBatch>& batch);
+
+    arrow::Status
     Flush();
 
     arrow::Status
@@ -220,14 +228,15 @@ class JsonStatsParquetWriter {
         return total_size_;
     }
 
+    const std::shared_ptr<arrow::Schema>&
+    GetSchema() const {
+        return schema_;
+    }
+
     void
     UpdatePathSizeMap(const std::vector<std::shared_ptr<arrow::Array>>& arrays);
 
  private:
-    arrow::Status
-    AppendDataToBuilder(const std::string& value,
-                        const std::shared_ptr<arrow::ArrayBuilder>& builder);
-
     // init info
     std::shared_ptr<arrow::Schema> schema_{nullptr};
 

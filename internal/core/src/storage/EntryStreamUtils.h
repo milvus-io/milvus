@@ -88,9 +88,20 @@ class TransientMemoryBudget {
         return instance;
     }
 
+    static TransientMemoryBudget&
+    GetJsonStatsBuildBudget() {
+        static TransientMemoryBudget instance;
+        return instance;
+    }
+
     static void
     SetLoadTransientBudgetBytes(size_t bytes) {
         GetLoadTransientBudget().SetCapacityBytes(bytes);
+    }
+
+    static void
+    SetJsonStatsBuildBudgetBytes(size_t bytes) {
+        GetJsonStatsBuildBudget().SetCapacityBytes(bytes);
     }
 
     /// Block until enough budget is available. Safe to call when the calling
@@ -158,10 +169,46 @@ class TransientMemoryBudget {
         cv_.notify_all();
     }
 
+    /// Replace a task's pre-dispatch reservation with its measured result
+    /// size. Growth is intentionally non-blocking: completed workers must not
+    /// wait for consumers that are ordered behind other active tasks. Any
+    /// temporary overage prevents new TryAcquire calls until consumers release
+    /// enough bytes.
+    void
+    ReconcileReservation(size_t reserved_bytes, size_t actual_bytes) {
+        bool released_bytes = false;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            AssertInfo(reserved_bytes <= inflight_bytes_,
+                       "Transient memory budget reconcile exceeds inflight: "
+                       "reserved {}, inflight {}",
+                       reserved_bytes,
+                       inflight_bytes_);
+            auto other_inflight_bytes = inflight_bytes_ - reserved_bytes;
+            AssertInfo(actual_bytes <= std::numeric_limits<size_t>::max() -
+                                           other_inflight_bytes,
+                       "Transient memory budget reconcile overflow: actual "
+                       "{}, other inflight {}",
+                       actual_bytes,
+                       other_inflight_bytes);
+            inflight_bytes_ = other_inflight_bytes + actual_bytes;
+            released_bytes = actual_bytes < reserved_bytes;
+        }
+        if (released_bytes) {
+            cv_.notify_all();
+        }
+    }
+
     size_t
     CapacityBytes() const {
         std::lock_guard<std::mutex> lock(mu_);
         return CapacityBytesLocked();
+    }
+
+    size_t
+    InflightBytes() const {
+        std::lock_guard<std::mutex> lock(mu_);
+        return inflight_bytes_;
     }
 
     void

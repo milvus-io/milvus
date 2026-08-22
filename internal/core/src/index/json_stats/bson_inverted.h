@@ -55,6 +55,9 @@ class BsonInvertedIndex {
     AddRecord(const std::string& key, uint32_t row_id, uint32_t offset);
 
     void
+    AddRecords(const std::string& key, std::vector<int64_t> records);
+
+    void
     BuildIndex();
 
     void

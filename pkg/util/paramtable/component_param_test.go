@@ -927,6 +927,22 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10, Params.MaxCompactionConcurrency.GetAsInt())
 
 		assert.Equal(t, 4, Params.MaxVecIndexBuildConcurrency.GetAsInt())
+		assert.Equal(t, 4, Params.JSONStatsBuildMaxWorkers.GetAsInt())
+		assert.Equal(t, int64(DefaultJSONStatsBuildMaxInflightBytes),
+			Params.JSONStatsBuildMaxInflightBytes.GetAsInt64())
+		params.Save(Params.JSONStatsBuildMaxInflightBytes.Key, "-1")
+		assert.Equal(t, int64(DefaultJSONStatsBuildMaxInflightBytes),
+			Params.JSONStatsBuildMaxInflightBytes.GetAsInt64())
+		params.Save(Params.JSONStatsBuildMaxInflightBytes.Key, "invalid")
+		assert.Equal(t, int64(DefaultJSONStatsBuildMaxInflightBytes),
+			Params.JSONStatsBuildMaxInflightBytes.GetAsInt64())
+		params.Save(Params.JSONStatsBuildMaxInflightBytes.Key, "0")
+		assert.Equal(t, int64(0),
+			Params.JSONStatsBuildMaxInflightBytes.GetAsInt64())
+		params.Save(Params.JSONStatsBuildMaxInflightBytes.Key, "67108864")
+		assert.Equal(t, int64(67108864),
+			Params.JSONStatsBuildMaxInflightBytes.GetAsInt64())
+		params.Reset(Params.JSONStatsBuildMaxInflightBytes.Key)
 
 		// clustering compaction
 		params.Save("datanode.clusteringCompaction.memoryBufferRatio", "0.1")

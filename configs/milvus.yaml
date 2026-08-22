@@ -928,6 +928,10 @@ dataCoord:
     clientMaxRecvSize: 536870912 # The maximum size of each RPC request that the clients on dataCoord can receive, unit: byte
 
 dataNode:
+  jsonStats:
+    parallelBuild:
+      maxWorkers: 4 # Maximum process-wide JSON Stats Build workers. Effective value is capped by the cgroup-aware CPU count; values <= 0 use min(CPU, 4).
+      maxInflightBytes: 536870912 # Process-wide transient memory budget for materialized chunks. Oversized chunks run exclusively; 0 disables the limit.
   dataSync:
     flowGraph:
       maxQueueLength: 16 # Maximum length of task queue in flowgraph
