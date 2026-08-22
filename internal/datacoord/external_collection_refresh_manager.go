@@ -223,7 +223,16 @@ func NewExternalCollectionRefreshManager(
 	// forgetJob cleans up the notifiedJobs dedup map when the checker GC's
 	// a job, preventing unbounded growth.
 	m.inspector = newRefreshInspector(ctx, refreshMeta, scheduler, closeChan)
-	m.checker = newRefreshChecker(ctx, refreshMeta, closeChan, m.handleJobFinished, m.applyFinishedJobSegments, m.handleJobFailed, m.forgetJob, m.ensureTasksForInitJob)
+	m.checker = newRefreshChecker(ctx, refreshMeta, closeChan, refreshCheckerHooks{
+		onJobFinished:    m.handleJobFinished,
+		applyJobInfo:     m.applyFinishedJobSegments,
+		onJobFailed:      m.handleJobFailed,
+		onJobGC:          m.forgetJob,
+		onInitJobPending: m.ensureTasksForInitJob,
+		unindexedSegments: func(collectionID int64, segmentIDs []int64) []int64 {
+			return mt.indexMeta.GetUnindexedSegments(collectionID, segmentIDs)
+		},
+	})
 	m.inspector.wrapTask = m.wrapTask
 
 	return m
