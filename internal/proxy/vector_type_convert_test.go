@@ -164,6 +164,56 @@ func TestValidateFloat32ForBFloat16(t *testing.T) {
 	}
 }
 
+func assertFP16BF16BytesMatchFloat32(
+	t *testing.T,
+	dataType schemapb.DataType,
+	floatData []float32,
+	got []byte,
+) {
+	t.Helper()
+	var want []byte
+	var decoded []float32
+	var tolerance float64
+	switch dataType {
+	case schemapb.DataType_Float16Vector:
+		want = typeutil.Float32ArrayToFloat16Bytes(floatData)
+		decoded = typeutil.Float16BytesToFloat32Vector(got)
+		tolerance = 1e-3
+	case schemapb.DataType_BFloat16Vector:
+		want = typeutil.Float32ArrayToBFloat16Bytes(floatData)
+		decoded = typeutil.BFloat16BytesToFloat32Vector(got)
+		tolerance = 1e-2
+	default:
+		t.Fatalf("unsupported data type: %s", dataType.String())
+	}
+	assert.Equal(t, want, got)
+	assert.InDeltaSlice(t, floatData, decoded, tolerance)
+}
+
+func assertPlaceholderVectorsMatchFloat32(
+	t *testing.T,
+	placeholderType commonpb.PlaceholderType,
+	fieldType schemapb.DataType,
+	placeholders []*commonpb.PlaceholderValue,
+	inputs [][]float32,
+) {
+	t.Helper()
+	assert.Len(t, placeholders, 1)
+	placeholder := placeholders[0]
+	assert.Equal(t, placeholderType, placeholder.GetType())
+	assert.Len(t, placeholder.GetValues(), len(inputs))
+	for i, input := range inputs {
+		switch fieldType {
+		case schemapb.DataType_Float16Vector:
+			assertFP16BF16BytesMatchFloat32(t, fieldType, input, placeholder.GetValues()[i])
+		case schemapb.DataType_BFloat16Vector:
+			assertFP16BF16BytesMatchFloat32(t, fieldType, input, placeholder.GetValues()[i])
+		default:
+			assert.Equal(t, typeutil.Float32ArrayToBytes(input), placeholder.GetValues()[i])
+		}
+	}
+}
+
 func createFloat32PlaceholderGroup(vectors [][]float32) []byte {
 	values := make([][]byte, len(vectors))
 	for i, vec := range vectors {
@@ -223,6 +273,42 @@ func TestConvertPlaceholderGroupToBFloat16(t *testing.T) {
 
 	assert.Equal(t, commonpb.PlaceholderType_BFloat16Vector, resultPhg.Placeholders[0].Type)
 	assert.Equal(t, 4*2, len(resultPhg.Placeholders[0].Values[0]))
+}
+
+func TestConvertPlaceholderGroupArrayOfVectorElementType(t *testing.T) {
+	for _, tt := range []struct {
+		name            string
+		elementType     schemapb.DataType
+		placeholderType commonpb.PlaceholderType
+	}{
+		{
+			name:            "float16 element",
+			elementType:     schemapb.DataType_Float16Vector,
+			placeholderType: commonpb.PlaceholderType_Float16Vector,
+		},
+		{
+			name:            "bfloat16 element",
+			elementType:     schemapb.DataType_BFloat16Vector,
+			placeholderType: commonpb.PlaceholderType_BFloat16Vector,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			vectors := [][]float32{{0.1, 0.2, 0.3, 0.4}}
+			phgBytes := createFloat32PlaceholderGroup(vectors)
+			fieldSchema := &schemapb.FieldSchema{
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: tt.elementType,
+			}
+
+			convertedBytes, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
+			assert.NoError(t, err)
+
+			var resultPhg commonpb.PlaceholderGroup
+			err = proto.Unmarshal(convertedBytes, &resultPhg)
+			assert.NoError(t, err)
+			assertPlaceholderVectorsMatchFloat32(t, tt.placeholderType, tt.elementType, resultPhg.Placeholders, vectors)
+		})
+	}
 }
 
 func TestConvertPlaceholderGroupTypeMismatch(t *testing.T) {
@@ -365,4 +451,63 @@ func TestConvertPlaceholderGroupIntegration(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, phgBytes, convertedBytes) // Should be unchanged
 	})
+}
+
+// TestConvertPlaceholderIfNeededArrayOfVectorSubField enters through the real
+// search-task call path instead of calling ConvertPlaceholderGroup directly, so
+// it also covers the field lookup. An ArrayOfVector field only ever lives inside
+// a struct array field, so its ID is absent from schema.Fields.
+func TestConvertPlaceholderIfNeededArrayOfVectorSubField(t *testing.T) {
+	const subFieldID = int64(102)
+
+	for _, tt := range []struct {
+		name            string
+		elementType     schemapb.DataType
+		placeholderType commonpb.PlaceholderType
+	}{
+		{
+			name:            "float16 element",
+			elementType:     schemapb.DataType_Float16Vector,
+			placeholderType: commonpb.PlaceholderType_Float16Vector,
+		},
+		{
+			name:            "bfloat16 element",
+			elementType:     schemapb.DataType_BFloat16Vector,
+			placeholderType: commonpb.PlaceholderType_BFloat16Vector,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{
+				Name: "test_struct_array_search",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				},
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{
+					{
+						FieldID: 101,
+						Name:    "struct_array",
+						Fields: []*schemapb.FieldSchema{
+							{
+								FieldID:     subFieldID,
+								Name:        "vector_array",
+								DataType:    schemapb.DataType_ArrayOfVector,
+								ElementType: tt.elementType,
+							},
+						},
+					},
+				},
+			}
+
+			vectors := [][]float32{{0.1, 0.2, 0.3, 0.4}}
+			task := &searchTask{schema: newSchemaInfo(schema)}
+
+			convertedBytes, err := task.convertPlaceholderIfNeeded(createFloat32PlaceholderGroup(vectors), subFieldID)
+			assert.NoError(t, err)
+
+			var resultPhg commonpb.PlaceholderGroup
+			err = proto.Unmarshal(convertedBytes, &resultPhg)
+			assert.NoError(t, err)
+			assertPlaceholderVectorsMatchFloat32(t, tt.placeholderType, tt.elementType, resultPhg.Placeholders, vectors)
+		})
+	}
 }

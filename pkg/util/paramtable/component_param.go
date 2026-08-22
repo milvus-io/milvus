@@ -1080,7 +1080,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Key:          "common.locks.maxWLockConditionalWaitTime",
 		Version:      "2.5.4",
 		DefaultValue: "600",
-		Doc:          "maximum seconds for waiting wlock conditional",
+		Doc:          "seconds before logging a wlock conditional wait that is taking long; the wait itself is not bounded by this value",
 		Export:       true,
 	}
 	p.MaxWLockConditionalWaitTime.Init(base.mgr)
