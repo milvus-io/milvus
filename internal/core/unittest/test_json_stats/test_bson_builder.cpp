@@ -173,6 +173,49 @@ TEST_F(BsonBuilderTest, CreateValueNodeTest) {
                  std::runtime_error);
 }
 
+TEST_F(BsonBuilderTest, LegacyNonFiniteArrayValuesBecomeNull) {
+    auto array_node = builder_->CreateValueNode(
+        R"([NaN, Infinity, -Infinity, "NaN", "escaped \"NaN\" Infinity", {"Infinity":NaN}, [Infinity]])",
+        JSONType::ARRAY);
+
+    ASSERT_TRUE(array_node.value.has_value());
+    const auto& array_bytes = array_node.value->arr_bytes;
+    milvus::bson::array_view array_view(array_bytes.data(), array_bytes.size());
+    ASSERT_EQ(std::distance(array_view.begin(), array_view.end()), 7);
+
+    auto it = array_view.begin();
+    EXPECT_EQ(it->type(), milvus::bson::type::k_null);
+    ++it;
+    EXPECT_EQ(it->type(), milvus::bson::type::k_null);
+    ++it;
+    EXPECT_EQ(it->type(), milvus::bson::type::k_null);
+    ++it;
+    EXPECT_EQ(it->get_string().value, "NaN");
+    ++it;
+    EXPECT_EQ(it->get_string().value, "escaped \"NaN\" Infinity");
+    ++it;
+
+    auto document_view = it->get_value().get_document().value;
+    auto document_it = document_view.begin();
+    ASSERT_NE(document_it, document_view.end());
+    EXPECT_EQ(document_it->key(), "Infinity");
+    EXPECT_EQ(document_it->type(), milvus::bson::type::k_null);
+    ++it;
+
+    auto nested_array_view = it->get_value().get_array().value;
+    auto nested_it = nested_array_view.begin();
+    ASSERT_NE(nested_it, nested_array_view.end());
+    EXPECT_EQ(nested_it->type(), milvus::bson::type::k_null);
+}
+
+TEST_F(BsonBuilderTest, LegacyNonFiniteFallbackKeepsMalformedJsonInvalid) {
+    EXPECT_THROW(
+        builder_->CreateValueNode(R"([NaN "missing comma"])", JSONType::ARRAY),
+        std::runtime_error);
+    EXPECT_THROW(builder_->CreateValueNode(R"([NaNsuffix])", JSONType::ARRAY),
+                 std::runtime_error);
+}
+
 TEST_F(BsonBuilderTest, AppendToDomTest) {
     BsonBuilder builder;
     DomNode root(DomNode::Type::DOCUMENT);

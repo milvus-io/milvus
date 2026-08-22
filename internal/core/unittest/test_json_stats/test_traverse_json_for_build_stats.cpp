@@ -147,3 +147,70 @@ TEST(CollectSingleJsonStatsInfoTest, EmptyJsonStringThrows) {
     EXPECT_NO_THROW(
         { CollectSingleJsonStatsInfoAccessor::Call(stats, json, infos); });
 }
+
+TEST(TraverseJsonForBuildStatsTest, LegacyNonFiniteScalarsRemainDouble) {
+    const char* json = R"({
+        "nan": NaN,
+        "positive": Infinity,
+        "negative": -Infinity,
+        "text": "NaN"
+    })";
+    auto tokens = Tokenize(json);
+
+    milvus::storage::FieldDataMeta field_meta{1, 2, 3, 100, {}};
+    milvus::storage::IndexMeta index_meta{3, 100, 1, 1};
+    milvus::storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestLocalPath;
+    auto cm = milvus::storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
+    JsonKeyStats stats(ctx, true);
+
+    int index = 0;
+    std::vector<std::string> path;
+    std::map<JsonKey, std::string> values;
+    TraverseJsonForBuildStatsAccessor::Call(
+        stats, json, tokens.data(), index, path, values);
+
+    auto expect_double = [&](const char* key, const char* expected) {
+        auto it = values.find(JsonKey{key, JSONType::DOUBLE});
+        ASSERT_NE(it, values.end()) << key;
+        EXPECT_EQ(it->second, expected);
+    };
+    expect_double("/nan", "NaN");
+    expect_double("/positive", "Infinity");
+    expect_double("/negative", "-Infinity");
+
+    auto text = values.find(JsonKey{"/text", JSONType::STRING});
+    ASSERT_NE(text, values.end());
+    EXPECT_EQ(text->second, "NaN");
+}
+
+TEST(CollectSingleJsonStatsInfoTest, LegacyNonFiniteScalarsRemainDouble) {
+    const char* json =
+        R"({"nan":NaN,"positive":Infinity,"negative":-Infinity,"text":"Infinity"})";
+
+    milvus::storage::FieldDataMeta field_meta{1, 2, 3, 100, {}};
+    milvus::storage::IndexMeta index_meta{3, 100, 1, 1};
+    milvus::storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestLocalPath;
+    auto cm = milvus::storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
+    JsonKeyStats stats(ctx, true);
+
+    std::map<JsonKey, milvus::index::KeyStatsInfo> infos;
+    CollectSingleJsonStatsInfoAccessor::Call(stats, json, infos);
+
+    for (const auto key : {"/nan", "/positive", "/negative"}) {
+        auto it = infos.find(JsonKey{key, JSONType::DOUBLE});
+        ASSERT_NE(it, infos.end()) << key;
+        EXPECT_EQ(it->second.hit_row_num_, 1);
+    }
+
+    auto text = infos.find(JsonKey{"/text", JSONType::STRING});
+    ASSERT_NE(text, infos.end());
+    EXPECT_EQ(text->second.hit_row_num_, 1);
+}
