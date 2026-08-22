@@ -461,6 +461,11 @@ func handleCompare(op planpb.OpType, left *ExprWithType, right *ExprWithType) (*
 	leftColumnInfo := toColumnInfo(left)
 	rightColumnInfo := toColumnInfo(right)
 
+	if (left.expr.GetIsTemplate() && left.expr.GetValueExpr() == nil) ||
+		(right.expr.GetIsTemplate() && right.expr.GetValueExpr() == nil) {
+		return nil, merr.WrapErrQueryPlanMsg("template variables in composite expressions cannot be compared with fields")
+	}
+
 	if left.expr.GetIsTemplate() {
 		return &planpb.Expr{
 			Expr: &planpb.Expr_UnaryRangeExpr{

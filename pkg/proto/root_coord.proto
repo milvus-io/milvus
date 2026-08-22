@@ -306,6 +306,25 @@ message AlterDatabaseRequest {
   repeated string delete_keys = 5;
 }
 
+message RLSPolicyInfo {
+  int64 db_id = 1;
+  int64 collection_id = 2;
+  int64 policy_id = 3;
+  string policy_name = 4;
+  milvus.RowPolicyType policy_type = 5;
+  repeated milvus.RowPolicyAction actions = 6;
+  string using_expr = 7;
+  string check_expr = 8;
+  string description = 9;
+}
+
+message RLSPrincipalInfo {
+  int64 db_id = 1;
+  int64 collection_id = 2;
+  string principal_name = 3;
+  map<string, string> tags = 4;
+}
+
 message GetPChannelInfoRequest {
   common.MsgBase base = 1;
   string pchannel = 2;
