@@ -133,6 +133,33 @@ func (b *broadcastTask) BroadcastResult() (message.BroadcastMutableMessage, map[
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	msg, result, acked := b.broadcastResult()
+	if !acked {
+		panic("unreachable: BroadcastResult is called before the broadcast task is acked")
+	}
+	return msg, result
+}
+
+// BroadcastResultIfAcked is the non-panicking variant of BroadcastResult, returning
+// nil results when the task has not been acked on every vchannel yet.
+//
+// It exists for callers that reach a task whose ack state they do not control: the
+// duplicate branch of an idempotent broadcast resolves to a task created by another
+// request, which may still be in flight. Whether it can be observed unacked depends
+// on a resource-key lock lifetime two layers away, and a panic in a coordinator is
+// severe, so the duplicate is answered with whatever is available instead.
+func (b *broadcastTask) BroadcastResultIfAcked() (message.BroadcastMutableMessage, map[string]*types.AppendResult) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	msg, result, _ := b.broadcastResult()
+	return msg, result
+}
+
+// broadcastResult zips the vchannels of the task with their acked checkpoints.
+// Returns acked=false and a nil result when any vchannel has no checkpoint yet.
+// Caller must hold b.mu.
+func (b *broadcastTask) broadcastResult() (message.BroadcastMutableMessage, map[string]*types.AppendResult, bool) {
 	vchannels := b.header().VChannels
 	result := make(map[string]*types.AppendResult, len(vchannels))
 	for idx, vchannel := range vchannels {
@@ -147,7 +174,7 @@ func (b *broadcastTask) BroadcastResult() (message.BroadcastMutableMessage, map[
 		}
 		cp := b.task.AckedCheckpoints[idx]
 		if cp == nil || cp.TimeTick == 0 {
-			panic("unreachable: BroadcastResult is called before the broadcast task is acked")
+			return b.msg, nil, false
 		}
 		result[vchannel] = &types.AppendResult{
 			MessageID:              message.MustUnmarshalMessageID(cp.MessageId),
@@ -155,7 +182,7 @@ func (b *broadcastTask) BroadcastResult() (message.BroadcastMutableMessage, map[
 			TimeTick:               cp.TimeTick,
 		}
 	}
-	return b.msg, result
+	return b.msg, result, true
 }
 
 // Header returns the header of the broadcast task.
@@ -170,6 +197,22 @@ func (b *broadcastTask) Header() *message.BroadcastHeader {
 // Caller must hold b.mu.
 func (b *broadcastTask) header() *message.BroadcastHeader {
 	return b.msg.BroadcastHeader()
+}
+
+// IdempotencyScope returns the idempotency scope of the message of the broadcast task.
+// Must acquire b.mu because MarkIgnore may replace b.msg concurrently.
+func (b *broadcastTask) IdempotencyScope() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return idempotencyScopeOfMessage(b.msg)
+}
+
+// BroadcastMessage returns the message of the broadcast task.
+// Must acquire b.mu because MarkIgnore may replace b.msg concurrently.
+func (b *broadcastTask) BroadcastMessage() message.BroadcastMutableMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.msg
 }
 
 // ControlChannelTimeTick returns the time tick of the control channel.

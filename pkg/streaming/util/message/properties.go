@@ -20,6 +20,7 @@ const (
 	messageUnreplicable                     = "_ur"  // mark the message as unsafe to replicate.
 	messageTraceContext                     = "_tc"  // Trace context subset header.
 	messagePartialUpdateCAS                 = "_puc" // partial update CAS transaction marker.
+	messageIdempotencyKey                   = "_ik"  // idempotency key of an idempotent write, see `IdempotencyKeyOf`.
 )
 
 var (

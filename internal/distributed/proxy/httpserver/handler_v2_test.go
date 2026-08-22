@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tidwall/gjson"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -2772,6 +2773,9 @@ func versionalV2(category string, action string) string {
 func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 	h := NewHandlersV2(proxy)
 	ginHandler := gin.Default()
+	// Mirror the middleware the real server installs, so tests exercise the same
+	// chain rather than a handler-only subset of it.
+	ginHandler.Use(IdempotencyKeyHandlerFunc)
 	appV2 := ginHandler.Group("/v2/vectordb", genAuthMiddleWare(needAuth))
 	h.RegisterRoutesToV2(appV2)
 
@@ -6792,4 +6796,137 @@ func TestGroupKnobSpellingsCannotDisagree(t *testing.T) {
 		assert.Equal(t, http.StatusOK, code)
 		assert.Contains(t, body, "cannot be used simultaneously")
 	})
+}
+
+func TestIdempotencyKeyHandlerFuncSetsIncomingMetadata(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)
+	c.Request.Header.Set(HTTPHeaderIdempotencyKey, "run-1-batch-1")
+
+	IdempotencyKeyHandlerFunc(c)
+
+	md, ok := metadata.FromIncomingContext(c.Request.Context())
+	assert.True(t, ok)
+	assert.Equal(t, []string{"run-1-batch-1"}, md.Get(util.HeaderIdempotencyKey))
+}
+
+// TestIdempotencyKeyHandlerFuncRejectsUnsendableKey pins the REST door found open by
+// the adversarial review on milvus#52544. Go's header parser accepts every byte
+// >= 0x80, gRPC refuses anything outside printable ASCII before the stream exists,
+// and ClientBase reads that codes.Internal as a broken connection -- so an unchecked
+// key turns one request into repeated resets of a shared connection. The middleware is
+// mounted on the whole engine, so this covers every v1 and v2 route.
+func TestIdempotencyKeyHandlerFuncRejectsUnsendableKey(t *testing.T) {
+	paramtable.Init()
+
+	for _, key := range []string{"批次-1", "run\t1"} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)
+		c.Request.Header.Set(HTTPHeaderIdempotencyKey, key)
+
+		IdempotencyKeyHandlerFunc(c)
+
+		assert.True(t, c.IsAborted())
+		assert.Contains(t, w.Body.String(), "printable ASCII")
+		// The key must not have been copied onto the outgoing path.
+		md, ok := metadata.FromIncomingContext(c.Request.Context())
+		if ok {
+			assert.Empty(t, md.Get(util.HeaderIdempotencyKey))
+		}
+	}
+}
+
+func TestIdempotencyKeyHandlerFuncRejectsOversizedKey(t *testing.T) {
+	paramtable.Init()
+	limit := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)
+	c.Request.Header.Set(HTTPHeaderIdempotencyKey, strings.Repeat("a", limit+1))
+
+	IdempotencyKeyHandlerFunc(c)
+
+	assert.True(t, c.IsAborted())
+	assert.Contains(t, w.Body.String(), "exceeds limit")
+}
+
+func TestIdempotencyKeyHandlerFuncPreservesExistingMetadata(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	req := httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)
+	req = req.WithContext(metadata.NewIncomingContext(req.Context(),
+		metadata.Pairs(util.HeaderDBName, "db1")))
+	req.Header.Set(HTTPHeaderIdempotencyKey, "run-1-batch-1")
+	c.Request = req
+
+	IdempotencyKeyHandlerFunc(c)
+
+	md, _ := metadata.FromIncomingContext(c.Request.Context())
+	assert.Equal(t, []string{"db1"}, md.Get(util.HeaderDBName))
+	assert.Equal(t, []string{"run-1-batch-1"}, md.Get(util.HeaderIdempotencyKey))
+}
+
+// A request without the header must leave the context alone: an empty metadata value
+// is not the same as an absent one for the components that read it, and every route in
+// the cluster passes through this middleware.
+func TestIdempotencyKeyHandlerFuncNoHeaderIsNoop(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/collections/list", nil)
+	before := c.Request.Context()
+
+	IdempotencyKeyHandlerFunc(c)
+
+	assert.Equal(t, before, c.Request.Context())
+	md, ok := metadata.FromIncomingContext(c.Request.Context())
+	if ok {
+		_, present := md[util.HeaderIdempotencyKey]
+		assert.False(t, present)
+	}
+}
+
+func TestCreateImportJobForwardsIdempotencyKeyWithAuth(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().ImportV2(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *internalpb.ImportRequest) (*internalpb.ImportResponse, error) {
+			md, ok := metadata.FromIncomingContext(ctx)
+			assert.True(t, ok)
+			assert.Equal(t, []string{"run-1-batch-1"}, md.Get(util.HeaderIdempotencyKey))
+			return &internalpb.ImportResponse{
+				Status: commonSuccessStatus,
+				JobID:  "1234567890",
+			}, nil
+		}).Once()
+	testEngine := initHTTPServerV2(mp, true)
+
+	bodyReader := bytes.NewReader([]byte(`{"collectionName": "` + DefaultCollectionName + `", "files": [["book.json"]]}`))
+	req := httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, CreateAction), bodyReader)
+	req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
+	req.Header.Set(HTTPHeaderIdempotencyKey, "run-1-batch-1")
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	err := json.Unmarshal(w.Body.Bytes(), returnBody)
+	assert.NoError(t, err)
+	assert.Equal(t, merr.Code(nil), returnBody.Code)
+}
+
+// A browser sends the Idempotency-Key header cross-origin only if the preflight
+// response lists it in Access-Control-Allow-Headers; the header is otherwise blocked
+// before the actual request is ever sent, making idempotent import unusable from a
+// browser client.
+func TestRequestHandlerFuncAllowsIdempotencyKeyHeaderInCORS(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodOptions, "/v2/vectordb/jobs/import/create", nil)
+
+	RequestHandlerFunc(c)
+
+	assert.Contains(t, w.Header().Get("Access-Control-Allow-Headers"), HTTPHeaderIdempotencyKey)
 }

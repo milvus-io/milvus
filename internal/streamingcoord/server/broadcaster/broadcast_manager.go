@@ -47,6 +47,7 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 	pendingTasks := make([]*pendingBroadcastTask, 0, len(recoveryTasks))
 	pendingAckCallbackTasks := make([]*broadcastTask, 0, len(recoveryTasks))
 	tombstoneIDs := make([]uint64, 0, len(recoveryTasks))
+	idxOfKeys := newIdempotencyIndex()
 	for _, task := range recoveryTasks {
 		switch task.task.State {
 		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_WAIT_ACK:
@@ -74,12 +75,16 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 			tombstoneIDs = append(tombstoneIDs, task.Header().BroadcastID)
 		}
 		tasks[task.Header().BroadcastID] = task
+		// Rebuild the idempotency index across EVERY state, tombstones included:
+		// a tombstoned task is exactly what a late retry must still hit.
+		idxOfKeys.Add(task.IdempotencyScope(), task.Header().BroadcastID)
 	}
 
 	m := &broadcastTaskManager{
 		lifetime:           typeutil.NewLifetime(),
 		mu:                 &sync.Mutex{},
 		tasks:              tasks,
+		idempotencyIndex:   idxOfKeys,
 		resourceKeyLocker:  rkLocker,
 		metrics:            metrics,
 		broadcastScheduler: newBroadcasterScheduler(pendingTasks, logger),
@@ -102,6 +107,7 @@ type broadcastTaskManager struct {
 	lifetime           *typeutil.Lifetime
 	mu                 *sync.Mutex
 	tasks              map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
+	idempotencyIndex   *idempotencyIndex         // map the idempotency key to the broadcastID that owns it
 	resourceKeyLocker  *resourceKeyLocker
 	metrics            *broadcasterMetrics
 	broadcastScheduler *broadcasterScheduler // the scheduler of the broadcast task
@@ -299,6 +305,10 @@ func (bm *broadcastTaskManager) addBroadcastTask(msg message.BroadcastMutableMes
 
 	bm.mu.Lock()
 	bm.tasks[broadcastID] = newIncomingTask
+	// The message header carries the broadcast's resource keys at this point
+	// (OverwriteBroadcastHeader stamped them), so the scope derived here is exactly
+	// the one broadcasterWithRK.Broadcast derives from its own lock guards.
+	bm.idempotencyIndex.Add(idempotencyScopeOfMessage(msg), broadcastID)
 	bm.mu.Unlock()
 	return newIncomingTask
 }
@@ -323,7 +333,32 @@ func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMe
 	newBroadcastTask := newBroadcastTaskFromImmutableMessage(msg, bm.metrics, bm.ackScheduler)
 	newBroadcastTask.SetLogger(bm.Logger())
 	bm.tasks[bh.BroadcastID] = newBroadcastTask
+	bm.idempotencyIndex.Add(newBroadcastTask.IdempotencyScope(), bh.BroadcastID)
 	return newBroadcastTask, true
+}
+
+// getOriginalBroadcast returns the original broadcast message that owns the given
+// idempotency scope, so the caller can recover its own response payload, together
+// with the per-vchannel append results of that original broadcast.
+//
+// The results are nil when the original has not been acked on every vchannel yet;
+// see broadcastTask.BroadcastResultIfAcked.
+func (bm *broadcastTaskManager) getOriginalBroadcast(scope string) (message.BroadcastMutableMessage, map[string]*types.AppendResult, bool) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	broadcastID, ok := bm.idempotencyIndex.Get(scope)
+	if !ok {
+		return nil, nil, false
+	}
+	t, ok := bm.tasks[broadcastID]
+	if !ok {
+		// The index and tasks map are maintained under the same lock, so this is
+		// unreachable; treat it as a miss rather than trusting a dangling entry.
+		return nil, nil, false
+	}
+	msg, results := t.BroadcastResultIfAcked()
+	return msg, results, true
 }
 
 // getBroadcastTaskByID return the task by the broadcastID.
@@ -340,6 +375,9 @@ func (bm *broadcastTaskManager) removeBroadcastTask(broadcastID uint64) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
+	if t, ok := bm.tasks[broadcastID]; ok {
+		bm.idempotencyIndex.Remove(t.IdempotencyScope(), broadcastID)
+	}
 	delete(bm.tasks, broadcastID)
 }
 

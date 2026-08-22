@@ -39,6 +39,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	oteltrace "go.opentelemetry.io/otel/trace"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -55,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -4748,7 +4750,7 @@ func RequestHandlerFunc(c *gin.Context) {
 	}
 	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 	c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-	c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+	c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, "+HTTPHeaderIdempotencyKey)
 	c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH")
 	c.Writer.Header().Set("X-Content-Type-Options", "nosniff") // Prevents MIME sniffing
 
@@ -5581,4 +5583,36 @@ func trimStringList(values []string) []string {
 		trimmed[i] = strings.TrimSpace(value)
 	}
 	return trimmed
+}
+
+// IdempotencyKeyHandlerFunc copies the REST Idempotency-Key header into the gRPC
+// incoming metadata, so the proxy reads the key from exactly one place regardless of
+// whether the request arrived over REST or gRPC. Existing metadata is preserved.
+//
+// Registered as middleware rather than inside a handler wrapper: which operations are
+// idempotent is decided downstream, so every route — v1 and v2 alike — must carry the
+// key rather than drop it and force the next adopter to rediscover this hop.
+func IdempotencyKeyHandlerFunc(c *gin.Context) {
+	key := c.Request.Header.Get(HTTPHeaderIdempotencyKey)
+	if key == "" {
+		c.Next()
+		return
+	}
+	// Validate before the key reaches outgoing metadata. Go accepts header bytes
+	// gRPC does not, and this middleware is mounted on the whole engine, so an
+	// unchecked key would ride along on every coordinator RPC of any v1 or v2
+	// route -- see ValidateIdempotencyKey for what that costs.
+	if err := interceptor.ValidateIdempotencyKey(key); err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return
+	}
+	ctx := c.Request.Context()
+	md, _ := metadata.FromIncomingContext(ctx)
+	md = md.Copy()
+	md.Set(util.HeaderIdempotencyKey, key)
+	c.Request = c.Request.WithContext(metadata.NewIncomingContext(ctx, md))
+	c.Next()
 }

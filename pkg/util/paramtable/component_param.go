@@ -7005,10 +7005,20 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	p.FilesPerPreImportTask.Init(base.mgr)
 
 	p.ImportTaskRetention = ParamItem{
-		Key:          "dataCoord.import.taskRetention",
-		Version:      "2.4.0",
-		Doc:          "The retention period in seconds for tasks in the Completed or Failed state.",
-		DefaultValue: "10800",
+		Key:     "dataCoord.import.taskRetention",
+		Version: "2.4.0",
+		Doc: `The retention period in seconds for tasks in the Completed or Failed state.
+Must be >= streaming.walBroadcaster.tombstone.maxLifetime: the BulkImport
+idempotency window is bounded by the tombstone retention, so a job GC'd earlier
+than its tombstone would let an in-window retry resolve to a jobID that
+GetImportProgress can no longer find. The default is twice the tombstone default
+rather than equal to it, because a tombstone's age is measured from the last
+StreamingCoord start: every restart extends its remaining life by up to another
+maxLifetime, while this retention keeps counting from the job's own completion.
+Equal values hold only for a window with no restart, which is not a property a
+default may assume. Raise it further if StreamingCoord restarts more than once
+inside one tombstone lifetime.`,
+		DefaultValue: "172800",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -8175,6 +8185,9 @@ type streamingConfig struct {
 	WALBroadcasterTombstoneMaxCount      ParamItem `refreshable:"true"`
 	WALBroadcasterTombstoneMaxLifetime   ParamItem `refreshable:"true"`
 
+	// idempotency
+	IdempotencyMaxKeyLength ParamItem `refreshable:"true"`
+
 	// txn
 	TxnDefaultKeepaliveTimeout ParamItem `refreshable:"true"`
 
@@ -8476,6 +8489,19 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 		Export:       false,
 	}
 	p.WALBroadcasterTombstoneMaxLifetime.Init(base.mgr)
+
+	p.IdempotencyMaxKeyLength = ParamItem{
+		Key:     "streaming.idempotency.maxKeyLength",
+		Version: "2.6.6",
+		Doc: `The max length in bytes of a client-supplied idempotency key, 256 by default.
+The key is stored in the message properties of every write it guards, so an
+oversized key inflates both the WAL entry and the in-memory dedup index.
+A value of 0 rejects every non-empty key, disabling idempotency keys entirely;
+requests that carry no key are accepted at any value.`,
+		DefaultValue: "256",
+		Export:       false,
+	}
+	p.IdempotencyMaxKeyLength.Init(base.mgr)
 
 	// txn
 	p.TxnDefaultKeepaliveTimeout = ParamItem{

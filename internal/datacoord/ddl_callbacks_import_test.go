@@ -85,34 +85,6 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_InvalidTimeoutReturnsEr
 	s.Contains(err.Error(), "timeout")
 }
 
-func (s *ImportCallbacksSuite) TestValidateImportRequest_MaxJobsExceededReturnsError() {
-	ctx := context.Background()
-
-	mock := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
-		return 2000 // Exceeds default MaxImportJobNum (1024)
-	}).Build()
-	defer mock.UnPatch()
-
-	server := &Server{
-		importMeta: &importMeta{},
-	}
-
-	files := []*msgpb.ImportFile{
-		{Id: 1, Paths: []string{"/test/file1.json"}},
-	}
-	options := []*commonpb.KeyValuePair{
-		{Key: "timeout", Value: "300s"},
-	}
-
-	err := server.validateImportRequest(ctx, files, options)
-
-	s.Error(err)
-	// Job-count backpressure is a server-side condition -> ErrImportSysFailed
-	// (must not be bucketed as a user-caused failure).
-	s.True(errors.Is(err, merr.ErrImportSysFailed))
-	s.Contains(err.Error(), "The number of jobs has reached the limit")
-}
-
 func (s *ImportCallbacksSuite) TestValidateImportRequest_BalancerGetFailsReturnsError() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -283,29 +255,29 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_SuccessWithValidInput()
 // broadcastImport Tests
 // --------------------------------
 
+// A request that fails validateImportRequest is rejected before any broadcast wiring is
+// touched -- server.broker is nil here, so reaching it would panic or block. The trigger
+// is an unparsable timeout, i.e. a pure function of the request. The job-count limit is
+// no longer one of these: it is admission over mutable cluster state and now runs inside
+// the broadcast, covered by TestImportV2_JobLimitStillRejectsANewJob.
 func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError() {
 	ctx := context.Background()
-
-	// Mock validateImportRequest to fail
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
-		return 2000 // Exceeds limit
-	}).Build()
-	defer mockCount.UnPatch()
 
 	server := &Server{
 		importMeta: &importMeta{},
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
-		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "not-a-duration"}},
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.Error(err)
@@ -344,7 +316,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		broker:     mockBroker,
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -354,6 +326,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.Error(err)
@@ -402,7 +375,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		broker:     mockBroker,
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -412,6 +385,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.Error(err)
@@ -465,7 +439,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 		broker:     mockBroker,
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -475,6 +449,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.Error(err)
@@ -526,7 +501,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		broker:     mockBroker,
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -536,6 +511,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.Error(err)
@@ -586,7 +562,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		broker:     mockBroker,
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -596,6 +572,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.NoError(err)
@@ -634,6 +611,9 @@ type mockBroadcastAPIImpl struct {
 	broadcastResult *types.BroadcastAppendResult
 	broadcastErr    error
 	closeCalled     atomic.Bool
+	// capturedMsg is the last message handed to Broadcast, for assertions on what the
+	// caller actually put on the wire.
+	capturedMsg message.BroadcastMutableMessage
 }
 
 func newMockBroadcastAPIImpl() *mockBroadcastAPIImpl {
@@ -656,6 +636,7 @@ func (m *mockBroadcastAPIImpl) Broadcast(ctx context.Context, msg message.Broadc
 	if msg == nil {
 		return nil, errors.New("message is nil")
 	}
+	m.capturedMsg = msg
 	if m.broadcastErr != nil {
 		return nil, m.broadcastErr
 	}
@@ -1256,4 +1237,39 @@ func TestBroadcastCommitImportMessage_RequiresVchannels(t *testing.T) {
 
 func TestBroadcastRollbackImportMessage_RequiresVchannels(t *testing.T) {
 	testBroadcastRequiresVchannels(t, (*Server).broadcastRollbackImportMessage)
+}
+
+func TestJobIDFromDuplicatedBroadcast(t *testing.T) {
+	msg := message.NewImportMessageBuilderV1().
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{JobID: 4242, CollectionID: 100}).
+		WithIdempotencyKey("run-1").
+		WithBroadcast([]string{"v1"}).
+		MustBuildBroadcast()
+
+	jobID, err := jobIDFromDuplicatedBroadcast(msg, 100)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(4242), jobID)
+}
+
+// The dedup scope is built from resource keys that name a collection rather than
+// identify it, so drop db1.c1 -> recreate db1.c1 keeps the same scope and a reused key
+// still hits the index. Without this guard the caller would be handed the dropped
+// incarnation's jobID, and nothing downstream would catch it: checkCollection leaves a
+// Completed job alone when its collection vanishes, and GetImportProgress reports that
+// state without checking the collection still exists -- so the client would read
+// Completed for data that was never imported.
+func TestJobIDFromDuplicatedBroadcast_RejectsADifferentCollection(t *testing.T) {
+	msg := message.NewImportMessageBuilderV1().
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{JobID: 4242, CollectionID: 100}).
+		WithIdempotencyKey("run-1").
+		WithBroadcast([]string{"v1"}).
+		MustBuildBroadcast()
+
+	// 101 is the recreated same-named collection: same scope, different identity.
+	_, err := jobIDFromDuplicatedBroadcast(msg, 101)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
+	assert.Contains(t, err.Error(), "use a fresh key")
 }
