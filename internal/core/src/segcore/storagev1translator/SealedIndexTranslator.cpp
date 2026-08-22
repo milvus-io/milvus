@@ -5,6 +5,7 @@
 #include <optional>
 #include <utility>
 
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
 #include "common/resource_c.h"
@@ -215,6 +216,11 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
     } else {
         config_[milvus::index::ENABLE_MMAP] = "false";
     }
+
+    // Plumb the segment row count into the load config so JSON typed-path
+    // indexes size their exists bitmap from the true row domain (tantivy
+    // Count() only covers non-null rows).
+    config_[INDEX_NUM_ROWS_KEY] = index_load_info_.num_rows;
 
     // Check for cancellation before loading index data
     CheckCancellation(ctx, segment_id, "LoadIndex");

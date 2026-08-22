@@ -780,7 +780,7 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
 
     void
     finish() {
-        this->wrapper_->finish();
+        InvertedIndexTantivy<std::string>::finish();
     }
 
     void
@@ -800,6 +800,6 @@ JsonFlatIndexQueryExecutor<T>::JsonFlatIndexQueryExecutor(
     json_path_ = json_path;
     use_comparable_value_mask_ = use_comparable_value_mask;
     this->wrapper_ = json_flat_index.wrapper_;
-    this->null_offset_ = json_flat_index.null_offset_;
+    this->null_offsets_ = json_flat_index.null_offsets_;
 }
 }  // namespace milvus::index

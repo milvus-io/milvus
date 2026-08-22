@@ -131,6 +131,10 @@ InvertedIndexTantivy<T>::~InvertedIndexTantivy() {
 template <typename T>
 void
 InvertedIndexTantivy<T>::finish() {
+    {
+        std::unique_lock<folly::SharedMutex> lock(mutex_);
+        OptimizeNullOffsets();
+    }
     wrapper_->finish();
 }
 
@@ -138,11 +142,12 @@ template <typename T>
 BinarySet
 InvertedIndexTantivy<T>::Serialize(const Config& config) {
     std::shared_lock<folly::SharedMutex> lock(mutex_);
-    auto index_valid_data_length = null_offset_.size() * sizeof(size_t);
+    auto legacy_offsets = RoaringToLegacyOffsets(null_offsets_);
+    auto index_valid_data_length = legacy_offsets.size() * sizeof(size_t);
     std::shared_ptr<uint8_t[]> index_valid_data(
         new uint8_t[index_valid_data_length]);
     milvus::fastmem::FastMemcpy(
-        index_valid_data.get(), null_offset_.data(), index_valid_data_length);
+        index_valid_data.get(), legacy_offsets.data(), index_valid_data_length);
     lock.unlock();
     BinarySet res_set;
     if (index_valid_data_length > 0) {
@@ -257,8 +262,7 @@ void
 InvertedIndexTantivy<T>::LoadIndexMetas(
     const std::vector<std::string>& index_files, const Config& config) {
     auto fill_null_offsets = [&](const uint8_t* data, int64_t size) {
-        null_offset_.resize((size_t)size / sizeof(size_t));
-        milvus::fastmem::FastMemcpy(null_offset_.data(), data, (size_t)size);
+        LoadLegacyOffsets(null_offsets_, data, size);
     };
     auto null_offset_file_itr = std::find_if(
         index_files.begin(), index_files.end(), [&](const std::string& file) {
@@ -350,21 +354,17 @@ InvertedIndexTantivy<T>::IsNull() {
     tracer::AutoSpan span("InvertedIndexTantivy::IsNull",
                           tracer::GetRootSpan());
     int64_t count = Count();
-    TargetBitmap bitset(count);
 
     // For nested index, null rows don't have elements in the index,
     // so all elements in the index are valid (none are null).
-    // null_offset_ stores row offsets, not element offsets.
+    // null_offsets_ stores row offsets, not element offsets.
     if (is_nested_index_) {
-        return bitset;  // All false - no element is null
+        return TargetBitmap(count);  // All false - no element is null
     }
 
+    TargetBitmap bitset;
     auto fill_bitset = [this, count, &bitset]() {
-        auto end =
-            std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
-        for (auto iter = null_offset_.begin(); iter != end; ++iter) {
-            bitset.set(*iter);
-        }
+        bitset = RoaringToBitset(null_offsets_, count);
     };
 
     if (is_growing_) {
@@ -387,17 +387,13 @@ InvertedIndexTantivy<T>::IsNotNull() {
 
     // For nested index, null rows don't have elements in the index,
     // so all elements in the index are valid.
-    // null_offset_ stores row offsets, not element offsets.
+    // null_offsets_ stores row offsets, not element offsets.
     if (is_nested_index_) {
         return bitset;  // All true - all elements are valid
     }
 
-    auto fill_bitset = [this, count, &bitset]() {
-        auto end =
-            std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
-        for (auto iter = null_offset_.begin(); iter != end; ++iter) {
-            bitset.reset(*iter);
-        }
+    auto fill_bitset = [this, &bitset]() {
+        ClearRoaringRows(null_offsets_, bitset);
     };
 
     if (is_growing_) {
@@ -445,12 +441,8 @@ InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
     // The expression is "not" in, so we flip the bit.
     bitset.flip();
 
-    auto fill_bitset = [this, count, &bitset]() {
-        auto end =
-            std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
-        for (auto iter = null_offset_.begin(); iter != end; ++iter) {
-            bitset.reset(*iter);
-        }
+    auto fill_bitset = [this, &bitset]() {
+        ClearRoaringRows(null_offsets_, bitset);
     };
 
     if (is_growing_) {
@@ -645,13 +637,6 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::BuildWithFieldData(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
-    if (schema_.nullable()) {
-        int64_t total = 0;
-        for (const auto& data : field_datas) {
-            total += data->get_null_count();
-        }
-        null_offset_.reserve(total);
-    }
     switch (schema_.data_type()) {
         case proto::schema::DataType::Bool:
         case proto::schema::DataType::Int8:
@@ -672,7 +657,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                         auto n = data->get_num_rows();
                         for (int i = 0; i < n; i++) {
                             if (!data->is_valid(i)) {
-                                null_offset_.push_back(offset);
+                                AddNullOffset(offset);
                             }
                             wrapper_->add_array_data<T>(
                                 static_cast<const T*>(data->RawValue(i)),
@@ -695,7 +680,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                     if (schema_.nullable()) {
                         for (int i = 0; i < n; i++) {
                             if (!data->is_valid(i)) {
-                                null_offset_.push_back(offset);
+                                AddNullOffset(offset);
                             }
                             wrapper_
                                 ->add_array_data_by_single_segment_writer<T>(
@@ -731,6 +716,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                       fmt::format("Inverted index not supported on {}",
                                   schema_.data_type()));
     }
+    OptimizeNullOffsets();
 }
 
 template <typename T>
@@ -747,7 +733,7 @@ InvertedIndexTantivy<T>::build_index_for_array(
         auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
             if (schema_.nullable() && !data->is_valid(i)) {
-                null_offset_.push_back(offset);
+                AddNullOffset(offset);
             }
             auto length = data->is_valid(i) ? array_column[i].length() : 0;
             if (!inverted_index_single_segment_) {
@@ -777,7 +763,7 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
         auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
             if (schema_.nullable() && !data->is_valid(i)) {
-                null_offset_.push_back(offset);
+                AddNullOffset(offset);
             } else {
                 Assert(IsStringDataType(array_column[i].get_element_type()));
                 Assert(IsStringDataType(
@@ -815,7 +801,7 @@ InvertedIndexTantivy<T>::build_index_for_array_nested(
         for (int64_t i = 0; i < n; i++, row_offset++) {
             if (schema_.nullable() && !data->is_valid(i)) {
                 // Record null row offset, no elements to add
-                null_offset_.push_back(row_offset);
+                AddNullOffset(row_offset);
                 continue;
             }
             // RawValue maps logical->physical so compact nullable array
@@ -843,7 +829,7 @@ InvertedIndexTantivy<std::string>::build_index_for_array_nested(
         for (int64_t i = 0; i < n; i++, row_offset++) {
             if (schema_.nullable() && !data->is_valid(i)) {
                 // Record null row offset, no elements to add
-                null_offset_.push_back(row_offset);
+                AddNullOffset(row_offset);
                 continue;
             }
             // RawValue maps logical->physical so compact nullable array
@@ -893,7 +879,7 @@ InvertedIndexTantivy<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     }
 
     std::shared_lock<folly::SharedMutex> lock(mutex_);
-    bool has_null = !null_offset_.empty();
+    bool has_null = !null_offsets_.isEmpty();
     lock.unlock();
 
     writer->PutMeta("file_names", file_names);
@@ -910,9 +896,10 @@ InvertedIndexTantivy<T>::WriteEntries(storage::IndexEntryWriter* writer) {
 
     lock.lock();
     if (has_null) {
+        auto legacy_offsets = RoaringToLegacyOffsets(null_offsets_);
         writer->WriteEntry(INDEX_NULL_OFFSET_FILE_NAME,
-                           null_offset_.data(),
-                           null_offset_.size() * sizeof(size_t));
+                           legacy_offsets.data(),
+                           legacy_offsets.size() * sizeof(size_t));
     }
     lock.unlock();
 }
@@ -940,10 +927,8 @@ InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
 
     if (has_null) {
         auto null_entry = reader.ReadEntry(INDEX_NULL_OFFSET_FILE_NAME);
-        null_offset_.resize(null_entry.data.size() / sizeof(size_t));
-        milvus::fastmem::FastMemcpy(null_offset_.data(),
-                                    null_entry.data.data(),
-                                    null_entry.data.size());
+        LoadLegacyOffsets(
+            null_offsets_, null_entry.data.data(), null_entry.data.size());
     }
 
     auto load_in_mmap =

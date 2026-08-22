@@ -121,7 +121,8 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
             index_params,
             load_index_info->enable_mmap,
             load_index_info->num_rows,
-            load_index_info->dim);
+            load_index_info->dim,
+            load_index_info->schema.nullable());
     } catch (std::exception& e) {
         ThrowInfo(milvus::UnexpectedError,
                   fmt::format("failed to estimate index load resource, "

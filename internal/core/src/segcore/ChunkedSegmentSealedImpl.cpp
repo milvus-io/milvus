@@ -890,7 +890,8 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
                 info.index_size,
                 info.index_params,
                 info.enable_mmap,
-                target_runtime->row_count);
+                target_runtime->row_count,
+                field_meta.is_nullable());
     }
 
     request.has_raw_data =

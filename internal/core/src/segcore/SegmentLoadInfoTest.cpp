@@ -312,6 +312,7 @@ TEST_F(SegmentLoadInfoTest, BuildCacheDefersFileAwareScalarResourceEstimate) {
     auto* legacy_inverted_index = proto.add_index_infos();
     legacy_inverted_index->set_fieldid(110);
     legacy_inverted_index->set_indexid(5003);
+    legacy_inverted_index->set_num_rows(1000);
     legacy_inverted_index->add_index_file_paths(
         "/path/to/legacy_inverted_index");
     auto* legacy_inverted_param = legacy_inverted_index->add_index_params();
@@ -331,6 +332,19 @@ TEST_F(SegmentLoadInfoTest, BuildCacheDefersFileAwareScalarResourceEstimate) {
     auto legacy_inverted_infos = segment_info.GetFieldIndexInfos(FieldId(110));
     ASSERT_EQ(legacy_inverted_infos.size(), 1);
     EXPECT_TRUE(legacy_inverted_infos[0].load_resource_request.has_value());
+    const auto expected_legacy_request =
+        milvus::index::IndexFactory::GetInstance().ScalarIndexLoadResource(
+            legacy_inverted_infos[0].field_type,
+            legacy_inverted_infos[0].index_engine_version,
+            legacy_inverted_infos[0].index_size,
+            legacy_inverted_infos[0].index_params,
+            legacy_inverted_infos[0].enable_mmap,
+            legacy_inverted_infos[0].num_rows,
+            false);
+    EXPECT_EQ(legacy_inverted_infos[0].load_resource_request->final_memory_cost,
+              expected_legacy_request.final_memory_cost);
+    EXPECT_EQ(legacy_inverted_infos[0].load_resource_request->max_memory_cost,
+              expected_legacy_request.max_memory_cost);
 }
 
 TEST_F(SegmentLoadInfoTest, CompactRuntimeInfoForManifest) {

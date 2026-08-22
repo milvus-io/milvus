@@ -102,7 +102,7 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
 
     void
     finish() {
-        this->wrapper_->finish();
+        InvertedIndexTantivy<std::string>::finish();
     }
 
     void
