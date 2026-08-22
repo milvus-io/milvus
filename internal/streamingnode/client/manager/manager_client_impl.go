@@ -257,7 +257,9 @@ func (c *managerClientImpl) Assign(ctx context.Context, pchannel types.PChannelI
 	// Select a log node to assign the wal instance.
 	ctx = contextutil.WithPickServerID(ctx, pchannel.Node.ServerID)
 	_, err = manager.Assign(ctx, &streamingpb.StreamingNodeManagerAssignRequest{
-		Pchannel: types.NewProtoFromPChannelInfo(pchannel.Channel),
+		Pchannel:        types.NewProtoFromPChannelInfo(pchannel.Channel),
+		WalReplicaId:    pchannel.WALReplicaID,
+		AssignmentEpoch: pchannel.AssignmentEpoch,
 	})
 	return err
 }
@@ -278,7 +280,9 @@ func (c *managerClientImpl) Remove(ctx context.Context, pchannel types.PChannelI
 	// Select a streaming node to remove the wal instance.
 	ctx = contextutil.WithPickServerID(ctx, pchannel.Node.ServerID)
 	_, err = manager.Remove(ctx, &streamingpb.StreamingNodeManagerRemoveRequest{
-		Pchannel: types.NewProtoFromPChannelInfo(pchannel.Channel),
+		Pchannel:        types.NewProtoFromPChannelInfo(pchannel.Channel),
+		WalReplicaId:    pchannel.WALReplicaID,
+		AssignmentEpoch: pchannel.AssignmentEpoch,
 	})
 	// The following error can be treated as success.
 	// 1. err is nil, a real remove operation at streaming node has been happened.

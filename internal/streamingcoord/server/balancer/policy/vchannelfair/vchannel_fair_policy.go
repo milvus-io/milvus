@@ -4,8 +4,6 @@ import (
 	"context"
 	"math"
 
-	"github.com/samber/lo"
-
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -47,7 +45,7 @@ func (p *policy) Balance(currentLayout balancer.CurrentLayout) (layout balancer.
 		}
 		newIncomingChannel[channelID] = struct{}{}
 	}
-	serverIDs := lo.Keys(currentLayout.AllNodesInfo)
+	serverIDs := currentLayout.GetAssignableNodeIDs()
 
 	// 2. assign the new incoming channels at current layout based on lowest unbalance score.
 	allChannelIDSortedByVChannels := currentLayout.GetAllPChannelsSortedByVChannelCountDesc()
@@ -148,7 +146,7 @@ func (p *policy) assignChannels(expectedLayout *expectedLayoutForVChannelFairPol
 		}
 		return
 	}
-	for nodeID := range expectedLayout.CurrentLayout.AllNodesInfo {
+	for _, nodeID := range expectedLayout.CurrentLayout.GetAssignableNodeIDs() {
 		channelID := channelIDs[0]
 		expectedLayout.Assign(channelID, nodeID)
 		p.assignChannels(expectedLayout, channelIDs[1:], greatestSnapshot)
