@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strconv"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -67,10 +68,31 @@ func MustNewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) Rep
 
 // NewReplicateMessage creates a new replicate message.
 func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) (ReplicateMutableMessage, error) {
-	messageID := MustUnmarshalMessageID(im.GetId())
+	if im == nil {
+		return nil, merr.WrapErrParameterMissing("message")
+	}
+	messageID, err := UnmarshalMessageID(im.GetId())
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid message id: %s", err.Error())
+	}
 	msg := NewImmutableMesasge(messageID, im.GetPayload(), im.GetProperties()).(*immutableMessageImpl)
-	if msg.ReplicateHeader() != nil {
+	if msg.properties.Exist(messageReplicateMesssageHeader) {
 		return nil, merr.WrapErrParameterInvalidMsg("message is already a replicate message")
+	}
+	if err := validateReplicateMessageProperties(msg); err != nil {
+		return nil, err
+	}
+	lastConfirmedMessageID, err := lastConfirmedMessageID(msg)
+	if err != nil {
+		return nil, err
+	}
+	timeTick, err := replicateTimeTick(msg)
+	if err != nil {
+		return nil, err
+	}
+	vchannel, err := replicateVChannel(msg)
+	if err != nil {
+		return nil, err
 	}
 
 	m := &messageImpl{
@@ -84,11 +106,165 @@ func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) (Replic
 	m.WithReplicateHeader(&ReplicateHeader{
 		ClusterID:              clustrID,
 		MessageID:              msg.MessageID(),
-		LastConfirmedMessageID: msg.LastConfirmedMessageID(),
-		TimeTick:               msg.TimeTick(),
-		VChannel:               msg.VChannel(),
+		LastConfirmedMessageID: lastConfirmedMessageID,
+		TimeTick:               timeTick,
+		VChannel:               vchannel,
 	})
 	return m, nil
+}
+
+func validateReplicateMessageProperties(msg *immutableMessageImpl) error {
+	if !msg.MessageType().Valid() {
+		return merr.WrapErrParameterInvalidMsg("invalid message type: %s", msg.MessageType().String())
+	}
+	if value, ok := msg.properties.Get(messageVersion); ok {
+		if _, err := strconv.ParseInt(value, 10, 64); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid message version: %s", err.Error())
+		}
+	}
+	if err := validateReplicateMessageHeader(msg); err != nil {
+		return err
+	}
+	if err := validateReplicateProtoProperty(msg, messageBroadcastHeader, "broadcast header", &messagespb.BroadcastHeader{}); err != nil {
+		return err
+	}
+	if err := validateReplicateProtoProperty(msg, messageTxnContext, "transaction context", &messagespb.TxnContext{}); err != nil {
+		return err
+	}
+	if err := validateReplicateCipherHeader(msg); err != nil {
+		return err
+	}
+	if err := validateReplicatePayload(msg); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateReplicateMessageHeader(msg *immutableMessageImpl) error {
+	messageType := msg.MessageTypeWithVersion()
+	specializedType, ok := GetSerializeType(messageType)
+	if !ok {
+		return merr.WrapErrParameterInvalidMsg("unsupported message type version: %s", messageType.String())
+	}
+
+	value, ok := msg.properties.Get(messageHeader)
+	if !ok {
+		return merr.WrapErrParameterMissing("message_header")
+	}
+	header := reflect.New(specializedType.HeaderType.Elem()).Interface().(proto.Message)
+	if err := DecodeProto(value, header); err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid message header: %s", err.Error())
+	}
+	return nil
+}
+
+func validateReplicateProtoProperty(msg *immutableMessageImpl, key string, name string, target proto.Message) error {
+	value, ok := msg.properties.Get(key)
+	if !ok {
+		return nil
+	}
+	if err := DecodeProto(value, target); err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid %s: %s", name, err.Error())
+	}
+	return nil
+}
+
+func validateReplicateCipherHeader(msg *immutableMessageImpl) error {
+	if !msg.properties.Exist(messageCipherHeader) {
+		return nil
+	}
+	if !msg.MessageType().CanEnableCipher() {
+		return merr.WrapErrParameterInvalidMsg("message type %s cannot enable cipher", msg.MessageType().String())
+	}
+	return validateReplicateProtoProperty(msg, messageCipherHeader, "cipher header", &messagespb.CipherHeader{})
+}
+
+func validateReplicatePayload(msg *immutableMessageImpl) error {
+	messageType := msg.MessageTypeWithVersion()
+	specializedType, ok := GetSerializeType(messageType)
+	if !ok {
+		return merr.WrapErrParameterInvalidMsg("unsupported message type version: %s", messageType.String())
+	}
+
+	payload := msg.payload
+	if msg.properties.Exist(messageCipherHeader) {
+		decryptedPayload, err := decryptReplicatePayloadForValidation(msg)
+		if err != nil {
+			return err
+		}
+		payload = decryptedPayload
+	}
+
+	body := reflect.New(specializedType.BodyType.Elem()).Interface().(proto.Message)
+	if err := proto.Unmarshal(payload, body); err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid message payload: %s", err.Error())
+	}
+	return nil
+}
+
+func decryptReplicatePayloadForValidation(msg *immutableMessageImpl) ([]byte, error) {
+	value, ok := msg.properties.Get(messageCipherHeader)
+	if !ok {
+		return msg.payload, nil
+	}
+	header := &messagespb.CipherHeader{}
+	if err := DecodeProto(value, header); err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid cipher header: %s", err.Error())
+	}
+	if cipher == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid cipher header: cipher not registered")
+	}
+
+	decryptor, err := getDecryptorWithRetry(header.EzId, header.CollectionId, header.SafeKey)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid cipher header: failed to get decryptor: %s", err.Error())
+	}
+	if decryptor == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid cipher header: decryptor is nil")
+	}
+	payload, err := decryptor.Decrypt(msg.payload)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid encrypted message payload: %s", err.Error())
+	}
+	return payload, nil
+}
+
+func lastConfirmedMessageID(msg *immutableMessageImpl) (MessageID, error) {
+	if _, ok := msg.properties.Get(messageLastConfirmedIDSameWithMessageID); ok {
+		return msg.MessageID(), nil
+	}
+	value, ok := msg.properties.Get(messageLastConfirmed)
+	if !ok {
+		return nil, merr.WrapErrParameterMissing("last_confirmed_message_id")
+	}
+	id, err := UnmarshalMessageID(&commonpb.MessageID{
+		WALName: commonpb.WALName(msg.id.WALName()),
+		Id:      value,
+	})
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid last_confirmed_message_id: %s", err.Error())
+	}
+	return id, nil
+}
+
+func replicateTimeTick(msg *immutableMessageImpl) (uint64, error) {
+	value, ok := msg.properties.Get(messageTimeTick)
+	if !ok {
+		return 0, merr.WrapErrParameterMissing("time_tick")
+	}
+	timeTick, err := DecodeUint64(value)
+	if err != nil {
+		return 0, merr.WrapErrParameterInvalidMsg("invalid time_tick: %s", err.Error())
+	}
+	return timeTick, nil
+}
+
+func replicateVChannel(msg *immutableMessageImpl) (string, error) {
+	if msg.properties.Exist(messageBroadcastHeader) && !msg.properties.Exist(messageVChannel) {
+		return "", merr.WrapErrParameterInvalidMsg("vchannel is missing for broadcast message")
+	}
+	value, _ := msg.properties.Get(messageVChannel)
+	return value, nil
 }
 
 func MilvusMessageToImmutableMessage(im *commonpb.ImmutableMessage) ImmutableMessage {
