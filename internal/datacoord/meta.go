@@ -2899,6 +2899,7 @@ func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos
 		}
 		m.channelCPs.Lock()
 		m.channelCPs.checkpoints[vChannel] = pos
+		m.channelCPs.cond.UnsafeBroadcast()
 		m.channelCPs.Unlock()
 		ts, _ := tsoutil.ParseTS(pos.Timestamp)
 		mlog.Info(ctx, "UpdateChannelCheckpoint done",
@@ -2933,6 +2934,7 @@ func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string)
 
 	m.channelCPs.Lock()
 	m.channelCPs.checkpoints[channel] = cp
+	m.channelCPs.cond.UnsafeBroadcast()
 	m.channelCPs.Unlock()
 
 	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), channel)
@@ -3031,6 +3033,7 @@ func (m *meta) DropChannelCheckpoint(vChannel string) error {
 	}
 	m.channelCPs.Lock()
 	delete(m.channelCPs.checkpoints, vChannel)
+	m.channelCPs.cond.UnsafeBroadcast()
 	m.channelCPs.Unlock()
 	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), vChannel)
 	mlog.Info(m.ctx, "DropChannelCheckpoint done", mlog.String("vChannel", vChannel))
@@ -3824,7 +3827,7 @@ func (m *meta) WatchChannelCheckpoint(ctx context.Context, vChannel string, targ
 
 	for {
 		cp, ok := m.channelCPs.checkpoints[vChannel]
-		if ok && cp != nil && cp.GetTimestamp() >= targetTs {
+		if !ok || cp == nil || funcutil.IsDroppedChannelCheckpoint(cp) || cp.GetTimestamp() >= targetTs {
 			m.channelCPs.cond.L.Unlock()
 			return nil
 		}
