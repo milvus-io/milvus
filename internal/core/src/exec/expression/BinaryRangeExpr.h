@@ -313,6 +313,11 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
         return expr_->column_;
     }
 
+    bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
+    }
+
  private:
     // Check overflow and cache result for performace
     template <
@@ -328,6 +333,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
                      HighPrecisionType& val2,
                      bool& lower_inclusive,
                      bool& upper_inclusive,
+                     int64_t batch_size,
                      OffsetVector* input = nullptr);
 
     template <typename T>
