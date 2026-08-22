@@ -3350,6 +3350,22 @@ ChunkedSegmentSealedImpl::chunk_array_view_impl(
               "chunk_array_view_impl only used for chunk column field ");
 }
 
+PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
+ChunkedSegmentSealedImpl::chunk_array_value_view_impl(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t chunk_id,
+    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
+    auto snapshot = CapturePublishedState();
+    AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto column = get_column(snapshot->runtime, field_id)) {
+        return column->ArrayValueViews(op_ctx, chunk_id, offset_len);
+    }
+    ThrowInfo(ErrorCode::UnexpectedError,
+              "chunk_array_value_view_impl only used for chunk column field ");
+}
+
 PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
 ChunkedSegmentSealedImpl::chunk_vector_array_view_impl(
     milvus::OpContext* op_ctx,
@@ -3413,6 +3429,23 @@ ChunkedSegmentSealedImpl::chunk_array_views_by_offsets(
     ThrowInfo(ErrorCode::UnexpectedError,
               "chunk_array_views_by_offsets only used for variable column "
               "field ");
+}
+
+PinWrapper<std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+ChunkedSegmentSealedImpl::chunk_array_value_views_by_offsets(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t chunk_id,
+    const FixedVector<int32_t>& offsets) const {
+    auto snapshot = CapturePublishedState();
+    AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto column = get_column(snapshot->runtime, field_id)) {
+        return column->ArrayValueViewsByOffsets(op_ctx, chunk_id, offsets);
+    }
+    ThrowInfo(ErrorCode::UnexpectedError,
+              "chunk_array_value_views_by_offsets only used for recursive "
+              "ARRAY column field ");
 }
 
 PinWrapper<index::NgramInvertedIndex*>

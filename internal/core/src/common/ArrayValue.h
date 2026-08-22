@@ -139,7 +139,8 @@ class ArrayValue {
 };
 
 // A non-owning view of one logical Array value. The owning ArrayValue,
-// ColumnarArrayChunk, or an outer cache pin must outlive the view.
+// ColumnarArrayChunk, or an outer cache pin must outlive the view. A
+// default-constructed view must be assigned before use.
 class ArrayValueView {
     friend class ColumnarArrayChunk;
 
@@ -160,7 +161,6 @@ class ArrayValueView {
 
     size_t
     size() const {
-        AssertInitialized();
         return static_cast<size_t>(end_ - begin_);
     }
 
@@ -171,13 +171,11 @@ class ArrayValueView {
 
     bool
     is_null() const {
-        AssertInitialized();
         return is_null_;
     }
 
     DataType
     element_type() const {
-        AssertInitialized();
         return ColumnarArrayChunk::GetElementType(*type_);
     }
 
@@ -188,8 +186,6 @@ class ArrayValueView {
 
     ArrayValueView
     array_at(size_t index) const {
-        AssertInitialized();
-        AssertNotNull();
         const auto length = static_cast<size_t>(end_ - begin_);
         AssertInfo(index < length,
                    "array view index {} out of range {}",
@@ -221,7 +217,6 @@ class ArrayValueView {
 
     void
     output_data(ScalarFieldProto& output) const {
-        AssertInitialized();
         if (is_null_) {
             output.Clear();
             return;
@@ -238,25 +233,21 @@ class ArrayValueView {
 
     const proto::schema::TypeSchema&
     type() const {
-        AssertInitialized();
         return *type_;
     }
 
     ArrayOffset
     begin() const {
-        AssertInitialized();
         return begin_;
     }
 
     ArrayOffset
     end() const {
-        AssertInitialized();
         return end_;
     }
 
     const Chunk&
     child() const {
-        AssertInitialized();
         return *child_;
     }
 
@@ -272,6 +263,8 @@ class ArrayValueView {
           begin_(begin),
           end_(end),
           is_null_(is_null) {
+        AssertInfo(type_ != nullptr && child_ != nullptr,
+                   "ArrayValueView type and child must not be null");
     }
 
     static ArrayValueView
@@ -281,18 +274,6 @@ class ArrayValueView {
                   ArrayOffset end,
                   bool is_null) {
         return ArrayValueView(ValidatedTag{}, type, child, begin, end, is_null);
-    }
-
-    void
-    AssertInitialized() const {
-        AssertInfo(type_ != nullptr && child_ != nullptr,
-                   "ArrayValueView is not initialized");
-    }
-
-    void
-    AssertNotNull() const {
-        AssertInfo(!is_null_,
-                   "cannot access elements of a null ArrayValueView");
     }
 
     const proto::schema::TypeSchema* type_{nullptr};
