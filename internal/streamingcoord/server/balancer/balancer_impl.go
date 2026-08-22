@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
@@ -55,16 +54,17 @@ func RecoverBalancer(
 	manager.SetLogger(resource.Resource().Logger().With(mlog.FieldComponent("channel-manager")))
 	ctx, cancel := context.WithCancelCause(context.Background())
 	b := &balancerImpl{
-		ctx:                    ctx,
-		cancel:                 cancel,
-		lifetime:               typeutil.NewLifetime(),
-		provider:               provider,
-		channelMetaManager:     manager,
-		policy:                 policy,
-		reqCh:                  make(chan *request, 5),
-		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
-		freezeNodes:            typeutil.NewConcurrentSet[int64](),
-		primaryRGChangedCh:     make(chan struct{}, 1),
+		ctx:                      ctx,
+		cancel:                   cancel,
+		lifetime:                 typeutil.NewLifetime(),
+		provider:                 provider,
+		channelMetaManager:       manager,
+		policy:                   policy,
+		reqCh:                    make(chan *request, 5),
+		backgroundTaskNotifier:   syncutil.NewAsyncTaskNotifier[struct{}](),
+		freezeNodes:              typeutil.NewConcurrentSet[int64](),
+		primaryRGChangedCh:       make(chan struct{}, 1),
+		balanceOperationResultCh: make(chan balanceOperationResult),
 	}
 	b.SetLogger(logger)
 	ready260Future, err := b.checkIfAllNodeGreaterThan260AndWatch(ctx)
@@ -80,17 +80,19 @@ func RecoverBalancer(
 type balancerImpl struct {
 	mlog.Binder
 
-	ctx                    context.Context
-	cancel                 context.CancelCauseFunc
-	lifetime               *typeutil.Lifetime
-	provider               ChannelProvider
-	channelMetaManager     *channel.ChannelManager
-	policy                 Policy                                // policy is the balance policy, TODO: should be dynamic in future.
-	reqCh                  chan *request                         // reqCh is the request channel, send the operation to background task.
-	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}] // backgroundTaskNotifier is used to conmunicate with the background task.
-	freezeNodes            *typeutil.ConcurrentSet[int64]        // freezeNodes is the nodes that will be frozen, no more wal will be assigned to these nodes and wal will be removed from these nodes.
-	primaryRGChangedCh     chan struct{}                         // primaryRGChangedCh wakes the balance loop when streaming.primaryResourceGroup changes.
-	primaryRGChangeHandler config.EventHandler
+	ctx                      context.Context
+	cancel                   context.CancelCauseFunc
+	lifetime                 *typeutil.Lifetime
+	provider                 ChannelProvider
+	channelMetaManager       *channel.ChannelManager
+	policy                   Policy                                // policy is the balance policy, TODO: should be dynamic in future.
+	reqCh                    chan *request                         // reqCh is the request channel, send the operation to background task.
+	backgroundTaskNotifier   *syncutil.AsyncTaskNotifier[struct{}] // backgroundTaskNotifier is used to conmunicate with the background task.
+	freezeNodes              *typeutil.ConcurrentSet[int64]        // freezeNodes is the nodes that will be frozen, no more wal will be assigned to these nodes and wal will be removed from these nodes.
+	primaryRGChangedCh       chan struct{}                         // primaryRGChangedCh wakes the balance loop when streaming.primaryResourceGroup changes.
+	primaryRGChangeHandler   config.EventHandler
+	balanceOperationResultCh chan balanceOperationResult
+	balanceOperationWG       sync.WaitGroup
 
 	fileResourceChecker FileResourceChecker
 	checkerMu           sync.RWMutex
@@ -338,7 +340,10 @@ func (b *balancerImpl) Close() {
 // execute the balancer.
 func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 	b.Logger().Info(b.backgroundTaskNotifier.Context(), "balancer start to execute")
+	balanceCtx, cancelBalance := context.WithCancel(b.backgroundTaskNotifier.Context())
 	defer func() {
+		cancelBalance()
+		b.balanceOperationWG.Wait()
 		b.backgroundTaskNotifier.Finish(struct{}{})
 		b.Logger().Info(b.backgroundTaskNotifier.Context(), "balancer execute finished")
 	}()
@@ -360,6 +365,7 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 		return
 	}
 	channelChanged := statsManager.WatchAtChannelCountChanged()
+	inFlightChannels := make(map[types.ChannelID]struct{})
 
 	for {
 		// Wait for next balance trigger.
@@ -371,6 +377,7 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 		}
 
 		b.Logger().Info(b.backgroundTaskNotifier.Context(), "balance wait", mlog.Duration("nextBalanceInterval", nextBalanceInterval))
+		var balanceOperationErr error
 		select {
 		case <-b.backgroundTaskNotifier.Context().Done():
 			return
@@ -411,8 +418,19 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 				b.Logger().Warn(b.backgroundTaskNotifier.Context(), "failed to add dynamic channels", mlog.Err(err), mlog.Strings("channels", newChannels))
 			}
 			// new pchannels added dynamically, trigger rebalance
+		case result := <-b.balanceOperationResultCh:
+			balanceOperationErr = b.handleBalanceOperationResults(
+				b.backgroundTaskNotifier.Context(),
+				result,
+				inFlightChannels,
+			)
 		}
-		if err := b.balanceUntilNoChanged(b.backgroundTaskNotifier.Context()); err != nil {
+		if balanceOperationErr != nil {
+			b.Logger().Warn(b.backgroundTaskNotifier.Context(), "fail to apply balance operation, start a backoff...", mlog.Err(balanceOperationErr))
+			balanceTimer.EnableBackoff()
+			continue
+		}
+		if err := b.balanceUntilNoChanged(balanceCtx, inFlightChannels); err != nil {
 			if b.backgroundTaskNotifier.Context().Err() != nil {
 				// balancer is closed.
 				return
@@ -565,9 +583,9 @@ func (b *balancerImpl) applyAllRequest() {
 }
 
 // balanceUntilNoChanged try to balance until there's changed.
-func (b *balancerImpl) balanceUntilNoChanged(ctx context.Context) error {
+func (b *balancerImpl) balanceUntilNoChanged(ctx context.Context, inFlightChannels map[types.ChannelID]struct{}) error {
 	for {
-		layoutChanged, err := b.balance(ctx)
+		layoutChanged, err := b.balance(ctx, inFlightChannels)
 		if err != nil {
 			return err
 		}
@@ -580,7 +598,7 @@ func (b *balancerImpl) balanceUntilNoChanged(ctx context.Context) error {
 // Trigger a balance of layout.
 // Return a nil chan to avoid
 // Return a channel to notify the balance trigger again.
-func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
+func (b *balancerImpl) balance(ctx context.Context, inFlightChannels map[types.ChannelID]struct{}) (bool, error) {
 	b.Logger().Info(ctx, "start to balance")
 	pchannelView := b.channelMetaManager.CurrentPChannelsView()
 
@@ -597,11 +615,15 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 		accessMode = types.AccessModeRW
 	}
 	currentLayout := generateCurrentLayout(pchannelView, nodeStatus, accessMode)
+	markInFlightChannelsAsAssigned(&currentLayout, pchannelView, inFlightChannels)
 	expectedLayout, err := b.policy.Balance(currentLayout)
 	if err != nil {
 		return false, merr.Wrap(err, "fail to balance")
 	}
 
+	for channelID := range inFlightChannels {
+		delete(expectedLayout.ChannelAssignment, channelID)
+	}
 	b.Logger().Info(ctx, "balance policy generate result success, try to assign...", mlog.Stringer("expectedLayout", expectedLayout))
 	// bookkeeping the meta assignment started.
 	modifiedChannels, err := b.channelMetaManager.AssignPChannels(ctx, expectedLayout.ChannelAssignment)
@@ -613,7 +635,8 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 		b.Logger().Info(ctx, "no change of balance result need to be applied")
 		return false, nil
 	}
-	return true, b.applyBalanceResultToStreamingNode(ctx, modifiedChannels)
+	b.startBalanceOperations(ctx, modifiedChannels, inFlightChannels)
+	return true, nil
 }
 
 // fetchStreamingNodeStatus fetch the streaming node status.
@@ -650,49 +673,115 @@ func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context, rgName stri
 	return nodeStatus, nil
 }
 
-// applyBalanceResultToStreamingNode apply the balance result to streaming node.
-func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, modifiedChannels map[types.ChannelID]*channel.PChannelMeta) error {
+type balanceOperationResult struct {
+	channelID types.ChannelID
+	err       error
+}
+
+// startBalanceOperations applies each modified pchannel independently so the balancer
+// can continue accepting new unavailable reports while existing WALs are reopening.
+func (b *balancerImpl) startBalanceOperations(
+	ctx context.Context,
+	modifiedChannels map[types.ChannelID]*channel.PChannelMeta,
+	inFlightChannels map[types.ChannelID]struct{},
+) {
 	b.Logger().Info(ctx, "balance result need to be applied...", mlog.Int("modifiedChannelCount", len(modifiedChannels)))
 
-	// different channel can be execute concurrently.
-	g, _ := errgroup.WithContext(ctx)
-	opTimeout := paramtable.Get().StreamingCfg.WALBalancerOperationTimeout.GetAsDurationByParse()
-	// generate balance operations and applied them.
-	for _, channel := range modifiedChannels {
-		channel := channel
-		g.Go(func() error {
-			// all history channels should be remove from related nodes.
-			for _, assignment := range channel.AssignHistories() {
-				opCtx, cancel := context.WithTimeout(ctx, opTimeout)
-				defer cancel()
-				if err := resource.Resource().StreamingNodeManagerClient().Remove(opCtx, assignment); err != nil {
-					b.Logger().Warn(ctx, "fail to remove channel", mlog.String("assignment", assignment.String()), mlog.Err(err))
-					return err
-				}
-				b.Logger().Info(ctx, "remove channel success", mlog.String("assignment", assignment.String()))
+	for channelID, pchannel := range modifiedChannels {
+		inFlightChannels[channelID] = struct{}{}
+		b.balanceOperationWG.Add(1)
+		go func(pchannel *channel.PChannelMeta) {
+			defer b.balanceOperationWG.Done()
+			err := b.applyBalanceOperation(ctx, pchannel)
+			select {
+			case b.balanceOperationResultCh <- balanceOperationResult{channelID: pchannel.ChannelID(), err: err}:
+			case <-ctx.Done():
 			}
-
-			// assign the channel to the target node.
-			opCtx, cancel := context.WithTimeout(ctx, opTimeout)
-			defer cancel()
-			if err := resource.Resource().StreamingNodeManagerClient().Assign(opCtx, channel.CurrentAssignment()); err != nil {
-				b.Logger().Warn(ctx, "fail to assign channel", mlog.String("assignment", channel.CurrentAssignment().String()), mlog.Err(err))
-				return err
-			}
-			b.Logger().Info(ctx, "assign channel success", mlog.String("assignment", channel.CurrentAssignment().String()))
-
-			// bookkeeping the meta assignment done.
-			if err := b.channelMetaManager.AssignPChannelsDone(ctx, []types.ChannelID{channel.ChannelID()}); err != nil {
-				b.Logger().Warn(ctx, "fail to bookkeep pchannel assignment done", mlog.String("assignment", channel.CurrentAssignment().String()))
-				return err
-			}
-			return nil
-		})
+		}(pchannel)
 	}
-	// TODO: Current implementation recovery will wait for all node reply,
-	// huge unavaiable time may be caused by this,
-	// should be fixed in future.
-	return g.Wait()
+}
+
+func (b *balancerImpl) applyBalanceOperation(ctx context.Context, pchannel *channel.PChannelMeta) error {
+	opTimeout := paramtable.Get().StreamingCfg.WALBalancerOperationTimeout.GetAsDurationByParse()
+	for _, assignment := range pchannel.AssignHistories() {
+		opCtx, cancel := context.WithTimeout(ctx, opTimeout)
+		err := resource.Resource().StreamingNodeManagerClient().Remove(opCtx, assignment)
+		cancel()
+		if err != nil {
+			b.Logger().Warn(ctx, "fail to remove channel", mlog.String("assignment", assignment.String()), mlog.Err(err))
+			return err
+		}
+		b.Logger().Info(ctx, "remove channel success", mlog.String("assignment", assignment.String()))
+	}
+
+	opCtx, cancel := context.WithTimeout(ctx, opTimeout)
+	err := resource.Resource().StreamingNodeManagerClient().Assign(opCtx, pchannel.CurrentAssignment())
+	cancel()
+	if err != nil {
+		b.Logger().Warn(ctx, "fail to assign channel", mlog.String("assignment", pchannel.CurrentAssignment().String()), mlog.Err(err))
+		return err
+	}
+	b.Logger().Info(ctx, "assign channel success", mlog.String("assignment", pchannel.CurrentAssignment().String()))
+	return nil
+}
+
+func (b *balancerImpl) handleBalanceOperationResults(
+	ctx context.Context,
+	first balanceOperationResult,
+	inFlightChannels map[types.ChannelID]struct{},
+) error {
+	results := []balanceOperationResult{first}
+	for {
+		select {
+		case result := <-b.balanceOperationResultCh:
+			results = append(results, result)
+		default:
+			return b.finishBalanceOperationResults(ctx, results, inFlightChannels)
+		}
+	}
+}
+
+func (b *balancerImpl) finishBalanceOperationResults(
+	ctx context.Context,
+	results []balanceOperationResult,
+	inFlightChannels map[types.ChannelID]struct{},
+) error {
+	completed := make([]types.ChannelID, 0, len(results))
+	var firstErr error
+	for _, result := range results {
+		delete(inFlightChannels, result.channelID)
+		if result.err != nil {
+			if firstErr == nil {
+				firstErr = result.err
+			}
+			continue
+		}
+		completed = append(completed, result.channelID)
+	}
+	if err := b.channelMetaManager.AssignPChannelsDone(ctx, completed); err != nil {
+		return err
+	}
+	return firstErr
+}
+
+func markInFlightChannelsAsAssigned(
+	layout *CurrentLayout,
+	view *channel.PChannelView,
+	inFlightChannels map[types.ChannelID]struct{},
+) {
+	for channelID := range inFlightChannels {
+		meta, ok := view.Channels[channelID]
+		if !ok {
+			continue
+		}
+		if _, ok := layout.AllNodesInfo[meta.CurrentServerID()]; !ok {
+			continue
+		}
+		layout.ChannelsToNodes[channelID] = meta.CurrentServerID()
+		stats := layout.Stats[channelID]
+		stats.LastAssignTimestamp = time.Now()
+		layout.Stats[channelID] = stats
+	}
 }
 
 // generateCurrentLayout generate layout from all nodes info and meta.
