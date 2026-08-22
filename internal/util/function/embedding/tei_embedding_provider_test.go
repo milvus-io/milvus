@@ -158,23 +158,40 @@ func (s *TEITextEmbeddingProviderSuite) TestNewTEIEmbeddingProvider() {
 		Params: []*commonpb.KeyValuePair{
 			{Key: models.CredentialParamKey, Value: "mock"},
 			{Key: models.EndpointParamKey, Value: "http://mymock.com"},
+			{Key: models.DimParamKey, Value: "4"},
 		},
 	}
 	batchFactor := 5
 	provider, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: batchFactor})
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(4))
+	s.Equal(int64(4), provider.embedDimParam)
 	s.True(provider.MaxBatch() == 32*batchFactor)
+
+	// Invalid dim
+	{
+		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: models.DimParamKey, Value: "Invalid"}
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
+		s.Error(err)
+	}
+
+	// Mismatched dim
+	{
+		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: models.DimParamKey, Value: "8"}
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
+		s.Error(err)
+	}
 
 	// Invalid truncate
 	{
+		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: models.DimParamKey, Value: "4"}
 		functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: models.TruncateParamKey, Value: "Invalid"})
 		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 		s.Error(err)
 	}
 	// Invalid truncationDirection
 	{
-		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: models.TruncateParamKey, Value: "true"}
+		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: models.TruncateParamKey, Value: "true"}
 		functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: models.TruncationDirectionParamKey, Value: "Invalid"})
 		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 		s.Error(err)
@@ -182,7 +199,7 @@ func (s *TEITextEmbeddingProviderSuite) TestNewTEIEmbeddingProvider() {
 
 	// truncationDirection
 	{
-		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: models.TruncationDirectionParamKey, Value: "Left"}
+		functionSchema.Params[4] = &commonpb.KeyValuePair{Key: models.TruncationDirectionParamKey, Value: "Left"}
 		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 		s.NoError(err)
 	}
@@ -196,7 +213,7 @@ func (s *TEITextEmbeddingProviderSuite) TestNewTEIEmbeddingProvider() {
 
 	// Valid max batch
 	{
-		functionSchema.Params[4] = &commonpb.KeyValuePair{Key: models.MaxClientBatchSizeParamKey, Value: "128"}
+		functionSchema.Params[5] = &commonpb.KeyValuePair{Key: models.MaxClientBatchSizeParamKey, Value: "128"}
 		pv, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: batchFactor})
 		s.NoError(err)
 		s.True(pv.MaxBatch() == 128*batchFactor)
