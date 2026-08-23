@@ -81,11 +81,23 @@ func TestFunctionRunnerSignatureTracksRequiredMetadata(t *testing.T) {
 	signature := firstEmbeddingSignature(t, functionParamChanged)
 	require.NotEqual(t, baseSignature, signature)
 
-	fieldNonFunctionMetadataChanged := cloneCollectionSchema(base)
-	fieldNonFunctionMetadataChanged.Fields[1].TypeParams = []*commonpb.KeyValuePair{
+	analyzerParamsChanged := cloneCollectionSchema(base)
+	analyzerParamsChanged.Fields[1].TypeParams = []*commonpb.KeyValuePair{
 		{Key: analyzerParams, Value: `{"tokenizer": "standard"}`},
-		{Key: "mmap.enabled", Value: "true"},
 	}
+	signature = firstEmbeddingSignature(t, analyzerParamsChanged)
+	require.NotEqual(t, baseSignature, signature)
+
+	multiAnalyzerParamsChanged := cloneCollectionSchema(base)
+	multiAnalyzerParamsChanged.Fields[1].TypeParams = append(multiAnalyzerParamsChanged.Fields[1].TypeParams,
+		&commonpb.KeyValuePair{Key: multiAnalyzerParams, Value: `{"by_field": "language", "analyzers": {}}`})
+	signature = firstEmbeddingSignature(t, multiAnalyzerParamsChanged)
+	require.NotEqual(t, baseSignature, signature)
+
+	fieldNonFunctionMetadataChanged := cloneCollectionSchema(base)
+	fieldNonFunctionMetadataChanged.Fields[1].TypeParams = append(fieldNonFunctionMetadataChanged.Fields[1].TypeParams,
+		&commonpb.KeyValuePair{Key: "mmap.enabled", Value: "true"},
+	)
 	fieldNonFunctionMetadataChanged.Fields[1].IsPartitionKey = true
 	fieldNonFunctionMetadataChanged.Fields[1].IsClusteringKey = true
 	signature = firstEmbeddingSignature(t, fieldNonFunctionMetadataChanged)
@@ -477,6 +489,28 @@ func TestFunctionRunnerManagerUpdateReusesSameSignatureAcrossSchemaVersions(t *t
 	require.Contains(t, versionRunners, int32(2))
 	require.NotContains(t, versionRunners, int32(1))
 	require.Equal(t, 1, runnerCount)
+}
+
+func TestFunctionRunnerManagerUpdateRebuildsWhenAnalyzerParamsChange(t *testing.T) {
+	manager, factory := newMockFunctionRunnerManager(t)
+	t.Cleanup(manager.Close)
+
+	base := newBM25SignatureTestSchema()
+	require.NoError(t, manager.Alloc(1, "v1", base))
+	baseRunner := requireRunnerByOutput(t, manager, 1, "v1", 102)
+
+	changed := cloneCollectionSchema(base)
+	changed.Version = 2
+	changed.Fields[1].TypeParams = []*commonpb.KeyValuePair{
+		{Key: analyzerParams, Value: `{"tokenizer": "standard"}`},
+	}
+	require.NoError(t, manager.Update(1, "v1", changed))
+	changedRunner := requireRunnerByOutput(t, manager, 1, "v1", 102)
+
+	require.False(t, baseRunner == changedRunner)
+	require.Equal(t, int32(2), factory.buildCount.Load())
+	require.Eventually(t, baseRunner.isClosed, time.Second, time.Millisecond)
+	require.False(t, changedRunner.isClosed())
 }
 
 func TestFunctionRunnerManagerUpdateKeepsOldVersionUntilAllKeysAdvance(t *testing.T) {

@@ -1120,6 +1120,12 @@ func writeFieldSignature(hasher hashWriter, prefix string, field *schemapb.Field
 		field.GetDataType(),
 		field.GetElementType(),
 		field.GetIsFunctionOutput())
+	// BM25 runner construction reads analyzer configuration from its input
+	// field. Other field type params do not affect runner state.
+	runnerParams := lo.Filter(field.GetTypeParams(), func(param *commonpb.KeyValuePair, _ int) bool {
+		return param.GetKey() == analyzerParams || param.GetKey() == multiAnalyzerParams
+	})
+	writeKeyValuePairs(hasher, prefix+"_runner_params", runnerParams)
 }
 
 func writeKeyValuePairs(hasher hashWriter, prefix string, pairs []*commonpb.KeyValuePair) {
