@@ -131,10 +131,6 @@ func WithLeaderViewUpdatedCallback(callback func(channel string)) ShardDelegator
 	}
 }
 
-type idfOracleHolder struct {
-	oracle IDFOracle
-}
-
 // shardDelegator maintains the shard distribution and streaming part of the data.
 type shardDelegator struct {
 	// shard information attributes
@@ -145,14 +141,12 @@ type shardDelegator struct {
 	// collection schema
 	collection *segments.Collection
 
-	collectionManager segments.CollectionManager
-
 	workerManager cluster.Manager
 
 	lifetime lifetime.Lifetime[lifetime.State]
 
 	distribution *distribution
-	idfOracle    atomic.Pointer[idfOracleHolder]
+	idfOracle    IDFOracle
 
 	segmentManager segments.SegmentManager
 	// stream delete buffer
@@ -208,18 +202,6 @@ func (sd *shardDelegator) notifyLeaderViewUpdated() {
 	if sd.leaderViewUpdatedCallback != nil {
 		sd.leaderViewUpdatedCallback(sd.vchannelName)
 	}
-}
-
-func (sd *shardDelegator) getIDFOracle() IDFOracle {
-	holder := sd.idfOracle.Load()
-	if holder == nil {
-		return nil
-	}
-	return holder.oracle
-}
-
-func (sd *shardDelegator) publishIDFOracle(idfOracle IDFOracle) {
-	sd.idfOracle.Store(&idfOracleHolder{oracle: idfOracle})
 }
 
 func (sd *shardDelegator) NotStopped(state lifetime.State) error {
@@ -1229,13 +1211,6 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	sd.schemaChangeMutex.Lock()
 	defer sd.schemaChangeMutex.Unlock()
 
-	oldSet := newBM25FunctionSet(sd.collection.Schema())
-	newSet := newBM25FunctionSet(schema)
-	idfOracle := sd.getIDFOracle()
-	if idfOracle != nil && !newSet.IsSupersetOf(oldSet) {
-		return merr.WrapErrServiceInternal("unsupported non-additive BM25 function schema change on loaded collection")
-	}
-
 	// set updated schema version as load barrier
 	// prevent concurrent load segment with old schema
 	sd.schemaVersion = schVersion
@@ -1274,43 +1249,8 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		status, err := worker.UpdateSchema(ctx, req)
 		return (*StatusWrapper)(status), err
 	}, "UpdateSchema", log)
-	if err != nil {
-		return err
-	}
 
-	if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema, schVersion); err != nil {
-		return err
-	}
-
-	// Publish the manager schema after the delegator schema update. Queries use
-	// the previous function schema until this point.
-	if err := function.GetManager().Update(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema); err != nil {
-		// Runner construction failures are retried asynchronously by the manager.
-		// A synchronous error here means the internal function metadata is invalid.
-		panic(err)
-	}
-	if idfOracle == nil && len(newSet) > 0 {
-		// StreamingNode schema changes flush and fence old growings before UpdateSchema and new-schema inserts.
-		// Old growings cannot receive stats for newly added BM25 fields; ProcessInsert registers only new growings.
-		idfOracle = NewIDFOracle(sd.vchannelName, schema.GetFunctions())
-		idfOracle.Start()
-		sd.distribution.SetIDFOracle(idfOracle)
-		if current := sd.distribution.current.Load(); current != nil {
-			idfOracle.SetNext(current)
-		}
-		sd.publishIDFOracle(idfOracle)
-	} else if idfOracle != nil && !newSet.Equal(oldSet) {
-		if err := idfOracle.SyncFunctions(schema.GetFunctions()); err != nil {
-			return err
-		}
-	}
-	log.Info("delegator finished update schema event",
-		zap.Uint64("schemaVersion", schVersion),
-		zap.Int("sealedNum", len(sealed)),
-		zap.Int("growingNum", len(growing)),
-		zap.Int("bm25FunctionNum", len(newSet)),
-	)
-	return nil
+	return err
 }
 
 type StatusWrapper commonpb.Status
@@ -1335,8 +1275,8 @@ func (sd *shardDelegator) Close() {
 	sd.distribution.RefundAllCandidates()
 
 	// clean idf oracle
-	if idfOracle := sd.getIDFOracle(); idfOracle != nil {
-		idfOracle.Close()
+	if sd.idfOracle != nil {
+		sd.idfOracle.Close()
 	}
 
 	if sd.postLoadConfigHandler != nil {
@@ -1443,16 +1383,15 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	})
 
 	sd := &shardDelegator{
-		collectionID:      collectionID,
-		replicaID:         replicaID,
-		vchannelName:      channel,
-		version:           version,
-		collection:        collection,
-		collectionManager: manager.Collection,
-		segmentManager:    manager.Segment,
-		workerManager:     workerManager,
-		lifetime:          lifetime.NewLifetime(lifetime.Initializing),
-		distribution:      NewDistribution(channel, queryView),
+		collectionID:   collectionID,
+		replicaID:      replicaID,
+		vchannelName:   channel,
+		version:        version,
+		collection:     collection,
+		segmentManager: manager.Segment,
+		workerManager:  workerManager,
+		lifetime:       lifetime.NewLifetime(lifetime.Initializing),
+		distribution:   NewDistribution(channel, queryView),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{fmt.Sprint(paramtable.GetNodeID()), channel}),
 		latestTsafe:                atomic.NewUint64(startTs),
@@ -1475,22 +1414,15 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		return tf.GetType() == schemapb.FunctionType_BM25
 	})
 	if hasBM25Field {
-		idfOracle := NewIDFOracle(sd.vchannelName, collection.Schema().GetFunctions())
-		idfOracle.Start()
-		sd.distribution.SetIDFOracle(idfOracle)
-		sd.publishIDFOracle(idfOracle)
+		sd.idfOracle = NewIDFOracle(sd.vchannelName, collection.Schema().GetFunctions())
+		sd.distribution.SetIDFOracle(sd.idfOracle)
+		sd.idfOracle.Start()
 	}
 
 	sd.tsCond = syncutil.NewContextCond(&sync.Mutex{})
 	paramtable.Get().Watch(paramtable.Get().QueryNodeCfg.DelegatorPostLoadConcurrencyFactor.Key, postLoadConfigHandler)
 	log.Info("finish build new shardDelegator")
 	return sd, nil
-}
-
-// useGrowingSourceFlush is disabled in 2.6 because this branch does not expose
-// the growing-source-flush switch.
-func (sd *shardDelegator) useGrowingSourceFlush() bool {
-	return false
 }
 
 func (sd *shardDelegator) runWithAnalyzer(ctx context.Context, fieldID int64, run func(function.Analyzer) error) (bool, error) {

@@ -280,16 +280,7 @@ func (impl *shardInterceptor) handleAlterCollection(ctx context.Context, msg mes
 
 	header.FlushedSegmentIds = segmentIDs
 	putCollectionMsg.OverwriteHeader(header)
-	msgID, err := appendOp(ctx, msg)
-	if err != nil {
-		return msgID, err
-	}
-	if messageutil.IsSchemaChange(header) {
-		if schema := putCollectionMsg.MustBody().GetUpdates().GetSchema(); schema != nil {
-			impl.updateFunctionRunners(header.GetCollectionId(), putCollectionMsg.VChannel(), schema)
-		}
-	}
-	return msgID, nil
+	return appendOp(ctx, msg)
 }
 
 // handleCreateSegment handles the create segment message.

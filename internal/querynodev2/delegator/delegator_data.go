@@ -161,8 +161,8 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 
 			if !sd.distribution.GrowingSegmentExists(segmentID) {
 				// register created growing segment after insert, avoid to add empty growing to delegator
-				if idfOracle := sd.getIDFOracle(); idfOracle != nil {
-					idfOracle.RegisterGrowing(segmentID, insertData.BM25Stats)
+				if sd.idfOracle != nil {
+					sd.idfOracle.RegisterGrowing(segmentID, insertData.BM25Stats)
 				}
 				sd.segmentManager.Put(context.Background(), segments.SegmentTypeGrowing, growing)
 				sd.addGrowing(SegmentEntry{
@@ -177,8 +177,8 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			}
 
 			sd.growingSegmentLock.Unlock()
-		} else if idfOracle := sd.getIDFOracle(); idfOracle != nil {
-			idfOracle.UpdateGrowing(growing.ID(), insertData.BM25Stats)
+		} else if sd.idfOracle != nil {
+			sd.idfOracle.UpdateGrowing(growing.ID(), insertData.BM25Stats)
 		}
 		log.Info("insert into growing segment",
 			zap.Int64("collectionID", growing.Collection()),
@@ -419,8 +419,8 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 	log.Info("load growing segments done", zap.Int64s("segmentIDs", segmentIDs))
 
 	for _, segment := range loaded {
-		if idfOracle := sd.getIDFOracle(); idfOracle != nil {
-			idfOracle.RegisterGrowing(segment.ID(), segment.GetBM25Stats())
+		if sd.idfOracle != nil {
+			sd.idfOracle.RegisterGrowing(segment.ID(), segment.GetBM25Stats())
 		}
 	}
 	sd.addGrowing(lo.Map(loaded, func(segment segments.Segment, _ int) SegmentEntry {
@@ -439,7 +439,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 // load bm25 stats for sealed segments.
 // idf oracle owns the full lifecycle: download, disk write, register, cleanup.
 func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
-	idfOracle := sd.getIDFOracle()
+	idfOracle := sd.idfOracle
 	if idfOracle == nil {
 		return nil
 	}
@@ -1171,7 +1171,7 @@ func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
 }
 
 func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest, functionRunner function.FunctionRunner) (float64, error) {
-	idfOracle := sd.getIDFOracle()
+	idfOracle := sd.idfOracle
 	if idfOracle == nil {
 		return 0, merr.WrapErrServiceInternal("bm25 oracle is not initialized")
 	}

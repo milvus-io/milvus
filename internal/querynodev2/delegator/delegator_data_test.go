@@ -220,7 +220,6 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.NoError(err)
 	s.delegator = delegator.(*shardDelegator)
-	s.allocFunctionRunnersForTest()
 }
 
 func (s *DelegatorDataSuite) SetupTest() {
@@ -246,10 +245,6 @@ func (s *DelegatorDataSuite) SetupTest() {
 func (s *DelegatorDataSuite) TearDownTest() {
 	function.GetManager().Release(s.collectionID, "WAL-"+s.vchannelName)
 	function.GetManager().Release(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName))
-}
-
-func (s *DelegatorDataSuite) allocFunctionRunnersForTest() {
-	s.Require().NoError(function.GetManager().Update(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), s.delegator.collection.Schema()))
 }
 
 func (s *DelegatorDataSuite) TestProcessInsert() {
@@ -1116,7 +1111,7 @@ func (s *DelegatorDataSuite) TestPostLoadLimiter() {
 
 func (s *DelegatorDataSuite) waitTargetVersion(targetVersion int64) {
 	for {
-		if s.delegator.getIDFOracle().TargetVersion() >= targetVersion {
+		if s.delegator.idfOracle.TargetVersion() >= targetVersion {
 			return
 		}
 		time.Sleep(time.Millisecond * 100)
@@ -1196,11 +1191,11 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		sealedSegs := []int64{1, 2, 3, 4}
 		for _, segID := range sealedSegs {
 			// every segment stats only has one token, avgdl = 1
-			registerSealedStats(s.delegator.getIDFOracle().(*idfOracle), segID, uint32(segID), uint32(segID)+1)
+			registerSealedStats(s.delegator.idfOracle.(*idfOracle), segID, uint32(segID), uint32(segID)+1)
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 
-		s.delegator.getIDFOracle().SetNext(snapshot)
+		s.delegator.idfOracle.SetNext(snapshot)
 		s.waitTargetVersion(snapshot.targetVersion)
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
@@ -1338,11 +1333,11 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		sealedSegs := []int64{1, 2, 3, 4}
 		for _, segID := range sealedSegs {
 			// every segment stats only has one token, avgdl = 1
-			registerSealedStats(s.delegator.getIDFOracle().(*idfOracle), segID, uint32(segID), uint32(segID)+1)
+			registerSealedStats(s.delegator.idfOracle.(*idfOracle), segID, uint32(segID), uint32(segID)+1)
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 
-		s.delegator.getIDFOracle().SetNext(snapshot)
+		s.delegator.idfOracle.SetNext(snapshot)
 		s.waitTargetVersion(snapshot.targetVersion)
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)

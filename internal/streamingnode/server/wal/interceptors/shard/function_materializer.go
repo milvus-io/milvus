@@ -31,22 +31,6 @@ func (impl *shardInterceptor) allocFunctionRunners(collectionID int64, vchannel 
 	}
 }
 
-func (impl *shardInterceptor) updateFunctionRunners(collectionID int64, vchannel string, schema *schemapb.CollectionSchema) {
-	key := walFunctionRunnerKey(vchannel)
-	schemaVersion := function.LatestFunctionRunnerVersion
-	if schema != nil {
-		schemaVersion = schema.GetVersion()
-	}
-	if err := function.GetManager().Update(collectionID, key, schema); err != nil {
-		impl.shardManager.Logger().Warn("failed to update function runners",
-			zap.Int64("collectionID", collectionID),
-			zap.String("vchannel", vchannel),
-			zap.String("key", key),
-			zap.Int32("schemaVersion", schemaVersion),
-			zap.Error(err))
-	}
-}
-
 type collectionSchemaProvider interface {
 	GetAllCollectionSchemaInfos() map[int64]shards.CollectionSchemaInfo
 }

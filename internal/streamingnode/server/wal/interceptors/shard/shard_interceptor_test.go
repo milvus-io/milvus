@@ -52,65 +52,6 @@ func TestMaterializeFunctionFieldsSkipsOmittedVersionWithoutFunctions(t *testing
 	require.NoError(t, err)
 }
 
-func TestShardInterceptorUpdateFunctionRunnersRetainsSchemaWhenFunctionsDropped(t *testing.T) {
-	collectionID := int64(99001)
-	vchannel := "by-dev-rootcoord-dml_0_99001v0"
-	key := walFunctionRunnerKey(vchannel)
-	schema := &schemapb.CollectionSchema{
-		Version: 1,
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{
-				FieldID:  101,
-				Name:     "text",
-				DataType: schemapb.DataType_VarChar,
-				TypeParams: []*commonpb.KeyValuePair{
-					{Key: "analyzer_params", Value: "{}"},
-				},
-			},
-			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
-		},
-		Functions: []*schemapb.FunctionSchema{{
-			Name:           "bm25",
-			Type:           schemapb.FunctionType_BM25,
-			InputFieldIds:  []int64{101},
-			OutputFieldIds: []int64{102},
-		}},
-	}
-	require.NoError(t, function.GetManager().Alloc(collectionID, key, schema))
-	defer function.GetManager().Release(collectionID, key)
-
-	ok, err := function.GetManager().RunWithAnalyzer(context.Background(), collectionID, key, 101, func(function.Analyzer) error {
-		return nil
-	})
-	require.NoError(t, err)
-	require.True(t, ok)
-
-	shardManager := mock_shards.NewMockShardManager(t)
-	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
-	impl := &shardInterceptor{shardManager: shardManager}
-	noFunctionSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
-	noFunctionSchema.Version = 2
-	noFunctionSchema.Functions = nil
-	impl.updateFunctionRunners(collectionID, vchannel, noFunctionSchema)
-
-	ok, err = function.GetManager().RunWithAnalyzer(context.Background(), collectionID, key, 101, func(function.Analyzer) error {
-		return nil
-	})
-	require.NoError(t, err)
-	require.False(t, ok)
-
-	invalidSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
-	invalidSchema.Version = 3
-	invalidSchema.Functions[0].OutputFieldIds = []int64{999}
-	require.NotPanics(t, func() {
-		impl.updateFunctionRunners(collectionID, vchannel, invalidSchema)
-	})
-	require.NotPanics(t, func() {
-		impl.allocFunctionRunners(collectionID+1, vchannel+"-alloc", invalidSchema)
-	})
-}
-
 func TestShardInterceptorCreateCollectionAllocatesFunctionRunnersFromLegacySchema(t *testing.T) {
 	collectionID := int64(99003)
 	vchannel := "by-dev-rootcoord-dml_0_99003v0"
