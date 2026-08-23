@@ -19,6 +19,10 @@ import (
 
 type ParserVisitorArgs struct {
 	Timezone string
+	// MembershipBudget is request-scoped when set: the main predicate, every
+	// hybrid sub-request and every scorer filter share one preflight budget and
+	// one validation cache. Nil means single-expression scope.
+	MembershipBudget *MembershipPreflightBudget
 }
 
 // int64OverflowError is a special error type used to handle the case where
@@ -1452,15 +1456,11 @@ func isUnsupportedNullExprVectorType(dataType schemapb.DataType) bool {
 // VisitCall parses the expr to call plan.
 func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 	functionName := strings.ToLower(ctx.Identifier().GetText())
-	if functionName == BloomMatchFunctionName {
-		// bloom_match is compiled on the proxy into a BloomFilterExpr carrying a
-		// pre-built bloom filter blob instead of a generic CallExpr.
-		return v.visitBloomMatch(ctx)
-	}
-	if functionName == RoaringMatchFunctionName {
-		// Likewise roaring_match, into a RoaringFilterExpr carrying a pre-built
-		// bitmap blob.
-		return v.visitRoaringMatch(ctx)
+	if isMembershipFunctionName(functionName) {
+		// bloom_match / roaring_match / membership_match are compiled on the
+		// proxy into a deferred CallExpr that carries the client pre-built blob;
+		// FillExpressionValue materializes it into the matching plan node.
+		return v.visitMembershipCall(ctx, functionName)
 	}
 	numParams := len(ctx.AllExpr())
 	funcParameters := make([]*planpb.Expr, 0, numParams)
@@ -3159,23 +3159,18 @@ func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) int
 		return merr.WrapErrParameterInvalidMsg("invalid element expression: %s", ctx.Expr().GetText())
 	}
 
-	// bloom_match is not supported inside an element_filter element expression:
-	// element_filter evaluates the sub-expression per ELEMENT, feeding global
-	// element IDs where PhyBloomFilterExpr expects scalar-field row offsets —
-	// which would read the wrong row, go out of bounds, or assert. The legal
-	// doc-level combination bloom_match(field, {bf}) && element_filter(...) is
-	// unaffected: that bloom_match is a sibling of element_filter, not inside
-	// its element expression. Mirrors the MATCH_* guard in parseMatchExpr.
-	if hasBloomFilterExpr(exprWithType.expr) {
+	// No membership filter may appear inside an element_filter element
+	// expression, regardless of kind: element_filter evaluates the sub-expression
+	// per ELEMENT, feeding global element IDs where the membership executors
+	// expect scalar-field row offsets — which would read the wrong row, go out
+	// of bounds, or assert. Approximate kinds would additionally break MATCH_*
+	// style upper bounds; exactness (roaring) does not fix the offset mismatch.
+	// The legal doc-level combination membership(field, {bf}) && element_filter(...)
+	// is unaffected: that call is a sibling of element_filter, not inside its
+	// element expression. Mirrors the guard in parseMatchExpr.
+	if hasMembershipFilterExpr(exprWithType.expr) {
 		return merr.WrapErrParameterInvalidMsg(
-			"bloom_match is not supported inside element_filter element expressions")
-	}
-	// roaring_match is also row-offset based. Exactness makes it safe for delete,
-	// but does not make it valid in an element-level executor that supplies
-	// global element IDs instead of row offsets.
-	if hasRoaringFilterExpr(exprWithType.expr) {
-		return merr.WrapErrParameterInvalidMsg(
-			"roaring_match is not supported inside element_filter element expressions")
+			"membership filters (bloom_match/roaring_match/membership_match) are not supported inside element_filter element expressions")
 	}
 
 	// Build ElementFilterExpr proto
@@ -3277,15 +3272,18 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 		return merr.WrapErrParameterInvalidMsg("predicate expression in %s must use element-level fields", funcName)
 	}
 
-	// bloom_match is not supported inside a MATCH_* element predicate. Its
-	// one-sided error (false positives) is only safe for monotonic
+	// No membership filter may appear inside a MATCH_* element predicate.
+	// bloom_match's one-sided error (false positives) is only safe for monotonic
 	// aggregations; MATCH_MOST / MATCH_EXACT bound the hit count from above, so
 	// a false positive would wrongly drop a true row (row-level false
-	// negative), breaking the never-miss-a-member guarantee. Reject rather than
-	// ship a per-MatchType error-semantics matrix.
-	if hasBloomFilterExpr(predicateExpr.expr) {
+	// negative), breaking the never-miss-a-member guarantee. roaring_match is
+	// exact, but its executor is row-offset based while every MATCH_*
+	// predicate field is element-level, so it is rejected for the same reason
+	// element_filter rejects it. Reject rather than ship a per-kind,
+	// per-MatchType error-semantics matrix.
+	if hasMembershipFilterExpr(predicateExpr.expr) {
 		return merr.WrapErrParameterInvalidMsg(
-			"bloom_match is not supported inside %s element predicates", funcName)
+			"membership filters (bloom_match/roaring_match/membership_match) are not supported inside %s element predicates", funcName)
 	}
 
 	// Build MatchExpr proto

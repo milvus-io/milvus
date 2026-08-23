@@ -229,6 +229,16 @@ func TestParseNegativeCases(t *testing.T) {
 			require.Nil(t, f)
 		})
 	}
+
+	t.Run("bad magic does not echo payload", func(t *testing.T) {
+		const secretMagic = "S3CR"
+		blob := mutate(valid, func(b []byte) { copy(b[:4], secretMagic) })
+		f, err := Parse(blob)
+		require.Error(t, err)
+		require.Nil(t, f)
+		require.Contains(t, err.Error(), Magic)
+		require.NotContains(t, err.Error(), secretMagic, "errors must not echo caller-controlled blob bytes")
+	})
 }
 
 func TestFilterAccessors(t *testing.T) {

@@ -59,9 +59,9 @@ const (
 
 	// DefaultMaxMembershipFilterPlanSize is the aggregate serialized size budget for
 	// membership-filter-bearing plans in one Search, HybridSearch, Query, or
-	// complex Delete request. It is
-	// deliberately below the default 256 MiB proxy gRPC client send limit so
-	// placeholders and the rest of the internal request retain ample headroom.
+	// complex Delete request. It is deliberately below the default 256 MiB proxy
+	// gRPC client send limit so placeholders and the rest of the internal request
+	// retain ample headroom.
 	DefaultMaxMembershipFilterPlanSize = 128 * 1024 * 1024
 
 	DefaultMaxDegree                     = 56
@@ -2532,8 +2532,14 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.MaxShardNum.Init(base.mgr)
 
 	p.MaxMembershipFilterSize = ParamItem{
-		Key:          "proxy.maxMembershipFilterSize",
-		FallbackKeys: []string{"proxy.maxBloomFilterSize"},
+		Key: "proxy.maxMembershipFilterSize",
+		FallbackKeys: []string{
+			// The bloom key was the released predecessor. The roaring key existed
+			// on development branches before the two per-blob limits were unified;
+			// accepting it is harmless and preserves those deployments too.
+			"proxy.maxBloomFilterSize",
+			"proxy.maxRoaringFilterSize",
+		},
 		// 64 MiB. Budgets one membership-filter body; the fixed 32-byte MBF1 or
 		// MRB1 header is allowed on top. Bloom SBBF bodies are powers of two, so
 		// any value in [64 MiB, 128 MiB) admits the same Bloom filters; 64 MiB is

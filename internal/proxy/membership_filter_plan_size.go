@@ -17,6 +17,7 @@
 package proxy
 
 import (
+	"errors"
 	"fmt"
 
 	"google.golang.org/protobuf/proto"
@@ -42,6 +43,11 @@ import (
 // own PR: REST, Go SDK and Delete expectations updated together, plus a
 // release note.
 func wrapPlanCreationError(err error, context string) error {
+	// Membership-filter size checks are a new, more specific public error. Do
+	// not collapse them into the legacy ParameterInvalid projection below.
+	if errors.Is(err, merr.ErrParameterTooLarge) {
+		return merr.Wrap(err, context)
+	}
 	return merr.Combine(merr.Wrap(err, context), merr.ErrParameterInvalid)
 }
 

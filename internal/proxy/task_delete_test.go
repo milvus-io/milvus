@@ -647,7 +647,8 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 		dr.metaCache = s.mockCache
 		err = dr.Init(context.Background())
 		s.Error(err)
-		s.ErrorContains(err, "bloom_match is approximate and cannot be used in delete expressions")
+		s.ErrorContains(err, "approximate membership filters")
+		s.ErrorContains(err, "cannot be used in delete expressions")
 	})
 
 	s.Run("partition key mode but delete with partition name", func() {

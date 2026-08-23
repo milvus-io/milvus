@@ -268,13 +268,13 @@ func TestExpr_BloomMatch_Errors(t *testing.T) {
 		intMV := map[string]*schemapb.TemplateValue{
 			"bf": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
 		}
-		expectError(t, "bloom_match(Int64Field, {bf})", intMV, "must be a client pre-built filter blob (bytes)")
+		expectError(t, "bloom_match(Int64Field, {bf})", intMV, "must be a client pre-built membership filter blob (bytes)")
 
 		arrMV := map[string]*schemapb.TemplateValue{
 			"bf": generateTemplateValue(schemapb.DataType_Array,
 				generateTemplateArrayValue(schemapb.DataType_Int64, []int64{1, 2, 3})),
 		}
-		expectError(t, "bloom_match(Int64Field, {bf})", arrMV, "must be a client pre-built filter blob (bytes)")
+		expectError(t, "bloom_match(Int64Field, {bf})", arrMV, "must be a client pre-built membership filter blob (bytes)")
 	})
 
 	t.Run("blob body over proxy.maxMembershipFilterSize is rejected; 32-byte header allowed on top", func(t *testing.T) {
@@ -288,7 +288,7 @@ func TestExpr_BloomMatch_Errors(t *testing.T) {
 
 		// A body budget one byte below the body rejects the blob.
 		pt.Save(pt.ProxyCfg.MaxMembershipFilterSize.Key, strconv.Itoa(body-1))
-		expectError(t, "bloom_match(Int64Field, {bf})", mv, "exceeding proxy.maxMembershipFilterSize")
+		expectError(t, "bloom_match(Int64Field, {bf})", mv, "proxy.maxMembershipFilterSize")
 		pt.Reset(pt.ProxyCfg.MaxMembershipFilterSize.Key)
 
 		// A body budget exactly equal to the body admits the blob even though the
@@ -341,17 +341,18 @@ func TestExpr_BloomMatch_Errors(t *testing.T) {
 		// blob). Bound to any comparison it must die at the proxy, not fan out
 		// a kBytesVal GenericValue that segcore cannot evaluate.
 		expectError(t, `JSONField["a"] == {bf}`, bf,
-			"bytes template value can only be used as the bloom_match or roaring_match filter argument")
+			"membership filter argument of bloom_match, roaring_match, or membership_match")
 		expectError(t, "Int64Field == {bf}", bf,
-			"bytes template value can only be used as the bloom_match or roaring_match filter argument")
+			"membership filter argument of bloom_match, roaring_match, or membership_match")
 		expectError(t, "Int64Field in {bf}", bf, "")
 	})
 }
 
-// TestHasBloomFilterExpr_MatchExprRecursion guards the delete-safety check: a
-// bloom_match nested inside a MATCH_*(...) predicate must still be detected, so the
-// delete path cannot be tricked into running an approximate filter destructively.
-func TestHasBloomFilterExpr_MatchExprRecursion(t *testing.T) {
+// TestHasMembershipFilterExpr_MatchExprRecursion guards the element-level
+// checks: a bloom_match nested inside a MATCH_*(...) predicate must still be
+// detected, so the guards cannot be tricked into letting a membership filter
+// run where it would read the wrong rows.
+func TestHasMembershipFilterExpr_MatchExprRecursion(t *testing.T) {
 	bloomNode := &planpb.Expr{Expr: &planpb.Expr_BloomFilterExpr{BloomFilterExpr: &planpb.BloomFilterExpr{}}}
 	callNode := &planpb.Expr{Expr: &planpb.Expr_CallExpr{CallExpr: &planpb.CallExpr{FunctionName: BloomMatchFunctionName}}}
 	plainNode := &planpb.Expr{Expr: &planpb.Expr_ColumnExpr{ColumnExpr: &planpb.ColumnExpr{}}}
@@ -360,9 +361,9 @@ func TestHasBloomFilterExpr_MatchExprRecursion(t *testing.T) {
 		return &planpb.Expr{Expr: &planpb.Expr_MatchExpr{MatchExpr: &planpb.MatchExpr{Predicate: pred}}}
 	}
 
-	assert.True(t, hasBloomFilterExpr(wrap(bloomNode)), "materialized bloom_match in MatchExpr predicate must be detected")
-	assert.True(t, hasBloomFilterExpr(wrap(callNode)), "deferred bloom_match call in MatchExpr predicate must be detected")
-	assert.False(t, hasBloomFilterExpr(wrap(plainNode)), "MatchExpr without bloom_match must not be flagged")
+	assert.True(t, hasMembershipFilterExpr(wrap(bloomNode)), "materialized bloom_match in MatchExpr predicate must be detected")
+	assert.True(t, hasMembershipFilterExpr(wrap(callNode)), "deferred bloom_match call in MatchExpr predicate must be detected")
+	assert.False(t, hasMembershipFilterExpr(wrap(plainNode)), "MatchExpr without bloom_match must not be flagged")
 }
 
 // TestCheckBloomMatchFieldTypeMatrix pins the accepted type set to exactly what
@@ -416,7 +417,7 @@ func TestPlanContainsBloomFilter(t *testing.T) {
 	for _, c := range cases {
 		plan, err := CreateRetrievePlan(helper, c.expr, c.mv)
 		require.NoError(t, err, c.expr)
-		assert.Equal(t, c.contains, PlanContainsBloomFilter(plan), c.expr)
+		assert.Equal(t, c.contains, PlanContainsMembershipFilter(plan), c.expr)
 	}
 }
 
@@ -446,11 +447,11 @@ func TestRedactPlanForLog(t *testing.T) {
 		require.NoError(t, err)
 
 		out := RedactPlanForLog(plan).String()
-		// The raw blob bytes must not appear; a fixed marker must.
+		// The raw blob bytes must not appear; a size marker must.
 		assert.NotContains(t, out, string(blob))
-		assert.Contains(t, out, "<blob>")
+		assert.Contains(t, out, "bytes elided")
 		// The original plan is restored after rendering.
-		require.True(t, PlanContainsBloomFilter(plan))
+		require.True(t, PlanContainsMembershipFilter(plan))
 		assert.Equal(t, blob, findFirstBloomBlob(plan))
 	})
 
@@ -541,30 +542,34 @@ func callWithParam(p *planpb.Expr) *planpb.Expr {
 	return &planpb.Expr{Expr: &planpb.Expr_CallExpr{CallExpr: &planpb.CallExpr{FunctionName: "other_fn", FunctionParameters: []*planpb.Expr{p}}}}
 }
 
-// TestFillBloomMatchExpressionValueErrors covers the FillBloomMatchExpressionValue
-// defensive branches, reachable only white-box (normal parsing always produces a
-// well-formed 2-parameter bloom_match call).
-func TestFillBloomMatchExpressionValueErrors(t *testing.T) {
+// TestFillMembershipMatchExpressionValueErrors covers the unified fill's
+// defensive branches, reachable only white-box (normal parsing always produces
+// a well-formed 2-parameter bloom_match call).
+func TestFillMembershipMatchExpressionValueErrors(t *testing.T) {
 	col := &planpb.Expr{Expr: &planpb.Expr_ColumnExpr{ColumnExpr: &planpb.ColumnExpr{Info: &planpb.ColumnInfo{}}}}
-	tmpl := &planpb.Expr{Expr: &planpb.Expr_ValueExpr{ValueExpr: &planpb.ValueExpr{TemplateVariableName: "bf"}}}
+	tmpl := &planpb.Expr{
+		Expr:       &planpb.Expr_ValueExpr{ValueExpr: &planpb.ValueExpr{TemplateVariableName: "bf"}},
+		IsTemplate: true,
+	}
+	ctx := &fillExpressionContext{}
 
 	// not exactly 2 parameters.
-	err := FillBloomMatchExpressionValue(&planpb.Expr{},
-		&planpb.CallExpr{FunctionName: BloomMatchFunctionName, FunctionParameters: []*planpb.Expr{col}}, nil)
+	err := fillMembershipMatchExpressionValue(&planpb.Expr{},
+		&planpb.CallExpr{FunctionName: BloomMatchFunctionName, FunctionParameters: []*planpb.Expr{col}}, nil, ctx)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "expected 2 parameters")
 
 	call := &planpb.CallExpr{FunctionName: BloomMatchFunctionName, FunctionParameters: []*planpb.Expr{col, tmpl}}
 	// template value not present.
-	err = FillBloomMatchExpressionValue(&planpb.Expr{}, call, map[string]*planpb.GenericValue{})
+	err = fillMembershipMatchExpressionValue(&planpb.Expr{}, call, map[string]*planpb.GenericValue{}, ctx)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 
 	// template value present but not a bytes blob.
-	err = FillBloomMatchExpressionValue(&planpb.Expr{}, call,
-		map[string]*planpb.GenericValue{"bf": {Val: &planpb.GenericValue_Int64Val{Int64Val: 1}}})
+	err = fillMembershipMatchExpressionValue(&planpb.Expr{}, call,
+		map[string]*planpb.GenericValue{"bf": {Val: &planpb.GenericValue_Int64Val{Int64Val: 1}}}, ctx)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "client pre-built filter blob")
+	assert.Contains(t, err.Error(), "membership filter blob")
 }
 
 // TestValidateMBF1Envelope covers every structural rejection branch.
@@ -595,37 +600,48 @@ func TestValidateMBF1Envelope(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.contains)
 		})
 	}
+
+	t.Run("bad magic does not echo payload", func(t *testing.T) {
+		const secretMagic = "S3CR"
+		blob := cloneBytes(valid)
+		copy(blob[:4], secretMagic)
+		err := validateMBF1Envelope(blob)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid magic")
+		assert.Contains(t, err.Error(), mbf1Magic)
+		assert.NotContains(t, err.Error(), secretMagic, "errors must not echo caller-controlled blob bytes")
+	})
 }
 
-// TestBloomExprTreeWalk exercises hasBloomFilterExpr and collectBloomFilterExprs
-// across every expression node type.
-func TestBloomExprTreeWalk(t *testing.T) {
+// TestMembershipExprTreeWalk exercises hasMembershipFilterExpr and
+// collectMembershipFilterExprs across every expression node type.
+func TestMembershipExprTreeWalk(t *testing.T) {
 	blob := mbf1Blob(1, mbf1BytesPerBlock)
 	leaf := func() *planpb.Expr { return bfLeaf(blob) }
 
-	// hasBloomFilterExpr: true for a bloom anywhere in the tree.
-	assert.True(t, hasBloomFilterExpr(leaf()))
-	assert.True(t, hasBloomFilterExpr(bloomCallNode()))
-	assert.True(t, hasBloomFilterExpr(unaryNode(leaf())))
-	assert.True(t, hasBloomFilterExpr(binNode(nonBloomLeaf(), leaf())))
-	assert.True(t, hasBloomFilterExpr(binNode(leaf(), nonBloomLeaf())))
-	assert.True(t, hasBloomFilterExpr(binaryArithNode(nonBloomLeaf(), leaf())))
-	assert.True(t, hasBloomFilterExpr(binaryArithNode(leaf(), nonBloomLeaf())))
-	assert.True(t, hasBloomFilterExpr(sampleNode(bloomCallNode())))
-	assert.True(t, hasBloomFilterExpr(elemFilterNode(leaf(), nonBloomLeaf())))
-	assert.True(t, hasBloomFilterExpr(elemFilterNode(nonBloomLeaf(), bloomCallNode())))
-	assert.True(t, hasBloomFilterExpr(matchNode(leaf())))
-	assert.True(t, hasBloomFilterExpr(callWithParam(leaf())))
+	// hasMembershipFilterExpr: true for a bloom anywhere in the tree.
+	assert.True(t, hasMembershipFilterExpr(leaf()))
+	assert.True(t, hasMembershipFilterExpr(bloomCallNode()))
+	assert.True(t, hasMembershipFilterExpr(unaryNode(leaf())))
+	assert.True(t, hasMembershipFilterExpr(binNode(nonBloomLeaf(), leaf())))
+	assert.True(t, hasMembershipFilterExpr(binNode(leaf(), nonBloomLeaf())))
+	assert.True(t, hasMembershipFilterExpr(binaryArithNode(nonBloomLeaf(), leaf())))
+	assert.True(t, hasMembershipFilterExpr(binaryArithNode(leaf(), nonBloomLeaf())))
+	assert.True(t, hasMembershipFilterExpr(sampleNode(bloomCallNode())))
+	assert.True(t, hasMembershipFilterExpr(elemFilterNode(leaf(), nonBloomLeaf())))
+	assert.True(t, hasMembershipFilterExpr(elemFilterNode(nonBloomLeaf(), bloomCallNode())))
+	assert.True(t, hasMembershipFilterExpr(matchNode(leaf())))
+	assert.True(t, hasMembershipFilterExpr(callWithParam(leaf())))
 	// false when no bloom present.
-	assert.False(t, hasBloomFilterExpr(nonBloomLeaf()))
-	assert.False(t, hasBloomFilterExpr(binNode(nonBloomLeaf(), nonBloomLeaf())))
-	assert.False(t, hasBloomFilterExpr(callWithParam(nonBloomLeaf())))
+	assert.False(t, hasMembershipFilterExpr(nonBloomLeaf()))
+	assert.False(t, hasMembershipFilterExpr(binNode(nonBloomLeaf(), nonBloomLeaf())))
+	assert.False(t, hasMembershipFilterExpr(callWithParam(nonBloomLeaf())))
 
-	// collectBloomFilterExprs: counts materialized BloomFilterExpr leaves only
-	// (a still-deferred bloom_match call has none yet).
+	// collectMembershipFilterExprs: counts materialized BloomFilterExpr leaves
+	// only (a still-deferred bloom_match call has none yet).
 	count := func(e *planpb.Expr) int {
-		var out []*planpb.BloomFilterExpr
-		collectBloomFilterExprs(e, &out)
+		var out []membershipBlobSlot
+		collectMembershipFilterExprs(e, &out)
 		return len(out)
 	}
 	assert.Equal(t, 0, count(nil))
@@ -649,24 +665,19 @@ func TestPlanContainsBloomFilterAndPredicates(t *testing.T) {
 	anns := &planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{Predicates: leaf}}}
 	preds := &planpb.PlanNode{Node: &planpb.PlanNode_Predicates{Predicates: leaf}}
 	noBloom := &planpb.PlanNode{Node: &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{Predicates: nonBloomLeaf()}}}
-	empty := &planpb.PlanNode{}
-	scorer := &planpb.PlanNode{
-		Node: &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{}},
-		Scorers: []*planpb.ScoreFunction{{
-			Filter: leaf,
-		}},
+	scorerBloom := &planpb.PlanNode{
+		Node:    &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{Predicates: nonBloomLeaf()}},
+		Scorers: []*planpb.ScoreFunction{{Filter: leaf}},
 	}
+	empty := &planpb.PlanNode{}
 
-	assert.True(t, PlanContainsBloomFilter(query))
 	assert.True(t, PlanContainsMembershipFilter(query))
-	assert.True(t, PlanContainsBloomFilter(anns))
-	assert.True(t, PlanContainsBloomFilter(preds))
-	assert.False(t, PlanContainsBloomFilter(noBloom))
+	assert.True(t, PlanContainsMembershipFilter(anns))
+	assert.True(t, PlanContainsMembershipFilter(preds))
+	assert.True(t, PlanContainsMembershipFilter(scorerBloom))
 	assert.False(t, PlanContainsMembershipFilter(noBloom))
-	assert.False(t, PlanContainsBloomFilter(empty))
-	assert.False(t, PlanContainsBloomFilter(nil))
-	assert.True(t, PlanContainsBloomFilter(scorer))
-	assert.True(t, PlanContainsMembershipFilter(scorer))
+	assert.False(t, PlanContainsMembershipFilter(empty))
+	assert.False(t, PlanContainsMembershipFilter(nil))
 
 	assert.Equal(t, leaf, planPredicates(query))
 	assert.Equal(t, leaf, planPredicates(anns))
@@ -674,9 +685,23 @@ func TestPlanContainsBloomFilterAndPredicates(t *testing.T) {
 	assert.Nil(t, planPredicates(empty))
 }
 
-// TestRedactPlanForLogEdgeCases covers the nil-plan branch.
+// TestRedactPlanForLogEdgeCases covers membershipRedactedPlan branches the
+// parsed-plan test does not: a nil plan and a bloom blob in a scorer filter.
 func TestRedactPlanForLogEdgeCases(t *testing.T) {
 	assert.Equal(t, "<nil>", RedactPlanForLog(nil).String())
+
+	// A bloom blob carried by a scorer filter (not the main predicate) is redacted
+	// too, and the original is restored afterwards.
+	secret := []byte("REDACT-ME-BLOOM-BLOB-CONTENT")
+	scorerFilter := bfLeaf(secret)
+	scorerPlan := &planpb.PlanNode{
+		Node:    &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{Predicates: nonBloomLeaf()}},
+		Scorers: []*planpb.ScoreFunction{{Filter: scorerFilter}},
+	}
+	out := RedactPlanForLog(scorerPlan).String()
+	assert.NotContains(t, out, string(secret))
+	assert.Contains(t, out, "bytes elided")
+	assert.Equal(t, secret, scorerFilter.GetBloomFilterExpr().GetFilterBlob(), "scorer blob must be restored after stringify")
 }
 
 // bloomBytesTemplateMixed builds a blob carrying BOTH value domains — the

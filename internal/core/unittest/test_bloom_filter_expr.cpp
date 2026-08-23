@@ -49,7 +49,7 @@
 #include "knowhere/comp/index_param.h"
 #include "exec/QueryContext.h"
 #include "exec/Task.h"
-#include "exec/expression/BloomFilterExpr.h"
+#include "exec/expression/MembershipFilterExpr.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
 #include "exec/expression/LogicalUnaryExpr.h"

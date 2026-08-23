@@ -262,14 +262,16 @@ func toColumnInfo(left *ExprWithType) *planpb.ColumnInfo {
 }
 
 func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
-	// A raw-bytes value has exactly two consumers — the bloom_match filter blob
-	// and the roaring_match bitmap blob — each validated and embedded by its own
-	// Fill*ExpressionValue without passing through castValue. Reject it in every
-	// typed/JSON comparison context here, at the proxy, instead of fanning out a
-	// GenericValue kBytesVal that segcore's plan parser cannot evaluate.
+	// A raw-bytes value has exactly one consumer family — the membership filter
+	// blob argument of bloom_match / roaring_match / membership_match — each
+	// validated and embedded by the unified fill path without passing through
+	// castValue. Reject it in every typed/JSON comparison context here, at the
+	// proxy, instead of fanning out a GenericValue kBytesVal that segcore's plan
+	// parser cannot evaluate.
 	if IsBytes(value) {
 		return nil, merr.WrapErrParameterInvalidMsg(
-			"a bytes template value can only be used as the bloom_match or roaring_match filter argument")
+			"a bytes template value can only be used as the membership filter argument " +
+				"of bloom_match, roaring_match, or membership_match")
 	}
 	if typeutil.IsJSONType(dataType) {
 		return value, nil
