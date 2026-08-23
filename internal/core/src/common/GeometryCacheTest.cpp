@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 #include <atomic>
+#include <chrono>
 #include <string>
 #include <thread>
 #include <vector>
@@ -416,6 +417,99 @@ TEST(GeometryCacheLifetime, OutOfRangeOffsetReturnsNullptrNotThrow) {
     EXPECT_NE(cache->GetByOffsetUnsafe(0), nullptr);
     EXPECT_EQ(cache->GetByOffsetUnsafe(1), nullptr);
     EXPECT_EQ(cache->GetByOffsetUnsafe(1000000), nullptr);
+}
+
+// Regression for issue #52191: the cache's shared_mutex must not let a
+// continuous stream of overlapping readers starve a writer.
+//
+// SimpleGeometryCache is read under AcquireReadLock() by every GIS expression
+// (GISFunctionFilterExpr / GISConjunctExpr hold it across a whole batch), while
+// the growing-segment insert path writes through AppendDataAt(). With a
+// reader-preferring rwlock -- which is what libstdc++'s std::shared_mutex maps
+// to on Linux, since glibc's pthread_rwlock_t defaults to
+// PTHREAD_RWLOCK_PREFER_READER_NP -- a writer only ever acquires during a
+// window in which the reader count drops to zero. Under sustained query load
+// that window may never occur, and the insert stalls indefinitely.
+//
+// The readers below deliberately overlap: each re-acquires immediately after
+// releasing, so with enough of them the reader count is essentially never zero.
+// Readers are stopped BEFORE joining the writer, so a starved writer makes this
+// test fail on the elapsed-time assertion instead of hanging forever.
+TEST(GeometryCacheConcurrency, WriterIsNotStarvedByOverlappingReaders) {
+    auto& mgr = SimpleGeometryCacheManager::Instance();
+    const int64_t seg_id = 900000011;
+    const FieldId field_id(31);
+    const std::string wkb = MakePointWkb(7.0, 7.0);
+
+    auto cache = mgr.GetOrCreateCache(kInstanceA, seg_id, field_id);
+    cache->AppendDataAt(0, wkb.data(), wkb.size());
+
+    constexpr int kReaders = 8;
+    // Generous: with a write-preferring lock the writer is admitted in about a
+    // millisecond, so this only trips on genuine starvation, not on a loaded
+    // CI machine.
+    constexpr auto kWriterBudget = std::chrono::seconds(5);
+
+    std::atomic<bool> stop{false};
+    std::atomic<int> readers_running{0};
+    std::vector<std::thread> readers;
+    readers.reserve(kReaders);
+    for (int i = 0; i < kReaders; ++i) {
+        readers.emplace_back([&]() {
+            readers_running.fetch_add(1);
+            while (!stop.load(std::memory_order_relaxed)) {
+                auto lock = cache->AcquireReadLock();
+                // Mirror the expression paths: real work is done while the
+                // read lock is held, so the lock is held for a while.
+                for (int k = 0; k < 64; ++k) {
+                    const Geometry* g = cache->GetByOffsetUnsafe(0);
+                    (void)g;
+                }
+            }
+        });
+    }
+
+    // Let the readers reach steady state so the reader count stays above zero.
+    while (readers_running.load() < kReaders) {
+        std::this_thread::yield();
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    std::atomic<bool> write_done{false};
+    auto started = std::chrono::steady_clock::now();
+    std::thread writer([&]() {
+        cache->AppendDataAt(1, wkb.data(), wkb.size());
+        write_done.store(true, std::memory_order_relaxed);
+    });
+
+    while (!write_done.load(std::memory_order_relaxed) &&
+           std::chrono::steady_clock::now() - started < kWriterBudget) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    auto elapsed = std::chrono::steady_clock::now() - started;
+    bool acquired = write_done.load(std::memory_order_relaxed);
+
+    // Stop the readers first: once they drain, even a starved writer completes,
+    // so join() cannot hang regardless of the outcome asserted below.
+    stop.store(true, std::memory_order_relaxed);
+    writer.join();
+    for (auto& t : readers) {
+        t.join();
+    }
+
+    EXPECT_TRUE(acquired)
+        << "writer did not acquire the cache lock within "
+        << std::chrono::duration_cast<std::chrono::milliseconds>(kWriterBudget)
+               .count()
+        << " ms while " << kReaders
+        << " overlapping readers held the shared lock -- the writer is being "
+           "starved (issue #52191)";
+    EXPECT_LT(
+        std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(kWriterBudget)
+            .count());
+
+    mgr.RemoveSegmentCaches(kInstanceA, seg_id);
 }
 
 }  // namespace
