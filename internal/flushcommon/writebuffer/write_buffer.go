@@ -694,14 +694,9 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 	}
 }
 
-// prepareInsert transfers InsertMsg into organized InsertData grouped by segmentID
-// also returns primary key field data
-func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.FieldSchema, insertMsgs []*msgstream.InsertMsg) ([]*InsertData, error) {
-	bm25OutputFieldIDs, err := getBM25OutputFieldIDs(collSchema)
-	if err != nil {
-		return nil, err
-	}
-
+// PrepareInsert transfers InsertMsg into organized InsertData grouped by segmentID.
+// bm25OutputFieldIDs must be resolved from collSchema by the caller.
+func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.FieldSchema, bm25OutputFieldIDs []int64, insertMsgs []*msgstream.InsertMsg) ([]*InsertData, error) {
 	groups := lo.GroupBy(insertMsgs, func(msg *msgstream.InsertMsg) int64 { return msg.SegmentID })
 	segmentPartition := lo.SliceToMap(insertMsgs, func(msg *msgstream.InsertMsg) (int64, int64) { return msg.GetSegmentID(), msg.GetPartitionID() })
 
@@ -782,23 +777,6 @@ func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.Fiel
 	}
 
 	return result, nil
-}
-
-func getBM25OutputFieldIDs(schema *schemapb.CollectionSchema) ([]int64, error) {
-	outputFieldIDs := make([]int64, 0)
-	for _, fn := range schema.GetFunctions() {
-		if fn.GetType() != schemapb.FunctionType_BM25 {
-			continue
-		}
-
-		outputField := typeutil.GetFunctionOutputField(schema, fn)
-		if outputField == nil {
-			return nil, merr.WrapErrServiceInternalMsg("function %s output field not found", fn.GetName())
-		}
-
-		outputFieldIDs = append(outputFieldIDs, outputField.GetFieldID())
-	}
-	return outputFieldIDs, nil
 }
 
 func appendBM25StatsFromInsertData(stats map[int64]*storage.BM25Stats, outputFieldIDs []int64, data *storage.InsertData) error {

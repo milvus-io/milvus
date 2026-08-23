@@ -576,7 +576,7 @@ func TestPrepareInsertWithMissingFields(t *testing.T) {
 		}
 
 		insertMsgs := []*msgstream.InsertMsg{insertMsg}
-		result, err := PrepareInsert(collSchema, pkField, insertMsgs)
+		result, err := PrepareInsert(collSchema, pkField, nil, insertMsgs)
 
 		assert.NoError(t, err)
 		assert.Len(t, result, 1)
@@ -678,7 +678,7 @@ func TestPrepareInsertMaterializesLegacyBM25Output(t *testing.T) {
 	assert.NoError(t, err)
 	defer function.GetManager().Release(1, "v1")
 
-	result, err := PrepareInsert(collSchema, pkField, []*msgstream.InsertMsg{insertMsg})
+	result, err := PrepareInsert(collSchema, pkField, []int64{102}, []*msgstream.InsertMsg{insertMsg})
 
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)

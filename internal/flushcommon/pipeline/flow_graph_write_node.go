@@ -110,7 +110,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 				panic(err)
 			}
 		}
-		preparedInsertData, err := writebuffer.PrepareInsert(currentSchema, wNode.pkField, fgMsg.InsertMessages)
+		preparedInsertData, err := writebuffer.PrepareInsert(currentSchema, wNode.pkField, functionOutputFieldIDs, fgMsg.InsertMessages)
 		if err != nil {
 			log.Error("failed to prepare data", zap.Error(err))
 			panic(err)
