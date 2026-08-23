@@ -763,6 +763,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
             schema_1.add_field("field2", DataType.INT64, is_primary=True, auto_id=False)
 
         schema_2 = self.create_schema(client, enable_dynamic_field=False, primary_field="field2")[0]
+        schema_2.add_field("field2", DataType.INT64)
         with pytest.raises(PrimaryKeyException):
             schema_2.add_field("field1", DataType.INT64, is_primary=True, auto_id=False)
 
