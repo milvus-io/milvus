@@ -746,6 +746,7 @@ func TestFunctionRunnerManagerAllocRetriesAfterFinalRelease(t *testing.T) {
 	require.NotSame(t, entry, manager.getEntry(1))
 	keyVersions, _, _ := functionRunnerEntrySnapshot(t, manager, 1)
 	require.Equal(t, map[string]int32{"v2": schema.GetVersion()}, keyVersions)
+	requireRunnerByOutput(t, manager, 1, "v2", 102)
 	entry.mu.RLock()
 	require.True(t, entry.closed)
 	entry.mu.RUnlock()
@@ -1158,6 +1159,7 @@ func TestFunctionRunnerManagerMaterializeLatestSkipsMissingLifecycleKey(t *testi
 
 	schema := newBM25SignatureTestSchema()
 	require.NoError(t, manager.Alloc(1, "other", schema))
+	requireRunnerByOutput(t, manager, 1, "other", 102)
 	changed, err = manager.Materialize(context.Background(), 1, "v1", LatestFunctionRunnerVersion, newTestInsertMessage(newBM25InsertRequest("message")))
 	require.NoError(t, err)
 	require.False(t, changed)
@@ -1169,6 +1171,7 @@ func TestFunctionRunnerManagerMaterializeRejectsVersionMismatch(t *testing.T) {
 
 	schema := newBM25SignatureTestSchema()
 	require.NoError(t, manager.Alloc(1, "v1", schema))
+	requireRunnerByOutput(t, manager, 1, "v1", 102)
 
 	changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion()+1, newTestInsertMessage(newBM25InsertRequest("message")))
 	require.ErrorContains(t, err, "schema version mismatch")
