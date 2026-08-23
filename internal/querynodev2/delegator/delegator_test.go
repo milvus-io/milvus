@@ -2125,6 +2125,33 @@ func newBM25FunctionSchema() *schemapb.FunctionSchema {
 	}
 }
 
+func TestDelegatorFunctionExecutionEligibility(t *testing.T) {
+	sd := &shardDelegator{
+		collectionID: 1002,
+		vchannelName: "static-function-schema-test-channel",
+		isBM25Field: map[UniqueID]bool{
+			102: true,
+		},
+		analyzerFields: map[UniqueID]bool{
+			101: true,
+		},
+	}
+
+	t.Run("added vector field skips function manager", func(t *testing.T) {
+		avgdl, skip, err := sd.prepareSearchFunction(context.Background(), &internalpb.SearchRequest{FieldId: 104})
+		require.NoError(t, err)
+		assert.Zero(t, avgdl)
+		assert.False(t, skip)
+	})
+
+	t.Run("added field skips analyzer manager", func(t *testing.T) {
+		_, err := sd.RunAnalyzer(context.Background(), &querypb.RunAnalyzerRequest{
+			FieldId: 104,
+		})
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+}
+
 func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {
 	paramtable.Init()
 	schema := newFunctionRuntimeTestSchema(newBM25FunctionSchema())
@@ -2146,6 +2173,7 @@ func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {
 		collectionID:               1002,
 		vchannelName:               "metric-test-channel",
 		collection:                 segments.NewCollectionWithoutSegcoreForTest(1002, schema),
+		isBM25Field:                map[UniqueID]bool{102: true},
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 

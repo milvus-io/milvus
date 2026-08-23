@@ -168,6 +168,11 @@ type shardDelegator struct {
 	growingSegmentLock sync.RWMutex
 	partitionStatsMut  sync.RWMutex
 
+	// 2.6 does not update the delegator's function lifecycle after schema changes,
+	// so execution eligibility stays fixed to the schema used during creation.
+	isBM25Field    map[UniqueID]bool
+	analyzerFields map[UniqueID]bool
+
 	// current forward policy
 	l0ForwardPolicy string
 
@@ -228,6 +233,10 @@ func (sd *shardDelegator) Stopped() bool {
 }
 
 func (sd *shardDelegator) prepareSearchFunction(ctx context.Context, req *internalpb.SearchRequest) (float64, bool, error) {
+	if !sd.isBM25Field[req.GetFieldId()] {
+		return 0, false, nil
+	}
+
 	var avgdl float64
 	isBM25 := false
 	ok, err := function.GetManager().RunWithRunner(ctx, sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), req.GetFieldId(), func(runner function.FunctionRunner) error {
@@ -1362,7 +1371,8 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	if collection == nil {
 		return nil, merr.WrapErrCollectionNotFound(collectionID, "not in delegator manager")
 	}
-	if err := function.GetManager().Alloc(collectionID, delegatorFunctionRunnerKey(channel), collection.Schema()); err != nil {
+	schema := collection.Schema()
+	if err := function.GetManager().Alloc(collectionID, delegatorFunctionRunnerKey(channel), schema); err != nil {
 		return nil, err
 	}
 
@@ -1400,6 +1410,8 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		chunkManager:               chunkManager,
 		partitionStats:             make(map[UniqueID]*storage.PartitionStatsSnapshot),
 		excludedSegments:           excludedSegments,
+		isBM25Field:                make(map[UniqueID]bool),
+		analyzerFields:             make(map[UniqueID]bool),
 		l0ForwardPolicy:            policy,
 		postLoadSem:                postLoadSem,
 		postLoadConfigHandler:      postLoadConfigHandler,
@@ -1410,11 +1422,25 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		opt(sd)
 	}
 
-	hasBM25Field := lo.ContainsBy(collection.Schema().GetFunctions(), func(tf *schemapb.FunctionSchema) bool {
-		return tf.GetType() == schemapb.FunctionType_BM25
-	})
-	if hasBM25Field {
-		sd.idfOracle = NewIDFOracle(sd.vchannelName, collection.Schema().GetFunctions())
+	for _, functionSchema := range schema.GetFunctions() {
+		if functionSchema.GetType() != schemapb.FunctionType_BM25 {
+			continue
+		}
+		for _, outputFieldID := range functionSchema.GetOutputFieldIds() {
+			sd.isBM25Field[outputFieldID] = true
+		}
+		for _, inputFieldID := range functionSchema.GetInputFieldIds() {
+			sd.analyzerFields[inputFieldID] = true
+		}
+	}
+	for _, field := range schema.GetFields() {
+		if typeutil.CreateFieldSchemaHelper(field).EnableAnalyzer() {
+			sd.analyzerFields[field.GetFieldID()] = true
+		}
+	}
+
+	if len(sd.isBM25Field) > 0 {
+		sd.idfOracle = NewIDFOracle(sd.vchannelName, schema.GetFunctions())
 		sd.distribution.SetIDFOracle(sd.idfOracle)
 		sd.idfOracle.Start()
 	}
@@ -1426,6 +1452,9 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 }
 
 func (sd *shardDelegator) runWithAnalyzer(ctx context.Context, fieldID int64, run func(function.Analyzer) error) (bool, error) {
+	if !sd.analyzerFields[fieldID] {
+		return false, nil
+	}
 	return function.GetManager().RunWithAnalyzer(ctx, sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), fieldID, run)
 }
 
