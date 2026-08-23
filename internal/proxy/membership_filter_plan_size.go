@@ -17,9 +17,9 @@
 package proxy
 
 import (
-	"errors"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
