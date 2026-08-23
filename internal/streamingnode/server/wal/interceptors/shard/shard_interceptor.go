@@ -71,10 +71,10 @@ func (impl *shardInterceptor) DoAppend(ctx context.Context, msg message.MutableM
 func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	createCollectionMsg := message.MustAsMutableCreateCollectionMessageV1(msg)
 	body := createCollectionMsg.MustBody()
-	if body.GetCollectionSchema() == nil && len(body.GetSchema()) == 0 {
-		return nil, status.NewUnrecoverableError("create collection message does not contain collection schema")
+	schema := body.GetCollectionSchema()
+	if schema == nil && len(body.GetSchema()) > 0 {
+		schema = messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
 	}
-	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
 	header := createCollectionMsg.Header()
 	if err := impl.shardManager.CheckIfCollectionCanBeCreated(header.GetCollectionId()); err != nil {
 		impl.shardManager.Logger().Warn("collection already exists when creating collection", zap.Int64("collectionID", header.GetCollectionId()))
@@ -89,9 +89,11 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 	}
 	impl.shardManager.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(msg.IntoImmutableMessage(msgID)))
 	// Legacy CreateCollection messages keep the schema in the serialized Schema
-	// field instead of CollectionSchema. Resolve both formats so Alloc always
-	// registers the WAL lifecycle key before later schema updates.
-	impl.allocFunctionRunners(header.GetCollectionId(), createCollectionMsg.VChannel(), schema)
+	// field instead of CollectionSchema. Schema-less messages remain valid on
+	// 2.6 and do not need a function-runner lifecycle entry.
+	if schema != nil {
+		impl.allocFunctionRunners(header.GetCollectionId(), createCollectionMsg.VChannel(), schema)
+	}
 	return msgID, nil
 }
 

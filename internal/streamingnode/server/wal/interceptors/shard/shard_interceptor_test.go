@@ -106,11 +106,15 @@ func TestShardInterceptorCreateCollectionAllocatesFunctionRunnersFromLegacySchem
 	require.True(t, ok)
 }
 
-func TestShardInterceptorRejectsCreateCollectionWithoutSchema(t *testing.T) {
-	impl := &shardInterceptor{shardManager: mock_shards.NewMockShardManager(t)}
+func TestShardInterceptorPreservesCreateCollectionWithoutSchema(t *testing.T) {
+	collectionID := int64(99004)
+	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().CheckIfCollectionCanBeCreated(collectionID).Return(nil).Once()
+	shardManager.EXPECT().CreateCollection(mock.Anything).Return().Once()
+	impl := &shardInterceptor{shardManager: shardManager}
 	msg := message.NewCreateCollectionMessageBuilderV1().
 		WithVChannel("by-dev-rootcoord-dml_0_99004v0").
-		WithHeader(&messagespb.CreateCollectionMessageHeader{CollectionId: 99004}).
+		WithHeader(&messagespb.CreateCollectionMessageHeader{CollectionId: collectionID}).
 		WithBody(&msgpb.CreateCollectionRequest{}).
 		MustBuildMutable()
 
@@ -119,9 +123,9 @@ func TestShardInterceptorRejectsCreateCollectionWithoutSchema(t *testing.T) {
 		appended = true
 		return rmq.NewRmqID(1), nil
 	})
-	require.ErrorContains(t, err, "does not contain collection schema")
-	require.Nil(t, msgID)
-	require.False(t, appended)
+	require.NoError(t, err)
+	require.NotNil(t, msgID)
+	require.True(t, appended)
 }
 
 func TestShardInterceptorRejectsInvalidLegacySchemaBeforeAppend(t *testing.T) {
@@ -194,7 +198,7 @@ func TestShardInterceptor(t *testing.T) {
 			CollectionId: 1,
 			PartitionIds: []int64{1},
 		}).
-		WithBody(&msgpb.CreateCollectionRequest{CollectionSchema: &schemapb.CollectionSchema{Version: 0}}).
+		WithBody(&msgpb.CreateCollectionRequest{}).
 		MustBuildMutable()
 	shardManager.EXPECT().CheckIfCollectionCanBeCreated(mock.Anything).Return(nil)
 	shardManager.EXPECT().CreateCollection(mock.Anything).Return()
