@@ -21,6 +21,7 @@
 #include "cachinglayer/Metrics.h"
 #include "exec/expression/DiskSlotFile.h"
 #include "exec/expression/EntryPool.h"
+#include "log/Log.h"
 #include "xxhash.h"
 
 namespace milvus {
