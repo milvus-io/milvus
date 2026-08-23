@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -81,6 +82,33 @@ func (m selectedColumnMaterializer) Materialize(rec storage.Record) (map[int64]a
 
 func (m selectedColumnMaterializer) Close() {}
 
+type inputViewMaterializer struct {
+	inputFieldID  int64
+	hiddenFieldID int64
+	outputFieldID int64
+	output        arrow.Array
+	view          storage.Record
+	input         arrow.Array
+	hidden        arrow.Array
+}
+
+func (m *inputViewMaterializer) Materialize(rec storage.Record) (map[int64]arrow.Array, error) {
+	m.view = rec
+	m.input = rec.Column(m.inputFieldID)
+	if m.input == nil {
+		return nil, merr.WrapErrFunctionFailedMsg("input field %d not found", m.inputFieldID)
+	}
+	if m.hiddenFieldID != 0 {
+		m.hidden = rec.Column(m.hiddenFieldID)
+	}
+	if m.output == nil {
+		return nil, nil
+	}
+	return map[int64]arrow.Array{m.outputFieldID: m.output}, nil
+}
+
+func (m *inputViewMaterializer) Close() {}
+
 type materializerTestFunctionRunner struct {
 	schema       *schemapb.FunctionSchema
 	inputFields  []*schemapb.FieldSchema
@@ -129,7 +157,11 @@ func TestRecordMaterializerWrapNoOpWhenAllFieldsExist(t *testing.T) {
 	require.Same(t, record, wrapped)
 }
 
-func TestRecordMaterializerWrapFillsNullableMissingFields(t *testing.T) {
+func TestRecordMaterializerWrapLeavesAbsentOrdinaryToReader(t *testing.T) {
+	// Contract pin: absent ordinary fields are reader-filled before records
+	// reach the materializer, so with no functions to run Wrap must hand the
+	// record back untouched even when the schema lists fields the record does
+	// not carry.
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
 		{FieldID: 101, Name: "added", DataType: schemapb.DataType_Int64, Nullable: true},
@@ -141,38 +173,7 @@ func TestRecordMaterializerWrapFillsNullableMissingFields(t *testing.T) {
 	record := &materializerTestRecord{len: 3}
 	wrapped, err := materializer.Wrap(record)
 	require.NoError(t, err)
-	require.NotSame(t, record, wrapped)
-
-	column := wrapped.Column(101)
-	require.NotNil(t, column)
-	require.Equal(t, 3, column.Len())
-	require.Equal(t, 3, column.NullN())
-	cleanupMaterializedRecord(wrapped)
-	require.Equal(t, 0, record.releaseCount)
-}
-
-func TestRecordMaterializerWrapFillsNullableMissingTextFieldAsBinary(t *testing.T) {
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
-		{FieldID: 101, Name: "added_text", DataType: schemapb.DataType_Text, Nullable: true},
-	}}
-	materializer, err := NewRecordMaterializer(schema, nil, map[int64]struct{}{100: {}})
-	require.NoError(t, err)
-	defer materializer.Close()
-
-	pk := newInt64Array(t, []int64{1, 2, 3})
-	defer pk.Release()
-	record := &materializerTestRecord{len: 3, columns: map[storage.FieldID]arrow.Array{100: pk}}
-	wrapped, err := materializer.Wrap(record)
-	require.NoError(t, err)
-	require.NotSame(t, record, wrapped)
-
-	column := wrapped.Column(101)
-	require.NotNil(t, column)
-	require.IsType(t, &array.Binary{}, column)
-	require.Equal(t, 3, column.Len())
-	require.Equal(t, 3, column.NullN())
-	cleanupMaterializedRecord(wrapped)
+	require.Same(t, record, wrapped)
 	require.Equal(t, 0, record.releaseCount)
 }
 
@@ -187,7 +188,12 @@ func TestRecordMaterializerWrapWithSelectionMaterializesKeptRowsOnly(t *testing.
 
 	input := newStringArray(t, []string{"drop-0", "keep-1", "drop-2", "keep-3"})
 	defer input.Release()
-	record := &materializerTestRecord{len: 4, columns: map[storage.FieldID]arrow.Array{100: input}}
+	// The reader contract delivers records readSchema-wide: the absent-ordinary
+	// field arrives reader-filled (all-null here).
+	added, err := storage.GenerateEmptyArrayFromSchema(schema.GetFields()[1], 4)
+	require.NoError(t, err)
+	defer added.Release()
+	record := &materializerTestRecord{len: 4, columns: map[storage.FieldID]arrow.Array{100: input, 101: added}}
 	selection := &recordSelection{ranges: []rowRange{{start: 1, end: 2}, {start: 3, end: 4}}, length: 2}
 
 	wrapped, err := materializer.WrapWithSelection(record, selection)
@@ -210,9 +216,8 @@ func TestRecordMaterializerWrapWithSelectionReturnsColumnBuildError(t *testing.T
 		{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
 	}}
 	materializer := &RecordMaterializer{
-		schema:         schema,
-		existingFields: map[int64]struct{}{100: {}},
-		materializers:  []FunctionMaterializer{selectedColumnMaterializer{fieldID: 100}},
+		schema:        schema,
+		materializers: []FunctionMaterializer{selectedColumnMaterializer{fieldID: 100}},
 	}
 
 	input := newInt64Array(t, []int64{1, 2})
@@ -237,7 +242,10 @@ func TestRecordMaterializerSelectionColumnsFixedBeforeTimestampOverwrite(t *test
 
 	input := newStringArray(t, []string{"drop-0", "keep-1", "drop-2", "keep-3"})
 	defer input.Release()
-	record := &materializerTestRecord{len: 4, columns: map[storage.FieldID]arrow.Array{100: input}}
+	added, err := storage.GenerateEmptyArrayFromSchema(schema.GetFields()[1], 4)
+	require.NoError(t, err)
+	defer added.Release()
+	record := &materializerTestRecord{len: 4, columns: map[storage.FieldID]arrow.Array{100: input, 101: added}}
 	selection := &recordSelection{ranges: []rowRange{{start: 1, end: 2}, {start: 3, end: 4}}, length: 2}
 
 	wrapped, err := materializer.WrapWithSelection(record, selection)
@@ -246,8 +254,8 @@ func TestRecordMaterializerSelectionColumnsFixedBeforeTimestampOverwrite(t *test
 	// commit-ts wrapper snapshots refcounts via Retain; a writer only pulls
 	// columns afterwards. Every column must exist before the snapshot, or the
 	// late-created ones escape it and get released more than they were retained.
-	selected := wrapped.(*materializedRecord).base.(*selectedRecord)
-	require.Len(t, selected.columns, 1)
+	selected := wrapped.(*selectedRecord)
+	require.Len(t, selected.columns, 2)
 
 	out := overwriteRecordTimestamps(wrapped, 12345)
 	require.NotSame(t, wrapped, out)
@@ -280,8 +288,12 @@ func TestRecordMaterializerSelectionColumnLifecycleExact(t *testing.T) {
 		builder.AppendValues([]string{"drop-0", "keep-1", "drop-2", "keep-3"}, nil)
 		input := builder.NewStringArray()
 		defer input.Release()
+		// Reader contract: the absent-ordinary field arrives reader-filled.
+		added, err := storage.GenerateEmptyArrayFromSchema(schema.GetFields()[1], 4)
+		require.NoError(t, err)
+		defer added.Release()
 
-		record := &materializerTestRecord{len: 4, columns: map[storage.FieldID]arrow.Array{100: input}}
+		record := &materializerTestRecord{len: 4, columns: map[storage.FieldID]arrow.Array{100: input, 101: added}}
 		selection := &recordSelection{ranges: []rowRange{{start: 1, end: 2}, {start: 3, end: 4}}, length: 2}
 
 		wrapped, err := materializer.WrapWithSelection(record, selection)
@@ -368,20 +380,92 @@ func TestRecordMaterializerWrapSkipsMissingSystemFields(t *testing.T) {
 	require.Same(t, record, wrapped)
 }
 
-func TestRecordMaterializerWrapFailsForMissingNonNullableField(t *testing.T) {
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
-		{FieldID: 101, Name: "required", DataType: schemapb.DataType_Int64},
-	}}
-	materializer, err := NewRecordMaterializer(schema, nil, map[int64]struct{}{100: {}})
-	require.NoError(t, err)
-	defer materializer.Close()
+func TestRecordMaterializerFunctionsShareOrdinaryInputView(t *testing.T) {
+	ordinaryField := &schemapb.FieldSchema{
+		FieldID: 101, Name: "added_input", DataType: schemapb.DataType_VarChar,
+		Nullable: true,
+	}
+	output := newInt64Array(t, []int64{10, 20})
+	first := &inputViewMaterializer{
+		inputFieldID:  ordinaryField.GetFieldID(),
+		outputFieldID: 102,
+		output:        output,
+	}
+	second := &inputViewMaterializer{
+		inputFieldID:  ordinaryField.GetFieldID(),
+		hiddenFieldID: first.outputFieldID,
+	}
+	materializer := &RecordMaterializer{
+		materializers: []FunctionMaterializer{first, second},
+	}
 
-	record := &materializerTestRecord{len: 3}
-	_, err = materializer.Wrap(record)
-	require.Error(t, err)
-	require.ErrorContains(t, err, "missing field data required")
-	require.Equal(t, 0, record.releaseCount)
+	// Per the reader contract the absent-ordinary input arrives on the base
+	// record null-filled; functions read it from there.
+	input, err := storage.GenerateEmptyArrayFromSchema(ordinaryField, 2)
+	require.NoError(t, err)
+	defer input.Release()
+	record := &materializerTestRecord{len: 2, columns: map[storage.FieldID]arrow.Array{ordinaryField.GetFieldID(): input}}
+	wrapped, err := materializer.Wrap(record)
+	require.NoError(t, err)
+	defer cleanupMaterializedRecord(wrapped)
+
+	require.Same(t, storage.Record(record), first.view, "functions read inputs straight from the base record")
+	require.Same(t, first.view, second.view)
+	require.Nil(t, second.hidden, "one function must not observe another function's new output")
+	for _, in := range []arrow.Array{first.input, second.input} {
+		column := in.(*array.String)
+		require.Equal(t, 2, column.Len())
+		require.Equal(t, 2, column.NullN(), "null-filled absent input stays null")
+	}
+	require.Nil(t, first.view.Column(first.outputFieldID), "the function input view must remain output-free")
+	require.Same(t, output, wrapped.Column(first.outputFieldID))
+}
+
+func TestRecordMaterializerFunctionOutputLifecycleExact(t *testing.T) {
+	alloc := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	original := memory.DefaultAllocator
+	memory.DefaultAllocator = alloc
+	defer func() { memory.DefaultAllocator = original }()
+
+	func() {
+		builder := array.NewInt64Builder(alloc)
+		builder.AppendValues([]int64{10, 20}, nil)
+		output := builder.NewArray()
+		builder.Release()
+
+		ordinaryField := &schemapb.FieldSchema{
+			FieldID: 101, Name: "added_input", DataType: schemapb.DataType_VarChar,
+			Nullable: true,
+		}
+		functionMaterializer := &inputViewMaterializer{
+			inputFieldID:  ordinaryField.GetFieldID(),
+			outputFieldID: 102,
+			output:        output,
+		}
+		materializer := &RecordMaterializer{
+			materializers: []FunctionMaterializer{functionMaterializer},
+		}
+		// Reader-null-filled ordinary input lives on the base record.
+		input, err := storage.GenerateEmptyArrayFromSchema(ordinaryField, 2)
+		require.NoError(t, err)
+		defer input.Release()
+		record := &materializerTestRecord{len: 2, columns: map[storage.FieldID]arrow.Array{ordinaryField.GetFieldID(): input}}
+
+		wrapped, err := materializer.Wrap(record)
+		require.NoError(t, err)
+		wrapped.Retain()
+		cleanupMaterializedRecord(wrapped)
+
+		// The retained view must keep the output layer alive after the reader's
+		// original derived references have been cleaned up; the ordinary input
+		// stays readable through the base record.
+		require.True(t, wrapped.Column(ordinaryField.GetFieldID()).(*array.String).IsNull(0))
+		require.Equal(t, int64(10), wrapped.Column(functionMaterializer.outputFieldID).(*array.Int64).Value(0))
+		wrapped.Release()
+		require.Equal(t, record.retainCount, record.releaseCount)
+	}()
+
+	alloc.AssertSize(t, 0)
 }
 
 func TestBM25FunctionMaterializerMaterializesSparseOutput(t *testing.T) {
@@ -541,10 +625,32 @@ func TestBM25FunctionMaterializerRejectsBadRunnerOutput(t *testing.T) {
 	})
 }
 
-func TestFunctionOutputIndexesToMaterializePartialStateReturnsAllOutputs(t *testing.T) {
-	functionSchema := &schemapb.FunctionSchema{OutputFieldIds: []int64{101, 102}}
-	require.Nil(t, functionOutputIndexesToMaterialize(functionSchema, map[int64]struct{}{101: {}, 102: {}}))
-	require.Equal(t, []int{0, 1}, functionOutputIndexesToMaterialize(functionSchema, map[int64]struct{}{101: {}}))
+func TestFunctionOutputIndexesToMaterialize(t *testing.T) {
+	functionSchema := &schemapb.FunctionSchema{Name: "multi_output", OutputFieldIds: []int64{101, 102}}
+
+	indexes, err := functionOutputIndexesToMaterialize(functionSchema, map[int64]struct{}{101: {}, 102: {}})
+	require.NoError(t, err)
+	require.Nil(t, indexes)
+
+	indexes, err = functionOutputIndexesToMaterialize(functionSchema, nil)
+	require.NoError(t, err)
+	require.Equal(t, []int{0, 1}, indexes)
+
+	indexes, err = functionOutputIndexesToMaterialize(functionSchema, map[int64]struct{}{101: {}})
+	require.Nil(t, indexes)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.ErrorContains(t, err, "partially materialized output fields")
+}
+
+func TestNewRecordMaterializerRejectsPartiallyPresentFunctionOutputs(t *testing.T) {
+	functionSchema := &schemapb.FunctionSchema{Name: "multi_output", OutputFieldIds: []int64{101, 102}}
+	materializer, err := NewRecordMaterializer(
+		&schemapb.CollectionSchema{},
+		[]*schemapb.FunctionSchema{functionSchema},
+		map[int64]struct{}{101: {}},
+	)
+	require.Nil(t, materializer)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 }
 
 func TestMaterializedRecordReaderReleasesPreviousRecordOnNextAndClose(t *testing.T) {
@@ -578,13 +684,29 @@ func TestMaterializedRecordReaderReleasesPreviousRecordOnNextAndClose(t *testing
 // the retained composite stays readable after the reader releases its own base
 // reference and the wrapper cleans its derived arrays, and every reference
 // balances to zero at the end.
+// freshOutputMaterializer emits a newly-allocated output column per call, so the
+// materialized record's function output is what makes Wrap return a
+// materializedRecord and no arrow array is shared between successive records.
+type freshOutputMaterializer struct {
+	t             *testing.T
+	outputFieldID int64
+}
+
+func (m freshOutputMaterializer) Materialize(storage.Record) (map[int64]arrow.Array, error) {
+	return map[int64]arrow.Array{m.outputFieldID: newInt64Array(m.t, []int64{7})}, nil
+}
+
+func (m freshOutputMaterializer) Close() {}
+
 func TestMaterializedRecordReaderRetainedRecordSurvivesAdvance(t *testing.T) {
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
-		{FieldID: 101, Name: "added", DataType: schemapb.DataType_Int64, Nullable: true},
-	}}
-	materializer, err := NewRecordMaterializer(schema, nil, map[int64]struct{}{100: {}})
-	require.NoError(t, err)
+	// Absent ordinary fields are reader-filled now, so the materializer only
+	// produces function outputs. Use a function output (field 101) as the
+	// materialized column to verify a retained wrapped record survives the
+	// reader advancing (its base ref is kept until the retained record is
+	// released).
+	materializer := &RecordMaterializer{
+		materializers: []FunctionMaterializer{freshOutputMaterializer{t: t, outputFieldID: 101}},
+	}
 
 	first := &materializerTestRecord{len: 1}
 	second := &materializerTestRecord{len: 1}

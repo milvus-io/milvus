@@ -187,11 +187,14 @@ func (pw *FFIPackedWriter) AsNewColumnGroups() *FFIPackedWriter {
 	return pw
 }
 
-// Destroy releases writer resources without committing pending output.
+// Destroy releases writer resources without committing pending output. It
+// also marks the writer closed, so a later Close reports the misuse instead
+// of handing a null handle to the FFI as an "invalid arguments" error.
 func (pw *FFIPackedWriter) Destroy() {
 	if pw == nil {
 		return
 	}
+	pw.closed = true
 	if pw.cWriterHandle != 0 {
 		C.loon_writer_destroy(pw.cWriterHandle)
 		pw.cWriterHandle = 0
@@ -277,16 +280,7 @@ func (pw *FFIPackedWriter) Close() (WriterOutput, error) {
 		return nil, merr.WrapErrServiceInternalMsg("FFIPackedWriter already closed")
 	}
 	pw.closed = true
-	defer func() {
-		if pw.cWriterHandle != 0 {
-			C.loon_writer_destroy(pw.cWriterHandle)
-			pw.cWriterHandle = 0
-		}
-		if pw.cProperties != nil {
-			C.loon_properties_free(pw.cProperties)
-			pw.cProperties = nil
-		}
-	}()
+	defer pw.Destroy()
 	var cColumnGroups *C.LoonColumnGroups
 	result := C.loon_writer_close(pw.cWriterHandle, nil, nil, 0, &cColumnGroups)
 	if err := HandleLoonFFIResult(result); err != nil {
