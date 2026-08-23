@@ -47,7 +47,12 @@ type insertNode struct {
 	functionStore *function.FunctionRunnerLocalStore
 }
 
-func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.InsertData, msg *InsertMsg, collection *Collection) {
+func (iNode *insertNode) addInsertData(
+	insertDatas map[UniqueID]*delegator.InsertData,
+	msg *InsertMsg,
+	collection *Collection,
+	bm25OutputFieldIDs []int64,
+) {
 	insertRecord, err := storage.TransferInsertMsgToInsertRecord(collection.Schema(), msg)
 	if err != nil {
 		err = merr.Wrap(err, "failed to get primary keys")
@@ -74,7 +79,7 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 		iData.InsertRecord.NumRows += insertRecord.NumRows
 	}
 
-	if err := iNode.appendBM25Stats(iData, msg, collection.Schema()); err != nil {
+	if err := iNode.appendBM25Stats(iData, msg, bm25OutputFieldIDs); err != nil {
 		log.Error("failed to append BM25 stats from insert message", zap.String("channel", iNode.channel), zap.Error(err))
 		panic(err)
 	}
@@ -131,7 +136,7 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 					panic(err)
 				}
 			}
-			iNode.addInsertData(insertDatas, msg, collection)
+			iNode.addInsertData(insertDatas, msg, collection, functionOutputFieldIDs)
 		}
 
 		iNode.delegator.ProcessInsert(insertDatas)
@@ -168,11 +173,7 @@ func newInsertNode(
 	return iNode, nil
 }
 
-func (iNode *insertNode) appendBM25Stats(iData *delegator.InsertData, msg *InsertMsg, schema *schemapb.CollectionSchema) error {
-	outputFieldIDs, err := getBM25OutputFieldIDs(schema)
-	if err != nil {
-		return err
-	}
+func (iNode *insertNode) appendBM25Stats(iData *delegator.InsertData, msg *InsertMsg, outputFieldIDs []int64) error {
 	if len(outputFieldIDs) == 0 {
 		return nil
 	}
@@ -190,23 +191,6 @@ func (iNode *insertNode) appendBM25Stats(iData *delegator.InsertData, msg *Inser
 		}
 	}
 	return nil
-}
-
-func getBM25OutputFieldIDs(schema *schemapb.CollectionSchema) ([]int64, error) {
-	outputFieldIDs := make([]int64, 0)
-	for _, fn := range schema.GetFunctions() {
-		if fn.GetType() != schemapb.FunctionType_BM25 {
-			continue
-		}
-
-		outputField := typeutil.GetFunctionOutputField(schema, fn)
-		if outputField == nil {
-			return nil, merr.WrapErrServiceInternalMsg("function %s output field not found", fn.GetName())
-		}
-
-		outputFieldIDs = append(outputFieldIDs, outputField.GetFieldID())
-	}
-	return outputFieldIDs, nil
 }
 
 func appendBM25StatsFromFieldData(stats map[int64]*storage.BM25Stats, outputFieldID int64, fieldData *schemapb.FieldData) error {
