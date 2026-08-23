@@ -304,7 +304,11 @@ func newCompactionSegmentRecordReaderWithFields(ctx context.Context, segment *da
 	readSchema := compactionReadSchema(schema, existingFields)
 
 	if segment.GetManifest() != "" {
-		reader, err := storage.NewManifestRecordReader(ctx, segment.GetManifest(), readSchema, opts...)
+		// existingFields is already the manifest's physically-present field set
+		// (compactionSegmentStorageFields called GetManifestFieldIDs on the same
+		// manifest); hand it over so the reader does not re-open the manifest.
+		reader, err := storage.NewManifestRecordReader(ctx, segment.GetManifest(), readSchema,
+			append(opts, storage.WithPresentFields(existingFields))...)
 		return reader, existingFields, err
 	}
 

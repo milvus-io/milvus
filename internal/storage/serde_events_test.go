@@ -688,6 +688,11 @@ func TestNewManifestRecordReaderBranches(t *testing.T) {
 	mockEncryption := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(true).Build()
 	defer mockEncryption.UnPatch()
 
+	// The reader self-sources physical field IDs from the manifest; stub it so the
+	// mocked inner reader (fake manifest path) is reached.
+	mockFieldIDs := mockey.Mock(packed.GetManifestFieldIDs).Return(map[int64]struct{}{100: {}}, nil).Build()
+	defer mockFieldIDs.UnPatch()
+
 	var capturedPluginContext *indexcgopb.StoragePluginContext
 	mockReader := mockey.Mock(NewRecordReaderFromManifest).To(
 		func(manifest string,
@@ -731,6 +736,70 @@ func TestNewManifestRecordReaderBranches(t *testing.T) {
 	// the plugin context contract carries the key base64-encoded, matching
 	// NewBinlogRecordReader/NewBinlogRecordWriter and hookutil.GetCPluginContext
 	require.Equal(t, base64.StdEncoding.EncodeToString([]byte("unsafe-key")), capturedPluginContext.GetEncryptionKey())
+}
+
+// TestNewManifestRecordReaderPresentFieldsSkipManifestRead pins the P5 perf path:
+// when the caller already knows the segment's physically-present field IDs and
+// supplies them via WithPresentFields, the reader must NOT re-derive them with a
+// second GetManifestFieldIDs manifest open.
+func TestNewManifestRecordReaderPresentFieldsSkipManifestRead(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64},
+		},
+	}
+	mockEnc := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(false).Build()
+	defer mockEnc.UnPatch()
+	mockFieldIDs := mockey.Mock(packed.GetManifestFieldIDs).To(
+		func(string, *indexpb.StorageConfig) (map[int64]struct{}, error) {
+			t.Fatal("GetManifestFieldIDs must not be called when present fields are supplied")
+			return nil, nil
+		}).Build()
+	defer mockFieldIDs.UnPatch()
+	mockReader := mockey.Mock(NewRecordReaderFromManifest).Return(fakeManifestRecordReader{}, nil).Build()
+	defer mockReader.UnPatch()
+
+	reader, err := NewManifestRecordReader(context.Background(), "manifest-json", schema,
+		WithVersion(StorageV3),
+		WithStorageConfig(&indexpb.StorageConfig{RootPath: "root"}),
+		WithPresentFields(map[FieldID]struct{}{100: {}}),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+}
+
+// TestNewManifestRecordReaderPartialStructErrors pins that the struct-array
+// all-or-nothing check in filterSchemaToPresentFields surfaces through the reader:
+// a physically-present set that covers only SOME children of a struct array is a
+// data-integrity violation, so NewManifestRecordReader must return an error and
+// never open the manifest.
+func TestNewManifestRecordReaderPartialStructErrors(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64}},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{FieldID: 200, Name: "st", Fields: []*schemapb.FieldSchema{
+				{FieldID: 201, Name: "st[a]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true},
+				{FieldID: 202, Name: "st[b]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar, Nullable: true},
+			}},
+		},
+	}
+	mockEnc := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(false).Build()
+	defer mockEnc.UnPatch()
+	// present covers only ONE of the struct's two children -> partial struct.
+	mockFieldIDs := mockey.Mock(packed.GetManifestFieldIDs).Return(map[int64]struct{}{100: {}, 201: {}}, nil).Build()
+	defer mockFieldIDs.UnPatch()
+	mockReader := mockey.Mock(NewRecordReaderFromManifest).To(
+		func(string, *schemapb.CollectionSchema, int64, *indexpb.StorageConfig, *indexcgopb.StoragePluginContext, ...RwOption) (RecordReader, error) {
+			t.Fatal("must not open the manifest when the present set is a partial struct")
+			return nil, nil
+		}).Build()
+	defer mockReader.UnPatch()
+
+	_, err := NewManifestRecordReader(context.Background(), "manifest-json", schema,
+		WithVersion(StorageV3),
+		WithStorageConfig(&indexpb.StorageConfig{RootPath: "root"}),
+	)
+	require.Error(t, err)
 }
 
 func TestBinlogSerializeWriter(t *testing.T) {
