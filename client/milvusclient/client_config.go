@@ -13,6 +13,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 )
 
@@ -47,6 +48,23 @@ var DefaultGrpcOpts = []grpc.DialOption{
 	),
 }
 
+// ConnectionOptions contains the settings required to create the Milvus gRPC
+// connection. DialOptions contains only the options explicitly supplied through
+// ClientConfig. ConnectionFactory implementations are responsible for their own
+// default connection policy, but must preserve the effective transport security,
+// apply DialOptions, and install the unary and stream interceptors in the order
+// provided.
+type ConnectionOptions struct {
+	TransportCredentials credentials.TransportCredentials
+	DialOptions          []grpc.DialOption
+	UnaryInterceptors    []grpc.UnaryClientInterceptor
+	StreamInterceptors   []grpc.StreamClientInterceptor
+}
+
+// ConnectionFactory creates the gRPC connection used by a Client. The Client
+// owns the returned connection and closes it when Client.Close is called.
+type ConnectionFactory func(context.Context, string, ConnectionOptions) (*grpc.ClientConn, error)
+
 // ClientConfig for milvus client.
 type ClientConfig struct {
 	Address  string // Remote address, "localhost:19530".
@@ -60,6 +78,17 @@ type ClientConfig struct {
 	tlsConfig *tls.Config // Custom TLS config, set via WithTLSConfig method.
 
 	DialOptions []grpc.DialOption // Dial options for GRPC.
+
+	// ConnectionFactory creates the underlying gRPC client connection. When nil,
+	// the client uses grpc.DialContext. A custom factory can integrate the Milvus
+	// client with a platform-specific gRPC connection framework while preserving
+	// the Milvus transport settings and interceptors.
+	ConnectionFactory ConnectionFactory
+
+	// RetryTransport configures retries for Unavailable and ResourceExhausted
+	// gRPC errors. When nil, the client uses the default policy. Set MaxRetry to
+	// 0 to disable transport retries.
+	RetryTransport *RetryTransportOption
 
 	RetryRateLimit *RetryRateLimitOption // option for retry on rate limit inteceptor
 
@@ -76,6 +105,11 @@ type ClientConfig struct {
 type RetryRateLimitOption struct {
 	MaxRetry   uint
 	MaxBackoff time.Duration
+}
+
+// RetryTransportOption configures retries for retriable gRPC transport errors.
+type RetryTransportOption struct {
+	MaxRetry uint
 }
 
 func (cfg *ClientConfig) parse() error {
@@ -139,6 +173,13 @@ func (c *ClientConfig) defaultRetryRateLimitOption() *RetryRateLimitOption {
 	}
 }
 
+func (c *ClientConfig) retryTransportOption() *RetryTransportOption {
+	if c.RetryTransport != nil {
+		return c.RetryTransport
+	}
+	return &RetryTransportOption{MaxRetry: 6}
+}
+
 // addFlags set internal flags
 func (c *ClientConfig) addFlags(flags uint64) {
 	c.flags |= flags
@@ -162,7 +203,7 @@ func (c *ClientConfig) WithTLSConfig(tlsConfig *tls.Config) *ClientConfig {
 }
 
 // WithGrpcAuthority sets the gRPC :authority header, used for proxy-based routing.
-// DefaultGrpcOpts are always applied by dialOptions(), so only the authority option is needed here.
+// DefaultGrpcOpts are applied separately, so only the authority option is needed here.
 func (c *ClientConfig) WithGrpcAuthority(authority string) *ClientConfig {
 	c.DialOptions = []grpc.DialOption{grpc.WithAuthority(authority)}
 	return c
