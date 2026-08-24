@@ -1019,6 +1019,12 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     DetermineExecPath() override;
 
     bool
+    SupportsRawExprCache() const override {
+        return !expr_->column_.element_level_ &&
+               !IsTextIndexOpType(expr_->op_type_) && !CanUseNgramIndex();
+    }
+
+    bool
     SupportOffsetInput() override {
         if (IsTextIndexOpType(expr_->op_type_)) {
             return false;

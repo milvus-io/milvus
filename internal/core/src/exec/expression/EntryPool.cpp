@@ -39,39 +39,33 @@ EntryPool::Get(int64_t segment_id,
                TargetBitmap& out_result,
                TargetBitmap& out_valid) {
     uint64_t sig_hash = XXH64(signature.data(), signature.size(), 0);
-    Key key{segment_id, sig_hash, signature, active_count};
+    Key key{segment_id, sig_hash, signature};
 
-    std::vector<char> data_copy;
-    uint8_t comp_type = 0;
-    {
-        std::shared_lock lock(mutex_);
-        auto it = entries_.find(key);
-        if (it == entries_.end()) {
-            return false;
-        }
-
-        auto& entry = *it->second;
-
-        // Staleness check
-        if (entry.active_count != active_count) {
-            return false;
-        }
-
-        // Bump usage_count (atomic, no lock needed — Clock "续命")
-        auto old = entry.usage_count.load(std::memory_order_relaxed);
-        if (old < 5) {
-            entry.usage_count.store(old + 1, std::memory_order_relaxed);
-        }
-
-        comp_type = entry.comp_type;
-        data_copy = entry.data;
+    std::shared_lock lock(mutex_);
+    auto it = entries_.find(key);
+    if (it == entries_.end()) {
+        return false;
     }
 
-    // Decompress outside the index lock. The copied compressed buffer gives the
-    // payload an independent lifetime if the entry is evicted concurrently.
-    return CacheCompressor::Decompress(data_copy.data(),
-                                       static_cast<uint32_t>(data_copy.size()),
-                                       comp_type,
+    auto& entry = *it->second;
+
+    // Staleness check
+    if (entry.active_count != active_count) {
+        return false;
+    }
+
+    // Bump usage_count so the Clock policy gives this entry another chance.
+    auto old = entry.usage_count.load(std::memory_order_relaxed);
+    if (old < 5) {
+        entry.usage_count.store(old + 1, std::memory_order_relaxed);
+    }
+
+    // Keep the shared lock while decoding so eviction cannot invalidate the
+    // payload. This avoids an unbudgeted full compressed-payload copy on every
+    // hit. Gets remain concurrent; only Put/erase waits for the decode.
+    return CacheCompressor::Decompress(entry.data.data(),
+                                       static_cast<uint32_t>(entry.data.size()),
+                                       entry.comp_type,
                                        out_result,
                                        out_valid);
 }
@@ -84,31 +78,29 @@ EntryPool::Put(int64_t segment_id,
                const TargetBitmap& valid,
                int64_t eval_duration_us) {
     uint64_t sig_hash = XXH64(signature.data(), signature.size(), 0);
-    Key key{segment_id, sig_hash, signature, active_count};
+    Key key{segment_id, sig_hash, signature};
 
-    bool same_signature_cached = false;
+    bool compression_enabled = true;
+    // Reject an already-obsolete snapshot before compression, then apply
+    // latency admission.
     {
         std::shared_lock lock(mutex_);
-        for (const auto& [entry_key, _] : entries_) {
-            if (entry_key.segment_id == segment_id &&
-                entry_key.sig_hash == sig_hash &&
-                entry_key.signature == signature) {
-                same_signature_cached = true;
-                break;
-            }
+        auto existing = entries_.find(key);
+        if (existing != entries_.end() &&
+            active_count < existing->second->active_count) {
+            return;
         }
-    }
-
-    // Latency admission: skip cheap expressions
-    if (!same_signature_cached && min_eval_duration_us_ > 0 &&
-        eval_duration_us > 0 && eval_duration_us < min_eval_duration_us_) {
-        return;
+        if (min_eval_duration_us_ > 0 && eval_duration_us > 0 &&
+            eval_duration_us < min_eval_duration_us_) {
+            return;
+        }
+        compression_enabled = compression_enabled_;
     }
 
     // Compress internally
     uint8_t comp_type = 0;
     std::vector<char> compressed_data = CacheCompressor::Compress(
-        result, valid, compression_enabled_, comp_type);
+        result, valid, compression_enabled, comp_type);
 
     size_t entry_mem =
         sizeof(Entry) + compressed_data.capacity() + signature.capacity() * 2;
@@ -117,6 +109,13 @@ EntryPool::Put(int64_t segment_id,
 
     auto existing = entries_.find(key);
     if (existing != entries_.end()) {
+        // Growing-segment evaluations may complete out of order. Never let an
+        // older snapshot replace a newer one. Recheck under the write lock
+        // because another put may have advanced active_count while this entry
+        // was being compressed.
+        if (active_count < existing->second->active_count) {
+            return;
+        }
         current_bytes_.fetch_sub(existing->second->MemoryUsage(),
                                  std::memory_order_relaxed);
         entries_.erase(existing);
@@ -166,21 +165,6 @@ EntryPool::EraseSegment(int64_t segment_id) {
         clock_dirty_ = true;
     }
     return erased;
-}
-
-bool
-EntryPool::HasSignature(int64_t segment_id,
-                        const std::string& signature) const {
-    uint64_t sig_hash = XXH64(signature.data(), signature.size(), 0);
-    std::shared_lock lock(mutex_);
-    for (const auto& [entry_key, _] : entries_) {
-        if (entry_key.segment_id == segment_id &&
-            entry_key.sig_hash == sig_hash &&
-            entry_key.signature == signature) {
-            return true;
-        }
-    }
-    return false;
 }
 
 void
