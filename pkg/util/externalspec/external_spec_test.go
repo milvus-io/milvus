@@ -64,10 +64,11 @@ func TestParseExternalSpec_UnsupportedFormat(t *testing.T) {
 }
 
 func TestParseExternalSpec_ValidExtfs(t *testing.T) {
-	spec, err := ParseExternalSpec(`{"format":"parquet","extfs":{"region":"us-west-2","use_ssl":"true"}}`)
+	spec, err := ParseExternalSpec(`{"format":"parquet","extfs":{"region":"us-west-2","use_ssl":"true","endpoint_url":"https://s3.example.com"}}`)
 	require.NoError(t, err)
 	assert.Equal(t, "us-west-2", spec.Extfs["region"])
 	assert.Equal(t, "true", spec.Extfs["use_ssl"])
+	assert.Equal(t, "https://s3.example.com", spec.Extfs["endpoint_url"])
 }
 
 func TestParseExternalSpec_NotAllowedExtfs(t *testing.T) {
@@ -379,6 +380,107 @@ func TestValidateSourceAndSpec(t *testing.T) {
 	})
 }
 
+func TestValidateEndpointURL(t *testing.T) {
+	validExtfs := func(endpoint string) map[string]string {
+		return map[string]string{
+			ExtfsKeyAccessKeyID:    "AK",
+			ExtfsKeyAccessKeyValue: "SK",
+			ExtfsKeyCloudProvider:  CloudProviderMinIO,
+			ExtfsKeyRegion:         "us-east-1",
+			ExtfsKeyEndpointURL:    endpoint,
+		}
+	}
+
+	for _, endpoint := range []string{
+		"http://rook-ceph-rgw.storage.svc:80",
+		"https://s3.example.com",
+		"http://127.0.0.1:9000/",
+	} {
+		t.Run("valid_"+endpoint, func(t *testing.T) {
+			assert.NoError(t, ValidateExtfsComplete("s3://my-bucket/object", validExtfs(endpoint)))
+		})
+	}
+
+	t.Run("matching_use_ssl", func(t *testing.T) {
+		extfs := validExtfs("https://s3.example.com")
+		extfs[ExtfsKeyUseSSL] = "true"
+		assert.NoError(t, ValidateExtfsComplete("s3://my-bucket/object", extfs))
+	})
+
+	t.Run("cloud_provider_optional", func(t *testing.T) {
+		extfs := validExtfs("http://rook-ceph-rgw.storage.svc:80")
+		delete(extfs, ExtfsKeyCloudProvider)
+		assert.NoError(t, ValidateExtfsComplete("s3://my-bucket/object", extfs))
+	})
+
+	t.Run("issue_minimal_configuration", func(t *testing.T) {
+		err := ValidateSourceAndSpec(
+			"s3://iceberg-warehouse/lakehouse/sec/rag_chunks/metadata/00001.json",
+			`{"format":"iceberg-table","snapshot_id":"517536919083875277","extfs":{"access_key_id":"AK","access_key_value":"SK","endpoint_url":"http://rook-ceph-rgw.storage.svc:80","region":"us-east-1","use_ssl":"false"}}`,
+		)
+		assert.NoError(t, err)
+	})
+
+	t.Run("minio_scheme", func(t *testing.T) {
+		extfs := validExtfs("http://localhost:9000")
+		delete(extfs, ExtfsKeyCloudProvider)
+		delete(extfs, ExtfsKeyRegion)
+		assert.NoError(t, ValidateExtfsComplete("minio://my-bucket/object", extfs))
+	})
+
+	tests := []struct {
+		name       string
+		source     string
+		endpoint   string
+		mutate     func(map[string]string)
+		wantErrMsg string
+	}{
+		{name: "empty", source: "s3://bucket/key", endpoint: "", wantErrMsg: "non-empty URL"},
+		{name: "surrounding_whitespace", source: "s3://bucket/key", endpoint: " http://host:9000", wantErrMsg: "surrounding whitespace"},
+		{name: "parse_error", source: "s3://bucket/key", endpoint: "http://[::1", wantErrMsg: "invalid extfs.endpoint_url"},
+		{name: "unsupported_endpoint_scheme", source: "s3://bucket/key", endpoint: "ftp://host", wantErrMsg: "scheme must be http or https"},
+		{name: "missing_host", source: "s3://bucket/key", endpoint: "http:///", wantErrMsg: "non-empty host"},
+		{name: "empty_port", source: "s3://bucket/key", endpoint: "http://host:", wantErrMsg: "empty port"},
+		{name: "out_of_range_port", source: "s3://bucket/key", endpoint: "http://host:65536", wantErrMsg: "invalid port"},
+		{name: "userinfo", source: "s3://bucket/key", endpoint: "http://user:pass@host", wantErrMsg: "must not embed credentials"},
+		{name: "query", source: "s3://bucket/key", endpoint: "http://host?tenant=a", wantErrMsg: "must not contain a query"},
+		{name: "empty_query", source: "s3://bucket/key", endpoint: "http://host?", wantErrMsg: "must not contain a query"},
+		{name: "fragment", source: "s3://bucket/key", endpoint: "http://host#frag", wantErrMsg: "must not contain a fragment"},
+		{name: "path", source: "s3://bucket/key", endpoint: "http://host/api", wantErrMsg: "must not contain a path"},
+		{name: "escaped_path", source: "s3://bucket/key", endpoint: "http://host/%2F", wantErrMsg: "must not contain a path"},
+		{name: "unsupported_source_scheme", source: "gs://bucket/key", endpoint: "https://storage.googleapis.com", wantErrMsg: "only supported for S3-compatible"},
+		{
+			name:     "bucket_name_conflict",
+			source:   "s3://bucket/key",
+			endpoint: "http://host",
+			mutate: func(extfs map[string]string) {
+				extfs[ExtfsKeyBucketName] = "bucket"
+			},
+			wantErrMsg: "bucket_name cannot be set",
+		},
+		{
+			name:     "use_ssl_conflict",
+			source:   "s3://bucket/key",
+			endpoint: "https://host",
+			mutate: func(extfs map[string]string) {
+				extfs[ExtfsKeyUseSSL] = "false"
+			},
+			wantErrMsg: "conflicts with extfs.endpoint_url",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			extfs := validExtfs(test.endpoint)
+			if test.mutate != nil {
+				test.mutate(extfs)
+			}
+			err := ValidateExtfsComplete(test.source, extfs)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), test.wantErrMsg)
+		})
+	}
+}
+
 func TestRedactExternalSpec(t *testing.T) {
 	t.Run("empty_returns_empty", func(t *testing.T) {
 		assert.Equal(t, "", RedactExternalSpec(""))
@@ -393,11 +495,12 @@ func TestRedactExternalSpec(t *testing.T) {
 	})
 
 	t.Run("secrets_masked", func(t *testing.T) {
-		out := RedactExternalSpec(`{"format":"parquet","extfs":{"access_key_id":"AKIA","access_key_value":"SEC","credential_json":"{\"private_key\":\"SECRET\"}","source_sas_token":"sv=2024-08-04&sig=SECRET","region":"us"}}`)
+		out := RedactExternalSpec(`{"format":"parquet","extfs":{"access_key_id":"AKIA","access_key_value":"SEC","credential_json":"{\"private_key\":\"SECRET\"}","source_sas_token":"sv=2024-08-04&sig=SECRET","endpoint_url":"https://s3.example.com","region":"us"}}`)
 		assert.Contains(t, out, `"access_key_id":"***"`)
 		assert.Contains(t, out, `"access_key_value":"***"`)
 		assert.Contains(t, out, `"credential_json":"***"`)
 		assert.Contains(t, out, `"source_sas_token":"***"`)
+		assert.Contains(t, out, `"endpoint_url":"https://s3.example.com"`)
 		assert.Contains(t, out, `"region":"us"`)
 		assert.NotContains(t, out, "AKIA")
 		assert.NotContains(t, out, "SEC")

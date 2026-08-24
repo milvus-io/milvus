@@ -84,7 +84,8 @@ GetLoonManifest(
  *       Layer 1: derive storage_type / use_ssl / bucket_name / address from
  *                the external_source URI (Milvus form by default).
  *       Layer 2: apply external_spec.extfs JSON with allowlist gating.
- *       Post-process: AWS-form swap + Tier-1/2 endpoint derivation.
+ *       Post-process: explicit endpoint_url mapping, or the legacy AWS-form
+ *       swap + Tier-1/2 endpoint derivation when endpoint_url is absent.
  *   - format-layer — per-format keys derived from spec.format (e.g.
  *     iceberg.snapshot_id when format="iceberg-table").
  *
