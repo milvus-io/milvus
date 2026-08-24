@@ -115,8 +115,16 @@ func TestGetShardLeadersScopedToAResourceGroupWithNoLeader(t *testing.T) {
 }
 
 // TestGetShardLeadersScopedToAnUnknownResourceGroup pins that a scope naming a
-// group the collection is not loaded into is answered as "not loaded" rather
+// group the collection is not loaded into is served no leaders at all, rather
 // than falling back to the collection-wide list.
+//
+// It is deliberately the LOOSE form: "not loaded" is the name of a specific
+// sentinel in this contract (ErrCollectionNotLoaded, 101, non-retriable) and
+// the loose path cannot reach it for this state -- the registered-at-all
+// check passes, the name refusal is skipped because the caller accepts
+// unserviceable shards, and the builder returns the shard listed but empty.
+// The refusal for the same state belongs to the strict form and is
+// ErrReplicaNotFound; it is pinned by the test directly below.
 func TestGetShardLeadersScopedToAnUnknownResourceGroup(t *testing.T) {
 	f := newShardLeaderReadinessFixture(t)
 	f.putLoadedCollection(t, 100, 1000, "100-dmc0")
