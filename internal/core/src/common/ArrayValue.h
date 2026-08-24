@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -82,26 +83,32 @@ class ArrayValue {
 
     size_t
     size() const {
+        assert(storage_ != nullptr);
         return static_cast<size_t>(storage_->length);
     }
 
     size_t
     byte_size() const {
+        assert(storage_ != nullptr);
         return storage_->buffer.size();
     }
 
     bool
     is_null() const {
+        assert(storage_ != nullptr);
         return storage_->is_null;
     }
 
     const char*
     data() const {
+        assert(storage_ != nullptr);
         return storage_->buffer.data();
     }
 
     void
     output_data(ScalarFieldProto& output) const {
+        assert(storage_ != nullptr && storage_->type != nullptr &&
+               storage_->child != nullptr);
         if (storage_->is_null) {
             output.Clear();
             return;
@@ -119,11 +126,13 @@ class ArrayValue {
 
     const proto::schema::TypeSchema&
     type() const {
+        assert(storage_ != nullptr && storage_->type != nullptr);
         return *storage_->type;
     }
 
     const Chunk&
     child() const {
+        assert(storage_ != nullptr && storage_->child != nullptr);
         return *storage_->child;
     }
 
@@ -133,6 +142,8 @@ class ArrayValue {
  private:
     explicit ArrayValue(std::shared_ptr<const ArrayValueStorage> storage)
         : storage_(std::move(storage)) {
+        assert(storage_ != nullptr && storage_->type != nullptr &&
+               storage_->child != nullptr);
     }
 
     std::shared_ptr<const ArrayValueStorage> storage_;
@@ -161,6 +172,7 @@ class ArrayValueView {
 
     size_t
     size() const {
+        assert(type_ != nullptr && child_ != nullptr);
         return static_cast<size_t>(end_ - begin_);
     }
 
@@ -171,11 +183,13 @@ class ArrayValueView {
 
     bool
     is_null() const {
+        assert(type_ != nullptr && child_ != nullptr);
         return is_null_;
     }
 
     DataType
     element_type() const {
+        assert(type_ != nullptr && child_ != nullptr);
         return ColumnarArrayChunk::GetElementType(*type_);
     }
 
@@ -186,6 +200,7 @@ class ArrayValueView {
 
     ArrayValueView
     array_at(size_t index) const {
+        assert(type_ != nullptr && child_ != nullptr);
         const auto length = static_cast<size_t>(end_ - begin_);
         AssertInfo(index < length,
                    "array view index {} out of range {}",
@@ -206,6 +221,7 @@ class ArrayValueView {
     template <typename T>
     T
     get_data(size_t index) const {
+        assert(type_ != nullptr && child_ != nullptr);
         const auto length = static_cast<size_t>(end_ - begin_);
         AssertInfo(index < length,
                    "array view index {} out of range {}",
@@ -217,6 +233,7 @@ class ArrayValueView {
 
     void
     output_data(ScalarFieldProto& output) const {
+        assert(type_ != nullptr && child_ != nullptr);
         if (is_null_) {
             output.Clear();
             return;
@@ -233,21 +250,25 @@ class ArrayValueView {
 
     const proto::schema::TypeSchema&
     type() const {
+        assert(type_ != nullptr && child_ != nullptr);
         return *type_;
     }
 
     ArrayOffset
     begin() const {
+        assert(type_ != nullptr && child_ != nullptr);
         return begin_;
     }
 
     ArrayOffset
     end() const {
+        assert(type_ != nullptr && child_ != nullptr);
         return end_;
     }
 
     const Chunk&
     child() const {
+        assert(type_ != nullptr && child_ != nullptr);
         return *child_;
     }
 

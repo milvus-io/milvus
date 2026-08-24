@@ -302,10 +302,9 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
         // ARRAY: extract from scalars().array_data().data(i)
         const auto& array_data = field_data.scalars().array_data();
         if (field_meta.is_nested_array()) {
-            const auto has_valid_data =
-                field_data.valid_data_size() == num_rows;
+            const auto has_valid_data = valid_data.size() == num_rows;
             for (int64_t i = 0; i < num_rows; ++i) {
-                if (has_valid_data && !field_data.valid_data(i)) {
+                if (has_valid_data && !valid_data[i]) {
                     array_lengths[i] = 0;
                     continue;
                 }
@@ -1626,15 +1625,13 @@ SegmentGrowingImpl::chunk_array_value_view_impl(
     std::vector<ArrayValueView> views;
     views.reserve(len);
     if (field_meta.is_nullable()) {
-        auto valid_data = std::make_shared<FixedVector<bool>>();
-        valid_data->reserve(len);
+        auto valid_data = insert_record_.get_valid_data(field_id);
+        const auto* row_valid = valid_data->get_chunk_data(logical_start);
         for (int64_t i = 0; i < len; ++i) {
-            auto view = array_data->view_element(logical_start + i);
-            valid_data->push_back(!view.is_null());
-            views.push_back(std::move(view));
+            views.push_back(array_data->view_element(logical_start + i));
         }
         std::pair<std::vector<ArrayValueView>, ValidityView> content{
-            std::move(views), ValidityView::FromExpanded(valid_data->data())};
+            std::move(views), ValidityView::FromExpanded(row_valid)};
         return PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>(
             std::move(valid_data), std::move(content));
     }
@@ -1814,10 +1811,8 @@ SegmentGrowingImpl::chunk_array_value_views_by_offsets(
 
     std::vector<ArrayValueView> views;
     views.reserve(offsets.size());
-    FixedVector<bool> valid_data;
-    if (field_meta.is_nullable()) {
-        valid_data.reserve(offsets.size());
-    }
+    std::vector<int64_t> logical_offsets;
+    logical_offsets.reserve(offsets.size());
     for (auto offset : offsets) {
         AssertInfo(offset >= 0 && offset < size_per_chunk,
                    "Retrieve array value view with out-of-bound offset:{} "
@@ -1830,11 +1825,17 @@ SegmentGrowingImpl::chunk_array_value_views_by_offsets(
                    "offset:{}",
                    chunk_id,
                    offset);
-        auto view = array_data->view_element(logical_offset);
-        if (field_meta.is_nullable()) {
-            valid_data.push_back(!view.is_null());
-        }
-        views.push_back(std::move(view));
+        logical_offsets.push_back(logical_offset);
+    }
+
+    FixedVector<bool> valid_data;
+    if (field_meta.is_nullable()) {
+        valid_data.resize(offsets.size());
+        insert_record_.get_valid_data(field_id)->bulk_is_valid(
+            logical_offsets.data(), logical_offsets.size(), valid_data.data());
+    }
+    for (auto logical_offset : logical_offsets) {
+        views.push_back(array_data->view_element(logical_offset));
     }
 
     std::pair<std::vector<ArrayValueView>, FixedVector<bool>> content{

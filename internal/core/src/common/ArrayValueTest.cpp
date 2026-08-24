@@ -887,6 +887,8 @@ TEST(ArrayValue, GrowingSegmentInsertAndRetrieveNestedArray) {
         segcore::CreateGrowingSegment(schema, empty_index_meta, 1, config);
     auto row0 = NestedArrayRow(proto::schema::DataType::Int32,
                                {IntArrayRow({1}), IntArrayRow({2, 3})});
+    auto null_row_payload =
+        NestedArrayRow(proto::schema::DataType::Int32, {IntArrayRow({99})});
     auto row2 = NestedArrayRow(proto::schema::DataType::Int32, {});
 
     InsertRecordProto insert;
@@ -901,13 +903,13 @@ TEST(ArrayValue, GrowingSegmentInsertAndRetrieveNestedArray) {
     auto* nested_data = insert.add_fields_data();
     nested_data->set_field_id(array_field.get());
     nested_data->set_type(proto::schema::DataType::Array);
-    nested_data->add_valid_data(true);
-    nested_data->add_valid_data(false);
-    nested_data->add_valid_data(true);
+    nested_data->mutable_scalars()->add_valid_data(true);
+    nested_data->mutable_scalars()->add_valid_data(false);
+    nested_data->mutable_scalars()->add_valid_data(true);
     auto* array_data = nested_data->mutable_scalars()->mutable_array_data();
     array_data->set_element_type(proto::schema::DataType::Array);
     *array_data->add_data() = row0;
-    array_data->add_data();
+    *array_data->add_data() = null_row_payload;
     *array_data->add_data() = row2;
 
     std::vector<int64_t> row_ids{100, 101, 102};
@@ -928,8 +930,7 @@ TEST(ArrayValue, GrowingSegmentInsertAndRetrieveNestedArray) {
     ASSERT_EQ(result_arrays.element_type(), proto::schema::DataType::Array);
     ASSERT_EQ(result_arrays.data_size(), 3);
     AssertProtoEqual(row0, result_arrays.data(0));
-    ASSERT_EQ(result_arrays.data(1).data_case(),
-              ScalarFieldProto::DATA_NOT_SET);
+    AssertProtoEqual(null_row_payload, result_arrays.data(1));
     AssertProtoEqual(row2, result_arrays.data(2));
 
     auto first_batch = segment->chunk_view<ArrayValueView>(
@@ -937,10 +938,22 @@ TEST(ArrayValue, GrowingSegmentInsertAndRetrieveNestedArray) {
     const auto& [first_batch_views, first_batch_valid_data] = first_batch.get();
     ASSERT_EQ(first_batch_views.size(), 2);
     ASSERT_TRUE(first_batch_valid_data);
-    AssertProtoEqual(row0, first_batch_views[0].output_data());
     ASSERT_TRUE(first_batch_valid_data[0]);
-    ASSERT_TRUE(first_batch_views[1].is_null());
     ASSERT_FALSE(first_batch_valid_data[1]);
+    AssertProtoEqual(row0, first_batch_views[0].output_data());
+    ASSERT_FALSE(first_batch_views[1].is_null());
+    AssertProtoEqual(null_row_payload, first_batch_views[1].output_data());
+
+    auto selected = segment->chunk_views_by_offsets<ArrayValueView>(
+        nullptr, array_field, 0, {1, 0});
+    const auto& [selected_views, selected_valid_data] = selected.get();
+    ASSERT_EQ(selected_views.size(), 2);
+    ASSERT_EQ(selected_valid_data.size(), 2);
+    ASSERT_FALSE(selected_views[0].is_null());
+    AssertProtoEqual(null_row_payload, selected_views[0].output_data());
+    ASSERT_FALSE(selected_valid_data[0]);
+    AssertProtoEqual(row0, selected_views[1].output_data());
+    ASSERT_TRUE(selected_valid_data[1]);
 
     auto second_batch = segment->chunk_view<ArrayValueView>(
         nullptr, array_field, 1, std::make_pair(0, 1));

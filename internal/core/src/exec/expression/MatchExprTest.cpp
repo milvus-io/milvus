@@ -739,10 +739,12 @@ TEST(MatchExprZeroElementBatch,
                 }
             }
         };
+    // NULL rows retain non-empty physical payloads. As with regular ARRAY,
+    // field validity is authoritative and these elements are not logical rows.
+    append_row({{7000}});
     append_row({});
     append_row({});
-    append_row({});
-    append_row({});
+    append_row({{8000}});
     append_row({});
     append_row({{9001}});
     append_row({{1}});
