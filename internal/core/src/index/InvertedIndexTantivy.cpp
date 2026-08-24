@@ -383,17 +383,17 @@ InvertedIndexTantivy<T>::IsNotNull() {
     tracer::AutoSpan span("InvertedIndexTantivy::IsNotNull",
                           tracer::GetRootSpan());
     int64_t count = Count();
-    TargetBitmap bitset(count, true);
 
     // For nested index, null rows don't have elements in the index,
     // so all elements in the index are valid.
     // null_offsets_ stores row offsets, not element offsets.
     if (is_nested_index_) {
-        return bitset;  // All true - all elements are valid
+        return TargetBitmap(count, true);  // All elements are valid
     }
 
-    auto fill_bitset = [this, &bitset]() {
-        ClearRoaringRows(null_offsets_, bitset);
+    TargetBitmap bitset;
+    auto fill_bitset = [this, count, &bitset]() {
+        bitset = RoaringToBitset(null_offsets_, count, /*inverted=*/true);
     };
 
     if (is_growing_) {
