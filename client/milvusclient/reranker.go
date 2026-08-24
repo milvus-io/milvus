@@ -21,7 +21,8 @@ type Reranker interface {
 }
 
 type rrfReranker struct {
-	K float64 `json:"k,omitempty"`
+	K       float64    `json:"k,omitempty"`
+	weights *[]float64 `json:"weights,omitempty"`
 }
 
 func (r *rrfReranker) WithK(k float64) *rrfReranker {
@@ -29,8 +30,23 @@ func (r *rrfReranker) WithK(k float64) *rrfReranker {
 	return r
 }
 
+// WithWeights sets optional reciprocal-rank coefficients in ANN request order.
+// The server requires a non-empty slice, one value in [0, 1] per ANN request;
+// nil and empty slices are serialized so the server can reject them.
+func (r *rrfReranker) WithWeights(weights []float64) *rrfReranker {
+	r.weights = &weights
+	return r
+}
+
 func (r *rrfReranker) GetParams() []*commonpb.KeyValuePair {
-	bs, _ := json.Marshal(r)
+	params := struct {
+		K       float64    `json:"k,omitempty"`
+		Weights *[]float64 `json:"weights,omitempty"`
+	}{
+		K:       r.K,
+		Weights: r.weights,
+	}
+	bs, _ := json.Marshal(params)
 
 	return []*commonpb.KeyValuePair{
 		{Key: rerankType, Value: rrfRerankType},

@@ -541,6 +541,11 @@ func (s *MergeHelperTestSuite) TestWithRRFKOption() {
 	s.InDelta(30.0, op.rrfK, 1e-9)
 }
 
+func (s *MergeHelperTestSuite) TestWithRRFWeightsOption() {
+	op := NewMergeOp(MergeStrategyRRF, WithWeights([]float64{0.8, 0.2}))
+	s.Equal([]float64{0.8, 0.2}, op.weights)
+}
+
 func (s *MergeHelperTestSuite) TestWithMetricTypesOption() {
 	op := NewMergeOp(MergeStrategyRRF, WithMetricTypes([]string{"COSINE", "L2"}))
 	// Mixed metrics → sortDescending=true, scoreNormFuncs populated for direction conversion
@@ -1179,6 +1184,131 @@ func (s *MergeHelperTestSuite) TestSingleInputRRFIgnoresOriginalScores() {
 
 	scores := result.Column(types.ScoreFieldName).Chunk(0).(*array.Float32)
 	s.InDelta(1.0/(60+1), float64(scores.Value(0)), 1e-6) // RRF score, not original
+}
+
+func (s *MergeHelperTestSuite) TestWeightedRRFProducesExpectedScoresAndOrder() {
+	df1 := s.createDF([]int64{1, 2, 3}, []float32{0.1, 0.2, 0.3}, []int64{3})
+	df2 := s.createDF([]int64{3, 2, 4}, []float32{0.9, 0.8, 0.7}, []int64{3})
+	defer df1.Release()
+	defer df2.Release()
+
+	op := NewMergeOp(MergeStrategyRRF, WithRRFK(1), WithWeights([]float64{0.7, 0.2}))
+	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
+
+	result, err := op.ExecuteMulti(ctx, []*DataFrame{df1, df2})
+	s.Require().NoError(err)
+	defer result.Release()
+
+	ids := result.Column(types.IDFieldName).Chunk(0).(*array.Int64)
+	scores := result.Column(types.ScoreFieldName).Chunk(0).(*array.Float32)
+	expectedIDs := []int64{1, 2, 3, 4}
+	expectedScores := []float64{0.35, 0.3, 0.275, 0.05}
+	for i := range expectedIDs {
+		s.Equal(expectedIDs[i], ids.Value(i))
+		s.InDelta(expectedScores[i], float64(scores.Value(i)), 1e-6)
+	}
+}
+
+func (s *MergeHelperTestSuite) TestAllOneRRFWeightsPreserveClassicScores() {
+	df1 := s.createDF([]int64{1, 2, 3}, []float32{0.1, 0.2, 0.3}, []int64{3})
+	df2 := s.createDF([]int64{3, 2, 4}, []float32{0.9, 0.8, 0.7}, []int64{3})
+	defer df1.Release()
+	defer df2.Release()
+
+	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
+	classic, err := NewMergeOp(MergeStrategyRRF).ExecuteMulti(ctx, []*DataFrame{df1, df2})
+	s.Require().NoError(err)
+	defer classic.Release()
+	weighted, err := NewMergeOp(MergeStrategyRRF, WithWeights([]float64{1, 1})).ExecuteMulti(ctx, []*DataFrame{df1, df2})
+	s.Require().NoError(err)
+	defer weighted.Release()
+
+	classicIDs := classic.Column(types.IDFieldName).Chunk(0).(*array.Int64)
+	weightedIDs := weighted.Column(types.IDFieldName).Chunk(0).(*array.Int64)
+	classicScores := classic.Column(types.ScoreFieldName).Chunk(0).(*array.Float32)
+	weightedScores := weighted.Column(types.ScoreFieldName).Chunk(0).(*array.Float32)
+	s.Equal(classicIDs.Len(), weightedIDs.Len())
+	for i := 0; i < classicIDs.Len(); i++ {
+		s.Equal(classicIDs.Value(i), weightedIDs.Value(i))
+		s.Equal(classicScores.Value(i), weightedScores.Value(i))
+	}
+}
+
+func (s *MergeHelperTestSuite) TestWeightedRRFInputCountMismatch() {
+	df1 := s.createDF([]int64{1}, []float32{0.1}, []int64{1})
+	df2 := s.createDF([]int64{2}, []float32{0.2}, []int64{1})
+	defer df1.Release()
+	defer df2.Release()
+
+	op := NewMergeOp(MergeStrategyRRF, WithWeights([]float64{1}))
+	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
+	_, err := op.ExecuteMulti(ctx, []*DataFrame{df1, df2})
+	s.Error(err)
+	s.Contains(err.Error(), "weights count 1 != inputs count 2")
+}
+
+func (s *MergeHelperTestSuite) TestWeightedStrategyRequiresWeights() {
+	df := s.createDF([]int64{1}, []float32{0.1}, []int64{1})
+	defer df.Release()
+
+	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
+	for _, op := range []*MergeOp{
+		NewMergeOp(MergeStrategyWeighted),
+		NewMergeOp(MergeStrategyWeighted, WithWeights(nil)),
+		NewMergeOp(MergeStrategyWeighted, WithWeights([]float64{})),
+	} {
+		_, err := op.ExecuteMulti(ctx, []*DataFrame{df})
+		s.Error(err)
+		s.Contains(err.Error(), "weights count 0 != inputs count 1")
+	}
+}
+
+func (s *MergeHelperTestSuite) TestRRFExplicitEmptyWeightsRejected() {
+	df := s.createDF([]int64{1}, []float32{0.1}, []int64{1})
+	defer df.Release()
+
+	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
+	for _, op := range []*MergeOp{
+		NewMergeOp(MergeStrategyRRF, WithWeights(nil)),
+		NewMergeOp(MergeStrategyRRF, WithWeights([]float64{})),
+	} {
+		_, err := op.ExecuteMulti(ctx, []*DataFrame{df})
+		s.Error(err)
+		s.Contains(err.Error(), "weights count 0 != inputs count 1")
+	}
+}
+
+func (s *MergeHelperTestSuite) TestAllZeroRRFWeightsKeepCandidateUnion() {
+	df1 := s.createDF([]int64{3, 1}, []float32{0.2, 0.1}, []int64{2})
+	df2 := s.createDF([]int64{2, 1}, []float32{0.4, 0.3}, []int64{2})
+	defer df1.Release()
+	defer df2.Release()
+
+	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
+	result, err := NewMergeOp(MergeStrategyRRF, WithWeights([]float64{0, 0})).ExecuteMulti(ctx, []*DataFrame{df1, df2})
+	s.Require().NoError(err)
+	defer result.Release()
+
+	ids := result.Column(types.IDFieldName).Chunk(0).(*array.Int64)
+	scores := result.Column(types.ScoreFieldName).Chunk(0).(*array.Float32)
+	s.Equal([]int64{1, 2, 3}, []int64{ids.Value(0), ids.Value(1), ids.Value(2)})
+	for index := 0; index < scores.Len(); index++ {
+		s.Zero(scores.Value(index))
+	}
+}
+
+func (s *MergeHelperTestSuite) TestMergeRejectsInvalidConfiguredWeights() {
+	df := s.createDF([]int64{1}, []float32{0.1}, []int64{1})
+	defer df.Release()
+
+	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
+	for _, strategy := range []MergeStrategy{MergeStrategyRRF, MergeStrategyWeighted} {
+		for _, weight := range []float64{math.NaN(), math.Inf(1), -0.1, 1.1} {
+			_, err := NewMergeOp(strategy, WithWeights([]float64{weight})).ExecuteMulti(ctx, []*DataFrame{df})
+			s.Require().Error(err)
+			s.Contains(err.Error(), "must be finite and in range [0, 1]")
+		}
+	}
 }
 
 func (s *MergeHelperTestSuite) TestSingleInputWeightedScoreNotFloat32() {
