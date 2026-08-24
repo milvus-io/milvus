@@ -923,10 +923,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			InsertBinlogs:        sourceSegDesc.GetBinlogs(),
 			StatsBinlogs:         sourceSegDesc.GetStatslogs(),
 			DeltaBinlogs:         sourceSegDesc.GetDeltalogs(),
-			IndexFiles:           sourceSegDesc.GetIndexFiles(),
 			Bm25Binlogs:          sourceSegDesc.GetBm25Statslogs(),
-			TextIndexFiles:       sourceSegDesc.GetTextIndexFiles(),
-			JsonKeyIndexFiles:    sourceSegDesc.GetJsonKeyIndexFiles(),
 			ManifestPath:         sourceSegDesc.GetManifestPath(),
 			StorageVersion:       sourceSegDesc.GetStorageVersion(),
 			IsExternalCollection: isExternalCollection,
@@ -934,11 +931,16 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			NumOfRows:            sourceSegDesc.GetNumOfRows(),
 			ManifestHasIndex:     cloneOptionalBool(sourceSegDesc.ManifestHasIndex),
 		}
+		if !job.GetSkipIndex() {
+			source.IndexFiles = sourceSegDesc.GetIndexFiles()
+			source.TextIndexFiles = sourceSegDesc.GetTextIndexFiles()
+			source.JsonKeyIndexFiles = sourceSegDesc.GetJsonKeyIndexFiles()
+		}
 		preparedSources[i] = source
 
 		snapshotCarriesIndexFiles := len(source.GetIndexFiles()) > 0
 		manifestKnownEmpty := source.ManifestHasIndex != nil && !source.GetManifestHasIndex()
-		if !snapshotCarriesIndexFiles && !manifestKnownEmpty && !job.GetExternal() &&
+		if !job.GetSkipIndex() && !snapshotCarriesIndexFiles && !manifestKnownEmpty && !job.GetExternal() &&
 			source.GetStorageVersion() >= storage.StorageV3 && source.GetManifestPath() != "" {
 			manifestReadMappings = append(manifestReadMappings, i)
 		}
@@ -981,11 +983,9 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 	}
 
 	for i, mapping := range idMappings {
-		sourceSegID := mapping.GetSourceSegmentId()
 		targetSegID := mapping.GetTargetSegmentId()
 		partitionID := mapping.GetPartitionId()
 
-		sourceSegDesc := sourceSegmentMap[sourceSegID]
 		source := preparedSources[i]
 		// WHICH INDEX FILES TO COPY: the snapshot's own index metadata wins.
 		// SegmentDescription.IndexFiles is the snapshot's capture of the etcd
@@ -1000,7 +1000,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		// captured marker as proof of an empty index section or enumerates and
 		// retracts inherited entries itself; DataCoord does not need to ship a
 		// second advisory list of the same IDs.
-		if !snapshotCarriesIndexFiles {
+		if !job.GetSkipIndex() && !snapshotCarriesIndexFiles {
 			for _, manifestIndex := range manifestIndexesByMapping[i] {
 				if _, exists := snapshotIndexIDs[manifestIndex.IndexID]; !exists {
 					continue
@@ -1035,14 +1035,14 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 				return nil, err
 			}
 		}
-		for _, textIndex := range sourceSegDesc.GetTextIndexFiles() {
+		for _, textIndex := range source.GetTextIndexFiles() {
 			if textIndex.GetBuildID() != 0 {
 				if err := allocNewBuildID(textIndex.GetBuildID()); err != nil {
 					return nil, err
 				}
 			}
 		}
-		for _, jsonKeyIndex := range sourceSegDesc.GetJsonKeyIndexFiles() {
+		for _, jsonKeyIndex := range source.GetJsonKeyIndexFiles() {
 			if jsonKeyIndex.GetBuildID() != 0 {
 				if err := allocNewBuildID(jsonKeyIndex.GetBuildID()); err != nil {
 					return nil, err

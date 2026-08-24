@@ -1246,7 +1246,6 @@ message CopySegmentSource {
   // copied manifest has no index entries, while absence means an older
   // snapshot whose manifest must still be inspected conservatively.
   optional bool manifest_has_index = 15;
-
   // Snapshot-declared row count, used when StorageV3 omits legacy PB binlogs.
   int64 num_of_rows = 16;
 }
@@ -1466,6 +1465,7 @@ message CopySegmentJob {
   string snapshot_s3_location = 20;
   string external_spec = 21;
   string snapshot_fingerprint = 22;
+  bool skip_index = 23; // true when index definitions and reusable index artifacts must not be restored
 }
 
 message ImportJob {
@@ -1791,6 +1791,7 @@ message CreateSnapshotRequest {
   string description = 3; // user-defined snapshot description
   int64 collection_id= 4; // collection name
   int64 compaction_protection_seconds = 5; // duration in seconds to protect referenced segments from compaction, 0 = no protection
+  bool skip_index = 6; // if true, omit reusable index definitions and artifacts from the snapshot
 }
 
 message DropSnapshotRequest {
@@ -1882,6 +1883,7 @@ message SnapshotInfo {
   // Per-channel snapshot boundaries. Each position records the seek point used
   // to decide which segments from that channel are included in the snapshot.
   repeated msg.MsgPosition channel_seek_positions = 13;
+  bool skip_index = 14; // whether this snapshot was created without reusable indexes
 }
 
 // StorageV2SegmentManifest maps a segment ID to its plain manifest object path.
@@ -1956,6 +1958,7 @@ message RestoreSnapshotRequest {
   bool external = 6; // true when restoring from an external snapshot metadata URI
   string snapshot_s3_location = 7; // metadata file path for external snapshot restore
   string external_spec = 8; // optional external storage spec for cross-bucket restore source
+  bool skip_index = 9; // if true, restore data without creating or copying indexes
 }
 
 message RestoreSnapshotResponse {

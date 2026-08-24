@@ -65,6 +65,16 @@ func ListSnapshotDataFiles(
 	snapshot *SnapshotData,
 	storageConfig *indexpb.StorageConfig,
 ) ([]SnapshotFileRef, error) {
+	return listSnapshotDataFiles(ctx, cm, snapshot, storageConfig, false)
+}
+
+func listSnapshotDataFiles(
+	ctx context.Context,
+	cm milvusstorage.ChunkManager,
+	snapshot *SnapshotData,
+	storageConfig *indexpb.StorageConfig,
+	skipIndex bool,
+) ([]SnapshotFileRef, error) {
 	if snapshot == nil {
 		return nil, merr.WrapErrServiceInternalMsg("snapshot cannot be nil")
 	}
@@ -78,6 +88,7 @@ func ListSnapshotDataFiles(
 	collector := &snapshotFileRefCollector{
 		cm:            cm,
 		storageConfig: storageConfig,
+		skipIndex:     skipIndex || snapshot.SnapshotInfo.GetSkipIndex(),
 		byPath:        make(map[string]SnapshotFileRef),
 	}
 	for _, segment := range snapshot.Segments {
@@ -89,14 +100,16 @@ func ListSnapshotDataFiles(
 }
 
 // ValidateExternalSnapshotDataFiles also enforces the root derived from metadata URI.
+// When skipIndex is true, index artifacts are excluded from validation.
 func ValidateExternalSnapshotDataFiles(
 	ctx context.Context,
 	cm milvusstorage.ChunkManager,
 	metadataFilePath string,
 	snapshot *SnapshotData,
 	storageConfig *indexpb.StorageConfig,
+	skipIndex bool,
 ) error {
-	refs, err := ListSnapshotDataFiles(ctx, cm, snapshot, storageConfig)
+	refs, err := listSnapshotDataFiles(ctx, cm, snapshot, storageConfig, skipIndex)
 	if err != nil {
 		return err
 	}
@@ -133,7 +146,23 @@ func validateSnapshotFileRefs(ctx context.Context, cm milvusstorage.ChunkManager
 type snapshotFileRefCollector struct {
 	cm            milvusstorage.ChunkManager
 	storageConfig *indexpb.StorageConfig
+	skipIndex     bool
 	byPath        map[string]SnapshotFileRef
+}
+
+// IsStorageV3IndexFile reports whether filePath is a manifest-owned text or
+// JSON index artifact. PK bloom filters and BM25 stats are data dependencies
+// and intentionally remain outside this classification.
+func IsStorageV3IndexFile(basePath, filePath string) bool {
+	statsPrefix := strings.TrimSuffix(NormalizeSnapshotObjectPath(basePath), "/") + "/_stats/"
+	relativePath, ok := strings.CutPrefix(NormalizeSnapshotObjectPath(filePath), statsPrefix)
+	if !ok {
+		return false
+	}
+
+	statKey, _, _ := strings.Cut(relativePath, "/")
+	prefix, _, ok := packed.ParseStatKey(statKey)
+	return ok && (prefix == "text_index" || prefix == "json_stats")
 }
 
 func (c *snapshotFileRefCollector) addSegment(ctx context.Context, segment *datapb.SegmentDescription) error {
@@ -145,8 +174,10 @@ func (c *snapshotFileRefCollector) addSegment(ctx context.Context, segment *data
 		// are metadata placeholders and may be stale after format migration.
 	} else {
 		c.addFieldBinlogRefs(segment.GetBinlogs(), segment, SnapshotFileTypeInsertBinlog)
-		c.addTextIndexRefs(segment.GetTextIndexFiles(), segment)
-		c.addJSONIndexRefs(segment.GetJsonKeyIndexFiles(), segment)
+		if !c.skipIndex {
+			c.addTextIndexRefs(segment.GetTextIndexFiles(), segment)
+			c.addJSONIndexRefs(segment.GetJsonKeyIndexFiles(), segment)
+		}
 		if segment.GetStorageVersion() == milvusstorage.StorageV2 && segment.GetManifestPath() != "" {
 			c.add(SnapshotFileRef{
 				Path:      segment.GetManifestPath(),
@@ -159,7 +190,9 @@ func (c *snapshotFileRefCollector) addSegment(ctx context.Context, segment *data
 	c.addFieldBinlogRefs(segment.GetStatslogs(), segment, SnapshotFileTypeStatsBinlog)
 	c.addFieldBinlogRefs(segment.GetDeltalogs(), segment, SnapshotFileTypeDeltaBinlog)
 	c.addFieldBinlogRefs(segment.GetBm25Statslogs(), segment, SnapshotFileTypeBM25StatsBinlog)
-	c.addIndexRefs(segment.GetIndexFiles(), segment)
+	if !c.skipIndex {
+		c.addIndexRefs(segment.GetIndexFiles(), segment)
+	}
 	return nil
 }
 
@@ -191,6 +224,9 @@ func (c *snapshotFileRefCollector) addStorageV3Segment(ctx context.Context, segm
 		}
 		manifestObjectCount := 0
 		if err := c.cm.WalkWithPrefix(ctx, walkPrefix, true, func(info *milvusstorage.ChunkObjectInfo) bool {
+			if c.skipIndex && IsStorageV3IndexFile(normalizedBasePath, info.FilePath) {
+				return true
+			}
 			manifestObjectCount++
 			c.add(SnapshotFileRef{
 				Path:      info.FilePath,
