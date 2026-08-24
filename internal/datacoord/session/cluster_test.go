@@ -17,6 +17,7 @@
 package session
 
 import (
+	"context"
 	"testing"
 
 	"github.com/cockroachdb/errors"

@@ -1465,7 +1465,7 @@ func (s *DataNodeServicesSuite) TestDropCopySegment_StaleDispatchEpochIgnored() 
 		Sources:       []*datapb.CopySegmentSource{{CollectionId: 111, PartitionId: 222, SegmentId: 333}},
 		Targets:       []*datapb.CopySegmentTarget{{CollectionId: 444, PartitionId: 555, SegmentId: 666}},
 	}
-	status, err := s.node.CopySegment(s.ctx, createReq)
+	status, err := s.node.copySegment(s.ctx, createReq, false)
 	s.NoError(merr.CheckRPCCall(status, err))
 
 	// A drop for an earlier dispatch is acknowledged — there is nothing left for
@@ -1503,7 +1503,7 @@ func (s *DataNodeServicesSuite) TestDropCopySegment_UnversionedPeerStillDrops() 
 		Sources:       []*datapb.CopySegmentSource{{CollectionId: 111, PartitionId: 222, SegmentId: 333}},
 		Targets:       []*datapb.CopySegmentTarget{{CollectionId: 444, PartitionId: 555, SegmentId: 666}},
 	}
-	status, err := s.node.CopySegment(s.ctx, createReq)
+	status, err := s.node.copySegment(s.ctx, createReq, false)
 	s.NoError(merr.CheckRPCCall(status, err))
 
 	// Old coordinator, new datanode: an epoch-less drop is still honored.
@@ -1518,7 +1518,7 @@ func (s *DataNodeServicesSuite) TestDropCopySegment_UnversionedPeerStillDrops() 
 
 	// New coordinator, task created before the upgrade: no epoch to match either.
 	createReq.TaskID = 602
-	status, err = s.node.CopySegment(s.ctx, createReq)
+	status, err = s.node.copySegment(s.ctx, createReq, false)
 	s.NoError(merr.CheckRPCCall(status, err))
 
 	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
@@ -1546,7 +1546,7 @@ func (s *DataNodeServicesSuite) TestDropCopySegment_LegacyNonAbortDropOfLiveTask
 		Sources:       []*datapb.CopySegmentSource{{CollectionId: 111, PartitionId: 222, SegmentId: 333}},
 		Targets:       []*datapb.CopySegmentTarget{{CollectionId: 444, PartitionId: 555, SegmentId: 666}},
 	}
-	status, err := s.node.CopySegment(s.ctx, createReq)
+	status, err := s.node.copySegment(s.ctx, createReq, false)
 	s.NoError(merr.CheckRPCCall(status, err))
 
 	// Task is Pending/InProgress; the legacy drop carries neither field.
@@ -1564,7 +1564,7 @@ func (s *DataNodeServicesSuite) TestDropCopySegment_LegacyNonAbortDropOfLiveTask
 	// this is a caller bug, not an upgrade artifact.
 	createReq.TaskID = 604
 	createReq.TaskVersion = 3
-	status, err = s.node.CopySegment(s.ctx, createReq)
+	status, err = s.node.copySegment(s.ctx, createReq, false)
 	s.NoError(merr.CheckRPCCall(status, err))
 
 	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
@@ -1599,11 +1599,11 @@ func (s *DataNodeServicesSuite) TestCopySegment_RedispatchAdoptsNewerEpoch() {
 		Sources:       []*datapb.CopySegmentSource{{CollectionId: 111, PartitionId: 222, SegmentId: 333}},
 		Targets:       []*datapb.CopySegmentTarget{{CollectionId: 444, PartitionId: 555, SegmentId: 666}},
 	}
-	status, err := s.node.CopySegment(s.ctx, createReq)
+	status, err := s.node.copySegment(s.ctx, createReq, false)
 	s.NoError(merr.CheckRPCCall(status, err))
 
 	createReq.TaskVersion = 2
-	status, err = s.node.CopySegment(s.ctx, createReq)
+	status, err = s.node.copySegment(s.ctx, createReq, false)
 	s.NoError(merr.CheckRPCCall(status, err))
 
 	// The queued drop of dispatch 1 no longer owns this task.
@@ -1618,7 +1618,7 @@ func (s *DataNodeServicesSuite) TestCopySegment_RedispatchAdoptsNewerEpoch() {
 
 	// An out-of-order dispatch RPC must not hand ownership back to the older one.
 	createReq.TaskVersion = 1
-	status, err = s.node.CopySegment(s.ctx, createReq)
+	status, err = s.node.copySegment(s.ctx, createReq, false)
 	s.NoError(merr.CheckRPCCall(status, err))
 
 	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
