@@ -333,6 +333,30 @@ func TestProcessProtoCommands(t *testing.T) {
 		assert.Equal(t, 1, executions)
 	})
 
+	t.Run("custom handler panic becomes a failed reply and batch continues", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+		executions := 0
+		manager.RegisterCommandHandler("panic", func(*ClientCommand) *CommandReply {
+			panic("boom")
+		})
+		manager.RegisterCommandHandler("success", func(cmd *ClientCommand) *CommandReply {
+			executions++
+			return &CommandReply{CommandId: cmd.CommandId, Success: true}
+		})
+
+		manager.processProtoCommands([]*commonpb.ClientCommand{
+			{CommandId: "panic-command", CommandType: "panic", CreateTime: 1000},
+			{CommandId: "next-command", CommandType: "success", CreateTime: 1000},
+		})
+
+		replies := manager.getPendingProtoRepliesSnapshot()
+		require.Len(t, replies, 2)
+		assert.False(t, replies[0].GetSuccess())
+		assert.Equal(t, "command handler panicked: boom", replies[0].GetErrorMessage())
+		assert.True(t, replies[1].GetSuccess())
+		assert.Equal(t, 1, executions)
+	})
+
 	t.Run("idempotent ack and timestamp update", func(t *testing.T) {
 		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
 
@@ -2311,7 +2335,7 @@ func TestBuildClientInfoEdgeCases(t *testing.T) {
 }
 
 func TestSnapshotTrimming(t *testing.T) {
-	t.Run("trims to 120 snapshots", func(t *testing.T) {
+	t.Run("retains more than the old 120 snapshot limit inside one hour", func(t *testing.T) {
 		manager := NewClientTelemetryManager(nil, &TelemetryConfig{
 			Enabled:           true,
 			HeartbeatInterval: time.Millisecond,
@@ -2321,13 +2345,41 @@ func TestSnapshotTrimming(t *testing.T) {
 		// Record an operation first
 		manager.RecordOperation("Test", "", time.Now(), nil)
 
-		// Manually add more than 120 snapshots
+		// A count-only cap of 120 retained just two minutes at this interval.
 		for i := 0; i < 130; i++ {
 			manager.createSnapshot()
 		}
 
 		snapshots := manager.GetMetricsSnapshots()
-		assert.Equal(t, 120, len(snapshots))
+		assert.Equal(t, 130, len(snapshots))
+	})
+
+	t.Run("drops snapshots outside the one hour retention window", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+		now := time.Now()
+		manager.snapshots = []*MetricsSnapshot{
+			{Timestamp: now.Add(-2 * time.Hour).UnixMilli(), EndTime: now.Add(-90 * time.Minute).UnixMilli()},
+			{Timestamp: now.Add(-time.Hour).UnixMilli(), EndTime: now.Add(-59 * time.Minute).UnixMilli()},
+		}
+
+		manager.createSnapshot()
+
+		snapshots := manager.GetMetricsSnapshots()
+		require.Len(t, snapshots, 2)
+		assert.Equal(t, now.Add(-59*time.Minute).UnixMilli(), snapshots[0].EndTime)
+	})
+
+	t.Run("keeps a hard memory bound for sub-second intervals", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+		now := time.Now().UnixMilli()
+		manager.snapshots = make([]*MetricsSnapshot, 0, maxTelemetryHistorySnapshots+1)
+		for i := 0; i < maxTelemetryHistorySnapshots; i++ {
+			manager.snapshots = append(manager.snapshots, &MetricsSnapshot{Timestamp: now, EndTime: now})
+		}
+
+		manager.createSnapshot()
+
+		assert.Len(t, manager.GetMetricsSnapshots(), maxTelemetryHistorySnapshots)
 	})
 }
 

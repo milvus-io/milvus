@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"sort"
 	"strconv"
@@ -37,6 +38,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v3/common"
 	"github.com/milvus-io/milvus/client/v3/internal/merr"
+)
+
+const (
+	telemetryHistoryRetention    = time.Hour
+	maxTelemetryHistorySnapshots = 3600
 )
 
 // TelemetryConfig holds configurable settings for client telemetry
@@ -1112,8 +1118,21 @@ func (m *ClientTelemetryManager) collectMetrics() []*OperationMetrics {
 	return result
 }
 
-// handleCommand handles a single command
-func (m *ClientTelemetryManager) handleCommand(cmd *ClientCommand) *CommandReply {
+// handleCommand handles a single command. Command handlers are extensible user callbacks
+// invoked by the background heartbeat goroutine, so a panic must not take down either that
+// goroutine or the caller's whole process. Convert it into the same failed reply used for an
+// ordinary handler error and let later commands and heartbeats continue.
+func (m *ClientTelemetryManager) handleCommand(cmd *ClientCommand) (reply *CommandReply) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			reply = &CommandReply{
+				CommandId:    cmd.CommandId,
+				Success:      false,
+				ErrorMessage: "command handler panicked: " + panicValueString(recovered),
+			}
+		}
+	}()
+
 	m.commandHandlersMu.RLock()
 	handler, ok := m.commandHandlers[cmd.CommandType]
 	m.commandHandlersMu.RUnlock()
@@ -1127,6 +1146,17 @@ func (m *ClientTelemetryManager) handleCommand(cmd *ClientCommand) *CommandReply
 	}
 
 	return handler(cmd)
+}
+
+func panicValueString(value any) (result string) {
+	// A panic value can implement Stringer/Error with another panicking method. Keep a safe
+	// type-only fallback so formatting a malicious callback failure cannot escape the boundary.
+	result = fmt.Sprintf("%T", value)
+	defer func() {
+		_ = recover()
+	}()
+	result = fmt.Sprint(value)
+	return result
 }
 
 // RegisterCommandHandler registers a handler for a command type
@@ -1319,11 +1349,22 @@ func (m *ClientTelemetryManager) createSnapshot() {
 		Metrics:   metrics,
 	}
 
-	// Add to snapshot list (keep only the most recent 120 = 1 hour at 30s intervals)
+	// Retain one hour by timestamp instead of assuming a fixed heartbeat interval. The
+	// interval is dynamically configurable, so a fixed snapshot count silently changes the
+	// amount of queryable history. Keep a hard cap as a final memory bound for sub-second
+	// heartbeat configurations.
 	m.snapshotsMu.Lock()
 	m.snapshots = append(m.snapshots, snapshot)
-	if len(m.snapshots) > 120 {
-		m.snapshots = m.snapshots[len(m.snapshots)-120:]
+	cutoff := now - telemetryHistoryRetention.Milliseconds()
+	retained := m.snapshots[:0]
+	for _, existing := range m.snapshots {
+		if existing.EndTime >= cutoff {
+			retained = append(retained, existing)
+		}
+	}
+	m.snapshots = retained
+	if len(m.snapshots) > maxTelemetryHistorySnapshots {
+		m.snapshots = m.snapshots[len(m.snapshots)-maxTelemetryHistorySnapshots:]
 	}
 	m.snapshotsMu.Unlock()
 }
