@@ -67,9 +67,14 @@ const (
 // This function therefore keeps the replica in hand throughout: it selects the
 // replicas whose own resource group is rgName, and asks whether each shard has
 // a serviceable leader inside one of THOSE replicas. Only query-visible
-// replicas count as able to serve, matching the IsQueryVisible filter every
-// GetShardLeaders path applies -- a leader the proxy can never be routed to
-// must not make its resource group look ready.
+// replicas count as able to serve, matching the IsQueryVisible filter both
+// GetShardLeaders ROUTING paths apply -- a leader the proxy can never be
+// routed to must not make its resource group look ready. Not every caller of
+// the shard-leader machinery filters: checkCollectionQueryable, on the
+// CheckHealth path, goes through GetShardLeadersWithChannels with no replica
+// filter and does count leaders on query-invisible replicas. That asymmetry
+// predates this PR and is untouched by it; readiness follows routing because
+// routing is what its answer is about.
 //
 // It does not reuse checkLoadStatus, which gates the GetShardLeaders path.
 // That gate is collection-wide by construction - it reads
