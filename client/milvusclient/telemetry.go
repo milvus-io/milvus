@@ -1016,12 +1016,12 @@ func (m *ClientTelemetryManager) processProtoCommands(commands []*commonpb.Clien
 		}
 	}
 
-	// Clean up old entries from executedCommands map
-	// Commands with CreateTime <= lastTS are now filtered by timestamp comparison
-	// Using <= ensures commands with same millisecond timestamp are also cleaned up
+	// Clean up entries older than the new cursor. Commands at the cursor still pass
+	// the timestamp check, so retain their IDs to keep equal-timestamp redeliveries
+	// idempotent across any number of retries.
 	m.executedCommandsMu.Lock()
 	for cmdID, ts := range m.executedCommands {
-		if ts <= lastTS {
+		if ts < maxCommandTS {
 			delete(m.executedCommands, cmdID)
 		}
 	}

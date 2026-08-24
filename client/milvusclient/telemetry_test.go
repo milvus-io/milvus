@@ -313,6 +313,26 @@ func TestClientTelemetryManager(t *testing.T) {
 }
 
 func TestProcessProtoCommands(t *testing.T) {
+	t.Run("equal timestamp stays idempotent after repeated delivery", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+		executions := 0
+		manager.RegisterCommandHandler("custom", func(cmd *ClientCommand) *CommandReply {
+			executions++
+			return &CommandReply{CommandId: cmd.CommandId, Success: true}
+		})
+		command := []*commonpb.ClientCommand{{
+			CommandId:   "same-command",
+			CommandType: "custom",
+			CreateTime:  1000,
+		}}
+
+		manager.processProtoCommands(command)
+		manager.processProtoCommands(command)
+		manager.processProtoCommands(command)
+
+		assert.Equal(t, 1, executions)
+	})
+
 	t.Run("idempotent ack and timestamp update", func(t *testing.T) {
 		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
 
