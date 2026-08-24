@@ -321,6 +321,12 @@ func TestGetLoadPercentageByResourceGroup_NilFailedLoadCache(t *testing.T) {
 // GlobalFailedLoadCache error is surfaced to the caller instead of a bare
 // -1. Deleting the GlobalFailedLoadCache.Get block makes this test observe a
 // nil error where it expects the seeded failure.
+//
+// The error is normalized to ErrCollectionNotLoaded rather than returned
+// verbatim, so the assertion is on the code plus the preserved cause text,
+// not on errors.Is against the seeded error -- see
+// TestGetLoadPercentageByResourceGroup_FailedLoadIsNotRetriable for why the
+// normalization is load-bearing.
 func TestGetLoadPercentageByResourceGroup_FailedLoad(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	// Collection 700 is never registered via putTarget/PutCollectionWithoutSave,
@@ -333,7 +339,41 @@ func TestGetLoadPercentageByResourceGroup_FailedLoad(t *testing.T) {
 	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 700, "rg-target")
 
 	assert.EqualValues(t, -1, percentage)
-	assert.ErrorIs(t, err, loadErr)
+	assert.ErrorIs(t, err, merr.ErrCollectionNotLoaded)
+	assert.Contains(t, err.Error(), "mocked load failure",
+		"normalizing the code must not throw away the recorded cause")
+}
+
+// TestGetLoadPercentageByResourceGroup_FailedLoadIsNotRetriable is the reason
+// the recorded failure is normalized rather than passed through.
+// FailedLoadCache stores whatever error the failing load task recorded, and a
+// load genuinely fails with retriable sentinels -- ErrServiceNotReady is what
+// LoadSegments returns when the target query node is restarting, and the
+// scheduler's exclusion list does not filter it out before
+// recordSegmentTaskError stores it.
+//
+// ErrServiceNotReady is also this function's OWN answer for the init window,
+// where it means "retry, this fixes itself in a moment". Returning the cached
+// error verbatim would make a load that is never coming back
+// indistinguishable from one that is, and a caller written to the documented
+// contract would retry until the cache entry expires 24h later. The seeded
+// error here is deliberately a retriable sentinel; the previous test's
+// errors.New could not catch this.
+func TestGetLoadPercentageByResourceGroup_FailedLoadIsNotRetriable(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	f.putReplica(t, 720, 72, "rg-target")
+
+	seedFailedLoadCache(t, 720, merr.WrapErrServiceNotReady("querynode", 72, "restarting"))
+
+	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 720, "rg-target")
+
+	assert.EqualValues(t, -1, percentage)
+	assert.ErrorIs(t, err, merr.ErrCollectionNotLoaded,
+		"a terminally failed load must be reported with the terminal code")
+	assert.NotErrorIs(t, err, merr.ErrServiceNotReady,
+		"a failed load must not borrow the code this function uses for the self-healing init window")
+	assert.False(t, merr.IsRetryableErr(err),
+		"the caller must not be told to wait for a load that is never coming back")
 }
 
 // TestGetLoadPercentageByResourceGroup_FailedLoadSurvivesReplicaCleanup pins
@@ -353,8 +393,9 @@ func TestGetLoadPercentageByResourceGroup_FailedLoadSurvivesReplicaCleanup(t *te
 	percentage, err := f.freeFn(context.Background(), 1200, "")
 
 	assert.EqualValues(t, -1, percentage)
-	assert.ErrorIs(t, err, loadErr,
+	assert.ErrorIs(t, err, merr.ErrCollectionNotLoaded,
 		"the recorded load failure must survive the removal of the replica records")
+	assert.Contains(t, err.Error(), loadErr.Error())
 }
 
 // TestGetLoadPercentageByResourceGroup_NilDist asserts that a Server whose

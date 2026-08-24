@@ -6,6 +6,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // ShardLeaderReadiness is the answer type of
@@ -108,9 +109,16 @@ func ShardLeaderReadinessByResourceGroup(
 		// after initMeta has wired the stores -- and Get dereferences a nil
 		// receiver. In that window the collection simply reads as not
 		// loaded, without the recorded-failure detail.
+		//
+		// A recorded failure is normalized to ErrCollectionNotLoaded for the
+		// same reason LoadPercentageByResourceGroup normalizes it: the cache
+		// stores whatever code the failing load recorded, including retriable
+		// sentinels, and a terminal failure must not be reported with one.
 		var failedLoadErr error
 		if meta.GlobalFailedLoadCache != nil {
-			failedLoadErr = meta.GlobalFailedLoadCache.Get(collectionID)
+			if err := meta.GlobalFailedLoadCache.Get(collectionID); err != nil {
+				failedLoadErr = merr.WrapErrCollectionNotLoaded(collectionID, err.Error())
+			}
 		}
 		return ShardLeaderReadiness{Reason: ShardLeadersReasonCollectionNotLoaded}, failedLoadErr
 	}

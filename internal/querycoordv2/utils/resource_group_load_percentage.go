@@ -27,9 +27,10 @@ import (
 // of a filter. This keeps the resource-group concept inert for callers that do
 // not use it.
 //
-// Three distinct outcomes are all spelled "the collection isn't ready in this
+// Four distinct outcomes are all spelled "the collection isn't ready in this
 // resource group", and callers must be able to tell them apart. The
-// percentage alone separates the first two; the error separates the third:
+// percentage alone separates the first two; the error separates the rest,
+// and the two error outcomes differ in whether waiting can ever help:
 //
 //   - -1, nil error: rgName has no replica of this collection at all. There
 //     is nothing to report a percentage for.
@@ -38,23 +39,32 @@ import (
 //     This is a real, distinct state from "no replica" -- it means loading is
 //     underway but has not made progress, not that the resource group is
 //     unrelated to the collection.
-//   - -1, ErrServiceNotReady: the coordinator's own read stores are not wired
-//     up yet, so no answer about any resource group can be computed. This is
-//     the state initQueryCoord passes through -- initMeta assigns the meta
-//     before the distribution and target managers -- and it is neither of the
-//     two above: nothing is known, rather than something being known to be
-//     absent. Reusing a bare -1 for it would tell a caller "this resource
-//     group holds no replica", which is a claim this function is in no
-//     position to make. The sentinel is the retriable one because the state
-//     resolves on its own within the init window, and it mirrors the
-//     ShardLeadersReasonCoordinatorNotReady that
+//   - -1, ErrServiceNotReady (1, retriable): the coordinator's own read
+//     stores are not wired up yet, so no answer about any resource group can
+//     be computed. This is the state initQueryCoord passes through --
+//     initMeta assigns the meta before the distribution and target managers
+//     -- and it is neither of the two above: nothing is known, rather than
+//     something being known to be absent. Reusing a bare -1 for it would tell
+//     a caller "this resource group holds no replica", which is a claim this
+//     function is in no position to make. The sentinel is the retriable one
+//     because the state resolves on its own within the init window, and it
+//     mirrors the ShardLeadersReasonCoordinatorNotReady that
 //     ShardLeaderReadinessByResourceGroup reports for the same window.
+//   - -1, ErrCollectionNotLoaded (101, non-retriable): the collection is not
+//     registered as loaded and GlobalFailedLoadCache holds a recorded reason
+//     -- the load failed and is not coming back on its own. The recorded
+//     cause is kept in the message.
 //
-// When the collection itself is not currently registered as loaded (for
-// example the load request failed), this surfaces the recorded
-// GlobalFailedLoadCache error, matching the convention already used by
-// ShowLoadCollections and ShowLoadPartitions to turn a negative percentage
-// into an actionable error for the caller.
+// The last two MUST NOT be conflated, which is why the failed-load error is
+// normalized here rather than returned verbatim. FailedLoadCache stores
+// whatever error the failing load task recorded, and a load can fail with a
+// retriable sentinel -- ErrServiceNotReady when a target query node was
+// restarting during LoadSegments, ErrServiceUnavailable -- which is the very
+// code the init window above uses to mean "retry, this fixes itself". A
+// caller written to this contract would then retry a terminally failed load
+// until the cache entry expires 24h later. ShowLoadCollections and
+// ShowLoadPartitions normalize the same cache the same way, so this also
+// restores the parity with them that this comment claims.
 //
 // The percentage is a LIVE target-coverage figure: the fraction of the
 // collection's current work set -- its channel targets plus sealed-segment
@@ -138,7 +148,19 @@ func LoadPercentageByResourceGroup(
 		// loaded, without the recorded-failure detail.
 		if meta.GlobalFailedLoadCache != nil {
 			if err := meta.GlobalFailedLoadCache.Get(collectionID); err != nil {
-				return -1, err
+				// Normalized to ErrCollectionNotLoaded rather than returned
+				// verbatim, exactly as ShowLoadCollections does with the same
+				// cache. FailedLoadCache stores whatever code the failing load
+				// task recorded, and those include retriable sentinels --
+				// ErrServiceNotReady when a target query node was restarting,
+				// ErrServiceUnavailable -- which is the SAME code this
+				// function returns for the init window above, where it means
+				// "self-heals in a moment, retry". Returning the cached error
+				// as-is would make a load that is never coming back
+				// indistinguishable from one that is, and the caller would
+				// retry until the cache entry expires 24h later. The recorded
+				// cause is kept in the message.
+				return -1, merr.WrapErrCollectionNotLoaded(collectionID, err.Error())
 			}
 		}
 		return -1, nil

@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // shardLeaderReadinessFixture wires up the four read-only stores
@@ -487,7 +488,53 @@ func TestShardLeaderReadinessByRG_FailedLoadIsSurfaced(t *testing.T) {
 
 	got, err := f.server().GetShardLeaderReadinessByResourceGroup(context.Background(), 1000, "rg-a")
 
-	assert.ErrorIs(t, err, loadErr, "a recorded load failure must reach the caller unwrapped")
+	assert.ErrorIs(t, err, merr.ErrCollectionNotLoaded,
+		"a recorded load failure must reach the caller, normalized to the terminal code")
+	assert.Contains(t, err.Error(), loadErr.Error(),
+		"normalizing the code must not throw away the recorded cause")
+	assert.False(t, got.Ready)
+	assert.Equal(t, utils.ShardLeadersReasonCollectionNotLoaded, got.Reason)
+}
+
+// TestShardLeaderReadinessByRG_FailedLoadIsNotRetriable mirrors the
+// percentage surface: the cache stores whatever the failing load recorded,
+// including retriable sentinels, and this surface must not hand one back --
+// the struct's Reason disambiguates for a caller that reads it, but the error
+// code is what a caller triaging on merr sees.
+func TestShardLeaderReadinessByRG_FailedLoadIsNotRetriable(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	f.putReplica(t, 1020, "rg-a", 102)
+
+	seedFailedLoadCache(t, 1020, merr.WrapErrServiceNotReady("querynode", 102, "restarting"))
+
+	got, err := f.server().GetShardLeaderReadinessByResourceGroup(context.Background(), 1020, "rg-a")
+
+	assert.ErrorIs(t, err, merr.ErrCollectionNotLoaded)
+	assert.NotErrorIs(t, err, merr.ErrServiceNotReady)
+	assert.False(t, merr.IsRetryableErr(err))
+	assert.False(t, got.Ready)
+}
+
+// TestShardLeaderReadinessByRG_FailedLoadSurvivesReplicaCleanup pins the
+// terminal failed-load state, which is also the common one:
+// CollectionObserver.observeTimeout removes BOTH the collection registration
+// and every replica record, leaving only the GlobalFailedLoadCache entry
+// behind. The recorded failure must still reach the caller from that state;
+// checking replicas before consulting the cache would swallow it into
+// (NoReplicaInResourceGroup, nil), which tells the caller nothing is loading
+// here when the truth is that the load failed.
+func TestShardLeaderReadinessByRG_FailedLoadSurvivesReplicaCleanup(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	// No putLoadedCollection, no putReplica: collection 1400 has been fully
+	// cleaned up after its load timed out; only the failure record remains.
+	loadErr := errors.New("mocked load failure")
+	seedFailedLoadCache(t, 1400, loadErr)
+
+	got, err := f.server().GetShardLeaderReadinessByResourceGroup(context.Background(), 1400, "rg-a")
+
+	assert.ErrorIs(t, err, merr.ErrCollectionNotLoaded,
+		"the recorded load failure must survive the removal of the replica records")
+	assert.Contains(t, err.Error(), loadErr.Error())
 	assert.False(t, got.Ready)
 	assert.Equal(t, utils.ShardLeadersReasonCollectionNotLoaded, got.Reason)
 }
