@@ -1009,8 +1009,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedSmallEntryRoundtrip) {
     const size_t entry_size = 1024;
     auto data = GeneratePattern(entry_size);
 
-    // Use small slice_size for testing multi-slice behavior
-    const size_t slice_size = 512;
+    const size_t slice_size = kStreamSliceAlignment;
 
     {
         // Note: remote_path should be relative to fs root
@@ -1063,11 +1062,23 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedWriterCreatesMissingTempDir) {
     EXPECT_GT(info.ValueOrDie().size(), 1024);  // ciphertext > plaintext
 }
 
+TEST_F(IndexEntryEncryptedV3Test, EncryptedWriterRejectsUnalignedSliceSize) {
+    const std::string file_path = kV3FilePath + "_enc_unaligned_slice";
+    EXPECT_THROW(IndexEntryEncryptedLocalWriter writer(file_path,
+                                                       fs_,
+                                                       mock_cipher_,
+                                                       /*ez_id=*/1,
+                                                       /*collection_id=*/100,
+                                                       GetRootPath(),
+                                                       1024),
+                 milvus::SegcoreError);
+}
+
 TEST_F(IndexEntryEncryptedV3Test, EncryptedMultiSliceEntry) {
     // Entry larger than slice_size, requiring multiple slices
     const std::string file_path = kV3FilePath + "_enc_multislice";
-    const size_t slice_size = 1024;            // 1KB slices
-    const size_t entry_size = 5 * 1024 + 100;  // 5KB + 100B = 6 slices
+    const size_t slice_size = kStreamSliceAlignment;
+    const size_t entry_size = 5 * slice_size + 100;
     auto data = GeneratePattern(entry_size);
 
     {
@@ -1092,11 +1103,11 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedMultiSliceEntry) {
 TEST_F(IndexEntryEncryptedV3Test, EncryptedMultipleEntriesMultiSlice) {
     // Multiple entries, each requiring multiple slices
     const std::string file_path = kV3FilePath + "_enc_multi_multi";
-    const size_t slice_size = 1024;  // 1KB slices
+    const size_t slice_size = kStreamSliceAlignment;
 
-    const size_t size_a = 3 * 1024 + 500;  // 4 slices
-    const size_t size_b = 2 * 1024 + 100;  // 3 slices
-    const size_t size_c = 5 * 1024;        // 5 slices
+    const size_t size_a = 3 * slice_size + 500;
+    const size_t size_b = 2 * slice_size + 100;
+    const size_t size_c = 5 * slice_size;
 
     auto data_a = GeneratePattern(size_a);
     auto data_b = GeneratePattern(size_b);
@@ -1128,7 +1139,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedMultipleEntriesMultiSlice) {
 TEST_F(IndexEntryEncryptedV3Test, EncryptedLargeMetaMultiSlice) {
     // Large meta entry requiring multiple slices
     const std::string file_path = kV3FilePath + "_enc_largemeta";
-    const size_t slice_size = 1024;  // 1KB slices
+    const size_t slice_size = kStreamSliceAlignment;
 
     auto data = GeneratePattern(256);
 
@@ -1142,7 +1153,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedLargeMetaMultiSlice) {
                                               slice_size);
         writer.WriteEntry("data", data.data(), data.size());
 
-        // Meta will be ~5KB = 5 slices
+        // Meta is larger than one slice.
         std::string meta_value(5000, 'M');
         writer.PutMeta("large_meta", meta_value);
         writer.Finish();
@@ -1162,8 +1173,8 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedLargeMetaMultiSlice) {
 TEST_F(IndexEntryEncryptedV3Test, EncryptedFdEntryMultiSlice) {
     // Test fd-based entry with multiple slices
     const std::string file_path = kV3FilePath + "_enc_fd";
-    const size_t slice_size = 1024;            // 1KB slices
-    const size_t entry_size = 4 * 1024 + 200;  // 5 slices
+    const size_t slice_size = kStreamSliceAlignment;
+    const size_t entry_size = 4 * slice_size + 200;
     auto data = GeneratePattern(entry_size);
 
     // Write source file
@@ -1223,17 +1234,11 @@ TEST_F(IndexEntryEncryptedV3Test,
     auto input = CreateInputStream(file_path);
     int64_t file_size = GetFileSize(file_path);
 
-    // Directory validation must pass and let Open proceed to cipher-plugin
-    // resolution, which fails only because no plugin is registered in this
-    // unit test.
-    try {
-        IndexEntryReader::Open(input, file_size);
-        FAIL() << "expected Open to fail on the missing cipher plugin";
-    } catch (const milvus::SegcoreError& e) {
-        EXPECT_NE(std::string(e.what()).find("Cipher plugin required"),
-                  std::string::npos)
-            << "unexpected error: " << e.what();
-    }
+    auto reader = IndexEntryReader::Open(input, file_size);
+    ASSERT_NE(reader, nullptr);
+    auto entry = reader->ReadEntry("data");
+    ASSERT_EQ(entry.data.size(), entry_size);
+    VerifyPattern(entry.data, entry_size);
 }
 
 TEST_F(IndexEntryEncryptedV3Test,
@@ -1261,8 +1266,15 @@ TEST_F(IndexEntryEncryptedV3Test,
 
     auto input = CreateInputStream(file_path);
     int64_t file_size = GetFileSize(file_path);
-    EXPECT_THROW(IndexEntryReader::Open(input, file_size),
-                 milvus::SegcoreError);
+    try {
+        IndexEntryReader::Open(input, file_size);
+        FAIL() << "expected Open to reject an unaligned slice size";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_NE(
+            std::string(e.what()).find("Encrypted entry slice_size must be"),
+            std::string::npos)
+            << "unexpected error: " << e.what();
+    }
 }
 
 TEST_F(IndexEntryEncryptedV3Test,
@@ -1296,8 +1308,15 @@ TEST_F(IndexEntryEncryptedV3Test,
 
     auto input = CreateInputStream(file_path);
     int64_t file_size = GetFileSize(file_path);
-    EXPECT_THROW(IndexEntryReader::Open(input, file_size),
-                 milvus::SegcoreError);
+    try {
+        IndexEntryReader::Open(input, file_size);
+        FAIL() << "expected Open to reject an out-of-range slice";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_NE(std::string(e.what()).find(
+                      "Encrypted slice exceeds original entry size"),
+                  std::string::npos)
+            << "unexpected error: " << e.what();
+    }
 }
 
 TEST_F(IndexEntryEncryptedV3Test,
@@ -1330,8 +1349,14 @@ TEST_F(IndexEntryEncryptedV3Test,
 
     auto input = CreateInputStream(file_path);
     int64_t file_size = GetFileSize(file_path);
-    EXPECT_THROW(IndexEntryReader::Open(input, file_size),
-                 milvus::SegcoreError);
+    try {
+        IndexEntryReader::Open(input, file_size);
+        FAIL() << "expected Open to reject incomplete slice coverage";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_NE(std::string(e.what()).find("Encrypted slices cover"),
+                  std::string::npos)
+            << "unexpected error: " << e.what();
+    }
 }
 
 // ---- ReadEntryStream tests ----
