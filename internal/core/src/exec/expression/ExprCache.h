@@ -19,12 +19,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "common/Types.h"
@@ -35,19 +38,37 @@ namespace exec {
 // Forward declarations for backend types
 class EntryPool;
 class DiskSlotFile;
+class ExprCacheMaterializationBudgetState;
+class ExprCacheMemoryBudget;
+class ExprCacheTestPeer;
+
+// Run only optional expression-cache work through this boundary. Callers must
+// keep source-of-truth expression evaluation outside the callback so cache
+// allocation, lookup, or storage failures can be ignored without hiding real
+// query failures.
+template <typename Fn>
+bool
+RunExprCacheBestEffort(Fn&& operation) noexcept {
+    try {
+        std::forward<Fn>(operation)();
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
 
 // Lightweight frequency tracker using direct-mapped counter array.
-// Used for cache admission control: only cache expressions seen >= threshold times.
+// Used for cache admission control: only cache keys seen >= threshold times.
 // Approximate — hash collisions cause shared counters, which is acceptable.
 class FrequencyTracker {
  public:
-    // Record a signature hash and return whether it has reached the threshold.
+    // Record a cache-key hash and return whether it has reached the threshold.
     bool
-    RecordAndCheck(uint64_t sig_hash, uint8_t threshold) {
+    RecordAndCheck(uint64_t key_hash, uint8_t threshold) {
         if (threshold <= 1) {
             return true;  // no admission control
         }
-        size_t slot = sig_hash % kNumSlots;
+        size_t slot = key_hash % kNumSlots;
         uint8_t old = counters_[slot].fetch_add(1, std::memory_order_relaxed);
         // Cap at 255 to prevent overflow
         if (old >= 254) {
@@ -80,7 +101,7 @@ class FrequencyTracker {
         }
     }
 
-    static constexpr size_t kNumSlots = 16384;  // 16K slots = 16KB memory
+    static constexpr size_t kNumSlots = 256 * 1024;  // 256K slots = 256 KiB
     static constexpr uint64_t kDecayInterval =
         10000;  // decay every 10K records
 
@@ -95,9 +116,13 @@ enum class CacheMode { Memory, Disk };
 struct CacheConfig {
     CacheMode mode{CacheMode::Disk};
     uint8_t admission_threshold{2};
+    // Full bitmap pairs materialized by cache hits and raw-expression capture.
+    // This heap budget is shared by memory and disk modes.
+    size_t materialization_max_bytes{256ULL * 1024 * 1024};
     // Memory mode
     size_t mem_max_bytes{256ULL * 1024 * 1024};
     bool compression_enabled{true};
+    bool mem_enable_growing{false};
     int64_t mem_min_eval_duration_us{1000};
     // Disk mode
     std::string disk_base_path;
@@ -110,6 +135,39 @@ struct CacheConfig {
 // Routes to EntryPool (memory mode) or per-segment DiskSlotFile (disk mode).
 class ExprResCacheManager {
  public:
+    // A move-only reservation for one full result/validity bitmap pair.
+    // Destruction returns the reserved bytes to the process-level budget.
+    class MaterializationLease {
+     public:
+        MaterializationLease() = default;
+        MaterializationLease(const MaterializationLease&) = delete;
+        MaterializationLease&
+        operator=(const MaterializationLease&) = delete;
+        MaterializationLease(MaterializationLease&& other) noexcept;
+        MaterializationLease&
+        operator=(MaterializationLease&& other) noexcept;
+        ~MaterializationLease();
+
+        void
+        Release();
+
+     private:
+        friend class ExprResCacheManager;
+
+        MaterializationLease(
+            std::shared_ptr<ExprCacheMaterializationBudgetState> budget,
+            size_t bytes);
+
+        std::shared_ptr<ExprCacheMaterializationBudgetState> budget_;
+        size_t bytes_{0};
+    };
+
+    enum class LookupResult {
+        Hit,
+        Miss,
+        ResourceLimit,
+    };
+
     struct Key {
         int64_t segment_id{0};
         std::string signature;  // expr signature including parameters
@@ -139,13 +197,23 @@ class ExprResCacheManager {
             0};  // eval duration in us, 0 = skip cost check
     };
 
+    // A forward-admission decision for batched evaluators that need to know
+    // whether a miss is frequent enough before allocating full-segment capture
+    // buffers. Tickets are valid only for the config epoch, full cache key,
+    // and active count that produced them.
+    struct AdmissionTicket {
+        uint64_t config_epoch{0};
+        uint64_t key_hash{0};  // Includes active_count, unlike the storage Key.
+        bool admitted{false};
+    };
+
  public:
     static ExprResCacheManager&
     Instance();
     static void
     SetEnabled(bool enabled);
     static bool
-    IsEnabled();
+    IsEnabled() noexcept;
 
     // Configure the cache mode and parameters.
     bool
@@ -153,6 +221,11 @@ class ExprResCacheManager {
 
     CacheMode
     GetMode() const;
+
+    // Sealed segments are supported by both backends. Growing segments are
+    // opt-in and supported only by the memory backend.
+    bool
+    CanCacheSegment(SegmentType segment_type) const noexcept;
 
     // Backward-compatible shim: maps old SetDiskConfig parameters to CacheConfig.
     void
@@ -171,14 +244,51 @@ class ExprResCacheManager {
     size_t
     GetEntryCount() const;
 
+    // Current full-bitmap bytes retained by cache hits and raw-expression
+    // captures. This excludes persistent memory-mode entries.
+    size_t
+    GetMaterializationBytes() const;
+
+    // Includes reader-held compressed payloads from retired memory backends,
+    // even when the active backend is disk.
+    size_t
+    GetMemoryBytes() const;
+
+    // Non-blocking reservation for one full result/validity pair. Returns no
+    // lease when the request would exceed materialization_max_bytes.
+    std::optional<MaterializationLease>
+    TryAcquireMaterialization(int64_t active_count);
+
     // Try to get cached value. If found, returns true and fills out_value.
     // NOTE: caller must pre-set out_value.active_count for staleness check.
     bool
-    Get(const Key& key, Value& out_value);
+    Get(const Key& key, Value& out_value) noexcept;
+
+    // Same lookup with an explicit resource-limit result so batched callers
+    // can bypass cache capture rather than turning memory pressure into a miss.
+    // Missing or stale entries return Miss without reserving bitmap capacity.
+    LookupResult
+    GetWithStatus(const Key& key, Value& out_value);
 
     // Insert or update cache entry. The provided value.result must be non-null.
     void
-    Put(const Key& key, const Value& value);
+    Put(const Key& key, const Value& value) noexcept;
+
+    // Observe one real cache-miss evaluation and decide frequency admission
+    // before the caller allocates a full-segment result. Count each active-count
+    // snapshot separately. Call at most once per physical expression instance,
+    // not once per batch. Validate segment eligibility under the same config
+    // lock used to stamp the ticket's epoch.
+    AdmissionTicket
+    ObserveMiss(const Key& key, int64_t active_count, SegmentType segment_type);
+
+    // Put a value using a ticket returned by ObserveMiss. This bypasses only
+    // the duplicate frequency check; latency, backend eligibility, capacity,
+    // compression, and eviction policies still apply.
+    void
+    PutAdmitted(const Key& key,
+                const Value& value,
+                const AdmissionTicket& ticket) noexcept;
 
     void
     Clear();
@@ -188,7 +298,11 @@ class ExprResCacheManager {
     EraseSegment(int64_t segment_id);
 
  private:
-    ExprResCacheManager() = default;
+    ExprResCacheManager();
+
+    // Requires state_mutex_ to be held.
+    bool
+    CanCacheSegmentLocked(SegmentType segment_type) const noexcept;
 
     size_t
     GetDiskCurrentBytesLocked() const;
@@ -196,8 +310,20 @@ class ExprResCacheManager {
     size_t
     EvictDiskSegmentsUntilWithinBudget(int64_t protected_segment_id);
 
+    // Private injection points for testing disk-put exception safety.
+    enum class DiskPutStage {
+        ClockAppend,
+        ClockIndexInsert,
+        ClockUsageInsert,
+        FileCreate,
+        FilePublish,
+        SlotWrite,
+        SlotWritten,
+    };
+    using DiskPutHook = std::function<void(DiskPutStage)>;
+
     void
-    TouchDiskSegment(int64_t segment_id);
+    TouchDiskSegment(int64_t segment_id, const DiskPutHook& hook);
 
     void
     TryTouchDiskSegment(int64_t segment_id);
@@ -209,7 +335,21 @@ class ExprResCacheManager {
     RemoveDiskSegmentFile(int64_t segment_id);
 
     void
-    SyncUsageMetrics(size_t memory_bytes, size_t disk_bytes);
+    SyncDiskUsageMetrics(size_t disk_bytes);
+
+    friend class ExprCacheTestPeer;
+    // The test peer can suspend/fail a real hit immediately before decoding.
+    // Public callers use the overload without a callback.
+    LookupResult
+    GetWithStatus(const Key& key,
+                  Value& out_value,
+                  const std::function<void()>& before_decode);
+
+    void
+    PutInternal(const Key& key,
+                const Value& value,
+                const AdmissionTicket* ticket,
+                const DiskPutHook& hook = {});
 
     static std::atomic<bool> enabled_;
 
@@ -217,6 +357,7 @@ class ExprResCacheManager {
     CacheConfig config_;
 
     // Memory mode backend
+    std::shared_ptr<ExprCacheMemoryBudget> memory_budget_;
     std::unique_ptr<EntryPool> entry_pool_;
 
     // Disk mode backend
@@ -230,7 +371,9 @@ class ExprResCacheManager {
     size_t disk_clock_hand_{0};
 
     FrequencyTracker frequency_tracker_;
-    std::atomic<size_t> reported_memory_bytes_{0};
+    std::shared_ptr<ExprCacheMaterializationBudgetState>
+        materialization_budget_;
+    std::atomic<uint64_t> config_epoch_{1};
     std::atomic<size_t> reported_disk_bytes_{0};
 };
 

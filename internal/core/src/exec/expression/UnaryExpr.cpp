@@ -2318,9 +2318,14 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
 
     // Cache lookup + full-bitset compute via helper
     if (cached_match_res_ == nullptr) {
+        // Growing text-index visibility can change after commit/reload without
+        // changing active_count_. Only sealed text results are safe to cache
+        // across requests; a null cache segment bypasses both reads and writes.
+        const auto* cache_segment =
+            segment_->type() == SegmentType::Sealed ? segment_ : nullptr;
         auto cached = exec::ExprCacheHelper::GetOrCompute(
-            segment_,
-            this->ToString(),
+            cache_segment,
+            [this]() { return this->ToString(); },
             active_count_,
             [&]() -> exec::ExprCacheHelper::ComputeResult {
                 auto pw = segment_->GetTextIndex(op_ctx_, field_id_);

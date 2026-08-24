@@ -39,7 +39,7 @@ namespace exec {
 // Example usage in an expression:
 //
 //   auto cached = exec::ExprCacheHelper::GetOrCompute(
-//       segment_, this->ToString(), active_count_,
+//       segment_, [this]() { return this->ToString(); }, active_count_,
 //       [&]() -> exec::ExprCacheHelper::ComputeResult {
 //           TargetBitmap res = do_actual_computation();
 //           TargetBitmap valid = compute_valid();
@@ -65,9 +65,8 @@ class ExprCacheHelper {
 
     // Try cache; on miss, call `compute`, put result into cache, return.
     // Backend semantics:
-    //   - Memory mode supports sealed and growing segments. `active_count`
-    //     participates in the memory cache key, so growing-segment snapshots
-    //     with different row counts are isolated from each other.
+    //   - Memory mode always supports sealed segments. Growing segments are
+    //     supported only when explicitly enabled.
     //   - Disk mode is sealed-segment only. DiskSlotFile uses fixed-size slots
     //     derived from row_count; if a segment's row_count changes, the manager
     //     drops that disk file and skips disk caching for the segment.
@@ -76,35 +75,45 @@ class ExprCacheHelper {
     // also skips growing segments because DiskSlotFile has fixed row_count slots.
     //
     // Correctness requirements for the caller:
-    //   - `expr_signature` MUST uniquely identify the expression and its
-    //     parameters. Same parameters → same signature. Field order in the
-    //     string must be fixed (don't rely on protobuf DebugString).
+    //   - `make_signature` MUST return a string that uniquely identifies the
+    //     expression and its parameters. Same parameters → same signature.
+    //     Field order in the string must be fixed (don't rely on protobuf
+    //     DebugString).
     //   - `active_count` MUST be the current segment row count. Used to
     //     detect staleness after insert/compaction.
     //   - `compute` MUST be deterministic: same segment + same signature
     //     + same active_count must always produce the same bitmaps.
-    template <typename ComputeFn>
+    template <typename SignatureFn, typename ComputeFn>
     static CachedBitmaps
     GetOrCompute(const segcore::SegmentInternalInterface* segment,
-                 const std::string& expr_signature,
+                 SignatureFn&& make_signature,
                  int64_t active_count,
                  ComputeFn&& compute,
                  bool enable_cache_write = true) {
-        bool cache_eligible =
-            segment != nullptr && ExprResCacheManager::IsEnabled();
-        if (cache_eligible &&
-            ExprResCacheManager::Instance().GetMode() == CacheMode::Disk &&
-            segment->type() != SegmentType::Sealed) {
-            cache_eligible = false;
+        ExprResCacheManager* manager = nullptr;
+        bool cache_eligible = false;
+        std::string expr_signature;
+        if (segment != nullptr && ExprResCacheManager::IsEnabled()) {
+            RunExprCacheBestEffort([&]() {
+                manager = &ExprResCacheManager::Instance();
+                if (!manager->CanCacheSegment(segment->type())) {
+                    return;
+                }
+                expr_signature = std::forward<SignatureFn>(make_signature)();
+                cache_eligible = true;
+            });
         }
 
         if (cache_eligible) {
-            // Try Get
-            ExprResCacheManager::Key key{segment->get_segment_id(),
-                                         expr_signature};
             ExprResCacheManager::Value got;
-            got.active_count = active_count;
-            if (ExprResCacheManager::Instance().Get(key, got)) {
+            bool cache_hit = false;
+            RunExprCacheBestEffort([&]() {
+                ExprResCacheManager::Key key{segment->get_segment_id(),
+                                             expr_signature};
+                got.active_count = active_count;
+                cache_hit = manager->Get(key, got);
+            });
+            if (cache_hit) {
                 return {got.result, got.valid_result};
             }
         }
@@ -127,13 +136,16 @@ class ExprCacheHelper {
         auto result = std::make_shared<TargetBitmap>(std::move(out.result));
         auto valid = std::make_shared<TargetBitmap>(std::move(out.valid));
 
-        ExprResCacheManager::Key key{segment->get_segment_id(), expr_signature};
-        ExprResCacheManager::Value v;
-        v.result = result;
-        v.valid_result = valid;
-        v.active_count = active_count;
-        v.eval_duration_us = eval_us;
-        ExprResCacheManager::Instance().Put(key, v);
+        RunExprCacheBestEffort([&]() {
+            ExprResCacheManager::Key key{segment->get_segment_id(),
+                                         expr_signature};
+            ExprResCacheManager::Value v;
+            v.result = result;
+            v.valid_result = valid;
+            v.active_count = active_count;
+            v.eval_duration_us = eval_us;
+            manager->Put(key, v);
+        });
 
         return {result, valid};
     }
@@ -142,16 +154,16 @@ class ExprCacheHelper {
     // staleness, and segment-invalidation rules as full expression results.
     // The all-ones companion satisfies the existing two-bitmap cache value
     // contract and is compressed efficiently by the memory backend.
-    template <typename ComputeFn>
+    template <typename SignatureFn, typename ComputeFn>
     static std::shared_ptr<TargetBitmap>
     GetOrComputeBitmap(const segcore::SegmentInternalInterface* segment,
-                       const std::string& artifact_signature,
+                       SignatureFn&& make_signature,
                        int64_t active_count,
                        ComputeFn&& compute,
                        bool enable_cache_write = true) {
         auto cached = GetOrCompute(
             segment,
-            artifact_signature,
+            std::forward<SignatureFn>(make_signature),
             active_count,
             [&]() -> ComputeResult {
                 auto result = compute();

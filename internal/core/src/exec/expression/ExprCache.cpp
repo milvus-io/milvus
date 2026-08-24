@@ -16,17 +16,116 @@
 
 #include "exec/expression/ExprCache.h"
 
+#include <folly/ScopeGuard.h>
+#include <unistd.h>
 #include <filesystem>
+#include <functional>
+#include <limits>
+#include <utility>
 
 #include "cachinglayer/Metrics.h"
 #include "exec/expression/DiskSlotFile.h"
 #include "exec/expression/EntryPool.h"
+#include "monitor/Monitor.h"
 #include "xxhash.h"
 
 namespace milvus {
 namespace exec {
 
+class ExprCacheMaterializationBudgetState {
+ public:
+    explicit ExprCacheMaterializationBudgetState(size_t capacity_bytes)
+        : capacity_bytes_(capacity_bytes),
+          memory_gauge_(cachinglayer::monitor::cache_loaded_bytes(
+              cachinglayer::CellDataType::OTHER,
+              cachinglayer::StorageType::MEMORY)) {
+    }
+
+    bool
+    TryAcquire(size_t bytes) {
+        std::lock_guard lock(mutex_);
+        if (capacity_bytes_ == 0 || bytes > capacity_bytes_ ||
+            used_bytes_ > capacity_bytes_ - bytes) {
+            return false;
+        }
+        used_bytes_ += bytes;
+        memory_gauge_.Increment(bytes);
+        return true;
+    }
+
+    void
+    Release(size_t bytes) noexcept {
+        std::lock_guard lock(mutex_);
+        if (bytes > used_bytes_) {
+            bytes = used_bytes_;
+        }
+        used_bytes_ -= bytes;
+        memory_gauge_.Decrement(bytes);
+    }
+
+    void
+    SetCapacity(size_t capacity_bytes) {
+        std::lock_guard lock(mutex_);
+        capacity_bytes_ = capacity_bytes;
+    }
+
+    size_t
+    GetUsedBytes() const {
+        std::lock_guard lock(mutex_);
+        return used_bytes_;
+    }
+
+ private:
+    mutable std::mutex mutex_;
+    size_t capacity_bytes_{0};
+    size_t used_bytes_{0};
+    // Lease lifetime, including outstanding queries after clear/reconfigure,
+    // determines this contribution to the shared cachinglayer memory gauge.
+    prometheus::Gauge& memory_gauge_;
+};
+
 namespace {
+
+std::optional<size_t>
+FullBitmapPairBytes(int64_t active_count) {
+    if (active_count < 0) {
+        return std::nullopt;
+    }
+    const auto bits = static_cast<size_t>(active_count);
+    constexpr size_t kBitsPerWord = 64;
+    constexpr size_t kBytesPerWord = sizeof(uint64_t);
+    if (bits > std::numeric_limits<size_t>::max() - (kBitsPerWord - 1)) {
+        return std::nullopt;
+    }
+    const auto words = (bits + kBitsPerWord - 1) / kBitsPerWord;
+    if (words > std::numeric_limits<size_t>::max() / (2 * kBytesPerWord)) {
+        return std::nullopt;
+    }
+    return words * kBytesPerWord * 2;
+}
+
+struct MaterializedBitmapPair {
+    explicit MaterializedBitmapPair(
+        ExprResCacheManager::MaterializationLease lease)
+        : lease(std::move(lease)) {
+    }
+
+    // Keep the reservation alive until after both bitmap buffers are freed.
+    ExprResCacheManager::MaterializationLease lease;
+    TargetBitmap result{0};
+    TargetBitmap valid{0};
+};
+
+uint64_t
+AdmissionKeyHash(const ExprResCacheManager::Key& key, int64_t active_count) {
+    // Count reuse of the same expression snapshot. Different segments or
+    // growing row counts must not make a one-off snapshot look recurrent.
+    // Storage still keeps only one snapshot per (segment_id, signature).
+    const auto key_hash = XXH64(key.signature.data(),
+                                key.signature.size(),
+                                static_cast<uint64_t>(key.segment_id));
+    return XXH64(&active_count, sizeof(active_count), key_hash);
+}
 
 void
 RemoveCacheFilesInDir(const std::string& base_path) {
@@ -83,6 +182,50 @@ UpdateGauge(prometheus::Gauge& gauge, int64_t delta) {
 
 }  // namespace
 
+ExprResCacheManager::MaterializationLease::MaterializationLease(
+    std::shared_ptr<ExprCacheMaterializationBudgetState> budget, size_t bytes)
+    : budget_(std::move(budget)), bytes_(bytes) {
+}
+
+ExprResCacheManager::MaterializationLease::MaterializationLease(
+    MaterializationLease&& other) noexcept
+    : budget_(std::exchange(other.budget_, nullptr)),
+      bytes_(std::exchange(other.bytes_, 0)) {
+}
+
+ExprResCacheManager::MaterializationLease&
+ExprResCacheManager::MaterializationLease::operator=(
+    MaterializationLease&& other) noexcept {
+    if (this != &other) {
+        Release();
+        budget_ = std::exchange(other.budget_, nullptr);
+        bytes_ = std::exchange(other.bytes_, 0);
+    }
+    return *this;
+}
+
+ExprResCacheManager::MaterializationLease::~MaterializationLease() {
+    Release();
+}
+
+void
+ExprResCacheManager::MaterializationLease::Release() {
+    if (!budget_) {
+        return;
+    }
+    auto budget = std::exchange(budget_, nullptr);
+    const auto bytes = std::exchange(bytes_, 0);
+    budget->Release(bytes);
+}
+
+ExprResCacheManager::ExprResCacheManager()
+    : memory_budget_(std::make_shared<ExprCacheMemoryBudget>(
+          config_.mem_max_bytes, /*report_metrics=*/true)),
+      materialization_budget_(
+          std::make_shared<ExprCacheMaterializationBudgetState>(
+              config_.materialization_max_bytes)) {
+}
+
 ExprResCacheManager&
 ExprResCacheManager::Instance() {
     static ExprResCacheManager instance;
@@ -91,17 +234,30 @@ ExprResCacheManager::Instance() {
 
 void
 ExprResCacheManager::SetEnabled(bool enabled) {
-    enabled_.store(enabled);
+    auto current = enabled_.load(std::memory_order_acquire);
+    while (current != enabled) {
+        // Invalidate old tickets before publishing an enabled state. A Put
+        // that observes enabled=true with acquire ordering must also observe
+        // this epoch change.
+        Instance().config_epoch_.fetch_add(1, std::memory_order_release);
+        if (enabled_.compare_exchange_weak(current,
+                                           enabled,
+                                           std::memory_order_release,
+                                           std::memory_order_acquire)) {
+            return;
+        }
+    }
 }
 
 bool
-ExprResCacheManager::IsEnabled() {
+ExprResCacheManager::IsEnabled() noexcept {
     return enabled_.load();
 }
 
 bool
 ExprResCacheManager::SetConfig(const CacheConfig& config) {
     std::unique_lock state_lock(state_mutex_);
+    config_epoch_.fetch_add(1, std::memory_order_relaxed);
     const auto old_mode = config_.mode;
     const auto old_disk_base_path = config_.disk_base_path;
 
@@ -126,15 +282,17 @@ ExprResCacheManager::SetConfig(const CacheConfig& config) {
                 disk_segment_usage_.clear();
                 disk_clock_hand_ = 0;
             }
-            SyncUsageMetrics(0, 0);
+            SyncDiskUsageMetrics(0);
             return false;
         }
     }
 
     config_ = config;
+    materialization_budget_->SetCapacity(config_.materialization_max_bytes);
     frequency_tracker_.Reset();
     if (config_.mode == CacheMode::Memory) {
-        entry_pool_ = std::make_unique<EntryPool>(config_.mem_max_bytes);
+        entry_pool_ =
+            std::make_unique<EntryPool>(config_.mem_max_bytes, memory_budget_);
         entry_pool_->Configure(config_.mem_max_bytes,
                                config_.compression_enabled,
                                config_.mem_min_eval_duration_us);
@@ -153,7 +311,7 @@ ExprResCacheManager::SetConfig(const CacheConfig& config) {
         if (old_mode == CacheMode::Disk) {
             RemoveCacheFilesInDir(old_disk_base_path);
         }
-        SyncUsageMetrics(0, 0);
+        SyncDiskUsageMetrics(0);
         return true;
     } else {
         entry_pool_.reset();
@@ -177,7 +335,7 @@ ExprResCacheManager::SetConfig(const CacheConfig& config) {
             old_disk_base_path != config_.disk_base_path) {
             RemoveCacheFilesInDir(old_disk_base_path);
         }
-        SyncUsageMetrics(0, 0);
+        SyncDiskUsageMetrics(0);
         return true;
     }
 }
@@ -186,6 +344,24 @@ CacheMode
 ExprResCacheManager::GetMode() const {
     std::shared_lock state_lock(state_mutex_);
     return config_.mode;
+}
+
+bool
+ExprResCacheManager::CanCacheSegment(SegmentType segment_type) const noexcept {
+    bool can_cache = false;
+    RunExprCacheBestEffort([&]() {
+        std::shared_lock state_lock(state_mutex_);
+        can_cache = CanCacheSegmentLocked(segment_type);
+    });
+    return can_cache;
+}
+
+bool
+ExprResCacheManager::CanCacheSegmentLocked(
+    SegmentType segment_type) const noexcept {
+    return segment_type == SegmentType::Sealed ||
+           (segment_type == SegmentType::Growing &&
+            config_.mode == CacheMode::Memory && config_.mem_enable_growing);
 }
 
 void
@@ -204,6 +380,7 @@ ExprResCacheManager::SetDiskConfig(const std::string& base_path,
     CacheConfig cfg;
     cfg.mode = CacheMode::Memory;
     cfg.mem_max_bytes = max_total_size;
+    cfg.materialization_max_bytes = max_total_size;
     cfg.compression_enabled = compression_enabled;
     cfg.admission_threshold = admission_threshold;
     cfg.mem_min_eval_duration_us = min_eval_duration_us;
@@ -213,6 +390,7 @@ ExprResCacheManager::SetDiskConfig(const std::string& base_path,
 void
 ExprResCacheManager::SetCapacityBytes(size_t capacity_bytes) {
     std::unique_lock state_lock(state_mutex_);
+    config_epoch_.fetch_add(1, std::memory_order_relaxed);
     // Backward compatibility: ensure memory-mode EntryPool exists.
     // Old callers used SetCapacityBytes to configure the cache size;
     // the V2 manager needs an EntryPool to actually store entries.
@@ -220,21 +398,25 @@ ExprResCacheManager::SetCapacityBytes(size_t capacity_bytes) {
     // to match the old manager's unconditional caching behavior.
     config_.mode = CacheMode::Memory;
     config_.mem_max_bytes = capacity_bytes;
+    config_.materialization_max_bytes = capacity_bytes;
+    config_.mem_enable_growing = false;
     config_.admission_threshold = 1;
     config_.mem_min_eval_duration_us = 0;
     if (!entry_pool_) {
-        entry_pool_ = std::make_unique<EntryPool>(capacity_bytes);
+        entry_pool_ =
+            std::make_unique<EntryPool>(capacity_bytes, memory_budget_);
     }
     entry_pool_->Configure(capacity_bytes,
                            config_.compression_enabled,
                            config_.mem_min_eval_duration_us);
+    materialization_budget_->SetCapacity(capacity_bytes);
 }
 
 size_t
 ExprResCacheManager::GetCurrentBytes() const {
     std::shared_lock state_lock(state_mutex_);
-    if (config_.mode == CacheMode::Memory && entry_pool_) {
-        return entry_pool_->GetCurrentBytes();
+    if (config_.mode == CacheMode::Memory) {
+        return GetMemoryBytes();
     }
     if (config_.mode == CacheMode::Disk) {
         std::shared_lock lock(disk_files_mutex_);
@@ -262,80 +444,219 @@ ExprResCacheManager::GetEntryCount() const {
     return 0;
 }
 
+size_t
+ExprResCacheManager::GetMemoryBytes() const {
+    return memory_budget_->GetUsedBytes();
+}
+
+size_t
+ExprResCacheManager::GetMaterializationBytes() const {
+    return materialization_budget_->GetUsedBytes();
+}
+
+std::optional<ExprResCacheManager::MaterializationLease>
+ExprResCacheManager::TryAcquireMaterialization(int64_t active_count) {
+    const auto bytes = FullBitmapPairBytes(active_count);
+    if (!bytes.has_value() || !materialization_budget_->TryAcquire(*bytes)) {
+        return std::nullopt;
+    }
+    return MaterializationLease(materialization_budget_, *bytes);
+}
+
 bool
-ExprResCacheManager::Get(const Key& key, Value& out_value) {
-    if (!IsEnabled()) {
+ExprResCacheManager::Get(const Key& key, Value& out_value) noexcept {
+    bool hit = false;
+    if (!RunExprCacheBestEffort([&]() {
+            hit = GetWithStatus(key, out_value) == LookupResult::Hit;
+        })) {
+        out_value.result.reset();
+        out_value.valid_result.reset();
+        out_value.bytes = 0;
         return false;
+    }
+    return hit;
+}
+
+ExprResCacheManager::LookupResult
+ExprResCacheManager::GetWithStatus(const Key& key, Value& out_value) {
+    return GetWithStatus(key, out_value, {});
+}
+
+ExprResCacheManager::LookupResult
+ExprResCacheManager::GetWithStatus(const Key& key,
+                                   Value& out_value,
+                                   const std::function<void()>& before_decode) {
+    out_value.result.reset();
+    out_value.valid_result.reset();
+    out_value.bytes = 0;
+    if (!IsEnabled()) {
+        return LookupResult::Miss;
     }
 
-    std::shared_lock state_lock(state_mutex_);
-    if (!IsEnabled()) {
-        return false;
-    }
-    if (config_.mode == CacheMode::Memory) {
-        if (!entry_pool_) {
+    std::shared_ptr<MaterializedBitmapPair> materialized;
+    // Free partially decoded buffers before their reservation on every exit.
+    TargetBitmap result{0};
+    TargetBitmap valid{0};
+    auto failure = LookupResult::Miss;
+    auto before_materialize = [&]() {
+        auto lease = TryAcquireMaterialization(out_value.active_count);
+        if (!lease.has_value()) {
+            failure = LookupResult::ResourceLimit;
             return false;
         }
-        TargetBitmap result(0), valid(0);
-        if (!entry_pool_->Get(key.segment_id,
-                              key.signature,
-                              out_value.active_count,
-                              result,
-                              valid)) {
-            return false;
-        }
-        out_value.result = std::make_shared<TargetBitmap>(std::move(result));
-        out_value.valid_result =
-            std::make_shared<TargetBitmap>(std::move(valid));
+        materialized =
+            std::make_shared<MaterializedBitmapPair>(std::move(*lease));
         return true;
-    } else {
-        // Disk mode
-        std::shared_lock lock(disk_files_mutex_);
-        auto it = disk_files_.find(key.segment_id);
-        if (it == disk_files_.end()) {
-            return false;
+    };
+
+    {
+        std::shared_lock state_lock(state_mutex_);
+        if (!IsEnabled()) {
+            return LookupResult::Miss;
         }
-        TargetBitmap result(0), valid(0);
-        if (!it->second->Get(
-                key.signature, out_value.active_count, result, valid)) {
-            return false;
+        if (config_.mode == CacheMode::Memory) {
+            if (!entry_pool_) {
+                return LookupResult::Miss;
+            }
+            auto payload = entry_pool_->Lookup(
+                key.segment_id, key.signature, out_value.active_count);
+            if (!payload) {
+                return LookupResult::Miss;
+            }
+            // Lookup has released the pool lock. The immutable payload owns
+            // its bytes and charge independently of the pool/config lifetime.
+            state_lock.unlock();
+            if (!before_materialize()) {
+                return failure;
+            }
+            if (before_decode) {
+                before_decode();
+            }
+            if (!payload->Decode(result, valid)) {
+                return LookupResult::Miss;
+            }
+        } else {
+            // Disk slots still require their file/metadata locks during I/O.
+            std::shared_lock lock(disk_files_mutex_);
+            auto it = disk_files_.find(key.segment_id);
+            if (it == disk_files_.end() || !it->second) {
+                return LookupResult::Miss;
+            }
+            if (!it->second->Get(key.signature,
+                                 out_value.active_count,
+                                 result,
+                                 valid,
+                                 std::ref(before_materialize))) {
+                return failure;
+            }
+            TryTouchDiskSegment(key.segment_id);
         }
-        out_value.result = std::make_shared<TargetBitmap>(std::move(result));
-        out_value.valid_result =
-            std::make_shared<TargetBitmap>(std::move(valid));
-        TryTouchDiskSegment(key.segment_id);
-        return true;
     }
+
+    materialized->result = std::move(result);
+    materialized->valid = std::move(valid);
+    out_value.result =
+        std::shared_ptr<TargetBitmap>(materialized, &materialized->result);
+    out_value.valid_result =
+        std::shared_ptr<TargetBitmap>(materialized, &materialized->valid);
+    out_value.bytes = FullBitmapPairBytes(out_value.active_count).value_or(0);
+    ::milvus::monitor::internal_expr_cache_hit_total.Increment();
+    return LookupResult::Hit;
 }
 
 void
-ExprResCacheManager::Put(const Key& key, const Value& value) {
+ExprResCacheManager::Put(const Key& key, const Value& value) noexcept {
+    RunExprCacheBestEffort([&]() { PutInternal(key, value, nullptr); });
+}
+
+ExprResCacheManager::AdmissionTicket
+ExprResCacheManager::ObserveMiss(const Key& key,
+                                 int64_t active_count,
+                                 SegmentType segment_type) {
+    AdmissionTicket ticket;
+    if (!IsEnabled() || active_count < 0) {
+        return ticket;
+    }
+
+    std::shared_lock state_lock(state_mutex_);
+    if (!IsEnabled() || !CanCacheSegmentLocked(segment_type)) {
+        return ticket;
+    }
+
+    ticket.config_epoch = config_epoch_.load(std::memory_order_relaxed);
+    ticket.key_hash = AdmissionKeyHash(key, active_count);
+
+    if (config_.mode == CacheMode::Memory) {
+        if (!entry_pool_) {
+            return ticket;
+        }
+    } else {
+        if (config_.disk_base_path.empty()) {
+            return ticket;
+        }
+        std::shared_lock lock(disk_files_mutex_);
+        if (disk_ineligible_segments_.find(key.segment_id) !=
+            disk_ineligible_segments_.end()) {
+            return ticket;
+        }
+    }
+
+    ticket.admitted = frequency_tracker_.RecordAndCheck(
+        ticket.key_hash, config_.admission_threshold);
+    return ticket;
+}
+
+void
+ExprResCacheManager::PutAdmitted(const Key& key,
+                                 const Value& value,
+                                 const AdmissionTicket& ticket) noexcept {
+    RunExprCacheBestEffort([&]() { PutInternal(key, value, &ticket); });
+}
+
+void
+ExprResCacheManager::PutInternal(const Key& key,
+                                 const Value& value,
+                                 const AdmissionTicket* ticket,
+                                 const DiskPutHook& hook) {
     if (!IsEnabled()) {
         return;
     }
     if (!value.result || !value.valid_result) {
         return;
     }
+    if (value.active_count < 0 ||
+        value.result->size() != static_cast<size_t>(value.active_count) ||
+        value.valid_result->size() != static_cast<size_t>(value.active_count)) {
+        return;
+    }
 
     std::shared_lock state_lock(state_mutex_);
     if (!IsEnabled()) {
         return;
     }
+
+    if (ticket != nullptr) {
+        const auto key_hash = AdmissionKeyHash(key, value.active_count);
+        if (!ticket->admitted ||
+            ticket->config_epoch !=
+                config_epoch_.load(std::memory_order_relaxed) ||
+            ticket->key_hash != key_hash) {
+            return;
+        }
+    }
+
     if (config_.mode == CacheMode::Memory) {
         if (!entry_pool_) {
             return;
         }
-        const bool same_signature_cached =
-            entry_pool_->HasSignature(key.segment_id, key.signature);
-        if (!same_signature_cached && config_.mem_min_eval_duration_us > 0 &&
+        if (config_.mem_min_eval_duration_us > 0 &&
             value.eval_duration_us > 0 &&
             value.eval_duration_us < config_.mem_min_eval_duration_us) {
             return;
         }
-        if (!same_signature_cached &&
-            !frequency_tracker_.RecordAndCheck(
-                XXH64(key.signature.data(), key.signature.size(), 0),
-                config_.admission_threshold)) {
+        if (ticket == nullptr && !frequency_tracker_.RecordAndCheck(
+                                     AdmissionKeyHash(key, value.active_count),
+                                     config_.admission_threshold)) {
             return;
         }
         entry_pool_->Put(key.segment_id,
@@ -344,28 +665,23 @@ ExprResCacheManager::Put(const Key& key, const Value& value) {
                          *value.result,
                          *value.valid_result,
                          value.eval_duration_us);
-        SyncUsageMetrics(entry_pool_->GetCurrentBytes(), 0);
+        SyncDiskUsageMetrics(0);
     } else {
         // Disk mode
         if (config_.disk_base_path.empty()) {
             return;
         }
 
-        bool replacing_existing = false;
         {
             std::shared_lock lock(disk_files_mutex_);
             if (disk_ineligible_segments_.find(key.segment_id) !=
                 disk_ineligible_segments_.end()) {
                 return;
             }
-            auto it = disk_files_.find(key.segment_id);
-            if (it != disk_files_.end()) {
-                replacing_existing = it->second->HasSignature(key.signature);
-            }
         }
 
         // Latency admission (disk mode)
-        if (!replacing_existing && config_.disk_min_eval_duration_us > 0 &&
+        if (config_.disk_min_eval_duration_us > 0 &&
             value.eval_duration_us > 0 &&
             value.eval_duration_us < config_.disk_min_eval_duration_us) {
             return;
@@ -374,10 +690,9 @@ ExprResCacheManager::Put(const Key& key, const Value& value) {
         // Frequency admission is mode-independent. Applying it before opening
         // the segment file avoids one-off expressions consuming disk slots and
         // issuing unnecessary pwrite calls.
-        if (!replacing_existing &&
-            !frequency_tracker_.RecordAndCheck(
-                XXH64(key.signature.data(), key.signature.size(), 0),
-                config_.admission_threshold)) {
+        if (ticket == nullptr && !frequency_tracker_.RecordAndCheck(
+                                     AdmissionKeyHash(key, value.active_count),
+                                     config_.admission_threshold)) {
             return;
         }
 
@@ -388,37 +703,77 @@ ExprResCacheManager::Put(const Key& key, const Value& value) {
         }
         std::string path = config_.disk_base_path + "/seg_" +
                            std::to_string(key.segment_id) + ".cache";
-        auto& file = disk_files_[key.segment_id];
-        if (file &&
-            file->GetRowCount() != static_cast<int64_t>(value.result->size())) {
+        auto file_it = disk_files_.find(key.segment_id);
+        if (file_it != disk_files_.end() && file_it->second &&
+            file_it->second->GetRowCount() !=
+                static_cast<int64_t>(value.result->size())) {
             // Disk cache is sealed-only. A row-count change identifies a
             // growing/unstable segment for this backend, so drop the old fixed
             // file and skip future disk puts until the segment/config resets.
             RemoveDiskSegmentFile(key.segment_id);
             disk_ineligible_segments_.insert(key.segment_id);
-            SyncUsageMetrics(0, GetDiskCurrentBytesLocked());
+            SyncDiskUsageMetrics(GetDiskCurrentBytesLocked());
             return;
         }
-        if (!file) {
-            file = std::make_unique<DiskSlotFile>(
+        const bool create_file =
+            file_it == disk_files_.end() || !file_it->second;
+        // Finish the allocating Clock registration before creating a file or
+        // committing a slot. A failed registration must leave no disk write.
+        TouchDiskSegment(key.segment_id, hook);
+        auto rollback_new_file = folly::makeGuard([&]() {
+            if (create_file) {
+                disk_files_.erase(key.segment_id);
+                // Reuse the prepared path: exception cleanup must not allocate
+                // another path string while handling an allocation failure.
+                ::unlink(path.c_str());
+                RemoveDiskClockSegment(key.segment_id);
+            }
+        });
+        if (create_file) {
+            if (hook) {
+                hook(DiskPutStage::FileCreate);
+            }
+            auto new_file = std::make_unique<DiskSlotFile>(
                 key.segment_id,
                 path,
                 static_cast<int64_t>(value.result->size()),
                 config_.disk_max_file_size);
+            if (hook) {
+                hook(DiskPutStage::FilePublish);
+            }
+            if (file_it == disk_files_.end()) {
+                file_it =
+                    disk_files_.emplace(key.segment_id, std::move(new_file))
+                        .first;
+            } else {
+                file_it->second = std::move(new_file);
+            }
         }
-        file->Put(key.signature,
-                  value.active_count,
-                  *value.result,
-                  *value.valid_result);
-        TouchDiskSegment(key.segment_id);
+        if (hook) {
+            hook(DiskPutStage::SlotWrite);
+        }
+        file_it->second->Put(key.signature,
+                             value.active_count,
+                             *value.result,
+                             *value.valid_result);
+        if (hook) {
+            hook(DiskPutStage::SlotWritten);
+        }
+        if (create_file && file_it->second->GetUsedCount() == 0) {
+            // Open/pwrite failures are reported by leaving the file empty.
+            // Roll back its registration and file before returning as well.
+            return;
+        }
+        rollback_new_file.dismiss();
         EvictDiskSegmentsUntilWithinBudget(key.segment_id);
-        SyncUsageMetrics(0, GetDiskCurrentBytesLocked());
+        SyncDiskUsageMetrics(GetDiskCurrentBytesLocked());
     }
 }
 
 void
 ExprResCacheManager::Clear() {
     std::unique_lock state_lock(state_mutex_);
+    config_epoch_.fetch_add(1, std::memory_order_relaxed);
     if (entry_pool_) {
         entry_pool_->Clear();
     }
@@ -438,7 +793,7 @@ ExprResCacheManager::Clear() {
     if (!config_.disk_base_path.empty()) {
         RemoveCacheFilesInDir(config_.disk_base_path);
     }
-    SyncUsageMetrics(0, 0);
+    SyncDiskUsageMetrics(0);
 }
 
 size_t
@@ -446,7 +801,7 @@ ExprResCacheManager::EraseSegment(int64_t segment_id) {
     std::unique_lock state_lock(state_mutex_);
     if (config_.mode == CacheMode::Memory) {
         size_t erased = entry_pool_ ? entry_pool_->EraseSegment(segment_id) : 0;
-        SyncUsageMetrics(entry_pool_ ? entry_pool_->GetCurrentBytes() : 0, 0);
+        SyncDiskUsageMetrics(0);
         return erased;
     } else {
         std::unique_lock lock(disk_files_mutex_);
@@ -456,7 +811,7 @@ ExprResCacheManager::EraseSegment(int64_t segment_id) {
             return 0;
         }
         RemoveDiskSegmentFile(segment_id);
-        SyncUsageMetrics(0, GetDiskCurrentBytesLocked());
+        SyncDiskUsageMetrics(GetDiskCurrentBytesLocked());
         return 1;
     }
 }
@@ -546,17 +901,35 @@ ExprResCacheManager::EvictDiskSegmentsUntilWithinBudget(
 }
 
 void
-ExprResCacheManager::TouchDiskSegment(int64_t segment_id) {
+ExprResCacheManager::TouchDiskSegment(int64_t segment_id,
+                                      const DiskPutHook& hook) {
     static constexpr uint8_t kMaxSegmentUsage = 5;
 
     std::lock_guard lock(disk_clock_mutex_);
     if (disk_clock_index_.find(segment_id) == disk_clock_index_.end()) {
-        disk_clock_index_[segment_id] = disk_clock_segments_.size();
+        const auto index = disk_clock_segments_.size();
+        if (hook) {
+            hook(DiskPutStage::ClockAppend);
+        }
         disk_clock_segments_.push_back(segment_id);
-        disk_segment_usage_[segment_id] = 0;
+        try {
+            if (hook) {
+                hook(DiskPutStage::ClockIndexInsert);
+            }
+            disk_clock_index_.emplace(segment_id, index);
+            if (hook) {
+                hook(DiskPutStage::ClockUsageInsert);
+            }
+            disk_segment_usage_.try_emplace(segment_id, 0);
+        } catch (...) {
+            disk_clock_index_.erase(segment_id);
+            disk_segment_usage_.erase(segment_id);
+            disk_clock_segments_.pop_back();
+            throw;
+        }
     }
 
-    auto& usage = disk_segment_usage_[segment_id];
+    auto& usage = disk_segment_usage_.try_emplace(segment_id, 0).first->second;
     if (usage < kMaxSegmentUsage) {
         ++usage;
     }
@@ -642,17 +1015,9 @@ ExprResCacheManager::RemoveDiskSegmentFile(int64_t segment_id) {
 }
 
 void
-ExprResCacheManager::SyncUsageMetrics(size_t memory_bytes, size_t disk_bytes) {
-    auto old_memory = reported_memory_bytes_.exchange(
-        memory_bytes, std::memory_order_relaxed);
-    auto old_disk =
+ExprResCacheManager::SyncDiskUsageMetrics(size_t disk_bytes) {
+    const auto old_disk =
         reported_disk_bytes_.exchange(disk_bytes, std::memory_order_relaxed);
-
-    UpdateGauge(
-        cachinglayer::monitor::cache_loaded_bytes(
-            cachinglayer::CellDataType::OTHER,
-            cachinglayer::StorageType::MEMORY),
-        static_cast<int64_t>(memory_bytes) - static_cast<int64_t>(old_memory));
     UpdateGauge(
         cachinglayer::monitor::cache_loaded_bytes(
             cachinglayer::CellDataType::OTHER, cachinglayer::StorageType::DISK),

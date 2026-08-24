@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <shared_mutex>
 #include <string>
@@ -88,11 +89,15 @@ class DiskSlotFile {
     operator=(const DiskSlotFile&) = delete;
 
     // Get cached bitsets. Returns false on miss/mismatch.
+    // Runs before_materialize only after a matching slot is found, while
+    // holding its shared lock and before any pread or bitmap allocation.
+    // Returning false skips the read; the callback must not reenter the file.
     bool
     Get(const std::string& signature,
         int64_t active_count,
         TargetBitmap& out_result,
-        TargetBitmap& out_valid);
+        TargetBitmap& out_valid,
+        const std::function<bool()>& before_materialize = {});
 
     // Store raw bitsets into a slot. May evict via Clock if full.
     void
@@ -106,9 +111,6 @@ class DiskSlotFile {
 
     uint32_t
     GetUsedCount() const;
-
-    bool
-    HasSignature(const std::string& signature) const;
 
     uint32_t
     GetSlotSize() const {
@@ -124,6 +126,8 @@ class DiskSlotFile {
     }
 
  private:
+    friend struct DiskSlotFileTestAccess;
+
     struct SlotMeta {
         uint32_t slot_id;
         std::string signature;
@@ -150,11 +154,13 @@ class DiskSlotFile {
     int fd_{-1};
     uint32_t slot_size_{0};
     uint32_t num_slots_{0};
+    uint32_t next_unused_slot_{0};
     uint32_t bitset_bytes_{0};  // raw bitset size = ((row_count+63)/64)*8
 
     mutable std::shared_mutex mutex_;
     std::unordered_map<std::string, std::unique_ptr<SlotMeta>> slot_index_;
-    std::vector<uint32_t> free_slots_;  // available slot IDs
+    // Recycled IDs only; never-used slots are represented by next_unused_slot_.
+    std::vector<uint32_t> free_slots_;
 
     // Clock state
     std::vector<std::string> clock_keys_;
