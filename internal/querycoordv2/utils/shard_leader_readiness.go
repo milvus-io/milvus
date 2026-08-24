@@ -95,7 +95,14 @@ func ShardLeaderReadinessByResourceGroup(
 	// registration AND every replica record removed, and a no-replica early
 	// return would swallow the recorded failure into "nothing is loading
 	// here".
-	if !m.Exist(ctx, collectionID) {
+	// The test is CalculateLoadPercentage(...) < 0, NOT m.Exist, so that all
+	// three resource-group-scoped surfaces and the scoped GetShardLeaders gate
+	// answer "is this collection loaded" the same way -- see the longer note
+	// in LoadPercentageByResourceGroup. Exist would report Ready for a
+	// collection record left with zero partitions, a state whose routing the
+	// scoped GetShardLeaders path refuses with a non-retriable 101, which is
+	// exactly the disagreement the invariant above forbids.
+	if m.CalculateLoadPercentage(ctx, collectionID) < 0 {
 		// The nil check is part of the partially-wired tolerance:
 		// GlobalFailedLoadCache is the LAST piece initQueryCoord wires --
 		// after initMeta has wired the stores -- and Get dereferences a nil

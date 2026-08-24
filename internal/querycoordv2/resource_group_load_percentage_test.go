@@ -235,6 +235,13 @@ func TestGetLoadPercentageByResourceGroup_NoTargetYet(t *testing.T) {
 	require.NoError(t, f.meta.PutCollectionWithoutSave(ctx, &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: 500},
 	}))
+	// The partition record is what makes the collection count as registered:
+	// the registration test is CalculateLoadPercentage, which needs a
+	// non-empty partition set. Without it this fixture would land in the
+	// not-loaded branch and test nothing about the divide-by-zero guard.
+	require.NoError(t, f.meta.PutPartitionWithoutSave(ctx, &meta.Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{CollectionID: 500, PartitionID: 5000},
+	}))
 	f.putReplica(t, 500, 50, "rg-target")
 
 	assert.NotPanics(t, func() {
@@ -312,14 +319,12 @@ func TestGetLoadPercentageByResourceGroup_NilFailedLoadCache(t *testing.T) {
 // collection has a replica in the requested resource group but the
 // collection itself is not currently registered as loaded, a recorded
 // GlobalFailedLoadCache error is surfaced to the caller instead of a bare
-// -1. Deleting the
-// "if err := meta.GlobalFailedLoadCache.Get(collectionID); err != nil {
-// return -1, err }" block makes this test observe a nil error where it
-// expects the seeded failure.
+// -1. Deleting the GlobalFailedLoadCache.Get block makes this test observe a
+// nil error where it expects the seeded failure.
 func TestGetLoadPercentageByResourceGroup_FailedLoad(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	// Collection 700 is never registered via putTarget/PutCollectionWithoutSave,
-	// so meta.Exist(700) is false even though a replica record exists.
+	// so its load percentage reads negative even though a replica record exists.
 	f.putReplica(t, 700, 70, "rg-target")
 
 	loadErr := errors.New("mocked load failure")

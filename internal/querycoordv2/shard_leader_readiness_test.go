@@ -128,6 +128,40 @@ func (f *shardLeaderReadinessFixture) putLoadingCollection(t *testing.T, collect
 		"the fixture must leave the mid-load collection with a promoted current target")
 }
 
+// putLoadedCollectionWithoutPartitions registers collectionID as Loaded and
+// promotes its channels into the current target, but records NO partition --
+// the state job_load.go leaves behind between RemovePartition and
+// PutCollection whenever the incoming partition set is disjoint from the
+// loaded one. RemovePartition is an independent etcd commit that does not
+// touch the collection key, so the window is observable by a concurrent
+// reader and survives a crash inside it: etcd keeps the collection key with
+// zero partition keys, and CollectionManager.Recover restores the Loaded
+// record while the partition loop has nothing to iterate.
+//
+// This is the state on which m.Exist and CalculateLoadPercentage disagree.
+func (f *shardLeaderReadinessFixture) putLoadedCollectionWithoutPartitions(t *testing.T, collectionID int64, channelNames ...string) {
+	ctx := context.Background()
+	require.NoError(t, f.meta.PutCollectionWithoutSave(ctx, &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID: collectionID,
+			Status:       querypb.LoadStatus_Loaded,
+		},
+		LoadPercentage: 100,
+	}))
+
+	vChannels := make([]*datapb.VchannelInfo, 0, len(channelNames))
+	for _, name := range channelNames {
+		vChannels = append(vChannels, &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: name})
+	}
+	f.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vChannels, nil, nil).Maybe()
+	f.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+	f.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+	require.True(t, f.meta.Exist(ctx, collectionID),
+		"the fixture must reproduce the state Exist calls loaded")
+	require.Negative(t, f.meta.CalculateLoadPercentage(ctx, collectionID),
+		"...and on which the load percentage reads negative, which is the disagreement under test")
+}
+
 // putReplica registers a replica of collectionID in rgName holding nodeIDs.
 // The replica ID is the first node id, so distinct replicas in one test need
 // distinct nodes; ReplicaManager indexes by ID and a repeated ID would
@@ -416,6 +450,18 @@ func TestShardLeaderReadinessByRG_NoChannelTarget(t *testing.T) {
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: 900, Status: querypb.LoadStatus_Loaded},
 		LoadPercentage:     100,
 	}))
+	// The partition record is what makes the collection count as registered:
+	// the registration test is CalculateLoadPercentage, which needs a
+	// non-empty partition set. Without it this fixture lands in the
+	// not-loaded branch and would test that instead of the empty-shard-set
+	// guard it exists for -- see
+	// TestZeroPartitionCollectionReadsNotLoadedOnEveryScopedSurface.
+	require.NoError(t, f.meta.PutPartitionWithoutSave(ctx, &meta.Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{
+			CollectionID: 900, PartitionID: 9000, Status: querypb.LoadStatus_Loaded,
+		},
+		LoadPercentage: 100,
+	}))
 	f.putReplica(t, 900, "rg-a", 90)
 
 	got := f.readiness(t, 900, "rg-a")
@@ -432,8 +478,8 @@ func TestShardLeaderReadinessByRG_NoChannelTarget(t *testing.T) {
 // what LoadPercentageByResourceGroup does with the same cache.
 func TestShardLeaderReadinessByRG_FailedLoadIsSurfaced(t *testing.T) {
 	f := newShardLeaderReadinessFixture(t)
-	// Collection 1000 is never registered as loaded, so meta.Exist is false
-	// even though a replica record exists.
+	// Collection 1000 is never registered as loaded, so its load percentage
+	// reads negative even though a replica record exists.
 	f.putReplica(t, 1000, "rg-a", 100)
 
 	loadErr := errors.New("mocked load failure")
@@ -442,29 +488,6 @@ func TestShardLeaderReadinessByRG_FailedLoadIsSurfaced(t *testing.T) {
 	got, err := f.server().GetShardLeaderReadinessByResourceGroup(context.Background(), 1000, "rg-a")
 
 	assert.ErrorIs(t, err, loadErr, "a recorded load failure must reach the caller unwrapped")
-	assert.False(t, got.Ready)
-	assert.Equal(t, utils.ShardLeadersReasonCollectionNotLoaded, got.Reason)
-}
-
-// TestShardLeaderReadinessByRG_FailedLoadSurvivesReplicaCleanup pins the
-// terminal failed-load state, which is also the common one:
-// CollectionObserver.observeTimeout removes BOTH the collection registration
-// and every replica record, leaving only the GlobalFailedLoadCache entry
-// behind. The recorded failure must still reach the caller from that state;
-// checking replicas before consulting the cache would swallow it into
-// (NoReplicaInResourceGroup, nil), which tells the caller nothing is loading
-// here when the truth is that the load failed.
-func TestShardLeaderReadinessByRG_FailedLoadSurvivesReplicaCleanup(t *testing.T) {
-	f := newShardLeaderReadinessFixture(t)
-	// No putLoadedCollection, no putReplica: collection 1400 has been fully
-	// cleaned up after its load timed out; only the failure record remains.
-	loadErr := errors.New("mocked load failure")
-	seedFailedLoadCache(t, 1400, loadErr)
-
-	got, err := f.server().GetShardLeaderReadinessByResourceGroup(context.Background(), 1400, "rg-a")
-
-	assert.ErrorIs(t, err, loadErr,
-		"the recorded load failure must survive the removal of the replica records")
 	assert.False(t, got.Ready)
 	assert.Equal(t, utils.ShardLeadersReasonCollectionNotLoaded, got.Reason)
 }

@@ -317,6 +317,49 @@ func TestGetShardLeadersStrictScopeQueryInvisibleReplicaIsNotTerminal(t *testing
 	assert.Equal(t, utils.ShardLeadersReasonShardsWithoutLeader, f.readiness(t, 100, "rg-b").Reason)
 }
 
+// TestZeroPartitionCollectionReadsNotLoadedOnEveryScopedSurface pins that the
+// three surfaces this PR adds answer "is this collection loaded" the same
+// way. They used to disagree: the two utils surfaces tested m.Exist, which
+// checks only the collection map, while scoped GetShardLeaders gates on
+// checkLoadStatus, i.e. CalculateLoadPercentage, which additionally requires
+// a non-empty partition set and otherwise falls through to -1.
+//
+// The disagreement is not theoretical -- see the fixture helper for the
+// job_load.go window that produces a collection record with zero partitions,
+// concurrently and across a crash. Under the old test, readiness reported
+// Ready=true and the percentage reported 100 for a collection whose scoped
+// routing is refused with ErrCollectionNotLoaded (101, non-retriable, so the
+// gRPC layer will not even resend): a caller gating a switchover on the first
+// two would cut traffic over and then have every route permanently refused.
+//
+// This test fails on every one of the three surfaces if any of them reverts
+// to m.Exist.
+func TestZeroPartitionCollectionReadsNotLoadedOnEveryScopedSurface(t *testing.T) {
+	ctx := context.Background()
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollectionWithoutPartitions(t, 100, "100-dmc0")
+	f.putReplica(t, 100, "rg-a", 10)
+	f.putLeader(100, 10, "100-dmc0", true)
+
+	readiness := f.readiness(t, 100, "rg-a")
+	assert.False(t, readiness.Ready,
+		"a collection with no partitions must not be called ready, whatever its leaders look like")
+	assert.Equal(t, utils.ShardLeadersReasonCollectionNotLoaded, readiness.Reason)
+
+	percentage, err := utils.LoadPercentageByResourceGroup(ctx, f.meta, f.targetMgr, f.dist, 100, "rg-a")
+	require.NoError(t, err)
+	assert.EqualValues(t, -1, percentage,
+		"the progress figure must agree with the routing surface, not report 100 for a collection that cannot be routed to")
+
+	resp, err := scopedServer(f).GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
+		CollectionID:  100,
+		ResourceGroup: "rg-a",
+	})
+	require.NoError(t, err)
+	assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCollectionNotLoaded,
+		"the routing surface's verdict is the one the other two now match")
+}
+
 // TestGetShardLeadersByResourceGroupEmptyScopeIsTheUnscopedAnswer pins the
 // third of the empty-string contracts this PR establishes. The proto field and
 // both sibling surfaces define "" as the absence of a filter; a literal

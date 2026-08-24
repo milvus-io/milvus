@@ -115,7 +115,22 @@ func LoadPercentageByResourceGroup(
 	// removed and only the GlobalFailedLoadCache entry remaining. Scanning
 	// replicas first would turn that state into a bare (-1, nil) and swallow
 	// the recorded failure.
-	if !m.Exist(ctx, collectionID) {
+	//
+	// The test is CalculateLoadPercentage(...) < 0, NOT m.Exist: Exist checks
+	// only the collection map, while calculateLoadPercentage additionally
+	// requires a non-empty partition set and otherwise falls through to -1.
+	// The two disagree on a collection record that has no partitions, which
+	// job_load.go leaves behind whenever the incoming partition set is
+	// disjoint from the loaded one -- RemovePartition is an independent etcd
+	// commit that does not touch the collection key, so the window is
+	// observable concurrently and survives a crash inside it, with Recover
+	// restoring the Loaded record over zero partitions. Exist would call that
+	// state loaded while the scoped GetShardLeaders path (which gates on
+	// checkLoadStatus, i.e. this same figure) calls it not loaded, and the
+	// caller would be told to cut traffic over to a group whose routing is
+	// then refused with a non-retriable 101. This is also the test
+	// ShowLoadCollections has always used.
+	if m.CalculateLoadPercentage(ctx, collectionID) < 0 {
 		// The nil check is part of the partially-wired tolerance:
 		// GlobalFailedLoadCache is the LAST piece initQueryCoord wires --
 		// after initMeta has wired the three stores -- and Get dereferences
