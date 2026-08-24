@@ -889,13 +889,18 @@ func TestIndexInspector_estimateIndexFieldSize(t *testing.T) {
 			return m.GetCollection(collectionID), nil
 		}).Maybe()
 
+	// Nullable is set on every user field: create time forces it for non
+	// milvus-table external collections (Pass 2 of
+	// NormalizeAndValidateExternalCollectionSchema), so this is the only
+	// schema shape production can produce here.
 	externalSchema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk_col"},
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, Nullable: true, ExternalField: "pk_col"},
 			{
 				FieldID:       vecField,
 				Name:          "vec",
 				DataType:      schemapb.DataType_FloatVector,
+				Nullable:      true,
 				ExternalField: "vec_col",
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: common.DimKey, Value: "128"},
@@ -995,8 +1000,10 @@ func TestIndexInspector_estimateIndexFieldSize(t *testing.T) {
 	})
 
 	t.Run("external collection estimates from schema", func(t *testing.T) {
+		// all user fields are nullable, so the vector is charged its width
+		// plus the nullable encoding overhead instead of the whole group
 		m.collections.Insert(collID, &collectionInfo{ID: collID, Schema: externalSchema})
-		assert.Equal(t, int64(128*4)*numRows, inspector.estimateIndexFieldSize(ctx, m.GetCollection(collID), externalSegment, vecField))
+		assert.Equal(t, int64(128*4+nullableFixedWidthPadPerRow)*numRows, inspector.estimateIndexFieldSize(ctx, m.GetCollection(collID), externalSegment, vecField))
 	})
 
 	t.Run("external collection falls back on unknown field", func(t *testing.T) {
@@ -1049,15 +1056,18 @@ func TestIndexInspector_CreateIndexForSegment_ExternalTaskSlot(t *testing.T) {
 			},
 		},
 	}
+	// production shape: non milvus-table external user fields are always
+	// nullable (Pass 2 of NormalizeAndValidateExternalCollectionSchema)
 	m.collections.Insert(collID, &collectionInfo{
 		ID: collID,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk_col"},
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, Nullable: true, ExternalField: "pk_col"},
 				{
 					FieldID:       vecField,
 					Name:          "vec",
 					DataType:      schemapb.DataType_FloatVector,
+					Nullable:      true,
 					ExternalField: "vec_col",
 					TypeParams: []*commonpb.KeyValuePair{
 						{Key: common.DimKey, Value: "128"},
@@ -1102,10 +1112,11 @@ func TestIndexInspector_CreateIndexForSegment_ExternalTaskSlot(t *testing.T) {
 	err := inspector.createIndexForSegment(ctx, m.GetCollection(collID), segment, indexID)
 	assert.NoError(t, err)
 
-	// 128 dim float vector over 3000 rows is ~1.5MB, the smallest slot bucket,
+	// A 128 dim nullable float vector over 3000 rows is bounded by its width
+	// plus the nullable encoding overhead — ~1.5MB, the smallest slot bucket,
 	// instead of the whole 2GB column group.
 	indexParams := m.indexMeta.indexes[collID][indexID].IndexParams
-	expected := calculateIndexTaskSlot(int64(128*4)*numRows, numRows, indexParams)
+	expected := calculateIndexTaskSlot(int64(128*4+nullableFixedWidthPadPerRow)*numRows, numRows, indexParams)
 	assert.Equal(t, expected, enqueuedSlot)
 	assert.Less(t, enqueuedSlot, calculateIndexTaskSlot(groupSize, numRows, indexParams))
 }

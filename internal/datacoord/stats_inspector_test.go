@@ -116,17 +116,20 @@ func (s *statsInspectorSuite) SetupTest() {
 		ID: 2,
 		Schema: &schemapb.CollectionSchema{
 			ExternalSource: "s3://external",
+			ExternalSpec:   `{"format":"parquet"}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:       200,
 					Name:          "pk",
 					DataType:      schemapb.DataType_Int64,
+					Nullable:      true,
 					ExternalField: "pk_col",
 				},
 				{
 					FieldID:       201,
 					Name:          "var",
 					DataType:      schemapb.DataType_VarChar,
+					Nullable:      true,
 					ExternalField: "var_col",
 					TypeParams: []*commonpb.KeyValuePair{
 						{
@@ -141,6 +144,7 @@ func (s *statsInspectorSuite) SetupTest() {
 					FieldID:       202,
 					Name:          "json",
 					DataType:      schemapb.DataType_JSON,
+					Nullable:      true,
 					ExternalField: "json_col",
 				},
 			},
@@ -750,9 +754,10 @@ func (s *statsInspectorSuite) TestReloadFromMetaEstimatesPerSubJobType() {
 		ID: collectionID,
 		Schema: &schemapb.CollectionSchema{
 			ExternalSource: "s3://external",
+			ExternalSpec:   `{"format":"parquet"}`,
 			Fields: []*schemapb.FieldSchema{
-				{FieldID: pkFieldID, Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk_col"},
-				{FieldID: jsonFieldID, Name: "json", DataType: schemapb.DataType_JSON, ExternalField: "json_col"},
+				{FieldID: pkFieldID, Name: "pk", DataType: schemapb.DataType_Int64, Nullable: true, ExternalField: "pk_col"},
+				{FieldID: jsonFieldID, Name: "json", DataType: schemapb.DataType_JSON, Nullable: true, ExternalField: "json_col"},
 			},
 		},
 	})
@@ -992,22 +997,22 @@ func (s *statsInspectorSuite) TestEstimateStatsTaskSize() {
 		wholeRowSize = int64(100 * 1024 * 1024)
 	)
 
+	// an internal storage v3 collection whose short columns share one column
+	// group: the non-nullable pk is exact and deductible from the group budget
 	schema := &schemapb.CollectionSchema{
-		ExternalSource: "s3://external",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: pkFieldID, Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk_col"},
+			{FieldID: pkFieldID, Name: "pk", DataType: schemapb.DataType_Int64},
 			{
-				FieldID:       textFieldID,
-				Name:          "var",
-				DataType:      schemapb.DataType_VarChar,
-				ExternalField: "var_col",
+				FieldID:  textFieldID,
+				Name:     "var",
+				DataType: schemapb.DataType_VarChar,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: common.MaxLengthKey, Value: "1024"},
 					{Key: "enable_match", Value: "true"},
 					{Key: "enable_analyzer", Value: "true"},
 				},
 			},
-			{FieldID: jsonFieldID, Name: "json", DataType: schemapb.DataType_JSON, ExternalField: "json_col"},
+			{FieldID: jsonFieldID, Name: "json", DataType: schemapb.DataType_JSON},
 		},
 	}
 	s.mt.collections.Insert(collectionID, &collectionInfo{ID: collectionID, Schema: schema})
@@ -1093,5 +1098,41 @@ func (s *statsInspectorSuite) TestEstimateStatsTaskSize() {
 		segment := newSegment(collectionID)
 		segment.Binlogs[0].ChildFields = []int64{pkFieldID}
 		s.Equal(segment.getSegmentSize()*2, s.inspector.estimateStatsTaskSize(s.mt.GetCollection(segment.GetCollectionID()), segment, indexpb.StatsSubJob_JsonKeyIndexJob))
+	})
+
+	s.Run("non milvus-table external collection keeps the whole segment", func() {
+		// The only schema shape production can produce for a non milvus-table
+		// external collection: source and spec both set, every user field
+		// nullable (Pass 2 of NormalizeAndValidateExternalCollectionSchema).
+		// With nothing exact to deduct, a variable length target column is
+		// charged the whole synthetic group, i.e. the pre-attribution size.
+		const externalCollID = UniqueID(7)
+		externalSchema := &schemapb.CollectionSchema{
+			ExternalSource: "s3://external",
+			ExternalSpec:   `{"format":"parquet"}`,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: pkFieldID, Name: "pk", DataType: schemapb.DataType_Int64, Nullable: true, ExternalField: "pk_col"},
+				{
+					FieldID:       textFieldID,
+					Name:          "var",
+					DataType:      schemapb.DataType_VarChar,
+					Nullable:      true,
+					ExternalField: "var_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "1024"},
+						{Key: "enable_match", Value: "true"},
+						{Key: "enable_analyzer", Value: "true"},
+					},
+				},
+				{FieldID: jsonFieldID, Name: "json", DataType: schemapb.DataType_JSON, Nullable: true, ExternalField: "json_col"},
+			},
+		}
+		s.mt.collections.Insert(externalCollID, &collectionInfo{ID: externalCollID, Schema: externalSchema})
+
+		segment := newSegment(externalCollID)
+		s.Equal(wholeRowSize, s.inspector.estimateStatsTaskSize(
+			s.mt.GetCollection(segment.GetCollectionID()), segment, indexpb.StatsSubJob_TextIndexJob))
+		s.Equal(wholeRowSize*2, s.inspector.estimateStatsTaskSize(
+			s.mt.GetCollection(segment.GetCollectionID()), segment, indexpb.StatsSubJob_JsonKeyIndexJob))
 	})
 }
