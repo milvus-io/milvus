@@ -383,6 +383,55 @@ TEST(InvertedIndexRowMaskUtil, MaterializesDenseRoaringRows) {
     EXPECT_TRUE(complement[99]);
 }
 
+TEST(InvertedIndexRowMaskUtil, SelectsContainerAwareMaterialization) {
+    constexpr size_t kRowCount = uint64_t{1} << 16;
+
+    roaring::Roaring sparse_offsets;
+    sparse_offsets.add(1);
+    sparse_offsets.add(4097);
+    sparse_offsets.runOptimize();
+    EXPECT_FALSE(
+        index::ShouldMaterializeRoaringAsBitset(sparse_offsets, kRowCount));
+
+    roaring::Roaring bitmap_offsets;
+    for (uint32_t offset = 0; offset < kRowCount; offset += 2) {
+        bitmap_offsets.add(offset);
+    }
+    bitmap_offsets.runOptimize();
+    EXPECT_TRUE(
+        index::ShouldMaterializeRoaringAsBitset(bitmap_offsets, kRowCount));
+
+    roaring::Roaring run_offsets;
+    run_offsets.addRange(1000, kRowCount - 1000);
+    run_offsets.runOptimize();
+    EXPECT_TRUE(
+        index::ShouldMaterializeRoaringAsBitset(run_offsets, kRowCount));
+
+    run_offsets.add(kRowCount);
+    EXPECT_FALSE(
+        index::ShouldMaterializeRoaringAsBitset(run_offsets, kRowCount));
+}
+
+TEST(InvertedIndexRowMaskUtil, MaterializesBitmapContainerRows) {
+    constexpr size_t kRowCount = uint64_t{1} << 16;
+    roaring::Roaring offsets;
+    for (uint32_t offset = 0; offset < kRowCount; offset += 2) {
+        offsets.add(offset);
+    }
+    offsets.runOptimize();
+
+    auto rows = index::RoaringToBitset(offsets, kRowCount);
+    auto complement =
+        index::RoaringToBitset(offsets, kRowCount, /*inverted=*/true);
+
+    EXPECT_EQ(rows.count(), kRowCount / 2);
+    EXPECT_EQ(complement.count(), kRowCount / 2);
+    for (size_t offset : {size_t{0}, size_t{1}, kRowCount - 2, kRowCount - 1}) {
+        EXPECT_EQ(rows[offset], offset % 2 == 0);
+        EXPECT_EQ(complement[offset], offset % 2 != 0);
+    }
+}
+
 TEST(InvertedIndexRowMaskUtil, ClearsRoaringRowsFromCandidates) {
     roaring::Roaring offsets;
     offsets.add(1);

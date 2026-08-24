@@ -355,10 +355,10 @@ InvertedIndexTantivy<T>::IsNotNull() {
     tracer::AutoSpan span("InvertedIndexTantivy::IsNotNull",
                           tracer::GetRootSpan());
     int64_t count = Count();
-    TargetBitmap bitset(count, true);
 
-    auto fill_bitset = [this, &bitset]() {
-        ClearRoaringRows(null_offsets_, bitset);
+    TargetBitmap bitset;
+    auto fill_bitset = [this, count, &bitset]() {
+        bitset = RoaringToBitset(null_offsets_, count, /*inverted=*/true);
     };
 
     if (is_growing_) {

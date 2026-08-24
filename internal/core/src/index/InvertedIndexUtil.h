@@ -75,10 +75,54 @@ RoaringToLegacyOffsets(const roaring::Roaring& offsets) {
     return legacy;
 }
 
+inline bool
+ShouldMaterializeRoaringAsBitset(const roaring::Roaring& offsets,
+                                 size_t row_count) {
+    if (offsets.isEmpty() || row_count == 0) {
+        return false;
+    }
+
+    roaring::api::roaring_statistics_t stats{};
+    roaring::api::roaring_bitmap_statistics(&offsets.roaring, &stats);
+    // The dense converter may resize its bitset to cover the largest value.
+    // Keep the iterator path when the row mask extends beyond this result so
+    // out-of-range offsets retain the existing ignore semantics.
+    if (static_cast<uint64_t>(stats.max_value) >= row_count) {
+        return false;
+    }
+
+    const auto word_count =
+        row_count / 64 + static_cast<size_t>(row_count % 64 != 0);
+    const auto dense_container_values =
+        static_cast<uint64_t>(stats.n_values_run_containers) +
+        stats.n_values_bitset_containers;
+    // Materializing run and bitmap containers avoids more scattered bit
+    // updates than the extra word-wise flip needed by the inverted result.
+    // Array-container values stay on the sparse iterator path.
+    return dense_container_values > word_count;
+}
+
 inline TargetBitmap
 RoaringToBitset(const roaring::Roaring& offsets,
                 size_t row_count,
                 bool inverted = false) {
+    if (ShouldMaterializeRoaringAsBitset(offsets, row_count)) {
+        TargetBitmap result(row_count);
+        const auto word_count = result.size_in_elements();
+        // The selection predicate guarantees max(offsets) < row_count, so the
+        // converter cannot grow or reallocate this borrowed target buffer.
+        roaring::api::bitset_t bitset_view{
+            result.data(), word_count, word_count};
+        const auto converted = roaring::api::roaring_bitmap_to_bitset(
+            &offsets.roaring, &bitset_view);
+        AssertInfo(converted,
+                   "failed to materialize roaring row mask as a bitset");
+        if (inverted) {
+            result.flip();
+        }
+        return result;
+    }
+
     TargetBitmap result(row_count, inverted);
     for (auto offset : offsets) {
         if (offset >= row_count) {
