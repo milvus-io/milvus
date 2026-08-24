@@ -68,6 +68,14 @@ func (t *mixCompactionTask) GetTaskSlot() int64 {
 	return memoryToSlots(t.computeAndCacheRequirement(segments, allResolved).Memory)
 }
 
+// TaskResources states this task's requirement to the scheduler BEFORE it is
+// dispatched, which is what lets the node be chosen for having room rather
+// than for a scalar that stands in for it. It reuses the same cached estimate
+// the plan ships, so stating it costs nothing extra.
+func (t *mixCompactionTask) TaskResources() *datapb.TaskResources {
+	return t.taskRequirement().ToProto()
+}
+
 // taskRequirement is the two-dimensional estimate that goes on the wire. It
 // reuses whatever GetTaskSlot already resolved, so asking for both costs one
 // meta walk rather than two.

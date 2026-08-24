@@ -955,7 +955,24 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	return &datapb.QuerySlotResponse{
 		Status:         merr.Success(),
 		AvailableSlots: available,
+		Resources:      nodeResources(snap),
 	}, nil
+}
+
+// nodeResources is the two-dimensional report, alongside the scalar fold above.
+//
+// Capacity is the budget rather than the raw machine, so what the coordinator
+// subtracts against is what this node will actually accept; committed is the
+// ledger of ACCEPTED tasks, never the measured usage, because a task admitted
+// a moment ago has not reached its peak yet and reporting observation is what
+// let eight compactions land on one node while every one was still downloading
+// (issue #52180).
+//
+// Frozen is reported through `admitting` rather than by zeroing the dimensions:
+// the coordinator needs to tell "this node is full" from "this node has stopped
+// taking work", because only the second is a reason to look at the node itself.
+func nodeResources(snap resource.Snapshot) *datapb.NodeResources {
+	return taskresource.NodeResourcesOf(snap.Total, snap.Reserved, !snap.Frozen && snap.ExclusiveTaskID == 0)
 }
 
 // Not in used now
