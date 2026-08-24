@@ -45,10 +45,10 @@ func TestGlobalScheduler_Enqueue(t *testing.T) {
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, len(scheduler.(*globalTaskScheduler).pendingTasks.TaskIDs()))
-	assert.Equal(t, 1, scheduler.GetPendingTaskCount())
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount(taskcommon.Compaction))
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, len(scheduler.(*globalTaskScheduler).pendingTasks.TaskIDs()))
-	assert.Equal(t, 1, scheduler.GetPendingTaskCount())
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount(taskcommon.Compaction))
 
 	task = NewMockTask(t)
 	task.EXPECT().GetTaskID().Return(2)
@@ -57,12 +57,36 @@ func TestGlobalScheduler_Enqueue(t *testing.T) {
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, scheduler.(*globalTaskScheduler).runningTasks.Len())
-	assert.Equal(t, 1, scheduler.GetPendingTaskCount())
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount(taskcommon.Compaction))
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, scheduler.(*globalTaskScheduler).runningTasks.Len())
 }
 
-func TestGlobalScheduler_GetPendingTaskCountExcludesBackoff(t *testing.T) {
+func TestGlobalScheduler_GetPendingTaskCountIsScopedByTaskType(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster)
+
+	enqueue := func(taskID int64, taskType taskcommon.Type) {
+		task := NewMockTask(t)
+		task.EXPECT().GetTaskID().Return(taskID)
+		task.EXPECT().GetTaskState().Return(taskcommon.Init)
+		task.EXPECT().GetTaskType().Return(taskType)
+		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
+		scheduler.Enqueue(task)
+	}
+
+	enqueue(1, taskcommon.Stats)
+	enqueue(2, taskcommon.Compaction)
+	enqueue(3, taskcommon.Index)
+	enqueue(4, taskcommon.Compaction)
+
+	// An index/compaction backlog must not consume the stats admission budget.
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount(taskcommon.Stats))
+	assert.Equal(t, 2, scheduler.GetPendingTaskCount(taskcommon.Compaction))
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount(taskcommon.Index))
+}
+
+func TestGlobalScheduler_GetPendingTaskCountIncludesBackoff(t *testing.T) {
 	pt := paramtable.Get()
 	pt.Save(pt.DataCoordCfg.TaskRetryBackoffInterval.Key, "60")
 	defer pt.Reset(pt.DataCoordCfg.TaskRetryBackoffInterval.Key)
@@ -76,17 +100,16 @@ func TestGlobalScheduler_GetPendingTaskCountExcludesBackoff(t *testing.T) {
 		task := NewMockTask(t)
 		task.EXPECT().GetTaskID().Return(taskID)
 		task.EXPECT().GetTaskState().Return(taskcommon.Init)
-		task.EXPECT().GetTaskType().Return(taskcommon.Compaction)
+		task.EXPECT().GetTaskType().Return(taskcommon.Stats)
 		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
 		scheduler.Enqueue(task)
 		tasks[taskID] = task
 	}
 
+	// A task waiting on its retry backoff still occupies queue depth: excluding it
+	// would let a worker-side failure storm silently disable the admission gate.
 	globalScheduler.recordTaskFailure(tasks[2])
-	assert.Equal(t, 1, scheduler.GetPendingTaskCount())
-
-	globalScheduler.backoffs.Insert(2, &taskBackoff{notBefore: time.Now().Add(-time.Minute)})
-	assert.Equal(t, 2, scheduler.GetPendingTaskCount())
+	assert.Equal(t, 2, scheduler.GetPendingTaskCount(taskcommon.Stats))
 }
 
 func TestGlobalScheduler_AbortAndRemoveTask(t *testing.T) {

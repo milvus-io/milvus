@@ -36,9 +36,13 @@ const NullNodeID = -1
 type GlobalScheduler interface {
 	Enqueue(task Task)
 	AbortAndRemoveTask(taskID int64)
-	// GetPendingTaskCount returns tasks that are eligible for dispatch now;
-	// tasks waiting for their retry backoff deadline are excluded.
-	GetPendingTaskCount() int
+	// GetPendingTaskCount returns the number of queued tasks of the given type.
+	// The queue is shared by every task type, so callers that gate admission for
+	// one kind of work must scope the count to that kind, otherwise an unrelated
+	// backlog starves them. Tasks waiting on a retry backoff deadline ARE counted:
+	// they still occupy queue depth, and excluding them would let a worker-side
+	// failure storm silently disable the caller's admission gate.
+	GetPendingTaskCount(taskType taskcommon.Type) int
 
 	Start()
 	Stop()
@@ -126,11 +130,9 @@ func (s *globalTaskScheduler) Enqueue(task Task) {
 	mlog.Info(s.ctx, "task enqueued", WrapTaskLog(task)...)
 }
 
-func (s *globalTaskScheduler) GetPendingTaskCount() int {
-	now := time.Now()
+func (s *globalTaskScheduler) GetPendingTaskCount(taskType taskcommon.Type) int {
 	return s.pendingTasks.TaskCountBy(func(task Task) bool {
-		backoff, ok := s.backoffs.Get(task.GetTaskID())
-		return !ok || !now.Before(backoff.notBefore)
+		return task.GetTaskType() == taskType
 	})
 }
 

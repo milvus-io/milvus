@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -240,7 +241,7 @@ func (s *statsInspectorSuite) SetupTest() {
 	gs := task.NewMockGlobalScheduler(s.T())
 	gs.EXPECT().Enqueue(mock.Anything).Return().Maybe()
 	gs.EXPECT().AbortAndRemoveTask(mock.Anything).Return().Maybe()
-	gs.EXPECT().GetPendingTaskCount().Return(0).Maybe()
+	gs.EXPECT().GetPendingTaskCount(taskcommon.Stats).Return(0).Maybe()
 	s.scheduler = gs
 
 	s.inspector = newStatsInspector(
@@ -353,7 +354,7 @@ func (s *statsInspectorSuite) TestSubmitStatsTaskPendingLimit() {
 
 	s.Run("allow at limit", func() {
 		scheduler := task.NewMockGlobalScheduler(s.T())
-		scheduler.EXPECT().GetPendingTaskCount().Return(pendingTaskLimit).Once()
+		scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats).Return(pendingTaskLimit).Once()
 		scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
 		s.inspector.scheduler = scheduler
 
@@ -364,7 +365,7 @@ func (s *statsInspectorSuite) TestSubmitStatsTaskPendingLimit() {
 
 	s.Run("skip over limit", func() {
 		scheduler := task.NewMockGlobalScheduler(s.T())
-		scheduler.EXPECT().GetPendingTaskCount().Return(pendingTaskLimit + 1).Once()
+		scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats).Return(pendingTaskLimit + 1).Once()
 		s.inspector.scheduler = scheduler
 		// A strict allocator asserts the admission check runs before task ID allocation.
 		s.inspector.allocator = allocator.NewMockAllocator(s.T())
@@ -460,7 +461,7 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskHonorsDeprecatedZe
 // docked yet. Walking on (continue) would ask once per collection instead.
 func (s *statsInspectorSuite) TestTriggerStatsTaskStopsWhenSchedulerBacklogged() {
 	scheduler := task.NewMockGlobalScheduler(s.T())
-	scheduler.EXPECT().GetPendingTaskCount().
+	scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats).
 		Return(Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt() + 1).Times(2)
 	s.inspector.scheduler = scheduler
 	s.inspector.allocator = allocator.NewMockAllocator(s.T())
@@ -489,7 +490,7 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskStopsAtPendingLimi
 
 	pending := 0
 	scheduler := task.NewMockGlobalScheduler(s.T())
-	scheduler.EXPECT().GetPendingTaskCount().RunAndReturn(func() int { return pending })
+	scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats).RunAndReturn(func(taskcommon.Type) int { return pending })
 	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(_ task.Task) { pending++ }).Return()
 	s.inspector.scheduler = scheduler
 
