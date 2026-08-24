@@ -798,9 +798,7 @@ BuildSearchResultFullBatch(CSearchResult c_search_result,
         search_result->segment_);
 
     milvus::futures::throwIfCancelled(cancel_token);
-    {
-        milvus::segcore::SortEqualScoresByPks(search_result);
-    }
+    { milvus::segcore::SortEqualScoresByPks(search_result); }
 
     std::map<milvus::FieldId, std::unique_ptr<milvus::DataArray>> extra_fields;
     if (num_extra_fields > 0 && extra_field_ids != nullptr &&
