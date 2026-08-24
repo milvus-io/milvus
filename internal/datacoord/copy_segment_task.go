@@ -519,8 +519,12 @@ func (t *copySegmentTask) dropUntrackedCopySegmentTask(cluster session.Cluster, 
 	mlog.Warn(context.TODO(), "untracked copy segment drop retry handler unavailable, dropping synchronously",
 		mlog.FieldTaskID(taskID), mlog.FieldNodeID(nodeID))
 	err := cluster.DropCopySegment(context.TODO(), nodeID, taskID, taskVersion, true)
-	if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
-		mlog.Warn(context.TODO(), "failed to drop untracked copy segment task on datanode",
+	if err != nil {
+		// ErrNodeNotFound included: absence from the client map does not prove
+		// the worker task is gone, and with the retry owner closed there is no
+		// later round to confirm it — report the cleanup as unconfirmed rather
+		// than claiming delivery.
+		mlog.Warn(context.TODO(), "failed to confirm drop of untracked copy segment task on datanode",
 			mlog.FieldTaskID(taskID), mlog.FieldNodeID(nodeID), mlog.Err(err))
 		return
 	}
@@ -577,7 +581,9 @@ func (t *copySegmentTask) markTaskAndJobFailed(reason string) {
 //
 // Because the first signal is not proof, the caller never relies on it: the
 // dispatch that was lost is always handed to the untracked cleanup path, which
-// converges either way (drop lands, or ErrNodeNotFound is treated as done).
+// converges either way (the drop lands on a reachable node, or the node stays
+// absent from the client map for a full session-lease interval and is
+// confirmed gone).
 //
 // Everything else (gRPC transport errors, node briefly not serving/not ready,
 // response decode failures) may coexist with a still-running worker task and
@@ -656,10 +662,12 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 		// alive its task entry, its slot and its copy goroutines would be
 		// orphaned for good once NodeId is cleared, while still writing the
 		// very target keys the re-dispatch writes. Queuing the drop is safe and
-		// converges in both cases: a node that is really gone answers
-		// ErrNodeNotFound, which the inspector treats as done on the first
-		// attempt, delaying the re-dispatch by at most one round; a live node
-		// aborts the stale task. The drop carries the lost dispatch's epoch,
+		// converges in both cases: a node that is really gone keeps answering
+		// ErrNodeNotFound until the absence outlasts a session-lease interval
+		// and the inspector confirms it gone, delaying the re-dispatch by that
+		// grace; a live node — including one whose client-map entry lapsed
+		// transiently — aborts the stale task once the drop reaches it. The
+		// drop carries the lost dispatch's epoch,
 		// so it can never abort the re-dispatch even if it lands on the same
 		// node, and ClaimTaskDispatch withholds the re-dispatch until this
 		// cleanup is settled.
@@ -752,13 +760,18 @@ func (t *copySegmentTask) dropTaskOnWorker(ctx context.Context, cluster session.
 	if nodeID == NullNodeID {
 		return
 	}
-	// ErrNodeNotFound means the node (and the in-memory task with it) is already
-	// gone — the drop's goal is achieved, proceed to clear the assignment.
 	job := t.copyMeta.GetJob(ctx, t.GetJobId())
 	abort := t.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskFailed ||
 		job == nil || job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed
-	if err := cluster.DropCopySegment(ctx, nodeID, t.GetTaskId(), t.GetTaskVersion(), abort); err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
-		mlog.Warn(ctx, "failed to drop copy segment task on datanode",
+	if err := cluster.DropCopySegment(ctx, nodeID, t.GetTaskId(), t.GetTaskVersion(), abort); err != nil {
+		// ErrNodeNotFound included: it only says DataCoord's client map has no
+		// entry for the node right now, not that the node — and the worker task,
+		// slot and copy goroutines it holds — is gone. This one-shot call has no
+		// way to tell a real departure from a transient gap, so it keeps the
+		// assignment either way and leaves convergence to the inspector's
+		// processTerminal, which retries every round and treats the error as
+		// delivery only after the absence outlasts a session-lease interval.
+		mlog.Warn(ctx, "failed to drop copy segment task on datanode, leaving assignment for inspector retry",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
 		return
 	}

@@ -452,14 +452,66 @@ func (s *CopySegmentInspectorSuite) TestHasPendingUntrackedDropGatesRedispatch()
 	s.False(s.inspector.HasPendingUntrackedDrop(drop.taskID))
 }
 
-func (s *CopySegmentInspectorSuite) TestUntrackedDropNodeGoneConverges() {
+// TestUntrackedDropNodeGoneConvergesAfterGrace pins the convergence criterion
+// for ErrNodeNotFound: the error is DataCoord's client-map view, not proof the
+// DataNode process is gone — a lease keepalive blip or a Startup() gap removes
+// the entry while the node, its task and its copy goroutines are still alive
+// and writing the shared target keys. A single observation must therefore keep
+// the entry (and the re-dispatch gate) in place; only an absence that outlasts
+// a full session-lease interval retires it.
+func (s *CopySegmentInspectorSuite) TestUntrackedDropNodeGoneConvergesAfterGrace() {
 	drop := untrackedCopySegmentDrop{nodeID: 11, taskID: 1002, taskVersion: 7}
 	s.cluster.EXPECT().DropCopySegment(mock.Anything, drop.nodeID, drop.taskID, mock.Anything, true).
-		Return(merr.WrapErrNodeNotFound(drop.nodeID)).Once()
+		Return(merr.WrapErrNodeNotFound(drop.nodeID)).Times(2)
 
+	// First ErrNodeNotFound only starts the departure clock: the entry stays
+	// pending and dispatch stays gated.
 	s.True(s.inspector.EnqueueUntrackedDrop(drop.nodeID, drop.taskID, drop.taskVersion))
 	s.waitDropsSettled()
+	s.True(s.inspector.untrackedDrops.Contain(drop))
+	s.True(s.inspector.HasPendingUntrackedDrop(drop.taskID))
+	s.True(s.inspector.nodeGoneSince.Contain(drop))
+
+	// Once the absence has persisted for a full session-lease interval, the
+	// node is confirmed gone and the entry converges.
+	s.inspector.nodeGoneSince.Insert(drop, time.Now().Add(-copySegmentNodeGoneGrace()))
+	s.inspector.processUntrackedDrops()
+	s.waitDropsSettled()
 	s.False(s.inspector.untrackedDrops.Contain(drop))
+	s.False(s.inspector.nodeGoneSince.Contain(drop))
+	s.False(s.inspector.HasPendingUntrackedDrop(drop.taskID))
+}
+
+// TestUntrackedDropNodeReappearingResetsGoneClock covers the disproof side of
+// the criterion: an attempt that reaches a client (any non-NodeNotFound
+// outcome) means the node is back in the client map, so the earlier absence was
+// a transient gap and its clock must not carry over to a later, unrelated one.
+func (s *CopySegmentInspectorSuite) TestUntrackedDropNodeReappearingResetsGoneClock() {
+	drop := untrackedCopySegmentDrop{nodeID: 13, taskID: 1004, taskVersion: 5}
+
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, drop.nodeID, drop.taskID, mock.Anything, true).
+		Return(merr.WrapErrNodeNotFound(drop.nodeID)).Once()
+	s.True(s.inspector.EnqueueUntrackedDrop(drop.nodeID, drop.taskID, drop.taskVersion))
+	s.waitDropsSettled()
+	s.True(s.inspector.nodeGoneSince.Contain(drop))
+
+	// The node reappears but the drop RPC itself fails: the departure clock is
+	// reset, the entry stays pending.
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, drop.nodeID, drop.taskID, mock.Anything, true).
+		Return(errors.New("rpc timeout")).Once()
+	s.inspector.processUntrackedDrops()
+	s.waitDropsSettled()
+	s.False(s.inspector.nodeGoneSince.Contain(drop))
+	s.True(s.inspector.untrackedDrops.Contain(drop))
+
+	// A later ErrNodeNotFound starts a fresh clock instead of inheriting the
+	// stale one, so it must not converge immediately.
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, drop.nodeID, drop.taskID, mock.Anything, true).
+		Return(merr.WrapErrNodeNotFound(drop.nodeID)).Once()
+	s.inspector.processUntrackedDrops()
+	s.waitDropsSettled()
+	s.True(s.inspector.untrackedDrops.Contain(drop))
+	s.True(s.inspector.nodeGoneSince.Contain(drop))
 }
 
 func (s *CopySegmentInspectorSuite) TestUntrackedDropDoesNotBlockOrDuplicate() {
@@ -675,6 +727,91 @@ func (s *CopySegmentInspectorSuite) TestProcessTerminal_RetriesPersistFailure() 
 	s.inspector.processTerminal(task)
 	s.waitDropsSettled()
 	s.EqualValues(NullNodeID, s.copyMeta.GetTask(context.TODO(), 1002).GetNodeId())
+}
+
+// TestProcessTerminal_NodeGoneKeepsAssignmentUntilGraceElapses pins the fix for
+// treating ErrNodeNotFound as delivery on the terminal-drop path: clearing the
+// assignment opens checkGC's gate, and once the task and job records are GC'd
+// there is no record left to ever retry the drop — so a transient client-map
+// gap must not clear NodeId. Only an absence that outlasts a session-lease
+// interval may.
+func (s *CopySegmentInspectorSuite) TestProcessTerminal_NodeGoneKeepsAssignmentUntilGraceElapses() {
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+
+	task := s.addTerminalTaskWithAssignment(1005, 12,
+		datapb.CopySegmentTaskState_CopySegmentTaskCompleted)
+	key := untrackedCopySegmentDrop{nodeID: 12, taskID: 1005, taskVersion: task.GetTaskVersion()}
+
+	// Round 1: ErrNodeNotFound starts the departure clock; the assignment must
+	// be kept so a later round can still address the worker task.
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, int64(12), int64(1005), mock.Anything, mock.Anything).
+		Return(merr.WrapErrNodeNotFound(12)).Once()
+	s.inspector.processTerminal(task)
+	s.waitDropsSettled()
+	s.EqualValues(12, s.copyMeta.GetTask(context.TODO(), 1005).GetNodeId())
+	s.True(s.inspector.nodeGoneSince.Contain(key))
+
+	// Round 2: the absence outlasted the grace — the node is confirmed gone,
+	// the assignment is cleared and checkGC can reclaim the task.
+	s.inspector.nodeGoneSince.Insert(key, time.Now().Add(-copySegmentNodeGoneGrace()))
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, int64(12), int64(1005), mock.Anything, mock.Anything).
+		Return(merr.WrapErrNodeNotFound(12)).Once()
+	s.inspector.processTerminal(task)
+	s.waitDropsSettled()
+	s.EqualValues(NullNodeID, s.copyMeta.GetTask(context.TODO(), 1005).GetNodeId())
+	s.False(s.inspector.nodeGoneSince.Contain(key))
+}
+
+// TestProcessTerminal_NodeReappearingResetsGoneClock: a drop attempt that
+// reaches a client disproves the departure, so the clock started by an earlier
+// ErrNodeNotFound must not survive it.
+func (s *CopySegmentInspectorSuite) TestProcessTerminal_NodeReappearingResetsGoneClock() {
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+
+	task := s.addTerminalTaskWithAssignment(1006, 13,
+		datapb.CopySegmentTaskState_CopySegmentTaskCompleted)
+	key := untrackedCopySegmentDrop{nodeID: 13, taskID: 1006, taskVersion: task.GetTaskVersion()}
+
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, int64(13), int64(1006), mock.Anything, mock.Anything).
+		Return(merr.WrapErrNodeNotFound(13)).Once()
+	s.inspector.processTerminal(task)
+	s.waitDropsSettled()
+	s.True(s.inspector.nodeGoneSince.Contain(key))
+
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, int64(13), int64(1006), mock.Anything, mock.Anything).
+		Return(errors.New("rpc timeout")).Once()
+	s.inspector.processTerminal(task)
+	s.waitDropsSettled()
+	s.False(s.inspector.nodeGoneSince.Contain(key))
+	s.EqualValues(13, s.copyMeta.GetTask(context.TODO(), 1006).GetNodeId())
+}
+
+// TestSweepNodeGoneClocks_RemovesOrphanedEntries: a clock whose owner converged
+// through another path (the scheduler's own drop cleared the assignment, or the
+// untracked entry was retired) must not live for the rest of the process.
+func (s *CopySegmentInspectorSuite) TestSweepNodeGoneClocks_RemovesOrphanedEntries() {
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
+
+	// Orphaned: no untracked entry, no task.
+	orphan := untrackedCopySegmentDrop{nodeID: 99, taskID: 9999, taskVersion: 1}
+	s.inspector.nodeGoneSince.Insert(orphan, time.Now())
+
+	// Owned by a pending untracked entry: kept.
+	tracked := untrackedCopySegmentDrop{nodeID: 98, taskID: 9998, taskVersion: 1}
+	s.inspector.untrackedDrops.Insert(tracked)
+	s.inspector.nodeGoneSince.Insert(tracked, time.Now())
+
+	// Owned by a terminal task still assigned to the node: kept.
+	task := s.addTerminalTaskWithAssignment(1007, 14,
+		datapb.CopySegmentTaskState_CopySegmentTaskCompleted)
+	assigned := untrackedCopySegmentDrop{nodeID: 14, taskID: 1007, taskVersion: task.GetTaskVersion()}
+	s.inspector.nodeGoneSince.Insert(assigned, time.Now())
+
+	s.inspector.sweepNodeGoneClocks()
+
+	s.False(s.inspector.nodeGoneSince.Contain(orphan))
+	s.True(s.inspector.nodeGoneSince.Contain(tracked))
+	s.True(s.inspector.nodeGoneSince.Contain(assigned))
 }
 
 // TestProcessTerminal_NoAssignmentIsNoop: an already-converged task must not

@@ -2742,9 +2742,17 @@ func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_ClearsNodeAssignment() {
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, updatedTask.GetState())
 }
 
-func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_NodeGoneStillClearsAssignment() {
-	// ErrNodeNotFound means the node (and its in-memory task) is already gone:
-	// the drop's goal is achieved, so the assignment must still be cleared.
+func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_NodeGoneKeepsAssignmentForInspector() {
+	// ErrNodeNotFound only says DataCoord's client map has no entry for the
+	// node right now — a lease keepalive blip or a Startup() reconciliation gap
+	// produces it while the DataNode, its task entry and its copy goroutines
+	// are all still alive. Clearing the assignment here would open checkGC's
+	// gate, and once the task and job records are GC'd nothing can ever retry
+	// the drop (the Drop RPC is the worker's only removal path). This one-shot
+	// call cannot tell a real departure from a transient gap, so it keeps the
+	// assignment and leaves convergence to the inspector's processTerminal,
+	// which treats the error as delivery only after the absence outlasts a
+	// session-lease interval.
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().DropCopySegment(mock.Anything, int64(10), int64(1001), mock.Anything, mock.Anything).
 		Return(merr.WrapErrNodeNotFound(10)).Once()
@@ -2757,7 +2765,7 @@ func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_NodeGoneStillClearsAssignmen
 	task.DropTaskOnWorker(cluster)
 
 	updatedTask := copyMeta.GetTask(context.Background(), 1001)
-	s.EqualValues(NullNodeID, updatedTask.GetNodeId())
+	s.EqualValues(10, updatedTask.GetNodeId())
 }
 
 func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_OtherErrorKeepsAssignment() {

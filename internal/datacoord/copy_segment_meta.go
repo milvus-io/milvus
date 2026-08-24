@@ -1271,8 +1271,9 @@ type workerLossOutcome struct {
 // whose NodeId is gone. Re-dispatch is then withheld until that cleanup
 // converges (ClaimTaskDispatch consults HasPendingUntrackedDrop), which is
 // what keeps a live stale worker from writing the shared target keys
-// alongside the new dispatch. A node that is really gone converges on the
-// first attempt through ErrNodeNotFound.
+// alongside the new dispatch. A node that is really gone converges once its
+// absence from the client map has outlasted a full session-lease interval
+// (the inspector's nodeConfirmedGone criterion).
 func (m *copySegmentMeta) ResolveTaskOnWorkerLoss(ctx context.Context, taskID int64, failReason string) (workerLossOutcome, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

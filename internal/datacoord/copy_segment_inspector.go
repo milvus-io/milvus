@@ -50,6 +50,19 @@ type untrackedCopySegmentDrop struct {
 	taskVersion int64
 }
 
+// copySegmentNodeGoneGrace is how long a drop target must stay missing from
+// the node manager's client map before its absence is believed. ErrNodeNotFound
+// only says DataCoord's session-watch-maintained client map has no entry — a
+// lease keepalive blip or a gap during Startup() reconciliation removes the
+// entry while the DataNode process, its task entry and its copy goroutines are
+// all still alive. One session-lease interval is the horizon that separates the
+// two cases: a node whose etcd session actually expired terminates itself via
+// its liveness check within the lease TTL, while a transiently missing entry is
+// re-added by the session watch and the next drop attempt reaches the node.
+func copySegmentNodeGoneGrace() time.Duration {
+	return Params.CommonCfg.SessionTTL.GetAsDuration(time.Second)
+}
+
 // Copy Segment Task Inspector
 //
 // The inspector is responsible for task-level scheduling and failure handling during
@@ -111,10 +124,17 @@ type copySegmentInspector struct {
 	droppingTask      *typeutil.ConcurrentSet[int64] // taskIDs with a drop in flight
 	untrackedDrops    *typeutil.ConcurrentSet[untrackedCopySegmentDrop]
 	droppingUntracked *typeutil.ConcurrentSet[untrackedCopySegmentDrop]
-	dropCtx           context.Context
-	dropCancel        context.CancelFunc
-	dropLifecycleMu   sync.RWMutex
-	dropClosed        bool
+	// nodeGoneSince records, per drop target, when DropCopySegment first
+	// returned ErrNodeNotFound. An entry converges through that error only
+	// after it has persisted for copySegmentNodeGoneGrace; any attempt that
+	// reaches a client (success or a different error) disproves the departure
+	// and resets the clock. Shared by the untracked and terminal drop paths —
+	// the key is the exact dispatch, so the two cannot alias.
+	nodeGoneSince   *typeutil.ConcurrentMap[untrackedCopySegmentDrop, time.Time]
+	dropCtx         context.Context
+	dropCancel      context.CancelFunc
+	dropLifecycleMu sync.RWMutex
+	dropClosed      bool
 
 	closeOnce sync.Once     // Ensures Close is idempotent
 	closeChan chan struct{} // Channel to signal inspector shutdown
@@ -155,6 +175,7 @@ func NewCopySegmentInspector(
 		droppingTask:      typeutil.NewConcurrentSet[int64](),
 		untrackedDrops:    typeutil.NewConcurrentSet[untrackedCopySegmentDrop](),
 		droppingUntracked: typeutil.NewConcurrentSet[untrackedCopySegmentDrop](),
+		nodeGoneSince:     typeutil.NewConcurrentMap[untrackedCopySegmentDrop, time.Time](),
 		dropCtx:           dropCtx,
 		dropCancel:        dropCancel,
 		closeChan:         make(chan struct{}),
@@ -277,6 +298,7 @@ func (s *copySegmentInspector) reloadFromMeta() {
 // - Failed tasks need prompt cleanup to prevent orphaned segments
 // - Periodic inspection ensures no tasks are missed during state transitions
 func (s *copySegmentInspector) inspect() {
+	s.sweepNodeGoneClocks()
 	s.processUntrackedDrops()
 
 	// Retrieve all jobs (no filters)
@@ -345,8 +367,11 @@ func (s *copySegmentInspector) EnqueueUntrackedDrop(nodeID, taskID, taskVersion 
 // still awaiting worker-side cleanup. Dispatch consults it before handing the
 // task to a worker again: both dispatches write the same deterministic target
 // object keys, so they must never overlap. Entries leave untrackedDrops only
-// once the drop is acknowledged or the node is confirmed gone, so this
-// converges without an extra timeout.
+// once the drop is acknowledged by the node, or the node has been missing from
+// the client map for a full session-lease interval (nodeConfirmedGone) — a
+// single ErrNodeNotFound is DataCoord's view of its client map, not proof the
+// worker and its copy goroutines are gone. Either way this converges without
+// an extra timeout.
 func (s *copySegmentInspector) HasPendingUntrackedDrop(taskID int64) bool {
 	for _, drop := range s.untrackedDrops.Collect() {
 		if drop.taskID == taskID {
@@ -359,6 +384,48 @@ func (s *copySegmentInspector) HasPendingUntrackedDrop(taskID int64) bool {
 func (s *copySegmentInspector) processUntrackedDrops() {
 	for _, drop := range s.untrackedDrops.Collect() {
 		s.processUntrackedDrop(drop)
+	}
+}
+
+// nodeConfirmedGone decides whether an ErrNodeNotFound from DropCopySegment may
+// be treated as convergence for this drop target. The first observation only
+// starts the clock: the error is DataCoord's client-map view, not proof about
+// the DataNode process, and retiring the entry on it alone would lift the
+// re-dispatch gate while a live node still writes the shared target keys.
+// Only after the absence has persisted for a full session-lease interval is the
+// node believed gone — a node whose session actually expired has terminated
+// itself by then, and a transient gap has healed and let the drop be delivered.
+func (s *copySegmentInspector) nodeConfirmedGone(target untrackedCopySegmentDrop) bool {
+	firstSeen, _ := s.nodeGoneSince.GetOrInsert(target, time.Now())
+	return time.Since(firstSeen) >= copySegmentNodeGoneGrace()
+}
+
+// nodeSeenAgain resets the departure clock: the drop attempt reached a client
+// for this node (whatever its outcome), so the node is not gone from the
+// client map and an earlier ErrNodeNotFound was a transient gap.
+func (s *copySegmentInspector) nodeSeenAgain(target untrackedCopySegmentDrop) {
+	s.nodeGoneSince.Remove(target)
+}
+
+// sweepNodeGoneClocks drops departure clocks whose owner no longer exists: the
+// untracked entry was retired, or the terminal task lost its assignment (or was
+// removed) through another path while a clock was running. Without the sweep an
+// abandoned clock would live for the rest of the process.
+func (s *copySegmentInspector) sweepNodeGoneClocks() {
+	var stale []untrackedCopySegmentDrop
+	s.nodeGoneSince.Range(func(key untrackedCopySegmentDrop, _ time.Time) bool {
+		if s.untrackedDrops.Contain(key) {
+			return true
+		}
+		task := s.copyMeta.GetTask(s.ctx, key.taskID)
+		if task != nil && task.GetNodeId() == key.nodeID && task.GetTaskVersion() == key.taskVersion {
+			return true
+		}
+		stale = append(stale, key)
+		return true
+	})
+	for _, key := range stale {
+		s.nodeGoneSince.Remove(key)
 	}
 }
 
@@ -376,17 +443,37 @@ func (s *copySegmentInspector) processUntrackedDrop(drop untrackedCopySegmentDro
 	future := s.dropPool.Submit(func() (struct{}, error) {
 		defer s.droppingUntracked.Remove(drop)
 		err := s.cluster.DropCopySegment(s.dropCtx, drop.nodeID, drop.taskID, drop.taskVersion, true)
-		if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
+		switch {
+		case err == nil:
+			s.nodeSeenAgain(drop)
+			s.untrackedDrops.Remove(drop)
+			mlog.Info(s.dropCtx, "dropped untracked copy segment task on datanode",
+				mlog.FieldTaskID(drop.taskID), mlog.FieldNodeID(drop.nodeID),
+				mlog.Int64("taskVersion", drop.taskVersion))
+		case errors.Is(err, merr.ErrNodeNotFound):
+			// Absence from the client map is not delivery. Keep the entry —
+			// and with it the re-dispatch gate — until the absence outlasts a
+			// session-lease interval: a live node whose entry lapsed
+			// transiently comes back and the retry aborts its task for real,
+			// while a node whose session expired has terminated itself by the
+			// time the grace runs out.
+			if !s.nodeConfirmedGone(drop) {
+				mlog.RatedWarn(s.dropCtx, 1, "node missing from client map, deferring untracked copy segment drop convergence",
+					mlog.FieldTaskID(drop.taskID), mlog.FieldNodeID(drop.nodeID),
+					mlog.Int64("taskVersion", drop.taskVersion))
+				return struct{}{}, nil
+			}
+			s.nodeGoneSince.Remove(drop)
+			s.untrackedDrops.Remove(drop)
+			mlog.Info(s.dropCtx, "untracked copy segment drop converged: node confirmed gone",
+				mlog.FieldTaskID(drop.taskID), mlog.FieldNodeID(drop.nodeID),
+				mlog.Int64("taskVersion", drop.taskVersion))
+		default:
+			s.nodeSeenAgain(drop)
 			mlog.RatedWarn(s.dropCtx, 1, "failed to drop untracked copy segment task on datanode, retrying",
 				mlog.FieldTaskID(drop.taskID), mlog.FieldNodeID(drop.nodeID),
 				mlog.Int64("taskVersion", drop.taskVersion), mlog.Err(err))
-			return struct{}{}, nil
 		}
-
-		s.untrackedDrops.Remove(drop)
-		mlog.Info(s.dropCtx, "dropped untracked copy segment task on datanode",
-			mlog.FieldTaskID(drop.taskID), mlog.FieldNodeID(drop.nodeID),
-			mlog.Int64("taskVersion", drop.taskVersion))
 		return struct{}{}, nil
 	})
 	s.dropLifecycleMu.RUnlock()
@@ -537,7 +624,29 @@ func (s *copySegmentInspector) processTerminal(task CopySegmentTask) {
 		abort := task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskFailed ||
 			job == nil || job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed
 		err := s.cluster.DropCopySegment(s.dropCtx, nodeID, taskID, taskVersion, abort)
-		if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
+		target := untrackedCopySegmentDrop{nodeID: nodeID, taskID: taskID, taskVersion: taskVersion}
+		switch {
+		case err == nil:
+			s.nodeSeenAgain(target)
+		case errors.Is(err, merr.ErrNodeNotFound):
+			// Clearing the assignment opens checkGC's gate, and GC deletes the
+			// task and job records after retention — if the node is merely
+			// missing from the client map transiently, that would strand its
+			// live worker task, slot and copy goroutines with no record left to
+			// retry the drop (the Drop RPC is the worker's only removal path).
+			// Converge through this error only once the absence has outlasted
+			// a session-lease interval; until then the assignment stays and
+			// the next round retries.
+			if !s.nodeConfirmedGone(target) {
+				mlog.RatedWarn(s.dropCtx, 1, "node missing from client map, keeping terminal copy segment task assignment",
+					WrapCopySegmentTaskLog(task, mlog.FieldNodeID(nodeID))...)
+				return struct{}{}, nil
+			}
+			s.nodeGoneSince.Remove(target)
+			mlog.Info(s.dropCtx, "terminal copy segment task drop converged: node confirmed gone",
+				WrapCopySegmentTaskLog(task, mlog.FieldNodeID(nodeID))...)
+		default:
+			s.nodeSeenAgain(target)
 			mlog.Warn(s.dropCtx, "failed to drop copy segment task on datanode",
 				WrapCopySegmentTaskLog(task, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
 			return struct{}{}, nil
