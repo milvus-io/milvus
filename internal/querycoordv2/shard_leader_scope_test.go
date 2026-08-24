@@ -360,6 +360,57 @@ func TestZeroPartitionCollectionReadsNotLoadedOnEveryScopedSurface(t *testing.T)
 		"the routing surface's verdict is the one the other two now match")
 }
 
+// TestInvisibleOnlyResourceGroupReadsFullButNotServable nails the one state
+// where the three surfaces deliberately disagree, in a single fixture, so the
+// pairing rule they carry is pinned rather than only asserted in prose.
+//
+// The percentage counts query-invisible replicas (it is a progress figure,
+// and those replicas are exactly what the load-config path waits on) while
+// readiness and scoped routing exclude them (a leader the proxy can never be
+// routed to cannot serve). A group whose replicas are all still invisible
+// therefore reads 100 while being unable to answer a single query.
+//
+// This is a normal product state, not a corner case: UpdateLoadConfig with
+// needWaitRGReady spawns the new group's replicas WithQueryInvisible, and
+// promotion is global and all-or-nothing, so rg-b can finish carrying every
+// target of its own while promotion stays blocked on an unrelated replica --
+// modelled here by rg-c, whose invisible replica has no serviceable leader.
+// A caller acting on the percentage alone would cut traffic to rg-b and then
+// retry it for as long as rg-c stays unserviceable.
+func TestInvisibleOnlyResourceGroupReadsFullButNotServable(t *testing.T) {
+	ctx := context.Background()
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 100, 1000, "100-dmc0")
+	f.putReplica(t, 100, "rg-a", 10)
+	f.putInvisibleReplica(t, 100, "rg-b", 11)
+	f.putInvisibleReplica(t, 100, "rg-c", 12) // the unrelated replica blocking promotion
+	f.putLeader(100, 10, "100-dmc0", true)
+	f.putLeader(100, 11, "100-dmc0", true) // rg-b carries the target, but invisibly
+	f.registerNode(12)                     // rg-c carries nothing: promotion cannot happen
+
+	percentage, err := utils.LoadPercentageByResourceGroup(ctx, f.meta, f.targetMgr, f.dist, 100, "rg-b")
+	require.NoError(t, err)
+	assert.EqualValues(t, 100, percentage,
+		"the progress figure counts the invisible replica: rg-b really has carried every target asked of it")
+
+	readiness := f.readiness(t, 100, "rg-b")
+	assert.False(t, readiness.Ready,
+		"readiness excludes invisible replicas, so the same group is not servable")
+	assert.Equal(t, utils.ShardLeadersReasonShardsWithoutLeader, readiness.Reason)
+
+	resp, err := scopedServer(f).GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
+		CollectionID:  100,
+		ResourceGroup: "rg-b",
+	})
+	require.NoError(t, err)
+	assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCollectionNotFullyLoaded,
+		"scoped routing agrees with readiness, not with the percentage")
+	assert.True(t, resp.GetStatus().GetRetriable(),
+		"the refusal stays retriable: promotion is what the caller is waiting on")
+	assert.NotErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrReplicaNotFound,
+		"rg-b does hold a replica -- this is not the terminal bucket")
+}
+
 // TestGetShardLeadersByResourceGroupEmptyScopeIsTheUnscopedAnswer pins the
 // third of the empty-string contracts this PR establishes. The proto field and
 // both sibling surfaces define "" as the absence of a filter; a literal

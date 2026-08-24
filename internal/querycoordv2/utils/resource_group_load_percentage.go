@@ -97,6 +97,25 @@ import (
 //     gate to re-arm whenever new work lands, where ShowLoadCollections
 //     would keep saying 100.
 //
+// 100 IS NOT A SERVABILITY VERDICT, and a caller gating a switchover must
+// pair it with ShardLeaderReadinessByResourceGroup rather than act on it
+// alone. This figure counts query-invisible replicas (see the note at the
+// selection loop); readiness and scoped GetShardLeaders both exclude them,
+// because a leader the proxy can never be routed to cannot serve. A resource
+// group whose replicas are all still query-invisible therefore reads 100
+// here while readiness says Ready=false and scoped GetShardLeaders refuses
+// every shard with the retriable ErrCollectionNotFullyLoaded.
+//
+// That is a normal product state, not a corner case: UpdateLoadConfig with
+// needWaitRGReady spawns a new group's replicas WithQueryInvisible, and
+// promotion is global and all-or-nothing, so the new group can finish
+// carrying every target of its own while promotion stays blocked on some
+// unrelated replica. A caller acting on 100 alone would cut traffic to a
+// group that cannot answer, and would keep retrying it for as long as that
+// unrelated replica stays unserviceable, instead of staying on the old one.
+// TestInvisibleOnlyResourceGroupReadsFullButNotServable pins the three-way
+// state.
+//
 // When more than one replica is selected -- either because Spawn put several
 // replicas of the collection in rgName, or because rgName is empty and every
 // replica is selected -- this returns the minimum percentage across them. A
@@ -171,7 +190,8 @@ func LoadPercentageByResourceGroup(
 	// is a progress figure, and those replicas are exactly the ones whose
 	// progress the load-config path is waiting on.
 	// ShardLeaderReadinessByResourceGroup, by contrast, excludes them to
-	// match the routing surface.
+	// match the routing surface -- see the pairing rule on this function:
+	// this asymmetry is why 100 here does not by itself mean servable.
 	var replicas []*meta.Replica
 	for _, replica := range m.GetByCollection(ctx, collectionID) {
 		if rgName == "" || replica.GetResourceGroup() == rgName {
