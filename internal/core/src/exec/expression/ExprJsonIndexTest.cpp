@@ -399,8 +399,19 @@ TEST(JsonIndexTest, JsonBinaryRangePathIndexMatchesRawData) {
                 evaluate(number_expr, number_index_segment.get()));
 
     exec::OffsetVector offsets = {7, 2, 4, 1, 3, 5, 6, 0, 2};
-    expect_same(evaluate(number_expr, raw_segment.get(), &offsets),
-                evaluate(number_expr, number_index_segment.get(), &offsets));
+    auto raw_offset_result = evaluate(number_expr, raw_segment.get(), &offsets);
+    auto indexed_offset_result =
+        evaluate(number_expr, number_index_segment.get(), &offsets);
+    expect_same(raw_offset_result, indexed_offset_result);
+
+    ASSERT_EQ(raw_offset_result->size(), offsets.size());
+    TargetBitmapView raw_offset_values(raw_offset_result->GetRawData(),
+                                       raw_offset_result->size());
+    TargetBitmapView raw_offset_validity(raw_offset_result->GetValidRawData(),
+                                         raw_offset_result->size());
+    ASSERT_EQ(offsets[1], offsets[8]);
+    EXPECT_EQ(raw_offset_values[1], raw_offset_values[8]);
+    EXPECT_EQ(raw_offset_validity[1], raw_offset_validity[8]);
 
     auto expect_nan_range_matches_raw = [&](bool nan_is_lower) {
         proto::plan::GenericValue nan_bound;
