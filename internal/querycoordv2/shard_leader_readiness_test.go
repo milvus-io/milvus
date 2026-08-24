@@ -630,7 +630,7 @@ func TestShardLeaderReadinessByRG_NotHealthy(t *testing.T) {
 }
 
 // TestShardLeaderReadinessByRG_NilStores covers the utils-level nil guard on
-// its own terms: defence in depth for a direct caller (the observers hold
+// its own terms: defense in depth for a direct caller (the observers hold
 // these stores and bypass Server), deliberately not reached through Server,
 // whose health gate would answer first.
 func TestShardLeaderReadinessByRG_NilStores(t *testing.T) {

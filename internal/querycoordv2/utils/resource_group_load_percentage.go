@@ -197,7 +197,7 @@ func LoadPercentageByResourceGroup(
 	// then refused with a non-retriable 101. This is also the test
 	// ShowLoadCollections has always used.
 	if m.CalculateLoadPercentage(ctx, collectionID) < 0 {
-		// Defence in depth, not a tolerance this function can promise:
+		// Defense in depth, not a tolerance this function can promise:
 		// GlobalFailedLoadCache is the LAST piece initQueryCoord wires and
 		// Get dereferences a nil receiver, so a caller reaching a Server
 		// mid-Init would panic here. Server's own entry point gates on

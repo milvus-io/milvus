@@ -143,7 +143,7 @@ func ShardLeaderReadinessByResourceGroup(
 	// scoped GetShardLeaders path refuses with a non-retriable 101, which is
 	// exactly the disagreement the invariant above forbids.
 	if m.CalculateLoadPercentage(ctx, collectionID) < 0 {
-		// Defence in depth, not a tolerance this function can promise --
+		// Defense in depth, not a tolerance this function can promise --
 		// see the matching note in LoadPercentageByResourceGroup.
 		// GlobalFailedLoadCache is the LAST piece initQueryCoord wires and
 		// Get dereferences a nil receiver; Server's entry point gates on

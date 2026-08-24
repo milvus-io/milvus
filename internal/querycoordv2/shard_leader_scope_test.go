@@ -455,7 +455,7 @@ func TestGetShardLeadersScopedOnRecoveringCollection(t *testing.T) {
 // needWaitRGReady spawns the new group's replicas WithQueryInvisible, and
 // promotion is global and all-or-nothing, so rg-b can finish carrying every
 // target of its own while promotion stays blocked on an unrelated replica --
-// modelled here by rg-c, whose invisible replica has no serviceable leader.
+// modeled here by rg-c, whose invisible replica has no serviceable leader.
 // A caller acting on the percentage alone would cut traffic to rg-b and then
 // retry it for as long as rg-c stays unserviceable.
 func TestInvisibleOnlyResourceGroupReadsFullButNotServable(t *testing.T) {

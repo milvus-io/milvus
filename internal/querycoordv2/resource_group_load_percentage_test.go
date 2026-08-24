@@ -459,7 +459,7 @@ func TestGetLoadPercentageByResourceGroup_NotHealthy(t *testing.T) {
 }
 
 // TestLoadPercentageByResourceGroup_NilStores covers the utils-level nil
-// guard on its own terms. It is defence in depth for a direct caller -- the
+// guard on its own terms. It is defense in depth for a direct caller -- the
 // observers hold these stores and call the free function, bypassing Server
 // and its health gate -- and it is deliberately NOT reached through Server,
 // because the gate above would answer first.
