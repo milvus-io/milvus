@@ -175,10 +175,12 @@ func TestGetShardLeadersStrictScopeRefusesAnUnheldResourceGroupByName(t *testing
 //     readiness and serve its leader -- gating it on the collection-wide
 //     percentage would refuse rg-a until rg-b finishes, which inverts the
 //     purpose of the scope;
-//   - the strict scoped answer for the lagging group is the per-channel,
-//     retriable ErrChannelNotAvailable: the group holds a replica, so
-//     waiting helps, and neither the name-refusal (ReplicaNotFound) nor the
-//     collection-wide NotFullyLoaded is the right shape.
+//   - the strict scoped answer for the lagging group is the retriable
+//     ErrCollectionNotFullyLoaded, scoped to that group: it holds a replica,
+//     so waiting helps, which rules out the terminal name-refusal
+//     (ReplicaNotFound) and equally rules out the non-retriable per-channel
+//     ChannelNotAvailable -- the channel is fine, the group is just still
+//     coming up.
 func TestGetShardLeadersScopedSeesThroughSiblingResourceGroupLag(t *testing.T) {
 	ctx := context.Background()
 	f := newShardLeaderReadinessFixture(t)
@@ -217,8 +219,102 @@ func TestGetShardLeadersScopedSeesThroughSiblingResourceGroupLag(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotEqual(t, int32(0), scopedToB.GetStatus().GetCode())
-	assert.ErrorIs(t, merr.Error(scopedToB.GetStatus()), merr.ErrChannelNotAvailable,
-		"the lagging group is refused per channel - retriable, and loading is exactly what a retry waits for")
+	assert.ErrorIs(t, merr.Error(scopedToB.GetStatus()), merr.ErrCollectionNotFullyLoaded,
+		"a group that holds a replica and is still coming up must be refused with the load-progress code, the same family the unscoped shape uses for the same physical state")
+	assert.NotErrorIs(t, merr.Error(scopedToB.GetStatus()), merr.ErrChannelNotAvailable,
+		"the channel is not unavailable - a sibling group is serving it right now")
+	assert.True(t, scopedToB.GetStatus().GetRetriable(),
+		"the wire status must say retriable: the gRPC wrapper re-issues the call only when this bit is set, and this state self-heals")
+	assert.Contains(t, scopedToB.GetStatus().GetReason(), "rg-b",
+		"the refusal must name the group whose progress the caller is waiting on")
+	assert.Contains(t, scopedToB.GetStatus().GetReason(), "100-dmc0",
+		"the refusal must name the shard that is not covered yet")
+}
+
+// TestGetShardLeadersStrictScopeRefusalIsRetriableOnTheWire is the same
+// contract stated at the sentinel level rather than through the fixture, so
+// that a future change of sentinel cannot quietly satisfy the assertions above
+// while flipping the bit callers actually branch on. merr.Status copies
+// IsRetryableErr onto the wire, so these two sentinels are what decide whether
+// the generic client wrapper waits or gives up.
+func TestGetShardLeadersStrictScopeRefusalIsRetriableOnTheWire(t *testing.T) {
+	assert.True(t, merr.IsRetryableErr(merr.ErrCollectionNotFullyLoaded),
+		"the refusal the scoped strict path uses for a group that is still coming up must be retriable")
+	assert.False(t, merr.IsRetryableErr(merr.ErrChannelNotAvailable),
+		"ChannelNotAvailable is not retriable, which is why the scoped path must not use it for a load-progress state")
+	assert.False(t, merr.IsRetryableErr(merr.ErrReplicaNotFound),
+		"the name-refusal is terminal: no amount of waiting puts a replica in a group nobody loaded into")
+}
+
+// TestGetShardLeadersScopedToTheGroupThatLostItsLeader keeps the coverage
+// refusal honest in the other direction: a fully loaded collection whose named
+// group once had the shard but whose leader is no longer serviceable is the
+// same physical state as "still coming up" from the caller's point of view --
+// the group holds a replica, and the coordinator will rebalance -- so it takes
+// the same retriable answer rather than the collection-wide 100% gate's
+// verdict that everything is fine.
+func TestGetShardLeadersScopedToTheGroupThatLostItsLeader(t *testing.T) {
+	ctx := context.Background()
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 100, 1000, "100-dmc0")
+	f.putReplica(t, 100, "rg-a", 10)
+	f.putReplica(t, 100, "rg-b", 11)
+	f.putLeader(100, 10, "100-dmc0", true)
+	f.putLeader(100, 11, "100-dmc0", false) // rg-b's leader is not serviceable
+
+	server := scopedServer(f)
+
+	unscoped, err := server.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{CollectionID: 100})
+	require.NoError(t, err)
+	require.Equal(t, int32(0), unscoped.GetStatus().GetCode(),
+		"collection-wide, the shard is served: rg-a's leader covers it")
+
+	scopedToB, err := server.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
+		CollectionID:  100,
+		ResourceGroup: "rg-b",
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, int32(0), scopedToB.GetStatus().GetCode(),
+		"a fully loaded collection does not make a group ready whose own leader cannot serve")
+	assert.ErrorIs(t, merr.Error(scopedToB.GetStatus()), merr.ErrCollectionNotFullyLoaded)
+	assert.True(t, scopedToB.GetStatus().GetRetriable())
+}
+
+// TestGetShardLeadersStrictScopeQueryInvisibleReplicaIsNotTerminal pins the
+// split the strict scoped path makes between "does this group hold a replica"
+// and "can this group serve". A load-config replica is spawned query-invisible
+// with a serviceable leader; routing can never reach it, so the group cannot
+// be served its leader -- but the collection DOES live here, and
+// tryPromoteReadyLoadConfigReplicas will flip it visible, so the refusal must
+// be the retriable load-progress one and NOT the terminal name-refusal.
+// Counting the invisible replica in only one of the two places is what makes
+// this test fail in both directions: as ReplicaNotFound if it is dropped from
+// the holds scan, and as a served leader if it is kept in the coverage scan.
+func TestGetShardLeadersStrictScopeQueryInvisibleReplicaIsNotTerminal(t *testing.T) {
+	ctx := context.Background()
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 100, 1000, "100-dmc0")
+	f.putReplica(t, 100, "rg-a", 10)
+	f.putInvisibleReplica(t, 100, "rg-b", 11)
+	f.putLeader(100, 10, "100-dmc0", true)
+	f.putLeader(100, 11, "100-dmc0", true) // serviceable, but on an invisible replica
+
+	resp, err := scopedServer(f).GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
+		CollectionID:  100,
+		ResourceGroup: "rg-b",
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, int32(0), resp.GetStatus().GetCode(),
+		"a leader on a query-invisible replica is one no query can be routed to")
+	assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCollectionNotFullyLoaded,
+		"the collection does live in rg-b, so the refusal is load progress, not a missing replica")
+	assert.NotErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrReplicaNotFound,
+		"the terminal name-refusal means waiting will never help, which is false here")
+	assert.True(t, resp.GetStatus().GetRetriable())
+
+	require.False(t, f.readiness(t, 100, "rg-b").Ready,
+		"readiness must tell the same story: the group is not ready, but it is not empty either")
+	assert.Equal(t, utils.ShardLeadersReasonShardsWithoutLeader, f.readiness(t, 100, "rg-b").Reason)
 }
 
 // TestGetShardLeadersByResourceGroupEmptyScopeIsTheUnscopedAnswer pins the

@@ -19,6 +19,7 @@ package utils
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/blang/semver/v4"
@@ -281,18 +282,40 @@ func GetShardLeadersWithReplicaFilter(ctx context.Context,
 //     would refuse the leading group until the laggard finishes, inverting
 //     the scope's purpose and contradicting
 //     ShardLeaderReadinessByResourceGroup, which deliberately bypasses the
-//     same gate. The strict per-channel check below still refuses every
-//     shard this group cannot serve, with the retriable ChannelNotAvailable.
+//     same gate. In its place the strict form runs the SCOPED equivalent of
+//     that half -- every current-target channel must have a serviceable,
+//     query-visible leader inside this group -- and refuses with the same
+//     retriable ErrCollectionNotFullyLoaded the unscoped gate uses.
 //
-// The strict form (withUnserviceableShards == false) additionally refuses a
-// resource group that holds no replica of the collection up front, by name.
-// Falling through would fail on the first channel with ChannelNotAvailable,
-// which misleads twice over: the channel is fine (a sibling group may be
-// serving it right now), and the caller retries an answer that will not
-// change until someone loads the collection into this group. This is the
-// shard-leader counterpart of LoadPercentageByResourceGroup's -1. A caller
-// accepting unserviceable shards (the proxy refreshing its cache) wants the
-// empty answer instead.
+// The strict form (withUnserviceableShards == false) therefore has exactly
+// three refusals, and the retry semantics of each are part of the contract
+// because merr.Status copies the sentinel's retriable bit onto the wire and
+// the generic gRPC wrapper re-issues the call only when it is set:
+//
+//   - ErrCollectionNotLoaded (101, non-retriable): the collection is not
+//     registered as loaded at all. Same family, same code as the unscoped
+//     shape for the same state.
+//   - ErrReplicaNotFound (400, non-retriable): the collection is loaded, but
+//     this resource group holds no replica of it. Terminal by construction --
+//     the answer cannot change until someone loads the collection into this
+//     group -- and refused up front, by name. Falling through to the channel
+//     walk would blame the channel instead, which misleads twice over: the
+//     channel is fine (a sibling group may be serving it right now), and it
+//     invites a retry that will never succeed. This is the shard-leader
+//     counterpart of LoadPercentageByResourceGroup's -1.
+//   - ErrCollectionNotFullyLoaded (103, retriable): this group holds a
+//     replica, but not every shard has a serviceable leader in it yet.
+//     Waiting is exactly the right response, so this must NOT be the
+//     non-retriable per-channel ErrChannelNotAvailable (503) the unscoped
+//     path raises after its full-load gate has already passed: there, a
+//     missing leader on a fully loaded collection really is channel-level
+//     unavailability, while here it is ordinary load progress. Reserving 103
+//     for it also keeps the scoped and unscoped shapes on one story -- both
+//     answer 103 while the collection is still coming up, and they differ
+//     only in whose progress they measure.
+//
+// A caller accepting unserviceable shards (the proxy refreshing its cache)
+// gets none of the last two: it wants the empty answer instead.
 func GetShardLeadersByResourceGroup(ctx context.Context,
 	m *meta.Meta,
 	targetMgr meta.TargetManagerInterface,
@@ -308,7 +331,7 @@ func GetShardLeadersByResourceGroup(ctx context.Context,
 	// ShardLeaderReadinessByResourceGroup); comparing it literally here would
 	// make this the one function of the three where an unset field means "no
 	// replica matches". There is no scoped question to answer, and the scoped
-	// gate below is only justified by a named group, so hand the request back
+	// gate above is only justified by a named group, so hand the request back
 	// to the unscoped path whole -- which also keeps the unscoped answer
 	// byte-identical to what it was before this field existed.
 	if resourceGroup == "" {
@@ -324,23 +347,33 @@ func GetShardLeadersByResourceGroup(ctx context.Context,
 		return nil, err
 	}
 
-	if !withUnserviceableShards {
-		holds := false
-		for _, replica := range m.GetByCollection(ctx, collectionID) {
-			if replica.GetResourceGroup() == resourceGroup {
-				holds = true
-				break
-			}
+	// holds and scoped answer two different questions and must be counted
+	// separately: a query-invisible replica (load-config spawns replicas
+	// invisible until every one of them is serviceable) still means the
+	// collection lives in this group, so it keeps the group out of the
+	// terminal ReplicaNotFound bucket, but no query can be routed to its
+	// leader, so it cannot make a shard count as covered. This is the same
+	// split ShardLeaderReadinessByResourceGroup makes between inRG and its
+	// replica list.
+	holds := false
+	scoped := make([]*meta.Replica, 0)
+	for _, replica := range m.GetByCollection(ctx, collectionID) {
+		if replica.GetResourceGroup() != resourceGroup {
+			continue
 		}
-		if !holds {
-			// merr.Wrapf rather than WrapErrReplicaNotFound: the latter stamps
-			// its argument as a replica id, and the only id in hand here is
-			// the collection's.
-			err := merr.Wrapf(merr.ErrReplicaNotFound,
-				"collection %d has no replica in resource group %q", collectionID, resourceGroup)
-			mlog.Warn(ctx, "failed to get shard leaders", mlog.Err(err))
-			return nil, err
+		holds = true
+		if replica.IsQueryVisible() {
+			scoped = append(scoped, replica)
 		}
+	}
+	if !withUnserviceableShards && !holds {
+		// merr.Wrapf rather than WrapErrReplicaNotFound: the latter stamps
+		// its argument as a replica id, and the only id in hand here is
+		// the collection's.
+		err := merr.Wrapf(merr.ErrReplicaNotFound,
+			"collection %d has no replica in resource group %q", collectionID, resourceGroup)
+		mlog.Warn(ctx, "failed to get shard leaders", mlog.Err(err))
+		return nil, err
 	}
 
 	channels := targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
@@ -350,6 +383,32 @@ func GetShardLeadersByResourceGroup(ctx context.Context,
 		mlog.Warn(ctx, "failed to get channels", mlog.Err(err))
 		return nil, err
 	}
+
+	// The scoped stand-in for the full-load gate. It uses the same three
+	// per-leader conditions GetShardLeadersWithChannelsAndReplicaFilter
+	// applies below, so a group that clears this walk clears that one too and
+	// the call below cannot fail on ChannelNotAvailable except in the race
+	// where a leader stops being serviceable between the two reads -- which is
+	// genuine channel-level unavailability, and is what that error means.
+	if !withUnserviceableShards {
+		uncovered := make([]string, 0, len(channels))
+		for _, channel := range channels {
+			if !hasServiceableLeaderInReplicas(dist, nodeMgr, channel.GetChannelName(), scoped) {
+				uncovered = append(uncovered, channel.GetChannelName())
+			}
+		}
+		if len(uncovered) > 0 {
+			// channels arrives as a map, so its iteration order is random;
+			// sort so that one state always prints one line.
+			sort.Strings(uncovered)
+			err := merr.WrapErrCollectionNotFullyLoaded(collectionID,
+				fmt.Sprintf("resource group %q has no serviceable leader yet for shard(s) %v",
+					resourceGroup, uncovered))
+			mlog.Warn(ctx, "failed to get shard leaders", mlog.Err(err))
+			return nil, err
+		}
+	}
+
 	// A request that names a resource group is asking which leaders THAT group
 	// can serve from, and the answer is not derivable from the unscoped one:
 	// the response flattens every replica into one list per channel, and a
