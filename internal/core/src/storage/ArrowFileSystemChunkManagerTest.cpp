@@ -160,17 +160,40 @@ TEST_F(ArrowFileSystemChunkManagerTest, RemoveAndList) {
 // LocalChunkManager parity: relative filepaths are plain OS paths resolved
 // against the process CWD (the unittest suite relies on this via
 // kOverrideRootPathForUT = "files"), and list results stay in the caller's
-// relative namespace.
+// relative namespace. The body runs inside a dedicated scratch CWD so that
+// relative writes and the recursive ListWithPrefix walk (which lists the
+// resolved prefix's parent directory) stay bounded to scratch space instead
+// of walking / leaking into the repo/build tree that is the real CWD.
 TEST_F(ArrowFileSystemChunkManagerTest, RelativePathsResolveAgainstCwd) {
-    std::string rel = "arrow_fs_cm_rel_" + std::to_string(::getpid());
-    std::string rel_path = rel + "/sub/f1";
+    // RAII: chdir into a fresh scratch dir, then restore the original CWD and
+    // reclaim the scratch dir on scope exit. The destructor runs on normal
+    // return, on a fatal-ASSERT return, and on exception unwind, so a failure
+    // below can neither leak a directory into the working tree nor leave the
+    // process CWD changed for later tests in the binary.
+    struct ScopedCwd {
+        std::filesystem::path prev_;
+        std::filesystem::path scratch_;
+        explicit ScopedCwd(std::filesystem::path scratch)
+            : prev_(std::filesystem::current_path()),
+              scratch_(std::move(scratch)) {
+            std::filesystem::create_directories(scratch_);
+            std::filesystem::current_path(scratch_);
+        }
+        ~ScopedCwd() {
+            std::error_code ec;
+            std::filesystem::current_path(prev_, ec);
+            std::filesystem::remove_all(scratch_, ec);
+        }
+    } scoped_cwd(std::filesystem::path(root_path_) / "cwd");
+
+    std::string rel_path = "sub/f1";
     uint8_t data[3] = {7, 8, 9};
     cm_->Write(rel_path, data, sizeof(data));
     EXPECT_TRUE(cm_->Exist(rel_path));
     EXPECT_TRUE(
         std::filesystem::exists(std::filesystem::current_path() / rel_path));
 
-    auto listed = cm_->ListWithPrefix(rel);
+    auto listed = cm_->ListWithPrefix("sub");
     ASSERT_EQ(listed.size(), 1);
     EXPECT_EQ(listed[0], rel_path);
 
@@ -180,9 +203,6 @@ TEST_F(ArrowFileSystemChunkManagerTest, RelativePathsResolveAgainstCwd) {
 
     cm_->Remove(rel_path);
     EXPECT_FALSE(cm_->Exist(rel_path));
-
-    std::error_code ec;
-    std::filesystem::remove_all(std::filesystem::current_path() / rel, ec);
 }
 
 TEST_F(ArrowFileSystemChunkManagerTest, OffsetOpsNotImplemented) {
