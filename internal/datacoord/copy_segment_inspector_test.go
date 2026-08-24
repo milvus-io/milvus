@@ -807,11 +807,20 @@ func (s *CopySegmentInspectorSuite) TestSweepNodeGoneClocks_RemovesOrphanedEntri
 	assigned := untrackedCopySegmentDrop{nodeID: 14, taskID: 1007, taskVersion: task.GetTaskVersion()}
 	s.inspector.nodeGoneSince.Insert(assigned, time.Now())
 
+	// A NullNodeID key can never converge and would satisfy the assignment
+	// check trivially against an unassigned task (-1 == -1): reclaimed on
+	// sight, even though its task exists.
+	unassigned := s.addTerminalTaskWithAssignment(1008, NullNodeID,
+		datapb.CopySegmentTaskState_CopySegmentTaskCompleted)
+	nullKey := untrackedCopySegmentDrop{nodeID: NullNodeID, taskID: 1008, taskVersion: unassigned.GetTaskVersion()}
+	s.inspector.nodeGoneSince.Insert(nullKey, time.Now())
+
 	s.inspector.sweepNodeGoneClocks()
 
 	s.False(s.inspector.nodeGoneSince.Contain(orphan))
 	s.True(s.inspector.nodeGoneSince.Contain(tracked))
 	s.True(s.inspector.nodeGoneSince.Contain(assigned))
+	s.False(s.inspector.nodeGoneSince.Contain(nullKey))
 }
 
 // TestProcessTerminal_NoAssignmentIsNoop: an already-converged task must not

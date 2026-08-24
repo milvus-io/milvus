@@ -414,6 +414,13 @@ func (s *copySegmentInspector) nodeSeenAgain(target untrackedCopySegmentDrop) {
 func (s *copySegmentInspector) sweepNodeGoneClocks() {
 	var stale []untrackedCopySegmentDrop
 	s.nodeGoneSince.Range(func(key untrackedCopySegmentDrop, _ time.Time) bool {
+		// A NullNodeID key can never converge (no such client will ever answer)
+		// and would satisfy the assignment check below trivially against any
+		// unassigned task. No valid drop target carries it; reclaim on sight.
+		if key.nodeID == NullNodeID {
+			stale = append(stale, key)
+			return true
+		}
 		if s.untrackedDrops.Contain(key) {
 			return true
 		}
@@ -600,10 +607,22 @@ func (s *copySegmentInspector) processFailed(task CopySegmentTask) {
 // NodeID is a no-op — so the inspector deliberately does not take the scheduler's
 // per-task lock.
 func (s *copySegmentInspector) processTerminal(task CopySegmentTask) {
-	if task.GetNodeId() == NullNodeID {
+	// Capture the drop target NOW, not inside the pool closure. task is the
+	// live meta object whose fields the scheduler's own drop path mutates in
+	// place (ClearTaskNodeAssignment swaps the atomic.Pointer), and the
+	// inspector deliberately runs unserialized against it — a closure that
+	// re-reads GetNodeId after a concurrent clear would address NullNodeID,
+	// warn about a node that never disappeared, and file a departure clock
+	// under nodeID -1. The guard below validates these captured values, so the
+	// closure must act on exactly them.
+	nodeID := task.GetNodeId()
+	if nodeID == NullNodeID {
 		return
 	}
 	taskID := task.GetTaskId()
+	taskVersion := task.GetTaskVersion()
+	jobID := task.GetJobId()
+	taskFailed := task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskFailed
 	s.dropLifecycleMu.RLock()
 	if s.dropClosed {
 		s.dropLifecycleMu.RUnlock()
@@ -615,13 +634,11 @@ func (s *copySegmentInspector) processTerminal(task CopySegmentTask) {
 		return
 	}
 	mlog.RatedInfo(s.ctx, 1, "retrying worker-side drop of terminal copy segment task",
-		WrapCopySegmentTaskLog(task, mlog.FieldNodeID(task.GetNodeId()))...)
+		WrapCopySegmentTaskLog(task, mlog.FieldNodeID(nodeID))...)
 	future := s.dropPool.Submit(func() (struct{}, error) {
 		defer s.droppingTask.Remove(taskID)
-		nodeID := task.GetNodeId()
-		taskVersion := task.GetTaskVersion()
-		job := s.copyMeta.GetJob(s.dropCtx, task.GetJobId())
-		abort := task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskFailed ||
+		job := s.copyMeta.GetJob(s.dropCtx, jobID)
+		abort := taskFailed ||
 			job == nil || job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed
 		err := s.cluster.DropCopySegment(s.dropCtx, nodeID, taskID, taskVersion, abort)
 		target := untrackedCopySegmentDrop{nodeID: nodeID, taskID: taskID, taskVersion: taskVersion}
