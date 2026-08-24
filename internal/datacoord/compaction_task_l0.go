@@ -576,16 +576,20 @@ func (t *l0CompactionTask) commitL0V3Deltalogs(ctx context.Context, segmentID in
 		return merr.WrapErrServiceInternalMsg("L0 StorageV3 manifest commit requires a published manifest, segmentID=%d", segmentID)
 	}
 
-	// Drop deltalogs already registered on the segment before building the
-	// manifest transaction. The same L0 output reaches saveSegmentMeta twice
-	// whenever it re-runs (a failed catalog write, or a failed meta_saved
-	// task-state write after the catalog write succeeded). Unlike the catalog
-	// half, packed manifest commits append delta-log entries without any
-	// deduplication, so a blind re-commit would leave duplicate entries in the
-	// manifest and bump a fresh revision on every retry. Filtering by
-	// (fieldID, logID) makes the manifest re-commit idempotent, mirroring the
-	// catalog dedup in addDeltalogsToSegment; a full duplicate short-circuits
-	// before any object-storage I/O.
+	// Drop deltalogs already registered on the in-memory segment before building
+	// the manifest transaction. Unlike the catalog half, packed manifest commits
+	// append delta-log entries without any deduplication, so a blind re-commit
+	// would leave duplicate entries in the manifest and bump a fresh revision on
+	// every retry. Filtering by (fieldID, logID) makes the re-commit idempotent
+	// for a saveSegmentMeta retry after a failed meta_saved task-state write: the
+	// catalog write already succeeded, so the in-memory Deltalogs reflect the
+	// committed manifest and a full duplicate short-circuits before any
+	// object-storage I/O (mirroring the catalog dedup in addDeltalogsToSegment).
+	// It does NOT cover a retry after catalog.Update itself fails: CommitSegmentManifest
+	// installs the in-memory Deltalogs only after its catalog write succeeds, so on
+	// that path they are stale and the new entries survive this filter. Closing that
+	// window needs durable dedup (persisted deltalog identity / a key-based manifest
+	// add); tracked as a follow-up.
 	deltalogs = filterDuplicateFieldBinlogs(current.GetDeltalogs(), deltalogs)
 	if len(deltalogs) == 0 {
 		return nil
