@@ -326,7 +326,6 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
 		log.Error("create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
-			zap.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
 			zap.Error(err),
 		)
 		return merr.Status(err), nil
@@ -366,7 +365,6 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
 		log.Error("create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
-			zap.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
 			zap.Error(err),
 		)
 		return merr.Status(err), nil

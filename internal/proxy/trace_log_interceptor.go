@@ -24,6 +24,7 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -108,5 +109,22 @@ func GetRequestFieldWithoutSensitiveInfo(req interface{}) zap.Field {
 			ModifiedUtcTimestamps: updateCredentialReq.ModifiedUtcTimestamps,
 		})
 	}
+	restoreRBACReq, ok := req.(*milvuspb.RestoreRBACMetaRequest)
+	if ok {
+		return zap.Any("request", redactRestoreRBACRequestForLog(restoreRBACReq))
+	}
 	return zap.Any("request", req)
+}
+
+func redactRestoreRBACRequestForLog(req *milvuspb.RestoreRBACMetaRequest) *milvuspb.RestoreRBACMetaRequest {
+	if req == nil {
+		return nil
+	}
+	redacted := proto.Clone(req).(*milvuspb.RestoreRBACMetaRequest)
+	for _, user := range redacted.GetRBACMeta().GetUsers() {
+		if user != nil {
+			user.Password = sensitiveMark
+		}
+	}
+	return redacted
 }

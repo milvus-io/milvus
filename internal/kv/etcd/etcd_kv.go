@@ -389,7 +389,7 @@ func (kv *etcdKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 	CheckTnxStringValueSizeAndWarn(ctx, kvs)
 	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx1), ops...)
 	if err != nil {
-		log.Ctx(ctx).Warn("Etcd MultiSave error", zap.Any("kvs", kvs), zap.Int("len", len(kvs)), zap.Error(err))
+		log.Ctx(ctx).Warn("Etcd MultiSave error", zap.Strings("keys", lo.Keys(kvs)), zap.Int("len", len(kvs)), zap.Error(err))
 	}
 	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi save", zap.Strings("keys", keys))
 	return err
@@ -411,7 +411,7 @@ func (kv *etcdKV) MultiSaveBytes(ctx context.Context, kvs map[string][]byte) err
 	CheckTnxBytesValueSizeAndWarn(ctx, kvs)
 	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx1), ops...)
 	if err != nil {
-		log.Ctx(ctx).Warn("Etcd MultiSaveBytes err", zap.Any("kvs", kvs), zap.Int("len", len(kvs)), zap.Error(err))
+		log.Ctx(ctx).Warn("Etcd MultiSaveBytes err", zap.Strings("keys", lo.Keys(kvs)), zap.Int("len", len(kvs)), zap.Error(err))
 	}
 	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi save", zap.Strings("keys", keys))
 	return err
@@ -489,7 +489,7 @@ func (kv *etcdKV) MultiSaveAndRemove(ctx context.Context, saves map[string]strin
 	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx1, cmps...), ops...)
 	if err != nil {
 		log.Ctx(ctx).Warn("Etcd MultiSaveAndRemove error",
-			zap.Any("saves", saves),
+			zap.Strings("saveKeys", lo.Keys(saves)),
 			zap.Strings("removes", removals),
 			zap.Int("saveLength", len(saves)),
 			zap.Int("removeLength", len(removals)),
@@ -524,7 +524,7 @@ func (kv *etcdKV) MultiSaveBytesAndRemove(ctx context.Context, saves map[string]
 	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx1), ops...)
 	if err != nil {
 		log.Ctx(ctx).Warn("Etcd MultiSaveBytesAndRemove error",
-			zap.Any("saves", saves),
+			zap.Strings("saveKeys", lo.Keys(saves)),
 			zap.Strings("removes", removals),
 			zap.Int("saveLength", len(saves)),
 			zap.Int("removeLength", len(removals)),
@@ -586,7 +586,7 @@ func (kv *etcdKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[st
 	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx1, cmps...), ops...)
 	if err != nil {
 		log.Ctx(ctx).Warn("Etcd MultiSaveAndRemoveWithPrefix error",
-			zap.Any("saves", saves),
+			zap.Strings("saveKeys", lo.Keys(saves)),
 			zap.Strings("removes", removals),
 			zap.Int("saveLength", len(saves)),
 			zap.Int("removeLength", len(removals)),
@@ -620,7 +620,7 @@ func (kv *etcdKV) MultiSaveBytesAndRemoveWithPrefix(ctx context.Context, saves m
 	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx1), ops...)
 	if err != nil {
 		log.Ctx(ctx).Warn("Etcd MultiSaveBytesAndRemoveWithPrefix error",
-			zap.Any("saves", saves),
+			zap.Strings("saveKeys", lo.Keys(saves)),
 			zap.Strings("removes", removals),
 			zap.Int("saveLength", len(saves)),
 			zap.Int("removeLength", len(removals)),
