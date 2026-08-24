@@ -21,8 +21,8 @@ type Reranker interface {
 }
 
 type rrfReranker struct {
-	K       float64    `json:"k,omitempty"`
-	weights *[]float64 `json:"weights,omitempty"`
+	K       float64 `json:"k,omitempty"`
+	weights *[]float64
 }
 
 func (r *rrfReranker) WithK(k float64) *rrfReranker {
