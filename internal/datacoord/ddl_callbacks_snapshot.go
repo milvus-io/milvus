@@ -35,7 +35,7 @@ func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result m
 	log.Info(ctx, "createSnapshotV2AckCallback received")
 
 	// Create snapshot - ID is allocated inside CreateSnapshot
-	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds)
+	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds, header.GetSkipIndex())
 	if err != nil {
 		log.Error(ctx, "failed to create snapshot via DDL callback", mlog.Err(err))
 		return err
@@ -102,6 +102,7 @@ func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result 
 		mlog.Bool("external", header.External),
 		mlog.String("snapshotS3Location", snapshotstorage.RedactSnapshotObjectPath(header.SnapshotS3Location)),
 		mlog.Bool("externalSpecSet", header.GetExternalSpec() != ""),
+		mlog.Bool("skipIndex", header.GetSkipIndex()),
 	)
 	log.Info(ctx, "restoreSnapshotV2AckCallback received")
 
@@ -124,6 +125,7 @@ func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result 
 			header.JobId,
 			header.GetExternalSpec(),
 			header.GetSnapshotFingerprint(),
+			header.GetSkipIndex(),
 		)
 	} else {
 		jobID, err = s.snapshotManager.RestoreData(
@@ -133,6 +135,7 @@ func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result 
 			header.CollectionId,
 			header.JobId,
 			header.PinId,
+			header.GetSkipIndex(),
 		)
 	}
 	if err != nil {

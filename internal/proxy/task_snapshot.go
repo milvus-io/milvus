@@ -148,6 +148,7 @@ func (cst *createSnapshotTask) Execute(ctx context.Context) error {
 		Description:                 cst.req.GetDescription(),
 		CollectionId:                cst.collectionID,
 		CompactionProtectionSeconds: cst.req.GetCompactionProtectionSeconds(),
+		SkipIndex:                   cst.req.GetSkipIndex(),
 	})
 	if err = merr.CheckRPCCall(cst.result, err); err != nil {
 		return err
@@ -371,6 +372,7 @@ func (dst *describeSnapshotTask) Execute(ctx context.Context) error {
 		CollectionName: collectionName,
 		PartitionNames: partitionNames,
 		S3Location:     snapshotInfo.GetS3Location(),
+		SkipIndex:      snapshotInfo.GetSkipIndex(),
 	}
 
 	return nil
@@ -587,6 +589,7 @@ func (rst *restoreSnapshotTask) Execute(ctx context.Context) error {
 		TargetDbName:         rst.req.GetTargetDbName(),
 		TargetCollectionName: rst.req.GetTargetCollectionName(),
 		SourceCollectionId:   rst.collectionID,
+		SkipIndex:            rst.req.GetSkipIndex(),
 	})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		mlog.Warn(ctx, "RestoreSnapshot failed",

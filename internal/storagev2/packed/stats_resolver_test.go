@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -357,5 +358,36 @@ func TestStatsResolverManifest(t *testing.T) {
 		assert.Equal(t, int64(7), result.JSONKeyStats[300].GetVersion())
 		assert.Equal(t, int64(7000), result.JSONKeyStats[300].GetBuildID())
 		assert.Equal(t, int64(3), result.JSONKeyStats[300].GetJsonKeyStatsDataFormat())
+	})
+
+	t.Run("manifest index filter requires registered text metadata", func(t *testing.T) {
+		filtered := NewStatsResolverFromLoadInfo(&querypb.SegmentLoadInfo{
+			ManifestPath:             newManifest,
+			FilterManifestIndexStats: true,
+		})
+		result := filtered.TextAndJSONIndexStatsWithBasePaths()
+		require.NoError(t, result.Err())
+		assert.Empty(t, result.TextIndexStats)
+
+		filteredSegment := NewStatsResolverFromSegmentInfo(&datapb.SegmentInfo{
+			ManifestPath:             newManifest,
+			FilterManifestIndexStats: true,
+		})
+		result = filteredSegment.TextAndJSONIndexStatsWithBasePaths()
+		require.NoError(t, result.Err())
+		assert.Empty(t, result.TextIndexStats)
+
+		registered := NewStatsResolverFromLoadInfo(&querypb.SegmentLoadInfo{
+			ManifestPath:             newManifest,
+			FilterManifestIndexStats: true,
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				400: {FieldID: 400, Version: 7, BuildID: 9001},
+			},
+		})
+		result = registered.TextAndJSONIndexStatsWithBasePaths()
+		require.NoError(t, result.Err())
+		require.Contains(t, result.TextIndexStats, int64(400))
+		assert.Equal(t, []string{"milvus_packed_inverted_index.v3"}, result.TextIndexStats[400].GetFiles())
+		assert.Equal(t, int64(9001), result.TextIndexStats[400].GetBuildID())
 	})
 }

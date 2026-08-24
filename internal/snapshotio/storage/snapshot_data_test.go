@@ -253,6 +253,7 @@ func TestSnapshotMetadata_ChannelSeekPositionsRoundTrip(t *testing.T) {
 			Name:         "per_channel_snapshot",
 			CollectionId: 100,
 			CreateTs:     100,
+			SkipIndex:    true,
 			ChannelSeekPositions: []*msgpb.MsgPosition{
 				{
 					ChannelName: "by-dev-rootcoord-dml_0_100v0",
@@ -281,6 +282,7 @@ func TestSnapshotMetadata_ChannelSeekPositionsRoundTrip(t *testing.T) {
 	err = protojson.UnmarshalOptions{DiscardUnknown: true}.Unmarshal(metadataJSON, restored)
 	require.NoError(t, err)
 	require.NotNil(t, restored.GetSnapshotInfo())
+	assert.True(t, restored.GetSnapshotInfo().GetSkipIndex())
 
 	positions := restored.GetSnapshotInfo().GetChannelSeekPositions()
 	require.Len(t, positions, 2)
@@ -318,6 +320,7 @@ func TestSnapshotMetadata_LegacySnapshotWithoutChannelSeekPositions(t *testing.T
 	require.NotNil(t, metadata.GetSnapshotInfo())
 	assert.Equal(t, int64(12345), metadata.GetSnapshotInfo().GetCreateTs())
 	assert.Empty(t, metadata.GetSnapshotInfo().GetChannelSeekPositions())
+	assert.False(t, metadata.GetSnapshotInfo().GetSkipIndex())
 }
 
 func TestSnapshotWriter_Save_RealAvro(t *testing.T) {
@@ -1588,6 +1591,57 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 	assert.Len(t, byPath, 4)
 }
 
+func TestListSnapshotDataFiles_StorageV3SkipIndex(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	ctx := context.Background()
+
+	basePath := path.Join(tempDir, "files/insert_log/100/20/1001")
+	paths := []string{
+		path.Join(basePath, "manifest"),
+		path.Join(basePath, "_data/cg0.parquet"),
+		path.Join(basePath, "_stats/pk.10/1"),
+		path.Join(basePath, "_stats/bm25.11/1"),
+		path.Join(basePath, "_stats/text_index.12/posting"),
+		path.Join(basePath, "_stats/json_stats.13/shredding"),
+	}
+	for _, filePath := range paths {
+		require.NoError(t, cm.Write(ctx, filePath, []byte("data")))
+	}
+
+	snapshot := createTestSnapshotData()
+	snapshot.SnapshotInfo.SkipIndex = true
+	segment := snapshot.Segments[0]
+	segment.StorageVersion = storage.StorageV3
+	segment.ManifestPath = packed.MarshalManifestPath(basePath, 1)
+	segment.Binlogs = nil
+	segment.Statslogs = nil
+	segment.Deltalogs = nil
+	segment.Bm25Statslogs = nil
+	segment.IndexFiles = nil
+	segment.TextIndexFiles = nil
+	segment.JsonKeyIndexFiles = nil
+
+	mockGetLobFiles := mockey.Mock(packed.GetManifestLobFiles).Return(nil, nil).Build()
+	defer mockGetLobFiles.UnPatch()
+
+	refs, err := snapshotstorage.ListSnapshotDataFiles(ctx, cm, snapshot, nil)
+	require.NoError(t, err)
+
+	byPath := make(map[string]snapshotstorage.SnapshotFileRef)
+	for _, ref := range refs {
+		byPath[ref.NormalizedPath] = ref
+	}
+
+	assert.Contains(t, byPath, basePath)
+	assert.Contains(t, byPath, path.Join(basePath, "manifest"))
+	assert.Contains(t, byPath, path.Join(basePath, "_data/cg0.parquet"))
+	assert.Contains(t, byPath, path.Join(basePath, "_stats/pk.10/1"))
+	assert.Contains(t, byPath, path.Join(basePath, "_stats/bm25.11/1"))
+	assert.NotContains(t, byPath, path.Join(basePath, "_stats/text_index.12/posting"))
+	assert.NotContains(t, byPath, path.Join(basePath, "_stats/json_stats.13/shredding"))
+}
+
 func validateSnapshotDataFiles(
 	ctx context.Context,
 	cm storage.ChunkManager,
@@ -1600,6 +1654,7 @@ func validateSnapshotDataFiles(
 		"snapshots/100/metadata/1.json",
 		snapshot,
 		storageConfig,
+		false,
 	)
 }
 
@@ -1652,6 +1707,70 @@ func TestValidateSnapshotDataFiles_SucceedsWhenObjectsExist(t *testing.T) {
 
 	err := validateSnapshotDataFiles(ctx, cm, snapshot, nil)
 	require.NoError(t, err)
+}
+
+func TestValidateSnapshotDataFiles_SkipIndexIgnoresMissingIndexFiles(t *testing.T) {
+	tests := []struct {
+		name           string
+		storageVersion int64
+	}{
+		{name: "storage v1", storageVersion: storage.StorageV1},
+		{name: "storage v2", storageVersion: storage.StorageV2},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+			ctx := context.Background()
+			existingPath := path.Join(tempDir, "files/insert_log/100/10/1001/1")
+			require.NoError(t, cm.Write(ctx, existingPath, []byte("insert")))
+
+			snapshot := createTestSnapshotData()
+			segment := snapshot.Segments[0]
+			segment.StorageVersion = test.storageVersion
+			segment.ManifestPath = ""
+			segment.Binlogs = []*datapb.FieldBinlog{{
+				FieldID: 10,
+				Binlogs: []*datapb.Binlog{{
+					LogPath: existingPath,
+				}},
+			}}
+			segment.Statslogs = nil
+			segment.Deltalogs = nil
+			segment.Bm25Statslogs = nil
+			segment.IndexFiles = []*indexpb.IndexFilePathInfo{{
+				IndexFilePaths: []string{path.Join(tempDir, "files/index_files/missing")},
+			}}
+			segment.TextIndexFiles = map[int64]*datapb.TextIndexStats{
+				12: {Files: []string{path.Join(tempDir, "files/text_index/missing")}},
+			}
+			segment.JsonKeyIndexFiles = map[int64]*datapb.JsonKeyStats{
+				13: {Files: []string{path.Join(tempDir, "files/json_index/missing")}},
+			}
+
+			err := snapshotstorage.ValidateExternalSnapshotDataFiles(
+				ctx,
+				cm,
+				"snapshots/100/metadata/1.json",
+				snapshot,
+				nil,
+				false,
+			)
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+
+			err = snapshotstorage.ValidateExternalSnapshotDataFiles(
+				ctx,
+				cm,
+				"snapshots/100/metadata/1.json",
+				snapshot,
+				nil,
+				true,
+			)
+			require.NoError(t, err)
+			assert.False(t, snapshot.SnapshotInfo.GetSkipIndex())
+		})
+	}
 }
 
 func TestValidateSnapshotDataFiles_StorageV3SucceedsWhenManifestObjectsExist(t *testing.T) {
@@ -3283,8 +3402,13 @@ func TestValidateFormatVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "version_4_current",
+			name:    "version_4_legacy",
 			version: 4,
+			wantErr: false,
+		},
+		{
+			name:    "version_5_current",
+			version: 5,
 			wantErr: false,
 		},
 		{
@@ -3336,8 +3460,13 @@ func TestGetManifestSchemaByVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "version_4_current",
+			name:    "version_4_legacy",
 			version: 4,
+			wantErr: false,
+		},
+		{
+			name:    "version_5_current",
+			version: 5,
 			wantErr: false,
 		},
 		{

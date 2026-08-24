@@ -94,8 +94,9 @@ func TestPackSegmentLoadInfo_ManifestPath(t *testing.T) {
 	t.Run("manifest set clears legacy stats fields and keeps json stats placeholders", func(t *testing.T) {
 		childManifestPaths := []string{`{"ver":4,"base_path":"files/insert_log/100/10/2001"}`}
 		seg := &datapb.SegmentInfo{
-			ID:           100,
-			ManifestPath: "base/path@5",
+			ID:                       100,
+			ManifestPath:             "base/path@5",
+			FilterManifestIndexStats: true,
 			Stats: &datapb.Statistics{
 				InsertBinlogSize: 1024,
 				LoadResource: &datapb.LoadResourceStatistics{
@@ -128,6 +129,7 @@ func TestPackSegmentLoadInfo_ManifestPath(t *testing.T) {
 		assert.Empty(t, loadInfo.GetBm25Logs())
 		assert.Equal(t, seg.GetTextStatsLogs(), loadInfo.GetTextStatsLogs())
 		assert.Equal(t, seg.GetJsonKeyStats(), loadInfo.GetJsonKeyStatsLogs())
+		assert.True(t, loadInfo.GetFilterManifestIndexStats())
 		// Deltalogs should always be populated
 		assert.NotEmpty(t, loadInfo.GetDeltalogs())
 	})

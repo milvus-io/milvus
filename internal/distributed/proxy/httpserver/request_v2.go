@@ -385,6 +385,7 @@ type CreateSnapshotReq struct {
 	SnapshotName                string `json:"snapshotName" binding:"required"`
 	Description                 string `json:"description"`
 	CompactionProtectionSeconds int64  `json:"compactionProtectionSeconds" binding:"gte=0"`
+	SkipIndex                   bool   `json:"skipIndex"`
 }
 
 func (req *CreateSnapshotReq) GetDbName() string { return req.DbName }
@@ -407,6 +408,7 @@ type RestoreSnapshotReq struct {
 	TargetDbName         string `json:"targetDbName"`
 	TargetCollectionName string `json:"targetCollectionName" binding:"required"`
 	SnapshotName         string `json:"snapshotName" binding:"required"`
+	SkipIndex            bool   `json:"skipIndex"`
 }
 
 func (req *RestoreSnapshotReq) GetDbName() string { return req.SourceDbName }
@@ -433,6 +435,7 @@ type RestoreExternalSnapshotReq struct {
 	TargetCollectionName string `json:"targetCollectionName" binding:"required"`
 	SnapshotMetadataURI  string `json:"snapshotMetadataURI" binding:"required"`
 	ExternalSpec         string `json:"externalSpec"`
+	SkipIndex            bool   `json:"skipIndex"`
 }
 
 func (req *RestoreExternalSnapshotReq) GetDbName() string { return req.DbName }
