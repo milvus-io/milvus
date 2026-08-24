@@ -1763,9 +1763,9 @@ func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest
 		ticket, _ := common.GetStringValue(request.GetParams(), "ticket")
 
 		if err := s.garbageCollector.Pause(ctx, collectionID, ticket, time.Duration(pauseSeconds)*time.Second); err != nil {
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = fmt.Sprintf("failed to pause gc, %s", err.Error())
-			return status, nil
+			// merr.Status keeps Code/Retriable, so callers can tell a timeout or a
+			// transient "collector is closing" apart from a genuine failure.
+			return merr.Status(err), nil
 		}
 	case datapb.GcCommand_Resume:
 		collectionID, err, _ := common.GetInt64Value(request.GetParams(), "collection_id")
@@ -1774,9 +1774,7 @@ func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest
 		}
 		ticket, _ := common.GetStringValue(request.GetParams(), "ticket")
 		if err := s.garbageCollector.Resume(ctx, collectionID, ticket); err != nil {
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = fmt.Sprintf("failed to pause gc, %s", err.Error())
-			return status, nil
+			return merr.Status(err), nil
 		}
 	default:
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError

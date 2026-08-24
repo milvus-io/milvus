@@ -88,10 +88,15 @@ type gcCmd struct {
 	collectionID int64
 	ticket       string
 	done         chan error
+	ctx          context.Context
 	timeout      <-chan struct{}
 }
 
 type gcPauseRecord struct {
+	// id uniquely identifies this record within its gcPauseRecords. Tickets are
+	// not unique -- the REST route in restful_mgr_routes.go issues every pause
+	// with an empty ticket -- so rollback must delete by id, not by ticket.
+	id         int64
 	ticket     string
 	pauseUntil time.Time
 }
@@ -99,6 +104,7 @@ type gcPauseRecord struct {
 type gcPauseRecords struct {
 	mut     sync.RWMutex
 	maxLen  int
+	nextID  int64
 	records typeutil.Heap[gcPauseRecord]
 }
 
@@ -117,17 +123,15 @@ func (gc *gcPauseRecords) PauseUntil() time.Time {
 	return gc.records.Peek().pauseUntil
 }
 
-func (gc *gcPauseRecords) Insert(ticket string, pauseUntil time.Time) error {
+// Insert records a pause ticket and returns the id of the record it created, so
+// that a failed pause can roll back exactly its own record via DeleteByID.
+func (gc *gcPauseRecords) Insert(ticket string, pauseUntil time.Time) (int64, error) {
 	gc.mut.Lock()
 	defer gc.mut.Unlock()
 
 	// heap small enough, short path
 	if gc.records.Len() < gc.maxLen {
-		gc.records.Push(gcPauseRecord{
-			ticket:     ticket,
-			pauseUntil: pauseUntil,
-		})
-		return nil
+		return gc.pushLocked(ticket, pauseUntil), nil
 	}
 
 	records := make([]gcPauseRecord, 0, gc.records.Len())
@@ -143,25 +147,46 @@ func (gc *gcPauseRecords) Insert(ticket string, pauseUntil time.Time) error {
 	})
 
 	if gc.records.Len() < gc.maxLen {
-		gc.records.Push(gcPauseRecord{
-			ticket:     ticket,
-			pauseUntil: pauseUntil,
-		})
-		return nil
+		return gc.pushLocked(ticket, pauseUntil), nil
 	}
 
 	// too many pause records, refresh heap
-	return merr.WrapErrTooManyRequests(64, "too many pause records")
+	return 0, merr.WrapErrTooManyRequests(64, "too many pause records")
 }
 
+// pushLocked appends a new record with a freshly allocated id. Caller must hold mut.
+func (gc *gcPauseRecords) pushLocked(ticket string, pauseUntil time.Time) int64 {
+	gc.nextID++
+	gc.records.Push(gcPauseRecord{
+		id:         gc.nextID,
+		ticket:     ticket,
+		pauseUntil: pauseUntil,
+	})
+	return gc.nextID
+}
+
+// Delete drops every record holding the given ticket. This is the user-facing
+// resume semantic ("release my ticket"); use DeleteByID to undo a single record.
 func (gc *gcPauseRecords) Delete(ticket string) {
+	gc.deleteMatching(func(r gcPauseRecord) bool { return r.ticket == ticket })
+}
+
+// DeleteByID drops the single record with the given id, leaving records that
+// merely share its ticket untouched.
+func (gc *gcPauseRecords) DeleteByID(id int64) {
+	gc.deleteMatching(func(r gcPauseRecord) bool { return r.id == id })
+}
+
+// deleteMatching rebuilds the heap without the matching records, dropping
+// already-expired records along the way.
+func (gc *gcPauseRecords) deleteMatching(match func(gcPauseRecord) bool) {
 	gc.mut.Lock()
 	defer gc.mut.Unlock()
 	now := time.Now()
 	records := make([]gcPauseRecord, 0, gc.records.Len())
 	for gc.records.Len() > 0 {
 		record := gc.records.Pop()
-		if now.Before(record.pauseUntil) && record.ticket != ticket {
+		if now.Before(record.pauseUntil) && !match(record) {
 			records = append(records, record)
 		}
 	}
@@ -292,11 +317,17 @@ func (gc *garbageCollector) Pause(ctx context.Context, collectionID int64, ticke
 		collectionID: collectionID,
 		ticket:       ticket,
 		done:         done,
+		ctx:          ctx,
 		timeout:      ctx.Done(),
 	}:
 		return <-done
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-gc.ctx.Done():
+		// cmdCh is unbuffered and startControlLoop has already returned, so the
+		// send above can never be received; without this arm the caller parks
+		// until its own ctx is canceled (forever for a Done()-less ctx).
+		return merr.WrapErrServiceUnavailable("garbage collector is closing")
 	}
 }
 
@@ -318,6 +349,9 @@ func (gc *garbageCollector) Resume(ctx context.Context, collectionID int64, tick
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-gc.ctx.Done():
+		// see Pause: the control loop is gone, nothing will receive this send.
+		return merr.WrapErrServiceUnavailable("garbage collector is closing")
 	}
 }
 
@@ -397,8 +431,9 @@ func (gc *garbageCollector) pause(cmd gcCmd) error {
 		zap.Duration("duration", cmd.duration),
 	)
 	var err error
+	var recordID int64
 	if cmd.collectionID <= 0 { // legacy pause all
-		err = gc.pauseUntil.Insert(cmd.ticket, reqPauseUntil)
+		recordID, err = gc.pauseUntil.Insert(cmd.ticket, reqPauseUntil)
 		log.Info("global pause ticket recorded")
 	} else {
 		curr, has := gc.pausedCollection.Get(cmd.collectionID)
@@ -406,7 +441,7 @@ func (gc *garbageCollector) pause(cmd gcCmd) error {
 			curr = NewGCPauseRecords()
 			gc.pausedCollection.Insert(cmd.collectionID, curr)
 		}
-		err = curr.Insert(cmd.ticket, reqPauseUntil)
+		recordID, err = curr.Insert(cmd.ticket, reqPauseUntil)
 		log.Info("collection new pause ticket recorded")
 	}
 	if err != nil {
@@ -421,12 +456,44 @@ func (gc *garbageCollector) pause(cmd gcCmd) error {
 	}
 	select {
 	case signalCh <- signal:
-		<-signal.done
+		select {
+		case <-signal.done:
+		case <-cmd.timeout:
+			gc.rollbackPause(cmd, recordID)
+			return cmd.ctx.Err()
+		}
 	case <-cmd.timeout:
 		// timeout, resume the pause
-		gc.resume(cmd)
+		gc.rollbackPause(cmd, recordID)
+		return cmd.ctx.Err()
+	case <-gc.ctx.Done():
+		// The collector is closing. The meta worker may already have returned on
+		// its own ctx.Done(), and signalCh is unbuffered, so the send above would
+		// never be received: bound the wait by the collector's lifetime instead of
+		// parking this control-loop goroutine and hanging gc.wg.Wait() in close().
+		gc.rollbackPause(cmd, recordID)
+		return merr.WrapErrServiceUnavailable("garbage collector is closing")
 	}
 	return nil
+}
+
+// rollbackPause undoes exactly the record this pause() call inserted. It must not
+// go through resume(), whose delete is ticket-scoped: tickets are not unique --
+// every pause issued by the REST route in restful_mgr_routes.go carries an empty
+// ticket -- so a ticket-scoped delete would also drop a concurrent caller's
+// still-valid pause record and resume GC while that caller believes it is paused.
+func (gc *garbageCollector) rollbackPause(cmd gcCmd, recordID int64) {
+	if cmd.collectionID <= 0 {
+		gc.pauseUntil.DeleteByID(recordID)
+	} else if curr, has := gc.pausedCollection.Get(cmd.collectionID); has {
+		curr.DeleteByID(recordID)
+		if curr.Len() == 0 || time.Now().After(curr.PauseUntil()) {
+			gc.pausedCollection.Remove(cmd.collectionID)
+		}
+	}
+	log.Info("pause rolled back",
+		zap.Int64("collectionID", cmd.collectionID),
+		zap.String("ticket", cmd.ticket))
 }
 
 func (gc *garbageCollector) resume(cmd gcCmd) {
@@ -1363,7 +1430,8 @@ func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context, signa
 				// process canceled.
 				return
 			}
-			removePrefix := prefix + fmt.Sprintf("%d/", task.Version)
+			// analyze stats files are laid out as analyze_stats/{taskID}/{version}/...
+			removePrefix := prefix + fmt.Sprintf("%d/%d/", taskID, i)
 			if err := gc.option.cli.RemoveWithPrefix(ctx, removePrefix); err != nil {
 				log.Warn("garbageCollector recycleUnusedAnalyzeFiles remove files with prefix failed",
 					zap.Int64("taskID", taskID), zap.String("removePrefix", removePrefix))

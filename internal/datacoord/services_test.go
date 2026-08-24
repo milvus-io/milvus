@@ -1682,6 +1682,53 @@ func (s *GcControlServiceSuite) TestPause() {
 	s.True(merr.Ok(resp))
 }
 
+// A pause that times out inside the collector rolls the ticket back and returns
+// the caller's context error. That error must reach the client as a failed
+// status: the timeout path used to return nil, so GcControl reported Success
+// while garbage collection was in fact never paused.
+func (s *GcControlServiceSuite) TestPauseErrorSurfacesAsFailedStatus() {
+	mockPause := mockey.Mock((*garbageCollector).Pause).Return(context.DeadlineExceeded).Build()
+	defer mockPause.UnPatch()
+
+	resp, err := s.server.GcControl(context.Background(), &datapb.GcControlRequest{
+		Command: datapb.GcCommand_Pause,
+		Params: []*commonpb.KeyValuePair{
+			{Key: "duration", Value: "60"},
+		},
+	})
+	s.NoError(err)
+	s.False(merr.Ok(resp))
+	// merr.Ok alone is satisfied by ErrorCode != Success, so assert the typed code
+	// too: a status that flattens to Code=0 leaves callers unable to tell a timeout
+	// from a real failure. Note merr.Error rebuilds the error from the code rather
+	// than restoring the original sentinel, so assert the code, not errors.Is.
+	s.Equal(merr.TimeoutCode, resp.GetCode())
+	s.Equal(merr.TimeoutCode, merr.Code(merr.Error(resp)))
+	// The proxy handler in proxy/management.go still branches on the deprecated
+	// ErrorCode field, so it must stay non-Success.
+	s.NotEqual(commonpb.ErrorCode_Success, resp.GetErrorCode())
+}
+
+// The "collector is closing" error is transient, so the retriable bit must reach
+// the client: merr.CheckRPCCall in restful_mgr_routes.go is what tells a caller
+// to retry, and a hand-built UnexpectedError status would report retriable=false.
+func (s *GcControlServiceSuite) TestPauseUnavailableStaysRetriable() {
+	mockPause := mockey.Mock((*garbageCollector).Pause).
+		Return(merr.WrapErrServiceUnavailable("garbage collector is closing")).Build()
+	defer mockPause.UnPatch()
+
+	resp, err := s.server.GcControl(context.Background(), &datapb.GcControlRequest{
+		Command: datapb.GcCommand_Pause,
+		Params: []*commonpb.KeyValuePair{
+			{Key: "duration", Value: "60"},
+		},
+	})
+	s.NoError(err)
+	s.False(merr.Ok(resp))
+	s.True(resp.GetRetriable())
+	s.ErrorIs(merr.Error(resp), merr.ErrServiceUnavailable)
+}
+
 func (s *GcControlServiceSuite) TestResume() {
 	resp, err := s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
 		Command: datapb.GcCommand_Resume,
