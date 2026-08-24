@@ -263,123 +263,13 @@ func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *tes
 	assert.NoError(t, inspector.createIndexForSegment(ctx, meta.GetCollection(segment.CollectionID), segment, 5))
 }
 
-func TestIndexInspector_ReloadFromMetaUsesCachedCollection(t *testing.T) {
-	// Recovery reads the collection from the local meta cache only: when the
-	// cache already holds the collection, recovered tasks get the per column
-	// estimate without going through the handler (rootcoord).
-	const (
-		collID    = UniqueID(2)
-		vecField  = UniqueID(101)
-		numRows   = int64(3000)
-		groupSize = int64(2 * 1024 * 1024 * 1024)
-	)
-
-	ctx := context.Background()
-	notifyChan := make(chan int64, 1)
-	scheduler := task.NewMockGlobalScheduler(t)
-	alloc := allocator.NewMockAllocator(t)
-	// no GetCollection expectation: any handler resolution fails the test
-	handler := NewNMockHandler(t)
-	storageCli := mocks.NewChunkManager(t)
-	versionManager := newIndexEngineVersionManager()
-	catalog := mocks2.NewDataCoordCatalog(t)
-
-	m := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		indexMeta: &indexMeta{
-			keyLock:          lock.NewKeyLock[UniqueID](),
-			catalog:          catalog,
-			segmentBuildInfo: newSegmentIndexBuildInfo(),
-			indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
-			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
-		},
-	}
-	m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
-		3: {
-			CollectionID: collID,
-			FieldID:      vecField,
-			IndexID:      3,
-			IndexName:    indexName,
-			IndexParams: []*commonpb.KeyValuePair{
-				{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
-			},
-		},
-	}
-	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
-
-	m.collections.Insert(collID, &collectionInfo{
-		ID: collID,
-		Schema: &schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk_col"},
-				{
-					FieldID:       vecField,
-					Name:          "vec",
-					DataType:      schemapb.DataType_FloatVector,
-					ExternalField: "vec_col",
-					TypeParams: []*commonpb.KeyValuePair{
-						{Key: common.DimKey, Value: "128"},
-					},
-				},
-			},
-		},
-	})
-
-	for _, segmentID := range []UniqueID{1, 2} {
-		segment := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:             segmentID,
-				CollectionID:   collID,
-				NumOfRows:      numRows,
-				State:          commonpb.SegmentState_Flushed,
-				StorageVersion: storage.StorageV3,
-				ManifestPath:   "manifest.json",
-				Binlogs: []*datapb.FieldBinlog{
-					{
-						FieldID:     0,
-						ChildFields: []int64{100, vecField},
-						Binlogs: []*datapb.Binlog{
-							{EntriesNum: numRows, MemorySize: groupSize},
-						},
-					},
-				},
-			},
-		}
-		m.segments.SetSegment(segmentID, segment)
-		err := m.indexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
-			CollectionID: collID,
-			SegmentID:    segmentID,
-			IndexID:      3,
-			BuildID:      100 + segmentID,
-			NumRows:      numRows,
-			IndexState:   commonpb.IndexState_Unissued,
-		})
-		assert.NoError(t, err)
-	}
-
-	slots := make([]int64, 0, 2)
-	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(t task.Task) {
-		slots = append(slots, t.GetTaskSlot())
-	}).Return()
-
-	inspector := newIndexInspector(ctx, notifyChan, m, scheduler, alloc, handler, storageCli, versionManager)
-	inspector.reloadFromMeta()
-
-	assert.Len(t, slots, 2)
-	indexParams := m.indexMeta.indexes[collID][3].IndexParams
-	expected := calculateIndexTaskSlot(int64(128*4)*numRows, numRows, indexParams)
-	for _, slot := range slots {
-		assert.Equal(t, expected, slot)
-		assert.Less(t, slot, calculateIndexTaskSlot(groupSize, numRows, indexParams))
-	}
-}
-
 func TestIndexInspector_ReloadFromMetaNeverResolvesThroughHandler(t *testing.T) {
 	// Recovery runs synchronously in Start(), so it must never load a
-	// collection through the handler (rootcoord): a StorageV2 segment keeps the
-	// whole binlog size, and a projection-capable segment whose collection is
-	// not cached yet falls back to the conservative group size.
+	// collection through the handler (rootcoord). It also never narrows the
+	// estimate: a StorageV2 segment keeps its per-field binlog size, and a
+	// manifest-backed V3 segment is recovered without FieldBinlog arrays (the
+	// catalog does not persist them), so it keeps the Stats-derived whole
+	// segment size.
 	const (
 		collID    = UniqueID(2)
 		vecField  = UniqueID(101)
@@ -421,9 +311,10 @@ func TestIndexInspector_ReloadFromMetaNeverResolvesThroughHandler(t *testing.T) 
 	}
 	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
 
-	// segment 1 is StorageV2, segment 2 is projection-capable but its
-	// collection is not cached: both must keep the conservative binlog size
-	// without any handler lookup.
+	// segment 1 is StorageV2 as recovered from the catalog (per-field binlogs
+	// persisted); segment 2 is a manifest-backed V3 segment as recovered from
+	// the catalog: no FieldBinlog arrays, aggregate size on Stats only. Both
+	// must keep the conservative size without any handler lookup.
 	segments := []*SegmentInfo{
 		{
 			SegmentInfo: &datapb.SegmentInfo{
@@ -450,15 +341,7 @@ func TestIndexInspector_ReloadFromMetaNeverResolvesThroughHandler(t *testing.T) 
 				State:          commonpb.SegmentState_Flushed,
 				StorageVersion: storage.StorageV3,
 				ManifestPath:   "manifest.json",
-				Binlogs: []*datapb.FieldBinlog{
-					{
-						FieldID:     0,
-						ChildFields: []int64{100, vecField},
-						Binlogs: []*datapb.Binlog{
-							{EntriesNum: numRows, MemorySize: fieldSize},
-						},
-					},
-				},
+				Stats:          &datapb.Statistics{InsertBinlogSize: fieldSize},
 			},
 		},
 	}

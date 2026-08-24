@@ -280,6 +280,24 @@ func (suite *UtilSuite) TestEstimateFieldsReadSize() {
 		suite.Equal(jsonBytes, size)
 	})
 
+	suite.Run("bool group member does not reduce the measured residual", func() {
+		// bool is measured bit-packed (~1/8 B per row) but the schema charges
+		// 1 B per row: treating it as exact would over-deduct from the
+		// variable width columns of its group
+		boolSchema := &schemapb.CollectionSchema{
+			Fields: append([]*schemapb.FieldSchema{
+				{FieldID: 106, Name: "flag", DataType: schemapb.DataType_Bool},
+			}, schema.Fields...),
+		}
+		boolBytes := numRows / 8
+		jsonBytes := jsonSize * numRows
+		segment := newSegment(group(pkSize*numRows+boolBytes+jsonBytes, 106, pkField, jsonField))
+
+		size, err := estimateFieldsReadSize(boolSchema, segment, []int64{jsonField})
+		suite.NoError(err)
+		suite.Equal(boolBytes+jsonBytes, size)
+	})
+
 	suite.Run("nullable fixed width field is charged from the residual", func() {
 		// a nullable vector is stored with a variable length encoding and rows
 		// holding null store less than the full width, so the schema size is
@@ -466,12 +484,15 @@ func (suite *UtilSuite) TestEstimateFieldsReadSize() {
 
 func (suite *UtilSuite) TestIsFixedWidthType() {
 	for _, dataType := range []schemapb.DataType{
-		schemapb.DataType_Bool, schemapb.DataType_Int64, schemapb.DataType_Double,
+		schemapb.DataType_Int64, schemapb.DataType_Double,
 		schemapb.DataType_FloatVector, schemapb.DataType_Int8Vector,
 	} {
 		suite.True(isFixedWidthType(dataType), dataType.String())
 	}
 	for _, dataType := range []schemapb.DataType{
+		// Bool is stored bit-packed, so the 1 byte per row schema estimate is
+		// not exact and it must be attributed from the measured residual
+		schemapb.DataType_Bool,
 		schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_JSON,
 		schemapb.DataType_Array, schemapb.DataType_Geometry,
 		schemapb.DataType_SparseFloatVector, schemapb.DataType_ArrayOfVector,

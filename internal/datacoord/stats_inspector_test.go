@@ -732,16 +732,18 @@ func (s *statsInspectorSuite) TestReloadFromMeta() {
 }
 
 func (s *statsInspectorSuite) TestReloadFromMetaEstimatesPerSubJobType() {
-	// Recovered stats tasks read the collection from the local meta cache and
-	// are sized by the columns their sub job actually reads; recovery must not
-	// resolve collections through the handler (rootcoord).
+	// A recovered manifest-backed V3 segment carries no FieldBinlog arrays
+	// (the catalog does not persist them), so recovered stats tasks keep the
+	// Stats-derived whole segment size — doubled for the json key index job —
+	// and recovery must not resolve collections through the handler
+	// (rootcoord).
 	const (
 		collectionID = UniqueID(5)
 		segmentID    = UniqueID(50)
 		pkFieldID    = int64(500)
 		jsonFieldID  = int64(501)
 		numRows      = int64(1000)
-		groupSize    = int64(2 * 1024 * 1024 * 1024)
+		segmentSize  = int64(2 * 1024 * 1024 * 1024)
 	)
 
 	s.mt.collections.Insert(collectionID, &collectionInfo{
@@ -766,15 +768,7 @@ func (s *statsInspectorSuite) TestReloadFromMetaEstimatesPerSubJobType() {
 			NumOfRows:      numRows,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("files/insert_log/5/3/50", 1),
-			Binlogs: []*datapb.FieldBinlog{
-				{
-					FieldID:     0,
-					ChildFields: []int64{pkFieldID, jsonFieldID},
-					Binlogs: []*datapb.Binlog{
-						{EntriesNum: numRows, LogSize: groupSize, MemorySize: groupSize},
-					},
-				},
-			},
+			Stats:          &datapb.Statistics{InsertBinlogSize: segmentSize},
 		},
 	}
 	s.mt.segments.SetSegment(segmentID, segment)
@@ -802,12 +796,10 @@ func (s *statsInspectorSuite) TestReloadFromMetaEstimatesPerSubJobType() {
 
 	s.inspector.reloadFromMeta()
 
-	// the json key index task drops the pk column out of its estimation, while
-	// the sort task still reads the whole segment
-	residualBytes := groupSize - 8*numRows
-	s.Equal(calculateStatsTaskSlot(residualBytes*2), slots[indexpb.StatsSubJob_JsonKeyIndexJob])
-	s.Equal(calculateStatsTaskSlot(segment.getSegmentSize()), slots[indexpb.StatsSubJob_Sort])
-	s.Less(slots[indexpb.StatsSubJob_JsonKeyIndexJob], calculateStatsTaskSlot(segment.getSegmentSize()*2))
+	// without binlogs to attribute, the json key index task keeps the whole
+	// segment size doubled, and the sort task the whole segment size
+	s.Equal(calculateStatsTaskSlot(segmentSize*2), slots[indexpb.StatsSubJob_JsonKeyIndexJob])
+	s.Equal(calculateStatsTaskSlot(segmentSize), slots[indexpb.StatsSubJob_Sort])
 }
 
 func (s *statsInspectorSuite) TestReloadFromMetaSkipsCollectionResolutionWithoutProjection() {

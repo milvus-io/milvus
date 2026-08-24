@@ -581,9 +581,15 @@ func calculateIndexTaskSlot(fieldSize, numRows int64, indexParams []*commonpb.Ke
 // a field, i.e. the estimation cannot be off. Variable length types only get a
 // configured guess out of the schema (see typeutil.EstimateSizePerRecord), so
 // they are attributed from the measured data instead whenever possible.
+//
+// Bool is deliberately absent: the schema charges it 1 byte per row while the
+// measured group size accounts it bit-packed (~1/8 byte per row, see
+// ActualSizeInBytes handling of arrow.BOOL), and external sampling can round
+// it down to 0. Treating it as exact would over-deduct from the residual and
+// understate the variable length columns sharing its group.
 func isFixedWidthType(dataType schemapb.DataType) bool {
 	switch dataType {
-	case schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16,
+	case schemapb.DataType_Int8, schemapb.DataType_Int16,
 		schemapb.DataType_Int32, schemapb.DataType_Int64, schemapb.DataType_Float,
 		schemapb.DataType_Double, schemapb.DataType_Timestamptz,
 		schemapb.DataType_BinaryVector, schemapb.DataType_FloatVector,
@@ -655,6 +661,13 @@ func segmentColumnGroups(segment *SegmentInfo) map[int64]*columnGroup {
 
 // estimateFieldsReadSize estimates how much data a task reads for fieldIDs of a
 // segment.
+//
+// It works off segment.GetBinlogs(), which for manifest-backed StorageV3
+// segments only exists in memory: the catalog does not persist their
+// FieldBinlog arrays (see isV3Segment), so after a DataCoord restart such
+// segments carry no binlogs and every field errors out here, letting the
+// callers keep their conservative whole-segment fallback until the segment is
+// rewritten.
 //
 // Both the index build and the json/text stats tasks request a single column at
 // a time. Per-field attribution is safe only for a StorageV3 segment with a
