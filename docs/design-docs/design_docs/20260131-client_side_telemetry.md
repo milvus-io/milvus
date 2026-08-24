@@ -318,9 +318,14 @@ Reply payloads are capped at 1 MB client-side; `show_errors` halves the returned
 until it fits. `get_config` deliberately omits `Password` and `APIKey`.
 
 Latency snapshots are retained by timestamp for one hour, independent of the dynamically
-configured heartbeat interval. A 3600-snapshot hard cap is the final memory bound for
+configured heartbeat interval. A 4096-snapshot hard cap is the final memory bound for
 sub-second intervals. The previous fixed 120-snapshot cap represented one hour only at the
 obsolete 30-second default and retained just 20 minutes at the current 10-second default.
+Each operation/window also retains an internal 128-point, evenly spaced quantile sketch
+from the collector's recent sample ring. Aggregated history merges those weighted samples
+and computes P99 from the combined distribution; averaging the P99 values of individual
+windows is mathematically invalid. The sketch is internal and is not added to heartbeat or
+detail-mode response payloads.
 
 ### Server-Side Components
 

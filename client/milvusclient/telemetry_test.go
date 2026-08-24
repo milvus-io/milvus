@@ -3002,6 +3002,35 @@ func TestAggregateSnapshotsEdgeCases(t *testing.T) {
 	})
 }
 
+func TestAggregateSnapshotsP99UsesCombinedLatencyDistribution(t *testing.T) {
+	manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+	fastStart := time.Now().Add(-time.Millisecond)
+	for i := 0; i < 100; i++ {
+		manager.RecordOperation("Search", "", fastStart, nil)
+	}
+	manager.createSnapshot()
+
+	slowStart := time.Now().Add(-100 * time.Millisecond)
+	for i := 0; i < 100; i++ {
+		manager.RecordOperation("Search", "", slowStart, nil)
+	}
+	manager.createSnapshot()
+
+	snapshots := manager.GetMetricsSnapshots()
+	require.Len(t, snapshots, 2)
+	require.NotEmpty(t, snapshots[0].historyLatencySamples["Search"])
+	require.NotEmpty(t, snapshots[1].historyLatencySamples["Search"])
+
+	result := manager.aggregateSnapshots(snapshots, snapshots[0].Timestamp, snapshots[1].EndTime)
+	search := result.Aggregated.Metrics["Search"]
+	require.NotNil(t, search)
+	assert.Equal(t, int64(200), search.RequestCount)
+	// Averaging the two per-window P99 values would report roughly 50ms. The P99 of
+	// the combined equal-sized distribution belongs to the slow window.
+	assert.Greater(t, search.P99LatencyMs, 90.0)
+}
+
 // TestCalculateP99FromSamplesBufferWrap tests the buffer wrap scenarios
 func TestCalculateP99FromSamplesBufferWrap(t *testing.T) {
 	t.Run("totalSamples greater than bufferSize copies full buffer", func(t *testing.T) {
