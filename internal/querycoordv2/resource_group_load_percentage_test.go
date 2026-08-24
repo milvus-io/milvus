@@ -205,9 +205,12 @@ func TestGetLoadPercentageByResourceGroup_TwoResourceGroupsDiffer(t *testing.T) 
 // the doc comment calls out as needing to stay distinguishable: a resource
 // group that holds a replica but no segments yet (0) versus a resource group
 // that is not on the collection at all (-1). Deleting the
-// "if len(replicas) == 0 { return -1, nil }" guard would turn the second
-// case into a panic (Exist/percentage computation on an unrelated resource
-// group query) instead of a clean -1; deleting the
+// "if len(replicas) == 0 { return -1, nil }" guard would make the second
+// case fall through to the percentage computation with an empty replica set,
+// where the loop never runs and the percentage keeps its initial value: the
+// function would answer 100 -- "fully loaded" for a resource group that
+// holds nothing -- which is worse than a panic because nothing reports it;
+// deleting the
 // "if targetNum == 0 { return 0 }" guard is exercised by a separate test
 // below, since this test's target is non-empty.
 func TestGetLoadPercentageByResourceGroup_ZeroVsAbsent(t *testing.T) {
