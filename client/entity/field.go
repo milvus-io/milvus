@@ -48,6 +48,10 @@ func (t FieldType) Name() string {
 		return "Double"
 	case FieldTypeTimestamptz:
 		return "Timestamptz"
+	case FieldTypeDate:
+		return "Date"
+	case FieldTypeTime:
+		return "Time"
 	case FieldTypeString:
 		return "String"
 	case FieldTypeVarChar:
@@ -94,6 +98,10 @@ func (t FieldType) String() string {
 		return "float64"
 	case FieldTypeTimestamptz:
 		return "timestamptz"
+	case FieldTypeDate:
+		return "date"
+	case FieldTypeTime:
+		return "time"
 	case FieldTypeString:
 		return "string"
 	case FieldTypeVarChar:
@@ -140,6 +148,10 @@ func (t FieldType) PbFieldType() (string, string) {
 		return "Double", "float64"
 	case FieldTypeTimestamptz:
 		return "Timestamptz", "int64" // Timestamptz
+	case FieldTypeDate:
+		return "Date", "int32"
+	case FieldTypeTime:
+		return "Time", "int64"
 	case FieldTypeString:
 		return "String", "string"
 	case FieldTypeVarChar:
@@ -197,6 +209,10 @@ const (
 	FieldTypeText FieldType = 25 // variable-length strings without a required max_length
 	// FieldTypeTimestamptz field type timestamptz
 	FieldTypeTimestamptz FieldType = 26
+	// FieldTypeDate field type date (int32 days since Unix epoch)
+	FieldTypeDate FieldType = 28
+	// FieldTypeTime field type time (int64 microseconds since midnight)
+	FieldTypeTime FieldType = 29
 	// FieldTypeBinaryVector field type binary vector
 	FieldTypeBinaryVector FieldType = 100
 	// FieldTypeFloatVector field type float vector

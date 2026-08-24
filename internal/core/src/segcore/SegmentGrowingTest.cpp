@@ -503,6 +503,8 @@ TEST_P(GrowingTest, FillData) {
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto timestamptz_field =
         schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ);
+    auto date_field = schema->AddDebugField("date", DataType::DATE);
+    auto time_field = schema->AddDebugField("time", DataType::TIME);
     auto float_field = schema->AddDebugField("float", DataType::FLOAT);
     auto double_field = schema->AddDebugField("double", DataType::DOUBLE);
     auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
@@ -569,6 +571,10 @@ TEST_P(GrowingTest, FillData) {
             nullptr, double_field, ids_ds->GetIds(), num_inserted);
         auto timestamptz_result = segment->bulk_subscript(
             nullptr, timestamptz_field, ids_ds->GetIds(), num_inserted);
+        auto date_result = segment->bulk_subscript(
+            nullptr, date_field, ids_ds->GetIds(), num_inserted);
+        auto time_result = segment->bulk_subscript(
+            nullptr, time_field, ids_ds->GetIds(), num_inserted);
         auto varchar_result = segment->bulk_subscript(
             nullptr, varchar_field, ids_ds->GetIds(), num_inserted);
         auto json_result = segment->bulk_subscript(
@@ -598,6 +604,8 @@ TEST_P(GrowingTest, FillData) {
                   num_inserted);
         EXPECT_EQ(timestamptz_result->scalars().timestamptz_data().data_size(),
                   num_inserted);
+        EXPECT_EQ(date_result->scalars().date_data().data_size(), num_inserted);
+        EXPECT_EQ(time_result->scalars().time_data().data_size(), num_inserted);
         EXPECT_EQ(float_result->scalars().float_data().data_size(),
                   num_inserted);
         EXPECT_EQ(double_result->scalars().double_data().data_size(),
@@ -638,6 +646,8 @@ TEST_P(GrowingTest, FillData) {
         EXPECT_EQ(GetFieldDataRowValidData(*float_result).size(), 0);
         EXPECT_EQ(GetFieldDataRowValidData(*double_result).size(), 0);
         EXPECT_EQ(GetFieldDataRowValidData(*timestamptz_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*date_result).size(), 0);
+        EXPECT_EQ(GetFieldDataRowValidData(*time_result).size(), 0);
         EXPECT_EQ(GetFieldDataRowValidData(*varchar_result).size(), 0);
         EXPECT_EQ(GetFieldDataRowValidData(*json_result).size(), 0);
         EXPECT_EQ(GetFieldDataRowValidData(*int_array_result).size(), 0);
@@ -661,6 +671,8 @@ TEST(Growing, FillNullableData) {
     auto double_field = schema->AddDebugField("double", DataType::DOUBLE, true);
     auto timestamptz_field =
         schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ, true);
+    auto date_field = schema->AddDebugField("date", DataType::DATE, true);
+    auto time_field = schema->AddDebugField("time", DataType::TIME, true);
     auto varchar_field =
         schema->AddDebugField("varchar", DataType::VARCHAR, true);
     auto json_field = schema->AddDebugField("json", DataType::JSON, true);
@@ -726,6 +738,10 @@ TEST(Growing, FillNullableData) {
             nullptr, double_field, ids_ds->GetIds(), num_inserted);
         auto timestamptz_result = segment->bulk_subscript(
             nullptr, timestamptz_field, ids_ds->GetIds(), num_inserted);
+        auto date_result = segment->bulk_subscript(
+            nullptr, date_field, ids_ds->GetIds(), num_inserted);
+        auto time_result = segment->bulk_subscript(
+            nullptr, time_field, ids_ds->GetIds(), num_inserted);
         auto varchar_result = segment->bulk_subscript(
             nullptr, varchar_field, ids_ds->GetIds(), num_inserted);
         auto json_result = segment->bulk_subscript(
@@ -757,6 +773,8 @@ TEST(Growing, FillNullableData) {
                   num_inserted);
         EXPECT_EQ(timestamptz_result->scalars().timestamptz_data().data_size(),
                   num_inserted);
+        EXPECT_EQ(date_result->scalars().date_data().data_size(), num_inserted);
+        EXPECT_EQ(time_result->scalars().time_data().data_size(), num_inserted);
         EXPECT_EQ(varchar_result->scalars().string_data().data_size(),
                   num_inserted);
         EXPECT_EQ(json_result->scalars().json_data().data_size(), num_inserted);
@@ -783,6 +801,8 @@ TEST(Growing, FillNullableData) {
                   num_inserted);
         EXPECT_EQ(GetFieldDataRowValidData(*timestamptz_result).size(),
                   num_inserted);
+        EXPECT_EQ(GetFieldDataRowValidData(*date_result).size(), num_inserted);
+        EXPECT_EQ(GetFieldDataRowValidData(*time_result).size(), num_inserted);
         EXPECT_EQ(GetFieldDataRowValidData(*varchar_result).size(),
                   num_inserted);
         EXPECT_EQ(GetFieldDataRowValidData(*json_result).size(), num_inserted);

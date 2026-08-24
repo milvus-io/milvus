@@ -4988,7 +4988,8 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                          small_int_raw_type);
             break;
         }
-        case DataType::INT32: {
+        case DataType::INT32:
+        case DataType::DATE: {
             bulk_subscript_impl<int32_t>(op_ctx,
                                          column.get(),
                                          seg_offsets,
@@ -4997,6 +4998,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::TIMESTAMPTZ:
+        case DataType::TIME:
         case DataType::INT64: {
             bulk_subscript_impl<int64_t>(op_ctx,
                                          column.get(),
@@ -6047,6 +6049,17 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
                                                       ->mutable_data());
             break;
         }
+        case DataType::DATE: {
+            bulk_subscript_impl<int32_t, int32_t>(op_ctx,
+                                                  column.get(),
+                                                  seg_offsets,
+                                                  count,
+                                                  ret->mutable_scalars()
+                                                      ->mutable_date_data()
+                                                      ->mutable_data()
+                                                      ->mutable_data());
+            break;
+        }
         case DataType::INT64: {
             bulk_subscript_impl<int64_t, int64_t>(op_ctx,
                                                   column.get(),
@@ -6090,6 +6103,17 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
                     ->mutable_timestamptz_data()
                     ->mutable_data()
                     ->mutable_data());
+            break;
+        }
+        case DataType::TIME: {
+            bulk_subscript_impl<int64_t, int64_t>(op_ctx,
+                                                  column.get(),
+                                                  seg_offsets,
+                                                  count,
+                                                  ret->mutable_scalars()
+                                                      ->mutable_time_data()
+                                                      ->mutable_data()
+                                                      ->mutable_data());
             break;
         }
         case DataType::VECTOR_FLOAT: {
@@ -9183,6 +9207,14 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             }
             break;
         }
+        case DataType::DATE: {
+            auto typed = std::static_pointer_cast<arrow::Int32Array>(arr);
+            auto obj = data_array->mutable_scalars()->mutable_date_data();
+            for (int64_t i = 0; i < size; i++) {
+                obj->add_data(typed->Value(result_mapping[i]));
+            }
+            break;
+        }
         case DataType::INT64: {
             auto typed = std::static_pointer_cast<arrow::Int64Array>(arr);
             auto obj = data_array->mutable_scalars()->mutable_long_data();
@@ -9305,6 +9337,14 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             // NormalizeExternalArrow already converted Timestamp→Int64.
             auto obj =
                 data_array->mutable_scalars()->mutable_timestamptz_data();
+            auto typed = std::static_pointer_cast<arrow::Int64Array>(arr);
+            for (int64_t i = 0; i < size; i++) {
+                obj->add_data(typed->Value(result_mapping[i]));
+            }
+            break;
+        }
+        case DataType::TIME: {
+            auto obj = data_array->mutable_scalars()->mutable_time_data();
             auto typed = std::static_pointer_cast<arrow::Int64Array>(arr);
             for (int64_t i = 0; i < size; i++) {
                 obj->add_data(typed->Value(result_mapping[i]));

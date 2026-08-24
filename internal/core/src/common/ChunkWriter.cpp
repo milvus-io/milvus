@@ -540,6 +540,7 @@ create_chunk_writer(const FieldMeta& field_meta) {
             return std::make_shared<ChunkWriter<arrow::Int16Array, int16_t>>(
                 dim, nullable);
         case milvus::DataType::INT32:
+        case milvus::DataType::DATE:
             return std::make_shared<ChunkWriter<arrow::Int32Array, int32_t>>(
                 dim, nullable);
         case milvus::DataType::INT64:
@@ -552,6 +553,7 @@ create_chunk_writer(const FieldMeta& field_meta) {
             return std::make_shared<ChunkWriter<arrow::DoubleArray, double>>(
                 dim, nullable);
         case milvus::DataType::TIMESTAMPTZ:
+        case milvus::DataType::TIME:
             return std::make_shared<ChunkWriter<arrow::Int64Array, int64_t>>(
                 dim, nullable);
         case milvus::DataType::VECTOR_FLOAT:
@@ -658,6 +660,7 @@ make_chunk(const FieldMeta& field_meta,
                                                      nullable,
                                                      chunk_mmap_guard);
         case milvus::DataType::INT32:
+        case milvus::DataType::DATE:
             return std::make_unique<FixedWidthChunk>(row_nums,
                                                      dim,
                                                      data,
@@ -690,6 +693,7 @@ make_chunk(const FieldMeta& field_meta,
                                                      nullable,
                                                      chunk_mmap_guard);
         case milvus::DataType::TIMESTAMPTZ:
+        case milvus::DataType::TIME:
             return std::make_unique<FixedWidthChunk>(row_nums,
                                                      dim,
                                                      data,

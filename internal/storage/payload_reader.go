@@ -145,6 +145,12 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, []bool, int, error) {
 	case schemapb.DataType_Timestamptz:
 		val, validData, err := r.GetTimestamptzFromPayload()
 		return val, validData, 0, err
+	case schemapb.DataType_Date:
+		val, validData, err := r.GetDateFromPayload()
+		return val, validData, 0, err
+	case schemapb.DataType_Time:
+		val, validData, err := r.GetTimeFromPayload()
+		return val, validData, 0, err
 	case schemapb.DataType_BinaryVector:
 		val, dim, validData, _, err := r.GetBinaryVectorFromPayload()
 		return val, validData, dim, err
@@ -446,6 +452,67 @@ func (r *PayloadReader) GetDoubleFromPayload() ([]float64, []bool, error) {
 func (r *PayloadReader) GetTimestamptzFromPayload() ([]int64, []bool, error) {
 	if r.colType != schemapb.DataType_Timestamptz {
 		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get timestamptz from datatype %v", r.colType.String())
+	}
+
+	values := make([]int64, r.numRows)
+	if r.nullable {
+		validData := make([]bool, r.numRows)
+		valuesRead, err := ReadData[int64, *array.Int64](r.reader, values, validData, r.numRows)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if valuesRead != r.numRows {
+			return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
+		}
+
+		return values, validData, nil
+	}
+	valuesRead, err := ReadDataFromAllRowGroups[int64, *file.Int64ColumnChunkReader](r.reader, values, 0, r.numRows)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if valuesRead != r.numRows {
+		return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
+	}
+
+	return values, nil, nil
+}
+
+func (r *PayloadReader) GetDateFromPayload() ([]int32, []bool, error) {
+	if r.colType != schemapb.DataType_Date {
+		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get date from datatype %v", r.colType.String())
+	}
+
+	values := make([]int32, r.numRows)
+	if r.nullable {
+		validData := make([]bool, r.numRows)
+		valuesRead, err := ReadData[int32, *array.Int32](r.reader, values, validData, r.numRows)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if valuesRead != r.numRows {
+			return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
+		}
+		return values, validData, nil
+	}
+	valuesRead, err := ReadDataFromAllRowGroups[int32, *file.Int32ColumnChunkReader](r.reader, values, 0, r.numRows)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if valuesRead != r.numRows {
+		return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
+	}
+
+	return values, nil, nil
+}
+
+func (r *PayloadReader) GetTimeFromPayload() ([]int64, []bool, error) {
+	if r.colType != schemapb.DataType_Time {
+		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get time from datatype %v", r.colType.String())
 	}
 
 	values := make([]int64, r.numRows)

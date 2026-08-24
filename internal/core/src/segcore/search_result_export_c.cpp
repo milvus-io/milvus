@@ -176,9 +176,11 @@ EmptyExtraFieldArrowType(const milvus::FieldMeta& field_meta) {
         case milvus::DataType::INT8:
         case milvus::DataType::INT16:
         case milvus::DataType::INT32:
+        case milvus::DataType::DATE:
             return arrow::int32();
         case milvus::DataType::INT64:
         case milvus::DataType::TIMESTAMPTZ:
+        case milvus::DataType::TIME:
             return arrow::int64();
         case milvus::DataType::FLOAT:
             return arrow::float32();
@@ -425,9 +427,11 @@ BuildGroupByArray(const std::vector<milvus::GroupByValueType>& values,
         case milvus::DataType::INT16:
             return BuildGroupByTypedArray<int16_t, arrow::Int16Builder>(values);
         case milvus::DataType::INT32:
+        case milvus::DataType::DATE:
             return BuildGroupByTypedArray<int32_t, arrow::Int32Builder>(values);
         case milvus::DataType::INT64:
         case milvus::DataType::TIMESTAMPTZ:
+        case milvus::DataType::TIME:
             return BuildGroupByTypedArray<int64_t, arrow::Int64Builder>(values);
         case milvus::DataType::BOOL:
             return BuildGroupByTypedArray<bool, arrow::BooleanBuilder>(values);
@@ -787,7 +791,9 @@ BuildSearchResultFullBatch(CSearchResult c_search_result,
         search_result->segment_);
 
     milvus::futures::throwIfCancelled(cancel_token);
-    { milvus::segcore::SortEqualScoresByPks(search_result); }
+    {
+        milvus::segcore::SortEqualScoresByPks(search_result);
+    }
 
     std::map<milvus::FieldId, std::unique_ptr<milvus::DataArray>> extra_fields;
     if (num_extra_fields > 0 && extra_field_ids != nullptr &&

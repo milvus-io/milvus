@@ -886,6 +886,17 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                 }
                 break;
             }
+            case DataType::DATE: {
+                auto data_ptr = result->mutable_scalars()
+                                    ->mutable_date_data()
+                                    ->mutable_data()
+                                    ->mutable_data();
+
+                for (int64_t i = 0; i < count; ++i) {
+                    data_ptr[i] = field_meta.default_value()->date_data();
+                }
+                break;
+            }
             case DataType::INT64: {
                 auto data_ptr = result->mutable_scalars()
                                     ->mutable_long_data()
@@ -928,6 +939,17 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                 for (int64_t i = 0; i < count; ++i) {
                     data_ptr[i] =
                         field_meta.default_value()->timestamptz_data();
+                }
+                break;
+            }
+            case DataType::TIME: {
+                auto data_ptr = result->mutable_scalars()
+                                    ->mutable_time_data()
+                                    ->mutable_data()
+                                    ->mutable_data();
+
+                for (int64_t i = 0; i < count; ++i) {
+                    data_ptr[i] = field_meta.default_value()->time_data();
                 }
                 break;
             }

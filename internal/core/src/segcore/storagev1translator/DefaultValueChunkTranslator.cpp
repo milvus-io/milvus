@@ -153,12 +153,14 @@ DefaultValueChunkTranslator::value_size() const {
             value_size = sizeof(int16_t);
             break;
         case milvus::DataType::INT32:
+        case milvus::DataType::DATE:
             value_size = sizeof(int32_t);
             break;
         case milvus::DataType::INT64:
             value_size = sizeof(int64_t);
             break;
         case milvus::DataType::TIMESTAMPTZ:
+        case milvus::DataType::TIME:
             value_size = sizeof(int64_t);
             break;
         case milvus::DataType::FLOAT:

@@ -515,3 +515,119 @@ TEST_P(ExprTest, TestTermTimestamptz) {
         }
     }
 }
+
+TEST_P(ExprTest, TestTermDate) {
+    std::vector<std::tuple<std::string, std::function<bool(int32_t)>>> testcases = {
+        {R"(d in ["1970-04-11", "1970-07-20"])",
+         [](int32_t v) { return v == 100 || v == 200; }},
+        {R"(d in ["1970-04-11"])", [](int32_t v) { return v == 100; }},
+        {"d in []", [](int32_t v) { return false; }},
+        {R"(d in ["1970-01-01", "1970-01-02", "1970-01-03", "1970-01-04", "1970-01-05", "1970-01-06"])",
+         [](int32_t v) { return v >= 0 && v <= 5; }},
+        {R"(d > "1970-02-20")", [](int32_t v) { return v > 50; }},
+        {R"(d > "1970-01-11" && d < "1970-04-11")",
+         [](int32_t v) { return v > 10 && v < 100; }},
+    };
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto d_fid = schema->AddDebugField("d", DataType::DATE);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 1000;
+    std::vector<int32_t> d_col;
+    int num_iters = 1;
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter);
+        auto new_d_col = raw_data.get_col<int32_t>(d_fid);
+        d_col.insert(d_col.end(), new_d_col.begin(), new_d_col.end());
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    SetSchema(schema);
+    for (auto [expr_str, ref_func] : testcases) {
+        auto plan_str = create_search_plan_from_expr(expr_str);
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+        BitsetType final;
+        final = ExecuteQueryExpr(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0],
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP);
+        EXPECT_EQ(final.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto ans = final[i];
+            auto val = d_col[i];
+            auto ref = ref_func(val);
+            ASSERT_EQ(ans, ref) << expr_str << "@" << i << "!!" << val;
+        }
+    }
+}
+
+TEST_P(ExprTest, TestTermTime) {
+    std::vector<std::tuple<std::string, std::function<bool(int64_t)>>> testcases = {
+        {R"(t in ["00:00:00.000100", "00:00:00.000200"])",
+         [](int64_t v) { return v == 100 || v == 200; }},
+        {R"(t in ["00:00:00.000100"])", [](int64_t v) { return v == 100; }},
+        {"t in []", [](int64_t v) { return false; }},
+        {R"(t in ["00:00:00", "00:00:00.000001", "00:00:00.000002", "00:00:00.000003", "00:00:00.000004", "00:00:00.000005"])",
+         [](int64_t v) { return v >= 0 && v <= 5; }},
+        {R"(t > "00:00:00.000050")", [](int64_t v) { return v > 50; }},
+        {R"(t > "00:00:00.000010" && t < "00:00:00.000100")",
+         [](int64_t v) { return v > 10 && v < 100; }},
+    };
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto t_fid = schema->AddDebugField("t", DataType::TIME);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 1000;
+    std::vector<int64_t> t_col;
+    int num_iters = 1;
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter);
+        auto new_t_col = raw_data.get_col<int64_t>(t_fid);
+        t_col.insert(t_col.end(), new_t_col.begin(), new_t_col.end());
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    SetSchema(schema);
+    for (auto [expr_str, ref_func] : testcases) {
+        auto plan_str = create_search_plan_from_expr(expr_str);
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+        BitsetType final;
+        final = ExecuteQueryExpr(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0],
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP);
+        EXPECT_EQ(final.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto ans = final[i];
+            auto val = t_col[i];
+            auto ref = ref_func(val);
+            ASSERT_EQ(ans, ref) << expr_str << "@" << i << "!!" << val;
+        }
+    }
+}

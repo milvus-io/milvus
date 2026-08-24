@@ -91,8 +91,13 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecVisitorImpl<int32_t>(context);
             break;
         }
+        case DataType::DATE: {
+            result = ExecVisitorImpl<int32_t>(context);
+            break;
+        }
         case DataType::INT64:
-        case DataType::TIMESTAMPTZ: {
+        case DataType::TIMESTAMPTZ:
+        case DataType::TIME: {
             result = ExecVisitorImpl<int64_t>(context);
             break;
         }
@@ -315,16 +320,16 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
     auto target_val = arg_val_.GetValue<ValueType>();
 
     int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const ArrayView* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const ValueType& target_val) {
+    auto execute_sub_batch = [&processed_cursor,
+                              &bitmap_input]<FilterType filter_type =
+                                                 FilterType::sequential>(
+                                 const ArrayView* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const ValueType& target_val) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -416,17 +421,18 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
     }
 
     int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const ArrayView* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            int index,
-            const std::shared_ptr<MultiElement>& term_set) {
+    auto execute_sub_batch = [&processed_cursor,
+                              &bitmap_input]<FilterType filter_type =
+                                                 FilterType::sequential>(
+                                 const ArrayView* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 int index,
+                                 const std::shared_ptr<MultiElement>&
+                                     term_set) {
         if (!term_set->Empty()) {
             AssertInfo(index >= 0,
                        "array element term predicate requires nested path");
@@ -522,17 +528,17 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
     int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const Json* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::string& pointer,
-            const ValueType& target_val) {
+    auto execute_sub_batch = [&processed_cursor,
+                              &bitmap_input]<FilterType filter_type =
+                                                 FilterType::sequential>(
+                                 const Json* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const std::string& pointer,
+                                 const ValueType& target_val) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -815,17 +821,17 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
     }
 
     int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const Json* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::string& pointer,
-            const std::shared_ptr<MultiElement>& terms) {
+    auto execute_sub_batch = [&processed_cursor,
+                              &bitmap_input]<FilterType filter_type =
+                                                 FilterType::sequential>(
+                                 const Json* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const std::string& pointer,
+                                 const std::shared_ptr<MultiElement>& terms) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -1126,16 +1132,18 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
     const auto str_set_elem = cached_str_set_elem_;
 
     int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &bitmap_input, &simd_filter_fn,
-         str_set_elem ]<FilterType filter_type = FilterType::sequential>(
-            const T* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::shared_ptr<MultiElement>& vals) {
+    auto execute_sub_batch = [&processed_cursor,
+                              &bitmap_input,
+                              &simd_filter_fn,
+                              str_set_elem]<FilterType filter_type =
+                                                FilterType::sequential>(
+                                 const T* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const std::shared_ptr<MultiElement>& vals) {
         if (data == nullptr) {
             processed_cursor += size;
             return;
@@ -1338,10 +1346,14 @@ PhyTermFilterExpr::PrefetchRawData() {
         case DataType::INT32:
             PrefetchRawData<int32_t>();
             break;
+        case DataType::DATE:
+            PrefetchRawData<int32_t>();
+            break;
         case DataType::INT64:
             PrefetchRawData<int64_t>();
             break;
         case DataType::TIMESTAMPTZ:
+        case DataType::TIME:
             PrefetchRawData<int64_t>();
             break;
         case DataType::FLOAT:

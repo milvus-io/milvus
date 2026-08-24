@@ -952,6 +952,7 @@ CreateIndex(const FieldMeta& field_meta,
             return std::make_unique<ScalarFieldIndexing<int16_t>>(
                 field_meta, segcore_config);
         case DataType::INT32:
+        case DataType::DATE:
             return std::make_unique<ScalarFieldIndexing<int32_t>>(
                 field_meta, segcore_config);
         case DataType::INT64:
@@ -964,6 +965,7 @@ CreateIndex(const FieldMeta& field_meta,
             return std::make_unique<ScalarFieldIndexing<double>>(
                 field_meta, segcore_config);
         case DataType::TIMESTAMPTZ:
+        case DataType::TIME:
             return std::make_unique<ScalarFieldIndexing<int64_t>>(
                 field_meta, segcore_config);
         case DataType::VARCHAR:

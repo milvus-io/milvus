@@ -18,6 +18,8 @@ package column
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -423,6 +425,37 @@ func int32ToType[T ~int8 | int16](data []int32) []T {
 	})
 }
 
+func formatDateDays(days []int32) []string {
+	out := make([]string, len(days))
+	for i, d := range days {
+		out[i] = time.Unix(int64(d)*86400, 0).UTC().Format("2006-01-02")
+	}
+	return out
+}
+
+func formatTimeMicros(micros []int64) []string {
+	const microsPerSecond = int64(1_000_000)
+	out := make([]string, len(micros))
+	for i, v := range micros {
+		if v < 0 {
+			v = 0
+		}
+		hours := v / (3600 * microsPerSecond)
+		remain := v % (3600 * microsPerSecond)
+		minutes := remain / (60 * microsPerSecond)
+		remain = remain % (60 * microsPerSecond)
+		seconds := remain / microsPerSecond
+		frac := remain % microsPerSecond
+		if frac == 0 {
+			out[i] = fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+			continue
+		}
+		fracStr := strings.TrimRight(fmt.Sprintf("%06d", frac), "0")
+		out[i] = fmt.Sprintf("%02d:%02d:%02d.%s", hours, minutes, seconds, fracStr)
+	}
+	return out
+}
+
 // FieldDataColumn converts schemapb.FieldData to Column, used int search result conversion logic
 // begin, end specifies the start and end positions
 func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
@@ -457,6 +490,18 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 
 	case schemapb.DataType_Timestamptz:
 		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetStringData().GetData(), begin, end, validData, NewColumnTimestamptzIsoString, NewNullableColumnTimestamptzIsoString)
+
+	case schemapb.DataType_Date:
+		if strings := fd.GetScalars().GetStringData().GetData(); len(strings) > 0 || fd.GetScalars().GetDateData() == nil {
+			return parseScalarData(fd.GetFieldName(), strings, begin, end, validData, NewColumnDate, NewNullableColumnDate)
+		}
+		return parseScalarData(fd.GetFieldName(), formatDateDays(fd.GetScalars().GetDateData().GetData()), begin, end, validData, NewColumnDate, NewNullableColumnDate)
+
+	case schemapb.DataType_Time:
+		if strings := fd.GetScalars().GetStringData().GetData(); len(strings) > 0 || fd.GetScalars().GetTimeData() == nil {
+			return parseScalarData(fd.GetFieldName(), strings, begin, end, validData, NewColumnTime, NewNullableColumnTime)
+		}
+		return parseScalarData(fd.GetFieldName(), formatTimeMicros(fd.GetScalars().GetTimeData().GetData()), begin, end, validData, NewColumnTime, NewNullableColumnTime)
 
 	case schemapb.DataType_String:
 		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetStringData().GetData(), begin, end, validData, NewColumnString, NewNullableColumnString)

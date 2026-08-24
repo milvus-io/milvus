@@ -118,7 +118,8 @@ IsMaterializedViewSupported(const DataType& data_type) {
            data_type == DataType::INT16 || data_type == DataType::INT32 ||
            data_type == DataType::INT64 || data_type == DataType::FLOAT ||
            data_type == DataType::DOUBLE || data_type == DataType::VARCHAR ||
-           data_type == DataType::TIMESTAMPTZ || data_type == DataType::STRING;
+           data_type == DataType::TIMESTAMPTZ || data_type == DataType::DATE ||
+           data_type == DataType::TIME || data_type == DataType::STRING;
 }
 
 struct ColumnInfo {
@@ -856,7 +857,7 @@ class GISFunctionFilterExpr : public ITypeFilterExpr {
         : column_(cloumn),
           op_(op),
           geometry_wkt_(geometry_wkt),
-          distance_(distance){};
+          distance_(distance) {};
     std::string
     ToString() const override {
         if (op_ == proto::plan::GISFunctionFilterExpr_GISOp_DWithin) {

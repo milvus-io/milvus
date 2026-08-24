@@ -259,6 +259,54 @@ func (c *ColumnTimestampTzIsoString) Slice(start, end int) Column {
 	}
 }
 
+/* Date */
+
+var _ Column = (*ColumnDate)(nil)
+
+type ColumnDate struct {
+	*genericColumnBase[string]
+}
+
+func NewColumnDate(name string, values []string) *ColumnDate {
+	return &ColumnDate{
+		genericColumnBase: &genericColumnBase[string]{
+			name:      name,
+			fieldType: entity.FieldTypeDate,
+			values:    values,
+		},
+	}
+}
+
+func (c *ColumnDate) Slice(start, end int) Column {
+	return &ColumnDate{
+		genericColumnBase: c.genericColumnBase.slice(start, end),
+	}
+}
+
+/* Time */
+
+var _ Column = (*ColumnTime)(nil)
+
+type ColumnTime struct {
+	*genericColumnBase[string]
+}
+
+func NewColumnTime(name string, values []string) *ColumnTime {
+	return &ColumnTime{
+		genericColumnBase: &genericColumnBase[string]{
+			name:      name,
+			fieldType: entity.FieldTypeTime,
+			values:    values,
+		},
+	}
+}
+
+func (c *ColumnTime) Slice(start, end int) Column {
+	return &ColumnTime{
+		genericColumnBase: c.genericColumnBase.slice(start, end),
+	}
+}
+
 /* Varchar */
 
 var _ (Column) = (*ColumnVarChar)(nil)

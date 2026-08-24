@@ -211,11 +211,19 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecRangeVisitorImpl<int32_t>(context);
             break;
         }
+        case DataType::DATE: {
+            result = ExecRangeVisitorImpl<int32_t>(context);
+            break;
+        }
         case DataType::INT64: {
             result = ExecRangeVisitorImpl<int64_t>(context);
             break;
         }
         case DataType::TIMESTAMPTZ: {
+            result = ExecRangeVisitorImpl<int64_t>(context);
+            break;
+        }
+        case DataType::TIME: {
             result = ExecRangeVisitorImpl<int64_t>(context);
             break;
         }
@@ -385,43 +393,47 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonPreciseNumeric(
 
     size_t processed_cursor = 0;
     auto execute_sub_batch =
-        [ pointer, bound, op_type, &bitmap_input, &
-          processed_cursor ]<FilterType filter_type = FilterType::sequential>(
+        [pointer,
+         bound,
+         op_type,
+         &bitmap_input,
+         &processed_cursor]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res) {
-        if (data == nullptr) {
-            processed_cursor += size;
-            return;
-        }
-        const bool has_bitmap_input = !bitmap_input.empty();
-        for (int i = 0; i < size; ++i) {
-            auto offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = offsets ? offsets[i] : i;
+            if (data == nullptr) {
+                processed_cursor += size;
+                return;
             }
-            if (valid_data && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                continue;
-            }
+            const bool has_bitmap_input = !bitmap_input.empty();
+            for (int i = 0; i < size; ++i) {
+                auto offset = i;
+                if constexpr (filter_type == FilterType::random) {
+                    offset = offsets ? offsets[i] : i;
+                }
+                if (valid_data && !valid_data[offset]) {
+                    res[i] = valid_res[i] = false;
+                    continue;
+                }
+                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                    continue;
+                }
 
-            auto number = data[offset].at_numeric(pointer);
-            if (number.error()) {
-                res[i] = valid_res[i] = false;
-                continue;
+                auto number = data[offset].at_numeric(pointer);
+                if (number.error()) {
+                    res[i] = valid_res[i] = false;
+                    continue;
+                }
+                auto comparison =
+                    CompareJsonNumberToBound(number.value(), bound);
+                res[i] = comparison.has_value() &&
+                         JsonNumberMatchesOp(*comparison, op_type);
             }
-            auto comparison = CompareJsonNumberToBound(number.value(), bound);
-            res[i] = comparison.has_value() &&
-                     JsonNumberMatchesOp(*comparison, op_type);
-        }
-        processed_cursor += size;
-    };
+            processed_cursor += size;
+        };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -467,8 +479,9 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
     }
     int processed_cursor = 0;
     auto execute_sub_batch =
-        [ op_type, &processed_cursor, &
-          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+        [op_type,
+         &processed_cursor,
+         &bitmap_input]<FilterType filter_type = FilterType::sequential>(
             const milvus::ArrayView* data,
             ValidityView valid_data,
             const int32_t* offsets,
@@ -477,206 +490,207 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
             TargetBitmapView valid_res,
             ValueType val,
             int index) {
-        if (data == nullptr) {
+            if (data == nullptr) {
+                processed_cursor += size;
+                return;
+            }
+            switch (op_type) {
+                case proto::plan::GreaterThan: {
+                    UnaryElementFuncForArray<ValueType,
+                                             proto::plan::GreaterThan,
+                                             filter_type>
+                        func;
+                    func(data,
+                         valid_data,
+                         size,
+                         val,
+                         index,
+                         res,
+                         valid_res,
+                         bitmap_input,
+                         processed_cursor,
+                         offsets);
+                    break;
+                }
+                case proto::plan::GreaterEqual: {
+                    UnaryElementFuncForArray<ValueType,
+                                             proto::plan::GreaterEqual,
+                                             filter_type>
+                        func;
+                    func(data,
+                         valid_data,
+                         size,
+                         val,
+                         index,
+                         res,
+                         valid_res,
+                         bitmap_input,
+                         processed_cursor,
+                         offsets);
+                    break;
+                }
+                case proto::plan::LessThan: {
+                    UnaryElementFuncForArray<ValueType,
+                                             proto::plan::LessThan,
+                                             filter_type>
+                        func;
+                    func(data,
+                         valid_data,
+                         size,
+                         val,
+                         index,
+                         res,
+                         valid_res,
+                         bitmap_input,
+                         processed_cursor,
+                         offsets);
+                    break;
+                }
+                case proto::plan::LessEqual: {
+                    UnaryElementFuncForArray<ValueType,
+                                             proto::plan::LessEqual,
+                                             filter_type>
+                        func;
+                    func(data,
+                         valid_data,
+                         size,
+                         val,
+                         index,
+                         res,
+                         valid_res,
+                         bitmap_input,
+                         processed_cursor,
+                         offsets);
+                    break;
+                }
+                case proto::plan::Equal: {
+                    UnaryElementFuncForArray<ValueType,
+                                             proto::plan::Equal,
+                                             filter_type>
+                        func;
+                    func(data,
+                         valid_data,
+                         size,
+                         val,
+                         index,
+                         res,
+                         valid_res,
+                         bitmap_input,
+                         processed_cursor,
+                         offsets);
+                    break;
+                }
+                case proto::plan::NotEqual: {
+                    UnaryElementFuncForArray<ValueType,
+                                             proto::plan::NotEqual,
+                                             filter_type>
+                        func;
+                    func(data,
+                         valid_data,
+                         size,
+                         val,
+                         index,
+                         res,
+                         valid_res,
+                         bitmap_input,
+                         processed_cursor,
+                         offsets);
+                    break;
+                }
+                case proto::plan::PrefixMatch: {
+                    UnaryElementFuncForArray<ValueType,
+                                             proto::plan::PrefixMatch,
+                                             filter_type>
+                        func;
+                    func(data,
+                         valid_data,
+                         size,
+                         val,
+                         index,
+                         res,
+                         valid_res,
+                         bitmap_input,
+                         processed_cursor,
+                         offsets);
+                    break;
+                }
+                case proto::plan::Match: {
+                    UnaryElementFuncForArray<ValueType,
+                                             proto::plan::Match,
+                                             filter_type>
+                        func;
+                    func(data,
+                         valid_data,
+                         size,
+                         val,
+                         index,
+                         res,
+                         valid_res,
+                         bitmap_input,
+                         processed_cursor,
+                         offsets);
+                    break;
+                }
+                case proto::plan::RegexMatch: {
+                    UnaryElementFuncForArray<ValueType,
+                                             proto::plan::RegexMatch,
+                                             filter_type>
+                        func;
+                    func(data,
+                         valid_data,
+                         size,
+                         val,
+                         index,
+                         res,
+                         valid_res,
+                         bitmap_input,
+                         processed_cursor,
+                         offsets);
+                    break;
+                }
+                case proto::plan::PostfixMatch: {
+                    UnaryElementFuncForArray<ValueType,
+                                             proto::plan::PostfixMatch,
+                                             filter_type>
+                        func;
+                    func(data,
+                         valid_data,
+                         size,
+                         val,
+                         index,
+                         res,
+                         valid_res,
+                         bitmap_input,
+                         processed_cursor,
+                         offsets);
+                    break;
+                }
+                case proto::plan::InnerMatch: {
+                    UnaryElementFuncForArray<ValueType,
+                                             proto::plan::InnerMatch,
+                                             filter_type>
+                        func;
+                    func(data,
+                         valid_data,
+                         size,
+                         val,
+                         index,
+                         res,
+                         valid_res,
+                         bitmap_input,
+                         processed_cursor,
+                         offsets);
+                    break;
+                }
+                default:
+                    ThrowInfo(
+                        UnexpectedError,
+                        fmt::format(
+                            "unsupported operator type for unary expr: {}",
+                            op_type));
+            }
             processed_cursor += size;
-            return;
-        }
-        switch (op_type) {
-            case proto::plan::GreaterThan: {
-                UnaryElementFuncForArray<ValueType,
-                                         proto::plan::GreaterThan,
-                                         filter_type>
-                    func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
-                break;
-            }
-            case proto::plan::GreaterEqual: {
-                UnaryElementFuncForArray<ValueType,
-                                         proto::plan::GreaterEqual,
-                                         filter_type>
-                    func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
-                break;
-            }
-            case proto::plan::LessThan: {
-                UnaryElementFuncForArray<ValueType,
-                                         proto::plan::LessThan,
-                                         filter_type>
-                    func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
-                break;
-            }
-            case proto::plan::LessEqual: {
-                UnaryElementFuncForArray<ValueType,
-                                         proto::plan::LessEqual,
-                                         filter_type>
-                    func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
-                break;
-            }
-            case proto::plan::Equal: {
-                UnaryElementFuncForArray<ValueType,
-                                         proto::plan::Equal,
-                                         filter_type>
-                    func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
-                break;
-            }
-            case proto::plan::NotEqual: {
-                UnaryElementFuncForArray<ValueType,
-                                         proto::plan::NotEqual,
-                                         filter_type>
-                    func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
-                break;
-            }
-            case proto::plan::PrefixMatch: {
-                UnaryElementFuncForArray<ValueType,
-                                         proto::plan::PrefixMatch,
-                                         filter_type>
-                    func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
-                break;
-            }
-            case proto::plan::Match: {
-                UnaryElementFuncForArray<ValueType,
-                                         proto::plan::Match,
-                                         filter_type>
-                    func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
-                break;
-            }
-            case proto::plan::RegexMatch: {
-                UnaryElementFuncForArray<ValueType,
-                                         proto::plan::RegexMatch,
-                                         filter_type>
-                    func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
-                break;
-            }
-            case proto::plan::PostfixMatch: {
-                UnaryElementFuncForArray<ValueType,
-                                         proto::plan::PostfixMatch,
-                                         filter_type>
-                    func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
-                break;
-            }
-            case proto::plan::InnerMatch: {
-                UnaryElementFuncForArray<ValueType,
-                                         proto::plan::InnerMatch,
-                                         filter_type>
-                    func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
-                break;
-            }
-            default:
-                ThrowInfo(
-                    UnexpectedError,
-                    fmt::format("unsupported operator type for unary expr: {}",
-                                op_type));
-        }
-        processed_cursor += size;
-    };
+        };
     int64_t processed_size;
     if (has_offset_input_) {
         processed_size =
@@ -915,16 +929,18 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
     } while (false)
 
     int processed_cursor = 0;
-    auto execute_sub_batch =
-        [ op_type, pointer, &processed_cursor, &
-          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const milvus::Json* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            ExprValueType val) {
+    auto execute_sub_batch = [op_type,
+                              pointer,
+                              &processed_cursor,
+                              &bitmap_input]<FilterType filter_type =
+                                                 FilterType::sequential>(
+                                 const milvus::Json* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 ExprValueType val) {
         if (data == nullptr) {
             processed_cursor += size;
             return;
@@ -1797,22 +1813,20 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     const LikePatternMatcher* like_matcher_ptr = cached_like_matcher_.get();
 
     size_t processed_cursor = 0;
-    auto execute_sub_batch =
-        [
-            expr_type,
-            &processed_cursor,
-            &bitmap_input,
-            regex_matcher_ptr,
-            volnitsky_ptr,
-            like_matcher_ptr
-        ]<FilterType filter_type = FilterType::sequential>(
-            const T* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            IndexInnerType val) {
+    auto execute_sub_batch = [expr_type,
+                              &processed_cursor,
+                              &bitmap_input,
+                              regex_matcher_ptr,
+                              volnitsky_ptr,
+                              like_matcher_ptr]<FilterType filter_type =
+                                                    FilterType::sequential>(
+                                 const T* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 IndexInnerType val) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -2158,8 +2172,12 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
         case DataType::INT32:
             can_use = SegmentExpr::CanUseIndexForOp<int32_t>(expr_->op_type_);
             break;
+        case DataType::DATE:
+            can_use = SegmentExpr::CanUseIndexForOp<int32_t>(expr_->op_type_);
+            break;
         case DataType::INT64:
         case DataType::TIMESTAMPTZ:
+        case DataType::TIME:
             can_use = SegmentExpr::CanUseIndexForOp<int64_t>(expr_->op_type_);
             break;
         case DataType::FLOAT:
@@ -2478,10 +2496,14 @@ PhyUnaryRangeFilterExpr::PrefetchRawData() {
         case DataType::INT32:
             PrefetchRawData<int32_t>();
             break;
+        case DataType::DATE:
+            PrefetchRawData<int32_t>();
+            break;
         case DataType::INT64:
             PrefetchRawData<int64_t>();
             break;
         case DataType::TIMESTAMPTZ:
+        case DataType::TIME:
             PrefetchRawData<int64_t>();
             break;
         case DataType::FLOAT:

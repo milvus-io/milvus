@@ -44,14 +44,16 @@ SkipIndexStatsBuilder::Build(
                 info.min_, info.max_, nullptr);
             break;
         }
-        case milvus::DataType::INT32: {
+        case milvus::DataType::INT32:
+        case milvus::DataType::DATE: {
             auto info =
                 ProcessFieldMetrics<parquet::Int32Type, int32_t>(statistic);
             chunk_metrics = std::make_unique<IntFieldChunkMetrics<int32_t>>(
                 info.min_, info.max_, nullptr);
             break;
         }
-        case milvus::DataType::INT64: {
+        case milvus::DataType::INT64:
+        case milvus::DataType::TIME: {
             auto info =
                 ProcessFieldMetrics<parquet::Int64Type, int64_t>(statistic);
             chunk_metrics = std::make_unique<IntFieldChunkMetrics<int64_t>>(
@@ -182,13 +184,15 @@ SkipIndexStatsBuilder::Build(DataType data_type, const Chunk* chunk) const {
                 ProcessFieldMetrics<int16_t>(typedData, validity, count);
             return LoadMetrics<int16_t>(info);
         }
-        case DataType::INT32: {
+        case DataType::INT32:
+        case DataType::DATE: {
             const int32_t* typedData = static_cast<const int32_t*>(chunk_data);
             auto info =
                 ProcessFieldMetrics<int32_t>(typedData, validity, count);
             return LoadMetrics<int32_t>(info);
         }
-        case DataType::INT64: {
+        case DataType::INT64:
+        case DataType::TIME: {
             const int64_t* typedData = static_cast<const int64_t*>(chunk_data);
             auto info =
                 ProcessFieldMetrics<int64_t>(typedData, validity, count);

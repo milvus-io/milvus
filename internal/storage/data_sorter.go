@@ -248,6 +248,16 @@ func (ds *DataSorter) Swap(i, j int) {
 			data := fd.Data
 			data[i], data[j] = data[j], data[i]
 			swapValidData(fd.ValidData, i, j)
+		case schemapb.DataType_Date:
+			fd := singleData.(*DateFieldData)
+			data := fd.Data
+			data[i], data[j] = data[j], data[i]
+			swapValidData(fd.ValidData, i, j)
+		case schemapb.DataType_Time:
+			fd := singleData.(*TimeFieldData)
+			data := fd.Data
+			data[i], data[j] = data[j], data[i]
+			swapValidData(fd.ValidData, i, j)
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			fd := singleData.(*StringFieldData)
 			data := fd.Data

@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
@@ -290,6 +291,52 @@ func (s *ScalarSuite) TestBasic() {
 			s.Equal(name, parsed.Name())
 			s.Equal(data, parsed.Data())
 			s.Equal(entity.FieldTypeTimestamptz, parsed.Type())
+		}
+	})
+
+	s.Run("column_date", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		data := []string{"2024-06-22", "1970-01-01", "2024-02-29"}
+		column := NewColumnDate(name, data)
+		s.Equal(entity.FieldTypeDate, column.Type())
+		s.Equal(name, column.Name())
+		s.Equal(data, column.Data())
+
+		fd := column.FieldData()
+		s.Equal(name, fd.GetFieldName())
+		s.Equal(schemapb.DataType_Date, fd.GetType())
+		s.Equal(data, fd.GetScalars().GetStringData().GetData())
+
+		result, err := FieldDataColumn(fd, 0, -1)
+		s.NoError(err)
+		parsed, ok := result.(*ColumnDate)
+		if s.True(ok) {
+			s.Equal(name, parsed.Name())
+			s.Equal(data, parsed.Data())
+			s.Equal(entity.FieldTypeDate, parsed.Type())
+		}
+	})
+
+	s.Run("column_time", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		data := []string{"13:45:30", "00:00:00", "24:00:00.000000"}
+		column := NewColumnTime(name, data)
+		s.Equal(entity.FieldTypeTime, column.Type())
+		s.Equal(name, column.Name())
+		s.Equal(data, column.Data())
+
+		fd := column.FieldData()
+		s.Equal(name, fd.GetFieldName())
+		s.Equal(schemapb.DataType_Time, fd.GetType())
+		s.Equal(data, fd.GetScalars().GetStringData().GetData())
+
+		result, err := FieldDataColumn(fd, 0, -1)
+		s.NoError(err)
+		parsed, ok := result.(*ColumnTime)
+		if s.True(ok) {
+			s.Equal(name, parsed.Name())
+			s.Equal(data, parsed.Data())
+			s.Equal(entity.FieldTypeTime, parsed.Type())
 		}
 	})
 }

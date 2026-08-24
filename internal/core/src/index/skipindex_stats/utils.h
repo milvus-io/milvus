@@ -58,6 +58,8 @@ SupportsSkipIndex(DataType type) {
         case DataType::VARCHAR:
         case DataType::STRING:
         case DataType::TIMESTAMPTZ:
+        case DataType::DATE:
+        case DataType::TIME:
             return true;
         default:
             return false;

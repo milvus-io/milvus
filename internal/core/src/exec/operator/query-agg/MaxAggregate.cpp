@@ -53,12 +53,18 @@ registerMax(const std::string& name) {
                 case DataType::INT32:
                     return std::make_unique<T<int32_t, int32_t, int32_t>>(
                         DataType::INT32);
+                case DataType::DATE:
+                    return std::make_unique<T<int32_t, int32_t, int32_t>>(
+                        DataType::DATE);
                 case DataType::INT64:
                     return std::make_unique<T<int64_t, int64_t, int64_t>>(
                         DataType::INT64);
                 case DataType::TIMESTAMPTZ:
                     return std::make_unique<T<int64_t, int64_t, int64_t>>(
                         DataType::TIMESTAMPTZ);
+                case DataType::TIME:
+                    return std::make_unique<T<int64_t, int64_t, int64_t>>(
+                        DataType::TIME);
                 case DataType::DOUBLE:
                     return std::make_unique<T<double, double, double>>(
                         DataType::DOUBLE);

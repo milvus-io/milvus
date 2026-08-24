@@ -95,7 +95,8 @@ New enum values. Existing collections are unchanged. Rolling upgrade is safe: ol
 - `internal/parser/planparserv2` literal compare, `IN`, null, and mixed-type rejection
 - Proxy insert validation: string to packed int, nullable rows
 - C++ segcore storage, `TermExpr`, `UnaryExpr`, both `CompareExpr` switches, and `STL_SORT` dispatch
-- Go client create, insert, and filter against a running standalone
+- MiniCluster create → insert → flush/load → filter/query (`tests/integration/hellomilvus/datetime_expr_test.go`)
+- In-tree Go client `FieldTypeDate` / `FieldTypeTime` ISO columns
 
 ## Rejected Alternatives
 

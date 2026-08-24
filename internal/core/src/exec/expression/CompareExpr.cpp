@@ -338,7 +338,11 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForBothDataSegment(
             return ExecCompareLeftType<int16_t>(context);
         case DataType::INT32:
             return ExecCompareLeftType<int32_t>(context);
+        case DataType::DATE:
+            return ExecCompareLeftType<int32_t>(context);
         case DataType::INT64:
+            return ExecCompareLeftType<int64_t>(context);
+        case DataType::TIME:
             return ExecCompareLeftType<int64_t>(context);
         case DataType::FLOAT:
             return ExecCompareLeftType<float>(context);
@@ -364,7 +368,11 @@ PhyCompareFilterExpr::ExecCompareLeftType(EvalCtx& context) {
             return ExecCompareRightType<T, int16_t>(context);
         case DataType::INT32:
             return ExecCompareRightType<T, int32_t>(context);
+        case DataType::DATE:
+            return ExecCompareRightType<T, int32_t>(context);
         case DataType::INT64:
+            return ExecCompareRightType<T, int64_t>(context);
+        case DataType::TIME:
             return ExecCompareRightType<T, int64_t>(context);
         case DataType::FLOAT:
             return ExecCompareRightType<T, float>(context);
@@ -397,14 +405,15 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
 
     auto expr_type = expr_->op_type_;
     size_t processed_cursor = 0;
-    auto execute_sub_batch =
-        [ expr_type, &bitmap_input, &
-          processed_cursor ]<FilterType filter_type = FilterType::sequential>(
-            const T* left,
-            const U* right,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res) {
+    auto execute_sub_batch = [expr_type,
+                              &bitmap_input,
+                              &processed_cursor]<FilterType filter_type =
+                                                     FilterType::sequential>(
+                                 const T* left,
+                                 const U* right,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res) {
         switch (expr_type) {
             case proto::plan::GreaterThan: {
                 CompareElementFunc<T, U, proto::plan::GreaterThan, filter_type>
