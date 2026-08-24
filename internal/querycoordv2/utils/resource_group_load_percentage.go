@@ -49,7 +49,19 @@ import (
 // and the two error outcomes differ in whether waiting can ever help:
 //
 //   - -1, nil error: rgName has no replica of this collection at all. There
-//     is nothing to report a percentage for.
+//     is nothing to report a percentage for. Terminal once the load has been
+//     registered -- but NOT during the load-startup window: job_load.go
+//     spawns the replicas before it registers the collection, in a separate
+//     meta commit, and the registration check below runs before the replica
+//     scan, so a poll landing between the two commits reads -1 for a group
+//     that already holds replicas. The window is one etcd commit wide and
+//     the next poll answers correctly; it is left as-is rather than
+//     special-cased because telling it apart from a registered collection
+//     with no partitions -- which must answer -1, so that this figure agrees
+//     with what scoped routing will do -- would mean layering an Exist check
+//     back on top of the registration test the three surfaces just unified
+//     on. A caller treating -1 as terminal should confirm it across two
+//     polls.
 //   - 0, nil error: rgName has a replica of this collection, but that replica
 //     has not picked up any of the collection's current load targets yet.
 //     This is a real, distinct state from "no replica" -- it means loading is
