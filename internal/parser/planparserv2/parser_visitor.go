@@ -43,7 +43,8 @@ type ParserVisitor struct {
 	parser.BasePlanVisitor
 	schema *typeutil.SchemaHelper
 	args   *ParserVisitorArgs
-	// currentStructArrayField stores the struct array field name when processing ElementFilter
+	// currentStructArrayField stores the struct array field name while processing
+	// ElementFilter or MATCH_* predicates.
 	currentStructArrayField string
 }
 
@@ -1271,7 +1272,7 @@ func validateMatchPredicateElementLevel(expr *planpb.Expr) (bool, error) {
 	case *planpb.Expr_CompareExpr:
 		return false, merr.WrapErrParameterInvalidMsg("column-to-column comparison is not supported inside MATCH predicate")
 	case *planpb.Expr_JsonContainsExpr:
-		return false, merr.WrapErrParameterInvalidMsg("array/JSON contains expressions are not supported inside MATCH predicate")
+		return validateMatchColumnInfo(realExpr.JsonContainsExpr.GetColumnInfo())
 	case *planpb.Expr_NullExpr:
 		return validateMatchColumnInfo(realExpr.NullExpr.GetColumnInfo())
 	case *planpb.Expr_ExistsExpr:
@@ -2474,13 +2475,75 @@ func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
 	}
 }
 
+func (v *ParserVisitor) resolveContainsField(
+	field *ExprWithType,
+) (*planpb.ColumnInfo, error) {
+	columnInfo := toColumnInfo(field)
+	if columnInfo == nil {
+		return columnInfo, nil
+	}
+	if !columnInfo.GetIsElementLevel() {
+		if !typeutil.IsArrayType(columnInfo.GetDataType()) {
+			return columnInfo, nil
+		}
+		fieldSchema, err := v.schema.GetFieldFromID(columnInfo.GetFieldId())
+		if err != nil {
+			return nil, err
+		}
+		if typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
+			return nil, merr.WrapErrQueryPlanMsg(
+				"contains operation is not supported on nested array field: %s",
+				fieldSchema.GetName())
+		}
+		return columnInfo, nil
+	}
+
+	// A recursive StructArray sub-field is stored as Array<Array<T>> across
+	// rows, but $[sub_field] addresses one struct element and therefore has the
+	// logical type Array<T> inside MATCH_*. Keep this reinterpretation local to
+	// contains expressions so scalar comparison operators remain unsupported.
+	fieldSchema, err := v.schema.GetFieldFromID(columnInfo.GetFieldId())
+	if err != nil {
+		return nil, err
+	}
+	typeSchema := fieldSchema.GetTypeSchema()
+	if fieldSchema.GetDataType() != schemapb.DataType_Array || typeSchema == nil {
+		return nil, merr.WrapErrQueryPlanMsg(
+			"element-level contains requires an Array<scalar> struct sub-field, got: %s",
+			fieldSchema.GetName())
+	}
+	elementSchema := typeSchema.GetArrayElement()
+	if elementSchema == nil {
+		return nil, merr.WrapErrQueryPlanMsg(
+			"element-level contains requires an Array<scalar> struct sub-field, got: %s",
+			fieldSchema.GetName())
+	}
+
+	logicalElement := elementSchema.GetArrayElement()
+	if logicalElement == nil ||
+		logicalElement.GetArrayElement() != nil ||
+		!typeutil.IsPrimitiveType(logicalElement.GetLeafType()) {
+		return nil, merr.WrapErrQueryPlanMsg(
+			"element-level contains only supports Array<scalar> struct sub-fields, got: %s",
+			fieldSchema.GetName())
+	}
+
+	columnInfo.DataType = schemapb.DataType_Array
+	columnInfo.ElementType = logicalElement.GetLeafType()
+	return columnInfo, nil
+}
+
 func (v *ParserVisitor) VisitJSONContains(ctx *parser.JSONContainsContext) interface{} {
 	field := ctx.Expr(0).Accept(v)
 	if err := getError(field); err != nil {
 		return err
 	}
 
-	columnInfo := toColumnInfo(field.(*ExprWithType))
+	fieldExpr := field.(*ExprWithType)
+	columnInfo, err := v.resolveContainsField(fieldExpr)
+	if err != nil {
+		return err
+	}
 	if columnInfo == nil ||
 		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {
 		return merr.WrapErrParameterInvalidMsg(
@@ -2501,7 +2564,7 @@ func (v *ParserVisitor) VisitJSONContains(ctx *parser.JSONContainsContext) inter
 	if !isTemplateExpr(elementExpr) {
 		elements = make([]*planpb.GenericValue, 1)
 		elementValue := elementExpr.GetValue()
-		if err := checkContainsElement(field.(*ExprWithType), planpb.JSONContainsExpr_Contains, elementValue); err != nil {
+		if err := checkContainsElement(fieldExpr, planpb.JSONContainsExpr_Contains, elementValue); err != nil {
 			return err
 		}
 		elements[0] = elementValue
@@ -2531,7 +2594,11 @@ func (v *ParserVisitor) VisitJSONContainsAll(ctx *parser.JSONContainsAllContext)
 		return err
 	}
 
-	columnInfo := toColumnInfo(field.(*ExprWithType))
+	fieldExpr := field.(*ExprWithType)
+	columnInfo, err := v.resolveContainsField(fieldExpr)
+	if err != nil {
+		return err
+	}
 	if columnInfo == nil ||
 		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {
 		return merr.WrapErrParameterInvalidMsg(
@@ -2553,7 +2620,7 @@ func (v *ParserVisitor) VisitJSONContainsAll(ctx *parser.JSONContainsAllContext)
 	var sameType bool
 	if !isTemplateExpr(elementExpr) {
 		elementValue := elementExpr.GetValue()
-		if err := checkContainsElement(field.(*ExprWithType), planpb.JSONContainsExpr_ContainsAll, elementValue); err != nil {
+		if err := checkContainsElement(fieldExpr, planpb.JSONContainsExpr_ContainsAll, elementValue); err != nil {
 			return err
 		}
 		elements = elementValue.GetArrayVal().GetArray()
@@ -2584,7 +2651,11 @@ func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext)
 		return err
 	}
 
-	columnInfo := toColumnInfo(field.(*ExprWithType))
+	fieldExpr := field.(*ExprWithType)
+	columnInfo, err := v.resolveContainsField(fieldExpr)
+	if err != nil {
+		return err
+	}
 	if columnInfo == nil ||
 		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {
 		return merr.WrapErrParameterInvalidMsg(
@@ -2606,7 +2677,7 @@ func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext)
 	var sameType bool
 	if !isTemplateExpr(valueExpr) {
 		elementValue := valueExpr.GetValue()
-		if err := checkContainsElement(field.(*ExprWithType), planpb.JSONContainsExpr_ContainsAny, elementValue); err != nil {
+		if err := checkContainsElement(fieldExpr, planpb.JSONContainsExpr_ContainsAny, elementValue); err != nil {
 			return err
 		}
 		elements = elementValue.GetArrayVal().GetArray()
@@ -2634,7 +2705,6 @@ func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext)
 func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interface{} {
 	var columnInfo *planpb.ColumnInfo
 	var err error
-	isStructArrayParent := false
 	if ctx.StructFieldIdentifier() != nil {
 		// Handle struct_arr[sub_field] syntax: look up the full field name directly
 		identifier := ctx.StructFieldIdentifier().GetText()
@@ -2653,24 +2723,18 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 			if parentColumnInfo, ok, parentErr := v.getStructArrayParentColumnInfo(ctx.Identifier().GetText()); ok || parentErr != nil {
 				columnInfo = parentColumnInfo
 				err = parentErr
-				isStructArrayParent = ok
 			}
 		}
 		if columnInfo == nil && err == nil {
-			columnInfo, err = v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil, nil)
+			columnInfo, err = v.getChildColumnInfo(
+				ctx.Identifier(),
+				ctx.JSONIdentifier(),
+				ctx.StructSubFieldIdentifier(),
+				nil,
+			)
 		}
 		if err != nil {
 			return err
-		}
-	}
-	if columnInfo != nil && !isStructArrayParent {
-		// StructArray parents are not represented as FieldSchema and remain
-		// supported. Recursive Array fields must be rejected before execution
-		// reaches the legacy ArrayView path in segcore.
-		field, fieldErr := v.schema.GetFieldFromID(columnInfo.GetFieldId())
-		if fieldErr == nil && typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
-			return merr.WrapErrParameterInvalidMsg(
-				"array_length operation is not supported on nested array field %s", field.GetName())
 		}
 	}
 	if columnInfo == nil ||
