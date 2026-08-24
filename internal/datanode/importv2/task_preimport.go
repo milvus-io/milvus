@@ -112,6 +112,9 @@ func (t *PreImportTask) GetSlots() int64 {
 // GetResourceRequirement prices a preimport: a fixed base buffer per file in
 // flight, with no vchannel or partition fan-out because nothing is written.
 func (t *PreImportTask) GetResourceRequirement() taskresource.Requirement {
+	if req, ok := taskresource.RequirementFromProto(t.req.GetTaskResources()); ok {
+		return req
+	}
 	return taskresource.EstimateImport(taskresource.ImportInput{
 		IsPreImport: true,
 		FileNum:     len(t.GetFileStats()),

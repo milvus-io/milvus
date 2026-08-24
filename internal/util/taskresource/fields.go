@@ -137,3 +137,11 @@ func SumFieldBinlogMemoryForFieldSet(logs []*datapb.FieldBinlog, ids map[int64]b
 func SumFieldBinlogMemoryForField(logs []*datapb.FieldBinlog, fieldID int64) int64 {
 	return sumFieldBinlogMemoryForField(logs, fieldID)
 }
+
+// VectorFieldByteSize is the closed form for a fixed-width vector type:
+// Dim x rows x the per-element width the build path itself applies. It returns
+// 0 for a type with no closed form, which the caller must read as "fall back",
+// not as "empty".
+func VectorFieldByteSize(dataType schemapb.DataType, dim, numRows int64) int64 {
+	return vectorFieldByteSize(dataType, dim, numRows)
+}

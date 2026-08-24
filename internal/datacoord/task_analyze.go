@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -231,6 +232,15 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 	req.MaxClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxClusterSizeRatio.GetAsFloat()
 	req.MaxClusterSize = Params.DataCoordCfg.ClusteringCompactionMaxClusterSize.GetAsSize()
 	req.TaskSlot = Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64()
+	// EstimateAnalyze is a bound on what the task allocates rather than a model
+	// of what it needs: TrainSize is node memory x this ratio regardless of how
+	// much data there is, so the charge is min(dataset, that). The dataset is
+	// recomputed from Dim x rows because AnalyzeRequest's SegmentStats carry
+	// row counts and log IDs but no byte figure.
+	req.TaskResources = taskresource.EstimateAnalyze(
+		taskresource.VectorFieldByteSize(task.FieldType, task.Dim, totalSegmentsRows),
+		req.GetMaxTrainSizeRatio(),
+	).ToProto()
 
 	WrapPluginContext(task.CollectionID, at.schema.GetProperties(), req)
 

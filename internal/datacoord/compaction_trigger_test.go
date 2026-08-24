@@ -645,6 +645,13 @@ func Test_compactionTrigger_force(t *testing.T) {
 					SlotUsage: memoryToSlots(taskresource.EstimateCompaction(taskresource.CompactionInput{
 						Type: datapb.CompactionType_MixCompaction,
 					}).Memory),
+					// The same estimate, unfolded: task_resources is what a
+					// current worker reads, and slot_usage above is only its
+					// fold for one that predates the vector. Both are asserted
+					// so a change to either has to be deliberate.
+					TaskResources: taskresource.EstimateCompaction(taskresource.CompactionInput{
+						Type: datapb.CompactionType_MixCompaction,
+					}).ToProto(),
 					JsonParams: params,
 				},
 			},

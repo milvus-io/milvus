@@ -582,6 +582,12 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		ExternalSpec:              schema.GetExternalSpec(),
 	}
 
+	// Priced from the field this build targets. For a fixed-width type that is
+	// a closed form over the row count, which is the only field-sizing route
+	// that survives a V3 segment -- no per-field byte figure exists in V3
+	// metadata on either side of the RPC.
+	req.TaskResources = indexBuildRequirement(segment, schema, field, indexType).ToProto()
+
 	WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req)
 
 	return req, nil

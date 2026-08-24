@@ -103,6 +103,9 @@ func (t *L0PreImportTask) GetSlots() int64 {
 // GetResourceRequirement prices an L0 preimport: a delete buffer per file in
 // flight.
 func (t *L0PreImportTask) GetResourceRequirement() taskresource.Requirement {
+	if req, ok := taskresource.RequirementFromProto(t.req.GetTaskResources()); ok {
+		return req
+	}
 	return taskresource.EstimateImport(taskresource.ImportInput{
 		IsL0:        true,
 		IsPreImport: true,
