@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -217,6 +219,48 @@ func TestGetShardLeadersScopedSeesThroughSiblingResourceGroupLag(t *testing.T) {
 	require.NotEqual(t, int32(0), scopedToB.GetStatus().GetCode())
 	assert.ErrorIs(t, merr.Error(scopedToB.GetStatus()), merr.ErrChannelNotAvailable,
 		"the lagging group is refused per channel - retriable, and loading is exactly what a retry waits for")
+}
+
+// TestGetShardLeadersByResourceGroupEmptyScopeIsTheUnscopedAnswer pins the
+// third of the empty-string contracts this PR establishes. The proto field and
+// both sibling surfaces define "" as the absence of a filter; a literal
+// comparison inside GetShardLeadersByResourceGroup would make this the one
+// place where an unset field means "no replica matches", so an empty scope
+// must hand the request back to the unscoped path -- gate included, since the
+// scoped gate is only justified by a named group.
+//
+// The fixture is mid-load precisely because that is where the two gates
+// disagree: a named group at 100% is served, while "" must keep the
+// collection-wide refusal.
+func TestGetShardLeadersByResourceGroupEmptyScopeIsTheUnscopedAnswer(t *testing.T) {
+	ctx := context.Background()
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadingCollection(t, 100, 1000, "100-dmc0")
+	f.putReplica(t, 100, "rg-a", 10)
+	f.putReplica(t, 100, "rg-b", 11)
+	f.putLeader(100, 10, "100-dmc0", true)
+	f.registerNode(11)
+
+	empty, err := utils.GetShardLeadersByResourceGroup(ctx, f.meta, f.targetMgr, f.dist, f.nodeMgr, 100, "", false)
+	assert.Nil(t, empty)
+	assert.ErrorIs(t, err, merr.ErrCollectionNotFullyLoaded,
+		"an empty scope must take the collection-wide gate, not the scoped one")
+	assert.NotErrorIs(t, err, merr.ErrReplicaNotFound,
+		"an empty scope must not be read as a group literally named \"\", which no replica lives in")
+
+	native, nativeErr := utils.GetShardLeadersWithReplicaFilter(ctx, f.meta, f.targetMgr, f.dist, f.nodeMgr, 100, false,
+		func(replica *meta.Replica) bool { return replica.IsQueryVisible() })
+	assert.Equal(t, nativeErr.Error(), err.Error(),
+		"an empty scope must be answered by the unscoped path verbatim")
+	assert.Equal(t, native, empty)
+
+	looseEmpty, err := utils.GetShardLeadersByResourceGroup(ctx, f.meta, f.targetMgr, f.dist, f.nodeMgr, 100, "", true)
+	require.NoError(t, err)
+	looseNative, err := utils.GetShardLeadersWithReplicaFilter(ctx, f.meta, f.targetMgr, f.dist, f.nodeMgr, 100, true,
+		func(replica *meta.Replica) bool { return replica.IsQueryVisible() })
+	require.NoError(t, err)
+	assert.Equal(t, looseNative, looseEmpty,
+		"the loose shape agrees too: an empty scope is the absence of a filter in both forms")
 }
 
 // TestGetShardLeadersStrictScopeUnloadedCollectionKeepsErrorFamily pins the

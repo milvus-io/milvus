@@ -302,6 +302,22 @@ func GetShardLeadersByResourceGroup(ctx context.Context,
 	resourceGroup string,
 	withUnserviceableShards bool,
 ) ([]*querypb.ShardLeadersList, error) {
+	// An empty resource group is the absence of a filter, not a filter that
+	// matches nothing. That is what the proto field documents and what both
+	// sibling surfaces implement (LoadPercentageByResourceGroup,
+	// ShardLeaderReadinessByResourceGroup); comparing it literally here would
+	// make this the one function of the three where an unset field means "no
+	// replica matches". There is no scoped question to answer, and the scoped
+	// gate below is only justified by a named group, so hand the request back
+	// to the unscoped path whole -- which also keeps the unscoped answer
+	// byte-identical to what it was before this field existed.
+	if resourceGroup == "" {
+		return GetShardLeadersWithReplicaFilter(ctx, m, targetMgr, dist, nodeMgr, collectionID, withUnserviceableShards,
+			func(replica *meta.Replica) bool {
+				return replica.IsQueryVisible()
+			})
+	}
+
 	// withUnserviceableShards=true here is "registered-at-all only": see the
 	// gate rationale above.
 	if err := checkLoadStatus(ctx, m, collectionID, true); err != nil {
