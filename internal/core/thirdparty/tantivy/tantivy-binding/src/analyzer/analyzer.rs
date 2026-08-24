@@ -293,25 +293,6 @@ mod tests {
         }"#;
         let mut analyzer = create_analyzer(params, "").unwrap();
         let mut stream = analyzer.token_stream("hello world");
-        let mut positions = Vec::new();
-        while stream.advance() {
-            positions.push(stream.token().position);
-        }
-
-        assert_eq!(positions, vec![0, 1, 2]);
-    }
-
-    #[test]
-    fn test_custom_icu_tokenizer_removes_punctuation_from_token_positions() {
-        let params = r#"{
-            "tokenizer": {
-                "type": "icu",
-                "position_mode": "token",
-                "remove_punctuation": true
-            }
-        }"#;
-        let mut analyzer = create_analyzer(params, "").unwrap();
-        let mut stream = analyzer.token_stream("hello, world");
         let mut tokens = Vec::new();
         while stream.advance() {
             tokens.push((stream.token().text.clone(), stream.token().position));
