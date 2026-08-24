@@ -291,6 +291,9 @@ func (s *globalTaskScheduler) schedule() {
 	// Build the node-slot max-heap once per round and reuse it across all picks,
 	// so each task is placed on the currently least-loaded node.
 	slotHeap := newNodeSlotHeap(nodeSlots)
+	// The picker places on dimensions where the worker reports them and falls
+	// back to this heap where it does not; a rolling upgrade has both.
+	picker := newNodePicker(nodeSlots, &scalarHeapAdapter{scheduler: s, heap: slotHeap})
 	futures := make([]*conc.Future[struct{}], 0)
 	var delayed []Task
 	for {
@@ -306,7 +309,8 @@ func (s *globalTaskScheduler) schedule() {
 			continue
 		}
 		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(slotHeap, taskSlot)
+		req, hasRequirement := requirementOf(task)
+		nodeID := picker.Pick(req, hasRequirement, taskSlot)
 		if nodeID == NullNodeID {
 			s.pendingTasks.Push(task)
 			break
@@ -488,4 +492,15 @@ func NewGlobalTaskScheduler(ctx context.Context, cluster session.Cluster) Global
 		cluster:      cluster,
 		backoffs:     typeutil.NewConcurrentMap[int64, *taskBackoff](),
 	}
+}
+
+// scalarHeapAdapter lets the pre-existing scalar placement serve as the
+// picker's second tier without changing it.
+type scalarHeapAdapter struct {
+	scheduler *globalTaskScheduler
+	heap      typeutil.Heap[*nodeSlotEntry]
+}
+
+func (a *scalarHeapAdapter) pick(taskSlot int64) int64 {
+	return a.scheduler.pickNode(a.heap, taskSlot)
 }

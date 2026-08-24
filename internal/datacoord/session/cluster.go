@@ -34,10 +34,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// WorkerSlots represents the slot information for a worker node
+// WorkerSlots represents the capacity information for a worker node.
+//
+// AvailableSlots is the scalar fold a worker has always reported. Resources is
+// the dimensioned report, and is nil for a worker that predates it -- the
+// scheduler falls back to the scalar in that case rather than treating the
+// node as having no capacity.
 type WorkerSlots struct {
 	NodeID         int64
 	AvailableSlots int64
+	Resources      *datapb.NodeResources
 }
 
 // Cluster defines the interface for tasks
@@ -201,6 +207,7 @@ func (c *cluster) QuerySlot() map[int64]*WorkerSlots {
 			availableNodeSlots[nodeID] = &WorkerSlots{
 				NodeID:         nodeID,
 				AvailableSlots: resp.GetAvailableSlots(),
+				Resources:      resp.GetResources(),
 			}
 		}()
 	}

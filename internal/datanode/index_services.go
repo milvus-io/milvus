@@ -226,6 +226,7 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 		Status:         merr.Success(),
 		TotalSlots:     legacyTotal,
 		AvailableSlots: available,
+		Resources:      nodeResources(snap),
 	}, nil
 }
 
