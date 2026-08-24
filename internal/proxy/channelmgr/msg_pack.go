@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package channelmgr
 
 import (
 	"context"
@@ -28,20 +28,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func getActiveWALName() message.WALName {
+// GetActiveWALName returns the name of the currently active WAL implementation.
+func GetActiveWALName() message.WALName {
 	return streamingutil.MustSelectWALName()
 }
 
 func getMaxSingleRowSize(walName message.WALName) (int, bool) {
 	switch walName {
 	case message.WALNamePulsar:
-		limit := Params.PulsarCfg.MaxMessageSize.GetAsInt()
+		limit := paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt()
 		return limit, limit > 0
 	case message.WALNameKafka:
-		limit := Params.KafkaCfg.ProducerMessageMaxBytes.GetAsInt()
+		limit := paramtable.Get().KafkaCfg.ProducerMessageMaxBytes.GetAsInt()
 		return limit, limit > 0
 	case message.WALNameRocksmq, message.WALNameWoodpecker:
 		// RocksMQ page size and Woodpecker batch size are not hard limits
@@ -52,9 +54,11 @@ func getMaxSingleRowSize(walName message.WALName) (int, bool) {
 	}
 }
 
-func genInsertMsgsByPartition(ctx context.Context,
-	segmentID UniqueID,
-	partitionID UniqueID,
+// GenInsertMsgsByPartition splits the insert payload of a partition into
+// per-segment messages, honoring the cross-WAL packing threshold.
+func GenInsertMsgsByPartition(ctx context.Context,
+	segmentID typeutil.UniqueID,
+	partitionID typeutil.UniqueID,
 	partitionName string,
 	rowOffsets []int,
 	channelName string,
@@ -63,11 +67,11 @@ func genInsertMsgsByPartition(ctx context.Context,
 ) ([]msgstream.TsMsg, error) {
 	// Keep the existing cross-WAL packing threshold separate from the
 	// backend-specific hard limit for a row that cannot be split further.
-	splitThreshold := Params.PulsarCfg.MaxMessageSize.GetAsInt()
+	splitThreshold := paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt()
 	singleRowLimit, hasSingleRowLimit := getMaxSingleRowSize(walName)
 
 	// create empty insert message
-	createInsertMsg := func(segmentID UniqueID, channelName string) *msgstream.InsertMsg {
+	createInsertMsg := func(segmentID typeutil.UniqueID, channelName string) *msgstream.InsertMsg {
 		insertReq := &msgpb.InsertRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_Insert),

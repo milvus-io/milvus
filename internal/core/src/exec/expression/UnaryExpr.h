@@ -1048,21 +1048,6 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         return expr_;
     }
 
-    proto::plan::OpType
-    GetOpType() {
-        return expr_->op_type_;
-    }
-
-    FieldId
-    GetFieldId() {
-        return expr_->column_.field_id_;
-    }
-
-    DataType
-    GetFieldType() {
-        return expr_->column_.data_type_;
-    }
-
     int64_t
     GetActiveCount() const {
         return active_count_;
@@ -1149,12 +1134,6 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     VectorPtr
     ExecTextMatch();
-
-    // Check if ngram index exists
-    bool
-    HasNgramIndex() const {
-        return pinned_ngram_index_.get() != nullptr;
-    }
 
     std::optional<VectorPtr>
     ExecNgramMatch(EvalCtx& context);

@@ -154,11 +154,6 @@ ReverseDataFromIndex(const index::IndexBase* index,
                      int64_t count,
                      const FieldMeta& field_meta);
 void
-LoadArrowReaderForJsonStatsFromRemote(
-    const std::vector<std::string>& remote_files,
-    std::shared_ptr<ArrowReaderChannel> channel);
-
-void
 LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
                           std::shared_ptr<ArrowReaderChannel> channel,
                           milvus::proto::common::LoadPriority priority);

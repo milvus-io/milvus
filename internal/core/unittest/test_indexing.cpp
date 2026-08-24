@@ -66,7 +66,6 @@
 #include "query/SearchBruteForce.h"
 #include "query/SubSearchResult.h"
 #include "query/helper.h"
-#include "segcore/ReduceStructure.h"
 #include "segcore/reduce/Reduce.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"

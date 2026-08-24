@@ -93,6 +93,4 @@ struct SearchInfo {
     }
 };
 
-using SearchInfoPtr = std::shared_ptr<SearchInfo>;
-
 }  // namespace milvus

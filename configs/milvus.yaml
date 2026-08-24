@@ -1135,6 +1135,15 @@ common:
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
     useLoonFFI: false
     enableGrowingSourceFlush: false # enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path
+    iops:
+      # Initial ObjectStore request rate used by the Lance AIMD limiter for External Table reads.
+      # The value must be greater than 0. Values above a positive maxRate are reduced to maxRate.
+      # The default matches the milvus-storage default.
+      initialRate: 2000
+      # Maximum request rate allowed by the Lance AIMD limiter for External Table reads.
+      # Set to 0 to disable the rate ceiling. This is not a strict aggregate limit across all filesystem instances.
+      # The default matches the milvus-storage default.
+      maxRate: 5000
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.

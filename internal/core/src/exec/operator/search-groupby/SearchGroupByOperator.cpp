@@ -179,13 +179,6 @@ MultiFieldDataGetter::MultiFieldDataGetter(
     }
 }
 
-CompositeGroupKey
-MultiFieldDataGetter::Get(int64_t idx) const {
-    CompositeGroupKey key(field_count_);
-    GetInto(idx, key);
-    return key;
-}
-
 void
 MultiFieldDataGetter::GetInto(int64_t idx, CompositeGroupKey& out) const {
     out.Clear();

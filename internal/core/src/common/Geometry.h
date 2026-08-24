@@ -411,12 +411,6 @@ class Geometry {
         return geometry_ != nullptr;
     }
 
-    // Get raw GEOS geometry pointer (for cache management)
-    GEOSGeometry*
-    GetRawGeometry() const {
-        return geometry_;
-    }
-
     GEOSGeometry*
     GetGeometry() const {
         return geometry_;

@@ -18,9 +18,11 @@ package session
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -36,7 +38,6 @@ import (
 type WorkerSlots struct {
 	NodeID         int64
 	AvailableSlots int64
-	Version        string
 }
 
 // Cluster defines the interface for tasks
@@ -91,7 +92,7 @@ type Cluster interface {
 	DropRefreshExternalCollectionTask(nodeID int64, taskID int64) error
 
 	// CreateCopySegment creates a copy segment task
-	CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64) error
+	CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64, external bool) error
 	// QueryCopySegment queries the status of a copy segment task
 	QueryCopySegment(nodeID int64, in *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error)
 	// DropCopySegment drops a copy segment task
@@ -200,7 +201,6 @@ func (c *cluster) QuerySlot() map[int64]*WorkerSlots {
 			availableNodeSlots[nodeID] = &WorkerSlots{
 				NodeID:         nodeID,
 				AvailableSlots: resp.GetAvailableSlots(),
-				Version:        resp.GetVersion(),
 			}
 		}()
 	}
@@ -698,14 +698,38 @@ func (c *cluster) DropRefreshExternalCollectionTask(nodeID int64, taskID int64) 
 	return c.dropTask(nodeID, properties)
 }
 
-func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64) error {
+func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64, external bool) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskID())
-	properties.AppendType(taskcommon.CopySegment)
+	taskType := taskcommon.CopySegment
+	if external {
+		taskType = taskcommon.ExternalCopySegment
+	}
+	properties.AppendType(taskType)
 	properties.AppendTaskSlot(in.GetTaskSlot())
 	properties.AppendCollectionID(collectionID)
-	return c.createTask(nodeID, in, properties)
+	err := c.createTask(nodeID, in, properties)
+	if external {
+		return normalizeExternalCopyCreateError(err)
+	}
+	return err
+}
+
+// normalizeExternalCopyCreateError translates the response emitted by workers
+// that predate ErrServiceUnimplemented into the typed capability error used by
+// current coordinators. The reason check intentionally narrows the legacy code
+// 5 match so unrelated ServiceInternal failures remain retryable.
+func normalizeExternalCopyCreateError(err error) error {
+	if err == nil || errors.Is(err, merr.ErrServiceUnimplemented) {
+		return err
+	}
+
+	legacyReason := "unrecognized task type '" + taskcommon.ExternalCopySegment + "'"
+	if errors.Is(err, merr.ErrServiceInternal) && strings.Contains(err.Error(), legacyReason) {
+		return merr.WrapErrServiceUnimplemented(err)
+	}
+	return err
 }
 
 func (c *cluster) QueryCopySegment(nodeID int64, in *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error) {

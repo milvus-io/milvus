@@ -1034,13 +1034,6 @@ IndexFactory::CreateCompositeScalarIndex(
     }
 }
 
-IndexBasePtr
-IndexFactory::CreateComplexScalarIndex(
-    IndexType index_type,
-    const storage::FileManagerContext& file_manager_context) {
-    ThrowInfo(Unsupported, "Complex index not supported now");
-}
-
 namespace {
 
 template <typename T, typename BaseIndex, typename... Args>

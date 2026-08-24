@@ -341,6 +341,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForBothDataSegment(
         case DataType::DATE:
             return ExecCompareLeftType<int32_t>(context);
         case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
             return ExecCompareLeftType<int64_t>(context);
         case DataType::TIME:
             return ExecCompareLeftType<int64_t>(context);
@@ -371,6 +372,7 @@ PhyCompareFilterExpr::ExecCompareLeftType(EvalCtx& context) {
         case DataType::DATE:
             return ExecCompareRightType<T, int32_t>(context);
         case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
             return ExecCompareRightType<T, int64_t>(context);
         case DataType::TIME:
             return ExecCompareRightType<T, int64_t>(context);

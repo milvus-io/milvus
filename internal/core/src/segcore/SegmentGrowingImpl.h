@@ -297,19 +297,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return stats_.mem_size.load() + deleted_record_.mem_size();
     }
 
-    // Returns the total disk usage of TEXT LOB spillover files in bytes.
-    // Used by Go-side sync policies for back-pressure.
-    uint64_t
-    GetTextSpilloverDiskUsage() const {
-        uint64_t total = 0;
-        for (const auto& [field_id, spillover] : text_lob_spillovers_) {
-            if (spillover) {
-                total += spillover->GetDiskUsage();
-            }
-        }
-        return total;
-    }
-
     int64_t
     get_row_count() const override {
         return insert_record_.ack_responder_.GetAck();
@@ -751,6 +738,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
+    PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
+    chunk_array_value_view_impl(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
+
     PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     chunk_vector_array_view_impl(
         milvus::OpContext* op_ctx,
@@ -767,6 +761,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
     chunk_array_views_by_offsets(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        const FixedVector<int32_t>& offsets) const override;
+
+    PinWrapper<std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    chunk_array_value_views_by_offsets(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,

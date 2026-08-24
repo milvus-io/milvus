@@ -110,16 +110,6 @@ ConvertToAwsString(const std::string& str) {
     return Aws::String(str.c_str(), str.size());
 }
 
-/**
- * @brief convert Aws::string to std::string
- * @param aws_str
- * @return std::string
- */
-inline std::string
-ConvertFromAwsString(const Aws::String& aws_str) {
-    return std::string(aws_str.c_str(), aws_str.size());
-}
-
 void
 AwsLogger::ProcessFormattedStatement(Aws::String&& statement) {
     LOG_INFO("[AWS LOG] {}", statement);

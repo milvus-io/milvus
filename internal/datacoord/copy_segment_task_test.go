@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/blang/semver/v4"
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -54,6 +53,10 @@ import (
 
 type CopySegmentTaskSuite struct {
 	suite.Suite
+}
+
+type copySegmentClusterMock struct {
+	session.Cluster
 }
 
 func TestCopySegmentTask(t *testing.T) {
@@ -101,19 +104,6 @@ func (s *CopySegmentTaskSuite) TestCopySegmentTask_GettersAndSetters() {
 	s.Equal(taskcommon.FromCopySegmentState(datapb.CopySegmentTaskState_CopySegmentTaskPending), task.GetTaskState())
 	s.Equal(int64(1), task.GetTaskSlot())
 	s.Equal(int64(1), task.GetTaskVersion())
-}
-
-func TestCopySegmentTask_MinimumWorkerVersion(t *testing.T) {
-	task := createTestCopyTask(1, 100).(*copySegmentTask)
-	copyMeta, _ := newCopySegmentTaskTestMeta(t, task)
-	ctx := context.Background()
-	require.NoError(t, copyMeta.AddJob(ctx, newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobPending)))
-
-	assert.Equal(t, semver.Version{}, task.MinimumWorkerVersion())
-	require.NoError(t, copyMeta.UpdateJob(ctx, 100, func(job CopySegmentJob) {
-		job.(*copySegmentJob).External = true
-	}))
-	assert.Equal(t, externalSnapshotMinimumDataNodeVersion, task.MinimumWorkerVersion())
 }
 
 func (s *CopySegmentTaskSuite) TestCopySegmentTask_Clone() {
@@ -489,6 +479,121 @@ func (s *CopySegmentTaskSuite) TestTaskType() {
 	s.Equal(taskcommon.CopySegment, task.GetTaskType())
 }
 
+func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerUsesJobExternalFlag() {
+	tests := []struct {
+		name     string
+		external bool
+	}{
+		{name: "local restore", external: false},
+		{name: "external restore", external: true},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			task := createTestCopyTask(100, 2001).(*copySegmentTask)
+			task.task.Load().State = datapb.CopySegmentTaskState_CopySegmentTaskPending
+			copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+			task.copyMeta = copyMeta
+
+			job := newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting).(*copySegmentJob)
+			job.External = test.external
+			s.NoError(copyMeta.AddJob(context.Background(), job))
+
+			req := &datapb.CopySegmentRequest{TaskID: task.GetTaskId()}
+			mockAssemble := mockey.Mock(AssembleCopySegmentRequest).Return(req, nil).Build()
+			defer mockAssemble.UnPatch()
+
+			cluster := session.NewMockCluster(s.T())
+			cluster.EXPECT().CreateCopySegment(int64(10), req, int64(100), test.external).Return(nil)
+
+			task.CreateTaskOnWorker(10, cluster)
+
+			updated := copyMeta.GetTask(context.Background(), task.GetTaskId())
+			s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, updated.GetState())
+			s.EqualValues(10, updated.GetNodeId())
+		})
+	}
+}
+
+func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerFailsUnsupportedExternalTask() {
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	task.task.Load().State = datapb.CopySegmentTaskState_CopySegmentTaskPending
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	task.copyMeta = copyMeta
+
+	job := newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting).(*copySegmentJob)
+	job.External = true
+	s.NoError(copyMeta.AddJob(context.Background(), job))
+
+	req := &datapb.CopySegmentRequest{TaskID: task.GetTaskId()}
+	assembleMock := mockey.Mock(AssembleCopySegmentRequest).Return(req, nil).Build()
+	defer assembleMock.UnPatch()
+
+	cluster := &copySegmentClusterMock{}
+	createMock := mockey.Mock((*copySegmentClusterMock).CreateCopySegment).
+		Return(merr.Wrapf(merr.ErrServiceUnimplemented,
+			"unrecognized task type '%s'", taskcommon.ExternalCopySegment)).Build()
+	defer createMock.UnPatch()
+
+	task.CreateTaskOnWorker(10, cluster)
+
+	updatedTask := copyMeta.GetTask(context.Background(), task.GetTaskId())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
+	s.Contains(updatedTask.GetReason(), "datanode does not support external copy segment tasks")
+	updatedJob := copyMeta.GetJob(context.Background(), task.GetJobId())
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
+	s.Equal(updatedTask.GetReason(), updatedJob.GetReason())
+}
+
+func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerRetriesOtherErrors() {
+	tests := []struct {
+		name     string
+		external bool
+		err      error
+	}{
+		{
+			name:     "external service not ready",
+			external: true,
+			err:      merr.WrapErrServiceNotReady("datanode", 10, "Initializing"),
+		},
+		{
+			name:     "local unimplemented",
+			external: false,
+			err:      merr.Wrapf(merr.ErrServiceUnimplemented, "unsupported local task"),
+		},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			task := createTestCopyTask(100, 2001).(*copySegmentTask)
+			task.task.Load().State = datapb.CopySegmentTaskState_CopySegmentTaskPending
+			copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+			task.copyMeta = copyMeta
+
+			job := newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting).(*copySegmentJob)
+			job.External = test.external
+			s.NoError(copyMeta.AddJob(context.Background(), job))
+
+			req := &datapb.CopySegmentRequest{TaskID: task.GetTaskId()}
+			assembleMock := mockey.Mock(AssembleCopySegmentRequest).Return(req, nil).Build()
+			defer assembleMock.UnPatch()
+
+			cluster := &copySegmentClusterMock{}
+			createMock := mockey.Mock((*copySegmentClusterMock).CreateCopySegment).
+				Return(test.err).Build()
+			defer createMock.UnPatch()
+
+			task.CreateTaskOnWorker(10, cluster)
+
+			updatedTask := copyMeta.GetTask(context.Background(), task.GetTaskId())
+			s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, updatedTask.GetState())
+			s.Empty(updatedTask.GetReason())
+			updatedJob := copyMeta.GetJob(context.Background(), task.GetJobId())
+			s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, updatedJob.GetState())
+		})
+	}
+}
+
 func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_NotCompletedKeepsTaskInProgress() {
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(
@@ -567,8 +672,8 @@ func (s *CopySegmentTaskSuite) TestScheduler_OneOffTransientErrorDoesNotRedispat
 			}, nil
 		})
 	var creates atomic.Int32
-	cluster.EXPECT().CreateCopySegment(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(int64, *datapb.CopySegmentRequest, int64) error {
+	cluster.EXPECT().CreateCopySegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(int64, *datapb.CopySegmentRequest, int64, bool) error {
 			creates.Add(1)
 			return nil
 		}).Maybe()
