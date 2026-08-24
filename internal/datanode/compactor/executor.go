@@ -105,18 +105,35 @@ func getTaskSlotUsage(task Compactor) int64 {
 	return taskSlotUsage
 }
 
-// taskRequirement prices a compaction from its own plan. The plan may come from
-// a coordinator that has no notion of resource requirements -- the upgrade order
-// puts this node ahead of DataCoord -- so nothing the plan carries beyond its
-// input sizes is trusted.
+// taskRequirement is what this compaction is charged against the node.
+//
+// The coordinator's figure wins whenever it is there, and that is not a matter
+// of taste. DataCoord prices from SegmentInfo.Stats, which is populated on
+// every storage version; recomputing here can only read the plan's
+// per-FieldBinlog arrays, and those are EMPTY for a storage-V3 segment once
+// DataCoord has restarted -- kv_catalog.AlterSegments skips writing the
+// per-FieldBinlog KVs for V3 and the data is described by the manifest
+// instead. A local recompute therefore prices a multi-GiB V3 mix or sort
+// compaction at the estimator's 64MiB floor, which is exactly the workload
+// issue #52180 is about and exactly the protection this charge exists to
+// provide.
+//
+// The two fallbacks below are for an un-upgraded coordinator, in descending
+// order of how much the request still says:
+//
+//   - No vector but a plan: recompute from the binlog arrays. Correct on V1/V2,
+//     and on V3 no worse than the pre-branch behaviour of not charging at all.
+//   - No plan: the legacy scalar slot, floored at one so an absent slot is
+//     never read as "this task is free".
 func taskRequirement(task Compactor) taskresource.Requirement {
-	if plan := task.GetPlan(); plan != nil {
-		return taskresource.RequirementForCompaction(plan)
+	plan := task.GetPlan()
+	if plan == nil {
+		return taskresource.LegacySlotToRequirement(getTaskSlotUsage(task))
 	}
-	// No plan means nothing to recompute from. Fall back to the legacy slot
-	// rather than admitting the task for free; LegacySlotToRequirement floors at
-	// one slot, so an absent slot is not read as "this task is free" either.
-	return taskresource.LegacySlotToRequirement(getTaskSlotUsage(task))
+	if req, ok := taskresource.RequirementFromProto(plan.GetTaskResources()); ok {
+		return req
+	}
+	return taskresource.RequirementForCompaction(plan)
 }
 
 func (e *executor) Enqueue(task Compactor) (bool, error) {

@@ -382,11 +382,13 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		plan.FileResources = resources
 	}
 
+	inputSegments := make([]*SegmentInfo, 0, len(taskProto.GetInputSegments()))
 	for _, segID := range taskProto.GetInputSegments() {
 		segInfo := t.meta.GetHealthySegment(context.TODO(), segID)
 		if segInfo == nil {
 			return nil, merr.WrapErrSegmentNotFound(segID)
 		}
+		inputSegments = append(inputSegments, segInfo)
 		plan.SegmentBinlogs = append(plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 			SegmentID:           segID,
 			CollectionID:        segInfo.GetCollectionID(),
@@ -403,6 +405,7 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 			CommitTimestamp:     segInfo.GetCommitTimestamp(),
 		})
 	}
+	plan.TaskResources = compactionRequirement(datapb.CompactionType_ClusteringCompaction, inputSegments).ToProto()
 	WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
 	mlog.Info(context.TODO(), "Compaction handler build clustering compaction plan", mlog.Any("PreAllocatedLogIDs", logIDRange))
 	return plan, nil

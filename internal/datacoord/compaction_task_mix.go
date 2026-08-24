@@ -37,6 +37,9 @@ type mixCompactionTask struct {
 	times *taskcommon.Times
 
 	slotUsage atomic.Int64
+	// requirement caches the two-dimensional estimate the plan ships. The
+	// scalar above stays as its fold, for a worker that predates the vector.
+	requirement atomic.Pointer[taskresource.Requirement]
 }
 
 func (t *mixCompactionTask) GetTaskID() int64 {
@@ -61,8 +64,19 @@ func (t *mixCompactionTask) GetTaskSlot() int64 {
 	// resolve them here. BuildCompactionRequest below has its own segments
 	// already in hand by the time it needs a slot count and calls
 	// computeAndCacheTaskSlot directly to avoid fetching them a second time.
-	segments, allResolved := t.resolveInputSegments(context.Background())
-	return t.computeAndCacheTaskSlot(segments, allResolved)
+	segments, allResolved := t.resolveInputSegments(context.TODO())
+	return memoryToSlots(t.computeAndCacheRequirement(segments, allResolved).Memory)
+}
+
+// taskRequirement is the two-dimensional estimate that goes on the wire. It
+// reuses whatever GetTaskSlot already resolved, so asking for both costs one
+// meta walk rather than two.
+func (t *mixCompactionTask) taskRequirement() taskresource.Requirement {
+	if cached := t.requirement.Load(); cached != nil {
+		return *cached
+	}
+	segments, allResolved := t.resolveInputSegments(context.TODO())
+	return t.computeAndCacheRequirement(segments, allResolved)
 }
 
 // resolveInputSegments fetches every input segment via meta.GetHealthySegment.
@@ -98,55 +112,26 @@ func (t *mixCompactionTask) resolveInputSegments(ctx context.Context) ([]*Segmen
 // immediately-usable number, but caching it would turn a transient
 // resolution failure into a permanently wrong slot count for this task
 // instance, since GetTaskSlot short-circuits once t.slotUsage is non-zero.
-func (t *mixCompactionTask) computeAndCacheTaskSlot(segments []*SegmentInfo, allResolved bool) int64 {
-	if slotUsage := t.slotUsage.Load(); slotUsage != 0 {
-		return slotUsage
+func (t *mixCompactionTask) computeAndCacheRequirement(segments []*SegmentInfo, allResolved bool) taskresource.Requirement {
+	if cached := t.requirement.Load(); cached != nil {
+		return *cached
 	}
 
 	if !paramtable.Get().DataCoordCfg.ResourceEnableCompactionEstimate.GetAsBool() {
-		return t.legacyTaskSlot(segments)
+		return taskresource.LegacySlotToRequirement(t.legacyTaskSlot(segments))
 	}
 
-	var totalMemory, totalRows, maxDelete, storageVersion int64
-	for _, segment := range segments {
-		totalMemory += segment.getSegmentSize()
-		totalRows += segment.GetNumOfRows()
-		if d := segment.getDeltaLogSize(); d > maxDelete {
-			maxDelete = d
-		}
-		// Storage version is per segment, not per task: neither CompactionTask
-		// nor CompactionPlan carries one (only SegmentInfo field 21 and
-		// CompactionSegmentBinlogs field 10 do). Take the max, matching what
-		// RequirementForCompaction does on the DataNode side — a v3 segment in
-		// a mixed plan dominates the memory profile, so the max is the
-		// conservative direction.
-		if v := segment.GetStorageVersion(); v > storageVersion {
-			storageVersion = v
-		}
-	}
-
-	req := taskresource.EstimateCompaction(taskresource.CompactionInput{
-		Type:                  t.GetTaskProto().GetType(),
-		StorageVersion:        storageVersion,
-		TotalMemorySize:       totalMemory,
-		TotalRows:             totalRows,
-		MaxSegmentDeleteBytes: maxDelete,
-	})
-
-	// Phase 0 still speaks the scalar protocol on the wire, so the byte-level
-	// estimate is folded back into slots here. Phase 1 sends the requirement
-	// itself and this fold disappears.
-	slotUsage := memoryToSlots(req.Memory)
+	req := compactionRequirement(t.GetTaskProto().GetType(), segments)
 	if allResolved {
-		t.slotUsage.Store(slotUsage)
+		t.requirement.Store(&req)
+		t.slotUsage.Store(memoryToSlots(req.Memory))
 	}
-	mlog.Info(context.TODO(), "mixCompactionTask get task slot",
-		mlog.Int64("totalMemorySize", totalMemory),
-		mlog.Int64("storageVersion", storageVersion),
+	mlog.Info(context.TODO(), "mixCompactionTask priced task",
+		mlog.Int64("planID", t.GetTaskID()),
 		mlog.String("requirement", req.String()),
-		mlog.Int64("taskSlot", slotUsage),
+		mlog.Int64("foldedTaskSlot", memoryToSlots(req.Memory)),
 		mlog.Bool("cached", allResolved))
-	return slotUsage
+	return req
 }
 
 // legacyTaskSlot is what this task reported before resource estimation existed:
@@ -525,7 +510,11 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 	// GetSlotUsage do its own independent meta fetch, which would both
 	// double the lookups and open a window where the two fetches disagree
 	// about which segments actually exist.
-	plan.SlotUsage = t.computeAndCacheTaskSlot(segments, true)
+	req := t.computeAndCacheRequirement(segments, true)
+	plan.TaskResources = req.ToProto()
+	// slot_usage stays populated with the fold so a worker that predates
+	// task_resources keeps the number it has always read.
+	plan.SlotUsage = memoryToSlots(req.Memory)
 
 	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments, taskSchema)
 	if err != nil {
