@@ -888,6 +888,101 @@ TEST(ExprResCacheManagerTest, AdmissionThresholdSkipsOneOff) {
     ExprResCacheManager::SetEnabled(false);
 }
 
+TEST(ExprResCacheManagerTest, AdmissionThresholdIsIsolatedAcrossSegments) {
+    auto& mgr = ExprResCacheManager::Instance();
+    ExprResCacheManager::SetEnabled(true);
+
+    milvus::exec::CacheConfig cfg;
+    cfg.mode = milvus::exec::CacheMode::Memory;
+    cfg.mem_max_bytes = 1ULL << 20;
+    cfg.compression_enabled = false;
+    cfg.admission_threshold = 2;
+    cfg.mem_min_eval_duration_us = 0;
+    ASSERT_TRUE(mgr.SetConfig(cfg));
+    mgr.Clear();
+
+    ExprResCacheManager::Key segment_a{7101, "same_expr_across_segments"};
+    ExprResCacheManager::Key segment_b{7102, "same_expr_across_segments"};
+    ExprResCacheManager::Value value;
+    value.result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
+    value.valid_result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
+    value.active_count = 128;
+
+    // One occurrence of the same expression on each segment must not satisfy
+    // either per-entry threshold.
+    mgr.Put(segment_a, value);
+    mgr.Put(segment_b, value);
+
+    ExprResCacheManager::Value got_a;
+    got_a.active_count = 128;
+    EXPECT_FALSE(mgr.Get(segment_a, got_a));
+    ExprResCacheManager::Value got_b;
+    got_b.active_count = 128;
+    EXPECT_FALSE(mgr.Get(segment_b, got_b));
+
+    // Each full cache key becomes eligible only on its own second occurrence.
+    mgr.Put(segment_a, value);
+    got_a.active_count = 128;
+    EXPECT_TRUE(mgr.Get(segment_a, got_a));
+    got_b.active_count = 128;
+    EXPECT_FALSE(mgr.Get(segment_b, got_b));
+
+    mgr.Put(segment_b, value);
+    got_b.active_count = 128;
+    EXPECT_TRUE(mgr.Get(segment_b, got_b));
+
+    mgr.Clear();
+    ExprResCacheManager::SetEnabled(false);
+}
+
+TEST(ExprResCacheManagerTest,
+     ForwardAdmissionAndTicketsAreIsolatedAcrossSegments) {
+    auto& mgr = ExprResCacheManager::Instance();
+    ExprResCacheManager::SetEnabled(true);
+
+    milvus::exec::CacheConfig cfg;
+    cfg.mode = milvus::exec::CacheMode::Memory;
+    cfg.mem_max_bytes = 1ULL << 20;
+    cfg.compression_enabled = false;
+    cfg.admission_threshold = 2;
+    cfg.mem_min_eval_duration_us = 0;
+    ASSERT_TRUE(mgr.SetConfig(cfg));
+    mgr.Clear();
+
+    ExprResCacheManager::Key segment_a{7201, "same_forward_expr"};
+    ExprResCacheManager::Key segment_b{7202, "same_forward_expr"};
+
+    EXPECT_FALSE(mgr.ObserveMiss(segment_a).admitted);
+    EXPECT_FALSE(mgr.ObserveMiss(segment_b).admitted);
+    auto ticket_a = mgr.ObserveMiss(segment_a);
+    auto ticket_b = mgr.ObserveMiss(segment_b);
+    ASSERT_TRUE(ticket_a.admitted);
+    ASSERT_TRUE(ticket_b.admitted);
+
+    ExprResCacheManager::Value value;
+    value.result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
+    value.valid_result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
+    value.active_count = 128;
+    value.eval_duration_us = 1;
+
+    // A ticket for one segment cannot authorize a put for another segment,
+    // even when the expression signature is identical.
+    mgr.PutAdmitted(segment_b, value, ticket_a);
+    ExprResCacheManager::Value got;
+    got.active_count = 128;
+    EXPECT_FALSE(mgr.Get(segment_b, got));
+
+    mgr.PutAdmitted(segment_a, value, ticket_a);
+    mgr.PutAdmitted(segment_b, value, ticket_b);
+    got.active_count = 128;
+    EXPECT_TRUE(mgr.Get(segment_a, got));
+    got.active_count = 128;
+    EXPECT_TRUE(mgr.Get(segment_b, got));
+
+    mgr.Clear();
+    ExprResCacheManager::SetEnabled(false);
+}
+
 TEST(ExprResCacheManagerTest, AdmissionThresholdOneIsDefault) {
     auto& mgr = ExprResCacheManager::Instance();
     ExprResCacheManager::SetEnabled(true);
@@ -1578,7 +1673,7 @@ TEST(EntryPoolV2Test, ActiveCountStaleness) {
     ASSERT_FALSE(pool.Get(100, "expr_stale", N - 1, out_r, out_v));
 }
 
-TEST(EntryPoolV2Test, SameSignatureActiveCountCreatesDistinctSnapshots) {
+TEST(EntryPoolV2Test, SameSignatureKeepsNewestActiveCountSnapshot) {
     milvus::exec::EntryPool pool(1 << 20);
 
     const size_t old_n = 256;
@@ -1589,28 +1684,18 @@ TEST(EntryPoolV2Test, SameSignatureActiveCountCreatesDistinctSnapshots) {
     auto new_valid = MakeBits(new_n, true);
 
     pool.Put(100, "expr_replace", old_n, old_result, old_valid);
-    pool.Configure(1 << 20,
-                   /*compression_enabled=*/true,
-                   /*min_eval_duration_us=*/100000);
-    pool.Put(100,
-             "expr_replace",
-             new_n,
-             new_result,
-             new_valid,
-             /*eval_duration_us=*/1);
+    pool.Put(100, "expr_replace", new_n, new_result, new_valid);
+    // Simulate an older growing-segment query finishing after the newer one.
+    pool.Put(100, "expr_replace", old_n, old_result, old_valid);
 
     milvus::TargetBitmap out_r, out_v;
-    ASSERT_TRUE(pool.Get(100, "expr_replace", old_n, out_r, out_v));
-    ASSERT_EQ(out_r.size(), old_n);
-    for (size_t i = 0; i < old_n; ++i) {
-        ASSERT_FALSE(out_r[i]) << "old result bit " << i;
-    }
+    ASSERT_FALSE(pool.Get(100, "expr_replace", old_n, out_r, out_v));
     ASSERT_TRUE(pool.Get(100, "expr_replace", new_n, out_r, out_v));
     ASSERT_EQ(out_r.size(), new_n);
     for (size_t i = 0; i < new_n; ++i) {
         ASSERT_TRUE(out_r[i]) << "new result bit " << i;
     }
-    ASSERT_EQ(pool.GetEntryCount(), 2u);
+    ASSERT_EQ(pool.GetEntryCount(), 1u);
 }
 
 TEST(EntryPoolV2Test, ClockEviction) {
@@ -2071,7 +2156,7 @@ TEST(ExprResCacheManagerV2Test, MemoryModePutGet) {
     ExprResCacheManager::SetEnabled(false);
 }
 
-TEST(ExprResCacheManagerV2Test, MemoryModeActiveCountRefreshesSnapshot) {
+TEST(ExprResCacheManagerV2Test, MemoryModeKeepsNewestActiveCountSnapshot) {
     auto& mgr = ExprResCacheManager::Instance();
     ExprResCacheManager::SetEnabled(true);
     mgr.Clear();
@@ -2106,6 +2191,16 @@ TEST(ExprResCacheManagerV2Test, MemoryModeActiveCountRefreshesSnapshot) {
     ASSERT_TRUE(mgr.Get(k, got));
     ASSERT_EQ(got.result->size(), 256u);
     ASSERT_TRUE((*got.result)[0]);
+
+    // A late result from the older snapshot must not move the cache backward.
+    mgr.Put(k, v1);
+    got.active_count = 256;
+    ASSERT_TRUE(mgr.Get(k, got));
+    ASSERT_TRUE((*got.result)[0]);
+
+    got.active_count = 128;
+    ASSERT_FALSE(mgr.Get(k, got));
+    ASSERT_EQ(mgr.GetEntryCount(), 1u);
 
     mgr.Clear();
     ExprResCacheManager::SetEnabled(false);
@@ -2190,23 +2285,32 @@ TEST(ExprResCacheManagerV2Test, DiskModeFrequencyAdmission) {
     cfg.admission_threshold = 2;
     mgr.SetConfig(cfg);
 
-    ExprResCacheManager::Key k{250, "disk_freq_sig"};
+    ExprResCacheManager::Key segment_a{250, "disk_freq_sig"};
+    ExprResCacheManager::Key segment_b{251, "disk_freq_sig"};
     ExprResCacheManager::Value v;
     v.result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
     v.valid_result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
     v.active_count = 128;
     v.eval_duration_us = 0;
 
-    mgr.Put(k, v);
+    mgr.Put(segment_a, v);
+    mgr.Put(segment_b, v);
     ExprResCacheManager::Value got;
     got.active_count = 128;
-    ASSERT_FALSE(mgr.Get(k, got));
-    ASSERT_FALSE(std::filesystem::exists(tmpdir / "seg_250.cache"));
-
-    mgr.Put(k, v);
+    ASSERT_FALSE(mgr.Get(segment_a, got));
     got.active_count = 128;
-    ASSERT_TRUE(mgr.Get(k, got));
+    ASSERT_FALSE(mgr.Get(segment_b, got));
+    ASSERT_FALSE(std::filesystem::exists(tmpdir / "seg_250.cache"));
+    ASSERT_FALSE(std::filesystem::exists(tmpdir / "seg_251.cache"));
+
+    mgr.Put(segment_a, v);
+    mgr.Put(segment_b, v);
+    got.active_count = 128;
+    ASSERT_TRUE(mgr.Get(segment_a, got));
+    got.active_count = 128;
+    ASSERT_TRUE(mgr.Get(segment_b, got));
     ASSERT_TRUE(std::filesystem::exists(tmpdir / "seg_250.cache"));
+    ASSERT_TRUE(std::filesystem::exists(tmpdir / "seg_251.cache"));
 
     mgr.Clear();
     std::filesystem::remove_all(tmpdir);
@@ -2519,15 +2623,14 @@ TEST(ExprResCacheManagerV2Test, DiskModeLatencyFilter) {
     got.active_count = 128;
     ASSERT_TRUE(mgr.Get(k2, got));
 
-    // Existing same-row-count entry must be replaceable even if the recompute is
-    // below the current latency admission threshold.
+    // A cheap recompute is rejected even when the signature already exists.
     v.result = std::make_shared<milvus::TargetBitmap>(MakeBits(128, false));
     v.valid_result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
     v.eval_duration_us = 1;
     mgr.Put(k2, v);
     got.active_count = 128;
     ASSERT_TRUE(mgr.Get(k2, got));
-    ASSERT_FALSE((*got.result)[0]);
+    ASSERT_TRUE((*got.result)[0]);
 
     // eval_duration_us=0 means skip cost check: admitted
     ExprResCacheManager::Key k3{500, "no_dur_disk_expr"};

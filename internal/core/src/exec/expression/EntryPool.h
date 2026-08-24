@@ -53,13 +53,11 @@ class EntryPool {
         int64_t segment_id{0};
         uint64_t sig_hash{0};
         std::string signature;
-        int64_t active_count{0};
 
         bool
         operator==(const Key& other) const {
             return segment_id == other.segment_id &&
-                   sig_hash == other.sig_hash && signature == other.signature &&
-                   active_count == other.active_count;
+                   sig_hash == other.sig_hash && signature == other.signature;
         }
     };
 
@@ -68,8 +66,7 @@ class EntryPool {
         operator()(const Key& k) const noexcept {
             return std::hash<int64_t>()(k.segment_id) * 1315423911u ^
                    std::hash<uint64_t>()(k.sig_hash) ^
-                   std::hash<std::string>()(k.signature) ^
-                   std::hash<int64_t>()(k.active_count);
+                   std::hash<std::string>()(k.signature);
         }
     };
 
@@ -113,7 +110,8 @@ class EntryPool {
 
     // Insert a compressed entry. Compression is done internally.
     // May trigger Clock eviction if over capacity.
-    // Subject to frequency and latency admission control.
+    // Subject to latency admission here; the manager applies frequency
+    // admission before calling this method.
     void
     Put(int64_t segment_id,
         const std::string& signature,
@@ -125,9 +123,6 @@ class EntryPool {
     // Erase all entries belonging to a segment. Returns number erased.
     size_t
     EraseSegment(int64_t segment_id);
-
-    bool
-    HasSignature(int64_t segment_id, const std::string& signature) const;
 
     // Clear all entries.
     void
