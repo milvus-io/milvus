@@ -2128,12 +2128,9 @@ func (data *DoubleFieldData) GetDataType() schemapb.DataType { return schemapb.D
 func (data *TimestamptzFieldData) GetDataType() schemapb.DataType {
 	return schemapb.DataType_Timestamptz
 }
-func (data *DateFieldData) GetDataType() schemapb.DataType {
-	return schemapb.DataType_Date
-}
-func (data *TimeFieldData) GetDataType() schemapb.DataType {
-	return schemapb.DataType_Time
-}
+
+func (data *DateFieldData) GetDataType() schemapb.DataType   { return schemapb.DataType_Date }
+func (data *TimeFieldData) GetDataType() schemapb.DataType   { return schemapb.DataType_Time }
 func (data *StringFieldData) GetDataType() schemapb.DataType { return data.DataType }
 func (data *ArrayFieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Array }
 func (data *JSONFieldData) GetDataType() schemapb.DataType   { return schemapb.DataType_JSON }
