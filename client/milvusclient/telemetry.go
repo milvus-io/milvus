@@ -41,7 +41,10 @@ import (
 
 // TelemetryConfig holds configurable settings for client telemetry
 type TelemetryConfig struct {
-	// Enabled controls whether telemetry collection is active
+	// Enabled controls telemetry at connection startup. An initial false value is an
+	// explicit opt-out and starts no heartbeat. When an already-running client is
+	// dynamically disabled by the server, operation collection and metric payloads
+	// stop while the command heartbeat stays active for ACKs and later re-enable.
 	Enabled bool
 	// HeartbeatInterval is how often to send heartbeats to server (default: 10 seconds).
 	//
@@ -580,7 +583,8 @@ func (m *ClientTelemetryManager) Start() {
 	// Mark as ready immediately - no blocking initial heartbeat
 	m.ready.Store(true)
 
-	// Start background heartbeat loop (snapshot creation is done inside heartbeatLoop)
+	// The heartbeat is also the command control plane. Keep it running while metrics
+	// are disabled so the server receives ACKs and can later re-enable collection.
 	m.wg.Add(1)
 	go m.heartbeatLoop()
 }
@@ -717,18 +721,16 @@ func (m *ClientTelemetryManager) sendHeartbeat() {
 	enabled := m.config.Enabled
 	m.configMu.RUnlock()
 
-	if !enabled {
-		return
-	}
-
 	if m.client == nil || m.client.telemetryService == nil {
 		return
 	}
 
 	// Get metrics from the latest snapshot (P99 already calculated during snapshot creation)
 	var metrics []*commonpb.OperationMetrics
-	if latestSnapshot := m.GetLatestSnapshot(); latestSnapshot != nil {
-		metrics = m.toProtoOperationMetrics(latestSnapshot.Metrics)
+	if enabled {
+		if latestSnapshot := m.GetLatestSnapshot(); latestSnapshot != nil {
+			metrics = m.toProtoOperationMetrics(latestSnapshot.Metrics)
+		}
 	}
 
 	// Get pending command replies (snapshot only)
