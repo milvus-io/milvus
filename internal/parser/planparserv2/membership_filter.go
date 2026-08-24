@@ -130,12 +130,12 @@ func sniffMembershipKind(blob []byte) (membershipKind, error) {
 }
 
 // checkMembershipField dispatches the per-kind probe-column validation.
-func checkMembershipField(kind membershipKind, columnInfo *planpb.ColumnInfo, argText string) error {
+func checkMembershipField(kind membershipKind, columnInfo *planpb.ColumnInfo, argText, functionName string) error {
 	switch kind {
 	case membershipBloom:
-		return checkBloomMatchField(columnInfo, argText)
+		return checkBloomMatchField(columnInfo, argText, functionName)
 	case membershipRoaring:
-		return checkRoaringMatchField(columnInfo, argText)
+		return checkRoaringMatchField(columnInfo, argText, functionName)
 	default:
 		return merr.WrapErrParameterInvalidMsg("unknown membership filter kind: %d", kind)
 	}
@@ -166,7 +166,7 @@ func (v *ParserVisitor) visitMembershipCall(ctx *parser.CallContext, functionNam
 	}
 	columnInfo := toColumnInfo(fieldExpr)
 	if kind, ok := fixedMembershipKind(functionName); ok {
-		if err := checkMembershipField(kind, columnInfo, allArgs[0].GetText()); err != nil {
+		if err := checkMembershipField(kind, columnInfo, allArgs[0].GetText(), functionName); err != nil {
 			return err
 		}
 	} else if columnInfo == nil {
@@ -267,7 +267,7 @@ func fillMembershipMatchExpressionValue(
 	// visitor already checked it: fills also serve hand-assembled plans (the
 	// c-shared parser boundary), and the unified name resolves its kind only
 	// here. Fail closed rather than fan out an out-of-domain probe.
-	if err := checkMembershipField(kind, columnInfo, "deferred column parameter"); err != nil {
+	if err := checkMembershipField(kind, columnInfo, ctx.membershipFieldName(columnInfo), functionName); err != nil {
 		return err
 	}
 
@@ -437,17 +437,6 @@ func collectMembershipFilterExprs(expr *planpb.Expr, out *[]membershipBlobSlot) 
 	})
 }
 
-// collectRoaringFilterExprs appends every materialized RoaringFilterExpr node
-// in the tree; the decoded-memory estimate only applies to the roaring kind.
-func collectRoaringFilterExprs(expr *planpb.Expr, out *[]*planpb.RoaringFilterExpr) {
-	walkExpr(expr, func(node *planpb.Expr) bool {
-		if e, ok := node.GetExpr().(*planpb.Expr_RoaringFilterExpr); ok {
-			*out = append(*out, e.RoaringFilterExpr)
-		}
-		return false
-	})
-}
-
 func planPredicates(plan *planpb.PlanNode) *planpb.Expr {
 	switch realPlan := plan.GetNode().(type) {
 	case *planpb.PlanNode_VectorAnns:
@@ -485,26 +474,4 @@ func PlanContainsMembershipFilter(plan *planpb.PlanNode) bool {
 // anything whose kind cannot be proven exact). Used by the proxy delete path.
 func PlanContainsMembershipFilterUnsafeForDelete(plan *planpb.PlanNode) bool {
 	return planHasMembershipExpr(plan, hasDeleteUnsafeMembershipFilterExpr)
-}
-
-// PlanContainsRoaringFilter reports whether the plan contains a roaring
-// membership node — materialized or still-deferred. Only the roaring kind
-// carries a decoded-memory dimension, so the aggregate decoded-budget gate keys
-// on this predicate.
-func PlanContainsRoaringFilter(plan *planpb.PlanNode) bool {
-	return planHasMembershipExpr(plan, hasRoaringFilterExpr)
-}
-
-// hasRoaringFilterExpr walks one expression tree for roaring membership nodes.
-func hasRoaringFilterExpr(expr *planpb.Expr) bool {
-	return walkExpr(expr, func(node *planpb.Expr) bool {
-		switch e := node.GetExpr().(type) {
-		case *planpb.Expr_RoaringFilterExpr:
-			return true
-		case *planpb.Expr_CallExpr:
-			return e.CallExpr.GetFunctionName() == RoaringMatchFunctionName
-		default:
-			return false
-		}
-	})
 }

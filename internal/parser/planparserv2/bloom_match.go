@@ -64,10 +64,10 @@ const (
 // checkBloomMatchField validates that the probe column is a plain scalar field
 // of an integer or string type, or a JSON field (optionally at a nested path,
 // including dynamic fields). ARRAY and other types are rejected.
-func checkBloomMatchField(columnInfo *planpb.ColumnInfo, argText string) error {
+func checkBloomMatchField(columnInfo *planpb.ColumnInfo, argText, functionName string) error {
 	if columnInfo == nil {
 		return merr.WrapErrParameterInvalidMsg(
-			"the first argument of bloom_match must be a scalar field name, got: %s", argText)
+			"the first argument of %s must be a scalar field name, got: %s", functionName, argText)
 	}
 	dataType := columnInfo.GetDataType()
 	// JSON (including dynamic-field paths): the probe is STRICTLY TYPED —
@@ -81,7 +81,7 @@ func checkBloomMatchField(columnInfo *planpb.ColumnInfo, argText string) error {
 	}
 	if len(columnInfo.GetNestedPath()) != 0 {
 		return merr.WrapErrParameterInvalidMsg(
-			"bloom_match does not support nested paths on non-JSON fields, got: %s", argText)
+			"%s does not support nested paths on non-JSON fields, got: %s", functionName, argText)
 	}
 	// Only INT8/16/32/64 and VARCHAR are supported. Use an exact VARCHAR check
 	// (not typeutil.IsStringType, which also accepts STRING/TEXT) so the proxy's
@@ -90,8 +90,8 @@ func checkBloomMatchField(columnInfo *planpb.ColumnInfo, argText string) error {
 	// fan-out at the QueryNode.
 	if !typeutil.IsIntegerType(dataType) && dataType != schemapb.DataType_VarChar {
 		return merr.WrapErrParameterInvalidMsg(
-			"bloom_match only supports INT8/INT16/INT32/INT64/VARCHAR fields and JSON paths, but field (%s) is of type %s",
-			argText, dataType.String())
+			"%s only supports INT8/INT16/INT32/INT64/VARCHAR fields and JSON paths, but field (%s) is of type %s",
+			functionName, argText, dataType.String())
 	}
 	return nil
 }

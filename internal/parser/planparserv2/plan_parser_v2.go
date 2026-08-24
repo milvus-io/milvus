@@ -210,7 +210,7 @@ func parseExprInner(schema *typeutil.SchemaHelper, exprStr string, exprTemplateV
 	if visitorArgs != nil {
 		membershipBudget = visitorArgs.MembershipBudget
 	}
-	if err := FillExpressionValueWithBudget(predicate.expr, valueMap, membershipBudget); err != nil {
+	if err := fillExpressionValueWithBudgetAndSchema(predicate.expr, valueMap, membershipBudget, schema); err != nil {
 		return nil, err
 	}
 

@@ -107,7 +107,37 @@ func TestExpr_MembershipMatch(t *testing.T) {
 		_, err = ParseExpr(helper, "membership_match(VarCharField, {rb})",
 			map[string]*schemapb.TemplateValue{"rb": tvRoaring})
 		require.Error(t, err)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, MembershipMatchFunctionName)
+		assert.ErrorContains(t, err, "VarCharField")
 		assert.ErrorContains(t, err, "only supports INT8/INT16/INT32/INT64")
+		assert.NotContains(t, err.Error(), RoaringMatchFunctionName)
+		assert.NotContains(t, err.Error(), "deferred column parameter")
+
+		_, err = ParseExpr(helper, `membership_match(JSONField["a"], {rb})`,
+			map[string]*schemapb.TemplateValue{"rb": tvRoaring})
+		require.Error(t, err)
+		assert.ErrorContains(t, err, MembershipMatchFunctionName)
+		assert.ErrorContains(t, err, `JSONField["a"]`)
+		assert.NotContains(t, err.Error(), RoaringMatchFunctionName)
+
+		_, err = ParseExpr(helper, "membership_match(dynamicKey, {rb})",
+			map[string]*schemapb.TemplateValue{"rb": tvRoaring})
+		require.Error(t, err)
+		assert.ErrorContains(t, err, MembershipMatchFunctionName)
+		assert.ErrorContains(t, err, "dynamicKey")
+		assert.NotContains(t, err.Error(), "$meta")
+
+		// The Bloom kind reports the same unified surface name and resolves the
+		// actual field name when its type is outside the Bloom domain.
+		_, err = ParseExpr(helper, "membership_match(FloatField, {bf})",
+			map[string]*schemapb.TemplateValue{"bf": tvBloom})
+		require.Error(t, err)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, MembershipMatchFunctionName)
+		assert.ErrorContains(t, err, "FloatField")
+		assert.NotContains(t, err.Error(), BloomMatchFunctionName)
+		assert.NotContains(t, err.Error(), "deferred column parameter")
 
 		// And an MBF1 int-domain blob against a VARCHAR field is rejected by
 		// the domain check, exactly like explicit bloom_match.
@@ -117,6 +147,33 @@ func TestExpr_MembershipMatch(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "value domain")
 	})
+}
+
+func TestFillMembershipMatchFieldNameFallback(t *testing.T) {
+	_, blob := bloomBytesTemplate(t, 0.001, 1, 2)
+	call := &planpb.CallExpr{
+		FunctionName: MembershipMatchFunctionName,
+		FunctionParameters: []*planpb.Expr{
+			{Expr: &planpb.Expr_ColumnExpr{ColumnExpr: &planpb.ColumnExpr{Info: &planpb.ColumnInfo{
+				FieldId:  42,
+				DataType: schemapb.DataType_Float,
+			}}}},
+			{
+				Expr: &planpb.Expr_ValueExpr{ValueExpr: &planpb.ValueExpr{
+					TemplateVariableName: "bf",
+				}},
+				IsTemplate: true,
+			},
+		},
+	}
+	expr := &planpb.Expr{Expr: &planpb.Expr_CallExpr{CallExpr: call}, IsTemplate: true}
+	err := FillExpressionValue(expr, map[string]*planpb.GenericValue{
+		"bf": {Val: &planpb.GenericValue_BytesVal{BytesVal: blob}},
+	})
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.ErrorContains(t, err, MembershipMatchFunctionName)
+	assert.ErrorContains(t, err, "field ID 42")
+	assert.NotContains(t, err.Error(), "deferred column parameter")
 }
 
 func TestMembershipMatchDeleteSafety(t *testing.T) {

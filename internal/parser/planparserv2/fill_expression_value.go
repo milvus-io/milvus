@@ -73,6 +73,18 @@ func FillExpressionValueWithBudget(
 	templateValues map[string]*planpb.GenericValue,
 	budget *MembershipPreflightBudget,
 ) error {
+	return fillExpressionValueWithBudgetAndSchema(expr, templateValues, budget, nil)
+}
+
+// fillExpressionValueWithBudgetAndSchema preserves the public fill API for
+// hand-assembled plans while allowing the parser path to recover a field name
+// from the schema for fill-time membership diagnostics.
+func fillExpressionValueWithBudgetAndSchema(
+	expr *planpb.Expr,
+	templateValues map[string]*planpb.GenericValue,
+	budget *MembershipPreflightBudget,
+	schema *typeutil.SchemaHelper,
+) error {
 	if budget == nil {
 		budget = NewMembershipPreflightBudget()
 	}
@@ -80,11 +92,13 @@ func FillExpressionValueWithBudget(
 	if err != nil {
 		return err
 	}
+	ctx.schema = schema
 	return fillExpressionValue(expr, templateValues, ctx)
 }
 
 type fillExpressionContext struct {
 	validatedRoaringBlobs map[string]validatedRoaringBitmapBlob
+	schema                *typeutil.SchemaHelper
 }
 
 type roaringTemplateBlob struct {
@@ -103,6 +117,26 @@ func (c *fillExpressionContext) validatedRoaringBlob(name string, blob []byte) (
 		return cached, nil
 	}
 	return validateRoaringBitmapBlob(blob)
+}
+
+func (c *fillExpressionContext) membershipFieldName(columnInfo *planpb.ColumnInfo) string {
+	if c != nil && c.schema != nil {
+		if field, err := c.schema.GetFieldFromID(columnInfo.GetFieldId()); err == nil {
+			name := field.GetName()
+			nestedPath := columnInfo.GetNestedPath()
+			if field.GetIsDynamic() && len(nestedPath) != 0 {
+				// An implicit dynamic key is represented by the $meta field ID
+				// with the caller-visible key as the first nested-path component.
+				name = nestedPath[0]
+				nestedPath = nestedPath[1:]
+			}
+			for _, path := range nestedPath {
+				name += fmt.Sprintf("[%q]", path)
+			}
+			return name
+		}
+	}
+	return fmt.Sprintf("field ID %d", columnInfo.GetFieldId())
 }
 
 // preflightMembershipFilterValues charges every deferred blob occurrence

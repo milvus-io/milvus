@@ -382,18 +382,20 @@ func TestCheckBloomMatchFieldTypeMatrix(t *testing.T) {
 		schemapb.DataType_Bool, schemapb.DataType_Float, schemapb.DataType_Double,
 	}
 	for _, dt := range accept {
-		require.NoError(t, checkBloomMatchField(&planpb.ColumnInfo{DataType: dt}, "f"), dt.String())
+		require.NoError(t, checkBloomMatchField(&planpb.ColumnInfo{DataType: dt}, "f", BloomMatchFunctionName), dt.String())
 	}
 	for _, dt := range reject {
-		err := checkBloomMatchField(&planpb.ColumnInfo{DataType: dt}, "f")
+		err := checkBloomMatchField(&planpb.ColumnInfo{DataType: dt}, "f", BloomMatchFunctionName)
 		require.Error(t, err, dt.String())
 		assert.Contains(t, err.Error(), "only supports INT8/INT16/INT32/INT64/VARCHAR", dt.String())
 	}
 	// JSON carries a nested path; non-JSON scalars must not.
 	require.NoError(t, checkBloomMatchField(
-		&planpb.ColumnInfo{DataType: schemapb.DataType_JSON, NestedPath: []string{"a", "b"}}, "f"))
+		&planpb.ColumnInfo{DataType: schemapb.DataType_JSON, NestedPath: []string{"a", "b"}},
+		"f", BloomMatchFunctionName))
 	err := checkBloomMatchField(
-		&planpb.ColumnInfo{DataType: schemapb.DataType_Int64, NestedPath: []string{"a"}}, "f")
+		&planpb.ColumnInfo{DataType: schemapb.DataType_Int64, NestedPath: []string{"a"}},
+		"f", BloomMatchFunctionName)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nested paths on non-JSON")
 }

@@ -22,8 +22,6 @@ package planparserv2
 // docs/design-docs/design_docs/20260714-roaring-exact-membership-expression.md.
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -41,20 +39,20 @@ type validatedRoaringBitmapBlob struct {
 // no VARCHAR or JSON path: a string would have to be hashed into the integer key
 // space first, which would reintroduce the false positives roaring_match exists
 // to avoid.
-func checkRoaringMatchField(columnInfo *planpb.ColumnInfo, argText string) error {
+func checkRoaringMatchField(columnInfo *planpb.ColumnInfo, argText, functionName string) error {
 	if columnInfo == nil {
 		return merr.WrapErrParameterInvalidMsg(
-			"the first argument of roaring_match must be a scalar field name, got: %s", argText)
+			"the first argument of %s must be a scalar field name, got: %s", functionName, argText)
 	}
 	dataType := columnInfo.GetDataType()
 	if typeutil.IsJSONType(dataType) || len(columnInfo.GetNestedPath()) != 0 {
 		return merr.WrapErrParameterInvalidMsg(
-			"roaring_match is not supported on JSON or dynamic fields, got: %s", argText)
+			"%s is not supported on JSON or dynamic fields, got: %s", functionName, argText)
 	}
 	if !typeutil.IsIntegerType(dataType) {
 		return merr.WrapErrParameterInvalidMsg(
-			"roaring_match only supports INT8/INT16/INT32/INT64 fields, but field (%s) is of type %s",
-			argText, dataType.String())
+			"%s only supports INT8/INT16/INT32/INT64 fields, but field (%s) is of type %s",
+			functionName, argText, dataType.String())
 	}
 	return nil
 }
@@ -94,45 +92,4 @@ func validateRoaringBitmapBlob(blob []byte) (validatedRoaringBitmapBlob, error) 
 		return validatedRoaringBitmapBlob{}, merr.Wrap(err, "roaring_match bitmap blob is invalid")
 	}
 	return validatedRoaringBitmapBlob{blob: blob, summary: summary}, nil
-}
-
-// EstimateRoaringFilterPlanDecodedBytes validates every materialized
-// RoaringFilterExpr occurrence in plan and returns the aggregate decoded-memory
-// estimate. Every occurrence is charged even when several nodes carry the same
-// blob: QueryNode must either share that decode or reserve enough budget for an
-// independent instance. The fixed 64 MiB admission is both the per-bitmap and
-// aggregate plan/request ceiling.
-func EstimateRoaringFilterPlanDecodedBytes(plan *planpb.PlanNode) (uint64, error) {
-	if plan == nil {
-		return 0, nil
-	}
-
-	var roaringExprs []*planpb.RoaringFilterExpr
-	for _, scorer := range plan.GetScorers() {
-		collectRoaringFilterExprs(scorer.GetFilter(), &roaringExprs)
-	}
-	switch realPlan := plan.GetNode().(type) {
-	case *planpb.PlanNode_VectorAnns:
-		collectRoaringFilterExprs(realPlan.VectorAnns.GetPredicates(), &roaringExprs)
-	case *planpb.PlanNode_Predicates:
-		collectRoaringFilterExprs(realPlan.Predicates, &roaringExprs)
-	case *planpb.PlanNode_Query:
-		collectRoaringFilterExprs(realPlan.Query.GetPredicates(), &roaringExprs)
-	}
-
-	var total uint64
-	for _, expr := range roaringExprs {
-		summary, err := roaringfilter.Validate(expr.GetBitmapBlob())
-		if err != nil {
-			return 0, merr.Wrap(err, "materialized roaring_match bitmap blob is invalid")
-		}
-		if total > roaringfilter.MaxEstimatedDecodedBytes ||
-			summary.EstimatedDecodedBytes > roaringfilter.MaxEstimatedDecodedBytes-total {
-			return 0, merr.WrapErrParameterTooLarge(fmt.Sprintf(
-				"aggregate roaring_match estimated decoded size exceeds maximum: %d + %d > %d bytes",
-				total, summary.EstimatedDecodedBytes, roaringfilter.MaxEstimatedDecodedBytes))
-		}
-		total += summary.EstimatedDecodedBytes
-	}
-	return total, nil
 }

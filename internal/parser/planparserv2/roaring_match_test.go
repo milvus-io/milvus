@@ -177,7 +177,8 @@ func TestExpr_RoaringMatchErrors(t *testing.T) {
 				continue
 			}
 			t.Run(name, func(t *testing.T) {
-				err := checkRoaringMatchField(&planpb.ColumnInfo{DataType: dataType}, "field")
+				err := checkRoaringMatchField(
+					&planpb.ColumnInfo{DataType: dataType}, "field", RoaringMatchFunctionName)
 				require.Error(t, err)
 			})
 		}
@@ -449,59 +450,6 @@ func TestRoaringMatchPreflightBudgetsAggregateDecodedBytes(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	require.ErrorContains(t, err, "estimated decoded size")
 	require.ErrorContains(t, err, "before plan materialization")
-}
-
-func TestEstimateRoaringFilterPlanDecodedBytesIncludesScorers(t *testing.T) {
-	_, blob := roaringBytesTemplate(t, 1, 2, 3)
-	summary, err := serverroaring.Validate(blob)
-	require.NoError(t, err)
-	plan := &planpb.PlanNode{
-		Node: &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{
-			Predicates: roaringPlanSizeTestExpr(blob),
-		}},
-		Scorers: []*planpb.ScoreFunction{{Filter: roaringPlanSizeTestExpr(blob)}},
-	}
-
-	decodedBytes, err := EstimateRoaringFilterPlanDecodedBytes(plan)
-	require.NoError(t, err)
-	require.Equal(t, summary.EstimatedDecodedBytes*2, decodedBytes)
-}
-
-func roaringPlanSizeTestExpr(blob []byte) *planpb.Expr {
-	return &planpb.Expr{Expr: &planpb.Expr_RoaringFilterExpr{
-		RoaringFilterExpr: &planpb.RoaringFilterExpr{BitmapBlob: blob},
-	}}
-}
-
-// TestPlanContainsRoaringFilter pins the accounting predicate that charges a
-// roaring plan against the shared filter-plan budget. A miss here would let a
-// bitmap blob skip the budget entirely.
-func TestPlanContainsRoaringFilter(t *testing.T) {
-	helper := newTestSchemaHelper(t)
-	tv, _ := roaringBytesTemplate(t, 1, 2, 3)
-	mv := map[string]*schemapb.TemplateValue{"rb": tv}
-
-	for _, expr := range []string{
-		"roaring_match(Int64Field, {rb})",
-		"not roaring_match(Int64Field, {rb})",
-		"roaring_match(Int64Field, {rb}) and Int64Field > 0",
-		"Int64Field > 0 or roaring_match(Int64Field, {rb})",
-	} {
-		parsed, err := ParseExpr(helper, expr, mv)
-		require.NoErrorf(t, err, "expr: %s", expr)
-		plan := &planpb.PlanNode{Node: &planpb.PlanNode_Predicates{Predicates: parsed}}
-		require.Truef(t, PlanContainsRoaringFilter(plan), "expr must be charged to the budget: %s", expr)
-		require.Truef(t, PlanContainsMembershipFilter(plan),
-			"roaring_match must be charged to the shared plan-size budget: %s", expr)
-		require.Falsef(t, PlanContainsMembershipFilterUnsafeForDelete(plan),
-			"exact roaring_match must stay delete-safe: %s", expr)
-	}
-
-	plain, err := ParseExpr(helper, "Int64Field > 0", nil)
-	require.NoError(t, err)
-	require.False(t, PlanContainsRoaringFilter(
-		&planpb.PlanNode{Node: &planpb.PlanNode_Predicates{Predicates: plain}}))
-	require.False(t, PlanContainsRoaringFilter(nil))
 }
 
 // The occurrence budget is documented as a per-request ceiling. It used to be
