@@ -4,11 +4,10 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -22,15 +21,15 @@ func (r *recoveryStorageImpl) recoverFromStream(
 	r.metrics.ObserveStateChange(recoveryStorageStateStreamRecovering)
 	r.metrics.ObServePersistedMetrics(r.checkpoint.TimeTick)
 	r.SetLogger(resource.Resource().Logger().With(
-		log.FieldComponent(componentRecoveryStorage),
-		zap.String("channel", recoveryStreamBuilder.Channel().String()),
-		zap.String("startMessageID", r.checkpoint.MessageID.String()),
-		zap.Uint64("fromTimeTick", r.checkpoint.TimeTick),
-		zap.Uint64("toTimeTick", lastTimeTickMessage.TimeTick()),
-		zap.String("state", recoveryStorageStateStreamRecovering),
+		mlog.FieldComponent(componentRecoveryStorage),
+		mlog.String("channel", recoveryStreamBuilder.Channel().String()),
+		mlog.String("startMessageID", r.checkpoint.MessageID.String()),
+		mlog.Uint64("fromTimeTick", r.checkpoint.TimeTick),
+		mlog.Uint64("toTimeTick", lastTimeTickMessage.TimeTick()),
+		mlog.String("state", recoveryStorageStateStreamRecovering),
 	))
 
-	r.Logger().Info("recover from wal stream...")
+	r.Logger().Info(ctx, "recover from wal stream...")
 	rs := recoveryStreamBuilder.Build(BuildRecoveryStreamParam{
 		StartCheckpoint: r.checkpoint.MessageID,
 		EndTimeTick:     lastTimeTickMessage.TimeTick(),
@@ -38,7 +37,7 @@ func (r *recoveryStorageImpl) recoverFromStream(
 	defer func() {
 		rs.Close()
 		if err != nil {
-			r.Logger().Warn("recovery from wal stream failed", zap.Error(err))
+			r.Logger().Warn(ctx, "recovery from wal stream failed", mlog.Err(err))
 			return
 		}
 	}()
@@ -60,20 +59,20 @@ L:
 	}
 	snapshot = r.getSnapshot()
 	snapshot.TxnBuffer = rs.TxnBuffer()
-	logFields := []zap.Field{
-		zap.String("channel", recoveryStreamBuilder.Channel().String()),
-		zap.Int("vchannels", len(snapshot.VChannels)),
-		zap.Int("segments", len(snapshot.SegmentAssignments)),
-		zap.String("checkpoint", snapshot.Checkpoint.MessageID.String()),
-		zap.Uint64("checkpointTimeTick", snapshot.Checkpoint.TimeTick),
+	logFields := []mlog.Field{
+		mlog.String("channel", recoveryStreamBuilder.Channel().String()),
+		mlog.Int("vchannels", len(snapshot.VChannels)),
+		mlog.Int("segments", len(snapshot.SegmentAssignments)),
+		mlog.String("checkpoint", snapshot.Checkpoint.MessageID.String()),
+		mlog.Uint64("checkpointTimeTick", snapshot.Checkpoint.TimeTick),
 	}
 	if snapshot.AlterWALInfo != nil {
 		logFields = append(logFields,
-			zap.Bool("foundAlterWALMsg", snapshot.AlterWALInfo.FoundAlterWALMsg),
-			zap.Stringer("targetWALName", snapshot.AlterWALInfo.TargetWALName),
+			mlog.Bool("foundAlterWALMsg", snapshot.AlterWALInfo.FoundAlterWALMsg),
+			mlog.Stringer("targetWALName", snapshot.AlterWALInfo.TargetWALName),
 		)
 	}
-	r.Logger().Info("recovery from wal stream done", logFields...)
+	r.Logger().Info(ctx, "recovery from wal stream done", logFields...)
 	return snapshot, nil
 }
 
@@ -102,21 +101,21 @@ func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 		// non-atomic etcd persistence or Kafka offset compaction replaying CreateSegment
 		// for dropped collections/partitions.
 		if _, ok := vchannels[segment.meta.Vchannel]; !ok {
-			r.Logger().Warn("getSnapshot: skipping orphaned segment assignment with non-active vchannel",
-				zap.Int64("segmentID", segmentID),
-				zap.String("vchannel", segment.meta.Vchannel),
-				zap.Int64("collectionID", segment.meta.CollectionId),
-				zap.String("state", segment.meta.State.String()),
+			r.Logger().Warn(context.TODO(), "getSnapshot: skipping orphaned segment assignment with non-active vchannel",
+				mlog.Int64("segmentID", segmentID),
+				mlog.String("vchannel", segment.meta.Vchannel),
+				mlog.Int64("collectionID", segment.meta.CollectionId),
+				mlog.String("state", segment.meta.State.String()),
 			)
 			continue
 		}
 		if _, ok := activePartitions[segment.meta.PartitionId]; !ok {
-			r.Logger().Warn("getSnapshot: skipping orphaned segment assignment with dropped partition",
-				zap.Int64("segmentID", segmentID),
-				zap.String("vchannel", segment.meta.Vchannel),
-				zap.Int64("collectionID", segment.meta.CollectionId),
-				zap.Int64("partitionID", segment.meta.PartitionId),
-				zap.String("state", segment.meta.State.String()),
+			r.Logger().Warn(context.TODO(), "getSnapshot: skipping orphaned segment assignment with dropped partition",
+				mlog.Int64("segmentID", segmentID),
+				mlog.String("vchannel", segment.meta.Vchannel),
+				mlog.Int64("collectionID", segment.meta.CollectionId),
+				mlog.Int64("partitionID", segment.meta.PartitionId),
+				mlog.String("state", segment.meta.State.String()),
 			)
 			continue
 		}

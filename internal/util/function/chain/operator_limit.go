@@ -107,34 +107,17 @@ func (o *LimitOp) String() string {
 
 // NewLimitOpFromRepr creates a LimitOp from an OperatorRepr.
 func NewLimitOpFromRepr(repr *OperatorRepr) (Operator, error) {
-	limitVal, ok := repr.Params["limit"]
-	if !ok {
-		return nil, merr.WrapErrParameterMissingMsg("limit_op: limit is required")
-	}
-	var limit int64
-	switch v := limitVal.(type) {
-	case int64:
-		limit = v
-	case int:
-		limit = int64(v)
-	case float64:
-		limit = int64(v)
-	default:
-		return nil, merr.WrapErrParameterInvalidMsg("limit_op: limit must be a number")
+	reader := types.NewParamReader("limit_op", repr.Params)
+	limit, err := reader.Int64("limit", true, 0)
+	if err != nil {
+		return nil, err
 	}
 	if limit <= 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("limit_op: limit must be positive")
 	}
-	offset := int64(0)
-	if offsetVal, ok := repr.Params["offset"]; ok {
-		switch v := offsetVal.(type) {
-		case int64:
-			offset = v
-		case int:
-			offset = int64(v)
-		case float64:
-			offset = int64(v)
-		}
+	offset, err := reader.Int64("offset", false, 0)
+	if err != nil {
+		return nil, err
 	}
 	if offset < 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("limit_op: offset must be non-negative")

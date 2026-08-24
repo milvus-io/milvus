@@ -5,15 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // mockCommandStore implements CommandStoreInterface for testing
@@ -116,6 +119,19 @@ func (m *mockCommandStore) DeleteNonPersistentCommand(commandID string) bool {
 		return true
 	}
 	return false
+}
+
+// DeleteCommandOnReply mirrors the real store: only a command aimed at one client is
+// retired by that client's reply.
+func (m *mockCommandStore) DeleteCommandOnReply(commandID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cmd, ok := m.commands[commandID]
+	if !ok || !strings.HasPrefix(cmd.TargetScope, clientScopePrefix) {
+		return false
+	}
+	delete(m.commands, commandID)
+	return true
 }
 
 func (m *mockCommandStore) GetCommandInfo(commandID string) (string, []byte, bool, bool) {
@@ -570,9 +586,165 @@ func TestClientHeartbeatUpdatesExistingClient(t *testing.T) {
 	assert.Len(t, clients, 1)
 
 	// Metrics should be latest
-	assert.Equal(t, int64(100), clients[0].LatestMetrics[0].Global.RequestCount)
+	assert.Equal(t, int64(100), clients[0].LatestWindow()[0].Global.RequestCount)
 	// SDK version should be updated
 	assert.Equal(t, "2.4.1", clients[0].ClientInfo.SdkVersion)
+}
+
+// servedRequestCount returns the request count a telemetry query reports for clientID, and
+// whether the query reported any metrics at all.
+func servedRequestCount(t *testing.T, mgr *TelemetryManager, clientID string) (int64, bool) {
+	t.Helper()
+	resp, err := mgr.GetClientTelemetry(&milvuspb.GetClientTelemetryRequest{
+		ClientId:       clientID,
+		IncludeMetrics: true,
+	})
+	assert.NoError(t, err)
+	assert.Len(t, resp.Clients, 1)
+	if len(resp.Clients[0].Metrics) == 0 {
+		return 0, false
+	}
+	return resp.Clients[0].Metrics[0].Global.RequestCount, true
+}
+
+// Retention is a knob rather than a constant so a deployment whose clients heartbeat often
+// can keep an answer alive across more than one quiet interval. Raising it moves the served
+// window further back by exactly that much.
+func TestRetainedWindowsIsConfigurable(t *testing.T) {
+	cfg := DefaultTelemetryConfig()
+	cfg.RetainedWindows = 3
+	mgr := NewTelemetryManagerWithConfig(nil, cfg)
+	clientID := "deep-retention-client"
+
+	heartbeat := func(mgr *TelemetryManager, requestCount int64) {
+		_, err := mgr.HandleHeartbeat(&milvuspb.ClientHeartbeatRequest{
+			ClientInfo: &commonpb.ClientInfo{
+				SdkType:  "pymilvus",
+				Reserved: map[string]string{"client_id": clientID},
+			},
+			Metrics: []*commonpb.OperationMetrics{
+				{Operation: "Search", Global: &commonpb.Metrics{RequestCount: requestCount}},
+			},
+		})
+		assert.NoError(t, err)
+	}
+
+	// With three windows retained the oldest still served is two heartbeats back, so the
+	// first window survives two more heartbeats instead of one.
+	heartbeat(mgr, 10)
+	heartbeat(mgr, 20)
+	heartbeat(mgr, 30)
+	count, present := servedRequestCount(t, mgr, clientID)
+	assert.True(t, present)
+	assert.Equal(t, int64(10), count)
+
+	heartbeat(mgr, 40)
+	count, present = servedRequestCount(t, mgr, clientID)
+	assert.True(t, present)
+	assert.Equal(t, int64(20), count)
+}
+
+// A zero in most of these fields is not a weaker setting but a broken one, so the config
+// normalizes rather than letting a partially filled struct silently disable telemetry --
+// or, for CleanupInterval, panic in time.NewTicker.
+func TestConfigNormalizesNonPositiveValues(t *testing.T) {
+	defaults := DefaultTelemetryConfig()
+
+	// An empty struct is the shape a caller lands on by filling in one field, and every
+	// path that installs a config normalizes, so both reach the same place.
+	forConstructor := &TelemetryConfig{}
+	mgr := NewTelemetryManagerWithConfig(nil, forConstructor)
+	assert.Equal(t, defaults.RetainedWindows, mgr.config.RetainedWindows)
+	assert.Equal(t, defaults.CleanupInterval, mgr.config.CleanupInterval)
+	assert.Equal(t, defaults.InactiveClientThreshold, mgr.config.InactiveClientThreshold)
+	assert.Equal(t, defaults.ClientStatusThreshold, mgr.config.ClientStatusThreshold)
+	assert.Equal(t, defaults.CommandCleanupTimeout, mgr.config.CommandCleanupTimeout)
+	assert.Equal(t, defaults.MaxOperationTypesPerClient, mgr.config.MaxOperationTypesPerClient)
+	assert.Equal(t, defaults.MaxClientsInMemory, mgr.config.MaxClientsInMemory)
+
+	mgr.SetConfig(&TelemetryConfig{RetainedWindows: -1, CleanupInterval: -time.Second})
+	assert.Equal(t, defaults.RetainedWindows, mgr.config.RetainedWindows)
+	assert.Equal(t, defaults.CleanupInterval, mgr.config.CleanupInterval)
+
+	// MaxMetricsPerClient is the exception: validateAndTruncateMetrics only enforces it
+	// when positive, so zero already means "no cap" and normalizing it away would impose a
+	// limit on deployments that deliberately removed one.
+	unlimited := &TelemetryConfig{MaxMetricsPerClient: 0}
+	unlimited.normalize()
+	assert.Equal(t, 0, unlimited.MaxMetricsPerClient)
+}
+
+// The zero that means "no cap" has to survive the whole path, not just normalize: a client
+// reporting more than the default cap is accepted untouched when the cap is disabled.
+func TestMaxMetricsPerClientZeroDisablesTheCap(t *testing.T) {
+	cfg := DefaultTelemetryConfig()
+	cfg.MaxMetricsPerClient = 0
+	mgr := NewTelemetryManagerWithConfig(nil, cfg)
+
+	// One operation whose per-collection breakdown is far past the default 1MB cap.
+	collections := make(map[string]*commonpb.Metrics, 4096)
+	for i := 0; i < 4096; i++ {
+		collections[fmt.Sprintf("collection-%d-%s", i, strings.Repeat("x", 64))] = &commonpb.Metrics{RequestCount: 1}
+	}
+	kept := mgr.validateAndTruncateMetrics([]*commonpb.OperationMetrics{
+		{Operation: "Search", Global: &commonpb.Metrics{RequestCount: 1}, CollectionMetrics: collections},
+	})
+	assert.Len(t, kept, 1)
+	assert.Len(t, kept[0].CollectionMetrics, 4096)
+}
+
+// A heartbeat window that carried no traffic is still a window, and the client that idles
+// for one interval has not stopped existing. Serving the newest window alone means one
+// quiet interval blanks the view -- so the cache keeps the two most recent windows and
+// serves the older of them, which costs one interval of freshness and buys a view that
+// survives a single idle window.
+func TestGetClientTelemetryServesOlderRetainedWindow(t *testing.T) {
+	mgr := NewTelemetryManager(nil)
+	clientID := "windowed-client"
+
+	heartbeat := func(requestCount int64, withMetrics bool) {
+		req := &milvuspb.ClientHeartbeatRequest{
+			ClientInfo: &commonpb.ClientInfo{
+				SdkType:  "pymilvus",
+				Host:     "192.168.1.100",
+				Reserved: map[string]string{"client_id": clientID},
+			},
+		}
+		if withMetrics {
+			req.Metrics = []*commonpb.OperationMetrics{
+				{Operation: "Search", Global: &commonpb.Metrics{RequestCount: requestCount}},
+			}
+		}
+		_, err := mgr.HandleHeartbeat(req)
+		assert.NoError(t, err)
+	}
+
+	// Only one window retained so far: it is the older one, so it is what gets served. A
+	// client is visible from its first heartbeat, not one interval later.
+	heartbeat(50, true)
+	count, present := servedRequestCount(t, mgr, clientID)
+	assert.True(t, present)
+	assert.Equal(t, int64(50), count)
+
+	// Two windows retained. The older one is served; the newest is held back.
+	heartbeat(100, true)
+	count, present = servedRequestCount(t, mgr, clientID)
+	assert.True(t, present)
+	assert.Equal(t, int64(50), count)
+
+	// An idle window arrives. It does not blank the view: the window before it is still
+	// retained and is now the older of the two.
+	heartbeat(0, false)
+	count, present = servedRequestCount(t, mgr, clientID)
+	assert.True(t, present)
+	assert.Equal(t, int64(100), count)
+
+	// A second consecutive idle window. Both retained windows are now empty, and an idle
+	// client honestly reports nothing -- no non-empty window is resurrected from further
+	// back.
+	heartbeat(0, false)
+	_, present = servedRequestCount(t, mgr, clientID)
+	assert.False(t, present)
 }
 
 func TestMultipleOperationTypes(t *testing.T) {
@@ -2137,15 +2309,41 @@ func TestMetricsSnapshotOverwrite(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	// Verify metrics were OVERWRITTEN, not accumulated
+	// Each heartbeat is one window, never merged into the last: what a query reports is one
+	// interval's counters, not a running total. Two windows are retained and the older is
+	// served, so this reports the first heartbeat -- 100, not 250 and not 150.
 	resp2, _ := mgr.GetClientTelemetry(&milvuspb.GetClientTelemetryRequest{
 		ClientId:       clientID,
 		IncludeMetrics: true,
 	})
-	assert.Equal(t, int64(150), resp2.Aggregated.RequestCount, "metrics should be overwritten, not accumulated")
-	assert.Equal(t, int64(145), resp2.Aggregated.SuccessCount)
+	assert.Equal(t, int64(100), resp2.Aggregated.RequestCount, "windows must not accumulate")
+	assert.Equal(t, int64(95), resp2.Aggregated.SuccessCount)
 	assert.Len(t, resp2.Clients, 1)
-	assert.Equal(t, 12.0, resp2.Clients[0].Metrics[0].Global.AvgLatencyMs)
+	assert.Equal(t, 10.0, resp2.Clients[0].Metrics[0].Global.AvgLatencyMs)
+
+	// A third heartbeat drops the first window, and the second becomes the one served --
+	// still a single window's counters, never a sum.
+	_, err = mgr.HandleHeartbeat(&milvuspb.ClientHeartbeatRequest{
+		ClientInfo: &commonpb.ClientInfo{
+			SdkType:  "pymilvus",
+			Host:     "192.168.1.100",
+			Reserved: map[string]string{"client_id": clientID},
+		},
+		Metrics: []*commonpb.OperationMetrics{
+			{
+				Operation: "Search",
+				Global:    &commonpb.Metrics{RequestCount: 7, SuccessCount: 7, AvgLatencyMs: 3.0},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	resp3, _ := mgr.GetClientTelemetry(&milvuspb.GetClientTelemetryRequest{
+		ClientId:       clientID,
+		IncludeMetrics: true,
+	})
+	assert.Equal(t, int64(150), resp3.Aggregated.RequestCount)
+	assert.Equal(t, 12.0, resp3.Clients[0].Metrics[0].Global.AvgLatencyMs)
 }
 
 // TestCommandDeduplication verifies that:
@@ -2266,9 +2464,13 @@ func TestCommandDeleteAfterAck(t *testing.T) {
 	clientID := "ack-test-client"
 
 	// Push a one-time command
+	// Targeted at this one client on purpose: its reply is the whole answer, so the command
+	// is finished. A command with no target is a broadcast and must outlive its first reply
+	// -- see TestBroadcastCommandSurvivesFirstReply.
 	pushResp, err := mgr.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
-		CommandType: "show_errors",
-		Payload:     []byte(`{"max_count": 50}`),
+		CommandType:    "show_errors",
+		TargetClientId: clientID,
+		Payload:        []byte(`{"max_count": 50}`),
 	})
 	assert.NoError(t, err)
 	commandID := pushResp.CommandId
@@ -2309,9 +2511,10 @@ func TestCommandDeleteAfterAckFailure(t *testing.T) {
 	ctx := context.Background()
 	clientID := "ack-failure-client"
 
-	// Push a one-time command
+	// Push a one-time command aimed at this client, so its reply retires the command.
 	pushResp, err := mgr.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
-		CommandType: "show_errors",
+		CommandType:    "show_errors",
+		TargetClientId: clientID,
 	})
 	assert.NoError(t, err)
 	commandID := pushResp.CommandId
@@ -2970,7 +3173,27 @@ func TestCleanupRepliedCommands(t *testing.T) {
 		assert.Len(t, configs, 1)
 	})
 
-	t.Run("deletes non-persistent commands", func(t *testing.T) {
+	t.Run("deletes a replied client-scoped command", func(t *testing.T) {
+		mgr := NewTelemetryManager(nil)
+		mockStore := newMockCommandStore()
+		mgr.SetCommandStore(mockStore)
+
+		ctx := context.Background()
+		cmdID, _ := mockStore.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+			CommandType:    "one_time_command",
+			TargetClientId: "only-recipient",
+			Payload:        []byte(`{}`),
+			Persistent:     false,
+		})
+
+		// Cleanup should delete it: the single recipient has answered.
+		mgr.cleanupRepliedCommands([]string{cmdID})
+
+		commands, _ := mockStore.ListCommands(ctx)
+		assert.Empty(t, commands)
+	})
+
+	t.Run("keeps a replied broadcast command", func(t *testing.T) {
 		mgr := NewTelemetryManager(nil)
 		mockStore := newMockCommandStore()
 		mgr.SetCommandStore(mockStore)
@@ -2982,12 +3205,31 @@ func TestCleanupRepliedCommands(t *testing.T) {
 			Persistent:  false,
 		})
 
-		// Cleanup should delete non-persistent command
 		mgr.cleanupRepliedCommands([]string{cmdID})
 
-		// Command should be deleted
 		commands, _ := mockStore.ListCommands(ctx)
-		assert.Empty(t, commands)
+		assert.Len(t, commands, 1,
+			"one client's reply must not retire a command every client is meant to receive")
+	})
+
+	t.Run("keeps a replied database-scoped command", func(t *testing.T) {
+		mgr := NewTelemetryManager(nil)
+		mockStore := newMockCommandStore()
+		mgr.SetCommandStore(mockStore)
+
+		ctx := context.Background()
+		cmdID, _ := mockStore.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+			CommandType:    "one_time_command",
+			TargetDatabase: "db1",
+			Payload:        []byte(`{}`),
+			Persistent:     false,
+		})
+
+		mgr.cleanupRepliedCommands([]string{cmdID})
+
+		commands, _ := mockStore.ListCommands(ctx)
+		assert.Len(t, commands, 1,
+			"a database scope can match many clients, so the first reply is not the last")
 	})
 }
 
@@ -3499,10 +3741,12 @@ func TestCleanupRepliedCommandsEmptyIDs(t *testing.T) {
 	mgr := NewTelemetryManager(nil)
 	mgr.SetCommandStore(mockStore)
 
-	// Add a command using the mock store directly
+	// Add a command using the mock store directly. Client-scoped so that a reply retires
+	// it -- this test is about empty IDs being skipped, not about scope.
 	ctx := context.Background()
 	cmdID, _ := mockStore.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
-		CommandType: "test_command",
+		CommandType:    "test_command",
+		TargetClientId: "only-recipient",
 	})
 
 	// Cleanup with empty strings and valid ID - should skip empty strings
@@ -3762,4 +4006,408 @@ func TestProcessCommandRepliesPayloadFormat(t *testing.T) {
 	jsonStr := string(data)
 	assert.Contains(t, jsonStr, `"payload":"{\"user_config\"`)
 	assert.NotContains(t, jsonStr, "eyJ1c2VyX2NvbmZpZyI") // base64 prefix
+}
+
+// TestValidatePersistentTarget covers the rule that replaced a blanket ban on
+// client-scoped persistent configs. The scope alone does not prove a config is doomed --
+// a client that pins TelemetryConfig.ClientID keeps its ID across restarts -- so the
+// decision is made on the identity the client declares.
+func TestValidatePersistentTarget(t *testing.T) {
+	newManager := func(clients map[string]bool) *TelemetryManager {
+		m := &TelemetryManager{config: DefaultTelemetryConfig()}
+		for id, stable := range clients {
+			reserved := map[string]string{"client_id": id}
+			if stable {
+				reserved[clientIDStableKey] = "true"
+			}
+			cache := &ClientMetricsCache{
+				ClientInfo: &commonpb.ClientInfo{Reserved: reserved},
+			}
+			cache.ClientIDStable.Store(declaresStableClientID(cache.ClientInfo))
+			m.clientMetrics.Store(id, cache)
+		}
+		return m
+	}
+
+	t.Run("non-persistent client-scoped command is always fine", func(t *testing.T) {
+		m := newManager(map[string]bool{"ephemeral": false})
+
+		assert.NoError(t, m.validatePersistentTarget(&milvuspb.PushClientCommandRequest{
+			CommandType:    "show_errors",
+			TargetClientId: "ephemeral",
+		}))
+	})
+
+	t.Run("persistent config to a stable client is allowed", func(t *testing.T) {
+		m := newManager(map[string]bool{"pinned": true})
+
+		assert.NoError(t, m.validatePersistentTarget(&milvuspb.PushClientCommandRequest{
+			CommandType:    "push_config",
+			TargetClientId: "pinned",
+			Persistent:     true,
+		}))
+	})
+
+	t.Run("persistent config to a generated-ID client is rejected", func(t *testing.T) {
+		m := newManager(map[string]bool{"ephemeral": false})
+
+		err := m.validatePersistentTarget(&milvuspb.PushClientCommandRequest{
+			CommandType:    "push_config",
+			TargetClientId: "ephemeral",
+			Persistent:     true,
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "generated client ID")
+	})
+
+	// An unknown client is a transient reading, not bad input: clientMetrics is rebuilt
+	// only from heartbeats, so it is empty for up to a heartbeat interval after a
+	// coordinator restart. Classifying that as a non-retriable input error makes a
+	// provisioning script give up on a request that would succeed seconds later.
+	t.Run("persistent config to an unknown client is rejected as retriable", func(t *testing.T) {
+		m := newManager(nil)
+
+		err := m.validatePersistentTarget(&milvuspb.PushClientCommandRequest{
+			CommandType:    "push_config",
+			TargetClientId: "never-seen",
+			Persistent:     true,
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not currently known to this coordinator")
+
+		assert.True(t, merr.IsRetryableErr(err),
+			"a cold coordinator cache must not tell the caller to stop retrying")
+		assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+		assert.NotErrorIs(t, err, merr.ErrParameterInvalid,
+			"must not be reported as caller input error")
+	})
+
+	// The other branch stays an input error: a generated client ID is a fact about the
+	// client that no amount of retrying will change.
+	t.Run("unstable client id stays a non-retriable input error", func(t *testing.T) {
+		m := newManager(nil)
+		cache := &ClientMetricsCache{}
+		cache.ClientIDStable.Store(false)
+		m.clientMetrics.Store("ephemeral", cache)
+
+		err := m.validatePersistentTarget(&milvuspb.PushClientCommandRequest{
+			CommandType:    "push_config",
+			TargetClientId: "ephemeral",
+			Persistent:     true,
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.False(t, merr.IsRetryableErr(err), "retrying will never make a generated ID stable")
+	})
+
+	t.Run("durable scopes are untouched", func(t *testing.T) {
+		m := newManager(nil)
+
+		assert.NoError(t, m.validatePersistentTarget(&milvuspb.PushClientCommandRequest{
+			CommandType: "push_config", Persistent: true,
+		}))
+		assert.NoError(t, m.validatePersistentTarget(&milvuspb.PushClientCommandRequest{
+			CommandType: "push_config", TargetDatabase: "db1", Persistent: true,
+		}))
+	})
+}
+
+// TestLoadCacheKeepsClientScopedConfigs pins the fix for a destructive migration: an
+// earlier revision deleted every client-scoped config from etcd on startup, which would
+// have discarded still-valid configuration belonging to clients using a stable ClientID.
+func TestLoadCacheKeepsClientScopedConfigs(t *testing.T) {
+	kv := newMockKV()
+
+	key := "/test/configs/pinned-id"
+	cfg, _ := json.Marshal(storedConfig{
+		ConfigID:    "pinned-id",
+		ConfigType:  "push_config",
+		Payload:     []byte(`{"sampling_rate":0.1}`),
+		CreateTime:  time.Now().UnixMilli(),
+		TargetScope: "client:ingest-worker-3",
+	})
+	require.NoError(t, kv.Put(context.Background(), key, string(cfg)))
+
+	store := NewCommandStoreWithKV(kv, "/test/")
+
+	store.cacheMu.RLock()
+	_, loaded := store.cache.configs["pinned-id"]
+	store.cacheMu.RUnlock()
+	assert.True(t, loaded, "a client-scoped config must not be discarded on startup")
+
+	resp, err := kv.Get(context.Background(), key)
+	require.NoError(t, err)
+	assert.Len(t, resp.Kvs, 1, "and must not be deleted from etcd")
+}
+
+// TestValidatePersistentTargetIsRaceFree runs the admin-side check against a client whose
+// heartbeats are concurrently rewriting its cache entry. That is the real deployment shape:
+// the WebUI polls telemetry while clients keep heartbeating.
+//
+// Reading ClientInfo directly here would be an unsynchronized read of a field the heartbeat
+// path writes without a lock, so this must be run with -race to mean anything.
+// TestBroadcastCommandSurvivesFirstReply walks the real lifecycle -- push, deliver to one
+// client, that client replies, then a second client heartbeats for the first time -- rather
+// than asserting on a constructed end state.
+//
+// The bug: cleanupRepliedCommands deleted any replied command regardless of scope. With
+// clients on different heartbeat intervals, the fastest one answered and the command was
+// gone before anyone else polled. A broadcast collection_metrics, which is a state change
+// meant for the whole fleet, would silently apply to whoever happened to heartbeat first,
+// with no error anywhere.
+func TestBroadcastCommandSurvivesFirstReply(t *testing.T) {
+	ctx := context.Background()
+
+	newHeartbeat := func(clientID string, replies ...*commonpb.CommandReply) *milvuspb.ClientHeartbeatRequest {
+		return &milvuspb.ClientHeartbeatRequest{
+			ClientInfo: &commonpb.ClientInfo{
+				SdkType:  "Go",
+				Reserved: map[string]string{"client_id": clientID},
+			},
+			CommandReplies: replies,
+		}
+	}
+
+	t.Run("global command reaches a client that heartbeats after the first reply", func(t *testing.T) {
+		store := newMockCommandStore()
+		m := &TelemetryManager{commandStore: store, config: DefaultTelemetryConfig()}
+
+		cmdID, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+			CommandType: "collection_metrics",
+			Payload:     []byte(`{"collections":["c1"]}`),
+		})
+		require.NoError(t, err)
+
+		// Fast client picks the command up...
+		respA, err := m.HandleHeartbeat(newHeartbeat("client-fast"))
+		require.NoError(t, err)
+		require.Len(t, respA.Commands, 1, "the broadcast command must reach the first client")
+		require.Equal(t, cmdID, respA.Commands[0].CommandId)
+
+		// ...and answers on its next heartbeat.
+		_, err = m.HandleHeartbeat(newHeartbeat("client-fast",
+			&commonpb.CommandReply{CommandId: cmdID, Success: true}))
+		require.NoError(t, err)
+
+		// A slower client heartbeats for the first time only now. It must still get it.
+		respB, err := m.HandleHeartbeat(newHeartbeat("client-slow"))
+		require.NoError(t, err)
+		require.Len(t, respB.Commands, 1,
+			"the first client's reply must not cancel delivery to everyone else")
+		assert.Equal(t, cmdID, respB.Commands[0].CommandId)
+	})
+
+	t.Run("client-scoped command is retired by its one recipient", func(t *testing.T) {
+		store := newMockCommandStore()
+		m := &TelemetryManager{commandStore: store, config: DefaultTelemetryConfig()}
+
+		cmdID, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+			CommandType:    "get_config",
+			TargetClientId: "client-a",
+		})
+		require.NoError(t, err)
+
+		respA, err := m.HandleHeartbeat(newHeartbeat("client-a"))
+		require.NoError(t, err)
+		require.Len(t, respA.Commands, 1)
+
+		_, err = m.HandleHeartbeat(newHeartbeat("client-a",
+			&commonpb.CommandReply{CommandId: cmdID, Success: true}))
+		require.NoError(t, err)
+
+		// Answered and done: it must not be handed out again.
+		respAgain, err := m.HandleHeartbeat(newHeartbeat("client-a"))
+		require.NoError(t, err)
+		assert.Empty(t, respAgain.Commands,
+			"a command with a single recipient is finished once that recipient answers")
+	})
+}
+
+// TestClientMetricsCacheIsRaceFree covers every reader of the fields a heartbeat writes.
+//
+// One cache belongs to one client, which used to be read as "one writer, so no
+// synchronization needed". It is not: the heartbeat writes ClientInfo, the retained windows,
+// ConfigHash, LastCommandTS and CommandReplies while admin readers -- the WebUI polling
+// GetClientTelemetry, the REST reply endpoints, GetClientCommandReplies -- read them
+// concurrently. A heartbeat rewriting the CommandReplies slice header while another
+// goroutine ranges or JSON-encodes it yields a torn ptr/len pair: out-of-bounds reads of
+// the old backing array at best, a nil dereference inside the RootCoord RPC handler at
+// worst.
+//
+// Run under -race, this fails on every one of those fields without the cache lock.
+// IncludeMetrics is exercised both ways on purpose: replies are encoded regardless of that
+// flag, so the deliberately cheap lookup the reply endpoint performs races just as much as
+// a full metrics query.
+func TestClientMetricsCacheIsRaceFree(t *testing.T) {
+	// Needs a real config: the heartbeat path runs metrics through
+	// validateAndTruncateMetrics, which reads it.
+	m := &TelemetryManager{config: DefaultTelemetryConfig()}
+
+	const clientID = "busy-worker"
+	heartbeat := func(i int) {
+		_, _ = m.HandleHeartbeat(&milvuspb.ClientHeartbeatRequest{
+			ClientInfo: &commonpb.ClientInfo{
+				SdkType:  "Go",
+				Reserved: map[string]string{"client_id": clientID},
+			},
+			ConfigHash:           fmt.Sprintf("hash-%d", i),
+			LastCommandTimestamp: int64(i),
+			Metrics: []*commonpb.OperationMetrics{
+				{
+					Operation: "search",
+					Global:    &commonpb.Metrics{RequestCount: int64(i), SuccessCount: int64(i)},
+				},
+			},
+			CommandReplies: []*commonpb.CommandReply{
+				{CommandId: fmt.Sprintf("cmd-%d", i), Success: true, Payload: []byte(`{"ok":true}`)},
+			},
+		})
+	}
+	heartbeat(0) // seed the cache entry
+
+	stop := make(chan struct{})
+
+	// Writer: keeps replacing metrics and appending replies, which also drives the reslice
+	// once the history passes its cap. Runs until the readers are done.
+	var writer sync.WaitGroup
+	writer.Add(1)
+	go func() {
+		defer writer.Done()
+		for i := 1; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+				heartbeat(i)
+			}
+		}
+	}()
+
+	// Readers, one per production path that touches the guarded fields. Each does a bounded
+	// number of passes so the test ends on its own.
+	readers := []func(){
+		func() { _, _ = m.GetClientTelemetry(&milvuspb.GetClientTelemetryRequest{IncludeMetrics: true}) },
+		func() { _, _ = m.GetClientTelemetry(&milvuspb.GetClientTelemetryRequest{IncludeMetrics: false}) },
+		func() { _, _ = m.GetClientTelemetry(&milvuspb.GetClientTelemetryRequest{ClientId: clientID}) },
+		func() { _ = m.GetClientCommandReplies(clientID) },
+	}
+
+	var readerGroup sync.WaitGroup
+	for _, read := range readers {
+		readerGroup.Add(1)
+		go func(read func()) {
+			defer readerGroup.Done()
+			for i := 0; i < 300; i++ {
+				read()
+			}
+		}(read)
+	}
+
+	readerGroup.Wait()
+	close(stop)
+	writer.Wait()
+
+	// The writer really did keep going alongside the readers, so the absence of a race
+	// report means something.
+	replies := m.GetClientCommandReplies(clientID)
+	require.NotEmpty(t, replies, "the heartbeat writer must have recorded replies")
+}
+
+// TestFirstHeartbeatPublishesStableIDAtomically covers the window between a new cache being
+// published and its ClientIDStable being written.
+//
+// The cache used to go into the sync.Map first and get ClientIDStable a few lines later. In
+// that gap a concurrent PushCommand finds the client, reads the zero value -- which means
+// "generated ID" -- and rejects a legitimately pinned client with a non-retriable
+// ParameterInvalid. A provisioning script racing a client's very first heartbeat would be
+// told, permanently, that a correct request was bad input.
+func TestFirstHeartbeatPublishesStableIDAtomically(t *testing.T) {
+	const clientID = "pinned-worker"
+
+	heartbeat := func(m *TelemetryManager) {
+		_, _ = m.HandleHeartbeat(&milvuspb.ClientHeartbeatRequest{
+			ClientInfo: &commonpb.ClientInfo{
+				SdkType: "Go",
+				Reserved: map[string]string{
+					"client_id":       clientID,
+					clientIDStableKey: "true",
+				},
+			},
+		})
+	}
+
+	// Repeat: the window is small, so one attempt proves little.
+	for i := 0; i < 200; i++ {
+		m := &TelemetryManager{config: DefaultTelemetryConfig()}
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			heartbeat(m)
+		}()
+
+		// Poll until the client appears, then immediately judge it -- landing as close to
+		// the publish as possible.
+		for {
+			if _, ok := m.clientMetrics.Load(clientID); ok {
+				break
+			}
+		}
+		err := m.validatePersistentTarget(&milvuspb.PushClientCommandRequest{
+			CommandType:    "push_config",
+			TargetClientId: clientID,
+			Persistent:     true,
+		})
+		wg.Wait()
+
+		require.False(t, err != nil && errors.Is(err, merr.ErrParameterInvalid),
+			"a visible client that declared a stable ID must never be rejected as bad input; "+
+				"iteration %d saw %v", i, err)
+	}
+}
+
+func TestValidatePersistentTargetIsRaceFree(t *testing.T) {
+	m := &TelemetryManager{config: DefaultTelemetryConfig()}
+
+	const clientID = "pinned-worker"
+	heartbeat := func() {
+		_, _ = m.HandleHeartbeat(&milvuspb.ClientHeartbeatRequest{
+			ClientInfo: &commonpb.ClientInfo{
+				SdkType: "Go",
+				Reserved: map[string]string{
+					"client_id":       clientID,
+					clientIDStableKey: "true",
+				},
+			},
+		})
+	}
+	heartbeat() // seed the cache entry
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				heartbeat()
+			}
+		}
+	}()
+
+	for i := 0; i < 500; i++ {
+		_ = m.validatePersistentTarget(&milvuspb.PushClientCommandRequest{
+			CommandType:    "push_config",
+			TargetClientId: clientID,
+			Persistent:     true,
+		})
+	}
+
+	close(stop)
+	wg.Wait()
 }

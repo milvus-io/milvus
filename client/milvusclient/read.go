@@ -26,10 +26,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
+	"github.com/milvus-io/milvus/client/v3/internal/typeutil"
 )
 
 func (c *Client) Search(ctx context.Context, option SearchOption, callOptions ...grpc.CallOption) ([]ResultSet, error) {
@@ -76,7 +76,32 @@ func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string
 	offset := 0
 	fieldDataList := results.GetFieldsData()
 	gb := results.GetGroupByFieldValue()
-	for i := 0; i < int(results.GetNumQueries()); i++ {
+	queryCount := int(results.GetNumQueries())
+
+	parseWholeResult := queryCount > 0 && len(results.GetTopks()) >= queryCount
+	totalResultCount := 0
+	if parseWholeResult {
+		for _, topk := range results.GetTopks()[:queryCount] {
+			if topk < 0 {
+				parseWholeResult = false
+				break
+			}
+			totalResultCount += int(topk)
+		}
+	}
+
+	var fields []column.Column
+	var fieldsErr error
+	var groupBy column.Column
+	var groupByErr error
+	if parseWholeResult && (!isAggregationResult || totalResultCount > 0) {
+		fields, fieldsErr = c.parseSearchResult(schema, outputFields, fieldDataList, 0, 0, totalResultCount)
+		if gb != nil {
+			groupBy, groupByErr = column.FieldDataColumn(gb, 0, totalResultCount)
+		}
+	}
+
+	for i := 0; i < queryCount; i++ {
 		func() {
 			var rc int
 			entry := ResultSet{
@@ -112,12 +137,28 @@ func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string
 			}
 			// parse group-by values
 			if gb != nil {
-				entry.GroupByValue, entry.Err = column.FieldDataColumn(gb, offset, offset+rc)
+				if parseWholeResult {
+					if groupByErr != nil {
+						entry.Err = groupByErr
+						return
+					}
+					entry.GroupByValue = groupBy.Slice(offset, offset+rc)
+				} else {
+					entry.GroupByValue, entry.Err = column.FieldDataColumn(gb, offset, offset+rc)
+				}
 				if entry.Err != nil {
 					return
 				}
 			}
-			entry.Fields, entry.Err = c.parseSearchResult(schema, outputFields, fieldDataList, i, offset, offset+rc)
+			if parseWholeResult {
+				if fieldsErr != nil {
+					entry.Err = fieldsErr
+					return
+				}
+				entry.Fields = column.SliceColumns(fields, offset, offset+rc)
+			} else {
+				entry.Fields, entry.Err = c.parseSearchResult(schema, outputFields, fieldDataList, i, offset, offset+rc)
+			}
 		}()
 	}
 	return sr, nil
@@ -141,7 +182,40 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 	schemaFieldSet := typeutil.NewSet(lo.Map(sch.Fields, func(f *entity.Field, _ int) string {
 		return f.Name
 	})...)
+	schemaFields := make(map[string]*entity.Field, len(sch.Fields))
+	var dynamicSchemaField *entity.Field
+	for _, field := range sch.Fields {
+		schemaFields[field.Name] = field
+		if field.IsDynamic {
+			dynamicSchemaField = field
+		}
+	}
 	dynamicNames := outputSet.Complement(schemaFieldSet)
+	structOutputParents := make(map[string]string)
+	structOutputSelections := make(map[string]map[string]struct{})
+	for _, field := range sch.Fields {
+		if field.DataType != entity.FieldTypeArray || field.ElementType != entity.FieldTypeStruct || field.StructSchema == nil {
+			continue
+		}
+		_, parentRequested := outputSet[field.Name]
+		for _, subField := range field.StructSchema.Fields {
+			outputName := field.Name + "[" + subField.Name + "]"
+			if _, requested := outputSet[outputName]; !requested {
+				continue
+			}
+			delete(dynamicNames, outputName)
+			structOutputParents[outputName] = field.Name
+			if parentRequested {
+				continue
+			}
+			selection := structOutputSelections[field.Name]
+			if selection == nil {
+				selection = make(map[string]struct{})
+				structOutputSelections[field.Name] = selection
+			}
+			selection[subField.Name] = struct{}{}
+		}
+	}
 
 	columns := make([]column.Column, 0, len(outputFields))
 	var dynamicColumn *column.ColumnJSONBytes
@@ -149,6 +223,12 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 		col, err := column.FieldDataColumn(fieldData, from, to)
 		if err != nil {
 			return nil, err
+		}
+		if field := schemaFields[fieldData.GetFieldName()]; field != nil && field.Nullable && !col.Nullable() {
+			col.SetNullable(true)
+			if err := col.ValidateNullable(); err != nil {
+				return nil, errors.Wrapf(err, "restore nullable state for field %q", fieldData.GetFieldName())
+			}
 		}
 
 		// if output data contains dynamic json, setup dynamicColumn
@@ -170,6 +250,51 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 
 		columns = append(columns, col)
 	}
+	if len(fieldDataList) == 0 {
+		seen := make(map[string]struct{}, len(outputFields))
+		for _, fieldName := range outputFields {
+			parentName := fieldName
+			if name, ok := structOutputParents[fieldName]; ok {
+				parentName = name
+			}
+			if _, ok := seen[parentName]; ok {
+				continue
+			}
+			seen[parentName] = struct{}{}
+
+			field := schemaFields[parentName]
+			if field == nil || field.DataType != entity.FieldTypeArray || field.ElementType != entity.FieldTypeStruct {
+				continue
+			}
+			col, err := newEmptyStructArrayColumn(field, structOutputSelections[parentName])
+			if err != nil {
+				return nil, err
+			}
+			columns = append(columns, col)
+		}
+		if sch.EnableDynamicField && (dynamicSchemaField != nil || len(dynamicNames) > 0) {
+			dynamicFieldName := ""
+			dynamicFieldNullable := false
+			dynamicFieldRequested := false
+			if dynamicSchemaField != nil {
+				dynamicFieldName = dynamicSchemaField.Name
+				dynamicFieldNullable = dynamicSchemaField.Nullable
+				_, dynamicFieldRequested = outputSet[dynamicFieldName]
+			}
+			if dynamicFieldRequested || len(dynamicNames) > 0 {
+				dynamicColumn = column.NewColumnJSONBytes(dynamicFieldName, nil).WithIsDynamic(true)
+				if dynamicFieldNullable {
+					dynamicColumn.SetNullable(true)
+					if err := dynamicColumn.ValidateNullable(); err != nil {
+						return nil, errors.Wrapf(err, "create empty dynamic field %q", dynamicFieldName)
+					}
+				}
+				if dynamicFieldRequested {
+					columns = append(columns, dynamicColumn)
+				}
+			}
+		}
+	}
 
 	// extra name found and not json output
 	if len(dynamicNames) > 0 && dynamicColumn == nil {
@@ -186,6 +311,32 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 	}
 
 	return columns, nil
+}
+
+func newEmptyStructArrayColumn(field *entity.Field, selectedSubFields map[string]struct{}) (column.Column, error) {
+	if field.StructSchema == nil {
+		return nil, errors.Newf("struct array field %q has no struct schema", field.Name)
+	}
+
+	subColumns := make([]column.Column, 0, len(field.StructSchema.Fields))
+	for _, subField := range field.StructSchema.Fields {
+		if selectedSubFields != nil {
+			if _, ok := selectedSubFields[subField.Name]; !ok {
+				continue
+			}
+		}
+		subColumn, err := newStructSubColumn(subField)
+		if err != nil {
+			return nil, errors.Wrapf(err, "create empty struct array field %q", field.Name)
+		}
+		subColumns = append(subColumns, subColumn)
+	}
+	col := column.NewColumnStructArray(field.Name, subColumns)
+	col.SetNullable(field.Nullable)
+	if err := col.ValidateNullable(); err != nil {
+		return nil, errors.Wrapf(err, "create empty struct array field %q", field.Name)
+	}
+	return col, nil
 }
 
 func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...grpc.CallOption) (ResultSet, error) {
@@ -213,7 +364,11 @@ func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...g
 			return err
 		}
 
-		columns, err := c.parseSearchResult(collection.Schema, resp.GetOutputFields(), resp.GetFieldsData(), 0, 0, -1)
+		outputFields := resp.GetOutputFields()
+		if len(outputFields) == 0 {
+			outputFields = req.GetOutputFields()
+		}
+		columns, err := c.parseSearchResult(collection.Schema, outputFields, resp.GetFieldsData(), 0, 0, -1)
 		if err != nil {
 			return err
 		}

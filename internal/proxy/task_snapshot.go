@@ -19,12 +19,10 @@ package proxy
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -45,17 +43,17 @@ const (
 
 // resolveCollectionNames resolves collection ID to (dbName, collectionName) via MetaCache.
 // Returns empty strings on failure (best-effort for display purposes).
-func resolveCollectionNames(ctx context.Context, collectionID int64) (string, string) {
+func resolveCollectionNames(ctx context.Context, metaCache Cache, collectionID int64) (string, string) {
 	if collectionID == 0 {
 		return "", ""
 	}
-	collInfo, err := globalMetaCache.GetCollectionInfo(ctx, "", "", collectionID)
+	collInfo, err := metaCache.GetCollectionInfo(ctx, "", "", collectionID)
 	if err != nil {
-		log.Ctx(ctx).Warn("failed to resolve collection names from ID",
-			zap.Int64("collectionID", collectionID), zap.Error(err))
+		mlog.Warn(ctx, "failed to resolve collection names from ID",
+			mlog.FieldCollectionID(collectionID), mlog.Err(err))
 		return "", ""
 	}
-	return collInfo.dbName, collInfo.schema.Name
+	return collInfo.DBName, collInfo.Schema.Name
 }
 
 type createSnapshotTask struct {
@@ -125,7 +123,7 @@ func (cst *createSnapshotTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("compaction_protection_seconds must not exceed %d", maxCompactionProtectionSeconds)
 	}
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, cst.req.GetDbName(), cst.req.GetCollectionName())
+	collectionID, err := cst.getMetaCache().GetCollectionID(ctx, cst.req.GetDbName(), cst.req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -135,10 +133,10 @@ func (cst *createSnapshotTask) PreExecute(ctx context.Context) error {
 }
 
 func (cst *createSnapshotTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy create snapshot",
-		zap.String("snapshotName", cst.req.GetName()),
-		zap.String("collectionName", cst.req.GetCollectionName()),
-		zap.Int64("collectionID", cst.collectionID),
+	mlog.Info(ctx, "proxy create snapshot",
+		mlog.String("snapshotName", cst.req.GetName()),
+		mlog.FieldCollectionName(cst.req.GetCollectionName()),
+		mlog.FieldCollectionID(cst.collectionID),
 	)
 
 	var err error
@@ -222,7 +220,7 @@ func (dst *dropSnapshotTask) PreExecute(ctx context.Context) error {
 	if dst.req.GetCollectionName() == "" {
 		return merr.WrapErrParameterMissingMsg("collection_name is required for drop snapshot")
 	}
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, dst.req.GetDbName(), dst.req.GetCollectionName())
+	collectionID, err := dst.getMetaCache().GetCollectionID(ctx, dst.req.GetDbName(), dst.req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -232,10 +230,10 @@ func (dst *dropSnapshotTask) PreExecute(ctx context.Context) error {
 }
 
 func (dst *dropSnapshotTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy drop snapshot",
-		zap.String("snapshotName", dst.req.GetName()),
-		zap.String("collectionName", dst.req.GetCollectionName()),
-		zap.Int64("collectionID", dst.collectionID),
+	mlog.Info(ctx, "proxy drop snapshot",
+		mlog.String("snapshotName", dst.req.GetName()),
+		mlog.FieldCollectionName(dst.req.GetCollectionName()),
+		mlog.FieldCollectionID(dst.collectionID),
 	)
 
 	var err error
@@ -317,7 +315,7 @@ func (dst *describeSnapshotTask) PreExecute(ctx context.Context) error {
 	if dst.req.GetCollectionName() == "" {
 		return merr.WrapErrParameterMissingMsg("collection_name is required for describe snapshot")
 	}
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, dst.req.GetDbName(), dst.req.GetCollectionName())
+	collectionID, err := dst.getMetaCache().GetCollectionID(ctx, dst.req.GetDbName(), dst.req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -327,8 +325,8 @@ func (dst *describeSnapshotTask) PreExecute(ctx context.Context) error {
 }
 
 func (dst *describeSnapshotTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy describe snapshot",
-		zap.String("snapshotName", dst.req.GetName()),
+	mlog.Info(ctx, "proxy describe snapshot",
+		mlog.String("snapshotName", dst.req.GetName()),
 	)
 
 	result, err := dst.mixCoord.DescribeSnapshot(ctx, &datapb.DescribeSnapshotRequest{
@@ -348,19 +346,19 @@ func (dst *describeSnapshotTask) Execute(ctx context.Context) error {
 
 	snapshotInfo := result.GetSnapshotInfo()
 
-	collectionName, err := globalMetaCache.GetCollectionName(ctx, "", snapshotInfo.GetCollectionId())
+	collectionName, err := dst.getMetaCache().GetCollectionName(ctx, "", snapshotInfo.GetCollectionId())
 	if err != nil {
-		log.Ctx(ctx).Warn("DescribeSnapshot fail to get collection name",
-			zap.Error(err))
+		mlog.Warn(ctx, "DescribeSnapshot fail to get collection name",
+			mlog.Err(err))
 		return err
 	}
 	var partitionNames []string
 	for _, partitionID := range snapshotInfo.GetPartitionIds() {
-		partitionName, err := globalMetaCache.GetPartitionName(ctx, "", collectionName, partitionID)
+		partitionName, err := dst.getMetaCache().GetPartitionName(ctx, "", collectionName, partitionID)
 		if err != nil {
-			log.Ctx(ctx).Warn("DescribeSnapshot fail to get partition name",
-				zap.Int64("partitionID", partitionID),
-				zap.Error(err))
+			mlog.Warn(ctx, "DescribeSnapshot fail to get partition name",
+				mlog.FieldPartitionID(partitionID),
+				mlog.Err(err))
 		}
 		partitionNames = append(partitionNames, partitionName)
 	}
@@ -438,18 +436,18 @@ func (lst *listSnapshotsTask) OnEnqueue() error {
 func (lst *listSnapshotsTask) PreExecute(ctx context.Context) error {
 	// Resolve database ID for db-level filtering
 	if lst.req.GetDbName() != "" {
-		dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, lst.req.GetDbName())
+		dbInfo, err := lst.getMetaCache().GetDatabaseInfo(ctx, lst.req.GetDbName())
 		if err != nil {
 			return err
 		}
-		lst.dbID = dbInfo.dbID
+		lst.dbID = dbInfo.DBID
 	}
 
 	if lst.req.GetCollectionName() == "" {
 		return merr.WrapErrParameterMissingMsg("collection_name is required for ListSnapshots")
 	}
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, lst.req.GetDbName(), lst.req.GetCollectionName())
+	collectionID, err := lst.getMetaCache().GetCollectionID(ctx, lst.req.GetDbName(), lst.req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -459,9 +457,9 @@ func (lst *listSnapshotsTask) PreExecute(ctx context.Context) error {
 }
 
 func (lst *listSnapshotsTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy list snapshots",
-		zap.String("collectionName", lst.req.GetCollectionName()),
-		zap.Int64("collectionID", lst.collectionID),
+	mlog.Info(ctx, "proxy list snapshots",
+		mlog.FieldCollectionName(lst.req.GetCollectionName()),
+		mlog.FieldCollectionID(lst.collectionID),
 	)
 
 	result, err := lst.mixCoord.ListSnapshots(ctx, &datapb.ListSnapshotsRequest{
@@ -562,7 +560,7 @@ func (rst *restoreSnapshotTask) PreExecute(ctx context.Context) error {
 	}
 
 	// Resolve source collection ID for per-collection snapshot lookup (RPC call)
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, rst.req.GetDbName(), rst.req.GetCollectionName())
+	collectionID, err := rst.getMetaCache().GetCollectionID(ctx, rst.req.GetDbName(), rst.req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -572,12 +570,12 @@ func (rst *restoreSnapshotTask) PreExecute(ctx context.Context) error {
 }
 
 func (rst *restoreSnapshotTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy restore snapshot",
-		zap.String("snapshotName", rst.req.GetName()),
-		zap.String("sourceCollection", rst.req.GetCollectionName()),
-		zap.String("sourceDb", rst.req.GetDbName()),
-		zap.String("targetCollection", rst.req.GetTargetCollectionName()),
-		zap.String("targetDb", rst.req.GetTargetDbName()),
+	mlog.Info(ctx, "proxy restore snapshot",
+		mlog.String("snapshotName", rst.req.GetName()),
+		mlog.String("sourceCollection", rst.req.GetCollectionName()),
+		mlog.String("sourceDb", rst.req.GetDbName()),
+		mlog.String("targetCollection", rst.req.GetTargetCollectionName()),
+		mlog.String("targetDb", rst.req.GetTargetDbName()),
 	)
 
 	// Delegate directly to DataCoord which handles the entire restore process
@@ -591,8 +589,8 @@ func (rst *restoreSnapshotTask) Execute(ctx context.Context) error {
 		SourceCollectionId:   rst.collectionID,
 	})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
-		log.Ctx(ctx).Warn("RestoreSnapshot failed",
-			zap.Error(err))
+		mlog.Warn(ctx, "RestoreSnapshot failed",
+			mlog.Err(err))
 		rst.result = &milvuspb.RestoreSnapshotResponse{Status: merr.Status(err)}
 		return err
 	}
@@ -663,8 +661,8 @@ func (grst *getRestoreSnapshotStateTask) PreExecute(ctx context.Context) error {
 }
 
 func (grst *getRestoreSnapshotStateTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy get restore snapshot state",
-		zap.Int64("jobID", grst.req.GetJobId()),
+	mlog.Info(ctx, "proxy get restore snapshot state",
+		mlog.FieldJobID(grst.req.GetJobId()),
 	)
 
 	result, err := grst.mixCoord.GetRestoreSnapshotState(ctx, &datapb.GetRestoreSnapshotStateRequest{
@@ -684,7 +682,7 @@ func (grst *getRestoreSnapshotStateTask) Execute(ctx context.Context) error {
 	info := result.GetInfo()
 	var milvusInfo *milvuspb.RestoreSnapshotInfo
 	if info != nil {
-		dbName, collectionName := resolveCollectionNames(ctx, info.GetCollectionId())
+		dbName, collectionName := resolveCollectionNames(ctx, grst.getMetaCache(), info.GetCollectionId())
 		milvusInfo = &milvuspb.RestoreSnapshotInfo{
 			JobId:          info.GetJobId(),
 			SnapshotName:   info.GetSnapshotName(),
@@ -766,15 +764,15 @@ func (lrst *listRestoreSnapshotJobsTask) OnEnqueue() error {
 func (lrst *listRestoreSnapshotJobsTask) PreExecute(ctx context.Context) error {
 	// Resolve database ID for db-level filtering
 	if lrst.req.GetDbName() != "" {
-		dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, lrst.req.GetDbName())
+		dbInfo, err := lrst.getMetaCache().GetDatabaseInfo(ctx, lrst.req.GetDbName())
 		if err != nil {
 			return err
 		}
-		lrst.dbID = dbInfo.dbID
+		lrst.dbID = dbInfo.DBID
 	}
 
 	if lrst.req.GetCollectionName() != "" {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, lrst.req.GetDbName(), lrst.req.GetCollectionName())
+		collectionID, err := lrst.getMetaCache().GetCollectionID(ctx, lrst.req.GetDbName(), lrst.req.GetCollectionName())
 		if err != nil {
 			return err
 		}
@@ -784,9 +782,9 @@ func (lrst *listRestoreSnapshotJobsTask) PreExecute(ctx context.Context) error {
 }
 
 func (lrst *listRestoreSnapshotJobsTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy list restore snapshot jobs",
-		zap.String("collectionName", lrst.req.GetCollectionName()),
-		zap.Int64("collectionID", lrst.collectionID),
+	mlog.Info(ctx, "proxy list restore snapshot jobs",
+		mlog.FieldCollectionName(lrst.req.GetCollectionName()),
+		mlog.FieldCollectionID(lrst.collectionID),
 	)
 
 	result, err := lrst.mixCoord.ListRestoreSnapshotJobs(ctx, &datapb.ListRestoreSnapshotJobsRequest{
@@ -807,7 +805,7 @@ func (lrst *listRestoreSnapshotJobsTask) Execute(ctx context.Context) error {
 	jobs := result.GetJobs()
 	milvusJobs := make([]*milvuspb.RestoreSnapshotInfo, 0, len(jobs))
 	for _, job := range jobs {
-		dbName, collectionName := resolveCollectionNames(ctx, job.GetCollectionId())
+		dbName, collectionName := resolveCollectionNames(ctx, lrst.getMetaCache(), job.GetCollectionId())
 		milvusJobs = append(milvusJobs, &milvuspb.RestoreSnapshotInfo{
 			JobId:          job.GetJobId(),
 			SnapshotName:   job.GetSnapshotName(),
@@ -906,7 +904,7 @@ func (pst *pinSnapshotDataTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("ttl_seconds exceeds maximum of %d (30 days)", maxPinTTLSeconds)
 	}
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, pst.req.GetDbName(), pst.req.GetCollectionName())
+	collectionID, err := pst.getMetaCache().GetCollectionID(ctx, pst.req.GetDbName(), pst.req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -916,10 +914,10 @@ func (pst *pinSnapshotDataTask) PreExecute(ctx context.Context) error {
 }
 
 func (pst *pinSnapshotDataTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy pin snapshot data",
-		zap.String("snapshotName", pst.req.GetName()),
-		zap.String("collectionName", pst.req.GetCollectionName()),
-		zap.Int64("collectionID", pst.collectionID),
+	mlog.Info(ctx, "proxy pin snapshot data",
+		mlog.String("snapshotName", pst.req.GetName()),
+		mlog.FieldCollectionName(pst.req.GetCollectionName()),
+		mlog.FieldCollectionID(pst.collectionID),
 	)
 
 	resp, err := pst.mixCoord.PinSnapshotData(ctx, &datapb.PinSnapshotDataRequest{
@@ -1007,8 +1005,8 @@ func (ust *unpinSnapshotDataTask) PreExecute(ctx context.Context) error {
 }
 
 func (ust *unpinSnapshotDataTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy unpin snapshot data",
-		zap.Int64("pinID", ust.req.GetPinId()),
+	mlog.Info(ctx, "proxy unpin snapshot data",
+		mlog.Int64("pinID", ust.req.GetPinId()),
 	)
 
 	var err error

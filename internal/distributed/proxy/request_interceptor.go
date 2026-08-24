@@ -22,12 +22,10 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -61,49 +59,45 @@ func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.Un
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		methodTag,
 		metrics.TotalLabel,
+		metrics.CauseNA,
 		dbName,
 		collectionName,
 	).Inc()
 
 	start := time.Now()
 	resp, err := handler(ctx, req)
-	label := requestutil.ParseMetricLabel(resp, err)
+	label, cause := requestutil.ParseMetricLabel(resp, err)
 
 	// set metrics for state code
 	metrics.ProxyFunctionCall.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		methodTag,
 		label,
+		cause,
 		dbName,
 		collectionName,
 	).Inc()
 
-	// Mirror the fail_input/fail_system metric split into the logs so a failed
-	// request can be filtered by error_type the same way the metric is. System
-	// failures are logged at Warn (actionable for SRE); input failures at Info
-	// (expected user mistakes — keeping them at Warn would spam the logs).
-	if label == metrics.FailSystemLabel || label == metrics.FailInputLabel {
-		var status *commonpb.Status
-		switch r := resp.(type) {
-		case interface{ GetStatus() *commonpb.Status }:
-			status = r.GetStatus()
-		case *commonpb.Status:
-			status = r
-		}
+	// Mirror the metric's cause into the logs so a failed request can be
+	// filtered by error_type the same way the metric is. System failures are
+	// logged at Warn (actionable for SRE); input failures at Info (expected user
+	// mistakes — keeping them at Warn would spam the logs).
+	if label == metrics.FailLabel && (cause == metrics.CauseSystem || cause == metrics.CauseUser) {
+		status, _ := requestutil.GetStatusFromResponse(resp)
 		errType := merr.SystemError
-		if label == metrics.FailInputLabel {
+		if cause == metrics.CauseUser {
 			errType = merr.InputError
 		}
-		logger := log.Ctx(ctx).With(
-			zap.String("method", methodTag),
-			zap.String("error_type", errType.String()),
-			zap.Int32("code", status.GetCode()),
-			zap.String("reason", status.GetReason()),
+		logger := mlog.With(
+			mlog.String("method", methodTag),
+			mlog.String("error_type", errType.String()),
+			mlog.Int32("code", status.GetCode()),
+			mlog.String("reason", status.GetReason()),
 		)
 		if errType == merr.InputError {
-			logger.Info("rpc returned an input error")
+			logger.Info(ctx, "rpc returned an input error")
 		} else {
-			logger.Warn("rpc returned a system error")
+			logger.Warn(ctx, "rpc returned a system error")
 		}
 	}
 
@@ -112,6 +106,7 @@ func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.Un
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		methodTag,
 		label,
+		cause,
 	).Observe(float64(time.Since(start).Milliseconds()))
 
 	return resp, err

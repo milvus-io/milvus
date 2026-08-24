@@ -13,13 +13,17 @@
 
 #include <fmt/core.h>
 #include <stdint.h>
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "common/EasyAssert.h"
+#include "common/Geometry.h"
 #include "common/OpContext.h"
+#include "common/PreparedGeometry.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "common/protobuf_utils.h"
@@ -32,6 +36,90 @@
 
 namespace milvus {
 namespace exec {
+
+// Evaluate a single GIS predicate using a prepared query geometry against an
+// already-constructed `left` row geometry. This centralizes the prepared
+// predicate semantics — notably the contains/within swap
+// (left.contains(query) == query.within(left)) — so the per-predicate path
+// (PhyGISFunctionFilterExpr::EvalForIndexSegment) and the optimizer's fusion
+// path (PhyGISRefineConjunctExpr) stay in lockstep instead of drifting as new
+// GISOps are added.
+//
+// `ctx` MUST be the calling thread's GEOS context (GetThreadLocalGEOSContext).
+// The unprepared fallbacks (Equals, DWithin) would otherwise drive GEOS through
+// `left`'s own stored context, and `left` is frequently a cache-owned Geometry
+// whose context is shared by every concurrent query on that segment+field — a
+// GEOS context is not thread-safe, so that is a data race. The prepared
+// predicates are unaffected: they run on `prepared`'s context, which the caller
+// already built on its own thread.
+inline bool
+EvaluateGISPreparedOp(proto::plan::GISFunctionFilterExpr_GISOp op,
+                      const PreparedGeometry& prepared,
+                      const Geometry& query_geom,
+                      const Geometry& left,
+                      double distance,
+                      GEOSContextHandle_t ctx) {
+    switch (op) {
+        case proto::plan::GISFunctionFilterExpr_GISOp_Intersects:
+            // Symmetric: prepared.intersects(left) == left.intersects(query)
+            return prepared.intersects(left);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Touches:
+            return prepared.touches(left);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Overlaps:
+            return prepared.overlaps(left);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Crosses:
+            return prepared.crosses(left);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Contains:
+            // left.contains(query) == query.within(left)
+            return prepared.within(left);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Within:
+            // left.within(query) == query.contains(left)
+            return prepared.contains(left);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Equals:
+            // No prepared version - fall back to regular geometry, on the
+            // caller's per-thread context (see the note on `ctx` above).
+            return left.equals(query_geom, ctx);
+        case proto::plan::GISFunctionFilterExpr_GISOp_DWithin:
+            // Distance-based operation - no prepared version; same per-thread
+            // context requirement as Equals above.
+            return left.dwithin(query_geom, distance, ctx);
+        default:
+            ThrowInfo(
+                NotImplemented, "unknown GIS op : {}", static_cast<int>(op));
+    }
+}
+
+// Promote a SHORT R-Tree coarse bitmap to the full active row space.
+//
+// The R-Tree Query() bitmap is sized by the index row count (Count()), while
+// callers combine it in the segment's active row space. When Count() <
+// active_count, the index predates placeholder-MBR indexing of
+// empty/unparseable geometries: those old builders advanced absolute_offset
+// even when they dropped a row, so the missing entries are INTERIOR holes, not
+// a trailing suffix. Count() reveals how many entries are missing, not where.
+// Once the index is short, therefore, no `false` bit in it is trustworthy as a
+// negative -- padding only the tail with 1s (resize(active_count, true)) would
+// leave interior holes false and silently drop matching rows. The only safe
+// coarse for such an index is the full row space; exact refinement settles it.
+//
+// Both consumers of an R-Tree coarse bitmap -- the per-predicate path
+// (PhyGISFunctionFilterExpr::EvalForIndexSegment) and the optimizer's fusion
+// path (PhyGISCoarseConjunctExpr::RunRTreeQuery) -- MUST route through this
+// helper so the short-index rule cannot drift between them again.
+//
+// Returns true when `coarse` was short and has been promoted; false when it
+// already spanned (at least) `active_count` rows and was left untouched.
+// Validity is deliberately NOT handled here: the per-predicate path needs
+// IsNotNull(active_count) (absolute null offsets survive independently of the
+// short entry count) while the fusion path derives nullness in Refine.
+inline bool
+PromoteShortGISCoarseBitmap(TargetBitmap& coarse, int64_t active_count) {
+    if (static_cast<int64_t>(coarse.size()) >= active_count) {
+        return false;
+    }
+    coarse = TargetBitmap(active_count, true);
+    return true;
+}
 
 class PhyGISFunctionFilterExpr : public SegmentExpr {
  public:
@@ -55,7 +143,7 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
                       batch_size,
                       consistency_level),
           expr_(expr) {
-        DetermineExecPath();
+        // DetermineExecPath();
     }
 
     void
@@ -69,16 +157,51 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
         return expr_->column_;
     }
 
+    // Expose the logical GIS expr so the optimizer can group same-column GIS
+    // predicates into a PhyGISCoarseConjunctExpr / PhyGISRefineConjunctExpr.
+    const std::shared_ptr<const milvus::expr::GISFunctionFilterExpr>&
+    GetGISExpr() const {
+        return expr_;
+    }
+
     std::string
     ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 
+    // The GIS filter slices by its own batch cursor (GetNextBatchSize) and never
+    // reads the offset-input list, so it cannot serve the offset-input
+    // (iterative-filter / rescore) path. Report false so IterativeFilterNode
+    // takes its non-native fallback instead of feeding offsets into Eval.
+    bool
+    SupportOffsetInput() override {
+        return false;
+    }
+
+    // A skipped batch (conjunct short-circuit via SkipFollowingExprs) must
+    // still advance this expression's cursors, otherwise it desynchronizes
+    // from its sibling expressions and later batches evaluate the wrong rows.
+    // The base MoveCursor() covers every case except the growing interim-index
+    // path: MoveCursorForIndex() asserts sealed-only, while
+    // EvalForIndexSegment() on a growing segment advances the global index
+    // position together with the data cursor -- mirror that here.
+    // Unlike the base implementation, MoveCursorForData() is called without a
+    // HasFieldData() guard: this exec path already walks data chunks
+    // unconditionally (EvalForIndexSegment), and with no field data
+    // num_data_chunk_ is 0, making the call a no-op -- the omission is
+    // intentional, not an oversight.
     void
     MoveCursor() override {
-        if (segment_->type() == SegmentType::Sealed) {
-            SegmentExpr::MoveCursor();
+        if (has_offset_input_ || execute_all_at_once_) {
+            return;
         }
+        if (UseIndexCursor() && segment_->type() != SegmentType::Sealed) {
+            current_index_chunk_pos_ +=
+                std::min(active_count_ - current_index_chunk_pos_, batch_size_);
+            MoveCursorForData();
+            return;
+        }
+        SegmentExpr::MoveCursor();
     }
 
  private:

@@ -54,17 +54,17 @@ const (
 // =============================================================================
 
 const (
-	// Score combine parameter keys
-	ScoreCombineParamMode    = "mode"
-	ScoreCombineParamWeights = "weights"
+	// Numeric combine parameter keys
+	NumCombineParamMode    = "mode"
+	NumCombineParamWeights = "weights"
 
-	// Score combine mode values
-	ScoreCombineModeMultiply = "multiply"
-	ScoreCombineModeSum      = "sum"
-	ScoreCombineModeMax      = "max"
-	ScoreCombineModeMin      = "min"
-	ScoreCombineModeAvg      = "avg"
-	ScoreCombineModeWeighted = "weighted"
+	// Numeric combine mode values
+	NumCombineModeMultiply = "multiply"
+	NumCombineModeSum      = "sum"
+	NumCombineModeMax      = "max"
+	NumCombineModeMin      = "min"
+	NumCombineModeAvg      = "avg"
+	NumCombineModeWeighted = "weighted"
 )
 
 // =============================================================================

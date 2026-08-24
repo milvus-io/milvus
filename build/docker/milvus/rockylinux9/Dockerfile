@@ -17,6 +17,7 @@ ARG MILVUS_ASAN_LIB
 RUN dnf install -y dnf-plugins-core && \
     dnf config-manager --set-enabled crb && \
     dnf install -y wget libgomp libaio libatomic tzdata && \
+    dnf upgrade -y openssl openssl-libs && \
     rm -rf /var/cache/dnf/*
 
 # Add Tini

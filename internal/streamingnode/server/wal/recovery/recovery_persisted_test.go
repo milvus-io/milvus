@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -72,11 +73,13 @@ func TestInitRecoveryInfoFromCoord(t *testing.T) {
 	snCatalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, channel string) ([]*streamingpb.VChannelMeta, error) {
 		return lo.Values(initialedVChannels), nil
 	})
-	snCatalog.EXPECT().SaveVChannels(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string, m map[string]*streamingpb.VChannelMeta) error {
-		initialedVChannels = m
+	snCatalog.EXPECT().SaveRecoverySnapshot(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string, snapshot *metastore.WALRecoverySnapshot) error {
+		assert.Empty(t, snapshot.SegmentAssignments)
+		assert.Nil(t, snapshot.SalvageCheckpoint)
+		assert.NotNil(t, snapshot.ConsumeCheckpoint)
+		initialedVChannels = snapshot.VChannels
 		return nil
 	})
-	snCatalog.EXPECT().SaveConsumeCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	fc := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	c := mocks.NewMockMixCoordClient(t)

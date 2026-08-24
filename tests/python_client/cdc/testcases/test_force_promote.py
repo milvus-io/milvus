@@ -242,9 +242,9 @@ class TestCDCForcePromote(TestCDCSyncBase):
 
             assert self.wait_for_sync(check_synced, sync_timeout, f"initial sync {c_name}")
 
-            # Kill source
-            logger.info(f"[FAILOVER] Killing source pods (instance={source_cluster_id})...")
-            kubectl_helper.delete_pods(source_cluster_id)
+            # Kill source containers while preserving Pod objects.
+            logger.info(f"[FAILOVER] Killing source containers (instance={source_cluster_id})...")
+            kubectl_helper.kill_containers(source_cluster_id)
 
             # Promote downstream — retry until writable
             self.promote_call_until_writable(
@@ -300,7 +300,7 @@ class TestCDCForcePromote(TestCDCSyncBase):
         downstream_token,
         pchannel_num,
     ):
-        """Promote downstream while downstream pods are bouncing.
+        """Promote downstream while downstream containers are restarting.
 
         Mirrors snippets test_restart_b_during_force_promote.py: promote runs
         async, restart happens in main thread mid-promote.
@@ -369,10 +369,10 @@ class TestCDCForcePromote(TestCDCSyncBase):
             th = threading.Thread(target=promote_thread, daemon=True)
             th.start()
 
-            # Mid-promote: kill target pods, wait for them to come back
+            # Mid-promote: kill target containers, wait for them to come back.
             time.sleep(2)
-            logger.info("[FAILOVER] Killing target pods mid-promote...")
-            kubectl_helper.delete_pods(target_cluster_id)
+            logger.info("[FAILOVER] Killing target containers mid-promote...")
+            kubectl_helper.kill_containers(target_cluster_id)
             time.sleep(2)
             kubectl_helper.wait_for_pods_ready(target_cluster_id, timeout=300)
 
@@ -437,7 +437,7 @@ class TestCDCForcePromote(TestCDCSyncBase):
         downstream_token,
         pchannel_num,
     ):
-        """Promote downstream while upstream pods are bouncing.
+        """Promote downstream while upstream containers are restarting.
 
         Mirrors snippets test_restart_a_during_force_promote.py.
         """
@@ -505,8 +505,8 @@ class TestCDCForcePromote(TestCDCSyncBase):
             th.start()
 
             time.sleep(2)
-            logger.info("[FAILOVER] Killing source pods mid-promote...")
-            kubectl_helper.delete_pods(source_cluster_id)
+            logger.info("[FAILOVER] Killing source containers mid-promote...")
+            kubectl_helper.kill_containers(source_cluster_id)
             # Don't wait-ready here — promotion should succeed independently
             # of whether the old primary is back.
 

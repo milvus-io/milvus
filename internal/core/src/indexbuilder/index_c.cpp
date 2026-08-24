@@ -14,6 +14,7 @@
 #include <exception>
 #include <map>
 #include <memory>
+#include <new>
 #include <string>
 #include <tuple>
 #include <unordered_map>
@@ -23,6 +24,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/Schema.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "common/type_c.h"
@@ -50,6 +52,7 @@
 #include "storage/PluginLoader.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 #include "storage/plugin/PluginInterface.h"
 
@@ -98,6 +101,9 @@ CreateIndexForUT(enum CDataType dtype,
         status.error_code = e.get_error_code();
         status.error_msg = strdup(e.what());
         return status;
+    } catch (std::bad_alloc& e) {
+        status.error_code = MemAllocateFailed;
+        status.error_msg = strdup(e.what());
     } catch (std::exception& e) {
         status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
@@ -170,6 +176,70 @@ get_segment_insert_files(
         files.emplace_back(std::move(paths));
     }
     return files;
+}
+
+milvus::storage::StorageColumnMapping
+get_storage_column_mapping(
+    const milvus::proto::schema::FieldSchema& field_schema,
+    bool is_milvus_table) {
+    auto physical_mapping =
+        milvus::ResolvePhysicalColumnMapping(is_milvus_table, field_schema);
+    milvus::storage::StorageColumnMapping mapping;
+    mapping.schema_column_name = physical_mapping.schema_column_name;
+    mapping.storage_column_name = physical_mapping.storage_column_name;
+    mapping.is_external_column = physical_mapping.is_external_column;
+    return mapping;
+}
+
+milvus::storage::StorageColumnMapping
+get_storage_column_mapping(
+    const milvus::proto::indexcgo::OptionalFieldInfo& field_info,
+    bool is_milvus_table) {
+    milvus::storage::StorageColumnMapping mapping;
+    mapping.schema_column_name = field_info.field_name();
+    mapping.storage_column_name = std::to_string(field_info.fieldid());
+    mapping.is_external_column = is_milvus_table;
+    return mapping;
+}
+
+void
+configure_manifest_file_manager_context(
+    milvus::storage::FileManagerContext& file_manager_context,
+    const milvus::proto::indexcgo::BuildIndexInfo& build_index_info,
+    const milvus::storage::StorageConfig& storage_config) {
+    if (build_index_info.manifest().empty()) {
+        return;
+    }
+
+    auto loon_properties = MakeInternalPropertiesFromStorageConfig(
+        ToCStorageConfig(storage_config));
+    if (!build_index_info.external_source().empty()) {
+        InjectExternalSpecProperties(*loon_properties,
+                                     build_index_info.collectionid(),
+                                     build_index_info.external_source(),
+                                     build_index_info.external_spec());
+    }
+    // Widen the per-round read window for index-build manifest reads when
+    // configured. With loon's 32MB default each prefetch round admits a
+    // single 64MB-class row group, so the whole raw-data download degrades
+    // to one S3 range read at a time; a wider window lets one round span
+    // multiple row groups whose column chunks are prefetched in parallel
+    // on the arrow IO thread pool.
+    milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+        .ApplyIndexBuildReadWindow(*loon_properties);
+    file_manager_context.set_loon_ffi_properties(loon_properties);
+
+    auto is_milvus_table =
+        milvus::IsMilvusTableExternalSpec(build_index_info.external_spec());
+    file_manager_context.set_storage_column_mapping(
+        build_index_info.field_schema().fieldid(),
+        get_storage_column_mapping(build_index_info.field_schema(),
+                                   is_milvus_table));
+    for (const auto& field_info : build_index_info.opt_fields()) {
+        file_manager_context.set_storage_column_mapping(
+            field_info.fieldid(),
+            get_storage_column_mapping(field_info, is_milvus_table));
+    }
 }
 
 milvus::Config
@@ -285,35 +355,19 @@ CreateIndex(CIndex* res_index,
             fileManagerContext.set_stats_base_path(
                 build_index_info->stats_base_path());
         }
-        if (build_index_info->manifest() != "") {
-            auto loon_properties = MakeInternalPropertiesFromStorageConfig(
-                ToCStorageConfig(storage_config));
-            // For external collections, inject extfs.{collID}.* from build_index_info
-            if (!build_index_info->external_source().empty()) {
-                InjectExternalSpecProperties(
-                    *loon_properties,
-                    build_index_info->collectionid(),
-                    build_index_info->external_source(),
-                    build_index_info->external_spec());
-            }
-            fileManagerContext.set_loon_ffi_properties(loon_properties);
-        }
+        configure_manifest_file_manager_context(
+            fileManagerContext, *build_index_info, storage_config);
 
         if (build_index_info->has_storage_plugin_context()) {
-            auto cipherPlugin =
-                milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-            AssertInfo(cipherPlugin != nullptr, "failed to get cipher plugin");
-            cipherPlugin->Update(
-                build_index_info->storage_plugin_context().encryption_zone_id(),
-                build_index_info->storage_plugin_context().collection_id(),
-                build_index_info->storage_plugin_context().encryption_key());
-
-            auto plugin_context = std::make_shared<CPluginContext>();
-            plugin_context->ez_id =
-                build_index_info->storage_plugin_context().encryption_zone_id();
-            plugin_context->collection_id =
-                build_index_info->storage_plugin_context().collection_id();
-            fileManagerContext.set_plugin_context(plugin_context);
+            fileManagerContext.set_plugin_context(
+                milvus::storage::PluginLoader::GetInstance()
+                    .registerCipherPluginContext(
+                        build_index_info->storage_plugin_context()
+                            .encryption_zone_id(),
+                        build_index_info->storage_plugin_context()
+                            .collection_id(),
+                        build_index_info->storage_plugin_context()
+                            .encryption_key()));
         }
 
         auto index =
@@ -331,6 +385,11 @@ CreateIndex(CIndex* res_index,
     } catch (SegcoreError& e) {
         auto status = CStatus();
         status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+        return status;
+    } catch (std::bad_alloc& e) {
+        auto status = CStatus();
+        status.error_code = MemAllocateFailed;
         status.error_msg = strdup(e.what());
         return status;
     } catch (std::exception& e) {
@@ -360,9 +419,6 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
         auto storage_config =
             get_storage_config(build_index_info->storage_config());
         auto config = get_config(build_index_info);
-
-        auto loon_properties =
-            MakePropertiesFromStorageConfig(ToCStorageConfig(storage_config));
 
         // init file manager
         milvus::storage::FieldDataMeta field_meta{
@@ -402,35 +458,19 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
         fileManagerContext.set_stats_base_path(
             build_index_info->stats_base_path());
 
-        if (build_index_info->manifest() != "") {
-            auto loon_properties = MakeInternalPropertiesFromStorageConfig(
-                ToCStorageConfig(storage_config));
-            // For external collections, inject extfs.{collID}.* from build_index_info
-            if (!build_index_info->external_source().empty()) {
-                InjectExternalSpecProperties(
-                    *loon_properties,
-                    build_index_info->collectionid(),
-                    build_index_info->external_source(),
-                    build_index_info->external_spec());
-            }
-            fileManagerContext.set_loon_ffi_properties(loon_properties);
-        }
+        configure_manifest_file_manager_context(
+            fileManagerContext, *build_index_info, storage_config);
 
         if (build_index_info->has_storage_plugin_context()) {
-            auto cipherPlugin =
-                milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-            AssertInfo(cipherPlugin != nullptr, "failed to get cipher plugin");
-            cipherPlugin->Update(
-                build_index_info->storage_plugin_context().encryption_zone_id(),
-                build_index_info->storage_plugin_context().collection_id(),
-                build_index_info->storage_plugin_context().encryption_key());
-
-            auto plugin_context = std::make_shared<CPluginContext>();
-            plugin_context->ez_id =
-                build_index_info->storage_plugin_context().encryption_zone_id();
-            plugin_context->collection_id =
-                build_index_info->storage_plugin_context().collection_id();
-            fileManagerContext.set_plugin_context(plugin_context);
+            fileManagerContext.set_plugin_context(
+                milvus::storage::PluginLoader::GetInstance()
+                    .registerCipherPluginContext(
+                        build_index_info->storage_plugin_context()
+                            .encryption_zone_id(),
+                        build_index_info->storage_plugin_context()
+                            .collection_id(),
+                        build_index_info->storage_plugin_context()
+                            .encryption_key()));
         }
 
         auto field_schema =
@@ -510,26 +550,19 @@ BuildTextIndex(ProtoLayoutInterface result,
         fileManagerContext.set_stats_base_path(
             build_index_info->stats_base_path());
 
-        if (build_index_info->manifest() != "") {
-            auto loon_properties = MakeInternalPropertiesFromStorageConfig(
-                ToCStorageConfig(storage_config));
-            fileManagerContext.set_loon_ffi_properties(loon_properties);
-        }
+        configure_manifest_file_manager_context(
+            fileManagerContext, *build_index_info, storage_config);
 
         if (build_index_info->has_storage_plugin_context()) {
-            auto cipherPlugin =
-                milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-            AssertInfo(cipherPlugin != nullptr, "failed to get cipher plugin");
-            cipherPlugin->Update(
-                build_index_info->storage_plugin_context().encryption_zone_id(),
-                build_index_info->storage_plugin_context().collection_id(),
-                build_index_info->storage_plugin_context().encryption_key());
-            auto plugin_context = std::make_shared<CPluginContext>();
-            plugin_context->ez_id =
-                build_index_info->storage_plugin_context().encryption_zone_id();
-            plugin_context->collection_id =
-                build_index_info->storage_plugin_context().collection_id();
-            fileManagerContext.set_plugin_context(plugin_context);
+            fileManagerContext.set_plugin_context(
+                milvus::storage::PluginLoader::GetInstance()
+                    .registerCipherPluginContext(
+                        build_index_info->storage_plugin_context()
+                            .encryption_zone_id(),
+                        build_index_info->storage_plugin_context()
+                            .collection_id(),
+                        build_index_info->storage_plugin_context()
+                            .encryption_key()));
         }
 
         auto scalar_index_engine_version =
@@ -1044,6 +1077,12 @@ SerializeIndexAndUpLoad(CIndex index, ProtoLayoutInterface result) {
             reinterpret_cast<milvus::ProtoLayout*>(result));
         status.error_code = Success;
         status.error_msg = "";
+    } catch (SegcoreError& e) {
+        status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+    } catch (std::bad_alloc& e) {
+        status.error_code = MemAllocateFailed;
+        status.error_msg = strdup(e.what());
     } catch (std::exception& e) {
         status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());

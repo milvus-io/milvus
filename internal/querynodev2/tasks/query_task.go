@@ -13,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
-	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -115,15 +114,7 @@ func (t *QueryTask) Execute() error {
 	}
 	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "QueryTask")
 
-	retrievePlan, err := segcore.NewRetrievePlan(
-		t.collection.GetCCollection(),
-		t.req.Req.GetSerializedExprPlan(),
-		t.req.Req.GetMvccTimestamp(),
-		t.req.Req.Base.GetMsgID(),
-		t.req.Req.GetConsistencyLevel(),
-		t.req.Req.GetCollectionTtlTimestamps(),
-		t.req.Req.GetEntityTtlPhysicalTime(),
-	)
+	retrievePlan, err := t.collection.NewRetrievePlan(t.req)
 	if err != nil {
 		return err
 	}

@@ -32,9 +32,15 @@ import (
 //
 // Reference: spark-milvus/docs/backfill-result-json-format.md
 type BackfillResult struct {
-	Success       bool                       `json:"success"`
-	CollectionID  int64                      `json:"collectionId"`
-	PartitionID   int64                      `json:"partitionId"`
+	Success      bool  `json:"success"`
+	CollectionID int64 `json:"collectionId"`
+	PartitionID  int64 `json:"partitionId"`
+	// SchemaVersion is the collection schema version the backfill job read
+	// when it snapshotted the data. Spark-milvus stamps it from the snapshot
+	// metadata; the fence in CommitBackfillResult rejects a result whose
+	// version no longer matches the collection's current version (schema
+	// changed while the job was in flight).
+	SchemaVersion int32                      `json:"schemaVersion"`
 	NewFieldNames []string                   `json:"newFieldNames"`
 	Segments      map[string]BackfillSegment `json:"segments"` // key = segmentID as decimal string
 }
@@ -190,10 +196,9 @@ func buildV2Groups(bucket string, entry *BackfillSegment) (map[int64]*datapb.Fie
 		}
 		out[fid] = &datapb.FieldBinlog{
 			FieldID: fid,
-			// ChildFields carries the real field IDs that index creation
-			// (getSegmentBinlogFields) and backfill-compaction detection
-			// (getMissingFunctions) rely on. Without it the new group is
-			// invisible to both paths; it also lets the operator's strip
+			// ChildFields carries the real field IDs that backfill-compaction
+			// detection (getMissingFunctions) relies on. Without it the new
+			// group is invisible to that path; it also lets the operator's strip
 			// logic reference-count the field out of the old groups.
 			// The backfill invariant guarantees len(g.FieldIDs) == 1.
 			ChildFields: []int64{fid},

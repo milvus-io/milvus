@@ -21,13 +21,12 @@ import (
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -170,8 +169,8 @@ func NewMergeByPKWithOffsetsOperator(
 		}
 
 		if skipDupCnt > 0 {
-			log.Ctx(ctx).Debug("skip duplicated PKs during IgnoreNonPk merge",
-				zap.Int64("dupCount", skipDupCnt))
+			mlog.Debug(ctx, "skip duplicated PKs during IgnoreNonPk merge",
+				mlog.Int64("dupCount", skipDupCnt))
 		}
 
 		return []any{&MergedResultWithOffsets{

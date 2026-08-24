@@ -25,22 +25,22 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/expr"
-	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -82,10 +82,13 @@ type Proxy struct {
 
 	address  string
 	mixCoord types.MixCoordClient
+	factory  dependency.Factory
 
 	simpleLimiter *SimpleLimiter
 
-	chMgr channelsMgr
+	metaCacheMu sync.RWMutex
+	metaCache   Cache
+	chMgr       channelmgr.ChannelsMgr
 
 	sched *taskScheduler
 
@@ -119,7 +122,7 @@ type Proxy struct {
 }
 
 // NewProxy returns a Proxy struct.
-func NewProxy(ctx context.Context, _ dependency.Factory) (*Proxy, error) {
+func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	n := 1024 // better to be configurable
@@ -129,6 +132,7 @@ func NewProxy(ctx context.Context, _ dependency.Factory) (*Proxy, error) {
 		cancel:         cancel,
 		searchResultCh: make(chan *internalpb.SearchResults, n),
 		// shardMgr:        mgr,
+		factory:       factory,
 		simpleLimiter: NewSimpleLimiter(Params.QuotaConfig.AllocWaitInterval.GetAsDuration(time.Millisecond), Params.QuotaConfig.AllocRetryTimes.GetAsUint()),
 		// lbPolicy:        lbPolicy,
 		resourceManager: resourceManager,
@@ -138,7 +142,7 @@ func NewProxy(ctx context.Context, _ dependency.Factory) (*Proxy, error) {
 	expr.Register("proxy", node)
 	hookutil.SetHook(connection.GetManager())
 	hookutil.InitOnceHook()
-	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
+	mlog.Debug(ctx, "create a new Proxy instance", mlog.Any("state", node.stateCode.Load()))
 	return node, nil
 }
 
@@ -151,11 +155,30 @@ func (node *Proxy) GetStateCode() commonpb.StateCode {
 	return commonpb.StateCode(node.stateCode.Load())
 }
 
+func (node *Proxy) getMetaCache() Cache {
+	node.metaCacheMu.RLock()
+	defer node.metaCacheMu.RUnlock()
+	return node.metaCache
+}
+
+// setMetaCache publishes the meta cache. It is called once during Proxy.Init()
+// after the cache is fully initialized, so request-serving goroutines observe it
+// atomically instead of racing with the assignment.
+func (node *Proxy) setMetaCache(cache Cache) {
+	node.metaCacheMu.Lock()
+	defer node.metaCacheMu.Unlock()
+	node.metaCache = cache
+}
+
+func (node *Proxy) GetMetaCache() Cache {
+	return node.getMetaCache()
+}
+
 // Register registers proxy at etcd
 func (node *Proxy) Register() error {
 	node.session.Register()
 	metrics.NumNodes.WithLabelValues(paramtable.GetStringNodeID(), typeutil.ProxyRole).Inc()
-	log.Info("Proxy Register Finished")
+	mlog.Info(node.ctx, "Proxy Register Finished")
 	// TODO Reset the logger
 	// Params.initLogCfg()
 	return nil
@@ -189,61 +212,86 @@ func (node *Proxy) initRateCollector() error {
 
 // Init initialize proxy.
 func (node *Proxy) Init() error {
-	log := log.Ctx(node.ctx)
-	log.Info("init session for Proxy")
+	mlog.Info(node.ctx, "init session for Proxy")
 	if err := node.initSession(); err != nil {
-		log.Warn("failed to init Proxy's session", zap.Error(err))
+		mlog.Warn(node.ctx, "failed to init Proxy's session", mlog.Err(err))
 		return err
 	}
-	log.Info("init session for Proxy done")
+	mlog.Info(node.ctx, "init session for Proxy done")
+
+	fileMode := fileresource.GetLocalMode()
+	if fileMode == fileresource.SyncMode {
+		if node.factory == nil {
+			return merr.WrapErrServiceInternalMsg("proxy dependency factory is nil")
+		}
+		node.factory.Init(paramtable.Get())
+		chunkManager, err := node.factory.NewPersistentStorageChunkManager(node.ctx)
+		if err != nil {
+			return merr.Wrap(err, "initialize Proxy file resource storage")
+		}
+		fileresource.InitManager(chunkManager, fileMode)
+	} else {
+		fileresource.InitManager(nil, fileMode)
+	}
 
 	err := node.initRateCollector()
 	if err != nil {
 		return err
 	}
-	log.Info("Proxy init rateCollector done", zap.Int64("nodeID", paramtable.GetNodeID()))
+	mlog.Info(node.ctx, "Proxy init rateCollector done", mlog.FieldNodeID(paramtable.GetNodeID()))
 
 	idAllocator, err := allocator.NewIDAllocator(node.ctx, node.mixCoord, paramtable.GetNodeID())
 	if err != nil {
-		log.Warn("failed to create id allocator",
-			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()),
-			zap.Error(err))
+		mlog.Warn(node.ctx, "failed to create id allocator",
+			mlog.String("role", typeutil.ProxyRole), mlog.Int64("ProxyID", paramtable.GetNodeID()),
+			mlog.Err(err))
 		return err
 	}
 	node.rowIDAllocator = idAllocator
-	log.Debug("create id allocator done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
+	mlog.Debug(node.ctx, "create id allocator done", mlog.String("role", typeutil.ProxyRole), mlog.Int64("ProxyID", paramtable.GetNodeID()))
 
 	tsoAllocator, err := newTimestampAllocator(node.mixCoord, paramtable.GetNodeID())
 	if err != nil {
-		log.Warn("failed to create timestamp allocator",
-			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()),
-			zap.Error(err))
+		mlog.Warn(node.ctx, "failed to create timestamp allocator",
+			mlog.String("role", typeutil.ProxyRole), mlog.Int64("ProxyID", paramtable.GetNodeID()),
+			mlog.Err(err))
 		return err
 	}
 	node.tsoAllocator = tsoAllocator
-	log.Debug("create timestamp allocator done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
+	mlog.Debug(node.ctx, "create timestamp allocator done", mlog.String("role", typeutil.ProxyRole), mlog.Int64("ProxyID", paramtable.GetNodeID()))
 
-	dmlChannelsFunc := getDmlChannelsFunc(node.ctx, node.mixCoord)
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, defaultInsertRepackFunc)
+	// The meta cache must be initialized before the channels manager so the
+	// injected channel resolver always observes a live cache (no nil window).
+	metaCache, err := initMetaCache(node.ctx, node.mixCoord)
+	if err != nil {
+		mlog.Warn(node.ctx, "failed to init meta cache", mlog.String("role", typeutil.ProxyRole), mlog.Err(err))
+		return err
+	}
+	node.setMetaCache(metaCache)
+	mlog.Debug(node.ctx, "init meta cache done", mlog.String("role", typeutil.ProxyRole))
+
+	chMgr := channelmgr.NewChannelsMgr(
+		func(collectionID typeutil.UniqueID) (channelmgr.ChannelInfo, error) {
+			collInfo, err := metaCache.GetCollectionInfo(node.ctx, "", "", collectionID)
+			if err != nil {
+				return channelmgr.ChannelInfo{}, err
+			}
+			return channelmgr.ChannelInfo{VChans: collInfo.VChannels, PChans: collInfo.PChannels}, nil
+		},
+	)
 	node.chMgr = chMgr
-	log.Debug("create channels manager done", zap.String("role", typeutil.ProxyRole))
+	mlog.Debug(node.ctx, "create channels manager done", mlog.String("role", typeutil.ProxyRole))
 
 	node.sched, err = newTaskScheduler(node.ctx, node.tsoAllocator)
 	if err != nil {
-		log.Warn("failed to create task scheduler", zap.String("role", typeutil.ProxyRole), zap.Error(err))
+		mlog.Warn(node.ctx, "failed to create task scheduler", mlog.String("role", typeutil.ProxyRole), mlog.Err(err))
 		return err
 	}
-	log.Debug("create task scheduler done", zap.String("role", typeutil.ProxyRole))
+	mlog.Debug(node.ctx, "create task scheduler done", mlog.String("role", typeutil.ProxyRole))
 
 	node.enableComplexDeleteLimit = Params.QuotaConfig.ComplexDeleteLimitEnable.GetAsBool()
 	node.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
-	log.Debug("create metrics cache manager done", zap.String("role", typeutil.ProxyRole))
-
-	if err := InitMetaCache(node.ctx, node.mixCoord); err != nil {
-		log.Warn("failed to init meta cache", zap.String("role", typeutil.ProxyRole), zap.Error(err))
-		return err
-	}
-	log.Debug("init meta cache done", zap.String("role", typeutil.ProxyRole))
+	mlog.Debug(node.ctx, "create metrics cache manager done", mlog.String("role", typeutil.ProxyRole))
 
 	node.shardMgr = shardclient.NewShardClientMgr(node.mixCoord)
 	node.lbPolicy = shardclient.NewLBPolicyImpl(node.shardMgr)
@@ -255,32 +303,30 @@ func (node *Proxy) Init() error {
 	// there is no possibility that New or any other UUID V4 generation function will be called concurrently
 	// Only proxy generates UUID for now, and one Milvus process only has one proxy
 	uuid.EnableRandPool()
-	log.Debug("enable rand pool for UUIDv4 generation")
+	mlog.Debug(node.ctx, "enable rand pool for UUIDv4 generation")
 
-	log.Info("init proxy done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", node.address))
+	mlog.Info(node.ctx, "init proxy done", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("Address", node.address))
 	return nil
 }
 
 // Start starts a proxy node.
 func (node *Proxy) Start() error {
-	log := log.Ctx(node.ctx)
-
 	node.shardMgr.Start()
-	log.Debug("start shard client manager done", zap.String("role", typeutil.ProxyRole))
+	mlog.Debug(node.ctx, "start shard client manager done", mlog.String("role", typeutil.ProxyRole))
 
 	node.lbPolicy.Start(node.ctx)
 
 	if err := node.sched.Start(); err != nil {
-		log.Warn("failed to start task scheduler", zap.String("role", typeutil.ProxyRole), zap.Error(err))
+		mlog.Warn(node.ctx, "failed to start task scheduler", mlog.String("role", typeutil.ProxyRole), mlog.Err(err))
 		return err
 	}
-	log.Debug("start task scheduler done", zap.String("role", typeutil.ProxyRole))
+	mlog.Debug(node.ctx, "start task scheduler done", mlog.String("role", typeutil.ProxyRole))
 
 	if err := node.rowIDAllocator.Start(); err != nil {
-		log.Warn("failed to start id allocator", zap.String("role", typeutil.ProxyRole), zap.Error(err))
+		mlog.Warn(node.ctx, "failed to start id allocator", mlog.String("role", typeutil.ProxyRole), mlog.Err(err))
 		return err
 	}
-	log.Debug("start id allocator done", zap.String("role", typeutil.ProxyRole))
+	mlog.Debug(node.ctx, "start id allocator done", mlog.String("role", typeutil.ProxyRole))
 
 	// Start callbacks
 	for _, cb := range node.startCallbacks {
@@ -292,7 +338,7 @@ func (node *Proxy) Start() error {
 		hookutil.NodeIDKey: paramtable.GetNodeID(),
 	})
 
-	log.Debug("update state code", zap.String("role", typeutil.ProxyRole), zap.String("State", commonpb.StateCode_Healthy.String()))
+	mlog.Debug(node.ctx, "update state code", mlog.String("role", typeutil.ProxyRole), mlog.String("State", commonpb.StateCode_Healthy.String()))
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	// register devops api
@@ -303,15 +349,14 @@ func (node *Proxy) Start() error {
 
 // Stop stops a proxy node.
 func (node *Proxy) Stop() error {
-	log := log.Ctx(node.ctx)
 	if node.rowIDAllocator != nil {
 		node.rowIDAllocator.Close()
-		log.Info("close id allocator", zap.String("role", typeutil.ProxyRole))
+		mlog.Info(node.ctx, "close id allocator", mlog.String("role", typeutil.ProxyRole))
 	}
 
 	if node.sched != nil {
 		node.sched.Close()
-		log.Info("close scheduler", zap.String("role", typeutil.ProxyRole))
+		mlog.Info(node.ctx, "close scheduler", mlog.String("role", typeutil.ProxyRole))
 	}
 
 	for _, cb := range node.closeCallbacks {
@@ -334,8 +379,8 @@ func (node *Proxy) Stop() error {
 		node.resourceManager.Close()
 	}
 
-	if globalMetaCache != nil {
-		globalMetaCache.Close()
+	if metaCache := node.getMetaCache(); metaCache != nil {
+		metaCache.Close()
 	}
 
 	node.cancel()

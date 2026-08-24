@@ -21,11 +21,10 @@ import (
 	"sync"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
@@ -53,11 +52,11 @@ func NewL0Segment(collection *Collection,
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
 	*/
 
-	log.Info("create L0 segment",
-		zap.Int64("collectionID", loadInfo.GetCollectionID()),
-		zap.Int64("partitionID", loadInfo.GetPartitionID()),
-		zap.Int64("segmentID", loadInfo.GetSegmentID()),
-		zap.String("segmentType", segmentType.String()))
+	mlog.Info(context.TODO(), "create L0 segment",
+		mlog.FieldCollectionID(loadInfo.GetCollectionID()),
+		mlog.FieldPartitionID(loadInfo.GetPartitionID()),
+		mlog.FieldSegmentID(loadInfo.GetSegmentID()),
+		mlog.String("segmentType", segmentType.String()))
 
 	base, err := newBaseSegment(collection, segmentType, version, loadInfo)
 	if err != nil {
@@ -126,10 +125,6 @@ func (s *L0Segment) ExistIndex(fieldID int64) bool {
 
 func (s *L0Segment) HasRawData(fieldID int64) bool {
 	return false
-}
-
-func (s *L0Segment) DropIndex(ctx context.Context, indexID int64) error {
-	return nil
 }
 
 func (s *L0Segment) Indexes() []*IndexedFieldInfo {
@@ -203,17 +198,12 @@ func (s *L0Segment) Release(ctx context.Context, opts ...releaseOption) {
 
 	s.pks = nil
 	s.tss = nil
-
-	log.Ctx(ctx).Info("release L0 segment from memory",
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID()),
-		zap.String("segmentType", s.segmentType.String()),
+	mlog.Info(ctx, "release L0 segment from memory",
+		mlog.FieldCollectionID(s.Collection()),
+		mlog.FieldPartitionID(s.Partition()),
+		mlog.FieldSegmentID(s.ID()),
+		mlog.String("segmentType", s.segmentType.String()),
 	)
-}
-
-func (s *L0Segment) RemoveUnusedFieldFiles() error {
-	panic("not implemented")
 }
 
 func (s *L0Segment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo {

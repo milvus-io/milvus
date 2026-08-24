@@ -1,6 +1,8 @@
 package adaptor
 
 import (
+	"context"
+
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -78,13 +80,15 @@ func parseTxnMsg(msg message.ImmutableMessage) ([]msgstream.TsMsg, error) {
 		panic("unreachable code, message must be a txn message")
 	}
 
+	txnTraceCtx := message.ExtractTraceContext(context.Background(), msg)
 	tsMsgs := make([]msgstream.TsMsg, 0, txnMsg.Size())
 	err := txnMsg.RangeOver(func(im message.ImmutableMessage) error {
 		var tsMsg msgstream.TsMsg
-		tsMsg, err := parseSingleMsg(im)
+		tsMsg, err := parseSingleMsgPayload(im)
 		if err != nil {
 			return err
 		}
+		tsMsg.SetTraceCtx(txnTraceCtx)
 		tsMsgs = append(tsMsgs, tsMsg)
 		return nil
 	})
@@ -96,14 +100,29 @@ func parseTxnMsg(msg message.ImmutableMessage) ([]msgstream.TsMsg, error) {
 
 // parseSingleMsg converts message to ts message.
 func parseSingleMsg(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+	tsMsg, err := parseSingleMsgPayload(msg)
+	if err != nil {
+		return nil, err
+	}
+	tsMsg.SetTraceCtx(message.ExtractTraceContext(context.Background(), msg))
+	return tsMsg, nil
+}
+
+func parseSingleMsgPayload(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+	var tsMsg msgstream.TsMsg
+	var err error
 	switch msg.Version() {
 	case message.VersionV1, message.VersionOld:
-		return fromMessageToTsMsgV1(msg)
+		tsMsg, err = fromMessageToTsMsgV1(msg)
 	case message.VersionV2:
-		return fromMessageToTsMsgV2(msg)
+		tsMsg, err = fromMessageToTsMsgV2(msg)
 	default:
 		panic("unsupported message version")
 	}
+	if err != nil {
+		return nil, err
+	}
+	return tsMsg, nil
 }
 
 // fromMessageToTsMsgV1 converts message to ts message.

@@ -7,13 +7,15 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/errs"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -44,7 +46,7 @@ func NewResumableProducer(f factory, opts *ProducerOptions) *ResumableProducer {
 		metrics:        newResumingProducerMetrics(opts.PChannel),
 		rateLimiter:    newProduceRateLimiter(opts.PChannel),
 	}
-	p.SetLogger(log.With(zap.String("pchannel", opts.PChannel)))
+	p.SetLogger(mlog.With(mlog.FieldPChannel(opts.PChannel)))
 	go p.resumeLoop()
 	return p
 }
@@ -57,7 +59,7 @@ type factory func(ctx context.Context, opts *handler.ProducerOptions) (producer.
 // ResumableProducer will do automatic resume from stream broken and streaming node re-balance.
 // All error in these package should be marked by streaming/errs package.
 type ResumableProducer struct {
-	log.Binder
+	mlog.Binder
 	ctx            context.Context
 	cancel         context.CancelFunc
 	resumingExitCh chan struct{}
@@ -125,7 +127,15 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 		if err != nil {
 			return nil, err
 		}
-		produceResult, err := producerHandler.Append(ctx, msg)
+		appendCtx, span := p.startDistAppendSpanIfRemote(ctx, producerHandler, msg)
+		produceResult, err := producerHandler.Append(appendCtx, msg)
+		if span != nil {
+			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
+			}
+			span.End()
+		}
 		if err == nil {
 			return produceResult, nil
 		}
@@ -134,6 +144,11 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 			return nil, errors.Mark(err, errs.ErrCanceledOrDeadlineExceed)
 		}
 		if sErr := status.AsStreamingError(err); sErr != nil {
+			if sErr.IsPartialUpdateRetryableCAS() {
+				// Proxy must re-query and rebuild the row instead of retrying the
+				// transaction with stale merged fields.
+				return nil, err
+			}
 			// if the error is txn unavailable or unrecoverable error,
 			// it cannot be retried forever.
 			// we should mark it and return.
@@ -153,10 +168,24 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 	}
 }
 
+func (p *ResumableProducer) startDistAppendSpanIfRemote(ctx context.Context, producerHandler handler.Producer, msg message.MutableMessage) (context.Context, trace.Span) {
+	if isLocalProducer(producerHandler) {
+		return ctx, nil
+	}
+	return message.StartSpanForMessage(ctx, msg, message.SpanNameWALDistAppend)
+}
+
+func isLocalProducer(producerHandler handler.Producer) bool {
+	if pm, ok := producerHandler.(producerWithMetrics); ok {
+		return registry.IsLocal(pm.Producer)
+	}
+	return registry.IsLocal(producerHandler)
+}
+
 // resumeLoop is used to resume producer from error.
 func (p *ResumableProducer) resumeLoop() {
 	defer func() {
-		p.Logger().Info("stop resuming")
+		p.Logger().Info(p.ctx, "stop resuming")
 		p.metrics.IntoUnavailable()
 		close(p.resumingExitCh)
 	}()
@@ -187,7 +216,7 @@ func (p *ResumableProducer) waitUntilUnavailable(producer handler.Producer) erro
 		return p.ctx.Err()
 	case <-producer.Available():
 		// Wait old producer unavailable, trigger a new resuming operation.
-		p.Logger().Warn("producer encounter error, try to resume...")
+		p.Logger().Warn(p.ctx, "producer encounter error, try to resume...")
 		return nil
 	}
 }
@@ -219,7 +248,7 @@ func (p *ResumableProducer) createNewProducer() (producer.Producer, error) {
 		// Otherwise, perform a resuming operation.
 		if err != nil {
 			nextBackoff := backoff.NextBackOff()
-			p.Logger().Warn("create producer failed, retry...", zap.Error(err), zap.Duration("nextRetryInterval", nextBackoff))
+			p.Logger().Warn(p.ctx, "create producer failed, retry...", mlog.Err(err), mlog.Duration("nextRetryInterval", nextBackoff))
 			time.Sleep(nextBackoff)
 			continue
 		}
@@ -245,7 +274,7 @@ func (p *ResumableProducer) gracefulClose() error {
 // Close close the producer.
 func (p *ResumableProducer) Close() {
 	if err := p.gracefulClose(); err != nil {
-		p.Logger().Warn("graceful close a producer fail, force close is applied")
+		p.Logger().Warn(p.ctx, "graceful close a producer fail, force close is applied")
 	}
 
 	// cancel is always need to be called, even graceful close is success.

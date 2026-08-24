@@ -42,9 +42,12 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -63,6 +66,27 @@ import (
 )
 
 // TODO(dragondriver): add more test cases
+
+// newTestChannelsMgr builds a channels manager backed by the coordinator's
+// DescribeCollection (test-only; production wiring reads the meta cache).
+func newTestChannelsMgr(ctx context.Context, mixCoord types.MixCoordClient) channelmgr.ChannelsMgr {
+	return channelmgr.NewChannelsMgr(
+		func(collectionID typeutil.UniqueID) (channelmgr.ChannelInfo, error) {
+			req := &milvuspb.DescribeCollectionRequest{
+				Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection)),
+				CollectionID: collectionID,
+			}
+			resp, err := mixCoord.DescribeCollection(ctx, req)
+			if err != nil {
+				return channelmgr.ChannelInfo{}, err
+			}
+			if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+				return channelmgr.ChannelInfo{}, merr.Error(resp.GetStatus())
+			}
+			return channelmgr.ChannelInfo{VChans: resp.GetVirtualChannelNames(), PChans: resp.GetPhysicalChannelNames()}, nil
+		},
+	)
+}
 
 const (
 	maxTestStringLen     = 100
@@ -520,7 +544,7 @@ func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
 
 	buildRoot := func(autoID bool) *mocks.MockMixCoordClient {
 		root := mocks.NewMockMixCoordClient(t)
-		// InitMetaCache requires ListPolicy
+		// initMetaCache requires ListPolicy
 		root.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil).Once()
 		// Meta cache update path fetches partitions info
 		root.EXPECT().ShowPartitions(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{Status: merr.Success()}, nil).Maybe()
@@ -542,13 +566,12 @@ func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
 	}
 
 	t.Run("success when PK autoID=true and allow_insert_autoid=true", func(t *testing.T) {
-		cache := globalMetaCache
-		defer func() { globalMetaCache = cache }()
 		root := buildRoot(true)
-		err := InitMetaCache(ctx, root)
+		cache, err := initMetaCache(ctx, root)
 		assert.NoError(t, err)
 
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
 				DbName:         dbName,
@@ -563,13 +586,12 @@ func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
 	})
 
 	t.Run("error when PK autoID=false and allow_insert_autoid=true", func(t *testing.T) {
-		cache := globalMetaCache
-		defer func() { globalMetaCache = cache }()
 		root := buildRoot(false)
-		err := InitMetaCache(ctx, root)
+		cache, err := initMetaCache(ctx, root)
 		assert.NoError(t, err)
 
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
 				DbName:         dbName,
@@ -707,7 +729,7 @@ func TestTranslateOutputFields(t *testing.T) {
 			},
 		},
 	}
-	schema := newSchemaInfo(collSchema)
+	schema := mustNewSchemaInfo(collSchema)
 
 	// Test empty output fields
 	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{}, schema, false)
@@ -842,7 +864,7 @@ func TestTranslateOutputFields(t *testing.T) {
 				{Name: common.MetaFieldName, FieldID: 102, DataType: schemapb.DataType_JSON, IsDynamic: true},
 			},
 		}
-		schema := newSchemaInfo(collSchema)
+		schema := mustNewSchemaInfo(collSchema)
 
 		outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"A", idFieldName}, schema, true)
 		assert.NoError(t, err)
@@ -918,7 +940,7 @@ func TestTranslateOutputFields_StructArrayField(t *testing.T) {
 			},
 		},
 	}
-	schema := newSchemaInfo(collSchema)
+	schema := mustNewSchemaInfo(collSchema)
 
 	// Test struct array field
 	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"sub_vector_field"}, schema, false)
@@ -2179,7 +2201,8 @@ func TestHasCollectionTask(t *testing.T) {
 	mixc := NewMixCoordMock()
 	defer mixc.Close()
 	ctx := context.Background()
-	InitMetaCache(ctx, mixc)
+	cache, err := initMetaCache(ctx, mixc)
+	assert.NoError(t, err)
 	prefix := "TestHasCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -2207,6 +2230,7 @@ func TestHasCollectionTask(t *testing.T) {
 
 	// CreateCollection
 	task := &hasCollectionTask{
+		baseTask:  baseTask{metaCache: cache},
 		Condition: NewTaskCondition(ctx),
 		HasCollectionRequest: &milvuspb.HasCollectionRequest{
 			Base: &commonpb.MsgBase{
@@ -2229,13 +2253,14 @@ func TestHasCollectionTask(t *testing.T) {
 	assert.Equal(t, Timestamp(100), task.BeginTs())
 	assert.Equal(t, Timestamp(100), task.EndTs())
 	assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
-	// missing collectionID in globalMetaCache
+	// missing collectionID in meta cache
 	err = task.Execute(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, false, task.result.Value)
-	// createIsoCollection in RootCood and fill GlobalMetaCache
+	// createIsoCollection in RootCood and fill meta cache
 	mixc.CreateCollection(ctx, createColReq)
-	globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
+	_, err = cache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
+	assert.NoError(t, err)
 
 	// success to drop collection
 	err = task.Execute(ctx)
@@ -2250,7 +2275,7 @@ func TestHasCollectionTask(t *testing.T) {
 	task.CollectionName = collectionName
 
 	// invalidate collection cache, trigger rootcoord rpc
-	globalMetaCache.RemoveCollection(ctx, dbName, collectionName, 0)
+	cache.RemoveCollection(ctx, dbName, collectionName)
 
 	// rc return collection not found error
 	mixc.describeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
@@ -2275,7 +2300,8 @@ func TestDescribeCollectionTask(t *testing.T) {
 	mixc := NewMixCoordMock()
 	defer mixc.Close()
 	ctx := context.Background()
-	InitMetaCache(ctx, mixc)
+	_, err := initMetaCache(ctx, mixc)
+	assert.NoError(t, err)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -2304,8 +2330,8 @@ func TestDescribeCollectionTask(t *testing.T) {
 	assert.Equal(t, Timestamp(100), task.BeginTs())
 	assert.Equal(t, Timestamp(100), task.EndTs())
 	assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
-	// missing collectionID in globalMetaCache
-	err := task.Execute(ctx)
+	// missing collectionID in meta cache
+	err = task.Execute(ctx)
 	assert.NoError(t, err)
 
 	// illegal name
@@ -2325,14 +2351,17 @@ func TestDescribeCollectionTask(t *testing.T) {
 	assert.NoError(t, err)
 	err = task.Execute(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.GetStatus().GetErrorCode())
+	assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, task.result.GetStatus().GetErrorCode())
+	assert.Equal(t, merr.Code(merr.ErrCollectionNotFound), task.result.GetStatus().GetCode())
+	assert.Equal(t, "true", task.result.GetStatus().GetExtraInfo()[merr.InputErrorFlagKey])
 }
 
 func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 	mix := NewMixCoordMock()
 
 	ctx := context.Background()
-	InitMetaCache(ctx, mix)
+	cache, err := initMetaCache(ctx, mix)
+	assert.NoError(t, err)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -2359,7 +2388,8 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 	}
 
 	mix.CreateCollection(ctx, createColReq)
-	globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
+	_, err = cache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
+	assert.NoError(t, err)
 
 	// CreateCollection
 	task := &describeCollectionTask{
@@ -2390,7 +2420,8 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 	mix := NewMixCoordMock()
 	ctx := context.Background()
-	InitMetaCache(ctx, mix)
+	cache, err := initMetaCache(ctx, mix)
+	assert.NoError(t, err)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -2417,7 +2448,8 @@ func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 	}
 
 	mix.CreateCollection(ctx, createColReq)
-	globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+	_, err = cache.GetCollectionID(ctx, dbName, collectionName)
+	assert.NoError(t, err)
 
 	// CreateCollection
 	task := &describeCollectionTask{
@@ -2449,7 +2481,9 @@ func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 func TestDescribeCollectionTask_FilterNamespaceField(t *testing.T) {
 	mix := NewMixCoordMock()
 	ctx := context.Background()
-	InitMetaCache(ctx, mix)
+	cache, err := initMetaCache(ctx, mix)
+	assert.NoError(t, err)
+	_ = cache
 
 	dbName := ""
 	collectionName := "TestDescribeCollectionTask_FilterNamespaceField"
@@ -2516,7 +2550,7 @@ func TestDescribeCollectionTask_FilterNamespaceField(t *testing.T) {
 		mixCoord: mix,
 	}
 
-	err := task.PreExecute(ctx)
+	err = task.PreExecute(ctx)
 	assert.NoError(t, err)
 
 	err = task.Execute(ctx)
@@ -2536,6 +2570,47 @@ func TestDescribeCollectionTask_FilterNamespaceField(t *testing.T) {
 	assert.Equal(t, collectionName, task.result.GetCollectionName())
 }
 
+func TestDescribeCollectionTask_FillsNameFromResultWhenQueriedByID(t *testing.T) {
+	ctx := context.Background()
+	mix := NewMixCoordMock()
+
+	const (
+		collectionName = "collection_from_result"
+		collectionID   = int64(449574)
+		dbName         = "db_from_result"
+		dbID           = int64(3)
+	)
+	mix.SetDescribeCollectionFunc(func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Status:         merr.Success(),
+			CollectionName: collectionName,
+			CollectionID:   collectionID,
+			DbName:         dbName,
+			DbId:           dbID,
+			Schema: &schemapb.CollectionSchema{
+				Name: collectionName,
+			},
+		}, nil
+	})
+
+	task := &describeCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
+			Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
+			CollectionID: collectionID,
+		},
+		ctx:      ctx,
+		mixCoord: mix,
+	}
+
+	assert.NoError(t, task.PreExecute(ctx))
+	assert.NoError(t, task.Execute(ctx))
+	assert.Equal(t, collectionName, task.result.GetCollectionName())
+	assert.Equal(t, collectionID, task.result.GetCollectionID())
+	assert.Equal(t, dbName, task.result.GetDbName())
+	assert.Equal(t, dbID, task.result.GetDbId())
+}
+
 // Security regression: DescribeCollection must redact credentials embedded in
 // ExternalSpec.extfs (access_key_id / access_key_value / ssl_ca_cert) before
 // returning to the client. Any caller with Describe privilege would otherwise
@@ -2544,7 +2619,9 @@ func TestDescribeCollectionTask_FilterNamespaceField(t *testing.T) {
 func TestDescribeCollectionTask_RedactsExternalSpecCredentials(t *testing.T) {
 	mix := NewMixCoordMock()
 	ctx := context.Background()
-	InitMetaCache(ctx, mix)
+	cache, err := initMetaCache(ctx, mix)
+	assert.NoError(t, err)
+	_ = cache
 
 	collectionName := "TestDescribeCollectionTask_RedactsExternalSpecCredentials"
 
@@ -2585,9 +2662,9 @@ func TestDescribeCollectionTask_RedactsExternalSpecCredentials(t *testing.T) {
 	assert.NoError(t, task.PreExecute(ctx))
 	assert.NoError(t, task.Execute(ctx))
 
-	// describeCollectionTask now passes ExternalSpec through unredacted —
-	// redaction lives at the public proxy.DescribeCollection edge so both
-	// cached and remote provider paths converge through one sanitizer.
+	// describeCollectionTask passes ExternalSpec through unredacted — the
+	// DescribeCollection interceptor response hook sanitizes both cached and
+	// remote provider results before metrics and API return.
 	// The task-level result must still carry raw creds so that the
 	// post-task wrapper can choose to redact (user-facing) or not
 	// (internal callers, if added later, that need raw spec for FFI).
@@ -2601,7 +2678,8 @@ func TestDescribeCollectionTask_RedactsExternalSpecCredentials(t *testing.T) {
 func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	mix := NewMixCoordMock()
 	ctx := context.Background()
-	InitMetaCache(ctx, mix)
+	cache, err := initMetaCache(ctx, mix)
+	assert.NoError(t, err)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -2626,7 +2704,8 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	}
 
 	mix.CreateCollection(ctx, createColReq)
-	globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
+	_, err = cache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
+	assert.NoError(t, err)
 
 	// CreateCollection
 	task := &describeCollectionTask{
@@ -2646,7 +2725,7 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	}
 	task.PreExecute(ctx)
 
-	// missing collectionID in globalMetaCache
+	// missing collectionID in meta cache
 	err = task.Execute(ctx)
 	assert.NoError(t, err)
 
@@ -2661,15 +2740,13 @@ func TestCreatePartitionTask(t *testing.T) {
 	rc := mocks.NewMockMixCoordClient(t)
 
 	mockCache := NewMockCache(t)
-	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(newSchemaInfo(&schemapb.CollectionSchema{
+	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{
 		EnableDynamicField: false,
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "ID", DataType: schemapb.DataType_Int64},
 			{FieldID: 101, Name: "Vector", DataType: schemapb.DataType_FloatVector},
 		},
 	}), nil)
-	globalMetaCache = mockCache
-
 	ctx := context.Background()
 	prefix := "TestCreatePartitionTask"
 	dbName := ""
@@ -2692,6 +2769,7 @@ func TestCreatePartitionTask(t *testing.T) {
 		mixCoord: rc,
 		result:   nil,
 	}
+	task.metaCache = mockCache
 	task.OnEnqueue()
 	task.PreExecute(ctx)
 
@@ -2745,8 +2823,7 @@ func TestDropPartitionTask(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
-	).Return(newSchemaInfo(&schemapb.CollectionSchema{}), nil)
-	globalMetaCache = mockCache
+	).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{}), nil)
 
 	task := &dropPartitionTask{
 		Condition: NewTaskCondition(ctx),
@@ -2764,6 +2841,7 @@ func TestDropPartitionTask(t *testing.T) {
 		mixCoord: mixc,
 		result:   nil,
 	}
+	task.metaCache = mockCache
 	task.OnEnqueue()
 	task.PreExecute(ctx)
 
@@ -2796,8 +2874,8 @@ func TestDropPartitionTask(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(newSchemaInfo(&schemapb.CollectionSchema{}), nil)
-		globalMetaCache = mockCache
+		).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{}), nil)
+		task.metaCache = mockCache
 		task.PartitionName = "partition1"
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
@@ -2823,8 +2901,8 @@ func TestDropPartitionTask(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(newSchemaInfo(&schemapb.CollectionSchema{}), nil)
-		globalMetaCache = mockCache
+		).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{}), nil)
+		task.metaCache = mockCache
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
 	})
@@ -2849,8 +2927,8 @@ func TestDropPartitionTask(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(newSchemaInfo(&schemapb.CollectionSchema{}), nil)
-		globalMetaCache = mockCache
+		).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{}), nil)
+		task.metaCache = mockCache
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 	})
@@ -2964,7 +3042,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
 
-	err = InitMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
 
 	shardsNum := int32(2)
@@ -3022,20 +3100,12 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 		PartitionName:  partitionName,
 	})
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+	collectionID, err := cache.GetCollectionID(ctx, dbName, collectionName)
 	assert.NoError(t, err)
 
-	dmlChannelsFunc := getDmlChannelsFunc(ctx, qc)
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil)
-	pchans, err := chMgr.getChannels(collectionID)
+	chMgr := newTestChannelsMgr(ctx, qc)
+	_, err = chMgr.GetChannels(collectionID)
 	assert.NoError(t, err)
-
-	interval := time.Millisecond * 10
-	tso := newMockTsoAllocator()
-
-	ticker := newChannelsTimeTicker(ctx, interval, []string{}, newGetStatisticsFunc(pchans), tso)
-	_ = ticker.start()
-	defer ticker.close()
 
 	idAllocator, err := allocator.NewIDAllocator(ctx, qc, paramtable.GetNodeID())
 	assert.NoError(t, err)
@@ -3045,6 +3115,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	t.Run("insert", func(t *testing.T) {
 		hash := testutils.GenerateHashKeys(nb)
 		task := &insertTask{
+			baseTask: baseTask{metaCache: cache},
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{
 					HashValues: hash,
@@ -3095,6 +3166,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 
 	t.Run("simple delete", func(t *testing.T) {
 		task := &deleteTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			req: &milvuspb.DeleteRequest{
 				CollectionName: collectionName,
@@ -3107,7 +3179,6 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1}}},
 			},
 			chMgr:        chMgr,
-			chTicker:     ticker,
 			collectionID: collectionID,
 			vChannels:    []string{"test-ch"},
 		}
@@ -3192,7 +3263,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 
 	ctx := context.Background()
 
-	err = InitMetaCache(ctx, mixc)
+	cache, err := initMetaCache(ctx, mixc)
 	assert.NoError(t, err)
 
 	shardsNum := int32(2)
@@ -3251,20 +3322,12 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 		PartitionName:  partitionName,
 	})
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+	collectionID, err := cache.GetCollectionID(ctx, dbName, collectionName)
 	assert.NoError(t, err)
 
-	dmlChannelsFunc := getDmlChannelsFunc(ctx, mixc)
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil)
-	pchans, err := chMgr.getChannels(collectionID)
+	chMgr := newTestChannelsMgr(ctx, mixc)
+	_, err = chMgr.GetChannels(collectionID)
 	assert.NoError(t, err)
-
-	interval := time.Millisecond * 10
-	tso := newMockTsoAllocator()
-
-	ticker := newChannelsTimeTicker(ctx, interval, []string{}, newGetStatisticsFunc(pchans), tso)
-	_ = ticker.start()
-	defer ticker.close()
 
 	idAllocator, err := allocator.NewIDAllocator(ctx, mixc, paramtable.GetNodeID())
 	assert.NoError(t, err)
@@ -3274,6 +3337,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	t.Run("insert", func(t *testing.T) {
 		hash := testutils.GenerateHashKeys(nb)
 		task := &insertTask{
+			baseTask: baseTask{metaCache: cache},
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{
 					HashValues: hash,
@@ -3327,6 +3391,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	t.Run("upsert", func(t *testing.T) {
 		hash := testutils.GenerateHashKeys(nb)
 		task := &upsertTask{
+			baseTask: baseTask{metaCache: cache},
 			upsertMsg: &msgstream.UpsertMsg{
 				InsertMsg: &BaseInsertTask{
 					BaseMsg: msgstream.BaseMsg{
@@ -3390,7 +3455,6 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			},
 			idAllocator: idAllocator,
 			chMgr:       chMgr,
-			chTicker:    ticker,
 			vChannels:   nil,
 			pChannels:   nil,
 			schema:      nil,
@@ -3410,6 +3474,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 
 	t.Run("simple delete", func(t *testing.T) {
 		task := &deleteTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			req: &milvuspb.DeleteRequest{
 				CollectionName: collectionName,
@@ -3419,7 +3484,6 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			idAllocator: idAllocator,
 			ctx:         ctx,
 			chMgr:       chMgr,
-			chTicker:    ticker,
 			vChannels:   []string{"test-channel"},
 			primaryKeys: &schemapb.IDs{
 				IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"milvus", "test"}}},
@@ -3492,14 +3556,14 @@ func Test_createIndexTask_getIndexedFieldAndFunction(t *testing.T) {
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(newSchemaInfo(&schemapb.CollectionSchema{
+		).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				idField,
 				vectorField,
 			},
 		}), nil)
 
-		globalMetaCache = cache
+		cit.metaCache = cache
 		err := cit.getIndexedFieldAndFunction(context.Background())
 		assert.NoError(t, err)
 		assert.Equal(t, fieldName, cit.fieldSchema.GetName())
@@ -3512,7 +3576,7 @@ func Test_createIndexTask_getIndexedFieldAndFunction(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(nil, errors.New("mock"))
-		globalMetaCache = cache
+		cit.metaCache = cache
 		err := cit.getIndexedFieldAndFunction(context.Background())
 		assert.Error(t, err)
 	})
@@ -3525,31 +3589,33 @@ func Test_createIndexTask_getIndexedFieldAndFunction(t *testing.T) {
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(newSchemaInfo(&schemapb.CollectionSchema{
+		).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				idField,
 				otherField,
 			},
 		}), nil)
-		globalMetaCache = cache
+		cit.metaCache = cache
 		err := cit.getIndexedFieldAndFunction(context.Background())
 		assert.Error(t, err)
 	})
 }
 
 func Test_fillDimension(t *testing.T) {
+	// fillDimension moved to indexparamcheck.FillDimension (shared with the
+	// add-function-field bound-index path); coverage kept here for the proxy flow.
 	t.Run("scalar", func(t *testing.T) {
 		f := &schemapb.FieldSchema{
 			DataType: schemapb.DataType_Int64,
 		}
-		assert.NoError(t, fillDimension(f, nil))
+		assert.NoError(t, indexparamcheck.FillDimension(f, nil))
 	})
 
 	t.Run("no dim in schema", func(t *testing.T) {
 		f := &schemapb.FieldSchema{
 			DataType: schemapb.DataType_FloatVector,
 		}
-		assert.Error(t, fillDimension(f, nil))
+		assert.Error(t, indexparamcheck.FillDimension(f, nil))
 	})
 
 	t.Run("dimension mismatch", func(t *testing.T) {
@@ -3562,7 +3628,7 @@ func Test_fillDimension(t *testing.T) {
 				},
 			},
 		}
-		assert.Error(t, fillDimension(f, map[string]string{common.DimKey: "8"}))
+		assert.Error(t, indexparamcheck.FillDimension(f, map[string]string{common.DimKey: "8"}))
 	})
 
 	t.Run("normal", func(t *testing.T) {
@@ -3576,7 +3642,7 @@ func Test_fillDimension(t *testing.T) {
 			},
 		}
 		m := map[string]string{}
-		assert.NoError(t, fillDimension(f, m))
+		assert.NoError(t, indexparamcheck.FillDimension(f, m))
 		assert.Equal(t, "128", m[common.DimKey])
 	})
 }
@@ -3672,7 +3738,7 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
-		).Return(newSchemaInfo(&schemapb.CollectionSchema{
+		).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      100,
@@ -3696,7 +3762,7 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("int64"),
 		).Return(&collectionInfo{}, nil)
-		globalMetaCache = cache
+		cit.metaCache = cache
 		cit.req.ExtraParams = []*commonpb.KeyValuePair{
 			{
 				Key:   common.IndexTypeKey,
@@ -3721,7 +3787,7 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(UniqueID(0), errors.New("mock"))
-		globalMetaCache = cache
+		cit.metaCache = cache
 		assert.Error(t, cit.PreExecute(context.Background()))
 	})
 
@@ -3738,7 +3804,7 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("int64"),
 		).Return(&collectionInfo{}, nil)
-		globalMetaCache = cache
+		cit.metaCache = cache
 
 		for i := 0; i < 256; i++ {
 			cit.req.IndexName += "a"
@@ -3769,7 +3835,7 @@ func Test_dropCollectionTask_PreExecute(t *testing.T) {
 		CollectionName: "valid", // invalid
 
 	}}
-	globalMetaCache = &MetaCache{}
+	dct.metaCache = &MetaCache{}
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
 		return 1, nil
 	}).Build()
@@ -3823,7 +3889,8 @@ func Test_dropCollectionTask_PostExecute(t *testing.T) {
 func Test_truncateCollectionTask_PreExecute(t *testing.T) {
 	mix := NewMixCoordMock()
 	ctx := context.Background()
-	require.NoError(t, InitMetaCache(ctx, mix))
+	cache, err := initMetaCache(ctx, mix)
+	require.NoError(t, err)
 
 	dbName := ""
 	regularName := "regular_truncate_" + funcutil.GenRandomStr()
@@ -3862,6 +3929,7 @@ func Test_truncateCollectionTask_PreExecute(t *testing.T) {
 		tct := &truncateCollectionTask{TruncateCollectionRequest: &milvuspb.TruncateCollectionRequest{
 			Base: &commonpb.MsgBase{}, DbName: dbName, CollectionName: regularName,
 		}}
+		tct.metaCache = cache
 		assert.NoError(t, tct.PreExecute(ctx))
 	})
 
@@ -3879,6 +3947,7 @@ func Test_truncateCollectionTask_PreExecute(t *testing.T) {
 		tct := &truncateCollectionTask{TruncateCollectionRequest: &milvuspb.TruncateCollectionRequest{
 			Base: &commonpb.MsgBase{}, DbName: dbName, CollectionName: externalName,
 		}}
+		tct.metaCache = cache
 		err := tct.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "external collection")
@@ -3938,7 +4007,8 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	indexID := int64(1000)
 
 	// failed to get collection id.
-	_ = InitMetaCache(ctx, rc)
+	cache, err := initMetaCache(ctx, rc)
+	assert.NoError(t, err)
 
 	rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
@@ -3967,6 +4037,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 		result:       nil,
 		collectionID: 0,
 	}
+	lct.metaCache = cache
 
 	t.Run("indexcoord describe index error", func(t *testing.T) {
 		err := lct.Execute(ctx)
@@ -4057,21 +4128,15 @@ func TestLoadCollectionTaskExecuteTextRequiresStorageV3(t *testing.T) {
 		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 	})
 
-	oldCache := globalMetaCache
-	t.Cleanup(func() {
-		globalMetaCache = oldCache
-	})
-
 	const (
 		dbName         = "db"
 		collectionName = "text_collection"
 		collectionID   = int64(100)
 	)
-	schema := newSchemaInfo(newTextSchemaForStorageV3Test(collectionName))
+	schema := mustNewSchemaInfo(newTextSchemaForStorageV3Test(collectionName))
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
 	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(schema, nil)
-	globalMetaCache = cache
 
 	task := &loadCollectionTask{
 		LoadCollectionRequest: &milvuspb.LoadCollectionRequest{
@@ -4081,6 +4146,7 @@ func TestLoadCollectionTaskExecuteTextRequiresStorageV3(t *testing.T) {
 		},
 		ctx: context.Background(),
 	}
+	task.metaCache = cache
 
 	err := task.Execute(context.Background())
 	assert.Error(t, err)
@@ -4100,7 +4166,8 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 	indexID := int64(1000)
 
 	// failed to get collection id.
-	_ = InitMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
+	assert.NoError(t, err)
 
 	qc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
@@ -4129,6 +4196,7 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 		result:       nil,
 		collectionID: 0,
 	}
+	lpt.metaCache = cache
 
 	t.Run("indexcoord describe index error", func(t *testing.T) {
 		err := lpt.Execute(ctx)
@@ -4183,7 +4251,8 @@ func TestCreateResourceGroupTask(t *testing.T) {
 	defer mixc.Close()
 
 	ctx := context.Background()
-	InitMetaCache(ctx, mixc)
+	_, err := initMetaCache(ctx, mixc)
+	assert.NoError(t, err)
 
 	createRGReq := &milvuspb.CreateResourceGroupRequest{
 		Base: &commonpb.MsgBase{
@@ -4209,7 +4278,7 @@ func TestCreateResourceGroupTask(t *testing.T) {
 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
-	err := task.Execute(ctx)
+	err = task.Execute(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
 }
@@ -4220,7 +4289,8 @@ func TestDropResourceGroupTask(t *testing.T) {
 	defer mixc.Close()
 
 	ctx := context.Background()
-	InitMetaCache(ctx, mixc)
+	_, err := initMetaCache(ctx, mixc)
+	assert.NoError(t, err)
 
 	dropRGReq := &milvuspb.DropResourceGroupRequest{
 		Base: &commonpb.MsgBase{
@@ -4246,7 +4316,7 @@ func TestDropResourceGroupTask(t *testing.T) {
 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
-	err := task.Execute(ctx)
+	err = task.Execute(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
 }
@@ -4256,7 +4326,8 @@ func TestTransferNodeTask(t *testing.T) {
 
 	defer mixc.Close()
 	ctx := context.Background()
-	InitMetaCache(ctx, mixc)
+	_, err := initMetaCache(ctx, mixc)
+	assert.NoError(t, err)
 
 	req := &milvuspb.TransferNodeRequest{
 		Base: &commonpb.MsgBase{
@@ -4284,7 +4355,7 @@ func TestTransferNodeTask(t *testing.T) {
 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
-	err := task.Execute(ctx)
+	err = task.Execute(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
 }
@@ -4293,9 +4364,11 @@ func TestTransferReplicaTask(t *testing.T) {
 	rc := &MockMixCoordClientInterface{}
 
 	ctx := context.Background()
-	InitMetaCache(ctx, rc)
+	cache, err := initMetaCache(ctx, rc)
+	assert.NoError(t, err)
 	// make it avoid remote call on rc
-	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
+	_, err = cache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
+	assert.NoError(t, err)
 
 	req := &milvuspb.TransferReplicaRequest{
 		Base: &commonpb.MsgBase{
@@ -4314,6 +4387,7 @@ func TestTransferReplicaTask(t *testing.T) {
 		ctx:                    ctx,
 		mixCoord:               rc,
 	}
+	task.metaCache = cache
 	task.OnEnqueue()
 	task.PreExecute(ctx)
 
@@ -4324,7 +4398,7 @@ func TestTransferReplicaTask(t *testing.T) {
 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
-	err := task.Execute(ctx)
+	err = task.Execute(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
 }
@@ -4340,7 +4414,8 @@ func TestListResourceGroupsTask(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	InitMetaCache(ctx, rc)
+	_, err := initMetaCache(ctx, rc)
+	assert.NoError(t, err)
 
 	req := &milvuspb.ListResourceGroupsRequest{
 		Base: &commonpb.MsgBase{
@@ -4365,7 +4440,7 @@ func TestListResourceGroupsTask(t *testing.T) {
 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
-	err := task.Execute(ctx)
+	err = task.Execute(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.GetStatus().GetErrorCode())
 	groups := task.result.GetResourceGroups()
@@ -4389,10 +4464,13 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	InitMetaCache(ctx, rc)
+	cache, err := initMetaCache(ctx, rc)
+	assert.NoError(t, err)
 	// make it avoid remote call on rc
-	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
-	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection2")
+	_, err = cache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
+	assert.NoError(t, err)
+	_, err = cache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection2")
+	assert.NoError(t, err)
 
 	req := &milvuspb.DescribeResourceGroupRequest{
 		Base: &commonpb.MsgBase{
@@ -4408,6 +4486,7 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 		ctx:                          ctx,
 		mixCoord:                     rc,
 	}
+	task.metaCache = cache
 	task.OnEnqueue()
 	task.PreExecute(ctx)
 
@@ -4418,7 +4497,7 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
-	err := task.Execute(ctx)
+	err = task.Execute(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.GetStatus().GetErrorCode())
 	groupInfo := task.result.GetResourceGroup()
@@ -4438,10 +4517,13 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	InitMetaCache(ctx, rc)
+	cache, err := initMetaCache(ctx, rc)
+	assert.NoError(t, err)
 	// make it avoid remote call on rc
-	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
-	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection2")
+	_, err = cache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
+	assert.NoError(t, err)
+	_, err = cache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection2")
+	assert.NoError(t, err)
 
 	req := &milvuspb.DescribeResourceGroupRequest{
 		Base: &commonpb.MsgBase{
@@ -4457,6 +4539,7 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 		ctx:                          ctx,
 		mixCoord:                     rc,
 	}
+	task.metaCache = cache
 	task.OnEnqueue()
 	task.PreExecute(ctx)
 
@@ -4467,7 +4550,7 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
-	err := task.Execute(ctx)
+	err = task.Execute(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.GetStatus().GetErrorCode())
 
@@ -4495,11 +4578,8 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 	paramtable.Init()
 
 	defer rc.Close()
-	cache := globalMetaCache
-	defer func() { globalMetaCache = cache }()
 	mockCache := NewMockCache(t)
 	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
-	globalMetaCache = mockCache
 	ctx := context.Background()
 	shardsNum := common.DefaultShardsNum
 	prefix := "TestCreateCollectionTaskWithPartitionKey"
@@ -4569,6 +4649,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		result:   nil,
 		schema:   nil,
 	}
+	task.metaCache = mockCache
 
 	t.Run("PreExecute", func(t *testing.T) {
 		defer Params.Reset(Params.RootCoordCfg.MaxPartitionNum.Key)
@@ -4686,13 +4767,14 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		assert.NoError(t, err)
 
 		// check default partitions
-		err = InitMetaCache(ctx, rc)
+		cache, err := initMetaCache(ctx, rc)
 		assert.NoError(t, err)
-		partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, "", task.CollectionName)
+		partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, cache, "", task.CollectionName)
 		assert.NoError(t, err)
 		assert.Equal(t, task.GetNumPartitions(), int64(len(partitionNames)))
 
 		createPartitionTask := &createPartitionTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			CreatePartitionRequest: &milvuspb.CreatePartitionRequest{
 				Base: &commonpb.MsgBase{
@@ -4710,6 +4792,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		assert.Error(t, err)
 
 		dropPartitionTask := &dropPartitionTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			DropPartitionRequest: &milvuspb.DropPartitionRequest{
 				Base: &commonpb.MsgBase{
@@ -4727,6 +4810,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		assert.Error(t, err)
 
 		loadPartitionTask := &loadPartitionsTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			LoadPartitionsRequest: &milvuspb.LoadPartitionsRequest{
 				Base: &commonpb.MsgBase{
@@ -4743,6 +4827,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		assert.Error(t, err)
 
 		releasePartitionsTask := &releasePartitionsTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			ReleasePartitionsRequest: &milvuspb.ReleasePartitionsRequest{
 				Base: &commonpb.MsgBase{
@@ -4765,7 +4850,7 @@ func TestPartitionKey(t *testing.T) {
 	defer qc.Close()
 	ctx := context.Background()
 
-	err := InitMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
 
 	shardsNum := common.DefaultShardsNum
@@ -4810,27 +4895,19 @@ func TestPartitionKey(t *testing.T) {
 	err = createCollectionTask.Execute(ctx)
 	assert.NoError(t, err)
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
+	collectionID, err := cache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	assert.NoError(t, err)
 
-	dmlChannelsFunc := getDmlChannelsFunc(ctx, qc)
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil)
-	pchans, err := chMgr.getChannels(collectionID)
+	chMgr := newTestChannelsMgr(ctx, qc)
+	_, err = chMgr.GetChannels(collectionID)
 	assert.NoError(t, err)
-
-	interval := time.Millisecond * 10
-	tso := newMockTsoAllocator()
-
-	ticker := newChannelsTimeTicker(ctx, interval, []string{}, newGetStatisticsFunc(pchans), tso)
-	_ = ticker.start()
-	defer ticker.close()
 
 	idAllocator, err := allocator.NewIDAllocator(ctx, qc, paramtable.GetNodeID())
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
 
-	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, "", collectionName)
+	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, cache, "", collectionName)
 	assert.NoError(t, err)
 	assert.Equal(t, common.DefaultPartitionsWithPartitionKey, int64(len(partitionNames)))
 
@@ -4846,6 +4923,7 @@ func TestPartitionKey(t *testing.T) {
 
 	t.Run("Insert", func(t *testing.T) {
 		it := &insertTask{
+			baseTask: baseTask{metaCache: cache},
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{},
 				InsertRequest: &msgpb.InsertRequest{
@@ -4895,6 +4973,7 @@ func TestPartitionKey(t *testing.T) {
 	t.Run("Upsert", func(t *testing.T) {
 		hash := testutils.GenerateHashKeys(nb)
 		ut := &upsertTask{
+			baseTask:  baseTask{metaCache: cache},
 			ctx:       ctx,
 			Condition: NewTaskCondition(ctx),
 			baseMsg: msgstream.BaseMsg{
@@ -4918,7 +4997,6 @@ func TestPartitionKey(t *testing.T) {
 			},
 			idAllocator: idAllocator,
 			chMgr:       chMgr,
-			chTicker:    ticker,
 		}
 
 		// don't support specify partition name if use partition key
@@ -4934,6 +5012,7 @@ func TestPartitionKey(t *testing.T) {
 
 	t.Run("delete", func(t *testing.T) {
 		dt := &deleteTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			req: &milvuspb.DeleteRequest{
 				CollectionName: collectionName,
@@ -4945,7 +5024,6 @@ func TestPartitionKey(t *testing.T) {
 			},
 			idAllocator:  idAllocator,
 			chMgr:        chMgr,
-			chTicker:     ticker,
 			collectionID: collectionID,
 			vChannels:    []string{"test-channel"},
 		}
@@ -4958,7 +5036,8 @@ func TestPartitionKey(t *testing.T) {
 
 	t.Run("search", func(t *testing.T) {
 		searchTask := &searchTask{
-			ctx: ctx,
+			baseTask: baseTask{metaCache: cache},
+			ctx:      ctx,
 			SearchRequest: &internalpb.SearchRequest{
 				Base: &commonpb.MsgBase{},
 			},
@@ -4978,7 +5057,8 @@ func TestPartitionKey(t *testing.T) {
 
 	t.Run("query", func(t *testing.T) {
 		queryTask := &queryTask{
-			ctx: ctx,
+			baseTask: baseTask{metaCache: cache},
+			ctx:      ctx,
 			RetrieveRequest: &internalpb.RetrieveRequest{
 				QueryLabel: "query",
 				Base:       &commonpb.MsgBase{},
@@ -5000,7 +5080,7 @@ func TestDefaultPartition(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
 
-	err := InitMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
 
 	shardsNum := common.DefaultShardsNum
@@ -5039,21 +5119,13 @@ func TestDefaultPartition(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
+	collectionID, err := cache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	assert.NoError(t, err)
 
-	dmlChannelsFunc := getDmlChannelsFunc(ctx, qc)
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil)
+	chMgr := newTestChannelsMgr(ctx, qc)
 
-	pchans, err := chMgr.getChannels(collectionID)
+	_, err = chMgr.GetChannels(collectionID)
 	assert.NoError(t, err)
-
-	interval := time.Millisecond * 10
-	tso := newMockTsoAllocator()
-
-	ticker := newChannelsTimeTicker(ctx, interval, []string{}, newGetStatisticsFunc(pchans), tso)
-	_ = ticker.start()
-	defer ticker.close()
 
 	idAllocator, err := allocator.NewIDAllocator(ctx, qc, paramtable.GetNodeID())
 	assert.NoError(t, err)
@@ -5072,6 +5144,7 @@ func TestDefaultPartition(t *testing.T) {
 
 	t.Run("Insert", func(t *testing.T) {
 		it := &insertTask{
+			baseTask: baseTask{metaCache: cache},
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{},
 				InsertRequest: &msgpb.InsertRequest{
@@ -5117,6 +5190,7 @@ func TestDefaultPartition(t *testing.T) {
 	t.Run("Upsert", func(t *testing.T) {
 		hash := testutils.GenerateHashKeys(nb)
 		ut := &upsertTask{
+			baseTask:  baseTask{metaCache: cache},
 			ctx:       ctx,
 			Condition: NewTaskCondition(ctx),
 			baseMsg: msgstream.BaseMsg{
@@ -5140,7 +5214,6 @@ func TestDefaultPartition(t *testing.T) {
 			},
 			idAllocator: idAllocator,
 			chMgr:       chMgr,
-			chTicker:    ticker,
 		}
 
 		ut.req.PartitionName = ""
@@ -5152,6 +5225,7 @@ func TestDefaultPartition(t *testing.T) {
 
 	t.Run("delete", func(t *testing.T) {
 		dt := &deleteTask{
+			baseTask:  baseTask{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			req: &milvuspb.DeleteRequest{
 				CollectionName: collectionName,
@@ -5163,7 +5237,6 @@ func TestDefaultPartition(t *testing.T) {
 			},
 			idAllocator:  idAllocator,
 			chMgr:        chMgr,
-			chTicker:     ticker,
 			collectionID: collectionID,
 			vChannels:    []string{"test-channel"},
 		}
@@ -5180,7 +5253,7 @@ func TestClusteringKey(t *testing.T) {
 
 	ctx := context.Background()
 
-	err := InitMetaCache(ctx, qc)
+	_, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
 
 	shardsNum := common.DefaultShardsNum
@@ -5455,7 +5528,8 @@ func TestClusteringKey(t *testing.T) {
 
 func TestAlterCollectionCheckLoaded(t *testing.T) {
 	qc := NewMixCoordMock()
-	InitMetaCache(context.Background(), qc)
+	cache, err := initMetaCache(context.Background(), qc)
+	assert.NoError(t, err)
 	collectionName := "test_alter_collection_check_loaded"
 	createColReq := &milvuspb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
@@ -5483,6 +5557,7 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 	}
 
 	task := &alterCollectionTask{
+		baseTask: baseTask{metaCache: cache},
 		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 			Base:           &commonpb.MsgBase{},
 			CollectionName: collectionName,
@@ -5497,9 +5572,7 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
-	cache := globalMetaCache
-	defer func() { globalMetaCache = cache }()
-	err := InitMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
 
 	createCollectionWithProps := func(colName string, props []*commonpb.KeyValuePair) {
@@ -5531,6 +5604,7 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 		col := "alter_ttl_seconds_then_field_" + funcutil.GenRandomStr()
 		createCollectionWithProps(col, []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "3600"}})
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: col,
@@ -5547,6 +5621,7 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 		col := "alter_ttl_field_then_seconds_" + funcutil.GenRandomStr()
 		createCollectionWithProps(col, []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}})
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: col,
@@ -5563,6 +5638,7 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 		col := "alter_ttl_field_invalid_" + funcutil.GenRandomStr()
 		createCollectionWithProps(col, nil)
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: col,
@@ -5578,6 +5654,7 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 		col := "alter_ttl_field_invalid_type_" + funcutil.GenRandomStr()
 		createCollectionWithProps(col, nil)
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: col,
@@ -5593,6 +5670,7 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 		col := "alter_delete_ttl_seconds_" + funcutil.GenRandomStr()
 		createCollectionWithProps(col, []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "3600"}})
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: col,
@@ -5608,6 +5686,7 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 		col := "alter_delete_ttl_field_" + funcutil.GenRandomStr()
 		createCollectionWithProps(col, []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}})
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: col,
@@ -5623,9 +5702,7 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 func TestAlterCollectionTaskValidateDescription(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
-	cache := globalMetaCache
-	defer func() { globalMetaCache = cache }()
-	err := InitMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
 
 	maxLen := Params.ProxyCfg.MaxCollectionDescriptionLength.GetAsInt()
@@ -5663,6 +5740,7 @@ func TestAlterCollectionTaskValidateDescription(t *testing.T) {
 
 	runAlter := func(collectionName string, properties []*commonpb.KeyValuePair) error {
 		task := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: collectionName,
@@ -5750,7 +5828,7 @@ func mockVectorIndexForCollection(t *testing.T, ctx context.Context, qc *MixCoor
 func TestTaskPartitionKeyIsolation(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
-	err := InitMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
 	shardsNum := common.DefaultShardsNum
 	prefix := "TestPartitionKeyIsolation"
@@ -5836,6 +5914,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 		}
 
 		return &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -5904,6 +5983,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 		colName := collectionName + "AlterNoIso"
 		createIsoCollection(colName, true, false, true)
 		alterTask := alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -5948,6 +6028,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 		createIsoCollection(colName, true, true, false)
 		mockVectorIndexForCollection(t, ctx, qc, colName)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -5964,6 +6045,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 		colName := collectionName + "DeleteIsoNoIdx"
 		createIsoCollection(colName, true, true, false)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -5982,6 +6064,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 		createIsoCollection(colName, true, true, false)
 		mockVectorIndexForCollection(t, ctx, qc, colName)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -5997,7 +6080,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 func TestAlterCollectionQueryMode(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
-	err := InitMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
 	prefix := "TestQueryMode"
 
@@ -6037,6 +6120,7 @@ func TestAlterCollectionQueryMode(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, false)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -6052,6 +6136,7 @@ func TestAlterCollectionQueryMode(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, true)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -6068,6 +6153,7 @@ func TestAlterCollectionQueryMode(t *testing.T) {
 		createCollection(colName, false)
 		mockVectorIndexForCollection(t, ctx, qc, colName)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -6085,6 +6171,7 @@ func TestAlterCollectionQueryMode(t *testing.T) {
 		createCollection(colName, true)
 		mockVectorIndexForCollection(t, ctx, qc, colName)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -6101,6 +6188,7 @@ func TestAlterCollectionQueryMode(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, true)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -6117,6 +6205,7 @@ func TestAlterCollectionQueryMode(t *testing.T) {
 		createCollection(colName, true)
 		mockVectorIndexForCollection(t, ctx, qc, colName)
 		alterTask := &alterCollectionTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
@@ -6132,7 +6221,7 @@ func TestAlterCollectionQueryMode(t *testing.T) {
 func TestCollectionNamespaceShardingEnabledValidation(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
-	err := InitMetaCache(ctx, qc)
+	_, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
 	prefix := "TestNamespaceShardingEnabled"
 
@@ -6235,7 +6324,8 @@ func TestCollectionNamespaceShardingEnabledValidation(t *testing.T) {
 
 func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 	qc := NewMixCoordMock()
-	InitMetaCache(context.Background(), qc)
+	cache, err := initMetaCache(context.Background(), qc)
+	assert.NoError(t, err)
 	collectionName := "test_alter_collection_field_check_loaded"
 	createColReq := &milvuspb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
@@ -6262,6 +6352,7 @@ func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 
 	// update property "mmap.enabled" but the collection is loaded
 	task := &alterCollectionFieldTask{
+		baseTask: baseTask{metaCache: cache},
 		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
 			Base:           &commonpb.MsgBase{},
 			CollectionName: collectionName,
@@ -6274,6 +6365,7 @@ func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 
 	// delete property "mmap.enabled" but the collection is loaded
 	task = &alterCollectionFieldTask{
+		baseTask: baseTask{metaCache: cache},
 		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
 			Base:           &commonpb.MsgBase{},
 			CollectionName: collectionName,
@@ -6289,7 +6381,8 @@ func TestAlterCollectionField(t *testing.T) {
 	paramtable.Init()
 
 	qc := NewMixCoordMock()
-	InitMetaCache(context.Background(), qc)
+	cache, err := initMetaCache(context.Background(), qc)
+	assert.NoError(t, err)
 	collectionName := "test_alter_collection_field"
 
 	// Create collection with string and array fields
@@ -6308,6 +6401,43 @@ func TestAlterCollectionField(t *testing.T) {
 				DataType:    schemapb.DataType_Array,
 				ElementType: schemapb.DataType_Int64,
 				TypeParams:  []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "100"}},
+			},
+			{
+				FieldID:  102,
+				Name:     "text_match_field",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "100"},
+					{Key: "enable_match", Value: "true"},
+					{Key: common.EnableAnalyzerKey, Value: "true"},
+					{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+				},
+			},
+			{
+				FieldID:  103,
+				Name:     "bm25_input_field",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "100"},
+					{Key: common.EnableAnalyzerKey, Value: "true"},
+					{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+				},
+			},
+			{
+				FieldID:          104,
+				Name:             "bm25_output_field",
+				DataType:         schemapb.DataType_SparseFloatVector,
+				IsFunctionOutput: true,
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25_func",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldIds:    []int64{103},
+				InputFieldNames:  []string{"bm25_input_field"},
+				OutputFieldIds:   []int64{104},
+				OutputFieldNames: []string{"bm25_output_field"},
 			},
 		},
 	}
@@ -6373,6 +6503,60 @@ func TestAlterCollectionField(t *testing.T) {
 				{Key: common.MmapEnabledKey, Value: "true"},
 			},
 			expectError: false,
+		},
+		{
+			name:      "update analyzer params on inactive string field",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.EnableAnalyzerKey, Value: "true"},
+				{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+			},
+			expectError: false,
+		},
+		{
+			name:      "update analyzer params without enable analyzer",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+			},
+			expectError: false,
+		},
+		{
+			name:      "reject analyzer params on non-string field",
+			fieldName: "array_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.EnableAnalyzerKey, Value: "true"},
+				{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:      "invalid enable analyzer value",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.EnableAnalyzerKey, Value: "not_bool"},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:      "reject analyzer params on text match field",
+			fieldName: "text_match_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"whitespace"}`},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:      "reject analyzer params on bm25 input field",
+			fieldName: "bm25_input_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"whitespace"}`},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
 		},
 		{
 			name:      "invalid property key",
@@ -6459,6 +6643,33 @@ func TestAlterCollectionField(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name:        "delete analyzer params on inactive string field",
+			fieldName:   "string_field",
+			deleteKeys:  []string{common.EnableAnalyzerKey, common.AnalyzerParamKey},
+			expectError: false,
+		},
+		{
+			name:        "reject delete analyzer params on non-string field",
+			fieldName:   "array_field",
+			deleteKeys:  []string{common.EnableAnalyzerKey, common.AnalyzerParamKey},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:        "reject delete analyzer params on text match field",
+			fieldName:   "text_match_field",
+			deleteKeys:  []string{common.AnalyzerParamKey},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:        "reject delete analyzer params on bm25 input field",
+			fieldName:   "bm25_input_field",
+			deleteKeys:  []string{common.AnalyzerParamKey},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
 			name:        "delete max_length is not allowed",
 			fieldName:   "string_field",
 			deleteKeys:  []string{common.MaxLengthKey},
@@ -6477,6 +6688,7 @@ func TestAlterCollectionField(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			task := &alterCollectionFieldTask{
+				baseTask: baseTask{metaCache: cache},
 				AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
 					Base:           &commonpb.MsgBase{},
 					CollectionName: collectionName,
@@ -6505,6 +6717,7 @@ func TestAlterCollectionField(t *testing.T) {
 		defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.MaxArrayCapacity.Key)
 
 		task := &alterCollectionFieldTask{
+			baseTask: baseTask{metaCache: cache},
 			AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: collectionName,
@@ -6613,11 +6826,8 @@ func constructCollectionSchemaWithStructArrayField(collectionName string, struct
 // TestCreateCollectionTaskWithStructArrayField tests creating collections with StructArrayField
 func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
 	mix := NewMixCoordMock()
-	cache := globalMetaCache
-	defer func() { globalMetaCache = cache }()
 	mockCache := NewMockCache(t)
 	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
-	globalMetaCache = mockCache
 	ctx := context.Background()
 	shardsNum := common.DefaultShardsNum
 	prefix := "TestCreateCollectionTaskWithStructArrayField"
@@ -6643,6 +6853,7 @@ func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
 		result:   nil,
 		schema:   nil,
 	}
+	task.metaCache = mockCache
 
 	t.Run("create collection with struct array field", func(t *testing.T) {
 		err := task.OnEnqueue()
@@ -6652,7 +6863,7 @@ func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify schema contains StructArrayFields
-		assert.NotNil(t, task.schema)
+		assert.NotNil(t, task.Schema)
 		assert.Len(t, task.schema.StructArrayFields, 1)
 
 		structArrayField := task.schema.StructArrayFields[0]
@@ -6935,7 +7146,8 @@ func TestDescribeCollectionTaskWithStructArrayField(t *testing.T) {
 
 func TestAlterCollection_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
 	qc := NewMixCoordMock()
-	InitMetaCache(context.Background(), qc)
+	cache, err := initMetaCache(context.Background(), qc)
+	assert.NoError(t, err)
 	ctx := context.Background()
 	collectionName := "test_alter_allow_insert_autoid_autoid_false"
 
@@ -6957,6 +7169,7 @@ func TestAlterCollection_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
 	qc.CreateCollection(ctx, createColReq)
 
 	task := &alterCollectionTask{
+		baseTask: baseTask{metaCache: cache},
 		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 			Base:           &commonpb.MsgBase{},
 			CollectionName: collectionName,
@@ -7431,6 +7644,31 @@ func TestValidateAddFieldRequest(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
+	t.Run("nested array", func(t *testing.T) {
+		schema := baseSchema()
+		newField := &schemapb.FieldSchema{
+			Name:        "nested_array",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			Nullable:    true,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}},
+			TypeSchema: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}},
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+						Kind: &schemapb.TypeSchema_ArrayElement{
+							ArrayElement: &schemapb.TypeSchema{
+								Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+							},
+						},
+					},
+				},
+			},
+		}
+		require.NoError(t, validateAddFieldRequest(schema, newField))
+	})
+
 	t.Run("external field mapping", func(t *testing.T) {
 		schema := baseSchema()
 		newField := &schemapb.FieldSchema{
@@ -7599,6 +7837,13 @@ func TestValidateAddFieldRequest(t *testing.T) {
 }
 
 func TestAlterCollectionSchemaTask(t *testing.T) {
+	// Add-function cases require StorageV3 + schema-bump/storage-version compaction enabled
+	// (validateAddFunctionRequiresStorageV3). storageVersion.enabled defaults true;
+	// bumpSchemaVersion.enabled defaults false, so it must be set explicitly.
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionEnabled.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionEnabled.Key)
 	rc := NewMixCoordMock()
 	ctx := context.Background()
 	prefix := "TestAlterCollectionSchemaTask"
@@ -7680,13 +7925,46 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
 					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
 						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
-							{FieldSchema: proto.Clone(sparseOutputField).(*schemapb.FieldSchema)},
+							{
+								FieldSchema: proto.Clone(sparseOutputField).(*schemapb.FieldSchema),
+								ExtraParams: []*commonpb.KeyValuePair{
+									{Key: common.IndexTypeKey, Value: "SPARSE_INVERTED_INDEX"},
+									{Key: common.MetricTypeKey, Value: "BM25"},
+								},
+							},
 						},
 						FuncSchema: []*schemapb.FunctionSchema{proto.Clone(functionSchema).(*schemapb.FunctionSchema)},
 					},
 				},
 			},
 		}
+	}
+	buildValidMinHashRequest := func() *milvuspb.AlterCollectionSchemaRequest {
+		req := buildValidRequest()
+		addRequest := req.GetAction().GetAddRequest()
+		addRequest.FieldInfos[0].FieldSchema = &schemapb.FieldSchema{
+			Name:     "binary_minhash",
+			DataType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "4096"},
+			},
+		}
+		addRequest.FieldInfos[0].ExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "MINHASH_LSH"},
+			{Key: common.MetricTypeKey, Value: "MHJACCARD"},
+		}
+		functionSchema := proto.Clone(addRequest.GetFuncSchema()[0]).(*schemapb.FunctionSchema)
+		functionSchema.Name = "minhash_func"
+		functionSchema.Type = schemapb.FunctionType_MinHash
+		functionSchema.OutputFieldNames = []string{"binary_minhash"}
+		functionSchema.Params = []*commonpb.KeyValuePair{
+			{Key: "num_hashes", Value: "128"},
+			{Key: "shingle_size", Value: "3"},
+			{Key: "hash_function", Value: "xxhash64"},
+			{Key: "seed", Value: "42"},
+		}
+		addRequest.FuncSchema = []*schemapb.FunctionSchema{functionSchema}
+		return req
 	}
 
 	buildAddFieldRequest := func(fieldName string, nullable bool, doBackfill bool) *milvuspb.AlterCollectionSchemaRequest {
@@ -7878,7 +8156,9 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 	t.Run("PreExecute add function without fieldInfos", func(t *testing.T) {
 		task := buildTask(buildAddFunctionRequest(minHashFunctionOnlySchema), functionOnlyOldSchema)
 		err := task.PreExecute(ctx)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "adding a function over existing fields is not supported")
 	})
 
 	t.Run("PreExecute rejects function-only BM25 request", func(t *testing.T) {
@@ -7979,30 +8259,21 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 	})
 
 	t.Run("PreExecute supports MinHash function with new output field", func(t *testing.T) {
-		req := buildValidRequest()
-		addRequest := req.GetAction().GetAddRequest()
-		addRequest.FieldInfos[0].FieldSchema = &schemapb.FieldSchema{
-			Name:     "binary_minhash",
-			DataType: schemapb.DataType_BinaryVector,
-			TypeParams: []*commonpb.KeyValuePair{
-				{Key: common.DimKey, Value: "4096"},
-			},
-		}
-		functionSchema := proto.Clone(addRequest.GetFuncSchema()[0]).(*schemapb.FunctionSchema)
-		functionSchema.Name = "minhash_func"
-		functionSchema.Type = schemapb.FunctionType_MinHash
-		functionSchema.OutputFieldNames = []string{"binary_minhash"}
-		functionSchema.Params = []*commonpb.KeyValuePair{
-			{Key: "num_hashes", Value: "128"},
-			{Key: "shingle_size", Value: "3"},
-			{Key: "hash_function", Value: "xxhash64"},
-			{Key: "seed", Value: "42"},
-		}
-		addRequest.FuncSchema = []*schemapb.FunctionSchema{functionSchema}
-
-		task := buildTask(req, oldSchema)
+		task := buildTask(buildValidMinHashRequest(), oldSchema)
 		err := task.PreExecute(ctx)
 		assert.NoError(t, err)
+	})
+
+	t.Run("PreExecute rejects MinHash AutoIndex with non-MHJACCARD metric", func(t *testing.T) {
+		req := buildValidMinHashRequest()
+		req.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "HAMMING"},
+		}
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "must be MHJACCARD")
 	})
 
 	t.Run("PreExecute rejects unsupported function", func(t *testing.T) {
@@ -8053,13 +8324,81 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		task := buildTask(req, oldSchema)
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
-		assert.ErrorContains(t, err, "function output field not found")
+		assert.ErrorContains(t, err, "adding a function over existing fields is not supported")
 	})
 
 	t.Run("PreExecute happy path", func(t *testing.T) {
 		task := buildTask(buildValidRequest(), oldSchema)
 		err := task.PreExecute(ctx)
 		assert.NoError(t, err)
+	})
+
+	t.Run("PreExecute rejects invalid bound index name", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().GetFieldInfos()[0].IndexName = "1bad-index-name"
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "Invalid index name")
+	})
+
+	t.Run("PreExecute keeps the user's original index params in the request", func(t *testing.T) {
+		req := buildValidRequest()
+		original := proto.Clone(req.GetAction().GetAddRequest().GetFieldInfos()[0]).(*milvuspb.AlterCollectionSchemaRequest_FieldInfo)
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+		// Validation-only: no normalization write-back, so the persisted
+		// UserIndexParams stay aligned with the create_index convention and a
+		// later create_index with identical params remains idempotent.
+		assert.True(t, proto.Equal(original, req.GetAction().GetAddRequest().GetFieldInfos()[0]))
+	})
+
+	t.Run("PreExecute empty index params resolve via AutoIndex", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = nil
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+		// Validation-only: the request still carries no params; rootcoord
+		// resolves and persists the concrete index at prepare.
+		assert.Empty(t, req.GetAction().GetAddRequest().GetFieldInfos()[0].GetExtraParams())
+	})
+
+	t.Run("PreExecute AUTOINDEX with metric passes", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "BM25"},
+		}
+		task := buildTask(req, oldSchema)
+		assert.NoError(t, task.PreExecute(ctx))
+	})
+
+	t.Run("PreExecute AUTOINDEX with non-metric param rejected", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: "drop_ratio_build", Value: "0.2"},
+		}
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "only metric type can be passed")
+	})
+
+	t.Run("PreExecute AUTOINDEX with wrong metric for BM25 rejected", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "IP"},
+		}
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "must be BM25")
 	})
 
 	t.Run("Execute leaves function output marker to RootCoord", func(t *testing.T) {
@@ -8097,16 +8436,13 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		}
 	})
 
-	t.Run("Execute supports function-only add request", func(t *testing.T) {
+	t.Run("PreExecute rejects function-only add request", func(t *testing.T) {
 		req := buildAddFunctionRequest(minHashFunctionOnlySchema)
 		task := buildTask(req, functionOnlyOldSchema)
 
 		err := task.PreExecute(ctx)
-		assert.NoError(t, err)
-
-		err = task.Execute(ctx)
-		assert.NoError(t, err)
-		assert.Empty(t, req.GetAction().GetAddRequest().GetFieldInfos())
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "adding a function over existing fields is not supported")
 	})
 
 	t.Run("Execute skips nil field infos", func(t *testing.T) {
@@ -8594,7 +8930,7 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("drop by function_name - detach minhash success", func(t *testing.T) {
+	t.Run("drop by function_name - detach minhash rejected", func(t *testing.T) {
 		schemaWithFunc := &schemapb.CollectionSchema{
 			Name: "test_collection",
 			Fields: []*schemapb.FieldSchema{
@@ -8623,7 +8959,8 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 			},
 		}
 		err := task.PreExecute(ctx)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "detaching a function without dropping its output field is not supported")
 	})
 
 	t.Run("drop by function_name - bm25 function field success", func(t *testing.T) {
@@ -8816,7 +9153,7 @@ func TestValidateDropFunction(t *testing.T) {
 		assert.Contains(t, err.Error(), "function not found")
 	})
 
-	t.Run("detach minhash function succeeds", func(t *testing.T) {
+	t.Run("detach minhash function rejected", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -8831,10 +9168,11 @@ func TestValidateDropFunction(t *testing.T) {
 			},
 		}
 		err := validateDropFunction(schema, "minhash_func", false)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "detaching a function without dropping its output field is not supported")
 	})
 
-	t.Run("detach bm25 function fails", func(t *testing.T) {
+	t.Run("detach bm25 function rejected", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -8850,7 +9188,26 @@ func TestValidateDropFunction(t *testing.T) {
 		}
 		err := validateDropFunction(schema, "bm25_func", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "BM25 function must be dropped with its output field")
+		assert.Contains(t, err.Error(), "detaching a function without dropping its output field is not supported")
+	})
+
+	t.Run("detach text embedding function rejected (coupled like all types)", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "vec_func_out", DataType: schemapb.DataType_FloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name: "embed_func", Type: schemapb.FunctionType_TextEmbedding,
+					InputFieldNames: []string{"text"}, OutputFieldNames: []string{"vec_func_out"},
+				},
+			},
+		}
+		err := validateDropFunction(schema, "embed_func", false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "detaching a function without dropping its output field is not supported")
 	})
 
 	t.Run("drop function field leaves another vector field", func(t *testing.T) {
@@ -8891,7 +9248,7 @@ func TestValidateDropFunction(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("drop unsupported function field fails", func(t *testing.T) {
+	t.Run("drop text embedding function field succeeds", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -8907,8 +9264,7 @@ func TestValidateDropFunction(t *testing.T) {
 			},
 		}
 		err := validateDropFunction(schema, "embed_func", true)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "only BM25 and MinHash functions support dropping output fields")
+		assert.NoError(t, err)
 	})
 
 	t.Run("drop function field would leave no vector field", func(t *testing.T) {

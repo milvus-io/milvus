@@ -13,15 +13,16 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -134,22 +135,24 @@ func TestCreateCompactionIDBlockUsesIDExpansionFactor(t *testing.T) {
 func TestCompactionViewsExposeTotalSizeAndCollectionTTL(t *testing.T) {
 	ttl := 3 * time.Hour
 	segments := []*SegmentView{{ID: 1, Size: 10}, {ID: 2, Size: 2.5}}
+	forceMergeSegments := newForceMergePlanningSegments(10, 2)
 	tests := []struct {
-		name    string
-		view    CompactionView
-		wantTTL time.Duration
+		name     string
+		view     CompactionView
+		wantSize float64
+		wantTTL  time.Duration
 	}{
-		{name: "single", view: &MixSegmentView{segments: segments, collectionTTL: ttl}, wantTTL: ttl},
-		{name: "clustering", view: &ClusteringSegmentsView{segments: segments, collectionTTL: ttl}, wantTTL: ttl},
-		{name: "force merge", view: &ForceMergeSegmentView{segments: segments, collectionTTL: ttl}, wantTTL: ttl},
-		{name: "level zero", view: &LevelZeroCompactionView{l0Segments: segments}},
-		{name: "bump schema version", view: &BumpSchemaVersionView{segments: segments}},
+		{name: "single", view: &MixSegmentView{segments: segments, collectionTTL: ttl}, wantSize: 12.5, wantTTL: ttl},
+		{name: "clustering", view: &ClusteringSegmentsView{segments: segments, collectionTTL: ttl}, wantSize: 12.5, wantTTL: ttl},
+		{name: "force merge", view: &ForceMergeSegmentView{segments: forceMergeSegments, collectionTTL: ttl}, wantSize: 12, wantTTL: ttl},
+		{name: "level zero", view: &LevelZeroCompactionView{l0Segments: segments}, wantSize: 12.5},
+		{name: "bump schema version", view: &BumpSchemaVersionView{segments: segments}, wantSize: 12.5},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := test.view.GetTotalSize(); got != 12.5 {
-				t.Fatalf("GetTotalSize() = %v, want 12.5", got)
+			if got := test.view.GetTotalSize(); got != test.wantSize {
+				t.Fatalf("GetTotalSize() = %v, want %v", got, test.wantSize)
 			}
 			if got := test.view.GetCollectionTTL(); got != test.wantTTL {
 				t.Fatalf("GetCollectionTTL() = %v, want %v", got, test.wantTTL)
@@ -258,7 +261,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	cView, ok := levelZeroViews[0].(*LevelZeroCompactionView)
 	s.True(ok)
 	s.NotNil(cView)
-	log.Info("view", zap.Any("cView", cView))
+	mlog.Info(context.TODO(), "view", mlog.Any("cView", cView))
 
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
 	s.inspector.EXPECT().enqueueCompaction(mock.Anything).
@@ -301,7 +304,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 	cView, ok := levelZeroViews[0].(*LevelZeroCompactionView)
 	s.True(ok)
 	s.NotNil(cView)
-	log.Info("view", zap.Any("cView", cView))
+	mlog.Info(context.TODO(), "view", mlog.Any("cView", cView))
 
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
 	s.inspector.EXPECT().enqueueCompaction(mock.Anything).
@@ -322,6 +325,14 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 }
 
 func (s *CompactionTriggerManagerSuite) TestManualTriggerSkipExternal() {
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key)
+
+	catalog, records, _, _ := newCompactionTargetTestCatalog(s.T())
+	targetMeta, err := newCompactionTargetMeta(context.Background(), catalog)
+	s.Require().NoError(err)
+	s.meta.compactionTargetMeta = targetMeta
+
 	handler := NewNMockHandler(s.T())
 	handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&collectionInfo{
 		ID: 1,
@@ -339,9 +350,71 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerSkipExternal() {
 	}, nil)
 	s.triggerManager.handler = handler
 
-	_, err := s.triggerManager.ManualTrigger(context.Background(), 1, true, false, 0)
+	targetID, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
+		CollectionID: 1,
+	})
+
 	s.Error(err)
 	s.Contains(err.Error(), "external collection")
+	s.Zero(targetID)
+	s.Empty(records)
+}
+
+func (s *CompactionTriggerManagerSuite) TestManualTriggerRecordsRewriteTargetWhenGuardEnabled() {
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key)
+
+	catalog, records, _, _ := newCompactionTargetTestCatalog(s.T())
+	targetMeta, err := newCompactionTargetMeta(context.Background(), catalog)
+	s.Require().NoError(err)
+	s.meta.compactionTargetMeta = targetMeta
+
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).Return(&collectionInfo{}, nil)
+	s.triggerManager.handler = handler
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(100), nil).Once()
+	s.mockAlloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(200), nil).Once()
+
+	targetID, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
+		CollectionID: s.testLabel.CollectionID,
+		SegmentIds:   []int64{20, 10},
+	})
+
+	s.Require().NoError(err)
+	s.Equal(int64(100), targetID)
+	record := records[100]
+	s.Require().NotNil(record)
+	s.Equal(datapb.TargetIntent_INTENT_REWRITE, record.GetIntent())
+	s.Equal(datapb.TargetState_TARGET_STATE_ACTIVE, record.GetState())
+	s.Equal(uint64(200), record.GetExpectedTS())
+	s.Equal(uint64(200), record.GetActivatedAtTS())
+	segmentIDs, ok := compactionTargetSegmentIDs(record)
+	s.True(ok)
+	s.Equal([]int64{10, 20}, segmentIDs)
+}
+
+func (s *CompactionTriggerManagerSuite) TestManualTriggerRejectsRewriteTargetWhenSnapshotBlocksCollection() {
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key)
+
+	catalog, records, _, _ := newCompactionTargetTestCatalog(s.T())
+	targetMeta, err := newCompactionTargetMeta(context.Background(), catalog)
+	s.Require().NoError(err)
+	s.meta.compactionTargetMeta = targetMeta
+	s.meta.snapshotMeta = createTestSnapshotMetaLoaded(s.T())
+	s.meta.snapshotMeta.SetSnapshotPending(s.testLabel.CollectionID)
+
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).Return(&collectionInfo{}, nil)
+	s.triggerManager.handler = handler
+
+	targetID, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
+		CollectionID: s.testLabel.CollectionID,
+	})
+
+	s.ErrorIs(err, merr.ErrCompactionBlocked)
+	s.Zero(targetID)
+	s.Empty(records)
 }
 
 func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
@@ -542,7 +615,10 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerL0Compaction() {
 		}).Return(nil).Once()
 
 	// Test L0 manual trigger
-	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), s.testLabel.CollectionID, false, true, 0)
+	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
+		CollectionID: s.testLabel.CollectionID,
+		L0Compaction: true,
+	})
 	s.NoError(err)
 	s.Equal(int64(12345), triggerID)
 }
@@ -552,7 +628,9 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerInvalidParams() {
 	handler := NewNMockHandler(s.T())
 	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 	s.triggerManager.handler = handler
-	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), s.testLabel.CollectionID, false, false, 0)
+	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
+		CollectionID: s.testLabel.CollectionID,
+	})
 	s.NoError(err)
 	s.Equal(int64(0), triggerID)
 }
@@ -783,9 +861,11 @@ func (s *CompactionTriggerManagerSuite) TestSubmitForceMergeViewToScheduler() {
 			return nil
 		}).Return(nil).Once()
 
+	segment := newForceMergePlanningSegment(200, 150*1024*1024)
+	segment.NumOfRows = 100
 	view := &ForceMergeSegmentView{
 		label:              s.testLabel,
-		segments:           []*SegmentView{{ID: 200, label: s.testLabel, NumOfRows: 100, Size: 150 * 1024 * 1024}},
+		segments:           []*SegmentInfo{segment},
 		triggerID:          1001,
 		targetSegmentSize:  100 * 1024 * 1024,
 		targetSegmentCount: 999,
@@ -825,9 +905,11 @@ func (s *CompactionTriggerManagerSuite) TestSubmitViewToSchedulerDefensiveReturn
 	}
 
 	makeForceMergeView := func() *ForceMergeSegmentView {
+		segment := newForceMergePlanningSegment(200, 150*1024*1024)
+		segment.NumOfRows = 100
 		return &ForceMergeSegmentView{
 			label:              s.testLabel,
-			segments:           []*SegmentView{{ID: 200, label: s.testLabel, NumOfRows: 100, Size: 150 * 1024 * 1024}},
+			segments:           []*SegmentInfo{segment},
 			triggerID:          1001,
 			targetSegmentSize:  100 * 1024 * 1024,
 			targetSegmentCount: 999,

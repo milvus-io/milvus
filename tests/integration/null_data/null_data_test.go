@@ -23,17 +23,17 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -59,7 +59,7 @@ func getTargetFieldData(fieldName string, fieldDatas []*schemapb.FieldData) *sch
 func (s *NullDataSuite) checkNullableFieldData(fieldName string, fieldDatas []*schemapb.FieldData, start int64) {
 	actual := getTargetFieldData(fieldName, fieldDatas)
 	fieldData := actual.GetScalars().GetLongData().Data
-	validData := actual.GetValidData()
+	validData := typeutil.GetFieldDataValidData(actual)
 	s.Equal(len(validData), len(fieldData))
 	for i, ans := range actual.GetScalars().GetLongData().Data {
 		if ans < start {
@@ -107,15 +107,15 @@ func (s *NullDataSuite) run() {
 	})
 	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.String("reason", createCollectionStatus.GetReason()))
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	fieldsData := make([]*schemapb.FieldData, 0)
 	fieldsData = append(fieldsData, integration.NewInt64FieldDataWithStart(integration.Int64Field, rowNum, start))
@@ -158,7 +158,7 @@ func (s *NullDataSuite) run() {
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		log.Info("ShowSegments result", zap.String("segment", segment.String()))
+		mlog.Info(context.TODO(), "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
 	// create index
@@ -169,7 +169,7 @@ func (s *NullDataSuite) run() {
 		ExtraParams:    integration.ConstructIndexParam(dim, s.indexType, s.metricType),
 	})
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createIndexStatus fail reason", mlog.String("reason", createIndexStatus.GetReason()))
 	}
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
@@ -209,7 +209,7 @@ func (s *NullDataSuite) run() {
 	})
 	s.NoError(err)
 	if loadStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
+		mlog.Warn(context.TODO(), "loadStatus fail reason", mlog.String("reason", loadStatus.GetReason()))
 	}
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	s.WaitForLoad(ctx, collectionName)
@@ -236,7 +236,7 @@ func (s *NullDataSuite) run() {
 		OutputFields:   []string{"nullableFid"},
 	})
 	if queryResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("searchResult fail reason", zap.String("reason", queryResult.GetStatus().GetReason()))
+		mlog.Warn(context.TODO(), "searchResult fail reason", mlog.String("reason", queryResult.GetStatus().GetReason()))
 	}
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode())
@@ -251,6 +251,7 @@ func (s *NullDataSuite) run() {
 		FieldName: nullableFid.GetName(),
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: make([]bool, rowNum),
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{
 						Data: []int64{},
@@ -258,7 +259,6 @@ func (s *NullDataSuite) run() {
 				},
 			},
 		},
-		ValidData: make([]bool, rowNum),
 	}
 	fieldsDataForUpsert = append(fieldsDataForUpsert, nullableFidDataForUpsert)
 	insertResult, err = c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
@@ -289,7 +289,7 @@ func (s *NullDataSuite) run() {
 		ExtraParams:    integration.ConstructIndexParam(dim, s.indexType, s.metricType),
 	})
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createIndexStatus fail reason", mlog.String("reason", createIndexStatus.GetReason()))
 	}
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
@@ -329,7 +329,7 @@ func (s *NullDataSuite) run() {
 	})
 	s.NoError(err)
 	if loadStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
+		mlog.Warn(context.TODO(), "loadStatus fail reason", mlog.String("reason", loadStatus.GetReason()))
 	}
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	s.WaitForLoad(ctx, collectionName)
@@ -352,7 +352,7 @@ func (s *NullDataSuite) run() {
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		log.Info("ShowSegments result", zap.String("segment", segment.String()))
+		mlog.Info(context.TODO(), "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
 	// search
@@ -368,7 +368,7 @@ func (s *NullDataSuite) run() {
 		OutputFields:   []string{"nullableFid"},
 	})
 	if queryResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("searchResult fail reason", zap.String("reason", queryResult.GetStatus().GetReason()))
+		mlog.Warn(context.TODO(), "searchResult fail reason", mlog.String("reason", queryResult.GetStatus().GetReason()))
 	}
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode())
@@ -382,13 +382,12 @@ func (s *NullDataSuite) run() {
 	// 	OutputFields:   []string{"nullableFid"},
 	// })
 	// if exprResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-	// 	log.Warn("searchResult fail reason", zap.String("reason", queryResult.GetStatus().GetReason()))
+	// 	log.Warn("searchResult fail reason", mlog.String("reason", queryResult.GetStatus().GetReason()))
 	// }
 	// s.NoError(err)
 	// s.Equal(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode())
 	// target := getTargetFieldData(nullableFid.Name, exprResult.GetFieldsData())
 	// s.Equal(len(target.GetScalars().GetLongData().GetData()), 1)
-	// s.Equal(len(target.GetValidData()), 1)
 
 	deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 		DbName:         dbName,
@@ -396,7 +395,7 @@ func (s *NullDataSuite) run() {
 		Expr:           integration.Int64Field + " in [1, 2]",
 	})
 	if deleteResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("deleteResult fail reason", zap.String("reason", deleteResult.GetStatus().GetReason()))
+		mlog.Warn(context.TODO(), "deleteResult fail reason", mlog.String("reason", deleteResult.GetStatus().GetReason()))
 	}
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, deleteResult.GetStatus().GetErrorCode())
@@ -413,7 +412,7 @@ func (s *NullDataSuite) run() {
 	err = merr.CheckRPCCall(status, err)
 	s.NoError(err)
 
-	log.Info("TestNullData succeed")
+	mlog.Info(context.TODO(), "TestNullData succeed")
 }
 
 func (s *NullDataSuite) TestNullData_basic() {

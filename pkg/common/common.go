@@ -124,14 +124,25 @@ const (
 	// - JSON path index supports STL_SORT / BITMAP / HYBRID (in addition to
 	//   the existing INVERTED / NGRAM)
 	// - On-disk file format is unchanged from v3
+	//
+	// Scalar index engine version 5:
+	// - FMINDEX scalar index (exact LIKE prefix/infix/suffix on VARCHAR).
+	//   An older QueryNode does not recognize FMINDEX and would fail to load
+	//   such a segment, so creation is gated on the whole cluster reporting >= 5
+	//   (see MinScalarIndexVersionForFMINDEX).
 	MinimalScalarIndexEngineVersion = int32(0)
-	CurrentScalarIndexEngineVersion = int32(4)
-	MaximumScalarIndexEngineVersion = int32(4)
+	CurrentScalarIndexEngineVersion = int32(5)
+	MaximumScalarIndexEngineVersion = int32(5)
 
 	// MinScalarIndexVersionForJsonPathMultiType is the minimum scalar index
 	// engine version that supports STL_SORT / BITMAP / HYBRID on JSON fields.
 	// Below this version, only INVERTED (and NGRAM for VARCHAR) are allowed.
 	MinScalarIndexVersionForJsonPathMultiType = int32(4) //nolint:revive // intentionally "Json" not "JSON" to match JsonCastType / JsonPathKey naming
+
+	// MinScalarIndexVersionForFMINDEX is the minimum scalar index engine version
+	// that recognizes FMINDEX. Creating an FMINDEX while any node still reports a
+	// lower version would break rolling upgrade (old QueryNodes cannot load it).
+	MinScalarIndexVersionForFMINDEX = int32(5)
 )
 
 // ClampScalarIndexVersion clamps the given scalar index version to MaximumScalarIndexEngineVersion.
@@ -315,9 +326,16 @@ const (
 	FieldDescriptionKey = "field.description"
 )
 
+// local format type
+const (
+	LocalFormatRaw    = "raw"
+	LocalFormatVortex = "vortex"
+)
+
 // common properties
 const (
 	MmapEnabledKey             = "mmap.enabled"
+	LocalFormatKey             = "local_format"
 	LoadPriorityKey            = "load_priority"
 	PartitionKeyIsolationKey   = "partitionkey.isolation"
 	FieldSkipLoadKey           = "field.skipLoad"
@@ -689,22 +707,16 @@ func IsNamespaceModePartition(kvs ...*commonpb.KeyValuePair) bool {
 	return GetNamespaceMode(kvs...) == NamespaceModePartition
 }
 
-type namespaceModeError string
-
-func (e namespaceModeError) Error() string {
-	return string(e)
-}
-
 func ValidateNamespaceMode(kvs ...*commonpb.KeyValuePair) error {
 	for _, kv := range kvs {
 		if kv.GetKey() == NamespaceModeKey {
 			if _, ok := normalizeNamespaceMode(kv.GetValue()); !ok {
-				return namespaceModeError("invalid namespace.mode value " + strconv.Quote(kv.GetValue()) + ", valid values: [" + ValidNamespaceModes + "]")
+				return merr.WrapErrParameterInvalidMsg("invalid namespace.mode value %q, valid values: [%s]", kv.GetValue(), ValidNamespaceModes)
 			}
 			return nil
 		}
 		if strings.EqualFold(kv.GetKey(), NamespaceModeKey) {
-			return namespaceModeError("invalid property key " + strconv.Quote(kv.GetKey()) + ", did you mean " + strconv.Quote(NamespaceModeKey) + "?")
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", kv.GetKey(), NamespaceModeKey)
 		}
 	}
 	return nil

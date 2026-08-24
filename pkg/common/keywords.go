@@ -1,5 +1,7 @@
 package common
 
+import "strings"
+
 var FieldNameKeywords = map[string]struct{}{
 	"$meta":              {},
 	"like":               {},
@@ -35,4 +37,17 @@ var FieldNameKeywords = map[string]struct{}{
 	"PHRASE_MATCH":       {},
 	"random_sample":      {},
 	"RANDOM_SAMPLE":      {},
+}
+
+// IsFieldNameKeyword reports whether fieldName is a reserved word that cannot be
+// used as a field name. `null` is matched case-insensitively — any casing of NULL
+// is rejected — to stay consistent with the expression parser, which rejects a
+// bare NULL literal regardless of casing (issue #50882). It is therefore handled
+// here rather than enumerated in FieldNameKeywords; the other keywords match the
+// exact casings listed there.
+func IsFieldNameKeyword(fieldName string) bool {
+	if _, ok := FieldNameKeywords[fieldName]; ok {
+		return true
+	}
+	return strings.EqualFold(fieldName, "null")
 }

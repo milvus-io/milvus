@@ -22,14 +22,13 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -78,7 +77,7 @@ func (broker *CoordinatorBroker) DescribeCollection(ctx context.Context, collect
 	}
 	resp, err := broker.mixCoord.DescribeCollection(ctx, req)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Ctx(ctx).Warn("failed to get collection schema", zap.Error(err))
+		mlog.Warn(ctx, "failed to get collection schema", mlog.Err(err))
 		return nil, err
 	}
 	return resp, nil
@@ -96,7 +95,7 @@ func (broker *CoordinatorBroker) DescribeDatabase(ctx context.Context, dbName st
 	}
 	resp, err := broker.mixCoord.DescribeDatabase(ctx, req)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Ctx(ctx).Warn("failed to describe database", zap.Error(err))
+		mlog.Warn(ctx, "failed to describe database", mlog.Err(err))
 		return nil, err
 	}
 	return resp, nil
@@ -108,20 +107,18 @@ func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, coll
 	if err != nil {
 		return nil, 0, err
 	}
-
-	log := log.Ctx(ctx)
 	replicaNum, err := common.CollectionLevelReplicaNumber(collectionInfo.GetProperties())
 	if err != nil {
-		log.Debug("failed to get collection level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
+		mlog.Debug(context.TODO(), "failed to get collection level load info", mlog.Int64("collectionID", collectionID), mlog.Err(err))
 	} else if replicaNum > 0 {
-		log.Info("get collection level load info", zap.Int64("collectionID", collectionID), zap.Int64("replica_num", replicaNum))
+		mlog.Info(context.TODO(), "get collection level load info", mlog.Int64("collectionID", collectionID), mlog.Int64("replica_num", replicaNum))
 	}
 
 	rgs, err := common.CollectionLevelResourceGroups(collectionInfo.GetProperties())
 	if err != nil {
-		log.Debug("failed to get collection level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
+		mlog.Debug(context.TODO(), "failed to get collection level load info", mlog.Int64("collectionID", collectionID), mlog.Err(err))
 	} else if len(rgs) > 0 {
-		log.Info("get collection level load info", zap.Int64("collectionID", collectionID), zap.Strings("resource_groups", rgs))
+		mlog.Info(context.TODO(), "get collection level load info", mlog.Int64("collectionID", collectionID), mlog.Strings("resource_groups", rgs))
 	}
 
 	if replicaNum <= 0 || len(rgs) == 0 {
@@ -133,18 +130,18 @@ func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, coll
 		if replicaNum <= 0 {
 			replicaNum, err = common.DatabaseLevelReplicaNumber(dbInfo.GetProperties())
 			if err != nil {
-				log.Debug("failed to get database level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
+				mlog.Debug(context.TODO(), "failed to get database level load info", mlog.Int64("collectionID", collectionID), mlog.Err(err))
 			} else if replicaNum > 0 {
-				log.Info("get database level load info", zap.Int64("collectionID", collectionID), zap.Int64("replica_num", replicaNum))
+				mlog.Info(context.TODO(), "get database level load info", mlog.Int64("collectionID", collectionID), mlog.Int64("replica_num", replicaNum))
 			}
 		}
 
 		if len(rgs) == 0 {
 			rgs, err = common.DatabaseLevelResourceGroups(dbInfo.GetProperties())
 			if err != nil {
-				log.Debug("failed to get database level load info", zap.Int64("collectionID", collectionID), zap.Error(err))
+				mlog.Debug(context.TODO(), "failed to get database level load info", mlog.Int64("collectionID", collectionID), mlog.Err(err))
 			} else if len(rgs) > 0 {
-				log.Info("get database level load info", zap.Int64("collectionID", collectionID), zap.Strings("resource_groups", rgs))
+				mlog.Info(context.TODO(), "get database level load info", mlog.Int64("collectionID", collectionID), mlog.Strings("resource_groups", rgs))
 			}
 		}
 	}
@@ -153,14 +150,14 @@ func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, coll
 		if replicaNum <= 0 {
 			replicaNum = paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt64()
 			if replicaNum > 0 {
-				log.Info("get cluster level load info", zap.Int64("collectionID", collectionID), zap.Int64("replica_num", replicaNum))
+				mlog.Info(context.TODO(), "get cluster level load info", mlog.Int64("collectionID", collectionID), mlog.Int64("replica_num", replicaNum))
 			}
 		}
 
 		if len(rgs) == 0 {
 			rgs = paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
 			if len(rgs) > 0 {
-				log.Info("get cluster level load info", zap.Int64("collectionID", collectionID), zap.Strings("resource_groups", rgs))
+				mlog.Info(context.TODO(), "get cluster level load info", mlog.Int64("collectionID", collectionID), mlog.Strings("resource_groups", rgs))
 			}
 		}
 	}
@@ -171,7 +168,6 @@ func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, coll
 func (broker *CoordinatorBroker) GetPartitions(ctx context.Context, collectionID UniqueID) ([]UniqueID, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 	req := &milvuspb.ShowPartitionsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
@@ -181,7 +177,7 @@ func (broker *CoordinatorBroker) GetPartitions(ctx context.Context, collectionID
 	}
 	resp, err := broker.mixCoord.ShowPartitions(ctx, req)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("failed to get partitions", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to get partitions", mlog.Err(err))
 		return nil, err
 	}
 
@@ -191,10 +187,6 @@ func (broker *CoordinatorBroker) GetPartitions(ctx context.Context, collectionID
 func (broker *CoordinatorBroker) GetRecoveryInfo(ctx context.Context, collectionID UniqueID, partitionID UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentBinlogs, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", collectionID),
-		zap.Int64("partitionID", partitionID),
-	)
 
 	getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -205,7 +197,7 @@ func (broker *CoordinatorBroker) GetRecoveryInfo(ctx context.Context, collection
 	}
 	recoveryInfo, err := broker.mixCoord.GetRecoveryInfo(ctx, getRecoveryInfoRequest)
 	if err := merr.CheckRPCCall(recoveryInfo, err); err != nil {
-		log.Warn("get recovery info failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "get recovery info failed", mlog.Err(err))
 		return nil, nil, err
 	}
 
@@ -231,10 +223,6 @@ func (broker *CoordinatorBroker) GetRecoveryInfo(ctx context.Context, collection
 func (broker *CoordinatorBroker) GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", collectionID),
-		zap.Int64s("partitionIDis", partitionIDs),
-	)
 
 	getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequestV2{
 		Base: commonpbutil.NewMsgBase(
@@ -246,7 +234,7 @@ func (broker *CoordinatorBroker) GetRecoveryInfoV2(ctx context.Context, collecti
 	recoveryInfo, err := broker.mixCoord.GetRecoveryInfoV2(ctx, getRecoveryInfoRequest)
 
 	if err := merr.CheckRPCCall(recoveryInfo, err); err != nil {
-		log.Warn("get recovery info failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "get recovery info failed", mlog.Err(err))
 		return nil, nil, err
 	}
 
@@ -257,10 +245,6 @@ func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...Uniq
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
-	log := log.Ctx(ctx).With(
-		zap.Int64s("segments", ids),
-	)
-
 	getSegmentInfo := func(ids []UniqueID) (*datapb.GetSegmentInfoResponse, error) {
 		req := &datapb.GetSegmentInfoRequest{
 			SegmentIDs:       ids,
@@ -268,18 +252,18 @@ func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...Uniq
 		}
 		resp, err := broker.mixCoord.GetSegmentInfo(ctx, req)
 		if err := merr.CheckRPCCall(resp, err); err != nil {
-			log.Warn("failed to get segment info from DataCoord", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to get segment info from DataCoord", mlog.Err(err))
 			return nil, err
 		}
 
 		if len(resp.Infos) == 0 {
-			log.Warn("No such segment in DataCoord")
+			mlog.Warn(context.TODO(), "No such segment in DataCoord")
 			return nil, merr.WrapErrSegmentNotFound(ids[0], "no such segment in DataCoord")
 		}
 
 		err = binlog.DecompressMultiBinLogs(resp.GetInfos())
 		if err != nil {
-			log.Warn("failed to DecompressMultiBinLogs", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to DecompressMultiBinLogs", mlog.Err(err))
 			return nil, err
 		}
 
@@ -307,11 +291,6 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", collectionID),
-		zap.Int64s("segmentIDs", segmentIDs),
-	)
-
 	// during rolling upgrade, query coord may connect to datacoord with version 2.2, which will return merr.ErrServiceUnimplemented
 	// we add retry here to retry the request until context done, and if new data coord start up, it will success
 	var resp *indexpb.GetIndexInfoResponse
@@ -329,14 +308,14 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 	})
 
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("failed to get segment index info", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to get segment index info", mlog.Err(err))
 		return nil, err
 	}
 
 	if resp.GetSegmentInfo() == nil {
 		err = merr.WrapErrIndexNotFoundForSegments(segmentIDs)
-		log.Warn("failed to get segments index info",
-			zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to get segments index info",
+			mlog.Err(err))
 		return nil, err
 	}
 
@@ -384,16 +363,15 @@ func (broker *CoordinatorBroker) describeIndex(ctx context.Context, collectionID
 	})
 
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Error("failed to fetch index meta",
-			zap.Int64("collection", collectionID),
-			zap.Error(err))
+		mlog.Error(context.TODO(), "failed to fetch index meta",
+			mlog.Int64("collection", collectionID),
+			mlog.Err(err))
 		return nil, err
 	}
 	return resp.GetIndexInfos(), nil
 }
 
 func (broker *CoordinatorBroker) ListIndexes(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error) {
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
@@ -404,10 +382,10 @@ func (broker *CoordinatorBroker) ListIndexes(ctx context.Context, collectionID U
 	err = merr.CheckRPCCall(resp, err)
 	if err != nil {
 		if errors.Is(err, merr.ErrServiceUnimplemented) {
-			log.Warn("datacoord does not implement ListIndex API fallback to DescribeIndex")
+			mlog.Warn(context.TODO(), "datacoord does not implement ListIndex API fallback to DescribeIndex")
 			return broker.describeIndex(ctx, collectionID)
 		}
-		log.Warn("failed to fetch index meta", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to fetch index meta", mlog.Err(err))
 		return nil, err
 	}
 

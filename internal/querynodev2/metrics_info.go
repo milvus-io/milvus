@@ -21,9 +21,6 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/samber/lo"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
@@ -31,8 +28,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -80,66 +77,64 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		return true
 	})
 
-	collections := node.manager.Collection.ListWithName()
 	nodeID := fmt.Sprint(node.GetNodeID())
+	collectionIDs := node.manager.Collection.List()
+
+	growingStatsByCollection := make(map[int64]segmentMetricStats, len(collectionIDs))
+	node.manager.Segment.RangeBy(func(seg segments.Segment) bool {
+		collectionID := seg.Collection()
+		stats := growingStatsByCollection[collectionID]
+		stats.size += seg.MemSize()
+		stats.rows += seg.RowNum()
+		growingStatsByCollection[collectionID] = stats
+		return true
+	}, segments.WithType(segments.SegmentTypeGrowing))
 
 	var totalGrowingSize int64
-	growingSegments := node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing))
-	growingGroupByCollection := lo.GroupBy(growingSegments, func(seg segments.Segment) int64 {
-		return seg.Collection()
-	})
-	for collection, name := range collections {
+	for _, collection := range collectionIDs {
 		coll := node.manager.Collection.Get(collection)
 		if coll == nil {
 			continue
 		}
-		segs := growingGroupByCollection[collection]
-		size := lo.SumBy(segs, func(seg segments.Segment) int64 {
-			return seg.MemSize()
-		})
-		totalGrowingSize += size
+		stats := growingStatsByCollection[collection]
+		totalGrowingSize += stats.size
 		metrics.QueryNodeEntitiesSize.WithLabelValues(nodeID, fmt.Sprint(collection),
-			segments.SegmentTypeGrowing.String()).Set(float64(size))
-
-		numEntities := lo.SumBy(segs, func(seg segments.Segment) int64 {
-			return seg.RowNum()
-		})
+			segments.SegmentTypeGrowing.String()).Set(float64(stats.size))
 
 		metrics.QueryNodeNumEntities.WithLabelValues(
 			coll.GetDBName(),
-			name,
+			coll.Schema().GetName(),
 			nodeID,
 			fmt.Sprint(collection),
 			segments.SegmentTypeGrowing.String(),
-		).Set(float64(numEntities))
+		).Set(float64(stats.rows))
 	}
 
-	sealedSegments := node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed))
-	sealedGroupByCollection := lo.GroupBy(sealedSegments, func(seg segments.Segment) int64 {
-		return seg.Collection()
-	})
-	for collection, name := range collections {
+	sealedStatsByCollection := make(map[int64]segmentMetricStats, len(collectionIDs))
+	node.manager.Segment.RangeBy(func(seg segments.Segment) bool {
+		collectionID := seg.Collection()
+		stats := sealedStatsByCollection[collectionID]
+		stats.size += seg.MemSize()
+		stats.rows += seg.RowNum()
+		sealedStatsByCollection[collectionID] = stats
+		return true
+	}, segments.WithType(segments.SegmentTypeSealed))
+	for _, collection := range collectionIDs {
 		coll := node.manager.Collection.Get(collection)
 		if coll == nil {
 			continue
 		}
-		segs := sealedGroupByCollection[collection]
-		size := lo.SumBy(segs, func(seg segments.Segment) int64 {
-			return seg.MemSize()
-		})
-		metrics.QueryNodeEntitiesSize.WithLabelValues(fmt.Sprint(node.GetNodeID()),
-			fmt.Sprint(collection), segments.SegmentTypeSealed.String()).Set(float64(size))
-		numEntities := lo.SumBy(segs, func(seg segments.Segment) int64 {
-			return seg.RowNum()
-		})
+		stats := sealedStatsByCollection[collection]
+		metrics.QueryNodeEntitiesSize.WithLabelValues(nodeID, fmt.Sprint(collection),
+			segments.SegmentTypeSealed.String()).Set(float64(stats.size))
 
 		metrics.QueryNodeNumEntities.WithLabelValues(
 			coll.GetDBName(),
-			name,
+			coll.Schema().GetName(),
 			nodeID,
 			fmt.Sprint(collection),
 			segments.SegmentTypeSealed.String(),
-		).Set(float64(numEntities))
+		).Set(float64(stats.rows))
 	}
 
 	deleteBufferNum := make(map[int64]int64)
@@ -165,7 +160,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		LoadedBinlogSize:    node.manager.Segment.GetLoadedBinlogSize(),
 		Effect: metricsinfo.NodeEffect{
 			NodeID:        node.GetNodeID(),
-			CollectionIDs: lo.Keys(collections),
+			CollectionIDs: collectionIDs,
 		},
 		DeleteBufferInfo: metricsinfo.DeleteBufferInfo{
 			CollectionDeleteBufferNum:  deleteBufferNum,
@@ -173,6 +168,11 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		},
 		StreamingQuota: getStreamingQuotaMetrics(),
 	}, nil
+}
+
+type segmentMetricStats struct {
+	size int64
+	rows int64
 }
 
 // getStreamingQuotaMetrics returns the streaming quota metrics of the QueryNode.
@@ -195,14 +195,14 @@ func getStreamingQuotaMetrics() *metricsinfo.StreamingQuotaMetrics {
 }
 
 func getCollectionMetrics(node *QueryNode) (*metricsinfo.QueryNodeCollectionMetrics, error) {
-	allSegments := node.manager.Segment.GetBy()
 	ret := &metricsinfo.QueryNodeCollectionMetrics{
 		CollectionRows: make(map[int64]int64),
 	}
-	for _, segment := range allSegments {
+	node.manager.Segment.RangeBy(func(segment segments.Segment) bool {
 		collectionID := segment.Collection()
 		ret.CollectionRows[collectionID] += segment.RowNum()
-	}
+		return true
+	})
 	return ret, nil
 }
 
@@ -211,7 +211,7 @@ func getChannelJSON(node *QueryNode, collectionID int64) string {
 	stats := node.pipelineManager.GetChannelStats(collectionID)
 	ret, err := json.Marshal(stats)
 	if err != nil {
-		log.Warn("failed to marshal channels", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to marshal channels", mlog.Err(err))
 		return ""
 	}
 	return string(ret)
@@ -253,7 +253,7 @@ func getSegmentJSON(node *QueryNode, collectionID int64) string {
 
 	ret, err := json.Marshal(ms)
 	if err != nil {
-		log.Warn("failed to marshal segments", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to marshal segments", mlog.Err(err))
 		return ""
 	}
 	return string(ret)
@@ -266,12 +266,12 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 
 	usedDiskGB, totalDiskGB, err := hardware.GetDiskUsage(paramtable.Get().LocalStorageCfg.Path.GetValue())
 	if err != nil {
-		log.Ctx(ctx).Warn("get disk usage failed", zap.Error(err))
+		mlog.Warn(ctx, "get disk usage failed", mlog.Err(err))
 	}
 
 	ioWait, err := hardware.GetIOWait()
 	if err != nil {
-		log.Ctx(ctx).Warn("get iowait failed", zap.Error(err))
+		mlog.Warn(ctx, "get iowait failed", mlog.Err(err))
 	}
 
 	// Get jemalloc memory statistics

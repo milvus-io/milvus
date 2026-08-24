@@ -28,7 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -81,7 +81,7 @@ func (s *ReplicaTestSuit) initCollection(collectionName string, replica int, cha
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	s.True(merr.Ok(loadStatus))
 	s.WaitForLoad(ctx, collectionName)
-	log.Info("initCollection Done")
+	mlog.Info(context.TODO(), "initCollection Done")
 }
 
 func (s *ReplicaTestSuit) TestNodeDownOnSingleReplica() {
@@ -96,7 +96,7 @@ func (s *ReplicaTestSuit) TestNodeDownOnSingleReplica() {
 		for {
 			select {
 			case <-stopSearchCh:
-				log.Info("stop search")
+				mlog.Info(context.TODO(), "stop search")
 				return
 			default:
 				expr := fmt.Sprintf("%s > 0", integration.Int64Field)
@@ -150,7 +150,7 @@ func (s *ReplicaTestSuit) TestNodeDownOnMultiReplica() {
 		for {
 			select {
 			case <-stopSearchCh:
-				log.Info("stop search")
+				mlog.Info(context.TODO(), "stop search")
 				return
 			default:
 				expr := fmt.Sprintf("%s > 0", integration.Int64Field)

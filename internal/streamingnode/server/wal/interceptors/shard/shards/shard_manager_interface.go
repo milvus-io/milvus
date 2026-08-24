@@ -2,13 +2,13 @@ package shards
 
 import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 type ShardManager interface {
-	log.WithLogger
+	mlog.WithLogger
 
 	Channel() types.PChannelInfo
 

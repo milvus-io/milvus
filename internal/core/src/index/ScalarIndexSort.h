@@ -110,6 +110,11 @@ class ScalarIndexSort : public ScalarIndex<T> {
     const TargetBitmap
     IsNull() override;
 
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<T>::IsNotNull;
+
     TargetBitmap
     IsNotNull() override;
 
@@ -166,7 +171,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     const bool
     HasRawData() const override {
-        return true;
+        return !is_nested_index_ && !is_array_field_;
     }
 
     void
@@ -180,16 +185,6 @@ class ScalarIndexSort : public ScalarIndex<T> {
     ShouldSkip(const T lower_value, const T upper_value, const OpType op);
 
  public:
-    const IndexStructure<T>*
-    GetData() {
-        return data_ptr_;
-    }
-
-    bool
-    IsBuilt() const {
-        return is_built_;
-    }
-
     void
     LoadWithoutAssemble(const BinarySet& binary_set,
                         const Config& config) override;
@@ -253,6 +248,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
     int64_t field_id_ = 0;
 
     bool is_nested_index_ = false;
+    bool is_array_field_ = false;
     bool is_built_ = false;
     Config config_;
     // idx_to_offsets: maps row_id → sorted offset.

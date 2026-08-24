@@ -17,15 +17,14 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -172,16 +171,16 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 	for _, blob := range blobs {
 		binlogReader, err := NewBinlogReader(blob.Value)
 		if err != nil {
-			log.Warn("failed to read binlog",
-				zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to read binlog",
+				mlog.Err(err))
 			return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
 		}
 		dataType := binlogReader.PayloadDataType
 
 		//desc, err := binlogReader.readDescriptorEvent()
 		//if err != nil {
-		//	log.Warn("failed to read descriptor event",
-		//		zap.Error(err))
+		//	mlog.Warn(context.TODO(), "failed to read descriptor event",
+		//		mlog.Err(err))
 		//	return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
 		//}
 		desc := binlogReader.descriptorEvent
@@ -210,8 +209,8 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 		for {
 			eventReader, err := binlogReader.NextEventReader()
 			if err != nil {
-				log.Warn("failed to get next event reader",
-					zap.Error(err))
+				mlog.Warn(context.TODO(), "failed to get next event reader",
+					mlog.Err(err))
 				binlogReader.Close()
 				return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
 			}
@@ -224,8 +223,8 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 				// todo: valid_data may need to check when create index
 				content, _, err := eventReader.GetByteFromPayload()
 				if err != nil {
-					log.Warn("failed to get byte from payload",
-						zap.Error(err))
+					mlog.Warn(context.TODO(), "failed to get byte from payload",
+						mlog.Err(err))
 					eventReader.Close()
 					binlogReader.Close()
 					return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
@@ -242,7 +241,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 			case schemapb.DataType_String:
 				content, _, err := eventReader.GetStringFromPayload()
 				if err != nil {
-					log.Warn("failed to get string from payload", zap.Error(err))
+					mlog.Warn(context.TODO(), "failed to get string from payload", mlog.Err(err))
 					eventReader.Close()
 					binlogReader.Close()
 					return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err

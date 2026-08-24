@@ -46,9 +46,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -56,7 +56,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -83,7 +83,6 @@ func ensureContext(ctx context.Context) error {
 // RefreshExternalCollectionTask handles updating external collection segments
 type RefreshExternalCollectionTask struct {
 	ctx context.Context
-
 	req *datapb.RefreshExternalCollectionTaskRequest
 	tr  *timerecord.TimeRecorder
 
@@ -93,6 +92,12 @@ type RefreshExternalCollectionTask struct {
 	// Cached parsed spec (populated in PreExecute, reused in Execute)
 	parsedSpec *externalspec.ExternalSpec
 	columns    []string
+
+	milvusTableSourcePKFieldMu sync.Mutex
+	milvusTableSourcePKField   *schemapb.FieldSchema
+
+	milvusTableSourceDeltalogsMu sync.Mutex
+	milvusTableSourceDeltalogs   map[string][]*datapb.FieldBinlog
 
 	// Result after execution — tracked separately for correct response building
 	keptSegmentIDs  []int64               // IDs of current segments that were kept unchanged
@@ -128,9 +133,9 @@ func (t *RefreshExternalCollectionTask) Name() string {
 
 func (t *RefreshExternalCollectionTask) OnEnqueue(ctx context.Context) error {
 	t.tr.RecordSpan()
-	log.Ctx(ctx).Info("RefreshExternalCollectionTask enqueued",
-		zap.Int64("taskID", t.req.GetTaskID()),
-		zap.Int64("collectionID", t.req.GetCollectionID()))
+	mlog.Info(ctx, "RefreshExternalCollectionTask enqueued",
+		mlog.Int64("taskID", t.req.GetTaskID()),
+		mlog.Int64("collectionID", t.req.GetCollectionID()))
 	return nil
 }
 
@@ -159,9 +164,9 @@ func (t *RefreshExternalCollectionTask) PreExecute(ctx context.Context) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
-	log.Ctx(ctx).Info("RefreshExternalCollectionTask PreExecute",
-		zap.Int64("taskID", t.req.GetTaskID()),
-		zap.Int64("collectionID", t.req.GetCollectionID()))
+	mlog.Info(ctx, "RefreshExternalCollectionTask PreExecute",
+		mlog.Int64("taskID", t.req.GetTaskID()),
+		mlog.Int64("collectionID", t.req.GetCollectionID()))
 
 	if t.req == nil {
 		return merr.WrapErrParameterInvalidMsg("request is nil")
@@ -181,8 +186,22 @@ func (t *RefreshExternalCollectionTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return merr.Wrap(err, "failed to parse external spec")
 	}
+	if t.req.GetTargetRowsPerSegment() == 0 {
+		t.req.TargetRowsPerSegment = paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
+	}
+	if t.req.GetTargetRowsPerSegment() <= 0 {
+		return merr.WrapErrParameterInvalidMsg("target rows per segment must be positive")
+	}
 	t.parsedSpec = spec
-	t.columns = packed.GetColumnNamesFromSchema(t.req.GetSchema())
+	schema := proto.Clone(t.req.GetSchema()).(*schemapb.CollectionSchema)
+	if schema.GetExternalSource() == "" {
+		schema.ExternalSource = t.req.GetExternalSource()
+	}
+	if schema.GetExternalSpec() == "" {
+		schema.ExternalSpec = t.req.GetExternalSpec()
+	}
+	t.req.Schema = schema
+	t.columns = packed.GetColumnNamesFromSchema(schema)
 
 	return nil
 }
@@ -191,10 +210,9 @@ func (t *RefreshExternalCollectionTask) Execute(ctx context.Context) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
-	log := log.Ctx(ctx)
-	log.Info("RefreshExternalCollectionTask Execute",
-		zap.Int64("taskID", t.req.GetTaskID()),
-		zap.Int64("collectionID", t.req.GetCollectionID()))
+	mlog.Info(ctx, "RefreshExternalCollectionTask Execute",
+		mlog.FieldTaskID(t.req.GetTaskID()),
+		mlog.FieldCollectionID(t.req.GetCollectionID()))
 
 	// Initialize pre-allocated segment IDs from request
 	if t.req.GetPreAllocatedSegmentIds() == nil {
@@ -204,10 +222,12 @@ func (t *RefreshExternalCollectionTask) Execute(ctx context.Context) error {
 	t.preallocatedIDRange = t.req.GetPreAllocatedSegmentIds()
 	t.nextAllocID = t.preallocatedIDRange.Begin
 
-	log.Info("Initialized pre-allocated segment ID range",
-		zap.Int64("idBegin", t.preallocatedIDRange.Begin),
-		zap.Int64("idEnd", t.preallocatedIDRange.End),
-		zap.Int64("count", t.preallocatedIDRange.End-t.preallocatedIDRange.Begin))
+	mlog.Info(ctx, "Initialized pre-allocated segment ID range",
+		mlog.FieldTaskID(t.req.GetTaskID()),
+		mlog.FieldCollectionID(t.req.GetCollectionID()),
+		mlog.Int64("idBegin", t.preallocatedIDRange.Begin),
+		mlog.Int64("idEnd", t.preallocatedIDRange.End),
+		mlog.Int64("count", t.preallocatedIDRange.End-t.preallocatedIDRange.Begin))
 
 	// Fetch fragments from external source
 	newFragments, err := t.fetchFragmentsFromExternalSource(ctx)
@@ -238,12 +258,10 @@ func (t *RefreshExternalCollectionTask) fetchFragmentsFromExternalSource(ctx con
 		return nil, merr.WrapErrParameterMissingMsg("explore manifest path is required but not provided")
 	}
 
-	log.Ctx(ctx).Info("reading file list from explore manifest",
-		zap.String("manifestPath", manifestPath),
-		zap.Int64("fileIndexBegin", t.req.GetFileIndexBegin()),
-		zap.Int64("fileIndexEnd", t.req.GetFileIndexEnd()))
-
-	targetRowsPerSegment := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
+	mlog.Info(ctx, "reading file list from explore manifest",
+		mlog.String("manifestPath", manifestPath),
+		mlog.Int64("fileIndexBegin", t.req.GetFileIndexBegin()),
+		mlog.Int64("fileIndexEnd", t.req.GetFileIndexEnd()))
 
 	return packed.FetchFragmentsFromExternalSourceWithRange(
 		ctx,
@@ -257,7 +275,7 @@ func (t *RefreshExternalCollectionTask) fetchFragmentsFromExternalSource(ctx con
 		packed.ExternalFetchOptions{
 			CollectionID: t.req.GetCollectionID(),
 			ExternalSpec: t.req.GetExternalSpec(),
-			RowLimit:     targetRowsPerSegment,
+			RowLimit:     t.req.GetTargetRowsPerSegment(),
 		},
 	)
 }
@@ -266,10 +284,10 @@ func (t *RefreshExternalCollectionTask) PostExecute(ctx context.Context) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
-	log.Ctx(ctx).Info("RefreshExternalCollectionTask PostExecute",
-		zap.Int64("taskID", t.req.GetTaskID()),
-		zap.Int64("collectionID", t.req.GetCollectionID()),
-		zap.Int("updatedSegments", len(t.updatedSegments)))
+	mlog.Info(ctx, "RefreshExternalCollectionTask PostExecute",
+		mlog.Int64("taskID", t.req.GetTaskID()),
+		mlog.Int64("collectionID", t.req.GetCollectionID()),
+		mlog.Int("updatedSegments", len(t.updatedSegments)))
 	return nil
 }
 
@@ -285,9 +303,8 @@ func (t *RefreshExternalCollectionTask) GetKeptSegmentIDs() []int64 {
 	return t.keptSegmentIDs
 }
 
-// fragmentKey generates a unique key for a fragment using its FilePath and row range
-// This composite key ensures fragments from the same file with different row ranges
-// are treated as distinct entities, which is critical for correct data mapping
+// fragmentKey identifies the L1 data fragment. Delete overlays are handled as
+// manifest-only updates so L0 changes do not force a new target segment ID.
 func fragmentKey(f packed.Fragment) string {
 	return fmt.Sprintf("%s:%d:%d", f.FilePath, f.StartRow, f.EndRow)
 }
@@ -306,7 +323,10 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
-	log := log.Ctx(ctx)
+	taskLog := mlog.With(
+		mlog.FieldTaskID(t.req.GetTaskID()),
+		mlog.FieldCollectionID(t.req.GetCollectionID()),
+	)
 	t.keptSegmentIDs = nil
 	t.updatedSegments = nil
 
@@ -314,15 +334,27 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 	// This is necessary because a single file can be split into multiple fragments
 	// with different row ranges, and they must be tracked independently
 	newFragmentMap := make(map[string]packed.Fragment)
+	inputFilePaths := make(map[string]struct{})
+	var inputRows int64
 	for _, f := range newFragments {
 		key := fragmentKey(f)
 		newFragmentMap[key] = f
+		inputRows += f.RowCount
+		if f.FilePath != "" {
+			inputFilePaths[f.FilePath] = struct{}{}
+		}
 	}
 
 	// Track which fragments are used by kept segments (use composite key)
 	usedFragments := make(map[string]bool)
 	var keptSegments []*datapb.SegmentInfo
 	var patchedSegments []*datapb.SegmentInfo
+	// Reason counters count baseline segments. A segment can increment both
+	// patch counters when deltalogs and missing columns are refreshed together.
+	removedFragmentSegments := 0
+	missingFunctionOutputSegments := 0
+	deltalogRefreshedSegments := 0
+	missingColumnPatchedSegments := 0
 
 	var outputColumns []string
 	if t.hasFunctions() {
@@ -340,25 +372,31 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		}
 		fragments := currentSegmentFragments[seg.GetID()]
 		allFragmentsExist := true
+		matchedNewFragments := make([]packed.Fragment, 0, len(fragments))
 
 		// Check if all fragments of this segment still exist
 		for _, f := range fragments {
 			key := fragmentKey(f)
-			if _, exists := newFragmentMap[key]; !exists {
+			newFragment, exists := newFragmentMap[key]
+			if !exists {
 				allFragmentsExist = false
-				log.Info("Fragment removed from segment",
-					zap.Int64("segmentID", seg.GetID()),
-					zap.String("filePath", f.FilePath),
-					zap.Int64("startRow", f.StartRow),
-					zap.Int64("endRow", f.EndRow))
+				removedFragmentSegments++
+				taskLog.Info(ctx, "Fragment removed from segment",
+					mlog.FieldSegmentID(seg.GetID()),
+					mlog.String("updateReason", "removed_fragment"),
+					mlog.String("filePath", f.FilePath),
+					mlog.Int64("startRow", f.StartRow),
+					mlog.Int64("endRow", f.EndRow))
 				break
 			}
+			matchedNewFragments = append(matchedNewFragments, newFragment)
 		}
 
 		if !allFragmentsExist {
 			// Segment invalidated - its remaining fragments become orphans
-			log.Info("Segment invalidated due to removed fragments",
-				zap.Int64("segmentID", seg.GetID()))
+			taskLog.Info(ctx, "Segment invalidated due to removed fragments",
+				mlog.FieldSegmentID(seg.GetID()),
+				mlog.String("updateReason", "removed_fragment"))
 			continue
 		}
 
@@ -370,14 +408,55 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			}
 			if !hasOutputs {
 				reusableSegment = false
-				log.Info("Segment invalidated due to missing function output columns",
-					zap.Int64("segmentID", seg.GetID()),
-					zap.String("manifestPath", seg.GetManifestPath()))
+				missingFunctionOutputSegments++
+				taskLog.Info(ctx, "Segment invalidated due to missing function output columns",
+					mlog.FieldSegmentID(seg.GetID()),
+					mlog.String("updateReason", "missing_function_output_columns"),
+					mlog.String("manifestPath", seg.GetManifestPath()))
 			}
 		}
 
 		if !reusableSegment {
 			continue
+		}
+
+		missingColumns := missingExternalColumns(seg, t.req.GetSchema())
+		shouldRefreshDeltalogs, err := t.shouldRefreshMilvusTableDeltalogs(seg, fragments, matchedNewFragments)
+		if err != nil {
+			return nil, err
+		}
+		var patchedSegment *datapb.SegmentInfo
+		if shouldRefreshDeltalogs {
+			updatedSegment, err := t.refreshMilvusTableSegmentManifest(ctx, seg, matchedNewFragments)
+			if err != nil {
+				return nil, err
+			}
+			patchedSegment = updatedSegment
+			deltalogRefreshedSegments++
+			taskLog.Info(ctx, "Segment kept with refreshed milvus-table deltalogs",
+				mlog.FieldSegmentID(seg.GetID()),
+				mlog.String("updateReason", "refreshed_milvus_table_deltalogs"),
+				mlog.String("oldManifestPath", seg.GetManifestPath()),
+				mlog.String("newManifestPath", updatedSegment.GetManifestPath()))
+		}
+
+		if len(missingColumns) > 0 {
+			segmentToPatch := seg
+			patchFragments := fragments
+			if patchedSegment != nil {
+				segmentToPatch = patchedSegment
+				patchFragments = matchedNewFragments
+			}
+			patchedWithColumns, err := t.patchSegmentForMissingColumns(ctx, segmentToPatch, patchFragments, missingColumns)
+			if err != nil {
+				return nil, err
+			}
+			patchedSegment = patchedWithColumns
+			missingColumnPatchedSegments++
+			taskLog.Info(ctx, "Segment patched with missing external columns",
+				mlog.FieldSegmentID(seg.GetID()),
+				mlog.String("updateReason", "missing_external_columns"),
+				mlog.Strings("missingColumns", missingColumns))
 		}
 
 		for _, f := range fragments {
@@ -387,21 +466,14 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			key := fragmentKey(f)
 			usedFragments[key] = true
 		}
-		missingColumns := missingExternalColumns(seg, t.req.GetSchema())
-		if len(missingColumns) == 0 {
+		if patchedSegment == nil {
 			// Keep this segment unchanged
 			keptSegments = append(keptSegments, seg)
-			log.Debug("Segment kept unchanged",
-				zap.Int64("segmentID", seg.GetID()))
+			taskLog.Debug(ctx, "Segment kept unchanged",
+				mlog.FieldSegmentID(seg.GetID()),
+				mlog.String("updateReason", "unchanged"))
 		} else {
-			patchedSegment, err := t.patchSegmentForMissingColumns(ctx, seg, fragments, missingColumns)
-			if err != nil {
-				return nil, err
-			}
 			patchedSegments = append(patchedSegments, patchedSegment)
-			log.Info("Segment patched with missing external columns",
-				zap.Int64("segmentID", seg.GetID()),
-				zap.Strings("missingColumns", missingColumns))
 		}
 	}
 
@@ -434,11 +506,32 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 
 	// Visible result contains unchanged kept segments plus upsert segments.
 	result := append(keptSegments, updatedSegments...)
+	// Compare physical source-fragment rows with physical output-segment rows.
+	// The delta is diagnostic only; segment validation remains authoritative.
+	var outputRows int64
+	for _, segment := range result {
+		if segment != nil {
+			outputRows += segment.GetNumOfRows()
+		}
+	}
 
-	log.Info("Segment organization complete",
-		zap.Int("keptSegments", len(keptSegments)),
-		zap.Int("newSegments", len(createdSegments)),
-		zap.Int("totalSegments", len(result)))
+	taskLog.Info(ctx, "Segment organization complete",
+		mlog.Int("inputFiles", len(inputFilePaths)),
+		mlog.Int("inputFragments", len(newFragments)),
+		mlog.Int64("inputRows", inputRows),
+		mlog.Int("ownedSegments", len(t.req.GetCurrentSegments())),
+		mlog.Int("keptSegments", len(keptSegments)),
+		mlog.Int("patchedSegments", len(patchedSegments)),
+		mlog.Int("newSegments", len(createdSegments)),
+		mlog.Int("invalidatedSegments", removedFragmentSegments+missingFunctionOutputSegments),
+		mlog.Int("orphanFragments", len(orphanFragments)),
+		mlog.Int("removedFragmentSegments", removedFragmentSegments),
+		mlog.Int("missingFunctionOutputSegments", missingFunctionOutputSegments),
+		mlog.Int("deltalogRefreshedSegments", deltalogRefreshedSegments),
+		mlog.Int("missingColumnPatchedSegments", missingColumnPatchedSegments),
+		mlog.Int("totalSegments", len(result)),
+		mlog.Int64("outputRows", outputRows),
+		mlog.Int64("rowDelta", outputRows-inputRows))
 
 	return result, nil
 }
@@ -607,8 +700,10 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
-
-	log := log.Ctx(ctx)
+	taskLog := mlog.With(
+		mlog.FieldTaskID(t.req.GetTaskID()),
+		mlog.FieldCollectionID(t.req.GetCollectionID()),
+	)
 
 	// Calculate total rows
 	var totalRows int64
@@ -627,55 +722,6 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			fmt.Sprintf("external source has %d fragments but zero total rows", len(fragments)))
 	}
 
-	// Get target rows per segment from configuration
-	targetRowsPerSegment := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
-	if totalRows < targetRowsPerSegment {
-		targetRowsPerSegment = totalRows
-	}
-
-	numSegments := (totalRows + targetRowsPerSegment - 1) / targetRowsPerSegment
-	if numSegments == 0 {
-		numSegments = 1
-	}
-
-	avgRowsPerSegment := totalRows / numSegments
-
-	log.Info("Balancing fragments to segments",
-		zap.Int("numFragments", len(fragments)),
-		zap.Int64("totalRows", totalRows),
-		zap.Int64("numSegments", numSegments),
-		zap.Int64("avgRowsPerSegment", avgRowsPerSegment))
-
-	// Sort fragments by row count descending for better bin-packing
-	sortedFragments := make([]packed.Fragment, len(fragments))
-	copy(sortedFragments, fragments)
-	sort.Slice(sortedFragments, func(i, j int) bool {
-		return sortedFragments[i].RowCount > sortedFragments[j].RowCount
-	})
-
-	// Initialize segment bins
-	type segmentBin struct {
-		fragments []packed.Fragment
-		rowCount  int64
-	}
-	bins := make([]segmentBin, numSegments)
-
-	// Greedy bin-packing: assign each fragment to the bin with lowest current row count
-	for _, f := range sortedFragments {
-		if err := ensureContext(ctx); err != nil {
-			return nil, err
-		}
-		// Find bin with minimum row count
-		minIdx := 0
-		for i := 1; i < len(bins); i++ {
-			if bins[i].rowCount < bins[minIdx].rowCount {
-				minIdx = i
-			}
-		}
-		bins[minIdx].fragments = append(bins[minIdx].fragments, f)
-		bins[minIdx].rowCount += f.RowCount
-	}
-
 	// Phase 1: Allocate segment IDs (sequential, lightweight)
 	type segmentWork struct {
 		segmentID   int64
@@ -684,13 +730,14 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 		fragments   []packed.Fragment
 	}
 	var works []segmentWork
-	for _, bin := range bins {
-		if len(bin.fragments) == 0 {
-			continue
-		}
+	isMilvusTableVirtualPKTask := t.parsedSpec != nil &&
+		t.parsedSpec.Format == externalspec.FormatMilvusTable &&
+		!packed.HasExternalPrimaryKey(t.req.GetSchema())
+	isMilvusTableTask := t.parsedSpec != nil && t.parsedSpec.Format == externalspec.FormatMilvusTable
+	appendWork := func(rowCount int64, fragments []packed.Fragment) error {
 		// Each segment needs 2 IDs: one for segment, one for fake binlog logID
 		if t.nextAllocID+1 >= t.preallocatedIDRange.End {
-			return nil, merr.WrapErrParameterInvalidMsg("insufficient pre-allocated IDs: need 2 more but only have %d IDs in range [%d, %d)",
+			return merr.WrapErrParameterInvalidMsg("insufficient pre-allocated IDs: need 2 more but only have %d IDs in range [%d, %d)",
 				t.preallocatedIDRange.End-t.nextAllocID,
 				t.preallocatedIDRange.Begin,
 				t.preallocatedIDRange.End)
@@ -698,22 +745,108 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 		segmentID := t.nextAllocID
 		binlogLogID := t.nextAllocID + 1
 		t.nextAllocID += 2
+		workFragments := fragments
+		if t.parsedSpec != nil && t.parsedSpec.Format == externalspec.FormatMilvusTable {
+			var err error
+			workFragments, err = t.prepareMilvusTableDeltalogFragments(fragments)
+			if err != nil {
+				return err
+			}
+		}
 		works = append(works, segmentWork{
 			segmentID:   segmentID,
 			binlogLogID: binlogLogID,
-			rowCount:    bin.rowCount,
-			fragments:   bin.fragments,
+			rowCount:    rowCount,
+			fragments:   workFragments,
 		})
+		return nil
+	}
+	if isMilvusTableTask {
+		// milvus-table maps each source fragment to exactly one target segment
+		// (1:1) instead of bin-packing fragments by row count. This keeps the
+		// target segment aligned with a single source segment manifest, which is
+		// what makes manifest reuse and the virtual-PK offset mapping well defined.
+		taskLog.Info(ctx, "Assigning milvus-table fragments to one segment each",
+			mlog.Int("numFragments", len(fragments)),
+			mlog.Int64("totalRows", totalRows),
+			mlog.Int("numSegments", len(fragments)))
+		for _, fragment := range fragments {
+			if err := appendWork(fragment.RowCount, []packed.Fragment{fragment}); err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		targetRowsPerSegment := t.req.GetTargetRowsPerSegment()
+		if totalRows < targetRowsPerSegment {
+			targetRowsPerSegment = totalRows
+		}
+
+		numSegments := (totalRows + targetRowsPerSegment - 1) / targetRowsPerSegment
+		if numSegments == 0 {
+			numSegments = 1
+		}
+
+		avgRowsPerSegment := totalRows / numSegments
+
+		taskLog.Info(ctx, "Balancing fragments to segments",
+			mlog.Int("numFragments", len(fragments)),
+			mlog.Int64("totalRows", totalRows),
+			mlog.Int64("numSegments", numSegments),
+			mlog.Int64("avgRowsPerSegment", avgRowsPerSegment))
+
+		// Sort fragments by row count descending for better bin-packing
+		sortedFragments := make([]packed.Fragment, len(fragments))
+		copy(sortedFragments, fragments)
+		sort.Slice(sortedFragments, func(i, j int) bool {
+			return sortedFragments[i].RowCount > sortedFragments[j].RowCount
+		})
+
+		// Initialize segment bins
+		type segmentBin struct {
+			fragments []packed.Fragment
+			rowCount  int64
+		}
+		bins := make([]segmentBin, numSegments)
+
+		// Greedy bin-packing: assign each fragment to the bin with lowest current row count
+		for _, f := range sortedFragments {
+			if err := ensureContext(ctx); err != nil {
+				return nil, err
+			}
+			// Find bin with minimum row count
+			minIdx := 0
+			for i := 1; i < len(bins); i++ {
+				if bins[i].rowCount < bins[minIdx].rowCount {
+					minIdx = i
+				}
+			}
+			bins[minIdx].fragments = append(bins[minIdx].fragments, f)
+			bins[minIdx].rowCount += f.RowCount
+		}
+
+		for _, bin := range bins {
+			if len(bin.fragments) == 0 {
+				continue
+			}
+			if err := appendWork(bin.rowCount, bin.fragments); err != nil {
+				return nil, err
+			}
+		}
 	}
 
-	log.Info("Allocated segment IDs, starting manifest creation",
-		zap.Int("numSegments", len(works)))
+	taskLog.Info(ctx, "Allocated segment IDs, starting manifest creation",
+		mlog.Int("numSegments", len(works)))
 
 	// Phase 2: Create manifests concurrently with a fixed-size worker pool.
 	const createManifestWorkers = 16
+	const createManifestVirtualPKWorkers = 4
 	manifestStart := time.Now()
 
-	workers := createManifestWorkers
+	workerLimit := createManifestWorkers
+	if isMilvusTableVirtualPKTask {
+		workerLimit = createManifestVirtualPKWorkers
+	}
+	workers := workerLimit
 	if workers > len(works) {
 		workers = len(works)
 	}
@@ -759,10 +892,10 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 	}
 
 	manifestDuration := time.Since(manifestStart)
-	log.Info("CreateManifest phase completed",
-		zap.Int("numSegments", len(works)),
-		zap.Int("workers", workers),
-		zap.Duration("duration", manifestDuration))
+	taskLog.Info(ctx, "CreateManifest phase completed",
+		mlog.Int("numSegments", len(works)),
+		mlog.Int("workers", workers),
+		mlog.Duration("duration", manifestDuration))
 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -818,9 +951,9 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			t.req.GetStorageConfig(),
 		)
 		if err != nil {
-			log.Warn("failed to sample external field sizes",
-				zap.String("manifestPath", manifestPath),
-				zap.Error(err))
+			taskLog.Warn(ctx, "failed to sample external field sizes",
+				mlog.String("manifestPath", manifestPath),
+				mlog.Err(err))
 			recordErr(err)
 			return 0, false
 		}
@@ -831,9 +964,9 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			// zero can come from (a) a schema with no ExternalField-mapped
 			// fields, or (b) a Parquet file whose sampled rows really are
 			// empty — both are degenerate and must not feed QN a zero.
-			log.Warn("external field size sample produced non-positive total",
-				zap.String("manifestPath", manifestPath),
-				zap.Int64("total", total))
+			taskLog.Warn(ctx, "external field size sample produced non-positive total",
+				mlog.String("manifestPath", manifestPath),
+				mlog.Int64("total", total))
 			recordErr(merr.WrapErrParameterInvalidMsg("sampled field sizes sum to %d (schema may have no external_field mappings, or sampled rows are empty)", total))
 			return 0, false
 		}
@@ -850,9 +983,9 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 					}
 				}
 			}
-			log.Info("per-segment sampling complete",
-				zap.Int("numSegments", len(manifestPaths)),
-				zap.Int64("fallbackAvgBytesPerRow", fallbackAvg))
+			taskLog.Info(ctx, "per-segment sampling complete",
+				mlog.Int("numSegments", len(manifestPaths)),
+				mlog.Int64("fallbackAvgBytesPerRow", fallbackAvg))
 		} else {
 			if avg, ok := sampleOne(manifestPaths[0]); ok {
 				fallbackAvg = avg
@@ -860,8 +993,8 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 					segmentAvgBytes[i] = avg
 				}
 			}
-			log.Info("single-sample complete",
-				zap.Int64("avgBytesPerRow", fallbackAvg))
+			taskLog.Info(ctx, "single-sample complete",
+				mlog.Int64("avgBytesPerRow", fallbackAvg))
 		}
 		// If every sample failed, fail the task rather than emitting
 		// zero-MemorySize fake binlogs that would collapse QueryNode's
@@ -933,14 +1066,27 @@ func (t *RefreshExternalCollectionTask) createManifestForSegment(
 		segmentID,
 	)
 
-	return packed.CreateSegmentManifestWithBasePath(
+	manifestPath, err := packed.CreateSegmentManifestWithBasePathAndExtfs(
 		ctx,
 		basePath,
 		t.parsedSpec.Format,
 		t.columns,
 		fragments,
 		t.req.GetStorageConfig(),
+		packed.ExternalSpecContext{
+			CollectionID:      t.req.GetCollectionID(),
+			Source:            t.req.GetExternalSource(),
+			Spec:              t.req.GetExternalSpec(),
+			MilvusTablePKMode: packed.MilvusTablePrimaryKeyModeFromSchema(t.req.GetSchema()),
+		},
 	)
+	if err != nil {
+		return "", err
+	}
+	if t.parsedSpec.Format == externalspec.FormatMilvusTable {
+		return t.postProcessMilvusTableDeltalogs(ctx, basePath, manifestPath, segmentID, fragments)
+	}
+	return manifestPath, nil
 }
 
 func segmentInsertLogBasePath(
@@ -969,7 +1115,6 @@ func (t *RefreshExternalCollectionTask) createManifestWithFunctions(
 	segmentID int64,
 	fragments []packed.Fragment,
 ) (string, error) {
-	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 	basePath := segmentInsertLogBasePath(
 		t.req.GetStorageConfig(),
 		t.req.GetCollectionID(),
@@ -977,7 +1122,7 @@ func (t *RefreshExternalCollectionTask) createManifestWithFunctions(
 		segmentID,
 	)
 
-	return ExecuteFunctionsForSegment(
+	manifestPath, err := ExecuteFunctionsForSegment(
 		ctx,
 		t.req.GetSchema(),
 		fragments,
@@ -986,8 +1131,15 @@ func (t *RefreshExternalCollectionTask) createManifestWithFunctions(
 		t.req.GetCollectionID(),
 		segmentID,
 		basePath,
-		clusterID,
+		t.req.GetClusterID(),
 	)
+	if err != nil {
+		return "", err
+	}
+	if t.parsedSpec.Format == externalspec.FormatMilvusTable {
+		return t.postProcessMilvusTableDeltalogs(ctx, basePath, manifestPath, segmentID, fragments)
+	}
+	return manifestPath, nil
 }
 
 // buildFakeBinlogs creates a synthetic FieldBinlog slice for an external segment.
@@ -1041,8 +1193,6 @@ func estimateFunctionOutputBytesPerRow(schema *schemapb.CollectionSchema) (int64
 }
 
 // sumFieldSizes computes total avgBytesPerRow from per-field sampling results.
-// Only external fields (those with ExternalField set) are counted to match
-// the QueryNode estimation logic.
 func sumFieldSizes(fieldSizes map[string]int64, schema *schemapb.CollectionSchema) int64 {
 	if schema == nil {
 		var total int64
@@ -1051,13 +1201,20 @@ func sumFieldSizes(fieldSizes map[string]int64, schema *schemapb.CollectionSchem
 		}
 		return total
 	}
+	columnResolver := typeutil.NewStorageColumnResolver(schema)
 	var total int64
 	for _, field := range schema.GetFields() {
-		extName := field.GetExternalField()
-		if extName == "" {
+		columnName, ok := columnResolver.SourceDataColumnName(field)
+		if !ok {
 			continue
 		}
-		if avgBytes, ok := fieldSizes[extName]; ok && avgBytes > 0 {
+		if avgBytes, ok := fieldSizes[columnName]; ok && avgBytes > 0 {
+			total += avgBytes
+		}
+	}
+	if columnResolver.IsMilvusTable() && packed.HasExternalPrimaryKey(schema) {
+		timestampColumn := strconv.FormatInt(common.TimeStampField, 10)
+		if avgBytes, ok := fieldSizes[timestampColumn]; ok && avgBytes > 0 {
 			total += avgBytes
 		}
 	}

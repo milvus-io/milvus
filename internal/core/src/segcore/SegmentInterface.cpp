@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <ratio>
 #include <type_traits>
@@ -27,6 +28,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/GeometryCache.h"
 #include "common/OpContext.h"
 #include "common/QueryResult.h"
 #include "common/SystemProperty.h"
@@ -48,6 +50,12 @@
 
 namespace milvus::segcore {
 
+std::shared_ptr<milvus::exec::SimpleGeometryCache>
+SegmentInternalInterface::GetGeometryCache(FieldId field_id) const {
+    return milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
+        segment_instance_uid(), get_segment_id(), field_id);
+}
+
 void
 SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
                                           SearchResult& results,
@@ -60,11 +68,12 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
     Assert(results.primary_keys_.size() == 0);
     results.primary_keys_.resize(size);
 
-    auto pk_field_id_opt = get_schema().get_primary_field_id();
+    auto schema = get_schema_snapshot();
+    auto pk_field_id_opt = schema->get_primary_field_id();
     AssertInfo(pk_field_id_opt.has_value(),
                "Cannot get primary key offset from schema");
     auto pk_field_id = pk_field_id_opt.value();
-    AssertInfo(IsPrimaryKeyDataType(get_schema()[pk_field_id].get_data_type()),
+    AssertInfo(IsPrimaryKeyDataType((*schema)[pk_field_id].get_data_type()),
                "Primary key field is not INT64 or VARCHAR type");
 
     segcore::CheckCancellation(op_ctx, get_segment_id(), "FillPrimaryKeys");
@@ -143,7 +152,8 @@ SegmentInternalInterface::Search(
     Timestamp collection_ttl,
     int64_t entity_ttl_physical_time_us,
     bool filter_only,
-    bool enable_expr_cache) const {
+    bool enable_expr_cache,
+    milvus::tracer::SpanPtr trace_span) const {
     std::shared_lock lck(mutex_);
     milvus::tracer::AddEvent("obtained_segment_lock_mutex");
 
@@ -154,7 +164,8 @@ SegmentInternalInterface::Search(
                                        cancel_token,
                                        consistency_level,
                                        collection_ttl,
-                                       entity_ttl_physical_time_us);
+                                       entity_ttl_physical_time_us,
+                                       std::move(trace_span));
     visitor.SetFilterOnly(filter_only);
     visitor.SetEnableExprCache(enable_expr_cache);
     auto results = std::make_unique<SearchResult>();
@@ -267,10 +278,11 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                         &fte_op_ctx);
     } else if (!plan->plan_node_->pipeline_field_ids_.empty()) {
         // Non-aggregation ORDER BY (single-project or two-project mode):
-        // Pipeline output contains [pk, sort_cols, ..., SegmentOffsetFieldID].
-        // FillOrderByResult strips the offset column, sets field_id on each
+        // Pipeline output contains [pk, sort_cols, ..., hidden columns].
+        // FillOrderByResult strips hidden columns, sets field_id on each
         // DataArray, bulk-fetches deferred fields (if any), populates system
-        // fields, and fills PK-based IDs for proxy reduce.
+        // fields, restores element indices when present, and fills PK-based
+        // IDs for proxy reduce.
         //
         // Aggregation + ORDER BY does NOT set pipeline_field_ids_ and produces
         // final columns directly, falling through to FillTargetEntryDirectly.
@@ -311,7 +323,10 @@ SegmentInternalInterface::FillOrderByResult(
     auto fields_data = results->mutable_fields_data();
     auto& deferred = plan->plan_node_->deferred_field_ids_;
 
-    // Pipeline layout: [...user_columns..., SegmentOffsetFieldID].
+    // Pipeline layout:
+    //   row-level:     [...user_columns..., SegmentOffsetFieldID]
+    //   element-level: [...user_columns..., ElementIndexFieldID,
+    //                   SegmentOffsetFieldID]
     // The last column is always SegmentOffsetFieldID carrying segment offsets.
     auto total_cols = retrieveResult.field_data_.size();
     AssertInfo(total_cols >= 2,
@@ -319,7 +334,7 @@ SegmentInternalInterface::FillOrderByResult(
                "(pk + SegmentOffsetFieldID), got: {}",
                total_cols);
 
-    // Move all columns except the last (SegmentOffsetFieldID) to results.
+    // Move all non-hidden columns to results.
     // Set field_id on each DataArray so QN-side AppendFieldData can match
     // fields correctly (pipeline-produced DataArrays have field_id=0 by default).
     auto& pipeline_ids = plan->plan_node_->pipeline_field_ids_;
@@ -328,20 +343,58 @@ SegmentInternalInterface::FillOrderByResult(
                "count ({})",
                pipeline_ids.size(),
                total_cols);
-    for (size_t i = 0; i + 1 < total_cols; i++) {
+
+    size_t segment_offset_col_idx = total_cols;
+    size_t element_index_col_idx = total_cols;
+    for (size_t i = 0; i < pipeline_ids.size(); i++) {
+        if (pipeline_ids[i] == SegmentOffsetFieldID) {
+            segment_offset_col_idx = i;
+        } else if (pipeline_ids[i] == ElementIndexFieldID) {
+            element_index_col_idx = i;
+        }
+    }
+    AssertInfo(segment_offset_col_idx != total_cols,
+               "ORDER BY pipeline must contain SegmentOffsetFieldID");
+
+    for (size_t i = 0; i < total_cols; i++) {
+        if (i == segment_offset_col_idx || i == element_index_col_idx) {
+            continue;
+        }
         auto* data = new DataArray(std::move(retrieveResult.field_data_[i]));
         data->set_field_id(pipeline_ids[i].get());
         fields_data->AddAllocated(data);
     }
 
-    // Extract segment offsets from the last column.
-    auto& offset_col = retrieveResult.field_data_.back();
+    // Extract segment offsets from the hidden SegmentOffsetFieldID column.
+    auto& offset_col = retrieveResult.field_data_[segment_offset_col_idx];
     auto& offset_data = offset_col.scalars().long_data().data();
     auto topk_count = offset_data.size();
 
     // Populate results->offset() so QN-side MergeSegcoreRetrieveResults
     // won't filter out this result (it checks len(r.GetOffset()) == 0).
     results->mutable_offset()->Add(offset_data.begin(), offset_data.end());
+
+    if (element_index_col_idx != total_cols) {
+        auto& element_index_col =
+            retrieveResult.field_data_[element_index_col_idx];
+        auto& element_index_data =
+            element_index_col.scalars().long_data().data();
+        AssertInfo(element_index_data.size() == topk_count,
+                   "element index column size ({}) must match offset column "
+                   "size ({})",
+                   element_index_data.size(),
+                   topk_count);
+        results->set_element_level(true);
+        results->clear_element_indices();
+        for (auto element_index : element_index_data) {
+            AssertInfo(element_index >= 0 &&
+                           element_index <= std::numeric_limits<int32_t>::max(),
+                       "invalid element index: {}",
+                       element_index);
+            auto* elem_indices = results->add_element_indices();
+            elem_indices->add_indices(static_cast<int32_t>(element_index));
+        }
+    }
 
     milvus::OpContext op_ctx;
 
@@ -601,6 +654,10 @@ SegmentInternalInterface::Retrieve(
 
 int64_t
 SegmentInternalInterface::get_real_count() const {
+    if (get_deleted_count() == 0) {
+        return get_row_count();
+    }
+
 #if 0
     auto insert_cnt = get_row_count();
     BitsetType bitset_holder;
@@ -608,8 +665,7 @@ SegmentInternalInterface::get_real_count() const {
     mask_with_delete(bitset_holder, insert_cnt, MAX_TIMESTAMP);
     return bitset_holder.size() - bitset_holder.count();
 #endif
-    auto plan = std::make_unique<query::RetrievePlan>(
-        std::make_shared<Schema>(get_schema()));
+    auto plan = std::make_unique<query::RetrievePlan>(get_schema_snapshot());
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     milvus::plan::PlanNodePtr plannode;
     std::vector<milvus::plan::PlanNodePtr> sources;
@@ -676,8 +732,8 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
         ThrowInfo(FieldIDInvalid, "unsupported system field id");
     }
 
-    auto& schema = get_schema();
-    auto& field_meta = schema[field_id];
+    auto schema = get_schema_snapshot();
+    auto& field_meta = (*schema)[field_id];
     auto data_type = field_meta.get_data_type();
 
     std::shared_lock lck(mutex_);
@@ -699,8 +755,18 @@ SegmentInternalInterface::set_field_avg_size(FieldId field_id,
                                              int64_t field_size) {
     AssertInfo(field_id.get() >= 0,
                "invalid field id, should be greater than or equal to 0");
-    auto& schema = get_schema();
-    auto& field_meta = schema[field_id];
+    auto schema = get_schema_snapshot();
+    auto& field_meta = (*schema)[field_id];
+    set_field_avg_size(field_meta, num_rows, field_size);
+}
+
+void
+SegmentInternalInterface::set_field_avg_size(const FieldMeta& field_meta,
+                                             int64_t num_rows,
+                                             int64_t field_size) {
+    auto field_id = field_meta.get_id();
+    AssertInfo(field_id.get() >= 0,
+               "invalid field id, should be greater than or equal to 0");
     auto data_type = field_meta.get_data_type();
 
     std::unique_lock lck(mutex_);
@@ -719,8 +785,11 @@ SegmentInternalInterface::set_field_avg_size(FieldId field_id,
     }
 }
 
-const SkipIndex&
+std::shared_ptr<const SkipIndex>
 SegmentInternalInterface::GetSkipIndex() const {
+    if (auto* sealed = dynamic_cast<const ChunkedSegmentSealedImpl*>(this)) {
+        return sealed->GetSkipIndexSnapshot();
+    }
     return skip_index_;
 }
 
@@ -776,7 +845,7 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
         auto create_count = IsVectorArrayDataType(data_type) ? count : 0;
         auto result = CreateEmptyVectorDataArray(create_count, field_meta);
 
-        auto valid_data = result->mutable_valid_data();
+        auto valid_data = MutableFieldDataRowValidData(result.get());
         for (int64_t i = 0; i < count; ++i) {
             valid_data->Add(false);
         }
@@ -786,7 +855,8 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
     auto result = CreateEmptyScalarDataArray(count, field_meta);
     if (field_meta.default_value().has_value()) {
         if (field_meta.is_nullable()) {
-            auto res = result->mutable_valid_data()->mutable_data();
+            auto res =
+                MutableFieldDataRowValidData(result.get())->mutable_data();
             for (int64_t i = 0; i < count; ++i) {
                 res[i] = true;
             }

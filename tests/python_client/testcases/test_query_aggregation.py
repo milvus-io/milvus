@@ -377,15 +377,13 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         log.info(f"test_group_by_with_filter passed: {len(results)} groups after filtering")
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="limit parameter on GROUP BY queries not fully supported in Milvus 2.6.6")
     def test_group_by_with_limit(self):
         """
         target: test GROUP BY with limit parameter (with and without filter)
         method: query with group_by_fields=["c1"], limit, with/without filter
         expected: returns at most N groups, aggregations computed correctly from filtered data
-        Note: Issue #47326 - limit parameter is currently ignored in aggregation queries
-              This test covers both scenarios originally tested by test_group_by_with_limit
-              and test_filter_and_limit_with_aggregation (which was redundant)
+        Note: This test covers both scenarios originally tested by test_group_by_with_limit
+              and test_filter_and_limit_with_aggregation.
         """
         client = self._client()
 
@@ -399,7 +397,14 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             output_fields=[self.c1_field_name, "avg(c2)"],
             limit=limit,
         )
-        assert len(results) <= limit, f"Expected at most {limit} groups, got {len(results)}"
+        ground_truth = self.datas.groupby(self.c1_field_name).agg(avg_c2=(self.c2_field_name, "mean")).reset_index()
+        assert len(results) == min(limit, len(ground_truth)), (
+            f"Expected {min(limit, len(ground_truth))} groups, got {len(results)}"
+        )
+        for result in results:
+            c1_value = result[self.c1_field_name]
+            expected = ground_truth[ground_truth[self.c1_field_name] == c1_value].iloc[0]
+            assert abs(result["avg(c2)"] - expected["avg_c2"]) < 0.01, f"AVG(c2) mismatch for c1={c1_value}"
 
         # Scenario 2: limit with filter - verify aggregation from filtered data
         # Filter "c2 >= 50" keeps roughly 50% of non-NULL values (c2 ranges 0-99)
@@ -413,12 +418,22 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             limit=2,
         )
 
-        # Verify limit
-        assert len(results_filtered) <= 2, f"Expected at most 2 groups, got {len(results_filtered)}"
+        filtered_data = self.datas[self.datas[self.c2_field_name] >= 50]
+        filtered_ground_truth = (
+            filtered_data.groupby(self.c1_field_name)
+            .agg(count_c2=(self.c2_field_name, "count"), avg_c2=(self.c2_field_name, "mean"))
+            .reset_index()
+        )
+        assert len(results_filtered) == min(2, len(filtered_ground_truth)), (
+            f"Expected {min(2, len(filtered_ground_truth))} groups, got {len(results_filtered)}"
+        )
 
         # Verify aggregations are from filtered data (c2 >= 50)
         for result in results_filtered:
-            # avg should be >= 50 since we filtered c2 >= 50
+            c1_value = result[self.c1_field_name]
+            expected = filtered_ground_truth[filtered_ground_truth[self.c1_field_name] == c1_value].iloc[0]
+            assert result["count(c2)"] == expected["count_c2"], f"COUNT mismatch for c1={c1_value} with filter"
+            assert abs(result["avg(c2)"] - expected["avg_c2"]) < 0.01, f"AVG(c2) mismatch for c1={c1_value}"
             assert result["avg(c2)"] >= 50, f"avg(c2) should be >= 50 after filter, got {result['avg(c2)']}"
 
         log.info("test_group_by_with_limit passed: limit and filter+limit scenarios verified")
@@ -1043,32 +1058,40 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         log.info("test_group_by_int64_field passed")
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="GROUP BY field not in output_fields should error but succeeds. Tracked in issue #47334")
-    def test_group_by_field_not_in_output_fields(self):
+    def test_group_by_field_not_required_in_output_fields(self):
         """
-        target: test error when group_by field is not in output_fields
+        target: test GROUP BY field is not required in output_fields.
         method: query with group_by_fields=["c1"] but output_fields=["count(c2)"] (missing c1)
-        expected: Should raise error indicating group_by field must be in output_fields
-        Note: Design requirement states "分组字段必须包含在 output_fields 中，否则应该报错"
-              Currently Milvus allows this query but returns useless results without group keys (issue #47334)
+        expected: query succeeds and returns one aggregate row per group without projecting the group key.
+        Note: Milvus issue #47334 was closed as by-design. SQL allows SELECT count(*) FROM t GROUP BY category
+              without including category in the SELECT list.
         """
         client = self._client()
 
-        # Query with missing group_by field in output_fields
-        # According to design, this should raise an error
-        error = {ct.err_code: 1, ct.err_msg: ""}  # Expected error
-        self.query(
+        results, _ = self.query(
             client,
             self.collection_name,
             filter="",
             limit=100,
             group_by_fields=[self.c1_field_name],
-            output_fields=["count(c2)"],  # Missing c1 - should error
-            check_task=CheckTasks.err_res,
-            check_items=error,
+            output_fields=["count(c2)"],
         )
 
-        log.info("test_group_by_field_not_in_output_fields passed")
+        ground_truth_counts = (
+            self.datas.groupby(self.c1_field_name)
+            .agg(count_c2=(self.c2_field_name, "count"))
+            .reset_index()["count_c2"]
+            .tolist()
+        )
+        result_counts = [result["count(c2)"] for result in results]
+
+        assert len(results) == len(ground_truth_counts)
+        assert sorted(result_counts) == sorted(ground_truth_counts)
+        for result in results:
+            assert self.c1_field_name not in result
+            assert set(result.keys()) == {"count(c2)"}
+
+        log.info("test_group_by_field_not_required_in_output_fields passed")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_unsupported_vector_field(self):

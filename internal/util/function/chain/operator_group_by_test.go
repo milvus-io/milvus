@@ -26,6 +26,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 )
 
@@ -569,11 +570,11 @@ func (s *GroupByOpTestSuite) TestFuncChain_GroupBy_InvalidParams() {
 func (s *GroupByOpTestSuite) TestNewGroupByOpFromRepr() {
 	repr := &OperatorRepr{
 		Type: types.OpTypeGroupBy,
-		Params: map[string]interface{}{
-			"field":      "category",
-			"group_size": int64(3),
-			"limit":      int64(10),
-			"offset":     int64(5),
+		Params: map[string]*schemapb.FunctionParamValue{
+			"field":      stringParam("category"),
+			"group_size": intParam(3),
+			"limit":      intParam(10),
+			"offset":     intParam(5),
 		},
 	}
 
@@ -591,10 +592,10 @@ func (s *GroupByOpTestSuite) TestNewGroupByOpFromRepr() {
 func (s *GroupByOpTestSuite) TestNewGroupByOpFromRepr_DefaultOffset() {
 	repr := &OperatorRepr{
 		Type: types.OpTypeGroupBy,
-		Params: map[string]interface{}{
-			"field":      "category",
-			"group_size": int64(3),
-			"limit":      int64(10),
+		Params: map[string]*schemapb.FunctionParamValue{
+			"field":      stringParam("category"),
+			"group_size": intParam(3),
+			"limit":      intParam(10),
 		},
 	}
 
@@ -649,7 +650,7 @@ func (s *GroupByOpTestSuite) TestGroupByOp_WithSort() {
 	result, err := NewFuncChainWithAllocator(s.pool).
 		SetStage(types.StageL2Rerank).
 		GroupBy("category", 2, 3, 0).
-		Sort(GroupScoreFieldName, true).
+		Sort(GroupScoreFieldName, true, types.IDFieldName).
 		Execute(df)
 
 	s.Require().NoError(err)
@@ -846,11 +847,11 @@ func (s *GroupByOpTestSuite) TestNewGroupByOpFromRepr_WithScorer() {
 	// Test max scorer
 	repr := &OperatorRepr{
 		Type: types.OpTypeGroupBy,
-		Params: map[string]interface{}{
-			"field":      "category",
-			"group_size": int64(3),
-			"limit":      int64(10),
-			"scorer":     "max",
+		Params: map[string]*schemapb.FunctionParamValue{
+			"field":      stringParam("category"),
+			"group_size": intParam(3),
+			"limit":      intParam(10),
+			"scorer":     stringParam("max"),
 		},
 	}
 	op, err := NewGroupByOpFromRepr(repr)
@@ -858,19 +859,19 @@ func (s *GroupByOpTestSuite) TestNewGroupByOpFromRepr_WithScorer() {
 	s.Equal(GroupScorerMax, op.(*GroupByOp).groupScorer)
 
 	// Test sum scorer
-	repr.Params["scorer"] = "sum"
+	repr.Params["scorer"] = stringParam("sum")
 	op, err = NewGroupByOpFromRepr(repr)
 	s.Require().NoError(err)
 	s.Equal(GroupScorerSum, op.(*GroupByOp).groupScorer)
 
 	// Test avg scorer
-	repr.Params["scorer"] = "avg"
+	repr.Params["scorer"] = stringParam("avg")
 	op, err = NewGroupByOpFromRepr(repr)
 	s.Require().NoError(err)
 	s.Equal(GroupScorerAvg, op.(*GroupByOp).groupScorer)
 
 	// Test invalid scorer
-	repr.Params["scorer"] = "invalid"
+	repr.Params["scorer"] = stringParam("invalid")
 	_, err = NewGroupByOpFromRepr(repr)
 	s.Error(err)
 	s.Contains(err.Error(), "invalid group scorer")

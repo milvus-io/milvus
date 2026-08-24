@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -54,21 +53,11 @@ func StreamClientInterceptor() grpc.StreamClientInterceptor {
 	}
 }
 
-// extractPropagated extracts mlog fields from incoming gRPC metadata and trace context.
+// extractPropagated extracts mlog fields from incoming gRPC metadata.
 // Extracted fields are marked as propagated so they will be forwarded in subsequent RPC calls.
-// TraceID and SpanID are extracted from OpenTelemetry span context.
 // Additional fields can be passed to be added in the same WithFields call.
 func extractPropagated(ctx context.Context, extraFields ...Field) context.Context {
 	var fields []Field
-
-	// Extract TraceID and SpanID from OpenTelemetry span context
-	spanCtx := trace.SpanContextFromContext(ctx)
-	if spanCtx.HasTraceID() {
-		fields = append(fields, String(keyTraceID, spanCtx.TraceID().String()))
-	}
-	if spanCtx.HasSpanID() {
-		fields = append(fields, String(keySpanID, spanCtx.SpanID().String()))
-	}
 
 	// Extract propagated fields from gRPC metadata.
 	// Format: "mlog-{t}-{key}" where {t} is 's' (string) or 'i' (int64).
@@ -80,7 +69,7 @@ func extractPropagated(ctx context.Context, extraFields ...Field) context.Contex
 			}
 			rest := key[len(MetadataPrefix):] // after "mlog-"
 			if len(rest) >= 2 && rest[1] == '-' {
-				fieldKey := rest[2:]
+				fieldKey := restoreWellKnownLogKey(rest[2:])
 				switch rest[0] {
 				case 'i':
 					if v, err := strconv.ParseInt(vals[0], 10, 64); err == nil {
@@ -93,7 +82,7 @@ func extractPropagated(ctx context.Context, extraFields ...Field) context.Contex
 				}
 			}
 			// Legacy format without type tag — treat as string
-			fields = append(fields, propagatedStringField(rest, vals[0]))
+			fields = append(fields, propagatedStringField(restoreWellKnownLogKey(rest), vals[0]))
 		}
 	}
 

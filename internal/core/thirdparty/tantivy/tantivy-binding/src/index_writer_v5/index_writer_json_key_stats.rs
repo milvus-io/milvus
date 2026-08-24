@@ -33,11 +33,17 @@ impl IndexWriterWrapperImpl {
         };
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
+        // Json key stats writers are only used for sealed index builds, which
+        // end with an explicit merge-all in finish(); background merges would
+        // only waste IO and race with it.
+        index_writer.set_merge_policy(Box::new(tantivy_5::merge_policy::NoMergePolicy));
         Ok(IndexWriterWrapperImpl {
             field,
             index_writer: Either::Left(index_writer),
             id_field: Some(id_field),
             _index: Arc::new(index),
+            // Sealed-build only; merge-all runs in finish().
+            enable_background_merge: false,
         })
     }
 }

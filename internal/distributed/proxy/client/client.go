@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -29,7 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -55,7 +54,7 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (types.ProxyClien
 	sess := sessionutil.NewSession(context.Background())
 	if sess == nil {
 		err := merr.WrapErrServiceUnavailable("new session error, maybe can not connect to etcd")
-		log.Ctx(ctx).Debug("Proxy client new session failed", zap.Error(err))
+		mlog.Debug(ctx, "Proxy client new session failed", mlog.Err(err))
 		return nil, err
 	}
 	config := &Params.ProxyGrpcClientCfg
@@ -73,7 +72,7 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (types.ProxyClien
 		client.grpcClient.EnableEncryption()
 		cp, err := utils.CreateCertPoolforClient(Params.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), "Proxy")
 		if err != nil {
-			log.Ctx(ctx).Error("Failed to create cert pool for Proxy client")
+			mlog.Error(ctx, "Failed to create cert pool for Proxy client")
 			return nil, err
 		}
 		client.grpcClient.SetInternalTLSCertPool(cp)
@@ -253,5 +252,11 @@ func (c *Client) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRe
 	)
 	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*internalpb.ClearReadTaskQueueResponse, error) {
 		return client.ClearReadTaskQueue(ctx, req)
+	})
+}
+
+func (c *Client) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*commonpb.Status, error) {
+		return client.SyncFileResource(ctx, req)
 	})
 }

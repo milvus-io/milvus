@@ -19,6 +19,7 @@
 
 #include <arrow/util/key_value_metadata.h>
 
+#include "common/Consts.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "filemanager/InputStream.h"
@@ -442,6 +443,32 @@ TEST_F(SchemaTest, ConvertToLoonArrowSchemaFieldNamesAreFieldIds) {
     EXPECT_EQ(loon_schema->field(1)->name(), std::to_string(float_id.get()));
 }
 
+TEST_F(SchemaTest, ConvertToLoonArrowSchemaCachesTextLobBinarySchema) {
+    schema_->AddDebugField("pk_field", DataType::INT64, false);
+    auto text_id = schema_->AddDebugField("text_field", DataType::TEXT, true);
+
+    auto first = schema_->ConvertToLoonArrowSchema();
+    auto second = schema_->ConvertToLoonArrowSchema();
+    EXPECT_NE(first.get(), second.get());
+
+    auto lob_first =
+        schema_->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
+    auto lob_second =
+        schema_->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
+    EXPECT_EQ(lob_first.get(), lob_second.get());
+    EXPECT_EQ(
+        lob_first->GetFieldByName(std::to_string(text_id.get()))->type()->id(),
+        arrow::Type::BINARY);
+
+    auto float_id =
+        schema_->AddDebugField("float_field", DataType::FLOAT, false);
+    auto updated =
+        schema_->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
+    EXPECT_NE(lob_first.get(), updated.get());
+    ASSERT_EQ(updated->num_fields(), 3);
+    EXPECT_EQ(updated->field(2)->name(), std::to_string(float_id.get()));
+}
+
 TEST_F(SchemaTest, ConvertToLoonArrowSchemaVsConvertToArrowSchema) {
     auto pk_id = schema_->AddDebugField("pk_field", DataType::INT64, false);
     schema_->set_primary_field_id(pk_id);
@@ -554,4 +581,154 @@ TEST_F(SchemaTest, ConvertToLoonArrowSchemaNullableDenseVectorUsesBinary) {
     auto dim_result = vector_field->metadata()->Get("dim");
     ASSERT_TRUE(dim_result.ok()) << dim_result.status().ToString();
     EXPECT_EQ(dim_result.ValueOrDie(), "128");
+}
+
+TEST_F(SchemaTest, ConvertToLoonArrowSchemaTextLobAsBinary) {
+    auto text_id = schema_->AddDebugField("text_field", DataType::TEXT, true);
+    auto varchar_id =
+        schema_->AddDebugField("varchar_field", DataType::VARCHAR, true);
+
+    auto default_schema = schema_->ConvertToLoonArrowSchema();
+    auto default_text =
+        default_schema->GetFieldByName(std::to_string(text_id.get()));
+    ASSERT_NE(default_text, nullptr);
+    EXPECT_EQ(default_text->type()->id(), arrow::Type::STRING);
+
+    auto lob_schema =
+        schema_->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
+    auto lob_text = lob_schema->GetFieldByName(std::to_string(text_id.get()));
+    auto lob_varchar =
+        lob_schema->GetFieldByName(std::to_string(varchar_id.get()));
+
+    ASSERT_NE(lob_text, nullptr);
+    ASSERT_NE(lob_varchar, nullptr);
+    EXPECT_EQ(lob_text->type()->id(), arrow::Type::BINARY);
+    EXPECT_TRUE(lob_text->nullable());
+    EXPECT_EQ(lob_varchar->type()->id(), arrow::Type::STRING);
+}
+
+TEST_F(SchemaTest,
+       ExternalFunctionOutputUsesFieldFlagWithoutFunctionOutputIds) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_external_source("s3://bucket/path");
+    schema_proto.set_external_spec(R"({"format":"parquet"})");
+
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(100);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+    pk_field->set_external_field("id_col");
+
+    auto* text_field = schema_proto.add_fields();
+    text_field->set_fieldid(101);
+    text_field->set_name("text");
+    text_field->set_data_type(milvus::proto::schema::DataType::VarChar);
+    text_field->set_external_field("sparse");
+    auto* max_length = text_field->add_type_params();
+    max_length->set_key("max_length");
+    max_length->set_value("1024");
+
+    auto* bm25_vector = schema_proto.add_fields();
+    bm25_vector->set_fieldid(102);
+    bm25_vector->set_name("sparse");
+    bm25_vector->set_data_type(
+        milvus::proto::schema::DataType::SparseFloatVector);
+    bm25_vector->set_is_function_output(true);
+
+    auto* function = schema_proto.add_functions();
+    function->set_type(milvus::proto::schema::BM25);
+    function->add_output_field_names("sparse");
+
+    auto schema = Schema::ParseFrom(schema_proto);
+
+    EXPECT_EQ(schema->get_storage_column_name(FieldId(101)), "sparse");
+    EXPECT_EQ(schema->get_storage_column_name(FieldId(102)), "102");
+    EXPECT_EQ(schema->ResolveColumnFieldId("sparse"), FieldId(101));
+    EXPECT_EQ(schema->ResolveColumnFieldId("102"), FieldId(102));
+
+    auto columns = schema->GetExternalColumnNames();
+    EXPECT_NE(std::find(columns->begin(), columns->end(), "sparse"),
+              columns->end());
+    EXPECT_NE(std::find(columns->begin(), columns->end(), "102"),
+              columns->end());
+}
+
+TEST_F(SchemaTest, NullableStructArrayMakesSubFieldsEffectivelyNullable) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(100);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+
+    auto* struct_array = schema_proto.add_struct_array_fields();
+    struct_array->set_fieldid(200);
+    struct_array->set_name("events");
+    struct_array->set_nullable(true);
+
+    auto* vector = struct_array->add_fields();
+    vector->set_fieldid(201);
+    vector->set_name("events[embedding]");
+    vector->set_data_type(milvus::proto::schema::DataType::ArrayOfVector);
+    vector->set_element_type(milvus::proto::schema::DataType::FloatVector);
+    auto* dim = vector->add_type_params();
+    dim->set_key("dim");
+    dim->set_value("8");
+
+    auto* tag = struct_array->add_fields();
+    tag->set_fieldid(202);
+    tag->set_name("events[tag]");
+    tag->set_data_type(milvus::proto::schema::DataType::Array);
+    tag->set_element_type(milvus::proto::schema::DataType::VarChar);
+
+    auto schema = Schema::ParseFrom(schema_proto);
+
+    EXPECT_TRUE(schema->operator[](FieldId(201)).is_nullable());
+    EXPECT_TRUE(schema->operator[](FieldId(202)).is_nullable());
+    EXPECT_FALSE(vector->nullable());
+    EXPECT_FALSE(tag->nullable());
+}
+
+TEST_F(SchemaTest, MilvusTableRealPKLoadsSourceTimestampColumn) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_external_source(
+        "s3://bucket/snapshots/100/metadata/200.json");
+    schema_proto.set_external_spec(R"({"format":"milvus-table"})");
+
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(100);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+
+    auto* vector_field = schema_proto.add_fields();
+    vector_field->set_fieldid(101);
+    vector_field->set_name("vector");
+    vector_field->set_data_type(milvus::proto::schema::DataType::FloatVector);
+    auto* dim = vector_field->add_type_params();
+    dim->set_key("dim");
+    dim->set_value("4");
+
+    auto* ts_field = schema_proto.add_fields();
+    ts_field->set_fieldid(TimestampFieldID.get());
+    ts_field->set_name("Timestamp");
+    ts_field->set_data_type(milvus::proto::schema::DataType::Int64);
+
+    auto* rowid_field = schema_proto.add_fields();
+    rowid_field->set_fieldid(RowFieldID.get());
+    rowid_field->set_name("RowID");
+    rowid_field->set_data_type(milvus::proto::schema::DataType::Int64);
+
+    auto schema = Schema::ParseFrom(schema_proto);
+
+    EXPECT_TRUE(schema->RequiresSourceInsertTimestamps());
+    auto columns = schema->GetExternalColumnNames();
+    EXPECT_NE(std::find(columns->begin(), columns->end(), "100"),
+              columns->end());
+    EXPECT_NE(std::find(columns->begin(), columns->end(), "101"),
+              columns->end());
+    EXPECT_NE(std::find(columns->begin(), columns->end(), "1"), columns->end());
+    EXPECT_EQ(std::find(columns->begin(), columns->end(), "0"), columns->end());
 }

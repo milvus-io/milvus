@@ -30,11 +30,6 @@
 namespace milvus {
 namespace index {
 
-struct BitmapInfo {
-    size_t offset_;
-    size_t size_;
-};
-
 enum class BitmapIndexBuildMode {
     ROARING,
     BITSET,
@@ -49,7 +44,8 @@ class BitmapIndex : public ScalarIndex<T> {
  public:
     explicit BitmapIndex(
         const storage::FileManagerContext& file_manager_context =
-            storage::FileManagerContext());
+            storage::FileManagerContext(),
+        bool is_nested_index = false);
 
     ~BitmapIndex() {
         if (is_mmap_) {
@@ -76,6 +72,18 @@ class BitmapIndex : public ScalarIndex<T> {
         return ScalarIndexType::BITMAP;
     }
 
+    // Reverse_Lookup is O(1) only when the offset cache is built; otherwise it
+    // linearly scans all distinct postings (O(cardinality)) per row.
+    bool
+    SupportFastReverseLookup() const override {
+        return use_offset_cache_;
+    }
+
+    bool
+    IsNestedIndex() const override {
+        return is_nested_index_;
+    }
+
     void
     Build(size_t n, const T* values, const bool* valid_data = nullptr) override;
 
@@ -93,6 +101,11 @@ class BitmapIndex : public ScalarIndex<T> {
 
     const TargetBitmap
     IsNull() override;
+
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<T>::IsNotNull;
 
     TargetBitmap
     IsNotNull() override;
@@ -323,6 +336,9 @@ class BitmapIndex : public ScalarIndex<T> {
     void
     BuildArrayField(const std::vector<FieldDataPtr>& datas);
 
+    void
+    BuildArrayFieldNested(const std::vector<FieldDataPtr>& datas);
+
     size_t
     GetIndexDataSize();
 
@@ -430,6 +446,7 @@ class BitmapIndex : public ScalarIndex<T> {
     std::map<T, roaring::Roaring> data_;
     std::map<T, TargetBitmap> bitsets_;
     bool is_mmap_{false};
+    bool is_nested_index_{false};
     char* mmap_data_;
     int64_t mmap_size_;
     std::map<T, roaring::Roaring> bitmap_info_map_;

@@ -1,15 +1,18 @@
 package datacoord
 
 import (
+	"context"
 	"math"
+	"strconv"
+	"strings"
 
 	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 )
@@ -124,7 +127,44 @@ func (m *versionManagerImpl) Update(session *sessionutil.Session) {
 	m.addOrUpdate(session)
 }
 
+// configuredIndexStorePathVersion parses dataCoord.index.storePathVersion. Only the two layouts
+// the enum defines are accepted; anything else (including a malformed value, which the paramtable
+// getters silently coerce to 0) falls back to the legacy layout and is logged, so an operator typo
+// is visible instead of being read as an opt-in.
+func configuredIndexStorePathVersion() indexpb.IndexStorePathVersion {
+	raw := Params.DataCoordCfg.IndexStorePathVersion.GetValue()
+	parsed, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 32)
+	if err == nil {
+		switch version := indexpb.IndexStorePathVersion(parsed); version {
+		case indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+			indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED:
+			return version
+		}
+	}
+	mlog.RatedWarn(context.TODO(), rate.Limit(60), "unsupported dataCoord.index.storePathVersion, falling back to the legacy index layout",
+		mlog.String("value", raw))
+	return indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
+}
+
+// GetClusterMinIndexStorePathVersion returns the index file layout to use for new index builds.
+//
+// COLLECTION_ROOTED requires BOTH:
+//   - the operator to opt in via dataCoord.index.storePathVersion, because a binary older than
+//     this one cannot read that layout and the opt-in is what gives up rollback compatibility;
+//   - no QueryNode to still report an older release line, because QueryNodes rebuild the remote
+//     index prefix themselves (storage/FileManager.h GetRemoteIndexObjectPrefix), so an older one
+//     would look for the files under the legacy layout. The comparison below is against the
+//     version each QueryNode publishes in its session, which is the compile-time common.Version
+//     constant, so it only separates release lines (2.6.x vs 3.0.x): two binaries on the same
+//     line report the identical version and cannot be told apart here.
+//
+// Falling back to BUILD_ROOTED is always safe: the layout is recorded per SegmentIndex, so
+// records built earlier keep being read and GC'd under the layout they were built with.
 func (m *versionManagerImpl) GetClusterMinIndexStorePathVersion() indexpb.IndexStorePathVersion {
+	if configuredIndexStorePathVersion() != indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED {
+		return indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -140,13 +180,13 @@ func (m *versionManagerImpl) GetClusterMinIndexStorePathVersion() indexpb.IndexS
 }
 
 func (m *versionManagerImpl) addOrUpdate(session *sessionutil.Session) {
-	log.Info("addOrUpdate version", zap.Int64("nodeId", session.ServerID),
-		zap.String("sessionVersion", session.Version.String()),
-		zap.Int32("minimal", session.IndexEngineVersion.MinimalIndexVersion),
-		zap.Int32("current", session.IndexEngineVersion.CurrentIndexVersion),
-		zap.Int32("maximum", session.IndexEngineVersion.MaximumIndexVersion),
-		zap.Int32("currentScalar", session.ScalarIndexEngineVersion.CurrentIndexVersion),
-		zap.Int32("maximumScalar", session.ScalarIndexEngineVersion.MaximumIndexVersion))
+	mlog.Info(context.TODO(), "addOrUpdate version", mlog.Int64("nodeId", session.ServerID),
+		mlog.String("sessionVersion", session.Version.String()),
+		mlog.Int32("minimal", session.IndexEngineVersion.MinimalIndexVersion),
+		mlog.Int32("current", session.IndexEngineVersion.CurrentIndexVersion),
+		mlog.Int32("maximum", session.IndexEngineVersion.MaximumIndexVersion),
+		mlog.Int32("currentScalar", session.ScalarIndexEngineVersion.CurrentIndexVersion),
+		mlog.Int32("maximumScalar", session.ScalarIndexEngineVersion.MaximumIndexVersion))
 	m.versions[session.ServerID] = session.IndexEngineVersion
 	m.scalarIndexVersions[session.ServerID] = session.ScalarIndexEngineVersion
 	m.indexNonEncoding[session.ServerID] = session.IndexNonEncoding
@@ -283,13 +323,13 @@ func getMaximumVersionFrom(versions map[int64]sessionutil.IndexEngineVersion) in
 // clampVersion clamps v into [minV, maxV], logging a rate-limited warning on each adjustment.
 func clampVersion(v, minV, maxV int32, name string) int32 {
 	if v < minV {
-		log.RatedWarn(60, name+" below cluster minimum, clamping",
-			zap.Int32("target", v), zap.Int32("minimum", minV))
+		mlog.RatedWarn(context.TODO(), rate.Limit(60), name+" below cluster minimum, clamping",
+			mlog.Int32("target", v), mlog.Int32("minimum", minV))
 		v = minV
 	}
 	if v > maxV {
-		log.RatedWarn(60, name+" exceeds cluster maximum, clamping",
-			zap.Int32("target", v), zap.Int32("maximum", maxV))
+		mlog.RatedWarn(context.TODO(), rate.Limit(60), name+" exceeds cluster maximum, clamping",
+			mlog.Int32("target", v), mlog.Int32("maximum", maxV))
 		v = maxV
 	}
 	return v
@@ -333,7 +373,7 @@ func (m *versionManagerImpl) GetIndexNonEncoding() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if len(m.indexNonEncoding) == 0 {
-		log.Info("indexNonEncoding map is empty")
+		mlog.Info(context.TODO(), "indexNonEncoding map is empty")
 		// by default, we fall back to old index format for safety
 		return false
 	}

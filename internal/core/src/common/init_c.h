@@ -32,7 +32,7 @@ void
 SetIndexSliceSize(const int64_t);
 
 void
-SetStreamBudgetRatio(const double);
+SetLoadTransientBudgetBytes(int64_t bytes);
 
 void
 SetHighPriorityThreadCoreCoefficient(const float);
@@ -54,6 +54,9 @@ SetDefaultDeleteDumpBatchSize(int64_t val);
 
 void
 SetDefaultOptimizeExprEnable(bool val);
+
+void
+SetDefaultDriverPrefetchEnable(bool val);
 
 void
 SetDefaultJSONKeyStatsEnable(bool val);

@@ -53,11 +53,19 @@ class CachedSearchIterator {
     CachedSearchIterator(const milvus::index::VectorIndex& index,
                          const knowhere::DataSetPtr& dataset,
                          const SearchInfo& search_info,
-                         const BitsetView& bitset);
+                         const BitsetView& bitset,
+                         milvus::OpContext* op_context = nullptr);
 
-    // For growing segment with chunked data, BF
+    // For growing segment with chunked data, BF.
+    //
+    // `chunks` must be the SAME snapshot the caller is scanning through. A
+    // growing column's chunks can be reclaimed by try_remove_chunks at any
+    // moment once the interim index owns the raw data, and reading the live
+    // container instead would either trip its bounds assertion (after a
+    // reclaim) or read a generation this iterator never pinned.
     CachedSearchIterator(const dataset::SearchDataset& dataset,
                          const segcore::VectorBase* vec_data,
+                         const ChunkSnapshot& chunks,
                          const int64_t row_count,
                          const SearchInfo& search_info,
                          const std::map<std::string, std::string>& index_info,
@@ -89,8 +97,11 @@ class CachedSearchIterator {
     using DisIdPair = std::pair<float, int64_t>;
     using IterIdx = size_t;
     using IterIdDisIdPair = std::pair<IterIdx, DisIdPair>;
-    using GetChunkDataFunc =
-        std::function<std::pair<const void*, int64_t>(int64_t)>;
+    struct ChunkSearchData {
+        dataset::RawDataset raw_data;
+        BitsetView bitset;
+    };
+    using GetChunkDataFunc = std::function<ChunkSearchData(int64_t, int64_t)>;
 
     // used only for sealed segment with chunked data
     std::vector<milvus::cachinglayer::PinWrapper<const void*>> pin_wrappers_;
@@ -178,11 +189,18 @@ class CachedSearchIterator {
     void
     WriteSingleQuerySearchResult(SearchResult& search_result,
                                  const size_t idx,
-                                 std::vector<DisIdPair>& rst,
-                                 const int64_t round_decimal);
+                                 std::vector<DisIdPair>& rst);
 
     void
     Init(const SearchInfo& search_info);
+
+    void
+    AppendChunkIterators(const dataset::SearchDataset& dataset,
+                         const SearchInfo& search_info,
+                         const std::map<std::string, std::string>& index_info,
+                         const dataset::RawDataset& raw_data,
+                         const BitsetView& bitset,
+                         const milvus::DataType& data_type);
 
     // must call get_chunk_data from chunk 0 to chunk num_chunks_ - 1 in order.
     void

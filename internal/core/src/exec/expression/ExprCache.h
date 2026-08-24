@@ -28,7 +28,6 @@
 #include <vector>
 
 #include "common/Types.h"
-#include "log/Log.h"
 
 namespace milvus {
 namespace exec {
@@ -147,8 +146,6 @@ class ExprResCacheManager {
     SetEnabled(bool enabled);
     static bool
     IsEnabled();
-    static void
-    Init(size_t capacity_bytes, bool enabled);
 
     // Configure the cache mode and parameters.
     bool
@@ -169,8 +166,6 @@ class ExprResCacheManager {
 
     void
     SetCapacityBytes(size_t capacity_bytes);
-    size_t
-    GetCapacityBytes() const;
     size_t
     GetCurrentBytes() const;
     size_t
@@ -238,16 +233,6 @@ class ExprResCacheManager {
     std::atomic<size_t> reported_memory_bytes_{0};
     std::atomic<size_t> reported_disk_bytes_{0};
 };
-
-// Helper API: erase all cache for a given segment id, returns erased entry count
-inline size_t
-EraseSegmentCache(int64_t segment_id) {
-    if (!ExprResCacheManager::IsEnabled()) {
-        LOG_INFO("expr res cache is disabled, skip erase segment cache");
-        return 0;
-    }
-    return ExprResCacheManager::Instance().EraseSegment(segment_id);
-}
 
 }  // namespace exec
 }  // namespace milvus

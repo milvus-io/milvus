@@ -12,9 +12,9 @@
 package client
 
 import (
-	"go.uber.org/zap"
+	"context"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/server"
 )
@@ -94,6 +94,6 @@ func (p *producer) SendForStreamingService(message *common.ProducerMessage) (Uni
 func (p *producer) Close() {
 	err := p.c.server.DestroyTopic(p.topic)
 	if err != nil {
-		log.Warn("Producer close failed", zap.String("topicName", p.topic), zap.Error(err))
+		mlog.Warn(context.TODO(), "Producer close failed", mlog.String("topicName", p.topic), mlog.Err(err))
 	}
 }

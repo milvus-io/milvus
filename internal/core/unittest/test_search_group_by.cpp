@@ -32,11 +32,15 @@
 #include "common/TracerBase.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "exec/Task.h"
+#include "exec/operator/SearchGroupByNode.h"
+#include "exec/operator/search-groupby/SearchGroupByOperator.h"
 #include "common/common_type_c.h"
 #include "common/protobuf_utils.h"
 #include "common/type_c.h"
 #include "gtest/gtest.h"
 #include "index/Index.h"
+#include "index/ScalarIndexSort.h"
 #include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/common.pb.h"
@@ -44,7 +48,6 @@
 #include "query/Plan.h"
 #include "query/Utils.h"
 #include "segcore/Collection.h"
-#include "segcore/ReduceStructure.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -63,6 +66,35 @@ using namespace milvus::query;
 using namespace milvus::segcore;
 using namespace milvus::storage;
 using namespace milvus::tracer;
+using namespace milvus::exec;
+
+namespace {
+
+class FixedVectorIterator : public VectorIterator {
+ public:
+    explicit FixedVectorIterator(std::vector<std::pair<int64_t, float>> results)
+        : results_(std::move(results)) {
+    }
+
+    bool
+    HasNext() override {
+        return pos_ < results_.size();
+    }
+
+    std::optional<std::pair<int64_t, float>>
+    Next() override {
+        if (!HasNext()) {
+            return std::nullopt;
+        }
+        return results_[pos_++];
+    }
+
+ private:
+    std::vector<std::pair<int64_t, float>> results_;
+    size_t pos_{0};
+};
+
+}  // namespace
 
 const char* METRICS_TYPE = "metric_type";
 
@@ -503,6 +535,175 @@ TEST(GroupBY, SealedData) {
     }
 }
 
+TEST(GroupBY, ElementLevelKeepsElementIndices) {
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    size_t N = 3;
+    int array_len = 3;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+    auto array_offsets = growing->GetArrayOffsets(vec_fid);
+    ASSERT_NE(array_offsets, nullptr);
+
+    SearchInfo search_info;
+    search_info.topk_ = 10;
+    search_info.group_size_ = 2;
+    search_info.metric_type_ = knowhere::metric::L2;
+    search_info.group_by_field_ids_.push_back(pk_fid);
+    search_info.array_offsets_ = array_offsets;
+
+    // Element IDs map to rows as:
+    // row 0: element IDs 0, 1, 2
+    // row 1: element IDs 3, 4, 5
+    // row 2: element IDs 6, 7, 8
+    // group_size=2 should keep only two hits from row 0 while preserving
+    // element indices for all accepted hits.
+    std::vector<std::shared_ptr<VectorIterator>> iterators{
+        std::make_shared<FixedVectorIterator>(
+            std::vector<std::pair<int64_t, float>>{
+                {0, 0.1F},
+                {1, 0.2F},
+                {2, 0.3F},
+                {3, 0.4F},
+                {4, 0.5F},
+                {6, 0.6F},
+            })};
+
+    OpContext op_context;
+    std::vector<CompositeGroupKey> group_by_values;
+    std::vector<int64_t> seg_offsets;
+    std::vector<float> distances;
+    std::vector<size_t> topk_per_nq_prefix_sum;
+    std::vector<int32_t> element_indices;
+
+    SearchGroupBy(&op_context,
+                  iterators,
+                  search_info,
+                  group_by_values,
+                  *growing,
+                  seg_offsets,
+                  distances,
+                  topk_per_nq_prefix_sum,
+                  &element_indices);
+
+    ASSERT_EQ(seg_offsets, (std::vector<int64_t>{0, 0, 1, 1, 2}));
+    ASSERT_EQ(element_indices, (std::vector<int32_t>{0, 1, 0, 1, 0}));
+    ASSERT_EQ(topk_per_nq_prefix_sum, (std::vector<size_t>{0, 5}));
+    ASSERT_EQ(group_by_values.size(), seg_offsets.size());
+    ASSERT_EQ(distances, (std::vector<float>{0.1F, 0.2F, 0.4F, 0.5F, 0.6F}));
+}
+
+TEST(GroupBY, SearchGroupByNodeKeepsElementIndices) {
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    size_t N = 3;
+    int array_len = 3;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+    auto array_offsets = growing->GetArrayOffsets(vec_fid);
+    ASSERT_NE(array_offsets, nullptr);
+
+    SearchInfo search_info;
+    search_info.topk_ = 10;
+    search_info.group_size_ = 2;
+    search_info.metric_type_ = knowhere::metric::L2;
+    search_info.group_by_field_ids_.push_back(pk_fid);
+    search_info.array_offsets_ = array_offsets;
+
+    SearchResult search_result;
+    search_result.total_nq_ = 1;
+    search_result.unity_topK_ = search_info.topk_;
+    search_result.element_level_ = true;
+    search_result.vector_iterators_ =
+        std::vector<std::shared_ptr<VectorIterator>>{
+            std::make_shared<FixedVectorIterator>(
+                std::vector<std::pair<int64_t, float>>{
+                    {0, 0.1F},
+                    {1, 0.2F},
+                    {2, 0.3F},
+                    {3, 0.4F},
+                    {4, 0.5F},
+                    {6, 0.6F},
+                })};
+
+    OpContext op_context;
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        "search_group_by_node_element_level",
+        growing,
+        N,
+        MAX_TIMESTAMP,
+        0,
+        0,
+        query::PlanOptions{false},
+        std::make_shared<milvus::exec::QueryConfig>(
+            std::unordered_map<std::string, std::string>{}));
+    query_context->set_search_info(search_info);
+    query_context->set_array_offsets(array_offsets);
+    query_context->set_search_result(std::move(search_result));
+    query_context->set_op_context(&op_context);
+
+    auto group_by_plan =
+        std::make_shared<milvus::plan::SearchGroupByNode>("group_by");
+    auto task =
+        milvus::exec::Task::Create("search_group_by_node_element_level",
+                                   milvus::plan::PlanFragment(group_by_plan),
+                                   0,
+                                   query_context);
+    milvus::exec::DriverContext driver_context(task, 0, 0, 0, 0);
+    milvus::exec::PhySearchGroupByNode node(1, &driver_context, group_by_plan);
+
+    auto input = std::make_shared<RowVector>(std::vector<VectorPtr>{});
+    node.AddInput(input);
+    node.NoMoreInput();
+    auto output = node.GetOutput();
+    ASSERT_NE(output, nullptr);
+
+    auto grouped = query_context->get_search_result();
+    ASSERT_TRUE(grouped.element_level_);
+    ASSERT_EQ(grouped.seg_offsets_, (std::vector<int64_t>{0, 0, 1, 1, 2}));
+    ASSERT_EQ(grouped.element_indices_, (std::vector<int32_t>{0, 1, 0, 1, 0}));
+    ASSERT_EQ(grouped.topk_per_nq_prefix_sum_, (std::vector<size_t>{0, 5}));
+    ASSERT_TRUE(grouped.composite_group_by_values_.has_value());
+    ASSERT_EQ(grouped.composite_group_by_values_->size(),
+              grouped.seg_offsets_.size());
+    ASSERT_TRUE(grouped.group_size_.has_value());
+    ASSERT_EQ(grouped.group_size_.value(), 2);
+}
+
 TEST(GroupBY, GrowingRawData) {
     //0. set up growing segment
     int dim = 128;
@@ -695,4 +896,82 @@ TEST(GroupBY, GrowingIndex) {
             ASSERT_EQ(group_size, map_pair.second);
         }
     }
+}
+
+// Group-by on an INDEX-ONLY nullable scalar field: the field's raw data is
+// excluded from the load and only a scalar index is loaded, so
+// SealedDataGetter takes the from_data_ == false (Reverse_Lookup) branch --
+// the exact branch this PR fixes. A NULL group value previously threw
+// AssertInfo("field data not found"); it must now form a distinct null group.
+TEST(GroupBY, SealedIndexOnlyNullableGroupBy) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    int dim = 64;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR);
+    auto i64_null_fid =
+        schema->AddDebugField("int64_null", DataType::INT64, true);
+    schema->set_primary_field_id(str_fid);
+    size_t N = 100;
+
+    auto raw_data = DataGen(schema, N, 42, 0, 8, 10, 1, false, false);
+    // Exclude the group-by field's raw data so that, once its scalar index is
+    // loaded below, the field is index-only (HasFieldData() == false) and the
+    // getter must resolve group values via Reverse_Lookup().
+    auto segment = CreateSealedWithFieldDataLoaded(
+        schema, raw_data, false, {i64_null_fid.get()});
+
+    // vector index for search
+    auto vector_data = raw_data.get_col<float>(vec_fid);
+    auto indexing = GenVecIndexing(
+        N, dim, vector_data.data(), knowhere::IndexEnum::INDEX_HNSW);
+    LoadIndexInfo vec_info;
+    vec_info.field_id = vec_fid.get();
+    vec_info.index_params = GenIndexParams(indexing.get());
+    vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
+    vec_info.index_params[METRICS_TYPE] = knowhere::metric::L2;
+    segment->LoadIndex(vec_info);
+
+    // scalar index on the (data-excluded) nullable group-by field -> index-only
+    auto null_col = raw_data.get_col<int64_t>(i64_null_fid);
+    auto null_valid = raw_data.get_col_valid(i64_null_fid);
+    auto scalar_index = milvus::index::CreateScalarIndexSort<int64_t>();
+    scalar_index->Build(N, null_col.data(), null_valid.data());
+    LoadIndexInfo scalar_info;
+    scalar_info.field_id = i64_null_fid.get();
+    scalar_info.field_type = DataType::INT64;
+    scalar_info.index_params = GenIndexParams(scalar_index.get());
+    scalar_info.cache_index =
+        CreateTestCacheIndex("test", std::move(scalar_index));
+    segment->LoadIndex(scalar_info);
+
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str = handle.ParseGroupBySearch(
+        "", "fakevec", 20, "L2", "{\"ef\": 10}", i64_null_fid.get(), 3);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+    auto ph_group_raw = CreatePlaceholderGroup(1, dim, 1024);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    // Pre-fix: throws AssertInfo("field data not found") on a NULL group value.
+    // Post-fix: NULL forms a distinct null group (nullopt) instead.
+    std::unique_ptr<SearchResult> search_result;
+    ASSERT_NO_THROW({
+        search_result =
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
+    });
+    ASSERT_NE(search_result, nullptr);
+    auto group_by_values = ExtractFirstFieldGroupByValues(*search_result);
+    ASSERT_FALSE(group_by_values.empty());
+    // A distinct NULL group must be present (nullopt), not dropped/crashed.
+    bool has_null_group = std::any_of(
+        group_by_values.begin(), group_by_values.end(), [](const auto& v) {
+            return !v.has_value();
+        });
+    ASSERT_TRUE(has_null_group);
 }

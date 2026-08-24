@@ -21,10 +21,9 @@ import (
 	"io"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -116,9 +115,9 @@ func (r *retryableReader) objectSize() (int64, bool) {
 	}
 	size, err := r.sizeFunc(r.ctx, r.path)
 	if err != nil {
-		log.Ctx(r.ctx).Warn("retryable reader failed to get object size",
-			zap.String("path", r.path),
-			zap.Error(err),
+		mlog.Warn(r.ctx, "retryable reader failed to get object size",
+			mlog.String("path", r.path),
+			mlog.Err(err),
 		)
 		return 0, false
 	}
@@ -170,10 +169,10 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 		if errors.Is(err, io.EOF) {
 			if size, ok := r.objectSize(); ok && r.offset < size && r.reopen != nil {
 				err = storage.ToMilvusIoError(r.path, io.ErrUnexpectedEOF)
-				log.Ctx(r.ctx).Warn("retryable reader got premature EOF",
-					zap.String("path", r.path),
-					zap.Int64("offset", r.offset),
-					zap.Int64("size", size),
+				mlog.Warn(r.ctx, "retryable reader got premature EOF",
+					mlog.String("path", r.path),
+					mlog.Int64("offset", r.offset),
+					mlog.Int64("size", size),
 				)
 				if reopenErr := r.reopenAtOffset(); reopenErr != nil {
 					return !merr.IsNonRetryableErr(reopenErr), reopenErr
@@ -186,9 +185,9 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return false, err
 		}
-		log.Ctx(r.ctx).Warn("retryable reader read failed",
-			zap.String("path", r.path),
-			zap.Error(err),
+		mlog.Warn(r.ctx, "retryable reader read failed",
+			mlog.String("path", r.path),
+			mlog.Err(err),
 		)
 		err = storage.ToMilvusIoError(r.path, err)
 		// Denylist check - don't retry permanent/validation errors

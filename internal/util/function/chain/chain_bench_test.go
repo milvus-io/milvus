@@ -475,7 +475,7 @@ func BenchmarkSortOp(b *testing.B) {
 			}
 			defer df.Release()
 
-			chain := NewFuncChainWithAllocator(nil).Sort("int64_field", bc.desc)
+			chain := NewFuncChainWithAllocator(nil).Sort("int64_field", bc.desc, types.IDFieldName)
 
 			b.ResetTimer()
 			b.ReportAllocs()
@@ -603,7 +603,7 @@ func BenchmarkChain_FilterSortLimit(b *testing.B) {
 			chain := NewFuncChainWithAllocator(nil).
 				SetStage(types.StageL2Rerank).
 				Filter(&BenchFilterFunction{threshold: bc.threshold}, []string{types.ScoreFieldName}).
-				Sort(types.ScoreFieldName, true).
+				Sort(types.ScoreFieldName, true, types.IDFieldName).
 				Limit(bc.limit)
 
 			b.ResetTimer()
@@ -687,7 +687,7 @@ func BenchmarkChain_FullPipeline(b *testing.B) {
 				SetStage(types.StageL2Rerank).
 				Map(&BenchScoreTransformFunction{multiplier: 2.0}, []string{types.ScoreFieldName}, []string{"transformed_score"}).
 				Filter(&BenchFilterFunction{threshold: 0.3}, []string{types.ScoreFieldName}).
-				Sort("transformed_score", true).
+				Sort("transformed_score", true, types.IDFieldName).
 				Limit(50).
 				Select(types.IDFieldName, "transformed_score", "int64_field", "float64_field")
 
@@ -724,7 +724,7 @@ func BenchmarkScale_VaryingNQ(b *testing.B) {
 			defer df.Release()
 
 			chain := NewFuncChainWithAllocator(nil).
-				Sort(types.ScoreFieldName, true).
+				Sort(types.ScoreFieldName, true, types.IDFieldName).
 				Limit(10)
 
 			b.ResetTimer()
@@ -756,7 +756,7 @@ func BenchmarkScale_VaryingTopK(b *testing.B) {
 			defer df.Release()
 
 			chain := NewFuncChainWithAllocator(nil).
-				Sort(types.ScoreFieldName, true).
+				Sort(types.ScoreFieldName, true, types.IDFieldName).
 				Limit(10)
 
 			b.ResetTimer()
@@ -791,7 +791,7 @@ func BenchmarkScale_VaryingColumns(b *testing.B) {
 			chain := NewFuncChainWithAllocator(nil).
 				SetStage(types.StageL2Rerank).
 				Filter(&BenchFilterFunction{threshold: 0.5}, []string{types.ScoreFieldName}).
-				Sort(types.ScoreFieldName, true).
+				Sort(types.ScoreFieldName, true, types.IDFieldName).
 				Limit(100)
 
 			b.ResetTimer()
@@ -836,7 +836,7 @@ func BenchmarkWithCheckedAllocator(b *testing.B) {
 			chain := NewFuncChainWithAllocator(pool).
 				SetStage(types.StageL2Rerank).
 				Filter(&BenchFilterFunction{threshold: 0.5}, []string{types.ScoreFieldName}).
-				Sort(types.ScoreFieldName, true).
+				Sort(types.ScoreFieldName, true, types.IDFieldName).
 				Limit(10)
 
 			b.ResetTimer()
@@ -881,7 +881,7 @@ func BenchmarkEndToEnd_Pipeline(b *testing.B) {
 			chain := NewFuncChainWithAllocator(nil).
 				SetStage(types.StageL2Rerank).
 				Filter(&BenchFilterFunction{threshold: 0.5}, []string{types.ScoreFieldName}).
-				Sort(types.ScoreFieldName, true).
+				Sort(types.ScoreFieldName, true, types.IDFieldName).
 				Limit(50).
 				Select(types.IDFieldName, types.ScoreFieldName, "int64_field")
 

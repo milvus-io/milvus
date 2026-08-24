@@ -3,7 +3,6 @@ CDC sync tests for topology switchover and failover scenarios.
 """
 
 import random
-import subprocess
 import threading
 import time
 
@@ -670,10 +669,10 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
         switchover_helper,
         source_cluster_id,
         target_cluster_id,
-        milvus_ns,
+        kubectl_helper,
     ):
         """
-        Failover when source goes down: insert 500 records, verify sync, kill source pods,
+        Failover when source goes down: insert 500 records, verify sync, kill source containers,
         verify target count >= 500, wait for source to recover and verify count >= 500.
         """
         start_time = time.time()
@@ -727,26 +726,12 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
                 f"Downstream did not receive 500 records within {sync_timeout}s"
             )
 
-            # Kill source pods forcefully
-            logger.info(f"[FAILOVER] Killing source pods (instance={source_cluster_id}, ns={milvus_ns})...")
-            kill_cmd = [
-                "kubectl",
-                "delete",
-                "pods",
-                "-l",
-                f"app.kubernetes.io/instance={source_cluster_id}",
-                "-n",
-                milvus_ns,
-                "--grace-period=0",
-                "--force",
-            ]
-            result = subprocess.run(kill_cmd, capture_output=True, text=True)
-            logger.info(
-                f"[FAILOVER] kubectl output: stdout={result.stdout!r}, stderr={result.stderr!r}, rc={result.returncode}"
-            )
+            # Kill source containers while preserving Pod objects.
+            logger.info(f"[FAILOVER] Killing source containers (instance={source_cluster_id})...")
+            kubectl_helper.kill_containers(source_cluster_id)
 
             # Wait 60 s and verify target still has data
-            logger.info("[FAILOVER] Waiting 60s after pod kill...")
+            logger.info("[FAILOVER] Waiting 60s after container kill...")
             time.sleep(60)
 
             def check_target_intact():

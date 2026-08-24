@@ -31,14 +31,13 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -87,7 +86,7 @@ func GetIP(ip string) string {
 	netIP := net.ParseIP(ip)
 	// not a valid ip addr
 	if netIP == nil {
-		log.Warn("cannot parse input ip, treat it as hostname/service name", zap.String("ip", ip))
+		mlog.Warn(context.TODO(), "cannot parse input ip, treat it as hostname/service name", mlog.String("ip", ip))
 		return ip
 	}
 	// only localhost or unicast is acceptable
@@ -104,7 +103,7 @@ func GetIP(ip string) string {
 func GetLocalIP() string {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		log.Warn("Failed to get interface addresses", zap.Error(err))
+		mlog.Warn(context.TODO(), "Failed to get interface addresses", mlog.Err(err))
 		return "127.0.0.1"
 	}
 
@@ -115,7 +114,7 @@ func GetLocalIP() string {
 		return ip
 	}
 
-	log.Warn("No valid local IP found, falling back to loopback")
+	mlog.Warn(context.TODO(), "No valid local IP found, falling back to loopback")
 	return "127.0.0.1"
 }
 
@@ -182,14 +181,14 @@ func getValidLocalIP(addrs []net.Addr, preferIPv6 bool) string {
 	for _, category := range priorities {
 		if ip, exists := candidates[category]; exists {
 			result := formatLocalIP(ip)
-			log.Debug("Selected IP by priority",
-				zap.String("ip", result),
-				zap.String("categoryName", getCategoryName(category)))
+			mlog.Debug(context.TODO(), "Selected IP by priority",
+				mlog.String("ip", result),
+				mlog.String("categoryName", getCategoryName(category)))
 			return result
 		}
 	}
 
-	log.Warn("No valid IP found in candidates")
+	mlog.Warn(context.TODO(), "No valid IP found in candidates")
 	return ""
 }
 
@@ -565,14 +564,15 @@ func ValidateNullableVectorFieldDataCompact(fieldData *schemapb.FieldData, logic
 	if fieldData == nil || !typeutil.IsSupportedNullableVectorType(fieldData.GetType()) {
 		return nil
 	}
-	if len(fieldData.GetValidData()) == 0 && !requireValidData {
+	validData := typeutil.GetFieldDataValidData(fieldData)
+	if len(validData) == 0 && !requireValidData {
 		return nil
 	}
 	physicalRows, err := GetVectorFieldPhysicalRows(fieldData.GetFieldName(), fieldData.GetType(), fieldData.GetVectors())
 	if err != nil {
 		return err
 	}
-	return ValidateNullableVectorCompactRows(fieldData.GetFieldName(), fieldData.GetValidData(), physicalRows, logicalRows, requireValidData)
+	return ValidateNullableVectorCompactRows(fieldData.GetFieldName(), validData, physicalRows, logicalRows, requireValidData)
 }
 
 func ValidateNullableVectorFieldDataCompactWithDim(fieldData *schemapb.FieldData, logicalRows uint64, requireValidData bool, dim int64) error {
@@ -582,14 +582,15 @@ func ValidateNullableVectorFieldDataCompactWithDim(fieldData *schemapb.FieldData
 	if !typeutil.IsSupportedNullableVectorType(fieldData.GetType()) {
 		return nil
 	}
-	if len(fieldData.GetValidData()) == 0 && !requireValidData {
+	validData := typeutil.GetFieldDataValidData(fieldData)
+	if len(validData) == 0 && !requireValidData {
 		return nil
 	}
 	physicalRows, err := getVectorFieldPhysicalRowsWithDim(fieldData.GetFieldName(), fieldData.GetType(), fieldData.GetVectors(), dim)
 	if err != nil {
 		return err
 	}
-	return ValidateNullableVectorCompactRows(fieldData.GetFieldName(), fieldData.GetValidData(), physicalRows, logicalRows, requireValidData)
+	return ValidateNullableVectorCompactRows(fieldData.GetFieldName(), validData, physicalRows, logicalRows, requireValidData)
 }
 
 // GetNumRowOfFieldDataWithSchema returns num of rows with schema specification.
@@ -600,7 +601,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 	if err != nil {
 		return 0, err
 	}
-	if len(fieldData.GetValidData()) > 0 && typeutil.IsSupportedNullableVectorType(fieldSchema.GetDataType()) {
+	validData := typeutil.GetFieldDataValidData(fieldData)
+	if len(validData) > 0 && typeutil.IsSupportedNullableVectorType(fieldSchema.GetDataType()) {
 		dim := fieldData.GetVectors().GetDim()
 		if dim == 0 && fieldSchema.GetDataType() != schemapb.DataType_SparseFloatVector {
 			dim, err = typeutil.GetDim(fieldSchema)
@@ -608,10 +610,10 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 				return 0, err
 			}
 		}
-		if err := ValidateNullableVectorFieldDataCompactWithDim(fieldData, uint64(len(fieldData.GetValidData())), false, dim); err != nil {
+		if err := ValidateNullableVectorFieldDataCompactWithDim(fieldData, uint64(len(validData)), false, dim); err != nil {
 			return 0, err
 		}
-		return uint64(len(fieldData.GetValidData())), nil
+		return uint64(len(validData)), nil
 	}
 	switch fieldSchema.GetDataType() {
 	case schemapb.DataType_Bool:
@@ -641,8 +643,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetGeometryWktData().GetData())
 		}
 	case schemapb.DataType_FloatVector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			dim := fieldData.GetVectors().GetDim()
 			fieldNumRows, err = GetNumRowsOfFloatVectorField(fieldData.GetVectors().GetFloatVector().GetData(), dim)
@@ -651,8 +653,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			}
 		}
 	case schemapb.DataType_BinaryVector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			dim := fieldData.GetVectors().GetDim()
 			fieldNumRows, err = GetNumRowsOfBinaryVectorField(fieldData.GetVectors().GetBinaryVector(), dim)
@@ -661,8 +663,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			}
 		}
 	case schemapb.DataType_Float16Vector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			dim := fieldData.GetVectors().GetDim()
 			fieldNumRows, err = GetNumRowsOfFloat16VectorField(fieldData.GetVectors().GetFloat16Vector(), dim)
@@ -671,8 +673,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			}
 		}
 	case schemapb.DataType_BFloat16Vector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			dim := fieldData.GetVectors().GetDim()
 			fieldNumRows, err = GetNumRowsOfBFloat16VectorField(fieldData.GetVectors().GetBfloat16Vector(), dim)
@@ -681,14 +683,14 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			}
 		}
 	case schemapb.DataType_SparseFloatVector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			fieldNumRows = uint64(len(fieldData.GetVectors().GetSparseFloatVector().GetContents()))
 		}
 	case schemapb.DataType_Int8Vector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			dim := fieldData.GetVectors().GetDim()
 			fieldNumRows, err = GetNumRowsOfInt8VectorField(fieldData.GetVectors().GetInt8Vector(), dim)
@@ -697,8 +699,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			}
 		}
 	case schemapb.DataType_ArrayOfVector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			fieldNumRows = getNumRowsOfArrayVectorField(fieldData.GetVectors().GetVectorArray().GetData())
 		}
@@ -713,6 +715,7 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 	var fieldNumRows uint64
 	var err error
+	validData := typeutil.GetFieldDataValidData(fieldData)
 	switch fieldType := fieldData.Field.(type) {
 	case *schemapb.FieldData_Scalars:
 		scalarField := fieldData.GetScalars()
@@ -742,11 +745,11 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 		}
 	case *schemapb.FieldData_Vectors:
 		vectorField := fieldData.GetVectors()
-		if len(fieldData.GetValidData()) > 0 {
-			if err := ValidateNullableVectorFieldDataCompact(fieldData, uint64(len(fieldData.GetValidData())), false); err != nil {
+		if len(validData) > 0 {
+			if err := ValidateNullableVectorFieldDataCompact(fieldData, uint64(len(validData)), false); err != nil {
 				return 0, err
 			}
-			return uint64(len(fieldData.GetValidData())), nil
+			return uint64(len(validData)), nil
 		}
 		switch vectorFieldType := vectorField.Data.(type) {
 		case *schemapb.VectorField_FloatVector:
@@ -904,7 +907,7 @@ func categorizeLocalIP(ip net.IP) (ipCategory, bool) {
 		return ipCategoryIPv6Public, true
 	}
 
-	log.Debug("IP categorization: uncategorized IPv6", zap.String("ip", ip.String()))
+	mlog.Debug(context.TODO(), "IP categorization: uncategorized IPv6", mlog.String("ip", ip.String()))
 	return 0, false
 }
 

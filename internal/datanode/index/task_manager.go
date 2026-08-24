@@ -23,11 +23,9 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -46,6 +44,10 @@ type IndexTaskInfo struct {
 	CurrentIndexVersion       int32
 	CurrentScalarIndexVersion int32
 	IndexStorePathVersion     indexpb.IndexStorePathVersion
+	ExecStartMs               int64
+	ExecEndMs                 int64
+	CostTimeMs                int64
+	CostCPUNum                int64
 
 	// task statistics
 	statistic *indexpb.JobInfo
@@ -62,6 +64,10 @@ func (i *IndexTaskInfo) Clone() *IndexTaskInfo {
 		CurrentIndexVersion:       i.CurrentIndexVersion,
 		CurrentScalarIndexVersion: i.CurrentScalarIndexVersion,
 		IndexStorePathVersion:     i.IndexStorePathVersion,
+		ExecStartMs:               i.ExecStartMs,
+		ExecEndMs:                 i.ExecEndMs,
+		CostTimeMs:                i.CostTimeMs,
+		CostCPUNum:                i.CostCPUNum,
 		statistic:                 typeutil.Clone(i.statistic),
 	}
 }
@@ -125,8 +131,39 @@ func (m *TaskManager) StoreIndexTaskState(ClusterID string, buildID typeutil.Uni
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	if task, ok := m.indexTasks[key]; ok {
-		log.Ctx(m.ctx).Debug("store task state", zap.String("clusterID", ClusterID), zap.Int64("buildID", buildID),
-			zap.String("state", state.String()), zap.String("fail reason", failReason))
+		mlog.Debug(m.ctx, "store task state", mlog.String("clusterID", ClusterID), mlog.FieldBuildID(buildID),
+			mlog.String("state", state.String()), mlog.String("fail reason", failReason))
+		task.State = state
+		task.FailReason = failReason
+	}
+}
+
+func (m *TaskManager) StoreIndexTaskExecutionStart(clusterID string, buildID typeutil.UniqueID, startMs int64, costCPUNum int64) {
+	key := Key{ClusterID: clusterID, TaskID: buildID}
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	if task, ok := m.indexTasks[key]; ok {
+		task.ExecStartMs = startMs
+		task.CostCPUNum = costCPUNum
+		task.ExecEndMs = 0
+		task.CostTimeMs = 0
+	}
+}
+
+// StoreIndexTaskExecutionEndWithState records the execution-end cost bookkeeping
+// together with the final task state/failReason in a single critical section, so
+// a concurrent reader can never observe a final cost paired with a stale state
+// (or vice versa).
+func (m *TaskManager) StoreIndexTaskExecutionEndWithState(clusterID string, buildID typeutil.UniqueID, endMs int64, costTimeMs int64, state commonpb.IndexState, failReason string) {
+	key := Key{ClusterID: clusterID, TaskID: buildID}
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	if task, ok := m.indexTasks[key]; ok {
+		mlog.Debug(m.ctx, "store task execution end with state", mlog.String("clusterID", clusterID), mlog.FieldBuildID(buildID),
+			mlog.String("state", state.String()), mlog.String("fail reason", failReason),
+			mlog.Int64("costTimeMs", costTimeMs))
+		task.ExecEndMs = endMs
+		task.CostTimeMs = costTimeMs
 		task.State = state
 		task.FailReason = failReason
 	}
@@ -138,6 +175,16 @@ func (m *TaskManager) ForeachIndexTaskInfo(fn func(ClusterID string, buildID typ
 	for key, info := range m.indexTasks {
 		fn(key.ClusterID, key.TaskID, info)
 	}
+}
+
+func (m *TaskManager) GetIndexTaskInfo(clusterID string, buildID typeutil.UniqueID) *IndexTaskInfo {
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+
+	if info, ok := m.indexTasks[Key{ClusterID: clusterID, TaskID: buildID}]; ok {
+		return info.Clone()
+	}
+	return nil
 }
 
 func (m *TaskManager) StoreIndexFilesAndStatistic(
@@ -173,8 +220,8 @@ func (m *TaskManager) DeleteIndexTaskInfos(ctx context.Context, keys []Key) []*I
 		if ok {
 			deleted = append(deleted, info)
 			delete(m.indexTasks, key)
-			log.Ctx(ctx).Info("delete task infos",
-				zap.String("cluster_id", key.ClusterID), zap.Int64("build_id", key.TaskID))
+			mlog.Info(ctx, "delete task infos",
+				mlog.String("cluster_id", key.ClusterID), mlog.FieldBuildID(key.TaskID))
 		}
 	}
 	return deleted
@@ -228,8 +275,8 @@ func (m *TaskManager) StoreAnalyzeTaskState(clusterID string, taskID typeutil.Un
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	if task, ok := m.analyzeTasks[key]; ok {
-		log.Info("store analyze task state", zap.String("clusterID", clusterID), zap.Int64("TaskID", taskID),
-			zap.String("state", state.String()), zap.String("fail reason", failReason))
+		mlog.Info(m.ctx, "store analyze task state", mlog.String("clusterID", clusterID), mlog.Int64("TaskID", taskID),
+			mlog.String("state", state.String()), mlog.String("fail reason", failReason))
 		task.State = state
 		task.FailReason = failReason
 	}
@@ -273,8 +320,8 @@ func (m *TaskManager) DeleteAnalyzeTaskInfos(ctx context.Context, keys []Key) []
 		if ok {
 			deleted = append(deleted, info)
 			delete(m.analyzeTasks, key)
-			log.Ctx(ctx).Info("delete analyze task infos",
-				zap.String("clusterID", key.ClusterID), zap.Int64("TaskID", key.TaskID))
+			mlog.Info(ctx, "delete analyze task infos",
+				mlog.String("clusterID", key.ClusterID), mlog.Int64("TaskID", key.TaskID))
 		}
 	}
 	return deleted
@@ -328,15 +375,15 @@ func (m *TaskManager) WaitTaskFinish() {
 				return
 			}
 		case <-timeoutCtx.Done():
-			log.Warn("timeout, the index node has some progress task")
+			mlog.Warn(m.ctx, "timeout, the index node has some progress task")
 			for _, info := range m.indexTasks {
 				if info.State == commonpb.IndexState_InProgress {
-					log.Warn("progress task", zap.Any("info", info))
+					mlog.Warn(m.ctx, "progress task", mlog.Any("info", info))
 				}
 			}
 			for _, info := range m.analyzeTasks {
 				if info.State == indexpb.JobState_JobStateInProgress {
-					log.Warn("progress task", zap.Any("info", info))
+					mlog.Warn(m.ctx, "progress task", mlog.Any("info", info))
 				}
 			}
 			return
@@ -359,6 +406,7 @@ type StatsTaskInfo struct {
 	Bm25Logs         []*datapb.FieldBinlog
 	JSONKeyStatsLogs map[int64]*datapb.JsonKeyStats
 	FileResources    []*internalpb.FileResourceInfo
+	BaseManifest     string
 	Manifest         string
 }
 
@@ -378,6 +426,7 @@ func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
 		Bm25Logs:         s.CloneBm25Logs(),
 		JSONKeyStatsLogs: s.CloneJSONKeyStatsLogs(),
 		FileResources:    s.CloneFileResources(),
+		BaseManifest:     s.BaseManifest,
 		Manifest:         s.Manifest,
 	}
 }
@@ -397,6 +446,7 @@ func (s *StatsTaskInfo) ToStatsResult(taskID int64) *workerpb.StatsResult {
 		Bm25Logs:         s.Bm25Logs,
 		NumRows:          s.NumRows,
 		JsonKeyStatsLogs: s.JSONKeyStatsLogs,
+		BaseManifest:     s.BaseManifest,
 		Manifest:         s.Manifest,
 	}
 }
@@ -477,8 +527,8 @@ func (m *TaskManager) StoreStatsTaskState(clusterID string, taskID typeutil.Uniq
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	if task, ok := m.statsTasks[key]; ok {
-		log.Info("store stats task state", zap.String("clusterID", clusterID), zap.Int64("TaskID", taskID),
-			zap.String("state", state.String()), zap.String("fail reason", failReason))
+		mlog.Info(m.ctx, "store stats task state", mlog.String("clusterID", clusterID), mlog.Int64("TaskID", taskID),
+			mlog.String("state", state.String()), mlog.String("fail reason", failReason))
 		task.State = state
 		task.FailReason = failReason
 	}
@@ -522,6 +572,7 @@ func (m *TaskManager) StoreStatsTextIndexResult(
 	segID typeutil.UniqueID,
 	channel string,
 	texIndexLogs map[int64]*datapb.TextIndexStats,
+	baseManifest string,
 	manifest string,
 ) {
 	key := Key{ClusterID: ClusterID, TaskID: taskID}
@@ -533,6 +584,7 @@ func (m *TaskManager) StoreStatsTextIndexResult(
 		info.CollID = collID
 		info.PartID = partID
 		info.InsertChannel = channel
+		info.BaseManifest = baseManifest
 		info.Manifest = manifest
 	}
 }
@@ -545,6 +597,7 @@ func (m *TaskManager) StoreJSONKeyStatsResult(
 	segID typeutil.UniqueID,
 	channel string,
 	jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats,
+	baseManifest string,
 	manifest string,
 ) {
 	key := Key{ClusterID: clusterID, TaskID: taskID}
@@ -556,6 +609,7 @@ func (m *TaskManager) StoreJSONKeyStatsResult(
 		info.CollID = collID
 		info.PartID = partID
 		info.InsertChannel = channel
+		info.BaseManifest = baseManifest
 		info.Manifest = manifest
 	}
 }
@@ -579,8 +633,8 @@ func (m *TaskManager) DeleteStatsTaskInfos(ctx context.Context, keys []Key) []*S
 		if ok {
 			deleted = append(deleted, info)
 			delete(m.statsTasks, key)
-			log.Ctx(ctx).Info("delete stats task infos",
-				zap.String("clusterID", key.ClusterID), zap.Int64("TaskID", key.TaskID))
+			mlog.Info(ctx, "delete stats task infos",
+				mlog.String("clusterID", key.ClusterID), mlog.Int64("TaskID", key.TaskID))
 		}
 	}
 	return deleted

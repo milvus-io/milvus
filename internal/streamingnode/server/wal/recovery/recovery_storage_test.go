@@ -14,12 +14,13 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -55,38 +56,38 @@ func TestRecoveryStorage(t *testing.T) {
 			return proto.Clone(v).(*streamingpb.VChannelMeta)
 		}), nil
 	})
-	snCatalog.EXPECT().SaveSegmentAssignments(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string, m map[int64]*streamingpb.SegmentAssignmentMeta) error {
+	snCatalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(cp, nil)
+	// Simulate the compound catalog save: parts are applied in order, and a
+	// random failure between parts leaves a partially applied snapshot, which
+	// must be re-persisted as a whole by the caller's retry.
+	snCatalog.EXPECT().SaveRecoverySnapshot(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string, snapshot *metastore.WALRecoverySnapshot) error {
 		if rand.Int31n(3) == 0 {
 			return errors.New("save failed")
 		}
-		for _, v := range m {
+		for _, v := range snapshot.SegmentAssignments {
 			if v.State != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
 				segmentMetas[v.SegmentId] = v
 			} else {
 				delete(segmentMetas, v.SegmentId)
 			}
 		}
-		return nil
-	})
-	snCatalog.EXPECT().SaveVChannels(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string, m map[string]*streamingpb.VChannelMeta) error {
 		if rand.Int31n(3) == 0 {
 			return errors.New("save failed")
 		}
-		for _, v := range m {
+		for _, v := range snapshot.VChannels {
 			if v.State != streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
 				vchannelMetas[v.Vchannel] = v
 			} else {
 				delete(vchannelMetas, v.Vchannel)
 			}
 		}
-		return nil
-	})
-	snCatalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(cp, nil)
-	snCatalog.EXPECT().SaveConsumeCheckpoint(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannelName string, checkpoint *streamingpb.WALCheckpoint) error {
+		// The consume checkpoint is the commit point, applied strictly last.
 		if rand.Int31n(3) == 0 {
 			return errors.New("save failed")
 		}
-		cp = checkpoint
+		if snapshot.ConsumeCheckpoint != nil {
+			cp = snapshot.ConsumeCheckpoint
+		}
 		return nil
 	})
 	mixCoord := mocks.NewMockMixCoordClient(t)
@@ -201,7 +202,7 @@ func TestRecoveryStorageManualFlushMarksSegmentsFlushed(t *testing.T) {
 			},
 		},
 	}
-	r.SetLogger(log.With())
+	r.SetLogger(mlog.With())
 
 	msg := message.NewManualFlushMessageBuilderV2().
 		WithVChannel("v1").
@@ -215,7 +216,7 @@ func TestRecoveryStorageManualFlushMarksSegmentsFlushed(t *testing.T) {
 		WithLastConfirmedUseMessageID().
 		IntoImmutableMessage(rmq.NewRmqID(2))
 
-	r.handleManualFlush(message.MustAsImmutableManualFlushMessageV2(msg))
+	r.handleManualFlush(context.Background(), message.MustAsImmutableManualFlushMessageV2(msg))
 	segment := r.segments[segmentID]
 	snapshot, shouldBeRemoved := segment.ConsumeDirtyAndGetSnapshot()
 	require.NotNil(t, snapshot)

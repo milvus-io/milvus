@@ -39,13 +39,6 @@
 namespace milvus {
 namespace exec {
 
-template <typename T>
-struct ExistsElementFunc {
-    void
-    operator()(const T* src, size_t size, T val, TargetBitmapView res) {
-    }
-};
-
 class PhyExistsFilterExpr : public SegmentExpr {
  public:
     PhyExistsFilterExpr(
@@ -72,7 +65,7 @@ class PhyExistsFilterExpr : public SegmentExpr {
                       false,
                       plan_options),
           expr_(expr) {
-        DetermineExecPath();
+        // DetermineExecPath();
     }
 
     void

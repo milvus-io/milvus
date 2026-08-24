@@ -89,6 +89,38 @@ using namespace milvus::query;
 using namespace milvus::segcore;
 using namespace milvus::exec;
 
+std::unique_ptr<index::NgramInvertedIndex>
+CreateNgramIndexForCanHandleLiteral(uintptr_t min_gram = 2,
+                                    uintptr_t max_gram = 4) {
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t index_build_id = 4000;
+    int64_t index_version = 4000;
+
+    auto schema = std::make_shared<Schema>();
+    auto field_id = schema->AddDebugField("ngram", DataType::VARCHAR);
+
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      field_id.get(),
+                                                      DataType::VARCHAR,
+                                                      DataType::NONE,
+                                                      false);
+    auto index_meta = gen_index_meta(
+        segment_id, field_id.get(), index_build_id, index_version);
+
+    auto storage_config = gen_local_storage_config(TestLocalPath);
+    auto cm = CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
+
+    auto ngram_params = index::NgramParams{
+        .loading_index = true, .min_gram = min_gram, .max_gram = max_gram};
+    return std::make_unique<index::NgramInvertedIndex>(ctx, ngram_params);
+}
+
 void
 test_ngram_with_data(const boost::container::vector<std::string>& data,
                      const std::string& literal,
@@ -252,7 +284,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
         trace.traceFlags = 0;
         auto cload_index_info = static_cast<CLoadIndexInfo>(&load_index_info);
         AppendIndexV2(trace, cload_index_info);
-        UpdateSealedSegmentIndex(segment.get(), cload_index_info);
+        segment->LoadIndex(load_index_info);
 
         auto unary_range_expr = test::GenUnaryRangeExpr(op_type, literal);
         auto column_info = test::GenColumnInfo(
@@ -530,7 +562,7 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
         trace.traceFlags = 0;
         auto cload_index_info = static_cast<CLoadIndexInfo>(&load_index_info);
         AppendIndexV2(trace, cload_index_info);
-        UpdateSealedSegmentIndex(segment.get(), cload_index_info);
+        segment->LoadIndex(load_index_info);
 
         // Test: TermFilterExpr (IN operator)
         {
@@ -1496,6 +1528,44 @@ TEST(NgramPatternMatchConsistency, UTF8Patterns) {
 
         // Test with ngram index
         test_ngram_with_data(test_data, pattern, op_type, expected_results);
+    }
+}
+
+TEST(NgramPatternMatchConsistency, CanHandleLiteralUsesUtf8CharacterCount) {
+    auto ngram_index = CreateNgramIndexForCanHandleLiteral(2, 4);
+
+    const std::string single_chinese = "测";
+    const std::string two_chinese = "测试";
+    ASSERT_EQ(single_chinese.size(), 3);
+    ASSERT_EQ(Utf8CharCount(single_chinese.data(), single_chinese.size()), 1);
+    ASSERT_EQ(Utf8CharCount(two_chinese.data(), two_chinese.size()), 2);
+
+    struct TestCase {
+        std::string literal;
+        proto::plan::OpType op_type;
+        bool expected_can_handle;
+    };
+
+    std::vector<TestCase> test_cases = {
+        {single_chinese, proto::plan::OpType::InnerMatch, false},
+        {single_chinese, proto::plan::OpType::PrefixMatch, false},
+        {single_chinese, proto::plan::OpType::PostfixMatch, false},
+        {"%" + single_chinese + "%", proto::plan::OpType::Match, false},
+        {single_chinese, proto::plan::OpType::RegexMatch, false},
+        {two_chinese, proto::plan::OpType::InnerMatch, true},
+        {"%" + two_chinese + "%", proto::plan::OpType::Match, true},
+        {two_chinese, proto::plan::OpType::RegexMatch, true},
+    };
+
+    for (const auto& test_case : test_cases) {
+        EXPECT_EQ(
+            ngram_index->CanHandleLiteral(test_case.literal, test_case.op_type),
+            test_case.expected_can_handle)
+            << "literal=\"" << test_case.literal << "\""
+            << ", op_type=" << static_cast<int>(test_case.op_type)
+            << ", byte_len=" << test_case.literal.size() << ", utf8_char_count="
+            << Utf8CharCount(test_case.literal.data(),
+                             test_case.literal.size());
     }
 }
 

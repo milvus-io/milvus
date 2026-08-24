@@ -25,9 +25,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -36,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -95,6 +91,10 @@ func (w closeErrBinlogRecordWriter) GetWrittenUncompressed() uint64 {
 	return w.writtenUncompressed
 }
 
+func (w closeErrBinlogRecordWriter) GetStatsBlobSize() int64 {
+	return 0
+}
+
 func (w closeErrBinlogRecordWriter) Close() error {
 	return nil
 }
@@ -149,6 +149,7 @@ func (s *MultiSegmentWriterSuite) SetupSuite() {
 
 func (s *MultiSegmentWriterSuite) SetupTest() {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, s.T().TempDir())
 
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -174,6 +175,7 @@ func (s *MultiSegmentWriterSuite) SetupTest() {
 
 func (s *MultiSegmentWriterSuite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
 }
 
 // genSimpleSchema generates a simple collection schema for testing
@@ -227,7 +229,7 @@ func (s *MultiSegmentWriterSuite) genSimpleSchema() *schemapb.CollectionSchema {
 
 // genTestValue generates a test storage.Value for the given ID
 func (s *MultiSegmentWriterSuite) genTestValue(id int64) *storage.Value {
-	ts := tsoutil.ComposeTSByTime(time.Now(), 0)
+	ts := tsoutil.ComposeTSByTime(time.Now())
 	return &storage.Value{
 		PK:        storage.NewInt64PrimaryKey(id),
 		Timestamp: int64(ts),
@@ -441,20 +443,6 @@ func (s *MultiSegmentWriterSuite) TestSegmentIDExhaustionGrowsCurrentSegment() {
 	segmentAlloc := allocator.NewLocalAllocator(1000, 1001)
 	logAlloc := allocator.NewLocalAllocator(2000, 3000)
 	allocator := NewCompactionAllocator(segmentAlloc, logAlloc)
-	core, recordedLogs := observer.New(zapcore.WarnLevel)
-	log.ReplaceGlobals(zap.New(core), &log.ZapProperties{
-		Core:  core,
-		Level: zap.NewAtomicLevelAt(zapcore.WarnLevel),
-	})
-	s.T().Cleanup(func() {
-		logger, props, err := log.InitLogger(&log.Config{
-			Level:               "debug",
-			Stdout:              true,
-			DisableErrorVerbose: true,
-		})
-		s.Require().NoError(err)
-		log.ReplaceGlobals(logger, props)
-	})
 
 	writer, err := NewMultiSegmentWriter(
 		context.Background(),
@@ -481,7 +469,6 @@ func (s *MultiSegmentWriterSuite) TestSegmentIDExhaustionGrowsCurrentSegment() {
 	s.Require().Len(segments, 1)
 	s.EqualValues(1000, segments[0].SegmentID)
 	s.EqualValues(3, segments[0].NumOfRows)
-	s.Len(recordedLogs.FilterMessage("pre-allocated compaction segment IDs exhausted, continue writing current segment").All(), 1)
 }
 
 func (s *MultiSegmentWriterSuite) TestRotateAllocFailureKeepsCurrentWriterOpen() {

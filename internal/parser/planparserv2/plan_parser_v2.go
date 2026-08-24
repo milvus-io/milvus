@@ -1,6 +1,7 @@
 package planparserv2
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -9,7 +10,6 @@ import (
 	"github.com/antlr4-go/antlr/v4"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -18,7 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -49,6 +49,56 @@ func ParseExprParams(vals map[string]*schemapb.TemplateValue) *ExprParams {
 		}
 	}
 	return ep
+}
+
+// parseExpr parses an expression with a two-stage strategy:
+//
+//	Stage 1 (fast): SLL prediction with a throwaway probe listener. For the
+//	  overwhelmingly common unambiguous filter expression SLL parses cleanly and
+//	  the result is identical to a full LL parse, so we return it directly. We do
+//	  not use BailErrorStrategy here: antlr-go's BailErrorStrategy can reach an
+//	  unimplemented ParseCancellationException path ("panic: implement me"), so
+//	  "SLL could not decide" is detected via a syntax error on the probe listener
+//	  instead of a bail/recover.
+//	Stage 2 (accurate): only if stage 1 saw an error. Rewind the tokens and reparse
+//	  with full LL prediction + default error recovery and the real error listener,
+//	  so the result/error is exactly what a pure-LL parse would produce. SLL never
+//	  accepts input that LL rejects, so a clean stage-1 parse equals the LL parse.
+func parseExpr(parser *planparserv2.PlanParser, listener *errorListenerImpl) planparserv2.IExprContext {
+	interp := parser.GetInterpreter()
+
+	// Stage 1 (fast): SLL prediction with a throwaway listener. For the
+	// overwhelmingly common unambiguous filter expression SLL parses cleanly and
+	// the result is identical to a full LL parse, so we return it directly. We do
+	// not use BailErrorStrategy: antlr-go's BailErrorStrategy can hit an
+	// unimplemented ParseCancellationException path ("panic: implement me"), so we
+	// instead detect "SLL could not decide" via a syntax error on a probe
+	// listener. DefaultErrorStrategy's recovery only runs on that rare error path.
+	probe := &errorListenerImpl{}
+	parser.RemoveErrorListeners()
+	parser.AddErrorListener(probe)
+	parser.SetErrorHandler(antlr.NewDefaultErrorStrategy())
+	interp.SetPredictionMode(antlr.PredictionModeSLL)
+	ast := parser.Expr()
+	if probe.Error() == nil {
+		return ast
+	}
+
+	// Stage 2 (accurate): SLL saw an error — it may be a genuine syntax error or
+	// an SLL-only false positive. Rewind the buffered tokens and reparse with full
+	// LL + default recovery and the real listener, so the result/error is exactly
+	// what a pure-LL parse would produce.
+	if tokens, ok := parser.GetTokenStream().(*antlr.CommonTokenStream); ok {
+		tokens.Seek(0)
+		// SetInputStream resets the parser's internal state (context stack,
+		// precedence stack, error handler) while preserving BuildParseTrees.
+		parser.SetInputStream(tokens)
+	}
+	parser.RemoveErrorListeners()
+	parser.AddErrorListener(listener)
+	parser.SetErrorHandler(antlr.NewDefaultErrorStrategy())
+	interp.SetPredictionMode(antlr.PredictionModeLL)
+	return parser.Expr()
 }
 
 func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
@@ -84,13 +134,13 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 		return
 	}
 
-	ast = parser.Expr()
+	ast = parseExpr(parser, listener)
 	if err = listener.Error(); err != nil {
 		return
 	}
 
 	if parser.GetCurrentToken().GetTokenType() != antlr.TokenEOF {
-		log.Info("invalid expression", zap.String("expr", exprStr))
+		mlog.Info(context.TODO(), "invalid expression", mlog.String("expr", exprStr))
 		err = merr.WrapErrQueryPlanMsg("invalid expression: %s", exprStr)
 		return
 	}
@@ -227,12 +277,12 @@ func CreateSearchPlanArgs(schema *typeutil.SchemaHelper, exprStr string, vectorF
 
 	expr, err := parse()
 	if err != nil {
-		log.Info("CreateSearchPlan failed", zap.Error(err))
+		mlog.Info(context.TODO(), "CreateSearchPlan failed", mlog.Err(err))
 		return nil, err
 	}
 	vectorField, err := schema.GetFieldFromName(vectorFieldName)
 	if err != nil {
-		log.Info("CreateSearchPlan failed", zap.Error(err))
+		mlog.Info(context.TODO(), "CreateSearchPlan failed", mlog.Err(err))
 		return nil, err
 	}
 	// plan ok with schema, check ann field
@@ -270,12 +320,12 @@ func CreateSearchPlanArgs(schema *typeutil.SchemaHelper, exprStr string, vectorF
 		case schemapb.DataType_Int8Vector:
 			vectorType = planpb.VectorType_EmbListInt8Vector
 		default:
-			log.Error("Invalid elementType for ArrayOfVector", zap.Any("elementType", elementType))
+			mlog.Error(context.TODO(), "Invalid elementType for ArrayOfVector", mlog.Any("elementType", elementType))
 			return nil, merr.WrapErrQueryPlanMsg("unsupported element type for ArrayOfVector: %v", elementType)
 		}
 
 	default:
-		log.Error("Invalid dataType", zap.Any("dataType", dataType))
+		mlog.Error(context.TODO(), "Invalid dataType", mlog.Any("dataType", dataType))
 		return nil, merr.WrapErrQueryPlanMsg("unsupported vector data type: %v", dataType)
 	}
 

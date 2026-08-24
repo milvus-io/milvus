@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -25,13 +26,6 @@ import (
 
 func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t *testing.T) {
 	paramtable.Init()
-
-	oldCache := globalMetaCache
-	cache := NewMockCache(t)
-	cache.On("GetPartitionID", mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
-	globalMetaCache = cache
-	defer func() { globalMetaCache = oldCache }()
-
 	insertMsg := &msgstream.InsertMsg{
 		InsertRequest: &msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
@@ -67,7 +61,9 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 		},
 	}
 
-	msgs, err := repackInsertDataForStreamingService(context.Background(), []string{"ch"}, insertMsg, result, nil, 0)
+	mockMetaCache := NewMockCache(t)
+	mockMetaCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(0), nil)
+	msgs, err := repackInsertDataForStreamingService(context.Background(), mockMetaCache, []string{"ch"}, insertMsg, result, nil, 0, nil)
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 1)
 
@@ -82,23 +78,15 @@ func TestInsertTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 	t.Cleanup(func() {
 		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 	})
-
-	oldCache := globalMetaCache
-	t.Cleanup(func() {
-		globalMetaCache = oldCache
-	})
-
 	const (
 		dbName         = "db"
 		collectionName = "text_collection"
 	)
-	schema := newSchemaInfo(newTextSchemaForStorageV3Test(collectionName))
+	schema := mustNewSchemaInfo(newTextSchemaForStorageV3Test(collectionName))
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(int64(100), nil)
 	cache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, int64(100)).Return(&collectionInfo{}, nil)
 	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(schema, nil)
-	globalMetaCache = cache
-
 	task := &insertTask{
 		ctx: context.Background(),
 		insertMsg: &BaseInsertTask{
@@ -110,6 +98,7 @@ func TestInsertTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 			},
 		},
 	}
+	task.metaCache = cache
 
 	err := task.PreExecute(context.Background())
 	assert.Error(t, err)
@@ -373,11 +362,11 @@ func TestInsertTask(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(collectionID, nil)
-		globalMetaCache = cache
-		chMgr := NewMockChannelsMgr(t)
-		chMgr.EXPECT().getChannels(mock.Anything).Return(channels, nil)
+		chMgr := channelmgr.NewMockChannelsMgr(t)
+		chMgr.EXPECT().GetChannels(mock.Anything).Return(channels, nil)
 		it := insertTask{
-			ctx: context.Background(),
+			baseTask: baseTask{metaCache: cache},
+			ctx:      context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: &msgpb.InsertRequest{
 					CollectionName: collectionName,
@@ -479,7 +468,7 @@ func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
 		idAllocator: idAllocator,
 	}
 
-	info := newSchemaInfo(schema)
+	info := mustNewSchemaInfo(schema)
 	cache := NewMockCache(t)
 	collectionID := UniqueID(0)
 	cache.On("GetCollectionID",
@@ -499,10 +488,8 @@ func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 		mock.Anything,
-	).Return(&collectionInfo{schema: info}, nil)
-
-	globalMetaCache = cache
-
+	).Return(&collectionInfo{Schema: info}, nil)
+	task.metaCache = cache
 	err = task.PreExecute(context.Background())
 	assert.NoError(t, err)
 
@@ -616,7 +603,7 @@ func TestInsertTask_Function(t *testing.T) {
 		idAllocator: idAllocator,
 	}
 
-	info := newSchemaInfo(schema)
+	info := mustNewSchemaInfo(schema)
 	cache := NewMockCache(t)
 	collectionID := UniqueID(0)
 	cache.On("GetCollectionID",
@@ -637,27 +624,24 @@ func TestInsertTask_Function(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(&partitionInfo{
-		name:                "p1",
-		partitionID:         10,
-		createdTimestamp:    10001,
-		createdUtcTimestamp: 10002,
+		Name:                "p1",
+		PartitionID:         10,
+		CreatedTimestamp:    10001,
+		CreatedUtcTimestamp: 10002,
 	}, nil)
 	cache.On("GetCollectionInfo",
 		mock.Anything,
 		mock.Anything,
 		mock.Anything,
 		mock.Anything,
-	).Return(&collectionInfo{schema: info}, nil)
-	globalMetaCache = cache
+	).Return(&collectionInfo{Schema: info}, nil)
+	task.metaCache = cache
 	err = task.PreExecute(ctx)
 	assert.NoError(t, err)
 }
 
 func TestInsertTaskForSchemaMismatch(t *testing.T) {
-	cache := globalMetaCache
-	defer func() { globalMetaCache = cache }()
 	mockCache := NewMockCache(t)
-	globalMetaCache = mockCache
 	ctx := context.Background()
 
 	t.Run("schema ts mismatch", func(t *testing.T) {
@@ -673,14 +657,15 @@ func TestInsertTaskForSchemaMismatch(t *testing.T) {
 		}
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
-			updateTimestamp: 100,
-			schema: newSchemaInfo(&schemapb.CollectionSchema{
+			UpdateTimestamp: 100,
+			Schema: mustNewSchemaInfo(&schemapb.CollectionSchema{
 				Name: "fooooo",
 				Fields: []*schemapb.FieldSchema{
 					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 				},
 			}),
 		}, nil)
+		it.metaCache = mockCache
 		err := it.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)
@@ -690,11 +675,10 @@ func TestInsertTaskForSchemaMismatch(t *testing.T) {
 func TestInsertTask_Namespace(t *testing.T) {
 	paramtable.Init()
 	cache := NewMockCache(t)
-	globalMetaCache = cache
 	cache.On("GetDatabaseInfo",
 		mock.Anything,
 		mock.Anything,
-	).Return(&databaseInfo{properties: []*commonpb.KeyValuePair{}}, nil).Maybe()
+	).Return(&databaseInfo{Properties: []*commonpb.KeyValuePair{}}, nil).Maybe()
 	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil).Maybe()
 	ctx := context.Background()
 	rc := mocks.NewMockRootCoordClient(t)
@@ -731,14 +715,14 @@ func TestInsertTask_Namespace(t *testing.T) {
 		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Unset()
 		cache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Unset()
 		cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
-			schema: newSchemaInfo(schemaWithNamespaceEnabled),
+			Schema: mustNewSchemaInfo(schemaWithNamespaceEnabled),
 		}, nil).Maybe()
-		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(newSchemaInfo(schemaWithNamespaceEnabled), nil).Maybe()
+		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(mustNewSchemaInfo(schemaWithNamespaceEnabled), nil).Maybe()
 		cache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{
-			name:                "p1",
-			partitionID:         10,
-			createdTimestamp:    10001,
-			createdUtcTimestamp: 10002,
+			Name:                "p1",
+			PartitionID:         10,
+			CreatedTimestamp:    10001,
+			CreatedUtcTimestamp: 10002,
 		}, nil).Maybe()
 		namespace := "test"
 		it := insertTask{
@@ -751,6 +735,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 					Version:        msgpb.InsertDataVersion_ColumnBased,
 				},
 			},
+			baseTask:    baseTask{metaCache: cache},
 			schema:      schemaWithNamespaceEnabled,
 			idAllocator: idAllocator,
 		}
@@ -769,6 +754,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 				},
 			},
 			idAllocator: idAllocator,
+			baseTask:    baseTask{metaCache: cache},
 		}
 		err = it.PreExecute(context.Background())
 		assert.Error(t, err)
@@ -778,14 +764,14 @@ func TestInsertTask_Namespace(t *testing.T) {
 		cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Unset()
 		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Unset()
 		cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
-			schema: newSchemaInfo(schemaWithNamespaceDisabled),
+			Schema: mustNewSchemaInfo(schemaWithNamespaceDisabled),
 		}, nil).Maybe()
-		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(newSchemaInfo(schemaWithNamespaceDisabled), nil).Maybe()
+		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(mustNewSchemaInfo(schemaWithNamespaceDisabled), nil).Maybe()
 		cache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{
-			name:                "p1",
-			partitionID:         10,
-			createdTimestamp:    10001,
-			createdUtcTimestamp: 10002,
+			Name:                "p1",
+			PartitionID:         10,
+			CreatedTimestamp:    10001,
+			CreatedUtcTimestamp: 10002,
 		}, nil).Maybe()
 		it := insertTask{
 			ctx: context.Background(),
@@ -796,6 +782,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 					Version:        msgpb.InsertDataVersion_ColumnBased,
 				},
 			},
+			baseTask:    baseTask{metaCache: cache},
 			schema:      schemaWithNamespaceDisabled,
 			idAllocator: idAllocator,
 		}
@@ -815,6 +802,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 				},
 			},
 			idAllocator: idAllocator,
+			baseTask:    baseTask{metaCache: cache},
 		}
 		err = it.PreExecute(context.Background())
 		assert.Error(t, err)

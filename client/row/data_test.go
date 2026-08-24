@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
 type ValidStruct struct {
@@ -343,6 +343,36 @@ func (s *RowsSuite) TestNullablePointerColumns() {
 			}
 		}
 	})
+}
+
+func (s *RowsSuite) TestRowsToTextColumnWithSchema() {
+	type TextRow struct {
+		ID      int64
+		Content string
+	}
+
+	schema := entity.NewSchema().
+		WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("Content").WithDataType(entity.FieldTypeText))
+	rows := []any{
+		&TextRow{ID: 1, Content: "short text"},
+		&TextRow{ID: 2, Content: "中文内容"},
+	}
+
+	columns, err := AnyToColumns(rows, false, schema)
+	s.Require().NoError(err)
+	s.Require().Len(columns, 2)
+
+	var textColumnFound bool
+	for _, col := range columns {
+		if col.Name() != "Content" {
+			continue
+		}
+		textColumnFound = true
+		s.Equal(entity.FieldTypeText, col.Type())
+		s.Equal([]string{"short text", "中文内容"}, col.FieldData().GetScalars().GetStringData().GetData())
+	}
+	s.True(textColumnFound)
 }
 
 func (s *RowsSuite) TestSetFieldPointer() {

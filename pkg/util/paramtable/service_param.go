@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"context"
 	"encoding/json"
 	"net/url"
 	"os"
@@ -25,10 +26,8 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -106,6 +105,7 @@ type EtcdConfig struct {
 	EtcdTLSCACert        ParamItem          `refreshable:"false"`
 	EtcdTLSMinVersion    ParamItem          `refreshable:"false"`
 	RequestTimeout       ParamItem          `refreshable:"false"`
+	DialTimeout          ParamItem          `refreshable:"false"`
 	DialKeepAliveTime    ParamItem          `refreshable:"false"`
 	DialKeepAliveTimeout ParamItem          `refreshable:"false"`
 
@@ -290,6 +290,15 @@ We recommend using version 1.2 and above.`,
 	}
 	p.RequestTimeout.Init(base.mgr)
 
+	p.DialTimeout = ParamItem{
+		Key:          "etcd.dialTimeout",
+		DefaultValue: "5000",
+		Version:      "2.6.12",
+		Doc:          `Timeout in milliseconds for establishing the initial connection to etcd endpoints. Increase it for environments where transient network delays are expected during node scale-out.`,
+		Export:       true,
+	}
+	p.DialTimeout.Init(base.mgr)
+
 	p.DialKeepAliveTime = ParamItem{
 		Key:          "etcd.dialKeepAliveTime",
 		DefaultValue: "3000",
@@ -318,7 +327,7 @@ We recommend using version 1.2 and above.`,
 	p.EtcdEnableAuth.Init(base.mgr)
 
 	if p.UseEmbedEtcd.GetAsBool() && p.EtcdEnableAuth.GetAsBool() {
-		log.Warn("embedded etcd does not support auth, disabling etcd auth automatically")
+		mlog.Warn(context.TODO(), "embedded etcd does not support auth, disabling etcd auth automatically")
 		p.EtcdEnableAuth.SwapTempValue("false")
 	}
 
@@ -359,6 +368,7 @@ func (p *EtcdConfig) GetAll() map[string]string {
 		"etcd.ssl.tlsCACert":        p.EtcdTLSCACert.GetValue(),
 		"etcd.ssl.tlsMinVersion":    p.EtcdTLSMinVersion.GetValue(),
 		"etcd.requestTimeout":       p.RequestTimeout.GetValue(),
+		"etcd.dialTimeout":          p.DialTimeout.GetValue(),
 		"etcd.dialKeepAliveTime":    p.DialKeepAliveTime.GetValue(),
 		"etcd.dialKeepAliveTimeout": p.DialKeepAliveTimeout.GetValue(),
 		"etcd.auth.enabled":         p.EtcdEnableAuth.GetValue(),
@@ -368,15 +378,18 @@ func (p *EtcdConfig) GetAll() map[string]string {
 }
 
 func (p *EtcdConfig) ClientOptions() []etcd.ClientOption {
+	dialTimeout := p.DialTimeout.GetAsDuration(time.Millisecond)
 	dialKeepAliveTime := p.DialKeepAliveTime.GetAsDuration(time.Millisecond)
 	dialKeepAliveTimeout := p.DialKeepAliveTimeout.GetAsDuration(time.Millisecond)
 
-	if dialKeepAliveTime <= 0 && dialKeepAliveTimeout <= 0 {
-		return nil
+	var options []etcd.ClientOption
+	if dialTimeout > 0 {
+		options = append(options, etcd.WithDialTimeout(dialTimeout))
 	}
-	return []etcd.ClientOption{
-		etcd.WithDialKeepAlive(dialKeepAliveTime, dialKeepAliveTimeout),
+	if dialKeepAliveTime > 0 || dialKeepAliveTimeout > 0 {
+		options = append(options, etcd.WithDialKeepAlive(dialKeepAliveTime, dialKeepAliveTimeout))
 	}
+	return options
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -559,6 +572,13 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		DefaultValue: "64",
 		Doc:          `maximum number of operations in a single etcd transaction`,
 		Export:       true,
+		Formatter: func(value string) string {
+			maxTxnNum := getAsInt(value)
+			if maxTxnNum < 1 {
+				return "64"
+			}
+			return strconv.Itoa(maxTxnNum)
+		},
 	}
 	p.MaxEtcdTxnNum.Init(base.mgr)
 
@@ -707,12 +727,17 @@ type WoodpeckerConfig struct {
 	MetaPrefix ParamItem `refreshable:"false"`
 
 	// client
-	AppendQueueSize         ParamItem `refreshable:"true"`
-	AppendMaxRetries        ParamItem `refreshable:"true"`
-	SegmentRollingMaxSize   ParamItem `refreshable:"true"`
-	SegmentRollingMaxTime   ParamItem `refreshable:"true"`
-	SegmentRollingMaxBlocks ParamItem `refreshable:"true"`
-	AuditorMaxInterval      ParamItem `refreshable:"true"`
+	AppendQueueSize           ParamItem `refreshable:"true"`
+	AppendMaxRetries          ParamItem `refreshable:"true"`
+	AppendMaxBatchEntries     ParamItem `refreshable:"false"`
+	AppendMaxBatchBytes       ParamItem `refreshable:"false"`
+	SegmentRollingMaxSize     ParamItem `refreshable:"true"`
+	SegmentRollingMaxTime     ParamItem `refreshable:"true"`
+	SegmentRollingMaxBlocks   ParamItem `refreshable:"true"`
+	AuditorMaxInterval        ParamItem `refreshable:"true"`
+	DirectReadEnabled         ParamItem `refreshable:"false"`
+	DirectReadMaxBatchSize    ParamItem `refreshable:"false"`
+	DirectReadMaxFetchThreads ParamItem `refreshable:"false"`
 
 	// quorum configuration
 	// Buffer pools for different regions
@@ -729,6 +754,7 @@ type WoodpeckerConfig struct {
 	// logstore
 	SyncMaxInterval                ParamItem `refreshable:"true"`
 	SyncMaxIntervalForLocalStorage ParamItem `refreshable:"true"`
+	SyncMaxIntervalForService      ParamItem `refreshable:"true"`
 	SyncMaxBytes                   ParamItem `refreshable:"true"`
 	SyncMaxEntries                 ParamItem `refreshable:"true"`
 	FlushMaxRetries                ParamItem `refreshable:"true"`
@@ -763,7 +789,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Key:          "woodpecker.meta.prefix",
 		Version:      "2.6.0",
 		DefaultValue: "woodpecker",
-		Doc:          "The Prefix of the metadata provider. default is woodpecker.",
+		Doc:          "The Prefix of the metadata provider, prepended with etcd.rootPath. default is woodpecker. Only takes effect on an etcd with no pre-existing woodpecker metadata under the legacy root 'woodpecker/' prefix; if legacy metadata is detected, the legacy prefix is reused for backward compatibility.",
 		Export:       true,
 	}
 	p.MetaPrefix.Init(base.mgr)
@@ -785,6 +811,24 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.AppendMaxRetries.Init(base.mgr)
+
+	p.AppendMaxBatchEntries = ParamItem{
+		Key:          "woodpecker.client.segmentAppend.maxBatchEntries",
+		Version:      "2.6.0",
+		DefaultValue: "1000",
+		Doc:          "Client-side group commit: max consecutive appends coalesced into one AddEntries request. Opportunistic (only batches already-queued ops, adds no latency at low load). Set to 1 to disable batching.",
+		Export:       true,
+	}
+	p.AppendMaxBatchEntries.Init(base.mgr)
+
+	p.AppendMaxBatchBytes = ParamItem{
+		Key:          "woodpecker.client.segmentAppend.maxBatchBytes",
+		Version:      "2.6.0",
+		DefaultValue: "2000000",
+		Doc:          "Max total payload (bytes) of a coalesced batch, default 2MB. A batch closes once it reaches maxBatchEntries or its payload reaches maxBatchBytes; the first entry is always taken, so a batch may exceed the byte cap by one entry. Set to 0 to remove the byte limit (bounded by maxBatchEntries only). Ignored when maxBatchEntries <= 1.",
+		Export:       true,
+	}
+	p.AppendMaxBatchBytes.Init(base.mgr)
 
 	p.SegmentRollingMaxSize = ParamItem{
 		Key:          "woodpecker.client.segmentRollingPolicy.maxSize",
@@ -822,6 +866,33 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	}
 	p.AuditorMaxInterval.Init(base.mgr)
 
+	p.DirectReadEnabled = ParamItem{
+		Key:          "woodpecker.client.directRead.enabled",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "Whether the Woodpecker client reads sealed segments directly from object storage in service storage mode.",
+		Export:       true,
+	}
+	p.DirectReadEnabled.Init(base.mgr)
+
+	p.DirectReadMaxBatchSize = ParamItem{
+		Key:          "woodpecker.client.directRead.maxBatchSize",
+		Version:      "2.6.0",
+		DefaultValue: "16M",
+		Doc:          "Maximum batch size for direct reads from object storage in service storage mode.",
+		Export:       true,
+	}
+	p.DirectReadMaxBatchSize.Init(base.mgr)
+
+	p.DirectReadMaxFetchThreads = ParamItem{
+		Key:          "woodpecker.client.directRead.maxFetchThreads",
+		Version:      "2.6.0",
+		DefaultValue: "4",
+		Doc:          "Maximum number of concurrent fetch threads used by Woodpecker direct reads from object storage.",
+		Export:       true,
+	}
+	p.DirectReadMaxFetchThreads.Init(base.mgr)
+
 	// Buffer pools for different regions
 	p.QuorumBufferPools = ParamItem{
 		Key:          "woodpecker.client.quorum.quorumBufferPools",
@@ -833,7 +904,7 @@ Example configuration below:
     seeds: [n1,n2,n3] # List of seed node addresses for this pool
   - name: region2 # Name of the region pool
     seeds: [n4,n5,n6] # List of seed node addresses for this pool`,
-		Export: false,
+		Export: true,
 	}
 	p.QuorumBufferPools.Init(base.mgr)
 
@@ -843,7 +914,7 @@ Example configuration below:
 		Version:      "2.6.0",
 		DefaultValue: "soft",
 		Doc:          "Affinity mode for node selection rules. Valid values: [soft, hard]",
-		Export:       false,
+		Export:       true,
 	}
 	p.QuorumAffinityMode.Init(base.mgr)
 
@@ -852,7 +923,7 @@ Example configuration below:
 		Version:      "2.6.0",
 		DefaultValue: "3",
 		Doc:          "Number of replicas in the quorum ensemble. Valid values: [3, 5]",
-		Export:       false,
+		Export:       true,
 	}
 	p.QuorumReplicas.Init(base.mgr)
 
@@ -869,7 +940,7 @@ multi-az-single-rg: Multiple availability zones, single resource group
 multi-az-multi-rg: Multiple availability zones and resource groups
 cross-region: Nodes across different regions for maximum durability
 custom: Use custom expressions defined below`,
-		Export: false,
+		Export: true,
 	}
 	p.QuorumStrategy.Init(base.mgr)
 
@@ -892,7 +963,7 @@ Example configuration below:
     region: "default-region-pool"
     az: "az.*"
     resourceGroup: "rg.*"`,
-		Export: false,
+		Export: true,
 	}
 	p.QuorumCustomPlacement.Init(base.mgr)
 
@@ -913,6 +984,15 @@ Example configuration below:
 		Export:       true,
 	}
 	p.SyncMaxIntervalForLocalStorage.Init(base.mgr)
+
+	p.SyncMaxIntervalForService = ParamItem{
+		Key:          "woodpecker.logstore.segmentSyncPolicy.maxIntervalForService",
+		Version:      "2.6.0",
+		DefaultValue: "10ms",
+		Doc:          "Maximum interval between two sync operations for woodpecker service-storage mode (woodpecker.storage.type=service), default is 10 milliseconds. Only takes effect on standalone woodpecker log-store servers (staged-storage writer); it is not consumed by milvus embedded mode. A larger interval coalesces more entries per flush to raise QPS under small-batch high-concurrency writes, at the cost of up to that much extra durability latency. Note this raises the interval from woodpecker's built-in 1ms default, changing the sync cadence for existing service-mode deployments.",
+		Export:       true,
+	}
+	p.SyncMaxIntervalForService.Init(base.mgr)
 
 	p.SyncMaxEntries = ParamItem{
 		Key:          "woodpecker.logstore.segmentSyncPolicy.maxEntries",
@@ -1037,7 +1117,7 @@ Valid values: [auto, enable, disable]`,
 		Key:          "woodpecker.storage.type",
 		Version:      "2.6.0",
 		DefaultValue: "minio",
-		Doc:          "The Type of the storage provider. Valid values: [minio, local]",
+		Doc:          "The Type of the storage provider. Valid values: [minio, local, service]",
 		Export:       true,
 	}
 	p.StorageType.Init(base.mgr)
@@ -1137,7 +1217,7 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		Formatter: func(add string) string {
 			pulsarURL, err := url.ParseRequestURI(p.Address.GetValue())
 			if err != nil {
-				log.Info("failed to parse pulsar config, assume pulsar not used", zap.Error(err))
+				mlog.Info(context.TODO(), "failed to parse pulsar config, assume pulsar not used", mlog.Err(err))
 				return ""
 			}
 			return "http://" + pulsarURL.Hostname() + ":" + p.WebPort.GetValue()
@@ -1237,20 +1317,21 @@ If this option is zero or negative, it will be ignored and the default value (10
 
 // --- kafka ---
 type KafkaConfig struct {
-	Address              ParamItem  `refreshable:"false"`
-	SaslUsername         ParamItem  `refreshable:"false"`
-	SaslPassword         ParamItem  `refreshable:"false"`
-	SaslMechanisms       ParamItem  `refreshable:"false"`
-	SecurityProtocol     ParamItem  `refreshable:"false"`
-	KafkaUseSSL          ParamItem  `refreshable:"false"`
-	KafkaTLSCert         ParamItem  `refreshable:"false"`
-	KafkaTLSKey          ParamItem  `refreshable:"false"`
-	KafkaTLSCACert       ParamItem  `refreshable:"false"`
-	KafkaTLSKeyPassword  ParamItem  `refreshable:"false"`
-	ConsumerExtraConfig  ParamGroup `refreshable:"false"`
-	ProducerExtraConfig  ParamGroup `refreshable:"false"`
-	ReadTimeout          ParamItem  `refreshable:"true"`
-	QueuedMessagesKbytes ParamItem  `refreshable:"false"`
+	Address                 ParamItem  `refreshable:"false"`
+	SaslUsername            ParamItem  `refreshable:"false"`
+	SaslPassword            ParamItem  `refreshable:"false"`
+	SaslMechanisms          ParamItem  `refreshable:"false"`
+	SecurityProtocol        ParamItem  `refreshable:"false"`
+	KafkaUseSSL             ParamItem  `refreshable:"false"`
+	KafkaTLSCert            ParamItem  `refreshable:"false"`
+	KafkaTLSKey             ParamItem  `refreshable:"false"`
+	KafkaTLSCACert          ParamItem  `refreshable:"false"`
+	KafkaTLSKeyPassword     ParamItem  `refreshable:"false"`
+	ProducerMessageMaxBytes ParamItem  `refreshable:"false"`
+	ConsumerExtraConfig     ParamGroup `refreshable:"false"`
+	ProducerExtraConfig     ParamGroup `refreshable:"false"`
+	ReadTimeout             ParamItem  `refreshable:"true"`
+	QueuedMessagesKbytes    ParamItem  `refreshable:"false"`
 }
 
 func (k *KafkaConfig) Init(base *BaseTable) {
@@ -1335,6 +1416,16 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		Export:  true,
 	}
 	k.KafkaTLSKeyPassword.Init(base.mgr)
+
+	k.ProducerMessageMaxBytes = ParamItem{
+		Key:          KafkaProducerConfigPrefix + "message.max.bytes",
+		DefaultValue: strconv.Itoa(10 * 1024 * 1024),
+		Version:      "3.0.0",
+		Doc:          "Maximum size of a Kafka producer message in bytes. Requires a restart to take effect.",
+		Export:       true,
+		Immutable:    true,
+	}
+	k.ProducerMessageMaxBytes.Init(base.mgr)
 
 	k.ConsumerExtraConfig = ParamGroup{
 		KeyPrefix: "kafka.consumer.",
@@ -1483,6 +1574,8 @@ type MinioConfig struct {
 	MaxConnections     ParamItem `refreshable:"false"`
 	ListObjectsMaxKeys ParamItem `refreshable:"true"`
 	UseCRC32C          ParamItem `refreshable:"false"`
+
+	DisableAWSChunkedEncoding ParamItem `refreshable:"false"`
 }
 
 func (p *MinioConfig) Init(base *BaseTable) {
@@ -1556,6 +1649,16 @@ The default value applies to MinIO or S3 service that started with the default d
 		Export:       true,
 	}
 	p.UseSSL.Init(base.mgr)
+
+	p.DisableAWSChunkedEncoding = ParamItem{
+		Key:          "minio.disableAWSChunkedEncoding",
+		Version:      "2.6.20",
+		DefaultValue: "false",
+		Doc: `When enabled, PutObject requests use UNSIGNED-PAYLOAD to support S3-compatible endpoints that are incompatible with AWS chunked encoding.
+HTTPS is recommended because payload integrity is then protected by TLS rather than a signed payload hash.`,
+		Export: false,
+	}
+	p.DisableAWSChunkedEncoding.Init(base.mgr)
 
 	p.SslCACert = ParamItem{
 		Key:          "minio.ssl.tlsCACert",

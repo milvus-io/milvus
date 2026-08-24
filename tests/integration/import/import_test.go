@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -32,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -58,6 +57,10 @@ type BulkInsertSuite struct {
 
 func (s *BulkInsertSuite) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "4")
+	// The binlog-import cases restore legacy L0 (delete-only) segments, which is
+	// disabled by default (dataCoord.import.enableL0Import=false); re-enable it
+	// so they keep covering the legacy path.
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableL0Import.Key, "true")
 	s.MiniClusterSuite.SetupSuite()
 }
 
@@ -165,7 +168,7 @@ func (s *BulkInsertSuite) run() {
 	})
 	s.NoError(err)
 	s.Equal(int32(0), importResp.GetStatus().GetCode())
-	log.Info("Import result", zap.Any("importResp", importResp))
+	mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 
 	jobID := importResp.GetJobID()
 	err = WaitForImportDone(ctx, c, jobID)
@@ -323,7 +326,7 @@ func (s *BulkInsertSuite) TestZeroRowCount() {
 		Files:          files,
 	})
 	s.NoError(err)
-	log.Info("Import result", zap.Any("importResp", importResp))
+	mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 
 	jobID := importResp.GetJobID()
 	err = WaitForImportDone(ctx, c, jobID)

@@ -19,8 +19,18 @@ package packed
 
 #include <stdlib.h>
 #include "segcore/packed_reader_c.h"
+#include "milvus-storage/ffi_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
+
+CStatus NewPackedReaderWithProperties(char** paths,
+                                      int64_t num_paths,
+                                      struct ArrowSchema* schema,
+                                      const int64_t buffer_size,
+                                      const LoonProperties* c_properties,
+                                      const char* filesystem_path,
+                                      CPackedReader* c_packed_reader,
+                                      CPluginContext* c_plugin_context);
 */
 import "C"
 
@@ -37,6 +47,53 @@ import (
 )
 
 func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedReader, error) {
+	return NewPackedReaderWithExtfs(filePaths, schema, bufferSize, storageConfig, storagePluginContext, ExternalReaderContext{})
+}
+
+// NewPackedReaderWithExtfs opens packed files and optionally resolves them
+// through an external filesystem alias described by extfs.
+func NewPackedReaderWithExtfs(
+	filePaths []string,
+	schema *arrow.Schema,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	extfs ExternalReaderContext,
+) (*PackedReader, error) {
+	var cProperties *C.LoonProperties
+	var cFilesystemPath *C.char
+	if extfs.Source != "" {
+		if storageConfig == nil {
+			return nil, merr.WrapErrServiceInternalMsg("storageConfig is required for external packed reader")
+		}
+		properties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+		if err != nil {
+			return nil, merr.Wrap(err, "failed to create properties")
+		}
+		cProperties = properties
+		defer C.loon_properties_free(cProperties)
+		if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
+			return nil, merr.Wrap(err, "inject extfs")
+		}
+		var filesystemPath string
+		normalizedPaths := make([]string, 0, len(filePaths))
+		for _, filePath := range filePaths {
+			currentFilesystemPath, normalizedPath, err := normalizeExternalPathForFilesystem(filePath, cProperties, extfs)
+			if err != nil {
+				return nil, merr.WrapErrServiceInternalErr(err, "normalize external packed file path %s", filePath)
+			}
+			if filesystemPath == "" {
+				filesystemPath = currentFilesystemPath
+			} else if currentFilesystemPath != filesystemPath {
+				return nil, merr.WrapErrServiceInternalMsg("external packed reader requires paths from one filesystem, got %s and %s", filesystemPath, currentFilesystemPath)
+			}
+			normalizedPaths = append(normalizedPaths, normalizedPath)
+		}
+		filePaths = normalizedPaths
+		cFilesystemPath = C.CString(filesystemPath)
+		defer C.free(unsafe.Pointer(cFilesystemPath))
+	}
+
 	cFilePaths := make([]*C.char, len(filePaths))
 	for i, path := range filePaths {
 		cFilePaths[i] = C.CString(path)
@@ -66,7 +123,9 @@ func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		pluginContextPtr = &pluginContext
 	}
 
-	if storageConfig != nil {
+	if cProperties != nil {
+		status = C.NewPackedReaderWithProperties(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cProperties, cFilesystemPath, &cPackedReader, pluginContextPtr)
+	} else if storageConfig != nil {
 		cStorageConfig := C.CStorageConfig{
 			address:                C.CString(storageConfig.GetAddress()),
 			bucket_name:            C.CString(storageConfig.GetBucketName()),

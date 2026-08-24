@@ -17,6 +17,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 
 #include "ArrayOffsets.h"
 #include "common/Tracer.h"
@@ -31,6 +32,16 @@ struct SearchIteratorV2Info {
     std::optional<float> last_bound = std::nullopt;
 };
 
+// Brute-force index params sourced from the collection-level index metadata at
+// plan creation. Used only by brute force when a segment predates a field added
+// by add_function_field, so its per-segment metadata does not carry the field.
+struct BruteForceIndexParams {
+    std::optional<float> bm25_k1_;
+    std::optional<float> bm25_b_;
+    std::optional<int64_t> minhash_lsh_band_;
+    std::optional<int64_t> minhash_element_bit_width_;
+};
+
 struct SearchInfo {
     int64_t topk_{0};
     int64_t group_size_{1};
@@ -39,6 +50,7 @@ struct SearchInfo {
     FieldId field_id_;
     MetricType metric_type_;
     knowhere::Json search_params_;
+    BruteForceIndexParams brute_force_index_params_;
     std::vector<FieldId>
         group_by_field_ids_;  // Group by field IDs (single or multi-field)
     tracer::TraceContext trace_ctx_;
@@ -53,6 +65,22 @@ struct SearchInfo {
     bool global_refine_enable_{false};
     float search_topk_ratio_{0.0f};
     float refine_topk_ratio_{0.0f};
+    // Number of rows visible to a growing-segment search, in logical row space.
+    // Growing plans decide it ONCE from get_active_count(timestamp) and carry
+    // it down so no kernel re-derives it. Sealed plans leave it unset: their
+    // indexes are immutable and retain the empty-bitset fast path.
+    //
+    // Re-deriving it is not safe on a growing segment: a concurrent insert
+    // publishes rows into the column storage (and into a nullable field's
+    // offset mapping) before ack_responder_ advances, so a later read sees
+    // rows this search must not touch. Reduce then validates offsets against
+    // the acknowledged count and rejects them ("invalid offset ... rows num
+    // ..."), or, if the ack catches up first, silently returns rows newer
+    // than the query's MVCC timestamp.
+    //
+    // -1 means "not supplied" (sealed searches and direct callers). Growing
+    // kernels fall back to computing it themselves for direct calls.
+    int64_t active_count_{-1};
 
     bool
     element_level() const {
@@ -64,7 +92,5 @@ struct SearchInfo {
         return !group_by_field_ids_.empty();
     }
 };
-
-using SearchInfoPtr = std::shared_ptr<SearchInfo>;
 
 }  // namespace milvus

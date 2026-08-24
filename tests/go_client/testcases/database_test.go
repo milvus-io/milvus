@@ -1,17 +1,17 @@
 package testcases
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
@@ -19,9 +19,9 @@ import (
 
 // teardownTest
 func teardownTest(t *testing.T) func(t *testing.T) {
-	log.Info("setup test func")
+	mlog.Info(context.TODO(), "setup test func")
 	return func(t *testing.T) {
-		log.Info("teardown func drop all non-default db")
+		mlog.Info(context.TODO(), "teardown func drop all non-default db")
 		// drop all db
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 		mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -226,21 +226,23 @@ func TestClientWithDb(t *testing.T) {
 
 	listCollOpt := client.NewListCollectionOption()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	newClientConfig := func(dbName string) *client.ClientConfig {
+		cfg := hp.GetDefaultClientConfig()
+		cfg.DBName = dbName
+		return cfg
+	}
 
 	// connect with not existed db
-	_, err := base.NewMilvusClient(ctx, &client.ClientConfig{Address: hp.GetAddr(), DBName: "dbName"})
+	_, err := base.NewMilvusClient(ctx, newClientConfig("dbName"))
 	common.CheckErr(t, err, false, "database not found")
 
 	// connect default db -> create a collection in default db
-	mcDefault, errDefault := base.NewMilvusClient(ctx, &client.ClientConfig{
-		Address: hp.GetAddr(),
-		// DBName:  common.DefaultDb,
-	})
+	mcDefault, errDefault := base.NewMilvusClient(ctx, newClientConfig(""))
 	common.CheckErr(t, errDefault, true)
 	_, defCol1 := hp.CollPrepare.CreateCollection(ctx, t, mcDefault, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	defCollections, _ := mcDefault.ListCollections(ctx, listCollOpt)
 	require.Contains(t, defCollections, defCol1.CollectionName)
-	log.Debug("default db collections:", zap.Any("default collections", defCollections))
+	mlog.Debug(context.TODO(), "default db collections:", mlog.Any("default collections", defCollections))
 
 	// create a db and create collection in db
 	dbName := common.GenRandomString("db", 5)
@@ -248,15 +250,12 @@ func TestClientWithDb(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	// and connect with db
-	mcDb, err := base.NewMilvusClient(ctx, &client.ClientConfig{
-		Address: hp.GetAddr(),
-		DBName:  dbName,
-	})
+	mcDb, err := base.NewMilvusClient(ctx, newClientConfig(dbName))
 	common.CheckErr(t, err, true)
 	_, dbCol1 := hp.CollPrepare.CreateCollection(ctx, t, mcDb, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
 	dbCollections, _ := mcDb.ListCollections(ctx, listCollOpt)
-	log.Debug("db collections:", zap.Any("db collections", dbCollections))
+	mlog.Debug(context.TODO(), "db collections:", mlog.Any("db collections", dbCollections))
 	require.Containsf(t, dbCollections, dbCol1.CollectionName, fmt.Sprintf("The collection %s not in: %v", dbCol1.CollectionName, dbCollections))
 
 	// using default db and collection not in
@@ -265,10 +264,7 @@ func TestClientWithDb(t *testing.T) {
 	require.NotContains(t, defCollections, dbCol1.CollectionName)
 
 	// connect empty db (actually default db)
-	mcEmpty, err := base.NewMilvusClient(ctx, &client.ClientConfig{
-		Address: hp.GetAddr(),
-		DBName:  "",
-	})
+	mcEmpty, err := base.NewMilvusClient(ctx, newClientConfig(""))
 	common.CheckErr(t, err, true)
 	defCollections, _ = mcEmpty.ListCollections(ctx, listCollOpt)
 	require.Contains(t, defCollections, defCol1.CollectionName)

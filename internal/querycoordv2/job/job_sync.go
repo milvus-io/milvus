@@ -20,12 +20,10 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -64,10 +62,6 @@ func (job *SyncNewCreatedPartitionJob) PreExecute() error {
 
 func (job *SyncNewCreatedPartitionJob) Execute() error {
 	req := job.req
-	log := log.Ctx(job.ctx).With(
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64("partitionID", req.GetPartitionID()),
-	)
 
 	// check if collection not load or loadType is loadPartition
 	collection := job.meta.GetCollection(job.ctx, job.req.GetCollectionID())
@@ -91,7 +85,7 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 	err := job.meta.PutPartition(job.ctx, partition)
 	if err != nil {
 		msg := "failed to store partitions"
-		log.Warn(msg, zap.Error(err))
+		mlog.Warn(job.ctx, msg, mlog.Err(err))
 		return merr.Wrapf(err, "%s", msg)
 	}
 

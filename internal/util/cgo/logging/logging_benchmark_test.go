@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -42,12 +42,12 @@ func BenchmarkZapAsyncLog4MB(b *testing.B) {
 func benchmarkZapAsyncLog(b *testing.B, bufferSize int) {
 	initOnce.Do(func() {
 		params := paramtable.Get()
-		logConfig := log.Config{
+		logConfig := mlog.Config{
 			Level:     params.LogCfg.Level.GetValue(),
 			GrpcLevel: params.LogCfg.GrpcLogLevel.GetValue(),
 			Format:    params.LogCfg.Format.GetValue(),
 			Stdout:    params.LogCfg.Stdout.GetAsBool(),
-			File: log.FileLogConfig{
+			File: mlog.FileLogConfig{
 				RootPath:   params.LogCfg.RootPath.GetValue(),
 				MaxSize:    params.LogCfg.MaxSize.GetAsInt(),
 				MaxDays:    params.LogCfg.MaxAge.GetAsInt(),

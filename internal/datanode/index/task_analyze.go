@@ -21,12 +21,11 @@ import (
 	"fmt"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -46,20 +45,24 @@ type analyzeTask struct {
 	queueDur time.Duration
 	manager  *TaskManager
 	analyze  analyzecgowrapper.CodecAnalyze
+
+	pluginContext *indexcgopb.StoragePluginContext
 }
 
 func NewAnalyzeTask(ctx context.Context,
 	cancel context.CancelFunc,
 	req *workerpb.AnalyzeRequest,
 	manager *TaskManager,
+	pluginContext *indexcgopb.StoragePluginContext,
 ) *analyzeTask {
 	return &analyzeTask{
-		ident:   fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
-		ctx:     ctx,
-		cancel:  cancel,
-		req:     req,
-		manager: manager,
-		tr:      timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
+		ident:         fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
+		ctx:           ctx,
+		cancel:        cancel,
+		req:           req,
+		manager:       manager,
+		pluginContext: pluginContext,
+		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
 	}
 }
 
@@ -81,121 +84,135 @@ func (at *analyzeTask) IsVectorIndex() bool {
 
 func (at *analyzeTask) PreExecute(ctx context.Context) error {
 	at.queueDur = at.tr.RecordSpan()
-	log := log.Ctx(ctx).With(zap.String("clusterID", at.req.GetClusterID()),
-		zap.Int64("TaskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
-		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
-	log.Info("Begin to prepare analyze task")
+	log := mlog.With(mlog.String("clusterID", at.req.GetClusterID()),
+		mlog.Int64("TaskID", at.req.GetTaskID()), mlog.Int64("Collection", at.req.GetCollectionID()),
+		mlog.FieldPartitionID(at.req.GetPartitionID()), mlog.FieldFieldID(at.req.GetFieldID()))
+	log.Info(ctx, "Begin to prepare analyze task")
 
-	log.Info("Successfully prepare analyze task, nothing to do...")
+	log.Info(ctx, "Successfully prepare analyze task, nothing to do...")
 	return nil
 }
 
-func (at *analyzeTask) Execute(ctx context.Context) error {
-	var err error
-
-	log := log.Ctx(ctx).With(zap.String("clusterID", at.req.GetClusterID()),
-		zap.Int64("TaskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
-		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
-
-	log.Info("Begin to build analyze task")
-
+func buildAnalyzeInfo(req *workerpb.AnalyzeRequest) *clusteringpb.AnalyzeInfo {
 	storageConfig := &clusteringpb.StorageConfig{
-		Address:           at.req.GetStorageConfig().GetAddress(),
-		AccessKeyID:       at.req.GetStorageConfig().GetAccessKeyID(),
-		SecretAccessKey:   at.req.GetStorageConfig().GetSecretAccessKey(),
-		UseSSL:            at.req.GetStorageConfig().GetUseSSL(),
-		BucketName:        at.req.GetStorageConfig().GetBucketName(),
-		RootPath:          at.req.GetStorageConfig().GetRootPath(),
-		UseIAM:            at.req.GetStorageConfig().GetUseIAM(),
-		IAMEndpoint:       at.req.GetStorageConfig().GetIAMEndpoint(),
-		StorageType:       at.req.GetStorageConfig().GetStorageType(),
-		UseVirtualHost:    at.req.GetStorageConfig().GetUseVirtualHost(),
-		Region:            at.req.GetStorageConfig().GetRegion(),
-		CloudProvider:     at.req.GetStorageConfig().GetCloudProvider(),
-		RequestTimeoutMs:  at.req.GetStorageConfig().GetRequestTimeoutMs(),
-		SslCACert:         at.req.GetStorageConfig().GetSslCACert(),
-		GcpCredentialJSON: at.req.GetStorageConfig().GetGcpCredentialJSON(),
-		SslTlsMinVersion:  at.req.GetStorageConfig().GetSslTlsMinVersion(),
-		UseCrc32CChecksum: at.req.GetStorageConfig().GetUseCrc32CChecksum(),
+		Address:           req.GetStorageConfig().GetAddress(),
+		AccessKeyID:       req.GetStorageConfig().GetAccessKeyID(),
+		SecretAccessKey:   req.GetStorageConfig().GetSecretAccessKey(),
+		UseSSL:            req.GetStorageConfig().GetUseSSL(),
+		BucketName:        req.GetStorageConfig().GetBucketName(),
+		RootPath:          req.GetStorageConfig().GetRootPath(),
+		UseIAM:            req.GetStorageConfig().GetUseIAM(),
+		IAMEndpoint:       req.GetStorageConfig().GetIAMEndpoint(),
+		StorageType:       req.GetStorageConfig().GetStorageType(),
+		UseVirtualHost:    req.GetStorageConfig().GetUseVirtualHost(),
+		Region:            req.GetStorageConfig().GetRegion(),
+		CloudProvider:     req.GetStorageConfig().GetCloudProvider(),
+		RequestTimeoutMs:  req.GetStorageConfig().GetRequestTimeoutMs(),
+		MaxConnections:    req.GetStorageConfig().GetMaxConnections(),
+		SslCACert:         req.GetStorageConfig().GetSslCACert(),
+		GcpCredentialJSON: req.GetStorageConfig().GetGcpCredentialJSON(),
+		SslTlsMinVersion:  req.GetStorageConfig().GetSslTlsMinVersion(),
+		UseCrc32CChecksum: req.GetStorageConfig().GetUseCrc32CChecksum(),
 	}
 
-	numRowsMap := make(map[int64]int64)
-	segmentInsertFilesMap := make(map[int64]*clusteringpb.InsertFiles)
+	n := len(req.GetSegmentStats())
+	numRowsMap := make(map[int64]int64, n)
+	segmentInsertFilesMap := make(map[int64]*clusteringpb.InsertFiles, n)
+	manifestPathsMap := make(map[int64]string, n)
 
-	for segID, stats := range at.req.GetSegmentStats() {
-		numRows := stats.GetNumRows()
-		numRowsMap[segID] = numRows
-		log.Info("append segment rows", zap.Int64("segment id", segID), zap.Int64("rows", numRows))
+	for segID, stats := range req.GetSegmentStats() {
+		numRowsMap[segID] = stats.GetNumRows()
+
+		if manifest := stats.GetManifestPath(); manifest != "" {
+			// StorageV3: forward the manifest string; C++ resolves files via loon.
+			manifestPathsMap[segID] = manifest
+			continue
+		}
+
+		// V1: reconstruct insert-log paths from logIDs.
 		insertFiles := make([]string, 0, len(stats.GetLogIDs()))
 		for _, id := range stats.GetLogIDs() {
-			path := metautil.BuildInsertLogPath(at.req.GetStorageConfig().RootPath,
-				at.req.GetCollectionID(), at.req.GetPartitionID(), segID, at.req.GetFieldID(), id)
+			path := metautil.BuildInsertLogPath(req.GetStorageConfig().RootPath,
+				req.GetCollectionID(), req.GetPartitionID(), segID, req.GetFieldID(), id)
 			insertFiles = append(insertFiles, path)
 		}
 		segmentInsertFilesMap[segID] = &clusteringpb.InsertFiles{InsertFiles: insertFiles}
 	}
 
-	field := at.req.GetField()
+	field := req.GetField()
 	if field == nil || field.GetDataType() == schemapb.DataType_None {
 		field = &schemapb.FieldSchema{
-			FieldID:  at.req.GetFieldID(),
-			Name:     at.req.GetFieldName(),
-			DataType: at.req.GetFieldType(),
+			FieldID:  req.GetFieldID(),
+			Name:     req.GetFieldName(),
+			DataType: req.GetFieldType(),
 		}
 	}
 
-	analyzeInfo := &clusteringpb.AnalyzeInfo{
-		ClusterID:       at.req.GetClusterID(),
-		BuildID:         at.req.GetTaskID(),
-		CollectionID:    at.req.GetCollectionID(),
-		PartitionID:     at.req.GetPartitionID(),
-		Version:         at.req.GetVersion(),
-		Dim:             at.req.GetDim(),
+	return &clusteringpb.AnalyzeInfo{
+		ClusterID:       req.GetClusterID(),
+		BuildID:         req.GetTaskID(),
+		CollectionID:    req.GetCollectionID(),
+		PartitionID:     req.GetPartitionID(),
+		Version:         req.GetVersion(),
+		Dim:             req.GetDim(),
 		StorageConfig:   storageConfig,
-		NumClusters:     at.req.GetNumClusters(),
-		TrainSize:       int64(float64(hardware.GetMemoryCount()) * at.req.GetMaxTrainSizeRatio()),
-		MinClusterRatio: at.req.GetMinClusterSizeRatio(),
-		MaxClusterRatio: at.req.GetMaxClusterSizeRatio(),
-		MaxClusterSize:  at.req.GetMaxClusterSize(),
+		NumClusters:     req.GetNumClusters(),
+		TrainSize:       int64(float64(hardware.GetMemoryCount()) * req.GetMaxTrainSizeRatio()),
+		MinClusterRatio: req.GetMinClusterSizeRatio(),
+		MaxClusterRatio: req.GetMaxClusterSizeRatio(),
+		MaxClusterSize:  req.GetMaxClusterSize(),
 		NumRows:         numRowsMap,
 		InsertFiles:     segmentInsertFilesMap,
 		FieldSchema:     field,
+		ManifestPaths:   manifestPathsMap,
 	}
+}
 
-	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo)
+func (at *analyzeTask) Execute(ctx context.Context) error {
+	var err error
+
+	log := mlog.With(mlog.String("clusterID", at.req.GetClusterID()),
+		mlog.Int64("TaskID", at.req.GetTaskID()), mlog.Int64("Collection", at.req.GetCollectionID()),
+		mlog.FieldPartitionID(at.req.GetPartitionID()), mlog.FieldFieldID(at.req.GetFieldID()))
+
+	log.Info(ctx, "Begin to build analyze task")
+
+	analyzeInfo := buildAnalyzeInfo(at.req)
+
+	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo, at.pluginContext)
 	if err != nil {
-		log.Error("failed to analyze data", zap.Error(err))
+		log.Error(ctx, "failed to analyze data", mlog.Err(err))
 		return err
 	}
 
 	analyzeLatency := at.tr.RecordSpan()
-	log.Info("analyze done", zap.Int64("analyze cost", analyzeLatency.Milliseconds()))
+	log.Info(ctx, "analyze done", mlog.Int64("analyze cost", analyzeLatency.Milliseconds()))
 	return nil
 }
 
 func (at *analyzeTask) PostExecute(ctx context.Context) error {
-	log := log.Ctx(ctx).With(zap.String("clusterID", at.req.GetClusterID()),
-		zap.Int64("TaskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
-		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
+	log := mlog.With(mlog.String("clusterID", at.req.GetClusterID()),
+		mlog.Int64("TaskID", at.req.GetTaskID()), mlog.Int64("Collection", at.req.GetCollectionID()),
+		mlog.FieldPartitionID(at.req.GetPartitionID()), mlog.FieldFieldID(at.req.GetFieldID()))
 	gc := func() {
 		if err := at.analyze.Delete(); err != nil {
-			log.Error("indexBuildTask Execute CIndexDelete failed", zap.Error(err))
+			log.Error(ctx, "indexBuildTask Execute CIndexDelete failed", mlog.Err(err))
 		}
 	}
 	defer gc()
 
 	centroidsFile, _, _, _, err := at.analyze.GetResult(len(at.req.GetSegmentStats()))
 	if err != nil {
-		log.Error("failed to upload index", zap.Error(err))
+		log.Error(ctx, "failed to upload index", mlog.Err(err))
 		return err
 	}
-	log.Info("analyze result", zap.String("centroidsFile", centroidsFile))
+	log.Info(ctx, "analyze result", mlog.String("centroidsFile", centroidsFile))
 
 	at.manager.StoreAnalyzeFilesAndStatistic(at.req.GetClusterID(),
 		at.req.GetTaskID(),
 		centroidsFile)
 	at.tr.Elapse("index building all done")
-	log.Info("Successfully save analyze files")
+	log.Info(ctx, "Successfully save analyze files")
 	return nil
 }
 
@@ -203,8 +220,8 @@ func (at *analyzeTask) OnEnqueue(ctx context.Context) error {
 	at.queueDur = 0
 	at.tr.RecordSpan()
 
-	log.Ctx(ctx).Info("analyzeTask enqueued", zap.String("clusterID", at.req.GetClusterID()),
-		zap.Int64("TaskID", at.req.GetTaskID()))
+	mlog.Info(ctx, "analyzeTask enqueued", mlog.String("clusterID", at.req.GetClusterID()),
+		mlog.Int64("TaskID", at.req.GetTaskID()))
 	return nil
 }
 
@@ -224,4 +241,5 @@ func (at *analyzeTask) Reset() {
 	at.tr = nil
 	at.queueDur = 0
 	at.manager = nil
+	at.pluginContext = nil
 }

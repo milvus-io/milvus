@@ -15,6 +15,7 @@
 #include <nlohmann/json_fwd.hpp>
 #include <string.h>
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <initializer_list>
 #include <iostream>
@@ -65,7 +66,6 @@
 #include "query/SearchBruteForce.h"
 #include "query/SubSearchResult.h"
 #include "query/helper.h"
-#include "segcore/ReduceStructure.h"
 #include "segcore/reduce/Reduce.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
@@ -267,7 +267,7 @@ TEST(Indexing, BinaryBruteForce) {
     sr.seg_offsets_ = std::move(sub_result.mutable_offsets());
     sr.distances_ = std::move(sub_result.mutable_distances());
 
-    auto json = SearchResultToJson(sr);
+    auto json = SearchResultToJson(sr, round_decimal);
     std::cout << json.dump(2);
 #ifdef __linux__
     auto ref = nlohmann::json::parse(R"(
@@ -535,9 +535,9 @@ TEST(Indexing, Iterator) {
     ASSERT_TRUE(kw_iterators.has_value());
     ASSERT_EQ(kw_iterators.value().size(), 1);
     auto iterator = kw_iterators.value()[0];
-    ASSERT_TRUE(iterator->HasNext());
-    while (iterator->HasNext()) {
-        auto [off, dis] = iterator->Next();
+    ASSERT_TRUE(iterator->HasNext().value());
+    while (iterator->HasNext().value()) {
+        auto [off, dis] = iterator->Next().value();
         ASSERT_TRUE(off >= 0);
         ASSERT_TRUE(dis >= 0);
     }
@@ -843,6 +843,63 @@ TEST_P(IndexTest, GetVector_EmptySparseVector) {
     }
 }
 
+TEST(Indexing, HnswEmbListEmptyNullableUsesLogicalIds) {
+    constexpr int64_t dim = DIM;
+    auto metric_type = knowhere::metric::MAX_SIM;
+
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    create_index_info.metric_type = metric_type;
+    create_index_info.field_type = DataType::VECTOR_ARRAY;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    auto storage_config = get_default_local_storage_config();
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    auto field_data_meta = milvus::segcore::gen_field_meta(
+        1, 2, 3, 100, DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true);
+    milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
+    index_meta.field_type = DataType::VECTOR_ARRAY;
+    index_meta.dim = dim;
+    milvus::storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, chunk_manager, fs);
+
+    auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+    auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(index.get());
+    ASSERT_NE(vec_index, nullptr);
+
+    std::array<bool, 3> valid_data{{true, false, true}};
+    auto dataset = knowhere::GenDataSet(0, dim, nullptr);
+    dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+        valid_data.data(), valid_data.size()));
+
+    Config build_conf;
+    build_conf[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
+    build_conf[knowhere::meta::METRIC_TYPE] = metric_type;
+    build_conf[knowhere::indexparam::M] = "16";
+    build_conf[knowhere::indexparam::EF] = "10";
+    build_conf[DIM_KEY] = dim;
+
+    ASSERT_NO_THROW(index->BuildWithDataset(dataset, build_conf));
+    EXPECT_TRUE(vec_index->HasValidData());
+    EXPECT_EQ(vec_index->GetValidCount(), 2);
+    EXPECT_EQ(vec_index->GetIdMap().OutCount(), 3);
+    EXPECT_EQ(vec_index->Count(), 0);
+
+    std::vector<int64_t> logical_ids = {0, 2};
+    auto ids_ds = GenIdsDataset(logical_ids.size(), logical_ids.data());
+    auto [raw_data, emb_offsets] =
+        vec_index->GetEmbListByIds(ids_ds, metric_type);
+    EXPECT_TRUE(raw_data.empty());
+    EXPECT_EQ(emb_offsets, std::vector<size_t>({0, 0, 0}));
+
+    std::vector<int64_t> null_ids = {1};
+    auto null_ids_ds = GenIdsDataset(null_ids.size(), null_ids.data());
+    EXPECT_ANY_THROW(vec_index->GetEmbListByIds(null_ids_ds, metric_type));
+}
+
 TEST(Indexing, HnswEmbListBuildAllNullNullableFromBinlog) {
     constexpr int64_t row_count = 8;
     constexpr int64_t dim = DIM;
@@ -940,8 +997,8 @@ TEST(Indexing, HnswEmbListBuildAllNullNullableFromBinlog) {
         iterator_dataset, iterator_conf, nullptr);
     ASSERT_TRUE(iterators.has_value()) << iterators.what();
     ASSERT_EQ(iterators.value().size(), 2);
-    EXPECT_FALSE(iterators.value()[0]->HasNext());
-    EXPECT_FALSE(iterators.value()[1]->HasNext());
+    EXPECT_FALSE(iterators.value()[0]->HasNext().value());
+    EXPECT_FALSE(iterators.value()[1]->HasNext().value());
 
     std::vector<float> emb_list_iterator_queries(3 * dim, 0.1F);
     auto emb_list_iterator_dataset =
@@ -955,9 +1012,10 @@ TEST(Indexing, HnswEmbListBuildAllNullNullableFromBinlog) {
         emb_list_iterator_dataset, iterator_conf, nullptr);
     ASSERT_TRUE(emb_list_iterators.has_value()) << emb_list_iterators.what();
     ASSERT_EQ(emb_list_iterators.value().size(), 4);
-    EXPECT_TRUE(std::all_of(emb_list_iterators.value().begin(),
-                            emb_list_iterators.value().end(),
-                            [](const auto& iter) { return !iter->HasNext(); }));
+    EXPECT_TRUE(
+        std::all_of(emb_list_iterators.value().begin(),
+                    emb_list_iterators.value().end(),
+                    [](const auto& iter) { return !iter->HasNext().value(); }));
 
     milvus::SearchInfo iterator_search_info;
     iterator_search_info.topk_ = 3;
@@ -1117,8 +1175,8 @@ TEST(Indexing, HnswEmbListBuildAllValidEmptyListsFromBinlog) {
         iterator_dataset, iterator_conf, nullptr);
     ASSERT_TRUE(iterators.has_value()) << iterators.what();
     ASSERT_EQ(iterators.value().size(), 2);
-    EXPECT_FALSE(iterators.value()[0]->HasNext());
-    EXPECT_FALSE(iterators.value()[1]->HasNext());
+    EXPECT_FALSE(iterators.value()[0]->HasNext().value());
+    EXPECT_FALSE(iterators.value()[1]->HasNext().value());
 
     std::vector<int64_t> ids = {0, 3, 7};
     auto ids_ds = GenIdsDataset(ids.size(), ids.data());
@@ -1143,9 +1201,10 @@ TEST(Indexing, HnswEmbListBuildAllValidEmptyListsFromBinlog) {
         emb_list_iterator_dataset, emb_list_iterator_conf, nullptr);
     ASSERT_TRUE(emb_list_iterators.has_value()) << emb_list_iterators.what();
     ASSERT_EQ(emb_list_iterators.value().size(), 4);
-    EXPECT_TRUE(std::all_of(emb_list_iterators.value().begin(),
-                            emb_list_iterators.value().end(),
-                            [](const auto& iter) { return !iter->HasNext(); }));
+    EXPECT_TRUE(
+        std::all_of(emb_list_iterators.value().begin(),
+                    emb_list_iterators.value().end(),
+                    [](const auto& iter) { return !iter->HasNext().value(); }));
 
     std::vector<float> query(dim, 0.1F);
     auto xq_dataset = knowhere::GenDataSet(1, dim, query.data());
@@ -1834,8 +1893,8 @@ TEST(Indexing, DiskAnnEmbListBuildAllNullNullableFromBinlog) {
         iterator_dataset, iterator_conf, nullptr);
     ASSERT_TRUE(iterators.has_value()) << iterators.what();
     ASSERT_EQ(iterators.value().size(), 2);
-    EXPECT_FALSE(iterators.value()[0]->HasNext());
-    EXPECT_FALSE(iterators.value()[1]->HasNext());
+    EXPECT_FALSE(iterators.value()[0]->HasNext().value());
+    EXPECT_FALSE(iterators.value()[1]->HasNext().value());
 
     milvus::SearchInfo search_info;
     search_info.topk_ = 3;

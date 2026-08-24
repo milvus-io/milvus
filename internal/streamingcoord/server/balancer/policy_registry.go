@@ -8,7 +8,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -167,7 +167,7 @@ type PolicyBuilder interface {
 
 // Policy is a interface to define the policy of rebalance.
 type Policy interface {
-	log.LoggerBinder
+	mlog.LoggerBinder
 
 	// Name is the name of the policy.
 	Name() string

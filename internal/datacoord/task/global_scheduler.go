@@ -21,11 +21,9 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/datacoord/session"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -38,6 +36,13 @@ const NullNodeID = -1
 type GlobalScheduler interface {
 	Enqueue(task Task)
 	AbortAndRemoveTask(taskID int64)
+	// GetPendingTaskCount returns the number of queued tasks of the given type.
+	// The queue is shared by every task type, so callers that gate admission for
+	// one kind of work must scope the count to that kind, otherwise an unrelated
+	// backlog starves them. Tasks waiting on a retry backoff deadline ARE counted:
+	// they still occupy queue depth, and excluding them would let a worker-side
+	// failure storm silently disable the caller's admission gate.
+	GetPendingTaskCount(taskType taskcommon.Type) int
 
 	Start()
 	Stop()
@@ -56,6 +61,55 @@ type globalTaskScheduler struct {
 	execPool     *conc.Pool[struct{}]
 	checkPool    *conc.Pool[struct{}]
 	cluster      session.Cluster
+	// backoffs delays re-dispatch of tasks that failed on a worker. Without
+	// it a task that keeps failing (e.g. its object-storage reads are being
+	// throttled) is re-sent every TaskScheduleInterval (~100ms), which turns
+	// one bad task into a dispatch storm that keeps the store throttled.
+	backoffs *typeutil.ConcurrentMap[int64, *taskBackoff]
+}
+
+// taskBackoff records how often a task failed on a worker and when it may be
+// dispatched again. Entries are replaced wholesale (copy-on-write) so readers
+// never observe a partially updated value.
+type taskBackoff struct {
+	failures  int
+	notBefore time.Time
+}
+
+// recordTaskFailure schedules the next dispatch of a failed task with
+// exponential backoff: interval * 2^(failures-1), capped at maxInterval.
+func (s *globalTaskScheduler) recordTaskFailure(task Task) {
+	interval := paramtable.Get().DataCoordCfg.TaskRetryBackoffInterval.GetAsDuration(time.Second)
+	if interval <= 0 {
+		return
+	}
+	maxInterval := paramtable.Get().DataCoordCfg.TaskRetryBackoffMaxInterval.GetAsDuration(time.Second)
+
+	failures := 1
+	if old, ok := s.backoffs.Get(task.GetTaskID()); ok {
+		failures = old.failures + 1
+	}
+	// cap the shift to keep the doubling far away from overflow
+	if shift := failures - 1; shift < 30 {
+		interval <<= shift
+	} else {
+		interval = maxInterval
+	}
+	if maxInterval > 0 && interval > maxInterval {
+		interval = maxInterval
+	}
+	s.backoffs.Insert(task.GetTaskID(), &taskBackoff{
+		failures:  failures,
+		notBefore: time.Now().Add(interval),
+	})
+	mlog.Info(s.ctx, "task failed on worker, backing off before retry",
+		WrapTaskLog(task, mlog.Int("failures", failures), mlog.Duration("backoff", interval))...)
+}
+
+// taskInBackoff reports whether the task's next dispatch is still delayed.
+func (s *globalTaskScheduler) taskInBackoff(task Task) bool {
+	bo, ok := s.backoffs.Get(task.GetTaskID())
+	return ok && time.Now().Before(bo.notBefore)
 }
 
 func (s *globalTaskScheduler) Enqueue(task Task) {
@@ -73,7 +127,13 @@ func (s *globalTaskScheduler) Enqueue(task Task) {
 		task.SetTaskTime(taskcommon.TimeStart, time.Now())
 		s.runningTasks.Insert(task.GetTaskID(), task)
 	}
-	log.Ctx(s.ctx).Info("task enqueued", WrapTaskLog(task)...)
+	mlog.Info(s.ctx, "task enqueued", WrapTaskLog(task)...)
+}
+
+func (s *globalTaskScheduler) GetPendingTaskCount(taskType taskcommon.Type) int {
+	return s.pendingTasks.TaskCountBy(func(task Task) bool {
+		return task.GetTaskType() == taskType
+	})
 }
 
 func (s *globalTaskScheduler) AbortAndRemoveTask(taskID int64) {
@@ -86,6 +146,7 @@ func (s *globalTaskScheduler) AbortAndRemoveTask(taskID int64) {
 		task.DropTaskOnWorker(s.cluster)
 		s.pendingTasks.Remove(taskID)
 	}
+	s.backoffs.Remove(taskID)
 }
 
 func (s *globalTaskScheduler) Start() {
@@ -137,44 +198,95 @@ func (s *globalTaskScheduler) Stop() {
 	s.wg.Wait()
 }
 
-func (s *globalTaskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, taskSlot int64) int64 {
-	var fallbackNodeID int64 = NullNodeID
-	var maxAvailable int64 = -1
+type nodeSlotEntry struct {
+	nodeID int64
+	slots  *session.WorkerSlots
+}
 
+// newNodeSlotHeap builds a max-heap of worker nodes ordered by their available
+// slots, so the most-available (least-loaded) node always sits at the top.
+func newNodeSlotHeap(workerSlots map[int64]*session.WorkerSlots) typeutil.Heap[*nodeSlotEntry] {
+	slots := make([]*nodeSlotEntry, 0, len(workerSlots))
 	for nodeID, ws := range workerSlots {
-		if ws.AvailableSlots >= taskSlot {
-			ws.AvailableSlots -= taskSlot
-			return nodeID
-		}
-		if ws.AvailableSlots > maxAvailable && ws.AvailableSlots > 0 {
-			maxAvailable = ws.AvailableSlots
-			fallbackNodeID = nodeID
-		}
+		slots = append(slots, &nodeSlotEntry{
+			nodeID: nodeID,
+			slots:  ws,
+		})
 	}
+	return typeutil.NewObjectArrayBasedMaximumHeap(slots, func(entry *nodeSlotEntry) int64 {
+		return entry.slots.AvailableSlots
+	})
+}
 
-	if fallbackNodeID != NullNodeID {
-		workerSlots[fallbackNodeID].AvailableSlots = 0
-		return fallbackNodeID
+// pickNode selects the least-loaded node (the one with the most available slots)
+// for a task requiring taskSlot slots, instead of the first node that happens to
+// fit. Always assigning to the most-available node spreads tasks evenly across
+// DataNodes (water-filling on available slots) rather than packing them onto
+// whichever node is iterated first.
+//
+// It returns NullNodeID when no node has any available slot for a positive-slot
+// task. Non-positive-slot tasks are scheduled on the most-available node without
+// consuming slots. When even the most-available node cannot fully satisfy
+// taskSlot, it falls back to that node on a best-effort basis and drains its
+// slots, preserving the previous behavior.
+//
+// The picked node's slots are updated in place; the caller reuses the same heap
+// across all tasks in a scheduling round so later picks observe the decremented
+// slots.
+func (s *globalTaskScheduler) pickNode(slotHeap typeutil.Heap[*nodeSlotEntry], taskSlot int64) int64 {
+	if slotHeap.Len() == 0 {
+		return NullNodeID
 	}
-	return NullNodeID
+	// Pop the most-available node, mutate its slots, then push it back. An element
+	// must not be mutated while it stays in the heap, or the heap order breaks.
+	entry := slotHeap.Pop()
+	if taskSlot <= 0 {
+		slotHeap.Push(entry)
+		return entry.nodeID
+	}
+	if entry.slots.AvailableSlots <= 0 {
+		// The most-available node has no slot, so neither does any other node.
+		slotHeap.Push(entry)
+		return NullNodeID
+	}
+	if entry.slots.AvailableSlots >= taskSlot {
+		entry.slots.AvailableSlots -= taskSlot
+	} else {
+		// No node can fully satisfy the request; assign to the most-available
+		// node on a best-effort basis and drain its slots.
+		entry.slots.AvailableSlots = 0
+	}
+	slotHeap.Push(entry)
+	return entry.nodeID
 }
 
 func (s *globalTaskScheduler) schedule() {
-	pendingNum := len(s.pendingTasks.TaskIDs())
+	pendingNum := s.pendingTasks.TaskCount()
 	if pendingNum == 0 {
 		return
 	}
 	nodeSlots := s.cluster.QuerySlot()
-	log.Ctx(s.ctx).Info("scheduling pending tasks...", zap.Int("num", pendingNum), zap.Any("nodeSlots", nodeSlots))
+	mlog.Info(s.ctx, "scheduling pending tasks...", mlog.Int("num", pendingNum), mlog.Any("nodeSlots", nodeSlots))
 
+	// Build the node-slot max-heap once per round and reuse it across all picks,
+	// so each task is placed on the currently least-loaded node.
+	slotHeap := newNodeSlotHeap(nodeSlots)
 	futures := make([]*conc.Future[struct{}], 0)
+	var delayed []Task
 	for {
 		task := s.pendingTasks.Pop()
 		if task == nil {
 			break
 		}
+		// A task in failure backoff gives way: it re-enters the queue after
+		// this round and is dispatched once its delay elapses, so one
+		// persistently failing task cannot occupy the scheduler.
+		if s.taskInBackoff(task) {
+			delayed = append(delayed, task)
+			continue
+		}
 		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(nodeSlots, taskSlot)
+		nodeID := s.pickNode(slotHeap, taskSlot)
 		if nodeID == NullNodeID {
 			s.pendingTasks.Push(task)
 			break
@@ -182,20 +294,40 @@ func (s *globalTaskScheduler) schedule() {
 		future := s.execPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())
 			defer s.mu.RUnlock(task.GetTaskID())
-			log.Ctx(s.ctx).Info("processing task...", WrapTaskLog(task)...)
+			mlog.Info(s.ctx, "processing task...", WrapTaskLog(task)...)
 			if task.GetTaskState() == taskcommon.Init {
 				task.CreateTaskOnWorker(nodeID, s.cluster)
 				switch task.GetTaskState() {
 				case taskcommon.Init, taskcommon.Retry:
+					s.recordTaskFailure(task)
 					s.pendingTasks.Push(task)
 				case taskcommon.InProgress:
+					// The task was accepted by the worker and is now in flight.
+					// Any accumulated failure count is intentionally kept: reaching
+					// InProgress only means a slot happened to be free, not that the
+					// cause of earlier failures is gone. If the task fails again the
+					// backoff must keep escalating rather than restart from scratch.
+					// The entry is cleared only on a terminal state (here and in
+					// check()).
 					task.SetTaskTime(taskcommon.TimeStart, time.Now())
 					s.runningTasks.Insert(task.GetTaskID(), task)
+				case taskcommon.None, taskcommon.Finished, taskcommon.Failed:
+					// CreateTaskOnWorker can drive a task straight to a terminal
+					// state (e.g. missing meta, unhealthy segment, estimation
+					// failure). Such a task leaves the scheduler without ever
+					// entering runningTasks, so check()'s terminal-state cleanup
+					// never runs. Drop the backoff entry here; otherwise it would
+					// leak until datacoord restarts and grow without bound under
+					// the very failure storms this backoff exists to relieve.
+					s.backoffs.Remove(task.GetTaskID())
 				}
 			}
 			return struct{}{}, nil
 		})
 		futures = append(futures, future)
+	}
+	for _, task := range delayed {
+		s.pendingTasks.Push(task)
 	}
 	_ = conc.AwaitAll(futures...)
 }
@@ -204,7 +336,7 @@ func (s *globalTaskScheduler) check() {
 	if s.runningTasks.Len() <= 0 {
 		return
 	}
-	log.Ctx(s.ctx).Info("check running tasks", zap.Int("num", s.runningTasks.Len()))
+	mlog.Info(s.ctx, "check running tasks", mlog.Int("num", s.runningTasks.Len()))
 
 	tasks := s.runningTasks.Values()
 	futures := make([]*conc.Future[struct{}], 0, len(tasks))
@@ -216,13 +348,16 @@ func (s *globalTaskScheduler) check() {
 			switch task.GetTaskState() {
 			case taskcommon.None:
 				s.runningTasks.Remove(task.GetTaskID())
+				s.backoffs.Remove(task.GetTaskID())
 			case taskcommon.Init, taskcommon.Retry:
+				s.recordTaskFailure(task)
 				s.runningTasks.Remove(task.GetTaskID())
 				s.pendingTasks.Push(task)
 			case taskcommon.Finished, taskcommon.Failed:
 				task.SetTaskTime(taskcommon.TimeEnd, time.Now())
 				task.DropTaskOnWorker(s.cluster)
 				s.runningTasks.Remove(task.GetTaskID())
+				s.backoffs.Remove(task.GetTaskID())
 			}
 			return struct{}{}, nil
 		})
@@ -255,8 +390,8 @@ func (s *globalTaskScheduler) updateTaskTimeMetrics() {
 
 		queueingTime := time.Since(task.GetTaskTime(taskcommon.TimeQueue))
 		if queueingTime > paramtable.Get().DataCoordCfg.TaskSlowThreshold.GetAsDuration(time.Second) {
-			log.Ctx(s.ctx).Warn("task queueing time is too long", zap.Int64("taskID", taskID),
-				zap.Int64("queueing time(ms)", queueingTime.Milliseconds()))
+			mlog.Warn(s.ctx, "task queueing time is too long", mlog.FieldTaskID(taskID),
+				mlog.Int64("queueing time(ms)", queueingTime.Milliseconds()))
 		}
 
 		maxQueueingTime, ok := maxTaskQueueingTime[taskType]
@@ -276,8 +411,8 @@ func (s *globalTaskScheduler) updateTaskTimeMetrics() {
 
 		runningTime := time.Since(task.GetTaskTime(taskcommon.TimeStart))
 		if runningTime > paramtable.Get().DataCoordCfg.TaskSlowThreshold.GetAsDuration(time.Second) {
-			log.Ctx(s.ctx).Warn("task running time is too long", zap.Int64("taskID", task.GetTaskID()),
-				zap.Int64("running time(ms)", runningTime.Milliseconds()))
+			mlog.Warn(s.ctx, "task running time is too long", mlog.FieldTaskID(task.GetTaskID()),
+				mlog.Int64("running time(ms)", runningTime.Milliseconds()))
 		}
 
 		maxRunningTime, ok := maxTaskRunningTime[taskType]
@@ -331,5 +466,6 @@ func NewGlobalTaskScheduler(ctx context.Context, cluster session.Cluster) Global
 		execPool:     execPool,
 		checkPool:    checkPool,
 		cluster:      cluster,
+		backoffs:     typeutil.NewConcurrentMap[int64, *taskBackoff](),
 	}
 }

@@ -7,8 +7,9 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -64,10 +65,10 @@ func (w *walImpl) initProducer() error {
 		// ProducerAccessMode: pulsar.ProducerAccessModeExclusiveWithFencing,
 	})
 	if err != nil {
-		w.Log().Warn("create producer failed", zap.Error(err))
+		w.Log().Warn(context.TODO(), "create producer failed", mlog.Err(err))
 		return err
 	}
-	w.Log().Info("pulsar create producer done")
+	w.Log().Info(context.TODO(), "pulsar create producer done")
 	w.p.Set(p)
 	return nil
 }
@@ -93,7 +94,7 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 	// Because if the write is failed, the message may be already written to the pulsar topic.
 	w.backlogClearHelper.ObserveAppend(msg.EstimateSize())
 	if err != nil {
-		w.Log().RatedWarn(1, "send message to pulsar failed", zap.Error(err))
+		w.Log().RatedWarn(ctx, rate.Limit(1), "send message to pulsar failed", mlog.Err(err))
 		return nil, err
 	}
 	return pulsarID{id}, nil

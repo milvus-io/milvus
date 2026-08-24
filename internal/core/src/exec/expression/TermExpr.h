@@ -33,14 +33,6 @@ namespace milvus {
 namespace exec {
 
 template <typename T>
-struct TermElementFuncSet {
-    bool
-    operator()(const std::unordered_set<T>& srcs, T val) {
-        return srcs.find(val) != srcs.end();
-    }
-};
-
-template <typename T>
 struct TermIndexFunc {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
@@ -81,7 +73,7 @@ class PhyTermFilterExpr : public SegmentExpr {
                       false,
                       plan_options),
           expr_(expr) {
-        DetermineExecPath();
+        // DetermineExecPath();
     }
 
     void
@@ -104,6 +96,18 @@ class PhyTermFilterExpr : public SegmentExpr {
     GetColumnInfo() const override {
         return expr_->column_;
     }
+
+    bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
+    }
+
+    void
+    PrefetchRawData() override;
+
+    template <typename T>
+    void
+    PrefetchRawData();
 
  private:
     void
@@ -162,7 +166,6 @@ class PhyTermFilterExpr : public SegmentExpr {
     TargetBitmap cached_bits_;
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
-    std::shared_ptr<MultiElement> arg_set_double_;
     SingleElement arg_val_;
     PinWrapper<index::BsonInvertedIndex*> bson_index_{nullptr};
 

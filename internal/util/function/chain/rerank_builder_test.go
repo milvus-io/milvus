@@ -380,7 +380,7 @@ func (s *RerankBuilderTestSuite) TestBuildDecayChain() {
 	s.Require().NoError(err)
 	s.NotNil(fc)
 
-	// Verify chain structure: MergeOp -> MapOp(Decay) -> MapOp(ScoreCombine) -> SortOp -> LimitOp -> SelectOp
+	// Verify chain structure: MergeOp -> MapOp(Decay) -> MapOp(NumCombine) -> SortOp -> LimitOp -> SelectOp
 	s.Equal(6, len(fc.operators))
 	s.Equal("Merge", fc.operators[0].Name())
 	s.Equal("Map", fc.operators[1].Name())
@@ -1213,7 +1213,7 @@ func (s *RerankBuilderTestSuite) TestBuildDecayChainWithGrouping() {
 	s.Require().NoError(err)
 	s.NotNil(fc)
 
-	// Verify chain structure: MergeOp -> MapOp(Decay) -> MapOp(ScoreCombine) -> GroupByOp -> SelectOp
+	// Verify chain structure: MergeOp -> MapOp(Decay) -> MapOp(NumCombine) -> GroupByOp -> SelectOp
 	s.Equal(5, len(fc.operators))
 	s.Equal("Merge", fc.operators[0].Name())
 	s.Equal("Map", fc.operators[1].Name())
@@ -1695,6 +1695,52 @@ func (s *RerankBuilderTestSuite) TestExecuteRerankChain_RoundDecimalNegativeOne_
 	// Verify chain does not contain round_decimal
 	chainStr := fc.String()
 	s.NotContains(chainStr, "round_decimal")
+}
+
+func (s *RerankBuilderTestSuite) TestExecuteRerankChain_RoundDecimalAfterOrdering() {
+	collSchema := s.createCollectionSchemaWithCategory()
+	searchParams := NewSearchParams(1, 2, 0, 0)
+	searchMetrics := []string{"L2"}
+
+	funcScoreSchema := &schemapb.FunctionScore{
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Type: schemapb.FunctionType_Rerank,
+				Params: []*commonpb.KeyValuePair{
+					{Key: "reranker", Value: "weighted"},
+					{Key: "weights", Value: "[1.0]"},
+					{Key: "norm_score", Value: "false"},
+				},
+			},
+		},
+	}
+
+	fc, err := BuildRerankChain(collSchema, funcScoreSchema, searchMetrics, searchParams, s.pool)
+	s.Require().NoError(err)
+
+	df := s.createTestDataFrameForRerank(
+		[]int64{1, 2},
+		[]float32{0.49, 0.36},
+		[]string{"A", "B"},
+		[]int64{2},
+	)
+	defer df.Release()
+
+	result, err := fc.ExecuteWithContext(context.Background(), df)
+	s.Require().NoError(err)
+	defer result.Release()
+
+	idCol := result.Column("$id")
+	s.Require().NotNil(idCol)
+	idChunk := idCol.Chunk(0).(*array.Int64)
+	s.Equal(int64(2), idChunk.Value(0))
+	s.Equal(int64(1), idChunk.Value(1))
+
+	scoreCol := result.Column("$score")
+	s.Require().NotNil(scoreCol)
+	scoreChunk := scoreCol.Chunk(0).(*array.Float32)
+	s.Equal(float32(0), scoreChunk.Value(0))
+	s.Equal(float32(0), scoreChunk.Value(1))
 }
 
 func (s *RerankBuilderTestSuite) TestExecuteRerankChain_WithGroupingAndRoundDecimal() {

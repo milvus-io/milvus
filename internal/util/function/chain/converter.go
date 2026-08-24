@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // =============================================================================
@@ -278,7 +279,11 @@ func FromSearchResultData(resultData *schemapb.SearchResultData, alloc memory.Al
 	}
 
 	// Import ID column ($id)
-	if ids := resultData.GetIds(); ids != nil {
+	// Zero-hit results may carry Ids as a non-nil shell whose IdField oneof is
+	// unset (e.g. querynode emptySearchResultData forwarded verbatim by the
+	// single-channel reduce fast path); it holds no IDs, so treat it exactly
+	// like Ids == nil.
+	if ids := resultData.GetIds(); ids.GetIdField() != nil {
 		if err := importIDs(builder, ids, offsets, alloc); err != nil {
 			return nil, err
 		}
@@ -287,6 +292,9 @@ func FromSearchResultData(resultData *schemapb.SearchResultData, alloc memory.Al
 		if err := importEmptyIDs(builder, offsets, alloc); err != nil {
 			return nil, err
 		}
+	} else if ids != nil {
+		// IdField unset but rows present: malformed input.
+		return nil, importIDs(builder, ids, offsets, alloc)
 	}
 
 	// Import Score column ($score)
@@ -449,7 +457,7 @@ func importFieldDataWithName(builder *DataFrameBuilder, fieldData *schemapb.Fiel
 
 	totalRows := offsets[len(offsets)-1]
 
-	validData := fieldData.GetValidData()
+	validData := typeutil.GetFieldDataValidData(fieldData)
 	nullable := len(validData) > 0
 	if nullable && int64(len(validData)) < totalRows {
 		return merr.WrapErrServiceInternalMsg("field %s: validData length (%d) is less than totalRows (%d)", fieldName, len(validData), totalRows)
@@ -933,7 +941,7 @@ func exportFieldData(df *DataFrame, name string) (*schemapb.FieldData, error) {
 	// Export validity data for nullable fields
 	if df.fieldNullables[name] {
 		if validData := exportValidData(col); validData != nil {
-			fieldData.ValidData = validData
+			typeutil.SetFieldDataValidData(fieldData, validData)
 		}
 	}
 

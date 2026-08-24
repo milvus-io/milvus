@@ -21,14 +21,13 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -46,7 +45,6 @@ type Cluster interface {
 	GetMetrics(ctx context.Context, nodeID int64, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	SyncDistribution(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) (*commonpb.Status, error)
 	GetComponentStates(ctx context.Context, nodeID int64) (*milvuspb.ComponentStates, error)
-	DropIndex(ctx context.Context, nodeID int64, req *querypb.DropIndexRequest) (*commonpb.Status, error)
 	RunAnalyzer(ctx context.Context, nodeID int64, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
 	ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error)
 	SyncFileResource(ctx context.Context, nodeID int64, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)
@@ -101,7 +99,7 @@ func (c *QueryCluster) updateLoop() {
 	for {
 		select {
 		case <-c.ch:
-			log.Info("cluster closed")
+			mlog.Info(context.TODO(), "cluster closed")
 			return
 		case <-ticker.C:
 			nodes := c.getAllNodeIDs()
@@ -268,20 +266,6 @@ func (c *QueryCluster) GetComponentStates(ctx context.Context, nodeID int64) (*m
 	return resp, err
 }
 
-func (c *QueryCluster) DropIndex(ctx context.Context, nodeID int64, req *querypb.DropIndexRequest) (*commonpb.Status, error) {
-	var (
-		resp *commonpb.Status
-		err  error
-	)
-	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
-		resp, err = cli.DropIndex(ctx, req)
-	})
-	if err1 != nil {
-		return nil, err1
-	}
-	return resp, err
-}
-
 func (c *QueryCluster) RunAnalyzer(ctx context.Context, nodeID int64, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	var (
 		resp *milvuspb.RunAnalyzerResponse
@@ -430,7 +414,7 @@ func (c *clients) close(nodeID int64) {
 	defer c.Unlock()
 	if cli, ok := c.clients[nodeID]; ok {
 		if err := cli.Close(); err != nil {
-			log.Warn("error occurred during stopping client", zap.Int64("nodeID", nodeID), zap.Error(err))
+			mlog.Warn(context.TODO(), "error occurred during stopping client", mlog.Int64("nodeID", nodeID), mlog.Err(err))
 		}
 		delete(c.clients, nodeID)
 	}
@@ -441,7 +425,7 @@ func (c *clients) closeAll() {
 	defer c.Unlock()
 	for nodeID, cli := range c.clients {
 		if err := cli.Close(); err != nil {
-			log.Warn("error occurred during stopping client", zap.Int64("nodeID", nodeID), zap.Error(err))
+			mlog.Warn(context.TODO(), "error occurred during stopping client", mlog.Int64("nodeID", nodeID), mlog.Err(err))
 		}
 	}
 }

@@ -8,11 +8,13 @@ from api.milvus import (
     AliasClient,
     CollectionClient,
     DatabaseClient,
+    FileResourceClient,
     ImportJobClient,
     IndexClient,
     PartitionClient,
     Requests,
     RoleClient,
+    SnapshotClient,
     StorageClient,
     UserClient,
     VectorClient,
@@ -47,10 +49,21 @@ class Base:
     storage_client = None
     milvus_client = None
     database_client = None
+    file_resource_client = None
+    snapshot_client = None
 
 
 class TestBase(Base):
     req = None
+
+    @pytest.fixture(scope="class", autouse=True)
+    def init_class_config(self, endpoint, token):
+        self.endpoint = f"{endpoint}"
+        self.api_key = f"{token}" if token is not None else None
+        self.invalid_api_key = "invalid_token"
+
+    def _class_scope_clients(self):
+        return CollectionClient(self.endpoint, self.api_key), VectorClient(self.endpoint, self.api_key)
 
     def teardown_method(self):
         # Clean up collections
@@ -106,6 +119,8 @@ class TestBase(Base):
         self.import_job_client = ImportJobClient(self.endpoint, self.api_key)
         self.storage_client = StorageClient(f"{minio_host}:9000", "minioadmin", "minioadmin", bucket_name, root_path)
         self.database_client = DatabaseClient(self.endpoint, self.api_key)
+        self.file_resource_client = FileResourceClient(self.endpoint, self.api_key)
+        self.snapshot_client = SnapshotClient(self.endpoint, self.api_key)
 
         if token is None:
             self.vector_client.api_key = None

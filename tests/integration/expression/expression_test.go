@@ -23,13 +23,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -134,7 +133,7 @@ func (s *ExpressionSuite) insertFlushIndexLoad(ctx context.Context, fieldData []
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		log.Info("ShowSegments result", zap.String("segment", segment.String()))
+		mlog.Info(ctx, "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
 	// create index
@@ -148,7 +147,7 @@ func (s *ExpressionSuite) insertFlushIndexLoad(ctx context.Context, fieldData []
 	err = merr.Error(createIndexStatus)
 	s.NoError(err)
 	s.WaitForIndexBuilt(context.TODO(), s.collectionName, integration.FloatVecField)
-	log.Info("=========================Index created=========================")
+	mlog.Info(ctx, "=========================Index created=========================")
 
 	// load
 	loadStatus, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -159,7 +158,7 @@ func (s *ExpressionSuite) insertFlushIndexLoad(ctx context.Context, fieldData []
 	err = merr.Error(loadStatus)
 	s.NoError(err)
 	s.WaitForLoad(context.TODO(), s.collectionName)
-	log.Info("=========================Collection loaded=========================")
+	mlog.Info(ctx, "=========================Collection loaded=========================")
 }
 
 func (s *ExpressionSuite) setupData() {
@@ -225,7 +224,69 @@ func (s *ExpressionSuite) searchWithExpression() {
 		err = merr.Error(searchResult.GetStatus())
 		s.NoError(err)
 		s.Equal(c.resNum, len(searchResult.GetResults().GetScores()))
-		log.Info(fmt.Sprintf("=========================Search done with expr:%s =========================", c.expr))
+		mlog.Info(context.TODO(),
+			fmt.Sprintf("=========================Search done with expr:%s =========================", c.expr))
+	}
+}
+
+// searchWithBitwiseExpression verifies bitwise filter operators end-to-end with
+// EXACT result counts. The JSON dynamic fields satisfy E['F'] == i and
+// B == rowNum-i for every row i in [0, rowNum), so each filter's match count is
+// computable. topK is set to rowNum so the returned count equals the number of
+// rows passing the filter (rather than being capped by a small topK).
+func (s *ExpressionSuite) searchWithBitwiseExpression() {
+	testcases := []testCase{
+		{"(E['F'] & 1) == 0", s.rowNum, 50}, // i even
+		{"(E['F'] & 1) == 1", s.rowNum, 50}, // i odd
+		{"(E['F'] & 4) == 4", s.rowNum, 48}, // bit 2 set: i%8 in {4,5,6,7}
+		{"(E['F'] | 1) == 1", s.rowNum, 2},  // i in {0,1}
+		{"(E['F'] ^ 1) == 0", s.rowNum, 1},  // i == 1
+		{"(E['F'] ^ 1) != 0", s.rowNum, 99}, // i != 1
+		{"(B & 1) == 0", s.rowNum, 50},      // B = rowNum-i even <=> i even
+	}
+	for _, c := range testcases {
+		params := integration.GetSearchParams(integration.IndexFaissIDMap, metric.IP)
+		searchReq := integration.ConstructSearchRequest(s.dbName, s.collectionName, c.expr,
+			integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, 1, s.dim, c.topK, -1)
+
+		searchResult, err := s.Cluster.MilvusClient.Search(context.Background(), searchReq)
+		s.NoError(err)
+		err = merr.Error(searchResult.GetStatus())
+		s.NoError(err)
+		s.Equal(c.resNum, len(searchResult.GetResults().GetScores()),
+			fmt.Sprintf("unexpected match count for bitwise expr: %s", c.expr))
+		mlog.Info(context.TODO(),
+			fmt.Sprintf("=========================Bitwise search done with expr:%s =========================", c.expr))
+	}
+}
+
+// searchWithShiftNotExpression verifies shift (<<, >>) and bitwise NOT (~)
+// filter operators end-to-end with EXACT result counts. As above, E['F'] == i
+// and B == rowNum-i for every row i in [0, rowNum). ~ is rewritten to (x ^ -1)
+// at plan time, so this also exercises that rewrite end-to-end.
+func (s *ExpressionSuite) searchWithShiftNotExpression() {
+	testcases := []testCase{
+		{"(E['F'] << 1) == 4", s.rowNum, 1}, // 2*i == 4 -> i == 2
+		{"(E['F'] >> 1) == 0", s.rowNum, 2}, // i>>1 == 0 -> i in {0,1}
+		{"(E['F'] >> 2) == 1", s.rowNum, 4}, // i>>2 == 1 -> i in {4,5,6,7}
+		{"(E['F'] >> 3) == 0", s.rowNum, 8}, // i>>3 == 0 -> i in {0..7}
+		{"(B >> 1) == 0", s.rowNum, 1},      // B = 100-i in {0,1} -> i == 99
+		{"~E['F'] == -1", s.rowNum, 1},      // ~i == -1 -> i == 0
+		{"~E['F'] < -50", s.rowNum, 50},     // ~i = -i-1 < -50 -> i > 49 -> i in {50..99}
+	}
+	for _, c := range testcases {
+		params := integration.GetSearchParams(integration.IndexFaissIDMap, metric.IP)
+		searchReq := integration.ConstructSearchRequest(s.dbName, s.collectionName, c.expr,
+			integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, 1, s.dim, c.topK, -1)
+
+		searchResult, err := s.Cluster.MilvusClient.Search(context.Background(), searchReq)
+		s.NoError(err)
+		err = merr.Error(searchResult.GetStatus())
+		s.NoError(err)
+		s.Equal(c.resNum, len(searchResult.GetResults().GetScores()),
+			fmt.Sprintf("unexpected match count for shift/not expr: %s", c.expr))
+		mlog.Info(context.TODO(),
+			fmt.Sprintf("=========================Shift/Not search done with expr:%s =========================", c.expr))
 	}
 }
 
@@ -281,9 +342,9 @@ func (s *ExpressionSuite) TestDivisionByZeroError() {
 					fmt.Sprintf("Error message should contain '%s' for expr: %s",
 						c.expectedInReason, c.expr))
 			}
-			log.Info("Got expected error",
-				zap.String("expr", c.expr),
-				zap.String("reason", status.GetReason()))
+			mlog.Info(context.TODO(), "Got expected error",
+				mlog.String("expr", c.expr),
+				mlog.String("reason", status.GetReason()))
 		} else {
 			// For valid cases, check successful execution
 			err = merr.Error(searchResult.GetStatus())
@@ -297,6 +358,8 @@ func (s *ExpressionSuite) TestExpression() {
 	s.setParams()
 	s.setupData()
 	s.searchWithExpression()
+	s.searchWithBitwiseExpression()
+	s.searchWithShiftNotExpression()
 	s.TestDivisionByZeroError()
 }
 

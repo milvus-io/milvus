@@ -24,6 +24,8 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 // dummyFunc is a minimal FunctionExpr implementation for testing.
@@ -43,7 +45,7 @@ func (d *dummyFunc) IsRunnable(_ string) bool { return true }
 
 // dummyFactory returns a FunctionFactory that produces a dummyFunc with the given name.
 func dummyFactory(name string) FunctionFactory {
-	return func(params map[string]interface{}) (FunctionExpr, error) {
+	return func(_ FunctionBuildContext, _ FunctionConfig) (FunctionExpr, error) {
 		return &dummyFunc{name: name}, nil
 	}
 }
@@ -132,7 +134,7 @@ func TestFunctionRegistry_Get(t *testing.T) {
 	assert.NotNil(t, factory)
 
 	// Verify the factory produces the expected function
-	fn, err := factory(nil)
+	fn, err := factory(FunctionBuildContext{}, FunctionConfig{})
 	require.NoError(t, err)
 	assert.Equal(t, "get_func", fn.Name())
 }
@@ -149,21 +151,26 @@ func TestFunctionRegistry_Create(t *testing.T) {
 	r := NewFunctionRegistry()
 	r.MustRegister("create_func", dummyFactory("create_func"))
 
-	fn, err := r.Create("create_func", nil)
+	fn, err := r.Create(FunctionBuildContext{}, FunctionConfig{Name: "create_func"})
 	require.NoError(t, err)
 	assert.Equal(t, "create_func", fn.Name())
 }
 
-func TestFunctionRegistry_Create_WithParams(t *testing.T) {
+func TestFunctionRegistry_Create_WithConfig(t *testing.T) {
 	r := NewFunctionRegistry()
 
-	// Register a factory that reads params
-	r.MustRegister("param_func", func(params map[string]interface{}) (FunctionExpr, error) {
-		name, _ := params["name"].(string)
+	r.MustRegister("param_func", func(_ FunctionBuildContext, cfg FunctionConfig) (FunctionExpr, error) {
+		name := cfg.Name
+		if v := cfg.Params["name"]; v != nil && v.GetStringValue() != "" {
+			name = v.GetStringValue()
+		}
 		return &dummyFunc{name: name}, nil
 	})
 
-	fn, err := r.Create("param_func", map[string]interface{}{"name": "custom"})
+	fn, err := r.Create(FunctionBuildContext{}, FunctionConfig{
+		Name:   "param_func",
+		Params: map[string]*schemapb.FunctionParamValue{"name": {Value: &schemapb.FunctionParamValue_StringValue{StringValue: "custom"}}},
+	})
 	require.NoError(t, err)
 	assert.Equal(t, "custom", fn.Name())
 }
@@ -171,7 +178,7 @@ func TestFunctionRegistry_Create_WithParams(t *testing.T) {
 func TestFunctionRegistry_Create_NotFound(t *testing.T) {
 	r := NewFunctionRegistry()
 
-	fn, err := r.Create("missing", nil)
+	fn, err := r.Create(FunctionBuildContext{}, FunctionConfig{Name: "missing"})
 	assert.Error(t, err)
 	assert.Nil(t, fn)
 	assert.Contains(t, err.Error(), "unknown function")
@@ -253,7 +260,7 @@ func TestGlobalRegistry_GetFunctionFactory(t *testing.T) {
 	assert.True(t, ok)
 	assert.NotNil(t, factory)
 
-	fn, err := factory(nil)
+	fn, err := factory(FunctionBuildContext{}, FunctionConfig{})
 	require.NoError(t, err)
 	assert.Equal(t, name, fn.Name())
 }
@@ -269,13 +276,13 @@ func TestGlobalRegistry_CreateFunction(t *testing.T) {
 
 	MustRegisterFunction(name, dummyFactory(name))
 
-	fn, err := CreateFunction(name, nil)
+	fn, err := CreateFunction(FunctionBuildContext{}, FunctionConfig{Name: name})
 	require.NoError(t, err)
 	assert.Equal(t, name, fn.Name())
 }
 
 func TestGlobalRegistry_CreateFunction_NotFound(t *testing.T) {
-	fn, err := CreateFunction("test_global_create_missing_xyz", nil)
+	fn, err := CreateFunction(FunctionBuildContext{}, FunctionConfig{Name: "test_global_create_missing_xyz"})
 	assert.Error(t, err)
 	assert.Nil(t, fn)
 	assert.Contains(t, err.Error(), "unknown function")

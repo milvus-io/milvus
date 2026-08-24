@@ -23,37 +23,54 @@ import (
 	"encoding/json"
 	"os"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
+	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/client/v2/common"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/client/v3/common"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
 
 // TelemetryConfig holds configurable settings for client telemetry
 type TelemetryConfig struct {
 	// Enabled controls whether telemetry collection is active
 	Enabled bool
-	// HeartbeatInterval is how often to send heartbeats to server (default: 30 seconds)
-	// Snapshot period aligns with heartbeat interval
+	// HeartbeatInterval is how often to send heartbeats to server (default: 10 seconds).
+	//
+	// It is also the metrics window: each heartbeat carries the operations since the last
+	// one. The coordinator answers a telemetry query from the window before the newest, so
+	// what a caller reads is between one and two intervals old -- ten to twenty seconds at
+	// the default. Raising it cuts the coordinator's heartbeat load, which scales with the
+	// number of connected clients rather than with traffic, at the cost of that staleness.
 	HeartbeatInterval time.Duration
 	// SamplingRate is the sampling rate for all operations (0.0-1.0, default: 1.0 = 100%)
 	// Can be dynamically adjusted
 	SamplingRate float64
 	// ErrorMaxCount is the maximum number of errors to keep
 	ErrorMaxCount int
+	// ClientID identifies this client to the server across process restarts.
+	//
+	// When empty, a random UUID is generated per Client, which means the server sees a
+	// brand-new client on every restart: telemetry history fragments and `client:<id>`
+	// scoped commands cannot target a long-lived client. Set it to a stable value (e.g.
+	// a pod name, or hostname+role) to get continuity. It must be unique per process --
+	// reusing one value across processes collapses them into a single server-side entry.
+	ClientID string
 }
 
 // DefaultTelemetryConfig returns the default telemetry configuration
 func DefaultTelemetryConfig() *TelemetryConfig {
 	return &TelemetryConfig{
 		Enabled:           true,
-		HeartbeatInterval: 30 * time.Second,
+		HeartbeatInterval: 10 * time.Second,
 		SamplingRate:      1.0, // 100% sampling by default
 		ErrorMaxCount:     100,
 	}
@@ -431,8 +448,14 @@ type ClientTelemetryManager struct {
 	configMu sync.RWMutex // Protects config access
 	client   *Client
 
-	// Unique client ID (UUID), generated once at startup, stable across reconnections
+	// Unique client ID, resolved once at construction. Stable for the lifetime of this
+	// Client (and therefore across gRPC reconnects). It only survives a process restart
+	// when the caller pins it via TelemetryConfig.ClientID; otherwise it is a fresh UUID.
 	clientID string
+
+	// clientIDStable records whether clientID came from TelemetryConfig.ClientID (and so
+	// survives a restart) rather than being generated for this process.
+	clientIDStable bool
 
 	// Metrics collectors per operation
 	mu         sync.RWMutex
@@ -476,8 +499,29 @@ type ClientTelemetryManager struct {
 	// Startup state - indicates if telemetry manager has started
 	ready atomic.Bool
 
-	// Deterministic sampling counter
-	samplingCounter uint64
+	// unsupportedStreak counts consecutive heartbeats rejected with codes.Unimplemented.
+	// It backs off the heartbeat interval instead of latching telemetry off: a client
+	// load-balances across proxies, so during a rolling upgrade a single heartbeat can
+	// land on an old one while the rest of the cluster already supports the service.
+	// Disabling permanently on one such answer would never recover. Reset by any
+	// successful heartbeat.
+	unsupportedStreak atomic.Int64
+
+	// lastHeartbeatErr records the most recent heartbeat failure. The client module has
+	// no logger, so this is the only way to surface an otherwise silent best-effort
+	// failure; read it with LastHeartbeatError().
+	lastHeartbeatErr   error
+	lastHeartbeatErrMu sync.RWMutex
+
+	// lastSnapshotEnd is the end of the most recent snapshot window, in Unix milliseconds,
+	// so the next one can start where it left off instead of assuming the configured
+	// interval elapsed. Zero until the first snapshot.
+	lastSnapshotEnd atomic.Int64
+
+	// samplingAccum carries the fractional sampling rate between calls, in samplingScale
+	// units: each operation adds the rate and the one that pushes it past a whole unit is
+	// the one sampled. See shouldSample.
+	samplingAccum uint64
 }
 
 // CommandHandler handles a specific command type from the server
@@ -496,10 +540,19 @@ func NewClientTelemetryManager(client *Client, config *TelemetryConfig) *ClientT
 		config = DefaultTelemetryConfig()
 	}
 
+	// Prefer a caller-supplied stable ID so the server can correlate this client across
+	// process restarts; fall back to a per-process UUID.
+	clientID := config.ClientID
+	clientIDStable := clientID != ""
+	if clientID == "" {
+		clientID = uuid.New().String()
+	}
+
 	tm := &ClientTelemetryManager{
 		config:             config,
 		client:             client,
-		clientID:           uuid.New().String(),
+		clientID:           clientID,
+		clientIDStable:     clientIDStable,
 		collectors:         make(map[string]*OperationMetricsCollector),
 		commandHandlers:    make(map[string]CommandHandler),
 		executedCommands:   make(map[string]int64),
@@ -545,7 +598,12 @@ func (m *ClientTelemetryManager) buildClientInfo() *commonpb.ClientInfo {
 		LocalTime:  time.Now().String(),
 		Host:       hostname,
 		Reserved: map[string]string{
-			"client_id": m.clientID, // Always send stable UUID to prevent ID collisions
+			"client_id": m.clientID,
+			// Tell the server whether this ID survives a restart. It only does when the
+			// caller pinned it via TelemetryConfig.ClientID; a generated UUID does not.
+			// The server needs this to decide whether a client-scoped persistent config
+			// would keep matching.
+			"client_id_stable": strconv.FormatBool(m.clientIDStable),
 		},
 	}
 	if m.client != nil {
@@ -581,7 +639,7 @@ func (m *ClientTelemetryManager) heartbeatLoop() {
 	// Use time.After instead of ticker to dynamically adapt to interval changes
 	// This allows server-pushed config to take effect immediately
 	for {
-		interval := m.getHeartbeatInterval()
+		interval := m.nextHeartbeatDelay()
 		select {
 		case <-m.stopCh:
 			return
@@ -590,6 +648,67 @@ func (m *ClientTelemetryManager) heartbeatLoop() {
 			m.sendHeartbeat()
 		}
 	}
+}
+
+// maxUnsupportedBackoff caps the heartbeat interval while the server keeps answering
+// Unimplemented. Large enough that talking to an old cluster costs almost nothing, small
+// enough that a client notices an upgrade without being restarted.
+const maxUnsupportedBackoff = 30 * time.Minute
+
+// nextHeartbeatDelay returns how long to wait before the next heartbeat: the configured
+// interval normally, backed off while the server keeps reporting Unimplemented.
+//
+// The backoff doubles per consecutive rejection and is capped, so a client against a
+// server without the service settles at one probe per maxUnsupportedBackoff rather than
+// one per interval -- and still recovers on its own once the server gains the service.
+func (m *ClientTelemetryManager) nextHeartbeatDelay() time.Duration {
+	interval := m.getHeartbeatInterval()
+
+	streak := m.unsupportedStreak.Load()
+	if streak <= 0 {
+		return interval
+	}
+
+	backoff := interval
+	for i := int64(0); i < streak && backoff < maxUnsupportedBackoff; i++ {
+		backoff *= 2
+	}
+	if backoff > maxUnsupportedBackoff {
+		backoff = maxUnsupportedBackoff
+	}
+	if backoff < interval {
+		// A client configured to heartbeat less often than the cap must not start
+		// heartbeating *more* often because the server is rejecting it.
+		return interval
+	}
+	return backoff
+}
+
+// IsSupported reports whether the server is currently known *not* to implement
+// ClientTelemetryService. It is optimistic: it returns true before the first heartbeat has
+// been sent, because nothing is known yet, so true means "no evidence of an old server"
+// rather than "confirmed supported". Use LastHeartbeatError to tell those apart.
+//
+// It goes false while the server answers codes.Unimplemented and returns true again on the
+// first reply, so it reflects current reachability rather than a permanent verdict -- a
+// client may be load-balanced across proxies that differ mid upgrade.
+func (m *ClientTelemetryManager) IsSupported() bool {
+	return m.unsupportedStreak.Load() == 0
+}
+
+// LastHeartbeatError returns the most recent heartbeat failure, or nil if the last
+// heartbeat succeeded. Heartbeats are best-effort and never surfaced through the normal
+// API, so this is the supported way to diagnose a client that is not reporting.
+func (m *ClientTelemetryManager) LastHeartbeatError() error {
+	m.lastHeartbeatErrMu.RLock()
+	defer m.lastHeartbeatErrMu.RUnlock()
+	return m.lastHeartbeatErr
+}
+
+func (m *ClientTelemetryManager) setLastHeartbeatError(err error) {
+	m.lastHeartbeatErrMu.Lock()
+	defer m.lastHeartbeatErrMu.Unlock()
+	m.lastHeartbeatErr = err
 }
 
 // sendHeartbeat sends a heartbeat to the server
@@ -602,45 +721,14 @@ func (m *ClientTelemetryManager) sendHeartbeat() {
 		return
 	}
 
-	if m.client == nil || m.client.service == nil {
+	if m.client == nil || m.client.telemetryService == nil {
 		return
 	}
 
 	// Get metrics from the latest snapshot (P99 already calculated during snapshot creation)
 	var metrics []*commonpb.OperationMetrics
-	latestSnapshot := m.GetLatestSnapshot()
-	if latestSnapshot != nil {
-		enabledCollections, allEnabled := m.snapshotEnabledCollections()
-
-		// Convert snapshot metrics to proto format
-		for _, opMetrics := range latestSnapshot.Metrics {
-			protoCollMetrics := make(map[string]*commonpb.Metrics)
-			// Only include metrics for enabled collections
-			// Use "*" wildcard to enable all collections
-			for coll, cm := range opMetrics.CollectionMetrics {
-				if allEnabled || enabledCollections[coll] {
-					protoCollMetrics[coll] = &commonpb.Metrics{
-						RequestCount: cm.RequestCount,
-						SuccessCount: cm.SuccessCount,
-						ErrorCount:   cm.ErrorCount,
-						AvgLatencyMs: cm.AvgLatencyMs,
-						P99LatencyMs: cm.P99LatencyMs,
-					}
-				}
-			}
-
-			metrics = append(metrics, &commonpb.OperationMetrics{
-				Operation: opMetrics.Operation,
-				Global: &commonpb.Metrics{
-					RequestCount: opMetrics.Global.RequestCount,
-					SuccessCount: opMetrics.Global.SuccessCount,
-					ErrorCount:   opMetrics.Global.ErrorCount,
-					AvgLatencyMs: opMetrics.Global.AvgLatencyMs,
-					P99LatencyMs: opMetrics.Global.P99LatencyMs, // Use P99 from snapshot
-				},
-				CollectionMetrics: protoCollMetrics,
-			})
-		}
+	if latestSnapshot := m.GetLatestSnapshot(); latestSnapshot != nil {
+		metrics = m.toProtoOperationMetrics(latestSnapshot.Metrics)
 	}
 
 	// Get pending command replies (snapshot only)
@@ -662,19 +750,37 @@ func (m *ClientTelemetryManager) sendHeartbeat() {
 		LastCommandTimestamp: m.lastCommandTimestamp.Load(),
 	}
 
-	// Send heartbeat with 30s fixed interval (no retry - telemetry is best effort)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	resp, err := m.client.telemetryService.ClientHeartbeat(ctx, req)
+	// Telemetry is best-effort: opt out of the client-wide retry interceptor so a failing
+	// heartbeat costs exactly one RPC instead of up to 6 with backoff. The next heartbeat
+	// is the retry.
+	resp, err := m.client.telemetryService.ClientHeartbeat(ctx, req, grpc_retry.Disable())
 	if err != nil {
-		// Log error but continue - telemetry is best-effort
+		m.setLastHeartbeatError(err)
+		// Unimplemented means *this* server does not offer the service. That may be the
+		// whole cluster, or it may be one stale proxy during a rolling upgrade, so back
+		// off rather than give up: the interval grows with the streak and snaps back on
+		// the first success.
+		if s, ok := status.FromError(err); ok && s.Code() == codes.Unimplemented {
+			m.unsupportedStreak.Add(1)
+		}
 		return
 	}
 
-	if !merr.Ok(resp.GetStatus()) {
+	// Reaching a reply at all proves the server implements the service: an unimplemented
+	// method never returns a business status. Clear the backoff before inspecting that
+	// status, so a server that is reachable but unhealthy -- a coordinator still starting,
+	// a rate limit -- does not leave the client stuck at an inflated interval left over
+	// from some earlier Unimplemented.
+	m.unsupportedStreak.Store(0)
+
+	if err := merr.Error(resp.GetStatus()); err != nil {
+		m.setLastHeartbeatError(err)
 		return
 	}
+	m.setLastHeartbeatError(nil)
 
 	// Clear sent replies only after successful heartbeat
 	m.clearPendingProtoReplies(len(replies))
@@ -688,7 +794,10 @@ func (m *ClientTelemetryManager) getHeartbeatInterval() time.Duration {
 	interval := m.config.HeartbeatInterval
 	m.configMu.RUnlock()
 	if interval <= 0 {
-		return 30 * time.Second
+		// Matches DefaultTelemetryConfig: a config built field by field can leave this
+		// zero, and falling back to a different number than the documented default would
+		// make the interval depend on how the config was constructed.
+		return DefaultTelemetryConfig().HeartbeatInterval
 	}
 	return interval
 }
@@ -716,8 +825,27 @@ func (m *ClientTelemetryManager) snapshotEnabledCollections() (map[string]bool, 
 	return snapshot, false
 }
 
-const samplingDenominator = 10000
+// samplingScale is the fixed-point unit for accumulating a fractional sampling rate. A
+// rate becomes an integer step of samplingScale units, so the smallest rate that still
+// samples is 1e-9 -- far below anything an operator would set, which is the point: a
+// configured rate must never round down to "off".
+const samplingScale = 1_000_000_000
 
+// shouldSample decides whether this operation is recorded, spreading the sampled ones
+// evenly rather than in runs.
+//
+// Each call adds the rate to a shared accumulator and samples on the call that carries it
+// across a whole unit: at 0.25 that is every fourth operation, at 0.1 every tenth. What
+// matters is that the ratio holds over any stretch of calls, not only over a long one --
+// metrics are reported per heartbeat window, and a window is tens or hundreds of
+// operations. A scheme that sampled a contiguous run and then dropped one would give the
+// right long-run ratio while making every individual window either complete or empty.
+//
+// The accumulator is shared, so concurrent callers reorder which of them observes a
+// crossing, but each crossing is observed exactly once: atomic.AddUint64 hands every caller
+// a distinct interval, and the step is smaller than one unit, so no interval spans two
+// crossings. The count of sampled operations is therefore exact, not statistical, which is
+// also why this needs no random source.
 func (m *ClientTelemetryManager) shouldSample(samplingRate float64) bool {
 	if samplingRate >= 1.0 {
 		return true
@@ -726,60 +854,61 @@ func (m *ClientTelemetryManager) shouldSample(samplingRate float64) bool {
 		return false
 	}
 
-	threshold := uint64(samplingRate * float64(samplingDenominator))
-	if threshold == 0 {
-		return false
+	step := uint64(samplingRate * float64(samplingScale))
+	if step == 0 {
+		// A rate too small to represent still means "sample rarely", never "sample never":
+		// silently disabling telemetry for a positive rate is the one outcome nobody could
+		// have intended.
+		step = 1
 	}
 
-	counter := atomic.AddUint64(&m.samplingCounter, 1)
-	return counter%samplingDenominator < threshold
+	after := atomic.AddUint64(&m.samplingAccum, step)
+	before := after - step
+	return after/samplingScale != before/samplingScale
 }
 
-// collectProtoMetrics collects all operation metrics and converts to proto format
-func (m *ClientTelemetryManager) collectProtoMetrics() []*commonpb.OperationMetrics {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+// toProtoOperationMetrics converts collected metrics into their proto form, dropping
+// collection-level entries for collections that are not currently enabled ("*" enables
+// all). This is the single conversion path used for everything put on the wire.
+func (m *ClientTelemetryManager) toProtoOperationMetrics(opMetricsList []*OperationMetrics) []*commonpb.OperationMetrics {
+	if len(opMetricsList) == 0 {
+		return nil
+	}
 
 	enabledCollections, allEnabled := m.snapshotEnabledCollections()
 
-	var result []*commonpb.OperationMetrics
-	for opName, collector := range m.collectors {
-		globalMetrics := collector.GetMetrics()
-		if globalMetrics == nil {
-			continue
-		}
-
-		collMetrics := collector.GetCollectionMetrics()
-
+	result := make([]*commonpb.OperationMetrics, 0, len(opMetricsList))
+	for _, opMetrics := range opMetricsList {
 		protoCollMetrics := make(map[string]*commonpb.Metrics)
-		// Only include metrics for enabled collections
-		// Use "*" wildcard to enable all collections
-		for coll, cm := range collMetrics {
+		for coll, cm := range opMetrics.CollectionMetrics {
 			if allEnabled || enabledCollections[coll] {
-				protoCollMetrics[coll] = &commonpb.Metrics{
-					RequestCount: cm.RequestCount,
-					SuccessCount: cm.SuccessCount,
-					ErrorCount:   cm.ErrorCount,
-					AvgLatencyMs: cm.AvgLatencyMs,
-					P99LatencyMs: cm.P99LatencyMs,
-				}
+				protoCollMetrics[coll] = toProtoMetrics(cm)
 			}
 		}
 
 		result = append(result, &commonpb.OperationMetrics{
-			Operation: opName,
-			Global: &commonpb.Metrics{
-				RequestCount: globalMetrics.RequestCount,
-				SuccessCount: globalMetrics.SuccessCount,
-				ErrorCount:   globalMetrics.ErrorCount,
-				AvgLatencyMs: globalMetrics.AvgLatencyMs,
-				P99LatencyMs: globalMetrics.P99LatencyMs,
-			},
+			Operation:         opMetrics.Operation,
+			Global:            toProtoMetrics(opMetrics.Global),
 			CollectionMetrics: protoCollMetrics,
 		})
 	}
 
 	return result
+}
+
+// toProtoMetrics converts a single metrics bucket to proto form.
+func toProtoMetrics(metrics *Metrics) *commonpb.Metrics {
+	if metrics == nil {
+		return nil
+	}
+	return &commonpb.Metrics{
+		RequestCount: metrics.RequestCount,
+		SuccessCount: metrics.SuccessCount,
+		ErrorCount:   metrics.ErrorCount,
+		AvgLatencyMs: metrics.AvgLatencyMs,
+		P99LatencyMs: metrics.P99LatencyMs,
+		MaxLatencyMs: metrics.MaxLatencyMs,
+	}
 }
 
 // getPendingProtoRepliesSnapshot returns a snapshot of pending replies without clearing.
@@ -981,100 +1110,6 @@ func (m *ClientTelemetryManager) collectMetrics() []*OperationMetrics {
 	return result
 }
 
-// getPendingReplies gets and clears pending command replies (local types, for testing)
-func (m *ClientTelemetryManager) getPendingReplies() []*CommandReply {
-	m.pendingRepliesMu.Lock()
-	defer m.pendingRepliesMu.Unlock()
-
-	var result []*CommandReply
-	for _, r := range m.pendingReplies {
-		result = append(result, &CommandReply{
-			CommandId:    r.GetCommandId(),
-			Success:      r.GetSuccess(),
-			ErrorMessage: r.GetErrorMessage(),
-			Payload:      r.GetPayload(),
-		})
-	}
-	m.pendingReplies = nil
-	return result
-}
-
-// processCommands processes commands (local types, for testing)
-// Commands are only executed once using timestamp-based deduplication:
-// - Commands with CreateTime < lastCommandTimestamp are filtered by timestamp (already processed)
-// - Commands with CreateTime >= lastCommandTimestamp use ID-based tracking for same-millisecond deduplication
-func (m *ClientTelemetryManager) processCommands(commands []*ClientCommand) {
-	hasPersistent := false
-	lastTS := m.lastCommandTimestamp.Load()
-	maxCommandTS := lastTS
-
-	// First, process all commands
-	for _, cmd := range commands {
-		if cmd.Persistent {
-			hasPersistent = true
-		}
-		if cmd.CreateTime > maxCommandTS {
-			maxCommandTS = cmd.CreateTime
-		}
-
-		// Timestamp-based deduplication: commands older than lastTS are already processed
-		if cmd.CreateTime < lastTS {
-			// Already processed in a previous cycle - skip
-			continue
-		}
-
-		// For commands at or after lastTS, check map for same-millisecond duplicates
-		m.executedCommandsMu.RLock()
-		_, alreadyExecuted := m.executedCommands[cmd.CommandId]
-		m.executedCommandsMu.RUnlock()
-
-		if alreadyExecuted {
-			// Skip execution but still generate a success reply
-			continue
-		}
-
-		// Handle the command
-		reply := m.handleCommand(cmd)
-
-		// Track command with its timestamp for later cleanup
-		m.executedCommandsMu.Lock()
-		m.executedCommands[cmd.CommandId] = cmd.CreateTime
-		m.executedCommandsMu.Unlock()
-
-		if reply != nil {
-			m.pendingRepliesMu.Lock()
-			m.pendingReplies = append(m.pendingReplies, &commonpb.CommandReply{
-				CommandId:    reply.CommandId,
-				Success:      reply.Success,
-				ErrorMessage: reply.ErrorMessage,
-				Payload:      reply.Payload,
-			})
-			m.pendingRepliesMu.Unlock()
-		}
-	}
-
-	// Clean up old entries from executedCommands map
-	// Commands with CreateTime <= lastTS are now filtered by timestamp comparison
-	// Using <= ensures commands with same millisecond timestamp are also cleaned up
-	m.executedCommandsMu.Lock()
-	for cmdID, ts := range m.executedCommands {
-		if ts <= lastTS {
-			delete(m.executedCommands, cmdID)
-		}
-	}
-	m.executedCommandsMu.Unlock()
-
-	// Update config hash AFTER all commands are processed
-	// This ensures partial processing doesn't lead to lost configs on reconnect
-	if hasPersistent {
-		m.configHashMu.Lock()
-		m.configHash = m.calculateConfigHash(commands)
-		m.configHashMu.Unlock()
-	}
-
-	m.updateLastCommandTimestamp(maxCommandTS)
-}
-
 // handleCommand handles a single command
 func (m *ClientTelemetryManager) handleCommand(cmd *ClientCommand) *CommandReply {
 	m.commandHandlersMu.RLock()
@@ -1090,32 +1125,6 @@ func (m *ClientTelemetryManager) handleCommand(cmd *ClientCommand) *CommandReply
 	}
 
 	return handler(cmd)
-}
-
-// calculateConfigHash calculates a hash for persistent commands (local types)
-func (m *ClientTelemetryManager) calculateConfigHash(commands []*ClientCommand) string {
-	if len(commands) == 0 {
-		return ""
-	}
-
-	var commandStrs []string
-	for _, cmd := range commands {
-		if cmd.Persistent {
-			commandStrs = append(commandStrs, cmd.CommandId+":"+cmd.CommandType)
-		}
-	}
-
-	if len(commandStrs) == 0 {
-		return ""
-	}
-
-	sort.Strings(commandStrs)
-
-	h := sha256.New()
-	for _, str := range commandStrs {
-		h.Write([]byte(str))
-	}
-	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // RegisterCommandHandler registers a handler for a command type
@@ -1285,9 +1294,26 @@ func (m *ClientTelemetryManager) createSnapshot() {
 	metrics := m.collectMetrics()
 
 	now := time.Now().UnixMilli()
+
+	// The window starts where the previous one ended, not one configured interval ago.
+	// Counters accumulate until they are collected, so the window has to be the time
+	// actually covered. Assuming HeartbeatInterval is wrong whenever the loop did not run
+	// on schedule: the Unimplemented backoff can stretch a gap to 30 minutes, and a
+	// server-pushed interval change moves it too. Labeling half an hour of traffic as a
+	// 30 second window makes every rate derived from it, and every history query that
+	// filters on the range, wrong by the same factor.
+	start := m.lastSnapshotEnd.Load()
+	if start == 0 || start > now {
+		// First snapshot of this process, or the clock moved backwards. Fall back to the
+		// configured interval -- it is the best guess available for a window with no
+		// predecessor.
+		start = now - heartbeatInterval.Milliseconds()
+	}
+	m.lastSnapshotEnd.Store(now)
+
 	snapshot := &MetricsSnapshot{
-		Timestamp: now - heartbeatInterval.Milliseconds(), // Start of the snapshot period
-		EndTime:   now,                                    // End of the snapshot period
+		Timestamp: start, // Start of the snapshot period
+		EndTime:   now,   // End of the snapshot period
 		Metrics:   metrics,
 	}
 
@@ -1348,6 +1374,31 @@ type ConfigPayload struct {
 	TTLSeconds        int64    `json:"ttl_seconds,omitempty"`
 }
 
+// ConfigApplyResult is what a push_config reply carries back, so the sender can tell a
+// config that took effect from one that was quietly dropped.
+//
+// encoding/json ignores fields it does not know, which made every payload look accepted:
+// a misspelled key, a key belonging to a newer client, or ttl_seconds -- which lives in
+// ConfigPayload and is sent by the web UI but has never been read by anything -- all
+// produced the same bare Success. Naming both halves is the only way the caller can see
+// the difference.
+type ConfigApplyResult struct {
+	// Applied lists the payload keys that changed this client's configuration.
+	Applied []string `json:"applied"`
+	// Ignored lists the payload keys this client does not act on. It is not an error:
+	// failing the whole command would stop a newer server from configuring an older
+	// client at all, so the keys are reported and the rest is still applied.
+	Ignored []string `json:"ignored,omitempty"`
+}
+
+// configPayloadKeys are the payload keys handlePushConfig acts on. Anything else in a
+// payload is reported as ignored.
+var configPayloadKeys = map[string]struct{}{
+	"enabled":               {},
+	"heartbeat_interval_ms": {},
+	"sampling_rate":         {},
+}
+
 // CollectionMetricsPayload represents the payload for collection_metrics command
 type CollectionMetricsPayload struct {
 	Enabled      bool     `json:"enabled"`
@@ -1358,6 +1409,10 @@ type CollectionMetricsPayload struct {
 // handlePushConfig handles dynamic configuration updates
 func (m *ClientTelemetryManager) handlePushConfig(cmd *ClientCommand) *CommandReply {
 	var payload ConfigPayload
+	// raw is decoded alongside the typed payload purely to see which keys were sent:
+	// unmarshalling into ConfigPayload cannot distinguish "key absent" from "key unknown",
+	// and both halves are needed to answer honestly.
+	raw := map[string]json.RawMessage{}
 	if len(cmd.Payload) > 0 {
 		if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
 			return &CommandReply{
@@ -1366,25 +1421,51 @@ func (m *ClientTelemetryManager) handlePushConfig(cmd *ClientCommand) *CommandRe
 				ErrorMessage: "failed to parse config payload: " + err.Error(),
 			}
 		}
+		if err := json.Unmarshal(cmd.Payload, &raw); err != nil {
+			return &CommandReply{
+				CommandId:    cmd.CommandId,
+				Success:      false,
+				ErrorMessage: "failed to parse config payload: " + err.Error(),
+			}
+		}
 	}
+
+	ignored := make([]string, 0, len(raw))
+	for key := range raw {
+		if _, known := configPayloadKeys[key]; !known {
+			ignored = append(ignored, key)
+		}
+	}
+	sort.Strings(ignored)
+
+	// Validate before touching anything: a payload is applied whole or not at all. Writing
+	// the fields as they were read would let a rejected value leave earlier ones applied,
+	// so a command carrying both enabled and a bad interval would switch telemetry off and
+	// still report failure -- the caller would have no way to know what state it left.
+	if payload.HeartbeatInterval != nil && *payload.HeartbeatInterval <= 0 {
+		return &CommandReply{
+			CommandId:    cmd.CommandId,
+			Success:      false,
+			ErrorMessage: "heartbeat_interval_ms must be positive",
+		}
+	}
+
+	applied := make([]string, 0, len(configPayloadKeys))
 
 	// Apply configuration changes with write lock
 	m.configMu.Lock()
 	if payload.Enabled != nil {
 		m.config.Enabled = *payload.Enabled
+		applied = append(applied, "enabled")
 	}
 	if payload.HeartbeatInterval != nil {
-		if *payload.HeartbeatInterval <= 0 {
-			m.configMu.Unlock()
-			return &CommandReply{
-				CommandId:    cmd.CommandId,
-				Success:      false,
-				ErrorMessage: "heartbeat_interval_ms must be positive",
-			}
-		}
 		m.config.HeartbeatInterval = time.Duration(*payload.HeartbeatInterval) * time.Millisecond
+		applied = append(applied, "heartbeat_interval_ms")
 	}
 	if payload.SamplingRate != nil {
+		// Out-of-range rates are clamped rather than rejected, which is why this is not
+		// part of the validation above: 1.5 means "everything" and -0.5 means "nothing",
+		// and neither is ambiguous enough to refuse.
 		samplingRate := *payload.SamplingRate
 		if samplingRate < 0.0 {
 			samplingRate = 0.0
@@ -1392,13 +1473,20 @@ func (m *ClientTelemetryManager) handlePushConfig(cmd *ClientCommand) *CommandRe
 			samplingRate = 1.0
 		}
 		m.config.SamplingRate = samplingRate
+		applied = append(applied, "sampling_rate")
 	}
 	m.configMu.Unlock()
 
-	return &CommandReply{
+	reply := &CommandReply{
 		CommandId: cmd.CommandId,
 		Success:   true,
 	}
+	// A reply that cannot be encoded would be worse than one without the detail, so the
+	// command still succeeds -- the configuration was applied either way.
+	if encoded, err := json.Marshal(ConfigApplyResult{Applied: applied, Ignored: ignored}); err == nil {
+		reply.Payload = encoded
+	}
+	return reply
 }
 
 // GetConfigResponse represents the response for get_config command

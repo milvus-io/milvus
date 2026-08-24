@@ -6,7 +6,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
@@ -16,8 +15,8 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
@@ -27,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -48,8 +48,8 @@ func RecoverWALFlusher(param *RecoverWALFlusherParam) *WALFlusherImpl {
 		notifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 		wal:      param.WAL,
 		logger: resource.Resource().Logger().With(
-			log.FieldComponent("flusher"),
-			zap.String("pchannel", param.ChannelInfo.String())),
+			mlog.FieldComponent("flusher"),
+			mlog.FieldPChannel(param.ChannelInfo.String())),
 		metrics:              newFlusherMetrics(param.ChannelInfo),
 		emptyTimeTickCounter: metrics.WALFlusherEmptyTimeTickFilteredTotal.WithLabelValues(paramtable.GetStringNodeID(), param.ChannelInfo.Name),
 		rateLimitComponent:   param.RateLimitComponent,
@@ -63,7 +63,7 @@ type WALFlusherImpl struct {
 	notifier             *syncutil.AsyncTaskNotifier[struct{}]
 	wal                  *syncutil.Future[wal.WAL]
 	flusherComponents    *flusherComponents
-	logger               *log.MLogger
+	logger               *mlog.Logger
 	metrics              *flusherMetrics
 	lastDispatchTimeTick uint64 // The last time tick that the message is dispatched.
 	emptyTimeTickCounter prometheus.Counter
@@ -76,14 +76,14 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 	defer func() {
 		impl.notifier.Finish(struct{}{})
 		if err == nil {
-			impl.logger.Info("wal flusher stop")
+			impl.logger.Info(context.TODO(), "wal flusher stop")
 			return
 		}
 		if !errors.Is(err, context.Canceled) {
-			impl.logger.DPanic("wal flusher stop to executing with unexpected error", zap.Error(err))
+			impl.logger.DPanic(context.TODO(), "wal flusher stop to executing with unexpected error", mlog.Err(err))
 			return
 		}
-		impl.logger.Warn("wal flusher is canceled before executing", zap.Error(err))
+		impl.logger.Warn(context.TODO(), "wal flusher is canceled before executing", mlog.Err(err))
 	}()
 
 	// because current flusher is build asynchronously,
@@ -91,12 +91,12 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 	// recovery-storage scanner will protect the wal from being overloaded after the recovery-storage is started.
 	impl.rateLimitComponent.FlusherRecovering.EnterSlowdownMode(nil)
 
-	impl.logger.Info("wal flusher start to recovery...")
+	impl.logger.Info(context.TODO(), "wal flusher start to recovery...")
 	l, err := impl.wal.GetWithContext(impl.notifier.Context())
 	if err != nil {
 		return errors.Wrap(err, "when get wal from future")
 	}
-	impl.logger.Info("wal ready for flusher recovery")
+	impl.logger.Info(context.TODO(), "wal ready for flusher recovery")
 
 	var checkpoint message.MessageID
 	impl.flusherComponents, checkpoint, err = impl.buildFlusherComponents(impl.notifier.Context(), l, recoverSnapshot)
@@ -111,7 +111,7 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 	}
 	defer scanner.Close()
 
-	impl.logger.Info("wal flusher start to work")
+	impl.logger.Info(context.TODO(), "wal flusher start to work")
 	impl.metrics.IntoState(flusherStateInWorking)
 	defer impl.metrics.IntoState(flusherStateOnClosing)
 	impl.rateLimitComponent.FlusherRecovering.EnterRecoveryMode()
@@ -122,13 +122,19 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 			return nil
 		case msg, ok := <-scanner.Chan():
 			if !ok {
-				impl.logger.Warn("wal flusher is closing for closed scanner channel, which is unexpected at graceful way")
+				impl.logger.Warn(context.TODO(), "wal flusher is closing for closed scanner channel, which is unexpected at graceful way")
 				return nil
 			}
 			impl.metrics.ObserveMetrics(msg.TimeTick())
 			if err := impl.dispatch(msg); err != nil {
-				// The error is always context canceled.
-				return nil
+				if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
+					return nil
+				}
+				impl.logger.Error(impl.notifier.Context(), "wal flusher dispatch failed with unexpected error",
+					mlog.FieldVChannel(msg.VChannel()),
+					mlog.String("messageType", msg.MessageType().String()),
+					mlog.Err(err))
+				return err
 			}
 		}
 	}
@@ -139,9 +145,9 @@ func (impl *WALFlusherImpl) Close() {
 	impl.notifier.Cancel()
 	impl.notifier.BlockUntilFinish()
 
-	impl.logger.Info("wal flusher start to close the recovery storage...")
+	impl.logger.Info(context.TODO(), "wal flusher start to close the recovery storage...")
 	impl.RecoveryStorage.Close()
-	impl.logger.Info("recovery storage closed")
+	impl.logger.Info(context.TODO(), "recovery storage closed")
 
 	impl.metrics.Close()
 }
@@ -150,26 +156,26 @@ func (impl *WALFlusherImpl) Close() {
 func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WAL, snapshot *recovery.RecoverySnapshot) (*flusherComponents, message.MessageID, error) {
 	// Get all existed vchannels of the pchannel.
 	vchannels := lo.Keys(snapshot.VChannels)
-	impl.logger.Info("fetch vchannel done", zap.Int("vchannelNum", len(vchannels)))
+	impl.logger.Info(ctx, "fetch vchannel done", mlog.Int("vchannelNum", len(vchannels)))
 
 	// Get all the recovery info of the recoverable vchannels.
 	recoverInfos, checkpoint, err := impl.getRecoveryInfos(ctx, vchannels)
 	if err != nil {
-		impl.logger.Warn("get recovery info failed", zap.Error(err))
+		impl.logger.Warn(ctx, "get recovery info failed", mlog.Err(err))
 		return nil, nil, err
 	}
-	impl.logger.Info("fetch recovery info done", zap.Int("recoveryInfoNum", len(recoverInfos)))
+	impl.logger.Info(ctx, "fetch recovery info done", mlog.Int("recoveryInfoNum", len(recoverInfos)))
 	if len(vchannels) == 0 && checkpoint == nil {
-		impl.logger.Info("no vchannel to recover, use the snapshot checkpoint", zap.Stringer("checkpoint", snapshot.Checkpoint.MessageID))
+		impl.logger.Info(ctx, "no vchannel to recover, use the snapshot checkpoint", mlog.Stringer("checkpoint", snapshot.Checkpoint.MessageID))
 		checkpoint = snapshot.Checkpoint.MessageID
 	}
 
 	mixc, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
 	if err != nil {
-		impl.logger.Warn("flusher recovery is canceled before data coord client ready", zap.Error(err))
+		impl.logger.Warn(ctx, "flusher recovery is canceled before data coord client ready", mlog.Err(err))
 		return nil, nil, err
 	}
-	impl.logger.Info("data coord client ready")
+	impl.logger.Info(ctx, "data coord client ready")
 
 	// build all components.
 	broker := broker.NewCoordBroker(mixc, paramtable.GetNodeID())
@@ -195,14 +201,14 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 		recoveryCheckPointTimeTick: snapshot.Checkpoint.TimeTick,
 		rs:                         impl.RecoveryStorage,
 	}
-	impl.logger.Info("flusher components intiailizing done")
+	impl.logger.Info(ctx, "flusher components intiailizing done")
 	if err := fc.recover(ctx, recoverInfos); err != nil {
-		impl.logger.Warn("flusher recovery is canceled before recovery done, recycle the resource", zap.Error(err))
+		impl.logger.Warn(ctx, "flusher recovery is canceled before recovery done, recycle the resource", mlog.Err(err))
 		fc.Close()
-		impl.logger.Info("flusher recycle the resource done")
+		impl.logger.Info(ctx, "flusher recycle the resource done")
 		return nil, nil, err
 	}
-	impl.logger.Info("flusher recovery done")
+	impl.logger.Info(ctx, "flusher recovery done")
 	return fc, checkpoint, nil
 }
 
@@ -216,16 +222,17 @@ func (impl *WALFlusherImpl) generateScanner(ctx context.Context, l wal.WAL, chec
 		RateLimitControl: impl.rateLimitComponent.RecoveryStorage,
 	}
 	if checkpoint != nil {
-		impl.logger.Info("wal start to scan from minimum checkpoint", zap.Stringer("checkpointMessageID", checkpoint))
+		impl.logger.Info(ctx, "wal start to scan from minimum checkpoint", mlog.Stringer("checkpointMessageID", checkpoint))
 		readOpt.DeliverPolicy = options.DeliverPolicyStartFrom(checkpoint)
 	} else {
-		impl.logger.Info("wal start to scan from the earliest checkpoint")
+		impl.logger.Info(ctx, "wal start to scan from the earliest checkpoint")
 	}
 	return l.Read(ctx, readOpt)
 }
 
 // dispatch dispatches the message to the related handler for flusher components.
 func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
+	ctx := message.ExtractTraceContext(impl.notifier.Context(), msg)
 	if msg.MessageType() == message.MessageTypeTimeTick && !msg.IsPersisted() {
 		// Currently, milvus use the timetick to synchronize the system periodically,
 		// so the wal will still produce empty timetick message after the last write operation is done.
@@ -236,7 +243,7 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		threshold := paramtable.Get().StreamingCfg.FlushEmptyTimeTickMaxFilterInterval.GetAsDurationByParse()
 		if tsoutil.CalculateDuration(timetick, impl.lastDispatchTimeTick) < threshold.Milliseconds() {
 			impl.emptyTimeTickCounter.Inc()
-			return
+			return err
 		}
 	}
 	timetick := msg.TimeTick()
@@ -244,21 +251,27 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		impl.lastDispatchTimeTick = timetick
 	}()
 
+	if msg.MessageType() == message.MessageTypeCommitImport {
+		// CommitImport must not be observed until DataCoord accepts the commit
+		// fence; otherwise replay can skip the only retry signal for this vchannel.
+		return impl.dispatchCommitImport(ctx, msg)
+	}
+
 	// TODO: should be removed at 3.0, after merge the flusher logic into recovery storage.
 	// Only truncate collection needs to observe before the flusher handles the message.
 	// Other messages should keep the deferred order so lifecycle cleanup such as
 	// DropCollection can finish the flowgraph before recovery storage observes it.
 	if msg.MessageType() == message.MessageTypeTruncateCollection {
-		if err := impl.ObserveMessage(impl.notifier.Context(), msg); err != nil {
-			impl.logger.Warn("failed to observe message", zap.Error(err))
+		if err := impl.ObserveMessage(ctx, msg); err != nil {
+			impl.logger.Warn(ctx, "failed to observe message", mlog.Err(err))
 			return err
 		}
 	} else {
 		// TODO: We will merge the flusher into recovery storage in future.
 		// Currently, flusher works as a separate component.
 		defer func() {
-			if err = impl.ObserveMessage(impl.notifier.Context(), msg); err != nil {
-				impl.logger.Warn("failed to observe message", zap.Error(err))
+			if err = impl.ObserveMessage(ctx, msg); err != nil {
+				impl.logger.Warn(ctx, "failed to observe message", mlog.Err(err))
 			}
 		}()
 	}
@@ -273,60 +286,91 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 	case message.MessageTypeCreateCollection:
 		createCollectionMsg, err := message.AsImmutableCreateCollectionMessageV1(msg)
 		if err != nil {
-			impl.logger.DPanic("the message type is not CreateCollectionMessage", zap.Error(err))
+			impl.logger.DPanic(ctx, "the message type is not CreateCollectionMessage", mlog.Err(err))
 			return nil
 		}
-		impl.flusherComponents.WhenCreateCollection(createCollectionMsg)
+		if err := impl.flusherComponents.WhenCreateCollection(ctx, createCollectionMsg); err != nil {
+			return err
+		}
 	case message.MessageTypeDropCollection:
 		// defer to remove the data sync service from the components.
 		// TODO: Current drop collection message will be handled by the underlying data sync service.
 		defer func() {
-			impl.flusherComponents.WhenDropCollection(msg.VChannel())
+			impl.flusherComponents.WhenDropCollection(ctx, msg.VChannel())
 		}()
-	case message.MessageTypeCommitImport:
-		commitMsg, err := message.AsImmutableCommitImportMessageV2(msg)
-		if err != nil {
-			impl.logger.DPanic("failed to parse CommitImportMessage", zap.Error(err))
-			return nil
-		}
-		vchannel := msg.VChannel()
-		jobID := commitMsg.Header().GetJobId()
+	case message.MessageTypeRollbackImport:
+		// No-op: DataCoord DDL ack callback handles all state changes.
+		impl.logger.Info(ctx, "RollbackImportMessage consumed (no-op in flusher)",
+			mlog.FieldVChannel(msg.VChannel()))
+		return nil // don't forward to flusherComponents
+	}
+	return impl.flusherComponents.HandleMessage(ctx, msg)
+}
 
-		// Flush DML data before this commit fence. Panic on failure so WAL replays the message.
-		if err := resource.Resource().WriteBufferManager().
-			FlushChannel(context.Background(), vchannel, msg.TimeTick()); err != nil {
-			if errors.Is(err, merr.ErrChannelNotFound) {
-				impl.logger.Info("CommitImport targets stale vchannel, skip local flush and continue commit ack",
-					zap.String("vchannel", vchannel), zap.Int64("jobID", jobID), zap.Error(err))
-			} else {
-				impl.logger.Panic("FlushChannel on CommitImport failed, panicking to retry from WAL",
-					zap.String("vchannel", vchannel), zap.Int64("jobID", jobID), zap.Error(err))
-			}
-		}
+func (impl *WALFlusherImpl) dispatchCommitImport(ctx context.Context, msg message.ImmutableMessage) error {
+	if funcutil.IsControlChannel(msg.VChannel()) && !msg.IsPChannelLevel() {
+		return impl.ObserveMessage(ctx, msg)
+	}
 
-		// Notify DataCoord that this vchannel has committed.
-		mixCoord, err := resource.Resource().MixCoordClient().GetWithContext(impl.notifier.Context())
-		if err != nil {
-			return errors.Wrap(err, "failed to get MixCoordClient for HandleCommitVchannel")
+	commitMsg, err := message.AsImmutableCommitImportMessageV2(msg)
+	if err != nil {
+		impl.logger.DPanic(ctx, "failed to parse CommitImportMessage", mlog.Err(err))
+		return nil
+	}
+	vchannel := msg.VChannel()
+	jobID := commitMsg.Header().GetJobId()
+
+	// Flush DML data before this commit fence. Panic on failure so WAL replays the message.
+	if err := resource.Resource().WriteBufferManager().
+		FlushChannel(ctx, vchannel, msg.TimeTick()); err != nil {
+		if errors.Is(err, merr.ErrChannelNotFound) {
+			impl.logger.Info(ctx, "CommitImport targets stale vchannel, skip local flush and continue commit ack",
+				mlog.FieldVChannel(vchannel), mlog.FieldJobID(jobID), mlog.Err(err))
+		} else {
+			impl.logger.Panic(ctx, "FlushChannel on CommitImport failed, panicking to retry from WAL",
+				mlog.FieldVChannel(vchannel), mlog.FieldJobID(jobID), mlog.Err(err))
 		}
-		resp, err := mixCoord.HandleCommitVchannel(impl.notifier.Context(), &datapb.HandleCommitVchannelRequest{
+	}
+
+	mixCoord, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to get MixCoordClient for HandleCommitVchannel")
+	}
+	// Retry only the DataCoord ack. The local FlushChannel above is a best-effort
+	// fence for this dispatch and must not be repeated on every retry.
+	// This retry blocks the whole pchannel flusher until DataCoord accepts the
+	// commit fence, preserving WAL replay order for later messages on the pchannel.
+	impl.logger.Info(ctx, "HandleCommitVchannel waits until DataCoord accepts the commit fence",
+		mlog.FieldJobID(jobID),
+		mlog.FieldVChannel(vchannel),
+		mlog.Uint64("commitTs", msg.TimeTick()))
+	if err := retry.Do(ctx, func() error {
+		resp, err := mixCoord.HandleCommitVchannel(ctx, &datapb.HandleCommitVchannelRequest{
 			Base:            commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
 			JobId:           jobID,
 			Vchannel:        vchannel,
 			CommitTimestamp: msg.TimeTick(),
 		})
 		if err := merr.CheckRPCCall(resp, err); err != nil {
-			impl.logger.Panic("HandleCommitVchannel RPC failed, panicking to retry from WAL",
-				zap.Int64("jobID", jobID), zap.String("vchannel", vchannel), zap.Error(err))
+			impl.logger.Debug(ctx, "HandleCommitVchannel failed, retry later",
+				mlog.FieldJobID(jobID),
+				mlog.FieldVChannel(vchannel),
+				mlog.Uint64("commitTs", msg.TimeTick()),
+				mlog.Err(err))
+			return err
 		}
-		impl.logger.Info("CommitImportMessage handled: vchannel committed",
-			zap.String("vchannel", vchannel), zap.Int64("jobID", jobID))
-		return nil // don't forward to flusherComponents
-	case message.MessageTypeRollbackImport:
-		// No-op: DataCoord DDL ack callback handles all state changes.
-		impl.logger.Info("RollbackImportMessage consumed (no-op in flusher)",
-			zap.String("vchannel", msg.VChannel()))
-		return nil // don't forward to flusherComponents
+		return nil
+	}, retry.AttemptAlways()); err != nil {
+		return err
 	}
-	return impl.flusherComponents.HandleMessage(impl.notifier.Context(), msg)
+
+	if err := impl.ObserveMessage(ctx, msg); err != nil {
+		impl.logger.Warn(ctx, "failed to observe CommitImport message",
+			mlog.FieldVChannel(vchannel), mlog.FieldJobID(jobID), mlog.Err(err))
+		return err
+	}
+
+	impl.logger.Info(ctx, "CommitImportMessage handled: vchannel committed",
+		mlog.FieldVChannel(vchannel), mlog.FieldJobID(jobID))
+	return nil
 }

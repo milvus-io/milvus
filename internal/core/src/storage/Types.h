@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
@@ -72,6 +73,16 @@ struct FieldDataMeta {
     int64_t field_id;
     proto::schema::FieldSchema field_schema;
 };
+
+// Column name mapping used when reading StorageV3 manifests. The index config
+// must not carry raw external_spec because Knowhere also consumes that config.
+struct StorageColumnMapping {
+    std::string schema_column_name;
+    std::string storage_column_name;
+    bool is_external_column = false;
+};
+
+using StorageColumnMappings = std::unordered_map<int64_t, StorageColumnMapping>;
 
 enum CodecType {
     InvalidCodecType = 0,
@@ -158,41 +169,21 @@ struct MmapConfig {
     GetEnableGrowingMmap() const {
         return growing_enable_mmap;
     }
-    void
-    SetEnableGrowingMmap(bool flag) {
-        this->growing_enable_mmap = flag;
-    }
     bool
     GetScalarIndexEnableMmap() const {
         return scalar_index_enable_mmap;
-    }
-    void
-    SetScalarIndexEnableMmap(bool flag) {
-        this->scalar_index_enable_mmap = flag;
     }
     bool
     GetScalarFieldEnableMmap() const {
         return scalar_field_enable_mmap;
     }
-    void
-    SetScalarFieldEnableMmap(bool flag) {
-        this->scalar_field_enable_mmap = flag;
-    }
     bool
     GetVectorIndexEnableMmap() const {
         return vector_index_enable_mmap;
     }
-    void
-    SetVectorIndexEnableMmap(bool flag) {
-        this->vector_index_enable_mmap = flag;
-    }
     bool
     GetVectorFieldEnableMmap() const {
         return vector_field_enable_mmap;
-    }
-    void
-    SetVectorFieldEnableMmap(bool flag) {
-        this->vector_field_enable_mmap = flag;
     }
     [[nodiscard]] bool
     GetMmapPopulate() const {

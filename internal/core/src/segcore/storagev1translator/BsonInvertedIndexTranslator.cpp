@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <optional>
 #include <string_view>
 #include <utility>
 
@@ -27,15 +28,17 @@
 #include "index/json_stats/bson_inverted.h"
 #include "log/Log.h"
 #include "pb/common.pb.h"
+#include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
+#include "storage/DiskFileManagerImpl.h"
 
 namespace milvus::segcore::storagev1translator {
 
 BsonInvertedIndexTranslator::BsonInvertedIndexTranslator(
     BsonInvertedIndexLoadInfo load_info,
-    std::shared_ptr<milvus::storage::DiskFileManagerImpl> disk_file_manager)
+    milvus::storage::FileManagerContext file_manager_context)
     : load_info_(std::move(load_info)),
-      disk_file_manager_(disk_file_manager),
+      file_manager_context_(std::move(file_manager_context)),
       key_(fmt::format("seg_{}_json_stats_shared_field_{}",
                        load_info_.segment_id,
                        load_info_.field_id)),
@@ -47,7 +50,9 @@ BsonInvertedIndexTranslator::BsonInvertedIndexTranslator(
             milvus::segcore::getCacheWarmupPolicy(load_info_.warmup_policy,
                                                   /* is_vector */ false,
                                                   /* is_index */ true),
-            /* support_eviction */ true) {
+            /* support_eviction */ true,
+            std::nullopt,
+            milvus::segcore::MetricAttributionFromShard(load_info_.shard)) {
 }
 
 size_t
@@ -96,8 +101,11 @@ BsonInvertedIndexTranslator::get_cells(
     CheckCancellation(
         ctx, load_info_.segment_id, "BsonInvertedIndexTranslator::get_cells()");
 
+    auto disk_file_manager =
+        std::make_shared<milvus::storage::DiskFileManagerImpl>(
+            file_manager_context_);
     auto index =
-        std::make_unique<milvus::index::BsonInvertedIndex>(disk_file_manager_);
+        std::make_unique<milvus::index::BsonInvertedIndex>(disk_file_manager);
 
     {
         milvus::ScopedTimer timer(

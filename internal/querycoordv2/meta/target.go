@@ -17,13 +17,13 @@
 package meta
 
 import (
+	"context"
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/metrics"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -125,7 +125,7 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 	}
 
 	if lackSegmentInfo {
-		log.Info("target has lack of segment info", zap.Int64("collectionID", target.GetCollectionID()))
+		mlog.Info(context.TODO(), "target has lack of segment info", mlog.FieldCollectionID(target.GetCollectionID()))
 	}
 
 	return &CollectionTarget{

@@ -25,10 +25,9 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
@@ -103,16 +102,16 @@ func (pi *ParamItem) handleConfigChange(event *config.Event) {
 	}
 
 	if err := pi.callback(context.Background(), pi.Key, oldValue, newValue); err != nil {
-		log.Error("param change callback failed",
-			zap.String("key", pi.Key),
-			zap.String("oldValue", oldValue),
-			zap.String("newValue", newValue),
-			zap.Error(err))
+		mlog.Error(context.TODO(), "param change callback failed",
+			mlog.String("key", pi.Key),
+			mlog.String("oldValue", oldValue),
+			mlog.String("newValue", newValue),
+			mlog.Err(err))
 	} else {
-		log.Info("param value changed",
-			zap.String("key", pi.Key),
-			zap.String("oldValue", oldValue),
-			zap.String("newValue", newValue))
+		mlog.Info(context.TODO(), "param value changed",
+			mlog.String("key", pi.Key),
+			mlog.String("oldValue", oldValue),
+			mlog.String("newValue", newValue))
 	}
 
 	pi.lastValue.Store(&newValue)

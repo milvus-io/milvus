@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/samber/lo"
@@ -53,7 +54,7 @@ type GrpcAccessInfo struct {
 	end      time.Time
 
 	// runtime set info
-	actualConsistencyLevel *commonpb.ConsistencyLevel
+	actualConsistencyLevel atomic.Pointer[commonpb.ConsistencyLevel]
 }
 
 func NewGrpcAccessInfo(ctx context.Context, grpcInfo *grpc.UnaryServerInfo, req interface{}) *GrpcAccessInfo {
@@ -247,10 +248,26 @@ func (i *GrpcAccessInfo) DbName() string {
 
 func (i *GrpcAccessInfo) CollectionName() string {
 	name, ok := requestutil.GetCollectionNameFromRequest(i.req)
-	if !ok {
-		return Unknown
+	if ok {
+		return name.(string)
 	}
-	return name.(string)
+
+	// requests such as Flush/ShowCollections carry a list of collection names
+	names, ok := requestutil.GetCollectionNamesFromRequest(i.req)
+	if ok {
+		return fmt.Sprint(names.([]string))
+	}
+
+	// requests that reference collections via non-standard fields
+	switch req := i.req.(type) {
+	case *milvuspb.RenameCollectionRequest:
+		// rename references both the source and target collection
+		return fmt.Sprintf("%s->%s", req.GetOldName(), req.GetNewName())
+	case *milvuspb.BatchDescribeCollectionRequest:
+		return fmt.Sprint(req.GetCollectionName())
+	}
+
+	return Unknown
 }
 
 func (i *GrpcAccessInfo) PartitionName() string {
@@ -307,8 +324,8 @@ func (i *GrpcAccessInfo) OutputFields() string {
 
 func (i *GrpcAccessInfo) ConsistencyLevel() string {
 	// return actual consistency level if set
-	if i.actualConsistencyLevel != nil {
-		return i.actualConsistencyLevel.String()
+	if acl := i.actualConsistencyLevel.Load(); acl != nil {
+		return acl.String()
 	}
 	level, ok := requestutil.GetConsistencyLevelFromRequst(i.req)
 	if ok {
@@ -370,7 +387,7 @@ func (i *GrpcAccessInfo) ClientRequestTime() string {
 }
 
 func (i *GrpcAccessInfo) SetActualConsistencyLevel(acl commonpb.ConsistencyLevel) {
-	i.actualConsistencyLevel = &acl
+	i.actualConsistencyLevel.Store(&acl)
 }
 
 func (i *GrpcAccessInfo) TemplateValueLength() string {

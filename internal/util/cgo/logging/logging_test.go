@@ -20,13 +20,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap/zapcore"
+
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 func TestLogging(t *testing.T) {
-	require.Equal(t, zapcore.InfoLevel, mapGlogSeverity(0))
-	require.Equal(t, zapcore.WarnLevel, mapGlogSeverity(1))
-	require.Equal(t, zapcore.ErrorLevel, mapGlogSeverity(2))
-	require.Equal(t, zapcore.ErrorLevel, mapGlogSeverity(3))
-	require.Equal(t, zapcore.InfoLevel, mapGlogSeverity(4))
+	require.Equal(t, mlog.InfoLevel, mapGlogSeverity(0))
+	require.Equal(t, mlog.WarnLevel, mapGlogSeverity(1))
+	require.Equal(t, mlog.ErrorLevel, mapGlogSeverity(2))
+	require.Equal(t, mlog.ErrorLevel, mapGlogSeverity(3))
+	require.Equal(t, mlog.InfoLevel, mapGlogSeverity(4))
 }

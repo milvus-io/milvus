@@ -6,10 +6,9 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -61,10 +60,10 @@ func (c *connImpl) initialize() {
 		conn, err := c.dialer(c.initializationNotifier.Context())
 		if err != nil {
 			if c.initializationNotifier.Context().Err() != nil {
-				log.Info("lazy grpc conn canceled", zap.Error(c.initializationNotifier.Context().Err()))
+				mlog.Info(context.TODO(), "lazy grpc conn canceled", mlog.Err(c.initializationNotifier.Context().Err()))
 				return nil
 			}
-			log.Warn("async dial failed, wait for retry...", zap.Error(err))
+			mlog.Warn(context.TODO(), "async dial failed, wait for retry...", mlog.Err(err))
 			return err
 		}
 		c.conn.Set(conn)
@@ -94,7 +93,7 @@ func (c *connImpl) Close() {
 
 	if c.conn.Ready() {
 		if err := c.conn.Get().Close(); err != nil {
-			log.Warn("close underlying grpc conn fail", zap.Error(err))
+			mlog.Warn(context.TODO(), "close underlying grpc conn fail", mlog.Err(err))
 		}
 	}
 }

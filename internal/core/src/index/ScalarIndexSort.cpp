@@ -47,6 +47,7 @@
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
+#include "pb/schema.pb.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileWriter.h"
 #include "storage/IndexEntryReader.h"
@@ -66,12 +67,24 @@ constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
 
 const uint64_t MMAP_INDEX_PADDING = 1;
 
+namespace {
+
+bool
+IsArrayField(const storage::FileManagerContext& file_manager_context) {
+    return file_manager_context.Valid() &&
+           file_manager_context.fieldDataMeta.field_schema.data_type() ==
+               proto::schema::DataType::Array;
+}
+
+}  // namespace
+
 template <typename T>
 ScalarIndexSort<T>::ScalarIndexSort(
     const storage::FileManagerContext& file_manager_context,
     bool is_nested_index)
     : ScalarIndex<T>(ASCENDING_SORT),
       is_nested_index_(is_nested_index),
+      is_array_field_(IsArrayField(file_manager_context)),
       is_built_(false),
       data_() {
     // not valid means we are in unit test
@@ -191,10 +204,12 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
     // calculate total_num_rows_
     for (const auto& data : datas) {
         auto n = data->get_num_rows();
-        auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
             if (data->is_valid(i)) {
-                total_num_rows_ += array_column[i].length();
+                // RawValue maps logical->physical so compact nullable array
+                // FieldData is read correctly (Data()[i] would overrun).
+                total_num_rows_ +=
+                    reinterpret_cast<const Array*>(data->RawValue(i))->length();
             }
         }
     }
@@ -209,15 +224,15 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
     int64_t offset = 0;
     for (const auto& data : datas) {
         auto n = data->get_num_rows();
-        auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
             if (!data->is_valid(i)) {
                 continue;
             }
-            auto length = array_column[i].length();
+            auto* array = reinterpret_cast<const Array*>(data->RawValue(i));
+            auto length = array->length();
             for (int64_t j = 0; j < length; j++) {
-                data_.emplace_back(IndexStructure(
-                    array_column[i].template get_data<T>(j), offset));
+                data_.emplace_back(
+                    IndexStructure(array->get_data<T>(j), offset));
                 offset++;
             }
         }
@@ -232,6 +247,7 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
     is_built_ = true;
 
     setup_data_pointers();
+    ComputeByteSize();
 }
 
 template <typename T>
@@ -355,9 +371,11 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
 
     auto is_nested_index = index_binary.GetByName("is_nested_index");
     if (is_nested_index) {
-        milvus::fastmem::FastMemcpy(&is_nested_index_,
+        bool loaded_is_nested_index = false;
+        milvus::fastmem::FastMemcpy(&loaded_is_nested_index,
                                     is_nested_index->data.get(),
                                     (size_t)is_nested_index->size);
+        is_nested_index_ = is_nested_index_ || loaded_is_nested_index;
     }
 
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
@@ -698,7 +716,7 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                                 const Config& config) {
     size_t index_size = reader.GetMeta<size_t>("index_length");
     total_num_rows_ = reader.GetMeta<size_t>("num_rows");
-    is_nested_index_ = reader.GetMeta<bool>("is_nested");
+    is_nested_index_ = is_nested_index_ || reader.GetMeta<bool>("is_nested");
 
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
 

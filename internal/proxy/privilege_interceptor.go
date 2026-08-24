@@ -6,15 +6,17 @@ import (
 	"reflect"
 	"sync"
 
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -23,6 +25,8 @@ import (
 
 type PrivilegeFunc func(ctx context.Context, req interface{}) (context.Context, error)
 
+const RBACRoleContextKey = hook.HookContextKeyType("rbac-role")
+
 var (
 	initOnce                sync.Once
 	initPrivilegeGroupsOnce sync.Once
@@ -30,12 +34,20 @@ var (
 
 var roPrivileges, rwPrivileges, adminPrivileges map[string]struct{}
 
+func SetRBACRolesToContext(ctx context.Context, roles []string) context.Context {
+	rolesCopy := append([]string(nil), roles...)
+	return context.WithValue(ctx, RBACRoleContextKey, rolesCopy)
+}
+
 // UnaryServerInterceptor returns a new unary server interceptors that performs per-request privilege access.
 func UnaryServerInterceptor(privilegeFunc PrivilegeFunc) grpc.UnaryServerInterceptor {
 	privilege.InitPrivilegeGroups()
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		newCtx, err := privilegeFunc(ctx, req)
 		if err != nil {
+			hookutil.GetExtension().ReportAction(newCtx, req, &milvuspb.BoolResponse{
+				Status: merr.Status(err),
+			}, err, info.FullMethod, hookutil.ActionAuthorize)
 			return nil, err
 		}
 		return handler(newCtx, req)
@@ -43,141 +55,180 @@ func UnaryServerInterceptor(privilegeFunc PrivilegeFunc) grpc.UnaryServerInterce
 }
 
 func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context, error) {
-	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
-		return ctx, nil
-	}
-	log := log.Ctx(ctx)
-	log.RatedDebug(60, "PrivilegeInterceptor", zap.String("type", reflect.TypeOf(req).String()))
-	privilegeExt, err := funcutil.GetPrivilegeExtObj(req)
-	if err != nil {
-		log.RatedInfo(60, "GetPrivilegeExtObj err", zap.Error(err))
-		return ctx, nil
-	}
-	username, password, err := contextutil.GetAuthInfoFromContext(ctx)
-	if err != nil {
-		log.Warn("GetCurUserFromContext fail", zap.Error(err))
-		return ctx, err
-	}
-	if !Params.CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
-		return ctx, nil
-	}
-	roleNames, err := GetRole(username)
-	if err != nil {
-		log.Warn("GetRole fail", zap.String("username", username), zap.Error(err))
-		return ctx, err
-	}
-	roleNames = append(roleNames, util.RolePublic)
-	objectType := privilegeExt.ObjectType.String()
-	objectNameIndex := privilegeExt.ObjectNameIndex
-	objectName := funcutil.GetObjectName(req, objectNameIndex)
-	dbName := GetCurDBNameFromContextOrDefault(ctx)
+	return PrivilegeInterceptorWithMetaCache(func() Cache { return nil })(ctx, req)
+}
 
-	// Resolve alias to actual collection name for RBAC checks
-	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndex != 0 {
-		if objectName != util.AnyWord && objectName != "" {
-			if actualCollectionName, resolveErr := resolveCollectionAlias(ctx, dbName, objectName); resolveErr != nil {
-				log.RatedWarn(60, "failed to resolve collection alias for RBAC, using original name",
-					zap.String("objectName", objectName), zap.String("dbName", dbName), zap.Error(resolveErr))
-			} else {
-				objectName = actualCollectionName
+func PrivilegeInterceptorWithMetaCache(getMetaCache func() Cache) PrivilegeFunc {
+	return func(ctx context.Context, req interface{}) (context.Context, error) {
+		if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+			return ctx, nil
+		}
+		mlog.RatedDebug(ctx, rate.Limit(60), "PrivilegeInterceptor", mlog.String("type", reflect.TypeOf(req).String()))
+		privilegeExt, err := funcutil.GetPrivilegeExtObj(req)
+		if err != nil {
+			mlog.RatedInfo(ctx, rate.Limit(60), "GetPrivilegeExtObj err", mlog.Err(err))
+			return ctx, nil
+		}
+		username, password, err := contextutil.GetAuthInfoFromContext(ctx)
+		if err != nil {
+			mlog.Warn(ctx, "GetCurUserFromContext fail", mlog.Err(err))
+			return ctx, err
+		}
+		if !Params.CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
+			return ctx, nil
+		}
+		roleNames, err := GetRole(username)
+		if err != nil {
+			mlog.Warn(ctx, "GetRole fail", mlog.String("username", username), mlog.Err(err))
+			return ctx, err
+		}
+		roleNames = append(roleNames, util.RolePublic)
+		ctx = SetRBACRolesToContext(ctx, roleNames)
+		objectType := privilegeExt.ObjectType.String()
+		objectNameIndex := privilegeExt.ObjectNameIndex
+		objectName := funcutil.GetObjectName(req, objectNameIndex)
+		objectPrivilege := privilegeExt.ObjectPrivilege.String()
+		// Resolve resources against the database the request actually reads from,
+		// while keeping the database used by the policy check separate. Alias
+		// resolution must remain database-scoped even when a cross-database
+		// operation requires a cluster-scoped policy (db="*").
+		//
+		// Policy scope mirrors the grant-side validation (see milvus-io/milvus#50678):
+		//   - Cluster-level privileges (CreateDatabase/ResourceGroup/...) are not
+		//     scoped to a database, so authorize them globally (AnyWord),
+		//     independent of the connection namespace.
+		//   - Database-/Collection-level privileges are scoped to the db the request
+		//     targets: the request-body DbName takes precedence, falling back to the
+		//     connection-context db.
+		dbName := GetCurDBNameFromRequestOrContext(ctx, req)
+		policyDBName := dbName
+		if util.GetPrivilegeLevel(util.MetaStore2API(objectPrivilege)) == milvuspb.PrivilegeLevel_Cluster.String() {
+			policyDBName = util.AnyWord
+		}
+		// RenameCollection is a database-admin privilege: a same-db rename is
+		// authorized against the target db (database level, handled above), while a
+		// cross-db rename additionally requires a cluster-scoped (global) grant.
+		if r, ok := req.(*milvuspb.RenameCollectionRequest); ok && r.GetDbName() != r.GetNewDBName() {
+			policyDBName = util.AnyWord
+		}
+		// RestoreSnapshot is collection-scoped within one database. Restoring into
+		// another database creates a collection there, so require the same privilege
+		// at cluster scope (db="*") instead of authorizing only against the source.
+		if r, ok := req.(*milvuspb.RestoreSnapshotRequest); ok {
+			targetDBName := r.GetTargetDbName()
+			if targetDBName == "" {
+				targetDBName = GetCurDBNameFromContextOrDefault(ctx)
+			}
+			if dbName != targetDBName {
+				policyDBName = util.AnyWord
 			}
 		}
-	}
 
-	if isCurUserObject(objectType, username, objectName) {
-		return ctx, nil
-	}
-
-	if isSelectMyRoleGrants(req, roleNames) {
-		return ctx, nil
-	}
-
-	objectNameIndexs := privilegeExt.ObjectNameIndexs
-	objectNames := funcutil.GetObjectNames(req, objectNameIndexs)
-
-	// Resolve aliases for operations that refer to multiple resources
-	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndexs != 0 && len(objectNames) > 0 {
-		resolvedNames := make([]string, 0, len(objectNames))
-		for _, name := range objectNames {
-			if name == util.AnyWord || name == "" {
-				resolvedNames = append(resolvedNames, name)
-				continue
-			}
-			if actualName, resolveErr := resolveCollectionAlias(ctx, dbName, name); resolveErr != nil {
-				log.RatedWarn(60, "failed to resolve collection alias for RBAC, using original name",
-					zap.String("objectName", name), zap.String("dbName", dbName), zap.Error(resolveErr))
-				resolvedNames = append(resolvedNames, name)
-			} else {
-				resolvedNames = append(resolvedNames, actualName)
+		// Resolve alias to actual collection name for RBAC checks
+		if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndex != 0 {
+			if objectName != util.AnyWord && objectName != "" {
+				if actualCollectionName, resolveErr := resolveCollectionAlias(ctx, getMetaCache(), dbName, objectName); resolveErr != nil {
+					mlog.RatedWarn(ctx, rate.Limit(60), "failed to resolve collection alias for RBAC, using original name",
+						mlog.String("objectName", objectName), mlog.FieldDbName(dbName), mlog.Err(resolveErr))
+				} else {
+					objectName = actualCollectionName
+				}
 			}
 		}
-		objectNames = resolvedNames
-	}
 
-	objectPrivilege := privilegeExt.ObjectPrivilege.String()
+		if isCurUserObject(objectType, username, objectName) {
+			return ctx, nil
+		}
 
-	log = log.With(zap.String("username", username), zap.Strings("role_names", roleNames),
-		zap.String("object_type", objectType), zap.String("object_privilege", objectPrivilege),
-		zap.String("db_name", dbName),
-		zap.Int32("object_index", objectNameIndex), zap.String("object_name", objectName),
-		zap.Int32("object_indexs", objectNameIndexs), zap.Strings("object_names", objectNames))
+		if isSelectMyRoleGrants(req, roleNames) {
+			return ctx, nil
+		}
 
-	e := privilege.GetEnforcer()
-	for _, roleName := range roleNames {
-		permitFunc := func(objectName string) (bool, error) {
-			object := funcutil.PolicyForResource(dbName, objectType, objectName)
-			isPermit, cached, version := privilege.GetResultCache(roleName, object, objectPrivilege)
-			if cached {
+		objectNameIndexs := privilegeExt.ObjectNameIndexs
+		objectNames := funcutil.GetObjectNames(req, objectNameIndexs)
+
+		// Resolve aliases for operations that refer to multiple resources
+		if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndexs != 0 && len(objectNames) > 0 {
+			resolvedNames := make([]string, 0, len(objectNames))
+			for _, name := range objectNames {
+				if name == util.AnyWord || name == "" {
+					resolvedNames = append(resolvedNames, name)
+					continue
+				}
+				if actualName, resolveErr := resolveCollectionAlias(ctx, getMetaCache(), dbName, name); resolveErr != nil {
+					mlog.RatedWarn(ctx, rate.Limit(60), "failed to resolve collection alias for RBAC, using original name",
+						mlog.String("objectName", name), mlog.FieldDbName(dbName), mlog.Err(resolveErr))
+					resolvedNames = append(resolvedNames, name)
+				} else {
+					resolvedNames = append(resolvedNames, actualName)
+				}
+			}
+			objectNames = resolvedNames
+		}
+
+		log := mlog.With(mlog.String("username", username), mlog.Strings("role_names", roleNames),
+			mlog.String("object_type", objectType), mlog.String("object_privilege", objectPrivilege),
+			mlog.FieldDbName(policyDBName),
+			mlog.Int32("object_index", objectNameIndex), mlog.String("object_name", objectName),
+			mlog.Int32("object_indexs", objectNameIndexs), mlog.Strings("object_names", objectNames))
+
+		e := privilege.GetEnforcer()
+		for _, roleName := range roleNames {
+			permitFunc := func(objectName string) (bool, error) {
+				object := funcutil.PolicyForResource(policyDBName, objectType, objectName)
+				isPermit, cached, version := privilege.GetResultCache(roleName, object, objectPrivilege)
+				if cached {
+					return isPermit, nil
+				}
+				isPermit, err := e.Enforce(roleName, object, objectPrivilege)
+				if err != nil {
+					return false, err
+				}
+				privilege.SetResultCache(roleName, object, objectPrivilege, isPermit, version)
 				return isPermit, nil
 			}
-			isPermit, err := e.Enforce(roleName, object, objectPrivilege)
-			if err != nil {
-				return false, err
-			}
-			privilege.SetResultCache(roleName, object, objectPrivilege, isPermit, version)
-			return isPermit, nil
-		}
 
-		if objectNameIndex != 0 {
-			// handle the api which refers one resource
-			permitObject, err := permitFunc(objectName)
-			if err != nil {
-				log.Warn("fail to execute permit func", zap.String("name", objectName), zap.Error(err))
-				return ctx, err
-			}
-			if permitObject {
-				return ctx, nil
-			}
-		}
-
-		if objectNameIndexs != 0 {
-			// handle the api which refers many resources
-			permitObjects := true
-			for _, name := range objectNames {
-				p, err := permitFunc(name)
+			if objectNameIndex != 0 {
+				// handle the api which refers one resource
+				permitObject, err := permitFunc(objectName)
 				if err != nil {
-					log.Warn("fail to execute permit func", zap.String("name", name), zap.Error(err))
+					log.Warn(ctx, "fail to execute permit func", mlog.String("name", objectName), mlog.Err(err))
 					return ctx, err
 				}
-				if !p {
-					permitObjects = false
-					break
+				if permitObject {
+					return ctx, nil
 				}
 			}
-			if permitObjects && len(objectNames) != 0 {
-				return ctx, nil
+
+			if objectNameIndexs != 0 {
+				// handle the api which refers many resources
+				permitObjects := true
+				for _, name := range objectNames {
+					p, err := permitFunc(name)
+					if err != nil {
+						log.Warn(ctx, "fail to execute permit func", mlog.String("name", name), mlog.Err(err))
+						return ctx, err
+					}
+					if !p {
+						permitObjects = false
+						break
+					}
+				}
+				if permitObjects && len(objectNames) != 0 {
+					return ctx, nil
+				}
 			}
 		}
+
+		log.Info(ctx, "permission deny", mlog.Strings("roles", roleNames))
+
+		if password == util.PasswordHolder {
+			username = "apikey user"
+		}
+
+		return ctx, status.Error(codes.PermissionDenied,
+			fmt.Sprintf("%s: permission deny to %s in the `%s` database", objectPrivilege, username, policyDBName))
 	}
-
-	log.Info("permission deny", zap.Strings("roles", roleNames))
-
-	if password == util.PasswordHolder {
-		username = "apikey user"
-	}
-
-	return ctx, status.Error(codes.PermissionDenied,
-		fmt.Sprintf("%s: permission deny to %s in the `%s` database", objectPrivilege, username, dbName))
 }
 
 // isCurUserObject Determine whether it is an Object of type User that operates on its own user information,
@@ -201,10 +252,9 @@ func isSelectMyRoleGrants(req interface{}, roleNames []string) bool {
 }
 
 // resolveCollectionAlias resolves an alias to its actual collection name
-func resolveCollectionAlias(ctx context.Context, dbName, nameOrAlias string) (string, error) {
-	cache := globalMetaCache
-	if cache == nil {
+func resolveCollectionAlias(ctx context.Context, metaCache Cache, dbName, nameOrAlias string) (string, error) {
+	if metaCache == nil {
 		return nameOrAlias, merr.WrapErrServiceInternal("meta cache not initialized")
 	}
-	return cache.ResolveCollectionAlias(ctx, dbName, nameOrAlias)
+	return metaCache.ResolveCollectionAlias(ctx, dbName, nameOrAlias)
 }

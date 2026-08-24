@@ -26,6 +26,7 @@ class InterimSealedIndexTranslator
         int64_t field_id,
         knowhere::IndexType index_type,
         knowhere::MetricType metric_type,
+        IndexVersion index_version,
         knowhere::Json build_config,
         int64_t dim,
         bool is_sparse,
@@ -58,6 +59,7 @@ class InterimSealedIndexTranslator
     int64_t segment_id_;
     knowhere::IndexType index_type_;
     knowhere::MetricType metric_type_;
+    IndexVersion index_version_;
     knowhere::Json build_config_;
     int64_t dim_;
     bool is_sparse_;

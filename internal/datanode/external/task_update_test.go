@@ -51,13 +51,28 @@ type RefreshExternalCollectionTaskSuite struct {
 	taskID       int64
 }
 
+func (s *RefreshExternalCollectionTaskSuite) newTask(
+	ctx context.Context,
+	req *datapb.RefreshExternalCollectionTaskRequest,
+) *RefreshExternalCollectionTask {
+	if req != nil && req.GetTargetRowsPerSegment() == 0 {
+		req.TargetRowsPerSegment = 1_000_000
+	}
+	return NewRefreshExternalCollectionTask(ctx, req)
+}
+
 type fakeRecordReader struct {
 	records []storage.Record
 	errs    []error
 	idx     int
+	current storage.Record
 }
 
 func (r *fakeRecordReader) Next() (storage.Record, error) {
+	if r.current != nil {
+		r.current.Release()
+		r.current = nil
+	}
 	if r.idx < len(r.errs) && r.errs[r.idx] != nil {
 		err := r.errs[r.idx]
 		r.idx++
@@ -68,10 +83,15 @@ func (r *fakeRecordReader) Next() (storage.Record, error) {
 	}
 	record := r.records[r.idx]
 	r.idx++
+	r.current = record
 	return record, nil
 }
 
 func (r *fakeRecordReader) Close() error {
+	if r.current != nil {
+		r.current.Release()
+		r.current = nil
+	}
 	return nil
 }
 
@@ -84,6 +104,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestNewRefreshExternalCollectionTas
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	req := &datapb.RefreshExternalCollectionTaskRequest{
+		ClusterID:      "cluster-0",
 		CollectionID:   s.collectionID,
 		TaskID:         s.taskID,
 		ExternalSource: "test_source",
@@ -93,6 +114,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestNewRefreshExternalCollectionTas
 	task := NewRefreshExternalCollectionTask(ctx, req)
 
 	s.NotNil(task)
+	s.Equal("cluster-0", task.req.GetClusterID())
 	s.Equal(s.collectionID, task.req.GetCollectionID())
 	s.Equal(s.taskID, task.req.GetTaskID())
 	s.Equal(indexpb.JobState_JobStateInit, task.GetState())
@@ -109,7 +131,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestTaskLifecycle() {
 		ExternalSpec:   `{"format":"parquet"}`,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{Name: "id"},
+				{Name: "id", ExternalField: "id"},
 			},
 		},
 		StorageConfig: &indexpb.StorageConfig{
@@ -125,7 +147,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestTaskLifecycle() {
 		},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 
 	// Test OnEnqueue
 	err := task.OnEnqueue(ctx)
@@ -144,6 +166,80 @@ func (s *RefreshExternalCollectionTaskSuite) TestTaskLifecycle() {
 
 	// Test GetSlot
 	s.Equal(int64(1), task.GetSlot())
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestPreExecuteClonesSchemaBeforeFillingExternalMetadata() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sourceSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", ExternalField: "id"},
+		},
+	}
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:   s.collectionID,
+		TaskID:         s.taskID,
+		ExternalSource: "s3://bucket/data/",
+		ExternalSpec:   `{"format":"parquet"}`,
+		Schema:         sourceSchema,
+		StorageConfig: &indexpb.StorageConfig{
+			StorageType: "local",
+		},
+	}
+
+	task := s.newTask(ctx, req)
+	err := task.PreExecute(ctx)
+
+	s.NoError(err)
+	s.Empty(sourceSchema.GetExternalSource())
+	s.Empty(sourceSchema.GetExternalSpec())
+	s.NotSame(sourceSchema, task.req.GetSchema())
+	s.Equal(req.GetExternalSource(), task.req.GetSchema().GetExternalSource())
+	s.Equal(req.GetExternalSpec(), task.req.GetSchema().GetExternalSpec())
+	s.Equal([]string{"id"}, task.columns)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestPreExecuteFallsBackToConfigWhenTargetRowsPerSegmentMissing() {
+	paramtable.Init()
+	const targetRowsPerSegmentKey = "dataNode.externalCollection.targetRowsPerSegment"
+	paramtable.Get().Save(targetRowsPerSegmentKey, "12345")
+	defer paramtable.Get().Reset(targetRowsPerSegmentKey)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:   s.collectionID,
+		TaskID:         s.taskID,
+		ExternalSource: "test_source",
+		ExternalSpec:   `{"format":"parquet"}`,
+		Schema:         &schemapb.CollectionSchema{},
+		StorageConfig:  &indexpb.StorageConfig{StorageType: "local"},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	err := task.PreExecute(ctx)
+	s.NoError(err)
+	s.Equal(int64(12345), req.GetTargetRowsPerSegment())
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestPreExecuteRejectsNegativeTargetRowsPerSegment() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:         s.collectionID,
+		TaskID:               s.taskID,
+		ExternalSource:       "test_source",
+		ExternalSpec:         `{"format":"parquet"}`,
+		Schema:               &schemapb.CollectionSchema{},
+		StorageConfig:        &indexpb.StorageConfig{StorageType: "local"},
+		TargetRowsPerSegment: -1,
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	err := task.PreExecute(ctx)
+	s.Error(err)
+	s.Contains(err.Error(), "target rows per segment must be positive")
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestPreExecuteWithNilRequest() {
@@ -166,7 +262,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestSetAndGetState() {
 		TaskID:       s.taskID,
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 
 	task.SetState(indexpb.JobState_JobStateInProgress, "")
 	s.Equal(indexpb.JobState_JobStateInProgress, task.GetState())
@@ -201,7 +297,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Empt
 		TaskID:       s.taskID,
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	result, err := task.balanceFragmentsToSegments(context.Background(), []packed.Fragment{})
 	s.NoError(err)
 	s.Nil(result)
@@ -219,7 +315,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Zero
 		CollectionID: s.collectionID,
 		TaskID:       s.taskID,
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 
 	fragments := []packed.Fragment{
 		{FragmentID: 1, RowCount: 0, FilePath: "s3://bucket/zero.parquet"},
@@ -253,13 +349,13 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Sing
 		},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
-	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
-		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
 			return fmt.Sprintf("%s/manifest.json", basePath), nil
 		}).Build()
 	defer m1.UnPatch()
@@ -300,6 +396,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Mult
 	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:           s.collectionID,
 		TaskID:                 s.taskID,
+		TargetRowsPerSegment:   500000,
 		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
 		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
 		ExternalSource:         "s3://bucket/data/",
@@ -311,13 +408,13 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Mult
 		},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
-	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
-		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
 			return fmt.Sprintf("%s/manifest.json", basePath), nil
 		}).Build()
 	defer m1.UnPatch()
@@ -336,6 +433,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Mult
 
 	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
 	s.NoError(err)
+	s.Len(result, 4)
 
 	// Verify all segments have StorageVersion=V3 and fake binlogs
 	for i, seg := range result {
@@ -381,7 +479,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestPreExecuteContextCanceled() {
 		TaskID:       s.taskID,
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	cancel()
 
 	err := task.PreExecute(ctx)
@@ -396,7 +494,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteContextCanceled() {
 		TaskID:       s.taskID,
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	cancel()
 
 	err := task.Execute(ctx)
@@ -411,7 +509,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegmentsConte
 		TaskID:       s.taskID,
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	cancel()
 
 	result, err := task.balanceFragmentsToSegments(ctx, []packed.Fragment{{FragmentID: 1, RowCount: 10}})
@@ -431,7 +529,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_AllFragmentsEx
 		},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 
 	// Simulate current segment fragments mapping (use FilePath as identifier)
 	currentSegmentFragments := packed.SegmentFragments{
@@ -494,7 +592,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_SameFragmentsM
 			}, "parquet"),
 		}},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 	task.columns = []string{"id", "vec", "text", "score"}
 
@@ -593,7 +691,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_PatchedSegment
 			}, "parquet"),
 		}},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 	task.columns = []string{"id", "text", "score"}
 
@@ -654,7 +752,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_SameFragmentsA
 			}, "parquet"),
 		}},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	current := packed.SegmentFragments{
 		10: []packed.Fragment{{FilePath: "s3://bucket/data/a.parquet", StartRow: 0, EndRow: 100, RowCount: 100}},
 	}
@@ -685,7 +783,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_PartialFragmen
 		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 
 	// S1 has file1, S2 has file2, S3 has file3
 	currentSegmentFragments := packed.SegmentFragments{
@@ -719,7 +817,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_NewFragmentsUs
 			{ID: 1, CollectionID: s.collectionID, NumOfRows: 1000},
 		},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 
 	currentSegmentFragments := packed.SegmentFragments{
 		1: []packed.Fragment{{FragmentID: 101, FilePath: "/data/file1.parquet", StartRow: 0, EndRow: 1000, RowCount: 1000}},
@@ -774,7 +872,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_RewritesSegmen
 			},
 		},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 
 	currentSegmentFragments := packed.SegmentFragments{
 		1: []packed.Fragment{{FragmentID: 101, FilePath: "/data/file1.parquet", StartRow: 0, EndRow: 1000, RowCount: 1000}},
@@ -837,7 +935,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_KeepsSegmentWi
 			},
 		},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 
 	currentSegmentFragments := packed.SegmentFragments{
 		1: []packed.Fragment{{FragmentID: 101, FilePath: "/data/file1.parquet", StartRow: 0, EndRow: 1000, RowCount: 1000}},
@@ -890,7 +988,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_FunctionOutput
 			},
 		},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 
 	currentSegmentFragments := packed.SegmentFragments{
 		1: []packed.Fragment{{FragmentID: 101, FilePath: "/data/file1.parquet", StartRow: 0, EndRow: 1000, RowCount: 1000}},
@@ -1093,7 +1191,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBuildFunctionExecutionSchemaBra
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestSegmentHasFunctionOutputColumnsBranches() {
-	task := NewRefreshExternalCollectionTask(context.Background(), &datapb.RefreshExternalCollectionTaskRequest{})
+	task := s.newTask(context.Background(), &datapb.RefreshExternalCollectionTaskRequest{})
 
 	hasColumns, err := task.segmentHasFunctionOutputColumns(&datapb.SegmentInfo{}, nil)
 	s.NoError(err)
@@ -1133,7 +1231,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegmentsFunctionOutputC
 			},
 		},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 
 	result, err := task.organizeSegments(ctx, nil, nil)
 	s.Error(err)
@@ -1151,7 +1249,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegmentsBalanceError() 
 		CollectionID: s.collectionID,
 		TaskID:       s.taskID,
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	mockBalance := mockey.Mock(mockey.GetMethod(task, "balanceFragmentsToSegments")).
 		Return(nil, fmt.Errorf("balance failed")).Build()
 	defer mockBalance.UnPatch()
@@ -1202,7 +1300,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegmentsContextCanceled
 				TaskID:          s.taskID,
 				CurrentSegments: tc.currentSegments,
 			}
-			task := NewRefreshExternalCollectionTask(ctx, req)
+			task := s.newTask(ctx, req)
 
 			var calls int
 			mockEnsure := mockey.Mock(ensureContext).To(func(ctx context.Context) error {
@@ -1327,13 +1425,14 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment() {
 		PartitionID:   2000,
 		StorageConfig: &indexpb.StorageConfig{RootPath: "files", StorageType: "local"},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 	task.columns = []string{"col1"}
 
 	var gotBasePath string
 	var gotStorageConfig *indexpb.StorageConfig
-	mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+	var gotExtfs packed.ExternalSpecContext
+	mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
 		To(func(
 			ctx context.Context,
 			basePath string,
@@ -1341,9 +1440,11 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment() {
 			columns []string,
 			fragments []packed.Fragment,
 			storageConfig *indexpb.StorageConfig,
+			extfs packed.ExternalSpecContext,
 		) (string, error) {
 			gotBasePath = basePath
 			gotStorageConfig = storageConfig
+			gotExtfs = extfs
 			return "manifest-path", nil
 		}).Build()
 	defer mockCreate.UnPatch()
@@ -1353,13 +1454,15 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment() {
 	s.Equal("manifest-path", manifestPath)
 	s.Equal("files/insert_log/1000/2000/3000", gotBasePath)
 	s.Same(req.GetStorageConfig(), gotStorageConfig)
+	s.Equal(s.collectionID, gotExtfs.CollectionID)
+	s.Empty(gotExtfs.Source)
+	s.Empty(gotExtfs.Spec)
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestWithFunctionsUsesInsertLogBasePath() {
-	paramtable.Init()
-
 	ctx := context.Background()
 	req := &datapb.RefreshExternalCollectionTaskRequest{
+		ClusterID:     "in01-test",
 		CollectionID:  s.collectionID,
 		PartitionID:   2000,
 		StorageConfig: &indexpb.StorageConfig{RootPath: "files", StorageType: "local"},
@@ -1382,6 +1485,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestWithFunctionsUses
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
 	var gotBasePath string
+	var gotClusterID string
 	var gotStorageConfig *indexpb.StorageConfig
 	mockExec := mockey.Mock(ExecuteFunctionsForSegment).
 		To(func(
@@ -1396,6 +1500,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestWithFunctionsUses
 			clusterID string,
 		) (string, error) {
 			gotBasePath = basePath
+			gotClusterID = clusterID
 			gotStorageConfig = storageConfig
 			return "manifest-path", nil
 		}).Build()
@@ -1405,6 +1510,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestWithFunctionsUses
 	s.NoError(err)
 	s.Equal("manifest-path", manifestPath)
 	s.Equal("files/insert_log/1000/2000/3000", gotBasePath)
+	s.Equal("in01-test", gotClusterID)
 	s.Same(req.GetStorageConfig(), gotStorageConfig)
 }
 
@@ -1424,7 +1530,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentUsesP
 	var gotColumns []string
 	var gotFragments []packed.Fragment
 	var gotStorageConfig *indexpb.StorageConfig
-	mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+	mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
 		To(func(
 			ctx context.Context,
 			basePath string,
@@ -1432,6 +1538,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentUsesP
 			columns []string,
 			fragments []packed.Fragment,
 			storageConfig *indexpb.StorageConfig,
+			extfs packed.ExternalSpecContext,
 		) (string, error) {
 			gotBasePath = basePath
 			gotColumns = columns
@@ -1469,7 +1576,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentRequi
 		},
 	}
 
-	mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+	mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
 		To(func(
 			ctx context.Context,
 			basePath string,
@@ -1477,6 +1584,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentRequi
 			columns []string,
 			fragments []packed.Fragment,
 			storageConfig *indexpb.StorageConfig,
+			extfs packed.ExternalSpecContext,
 		) (string, error) {
 			return packed.MarshalManifestPath(basePath, 42), nil
 		}).Build()
@@ -1909,7 +2017,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentSucce
 	basePath := "files/insert_log/1000/2000/3000"
 
 	var sourceColumns []string
-	mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+	mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
 		To(func(
 			ctx context.Context,
 			basePath string,
@@ -1917,6 +2025,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentSucce
 			columns []string,
 			fragments []packed.Fragment,
 			storageConfig *indexpb.StorageConfig,
+			extfs packed.ExternalSpecContext,
 		) (string, error) {
 			sourceColumns = columns
 			return packed.MarshalManifestPath(basePath, 42), nil
@@ -2001,7 +2110,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 	}
 
 	s.T().Run("parse input manifest", func(t *testing.T) {
-		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePath).Return("bad manifest", nil).Build()
+		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).Return("bad manifest", nil).Build()
 		defer mockCreate.UnPatch()
 		manifestPath, err := ExecuteFunctionsForSegment(ctx, schema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster")
 		s.Error(err)
@@ -2014,7 +2123,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 				{FieldID: 101, Name: "bad", DataType: schemapb.DataType_None, IsFunctionOutput: true},
 			},
 		}
-		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePath).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
+		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
 		defer mockCreate.UnPatch()
 		manifestPath, err := ExecuteFunctionsForSegment(ctx, badSchema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster")
 		s.Error(err)
@@ -2032,7 +2141,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 				{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{100}, OutputFieldIds: []int64{101}},
 			},
 		}
-		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePath).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
+		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
 		defer mockCreate.UnPatch()
 		manifestPath, err := ExecuteFunctionsForSegment(ctx, badSchema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster")
 		s.Error(err)
@@ -2041,7 +2150,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 	})
 
 	s.T().Run("open reader", func(t *testing.T) {
-		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePath).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
+		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
 		defer mockCreate.UnPatch()
 		mockOpen := mockey.Mock(openInputReader).Return(nil, fmt.Errorf("open failed")).Build()
 		defer mockOpen.UnPatch()
@@ -2052,7 +2161,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 
 	s.T().Run("new writer", func(t *testing.T) {
 		reader := &fakeRecordReader{}
-		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePath).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
+		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
 		defer mockCreate.UnPatch()
 		mockOpen := mockey.Mock(openInputReader).Return(reader, nil).Build()
 		defer mockOpen.UnPatch()
@@ -2066,7 +2175,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 	s.T().Run("stream", func(t *testing.T) {
 		reader := &fakeRecordReader{}
 		writer := &packed.FFIPackedWriter{}
-		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePath).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
+		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
 		defer mockCreate.UnPatch()
 		mockOpen := mockey.Mock(openInputReader).Return(reader, nil).Build()
 		defer mockOpen.UnPatch()
@@ -2082,7 +2191,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 	s.T().Run("close writer", func(t *testing.T) {
 		reader := &fakeRecordReader{}
 		writer := &packed.FFIPackedWriter{}
-		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePath).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
+		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
 		defer mockCreate.UnPatch()
 		mockOpen := mockey.Mock(openInputReader).Return(reader, nil).Build()
 		defer mockOpen.UnPatch()
@@ -2100,7 +2209,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 	s.T().Run("finalize stats", func(t *testing.T) {
 		reader := &fakeRecordReader{}
 		writer := &packed.FFIPackedWriter{}
-		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePath).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
+		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
 		defer mockCreate.UnPatch()
 		mockOpen := mockey.Mock(openInputReader).Return(reader, nil).Build()
 		defer mockOpen.UnPatch()
@@ -2126,7 +2235,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestTaskAccessorsAndCloneHelpers() 
 	s.Error(ensureContext(ctx))
 
 	taskCtx := context.Background()
-	task := NewRefreshExternalCollectionTask(taskCtx, &datapb.RefreshExternalCollectionTaskRequest{TaskID: 10})
+	task := s.newTask(taskCtx, &datapb.RefreshExternalCollectionTaskRequest{TaskID: 10})
 	task.updatedSegments = []*datapb.SegmentInfo{{ID: 100}}
 	s.Equal(taskCtx, task.Ctx())
 	s.Equal(task.updatedSegments, task.GetUpdatedSegments())
@@ -2171,7 +2280,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteWithMockedSteps() {
 		FileIndexBegin:         0,
 		FileIndexEnd:           1,
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 	task.columns = []string{"text"}
 	fragments := []packed.Fragment{{FragmentID: 1, FilePath: "file", StartRow: 0, EndRow: 10, RowCount: 10}}
@@ -2204,10 +2313,10 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteErrorPathsWithMockedStep
 			TaskID:                 s.taskID,
 			PreAllocatedSegmentIds: &datapb.IDRange{Begin: 3000, End: 4000},
 		}
-		return NewRefreshExternalCollectionTask(ctx, req)
+		return s.newTask(ctx, req)
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, &datapb.RefreshExternalCollectionTaskRequest{TaskID: s.taskID})
+	task := s.newTask(ctx, &datapb.RefreshExternalCollectionTaskRequest{TaskID: s.taskID})
 	s.Error(task.Execute(ctx))
 
 	task = newTask()
@@ -2242,7 +2351,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteErrorPathsWithMockedStep
 func (s *RefreshExternalCollectionTaskSuite) TestPostExecuteAndOrganizeCanceled() {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	task := NewRefreshExternalCollectionTask(ctx, &datapb.RefreshExternalCollectionTaskRequest{
+	task := s.newTask(ctx, &datapb.RefreshExternalCollectionTaskRequest{
 		TaskID:       s.taskID,
 		CollectionID: s.collectionID,
 	})
@@ -2263,7 +2372,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBuildCurrentSegmentFragments() 
 		StorageConfig:   &indexpb.StorageConfig{RootPath: "files", StorageType: "local"},
 		CurrentSegments: []*datapb.SegmentInfo{{ID: 1}},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.columns = []string{"text_col"}
 	expected := packed.SegmentFragments{1: []packed.Fragment{{FragmentID: 1}}}
 	var gotColumns []string
@@ -2306,7 +2415,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegmentsWithF
 			},
 		},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
@@ -2373,7 +2482,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestPreAllocatedSegmentIDs() {
 		CurrentSegments:        []*datapb.SegmentInfo{},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 
 	// Before Execute(), pre-allocated fields should not be initialized
 	s.Nil(task.preallocatedIDRange)
@@ -2408,7 +2517,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestPreAllocatedIDAllocation() {
 		CurrentSegments:        []*datapb.SegmentInfo{},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 
 	// Manually initialize (simulating Execute)
 	task.preallocatedIDRange = idRange
@@ -2437,7 +2546,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestMissingPreAllocatedIDs() {
 		// PreAllocatedSegmentIds is nil
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 
 	// Execute should fail because pre-allocated IDs are missing
 	err := task.Execute(ctx)
@@ -2455,7 +2564,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestPreExecute_NilSchema() {
 		StorageConfig:  &indexpb.StorageConfig{StorageType: "local"},
 		// Schema is nil
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	err := task.PreExecute(ctx)
 	s.Error(err)
 	s.Contains(err.Error(), "schema is nil")
@@ -2471,7 +2580,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestPreExecute_NilStorageConfig() {
 		Schema:         &schemapb.CollectionSchema{},
 		// StorageConfig is nil
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	err := task.PreExecute(ctx)
 	s.Error(err)
 	s.Contains(err.Error(), "storage config is nil")
@@ -2487,7 +2596,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestPreExecute_EmptyExternalSource(
 		StorageConfig: &indexpb.StorageConfig{StorageType: "local"},
 		// ExternalSource is empty
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	err := task.PreExecute(ctx)
 	s.Error(err)
 	s.Contains(err.Error(), "external source is empty")
@@ -2504,7 +2613,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestPreExecute_InvalidExternalSpec(
 		Schema:         &schemapb.CollectionSchema{},
 		StorageConfig:  &indexpb.StorageConfig{StorageType: "local"},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	err := task.PreExecute(ctx)
 	s.Error(err)
 	s.Contains(err.Error(), "failed to parse external spec")
@@ -2521,7 +2630,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestPreExecute_UnsupportedFormat() 
 		Schema:         &schemapb.CollectionSchema{},
 		StorageConfig:  &indexpb.StorageConfig{StorageType: "local"},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	err := task.PreExecute(ctx)
 	s.Error(err)
 	s.Contains(err.Error(), "unsupported format")
@@ -2632,6 +2741,37 @@ func (s *RefreshExternalCollectionTaskSuite) TestFragmentKey() {
 	// Identical fragments should produce the same key
 	f4 := packed.Fragment{FilePath: "/data/file1.parquet", StartRow: 0, EndRow: 1000}
 	s.Equal(fragmentKey(f1), fragmentKey(f4))
+
+	// L0 deltalogs are not part of the L1 data identity. They are handled by a
+	// manifest-only refresh so the target segment ID can be reused.
+	f5 := packed.Fragment{
+		FilePath: "/data/file1.parquet",
+		StartRow: 0,
+		EndRow:   1000,
+		Deltalogs: []*datapb.FieldBinlog{{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{{
+				LogID:      10,
+				LogPath:    "s3://bucket/files/insert_log/1/_delta/10",
+				EntriesNum: 2,
+			}},
+		}},
+	}
+	f6 := packed.Fragment{
+		FilePath: "/data/file1.parquet",
+		StartRow: 0,
+		EndRow:   1000,
+		Deltalogs: []*datapb.FieldBinlog{{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{{
+				LogID:      11,
+				LogPath:    "s3://bucket/files/insert_log/1/_delta/11",
+				EntriesNum: 2,
+			}},
+		}},
+	}
+	s.Equal(fragmentKey(f1), fragmentKey(f5))
+	s.Equal(fragmentKey(f5), fragmentKey(f6))
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestGetColumnNamesFromSchema() {
@@ -2679,7 +2819,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestFetchFragmentsFromExternalSourc
 		ExternalSpec:        `{"format":"parquet"}`,
 		ExploreManifestPath: "", // empty
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
 	_, err := task.fetchFragmentsFromExternalSource(ctx)
@@ -2688,26 +2828,38 @@ func (s *RefreshExternalCollectionTaskSuite) TestFetchFragmentsFromExternalSourc
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestFetchFragmentsFromExternalSource_Success() {
-	paramtable.Init()
 	ctx := context.Background()
 	req := &datapb.RefreshExternalCollectionTaskRequest{
-		CollectionID:        s.collectionID,
-		TaskID:              s.taskID,
-		ExternalSource:      "s3:///bucket/path",
-		ExternalSpec:        `{"format":"parquet"}`,
-		ExploreManifestPath: "/manifests/explore.json",
-		FileIndexBegin:      0,
-		FileIndexEnd:        5,
-		StorageConfig:       &indexpb.StorageConfig{StorageType: "local", BucketName: "/tmp"},
+		CollectionID:         s.collectionID,
+		TaskID:               s.taskID,
+		ExternalSource:       "s3:///bucket/path",
+		ExternalSpec:         `{"format":"parquet"}`,
+		ExploreManifestPath:  "/manifests/explore.json",
+		FileIndexBegin:       0,
+		FileIndexEnd:         5,
+		StorageConfig:        &indexpb.StorageConfig{StorageType: "local", BucketName: "/tmp"},
+		TargetRowsPerSegment: 12345,
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 	task.columns = []string{"col1"}
 
 	mockFetch := mockey.Mock(packed.FetchFragmentsFromExternalSourceWithRange).
-		Return([]packed.Fragment{
-			{FragmentID: 0, FilePath: "f1.parquet", StartRow: 0, EndRow: 1000, RowCount: 1000},
-		}, nil).Build()
+		To(func(
+			ctx context.Context,
+			format string,
+			columns []string,
+			externalSource string,
+			storageConfig *indexpb.StorageConfig,
+			fileIndexBegin, fileIndexEnd int64,
+			exploreManifestPath string,
+			opts packed.ExternalFetchOptions,
+		) ([]packed.Fragment, error) {
+			s.Equal(req.GetTargetRowsPerSegment(), opts.RowLimit)
+			return []packed.Fragment{
+				{FragmentID: 0, FilePath: "f1.parquet", StartRow: 0, EndRow: 1000, RowCount: 1000},
+			}, nil
+		}).Build()
 	defer mockFetch.UnPatch()
 
 	frags, err := task.fetchFragmentsFromExternalSource(ctx)
@@ -2725,7 +2877,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Crea
 		ExternalSpec:   `{"format":"parquet"}`,
 		StorageConfig:  &indexpb.StorageConfig{StorageType: "local", BucketName: tmpDir, RootPath: tmpDir},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 	task.columns = []string{"col1"}
 	task.preallocatedIDRange = &datapb.IDRange{Begin: 1, End: 100}
@@ -2756,7 +2908,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Cont
 		ExternalSpec:   `{"format":"parquet"}`,
 		StorageConfig:  &indexpb.StorageConfig{StorageType: "local", BucketName: tmpDir, RootPath: tmpDir},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 	task.columns = []string{"col1"}
 	task.preallocatedIDRange = &datapb.IDRange{Begin: 1, End: 100}
@@ -2790,7 +2942,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_CtxC
 		ExternalSpec:   `{"format":"parquet"}`,
 		StorageConfig:  &indexpb.StorageConfig{StorageType: "local", BucketName: tmpDir, RootPath: tmpDir},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 	task.columns = []string{"col1"}
 	task.preallocatedIDRange = &datapb.IDRange{Begin: 1, End: 100}
@@ -2863,6 +3015,43 @@ func (s *RefreshExternalCollectionTaskSuite) TestSumFieldSizes() {
 	s.Equal(int64(576), total, "should sum only external fields: 64+512")
 }
 
+func (s *RefreshExternalCollectionTaskSuite) TestSumFieldSizes_MilvusTableUsesSourceFieldIDs() {
+	schema := &schemapb.CollectionSchema{
+		ExternalSpec: `{"format":"milvus-table"}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 0, Name: common.VirtualPKFieldName},
+			{FieldID: 100, Name: "target_pk", ExternalField: "pk"},
+			{FieldID: 101, Name: "target_vec", ExternalField: "vec"},
+		},
+	}
+	fieldSizes := map[string]int64{
+		"100": 64,
+		"101": 512,
+	}
+
+	total := sumFieldSizes(fieldSizes, schema)
+	s.Equal(int64(576), total)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestSumFieldSizes_MilvusTableSkipsFunctionOutputField() {
+	schema := &schemapb.CollectionSchema{
+		ExternalSpec: `{"format":"milvus-table"}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "text", ExternalField: "text"},
+			{FieldID: 101, Name: "vec", ExternalField: "vec"},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+	}
+	fieldSizes := map[string]int64{
+		"100": 64,
+		"101": 512,
+		"102": 4096,
+	}
+
+	total := sumFieldSizes(fieldSizes, schema)
+	s.Equal(int64(576), total)
+}
+
 func (s *RefreshExternalCollectionTaskSuite) TestSumFieldSizes_NilSchema() {
 	fieldSizes := map[string]int64{"a": 10, "b": 20}
 	total := sumFieldSizes(fieldSizes, nil)
@@ -2888,13 +3077,13 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Samp
 		},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
-	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
-		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
 			return fmt.Sprintf("%s/manifest.json", basePath), nil
 		}).Build()
 	defer m1.UnPatch()
@@ -2942,13 +3131,13 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Samp
 		},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
-	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
-		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
 			return fmt.Sprintf("%s/manifest.json", basePath), nil
 		}).Build()
 	defer m1.UnPatch()
@@ -2992,13 +3181,13 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Samp
 		},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
-	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
-		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
 			return fmt.Sprintf("%s/manifest.json", basePath), nil
 		}).Build()
 	defer m1.UnPatch()
@@ -3049,13 +3238,13 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerS
 		},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
-	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
-		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
 			return fmt.Sprintf("%s/manifest.json", basePath), nil
 		}).Build()
 	defer m1.UnPatch()
@@ -3075,7 +3264,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerS
 	defer m2.UnPatch()
 
 	// 3 fragments each above targetRowsPerSegment → 3 segments.
-	targetRows := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
+	targetRows := req.GetTargetRowsPerSegment()
 	rowsPerFragment := targetRows * 2 // force one segment per fragment
 	fragments := []packed.Fragment{
 		{FragmentID: 1, RowCount: rowsPerFragment},
@@ -3118,13 +3307,13 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerS
 		},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
-	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
-		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
 			return fmt.Sprintf("%s/manifest.json", basePath), nil
 		}).Build()
 	defer m1.UnPatch()
@@ -3147,7 +3336,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerS
 		}).Build()
 	defer m2.UnPatch()
 
-	targetRows := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
+	targetRows := req.GetTargetRowsPerSegment()
 	rowsPerFragment := targetRows * 2
 	fragments := []packed.Fragment{
 		{FragmentID: 1, RowCount: rowsPerFragment},
@@ -3190,13 +3379,13 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerS
 		},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
-	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
-		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
 			return fmt.Sprintf("%s/manifest.json", basePath), nil
 		}).Build()
 	defer m1.UnPatch()
@@ -3205,7 +3394,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerS
 		Return(nil, fmt.Errorf("all samples failed")).Build()
 	defer m2.UnPatch()
 
-	targetRows := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
+	targetRows := req.GetTargetRowsPerSegment()
 	rowsPerFragment := targetRows * 2
 	fragments := []packed.Fragment{
 		{FragmentID: 1, RowCount: rowsPerFragment},
@@ -3218,7 +3407,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerS
 	s.Nil(result)
 }
 
-// Regression: if the schema has no ExternalField-mapped fields, sumFieldSizes
+// Regression: if the schema has no mapped external data fields, sumFieldSizes
 // returns 0 even when SampleExternalFieldSizes itself "succeeds". The old
 // code treated this as a successful zero-sized sample and wrote MemorySize=0
 // fake binlogs into every segment, which feeds QueryNode a degenerate
@@ -3244,13 +3433,13 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Zero
 		},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
-	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
-		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
 			return fmt.Sprintf("%s/manifest.json", basePath), nil
 		}).Build()
 	defer m1.UnPatch()
@@ -3271,6 +3460,24 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Zero
 	s.Nil(result)
 }
 
+func (s *RefreshExternalCollectionTaskSuite) TestSumFieldSizes_MilvusTableRealPKIncludesSourceTimestamp() {
+	schema := &schemapb.CollectionSchema{
+		ExternalSpec: `{"format":"milvus-table"}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
+	}
+
+	total := sumFieldSizes(map[string]int64{
+		"100": 16,
+		"101": 64,
+		"1":   8,
+	}, schema)
+
+	s.Equal(int64(88), total)
+}
+
 func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_InsufficientIDs() {
 	paramtable.Init()
 
@@ -3286,7 +3493,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Insu
 		Schema:                 &schemapb.CollectionSchema{},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
@@ -3315,12 +3522,12 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Mani
 		Schema:                 &schemapb.CollectionSchema{},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
-	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
 		Return("", fmt.Errorf("storage error")).Build()
 	defer m1.UnPatch()
 
@@ -3350,14 +3557,14 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Cont
 		Schema:                 &schemapb.CollectionSchema{},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
 	// Mock manifest creation: first call cancels ctx and returns error
-	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
-		To(func(_ context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(_ context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
 			cancel() // cancel the ctx we pass to balanceFragmentsToSegments
 			return "", fmt.Errorf("canceled")
 		}).Build()
@@ -3393,7 +3600,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Ensu
 		Schema:                 &schemapb.CollectionSchema{},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
@@ -3434,13 +3641,13 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Empt
 		},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
-	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
-		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
 			return fmt.Sprintf("%s/manifest.json", basePath), nil
 		}).Build()
 	defer m1.UnPatch()
@@ -3492,7 +3699,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Cont
 				ExternalSpec:           `{"format":"parquet"}`,
 				Schema:                 &schemapb.CollectionSchema{},
 			}
-			task := NewRefreshExternalCollectionTask(ctx, req)
+			task := s.newTask(ctx, req)
 			task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 			task.nextAllocID = task.preallocatedIDRange.Begin
 			task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
@@ -3527,7 +3734,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Cont
 		ExternalSpec:           `{"format":"parquet"}`,
 		Schema:                 &schemapb.CollectionSchema{},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
@@ -3559,12 +3766,12 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Func
 			},
 		},
 	}
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
-	mockManifest := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+	mockManifest := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
 		Return("manifest.json", nil).Build()
 	defer mockManifest.UnPatch()
 	mockSample := mockey.Mock(packed.SampleExternalFieldSizes).
@@ -3685,13 +3892,13 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Adds
 		},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
-	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
-		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
 			return fmt.Sprintf("%s/manifest.json", basePath), nil
 		}).Build()
 	defer m1.UnPatch()
@@ -3738,7 +3945,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Pass
 		},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	// Parse the spec so the balance path has an in-memory struct to work with.
@@ -3746,8 +3953,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Pass
 	s.Require().NoError(err)
 	task.parsedSpec = parsed
 
-	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
-		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, sc *indexpb.StorageConfig) (string, error) {
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, sc *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
 			return fmt.Sprintf("%s/manifest.json", basePath), nil
 		}).Build()
 	defer m1.UnPatch()
@@ -3806,13 +4013,13 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_NilS
 		},
 	}
 
-	task := NewRefreshExternalCollectionTask(ctx, req)
+	task := s.newTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
-	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
-		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, sc *indexpb.StorageConfig) (string, error) {
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, sc *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
 			return fmt.Sprintf("%s/manifest.json", basePath), nil
 		}).Build()
 	defer m1.UnPatch()

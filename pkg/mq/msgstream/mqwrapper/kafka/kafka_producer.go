@@ -6,11 +6,10 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	mqcommon "github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -34,7 +33,7 @@ func (kp *kafkaProducer) Send(ctx context.Context, message *mqcommon.ProducerMes
 
 	if kp.isClosed {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
-		log.Error("kafka produce message fail because the producer has been closed", zap.String("topic", kp.topic))
+		mlog.Error(context.TODO(), "kafka produce message fail because the producer has been closed", mlog.String("topic", kp.topic))
 		return nil, common.NewIgnorableErrorf("kafka producer is closed")
 	}
 
@@ -59,7 +58,7 @@ func (kp *kafkaProducer) Send(ctx context.Context, message *mqcommon.ProducerMes
 	select {
 	case <-kp.stopCh:
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
-		log.Error("kafka produce message fail because of kafka producer is closed", zap.String("topic", kp.topic))
+		mlog.Error(context.TODO(), "kafka produce message fail because of kafka producer is closed", mlog.String("topic", kp.topic))
 		return nil, common.NewIgnorableErrorf("kafka producer is closed")
 	case e := <-resultCh:
 		m = e.(*kafka.Message)
@@ -78,7 +77,6 @@ func (kp *kafkaProducer) Send(ctx context.Context, message *mqcommon.ProducerMes
 }
 
 func (kp *kafkaProducer) Close() {
-	log := log.Ctx(context.TODO())
 	kp.closeOnce.Do(func() {
 		kp.isClosed = true
 
@@ -86,13 +84,13 @@ func (kp *kafkaProducer) Close() {
 		// flush in-flight msg within queue.
 		i := kp.p.Flush(10000)
 		if i > 0 {
-			log.Warn("There are still un-flushed outstanding events", zap.Int("event_num", i), zap.String("topic", kp.topic))
+			mlog.Warn(context.TODO(), "There are still un-flushed outstanding events", mlog.Int("event_num", i), mlog.String("topic", kp.topic))
 		}
 
 		close(kp.stopCh)
 		cost := time.Since(start).Milliseconds()
 		if cost > 500 {
-			log.Debug("kafka producer is closed", zap.String("topic", kp.topic), zap.Int64("time cost(ms)", cost))
+			mlog.Debug(context.TODO(), "kafka producer is closed", mlog.String("topic", kp.topic), mlog.Int64("time cost(ms)", cost))
 		}
 	})
 }

@@ -85,7 +85,7 @@ func (h *HandlersV2) createResourceGroup(ctx context.Context, c *gin.Context, an
 		ResourceGroup: httpReq.GetName(),
 		Config:        toPbResourceGroupConfig(httpReq.GetConfig()),
 	}
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateResourceGroup", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateResourceGroup", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.CreateResourceGroup(reqCtx, req.(*milvuspb.CreateResourceGroupRequest))
 	})
 	if err == nil {
@@ -99,7 +99,7 @@ func (h *HandlersV2) dropResourceGroup(ctx context.Context, c *gin.Context, anyR
 	req := &milvuspb.DropResourceGroupRequest{
 		ResourceGroup: httpReq.GetName(),
 	}
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DropResourceGroup", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DropResourceGroup", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DropResourceGroup(reqCtx, req.(*milvuspb.DropResourceGroupRequest))
 	})
 	if err == nil {
@@ -110,7 +110,7 @@ func (h *HandlersV2) dropResourceGroup(ctx context.Context, c *gin.Context, anyR
 
 func (h *HandlersV2) listResourceGroups(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	req := &milvuspb.ListResourceGroupsRequest{}
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/ListResourceGroups", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/ListResourceGroups", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ListResourceGroups(reqCtx, req.(*milvuspb.ListResourceGroupsRequest))
 	})
 	if err == nil {
@@ -124,7 +124,7 @@ func (h *HandlersV2) describeResourceGroup(ctx context.Context, c *gin.Context, 
 	req := &milvuspb.DescribeResourceGroupRequest{
 		ResourceGroup: httpReq.GetName(),
 	}
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DescribeResourceGroup", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DescribeResourceGroup", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DescribeResourceGroup(reqCtx, req.(*milvuspb.DescribeResourceGroupRequest))
 	})
 	if err == nil {
@@ -143,7 +143,7 @@ func (h *HandlersV2) updateResourceGroup(ctx context.Context, c *gin.Context, an
 			return toPbResourceGroupConfig(config)
 		}),
 	}
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/UpdateResourceGroups", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/UpdateResourceGroups", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.UpdateResourceGroups(reqCtx, req.(*milvuspb.UpdateResourceGroupsRequest))
 	})
 	if err == nil {
@@ -160,7 +160,7 @@ func (h *HandlersV2) transferReplica(ctx context.Context, c *gin.Context, anyReq
 		CollectionName:      httpReq.GetCollectionName(),
 		NumReplica:          httpReq.GetReplicaNum(),
 	}
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/TransferMaster", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/TransferMaster", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.TransferReplica(reqCtx, req.(*milvuspb.TransferReplicaRequest))
 	})
 	if err == nil {

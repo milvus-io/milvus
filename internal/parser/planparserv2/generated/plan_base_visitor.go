@@ -15,6 +15,10 @@ func (v *BasePlanVisitor) VisitFloating(ctx *FloatingContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitTextMatchFuzzy(ctx *TextMatchFuzzyContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitIsNotNull(ctx *IsNotNullContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -104,6 +108,10 @@ func (v *BasePlanVisitor) VisitJSONIdentifier(ctx *JSONIdentifierContext) interf
 }
 
 func (v *BasePlanVisitor) VisitRandomSample(ctx *RandomSampleContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitRawString(ctx *RawStringContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 

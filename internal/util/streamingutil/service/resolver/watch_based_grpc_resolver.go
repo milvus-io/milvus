@@ -1,10 +1,11 @@
 package resolver
 
 import (
-	"go.uber.org/zap"
+	"context"
+
 	"google.golang.org/grpc/resolver"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -23,7 +24,7 @@ type watchBasedGRPCResolver struct {
 	lifetime *typeutil.Lifetime
 
 	cc resolver.ClientConn
-	log.Binder
+	mlog.Binder
 }
 
 // ResolveNow will be called by gRPC to try to resolve the target name
@@ -50,10 +51,10 @@ func (r *watchBasedGRPCResolver) Update(state VersionedState) error {
 
 	if err := r.cc.UpdateState(state.State); err != nil {
 		// watch based resolver could ignore the error, just log and return nil
-		r.Logger().Warn("fail to update resolver state", zap.Stringer("state", state), zap.Error(err))
+		r.Logger().Warn(context.TODO(), "fail to update resolver state", mlog.Stringer("state", state), mlog.Err(err))
 		return nil
 	}
-	r.Logger().Info("update resolver state success", zap.Stringer("state", state))
+	r.Logger().Info(context.TODO(), "update resolver state success", mlog.Stringer("state", state))
 	return nil
 }
 

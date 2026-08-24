@@ -62,7 +62,8 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false,
                 /* in_load_list, set to false to reduce memory usage */ false),
-            /* support_eviction */ false) {
+            /* support_eviction */ false,
+            field_data_info.shard) {
     // Split rows into ~64KB cells according to value_size().
     // Fallback to single-cell if value_size() is not well-defined.
     auto vsize = this->value_size();

@@ -21,17 +21,18 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -65,6 +66,10 @@ type CommandStoreInterface interface {
 	CleanupExpiredCommands(ctx context.Context)
 	// DeleteNonPersistentCommand removes a non-persistent command by ID (no-op for configs).
 	DeleteNonPersistentCommand(commandID string) bool
+	// DeleteCommandOnReply removes a replied one-time command, but only if it was aimed at
+	// a single client; broadcast commands must survive until their TTL so every recipient
+	// still gets them.
+	DeleteCommandOnReply(commandID string) bool
 	// GetCommandInfo returns command type and payload by ID for display/debugging.
 	GetCommandInfo(commandID string) (commandType string, payload []byte, persistent bool, ok bool)
 	// ListCommandsWithInfo returns all active commands with TTL information
@@ -106,6 +111,26 @@ func (w *etcdKVWrapper) Delete(ctx context.Context, key string, opts ...clientv3
 	_, err := w.client.Delete(ctx, key, opts...)
 	return err
 }
+
+const (
+	// clientScopePrefix marks a target scope naming a single client.
+	clientScopePrefix = "client:"
+
+	// clientIDStableKey is how a client declares, in ClientInfo.Reserved, that its client
+	// ID was configured rather than generated and therefore survives a restart.
+	clientIDStableKey = "client_id_stable"
+)
+
+// The store honors ttl_seconds exactly as the proto documents it: 0 means no expiry, a
+// positive value expires the command that many seconds after the push.
+//
+// It applies no default of its own, and no proto declaration could let it. Proto3 implicit
+// presence means a client emits *nothing* for an explicit 0, so an absent field and a
+// deliberate "never expire" are the same bytes -- marking the field optional would only
+// give presence to senders rebuilt against the new definition, which are not the ones at
+// risk. Defaulting on absence would silently convert every existing caller's "no expiry"
+// into an hour. Defaulting belongs where absence is genuinely observable: the HTTP layer,
+// which decodes JSON into a pointer. See defaultCommandTTLSeconds in internal/proxy.
 
 // cache holds in-memory cache of all commands and configs
 // Loaded at initialization and kept in sync with etcd on writes
@@ -182,17 +207,28 @@ func (s *CommandStore) loadCache() {
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
 
+	clientScoped := 0
+
 	// Load configs
 	if resp, err := s.kv.Get(ctx, s.configPath, clientv3.WithPrefix()); err != nil {
-		log.Ctx(ctx).Warn("loadCache: failed to load configs", zap.Error(err))
+		mlog.Warn(ctx, "loadCache: failed to load configs", mlog.Err(err))
 	} else {
 		for _, kv := range resp.Kvs {
 			var cfg storedConfig
 			if err := json.Unmarshal(kv.Value, &cfg); err != nil {
-				log.Ctx(ctx).Warn("loadCache: failed to unmarshal config",
-					zap.Error(err),
-					zap.String("key", string(kv.Key)))
+				mlog.Warn(ctx, "loadCache: failed to unmarshal config",
+					mlog.Err(err),
+					mlog.String("key", string(kv.Key)))
 				continue
+			}
+			// Client-scoped configs are loaded like any other. A client ID is not
+			// necessarily ephemeral -- a client that sets TelemetryConfig.ClientID keeps
+			// the same ID across restarts -- so the scope alone does not prove the config
+			// is dead, and deleting operator-created configuration on startup because of
+			// a guess is not something to do silently. They are counted so an operator
+			// can see how many exist and retire them with DeleteClientCommand.
+			if strings.HasPrefix(cfg.TargetScope, clientScopePrefix) {
+				clientScoped++
 			}
 			s.cache.configs[cfg.ConfigID] = &cfg
 		}
@@ -201,9 +237,15 @@ func (s *CommandStore) loadCache() {
 	// Calculate config hash
 	s.cache.configHash = s.computeConfigHash()
 
-	log.Ctx(ctx).Info("loadCache: completed",
-		zap.Int("commands", len(s.cache.commands)),
-		zap.Int("configs", len(s.cache.configs)))
+	if clientScoped > 0 {
+		// Visibility, not a failure: these only keep matching if the target client uses a
+		// stable TelemetryConfig.ClientID.
+		mlog.Info(ctx, "loadCache: loaded client-scoped configs; these match only clients using a stable ClientID",
+			mlog.Int("client_scoped_configs", clientScoped))
+	}
+	mlog.Info(ctx, "loadCache: completed",
+		mlog.Int("commands", len(s.cache.commands)),
+		mlog.Int("configs", len(s.cache.configs)))
 }
 
 // PushCommand stores a command/config in etcd and cache
@@ -214,6 +256,10 @@ func (s *CommandStore) PushCommand(ctx context.Context, req *milvuspb.PushClient
 		return "", merr.WrapErrParameterInvalid("push_config", req.CommandType,
 			"only push_config can be persistent")
 	}
+
+	// Whether a client-scoped config may be persistent depends on whether the target's ID
+	// survives a restart, which is client state only the manager can see. That check lives
+	// in TelemetryManager.PushCommand.
 
 	cmdID := uuid.New().String()
 	scope := "global"
@@ -257,9 +303,9 @@ func (s *CommandStore) PushCommand(ctx context.Context, req *milvuspb.PushClient
 		failedDeletes := make(map[string]struct{})
 		for _, id := range existingIDs {
 			if err := s.kv.Delete(ctx, s.configPath+id); err != nil {
-				log.Ctx(ctx).Warn("PushCommand: failed to delete old config",
-					zap.String("config_id", id),
-					zap.Error(err))
+				mlog.Warn(ctx, "PushCommand: failed to delete old config",
+					mlog.String("config_id", id),
+					mlog.Err(err))
 				failedDeletes[id] = struct{}{}
 			}
 		}
@@ -279,7 +325,8 @@ func (s *CommandStore) PushCommand(ctx context.Context, req *milvuspb.PushClient
 			Payload:     req.Payload,
 			CreateTime:  createTime,
 			TargetScope: scope,
-			TTLSeconds:  req.TtlSeconds,
+			// Verbatim; 0 is "no expiry". See the note above.
+			TTLSeconds: req.GetTtlSeconds(),
 		}
 		// Update cache
 		s.cacheMu.Lock()
@@ -433,12 +480,26 @@ func (s *CommandStore) DeleteCommand(ctx context.Context, commandID string) erro
 func (s *CommandStore) CleanupExpiredCommands(ctx context.Context) {
 	now := time.Now().UnixMilli()
 
+	// maxReapedSamples bounds the detail in the log line below. A command reaped here is
+	// one no client ever collected, so whoever pushed it is still waiting on a reply that
+	// can never arrive, and the ID and scope are what let them correlate. But nothing
+	// bounds how many commands can expire at once, and formatting every one of them --
+	// inside the read lock, into a single log record -- would turn a large sweep into a
+	// giant allocation, a giant log line, and a long lock hold. A few examples plus the
+	// total is enough to recognize what happened.
+	const maxReapedSamples = 10
+
 	// Find expired commands
 	s.cacheMu.RLock()
 	var expired []string
+	var reaped []string
 	for _, cmd := range s.cache.commands {
 		if cmd.TTLSeconds > 0 && now > cmd.CreateTime+cmd.TTLSeconds*1000 {
 			expired = append(expired, cmd.CommandID)
+			if len(reaped) < maxReapedSamples {
+				reaped = append(reaped, fmt.Sprintf("%s(%s,scope=%s,ttl=%ds)",
+					cmd.CommandID, cmd.CommandType, cmd.TargetScope, cmd.TTLSeconds))
+			}
 		}
 	}
 	s.cacheMu.RUnlock()
@@ -449,7 +510,10 @@ func (s *CommandStore) CleanupExpiredCommands(ctx context.Context) {
 	}
 
 	if len(expired) > 0 {
-		log.Ctx(ctx).Info("CleanupExpiredCommands", zap.Int("deleted", len(expired)))
+		mlog.Info(ctx, "CleanupExpiredCommands: reaped commands no client collected before their TTL",
+			mlog.Int("deleted", len(expired)),
+			mlog.Int("sampled", len(reaped)),
+			mlog.Strings("sample", reaped))
 	}
 }
 
@@ -464,6 +528,39 @@ func (s *CommandStore) DeleteNonPersistentCommand(commandID string) bool {
 		return true
 	}
 	return false
+}
+
+// DeleteCommandOnReply removes a one-time command because a client answered it -- but only
+// when the command was aimed at that single client. Returns true if it was removed.
+//
+// A client-scoped command has exactly one recipient, so the reply that just arrived is the
+// whole answer and the command is finished.
+//
+// A global or database-scoped command is delivered to every matching client, each answering
+// on its own heartbeat. Deleting on the first reply hands whichever client heartbeats
+// soonest the power to cancel delivery to everyone else: with clients on a 30s and a 5min
+// interval, the fast one answers and the slow one never sees the command at all. That made
+// a broadcast collection_metrics -- a state change meant for the whole fleet -- silently
+// apply to part of it, with no error and no way to tell from the outside. Those commands
+// are left to expire on their TTL instead.
+//
+// Retention does not cause re-execution: clients skip commands older than their
+// last_command_timestamp watermark and track executed IDs for same-millisecond ties. It
+// does mean a client that connects during the TTL window also executes the command, which
+// is what you want for a fleet-wide state change and merely noisy for a one-off query.
+func (s *CommandStore) DeleteCommandOnReply(commandID string) bool {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+
+	cmd, ok := s.cache.commands[commandID]
+	if !ok {
+		return false
+	}
+	if !strings.HasPrefix(cmd.TargetScope, clientScopePrefix) {
+		return false
+	}
+	delete(s.cache.commands, commandID)
+	return true
 }
 
 // GetCommandInfo returns command metadata from cache.

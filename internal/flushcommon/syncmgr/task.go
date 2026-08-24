@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -34,8 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -78,6 +77,13 @@ type SyncTask struct {
 
 	manifestPath string
 
+	// stats is the writer-built Statistics for SegmentInfo.Stats: insert /
+	// delta counts and sizes, bloom-filter / BM25 stats_binlog_size,
+	// timestamp_from/to/quantiles. DataCoord persists it directly on
+	// SaveBinlogPathsRequest.Stats; for V2 (or any flush that returns nil
+	// here) the handler falls back to computing from FieldBinlog arrays.
+	stats *datapb.Statistics
+
 	writeRetryOpts []retry.Option
 
 	failureCallback func(err error)
@@ -92,13 +98,13 @@ type SyncTask struct {
 	storageConfig *indexpb.StorageConfig
 }
 
-func (t *SyncTask) getLogger() *log.MLogger {
-	return log.Ctx(context.Background()).With(
-		zap.Int64("collectionID", t.collectionID),
-		zap.Int64("partitionID", t.partitionID),
-		zap.Int64("segmentID", t.segmentID),
-		zap.String("channel", t.channelName),
-		zap.String("level", t.level.String()),
+func (t *SyncTask) getLogger() *mlog.Logger {
+	return mlog.With(
+		mlog.FieldCollectionID(t.collectionID),
+		mlog.FieldPartitionID(t.partitionID),
+		mlog.FieldSegmentID(t.segmentID),
+		mlog.String("channel", t.channelName),
+		mlog.String("level", t.level.String()),
 	)
 }
 
@@ -116,7 +122,7 @@ func (t *SyncTask) HandleError(err error) {
 func (t *SyncTask) Run(ctx context.Context) (err error) {
 	t.tr = timerecord.NewTimeRecorder("syncTask")
 
-	log := t.getLogger()
+	logger := t.getLogger()
 	defer func() {
 		if err != nil {
 			t.HandleError(err)
@@ -126,25 +132,34 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	segmentInfo, has := t.metacache.GetSegmentByID(t.segmentID)
 	if !has {
 		if t.pack.isDrop {
-			log.Info("segment dropped, discard sync task")
+			logger.Info(ctx, "segment dropped, discard sync task")
 			return nil
 		}
-		log.Warn("segment not found in metacache, may be already synced")
+		logger.Warn(ctx, "segment not found in metacache, may be already synced")
 		return nil
 	}
 
 	columnGroups := t.getColumnGroups(segmentInfo)
+
+	// statsWriter, when set (V2 / V3), exposes this sync's prepared cumulative
+	// stats. SyncTask.Run installs it on the metaCache only after the DataCoord
+	// ack below, so a failed/retried sync never double-counts.
+	var statsWriter interface {
+		PreparedStats() *metacache.SegmentStats
+	}
 
 	switch segmentInfo.GetStorageVersion() {
 	case storage.StorageV2:
 		// New sync task means needs to flush data immediately, so do not need to buffer data in writer again.
 		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, t.writeRetryOpts...)
-		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, err = writer.Write(ctx, t.pack)
+		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, t.stats, err = writer.Write(ctx, t.pack)
+		statsWriter = writer
 	case storage.StorageV3:
 		writer := NewBulkPackWriterV3(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, segmentInfo.ManifestPath(), t.writeRetryOpts...)
-		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, err = writer.Write(ctx, t.pack)
+		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, t.stats, err = writer.Write(ctx, t.pack)
+		statsWriter = writer
 	default:
 		writer, writerErr := NewBulkPackWriter(t.metacache, t.schema, t.chunkManager, t.allocator, t.writeRetryOpts...)
 		if writerErr != nil {
@@ -154,7 +169,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	}
 
 	if err != nil {
-		log.Warn("failed to write sync data with storage v2 format", zap.Error(err))
+		logger.Warn(ctx, "failed to write sync data with storage v2 format", mlog.Err(err))
 		return err
 	}
 
@@ -178,7 +193,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	if t.metaWriter != nil {
 		err = t.writeMeta(ctx)
 		if err != nil {
-			log.Warn("failed to save serialized data into storage", zap.Error(err))
+			logger.Warn(ctx, "failed to save serialized data into storage", mlog.Err(err))
 			return err
 		}
 	}
@@ -192,15 +207,20 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	if t.pack.isFlush {
 		actions = append(actions, metacache.UpdateState(commonpb.SegmentState_Flushed))
 	}
+	// Install the prepared cumulative stats directly in the commit transaction:
+	// no digest work, the exact object whose Publish() DataCoord just persisted.
+	if statsWriter != nil {
+		actions = append(actions, metacache.SetStatistics(statsWriter.PreparedStats()))
+	}
 	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segmentID))
 
 	if t.pack.isDrop {
 		t.metacache.RemoveSegments(metacache.WithSegmentIDs(t.segmentID))
-		log.Info("segment removed", zap.Int64("segmentID", t.segmentID), zap.String("channel", t.channelName))
+		logger.Info(ctx, "segment removed", mlog.FieldSegmentID(t.segmentID), mlog.String("channel", t.channelName))
 	}
 
 	t.execTime = t.tr.ElapseSpan()
-	log.Info("task done", zap.Int64("flushedSize", t.flushedSize), zap.Duration("timeTaken", t.execTime))
+	logger.Info(ctx, "task done", mlog.Int64("flushedSize", t.flushedSize), mlog.Duration("timeTaken", t.execTime))
 
 	if !t.pack.isFlush {
 		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.SuccessLabel, t.level.String()).Inc()
@@ -214,26 +234,30 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 }
 
 func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) []storagecommon.ColumnGroup {
-	// column group only needed for storage v2 segment
+	return resolveColumnGroups(segmentInfo, t.schema, t.segmentID, t.calcColumnStats)
+}
+
+func resolveColumnGroups(segmentInfo *metacache.SegmentInfo, schema *schemapb.CollectionSchema, segmentID int64, calcColumnStats func() map[int64]storagecommon.ColumnStats) []storagecommon.ColumnGroup {
+	// column group only needed for storage v2/v3 segments
 	if segmentInfo.GetStorageVersion() != storage.StorageV2 && segmentInfo.GetStorageVersion() != storage.StorageV3 {
 		return nil
 	}
 
 	// empty pack
-	if len(t.pack.insertData) == 0 && t.schema == nil {
+	if schema == nil {
 		return nil
 	}
 
-	allFields := typeutil.GetAllFieldSchemas(t.schema)
+	allFields := typeutil.GetAllFieldSchemas(schema)
 
 	// use previous split if already exists
 	if currentSplit := segmentInfo.GetCurrentSplit(); currentSplit != nil {
 		for _, cg := range currentSplit {
 			// legacy split found, use legacy policy
 			if len(cg.Fields) == 0 {
-				result := storagecommon.SplitColumns(allFields, map[int64]storagecommon.ColumnStats{}, storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
+				result := storagecommon.SplitColumns(allFields, map[int64]storagecommon.ColumnStats{}, storagecommon.NewLocalFormatPolicy(), storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
 				result = storagecommon.FillColumnGroupFormats(result, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
-				log.Info("use legacy split policy", zap.Int64("segmentID", t.segmentID), zap.Stringers("columnGroups", result))
+				mlog.Info(context.TODO(), "use legacy split policy", mlog.FieldSegmentID(segmentID), mlog.Stringers("columnGroups", result))
 				return result
 			}
 		}
@@ -254,9 +278,13 @@ func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) []storage
 	}
 
 	policies := storagecommon.DefaultPolicies()
-	result := storagecommon.SplitColumns(allFields, t.calcColumnStats(), policies...)
+	stats := map[int64]storagecommon.ColumnStats{}
+	if calcColumnStats != nil {
+		stats = calcColumnStats()
+	}
+	result := storagecommon.SplitColumns(allFields, stats, policies...)
 	result = storagecommon.FillColumnGroupFormats(result, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
-	log.Info("sync new split columns", zap.Int64("segmentID", t.segmentID), zap.Stringers("columnGroups", result))
+	mlog.Info(context.TODO(), "sync new split columns", mlog.FieldSegmentID(segmentID), mlog.Stringers("columnGroups", result))
 	return result
 }
 

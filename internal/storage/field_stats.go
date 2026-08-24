@@ -17,13 +17,13 @@
 package storage
 
 import (
-	"go.uber.org/zap"
+	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -166,44 +166,66 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 		if bfMessage, ok := messageMap["bf"]; ok && bfMessage != nil {
 			bf, err := bloomfilter.UnmarshalJSON(*bfMessage, bfType)
 			if err != nil {
-				log.Warn("Failed to unmarshal bloom filter, use AlwaysTrueBloomFilter instead of return err", zap.Error(err))
+				mlog.Warn(context.TODO(), "Failed to unmarshal bloom filter, use AlwaysTrueBloomFilter instead of return err", mlog.Err(err))
 				bf = bloomfilter.AlwaysTrueBloomFilter
 			}
 			stats.BF = bf
 		}
 	} else {
-		stats.initCentroids(data, stats.Type)
-		err = json.Unmarshal(*messageMap["centroids"], &stats.Centroids)
-		if err != nil {
-			return err
+		// "centroids" carries no omitempty, so a snapshot Milvus wrote always has the
+		// key, null when there is nothing to store. Types without centroid support also
+		// reach this branch, so only a float vector may read a missing key as corruption.
+		value, ok := messageMap["centroids"]
+		switch {
+		case value != nil:
+			if err := stats.unmarshalCentroids(*value, stats.Type); err != nil {
+				return err
+			}
+		case !ok && stats.Type == schemapb.DataType_FloatVector:
+			// Accepting this silently hands segment pruning an empty centroid set,
+			// which degrades to a full scan with no signal.
+			return merr.WrapErrDataIntegrityMsg("field stats of field %d has no centroids key", stats.FieldID)
 		}
 	}
 
 	return nil
 }
 
-func (stats *FieldStats) initCentroids(data []byte, dataType schemapb.DataType) {
-	type FieldStatsAux struct {
-		FieldID   int64                            `json:"fieldID"`
-		Type      schemapb.DataType                `json:"type"`
-		Max       json.RawMessage                  `json:"max"`
-		Min       json.RawMessage                  `json:"min"`
-		BF        bloomfilter.BloomFilterInterface `json:"bf"`
-		Centroids []json.RawMessage                `json:"centroids"`
+// unmarshalCentroids decodes the centroid array into the concrete VectorFieldValue
+// implementation chosen by dataType.
+//
+// Each centroid is decoded explicitly rather than pre-allocating concrete values into
+// the interface slice and letting the decoder fill them in place. That older trick
+// needed a pre-pass over the whole blob, which sonic's arm64 decoder aborts: it rejects
+// null into an interface whose method set carries UnmarshalJSON, and a vector field
+// always serializes "bf" as null. Nothing got pre-allocated, so partition stats with
+// centroids failed to load on arm64 and pruning silently fell back to a full scan
+// (#51869).
+func (stats *FieldStats) unmarshalCentroids(data json.RawMessage, dataType schemapb.DataType) error {
+	var rawCentroids []json.RawMessage
+	if err := json.Unmarshal(data, &rawCentroids); err != nil {
+		return merr.WrapErrDataIntegrity(err, "field stats of field %d has a malformed centroids array", stats.FieldID)
 	}
-	// Unmarshal JSON into the auxiliary struct
-	var aux FieldStatsAux
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return
-	}
-	for i := 0; i < len(aux.Centroids); i++ {
+
+	centroids := make([]VectorFieldValue, 0, len(rawCentroids))
+	for i, rawCentroid := range rawCentroids {
 		switch dataType {
 		case schemapb.DataType_FloatVector:
-			stats.Centroids = append(stats.Centroids, &FloatVectorFieldValue{})
+			centroid := &FloatVectorFieldValue{}
+			if err := json.Unmarshal(rawCentroid, centroid); err != nil {
+				return merr.WrapErrDataIntegrity(err, "field stats of field %d has a malformed centroid at index %d", stats.FieldID, i)
+			}
+			centroids = append(centroids, centroid)
 		default:
-			// other vector datatype
+			// Fail loudly rather than dropping the centroids: a silently empty
+			// snapshot degrades segment pruning to a full scan with no signal.
+			return merr.WrapErrDataIntegrityMsg("field stats of field %d has centroids for unsupported data type %s",
+				stats.FieldID, dataType.String())
 		}
 	}
+
+	stats.Centroids = centroids
+	return nil
 }
 
 func (stats *FieldStats) UpdateByMsgs(msgs FieldData) {

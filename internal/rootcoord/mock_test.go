@@ -23,7 +23,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -39,7 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -101,6 +100,7 @@ type mockMetaTable struct {
 	ListPolicyFunc                   func(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error)
 	ListUserRoleFunc                 func(ctx context.Context, tenant string) ([]string, error)
 	DescribeDatabaseFunc             func(ctx context.Context, dbName string) (*model.Database, error)
+	GetAvailableCollectionCountFunc  func(ctx context.Context, dbID int64) (int, int, bool)
 	CreatePrivilegeGroupFunc         func(ctx context.Context, groupName string) error
 	DropPrivilegeGroupFunc           func(ctx context.Context, groupName string) error
 	IsCustomPrivilegeGroupFunc       func(ctx context.Context, groupName string) (bool, error)
@@ -111,6 +111,10 @@ type mockMetaTable struct {
 
 func (m mockMetaTable) GetDatabaseByName(ctx context.Context, dbName string, ts Timestamp) (*model.Database, error) {
 	return m.DescribeDatabaseFunc(ctx, dbName)
+}
+
+func (m mockMetaTable) GetAvailableCollectionCount(ctx context.Context, dbID int64) (int, int, bool) {
+	return m.GetAvailableCollectionCountFunc(ctx, dbID)
 }
 
 func (m mockMetaTable) ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Database, error) {
@@ -770,9 +774,9 @@ func cleanTestEnv() {
 		return
 	}
 	if err := os.RemoveAll(path); err != nil { //nolint:gosec // path is from test environment variable
-		log.Warn("failed to clean test directories", zap.Error(err), zap.String("path", path))
+		mlog.Warn(context.TODO(), "failed to clean test directories", mlog.Err(err), mlog.String("path", path))
 	}
-	log.Debug("clean test environment", zap.String("path", path))
+	mlog.Debug(context.TODO(), "clean test environment", mlog.String("path", path))
 }
 
 func withTtSynchronizer(ticker *timetickSync) Opt {
@@ -1064,12 +1068,12 @@ func newChanTimeTickSync(packChan chan *msgstream.ConsumeMsgPack) *timetickSync 
 	f.NewMsgStreamFunc = func(ctx context.Context) (msgstream.MsgStream, error) {
 		stream := msgstream.NewWastedMockMsgStream()
 		stream.BroadcastFunc = func(pack *msgstream.MsgPack) error {
-			log.Info("mock Broadcast")
+			mlog.Info(context.TODO(), "mock Broadcast")
 			packChan <- msgstream.BuildConsumeMsgPack(pack)
 			return nil
 		}
 		stream.BroadcastMarkFunc = func(pack *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
-			log.Info("mock BroadcastMark")
+			mlog.Info(context.TODO(), "mock BroadcastMark")
 			packChan <- msgstream.BuildConsumeMsgPack(pack)
 			return map[string][]msgstream.MessageID{}, nil
 		}

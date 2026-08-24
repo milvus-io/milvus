@@ -1,18 +1,19 @@
 package testcases
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -265,7 +266,7 @@ func TestQueryOutputFields(t *testing.T) {
 		if enableDynamic {
 			common.CheckErr(t, err2, true)
 			for _, c := range res2.Fields {
-				log.Info("data", zap.String("name", c.Name()), zap.Any("type", c.Type()), zap.Any("data", c.FieldData()))
+				mlog.Info(context.TODO(), "data", mlog.String("name", c.Name()), mlog.Any("type", c.Type()), mlog.Any("data", c.FieldData()))
 			}
 			common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, fakeName}, res2.Fields)
 			dynamicColumn := hp.MergeColumnsToDynamic(10, []column.Column{}, common.DefaultDynamicFieldName)
@@ -655,7 +656,7 @@ func TestQueryCountJsonDynamicExpr(t *testing.T) {
 	}
 
 	for _, _exprCount := range exprCounts {
-		log.Debug("TestQueryCountJsonDynamicExpr", zap.String("expr", _exprCount.expr))
+		mlog.Debug(context.TODO(), "TestQueryCountJsonDynamicExpr", mlog.String("expr", _exprCount.expr))
 		countRes, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(_exprCount.expr).WithOutputFields(common.QueryCountFieldName))
 		count, _ := countRes.Fields[0].GetAsInt64(0)
 		require.Equal(t, _exprCount.count, count)
@@ -701,7 +702,7 @@ func TestQueryNestedJsonExpr(t *testing.T) {
 		{expr: nestedExpr, count: 500},
 	}
 	for _, _exprCount := range exprCounts {
-		log.Info("TestQueryCountJsonDynamicExpr", zap.String("expr", _exprCount.expr))
+		mlog.Info(context.TODO(), "TestQueryCountJsonDynamicExpr", mlog.String("expr", _exprCount.expr))
 		countRes, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(_exprCount.expr).WithOutputFields(common.QueryCountFieldName))
 		count, _ := countRes.Fields[0].GetAsInt64(0)
 		require.Equal(t, _exprCount.count, count)
@@ -950,7 +951,7 @@ func TestQueryObjectJsonExpr(t *testing.T) {
 		{expr: fmt.Sprintf("%s['interface'][6]['double'][3] == 1.7976931348623157e+308", common.DefaultJSONFieldName), count: common.DefaultNb},
 		{expr: fmt.Sprintf("%s['interface'][7]['bool'][0] == true", common.DefaultJSONFieldName), count: common.DefaultNb},
 		{expr: fmt.Sprintf("%s['interface'][7]['bool'][1] == false", common.DefaultJSONFieldName), count: common.DefaultNb},
-		{expr: fmt.Sprintf("array_length(%s['interface'][0]['empty_array']) == 0", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("array_length(%s['interface'][8]['empty_array']) == 0", common.DefaultJSONFieldName), count: common.DefaultNb},
 
 		// language
 		{expr: fmt.Sprintf("%s['language'][0]['中文'] == '月亮'", common.DefaultJSONFieldName), count: common.DefaultNb},
@@ -1089,7 +1090,7 @@ func TestQueryArrayFieldExpr(t *testing.T) {
 	}
 
 	for _, _exprCount := range exprCounts {
-		log.Debug("TestQueryCountJsonDynamicExpr", zap.String("expr", _exprCount.expr))
+		mlog.Debug(context.TODO(), "TestQueryCountJsonDynamicExpr", mlog.String("expr", _exprCount.expr))
 		countRes, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(_exprCount.expr).WithOutputFields(common.QueryCountFieldName))
 		count, _ := countRes.Fields[0].GetAsInt64(0)
 		require.Equal(t, _exprCount.count, count)
@@ -1289,4 +1290,79 @@ func TestRunAnalyzer(t *testing.T) {
 	for i, text := range []string{"doc"} {
 		require.Equal(t, text, tokens[0].Tokens[i].Text)
 	}
+}
+
+// test query with order by fields
+func TestQueryOrderBy(t *testing.T) {
+	t.Parallel()
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	// The default query path already returns rows in pk-ascending order, so ordering
+	// by the pk cannot tell "order_by applied" from "order_by ignored". Use a scalar
+	// field holding a permutation of 0..nb-1 that is non-monotonic in the pk, so both
+	// asc and desc results differ from the default order.
+	collName := common.GenRandomString("query_order_by", 6)
+	scoreField := "score"
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithField(entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName(scoreField).WithDataType(entity.FieldTypeInt64)).
+		WithField(entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	nb := 200
+	pks := make([]int64, nb)
+	scores := make([]int64, nb)
+	for i := 0; i < nb; i++ {
+		pks[i] = int64(i)
+		scores[i] = int64((i*7 + 3) % nb) // gcd(7, nb)=1 -> permutation, non-monotonic in pk
+	}
+	vecColumn := hp.GenColumnData(nb, entity.FieldTypeFloatVector, *hp.TNewDataOption().TWithDim(common.DefaultDim))
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName,
+		column.NewColumnInt64(common.DefaultInt64FieldName, pks),
+		column.NewColumnInt64(scoreField, scores),
+		vecColumn))
+	common.CheckErr(t, err, true)
+
+	flushTask, err := mc.Flush(ctx, client.NewFlushOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, flushTask.Await(ctx), true)
+	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, common.DefaultFloatVecFieldName, index.NewAutoIndex(entity.L2)))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, idxTask.Await(ctx), true)
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, loadTask.Await(ctx), true)
+
+	expr := fmt.Sprintf("%s >= 0", common.DefaultInt64FieldName)
+
+	// order by score asc (direction defaults to asc)
+	ascRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter(expr).WithLimit(nb).
+		WithOutputFields(scoreField).WithConsistencyLevel(entity.ClStrong).
+		WithOrderByFields(scoreField))
+	common.CheckErr(t, err, true)
+	ascScores := ascRes.GetColumn(scoreField).(*column.ColumnInt64).Data()
+	require.Len(t, ascScores, nb)
+	for i := 0; i < nb; i++ {
+		require.EqualValues(t, i, ascScores[i])
+	}
+
+	// order by score desc
+	descRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter(expr).WithLimit(nb).
+		WithOutputFields(scoreField).WithConsistencyLevel(entity.ClStrong).
+		WithOrderByFields(scoreField+":desc"))
+	common.CheckErr(t, err, true)
+	descScores := descRes.GetColumn(scoreField).(*column.ColumnInt64).Data()
+	require.Len(t, descScores, nb)
+	for i := 0; i < nb; i++ {
+		require.EqualValues(t, nb-1-i, descScores[i])
+	}
+
+	// order by without limit is rejected
+	_, err = mc.Query(ctx, client.NewQueryOption(collName).WithFilter(expr).
+		WithOrderByFields(scoreField+":desc"))
+	common.CheckErr(t, err, false, "ORDER BY requires explicit limit")
 }

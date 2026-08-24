@@ -1,11 +1,12 @@
 package rocksdbkv
 
 import (
+	"context"
 	"runtime"
 
 	"github.com/tecbot/gorocksdb"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 /**
@@ -24,7 +25,7 @@ func NewRocksIterator(db *gorocksdb.DB, opts *gorocksdb.ReadOptions) *RocksItera
 	it := &RocksIterator{iter, nil, false}
 	runtime.SetFinalizer(it, func(rocksit *RocksIterator) {
 		if !rocksit.close {
-			log.Error("iterator is leaking.. please check")
+			mlog.Error(context.TODO(), "iterator is leaking.. please check")
 		}
 	})
 	return it
@@ -35,7 +36,7 @@ func NewRocksIteratorCF(db *gorocksdb.DB, cf *gorocksdb.ColumnFamilyHandle, opts
 	it := &RocksIterator{iter, nil, false}
 	runtime.SetFinalizer(it, func(rocksit *RocksIterator) {
 		if !rocksit.close {
-			log.Error("iterator is leaking.. please check")
+			mlog.Error(context.TODO(), "iterator is leaking.. please check")
 		}
 	})
 	return it
@@ -48,7 +49,7 @@ func NewRocksIteratorWithUpperBound(db *gorocksdb.DB, upperBoundString string, o
 	it := &RocksIterator{iter, upperBound, false}
 	runtime.SetFinalizer(it, func(rocksit *RocksIterator) {
 		if !rocksit.close {
-			log.Error("iterator is leaking.. please check")
+			mlog.Error(context.TODO(), "iterator is leaking.. please check")
 		}
 	})
 	return it
@@ -61,7 +62,7 @@ func NewRocksIteratorCFWithUpperBound(db *gorocksdb.DB, cf *gorocksdb.ColumnFami
 	it := &RocksIterator{iter, upperBound, false}
 	runtime.SetFinalizer(it, func(rocksit *RocksIterator) {
 		if !rocksit.close {
-			log.Error("iteratorCF is leaking.. please check")
+			mlog.Error(context.TODO(), "iteratorCF is leaking.. please check")
 		}
 	})
 	return it

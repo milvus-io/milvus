@@ -290,10 +290,6 @@ TEST_P(TaskTest, RegisterFunction) {
     milvus::exec::expression::FunctionFactory& factory =
         milvus::exec::expression::FunctionFactory::Instance();
     ASSERT_EQ(factory.GetFilterFunctionNum(), 2);
-    auto all_functions = factory.ListAllFilterFunctions();
-    // for (auto& f : all_functions) {
-    //     std::cout << f.toString() << std::endl;
-    // }
 
     auto func_ptr = factory.GetFilterFunction(
         milvus::exec::expression::FilterFunctionRegisterKey{
@@ -383,6 +379,35 @@ TEST_P(TaskTest, UnaryExpr) {
                     .count();
     std::cout << "cost: " << cost << "us" << std::endl;
     EXPECT_EQ(num_rows, num_rows_);
+}
+
+TEST_P(TaskTest, DetermineExecPathFailureReleasesTaskDriverCycle) {
+    proto::plan::GenericValue int_value;
+    int_value.set_int64_val(1);
+    proto::plan::GenericValue string_value;
+    string_value.set_string_val("1");
+    auto logical_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(field_map_["json"], DataType::JSON, {"v"}),
+        std::vector<proto::plan::GenericValue>{int_value, string_value},
+        false);
+    auto filter_node = std::make_shared<plan::FilterBitsNode>(
+        "mixed-json-term", logical_expr, std::vector<plan::PlanNodePtr>{});
+    auto query_context =
+        std::make_shared<QueryContext>("mixed-json-term",
+                                       segment_.get(),
+                                       num_rows_,
+                                       MAX_TIMESTAMP,
+                                       0,
+                                       0,
+                                       query::PlanOptions{false},
+                                       std::make_shared<QueryConfig>());
+
+    auto task = Task::Create(
+        "mixed-json-term", plan::PlanFragment(filter_node), 0, query_context);
+    std::weak_ptr<Task> weak_task = task;
+    EXPECT_ANY_THROW(task->Next());
+    task.reset();
+    EXPECT_TRUE(weak_task.expired());
 }
 
 TEST_P(TaskTest, LogicalExpr) {
@@ -925,7 +950,8 @@ TEST(TaskTest, SkipIndexWithBitmapInputAlignment) {
 
     // Verify SkipIndex is working before running the expression:
     // Check if chunk 0 can be skipped for float > 60
-    auto& skip_index = segment->GetSkipIndex();
+    auto skip_index_owner = segment->GetSkipIndex();
+    const auto& skip_index = *skip_index_owner;
     bool chunk0_can_skip = skip_index.CanSkipUnaryRange<float>(
         float_fid, 0, proto::plan::OpType::GreaterThan, 60.0f);
     bool chunk1_can_skip = skip_index.CanSkipUnaryRange<float>(

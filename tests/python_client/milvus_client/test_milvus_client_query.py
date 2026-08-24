@@ -806,6 +806,68 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_with_multiple_namespaces(self):
+        """
+        target: test query with namespace enabled
+        method: create namespace-enabled collection with multiple shards, insert rows into multiple namespaces, then query by namespace
+        expected: query only returns rows from the requested namespace
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        shards_num = 4
+        self.create_collection(
+            client,
+            collection_name,
+            default_dim,
+            consistency_level="Strong",
+            enable_namespace=True,
+            shards_num=shards_num,
+        )
+
+        desc = self.describe_collection(client, collection_name)[0]
+        assert desc["enable_namespace"] is True
+        assert desc["num_shards"] == shards_num
+
+        rng = np.random.default_rng(seed=19530)
+        namespaces = [f"namespace_{i}" for i in range(8)]
+        nb_per_namespace = 10
+        ids_by_namespace = {
+            namespace: [idx * 1000 + i for i in range(nb_per_namespace)]
+            for idx, namespace in enumerate(namespaces)
+        }
+        for namespace, ids in ids_by_namespace.items():
+            rows = [
+                {
+                    default_primary_key_field_name: pk,
+                    default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                }
+                for pk in ids
+            ]
+            self.insert(client, collection_name, rows, namespace=namespace)
+
+        for namespace, expected_ids in ids_by_namespace.items():
+            res = self.query(
+                client,
+                collection_name,
+                filter=default_search_exp,
+                output_fields=[default_primary_key_field_name],
+                namespace=namespace,
+            )[0]
+            assert {r[default_primary_key_field_name] for r in res} == set(expected_ids)
+
+        first_id_per_namespace = [ids[0] for ids in ids_by_namespace.values()]
+        for namespace, expected_ids in ids_by_namespace.items():
+            filtered = self.query(
+                client,
+                collection_name,
+                filter=f"{default_primary_key_field_name} in {first_id_per_namespace}",
+                output_fields=[default_primary_key_field_name],
+                namespace=namespace,
+            )[0]
+            assert {r[default_primary_key_field_name] for r in filtered} == {expected_ids[0]}
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_query_output_fields(self):
         """
         target: test query (high level api) normal case
@@ -2044,7 +2106,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                 "listFlt": [m * 1.0 for m in range(i, i + limit)],
                 "listBool": [bool(i % 2)],
                 "listList": [[i, str(i + 1)], [i * 1.0, i + 1]],
-                "listMix": [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]],
+                "listMix": [i, i + 0.5, str(i), bool(i % 2), [i, str(i)]],
             }
         self.insert(client, collection_name, rows)
         # 3. create index and load
@@ -2113,7 +2175,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                 "listFlt": [m * 1.0 for m in range(i, i + limit)],
                 "listBool": [bool(i % 2)],
                 "listList": [[i, str(i + 1)], [i * 1.0, i + 1]],
-                "listMix": [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]],
+                "listMix": [i, i + 0.5, str(i), bool(i % 2), [i, str(i)]],
             }
         self.insert(client, collection_name, rows)
         # 3. create index and load
@@ -2413,7 +2475,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         flt_data = [[m * 1.0 for m in range(i, i + limit)] for i in range(default_nb)]
         bool_data = [[bool(i % 2)] for i in range(default_nb)]
         list_data = [[[i, str(i + 1)], [i * 1.0, i + 1]] for i in range(default_nb)]
-        mix_data = [[i, i * 1.1, str(i), bool(i % 2), [i, str(i)]] for i in range(default_nb)]
+        mix_data = [[i, i + 0.5, str(i), bool(i % 2), [i, str(i)]] for i in range(default_nb)]
 
         for i in range(default_nb):
             rows[i][ct.default_json_field_name] = {
@@ -5380,6 +5442,99 @@ class TestQueryArray(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_array_contains_merge_equivalence(self):
+        """
+        target: compare merged ARRAY contains predicates with explicit contains_any/contains_all
+        method: query nullable, empty, and duplicate-element arrays in growing and sealed/indexed segments
+        expected: original and explicit predicates return identical primary keys in both execution paths
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        array_field = "array_values"
+
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(
+            array_field,
+            DataType.ARRAY,
+            element_type=DataType.INT64,
+            max_capacity=16,
+            nullable=True,
+        )
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+
+        vector_index = self.prepare_index_params(client)[0]
+        vector_index.add_index(field_name="vector", index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, vector_index)
+        self.load_collection(client, collection_name)
+
+        arrays = [[], None, [1], [2], [1, 2], [1, 1, 2], [3]]
+        vectors = cf.gen_vectors(len(arrays), default_dim)
+        rows = [
+            {"id": row_id, "vector": vectors[row_id], array_field: array}
+            for row_id, array in enumerate(arrays)
+        ]
+        self.insert(client, collection_name, rows)
+
+        predicate_cases = [
+            (
+                f"array_contains({array_field}, 1) or array_contains({array_field}, 2)",
+                f"array_contains_any({array_field}, [1, 2])",
+                {2, 3, 4, 5},
+            ),
+            (
+                f"array_contains({array_field}, 1) and array_contains({array_field}, 2)",
+                f"array_contains_all({array_field}, [1, 2])",
+                {4, 5},
+            ),
+            (
+                f"array_contains({array_field}, 1) or array_contains({array_field}, 1)",
+                f"array_contains_any({array_field}, [1, 1])",
+                {2, 4, 5},
+            ),
+            (
+                f"array_contains({array_field}, 1) and array_contains({array_field}, 1)",
+                f"array_contains_all({array_field}, [1, 1])",
+                {2, 4, 5},
+            ),
+        ]
+
+        def assert_equivalent():
+            for original, explicit, expected_ids in predicate_cases:
+                original_result = self.query(
+                    client,
+                    collection_name,
+                    filter=original,
+                    output_fields=["id"],
+                    limit=len(rows),
+                )[0]
+                explicit_result = self.query(
+                    client,
+                    collection_name,
+                    filter=explicit,
+                    output_fields=["id"],
+                    limit=len(rows),
+                )[0]
+                original_ids = {record["id"] for record in original_result}
+                explicit_ids = {record["id"] for record in explicit_result}
+                assert original_ids == explicit_ids == expected_ids
+
+        # Loaded-before-insert data stays in the growing segment.
+        assert_equivalent()
+
+        # Flush and add an ARRAY scalar index to exercise the sealed/indexed path.
+        self.flush(client, collection_name)
+        self.release_collection(client, collection_name)
+        array_index = self.prepare_index_params(client)[0]
+        array_index.add_index(field_name=array_field, index_type="INVERTED")
+        self.create_index(client, collection_name, array_index)
+        self.load_collection(client, collection_name)
+        assert_equivalent()
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("use_index", [True, False])
     @pytest.mark.parametrize("index_type", ["INVERTED", "BITMAP"])
     def test_milvus_client_query_array_with_prefix_like(self, use_index, index_type):
@@ -6284,7 +6439,7 @@ class TestQueryCount(TestMilvusClientV2Base):
         # 3. create index and load
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(
-            field_name=ct.default_float_vec_field_name, index_type="IVF_SQ8", metric_type="L2", params={"nlist": 64}
+            field_name=ct.default_float_vec_field_name, index_type="FLAT", metric_type="L2", params={}
         )
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)

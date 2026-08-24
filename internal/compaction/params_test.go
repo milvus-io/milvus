@@ -41,6 +41,7 @@ func TestGetJSONParams(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, Params{
 		StorageVersion:            storageVersion,
+		StorageFormat:             paramtable.Get().DataNodeCfg.StorageFormat.GetValue(),
 		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
 		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
@@ -53,6 +54,36 @@ func TestGetJSONParams(t *testing.T) {
 		TextMaxLobFileBytes:       getTextMaxLobFileBytes(),
 		TextFlushThresholdBytes:   getTextFlushThresholdBytes(),
 	}, result)
+}
+
+func TestCreateStorageConfigMaxConnections(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "minio")
+	pt.Save(pt.MinioCfg.MaxConnections.Key, "237")
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.MinioCfg.MaxConnections.Key)
+	})
+
+	assert.Equal(t, uint32(237), CreateStorageConfig().GetMaxConnections())
+}
+
+// An external collection can reference an s3:// source while the cluster's
+// primary storage is local, so the local branch must carry the connection cap
+// too — otherwise the operator's minio.maxConnections is silently dropped for
+// that topology.
+func TestCreateStorageConfigMaxConnectionsLocalStorage(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	pt.Save(pt.MinioCfg.MaxConnections.Key, "237")
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.MinioCfg.MaxConnections.Key)
+	})
+
+	assert.Equal(t, uint32(237), CreateStorageConfig().GetMaxConnections())
 }
 
 func TestGetParamsFromJSON(t *testing.T) {

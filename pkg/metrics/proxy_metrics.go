@@ -139,15 +139,6 @@ var (
 			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName, queryTypeLabelName})
 
-	// ProxyMsgStreamObjectsForPChan record the number of MsgStream objects per PChannel on each collection_id on Proxy.
-	ProxyMsgStreamObjectsForPChan = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.ProxyRole,
-			Name:      "msgstream_obj_num",
-			Help:      "number of MsgStream objects per physical channel",
-		}, []string{nodeIDLabelName, channelNameLabelName})
-
 	// ProxySendMutationReqLatency record the latency that Proxy send insert request to MsgStream.
 	ProxySendMutationReqLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -233,7 +224,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "req_count",
 			Help:      "count of operation executed",
-		}, []string{nodeIDLabelName, functionLabelName, statusLabelName, databaseLabelName, collectionName})
+		}, []string{nodeIDLabelName, functionLabelName, statusLabelName, causeLabelName, databaseLabelName, collectionName})
 
 	// ProxyReqLatency records the latency for each grpc request.
 	ProxyGRPCLatency = prometheus.NewHistogramVec(
@@ -243,7 +234,7 @@ var (
 			Name:      "grpc_latency",
 			Help:      "latency of each grpc request",
 			Buckets:   buckets, // unit: ms
-		}, []string{nodeIDLabelName, functionLabelName, statusLabelName})
+		}, []string{nodeIDLabelName, functionLabelName, statusLabelName, causeLabelName})
 
 	// ProxyReqLatency records the latency that for all requests, like "CreateCollection".
 	ProxyReqLatency = prometheus.NewHistogramVec(
@@ -510,8 +501,6 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyReduceResultLatency)
 	registry.MustRegister(ProxyDecodeResultLatency)
 
-	registry.MustRegister(ProxyMsgStreamObjectsForPChan)
-
 	registry.MustRegister(ProxySendMutationReqLatency)
 
 	registry.MustRegister(ProxyAssignSegmentIDLatency)
@@ -611,6 +600,11 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 		collectionName:    collection,
 	})
 	ProxyUpsertVectors.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	})
+	ProxyDeleteVectors.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
 		collectionName:    collection,
@@ -780,5 +774,13 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 		msgTypeLabelName:  DeleteLabel,
 		databaseLabelName: dbName,
 		collectionName:    collection,
+	})
+	ProxySearchSparseNumNonZeros.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName: strconv.FormatInt(nodeID, 10),
+		collectionName:  collection,
+	})
+	ProxyFunctionlatency.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName: strconv.FormatInt(nodeID, 10),
+		collectionName:  collection,
 	})
 }

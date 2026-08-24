@@ -18,6 +18,7 @@
 #include <utility>
 
 #include "common/Tracer.h"
+#include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "exec/Task.h"
 #include "fmt/core.h"
@@ -110,18 +111,6 @@ ExecPlanNodeVisitor::ExecuteTask(
     return ret;
 }
 
-std::unique_ptr<RetrieveResult>
-wrap_num_entities(int64_t cnt) {
-    auto retrieve_result = std::make_unique<RetrieveResult>();
-    DataArray arr;
-    arr.set_type(milvus::proto::schema::Int64);
-    auto scalar = arr.mutable_scalars();
-    scalar->mutable_long_data()->mutable_data()->Add(cnt);
-    retrieve_result->field_data_ = {arr};
-    retrieve_result->total_data_cnt_ = 0;
-    return retrieve_result;
-}
-
 template <typename S, typename T>
 void
 fillTypedDataArray(void* src_raw_data, int64_t count, T* dst) {
@@ -153,7 +142,7 @@ fillDataArrayFromColumnVector(const ColumnVectorPtr& column_vector,
     // Always copy validity data from ColumnVector
     // ColumnVector always tracks validity via valid_values_, so we should
     // always propagate it to ensure correctness for nullable fields
-    auto valid_data = data_array.mutable_valid_data();
+    auto valid_data = MutableFieldDataRowValidData(&data_array);
     const uint8_t* src_bitmap =
         static_cast<const uint8_t*>(column_vector->GetValidRawData());
     AssertInfo(src_bitmap,
@@ -451,6 +440,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
             }
 
             auto op_context = milvus::OpContext(cancel_token_);
+            op_context.trace_span = trace_span_;
             query_context->set_op_context(&op_context);
 
             auto result = ExecuteTask(plan_fragment, query_context);
@@ -510,6 +500,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
+    op_context.trace_span = trace_span_;
     query_context->set_op_context(&op_context);
 
     // Do plan fragment task work

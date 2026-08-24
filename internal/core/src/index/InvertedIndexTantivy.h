@@ -173,6 +173,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     const TargetBitmap
     IsNull() override;
 
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<T>::IsNotNull;
+
     TargetBitmap
     IsNotNull() override;
 
@@ -288,10 +293,12 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     }
 
     bool
-    ShouldUseOp(proto::plan::OpType op) const override {
+    ShouldUseOp(proto::plan::OpType op,
+                const std::string& pattern = "") const override {
         // Suffix/contains LIKE and regex can be executed correctly over indexed
         // terms, but for short varchar values they are often slower than raw
         // scan. Keep only prefix/LIKE Match on the inverted-index path.
+        // (`pattern` unused: this index has no cheap per-literal cost bound.)
         switch (op) {
             case proto::plan::OpType::Match:
             case proto::plan::OpType::PrefixMatch:

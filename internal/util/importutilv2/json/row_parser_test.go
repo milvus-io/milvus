@@ -17,6 +17,7 @@
 package json
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -865,6 +866,201 @@ func TestArrayOfVectorToFieldData_DimensionMismatch(t *testing.T) {
 	result, err := parser.arrayOfVectorToFieldData(vectors, field)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(dim), result.Dim)
+}
+
+func TestArrayOfVectorToFieldData_NonFloatElementTypes(t *testing.T) {
+	fieldID := int64(100)
+	makeField := func(elementType schemapb.DataType, dim string) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			FieldID:     fieldID,
+			Name:        "test_vec",
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: elementType,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: dim},
+			},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		field   *schemapb.FieldSchema
+		dim     int
+		vectors []any
+		verify  func(*schemapb.VectorField)
+	}{
+		{
+			name:    "binary",
+			field:   makeField(schemapb.DataType_BinaryVector, "16"),
+			dim:     16,
+			vectors: []any{[]any{json.Number("3"), json.Number("11")}},
+			verify: func(field *schemapb.VectorField) {
+				assert.Equal(t, []byte{3, 11}, field.GetBinaryVector())
+			},
+		},
+		{
+			name:    "float16",
+			field:   makeField(schemapb.DataType_Float16Vector, "2"),
+			dim:     2,
+			vectors: []any{[]any{json.Number("0.25"), json.Number("0.5")}},
+			verify: func(field *schemapb.VectorField) {
+				expected := append(typeutil.Float32ToFloat16Bytes(0.25), typeutil.Float32ToFloat16Bytes(0.5)...)
+				assert.Equal(t, expected, field.GetFloat16Vector())
+			},
+		},
+		{
+			name:    "bfloat16",
+			field:   makeField(schemapb.DataType_BFloat16Vector, "2"),
+			dim:     2,
+			vectors: []any{[]any{json.Number("0.25"), json.Number("0.5")}},
+			verify: func(field *schemapb.VectorField) {
+				expected := append(typeutil.Float32ToBFloat16Bytes(0.25), typeutil.Float32ToBFloat16Bytes(0.5)...)
+				assert.Equal(t, expected, field.GetBfloat16Vector())
+			},
+		},
+		{
+			name:    "int8",
+			field:   makeField(schemapb.DataType_Int8Vector, "2"),
+			dim:     2,
+			vectors: []any{[]any{json.Number("1"), json.Number("-2")}},
+			verify: func(field *schemapb.VectorField) {
+				assert.Equal(t, typeutil.Int8ArrayToBytes([]int8{1, -2}), field.GetInt8Vector())
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := &rowParser{
+				id2Dim:   map[int64]int{fieldID: tt.dim},
+				id2Field: map[int64]*schemapb.FieldSchema{fieldID: tt.field},
+			}
+			result, err := parser.arrayOfVectorToFieldData(tt.vectors, tt.field)
+			assert.NoError(t, err)
+			assert.Equal(t, int64(tt.dim), result.GetDim())
+			tt.verify(result)
+		})
+	}
+}
+
+func TestParseStructArrayArrayOfVector_NonFloatElementTypes(t *testing.T) {
+	makeSchema := func(elementType schemapb.DataType, dim string) *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      1,
+					Name:         "id",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 200,
+					Name:    "struct_array",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     201,
+							Name:        "struct_array[vec]",
+							DataType:    schemapb.DataType_ArrayOfVector,
+							ElementType: elementType,
+							TypeParams: []*commonpb.KeyValuePair{
+								{Key: common.DimKey, Value: dim},
+								{Key: common.MaxCapacityKey, Value: "4"},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+	makeStructRows := func(vectors ...[]any) []any {
+		rows := make([]any, 0, len(vectors))
+		for _, vector := range vectors {
+			rows = append(rows, map[string]any{"vec": vector})
+		}
+		return rows
+	}
+
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		dim         string
+		rows        []any
+		verify      func(*schemapb.VectorField)
+	}{
+		{
+			name:        "binary",
+			elementType: schemapb.DataType_BinaryVector,
+			dim:         "16",
+			rows: makeStructRows(
+				[]any{json.Number("3"), json.Number("11")},
+				[]any{json.Number("5"), json.Number("7")},
+			),
+			verify: func(field *schemapb.VectorField) {
+				assert.Equal(t, []byte{3, 11, 5, 7}, field.GetBinaryVector())
+			},
+		},
+		{
+			name:        "float16",
+			elementType: schemapb.DataType_Float16Vector,
+			dim:         "2",
+			rows: makeStructRows(
+				[]any{json.Number("0.25"), json.Number("0.5")},
+				[]any{json.Number("0.75"), json.Number("1.0")},
+			),
+			verify: func(field *schemapb.VectorField) {
+				expected := append(typeutil.Float32ToFloat16Bytes(0.25), typeutil.Float32ToFloat16Bytes(0.5)...)
+				expected = append(expected, typeutil.Float32ToFloat16Bytes(0.75)...)
+				expected = append(expected, typeutil.Float32ToFloat16Bytes(1.0)...)
+				assert.Equal(t, expected, field.GetFloat16Vector())
+			},
+		},
+		{
+			name:        "bfloat16",
+			elementType: schemapb.DataType_BFloat16Vector,
+			dim:         "2",
+			rows: makeStructRows(
+				[]any{json.Number("0.25"), json.Number("0.5")},
+				[]any{json.Number("0.75"), json.Number("1.0")},
+			),
+			verify: func(field *schemapb.VectorField) {
+				expected := append(typeutil.Float32ToBFloat16Bytes(0.25), typeutil.Float32ToBFloat16Bytes(0.5)...)
+				expected = append(expected, typeutil.Float32ToBFloat16Bytes(0.75)...)
+				expected = append(expected, typeutil.Float32ToBFloat16Bytes(1.0)...)
+				assert.Equal(t, expected, field.GetBfloat16Vector())
+			},
+		},
+		{
+			name:        "int8",
+			elementType: schemapb.DataType_Int8Vector,
+			dim:         "2",
+			rows: makeStructRows(
+				[]any{json.Number("1"), json.Number("-2")},
+				[]any{json.Number("3"), json.Number("-4")},
+			),
+			verify: func(field *schemapb.VectorField) {
+				assert.Equal(t, typeutil.Int8ArrayToBytes([]int8{1, -2, 3, -4}), field.GetInt8Vector())
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser, err := NewRowParser(makeSchema(tt.elementType, tt.dim))
+			assert.NoError(t, err)
+
+			row, err := parser.Parse(map[string]any{
+				"id":           json.Number("1"),
+				"struct_array": tt.rows,
+			})
+			assert.NoError(t, err)
+			vectorField, ok := row[201].(*schemapb.VectorField)
+			assert.True(t, ok)
+			assert.Equal(t, tt.dim, strconv.FormatInt(vectorField.GetDim(), 10))
+			tt.verify(vectorField)
+		})
+	}
 }
 
 func TestJsonRowParser(t *testing.T) {

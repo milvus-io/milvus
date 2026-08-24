@@ -19,19 +19,21 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -98,7 +100,7 @@ func FilterInIndexedSegments(ctx context.Context, handler Handler, mt *meta, ski
 		coll, err := handler.GetCollection(timeoutCtx, collection)
 		cancel()
 		if err != nil {
-			log.Warn("failed to get collection schema", zap.Error(err))
+			mlog.Warn(ctx, "failed to get collection schema", mlog.Err(err))
 			continue
 		}
 
@@ -355,11 +357,11 @@ func CheckCheckPointsHealth(meta *meta) error {
 	for channel, cp := range meta.GetChannelCheckpoints() {
 		collectionID := funcutil.GetCollectionIDFromVChannel(channel)
 		if collectionID == -1 {
-			log.RatedWarn(60, "can't parse collection id from vchannel, skip check cp lag", zap.String("vchannel", channel))
+			mlog.RatedWarn(context.TODO(), rate.Limit(60), "can't parse collection id from vchannel, skip check cp lag", mlog.FieldVChannel(channel))
 			continue
 		}
 		if meta.GetCollection(collectionID) == nil {
-			log.RatedWarn(60, "corresponding the collection doesn't exists, skip check cp lag", zap.String("vchannel", channel))
+			mlog.RatedWarn(context.TODO(), rate.Limit(60), "corresponding the collection doesn't exists, skip check cp lag", mlog.FieldVChannel(channel))
 			continue
 		}
 		ts, _ := tsoutil.ParseTS(cp.Timestamp)
@@ -378,6 +380,9 @@ func createStorageConfig() *indexpb.StorageConfig {
 		storageConfig = &indexpb.StorageConfig{
 			RootPath:    Params.LocalStorageCfg.Path.GetValue(),
 			StorageType: Params.CommonCfg.StorageType.GetValue(),
+			// External collections may reference an s3:// source even when the
+			// primary storage is local, so the connection cap still applies.
+			MaxConnections: uint32(Params.MinioCfg.MaxConnections.GetAsInt()),
 		}
 	} else {
 		storageConfig = &indexpb.StorageConfig{
@@ -395,6 +400,7 @@ func createStorageConfig() *indexpb.StorageConfig {
 			UseVirtualHost:    Params.MinioCfg.UseVirtualHost.GetAsBool(),
 			CloudProvider:     Params.MinioCfg.CloudProvider.GetValue(),
 			RequestTimeoutMs:  Params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+			MaxConnections:    uint32(Params.MinioCfg.MaxConnections.GetAsInt()),
 			GcpCredentialJSON: Params.MinioCfg.GcpCredentialJSON.GetValue(),
 			SslTlsMinVersion:  Params.MinioCfg.SslTLSMinVersion.GetValue(),
 			UseCrc32CChecksum: Params.MinioCfg.UseCRC32C.GetAsBool(),
@@ -411,9 +417,151 @@ func getSortStatus(sorted bool) string {
 	return "unsorted"
 }
 
-func calculateIndexTaskSlot(fieldSize int64, isVectorIndex bool) int64 {
+const (
+	fmIndexDefaultSASampleRate = int64(8)
+	fmIndexDefaultBlockBytes   = int64(64)
+	fmIndexSuffixArrayExtra    = int64(6144)
+	bytesPerWorkerMemoryUnit   = int64(8 * 1024 * 1024 * 1024)
+)
+
+func saturatingAdd(values ...int64) int64 {
+	var result int64
+	for _, value := range values {
+		if value > math.MaxInt64-result {
+			return math.MaxInt64
+		}
+		result += value
+	}
+	return result
+}
+
+func saturatingMul(left, right int64) int64 {
+	if left <= 0 || right <= 0 {
+		return 0
+	}
+	if left > math.MaxInt64/right {
+		return math.MaxInt64
+	}
+	return left * right
+}
+
+func ceilDiv(value, divisor int64) int64 {
+	if value <= 0 {
+		return 0
+	}
+	return 1 + (value-1)/divisor
+}
+
+func getFMIndexBuildParam(indexParams []*commonpb.KeyValuePair, key string, defaultValue int64) int64 {
+	for _, param := range indexParams {
+		if param.GetKey() != key {
+			continue
+		}
+		value, err := strconv.ParseInt(param.GetValue(), 10, 64)
+		if err == nil && value > 0 {
+			return value
+		}
+		break
+	}
+	return defaultValue
+}
+
+// estimateFMIndexBuildPeakBytes mirrors the allocations in
+// fmindex::FMIndex::Build. fieldSize is the uncompressed VARCHAR payload size;
+// numRows determines the per-row object/view/boundary overhead and separator
+// count. The larger of suffix-array construction and wavelet construction is
+// returned because their scratch buffers do not all overlap.
+func estimateFMIndexBuildPeakBytes(fieldSize, numRows int64, indexParams []*commonpb.KeyValuePair) int64 {
+	fieldSize = max(fieldSize, 0)
+	numRows = max(numRows, 0)
+	saSampleRate := getFMIndexBuildParam(indexParams, indexparamcheck.FmSaSampleRateKey, fmIndexDefaultSASampleRate)
+	blockBytes := getFMIndexBuildParam(indexParams, indexparamcheck.FmBlockBytesKey, fmIndexDefaultBlockBytes)
+
+	// One separator per row and one trailing sentinel are appended to the text.
+	textSymbols := saturatingAdd(fieldSize, numRows, 1)
+	rowBitmaps := saturatingMul(ceilDiv(numRows, 8), 2) // valid + null bitmap
+	inputAndRows := saturatingAdd(
+		fieldSize,
+		saturatingMul(numRows, 32),                  // FieldData std::string objects (libstdc++)
+		saturatingMul(numRows, 16),                  // build-time std::string_view array
+		saturatingMul(saturatingAdd(numRows, 1), 8), // document boundaries
+		rowBitmaps,
+	)
+
+	// The sampled-SA bitmap and its rank9 directory coexist with the suffix
+	// array and remain live through wavelet construction.
+	sampleWords := ceilDiv(textSymbols, 64)
+	sampleBitmap := saturatingMul(sampleWords, 8)
+	sampleDirectory := saturatingMul(saturatingAdd(ceilDiv(sampleWords, 8), 1), 16)
+	sampleCount := saturatingAdd((textSymbols-1)/saSampleRate, 1)
+	sampleWidth := int64(4)
+	if textSymbols >= 1<<32 {
+		sampleWidth = 8
+	}
+	samples := saturatingMul(sampleCount, sampleWidth)
+	shared := saturatingAdd(inputAndRows, sampleBitmap, sampleDirectory, samples)
+
+	// Compact builds hold int32 text + int32 SA (including libsais scratch).
+	// The C++ decision uses the pre-sentinel length, so textSymbols itself can
+	// equal INT32_MAX and still use the compact path.
+	var suffixArrayScratch int64
+	if textSymbols <= math.MaxInt32 {
+		suffixArrayScratch = saturatingAdd(
+			saturatingMul(textSymbols, 4),
+			saturatingMul(saturatingAdd(textSymbols, fmIndexSuffixArrayExtra), 4),
+		)
+	} else {
+		suffixArrayScratch = saturatingMul(textSymbols, 16)
+	}
+	suffixArrayPeak := saturatingAdd(shared, suffixArrayScratch)
+
+	// Wavelet construction holds two uint16 ping-pong buffers plus one packed
+	// 2-bit vector and rank directory per quad level. Five levels is the maximum
+	// for the byte alphabet plus separator/sentinel and is conservative.
+	wordsPerBlock := max(blockBytes/8, 1)
+	waveletWords := ceilDiv(textSymbols, 32)
+	waveletBlocks := ceilDiv(waveletWords, wordsPerBlock)
+	waveletSuperBlocks := ceilDiv(waveletBlocks, 64)
+	waveletDirectoryPerLevel := saturatingAdd(
+		saturatingMul(saturatingAdd(waveletSuperBlocks, 1), 32),
+		saturatingMul(saturatingAdd(waveletBlocks, 1), 8),
+	)
+	waveletLevelBytes := saturatingAdd(saturatingMul(waveletWords, 8), waveletDirectoryPerLevel)
+	waveletPeak := saturatingAdd(
+		shared,
+		saturatingMul(textSymbols, 4),
+		saturatingMul(waveletLevelBytes, 5),
+	)
+
+	return max(suffixArrayPeak, waveletPeak)
+}
+
+func fmIndexBuildTaskSlots(fieldSize, numRows int64, indexParams []*commonpb.KeyValuePair) int64 {
+	// CalculateNodeSlots exposes WorkerSlotUnit * BuildParallel slots per 8 GiB
+	// memory unit. Use the inverse conversion so the coordinator and worker
+	// account for the same amount of memory per slot.
+	workerSlotsPerMemoryUnit := saturatingMul(
+		max(Params.DataNodeCfg.WorkerSlotUnit.GetAsInt64(), 1),
+		max(Params.DataNodeCfg.BuildParallel.GetAsInt64(), 1),
+	)
+	if paramtable.GetRole() == typeutil.StandaloneRole {
+		workerSlotsPerMemoryUnit = max(
+			int64(float64(workerSlotsPerMemoryUnit)*Params.DataNodeCfg.StandaloneSlotRatio.GetAsFloat()),
+			1,
+		)
+	}
+	bytesPerSlot := max(bytesPerWorkerMemoryUnit/workerSlotsPerMemoryUnit, 1)
+	return max(ceilDiv(estimateFMIndexBuildPeakBytes(fieldSize, numRows, indexParams), bytesPerSlot), 1)
+}
+
+func calculateIndexTaskSlot(fieldSize, numRows int64, indexParams []*commonpb.KeyValuePair) int64 {
+	indexType := GetIndexType(indexParams)
+	if indexType == indexparamcheck.IndexFMINDEX {
+		return fmIndexBuildTaskSlots(fieldSize, numRows, indexParams)
+	}
 	defaultSlots := Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()
-	if !isVectorIndex {
+	isHeavyIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
+	if !isHeavyIndex {
 		defaultSlots = Params.DataCoordCfg.ScalarIndexTaskSlotUsage.GetAsInt64()
 	}
 	if fieldSize > 512*1024*1024 {

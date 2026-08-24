@@ -113,7 +113,7 @@ func (h *LexicalHighlighter) addTaskWithSearchText(collInfo *schemaInfo, fieldID
 	return nil
 }
 
-func (h *LexicalHighlighter) addTaskWithQuery(fieldID int64, query *highlightQuery) {
+func (h *LexicalHighlighter) addTaskWithQuery(collInfo *schemaInfo, fieldID int64, query *highlightQuery, analyzerName string) error {
 	task, ok := h.tasks[fieldID]
 	if !ok {
 		task = &highlightTask{
@@ -133,16 +133,33 @@ func (h *LexicalHighlighter) addTaskWithQuery(fieldID int64, query *highlightQue
 	task.Queries = append(task.Queries, &querypb.HighlightQuery{
 		Type: query.highlightType,
 	})
+
+	nameFieldID, err := collInfo.GetMultiAnalyzerNameFieldID(fieldID)
+	if err != nil {
+		return err
+	}
+	if nameFieldID > 0 {
+		if analyzerName == "" {
+			analyzerName = "default"
+		}
+		task.AnalyzerNames = append(task.AnalyzerNames, analyzerName)
+		if !lo.Contains(h.extraFields, nameFieldID) {
+			h.extraFields = append(h.extraFields, nameFieldID)
+		}
+	}
+	return nil
 }
 
-func (h *LexicalHighlighter) initHighlightQueries(t *searchTask) error {
+func (h *LexicalHighlighter) initHighlightQueries(t *searchTask, analyzerName string) error {
 	// add query to highlight tasks
 	for _, query := range h.queries {
 		fieldID, ok := t.schema.MapFieldID(query.fieldName)
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("highlight field not found in schema: %s", query.fieldName)
 		}
-		h.addTaskWithQuery(fieldID, query)
+		if err := h.addTaskWithQuery(t.schema, fieldID, query, analyzerName); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -344,7 +361,7 @@ func rowAlignedStringFieldData(fieldData *schemapb.FieldData, rowNum int) ([]str
 	}
 
 	data := fieldData.GetScalars().GetStringData().GetData()
-	validData := fieldData.GetValidData()
+	validData := typeutil.GetFieldDataValidData(fieldData)
 	if len(validData) == 0 {
 		if len(data) != rowNum {
 			return nil, merr.WrapErrServiceInternalMsg(
@@ -552,6 +569,7 @@ func (op *semanticHighlightOperator) run(ctx context.Context, span trace.Span, i
 	}
 	highlightResults := []*commonpb.HighlightResult{}
 	topks := result.Results.GetTopks()
+	rowNum := searchResultHitCount(resultData)
 
 	// Process schema fields
 	for _, fieldID := range op.highlight.FieldIDs() {
@@ -559,7 +577,10 @@ func (op *semanticHighlightOperator) run(ctx context.Context, span trace.Span, i
 		if !ok {
 			return nil, merr.WrapErrParameterInvalidMsg("get highlight failed, text field not in output field %d", fieldID)
 		}
-		texts := fieldDatas.GetScalars().GetStringData().GetData()
+		texts, err := rowAlignedStringFieldData(fieldDatas, rowNum)
+		if err != nil {
+			return nil, err
+		}
 		fieldName := op.highlight.GetFieldName(fieldID)
 
 		highlightResult, err := op.processFieldHighlight(ctx, fieldName, texts, topks)
@@ -600,6 +621,14 @@ func (op *semanticHighlightOperator) run(ctx context.Context, span trace.Span, i
 
 		for _, dynFieldName := range dynFieldNames {
 			texts := allDynFieldTexts[dynFieldName]
+			// Process slices documents by topks without checking that they sum to
+			// len(documents), so an undersized $meta payload would go out of range
+			// there. Fail with the same error the schema branch returns instead.
+			if len(texts) != rowNum {
+				return nil, merr.WrapErrServiceInternalMsg(
+					"get highlight failed, dynamic field %s has %d rows, expected %d",
+					dynFieldName, len(texts), rowNum)
+			}
 
 			highlightResult, err := op.processFieldHighlight(ctx, dynFieldName, texts, topks)
 			if err != nil {

@@ -25,10 +25,9 @@ import (
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -97,13 +96,13 @@ func Exec(code, auth string) (res string, err error) {
 	}
 	program, err := expr.Compile(code, expr.Env(env), expr.WithContext("ctx"))
 	if err != nil {
-		log.Warn("expr compile failed", zap.String("code", code), zap.Error(err))
+		mlog.Warn(context.TODO(), "expr compile failed", mlog.String("code", code), mlog.Err(err))
 		return "", err
 	}
 
 	output, err := v.Run(program, env)
 	if err != nil {
-		log.Warn("expr run failed", zap.String("code", code), zap.Error(err))
+		mlog.Warn(context.TODO(), "expr run failed", mlog.String("code", code), mlog.Err(err))
 		return "", err
 	}
 	return fmt.Sprintf("%v", output), nil

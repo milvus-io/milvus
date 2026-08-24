@@ -23,15 +23,14 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -127,7 +126,7 @@ func newTimeTickSync(initCtx context.Context, parentLoopCtx context.Context, sou
 	// recover physical channels for all collections
 	for collID, chanNames := range chanMap {
 		dmlChannels.addChannels(chanNames...)
-		log.Ctx(initCtx).Info("recover physical channels", zap.Int64("collectionID", collID), zap.Strings("physical channels", chanNames))
+		mlog.Info(initCtx, "recover physical channels", mlog.Int64("collectionID", collID), mlog.Strings("physical channels", chanNames))
 	}
 
 	return &timetickSync{
@@ -169,8 +168,8 @@ func (t *timetickSync) sendToChannel() bool {
 	if len(idleSessionList) > 0 {
 		// give warning every 2 second if not get ttMsg from source sessions
 		if maxCnt%10 == 0 {
-			log.Warn("session idle for long time", zap.Any("idle list", idleSessionList),
-				zap.Int64("idle time", Params.ProxyCfg.TimeTickInterval.GetAsInt64()*time.Millisecond.Milliseconds()*maxCnt))
+			mlog.Warn(t.ctx, "session idle for long time", mlog.Any("idle list", idleSessionList),
+				mlog.Int64("idle time", Params.ProxyCfg.TimeTickInterval.GetAsInt64()*time.Millisecond.Milliseconds()*maxCnt))
 		}
 		return false
 	}
@@ -213,10 +212,10 @@ func (t *timetickSync) updateTimeTick(in *internalpb.ChannelTimeTickMsg, reason 
 
 	if in.Base.SourceID == t.sourceID {
 		if prev != nil && in.DefaultTimestamp < prev.defaultTs {
-			log.Warn("timestamp go back", zap.Int64("source id", in.Base.SourceID),
-				zap.Uint64("curr ts", in.DefaultTimestamp),
-				zap.Uint64("prev ts", prev.defaultTs),
-				zap.String("reason", reason))
+			mlog.Warn(t.ctx, "timestamp go back", mlog.Int64("source id", in.Base.SourceID),
+				mlog.Uint64("curr ts", in.DefaultTimestamp),
+				mlog.Uint64("prev ts", prev.defaultTs),
+				mlog.String("reason", reason))
 			return nil
 		}
 	}
@@ -235,14 +234,14 @@ func (t *timetickSync) addSession(sess *sessionutil.Session) {
 	defer t.lock.Unlock()
 	rangeChecker := semver.MustParseRange(">=2.6.0-dev")
 	if rangeChecker(sess.Version) {
-		log.Info("new proxy with no timetick join, ignored",
-			zap.String("version", sess.Version.String()),
-			zap.Int64("serverID", sess.ServerID),
-			zap.String("address", sess.Address))
+		mlog.Info(t.ctx, "new proxy with no timetick join, ignored",
+			mlog.String("version", sess.Version.String()),
+			mlog.Int64("serverID", sess.ServerID),
+			mlog.String("address", sess.Address))
 		return
 	}
 	t.sess2ChanTsMap[sess.ServerID] = nil
-	log.Info("Add session for timeticksync", zap.Int64("serverID", sess.ServerID))
+	mlog.Info(t.ctx, "Add session for timeticksync", mlog.Int64("serverID", sess.ServerID))
 }
 
 func (t *timetickSync) delSession(sess *sessionutil.Session) {
@@ -250,7 +249,7 @@ func (t *timetickSync) delSession(sess *sessionutil.Session) {
 	defer t.lock.Unlock()
 	if _, ok := t.sess2ChanTsMap[sess.ServerID]; ok {
 		delete(t.sess2ChanTsMap, sess.ServerID)
-		log.Info("Remove session from timeticksync", zap.Int64("serverID", sess.ServerID))
+		mlog.Info(t.ctx, "Remove session from timeticksync", mlog.Int64("serverID", sess.ServerID))
 		t.sendToChannel()
 	}
 }
@@ -264,14 +263,14 @@ func (t *timetickSync) initSessions(sess []*sessionutil.Session) {
 	rangeChecker := semver.MustParseRange(">=2.6.0-dev")
 	for _, s := range sess {
 		if rangeChecker(s.Version) {
-			log.Info("new proxy with no timetick join, ignored",
-				zap.String("version", s.Version.String()),
-				zap.Int64("serverID", s.ServerID),
-				zap.String("address", s.Address))
+			mlog.Info(t.ctx, "new proxy with no timetick join, ignored",
+				mlog.String("version", s.Version.String()),
+				mlog.Int64("serverID", s.ServerID),
+				mlog.String("address", s.Address))
 			continue
 		}
 		t.sess2ChanTsMap[s.ServerID] = nil
-		log.Info("Init proxy sessions for timeticksync", zap.Int64("serverID", s.ServerID))
+		mlog.Info(t.ctx, "Init proxy sessions for timeticksync", mlog.Int64("serverID", s.ServerID))
 	}
 }
 
@@ -284,11 +283,11 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 
 	if streamingutil.IsStreamingServiceEnabled() {
 		if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(t.ctx, streamingNotifier); err != nil {
-			log.Info("register streaming enabled listener failed", zap.Error(err))
+			mlog.Info(t.ctx, "register streaming enabled listener failed", mlog.Err(err))
 			return
 		}
 		if streamingNotifier.IsReady() {
-			log.Info("streaming service has been enabled, proxy timetick from rootcoord should not start")
+			mlog.Info(t.ctx, "streaming service has been enabled, proxy timetick from rootcoord should not start")
 			return
 		}
 	}
@@ -303,14 +302,14 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 	for {
 		select {
 		case <-streamingNotifier.Ready():
-			log.Info("streaming service has been enabled, proxy timetick from rootcoord should stop")
+			mlog.Info(t.ctx, "streaming service has been enabled, proxy timetick from rootcoord should stop")
 			return
 		case <-t.ctx.Done():
-			log.Info("rootcoord context done", zap.Error(t.ctx.Err()))
+			mlog.Info(t.ctx, "rootcoord context done", mlog.Err(t.ctx.Err()))
 			return
 		case sessTimetick, ok := <-t.sendChan:
 			if !ok {
-				log.Info("timetickSync sendChan closed")
+				mlog.Info(t.ctx, "timetickSync sendChan closed")
 				return
 			}
 			if enableTtChecker {
@@ -335,7 +334,7 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 						}
 					}
 					if err := t.sendTimeTickToChannel([]string{chanName}, mints); err != nil {
-						log.Warn("SendTimeTickToChannel fail", zap.Error(err))
+						mlog.Warn(t.ctx, "SendTimeTickToChannel fail", mlog.Err(err))
 					} else {
 						t.syncedTtHistogram.update(chanName, mints)
 					}
@@ -347,8 +346,8 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 			metrics.RootCoordSyncTimeTickLatency.Observe(float64(span.Milliseconds()))
 			// rootcoord send tt msg to all channels every 200ms by default
 			if span > Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond) {
-				log.Warn("rootcoord send tt to all channels too slowly",
-					zap.Int("chanNum", len(local.chanTsMap)), zap.Int64("span", span.Milliseconds()))
+				mlog.Warn(t.ctx, "rootcoord send tt to all channels too slowly",
+					mlog.Int("chanNum", len(local.chanTsMap)), mlog.Int64("span", span.Milliseconds()))
 			}
 		}
 	}
@@ -413,14 +412,14 @@ func (t *timetickSync) listDmlChannels() []string {
 // AddDmlChannels add dml channels
 func (t *timetickSync) addDmlChannels(names ...string) {
 	t.dmlChannels.addChannels(names...)
-	log.Info("add dml channels", zap.Strings("channels", names))
+	mlog.Info(t.ctx, "add dml channels", mlog.Strings("channels", names))
 }
 
 // RemoveDmlChannels remove dml channels
 func (t *timetickSync) removeDmlChannels(names ...string) {
 	t.dmlChannels.removeChannels(names...)
 	// t.syncedTtHistogram.remove(names...) // channel ts shouldn't go back.
-	log.Info("remove dml channels", zap.Strings("channels", names))
+	mlog.Info(t.ctx, "remove dml channels", mlog.Strings("channels", names))
 }
 
 // BroadcastDmlChannels broadcasts msg pack into dml channels

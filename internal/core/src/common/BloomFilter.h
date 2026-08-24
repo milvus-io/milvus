@@ -83,13 +83,6 @@ class BloomFilter {
     virtual bool
     Test(std::string_view data) const = 0;
 
-    virtual bool
-    TestLocations(const std::vector<uint64_t>& locs) const = 0;
-
-    virtual std::vector<bool>
-    BatchTestLocations(const std::vector<std::vector<uint64_t>>& locs,
-                       const std::vector<bool>& hits) const = 0;
-
     virtual nlohmann::json
     ToJson() const = 0;
 };
@@ -165,30 +158,6 @@ class BlockedBloomFilter : public BloomFilter {
     Test(std::string_view data) const override {
         uint64_t hash = XXH3_64bits(data.data(), data.size());
         return TestHash(hash);
-    }
-
-    bool
-    TestLocations(const std::vector<uint64_t>& locs) const override {
-        if (locs.size() != 1) {
-            return true;
-        }
-        return TestHash(locs[0]);
-    }
-
-    std::vector<bool>
-    BatchTestLocations(const std::vector<std::vector<uint64_t>>& locs,
-                       const std::vector<bool>& hits) const override {
-        std::vector<bool> ret(locs.size(), false);
-        for (size_t i = 0; i < hits.size(); ++i) {
-            if (!hits[i]) {
-                if (locs[i].size() != 1) {
-                    ret[i] = true;
-                    continue;
-                }
-                ret[i] = TestHash(locs[i][0]);
-            }
-        }
-        return ret;
     }
 
     nlohmann::json
@@ -274,17 +243,6 @@ class AlwaysTrueBloomFilter : public BloomFilter {
         return true;
     }
 
-    bool
-    TestLocations(const std::vector<uint64_t>& locs) const override {
-        return true;
-    }
-
-    std::vector<bool>
-    BatchTestLocations(const std::vector<std::vector<uint64_t>>& locs,
-                       const std::vector<bool>& hits) const override {
-        return std::vector<bool>(locs.size(), true);  // 全部返回 true
-    }
-
     nlohmann::json
     ToJson() const override {
         nlohmann::json data;
@@ -338,26 +296,6 @@ BloomFilterFromJson(const nlohmann::json& data) {
             throw std::runtime_error("Unsupported bloom filter type: " +
                                      type_str);
     }
-}
-
-inline std::vector<uint64_t>
-Locations(const uint8_t* data, size_t len, uint32_t k, BFType bf_type) {
-    switch (bf_type) {
-        case BFType::Blocked:
-            return {XXH3_64bits(data, len)};
-        case BFType::AlwaysTrue:
-            return {};
-        default:
-            LOG_WARN(
-                "Unsupported bloom filter type in Locations, returning empty");
-            return {};
-    }
-}
-
-inline std::vector<uint64_t>
-Locations(std::string_view data, uint32_t k, BFType bf_type) {
-    return Locations(
-        reinterpret_cast<const uint8_t*>(data.data()), data.size(), k, bf_type);
 }
 
 }  // namespace milvus

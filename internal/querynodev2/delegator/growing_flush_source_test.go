@@ -21,12 +21,50 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestDelegatorGrowingFlushSourcePassesTaskSchema(t *testing.T) {
+	ctx := context.Background()
+	schema := &schemapb.CollectionSchema{Name: "task-schema"}
+	segment := segments.NewMockSegment(t)
+	segment.EXPECT().
+		FlushData(ctx, int64(3), int64(7), mock.Anything).
+		RunAndReturn(func(_ context.Context, startOffset int64, endOffset int64, config *segments.FlushConfig) (*segments.FlushResult, error) {
+			require.EqualValues(t, 3, startOffset)
+			require.EqualValues(t, 7, endOffset)
+			require.True(t, config.Schema == schema)
+			return &segments.FlushResult{
+				ManifestPath:           "manifest",
+				NumRows:                4,
+				TimestampFrom:          100,
+				TimestampTo:            200,
+				ColumnGroupMemorySizes: map[int64]int64{100: 64},
+				FieldNullCounts:        map[int64]int64{100: 1},
+			}, nil
+		})
+
+	source := &delegatorGrowingFlushSource{segment: segment}
+	result, err := source.FlushGrowingData(ctx, 3, 7, &syncmgr.GrowingFlushConfig{
+		Schema: schema,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "manifest", result.ManifestPath)
+	require.EqualValues(t, 4, result.NumRows)
+	require.EqualValues(t, 100, result.TimestampFrom)
+	require.EqualValues(t, 200, result.TimestampTo)
+	require.EqualValues(t, 64, result.ColumnGroupMemorySizes[100])
+	require.EqualValues(t, 1, result.FieldNullCounts[100])
+}
 
 func TestDelegatorGrowingSourceProviderCloseWaitsForSourceRelease(t *testing.T) {
 	segmentManager := segments.NewMockSegmentManager(t)
@@ -77,6 +115,7 @@ func TestDelegatorGrowingSourceProviderRetainedSource(t *testing.T) {
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
 	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().MemSize().Return(int64(1024)).Once()
 
 	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 0, []syncmgr.GrowingSourceReleaseHandoffSegment{
 		{SegmentID: 1001, TargetOffset: 10},
@@ -163,6 +202,7 @@ func TestDelegatorGrowingSourceProviderPrepareWaitsFence(t *testing.T) {
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
 	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().MemSize().Return(int64(1024)).Once()
 
 	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 200, []syncmgr.GrowingSourceReleaseHandoffSegment{
 		{SegmentID: 1001, TargetOffset: 10},
@@ -216,6 +256,7 @@ func TestDelegatorGrowingSourceProviderHandoffOnlyRejectsNewSegmentsBeforeFence(
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
 	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().MemSize().Return(int64(1024)).Once()
 	close(releaseFence)
 	require.NoError(t, <-prepareDone)
 
@@ -235,6 +276,7 @@ func TestDelegatorGrowingSourceProviderDeactivatedOnlyServesRetainedSources(t *t
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
 	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().MemSize().Return(int64(1024)).Once()
 
 	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 100, []syncmgr.GrowingSourceReleaseHandoffSegment{
 		{SegmentID: 1001, TargetOffset: 10},
@@ -275,6 +317,7 @@ func TestDelegatorGrowingSourceProviderReleasesWhenDetachedBeforeCommit(t *testi
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
 	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().MemSize().Return(int64(1024)).Once()
 
 	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 0, []syncmgr.GrowingSourceReleaseHandoffSegment{
 		{SegmentID: 1001, TargetOffset: 10},
@@ -298,6 +341,7 @@ func TestDelegatorGrowingSourceProviderPrepareRollbackOnFailure(t *testing.T) {
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
 	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().MemSize().Return(int64(1024)).Once()
 	segmentManager.EXPECT().GetGrowing(int64(1002)).Return(behindSegment).Once()
 	behindSegment.EXPECT().PinIfNotReleased().Return(nil).Once()
 	behindSegment.EXPECT().InsertCount().Return(int64(5)).Once()
@@ -316,19 +360,50 @@ func TestDelegatorGrowingSourceProviderPrepareRollbackOnFailure(t *testing.T) {
 	require.Nil(t, source)
 }
 
-func TestDelegatorGrowingSourceProviderRegisterRetainedSegmentNotFound(t *testing.T) {
+func TestDelegatorGrowingSourceProviderReleaseAllowedWhenSegmentNotFound(t *testing.T) {
 	segmentManager := segments.NewMockSegmentManager(t)
 	provider := newDelegatorGrowingSourceProvider(segmentManager, nil)
-	registry := syncmgr.NewGrowingSourceRegistry()
-	registration := registry.Register("ch", provider)
-	defer registry.Unregister(registration)
 
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(nil).Once()
 
-	err := registry.PrepareGrowingSourceReleaseHandoff(context.Background(), "ch", 0, []syncmgr.GrowingSourceReleaseHandoffSegment{
+	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 0, []syncmgr.GrowingSourceReleaseHandoffSegment{
 		{SegmentID: 1001, TargetOffset: 10},
 	})
-	require.Error(t, err)
+	require.NoError(t, err)
+	require.True(t, provider.IsReleaseAllowed(1001, 0))
+	require.False(t, provider.IsReleasePrepared(1001, 0))
+
+	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(nil).Once()
+	source, state := provider.GetGrowingFlushSource(1001, 10, nil)
+	require.Equal(t, syncmgr.GrowingSourceUnavailable, state)
+	require.Nil(t, source)
+}
+
+func TestDelegatorGrowingSourceProviderPrepareMixedRetainedAndMissing(t *testing.T) {
+	segmentManager := segments.NewMockSegmentManager(t)
+	segment := segments.NewMockSegment(t)
+	provider := newDelegatorGrowingSourceProvider(segmentManager, nil)
+
+	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
+	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
+	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().MemSize().Return(int64(1024)).Once()
+	segmentManager.EXPECT().GetGrowing(int64(1002)).Return(nil).Once()
+
+	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 200, []syncmgr.GrowingSourceReleaseHandoffSegment{
+		{SegmentID: 1001, TargetOffset: 10},
+		{SegmentID: 1002, TargetOffset: 10},
+	})
+	require.NoError(t, err)
+	require.True(t, provider.IsReleaseAllowed(1001, 200))
+	require.True(t, provider.IsReleasePrepared(1001, 200))
+	require.True(t, provider.IsReleaseAllowed(1002, 200))
+	require.False(t, provider.IsReleasePrepared(1002, 200))
+
+	segment.EXPECT().Unpin().Once()
+	segmentManager.EXPECT().ReleaseDetached(context.Background(), segment).Once()
+	provider.MarkReleaseDetached(1001)
+	provider.releaseRetainedIfComplete(1001, 10)
 }
 
 func TestDelegatorGrowingSourceProviderRegisterRetainedBehindTarget(t *testing.T) {
@@ -345,4 +420,105 @@ func TestDelegatorGrowingSourceProviderRegisterRetainedBehindTarget(t *testing.T
 		{SegmentID: 1001, TargetOffset: 10},
 	})
 	require.Error(t, err)
+}
+
+func TestDelegatorGrowingSourceProviderRetainedMetrics(t *testing.T) {
+	metrics.QueryNodeGrowingSourceRetainedBytes.Reset()
+	metrics.QueryNodeGrowingSourceRetainedSegments.Reset()
+	t.Cleanup(func() {
+		metrics.QueryNodeGrowingSourceRetainedBytes.Reset()
+		metrics.QueryNodeGrowingSourceRetainedSegments.Reset()
+	})
+	paramtable.SetNodeID(1)
+
+	const channel = "by-dev-rootcoord-dml_0_100v0"
+	segmentManager := segments.NewMockSegmentManager(t)
+	segment := segments.NewMockSegment(t)
+	provider := newDelegatorGrowingSourceProvider(segmentManager, nil)
+	provider.SetChannelName(channel)
+	requireRetainedMetricCount(t, 0)
+
+	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
+	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
+	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().MemSize().Return(int64(4096)).Once()
+
+	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 0, []syncmgr.GrowingSourceReleaseHandoffSegment{
+		{SegmentID: 1001, TargetOffset: 10},
+	})
+	require.NoError(t, err)
+	requireRetainedMetricCount(t, 1)
+	require.Equal(t, float64(4096), testutil.ToFloat64(metrics.QueryNodeGrowingSourceRetainedBytes.WithLabelValues("1", channel)))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.QueryNodeGrowingSourceRetainedSegments.WithLabelValues("1", channel)))
+
+	provider.releaseRetainedIfComplete(1001, 10)
+	require.Equal(t, float64(4096), testutil.ToFloat64(metrics.QueryNodeGrowingSourceRetainedBytes.WithLabelValues("1", channel)))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.QueryNodeGrowingSourceRetainedSegments.WithLabelValues("1", channel)))
+	requireRetainedMetricCount(t, 1)
+
+	provider.Deactivate()
+	requireRetainedMetricCount(t, 1)
+
+	segment.EXPECT().Unpin().Once()
+	segmentManager.EXPECT().ReleaseDetached(context.Background(), segment).Once()
+	provider.MarkReleaseDetached(1001)
+	requireRetainedMetricCount(t, 0)
+}
+
+func TestDelegatorGrowingSourceProviderRetainedMetricsDeletedOnDeactivateWithoutRetained(t *testing.T) {
+	metrics.QueryNodeGrowingSourceRetainedBytes.Reset()
+	metrics.QueryNodeGrowingSourceRetainedSegments.Reset()
+	t.Cleanup(func() {
+		metrics.QueryNodeGrowingSourceRetainedBytes.Reset()
+		metrics.QueryNodeGrowingSourceRetainedSegments.Reset()
+	})
+	paramtable.SetNodeID(1)
+
+	provider := newDelegatorGrowingSourceProvider(segments.NewMockSegmentManager(t), nil)
+	provider.SetChannelName("by-dev-rootcoord-dml_0_101v0")
+	requireRetainedMetricCount(t, 0)
+
+	provider.Deactivate()
+	requireRetainedMetricCount(t, 0)
+}
+
+func TestDelegatorGrowingSourceProviderRetainedMetricsDeletedWhenRetainedDrains(t *testing.T) {
+	metrics.QueryNodeGrowingSourceRetainedBytes.Reset()
+	metrics.QueryNodeGrowingSourceRetainedSegments.Reset()
+	t.Cleanup(func() {
+		metrics.QueryNodeGrowingSourceRetainedBytes.Reset()
+		metrics.QueryNodeGrowingSourceRetainedSegments.Reset()
+	})
+	paramtable.SetNodeID(1)
+
+	const channel = "by-dev-rootcoord-dml_0_102v0"
+	segmentManager := segments.NewMockSegmentManager(t)
+	segment := segments.NewMockSegment(t)
+	provider := newDelegatorGrowingSourceProvider(segmentManager, nil)
+	provider.SetChannelName(channel)
+	requireRetainedMetricCount(t, 0)
+
+	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
+	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
+	segment.EXPECT().InsertCount().Return(int64(10)).Once()
+	segment.EXPECT().MemSize().Return(int64(2048)).Once()
+
+	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 0, []syncmgr.GrowingSourceReleaseHandoffSegment{
+		{SegmentID: 1001, TargetOffset: 10},
+	})
+	require.NoError(t, err)
+	requireRetainedMetricCount(t, 1)
+
+	segment.EXPECT().Unpin().Once()
+	segmentManager.EXPECT().ReleaseDetached(context.Background(), segment).Once()
+	provider.releaseRetainedIfComplete(1001, 10)
+	requireRetainedMetricCount(t, 1)
+	provider.MarkReleaseDetached(1001)
+	requireRetainedMetricCount(t, 0)
+}
+
+func requireRetainedMetricCount(t *testing.T, expected int) {
+	t.Helper()
+	require.Equal(t, expected, testutil.CollectAndCount(metrics.QueryNodeGrowingSourceRetainedBytes))
+	require.Equal(t, expected, testutil.CollectAndCount(metrics.QueryNodeGrowingSourceRetainedSegments))
 }

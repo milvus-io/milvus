@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -86,14 +86,14 @@ func (s *FlushAllWithRestartSuite) TestFlushAllWithStreamingNodeRestart() {
 	flushAllResp, err := c.MilvusClient.FlushAll(ctx, &milvuspb.FlushAllRequest{})
 	s.NoError(merr.CheckRPCCall(flushAllResp, err))
 	s.WaitForFlushAll(ctx, flushAllResp.GetFlushAllMsgs())
-	log.Info("first FlushAll completed")
+	mlog.Info(context.TODO(), "first FlushAll completed")
 
 	// Step 2: Restart all streaming nodes, then insert another 1000 rows and FlushAll.
 	for _, sn := range c.GetAllStreamingNodes() {
 		sn.Stop()
 	}
 	c.AddStreamingNode()
-	log.Info("streaming node restarted")
+	mlog.Info(context.TODO(), "streaming node restarted")
 
 	// Wait for channel rebalance to complete after streaming node restart,
 	// then insert data with retry.
@@ -114,7 +114,7 @@ func (s *FlushAllWithRestartSuite) TestFlushAllWithStreamingNodeRestart() {
 	flushAllResp2, err := c.MilvusClient.FlushAll(ctx, &milvuspb.FlushAllRequest{})
 	s.NoError(merr.CheckRPCCall(flushAllResp2, err))
 	s.WaitForFlushAll(ctx, flushAllResp2.GetFlushAllMsgs())
-	log.Info("second FlushAll completed after streaming node restart")
+	mlog.Info(context.TODO(), "second FlushAll completed after streaming node restart")
 
 	// Step 3: Create index, load collection, and query count(*) to verify total is 2000.
 	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
@@ -140,7 +140,7 @@ func (s *FlushAllWithRestartSuite) TestFlushAllWithStreamingNodeRestart() {
 	s.NoError(merr.CheckRPCCall(queryResult, err))
 	count := queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0]
 	s.Equal(int64(2*rowNum), count)
-	log.Info("query count(*) verified: 2000 rows")
+	mlog.Info(context.TODO(), "query count(*) verified: 2000 rows")
 
 	// Cleanup.
 	dropStatus, err := c.MilvusClient.DropCollection(ctx, &milvuspb.DropCollectionRequest{

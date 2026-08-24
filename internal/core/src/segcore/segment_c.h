@@ -244,43 +244,12 @@ CStatus
 LoadDeletedRecord(CSegmentInterface c_segment,
                   CLoadDeletedRecordInfo deleted_record_info);
 
-CStatus
-UpdateSealedSegmentIndex(CSegmentInterface c_segment,
-                         CLoadIndexInfo c_load_index_info);
-
-CStatus
-LoadJsonKeyIndex(CTraceContext c_trace,
-                 CSegmentInterface c_segment,
-                 const uint8_t* serialied_load_json_key_index_info,
-                 const uint64_t len,
-                 CLoadCancellationSource source);
-
-CStatus
-UpdateFieldRawDataSize(CSegmentInterface c_segment,
-                       int64_t field_id,
-                       int64_t num_rows,
-                       int64_t field_data_size);
-
 // This function is currently used only in test.
 // Current implement supports only dropping of non-system fields.
 CStatus
 DropFieldData(CSegmentInterface c_segment, int64_t field_id);
 
-CStatus
-DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id);
-
-CStatus
-DropSealedSegmentJSONIndex(CSegmentInterface c_segment,
-                           int64_t field_id,
-                           const char* nested_path);
-
 //////////////////////////////    interfaces for SegmentInterface    //////////////////////////////
-CStatus
-ExistPk(CSegmentInterface c_segment,
-        const uint8_t* raw_ids,
-        const uint64_t size,
-        bool* results);
-
 CStatus
 Delete(CSegmentInterface c_segment,
        int64_t size,
@@ -300,18 +269,37 @@ ExprResCacheEraseSegment(int64_t segment_id);
  * @brief Configuration for flushing growing segment data to storage.
  */
 typedef struct CFlushConfig {
-    const char* segment_path;   // base path for segment manifest and data
-    int64_t read_version;       // version to read (-1 = latest)
-    uint32_t retry_limit;       // retry limit for commit
-    const char* writer_format;  // writer.format
+    const char* segment_path;  // base path for segment manifest and data
+    const void* schema_blob;  // serialized CollectionSchema for this flush task
+    int64_t schema_length;    // length of schema_blob in bytes
+    int64_t read_version;     // version to read (-1 = latest)
+    uint32_t retry_limit;     // retry limit for commit
+    const char* writer_format;          // writer.format
+    const char* schema_based_pattern;   // writer.split.schema_based.patterns
+    const char* schema_based_formats;   // writer.split.schema_based.formats
+    int64_t* allowed_field_ids;         // projected field IDs to flush
+    size_t num_allowed_fields;          // number of projected fields
+    int64_t* column_group_ids;          // column group IDs to summarize
+    int64_t* column_group_field_ids;    // flattened field IDs per column group
+    size_t* column_group_field_counts;  // field count per column group
+    size_t num_column_groups;           // number of column groups
     // TEXT column configurations
-    int64_t* text_field_ids;       // array of TEXT field IDs
-    const char** text_lob_paths;   // array of LOB paths for each TEXT field
+    int64_t* text_field_ids;      // array of TEXT field IDs
+    const char** text_lob_paths;  // array of LOB paths for each TEXT field
+    int64_t text_inline_threshold;
+    int64_t text_max_lob_file_bytes;
+    int64_t text_flush_threshold_bytes;
     size_t num_text_columns;       // number of TEXT columns
     int64_t* bm25_field_ids;       // array of BM25 sparse output field IDs
     int64_t* bm25_stats_log_ids;   // array of BM25 stats log IDs
     size_t num_bm25_fields;        // number of BM25 output fields
     bool write_merged_bm25_stats;  // whether to write compound BM25 stats
+    int64_t pk_stats_field_id;     // primary key field ID for BF stat
+    int64_t pk_stats_log_id;       // log ID for BF stat file
+    const uint8_t* pk_stats_blob;  // serialized Go PrimaryKeyStats blob
+    size_t pk_stats_blob_size;     // byte length of pk_stats_blob
+    const uint8_t* merged_pk_stats_blob;  // serialized Go compound BF stat blob
+    size_t merged_pk_stats_blob_size;     // byte length of merged_pk_stats_blob
 } CFlushConfig;
 
 /**
@@ -319,13 +307,39 @@ typedef struct CFlushConfig {
  */
 typedef struct CFlushResult {
     char* manifest_path;  // path to the committed manifest (caller must free)
-    int64_t committed_version;  // committed version number
-    int64_t num_rows;           // number of rows flushed
-    int64_t* bm25_field_ids;    // field ids for serialized BM25 stats
-    uint8_t** bm25_stats;       // serialized BM25 stats per field
-    size_t* bm25_stats_sizes;   // serialized BM25 stats sizes
-    size_t num_bm25_stats;      // number of BM25 stats entries
+    int64_t committed_version;   // committed version number
+    int64_t num_rows;            // number of rows flushed
+    uint64_t timestamp_from;     // minimum row timestamp flushed
+    uint64_t timestamp_to;       // maximum row timestamp flushed
+    int64_t* field_ids;          // field ids for per-field flush summaries
+    int64_t* field_null_counts;  // null count per field
+    size_t num_field_stats;      // number of field summary entries
+    int64_t*
+        flushed_field_ids;  // exact set of columns actually written; skipped
+                            // non-materialized function outputs are absent
+    size_t num_flushed_fields;  // number of entries in flushed_field_ids
+    int64_t* column_group_ids;  // column group ids for binlog summaries
+    int64_t*
+        column_group_memory_sizes;  // uncompressed Arrow data size per column group
+    size_t num_column_groups;       // number of column group summary entries
+    int64_t* bm25_field_ids;        // field ids for serialized BM25 stats
+    uint8_t** bm25_stats;           // serialized BM25 stats per field
+    size_t* bm25_stats_sizes;       // serialized BM25 stats sizes
+    size_t num_bm25_stats;          // number of BM25 stats entries
 } CFlushResult;
+
+/**
+ * @brief Result of reading primary keys from a growing segment.
+ */
+typedef struct CPrimaryKeysResult {
+    int64_t pk_field_id;            // primary key field id
+    int64_t pk_data_type;           // primary key data type
+    int64_t* int64_primary_keys;    // int64 primary keys
+    uint8_t* varchar_primary_keys;  // concatenated varchar primary key bytes
+    int64_t* varchar_primary_key_offsets;  // offsets into varchar_primary_keys
+    size_t varchar_primary_keys_size;  // total bytes in varchar_primary_keys
+    size_t num_primary_keys;           // number of primary keys
+} CPrimaryKeysResult;
 
 /**
  * @brief Flush data from a growing segment directly to storage.
@@ -344,6 +358,16 @@ typedef struct CFlushResult {
  * @param result Output flush result (caller must free manifest_path)
  * @return CStatus indicating success or failure
  */
+/**
+ * @brief Get the field ids with materialized columns in a growing segment.
+ * The flush layout must be derived from this set. Caller frees *field_ids
+ * with free().
+ */
+CStatus
+GetGrowingSegmentMaterializedFieldIDs(CSegmentInterface c_segment,
+                                      int64_t** field_ids,
+                                      int64_t* count);
+
 CStatus
 FlushGrowingSegmentData(CSegmentInterface c_segment,
                         int64_t start_offset,
@@ -351,11 +375,20 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                         const CFlushConfig* config,
                         CFlushResult* result);
 
+CStatus
+GetGrowingSegmentPrimaryKeys(CSegmentInterface c_segment,
+                             int64_t start_offset,
+                             int64_t end_offset,
+                             CPrimaryKeysResult* result);
+
 /**
  * @brief Free the manifest_path in CFlushResult.
  */
 void
 FreeFlushResult(CFlushResult* result);
+
+void
+FreePrimaryKeysResult(CPrimaryKeysResult* result);
 
 CStatus
 SegmentSetCommitTimestamp(CSegmentInterface c_segment, uint64_t commit_ts);

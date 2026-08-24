@@ -57,11 +57,6 @@ class OperatorContext {
         return driver_context_->task_;
     }
 
-    const std::string&
-    get_task_id() const {
-        return driver_context_->task_->taskid();
-    }
-
     DriverContext*
     get_driver_context() const {
         return driver_context_;
@@ -91,7 +86,7 @@ class OperatorContext {
     mutable std::unique_ptr<ExecContext> exec_context_;
 };
 
-class Operator {
+class Operator : public std::enable_shared_from_this<Operator> {
  public:
     Operator(DriverContext* ctx,
              RowTypePtr output_type,
@@ -173,6 +168,15 @@ class Operator {
         return output_type_;
     }
 
+    virtual void
+    PrefetchAsync(
+        const std::shared_ptr<folly::CPUThreadPoolExecutor> prefetch_pool) {
+    }
+
+    virtual void
+    WaitPrefetch() {
+    }
+
  protected:
     std::unique_ptr<OperatorContext> operator_context_;
 
@@ -183,39 +187,6 @@ class Operator {
     bool no_more_input_{false};
 
     std::vector<VectorPtr> results_;
-};
-
-class SourceOperator : public Operator {
- public:
-    SourceOperator(DriverContext* driver_ctx,
-                   RowTypePtr out_type,
-                   int32_t operator_id,
-                   const std::string& plannode_id,
-                   const std::string& operator_type)
-        : Operator(
-              driver_ctx, out_type, operator_id, plannode_id, operator_type) {
-    }
-
-    bool
-    NeedInput() const override {
-        return false;
-    }
-
-    void
-    AddInput(RowVectorPtr& /* unused */) override {
-        ThrowInfo(NotImplemented, "SourceOperator does not support addInput()");
-    }
-
-    void
-    NoMoreInput() override {
-        ThrowInfo(NotImplemented,
-                  "SourceOperator does not support noMoreInput()");
-    }
-
-    virtual std::string
-    ToString() const override {
-        return "source operator";
-    }
 };
 
 }  // namespace exec

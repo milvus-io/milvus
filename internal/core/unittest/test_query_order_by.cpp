@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <set>
+#include <vector>
 #include "test_utils/DataGen.h"
 #include "segcore/SegmentSealed.h"
 #include "plan/PlanNode.h"
@@ -20,14 +21,84 @@
 #include "exec/expression/function/FunctionFactory.h"
 #include "exec/QueryContext.h"
 #include "common/Consts.h"
+#include "common/Exception.h"
 #include "common/FieldData.h"
+#include "pb/plan.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
+#include "query/PlanProto.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
 using namespace milvus::plan;
+
+namespace {
+
+void
+SetInt64FieldData(GeneratedData& raw_data,
+                  FieldId field_id,
+                  const std::vector<int64_t>& values) {
+    AssertInfo(raw_data.raw_->num_rows() == values.size(),
+               "values size must match row count");
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != field_id.get()) {
+            continue;
+        }
+        auto* data =
+            field_data->mutable_scalars()->mutable_long_data()->mutable_data();
+        data->Clear();
+        data->Add(values.data(), values.data() + values.size());
+        return;
+    }
+    ThrowInfo(FieldIDInvalid, "field id not found");
+}
+
+void
+SetIntArrayFieldData(GeneratedData& raw_data,
+                     FieldId field_id,
+                     const std::vector<std::vector<int32_t>>& rows) {
+    AssertInfo(raw_data.raw_->num_rows() == rows.size(),
+               "array rows size must match row count");
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != field_id.get()) {
+            continue;
+        }
+        auto* arrays =
+            field_data->mutable_scalars()->mutable_array_data()->mutable_data();
+        arrays->Clear();
+        for (const auto& row : rows) {
+            auto* array_data = arrays->Add();
+            array_data->mutable_int_data()->mutable_data()->Add(
+                row.data(), row.data() + row.size());
+        }
+        return;
+    }
+    ThrowInfo(FieldIDInvalid, "field id not found");
+}
+
+void
+AddPositiveElementFilter(proto::plan::QueryPlanNode* query,
+                         FieldId array_field_id) {
+    auto* element_filter =
+        query->mutable_predicates()->mutable_element_filter_expr();
+    element_filter->set_struct_name("structA");
+
+    auto* unary_range =
+        element_filter->mutable_element_expr()->mutable_unary_range_expr();
+    auto* column_info = unary_range->mutable_column_info();
+    column_info->set_field_id(array_field_id.get());
+    column_info->set_data_type(proto::schema::DataType::Int32);
+    column_info->set_element_type(proto::schema::DataType::Int32);
+    column_info->set_is_element_level(true);
+
+    unary_range->set_op(proto::plan::OpType::GreaterThan);
+    unary_range->mutable_value()->set_int64_val(0);
+}
+
+}  // namespace
 
 class QueryOrderByTest : public testing::TestWithParam<bool> {
  public:
@@ -73,10 +144,10 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
         schema_->set_primary_field_id(str_fid);
 
         num_rows_ = 20;
-        auto raw_data =
+        raw_data_ =
             DataGen(schema_, num_rows_, 42, 0, 1, 10, false, false, false);
 
-        auto segment = CreateSealedWithFieldDataLoaded(schema_, raw_data);
+        auto segment = CreateSealedWithFieldDataLoaded(schema_, raw_data_);
         segment_ = SegmentSealedSPtr(segment.release());
 
         milvus::exec::expression::FunctionFactory& factory =
@@ -212,6 +283,7 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
     SegmentSealedSPtr segment_;
     std::shared_ptr<Schema> schema_;
     std::map<std::string, FieldId> field_map_;
+    GeneratedData raw_data_;
 };
 
 INSTANTIATE_TEST_SUITE_P(QueryOrderBySuite,
@@ -259,6 +331,88 @@ TEST_P(QueryOrderByTest,
     EXPECT_EQ(col->size(), num_rows_ + 1);
     EXPECT_EQ(col->nullCount(), num_rows_ + 1);
     EXPECT_FALSE(col->ValidAt(num_rows_));
+}
+
+TEST(QueryOrderByElementLevel, RestoresElementIndicesAfterSorting) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugVectorArrayField(
+        "structA[array_vec]", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+    auto rank_fid = schema->AddDebugField("rank", DataType::INT64);
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    constexpr size_t N = 3;
+    constexpr int array_len = 3;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+    SetInt64FieldData(raw_data, pk_fid, {10, 20, 30});
+    SetInt64FieldData(raw_data, rank_fid, {20, 10, 30});
+    SetIntArrayFieldData(raw_data,
+                         array_fid,
+                         {
+                             {1, 0, 3},
+                             {0, 5, 0},
+                             {7, 8, 0},
+                         });
+    auto segment = SegmentSealedSPtr(
+        CreateSealedWithFieldDataLoaded(schema, raw_data).release());
+
+    proto::plan::PlanNode plan_node;
+    plan_node.add_output_field_ids(pk_fid.get());
+    plan_node.add_output_field_ids(rank_fid.get());
+
+    auto* query = plan_node.mutable_query();
+    query->set_limit(5);
+    AddPositiveElementFilter(query, array_fid);
+    auto* order_by = query->add_order_by_fields();
+    order_by->set_field_id(rank_fid.get());
+    order_by->set_ascending(true);
+    order_by->set_nulls_first(false);
+
+    auto parser = milvus::query::ProtoParser(schema);
+    auto plan = parser.CreateRetrievePlan(plan_node);
+    auto results = segment->Retrieve(
+        nullptr, plan.get(), MAX_TIMESTAMP, DEFAULT_MAX_OUTPUT_SIZE, false);
+
+    ASSERT_EQ(results->fields_data_size(), 2);
+    ASSERT_TRUE(results->element_level());
+    ASSERT_EQ(results->element_indices_size(), 5);
+    ASSERT_EQ(results->offset_size(), 5);
+
+    const auto& pk_data = results->fields_data(0).scalars().long_data().data();
+    const auto& rank_data =
+        results->fields_data(1).scalars().long_data().data();
+    ASSERT_EQ(pk_data.size(), 5);
+    ASSERT_EQ(rank_data.size(), 5);
+
+    EXPECT_EQ(rank_data.Get(0), 10);
+    EXPECT_EQ(pk_data.Get(0), 20);
+    EXPECT_EQ(results->offset(0), 1);
+    ASSERT_EQ(results->element_indices(0).indices_size(), 1);
+    EXPECT_EQ(results->element_indices(0).indices(0), 1);
+
+    for (int i : {1, 2}) {
+        EXPECT_EQ(rank_data.Get(i), 20);
+        EXPECT_EQ(pk_data.Get(i), 10);
+        EXPECT_EQ(results->offset(i), 0);
+        ASSERT_EQ(results->element_indices(i).indices_size(), 1);
+    }
+    std::set<int32_t> rank20_indices;
+    rank20_indices.insert(results->element_indices(1).indices(0));
+    rank20_indices.insert(results->element_indices(2).indices(0));
+    EXPECT_EQ(rank20_indices, (std::set<int32_t>{0, 2}));
+
+    for (int i : {3, 4}) {
+        EXPECT_EQ(rank_data.Get(i), 30);
+        EXPECT_EQ(pk_data.Get(i), 30);
+        EXPECT_EQ(results->offset(i), 2);
+        ASSERT_EQ(results->element_indices(i).indices_size(), 1);
+    }
+    std::set<int32_t> rank30_indices;
+    rank30_indices.insert(results->element_indices(3).indices(0));
+    rank30_indices.insert(results->element_indices(4).indices(0));
+    EXPECT_EQ(rank30_indices, (std::set<int32_t>{0, 1}));
 }
 
 TEST_P(QueryOrderByTest, OrderBySingleInt64Asc) {
@@ -428,6 +582,82 @@ TEST_P(QueryOrderByTest, OrderByWithDeferredFields) {
     auto& deferred_data = results->fields_data(2);
     auto count = deferred_data.scalars().double_data().data_size();
     EXPECT_GT(count, 0);
+}
+
+TEST_P(QueryOrderByTest, OrderByWithDenseVectorOutput) {
+    auto pk_fid = field_map_[string_field];
+    auto double_fid = field_map_[double_field];
+    auto vector_fid = field_map_[vector_field];
+
+    proto::plan::PlanNode plan_node;
+    plan_node.add_output_field_ids(pk_fid.get());
+    plan_node.add_output_field_ids(vector_fid.get());
+
+    auto* query = plan_node.mutable_query();
+    query->set_limit(10);
+    // Sort on the random double column, not the VARCHAR PK: DataGen pre-sorts
+    // VARCHAR, so a PK sort would make the segment offsets handed to the
+    // deferred bulk fetch the identity permutation and leave the vector
+    // reordering unexercised.
+    auto* order_by = query->add_order_by_fields();
+    order_by->set_field_id(double_fid.get());
+    order_by->set_ascending(true);
+    order_by->set_nulls_first(false);
+
+    auto parser = milvus::query::ProtoParser(schema_);
+    auto plan = parser.CreateRetrievePlan(plan_node);
+    EXPECT_EQ(plan->plan_node_->deferred_field_ids_,
+              std::vector<FieldId>{vector_fid});
+    EXPECT_EQ(plan->plan_node_->pipeline_field_ids_,
+              (std::vector<FieldId>{pk_fid, double_fid, SegmentOffsetFieldID}));
+
+    auto results = segment_->Retrieve(
+        nullptr, plan.get(), MAX_TIMESTAMP, DEFAULT_MAX_OUTPUT_SIZE, false);
+
+    // Pipeline columns [pk, double] + deferred vector.
+    ASSERT_EQ(results->fields_data_size(), 3);
+    const auto& pk_data = results->fields_data(0);
+    const auto& double_data = results->fields_data(1);
+    const auto& vector_data = results->fields_data(2);
+    auto row_count = pk_data.scalars().string_data().data_size();
+    ASSERT_GT(row_count, 0);
+    EXPECT_LE(row_count, query->limit());
+    EXPECT_EQ(vector_data.field_id(), vector_fid.get());
+    EXPECT_EQ(vector_data.vectors().dim(), 16);
+    ASSERT_EQ(vector_data.vectors().float_vector().data_size(), row_count * 16);
+
+    if (!GetParam()) {
+        // Non-nullable double: the returned sort column must be ascending.
+        for (int i = 1; i < row_count; i++) {
+            EXPECT_LE(double_data.scalars().double_data().data(i - 1),
+                      double_data.scalars().double_data().data(i));
+        }
+    }
+
+    // Verify each deferred vector row carries the payload of the ORIGINAL row
+    // selected by the sort: map returned PK -> original segment offset, then
+    // compare the vector payload element-wise against the generated data.
+    auto raw_pks = raw_data_.get_col<std::string>(pk_fid);
+    auto raw_vectors = raw_data_.get_col<float>(vector_fid);
+    std::map<std::string, int64_t> pk_to_offset;
+    for (int64_t i = 0; i < num_rows_; i++) {
+        pk_to_offset[raw_pks[i]] = i;
+    }
+    bool permuted = false;
+    for (int i = 0; i < row_count; i++) {
+        auto offset = pk_to_offset.at(pk_data.scalars().string_data().data(i));
+        permuted = permuted || (offset != i);
+        for (int d = 0; d < 16; d++) {
+            EXPECT_EQ(vector_data.vectors().float_vector().data(i * 16 + d),
+                      raw_vectors[offset * 16 + d])
+                << "vector mismatch at result row " << i << " dim " << d
+                << " (segment offset " << offset << ")";
+        }
+    }
+    // The double sort must actually permute rows relative to insertion order;
+    // an identity mapping would mean the deferred fetch path was never
+    // exercised — the exact gap this test guards against.
+    EXPECT_TRUE(permuted);
 }
 
 TEST_P(QueryOrderByTest, OrderByInt16Asc) {

@@ -5,15 +5,15 @@ import (
 	"strconv"
 
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -30,7 +30,7 @@ type insertTask struct {
 
 	result          *milvuspb.MutationResult
 	idAllocator     *allocator.IDAllocator
-	chMgr           channelsMgr
+	chMgr           channelmgr.ChannelsMgr
 	vChannels       []vChan
 	pChannels       []pChan
 	schema          *schemapb.CollectionSchema
@@ -75,11 +75,11 @@ func (it *insertTask) EndTs() Timestamp {
 }
 
 func (it *insertTask) setChannels() error {
-	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.insertMsg.GetDbName(), it.insertMsg.CollectionName)
+	collID, err := it.getMetaCache().GetCollectionID(it.ctx, it.insertMsg.GetDbName(), it.insertMsg.CollectionName)
 	if err != nil {
 		return err
 	}
-	channels, err := it.chMgr.getChannels(collID)
+	channels, err := it.chMgr.GetChannels(collID)
 	if err != nil {
 		return err
 	}
@@ -111,48 +111,52 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		},
 		Timestamp: it.EndTs(),
 	}
+	if err := validateAndNormalizeFieldDataValidData(it.insertMsg.GetFieldsData()); err != nil {
+		return err
+	}
 
 	collectionName := it.insertMsg.CollectionName
+	log := mlog.With(mlog.String("collectionName", collectionName))
 	if err := validateCollectionName(collectionName); err != nil {
-		log.Ctx(ctx).Warn("valid collection name failed", zap.String("collectionName", collectionName), zap.Error(err))
+		log.Warn(ctx, "valid collection name failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
 	}
 
 	maxInsertSize := Params.QuotaConfig.MaxInsertSize.GetAsInt()
 	if maxInsertSize != -1 && it.insertMsg.Size() > maxInsertSize {
-		log.Ctx(ctx).Warn("insert request size exceeds maxInsertSize",
-			zap.Int("request size", it.insertMsg.Size()), zap.Int("maxInsertSize", maxInsertSize))
+		log.Warn(ctx, "insert request size exceeds maxInsertSize",
+			mlog.Int("request size", it.insertMsg.Size()), mlog.Int("maxInsertSize", maxInsertSize))
 		return merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge("insert request size exceeds maxInsertSize"))
 	}
 
-	collID, err := globalMetaCache.GetCollectionID(context.Background(), it.insertMsg.GetDbName(), collectionName)
+	collID, err := it.getMetaCache().GetCollectionID(context.Background(), it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
-		log.Ctx(ctx).Warn("fail to get collection id", zap.Error(err))
+		log.Warn(ctx, "fail to get collection id", mlog.Err(err))
 		return err
 	}
 	it.collectionID = collID
 
-	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
+	colInfo, err := it.getMetaCache().GetCollectionInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
 	if err != nil {
-		log.Ctx(ctx).Warn("fail to get collection info", zap.Error(err))
+		log.Warn(ctx, "fail to get collection info", mlog.Err(err))
 		return err
 	}
 
 	if it.schemaTimestamp != 0 {
-		if it.schemaTimestamp != colInfo.updateTimestamp {
+		if it.schemaTimestamp != colInfo.UpdateTimestamp {
 			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)
-			log.Ctx(ctx).Info("collection schema mismatch",
-				zap.String("collectionName", collectionName),
-				zap.Uint64("requestSchemaTs", it.schemaTimestamp),
-				zap.Uint64("collectionSchemaTs", colInfo.updateTimestamp),
-				zap.Error(err))
+			log.Info(ctx, "collection schema mismatch",
+				mlog.String("collectionName", collectionName),
+				mlog.Uint64("requestSchemaTs", it.schemaTimestamp),
+				mlog.Uint64("collectionSchemaTs", colInfo.UpdateTimestamp),
+				mlog.Err(err))
 			return err
 		}
 	}
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
+	schema, err := it.getMetaCache().GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
-		log.Ctx(ctx).Warn("get collection schema from global meta cache failed", zap.String("collectionName", collectionName), zap.Error(err))
+		log.Warn(ctx, "get collection schema from global meta cache failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
 	}
 	it.schema = schema.CollectionSchema
@@ -174,11 +178,11 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	rowIDBegin, rowIDEnd, AllocErr := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
 	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
 	if AllocErr != nil {
-		log.Ctx(ctx).Warn("failed to allocate auto id",
-			zap.String("collectionName", collectionName),
-			zap.Int64("collectionID", it.collectionID),
-			zap.Uint32("rowNums", rowNums),
-			zap.Error(AllocErr))
+		log.Warn(ctx, "failed to allocate auto id",
+			mlog.String("collectionName", collectionName),
+			mlog.Int64("collectionID", it.collectionID),
+			mlog.Uint32("rowNums", rowNums),
+			mlog.Err(AllocErr))
 		return AllocErr
 	}
 
@@ -223,48 +227,47 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	// check primaryFieldData whether autoID is true or not
 	// set rowIDs as primary data if autoID == true
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
-	it.result.IDs, err = checkPrimaryFieldData(allFields, it.schema, it.insertMsg)
-	log := log.Ctx(ctx).With(zap.String("collectionName", collectionName))
+	it.result.IDs, err = checkPrimaryFieldData(ctx, allFields, it.schema, it.insertMsg)
 	if err != nil {
-		log.Warn("check primary field data and hash primary key failed",
-			zap.Error(err))
+		log.Warn(ctx, "check primary field data and hash primary key failed",
+			mlog.Err(err))
 		return err
 	}
 
 	// check varchar/text with analyzer was utf-8 format
 	err = checkInputUtf8Compatiable(allFields, it.insertMsg)
 	if err != nil {
-		log.Warn("check varchar/text format failed", zap.Error(err))
+		log.Warn(ctx, "check varchar/text format failed", mlog.Err(err))
 		return err
 	}
 
 	// Validate and set field ID to insert field data
 	err = validateFieldDataColumns(it.insertMsg.GetFieldsData(), schema)
 	if err != nil {
-		log.Info("validate field data columns failed", zap.Error(err))
+		log.Info(ctx, "validate field data columns failed", mlog.Err(err))
 		return err
 	}
 	err = fillFieldPropertiesOnly(it.insertMsg.GetFieldsData(), schema)
 	if err != nil {
-		log.Info("fill field properties failed", zap.Error(err))
+		log.Info(ctx, "fill field properties failed", mlog.Err(err))
 		return err
 	}
 	err = normalizeFP32ToFP16BF16VectorFieldData(it.insertMsg.GetFieldsData(), schema)
 	if err != nil {
-		log.Info("normalize fp32 to fp16/bf16 vector field data failed", zap.Error(err))
+		log.Info(ctx, "normalize fp32 to fp16/bf16 vector field data failed", mlog.Err(err))
 		return err
 	}
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, it.insertMsg.GetDbName(), collectionName)
+	partitionKeyMode, err := isPartitionKeyMode(ctx, it.getMetaCache(), it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
-		log.Warn("check partition key mode failed", zap.String("collectionName", collectionName), zap.Error(err))
+		log.Warn(ctx, "check partition key mode failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
 	}
 	if partitionKeyMode {
 		fieldSchema, _ := typeutil.GetPartitionKeyFieldSchema(it.schema)
 		it.partitionKeys, err = getPartitionKeyFieldData(fieldSchema, it.insertMsg)
 		if err != nil {
-			log.Warn("get partition keys from insert request failed", zap.String("collectionName", collectionName), zap.Error(err))
+			log.Warn(ctx, "get partition keys from insert request failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 			return err
 		}
 	} else {
@@ -272,27 +275,27 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		// insert to _default partition
 		partitionTag := it.insertMsg.GetPartitionName()
 		if len(partitionTag) <= 0 {
-			pinfo, err := globalMetaCache.GetPartitionInfo(ctx, it.insertMsg.GetDbName(), collectionName, "")
+			pinfo, err := it.getMetaCache().GetPartitionInfo(ctx, it.insertMsg.GetDbName(), collectionName, "")
 			if err != nil {
-				log.Warn("get partition info failed", zap.String("collectionName", collectionName), zap.Error(err))
+				log.Warn(ctx, "get partition info failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 				return err
 			}
-			partitionTag = pinfo.name
+			partitionTag = pinfo.Name
 			it.insertMsg.PartitionName = partitionTag
 		}
 
 		if err := validatePartitionTag(partitionTag, true); err != nil {
-			log.Warn("valid partition name failed", zap.String("partition name", partitionTag), zap.Error(err))
+			log.Warn(ctx, "valid partition name failed", mlog.String("partition name", partitionTag), mlog.Err(err))
 			return err
 		}
 	}
 
 	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck(), withMaxCapCheck()).
-		Validate(it.insertMsg.GetFieldsData(), schema.schemaHelper, it.insertMsg.NRows()); err != nil {
+		Validate(it.insertMsg.GetFieldsData(), schema.SchemaHelper, it.insertMsg.NRows()); err != nil {
 		return merr.WrapErrAsInputError(err)
 	}
 
-	log.Debug("Proxy Insert PreExecute done")
+	log.Debug(ctx, "Proxy Insert PreExecute done")
 
 	return nil
 }

@@ -26,7 +26,6 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
@@ -45,13 +44,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/tracer"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
-	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/netutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -110,11 +108,11 @@ func (s *Server) Prepare() error {
 		netutil.OptHighPriorityToUsePort(paramtable.Get().StreamingNodeGrpcServerCfg.Port.GetAsInt()),
 	)
 	if err != nil {
-		log.Ctx(s.ctx).Warn("StreamingNode fail to create net listener", zap.Error(err))
+		mlog.Warn(s.ctx, "StreamingNode fail to create net listener", mlog.Err(err))
 		return err
 	}
 	s.listener = listener
-	log.Ctx(s.ctx).Info("StreamingNode listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	mlog.Info(s.ctx, "StreamingNode listen on", mlog.String("address", listener.Addr().String()), mlog.Int("port", listener.Port()))
 	paramtable.Get().Save(
 		paramtable.Get().StreamingNodeGrpcServerCfg.Port.Key,
 		strconv.FormatInt(int64(listener.Port()), 10))
@@ -126,12 +124,12 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Ctx(s.ctx).Info("streamingnode init done ...")
+	mlog.Info(s.ctx, "streamingnode init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Ctx(s.ctx).Info("streamingnode start done ...")
+	mlog.Info(s.ctx, "streamingnode start done ...")
 	return nil
 }
 
@@ -144,52 +142,51 @@ func (s *Server) Stop() (err error) {
 // stop stops the server.
 func (s *Server) stop() {
 	s.componentState.OnStopping()
-	log := log.Ctx(s.ctx)
 
-	log.Info("streamingnode stop", zap.String("Address", s.listener.Address()))
+	mlog.Info(context.TODO(), "streamingnode stop", mlog.String("Address", s.listener.Address()))
 
 	// Unregister current server from etcd.
-	log.Info("streamingnode unregister session from etcd...")
+	mlog.Info(context.TODO(), "streamingnode unregister session from etcd...")
 	if err := s.session.GoingStop(); err != nil {
-		log.Warn("streamingnode unregister session failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "streamingnode unregister session failed", mlog.Err(err))
 	}
 
 	// Stop StreamingNode service.
-	log.Info("streamingnode stop service...")
+	mlog.Info(context.TODO(), "streamingnode stop service...")
 	s.streamingnode.Stop()
 
 	// Stop grpc server.
-	log.Info("streamingnode stop grpc server...")
+	mlog.Info(context.TODO(), "streamingnode stop grpc server...")
 	s.grpcServer.GracefulStop()
 
 	// Stop all session
-	log.Info("streamingnode stop session...")
+	mlog.Info(context.TODO(), "streamingnode stop session...")
 	s.session.Stop()
 
 	// Stop rootCoord client.
-	log.Info("streamingnode stop mixCoord client...")
+	mlog.Info(context.TODO(), "streamingnode stop mixCoord client...")
 
 	if s.mixCoord.Ready() {
 		if err := s.mixCoord.Get().Close(); err != nil {
-			log.Warn("streamingnode stop mixCoord client failed", zap.Error(err))
+			mlog.Warn(context.TODO(), "streamingnode stop mixCoord client failed", mlog.Err(err))
 		}
 	}
 
 	// Stop tikv
 	if s.tikvCli != nil {
 		if err := s.tikvCli.Close(); err != nil {
-			log.Warn("streamingnode stop tikv client failed", zap.Error(err))
+			mlog.Warn(context.TODO(), "streamingnode stop tikv client failed", mlog.Err(err))
 		}
 	}
 
 	// Wait for grpc server to stop.
-	log.Info("wait for grpc server stop...")
+	mlog.Info(context.TODO(), "wait for grpc server stop...")
 	<-s.grpcServerChan
-	log.Info("streamingnode stop done")
+	mlog.Info(context.TODO(), "streamingnode stop done")
 
 	s.cancel()
 	if err := s.listener.Close(); err != nil {
-		log.Warn("streamingnode stop listener failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "streamingnode stop listener failed", mlog.Err(err))
 	}
 }
 
@@ -200,13 +197,12 @@ func (s *Server) Health(ctx context.Context) commonpb.StateCode {
 }
 
 func (s *Server) init() (err error) {
-	log := log.Ctx(s.ctx)
 	defer func() {
 		if err != nil {
-			log.Error("StreamingNode init failed", zap.Error(err))
+			mlog.Error(context.TODO(), "StreamingNode init failed", mlog.Err(err))
 			return
 		}
-		log.Info("init StreamingNode server finished")
+		mlog.Info(context.TODO(), "init StreamingNode server finished")
 	}()
 
 	// Create etcd client.
@@ -237,13 +233,12 @@ func (s *Server) init() (err error) {
 }
 
 func (s *Server) start() (err error) {
-	log := log.Ctx(s.ctx)
 	defer func() {
 		if err != nil {
-			log.Error("StreamingNode start failed", zap.Error(err))
+			mlog.Error(context.TODO(), "StreamingNode start failed", mlog.Err(err))
 			return
 		}
-		log.Info("start StreamingNode server finished")
+		mlog.Info(context.TODO(), "start StreamingNode server finished")
 	}()
 
 	// Start grpc server.
@@ -264,22 +259,21 @@ func (s *Server) initSession() error {
 	}
 	s.session.Init(typeutil.StreamingNodeRole, s.listener.Address(), false)
 	paramtable.SetNodeID(s.session.ServerID)
-	log.Ctx(s.ctx).Info("StreamingNode init session", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("node address", s.listener.Address()))
+	mlog.Info(s.ctx, "StreamingNode init session", mlog.Int64("nodeID", paramtable.GetNodeID()), mlog.String("node address", s.listener.Address()))
 	return nil
 }
 
 func (s *Server) initMeta() error {
 	params := paramtable.Get()
 	metaType := params.MetaStoreCfg.MetaStoreType.GetValue()
-	log := log.Ctx(s.ctx)
-	log.Info("data coordinator connecting to metadata store", zap.String("metaType", metaType))
+	mlog.Info(context.TODO(), "data coordinator connecting to metadata store", mlog.String("metaType", metaType))
 	metaRootPath := ""
 	switch metaType {
 	case util.MetaStoreTypeTiKV:
 		var err error
 		s.tikvCli, err = tikv.GetTiKVClient(&paramtable.Get().TiKVCfg)
 		if err != nil {
-			log.Warn("Streamingnode init tikv client failed", zap.Error(err))
+			mlog.Warn(context.TODO(), "Streamingnode init tikv client failed", mlog.Err(err))
 			return err
 		}
 		metaRootPath = params.TiKVCfg.MetaRootPath.GetValue()
@@ -294,21 +288,20 @@ func (s *Server) initMeta() error {
 }
 
 func (s *Server) initMixCoord() {
-	log := log.Ctx(s.ctx)
 	go func() {
 		retry.Do(s.ctx, func() error {
-			log.Info("StreamingNode connect to mixCoord...")
+			mlog.Info(context.TODO(), "StreamingNode connect to mixCoord...")
 			mixCoord, err := mix.NewClient(s.ctx)
 			if err != nil {
 				return errors.Wrap(err, "StreamingNode try to new mixCoord client failed")
 			}
 
-			log.Info("StreamingNode try to wait for mixCoord ready")
+			mlog.Info(context.TODO(), "StreamingNode try to wait for mixCoord ready")
 			err = componentutil.WaitForComponentHealthy(s.ctx, mixCoord, "mixCoord", 1000000, time.Millisecond*200)
 			if err != nil {
 				return errors.Wrap(err, "StreamingNode wait for mixCoord ready failed")
 			}
-			log.Info("StreamingNode wait for mixCoord ready")
+			mlog.Info(context.TODO(), "StreamingNode wait for mixCoord ready")
 			s.mixCoord.Set(mixCoord)
 			return nil
 		}, retry.AttemptAlways())
@@ -316,7 +309,7 @@ func (s *Server) initMixCoord() {
 }
 
 func (s *Server) initChunkManager() (err error) {
-	log.Ctx(s.ctx).Info("StreamingNode init chunk manager...")
+	mlog.Info(s.ctx, "StreamingNode init chunk manager...")
 	s.factory.Init(paramtable.Get())
 	manager, err := s.factory.NewPersistentStorageChunkManager(s.ctx)
 	if err != nil {
@@ -327,7 +320,7 @@ func (s *Server) initChunkManager() (err error) {
 }
 
 func (s *Server) initGRPCServer() {
-	log.Ctx(s.ctx).Info("create StreamingNode server...")
+	mlog.Info(s.ctx, "create StreamingNode server...")
 	cfg := &paramtable.Get().StreamingNodeGrpcServerCfg
 	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
@@ -347,13 +340,13 @@ func (s *Server) initGRPCServer() {
 		grpc.MaxRecvMsgSize(cfg.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(cfg.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			logutil.UnaryTraceLoggerInterceptor,
+			mlog.UnaryServerInterceptor(typeutil.StreamingNodeRole),
 			streamingserviceinterceptor.NewStreamingServiceUnaryServerInterceptor(),
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(serverIDGetter),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			logutil.StreamTraceLoggerInterceptor,
+			mlog.StreamServerInterceptor(typeutil.StreamingNodeRole),
 			streamingserviceinterceptor.NewStreamingServiceStreamServerInterceptor(),
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(serverIDGetter),

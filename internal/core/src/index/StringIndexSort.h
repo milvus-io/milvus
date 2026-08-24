@@ -63,7 +63,7 @@ class StringIndexSort : public StringIndex {
 
     const bool
     HasRawData() const override {
-        return true;
+        return !is_nested_index_ && !is_array_field_;
     }
 
     void
@@ -76,9 +76,6 @@ class StringIndexSort : public StringIndex {
 
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
-
-    void
-    BuildWithArrayDataNested(const std::vector<FieldDataPtr>& datas);
 
     // See detailed format in StringIndexSortMemoryImpl::SerializeToBinary
     BinarySet
@@ -111,6 +108,11 @@ class StringIndexSort : public StringIndex {
 
     const TargetBitmap
     IsNull() override;
+
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<std::string>::IsNotNull;
 
     TargetBitmap
     IsNotNull() override;
@@ -175,6 +177,7 @@ class StringIndexSort : public StringIndex {
     std::unique_ptr<StringIndexSortImpl> impl_;
 
     bool is_nested_index_ = false;
+    bool is_array_field_ = false;
 
     // for mmap: idx_to_offsets meta file
     char* mmap_meta_data_ = nullptr;

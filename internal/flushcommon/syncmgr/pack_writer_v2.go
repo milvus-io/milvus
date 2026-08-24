@@ -23,7 +23,6 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -32,10 +31,11 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -49,6 +49,41 @@ type BulkPackWriterV2 struct {
 
 	storageConfig *indexpb.StorageConfig
 	columnGroups  []storagecommon.ColumnGroup
+	preparedStats *metacache.SegmentStats
+}
+
+// PreparedStats returns this sync's cumulative SegmentStats clone for SyncTask
+// to install on the metaCache after the DataCoord ack. Shared by V2 and the
+// embedding V3 writer.
+func (bw *BulkPackWriterV2) PreparedStats() *metacache.SegmentStats {
+	return bw.preparedStats
+}
+
+// finalizeStats builds this sync's cumulative Statistics by cloning the live
+// collector and folding this sync's writes into the clone — the metaCache stays
+// untouched, mutated only by SyncTask.Run (via the installed preparedStats)
+// after the DataCoord ack. The clone is stashed as preparedStats and its
+// Publish() returned to DataCoord, so the two are one object. Shared by V2 and
+// the embedding V3 writer; only the statsBlobSize source differs (V2 sums the
+// returned stats/bm25 arrays, V3 tracks bw.statsBlobSize). digested is false for
+// an empty sync, where the publish returns the segment's prior cumulative value.
+func (bw *BulkPackWriterV2) finalizeStats(
+	pack *SyncPack,
+	digested bool,
+	inserts map[int64]*datapb.FieldBinlog,
+	deltas *datapb.FieldBinlog,
+	statsBlobSize int64,
+) (*datapb.Statistics, error) {
+	seg, ok := bw.metaCache.GetSegmentByID(pack.segmentID)
+	if !ok {
+		return nil, merr.WrapErrSegmentNotFound(pack.segmentID)
+	}
+	clone := seg.Statistics().Clone()
+	if digested {
+		clone.Digest(inserts, deltas, statsBlobSize, pack.batchRows, pack.tsFrom, pack.tsTo)
+	}
+	bw.preparedStats = clone
+	return clone.Publish(), nil
 }
 
 func NewBulkPackWriterV2(metaCache metacache.MetaCache, schema *schemapb.CollectionSchema, chunkManager storage.ChunkManager,
@@ -77,27 +112,46 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 	bm25Stats map[int64]*datapb.FieldBinlog,
 	manifest string,
 	size int64,
+	segmentStats *datapb.Statistics,
 	err error,
 ) {
 	if inserts, manifest, err = bw.writeInserts(ctx, pack); err != nil {
-		log.Error("failed to write insert data", zap.Error(err))
+		mlog.Error(ctx, "failed to write insert data", mlog.Err(err))
 		return
 	}
 	if stats, err = bw.writeStats(ctx, pack); err != nil {
-		log.Error("failed to process stats blob", zap.Error(err))
+		mlog.Error(ctx, "failed to process stats blob", mlog.Err(err))
 		return
 	}
 	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
-		log.Error("failed to process delta blob", zap.Error(err))
+		mlog.Error(ctx, "failed to process delta blob", mlog.Err(err))
 		return
 	}
 	if bm25Stats, err = bw.writeBM25Stasts(ctx, pack); err != nil {
-		log.Error("failed to process bm25 stats blob", zap.Error(err))
+		mlog.Error(ctx, "failed to process bm25 stats blob", mlog.Err(err))
 		return
 	}
 
 	size = bw.sizeWritten
 
+	// V2 returns the stats / bm25Stats arrays, so statsBlobSize is summed from
+	// them here, then finalizeStats produces the cumulative Statistics.
+	digested := len(inserts) > 0 || len(stats) > 0 || len(bm25Stats) > 0 || len(deltas.GetBinlogs()) > 0
+	var statsBlobSize int64
+	if digested {
+		for _, fb := range stats {
+			for _, l := range fb.GetBinlogs() {
+				statsBlobSize += l.GetMemorySize()
+			}
+		}
+		for _, fb := range bm25Stats {
+			for _, l := range fb.GetBinlogs() {
+				statsBlobSize += l.GetMemorySize()
+			}
+		}
+	}
+
+	segmentStats, err = bw.finalizeStats(pack, digested, inserts, deltas, statsBlobSize)
 	return
 }
 
@@ -176,10 +230,10 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		var err error
 		logs, manifestPath, err = bw.writeInsertsIntoStorage(ctx, pluginContextPtr, pack, rec, tsFrom, tsTo)
 		if err != nil {
-			log.Warn("failed to write inserts into storage",
-				zap.Int64("collectionID", pack.collectionID),
-				zap.Int64("segmentID", pack.segmentID),
-				zap.Error(err))
+			mlog.Warn(ctx, "failed to write inserts into storage",
+				mlog.FieldCollectionID(pack.collectionID),
+				mlog.FieldSegmentID(pack.segmentID),
+				mlog.Err(err))
 			return err
 		}
 		return nil
@@ -204,7 +258,7 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 	doWrite := func(w storage.RecordWriter) error {
 		if err = w.Write(rec); err != nil {
 			if closeErr := w.Close(); closeErr != nil {
-				log.Error("failed to close writer after write failed", zap.Error(closeErr))
+				mlog.Error(context.TODO(), "failed to close writer after write failed", mlog.Err(closeErr))
 			}
 			return err
 		}

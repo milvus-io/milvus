@@ -21,17 +21,20 @@ import (
 	"io"
 
 	"github.com/minio/minio-go/v7"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var _ ObjectStorage = (*MinioObjectStorage)(nil)
 
+const minioSingleCopyObjectMaxSize = 5 * 1024 * 1024 * 1024
+
 type MinioObjectStorage struct {
 	*minio.Client
+
+	cloudProvider string
 }
 
 type ObjectReader struct {
@@ -51,7 +54,7 @@ func newMinioObjectStorageWithConfig(ctx context.Context, c *objectstorage.Confi
 	if err != nil {
 		return nil, err
 	}
-	return &MinioObjectStorage{minIOClient}, nil
+	return &MinioObjectStorage{Client: minIOClient, cloudProvider: c.CloudProvider}, nil
 }
 
 func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error) {
@@ -63,7 +66,7 @@ func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, buc
 		}
 		err := opts.SetRange(offset, end)
 		if err != nil {
-			log.Warn("failed to set range", zap.String("bucket", bucketName), zap.String("path", objectName), zap.Error(err))
+			mlog.Warn(ctx, "failed to set range", mlog.String("bucket", bucketName), mlog.String("path", objectName), mlog.Err(err))
 			return nil, mapObjectStorageError(objectName, err)
 		}
 	}
@@ -77,8 +80,17 @@ func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, buc
 }
 
 func (minioObjectStorage *MinioObjectStorage) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error {
-	_, err := minioObjectStorage.Client.PutObject(ctx, bucketName, objectName, reader, objectSize, minio.PutObjectOptions{})
+	_, err := minioObjectStorage.Client.PutObject(ctx, bucketName, objectName, reader, objectSize, minioObjectStorage.putObjectOptions())
 	return mapObjectStorageError(objectName, err)
+}
+
+func (minioObjectStorage *MinioObjectStorage) putObjectOptions() minio.PutObjectOptions {
+	if !paramtable.Get().MinioCfg.DisableAWSChunkedEncoding.GetAsBool() {
+		return minio.PutObjectOptions{}
+	}
+	return minio.PutObjectOptions{
+		DisableContentSha256: true,
+	}
 }
 
 func (minioObjectStorage *MinioObjectStorage) StatObject(ctx context.Context, bucketName, objectName string) (int64, error) {
@@ -113,15 +125,28 @@ func (minioObjectStorage *MinioObjectStorage) RemoveObject(ctx context.Context, 
 	return mapObjectStorageError(objectName, err)
 }
 
-func (minioObjectStorage *MinioObjectStorage) CopyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
+func (minioObjectStorage *MinioObjectStorage) CopyObjectCrossBucket(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) error {
 	srcOpts := minio.CopySrcOptions{
-		Bucket: bucketName,
+		Bucket: srcBucket,
 		Object: srcObjectName,
 	}
 	dstOpts := minio.CopyDestOptions{
-		Bucket: bucketName,
+		Bucket: dstBucket,
 		Object: dstObjectName,
 	}
-	_, err := minioObjectStorage.Client.CopyObject(ctx, dstOpts, srcOpts)
+	srcInfo, err := minioObjectStorage.Client.StatObject(ctx, srcBucket, srcObjectName, minio.StatObjectOptions{})
+	if err != nil {
+		return mapObjectStorageError(srcObjectName, err)
+	}
+	// GCS's XML API has no multipart copy: x-amz-copy-source-range (emitted by
+	// ComposeObject) has no x-goog-* equivalent. Its whole-object copy has no
+	// 5GiB cap though, so GCP always takes the single-copy path.
+	if srcInfo.Size <= minioSingleCopyObjectMaxSize || minioObjectStorage.cloudProvider == objectstorage.CloudProviderGCP {
+		_, err = minioObjectStorage.CopyObject(ctx, dstOpts, srcOpts)
+		return mapObjectStorageError(srcObjectName, err)
+	}
+	// MinIO's single CopyObject path is capped at 5GiB. ComposeObject still runs
+	// provider-side and avoids streaming snapshot data through Milvus.
+	_, err = minioObjectStorage.ComposeObject(ctx, dstOpts, srcOpts)
 	return mapObjectStorageError(srcObjectName, err)
 }

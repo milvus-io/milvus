@@ -5,11 +5,11 @@ import (
 	"fmt"
 
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -27,6 +27,17 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	}
 
 	dt.tr = timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute delete %d", dt.ID()))
+
+	var collectionSchema *schemapb.CollectionSchema
+	if dt.req.Namespace != nil || hookutil.IsClusterEncryptionEnabled() {
+		schema, err := dt.getMetaCache().GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
+		if err != nil {
+			mlog.Warn(ctx, "get collection schema from meta cache failed", mlog.String("collectionName", dt.req.GetCollectionName()), mlog.Err(err))
+			return err
+		}
+		collectionSchema = schema.CollectionSchema
+	}
+
 	result, numRows, err := repackDeleteMsgByHash(
 		ctx, dt.primaryKeys,
 		dt.vChannels, dt.idAllocator,
@@ -34,6 +45,8 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		dt.req.GetCollectionName(),
 		dt.partitionID, dt.req.GetPartitionName(),
 		dt.req.GetDbName(),
+		dt.req.Namespace,
+		collectionSchema,
 	)
 	if err != nil {
 		return err
@@ -41,13 +54,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 
 	var ez *message.CipherConfig
 	if hookutil.IsClusterEncryptionEnabled() {
-		schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
-		if err != nil {
-			log.Ctx(ctx).Warn("get collection schema from global meta cache failed", zap.String("collectionName", dt.req.GetCollectionName()), zap.Error(err))
-			return err
-		}
-
-		ez = hookutil.GetEzByCollProperties(schema.GetProperties(), dt.collectionID).AsMessageConfig()
+		ez = hookutil.GetEzByCollProperties(collectionSchema.GetProperties(), dt.collectionID).AsMessageConfig()
 	}
 
 	var msgs []message.MutableMessage
@@ -70,16 +77,16 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		}
 	}
 
-	log.Ctx(ctx).Debug("send delete request to virtual channels",
-		zap.String("collectionName", dt.req.GetCollectionName()),
-		zap.Int64("collectionID", dt.collectionID),
-		zap.Strings("virtual_channels", dt.vChannels),
-		zap.Int64("taskID", dt.ID()),
-		zap.Duration("prepare duration", dt.tr.RecordSpan()))
+	mlog.Debug(ctx, "send delete request to virtual channels",
+		mlog.String("collectionName", dt.req.GetCollectionName()),
+		mlog.Int64("collectionID", dt.collectionID),
+		mlog.Strings("virtual_channels", dt.vChannels),
+		mlog.Int64("taskID", dt.ID()),
+		mlog.Duration("prepare duration", dt.tr.RecordSpan()))
 
 	resp := streaming.WAL().AppendMessages(ctx, msgs...)
 	if err := resp.UnwrapFirstError(); err != nil {
-		log.Ctx(ctx).Warn("append messages to wal failed", zap.Error(err))
+		mlog.Warn(ctx, "append messages to wal failed", mlog.Err(err))
 		return err
 	}
 	dt.sessionTS = resp.MaxTimeTick()

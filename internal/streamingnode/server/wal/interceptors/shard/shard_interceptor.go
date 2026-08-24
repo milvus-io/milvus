@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
@@ -14,9 +13,10 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
@@ -69,9 +69,14 @@ func (impl *shardInterceptor) DoAppend(ctx context.Context, msg message.MutableM
 // handleCreateCollection handles the create collection message.
 func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	createCollectionMsg := message.MustAsMutableCreateCollectionMessageV1(msg)
+	body := createCollectionMsg.MustBody()
+	if body.GetCollectionSchema() == nil && len(body.GetSchema()) == 0 {
+		return nil, status.NewUnrecoverableError("create collection message does not contain collection schema")
+	}
+	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
 	header := createCollectionMsg.Header()
 	if err := impl.shardManager.CheckIfCollectionCanBeCreated(header.GetCollectionId()); err != nil {
-		impl.shardManager.Logger().Warn("collection already exists when creating collection", zap.Int64("collectionID", header.GetCollectionId()))
+		impl.shardManager.Logger().Warn(ctx, "collection already exists when creating collection", mlog.FieldCollectionID(header.GetCollectionId()))
 		// The collection can not be created at current shard, ignored
 		// TODO: idompotent for wal is required in future, but current milvus state is not recovered from wal.
 		// return nil, status.NewUnrecoverableError(err.Error())
@@ -82,9 +87,10 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 		return msgID, err
 	}
 	impl.shardManager.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(msg.IntoImmutableMessage(msgID)))
-	if schema := createCollectionMsg.MustBody().GetCollectionSchema(); schema != nil {
-		impl.allocFunctionRunners(header.GetCollectionId(), createCollectionMsg.VChannel(), schema)
-	}
+	// Legacy CreateCollection messages keep the schema in the serialized Schema
+	// field instead of CollectionSchema. Resolve both formats so Alloc always
+	// registers the WAL lifecycle key before later schema updates.
+	impl.allocFunctionRunners(header.GetCollectionId(), createCollectionMsg.VChannel(), schema)
 	return msgID, nil
 }
 
@@ -92,7 +98,7 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 func (impl *shardInterceptor) handleDropCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	dropCollectionMessage := message.MustAsMutableDropCollectionMessageV1(msg)
 	if err := impl.shardManager.CheckIfCollectionExists(dropCollectionMessage.Header().GetCollectionId()); err != nil {
-		impl.shardManager.Logger().Warn("collection not found when dropping collection", zap.Int64("collectionID", dropCollectionMessage.Header().GetCollectionId()))
+		impl.shardManager.Logger().Warn(ctx, "collection not found when dropping collection", mlog.FieldCollectionID(dropCollectionMessage.Header().GetCollectionId()))
 		// The collection can not be dropped at current shard, ignored
 		// TODO: idompotent for wal is required in future, but current milvus state is not recovered from wal.
 		// return nil, status.NewUnrecoverableError(err.Error())
@@ -103,7 +109,7 @@ func (impl *shardInterceptor) handleDropCollection(ctx context.Context, msg mess
 		return msgID, err
 	}
 	impl.shardManager.DropCollection(message.MustAsImmutableDropCollectionMessageV1(msg.IntoImmutableMessage(msgID)))
-	function.ReleaseFunctionRunners(dropCollectionMessage.Header().GetCollectionId(), dropCollectionMessage.VChannel())
+	function.GetManager().Release(dropCollectionMessage.Header().GetCollectionId(), walFunctionRunnerKey(dropCollectionMessage.VChannel()))
 	return msgID, nil
 }
 
@@ -112,7 +118,7 @@ func (impl *shardInterceptor) handleCreatePartition(ctx context.Context, msg mes
 	createPartitionMessage := message.MustAsMutableCreatePartitionMessageV1(msg)
 	h := createPartitionMessage.Header()
 	if err := impl.shardManager.CheckIfPartitionCanBeCreated(shards.PartitionUniqueKey{CollectionID: h.GetCollectionId(), PartitionID: h.GetPartitionId()}); err != nil {
-		impl.shardManager.Logger().Warn("partition already exists when creating partition", zap.Int64("collectionID", h.GetCollectionId()), zap.Int64("partitionID", h.GetPartitionId()))
+		impl.shardManager.Logger().Warn(ctx, "partition already exists when creating partition", mlog.FieldCollectionID(h.GetCollectionId()), mlog.FieldPartitionID(h.GetPartitionId()))
 		// TODO: idompotent for wal is required in future, but current milvus state is not recovered from wal.
 		// return nil, status.NewUnrecoverableError(err.Error())
 	}
@@ -130,7 +136,7 @@ func (impl *shardInterceptor) handleDropPartition(ctx context.Context, msg messa
 	dropPartitionMessage := message.MustAsMutableDropPartitionMessageV1(msg)
 	h := dropPartitionMessage.Header()
 	if err := impl.shardManager.CheckIfPartitionExists(shards.PartitionUniqueKey{CollectionID: h.GetCollectionId(), PartitionID: h.GetPartitionId()}); err != nil {
-		impl.shardManager.Logger().Warn("partition not found when dropping partition", zap.Int64("collectionID", h.GetCollectionId()), zap.Int64("partitionID", h.GetPartitionId()))
+		impl.shardManager.Logger().Warn(ctx, "partition not found when dropping partition", mlog.FieldCollectionID(h.GetCollectionId()), mlog.FieldPartitionID(h.GetPartitionId()))
 		// The partition can not be dropped at current shard, ignored
 		// TODO: idompotent for wal is required in future, but current milvus state is not recovered from wal.
 		// return nil, status.NewUnrecoverableError(err.Error())
@@ -152,7 +158,8 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	header := insertMsg.Header()
 	collectionID := header.GetCollectionId()
 	schemaVersion := header.GetSchemaVersion()
-	if correctSchemaVersion, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(header); err != nil {
+	correctSchemaVersion, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(header)
+	if err != nil {
 		if errors.Is(err, shards.ErrCollectionNotFound) {
 			return nil, status.NewUnrecoverableError("collection %d not found", collectionID)
 		}
@@ -160,28 +167,32 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			return nil, status.NewUnrecoverableError("collection %d schema not provided by create collection message", collectionID)
 		}
 		if errors.Is(err, shards.ErrCollectionSchemaVersionNotMatch) {
-			impl.shardManager.Logger().Warn("insertMessage schema version mismatch",
-				zap.Int64("collectionID", collectionID),
-				zap.Bool("schemaVersionProvided", header.SchemaVersion != nil),
-				zap.Int32("schemaVersion", schemaVersion),
-				zap.Int32("collectionSchemaVersion", correctSchemaVersion),
-				zap.Error(err))
+			impl.shardManager.Logger().Warn(ctx, "insertMessage schema version mismatch",
+				mlog.FieldCollectionID(collectionID),
+				mlog.Bool("schemaVersionProvided", header.SchemaVersion != nil),
+				mlog.Int32("schemaVersion", schemaVersion),
+				mlog.Int32("collectionSchemaVersion", correctSchemaVersion),
+				mlog.Err(err))
 			return nil, status.NewSchemaVersionMismatch("schema version mismatch, input schema version: %d, collection schema version: %d",
 				schemaVersion, correctSchemaVersion)
 		}
-		impl.shardManager.Logger().Error("unexpected error from CheckIfCollectionSchemaVersionMatch",
-			zap.Int64("collectionID", collectionID),
-			zap.Bool("schemaVersionProvided", header.SchemaVersion != nil),
-			zap.Int32("schemaVersion", schemaVersion),
-			zap.Error(err))
-		return nil, errors.Wrap(err, "CheckIfCollectionSchemaVersionMatch")
+		impl.shardManager.Logger().Error(ctx, "unexpected error from CheckIfCollectionSchemaVersionMatch",
+			mlog.FieldCollectionID(collectionID),
+			mlog.Bool("schemaVersionProvided", header.SchemaVersion != nil),
+			mlog.Int32("schemaVersion", schemaVersion),
+			mlog.Err(err))
+		return nil, status.NewUnrecoverableError("unexpected error from CheckIfCollectionSchemaVersionMatch: %s", err.Error())
+	}
+	schemaVersion = correctSchemaVersion
+	if header.SchemaVersion == nil {
+		schemaVersion = function.LatestFunctionRunnerVersion
 	}
 	if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
-		impl.shardManager.Logger().Warn("failed to materialize function fields before WAL append",
-			zap.Int64("collectionID", header.GetCollectionId()),
-			zap.Int32("schemaVersion", schemaVersion),
-			zap.Error(err))
-		return nil, status.NewInner("failed to materialize function fields before WAL append: %s", err.Error())
+		impl.shardManager.Logger().Warn(ctx, "failed to materialize function fields before WAL append",
+			mlog.Int64("collectionID", header.GetCollectionId()),
+			mlog.Int32("schemaVersion", schemaVersion),
+			mlog.Err(err))
+		return nil, status.NewUnrecoverableError("failed to materialize function fields before WAL append: %s", err.Error())
 	}
 	for _, partition := range header.GetPartitions() {
 		if partition.BinarySize == 0 {
@@ -213,7 +224,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 		}
 		if errors.IsAny(err, shards.ErrTooLargeInsert, shards.ErrPartitionNotFound, shards.ErrCollectionNotFound) {
 			// Message is too large, so retry operation is unrecoverable, can't be retry at client side.
-			impl.shardManager.Logger().Warn("unrecoverable insert operation", zap.Object("message", msg), zap.Error(err))
+			impl.shardManager.Logger().Warn(ctx, "unrecoverable insert operation", mlog.Object("message", msg), mlog.Err(err))
 			return nil, status.NewUnrecoverableError("fail to assign segment, %s", err.Error())
 		}
 		if err != nil {
@@ -303,8 +314,10 @@ func (impl *shardInterceptor) handleAlterCollection(ctx context.Context, msg mes
 	if err != nil {
 		return msgID, err
 	}
-	if schema := putCollectionMsg.MustBody().GetUpdates().GetSchema(); schema != nil {
-		impl.updateFunctionRunners(header.GetCollectionId(), putCollectionMsg.VChannel(), schema)
+	if messageutil.IsSchemaChange(header) {
+		if schema := putCollectionMsg.MustBody().GetUpdates().GetSchema(); schema != nil {
+			impl.updateFunctionRunners(header.GetCollectionId(), putCollectionMsg.VChannel(), schema)
+		}
 	}
 	return msgID, nil
 }
@@ -332,7 +345,7 @@ func (impl *shardInterceptor) handleFlushSegment(ctx context.Context, msg messag
 	if utility.GetFlushFromOldArch(ctx) {
 		// The flush message come from old arch, so it's not managed by shard manager.
 		// We need to flush it into wal directly.
-		impl.shardManager.Logger().Info("flush segment from old arch, skip checking of shard manager", log.FieldMessage(msg))
+		impl.shardManager.Logger().Info(ctx, "flush segment from old arch, skip checking of shard manager", mlog.FieldMessage(msg))
 		return appendOp(ctx, msg)
 	}
 
@@ -376,7 +389,7 @@ func (impl *shardInterceptor) handleTruncateCollectionMessage(ctx context.Contex
 func (impl *shardInterceptor) Close() {
 	if schemaProvider, ok := impl.shardManager.(collectionSchemaProvider); ok {
 		for collectionID, schemaInfo := range schemaProvider.GetAllCollectionSchemaInfos() {
-			function.ReleaseFunctionRunners(collectionID, schemaInfo.VChannel)
+			function.GetManager().Release(collectionID, walFunctionRunnerKey(schemaInfo.VChannel))
 		}
 	}
 }

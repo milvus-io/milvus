@@ -41,6 +41,7 @@ func (s *SegmentBelongs) PartitionUniqueKey() PartitionUniqueKey {
 // SegmentStats is the usage stats of a segment.
 type SegmentStats struct {
 	Modified              ModifiedMetrics
+	RuntimeFlushSize      uint64    // runtime-only size used by StreamingNode flush HWM/LWM decisions; not persisted into recovery meta.
 	MaxRows               uint64    // MaxRows of current segment should be assigned, it's a fixed value when segment is transfer int growing.
 	MaxBinarySize         uint64    // MaxBinarySize of current segment should be assigned, it's a fixed value when segment is transfer int growing.
 	CreateTime            time.Time // created timestamp of this segment, it's a fixed value when segment is created, not a tso.
@@ -115,6 +116,23 @@ func (s *SegmentStats) AllocRows(m ModifiedMetrics) bool {
 	s.Modified.Collect(m)
 	s.LastModifiedTime = time.Now()
 	return true
+}
+
+// AllocRuntimeFlushSize records runtime-only size growth for flush HWM/LWM decisions.
+func (s *SegmentStats) AllocRuntimeFlushSize(size uint64) {
+	if size > math.MaxUint64-s.RuntimeFlushSize {
+		s.RuntimeFlushSize = math.MaxUint64
+		return
+	}
+	s.RuntimeFlushSize += size
+}
+
+// FlushSize returns the size used by runtime flush decisions.
+func (s *SegmentStats) FlushSize() uint64 {
+	if s.RuntimeFlushSize > 0 {
+		return s.RuntimeFlushSize
+	}
+	return s.Modified.BinarySize
 }
 
 // BinaryCanBeAssign returns the capacity of binary size can be inserted.

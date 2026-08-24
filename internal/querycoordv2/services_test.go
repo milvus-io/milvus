@@ -137,7 +137,7 @@ func initStreamingSystem() {
 		for _, vchannel := range msg.BroadcastHeader().VChannels {
 			results[vchannel] = &message.AppendResult{
 				MessageID:              walimplstest.NewTestMessageID(1),
-				TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+				TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 				LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
 			}
 		}

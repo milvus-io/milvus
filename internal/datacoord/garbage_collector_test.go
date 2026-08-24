@@ -51,11 +51,13 @@ import (
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -2277,6 +2279,119 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 		s.Zero(gc.pauseUntil.PauseUntil())
 	})
 
+	s.Run("pause_timeout_after_signal_received", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Hour,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		controlDone := make(chan struct{})
+		go func() {
+			defer close(controlDone)
+			gc.startControlLoop(context.Background())
+		}()
+		defer func() {
+			gc.cancel()
+			<-controlDone
+			gc.option.removeObjectPool.Release()
+		}()
+
+		signalCh := make(chan gcCmd, 1)
+		go func() {
+			signalCh <- <-gc.controlChannels["meta"]
+		}()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		pauseDone := make(chan error, 1)
+		go func() {
+			pauseDone <- gc.Pause(ctx, -1, "timeout-ticket", time.Minute)
+		}()
+
+		// Receiving here means the meta worker already took the signal, so pause()
+		// is past the send and parked in the ack wait.
+		select {
+		case <-signalCh:
+		case <-time.After(time.Second * 5):
+			s.T().Fatal("pause signal was not delivered to meta worker")
+		}
+
+		// Deliberately never close signal.done: canceling only now makes the inner
+		// select take its timeout arm, with no dependency on wall-clock ordering.
+		cancel()
+
+		err := <-pauseDone
+		s.ErrorIs(err, context.Canceled)
+		s.Zero(gc.pauseUntil.PauseUntil())
+	})
+
+	// Tickets are not unique: the REST route in restful_mgr_routes.go issues every
+	// pause with an empty ticket. A failed pause must therefore roll back only its
+	// own record -- a ticket-scoped delete would also wipe a concurrent caller's
+	// still-valid pause and silently resume GC while that caller believes it is
+	// paused.
+	s.Run("pause_rollback_preserves_other_empty_ticket_record", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Hour,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		controlDone := make(chan struct{})
+		go func() {
+			defer close(controlDone)
+			gc.startControlLoop(context.Background())
+		}()
+		defer func() {
+			gc.cancel()
+			<-controlDone
+			gc.option.removeObjectPool.Release()
+		}()
+
+		metaCh := gc.controlChannels["meta"]
+		secondSignal := make(chan struct{})
+		go func() {
+			// Ack the first pause so it completes.
+			cmd := <-metaCh
+			close(cmd.done)
+			// Take the second pause's signal but never ack it, parking pause() in
+			// the inner ack wait so its rollback path is the one exercised.
+			<-metaCh
+			close(secondSignal)
+		}()
+
+		// First caller: a successful global pause with an empty ticket.
+		s.NoError(gc.Pause(context.Background(), -1, "", time.Minute))
+		firstUntil := gc.pauseUntil.PauseUntil()
+		s.NotZero(firstUntil)
+
+		// Second caller: same empty ticket, canceled while waiting for the ack.
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		pauseDone := make(chan error, 1)
+		go func() {
+			pauseDone <- gc.Pause(ctx, -1, "", time.Minute)
+		}()
+
+		select {
+		case <-secondSignal:
+		case <-time.After(time.Second * 5):
+			s.T().Fatal("second pause signal was not delivered to meta worker")
+		}
+		cancel()
+		s.ErrorIs(<-pauseDone, context.Canceled)
+
+		// The first caller's pause must survive the second caller's rollback.
+		s.Equal(firstUntil, gc.pauseUntil.PauseUntil())
+	})
+
 	s.Run("pause_collection", func() {
 		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
 			cli:              s.cli,
@@ -3085,6 +3200,97 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_SnapshotReference(t *testing.
 	assert.Empty(t, removeCalledPaths, "binlog files of snapshot-referenced segments should not be removed")
 }
 
+// TestGarbageCollector_recycleUnusedBinlogFiles_V3Orphan tests that V3-layout files whose
+// segment was never registered in meta (e.g. output uploaded by a failed sort compaction
+// attempt, issue #50962) are recycled after missingTolerance, while files of registered
+// V3 segments are still skipped.
+func TestGarbageCollector_recycleUnusedBinlogFiles_V3Orphan(t *testing.T) {
+	ctx := context.Background()
+
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
+
+	// Registered V3 segment, its files must be skipped by the orphan scan.
+	registered := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             1001,
+			CollectionID:   100,
+			PartitionID:    10,
+			State:          commonpb.SegmentState_Flushed,
+			InsertChannel:  "ch1",
+			StorageVersion: storage.StorageV3,
+		},
+	}
+
+	meta := &meta{
+		catalog:      &datacoord.Catalog{},
+		snapshotMeta: &snapshotMeta{},
+		indexMeta:    &indexMeta{},
+		segments: &SegmentsInfo{
+			segments: map[int64]*SegmentInfo{
+				1001: registered,
+			},
+		},
+		channelCPs: newChannelCps(),
+	}
+
+	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: time.Hour,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	var (
+		removedMu    sync.Mutex
+		removedPaths []string
+	)
+	mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).To(func(cm *storage.LocalChunkManager, ctx context.Context, filePath string) error {
+		removedMu.Lock()
+		defer removedMu.Unlock()
+		removedPaths = append(removedPaths, filePath)
+		return nil
+	}).Build()
+	defer mockRemove.UnPatch()
+
+	expired := time.Now().Add(-2 * time.Hour)
+	insertPrefix := path.Join(cli.RootPath(), common.SegmentInsertLogPath)
+	files := []*storage.ChunkObjectInfo{
+		// deep V3 path of the registered segment: skipped
+		{FilePath: path.Join(insertPrefix, "100/10/1001/_stats/bloom_filter.100/2001"), ModifyTime: expired},
+		// deep V3 path of orphan segment 999 (not in meta), expired: removed
+		{FilePath: path.Join(insertPrefix, "100/10/999/_stats/bloom_filter.100/2002"), ModifyTime: expired},
+		// data file of the same orphan segment: removed
+		{FilePath: path.Join(insertPrefix, "100/10/999/_data/2003_uuid.parquet"), ModifyTime: expired},
+		// orphan V3 file still within missingTolerance: kept
+		{FilePath: path.Join(insertPrefix, "100/10/998/_stats/bloom_filter.100/2004"), ModifyTime: time.Now()},
+	}
+
+	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(func(cm *storage.LocalChunkManager, ctx context.Context, prefix string, recursive bool, fn storage.ChunkObjectWalkFunc) error {
+		if prefix != insertPrefix {
+			return nil
+		}
+		for _, file := range files {
+			if !fn(file) {
+				break
+			}
+		}
+		return nil
+	}).Build()
+	defer mockWalk.UnPatch()
+
+	mockIsSegBlocked := mockey.Mock((*snapshotMeta).IsSegmentGCBlocked).Return(false).Build()
+	defer mockIsSegBlocked.UnPatch()
+
+	gc.recycleUnusedBinlogFiles(ctx)
+
+	assert.ElementsMatch(t, []string{
+		path.Join(insertPrefix, "100/10/999/_stats/bloom_filter.100/2002"),
+		path.Join(insertPrefix, "100/10/999/_data/2003_uuid.parquet"),
+	}, removedPaths)
+}
+
 // TestGarbageCollector_recycleDroppedSegments_SnapshotMetaNil tests that GC handles nil snapshotMeta gracefully
 func TestGarbageCollector_recycleDroppedSegments_SnapshotMetaNil(t *testing.T) {
 	// Setup
@@ -3341,6 +3547,66 @@ func TestGarbageCollector_recycleUnusedTextIndexFiles_SnapshotReference(t *testi
 	// Verify - files should NOT be removed
 	assert.Empty(t, removedFiles,
 		"text index files should not be removed when segment is referenced by snapshot")
+}
+
+func TestGarbageCollector_recycleUnusedAnalyzeFiles_StaleVersions(t *testing.T) {
+	ctx := context.Background()
+
+	meta := &meta{
+		catalog: &datacoord.Catalog{},
+		analyzeMeta: &analyzeMeta{
+			ctx: ctx,
+			tasks: map[int64]*indexpb.AnalyzeTask{
+				401: {
+					TaskID:  401,
+					Version: 2,
+					State:   indexpb.JobState_JobStateFinished,
+				},
+			},
+		},
+	}
+
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
+
+	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: 0,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	// The non-recursive walk lists the per-task top-level dirs under analyze_stats.
+	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
+			recursive bool, fn storage.ChunkObjectWalkFunc,
+		) error {
+			if strings.Contains(prefix, common.AnalyzeStatsPath) {
+				fn(&storage.ChunkObjectInfo{
+					FilePath:   path.Join(prefix, "401") + "/",
+					ModifyTime: time.Now().Add(-time.Hour),
+				})
+			}
+			return nil
+		}).Build()
+	defer mockWalk.UnPatch()
+
+	removedPrefixes := []string{}
+	mockRemove := mockey.Mock((*storage.LocalChunkManager).RemoveWithPrefix).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string) error {
+			removedPrefixes = append(removedPrefixes, prefix)
+			return nil
+		}).Build()
+	defer mockRemove.UnPatch()
+
+	gc.recycleUnusedAnalyzeFiles(ctx, nil)
+
+	// Analyze files are written under analyze_stats/{taskID}/{version}/... — for a
+	// finished task at Version=2, exactly the stale versions 0 and 1 under the
+	// task's own prefix must be removed, and version 2 must be kept.
+	root := path.Join(cli.RootPath(), common.AnalyzeStatsPath) + "/"
+	assert.ElementsMatch(t, []string{root + "401/0/", root + "401/1/"}, removedPrefixes)
 }
 
 func TestGarbageCollector_recycleUnusedJSONIndexFiles_SnapshotReference(t *testing.T) {
@@ -4310,7 +4576,7 @@ func TestGarbageCollector_recycleSnapshots_OrphanCleanup(t *testing.T) {
 		defer mockSave.UnPatch()
 		mockDropCatalog := mockey.Mock((*datacoord.Catalog).DropSnapshot).Return(nil).Build()
 		defer mockDropCatalog.UnPatch()
-		mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+		mockWriter := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).Return(nil).Build()
 		defer mockWriter.UnPatch()
 
 		gc.recycleSnapshots(ctx, nil)

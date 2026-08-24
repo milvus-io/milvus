@@ -17,13 +17,12 @@
 package compaction
 
 import (
+	"context"
 	"fmt"
-
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -45,6 +44,9 @@ const (
 // forced strategies:
 //   - clustering compaction: always REWRITE_ALL (data is repartitioned)
 //   - sort compaction: always REUSE_ALL (row order changes but same data)
+//   - schema-bump compaction: always REUSE_ALL (1->1, only materializes a new
+//     non-LOB output column + bumps schema version; existing TEXT LOB data is
+//     unchanged, so its refs are carried as-is — never REWRITE_ALL)
 //   - mix compaction with multiple outputs (N->M, M>1): always REWRITE_ALL
 //     (LOB refs cannot be duplicated across output manifests without inflating ValidRows)
 //   - L0 delete compaction: always SKIP (only applies delete logs, segment LOB refs unchanged)
@@ -56,6 +58,9 @@ func GetForcedStrategy(compactionType datapb.CompactionType, sourceSegmentCount,
 
 	case datapb.CompactionType_SortCompaction,
 		datapb.CompactionType_PartitionKeySortCompaction:
+		return LOBStrategyReuseAll, true
+
+	case datapb.CompactionType_BumpSchemaVersionCompaction:
 		return LOBStrategyReuseAll, true
 
 	case datapb.CompactionType_MixCompaction:
@@ -147,9 +152,9 @@ func DecideLOBStrategyFromManifest(lobFiles []packed.LobFileInfo, fieldID int64,
 		if _, seen := seenFiles[file.Path]; !seen {
 			seenFiles[file.Path] = file.TotalRows
 		} else {
-			log.Warn("LOB file referenced by multiple segments, invariant violation",
-				zap.String("path", file.Path),
-				zap.Int64("fieldID", fieldID))
+			mlog.Warn(context.TODO(), "LOB file referenced by multiple segments, invariant violation",
+				mlog.String("path", file.Path),
+				mlog.FieldFieldID(fieldID))
 		}
 	}
 

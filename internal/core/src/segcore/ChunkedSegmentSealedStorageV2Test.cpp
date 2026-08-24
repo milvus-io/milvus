@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -57,14 +58,17 @@
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/packed/writer.h"
+#include "mmap/ChunkedColumnGroup.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
+#include "query/PlanImpl.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentSealed.h"
+#include "segcore/search_result_export_c.h"
 #include "segcore/Types.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
@@ -182,7 +186,115 @@ class StorageV2CellTargetGuard {
  private:
     int64_t old_bytes_;
 };
+
+class StorageV2TempDirGuard {
+ public:
+    StorageV2TempDirGuard(milvus_storage::ArrowFileSystemPtr fs,
+                          std::string path)
+        : fs_(std::move(fs)), path_(std::move(path)) {
+        static_cast<void>(fs_->DeleteDir(path_));
+    }
+
+    ~StorageV2TempDirGuard() {
+        static_cast<void>(fs_->DeleteDir(path_));
+    }
+
+ private:
+    milvus_storage::ArrowFileSystemPtr fs_;
+    std::string path_;
+};
+
+void
+AddWarmupProperty(milvus::proto::schema::CollectionSchema& schema_proto,
+                  const std::string& key,
+                  const std::string& value) {
+    auto* prop = schema_proto.add_properties();
+    prop->set_key(key);
+    prop->set_value(value);
+}
 }  // namespace
+
+TEST(ChunkedSegmentSealedStorageV2,
+     DirectLoadFieldDataUsesVectorIndexWarmupForNoIndexVector) {
+    constexpr int64_t kPkFieldId = START_USER_FIELDID;
+    constexpr int64_t kVectorFieldId = START_USER_FIELDID + 1;
+    constexpr int64_t kDim = 4;
+    constexpr int64_t kRowCount = 4;
+
+    milvus::proto::schema::CollectionSchema schema_proto;
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(kPkFieldId);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+
+    auto* vector_field = schema_proto.add_fields();
+    vector_field->set_fieldid(kVectorFieldId);
+    vector_field->set_name("vec");
+    vector_field->set_data_type(milvus::proto::schema::DataType::FloatVector);
+    auto* dim = vector_field->add_type_params();
+    dim->set_key("dim");
+    dim->set_value(std::to_string(kDim));
+
+    AddWarmupProperty(schema_proto, "warmup.vectorField", "disable");
+    AddWarmupProperty(schema_proto, "warmup.vectorIndex", "sync");
+    auto schema = Schema::ParseFrom(schema_proto);
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    const std::string dir = "test_data/storage_v2_direct_warmup";
+    StorageV2TempDirGuard dir_guard(fs, dir);
+    const std::string path = dir + "/vec.parquet";
+    ASSERT_TRUE(fs->CreateDir(dir).ok());
+
+    auto arrow_schema = schema->ConvertToArrowSchema();
+    std::vector<std::string> paths{path};
+    auto storage_config = milvus_storage::StorageConfig();
+    std::vector<std::vector<int>> column_groups{{1}};
+    auto writer_result = milvus_storage::PackedRecordBatchWriter::Make(
+        fs,
+        paths,
+        arrow_schema,
+        storage_config,
+        column_groups,
+        16 * 1024 * 1024,
+        ::parquet::default_writer_properties());
+    ASSERT_TRUE(writer_result.ok()) << writer_result.status().ToString();
+    auto writer = writer_result.ValueOrDie();
+    auto dataset = DataGen(schema, kRowCount);
+    auto record_batch = ConvertToArrowRecordBatch(dataset, kDim, arrow_schema);
+    ASSERT_NE(record_batch, nullptr);
+    ASSERT_TRUE(writer->Write(record_batch).ok());
+    ASSERT_TRUE(writer->Close().ok());
+
+    LoadFieldDataInfo load_info;
+    load_info.storage_version = 2;
+    FieldBinlogInfo field_info{
+        kVectorFieldId,
+        kRowCount,
+        std::vector<int64_t>{kRowCount},
+        std::vector<int64_t>{kRowCount * kDim *
+                             static_cast<int64_t>(sizeof(float))},
+        false,
+        "disable",
+        std::vector<std::string>{path},
+        std::vector<int64_t>{kVectorFieldId}};
+    load_info.field_infos.emplace(kVectorFieldId, std::move(field_info));
+
+    auto segment = segcore::CreateSealedSegment(
+        schema, nullptr, -1, segcore::SegcoreConfig::default_config(), true);
+    segment->LoadFieldData(load_info);
+
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    auto field = runtime->fields.find(FieldId(kVectorFieldId));
+    ASSERT_NE(field, runtime->fields.end());
+    auto proxy_column =
+        std::dynamic_pointer_cast<ProxyChunkColumn>(field->second);
+    ASSERT_NE(proxy_column, nullptr);
+    EXPECT_EQ(proxy_column->TestCacheWarmupPolicy(),
+              CacheWarmupPolicy::CacheWarmupPolicy_Sync);
+}
 
 class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
  protected:
@@ -228,6 +340,20 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
     void
     SetUp() override {
         bool pk_is_string = GetParam();
+        auto* test_info =
+            ::testing::UnitTest::GetInstance()->current_test_info();
+        auto test_name = test_info == nullptr ? std::string()
+                                              : std::string(test_info->name());
+        if (test_name.find("ReduceStringPkWithSimulatedAnnResult") !=
+            std::string::npos) {
+            if (!pk_is_string) {
+                GTEST_SKIP() << "VARCHAR primary key fast path only";
+            }
+            chunk_num = 10;
+            test_data_count = 100000;
+            fixed_string_width = 32;
+        }
+
         schema_ = segcore::GenChunkedSegmentTestSchema(pk_is_string);
 
         // Use globally initialized ArrowFileSystem
@@ -245,6 +371,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
             EXPECT_TRUE(status.ok())
                 << "Failed to create directory: " << dir_path;
         }
+        test_data_created = true;
 
         std::vector<std::vector<int>> column_groups = {
             {0, 1, 4}, {2}, {3}};  // narrow columns and wide columns
@@ -267,11 +394,12 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         int64_t row_count = 0;
         int start_id = 0;
 
-        std::vector<std::string> str_data;
-        for (int i = 0; i < test_data_count * chunk_num; i++) {
-            str_data.push_back("test" + std::to_string(i));
+        string_data.clear();
+        string_data.reserve(RowCount());
+        for (int64_t i = 0; i < RowCount(); i++) {
+            string_data.push_back(MakeStringValue(i));
         }
-        std::sort(str_data.begin(), str_data.end());
+        std::sort(string_data.begin(), string_data.end());
 
         fields = {{"int64", schema_->get_field_id(FieldName("int64"))},
                   {"pk", schema_->get_field_id(FieldName("pk"))},
@@ -301,8 +429,9 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                 } else {
                     arrow::StringBuilder builder;
                     std::vector<std::string> str_values;
+                    str_values.reserve(test_data_count);
                     for (int j = 0; j < test_data_count; j++) {
-                        str_values.push_back(str_data[start_id + j]);
+                        str_values.push_back(string_data[start_id + j]);
                     }
                     auto status = builder.AppendValues(str_values);
                     EXPECT_TRUE(status.ok());
@@ -357,6 +486,9 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
 
     void
     TearDown() override {
+        if (!test_data_created) {
+            return;
+        }
         // Clean up test data directory
         auto fs = milvus::segcore::GetDefaultArrowFileSystem();
         auto status = fs->DeleteDir("test_data");
@@ -366,6 +498,21 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
     int64_t
     RowCount() const {
         return chunk_num * test_data_count;
+    }
+
+    std::string
+    MakeStringValue(int64_t row_id) const {
+        if (fixed_string_width == 0) {
+            return "test" + std::to_string(row_id);
+        }
+
+        auto suffix = std::to_string(row_id);
+        AssertInfo(suffix.size() + 2 <= fixed_string_width,
+                   "row id is too large for fixed string width");
+        std::string value = "pk";
+        value.append(fixed_string_width - value.size() - suffix.size(), '0');
+        value.append(suffix);
+        return value;
     }
 
     void
@@ -440,12 +587,166 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
     LoadFieldDataInfo load_info_;
     int chunk_num = 2;
     int test_data_count = 10000;
+    size_t fixed_string_width = 0;
+    bool test_data_created = false;
     std::unordered_map<std::string, FieldId> fields;
+    std::vector<std::string> string_data;
 };
 
 INSTANTIATE_TEST_SUITE_P(TestChunkSegmentStorageV2,
                          TestChunkSegmentStorageV2,
                          testing::Bool());
+
+TEST_P(TestChunkSegmentStorageV2, ReduceStringPkWithSimulatedAnnResult) {
+    constexpr int64_t nq = 4;
+    constexpr int64_t candidate_topk = 500;
+    constexpr int64_t final_topk = 32;
+    constexpr int64_t pk_lookup_count = nq * candidate_topk;
+    static_assert(pk_lookup_count == 2000);
+    ASSERT_EQ(RowCount(), 1000000);
+    ASSERT_EQ(fixed_string_width, 32);
+
+    milvus::query::Plan plan(schema_);
+    plan.plan_node_ = std::make_unique<milvus::query::VectorPlanNode>();
+    plan.plan_node_->search_info_.topk_ = final_topk;
+    plan.plan_node_->search_info_.metric_type_ = knowhere::metric::L2;
+    plan.target_entries_.push_back(fields.at("string1"));
+
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto offset_at = [this, candidate_topk](int64_t qi, int64_t rank) {
+        auto lookup_index = qi * candidate_topk + rank;
+        return (lookup_index * 499979 + qi * 9973) % RowCount();
+    };
+
+    auto make_result = [&]() {
+        SearchResult result;
+        result.total_nq_ = nq;
+        result.unity_topK_ = candidate_topk;
+        result.total_data_cnt_ = RowCount();
+        result.segment_ = segment.get();
+        result.read_lease_ =
+            sealed->AcquireReadLease(folly::CancellationToken());
+        result.seg_offsets_.resize(nq * candidate_topk);
+        result.distances_.resize(nq * candidate_topk);
+        for (int64_t qi = 0; qi < nq; ++qi) {
+            for (int64_t rank = 0; rank < candidate_topk; ++rank) {
+                auto loc = qi * candidate_topk + rank;
+                result.seg_offsets_[loc] = offset_at(qi, rank);
+                result.distances_[loc] = static_cast<float>(rank);
+            }
+        }
+        return result;
+    };
+
+    auto fast_pk_result = make_result();
+    auto generic_pk_result = make_result();
+    auto start = std::chrono::steady_clock::now();
+    segment->FillPrimaryKeys(&plan, fast_pk_result);
+    auto fast_fill_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::steady_clock::now() - start)
+                            .count();
+    start = std::chrono::steady_clock::now();
+    static_cast<SegmentInternalInterface*>(segment.get())
+        ->SegmentInternalInterface::FillPrimaryKeys(&plan, generic_pk_result);
+    auto generic_fill_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start)
+            .count();
+    RecordProperty("fast_pk_fill_us", fast_fill_us);
+    RecordProperty("generic_pk_fill_us", generic_fill_us);
+    RecordProperty("row_count", std::to_string(RowCount()));
+    RecordProperty("varchar_pk_len", std::to_string(fixed_string_width));
+    RecordProperty("pk_lookup_count", std::to_string(pk_lookup_count));
+
+    ASSERT_EQ(fast_pk_result.pk_type_, DataType::VARCHAR);
+    ASSERT_EQ(generic_pk_result.pk_type_, DataType::VARCHAR);
+    ASSERT_EQ(fast_pk_result.primary_keys_.size(),
+              generic_pk_result.primary_keys_.size());
+    for (size_t i = 0; i < fast_pk_result.primary_keys_.size(); ++i) {
+        ASSERT_EQ(std::get<std::string>(fast_pk_result.primary_keys_[i]),
+                  std::get<std::string>(generic_pk_result.primary_keys_[i]));
+    }
+
+    auto reduce_result = make_result();
+    std::vector<CSearchResult> c_search_results{
+        reinterpret_cast<CSearchResult>(&reduce_result)};
+    std::vector<int64_t> slice_nqs{nq};
+    std::vector<int64_t> slice_topks{final_topk};
+    int64_t all_search_count = 0;
+    CTraceContext trace{0, 0, 0};
+    auto status =
+        PrepareSearchResultsForExport(trace,
+                                      reinterpret_cast<CSearchPlan>(&plan),
+                                      nullptr,
+                                      c_search_results.data(),
+                                      c_search_results.size(),
+                                      slice_nqs.data(),
+                                      slice_nqs.size(),
+                                      slice_topks.data(),
+                                      &all_search_count,
+                                      nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    ASSERT_EQ(all_search_count, reduce_result.total_data_cnt_);
+
+    ASSERT_EQ(reduce_result.primary_keys_.size(), nq * candidate_topk);
+    ASSERT_EQ(reduce_result.seg_offsets_.size(), nq * candidate_topk);
+    ASSERT_EQ(reduce_result.topk_per_nq_prefix_sum_.size(), nq + 1);
+    ASSERT_EQ(reduce_result.topk_per_nq_prefix_sum_.back(),
+              nq * candidate_topk);
+
+    for (int64_t qi = 0; qi < nq; ++qi) {
+        for (int64_t rank = 0; rank < final_topk; ++rank) {
+            auto loc = qi * candidate_topk + rank;
+            auto expected_offset = offset_at(qi, rank);
+            auto expected_string = string_data[expected_offset];
+            ASSERT_EQ(reduce_result.seg_offsets_[loc], expected_offset);
+            ASSERT_EQ(std::get<std::string>(reduce_result.primary_keys_[loc]),
+                      expected_string);
+            ASSERT_FLOAT_EQ(reduce_result.distances_[loc],
+                            static_cast<float>(rank));
+        }
+    }
+
+    std::vector<int32_t> result_seg_indices(nq * final_topk, 0);
+    std::vector<int64_t> result_seg_offsets;
+    result_seg_offsets.reserve(nq * final_topk);
+    for (int64_t qi = 0; qi < nq; ++qi) {
+        for (int64_t rank = 0; rank < final_topk; ++rank) {
+            result_seg_offsets.push_back(offset_at(qi, rank));
+        }
+    }
+
+    CProto c_proto{};
+    status = FillOutputFieldsOrdered(c_search_results.data(),
+                                     c_search_results.size(),
+                                     reinterpret_cast<CSearchPlan>(&plan),
+                                     result_seg_indices.data(),
+                                     result_seg_offsets.data(),
+                                     result_seg_offsets.size(),
+                                     &c_proto,
+                                     nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    ASSERT_GT(c_proto.proto_size, 0);
+    milvus::proto::schema::SearchResultData search_result_data;
+    ASSERT_TRUE(search_result_data.ParseFromArray(c_proto.proto_blob,
+                                                  c_proto.proto_size));
+    ASSERT_EQ(search_result_data.fields_data_size(), 1);
+    const auto& marshaled_string_output =
+        search_result_data.fields_data(0).scalars().string_data().data();
+    ASSERT_EQ(marshaled_string_output.size(), nq * final_topk);
+    free(const_cast<void*>(c_proto.proto_blob));
+
+    for (int64_t qi = 0; qi < nq; ++qi) {
+        for (int64_t rank = 0; rank < final_topk; ++rank) {
+            auto loc = qi * final_topk + rank;
+            auto expected_offset = offset_at(qi, rank);
+            auto expected_string = string_data[expected_offset];
+            ASSERT_EQ(marshaled_string_output.Get(loc), expected_string);
+        }
+    }
+}
 
 TEST_P(TestChunkSegmentStorageV2, TestTermExpr) {
     bool pk_is_string = GetParam();

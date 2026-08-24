@@ -26,7 +26,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -37,7 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -334,7 +333,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 		s.NotNil(segment.GetDeltalogs())
 	}
 
-	log.Info("test segment results", zap.Any("result", segments))
+	mlog.Info(context.TODO(), "test segment results", mlog.Any("result", segments))
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
@@ -425,7 +424,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 		s.NotNil(segment.GetDeltalogs())
 	}
 
-	log.Info("test segment results", zap.Any("result", segments))
+	mlog.Info(context.TODO(), "test segment results", mlog.Any("result", segments))
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestSplitAndWrite() {
@@ -528,10 +527,10 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitAndWrite() {
 		s.ElementsMatch(expectedPKs, allPKs, "segment %d should have expected PKs", segmentID)
 		s.ElementsMatch(expectedTSs, allTSs, "segment %d should have expected timestamps", segmentID)
 
-		log.Info("verified deltalog content",
-			zap.Int64("segmentID", segmentID),
-			zap.Int64s("pks", allPKs),
-			zap.Uint64s("tss", allTSs))
+		mlog.Info(context.TODO(), "verified deltalog content",
+			mlog.FieldSegmentID(segmentID),
+			mlog.Int64s("pks", allPKs),
+			mlog.Uint64s("tss", allTSs))
 	}
 
 	// Segment 100 should have PKs 1 and 3 with their timestamps
@@ -624,6 +623,40 @@ func (s *LevelZeroCompactionTaskSuite) TestLoadBF() {
 	s.NoError(err)
 
 	s.Len(bfs, 1)
+}
+
+func (s *LevelZeroCompactionTaskSuite) TestLoadBFManifestMissingBloomFilterFails() {
+	manifest := packed.MarshalManifestPath(path.Join(s.T().TempDir(), "insert_log/1/10/201"), 1)
+	plan := &datapb.CompactionPlan{
+		PlanID: 19530,
+		Type:   datapb.CompactionType_Level0DeleteCompaction,
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{
+				CollectionID: 1,
+				PartitionID:  10,
+				SegmentID:    201,
+				Level:        datapb.SegmentLevel_L1,
+				Manifest:     manifest,
+			},
+		},
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+			},
+		},
+	}
+
+	s.task.plan = plan
+	patchStats := mockey.Mock((*packed.StatsResolver).BloomFilterPaths).Return(nil, nil).Build()
+	defer patchStats.UnPatch()
+
+	_, err := s.task.loadBF(context.Background(), plan.SegmentBinlogs)
+	s.Error(err)
+	s.Contains(err.Error(), "missing bloom filter stats")
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestFailed() {

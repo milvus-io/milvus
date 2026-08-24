@@ -113,10 +113,6 @@ RowContainer::store(const milvus::ColumnVectorPtr& column_data,
                                  rowColumn.nullMask());
 }
 
-Accumulator::Accumulator(bool isFixedSize, int32_t fixedSize, int32_t alignment)
-    : isFixedSize_(isFixedSize), fixedSize_(fixedSize), alignment_(alignment) {
-}
-
 Accumulator::Accumulator(milvus::exec::Aggregate* aggregate)
     : isFixedSize_(false), fixedSize_(0), alignment_(0) {
     AssertInfo(aggregate != nullptr,

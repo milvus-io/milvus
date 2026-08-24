@@ -26,7 +26,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -38,8 +37,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -107,19 +106,29 @@ func NewSyncTask(ctx context.Context,
 		syncPack.WithBM25Stats(bm25Stats)
 	}
 
-	writeRetryAttempts := paramtable.Get().DataNodeCfg.ImportMaxWriteRetryAttempts.GetAsUint()
-	retryOpts := []retry.Option{
-		retry.Attempts(writeRetryAttempts), // default retry always
-		retry.MaxSleepTime(10 * time.Second),
-	}
 	task := syncmgr.NewSyncTask().
 		WithAllocator(allocator).
 		WithMetaCache(metaCache).
 		WithSchema(metaCache.GetSchema(0)). // TODO specify import schema if needed
 		WithSyncPack(syncPack).
 		WithStorageConfig(storageConfig).
-		WithWriteRetryOptions(retryOpts...)
+		WithWriteRetryOptions(newWriteRetryOptions()...)
 	return task, nil
+}
+
+// newWriteRetryOptions builds the retry options for import writes. The options are
+// order-sensitive: retry.Sleep raises maxSleepTime to 2*initial, so MaxSleepTime must
+// be applied last. The paramtable formatters guarantee both intervals are positive,
+// which keeps retry.Do from degenerating into a zero-delay loop under attempts=0.
+func newWriteRetryOptions() []retry.Option {
+	params := &paramtable.Get().DataNodeCfg
+	initialInterval := time.Duration(params.ImportWriteRetryInitialInterval.GetAsInt()) * time.Second
+	maxInterval := time.Duration(params.ImportWriteRetryMaxInterval.GetAsInt()) * time.Second
+	return []retry.Option{
+		retry.Attempts(params.ImportMaxWriteRetryAttempts.GetAsUint()), // 0 = unlimited, preserved on purpose
+		retry.Sleep(initialInterval),
+		retry.MaxSleepTime(maxInterval),
+	}
 }
 
 func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache.MetaCache) (*datapb.ImportSegmentInfo, error) {
@@ -142,6 +151,9 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache
 		Bm25Logs:     lo.Values(bm25Log),
 		Deltalogs:    deltaLogs,
 		ManifestPath: segment.ManifestPath(),
+		// Report the writer-built cumulative Statistics so DataCoord persists
+		// it directly.
+		Stats: segment.Statistics().Publish(),
 	}, nil
 }
 
@@ -181,6 +193,203 @@ func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData)
 		}
 	}
 	return nil
+}
+
+// CheckStructArrayConsistency verifies that within each StructArrayField all
+// sub-field columns are row-wise consistent: for every row, the sub-fields
+// must agree on null-ness, and, when the row is valid, on the number of
+// struct elements (array length for scalar Array sub-fields, vector count
+// for ArrayOfVector sub-fields). The proxy enforces this invariant on the
+// insert path (checkAndFlattenStructFieldData), and JSON/CSV/Parquet/NumPy
+// importers produce consistent columns by construction, but binlog import
+// deserializes each sub-field's binlogs independently — divergent sub-field
+// data would otherwise be persisted and poison the segment (query-time
+// assertion failures or silently wrong element-level filter results).
+// Cost is O(rows * subFields), negligible compared with reading the data.
+func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storage.InsertData) error {
+	type subColumn struct {
+		name      string
+		data      storage.FieldData
+		validData []bool
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		subFields := structField.GetFields()
+		columns := make([]subColumn, 0, len(subFields))
+		var firstAbsent string
+		for _, subField := range subFields {
+			fieldData, ok := data.Data[subField.GetFieldID()]
+			if !ok || fieldData == nil {
+				if firstAbsent == "" {
+					firstAbsent = subField.GetName()
+				}
+				continue
+			}
+
+			var validData []bool
+			if fieldData.GetNullable() {
+				switch fd := fieldData.(type) {
+				case *storage.ArrayFieldData:
+					validData = fd.ValidData
+				case *storage.VectorArrayFieldData:
+					validData = fd.ValidData
+				default:
+					return merr.WrapErrImportSysFailedMsg(
+						"unexpected nullable column type '%s' for sub-field '%s' of struct field '%s'",
+						fieldData.GetDataType().String(), subField.GetName(), structField.GetName())
+				}
+				if len(validData) != fieldData.RowNum() {
+					return merr.WrapErrImportSysFailedMsg(
+						"nullable sub-field '%s' of struct field '%s' has invalid ValidData length %d, expected %d",
+						subField.GetName(), structField.GetName(), len(validData), fieldData.RowNum())
+				}
+			}
+
+			if fieldData.RowNum() == 0 {
+				if firstAbsent == "" {
+					firstAbsent = subField.GetName()
+				}
+				continue
+			}
+			columns = append(columns, subColumn{name: subField.GetName(), data: fieldData, validData: validData})
+		}
+		// A struct must be supplied whole: either all sub-fields present or all
+		// absent. A partial set is malformed input — the absent sub-fields get
+		// backfilled as all-NULL (AppendNullableDefaultFieldsData) while the
+		// present ones carry real elements, producing per-row element-count
+		// mismatches that poison the segment. (checkAndFlattenStructFieldData
+		// enforces the same on the proxy insert path.)
+		if len(columns) == 0 {
+			continue
+		}
+		if len(columns) < len(subFields) {
+			return merr.WrapErrImportFailedMsg(
+				"struct field '%s' has a partial sub-field set: sub-field '%s' is present but sub-field '%s' is missing; provide all sub-fields or none",
+				structField.GetName(), columns[0].name, firstAbsent)
+		}
+		ref := columns[0]
+		rows := ref.data.RowNum()
+		for _, col := range columns[1:] {
+			if col.data.RowNum() != rows {
+				return merr.WrapErrImportFailedMsg(
+					"struct field '%s' has misaligned sub-fields, sub-field '%s' with '%d' rows, sub-field '%s' with '%d' rows",
+					structField.GetName(), ref.name, rows, col.name, col.data.RowNum())
+			}
+		}
+
+		for i := 0; i < rows; i++ {
+			refValid := !ref.data.GetNullable() || ref.validData[i]
+			refCount := -1
+			if refValid {
+				var err error
+				refCount, err = structSubFieldRowElementCount(ref.data, i, structField.GetName(), ref.name)
+				if err != nil {
+					return err
+				}
+			}
+			for _, col := range columns[1:] {
+				valid := !col.data.GetNullable() || col.validData[i]
+				if valid != refValid {
+					return merr.WrapErrImportFailedMsg(
+						"struct field '%s' has inconsistent sub-field null-ness at row %d, sub-field '%s' valid=%t, sub-field '%s' valid=%t",
+						structField.GetName(), i, ref.name, refValid, col.name, valid)
+				}
+				if !valid {
+					continue
+				}
+				count, err := structSubFieldRowElementCount(col.data, i, structField.GetName(), col.name)
+				if err != nil {
+					return err
+				}
+				if count != refCount {
+					return merr.WrapErrImportFailedMsg(
+						"struct field '%s' has inconsistent element count at row %d, sub-field '%s' with %d elements, sub-field '%s' with %d elements",
+						structField.GetName(), i, ref.name, refCount, col.name, count)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// structSubFieldRowElementCount returns the number of struct elements in row i
+// of a struct sub-field column: the array length for scalar Array sub-fields,
+// or the number of vectors for ArrayOfVector sub-fields.
+func structSubFieldRowElementCount(fieldData storage.FieldData, i int, structName, subFieldName string) (int, error) {
+	switch fd := fieldData.(type) {
+	case *storage.ArrayFieldData:
+		count, ok := scalarFieldElementCount(fd.Data[i])
+		if !ok {
+			return 0, merr.WrapErrImportFailedMsg(
+				"invalid scalar array data at row %d of sub-field '%s' of struct field '%s': missing or unsupported scalar payload",
+				i, subFieldName, structName)
+		}
+		return count, nil
+	case *storage.VectorArrayFieldData:
+		row := fd.Data[i]
+		var payloadLen, width int
+		dim := int(fd.Dim)
+		switch fd.ElementType {
+		case schemapb.DataType_FloatVector:
+			payloadLen = len(row.GetFloatVector().GetData())
+			width = dim
+		case schemapb.DataType_BinaryVector:
+			payloadLen = len(row.GetBinaryVector())
+			width = (dim + 7) / 8
+		case schemapb.DataType_Float16Vector:
+			payloadLen = len(row.GetFloat16Vector())
+			width = dim * 2
+		case schemapb.DataType_BFloat16Vector:
+			payloadLen = len(row.GetBfloat16Vector())
+			width = dim * 2
+		case schemapb.DataType_Int8Vector:
+			payloadLen = len(row.GetInt8Vector())
+			width = dim
+		default:
+			return 0, merr.WrapErrImportSysFailedMsg(
+				"unsupported vector element type '%s' for sub-field '%s' of struct field '%s'",
+				fd.ElementType.String(), subFieldName, structName)
+		}
+		if width <= 0 || payloadLen%width != 0 {
+			return 0, merr.WrapErrImportFailedMsg(
+				"corrupted vector array data at row %d of sub-field '%s' of struct field '%s', payload length %d is not a multiple of vector width %d",
+				i, subFieldName, structName, payloadLen, width)
+		}
+		return payloadLen / width, nil
+	default:
+		return 0, merr.WrapErrImportSysFailedMsg(
+			"unexpected column type '%s' for sub-field '%s' of struct field '%s'",
+			fieldData.GetDataType().String(), subFieldName, structName)
+	}
+}
+
+// scalarFieldElementCount returns the number of elements held by one Array row
+// and whether its scalar payload type is recognized. A typed empty payload is
+// valid and returns (0, true); a nil or unset payload returns (0, false).
+func scalarFieldElementCount(sf *schemapb.ScalarField) (int, bool) {
+	switch d := sf.GetData().(type) {
+	case *schemapb.ScalarField_BoolData:
+		return len(d.BoolData.GetData()), true
+	case *schemapb.ScalarField_IntData:
+		return len(d.IntData.GetData()), true
+	case *schemapb.ScalarField_LongData:
+		return len(d.LongData.GetData()), true
+	case *schemapb.ScalarField_FloatData:
+		return len(d.FloatData.GetData()), true
+	case *schemapb.ScalarField_DoubleData:
+		return len(d.DoubleData.GetData()), true
+	case *schemapb.ScalarField_StringData:
+		return len(d.StringData.GetData()), true
+	case *schemapb.ScalarField_BytesData:
+		return len(d.BytesData.GetData()), true
+	case *schemapb.ScalarField_ArrayData:
+		return len(d.ArrayData.GetData()), true
+	case *schemapb.ScalarField_JsonData:
+		return len(d.JsonData.GetData()), true
+	case *schemapb.ScalarField_TimestamptzData:
+		return len(d.TimestamptzData.GetData()), true
+	default:
+		return 0, false
+	}
 }
 
 func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData, rowNum int) error {
@@ -441,7 +650,7 @@ func FillDynamicData(schema *schemapb.CollectionSchema, data *storage.InsertData
 }
 
 func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
-	log.Info("start to run embedding function")
+	mlog.Info(context.TODO(), "start to run embedding function")
 	schema := task.GetSchema()
 	allowNonBM25Outputs := common.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.GetProperties())
 	if err := embedding.RunAll(context.Background(), schema, data, embedding.RunOptions{
@@ -502,11 +711,11 @@ func LogStats(manager TaskManager) {
 		byState := lo.GroupBy(tasks, func(t Task) datapb.ImportTaskStateV2 {
 			return t.GetState()
 		})
-		log.Info("import task stats", zap.String("type", taskType.String()),
-			zap.Int("pending", len(byState[datapb.ImportTaskStateV2_Pending])),
-			zap.Int("inProgress", len(byState[datapb.ImportTaskStateV2_InProgress])),
-			zap.Int("completed", len(byState[datapb.ImportTaskStateV2_Completed])),
-			zap.Int("failed", len(byState[datapb.ImportTaskStateV2_Failed])))
+		mlog.Info(context.TODO(), "import task stats", mlog.String("type", taskType.String()),
+			mlog.Int("pending", len(byState[datapb.ImportTaskStateV2_Pending])),
+			mlog.Int("inProgress", len(byState[datapb.ImportTaskStateV2_InProgress])),
+			mlog.Int("completed", len(byState[datapb.ImportTaskStateV2_Completed])),
+			mlog.Int("failed", len(byState[datapb.ImportTaskStateV2_Failed])))
 	}
 	tasks := manager.GetBy(WithType(PreImportTaskType))
 	logFunc(tasks, PreImportTaskType)

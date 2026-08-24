@@ -18,12 +18,11 @@ import (
 	"sync"
 
 	"github.com/tidwall/gjson"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -126,7 +125,7 @@ func (mr *MetricsRequest) RegisterMetricsRequest(reqType string, action MetricsR
 	defer mr.lock.Unlock()
 	_, ok := mr.metricsReqType2Action[reqType]
 	if ok {
-		log.Info("metrics request type already exists", zap.String("reqType", reqType))
+		mlog.Info(context.TODO(), "metrics request type already exists", mlog.String("reqType", reqType))
 		return
 	}
 
@@ -137,7 +136,7 @@ func (mr *MetricsRequest) ExecuteMetricsRequest(ctx context.Context, req *milvus
 	jsonReq := gjson.Parse(req.Request)
 	reqType, err := ParseMetricRequestType(jsonReq)
 	if err != nil {
-		log.Warn("failed to parse metric type", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to parse metric type", mlog.Err(err))
 		return "", err
 	}
 
@@ -145,7 +144,7 @@ func (mr *MetricsRequest) ExecuteMetricsRequest(ctx context.Context, req *milvus
 	action, ok := mr.metricsReqType2Action[reqType]
 	if !ok {
 		mr.lock.Unlock()
-		log.Warn("unimplemented metric request type", zap.String("req_type", reqType))
+		mlog.Warn(context.TODO(), "unimplemented metric request type", mlog.String("req_type", reqType))
 		return "", merr.WrapErrParameterInvalidMsg(MsgUnimplementedMetric)
 	}
 	mr.lock.Unlock()
@@ -153,7 +152,7 @@ func (mr *MetricsRequest) ExecuteMetricsRequest(ctx context.Context, req *milvus
 	actionRet, err := action(ctx, req, jsonReq)
 	if err != nil {
 		msg := fmt.Sprintf("failed to execute %s", reqType)
-		log.Warn(msg, zap.Error(err))
+		mlog.Warn(ctx, msg, mlog.Err(err))
 		return "", err
 	}
 	return actionRet, nil

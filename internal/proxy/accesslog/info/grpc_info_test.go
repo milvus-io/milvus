@@ -145,6 +145,43 @@ func (s *GrpcAccessInfoSuite) TestDbName() {
 	s.Equal("test", result[0])
 }
 
+func (s *GrpcAccessInfoSuite) TestCollectionName() {
+	s.info.req = nil
+	result := Get(s.info, "$collection_name")
+	s.Equal(Unknown, result[0])
+
+	// singular collection name
+	s.info.req = &milvuspb.QueryRequest{
+		CollectionName: "test_collection",
+	}
+	result = Get(s.info, "$collection_name")
+	s.Equal("test_collection", result[0])
+
+	// requests carrying a list of collection names (e.g. Flush) should not be Unknown
+	s.info.req = &milvuspb.FlushRequest{
+		CollectionNames: []string{"coll_a", "coll_b"},
+	}
+	result = Get(s.info, "$collection_name")
+	s.Equal(fmt.Sprint([]string{"coll_a", "coll_b"}), result[0])
+	s.NotEqual(Unknown, result[0])
+
+	// rename logs both the source and target collection
+	s.info.req = &milvuspb.RenameCollectionRequest{
+		OldName: "old_coll",
+		NewName: "new_coll",
+	}
+	result = Get(s.info, "$collection_name")
+	s.Equal("old_coll->new_coll", result[0])
+
+	// batch describe carries a list under the singular-named CollectionName field
+	s.info.req = &milvuspb.BatchDescribeCollectionRequest{
+		CollectionName: []string{"coll_a", "coll_b"},
+	}
+	result = Get(s.info, "$collection_name")
+	s.Equal(fmt.Sprint([]string{"coll_a", "coll_b"}), result[0])
+	s.NotEqual(Unknown, result[0])
+}
+
 func (s *GrpcAccessInfoSuite) TestSdkInfo() {
 	ctx := context.Background()
 	clientInfo := &commonpb.ClientInfo{

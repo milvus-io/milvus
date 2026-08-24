@@ -25,6 +25,7 @@
 #include "pthread.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/segcore_init_c.h"
+#include "storage/PrefetchThreadPool.h"
 
 namespace milvus::segcore {
 
@@ -50,6 +51,30 @@ SegcoreSetEnableInterminSegmentIndex(const bool value) {
     config.set_enable_interim_segment_index(value);
 }
 
+extern "C" CStatus
+SegcoreSetInterimIndexTargetVersion(const int64_t target_version) {
+    try {
+        const int64_t current_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber();
+        if (target_version != -1 &&
+            !knowhere::Version::VersionSupport(
+                knowhere::Version(static_cast<int32_t>(target_version)))) {
+            ThrowInfo(ConfigInvalid,
+                      "interim index target version {} is not supported by "
+                      "Knowhere (current {}, maximum {})",
+                      target_version,
+                      current_version,
+                      knowhere::Version::GetMaximumVersion().VersionNumber());
+        }
+
+        SegcoreConfig::default_config().set_interim_index_target_version(
+            static_cast<int32_t>(target_version));
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
 extern "C" void
 SegcoreSetStorageV3Enabled(const bool value) {
     milvus::segcore::SegcoreConfig& config =
@@ -72,10 +97,19 @@ SegcoreSetEnableGeometryCache(const bool value) {
 }
 
 extern "C" void
-SegcoreSetVisibilityFilterEnabled(const bool value) {
+SegcoreSetEnableGISSplitFusion(const bool value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
-    config.set_visibility_filter_enabled(value);
+    config.set_enable_gis_split_fusion(value);
+}
+
+extern "C" void
+SegcoreSetVisibilityFilterEnabled(const bool value) {
+    // Deprecated compatibility shim: row visibility filtering is always
+    // enforced and this value is ignored. The symbol survives so callers
+    // built against the v3.0.0 interface keep linking; the Go side rejects
+    // `false` at querynode startup before this could ever matter.
+    (void)value;
 }
 
 extern "C" void
@@ -86,10 +120,31 @@ SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value) {
 }
 
 extern "C" void
+SegcoreSetTakeForOutputResultCountLimit(const int64_t value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_take_for_output_result_count_limit(value);
+}
+
+extern "C" int64_t
+SegcoreGetTakeForOutputResultCountLimit() {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    return config.get_take_for_output_result_count_limit();
+}
+
+extern "C" void
 SegcoreSetNlist(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
     config.set_nlist(value);
+}
+
+extern "C" void
+SegcoreSetFMIndexCostRatio(const float value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_fmindex_cost_ratio(value);
 }
 
 extern "C" void
@@ -187,6 +242,11 @@ SegcoreSetKnowhereFetchThreadPoolNum(const uint32_t num_threads) {
 }
 
 extern "C" void
+SegcoreSetPrefetchThreadPoolNum(const uint32_t num_threads) {
+    milvus::SetPrefetchThreadPoolSize(num_threads);
+}
+
+extern "C" void
 SegcoreSetKnowhereGpuMemoryPoolSize(const uint32_t init_size,
                                     const uint32_t max_size) {
     milvus::config::KnowhereInitGPUMemoryPool(init_size, max_size);
@@ -265,6 +325,7 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
                        const char* disk_path,
                        const int64_t loading_timeout_ms,
                        const int64_t warmup_loading_timeout_ms,
+                       const bool reject_remote_vector_output,
                        const uint32_t prefetch_pool_threads) {
     std::string disk_path_str(disk_path);
     milvus::cachinglayer::Manager::ConfigureTieredStorage(
@@ -291,6 +352,8 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
         std::chrono::milliseconds(loading_timeout_ms),
         std::chrono::milliseconds(warmup_loading_timeout_ms),
         prefetch_pool_threads);
+    milvus::segcore::SegcoreConfig::default_config()
+        .set_reject_remote_vector_output(reject_remote_vector_output);
 }
 
 extern "C" void
@@ -298,6 +361,7 @@ UpdateTieredStorageConfig(
     const int64_t loading_timeout_ms,
     const int64_t warmup_loading_timeout_ms,
     const bool storage_usage_tracking_enabled,
+    const bool reject_remote_vector_output,
     const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
     const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
     const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
@@ -310,6 +374,8 @@ UpdateTieredStorageConfig(
          vectorFieldCacheWarmupPolicy,
          scalarIndexCacheWarmupPolicy,
          vectorIndexCacheWarmupPolicy});
+    milvus::segcore::SegcoreConfig::default_config()
+        .set_reject_remote_vector_output(reject_remote_vector_output);
 }
 
 }  // namespace milvus::segcore

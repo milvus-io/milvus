@@ -36,11 +36,12 @@ import (
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -78,8 +79,14 @@ type timestampOracle struct {
 func (t *timestampOracle) loadTimestamp() (time.Time, error) {
 	strData, err := t.txnKV.Load(context.TODO(), t.key)
 	if err != nil {
-		// intend to return nil
-		return typeutil.ZeroTime, nil
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			// Fresh deployment: no persisted window yet.
+			return typeutil.ZeroTime, nil
+		}
+		// Any other failure must surface: swallowing it into ZeroTime lets
+		// InitTimestamp fall back to time.Now() below an already-persisted
+		// window and regress TSO/ID monotonicity.
+		return typeutil.ZeroTime, errors.WithStack(err)
 	}
 
 	binData := []byte(strData)
@@ -102,9 +109,20 @@ func (t *timestampOracle) saveTimestamp(ts time.Time) error {
 	return nil
 }
 
+// initLoadRetryAttempts bounds retries of the persisted-window read during
+// initialization: a transient backend hiccup at boot (etcd leader change,
+// TiKV region move) must not fail the coordinator outright, while a
+// persistent failure still surfaces loudly instead of regressing the window
+// to time.Now().
+const initLoadRetryAttempts = 5
+
 func (t *timestampOracle) InitTimestamp() error {
-	last, err := t.loadTimestamp()
-	if err != nil {
+	var last time.Time
+	if err := retry.Do(context.TODO(), func() error {
+		var err error
+		last, err = t.loadTimestamp()
+		return err
+	}, retry.Attempts(initLoadRetryAttempts), retry.Sleep(50*time.Millisecond)); err != nil {
 		return err
 	}
 	next := time.Now()
@@ -120,7 +138,7 @@ func (t *timestampOracle) InitTimestamp() error {
 		return err
 	}
 
-	log.Info("sync and save timestamp", zap.Time("last", last), zap.Time("save", save), zap.Time("next", next))
+	mlog.Info(context.TODO(), "sync and save timestamp", mlog.Time("last", last), mlog.Time("save", save), mlog.Time("next", next))
 	current := &atomicObject{
 		physical: next,
 	}
@@ -176,8 +194,8 @@ func (t *timestampOracle) UpdateTimestamp() error {
 
 	jetLag := typeutil.SubTimeByWallClock(now, prev.physical)
 	if jetLag > 3*UpdateTimestampStep {
-		log.Ctx(context.TODO()).WithRateGroup("tso", 1, 60).RatedWarn(60.0, "clock offset is huge, check network latency and clock skew", zap.Duration("jet-lag", jetLag),
-			zap.Time("prev-physical", prev.physical), zap.Time("now", now))
+		mlog.RatedWarn(context.TODO(), rate.Limit(60.0), "clock offset is huge, check network latency and clock skew", mlog.Duration("jet-lag", jetLag),
+			mlog.Time("prev-physical", prev.physical), mlog.Time("now", now))
 	}
 
 	var next time.Time
@@ -188,7 +206,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 	} else if prevLogical > maxLogical/2 {
 		// The reason choosing maxLogical/2 here is that it's big enough for common cases.
 		// Because there is enough timestamp can be allocated before next update.
-		log.Warn("the logical time may be not enough", zap.Int64("prev-logical", prevLogical))
+		mlog.Warn(context.TODO(), "the logical time may be not enough", mlog.Int64("prev-logical", prevLogical))
 		next = prev.physical.Add(time.Millisecond)
 	} else {
 		// It will still use the previous physical time to alloc the timestamp.

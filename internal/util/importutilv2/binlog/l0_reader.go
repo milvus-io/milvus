@@ -23,11 +23,10 @@ import (
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -82,7 +81,7 @@ func NewL0Reader(ctx context.Context,
 		return nil, err
 	}
 	if len(deltaLogs) == 0 {
-		log.Info("no delta logs for l0 segments", zap.String("prefix", path))
+		mlog.Info(ctx, "no delta logs for l0 segments", mlog.String("prefix", path))
 	}
 	r.deltaLogs = deltaLogs
 	return r, nil
@@ -110,7 +109,7 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 	deleteData := storage.NewDeleteData(nil, nil)
 	readInternal := func(path string, opts []storage.RwOption) (*storage.DeleteData, error) {
 		tempData := storage.NewDeleteData(nil, nil)
-		reader, err := storage.NewDeltalogReader(r.pkField.DataType, []string{path}, opts...)
+		reader, err := storage.NewDeltalogReader(r.ctx, r.pkField.DataType, []string{path}, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -122,7 +121,7 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 				if err == io.EOF {
 					break
 				}
-				log.Error("error on importing L0 segment, fail to read deltalogs", zap.Error(err))
+				mlog.Error(r.ctx, "error on importing L0 segment, fail to read deltalogs", mlog.Err(err))
 				return nil, err
 			}
 

@@ -24,8 +24,8 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
 
 type InsertResult struct {
@@ -77,13 +77,15 @@ type DeleteResult struct {
 
 func (c *Client) Delete(ctx context.Context, option DeleteOption, callOptions ...grpc.CallOption) (DeleteResult, error) {
 	startTime := time.Now()
-	req := option.Request()
+	req, err := option.Request()
 	collectionName := req.GetCollectionName()
 	result := DeleteResult{}
-	var err error
 	defer func() {
 		c.recordOperation("Delete", collectionName, startTime, err)
 	}()
+	if err != nil {
+		return result, err
+	}
 
 	err = c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.Delete(ctx, req, callOptions...)

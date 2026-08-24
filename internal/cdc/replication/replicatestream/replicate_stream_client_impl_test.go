@@ -86,6 +86,7 @@ func TestReplicateStreamClient_Replicate(t *testing.T) {
 			mockMsg.EXPECT().TimeTick().Return(tt)
 			mockMsg.EXPECT().EstimateSize().Return(1024)
 			mockMsg.EXPECT().MessageType().Return(message.MessageTypeInsert)
+			mockMsg.EXPECT().IsUnreplicable().Return(false)
 			mockMsg.EXPECT().MessageID().Return(messageID)
 			mockMsg.EXPECT().IntoImmutableMessageProto().Return(&commonpb.ImmutableMessage{
 				Id:         messageID.IntoProto(),
@@ -153,6 +154,31 @@ func TestReplicateStreamClient_Replicate_ContextCanceled(t *testing.T) {
 	mockStreamClient.Close()
 }
 
+func TestReplicateStreamClient_Replicate_UnreplicableMessageIgnored(t *testing.T) {
+	ctx := context.Background()
+	repMeta := &streamingpb.ReplicatePChannelMeta{
+		SourceChannelName: "test-source-channel",
+		TargetChannelName: "test-target-channel",
+		TargetCluster: &commonpb.MilvusCluster{
+			ClusterId: "test-cluster",
+		},
+	}
+	client := &replicateStreamClient{
+		ctx:             ctx,
+		pendingMessages: NewMsgQueue(MsgQueueOptions{Capacity: 16, MaxSize: 1024}),
+		metrics:         NewReplicateMetrics(repMeta),
+	}
+
+	mockMsg := mock_message.NewMockImmutableMessage(t)
+	mockMsg.EXPECT().MessageType().Return(message.MessageTypeCreateSnapshot)
+	mockMsg.EXPECT().IsUnreplicable().Return(true)
+	mockMsg.EXPECT().TimeTick().Return(uint64(100)).Maybe()
+
+	err := client.Replicate(mockMsg)
+	assert.ErrorIs(t, err, ErrReplicateIgnored)
+	assert.Equal(t, 0, client.pendingMessages.Len())
+}
+
 func TestReplicateStreamClient_Reconnect(t *testing.T) {
 	ctx := context.Background()
 	targetCluster := &commonpb.MilvusCluster{
@@ -205,6 +231,7 @@ func TestReplicateStreamClient_Reconnect(t *testing.T) {
 			mockMsg.EXPECT().MessageID().Return(messageID)
 			mockMsg.EXPECT().EstimateSize().Return(1024)
 			mockMsg.EXPECT().MessageType().Return(message.MessageTypeInsert)
+			mockMsg.EXPECT().IsUnreplicable().Return(false)
 			mockMsg.EXPECT().IntoImmutableMessageProto().Return(&commonpb.ImmutableMessage{
 				Id:         messageID.IntoProto(),
 				Payload:    []byte("test-payload"),

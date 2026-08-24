@@ -37,11 +37,10 @@ import (
 	"sync"
 	"unsafe"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/util/pathutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -61,6 +60,16 @@ func InitQueryNode(ctx context.Context) error {
 func doInitQueryNodeOnce(ctx context.Context) error {
 	nodeID := paramtable.GetNodeID()
 
+	// Deprecated compatibility shim for common.visibilityFilterEnabled. The
+	// bypass it used to gate returned deleted rows to readers and was removed;
+	// row visibility filtering is now always enforced. The key stays
+	// recognized so an operator who set it to false gets this explicit
+	// failure instead of a silent behavior change on upgrade.
+	if !paramtable.Get().CommonCfg.VisibilityFilterEnabled.GetAsBool() {
+		return merr.WrapErrParameterInvalidMsg(
+			"common.visibilityFilterEnabled=false is no longer supported: row visibility filtering (timestamp, delete, and TTL) is always enforced; remove the setting to start this querynode")
+	}
+
 	cGlogConf := C.CString(path.Join(paramtable.GetBaseTable().GetConfigDir(), paramtable.DefaultGlogConf))
 	C.SegcoreInit(cGlogConf)
 	C.free(unsafe.Pointer(cGlogConf))
@@ -74,18 +83,16 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cChunkRows := C.int64_t(paramtable.Get().QueryNodeCfg.ChunkRows.GetAsInt64())
 	C.SegcoreSetChunkRows(cChunkRows)
 
+	// override the FM-index count-first guard threshold (queryNode.fmindexCostRatio)
+	cFmindexCostRatio := C.float(paramtable.Get().QueryNodeCfg.FmindexCostRatio.GetAsFloat())
+	C.SegcoreSetFMIndexCostRatio(cFmindexCostRatio)
+
 	cMaxGroupByGroups := C.int64_t(paramtable.Get().CommonCfg.GroupByMaxGroups.GetAsInt64())
 	C.SegcoreSetMaxGroupByGroups(cMaxGroupByGroups)
 
-	visibilityEnabled := paramtable.Get().CommonCfg.VisibilityFilterEnabled.GetAsBool()
-	bloomEnabled := paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool()
-	C.SegcoreSetVisibilityFilterEnabled(C.bool(visibilityEnabled))
-	if !visibilityEnabled && bloomEnabled {
-		log.Warn("visibilityFilterEnabled=false with bloomFilterEnabled=true: deletes are forwarded via bloom filter but never applied — consider disabling bloom filter to save memory")
-	}
-
 	SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
 	SyncEnableGrowingSourceFlush(ctx, paramtable.Get())
+	SyncTakeForOutputResultCountLimit(paramtable.Get())
 
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
@@ -106,8 +113,8 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(paramtable.Get().CommonCfg.IndexSliceSize.GetAsInt64())
 	C.SetIndexSliceSize(cIndexSliceSize)
-	cStreamBudgetRatio := C.double(paramtable.Get().CommonCfg.StreamBudgetRatio.GetAsFloat())
-	C.SetStreamBudgetRatio(cStreamBudgetRatio)
+	cLoadTransientBudgetBytes := C.int64_t(paramtable.Get().CommonCfg.LoadTransientBudgetBytes.GetAsInt64())
+	C.SetLoadTransientBudgetBytes(cLoadTransientBudgetBytes)
 
 	// set up thread pool for different priorities
 	cHighPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat())
@@ -126,7 +133,7 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	if knowhereBuildPoolSize < uint32(1) {
 		knowhereBuildPoolSize = uint32(1)
 	}
-	log.Ctx(ctx).Info("set up knowhere build pool size", zap.Uint32("pool_size", knowhereBuildPoolSize))
+	mlog.Info(ctx, "set up knowhere build pool size", mlog.Uint32("pool_size", knowhereBuildPoolSize))
 	cKnowhereBuildPoolSize := C.uint32_t(knowhereBuildPoolSize)
 	C.SegcoreSetKnowhereBuildThreadPoolNum(cKnowhereBuildPoolSize)
 
@@ -141,6 +148,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 
 	cOptimizeExprEnabled := C.bool(paramtable.Get().CommonCfg.EnabledOptimizeExpr.GetAsBool())
 	C.SetDefaultOptimizeExprEnable(cOptimizeExprEnabled)
+
+	cDriverPrefetchEnabled := C.bool(paramtable.Get().CommonCfg.EnableDriverPrefetch.GetAsBool())
+	C.SetDefaultDriverPrefetchEnable(cDriverPrefetchEnabled)
 
 	cJSONKeyStatsEnabled := C.bool(paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool())
 	C.SetDefaultJSONKeyStatsEnable(cJSONKeyStatsEnabled)
@@ -168,7 +178,6 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 
 	cStorageV2CellTargetSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.StorageV2CellTargetSizeBytes.GetAsInt64())
 	C.SetStorageV2CellTargetSizeBytes(cStorageV2CellTargetSizeBytes)
-
 	enableParquetStatsSkipIndex := paramtable.Get().CommonCfg.ParquetStatsSkipIndex.GetAsBool()
 	C.SetDefaultEnableParquetStatsSkipIndex(C.bool(enableParquetStatsSkipIndex))
 
@@ -189,6 +198,12 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	}
 
 	err = InitDiskFileWriterConfig(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
+	// Publish the External Table IOPS policy once for native Segcore readers.
+	err = InitExternalIopsConfig(paramtable.Get())
 	if err != nil {
 		return err
 	}
@@ -218,6 +233,11 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		return err
 	}
 
+	err = InitGISSplitFusion(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
 	InitTraceConfig(paramtable.Get())
 	C.InitExecExpressionFunctionFactory()
 
@@ -234,7 +254,7 @@ func SyncPreferFieldDataWhenIndexHasRawData(ctx context.Context, params *paramta
 	v := params.QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.GetAsBool()
 	C.SegcoreSetPreferFieldDataWhenIndexHasRawData(C.bool(v))
 	if v {
-		log.Ctx(ctx).Info("preferFieldDataWhenIndexHasRawData=true: sealed retrieve will read field data instead of index raw data; " +
+		mlog.Info(ctx, "preferFieldDataWhenIndexHasRawData=true: sealed retrieve will read field data instead of index raw data; "+
 			"both will stay resident in memory, increasing the memory footprint for fields whose index also holds raw data")
 	}
 }
@@ -248,6 +268,18 @@ func SyncEnableGrowingSourceFlush(ctx context.Context, params *paramtable.Compon
 	C.SegcoreSetStorageV3Enabled(C.bool(storageV3Enabled))
 	C.SegcoreSetEnableGrowingSourceFlush(C.bool(v))
 	if v {
-		log.Ctx(ctx).Info("enableGrowingSourceFlush=true: growing segments retain raw field chunks for StorageV3 growing-source flush")
+		mlog.Info(ctx, "enableGrowingSourceFlush=true: growing segments retain raw field chunks for StorageV3 growing-source flush")
 	}
+}
+
+// SyncTakeForOutputResultCountLimit pushes the maximum search topK or retrieve
+// result row count allowed to use take() for output fields into segcore. A
+// value of 0 disables the limit.
+func SyncTakeForOutputResultCountLimit(params *paramtable.ComponentParam) {
+	limit := params.QueryNodeCfg.TakeForOutputResultCountLimit.GetAsInt64()
+	C.SegcoreSetTakeForOutputResultCountLimit(C.int64_t(limit))
+}
+
+func getTakeForOutputResultCountLimit() int64 {
+	return int64(C.SegcoreGetTakeForOutputResultCountLimit())
 }

@@ -14,7 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <chrono>
+#include <deque>
 #include <filesystem>
+#include <functional>
+#include <future>
 #include <memory>
 #include "common/FastMem.h"
 
@@ -35,6 +39,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/Geometry.h"
+#include "common/Schema.h"
 #include "common/FieldDataInterface.h"
 #include "pb/common.pb.h"
 #include "storage/StorageV2FSCache.h"
@@ -50,6 +55,7 @@
 #include "storage/LocalChunkManager.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/minio/MinioChunkManager.h"
+#include "storage/RecordBatchSize.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "common/Common.h"
@@ -64,6 +70,7 @@
 #include "storage/loon_ffi/ffi_reader_c.h"
 #include "storage/loon_ffi/util.h"
 #include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -108,13 +115,6 @@ std::map<std::string, CloudProviderType> CloudProviderType_Map = {
     {"tencent", CloudProviderType::TENCENTCLOUD},
     {"gcpnative", CloudProviderType::GCPNATIVE},
     {"huawei", CloudProviderType::HUAWEICLOUD}};
-
-std::map<std::string, int> ReadAheadPolicy_Map = {
-    {"normal", MADV_NORMAL},
-    {"random", MADV_RANDOM},
-    {"sequential", MADV_SEQUENTIAL},
-    {"willneed", MADV_WILLNEED},
-    {"dontneed", MADV_DONTNEED}};
 
 // in arrow, null_bitmap read from the least significant bit
 std::vector<uint8_t>
@@ -1021,25 +1021,32 @@ std::vector<std::future<std::unique_ptr<DataCodec>>>
 GetObjectData(ChunkManager* remote_chunk_manager,
               const std::vector<std::string>& remote_files,
               milvus::ThreadPoolPriority priority,
-              bool is_field_data) {
+              bool is_field_data,
+              std::optional<proto::schema::TypeSchema> array_type) {
     auto& pool = ThreadPools::GetThreadPool(priority);
     std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
     futures.reserve(remote_files.size());
 
-    auto DownloadAndDeserialize = [](ChunkManager* chunk_manager,
-                                     bool is_field_data,
-                                     const std::string file) {
-        // TODO remove this Size() cost
-        auto fileSize = chunk_manager->Size(file);
-        auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
-        chunk_manager->Read(file, buf.get(), fileSize);
-        auto res = DeserializeFileData(buf, fileSize, is_field_data);
-        return res;
-    };
+    auto DownloadAndDeserialize =
+        [](ChunkManager* chunk_manager,
+           bool is_field_data,
+           std::optional<proto::schema::TypeSchema> array_type,
+           const std::string file) {
+            // TODO remove this Size() cost
+            auto fileSize = chunk_manager->Size(file);
+            auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
+            chunk_manager->Read(file, buf.get(), fileSize);
+            auto res = DeserializeFileData(
+                buf, fileSize, is_field_data, std::move(array_type));
+            return res;
+        };
 
     for (auto& file : remote_files) {
-        futures.emplace_back(pool.Submit(
-            DownloadAndDeserialize, remote_chunk_manager, is_field_data, file));
+        futures.emplace_back(pool.Submit(DownloadAndDeserialize,
+                                         remote_chunk_manager,
+                                         is_field_data,
+                                         array_type,
+                                         file));
     }
     return futures;
 }
@@ -1092,16 +1099,6 @@ PutIndexData(ChunkManager* remote_chunk_manager,
     }
 
     return remote_paths_to_size;
-}
-
-int64_t
-GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas) {
-    int64_t count = 0;
-    for (auto& field_data : field_datas) {
-        count += field_data->get_num_rows();
-    }
-
-    return count;
 }
 
 size_t
@@ -1222,7 +1219,8 @@ CreateFieldData(const DataType& type,
                 const DataType& element_type,
                 bool nullable,
                 int64_t dim,
-                int64_t total_num_rows) {
+                int64_t total_num_rows,
+                std::optional<proto::schema::TypeSchema> array_type) {
     switch (type) {
         case DataType::BOOL:
             return std::make_shared<FieldData<bool>>(
@@ -1260,6 +1258,10 @@ CreateFieldData(const DataType& type,
             return std::make_shared<FieldData<Geometry>>(
                 type, nullable, total_num_rows);
         case DataType::ARRAY:
+            if (array_type.has_value()) {
+                return std::make_shared<FieldData<ArrayValue>>(
+                    std::move(*array_type), nullable, total_num_rows);
+            }
             return std::make_shared<FieldData<Array>>(
                 type, nullable, total_num_rows);
         case DataType::VECTOR_FLOAT:
@@ -1326,15 +1328,24 @@ MergeFieldData(std::vector<FieldDataPtr>& data_array) {
     }
 
     auto element_type = DataType::NONE;
+    std::optional<proto::schema::TypeSchema> array_type;
     auto vector_array_data =
         dynamic_cast<FieldData<VectorArray>*>(data_array[0].get());
     if (vector_array_data) {
         element_type = vector_array_data->get_element_type();
     }
+    auto nested_array_data =
+        dynamic_cast<FieldData<ArrayValue>*>(data_array[0].get());
+    if (nested_array_data != nullptr) {
+        array_type = nested_array_data->get_array_type_schema();
+    }
 
     auto merged_data = storage::CreateFieldData(data_array[0]->get_data_type(),
                                                 element_type,
-                                                data_array[0]->IsNullable());
+                                                data_array[0]->IsNullable(),
+                                                1,
+                                                0,
+                                                std::move(array_type));
     merged_data->Reserve(total_length);
     for (const auto& data : data_array) {
         if (merged_data->IsNullable()) {
@@ -1507,23 +1518,40 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                                     milvus::proto::common::LoadPriority::HIGH);
         });
         // read field data from channel
-        std::shared_ptr<milvus::ArrowDataWrapper> r;
-        while (field_data_info.arrow_reader_channel->pop(r)) {
-            size_t num_rows = 0;
-            std::vector<std::shared_ptr<arrow::ChunkedArray>> chunked_arrays;
-            for (const auto& table_info : r->arrow_tables) {
-                num_rows += table_info.table->num_rows();
-                chunked_arrays.push_back(table_info.table->column(col_offset));
+        try {
+            std::shared_ptr<milvus::ArrowDataWrapper> r;
+            while (field_data_info.arrow_reader_channel->pop(r)) {
+                size_t num_rows = 0;
+                std::vector<std::shared_ptr<arrow::ChunkedArray>>
+                    chunked_arrays;
+                for (const auto& table_info : r->arrow_tables) {
+                    num_rows += table_info.table->num_rows();
+                    chunked_arrays.push_back(
+                        table_info.table->column(col_offset));
+                }
+                auto field_data =
+                    storage::CreateFieldData(data_type,
+                                             element_type,
+                                             field_schema->nullable(),
+                                             dim,
+                                             num_rows);
+                for (const auto& chunked_array : chunked_arrays) {
+                    field_data->FillFieldData(chunked_array);
+                }
+                field_data_list.push_back(field_data);
             }
-            auto field_data = storage::CreateFieldData(data_type,
-                                                       element_type,
-                                                       field_schema->nullable(),
-                                                       dim,
-                                                       num_rows);
-            for (const auto& chunked_array : chunked_arrays) {
-                field_data->FillFieldData(chunked_array);
+        } catch (...) {
+            // The load task captures this frame by reference and may be
+            // blocked pushing into the bounded channel. Unblock it, then
+            // wait for it to finish before unwinding (see #46958).
+            try {
+                std::shared_ptr<milvus::ArrowDataWrapper> discard;
+                while (field_data_info.arrow_reader_channel->pop(discard)) {
+                }
+            } catch (...) {
             }
-            field_data_list.push_back(field_data);
+            DrainFuture(load_future);
+            throw;
         }
         // access underlying feature to get exception if any
         load_future.get();
@@ -1531,26 +1559,40 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     return field_data_list;
 }
 
-std::vector<FieldDataPtr>
-GetFieldDatasFromManifest(
+void
+IterateFieldDataFromManifest(
     const std::string& manifest_path,
     const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
     const FieldDataMeta& field_meta,
     std::optional<DataType> data_type,
     int64_t dim,
-    std::optional<DataType> element_type) {
+    std::optional<DataType> element_type,
+    std::optional<StorageColumnMapping> storage_column_mapping,
+    const std::function<void(FieldDataPtr)>& consumer,
+    int64_t max_inflight_bytes) {
+    AssertInfo(max_inflight_bytes > 0,
+               "max_inflight_bytes must be positive, got {}",
+               max_inflight_bytes);
     auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
 
-    // Determine the column name to use:
-    //   - external input fields: external column name
-    //   - internal and function-output fields: numeric field ID string
+    // Determine the column name to use. New index-build callers pass the
+    // storage column mapping through FileManagerContext. The fallback keeps
+    // direct test callers and older internal paths on the existing behavior.
     std::string column_name;
     const auto& ext_field = field_meta.field_schema.external_field();
-    if (!ext_field.empty()) {
+    bool is_external = false;
+    if (storage_column_mapping.has_value()) {
+        column_name = storage_column_mapping->storage_column_name;
+        is_external = storage_column_mapping->is_external_column;
+    } else if (!ext_field.empty()) {
         column_name = ext_field;
+        is_external = true;
     } else {
+        column_name = std::to_string(field_meta.field_id);
+    }
+    if (column_name.empty()) {
         column_name = std::to_string(field_meta.field_id);
     }
 
@@ -1567,20 +1609,20 @@ GetFieldDatasFromManifest(
     };
     bool field_exists = column_exists(column_name);
     if (!field_exists) {
-        return {};
+        return;
     }
 
     std::vector<std::string> needed_columns = {column_name};
 
     bool nullable = field_meta.field_schema.nullable();
-    bool is_external = !ext_field.empty();
-    std::optional<FieldMeta> normalize_field_meta;
+    std::shared_ptr<const FieldMeta> normalize_field_meta;
     if (is_external) {
         auto schema = field_meta.field_schema;
         if (schema.fieldid() == 0) {
             schema.set_fieldid(field_meta.field_id);
         }
-        normalize_field_meta.emplace(FieldMeta::ParseFrom(schema));
+        normalize_field_meta =
+            std::make_shared<const FieldMeta>(FieldMeta::ParseFrom(schema));
     }
 
     // External tables: schemaless reader - let the reader derive types from
@@ -1619,18 +1661,145 @@ GetFieldDatasFromManifest(
     AssertInfo(reader != nullptr, "Failed to create reader");
 
     auto reader_result = reader->get_record_batch_reader("");
-    AssertInfo(reader_result.ok(),
-               "Failed to get record batch reader: " +
-                   reader_result.status().ToString());
+    if (!reader_result.ok()) {
+        auto error = milvus_storage::ToSegcoreError(reader_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "Failed to get record batch reader: {}",
+                  error.what());
+    }
 
     auto record_batch_reader = reader_result.ValueOrDie();
 
-    std::vector<FieldDataPtr> field_datas;
+    // Decode batches on a background thread pool while this thread keeps
+    // draining the record batch reader. ReadNext must stay single-threaded
+    // (the reader is not thread-safe), but everything after it — external
+    // normalization plus FieldData materialization — is pure per-batch work
+    // and is the dominant cost. Offloading it keeps the reader thread free
+    // to trigger the next prefetch round, so network fetch and decode
+    // overlap instead of strictly alternating. Results are delivered to
+    // `consumer` on this thread in batch order; the bounded in-flight
+    // window provides backpressure so decoded-but-undelivered batches
+    // cannot pile up without limit.
+    //
+    // The window is bounded by bytes, not by batch count: a count-based cap
+    // scales with the pool size and the per-batch size, so on a large pool
+    // with 64MB batches it would admit gigabytes of decoded data per build
+    // (and several builds may run concurrently). The byte budget below bounds
+    // the window regardless of batch size and thread count; at least two
+    // batches are always admitted so decode can still overlap with fetch when
+    // a single batch exceeds the budget.
+    //
+    // What is charged is each batch's *input* arrow bytes
+    // (EstimateRecordBatchBytes on the source slice), not the decoded
+    // FieldData that actually accumulates in `pending`. For internal native
+    // types the two are close, but on the external path
+    // NormalizeExternalArrowByType can inflate the decoded footprint by a
+    // type-dependent factor, so peak retained bytes can exceed
+    // max_inflight_bytes by roughly that factor. Charging post-decode would
+    // need the decode to finish before admission, which is exactly the
+    // serialization this pipeline exists to avoid; the accounting is
+    // symmetric (deliver_front discharges what emplace_back charged), so this
+    // is a looser bound, not a leak.
+    //
+    // The budget is a parameter because what it buys depends on the caller.
+    // For a streaming consumer (DiskFileManagerImpl spilling to local disk)
+    // the window *replaces* full-column retention, so a large one is a net
+    // reduction. For an accumulating caller — GetFieldDatasFromManifest, and
+    // through it every storage-v3 index build that goes via
+    // MemFileManagerImpl — the whole column is retained regardless, so the
+    // window only adds the source arrow batches that in-flight futures keep
+    // alive: pure extra peak RSS, on top of a column the Go-side build memory
+    // estimate already sized without it. Those callers pass
+    // kAccumulatingInflightBytes.
+    //
+    // The decode tasks go to the LOW pool, not MIDDLE. Every production
+    // caller of this function is an index build (DiskFileManagerImpl /
+    // MemFileManagerImpl), i.e. background batch work, while MIDDLE is where
+    // ReduceHelper submits search reduce tasks and then blocks on
+    // future.get(). In standalone both share one ThreadPools singleton, so
+    // submitting a whole decode window to MIDDLE would queue CPU-bound
+    // tasks ahead of reduce and hold search latency up for the entire
+    // download phase. LOW carries only background segment loads and, being
+    // CPU_NUM-sized, still saturates the cores for this CPU-bound decode.
+    // Invariant this relies on: the calling thread blocks on decode futures,
+    // so this function must not be called from a LOW-pool thread. Index
+    // build tasks enter segcore from Go, so no caller does today.
+    auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::LOW);
+    const size_t max_inflight_batches =
+        std::max<size_t>(2, pool.GetMaxThreadNum() * 2);
+    std::deque<std::pair<std::future<FieldDataPtr>, int64_t>> pending;
+    int64_t pending_bytes = 0;
+
+    // No decode task may outlive this scope, on any exit path: ReadNext
+    // failing, a decode task rethrowing out of future::get(), or `consumer`
+    // throwing (for index build it writes to local disk). Only the first of
+    // those used to drain, which is safe today solely because the decode
+    // lambda below captures everything by value; a scope guard makes the
+    // guarantee structural instead of something every future edit has to
+    // re-derive. A future already consumed by a throwing get() is invalid
+    // and is skipped.
+    struct PendingDrainGuard {
+        std::deque<std::pair<std::future<FieldDataPtr>, int64_t>>& pending;
+
+        ~PendingDrainGuard() {
+            for (auto& entry : pending) {
+                if (entry.first.valid()) {
+                    entry.first.wait();
+                }
+            }
+        }
+    } pending_drain_guard{pending};
+
+    // Phase accounting for the streaming loop, reported once at the end.
+    // fetch = ReadNext (network/prefetch wait), decode_wait = blocking on
+    // the decode future, consume = the consumer callback (for index build:
+    // the local disk write). The three phases run on this thread and are
+    // mutually exclusive, so comparing their totals against the wall time
+    // shows where the pipeline actually spends its time — in particular
+    // whether a blocking consumer is starving ReadNext (fetch_max grows)
+    // or the writes themselves are slow (consume dominates).
+    int64_t fetch_ns = 0, fetch_max_ns = 0;
+    int64_t decode_wait_ns = 0;
+    int64_t consume_ns = 0, consume_max_ns = 0;
+    int64_t total_batch_bytes = 0;
+    size_t batch_count = 0;
+    auto wall_start = std::chrono::steady_clock::now();
+    auto now_ns = []() {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    };
+
+    auto deliver_front = [&]() {
+        auto t0 = now_ns();
+        auto field_data = pending.front().first.get();
+        auto t1 = now_ns();
+        pending_bytes -= pending.front().second;
+        pending.pop_front();
+        consumer(std::move(field_data));
+        auto t2 = now_ns();
+        decode_wait_ns += t1 - t0;
+        consume_ns += t2 - t1;
+        consume_max_ns = std::max(consume_max_ns, t2 - t1);
+    };
+
+    auto data_type_v = data_type.value();
+    auto element_type_v = element_type.value();
     while (true) {
         std::shared_ptr<arrow::RecordBatch> batch;
+        auto fetch_start = now_ns();
         auto status = record_batch_reader->ReadNext(&batch);
-        AssertInfo(status.ok(),
-                   "Failed to read record batch: " + status.ToString());
+        auto fetch_elapsed = now_ns() - fetch_start;
+        fetch_ns += fetch_elapsed;
+        fetch_max_ns = std::max(fetch_max_ns, fetch_elapsed);
+        if (!status.ok()) {
+            // pending_drain_guard waits for the outstanding decode tasks
+            // while this throw unwinds.
+            auto error = milvus_storage::ToSegcoreError(status);
+            ThrowInfo(error.get_error_code(),
+                      "Failed to read record batch: {}",
+                      error.what());
+        }
         if (batch == nullptr) {
             break;
         }
@@ -1640,23 +1809,109 @@ GetFieldDatasFromManifest(
             continue;
         }
 
-        auto raw_column = batch->GetColumnByName(column_name);
-        if (is_external) {
-            raw_column =
-                NormalizeExternalArrowByType(raw_column,
-                                             data_type.value(),
-                                             dim,
-                                             nullable,
-                                             element_type.value(),
-                                             normalize_field_meta.value());
+        // Charge this slice's arrow input bytes against the byte budget (see
+        // the note on the budget above for why input, not decoded, bytes).
+        // A record batch may share a large row-group backing buffer with
+        // adjacent slices, so count only the ranges this slice references.
+        auto batch_bytes = EstimateRecordBatchBytes(*batch);
+
+        auto decode_future = pool.Submit([batch,
+                                          column_name,
+                                          is_external,
+                                          data_type_v,
+                                          element_type_v,
+                                          dim,
+                                          nullable,
+                                          normalize_field_meta,
+                                          num_rows]() -> FieldDataPtr {
+            auto raw_column = batch->GetColumnByName(column_name);
+            if (is_external) {
+                raw_column =
+                    NormalizeExternalArrowByType(raw_column,
+                                                 data_type_v,
+                                                 dim,
+                                                 nullable,
+                                                 element_type_v,
+                                                 *normalize_field_meta);
+            }
+            auto chunked_array =
+                std::make_shared<arrow::ChunkedArray>(raw_column);
+            auto field_data = CreateFieldData(
+                data_type_v, element_type_v, nullable, dim, num_rows);
+            field_data->FillFieldData(chunked_array);
+            return field_data;
+        });
+        pending.emplace_back(std::move(decode_future), batch_bytes);
+        pending_bytes += batch_bytes;
+        total_batch_bytes += batch_bytes;
+        ++batch_count;
+
+        // Backpressure: block on the oldest batch once the window is full
+        // by bytes or by count. Always keep at least one in flight so a
+        // single oversized batch cannot deadlock the loop.
+        while (pending.size() > 1 && (pending_bytes > max_inflight_bytes ||
+                                      pending.size() >= max_inflight_batches)) {
+            deliver_front();
         }
-        auto chunked_array = std::make_shared<arrow::ChunkedArray>(raw_column);
-        auto field_data = CreateFieldData(
-            data_type.value(), element_type.value(), nullable, dim, num_rows);
-        field_data->FillFieldData(chunked_array);
-        field_datas.push_back(field_data);
+        // Opportunistically deliver whatever is already done, keeping
+        // consumer-side work (e.g. disk writes) interleaved with fetching.
+        while (!pending.empty() &&
+               pending.front().first.wait_for(std::chrono::seconds(0)) ==
+                   std::future_status::ready) {
+            deliver_front();
+        }
     }
 
+    while (!pending.empty()) {
+        deliver_front();
+    }
+
+    if (batch_count > 0) {
+        auto wall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - wall_start)
+                           .count();
+        LOG_INFO(
+            "[ManifestReadStats] column={} batches={} MB={} wall_ms={} "
+            "fetch_ms={} fetch_max_ms={} decode_wait_ms={} consume_ms={} "
+            "consume_max_ms={}",
+            column_name,
+            batch_count,
+            total_batch_bytes >> 20,
+            wall_ms,
+            fetch_ns / 1'000'000,
+            fetch_max_ns / 1'000'000,
+            decode_wait_ns / 1'000'000,
+            consume_ns / 1'000'000,
+            consume_max_ns / 1'000'000);
+    }
+}
+
+std::vector<FieldDataPtr>
+GetFieldDatasFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta,
+    std::optional<DataType> data_type,
+    int64_t dim,
+    std::optional<DataType> element_type,
+    std::optional<StorageColumnMapping> storage_column_mapping) {
+    std::vector<FieldDataPtr> field_datas;
+    IterateFieldDataFromManifest(
+        manifest_path,
+        loon_ffi_properties,
+        field_meta,
+        data_type,
+        dim,
+        element_type,
+        std::move(storage_column_mapping),
+        [&](FieldDataPtr field_data) {
+            field_datas.push_back(std::move(field_data));
+        },
+        // Every decoded batch is retained below, so a large in-flight window
+        // would only pin extra source arrow batches on top of the full
+        // column. Keep it small; overlap still happens, the peak does not
+        // grow by half a gigabyte per concurrent build.
+        kAccumulatingInflightBytes);
     return field_datas;
 }
 
@@ -1742,10 +1997,13 @@ OpenTextFieldSegmentReader(
 
     auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
         *loon_ffi_properties, segment_base_path);
-    AssertInfo(fs_result.ok(),
-               "Failed to get filesystem for TEXT field {}: {}",
-               field_meta.field_id,
-               fs_result.status().ToString());
+    if (!fs_result.ok()) {
+        auto error = milvus_storage::ToSegcoreError(fs_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "Failed to get filesystem for TEXT field {}: {}",
+                  field_meta.field_id,
+                  error.what());
+    }
     auto fs = std::move(fs_result.ValueOrDie());
 
     auto schema = BuildTextFieldReaderSchema(field_meta, column_name);
@@ -1754,10 +2012,13 @@ OpenTextFieldSegmentReader(
 
     auto reader_result = milvus_storage::segment::SegmentReader::Open(
         fs, loon_manifest, schema, {column_name}, config);
-    AssertInfo(reader_result.ok(),
-               "Failed to open SegmentReader for TEXT field {}: {}",
-               field_meta.field_id,
-               reader_result.status().ToString());
+    if (!reader_result.ok()) {
+        auto error = milvus_storage::ToSegcoreError(reader_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "Failed to open SegmentReader for TEXT field {}: {}",
+                  field_meta.field_id,
+                  error.what());
+    }
     return std::move(reader_result.ValueOrDie());
 }
 
@@ -1789,10 +2050,13 @@ GetTextFieldDatasFromManifest(
     while (true) {
         std::shared_ptr<arrow::RecordBatch> batch;
         auto status = reader->ReadNext(&batch);
-        AssertInfo(status.ok(),
-                   "Failed to read TEXT field {} from manifest: {}",
-                   field_meta.field_id,
-                   status.ToString());
+        if (!status.ok()) {
+            auto error = milvus_storage::ToSegcoreError(status);
+            ThrowInfo(error.get_error_code(),
+                      "Failed to read TEXT field {} from manifest: {}",
+                      field_meta.field_id,
+                      error.what());
+        }
         if (batch == nullptr) {
             break;
         }
@@ -1818,10 +2082,13 @@ GetTextFieldDatasFromManifest(
     }
 
     auto status = reader->Close();
-    AssertInfo(status.ok(),
-               "Failed to close SegmentReader for TEXT field {}: {}",
-               field_meta.field_id,
-               status.ToString());
+    if (!status.ok()) {
+        auto error = milvus_storage::ToSegcoreError(status);
+        ThrowInfo(error.get_error_code(),
+                  "Failed to close SegmentReader for TEXT field {}: {}",
+                  field_meta.field_id,
+                  error.what());
+    }
 
     return field_datas;
 }
@@ -2273,221 +2540,9 @@ ConvertStringArrayToBinary(const arrow::ArrayVector& arrays) {
     return result;
 }
 
-// Coerce any binary-like Arrow array to canonical BinaryArray.
-// Source readers (e.g. vortex) may produce LARGE_BINARY / BINARY_VIEW /
-// LARGE_STRING / STRING_VIEW for the same logical bytes; downstream
-// ChunkWriters dynamic_cast to BinaryArray and would null-deref.
-arrow::ArrayVector
-CoerceToBinary(const arrow::ArrayVector& arrays) {
-    arrow::ArrayVector result;
-    result.reserve(arrays.size());
-    for (const auto& arr : arrays) {
-        const auto tid = arr->type_id();
-        if (tid == arrow::Type::BINARY) {
-            result.push_back(arr);
-            continue;
-        }
-        if (tid == arrow::Type::STRING) {
-            // Zero-copy: identical buffer layout
-            auto d = arr->data();
-            auto bin = arrow::ArrayData::Make(arrow::binary(),
-                                              d->length,
-                                              d->buffers,
-                                              d->null_count,
-                                              d->offset);
-            result.push_back(std::make_shared<arrow::BinaryArray>(bin));
-            continue;
-        }
-        if (tid == arrow::Type::LARGE_BINARY ||
-            tid == arrow::Type::LARGE_STRING ||
-            tid == arrow::Type::BINARY_VIEW ||
-            tid == arrow::Type::STRING_VIEW) {
-            // Different offset/buffer layout -> rebuild via builder.
-            arrow::BinaryBuilder builder;
-            auto status = builder.Reserve(arr->length());
-            AssertInfo(status.ok(),
-                       "BinaryBuilder reserve failed: " + status.ToString());
-            switch (tid) {
-                case arrow::Type::LARGE_BINARY: {
-                    auto src =
-                        std::static_pointer_cast<arrow::LargeBinaryArray>(arr);
-                    for (int64_t i = 0; i < src->length(); ++i) {
-                        if (src->IsNull(i)) {
-                            status = builder.AppendNull();
-                        } else {
-                            auto v = src->GetView(i);
-                            status = builder.Append(
-                                reinterpret_cast<const uint8_t*>(v.data()),
-                                v.size());
-                        }
-                        AssertInfo(status.ok(),
-                                   "BinaryBuilder append failed: " +
-                                       status.ToString());
-                    }
-                    break;
-                }
-                case arrow::Type::LARGE_STRING: {
-                    auto src =
-                        std::static_pointer_cast<arrow::LargeStringArray>(arr);
-                    for (int64_t i = 0; i < src->length(); ++i) {
-                        if (src->IsNull(i)) {
-                            status = builder.AppendNull();
-                        } else {
-                            auto v = src->GetView(i);
-                            status = builder.Append(
-                                reinterpret_cast<const uint8_t*>(v.data()),
-                                v.size());
-                        }
-                        AssertInfo(status.ok(),
-                                   "BinaryBuilder append failed: " +
-                                       status.ToString());
-                    }
-                    break;
-                }
-                case arrow::Type::BINARY_VIEW: {
-                    auto src =
-                        std::static_pointer_cast<arrow::BinaryViewArray>(arr);
-                    for (int64_t i = 0; i < src->length(); ++i) {
-                        if (src->IsNull(i)) {
-                            status = builder.AppendNull();
-                        } else {
-                            auto v = src->GetView(i);
-                            status = builder.Append(
-                                reinterpret_cast<const uint8_t*>(v.data()),
-                                v.size());
-                        }
-                        AssertInfo(status.ok(),
-                                   "BinaryBuilder append failed: " +
-                                       status.ToString());
-                    }
-                    break;
-                }
-                case arrow::Type::STRING_VIEW: {
-                    auto src =
-                        std::static_pointer_cast<arrow::StringViewArray>(arr);
-                    for (int64_t i = 0; i < src->length(); ++i) {
-                        if (src->IsNull(i)) {
-                            status = builder.AppendNull();
-                        } else {
-                            auto v = src->GetView(i);
-                            status = builder.Append(
-                                reinterpret_cast<const uint8_t*>(v.data()),
-                                v.size());
-                        }
-                        AssertInfo(status.ok(),
-                                   "BinaryBuilder append failed: " +
-                                       status.ToString());
-                    }
-                    break;
-                }
-                default:
-                    break;
-            }
-            std::shared_ptr<arrow::Array> out;
-            status = builder.Finish(&out);
-            AssertInfo(status.ok(),
-                       "BinaryBuilder finish failed: " + status.ToString());
-            result.push_back(out);
-            continue;
-        }
-        result.push_back(arr);
-    }
-    return result;
-}
-
 // Forward decl: defined alongside CanonicalizeArrowVariants below.
 static std::shared_ptr<arrow::Buffer>
 RebuildNullBitmap(const std::shared_ptr<arrow::Array>& array);
-
-// Coerce LARGE_LIST / LIST_VIEW to canonical (32-bit offset) ListArray.
-// Vortex schemaless mode may emit list variants for the same logical
-// List<T>; downstream code (ConvertListToProtobufBinary,
-// NormalizeVectorArrayInner, ArrowListToScalarFieldProto) expects
-// arrow::ListArray and would static_cast-fail otherwise.
-arrow::ArrayVector
-CoerceToList(const arrow::ArrayVector& arrays) {
-    arrow::ArrayVector result;
-    result.reserve(arrays.size());
-    for (const auto& arr : arrays) {
-        const auto tid = arr->type_id();
-        if (tid != arrow::Type::LARGE_LIST && tid != arrow::Type::LIST_VIEW) {
-            result.push_back(arr);
-            continue;
-        }
-
-        std::shared_ptr<arrow::Array> values;
-        std::vector<std::pair<int64_t, int64_t>> ranges;
-        ranges.reserve(arr->length());
-        if (tid == arrow::Type::LARGE_LIST) {
-            auto la = std::static_pointer_cast<arrow::LargeListArray>(arr);
-            values = la->values();
-            for (int64_t i = 0; i < la->length(); ++i) {
-                int64_t s = la->value_offset(i);
-                int64_t e = s + la->value_length(i);
-                ranges.emplace_back(s, e);
-            }
-        } else {
-            auto lv = std::static_pointer_cast<arrow::ListViewArray>(arr);
-            values = lv->values();
-            for (int64_t i = 0; i < lv->length(); ++i) {
-                int64_t s = lv->value_offset(i);
-                int64_t e = s + lv->value_length(i);
-                ranges.emplace_back(s, e);
-            }
-        }
-
-        arrow::Int32Builder offset_builder;
-        auto status = offset_builder.Reserve(arr->length() + 1);
-        AssertInfo(status.ok(),
-                   "CoerceToList: offset reserve failed: " + status.ToString());
-        std::vector<std::shared_ptr<arrow::Array>> value_slices;
-        int32_t cur = 0;
-        status = offset_builder.Append(0);
-        AssertInfo(status.ok(), "CoerceToList: offset append failed");
-        for (int64_t i = 0; i < arr->length(); ++i) {
-            if (!arr->IsNull(i)) {
-                auto [s, e] = ranges[i];
-                int64_t len = e - s;
-                AssertInfo(cur + len <= INT32_MAX,
-                           "CoerceToList: offset overflows int32");
-                value_slices.push_back(values->Slice(s, len));
-                cur += static_cast<int32_t>(len);
-            }
-            status = offset_builder.Append(cur);
-            AssertInfo(status.ok(), "CoerceToList: offset append failed");
-        }
-        std::shared_ptr<arrow::Array> offsets_arr;
-        status = offset_builder.Finish(&offsets_arr);
-        AssertInfo(status.ok(),
-                   "CoerceToList: offset finish failed: " + status.ToString());
-
-        std::shared_ptr<arrow::Array> concat_values;
-        if (value_slices.empty()) {
-            auto empty = arrow::MakeArrayOfNull(values->type(), 0);
-            AssertInfo(empty.ok(), "CoerceToList: empty values failed");
-            concat_values = *empty;
-        } else {
-            auto concat = arrow::Concatenate(value_slices);
-            AssertInfo(
-                concat.ok(),
-                "CoerceToList: concat failed: " + concat.status().ToString());
-            concat_values = *concat;
-        }
-
-        auto offsets_buf =
-            std::static_pointer_cast<arrow::Int32Array>(offsets_arr)->values();
-        auto list_arr =
-            std::make_shared<arrow::ListArray>(arrow::list(values->type()),
-                                               arr->length(),
-                                               offsets_buf,
-                                               concat_values,
-                                               RebuildNullBitmap(arr),
-                                               arr->null_count(),
-                                               0);
-        result.push_back(list_arr);
-    }
-    return result;
-}
 
 // Rebuild null bitmap as a fresh buffer at offset=0.
 // Required when constructing a new arrow::Array that does not share the
@@ -2714,8 +2769,14 @@ ConvertWKTStringArrayToWKBBinary(const arrow::ArrayVector& arrays) {
     arrow::ArrayVector result;
     result.reserve(arrays.size());
 
-    GEOSContextHandle_t ctx = GEOS_init_r();
-    AssertInfo(ctx != nullptr, "Failed to initialize GEOS context");
+    // Scoped GEOS context: InitGEOSContext throws a retriable
+    // MemAllocateFailed on OOM (GEOS_init_r never returns nullptr -- see the
+    // helper's comment), and the RAII guard releases the context on every
+    // exit -- the throwing Geometry(ctx, wkt) constructor on malformed WKT
+    // and the arrow-status AssertInfo calls below would otherwise skip a
+    // trailing GEOS_finish_r and leak one context per failure.
+    ScopedGeosResources geos("WKT to WKB conversion");
+    GEOSContextHandle_t ctx = geos.ctx;
 
     for (const auto& arr : arrays) {
         const auto tid = arr->type_id();
@@ -2760,7 +2821,6 @@ ConvertWKTStringArrayToWKBBinary(const arrow::ArrayVector& arrays) {
         result.push_back(wkb_array);
     }
 
-    GEOS_finish_r(ctx);
     return result;
 }
 

@@ -31,6 +31,7 @@
 #include "common/QueryResult.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "common/VectorTrait.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
@@ -115,7 +116,7 @@ TEST(Query, ExecWithPredicateLoader) {
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
 
-    query::Json json = SearchResultToJson(*sr);
+    query::Json json = SearchResultToJson(*sr, 3);
 #ifdef __linux__
     auto ref = json::parse(R"(
 [
@@ -222,7 +223,7 @@ TEST(Query, ExecWithPredicate) {
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
 
-    query::Json json = SearchResultToJson(*sr);
+    query::Json json = SearchResultToJson(*sr, 3);
 #ifdef __linux__
     auto ref = json::parse(R"(
 [
@@ -404,7 +405,7 @@ TEST(Query, ExecWithoutPredicate) {
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     assert_order(*sr, "l2");
     std::vector<std::vector<std::string>> results;
-    auto json = SearchResultToJson(*sr);
+    auto json = SearchResultToJson(*sr, 3);
 #ifdef __linux__
     auto ref = json::parse(R"(
 [
@@ -684,7 +685,8 @@ TEST(Query, DISABLED_FillSegment) {
         auto output_i32_field_data =
             fields_data.at(i32_field_id)->scalars().int_data().data();
         ASSERT_EQ(output_i32_field_data.size(), topk * num_queries);
-        auto output_i32_valid_data = fields_data.at(i32_field_id)->valid_data();
+        auto output_i32_valid_data =
+            GetFieldDataRowValidData(*fields_data.at(i32_field_id));
         ASSERT_EQ(output_i32_valid_data.size(), topk * num_queries);
         auto float_field_id =
             schema->get_field_id(FieldName("lack_null_binlog"));
@@ -692,7 +694,7 @@ TEST(Query, DISABLED_FillSegment) {
             fields_data.at(float_field_id)->scalars().float_data().data();
         ASSERT_EQ(output_float_field_data.size(), topk * num_queries);
         auto output_float_valid_data =
-            fields_data.at(float_field_id)->valid_data();
+            GetFieldDataRowValidData(*fields_data.at(float_field_id));
         ASSERT_EQ(output_float_valid_data.size(), topk * num_queries);
         auto double_field_id =
             schema->get_field_id(FieldName("lack_default_value_binlog_double"));
@@ -700,7 +702,7 @@ TEST(Query, DISABLED_FillSegment) {
             fields_data.at(double_field_id)->scalars().double_data().data();
         ASSERT_EQ(output_double_field_data.size(), topk * num_queries);
         auto output_double_valid_data =
-            fields_data.at(double_field_id)->valid_data();
+            GetFieldDataRowValidData(*fields_data.at(double_field_id));
         ASSERT_EQ(output_double_valid_data.size(), topk * num_queries);
 
         auto bool_field_id =
@@ -709,7 +711,7 @@ TEST(Query, DISABLED_FillSegment) {
             fields_data.at(bool_field_id)->scalars().bool_data().data();
         ASSERT_EQ(output_bool_field_data.size(), topk * num_queries);
         auto output_bool_valid_data =
-            fields_data.at(bool_field_id)->valid_data();
+            GetFieldDataRowValidData(*fields_data.at(bool_field_id));
         ASSERT_EQ(output_bool_valid_data.size(), topk * num_queries);
 
         auto int_field_id =
@@ -717,7 +719,8 @@ TEST(Query, DISABLED_FillSegment) {
         auto output_int_field_data =
             fields_data.at(int_field_id)->scalars().int_data().data();
         ASSERT_EQ(output_int_field_data.size(), topk * num_queries);
-        auto output_int_valid_data = fields_data.at(int_field_id)->valid_data();
+        auto output_int_valid_data =
+            GetFieldDataRowValidData(*fields_data.at(int_field_id));
         ASSERT_EQ(output_int_valid_data.size(), topk * num_queries);
 
         auto int64_field_id =
@@ -726,7 +729,7 @@ TEST(Query, DISABLED_FillSegment) {
             fields_data.at(int64_field_id)->scalars().long_data().data();
         ASSERT_EQ(output_int64_field_data.size(), topk * num_queries);
         auto output_int64_valid_data =
-            fields_data.at(int64_field_id)->valid_data();
+            GetFieldDataRowValidData(*fields_data.at(int64_field_id));
         ASSERT_EQ(output_int64_valid_data.size(), topk * num_queries);
 
         auto float_field_id_default_value =
@@ -738,8 +741,8 @@ TEST(Query, DISABLED_FillSegment) {
                 .data();
         ASSERT_EQ(output_float_field_data_default_value.size(),
                   topk * num_queries);
-        auto output_float_valid_data_default_value =
-            fields_data.at(float_field_id_default_value)->valid_data();
+        auto output_float_valid_data_default_value = GetFieldDataRowValidData(
+            *fields_data.at(float_field_id_default_value));
         ASSERT_EQ(output_float_valid_data_default_value.size(),
                   topk * num_queries);
 
@@ -749,7 +752,7 @@ TEST(Query, DISABLED_FillSegment) {
             fields_data.at(varchar_field_id)->scalars().string_data().data();
         ASSERT_EQ(output_varchar_field_data.size(), topk * num_queries);
         auto output_varchar_valid_data =
-            fields_data.at(varchar_field_id)->valid_data();
+            GetFieldDataRowValidData(*fields_data.at(varchar_field_id));
         ASSERT_EQ(output_varchar_valid_data.size(), topk * num_queries);
 
         for (int i = 0; i < topk * num_queries; i++) {

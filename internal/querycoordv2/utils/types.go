@@ -17,14 +17,13 @@
 package utils
 
 import (
+	"context"
 	"time"
-
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -64,42 +63,48 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 	posTime := tsoutil.PhysicalTime(channelCheckpoint.GetTimestamp())
 	tsLag := time.Since(posTime)
 	if tsLag >= 10*time.Minute {
-		log.Warn("delta position is quite stale",
-			zap.Int64("collectionID", segment.GetCollectionID()),
-			zap.Int64("segmentID", segment.GetID()),
-			zap.String("channel", segment.InsertChannel),
-			zap.Uint64("posTs", channelCheckpoint.GetTimestamp()),
-			zap.Time("posTime", posTime),
-			zap.Duration("tsLag", tsLag))
+		mlog.Warn(context.TODO(), "delta position is quite stale",
+			mlog.FieldCollectionID(segment.GetCollectionID()),
+			mlog.FieldSegmentID(segment.GetID()),
+			mlog.String("channel", segment.InsertChannel),
+			mlog.Uint64("posTs", channelCheckpoint.GetTimestamp()),
+			mlog.Time("posTime", posTime),
+			mlog.Duration("tsLag", tsLag))
 	}
 	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:       segment.ID,
-		PartitionID:     segment.PartitionID,
-		CollectionID:    segment.CollectionID,
-		BinlogPaths:     segment.Binlogs,
-		NumOfRows:       segment.NumOfRows,
-		InsertChannel:   segment.InsertChannel,
-		IndexInfos:      indexes,
-		StartPosition:   segment.GetStartPosition(),
-		DeltaPosition:   channelCheckpoint,
-		Level:           segment.GetLevel(),
-		StorageVersion:  segment.GetStorageVersion(),
-		IsSorted:        segment.GetIsSorted(),
-		ManifestPath:    segment.GetManifestPath(),
-		CommitTimestamp: segment.GetCommitTimestamp(),
-		DataVersion:     segment.GetDataVersion(),
+		SegmentID:      segment.ID,
+		PartitionID:    segment.PartitionID,
+		CollectionID:   segment.CollectionID,
+		BinlogPaths:    segment.Binlogs,
+		NumOfRows:      segment.NumOfRows,
+		InsertChannel:  segment.InsertChannel,
+		IndexInfos:     indexes,
+		StartPosition:  segment.GetStartPosition(),
+		DeltaPosition:  channelCheckpoint,
+		Level:          segment.GetLevel(),
+		StorageVersion: segment.GetStorageVersion(),
+		IsSorted:       segment.GetIsSorted(),
+		ManifestPath:   segment.GetManifestPath(),
+		// Fallback parent loads use ChildManifestPaths to carry compact-to V3
+		// delete sources that are not representable as legacy Deltalogs.
+		ChildManifestPaths: segment.GetChildManifestPaths(),
+		CommitTimestamp:    segment.GetCommitTimestamp(),
+		DataVersion:        segment.GetDataVersion(),
+		Stats:              segment.GetStats(),
+		TextStatsLogs:      segment.GetTextStatsLogs(),
+		JsonKeyStatsLogs:   segment.GetJsonKeyStats(),
 	}
 
-	// Deltalogs are always populated (delta log loading has its own manifest path)
+	// Preserve legacy deltalog metadata when available. Manifest-backed internal
+	// V3 loads resolve their own delta paths from the manifest.
 	loadInfo.Deltalogs = segment.Deltalogs
 
 	// When manifest_path is set, stats are stored in the manifest.
-	// Skip populating legacy stats fields - the reader will load from manifest.
+	// Skip populating legacy stats fields. Text and JSON stats metadata stays in
+	// the load info so QueryNode can resolve the corresponding manifest entries.
 	if segment.GetManifestPath() == "" {
 		loadInfo.Statslogs = segment.Statslogs
 		loadInfo.Bm25Logs = segment.Bm25Statslogs
-		loadInfo.TextStatsLogs = segment.GetTextStatsLogs()
-		loadInfo.JsonKeyStatsLogs = segment.GetJsonKeyStats()
 	}
 
 	return loadInfo

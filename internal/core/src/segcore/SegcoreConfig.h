@@ -11,12 +11,14 @@
 
 #pragma once
 
+#include <atomic>
 #include <stdint.h>
 #include <string>
 #include <unordered_set>
 
 #include "common/EasyAssert.h"
 #include "knowhere/comp/index_param.h"
+#include "knowhere/version.h"
 
 namespace milvus::segcore {
 
@@ -28,9 +30,6 @@ class SegcoreConfig {
         static SegcoreConfig config;
         return config;
     }
-
-    void
-    parse_from(const std::string& string_path);
 
     int64_t
     get_chunk_rows() const {
@@ -70,6 +69,23 @@ class SegcoreConfig {
     bool
     get_enable_interim_segment_index() const {
         return enable_interim_segment_index_;
+    }
+
+    int32_t
+    get_interim_index_target_version() const {
+        return interim_index_target_version_;
+    }
+
+    int32_t
+    get_interim_index_version() const {
+        return interim_index_target_version_ == -1
+                   ? knowhere::Version::GetCurrentVersion().VersionNumber()
+                   : interim_index_target_version_;
+    }
+
+    void
+    set_interim_index_target_version(int32_t target_version) {
+        interim_index_target_version_ = target_version;
     }
 
     void
@@ -115,6 +131,24 @@ class SegcoreConfig {
     float
     get_build_ratio() const {
         return build_ratio_;
+    }
+
+    // FM-index count-first guard threshold (queryNode.fmindexCostRatio):
+    // accelerate a pattern through FMINDEX iff
+    // occ x sa_sample_rate < ratio x total_tokens. Default 0.001 is the
+    // conservative end of the measured enumeration/scan crossover — see
+    // FMIndex::ShouldUseOp.
+    void
+    set_fmindex_cost_ratio(float ratio) {
+        AssertInfo(ratio > 0.0f && ratio <= 1.0f,
+                   "fmindex cost ratio must be in (0, 1], got {}",
+                   ratio);
+        fmindex_cost_ratio_ = ratio;
+    }
+
+    float
+    get_fmindex_cost_ratio() const {
+        return fmindex_cost_ratio_;
     }
 
     int64_t
@@ -177,16 +211,6 @@ class SegcoreConfig {
     }
 
     void
-    set_visibility_filter_enabled(bool value) {
-        visibility_filter_enabled_ = value;
-    }
-
-    bool
-    get_visibility_filter_enabled() const {
-        return visibility_filter_enabled_;
-    }
-
-    void
     set_prefer_field_data_when_index_has_raw_data(bool value) {
         prefer_field_data_when_index_has_raw_data_ = value;
     }
@@ -196,7 +220,30 @@ class SegcoreConfig {
         return prefer_field_data_when_index_has_raw_data_;
     }
 
+    void
+    set_reject_remote_vector_output(bool value) {
+        reject_remote_vector_output_ = value;
+    }
+
+    bool
+    get_reject_remote_vector_output() const {
+        return reject_remote_vector_output_;
+    }
+
+    void
+    set_take_for_output_result_count_limit(int64_t value) {
+        take_for_output_result_count_limit_.store(value,
+                                                  std::memory_order_relaxed);
+    }
+
+    int64_t
+    get_take_for_output_result_count_limit() const {
+        return take_for_output_result_count_limit_.load(
+            std::memory_order_relaxed);
+    }
+
     static constexpr int64_t kDefaultMaxGroupByGroups = 100000;
+    static constexpr int64_t kDefaultTakeForOutputResultCountLimit = 10000;
 
     int64_t
     get_max_group_by_groups() const {
@@ -218,6 +265,16 @@ class SegcoreConfig {
         return interim_index_mem_expansion_rate_;
     }
 
+    void
+    set_enable_gis_split_fusion(bool value) {
+        enable_gis_split_fusion_ = value;
+    }
+
+    bool
+    get_enable_gis_split_fusion() const {
+        return enable_gis_split_fusion_;
+    }
+
  private:
     inline static const std::unordered_set<std::string>
         valid_dense_vector_index_type = {
@@ -226,6 +283,7 @@ class SegcoreConfig {
     };
     inline static bool storage_v3_enabled_ = false;
     inline static bool enable_interim_segment_index_ = false;
+    inline static int32_t interim_index_target_version_ = -1;
     inline static bool enable_growing_source_flush_ = false;
     inline static int64_t chunk_rows_ = 32 * 1024;
     inline static int64_t nlist_ = 100;
@@ -233,14 +291,19 @@ class SegcoreConfig {
     inline static int64_t sub_dim_ = 2;
     inline static float refine_ratio_ = 3.0;
     inline static float build_ratio_ = 0.1;
+    // FM-index guard threshold; overridden from queryNode.fmindexCostRatio.
+    inline static float fmindex_cost_ratio_ = 0.001f;
     inline static std::string dense_index_type_ =
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
     inline static knowhere::RefineType refine_type_ =
         knowhere::RefineType::DATA_VIEW;
     inline static bool refine_with_quant_flag_ = false;
     inline static bool enable_geometry_cache_ = false;
-    inline static bool visibility_filter_enabled_ = true;
+    inline static bool enable_gis_split_fusion_ = false;
     inline static bool prefer_field_data_when_index_has_raw_data_ = false;
+    inline static bool reject_remote_vector_output_ = false;
+    inline static std::atomic<int64_t> take_for_output_result_count_limit_{
+        kDefaultTakeForOutputResultCountLimit};
     inline static float interim_index_mem_expansion_rate_ = 1.15f;
     inline static int64_t max_group_by_groups_ = kDefaultMaxGroupByGroups;
 };

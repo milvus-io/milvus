@@ -1,6 +1,7 @@
 package common
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -9,10 +10,9 @@ import (
 	"strings"
 
 	"github.com/x448/float16"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -116,7 +116,7 @@ func GenSparseVector(maxLen int) entity.SparseEmbedding {
 	}
 	vector, err := entity.NewSliceSparseEmbedding(positions, values)
 	if err != nil {
-		log.Fatal("Generate vector failed %s", zap.Error(err))
+		mlog.Fatal(context.TODO(), "Generate vector failed %s", mlog.Err(err))
 	}
 	return vector
 }
@@ -132,7 +132,7 @@ var InvalidExpressions = []InvalidExprStruct{
 	{Expr: "id in [0]", ErrNil: true, ErrMsg: "fieldName(id) not found"},                                          // not exist field but no error, because enable dynamic
 	{Expr: "int64 in not [0]", ErrNil: false, ErrMsg: "cannot parse expression"},                                  // wrong term expr keyword
 	{Expr: "int64 < floatVec", ErrNil: false, ErrMsg: "not supported"},                                            // unsupported compare field
-	{Expr: "floatVec in [0]", ErrNil: false, ErrMsg: "cannot be casted to FloatVector"},                           // value and field type mismatch
+	{Expr: "floatVec in [0]", ErrNil: false, ErrMsg: "term expression is not supported"},                          // unsupported term target type
 	{Expr: fmt.Sprintf("%s == 1", DefaultJSONFieldName), ErrNil: true, ErrMsg: ""},                                // hist empty
 	{Expr: fmt.Sprintf("%s like 'a%%' ", DefaultJSONFieldName), ErrNil: true, ErrMsg: ""},                         // hist empty
 	{Expr: fmt.Sprintf("%s like `a%%` ", DefaultJSONFieldName), ErrNil: false, ErrMsg: "cannot parse expression"}, // ``
@@ -204,7 +204,7 @@ func GenText(lang string) string {
 		return fmt.Sprintf("%s%s%s", topic, verb, object)
 	default:
 		// Fallback to en for unsupported languages
-		log.Warn("Unsupported language, fallback to English", zap.String("language", lang))
+		mlog.Warn(context.TODO(), "Unsupported language, fallback to English", mlog.String("language", lang))
 		topic = englishTopics[rand.Intn(len(englishTopics))]
 		verb = englishVerbs[rand.Intn(len(englishVerbs))]
 		object = englishObjects[rand.Intn(len(englishObjects))]

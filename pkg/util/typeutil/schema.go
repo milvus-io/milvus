@@ -32,8 +32,10 @@ import (
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -112,13 +114,20 @@ func ValidateTextRequiresStorageV3(schema *schemapb.CollectionSchema, storageV3E
 	return nil
 }
 
-// UseGrowingSourceFlush returns whether insert payload for the schema should
-// be flushed from QueryNode growing source when available.
-func UseGrowingSourceFlush(schema *schemapb.CollectionSchema, storageV3Enabled bool, enableGrowingSourceFlush bool) bool {
+// AllowGrowingSourceFlush returns whether insert payload for the schema may try
+// flushing from QueryNode growing source when available.
+func AllowGrowingSourceFlush(schema *schemapb.CollectionSchema, storageV3Enabled bool, enableGrowingSourceFlush bool) bool {
 	if !storageV3Enabled {
 		return false
 	}
-	return HasTextField(schema) || enableGrowingSourceFlush
+	return enableGrowingSourceFlush
+}
+
+// UseGrowingSourceFlush is kept for compatibility. Prefer
+// AllowGrowingSourceFlush for new code to avoid implying the source choice is
+// mandatory.
+func UseGrowingSourceFlush(schema *schemapb.CollectionSchema, storageV3Enabled bool, enableGrowingSourceFlush bool) bool {
+	return AllowGrowingSourceFlush(schema, storageV3Enabled, enableGrowingSourceFlush)
 }
 
 // EstimateSizePerRecord returns the estimate size of a record in a collection
@@ -326,6 +335,15 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 				return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
 			}
 			array := fs.GetScalars().GetArrayData().GetData()[rowOffset]
+			if fs.GetScalars().GetArrayData().GetElementType() == schemapb.DataType_Array || array.GetArrayData() != nil {
+				// A recursive array row no longer carries enough leaf-type
+				// information in ArrayArray.element_type to derive its logical
+				// byte width (Int8/Int16/Int32 all share IntArray, for example).
+				// The insert splitter needs a safe wire-size estimate, so use the
+				// actual protobuf size for recursive rows.
+				res += proto.Size(array)
+				break
+			}
 			res += CalcScalarSize(&schemapb.FieldData{
 				Field: &schemapb.FieldData_Scalars{Scalars: array},
 				Type:  fs.GetScalars().GetArrayData().GetElementType(),
@@ -346,7 +364,7 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 			schemapb.DataType_BFloat16Vector,
 			schemapb.DataType_Int8Vector,
 			schemapb.DataType_SparseFloatVector:
-			validData := fs.GetValidData()
+			validData := GetFieldDataValidData(fs)
 			isNullRow := len(validData) > 0 && rowOffset < len(validData) && !validData[rowOffset]
 			if isNullRow {
 				continue
@@ -915,6 +933,15 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 				}
 			}
 			fd.Field = vectors
+		case *schemapb.FieldData_StructArrays:
+			fd.Field = &schemapb.FieldData_StructArrays{
+				StructArrays: &schemapb.StructArrayField{
+					Fields: PrepareResultFieldData(fieldData.GetStructArrays().GetFields(), topK),
+				},
+			}
+		}
+		if len(GetFieldDataValidData(fieldData)) > 0 {
+			SetFieldDataValidData(fd, make([]bool, 0, topK))
 		}
 		result = append(result, fd)
 	}
@@ -952,7 +979,7 @@ func NewFieldDataIdxComputerWithSchema(fieldsData []*schemapb.FieldData, schema 
 	}
 
 	for i, fieldData := range fieldsData {
-		validData := fieldData.GetValidData()
+		validData := GetFieldDataValidData(fieldData)
 		fieldSchema := fieldSchemas[fieldData.GetFieldId()]
 		isVector := IsSupportedNullableVectorType(fieldData.GetType())
 		isNullableVector := false
@@ -980,7 +1007,7 @@ func (c *FieldDataIdxComputer) Compute(rowIdx int64) []int64 {
 				c.resultBuffer[i] = -1
 				continue
 			}
-			validData := fieldData.GetValidData()
+			validData := GetFieldDataValidData(fieldData)
 			for j := c.lastRowIdx; j < rowIdx && j < int64(len(validData)); j++ {
 				if validData[j] {
 					c.dataIndices[i]++
@@ -997,18 +1024,38 @@ func (c *FieldDataIdxComputer) Compute(rowIdx int64) []int64 {
 }
 
 func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int64) (appendSize int64) {
-	dstMap := make(map[int64]*schemapb.FieldData)
-	for _, fieldData := range dst {
-		if fieldData != nil {
-			dstMap[fieldData.FieldId] = fieldData
-		}
-	}
+	// AppendFieldData copies a single row, so reduce loops call it once per row
+	// with the same dst. Building a FieldId index up front therefore repeats
+	// identical work on every row.
+	//
+	// dst and src are index-parallel in every caller -- the lazy-creation
+	// branch below already relies on that when it does `dst[i] = ...` -- so the
+	// column can normally be found by index. The map is only built when that
+	// does not hold for some column, which preserves the previous behavior
+	// without paying for it in the common case.
+	var dstMap map[int64]*schemapb.FieldData
 	for i, fieldData := range src {
 		fieldIdx := idx
 		if i < len(fieldIdxs) {
 			fieldIdx = fieldIdxs[i]
 		}
-		dstFieldData, ok := dstMap[fieldData.FieldId]
+		var (
+			dstFieldData *schemapb.FieldData
+			ok           bool
+		)
+		if i < len(dst) && dst[i] != nil && dst[i].FieldId == fieldData.FieldId {
+			dstFieldData, ok = dst[i], true
+		} else {
+			if dstMap == nil {
+				dstMap = make(map[int64]*schemapb.FieldData, len(dst))
+				for _, fd := range dst {
+					if fd != nil {
+						dstMap[fd.FieldId] = fd
+					}
+				}
+			}
+			dstFieldData, ok = dstMap[fieldData.FieldId]
+		}
 		if !ok {
 			dstFieldData = &schemapb.FieldData{
 				Type:      fieldData.Type,
@@ -1016,20 +1063,24 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				FieldId:   fieldData.FieldId,
 				IsDynamic: fieldData.IsDynamic,
 			}
-			dst[i] = dstFieldData
+			// Callers size dst to at least len(src). Keep that a hard failure
+			// rather than silently dropping the column: the pre-existing code
+			// wrote dst[i] unguarded and panicked here, and a silent drop would
+			// surface much later as missing data. The write stays inside the
+			// bounds-checked branch because gosec's G602 does not treat a
+			// preceding panic as terminating.
+			if i < len(dst) {
+				dst[i] = dstFieldData
+			} else {
+				panic(fmt.Sprintf("AppendFieldData: dst has %d columns, src has %d; "+
+					"callers must size dst to at least len(src)", len(dst), len(src)))
+			}
 		}
-		// assign null data
-		if len(fieldData.GetValidData()) != 0 {
-			if dstFieldData.ValidData == nil {
-				dstFieldData.ValidData = make([]bool, 0)
-			}
-			valid := fieldData.ValidData[idx]
-			dstFieldData.ValidData = append(dstFieldData.ValidData, valid)
-		} else if fieldIdx < 0 {
-			if dstFieldData.ValidData == nil {
-				dstFieldData.ValidData = make([]bool, 0)
-			}
-			dstFieldData.ValidData = append(dstFieldData.ValidData, false)
+		srcValidData := GetFieldDataValidData(fieldData)
+		appendValidity := len(srcValidData) != 0 || fieldIdx < 0
+		valid := fieldIdx >= 0
+		if len(srcValidData) != 0 {
+			valid = srcValidData[idx]
 		}
 		switch fieldType := fieldData.Field.(type) {
 		case *schemapb.FieldData_Scalars:
@@ -1182,7 +1233,7 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				}
 			}
 			dstVector := dstFieldData.GetVectors()
-			isNullRow := fieldIdx < 0 || (len(fieldData.GetValidData()) > 0 && !fieldData.GetValidData()[idx])
+			isNullRow := fieldIdx < 0 || (len(srcValidData) > 0 && !srcValidData[idx])
 
 			switch srcVector := fieldType.Vectors.Data.(type) {
 			case *schemapb.VectorField_BinaryVector:
@@ -1289,6 +1340,10 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				}
 			}
 		}
+		if appendValidity {
+			dstValidData := GetFieldDataValidData(dstFieldData)
+			SetFieldDataValidData(dstFieldData, append(dstValidData, valid))
+		}
 	}
 
 	return
@@ -1299,18 +1354,29 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 		return
 	}
 
-	// Handle ValidData: use rowIndices if provided, otherwise use dataIndices
-	if len(src.GetValidData()) > 0 {
+	// Handle ValidData: use rowIndices if provided, otherwise use dataIndices.
+	if srcValidData := GetFieldDataValidData(src); len(srcValidData) > 0 {
 		validIndices := dataIndices
 		if len(rowIndices) > 0 {
 			validIndices = rowIndices[0]
 		}
-		if dst.ValidData == nil {
-			dst.ValidData = make([]bool, 0, len(validIndices))
+		switch src.Field.(type) {
+		case *schemapb.FieldData_Scalars:
+			if dst.GetScalars() == nil {
+				dst.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{}}
+			}
+		case *schemapb.FieldData_Vectors:
+			if dst.GetVectors() == nil {
+				dst.Field = &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{Dim: src.GetVectors().GetDim()},
+				}
+			}
 		}
+		dstValidData := GetFieldDataValidData(dst)
 		for _, idx := range validIndices {
-			dst.ValidData = append(dst.ValidData, src.ValidData[int(idx)])
+			dstValidData = append(dstValidData, srcValidData[int(idx)])
 		}
+		SetFieldDataValidData(dst, dstValidData)
 	}
 
 	// Return early if no data to copy
@@ -1533,6 +1599,36 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 				dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data[idx])
 			}
 		}
+	case *schemapb.FieldData_StructArrays:
+		appendStructFieldDataByColumn(dst, srcField.StructArrays, dataIndices, rowIndices...)
+	}
+}
+
+func appendStructFieldDataByColumn(dst *schemapb.FieldData, src *schemapb.StructArrayField, dataIndices []int64, rowIndices ...[]int64) {
+	if src == nil {
+		return
+	}
+	if dst.GetStructArrays() == nil {
+		dst.Field = &schemapb.FieldData_StructArrays{
+			StructArrays: &schemapb.StructArrayField{
+				Fields: PrepareResultFieldData(src.GetFields(), int64(len(dataIndices))),
+			},
+		}
+	}
+	dstStruct := dst.GetStructArrays()
+	dstSubFields := make(map[int64]*schemapb.FieldData, len(dstStruct.GetFields()))
+	for _, dstSubField := range dstStruct.GetFields() {
+		dstSubFields[dstSubField.GetFieldId()] = dstSubField
+	}
+	for _, srcSubField := range src.GetFields() {
+		dstSubField := dstSubFields[srcSubField.GetFieldId()]
+		if dstSubField == nil {
+			newFields := PrepareResultFieldData([]*schemapb.FieldData{srcSubField}, int64(len(dataIndices)))
+			dstSubField = newFields[0]
+			dstStruct.Fields = append(dstStruct.Fields, dstSubField)
+			dstSubFields[dstSubField.GetFieldId()] = dstSubField
+		}
+		AppendFieldDataByColumn(dstSubField, srcSubField, dataIndices, rowIndices...)
 	}
 }
 
@@ -1608,9 +1704,12 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 		}
 
 		// Update ValidData if present
-		if len(updateFieldData.GetValidData()) != 0 {
-			if len(baseFieldData.GetValidData()) != 0 {
-				baseFieldData.ValidData[baseIdx] = updateFieldData.ValidData[updateIdx]
+		updateValidData := GetFieldDataValidData(updateFieldData)
+		if len(updateValidData) != 0 {
+			baseValidData := GetFieldDataValidData(baseFieldData)
+			if len(baseValidData) != 0 {
+				baseValidData[baseIdx] = updateValidData[updateIdx]
+				SetFieldDataValidData(baseFieldData, baseValidData)
 			}
 		}
 
@@ -1679,23 +1778,9 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 					if baseFieldData.GetIsDynamic() {
 						// dynamic field is a json with only 1 level nested struct,
 						// so we need to unmarshal and iterate updateData's key value, and update the baseData's key value
-						var baseMap map[string]interface{}
-						var updateMap map[string]interface{}
-						// unmarshal base and update
-						if err := json.Unmarshal(baseData.Data[baseIdx], &baseMap); err != nil {
-							return merr.Wrap(err, "failed to unmarshal base json")
-						}
-						if err := json.Unmarshal(updateData.Data[updateIdx], &updateMap); err != nil {
-							return merr.Wrap(err, "failed to unmarshal update json")
-						}
-						// merge
-						for k, v := range updateMap {
-							baseMap[k] = v
-						}
-						// marshal back
-						newJSON, err := json.Marshal(baseMap)
+						newJSON, err := mergeDynamicJSON(baseData.Data[baseIdx], updateData.Data[updateIdx])
 						if err != nil {
-							return merr.Wrap(err, "failed to marshal merged json")
+							return err
 						}
 						baseScalar.GetJsonData().Data[baseIdx] = newJSON
 					} else {
@@ -1851,7 +1936,8 @@ func UpdateArrayFieldByColumnWithOp(
 		updateIdx := updateIndices[i]
 		// If the upsert payload row is explicitly null, there is nothing to
 		// append/remove; leave the existing base row untouched.
-		if len(update.ValidData) > 0 && !update.ValidData[updateIdx] {
+		updateValidData := GetFieldDataValidData(update)
+		if len(updateValidData) > 0 && !updateValidData[updateIdx] {
 			continue
 		}
 		merged, err := ApplyArrayRowOp(baseData[baseIdx], updateData[updateIdx], op, elementType, maxCapacity)
@@ -1862,8 +1948,10 @@ func UpdateArrayFieldByColumnWithOp(
 		// After a successful merge the base row carries concrete data and
 		// must be marked valid, otherwise downstream readers keep treating
 		// it as null and drop the merged payload silently.
-		if len(base.ValidData) > 0 {
-			base.ValidData[baseIdx] = true
+		baseValidData := GetFieldDataValidData(base)
+		if len(baseValidData) > 0 {
+			baseValidData[baseIdx] = true
+			SetFieldDataValidData(base, baseValidData)
 		}
 	}
 	return nil
@@ -1881,11 +1969,14 @@ func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, upda
 	}
 
 	// Handle ValidData
-	if len(update.GetValidData()) > 0 && len(base.GetValidData()) > 0 {
+	updateValidData := GetFieldDataValidData(update)
+	baseValidData := GetFieldDataValidData(base)
+	if len(updateValidData) > 0 && len(baseValidData) > 0 {
 		for i, baseIdx := range baseIndices {
 			updateIdx := updateIndices[i]
-			base.ValidData[baseIdx] = update.ValidData[updateIdx]
+			baseValidData[baseIdx] = updateValidData[updateIdx]
 		}
+		SetFieldDataValidData(base, baseValidData)
 	}
 
 	switch baseField := base.Field.(type) {
@@ -1945,23 +2036,9 @@ func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, upda
 				// so we need to unmarshal and iterate updateData's key value, and update the baseData's key value
 				for i, baseIdx := range baseIndices {
 					updateIdx := updateIndices[i]
-					var baseMap map[string]interface{}
-					var updateMap map[string]interface{}
-					// unmarshal base and update
-					if err := json.Unmarshal(baseData[baseIdx], &baseMap); err != nil {
-						return merr.Wrap(err, "failed to unmarshal base json")
-					}
-					if err := json.Unmarshal(updateData[updateIdx], &updateMap); err != nil {
-						return merr.Wrap(err, "failed to unmarshal update json")
-					}
-					// merge
-					for k, v := range updateMap {
-						baseMap[k] = v
-					}
-					// marshal back
-					newJSON, err := json.Marshal(baseMap)
+					newJSON, err := mergeDynamicJSON(baseData[baseIdx], updateData[updateIdx])
 					if err != nil {
-						return merr.Wrap(err, "failed to marshal merged json")
+						return err
 					}
 					baseData[baseIdx] = newJSON
 				}
@@ -2054,7 +2131,7 @@ func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, upda
 
 // IsCompactNullableVectorFieldData reports whether field uses compact nullable vector payload.
 func IsCompactNullableVectorFieldData(field *schemapb.FieldData) bool {
-	return len(field.GetValidData()) > 0 && IsSupportedNullableVectorType(field.GetType())
+	return len(GetFieldDataValidData(field)) > 0 && IsSupportedNullableVectorType(field.GetType())
 }
 
 func updateCompactNullableVectorFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, updateIndices []int64) error {
@@ -2065,8 +2142,8 @@ func updateCompactNullableVectorFieldDataByColumn(base, update *schemapb.FieldDa
 		return merr.WrapErrParameterInvalidMsg("cannot update nullable vector field %s with %s", base.GetType().String(), update.GetType().String())
 	}
 
-	baseValidData := base.GetValidData()
-	updateValidData := update.GetValidData()
+	baseValidData := GetFieldDataValidData(base)
+	updateValidData := GetFieldDataValidData(update)
 	if len(updateValidData) == 0 {
 		return merr.WrapErrParameterInvalidMsg("nullable vector field %s missing ValidData", update.GetFieldName())
 	}
@@ -2223,7 +2300,7 @@ func updateCompactNullableVectorFieldDataByColumn(base, update *schemapb.FieldDa
 		return merr.WrapErrParameterInvalidMsg("unsupported nullable vector field type %s", base.GetType().String())
 	}
 
-	base.ValidData = newValidData
+	SetFieldDataValidData(base, newValidData)
 	return nil
 }
 
@@ -2270,6 +2347,40 @@ func countValid(validData []bool) int {
 	return validCount
 }
 
+// mergeDynamicJSON merges an update document over a base document without
+// decoding the values.
+//
+// Decoding into map[string]interface{} rounds every number to float64, so a
+// partial update of one key silently rewrote every other key in the row:
+// 9007199254740993 came back as ...992 even though the caller never touched it.
+// json.RawMessage keeps each value as the bytes it already was.
+func mergeDynamicJSON(base []byte, update []byte) ([]byte, error) {
+	baseMap := make(map[string]json.RawMessage)
+	updateMap := make(map[string]json.RawMessage)
+	if err := json.Unmarshal(base, &baseMap); err != nil {
+		return nil, merr.Wrap(err, "failed to unmarshal base json")
+	}
+	if err := json.Unmarshal(update, &updateMap); err != nil {
+		return nil, merr.Wrap(err, "failed to unmarshal update json")
+	}
+	// A literal null unmarshals into a map as nil with no error -- the one
+	// non-object document the error paths above do not catch -- and writing
+	// into the nil map then panics. Such a row is insertable through the
+	// dynamic-field validation, so merging over it must work: an empty base
+	// lets the update repair the row, and a null update simply says nothing.
+	if baseMap == nil {
+		baseMap = make(map[string]json.RawMessage, len(updateMap))
+	}
+	for k, v := range updateMap {
+		baseMap[k] = v
+	}
+	merged, err := json.Marshal(baseMap)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to marshal merged json")
+	}
+	return merged, nil
+}
+
 // MergeFieldData appends fields data to dst
 func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error {
 	fieldID2Data := make(map[int64]*schemapb.FieldData)
@@ -2287,7 +2398,7 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 				return merr.WrapErrParameterInvalidMsg("fields in src but not in dst: " + srcFieldData.Type.String())
 			}
 			fieldData := fieldID2Data[srcFieldData.FieldId]
-			fieldData.ValidData = append(fieldData.ValidData, srcFieldData.GetValidData()...)
+			SetFieldDataValidData(fieldData, append(GetFieldDataValidData(fieldData), GetFieldDataValidData(srcFieldData)...))
 			dstScalar := fieldData.GetScalars()
 			switch srcScalar := fieldType.Scalars.Data.(type) {
 			case *schemapb.ScalarField_BoolData:
@@ -2410,7 +2521,7 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 			}
 			fieldData := fieldID2Data[srcFieldData.FieldId]
 			// Merge ValidData for nullable vectors
-			fieldData.ValidData = append(fieldData.ValidData, srcFieldData.GetValidData()...)
+			SetFieldDataValidData(fieldData, append(GetFieldDataValidData(fieldData), GetFieldDataValidData(srcFieldData)...))
 			dstVector := fieldData.GetVectors()
 			switch srcVector := fieldType.Vectors.Data.(type) {
 			case *schemapb.VectorField_BinaryVector:
@@ -2511,9 +2622,7 @@ func GetAllFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldSche
 	return all
 }
 
-// IsExternalCollection returns true when schema describes an external collection.
-// External collections are identified by having fields with ExternalField set,
-// since ExternalSource can be null for empty external collections.
+// IsExternalCollection returns true when schema has external field mappings.
 func IsExternalCollection(schema *schemapb.CollectionSchema) bool {
 	if schema == nil {
 		return false
@@ -2567,11 +2676,12 @@ func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSc
 }
 
 // NormalizeAndValidateExternalCollectionSchema ensures unsupported features are
-// disabled for external collections AND mutates each user field to set
-// nullable=true. The mutation is intentional: external Parquet sources may
-// contain nulls, and non-nullable fields would silently produce incorrect
-// results when reading those nulls. The function is named "NormalizeAndValidate"
-// so callers know it has a write-back side effect.
+// disabled for external collections. For non-milvus-table formats, it also
+// mutates each user field to set nullable=true. The mutation is intentional:
+// external Parquet sources may contain nulls, and non-nullable fields would
+// silently produce incorrect results when reading those nulls. Milvus-table
+// keeps the mapped source snapshot nullability because the target field
+// definition must match the source field.
 //
 // Validation runs in two passes: pass 1 checks every field; pass 2 mutates
 // only after all checks succeed. Without this split, a failing check on a
@@ -2579,10 +2689,6 @@ func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSc
 // flipped — the caller receives an error but the schema pointer it owns is
 // already partially mutated.
 func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSchema) error {
-	if !IsExternalCollection(schema) {
-		return nil
-	}
-
 	// External source and spec form an atomic tuple. They must be both
 	// empty (deferred to a later refresh) or both non-empty (ready to
 	// load). One-without-the-other leaves the collection in a half-
@@ -2590,8 +2696,12 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 	srcSet := schema.GetExternalSource() != ""
 	specSet := schema.GetExternalSpec() != ""
 	if srcSet != specSet {
-		return merr.WrapErrParameterInvalidMsg("external collection %s requires external_source and external_spec to be both set or both empty (got source=%q, spec=%q)",
-			schema.GetName(), schema.GetExternalSource(), schema.GetExternalSpec())
+		return merr.WrapErrParameterInvalidMsg("external collection %s requires external_source and external_spec to be both set or both empty (source_set=%t, spec_set=%t)",
+			schema.GetName(), srcSet, specSet)
+	}
+
+	if !IsExternalCollection(schema) {
+		return nil
 	}
 
 	if schema.GetEnableDynamicField() {
@@ -2604,6 +2714,16 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 
 	generatedColumns := externalGeneratedColumnOwners(schema)
 
+	isMilvusTable := false
+	if schema.GetExternalSpec() != "" {
+		var err error
+		isMilvusTable, err = isMilvusTableExternalSpec(schema.GetExternalSpec())
+		if err != nil {
+			return err
+		}
+	}
+	allowRealPrimaryKey := hasUserPrimaryKey(schema) && isMilvusTable
+
 	// Pass 1: validate all user fields. No mutation here so a failure at any
 	// field leaves the input schema untouched.
 	externalFieldOwners := make(map[string][]*schemapb.FieldSchema)
@@ -2613,14 +2733,14 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		}
 
 		// Function output fields are computed internally, skip all external-data checks.
-		if isExternalGeneratedField(field, generatedColumns) {
+		if isExternalGeneratedField(schema, field) {
 			if field.GetExternalField() != "" {
 				return merr.WrapErrParameterInvalidMsg("function output field '%s' in external collection %s must not have external_field mapping", field.GetName(), schema.GetName())
 			}
 			continue
 		}
 
-		if field.GetIsPrimaryKey() {
+		if field.GetIsPrimaryKey() && !allowRealPrimaryKey {
 			return merr.WrapErrParameterInvalidMsg("external collection %s does not support user-defined primary key field %s", schema.GetName(), field.GetName())
 		}
 		if field.GetIsPartitionKey() {
@@ -2636,25 +2756,28 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		if field.GetExternalField() == "" {
 			return merr.WrapErrParameterInvalidMsg("field '%s' in external collection %s must have external_field mapping", field.GetName(), schema.GetName())
 		}
+		ext := field.GetExternalField()
+		externalFieldOwners[ext] = append(externalFieldOwners[ext], field)
 
-		if !isExternalFieldTypeSupported(field.GetDataType()) {
-			return merr.WrapErrParameterInvalidMsg("external collection %s does not support field type %s on field %s",
-				schema.GetName(), field.GetDataType().String(), field.GetName())
+		if err := validateExternalFieldType(schema.GetName(), field); err != nil {
+			return err
 		}
 
-		ext := field.GetExternalField()
 		if outputField, ok := generatedColumns[ext]; ok {
 			return merr.WrapErrParameterInvalidMsg("external_field %q on field '%s' in external collection %s conflicts with generated function output field '%s' (field id %d)",
 				ext, field.GetName(), schema.GetName(), outputField.GetName(), outputField.GetFieldID())
 		}
-		externalFieldOwners[ext] = append(externalFieldOwners[ext], field)
 	}
 
-	// Each external_field column must back at most one user field. A single
-	// physical column cannot satisfy two distinct type bindings, and even
-	// same-type aliasing has no semantic value here.
+	// Each external_field mapping must back at most one user field. A single
+	// source field cannot satisfy two distinct type bindings, and even same-type
+	// aliasing has no semantic value here.
 	if err := validateUniqueExternalFieldOwners(externalFieldOwners); err != nil {
 		return err
+	}
+
+	if isMilvusTable {
+		return nil
 	}
 
 	// Pass 2: normalize. All fields passed validation; safe to mutate.
@@ -2665,7 +2788,7 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 			continue
 		}
 		// Function output fields are computed internally.
-		if isExternalGeneratedField(field, generatedColumns) {
+		if isExternalGeneratedField(schema, field) {
 			continue
 		}
 		if !field.GetNullable() {
@@ -2692,46 +2815,20 @@ func validateUniqueExternalFieldOwners(externalFieldOwners map[string][]*schemap
 }
 
 func externalGeneratedColumnOwners(schema *schemapb.CollectionSchema) map[string]*schemapb.FieldSchema {
-	fieldsByID := make(map[int64]*schemapb.FieldSchema, len(schema.GetFields()))
-	generatedFields := make(map[int64]*schemapb.FieldSchema)
+	generatedColumns := make(map[string]*schemapb.FieldSchema)
 	for _, field := range schema.GetFields() {
 		if field.GetFieldID() == 0 {
 			continue
 		}
-		fieldsByID[field.GetFieldID()] = field
-		if field.GetIsFunctionOutput() {
-			generatedFields[field.GetFieldID()] = field
+		if IsFunctionOutputField(schema, field) {
+			generatedColumns[strconv.FormatInt(field.GetFieldID(), 10)] = field
 		}
-	}
-	for _, function := range schema.GetFunctions() {
-		for _, fieldID := range function.GetOutputFieldIds() {
-			if fieldID == 0 {
-				continue
-			}
-			if _, ok := generatedFields[fieldID]; ok {
-				continue
-			}
-			if field, ok := fieldsByID[fieldID]; ok {
-				generatedFields[fieldID] = field
-			}
-		}
-	}
-
-	generatedColumns := make(map[string]*schemapb.FieldSchema, len(generatedFields))
-	for fieldID, field := range generatedFields {
-		generatedColumns[strconv.FormatInt(fieldID, 10)] = field
 	}
 	return generatedColumns
 }
 
-func isExternalGeneratedField(field *schemapb.FieldSchema, generatedColumns map[string]*schemapb.FieldSchema) bool {
-	if field.GetIsFunctionOutput() {
-		return true
-	}
-	if field.GetFieldID() == 0 {
-		return false
-	}
-	return generatedColumns[strconv.FormatInt(field.GetFieldID(), 10)] == field
+func isExternalGeneratedField(schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+	return IsFunctionOutputField(schema, field)
 }
 
 // ValidateExternalCollectionResolvedSchema checks external-collection
@@ -2752,15 +2849,14 @@ func ValidateExternalCollectionResolvedSchema(schema *schemapb.CollectionSchema)
 		if IsExternalSystemOrVirtualField(field.GetName()) {
 			continue
 		}
-		if isExternalGeneratedField(field, generatedColumns) {
+		if isExternalGeneratedField(schema, field) {
 			if field.GetExternalField() != "" {
 				return merr.WrapErrParameterInvalidMsg("function output field '%s' in external collection %s must not have external_field mapping", field.GetName(), schema.GetName())
 			}
 			continue
 		}
-		if !isExternalFieldTypeSupported(field.GetDataType()) {
-			return merr.WrapErrParameterInvalidMsg("external collection %s does not support field type %s on field %s",
-				schema.GetName(), field.GetDataType().String(), field.GetName())
+		if err := validateExternalFieldType(schema.GetName(), field); err != nil {
+			return err
 		}
 		ext := field.GetExternalField()
 		if ext == "" {
@@ -2777,6 +2873,23 @@ func ValidateExternalCollectionResolvedSchema(schema *schemapb.CollectionSchema)
 	return validateUniqueExternalFieldOwners(externalFieldOwners)
 }
 
+func hasUserPrimaryKey(schema *schemapb.CollectionSchema) bool {
+	for _, field := range schema.GetFields() {
+		if field.GetIsPrimaryKey() && !IsExternalSystemOrVirtualField(field.GetName()) {
+			return true
+		}
+	}
+	return false
+}
+
+func isMilvusTableExternalSpec(externalSpec string) (bool, error) {
+	spec, err := specutil.ParseExternalSpec(externalSpec)
+	if err != nil {
+		return false, err
+	}
+	return spec.Format == specutil.FormatMilvusTable, nil
+}
+
 // IsExternalSystemOrVirtualField returns true for names reserved by the
 // external-table pipeline (RowID, Timestamp, VirtualPK) and never present in
 // user-provided external source data.
@@ -2784,6 +2897,344 @@ func IsExternalSystemOrVirtualField(name string) bool {
 	return name == common.RowIDFieldName ||
 		name == common.TimeStampFieldName ||
 		name == common.VirtualPKFieldName
+}
+
+func isExternalSystemOrVirtualField(name string) bool {
+	return IsExternalSystemOrVirtualField(name)
+}
+
+// ValidateMilvusTableSchemaIdentity checks that every target milvus-table data
+// field maps to exactly one source snapshot data field through ExternalField.
+// Source function outputs are optional source columns: a target ordinary field
+// may map to them, but a target function output remains target-local and is
+// regenerated during refresh. Create-time validation may ignore field IDs so
+// RootCoord can copy them from the snapshot; refresh-time validation must
+// require field IDs to prevent reading source manifests through a mismatched
+// target schema.
+func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema, requireFieldID bool) error {
+	if target == nil {
+		return merr.WrapErrParameterInvalidMsg("target schema is nil")
+	}
+	if source == nil {
+		return merr.WrapErrParameterInvalidMsg("source snapshot schema is nil")
+	}
+	if target.GetEnableDynamicField() != source.GetEnableDynamicField() {
+		return merr.WrapErrParameterInvalidMsg("dynamic field setting mismatch: target=%v source=%v",
+			target.GetEnableDynamicField(), source.GetEnableDynamicField())
+	}
+
+	targetFields := milvusTableMappableUserFieldMap(target)
+	requiredSourceFields := milvusTableMappableUserFieldMap(source)
+	allSourceFields := milvusTableUserFieldMap(source)
+	targetFieldCount := milvusTableMappableUserFieldCount(target)
+	requiredSourceFieldCount := milvusTableMappableUserFieldCount(source)
+	if targetFieldCount < requiredSourceFieldCount || targetFieldCount > len(allSourceFields) {
+		return merr.WrapErrParameterInvalidMsg("user field count mismatch: target=%d source=%d", targetFieldCount, requiredSourceFieldCount)
+	}
+	targetUsesVirtualPK := milvusTableUsesVirtualPrimaryKey(target)
+	mappedSourceFields := make(map[string]string, len(targetFields))
+	for targetName, targetField := range targetFields {
+		sourceName := targetField.GetExternalField()
+		if sourceName == "" {
+			return merr.WrapErrParameterInvalidMsg("target field %q must set external_field mapping to a source snapshot field", targetName)
+		}
+		sourceField, ok := allSourceFields[sourceName]
+		if !ok {
+			return merr.WrapErrParameterInvalidMsg("target field %q maps to source field %q, but source snapshot schema has no such field",
+				targetName, sourceName)
+		}
+		if owner, ok := mappedSourceFields[sourceName]; ok {
+			return merr.WrapErrParameterInvalidMsg("source snapshot field %q is mapped by multiple target fields: %q and %q",
+				sourceName, owner, targetName)
+		}
+		mappedSourceFields[sourceName] = targetName
+		if err := validateMilvusTableFieldIdentity(targetField, sourceField, requireFieldID, targetUsesVirtualPK, IsFunctionOutputField(source, sourceField)); err != nil {
+			return merr.Wrapf(err, "field %q mapped to source field %q", targetName, sourceName)
+		}
+	}
+	for sourceName := range requiredSourceFields {
+		if _, ok := mappedSourceFields[sourceName]; !ok {
+			return merr.WrapErrParameterInvalidMsg("source snapshot field %q is not mapped by target schema", sourceName)
+		}
+	}
+	return nil
+}
+
+// IsFunctionOutputField reports whether field is marked as a collection
+// function output. Create/alter paths are expected to normalize this marker
+// before schema validation and storage column resolution.
+func IsFunctionOutputField(_ *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+	return field != nil && field.GetIsFunctionOutput()
+}
+
+type storageColumnResolverConfig struct {
+	externalSpec string
+}
+
+// StorageColumnResolverOption configures StorageColumnResolver.
+type StorageColumnResolverOption func(*storageColumnResolverConfig)
+
+// WithStorageColumnExternalSpec lets callers provide the external spec carried
+// by the source manifest context. It is only an override hint; if it does not
+// resolve to milvus-table, the resolver still falls back to schema.ExternalSpec.
+func WithStorageColumnExternalSpec(externalSpec string) StorageColumnResolverOption {
+	return func(config *storageColumnResolverConfig) {
+		config.externalSpec = externalSpec
+	}
+}
+
+// StorageColumnResolver centralizes the mapping from Milvus fields to physical
+// storage columns. Source columns are columns read from the user's external
+// source; manifest-stored columns are columns read from Milvus segment
+// manifests after refresh or function execution.
+type StorageColumnResolver struct {
+	schema        *schemapb.CollectionSchema
+	hasSource     bool
+	isMilvusTable bool
+}
+
+// NewStorageColumnResolver builds a resolver from schema.ExternalSpec. Callers
+// should prefer schema as the source of truth; use WithStorageColumnExternalSpec
+// only for legacy paths where an external filesystem context carries the spec.
+func NewStorageColumnResolver(schema *schemapb.CollectionSchema, opts ...StorageColumnResolverOption) *StorageColumnResolver {
+	config := &storageColumnResolverConfig{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(config)
+		}
+	}
+
+	hasSource := false
+	isMilvusTable := false
+	if config.externalSpec != "" {
+		isMilvusTable = isMilvusTableStorageSpec(config.externalSpec)
+	}
+	if schema != nil {
+		hasSource = schema.GetExternalSource() != ""
+		if !isMilvusTable {
+			isMilvusTable = isMilvusTableStorageSpec(schema.GetExternalSpec())
+		}
+	}
+
+	return &StorageColumnResolver{
+		schema:        schema,
+		hasSource:     hasSource,
+		isMilvusTable: isMilvusTable,
+	}
+}
+
+func isMilvusTableStorageSpec(externalSpec string) bool {
+	spec, err := specutil.ParseExternalSpec(externalSpec)
+	return err == nil && spec.Format == specutil.FormatMilvusTable
+}
+
+// IsMilvusTable reports whether the resolver is using milvus-table physical
+// column rules.
+func (r *StorageColumnResolver) IsMilvusTable() bool {
+	return r != nil && r.isMilvusTable
+}
+
+// SourceDataColumnName returns the physical column name in the external source.
+// Function outputs are target-local generated columns and are never source data.
+func (r *StorageColumnResolver) SourceDataColumnName(field *schemapb.FieldSchema) (string, bool) {
+	if field == nil {
+		return "", false
+	}
+	var schema *schemapb.CollectionSchema
+	if r != nil {
+		schema = r.schema
+	}
+	if IsFunctionOutputField(schema, field) {
+		return "", false
+	}
+	if IsExternalSystemOrVirtualField(field.GetName()) {
+		return "", false
+	}
+	if r != nil && r.isMilvusTable {
+		return strconv.FormatInt(field.GetFieldID(), 10), true
+	}
+	if extField := field.GetExternalField(); extField != "" {
+		return extField, true
+	}
+	return "", false
+}
+
+// SourceDataColumnNames returns all top-level source columns required by the
+// external refresh path.
+func (r *StorageColumnResolver) SourceDataColumnNames() []string {
+	if r == nil || r.schema == nil {
+		return nil
+	}
+	columns := make([]string, 0, len(r.schema.GetFields()))
+	for _, field := range r.schema.GetFields() {
+		columnName, ok := r.SourceDataColumnName(field)
+		if ok {
+			columns = append(columns, columnName)
+		} else if !r.hasSource && !r.isMilvusTable && !IsFunctionOutputField(r.schema, field) && !IsExternalSystemOrVirtualField(field.GetName()) {
+			// Preserve the historical helper behavior for non-external schemas:
+			// callers that use this on ordinary schemas get field names.
+			columns = append(columns, field.GetName())
+		}
+	}
+	if r.isMilvusTable && hasUserPrimaryKey(r.schema) {
+		// Real-PK milvus-table segments import source deltalogs. Keep the
+		// source insert timestamp column so segcore can preserve Milvus
+		// delete/reinsert ordering when loading those deltas.
+		columns = append(columns, strconv.FormatInt(common.TimeStampField, 10))
+	}
+	if len(columns) == 0 {
+		return nil
+	}
+	return columns
+}
+
+// IsSourceDataField reports whether the field is backed by user external source
+// data. It intentionally excludes ordinary non-external fields.
+func (r *StorageColumnResolver) IsSourceDataField(field *schemapb.FieldSchema) bool {
+	_, ok := r.SourceDataColumnName(field)
+	return ok
+}
+
+// ManifestStoredColumnName returns the physical column name used when reading a
+// Milvus segment manifest. For milvus-table, refreshed source fields and
+// target-local function outputs are addressed by numeric field IDs; virtual PK
+// is not stored as a source column.
+func (r *StorageColumnResolver) ManifestStoredColumnName(field *schemapb.FieldSchema) (string, bool) {
+	if field == nil {
+		return "", false
+	}
+	if r != nil && r.isMilvusTable {
+		if field.GetName() == common.VirtualPKFieldName {
+			return "", false
+		}
+		return strconv.FormatInt(field.GetFieldID(), 10), true
+	}
+	if extField := field.GetExternalField(); extField != "" {
+		return extField, true
+	}
+	return strconv.FormatInt(field.GetFieldID(), 10), true
+}
+
+// ManifestStoredFields returns all fields that can be read from a segment
+// manifest with ManifestStoredColumnName.
+func (r *StorageColumnResolver) ManifestStoredFields() []*schemapb.FieldSchema {
+	if r == nil || r.schema == nil {
+		return nil
+	}
+	allFields := GetAllFieldSchemas(r.schema)
+	fields := make([]*schemapb.FieldSchema, 0, len(allFields))
+	for _, field := range allFields {
+		if _, ok := r.ManifestStoredColumnName(field); ok {
+			fields = append(fields, field)
+		}
+	}
+	return fields
+}
+
+func milvusTableUserFieldMap(schema *schemapb.CollectionSchema) map[string]*schemapb.FieldSchema {
+	fields := make(map[string]*schemapb.FieldSchema, len(schema.GetFields()))
+	for _, field := range schema.GetFields() {
+		if isExternalSystemOrVirtualField(field.GetName()) {
+			continue
+		}
+		fields[field.GetName()] = field
+	}
+	return fields
+}
+
+func milvusTableMappableUserFieldMap(schema *schemapb.CollectionSchema) map[string]*schemapb.FieldSchema {
+	fields := make(map[string]*schemapb.FieldSchema, len(schema.GetFields()))
+	for _, field := range schema.GetFields() {
+		if isExternalSystemOrVirtualField(field.GetName()) || IsFunctionOutputField(schema, field) {
+			continue
+		}
+		fields[field.GetName()] = field
+	}
+	return fields
+}
+
+func milvusTableMappableUserFieldCount(schema *schemapb.CollectionSchema) int {
+	count := 0
+	for _, field := range schema.GetFields() {
+		if isExternalSystemOrVirtualField(field.GetName()) || IsFunctionOutputField(schema, field) {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func milvusTableUsesVirtualPrimaryKey(schema *schemapb.CollectionSchema) bool {
+	for _, field := range schema.GetFields() {
+		if field.GetIsPrimaryKey() {
+			return field.GetName() == common.VirtualPKFieldName
+		}
+	}
+	return false
+}
+
+func validateMilvusTableFieldIdentity(target, source *schemapb.FieldSchema, requireFieldID bool, targetUsesVirtualPK bool, sourceFunctionOutputAsDataField bool) error {
+	if requireFieldID && target.GetFieldID() != source.GetFieldID() {
+		return merr.WrapErrParameterInvalidMsg("field_id mismatch: target=%d source=%d", target.GetFieldID(), source.GetFieldID())
+	}
+	sourcePKAsDataField := targetUsesVirtualPK && source.GetIsPrimaryKey() && !target.GetIsPrimaryKey()
+	targetComparable := comparableMilvusTableField(target, requireFieldID, sourcePKAsDataField, false)
+	sourceComparable := comparableMilvusTableField(source, requireFieldID, sourcePKAsDataField, sourceFunctionOutputAsDataField)
+	if !proto.Equal(targetComparable, sourceComparable) {
+		return merr.WrapErrParameterInvalidMsg("definition mismatch between target and source snapshot schema")
+	}
+	return nil
+}
+
+func comparableMilvusTableField(field *schemapb.FieldSchema, keepFieldID bool, sourcePKAsDataField bool, sourceFunctionOutputAsDataField bool) *schemapb.FieldSchema {
+	clone := proto.Clone(field).(*schemapb.FieldSchema)
+	if !keepFieldID {
+		clone.FieldID = 0
+	}
+	if sourcePKAsDataField {
+		clone.IsPrimaryKey = false
+		clone.AutoID = false
+	}
+	if sourceFunctionOutputAsDataField {
+		clone.IsFunctionOutput = false
+	}
+	clone.Name = ""
+	clone.ExternalField = ""
+	clone.Description = ""
+	clone.TypeParams = normalizeMilvusTableKVPairs(clone.GetTypeParams())
+	clone.IndexParams = normalizeMilvusTableKVPairs(clone.GetIndexParams())
+	return clone
+}
+
+func normalizeMilvusTableKVPairs(kvs []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+	if len(kvs) == 0 {
+		return nil
+	}
+	out := make([]*commonpb.KeyValuePair, 0, len(kvs))
+	for _, kv := range kvs {
+		out = append(out, &commonpb.KeyValuePair{Key: kv.GetKey(), Value: kv.GetValue()})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].GetKey() == out[j].GetKey() {
+			return out[i].GetValue() < out[j].GetValue()
+		}
+		return out[i].GetKey() < out[j].GetKey()
+	})
+	return out
+}
+
+// validateExternalFieldType applies external-collection restrictions that
+// depend on the complete field schema, not only its top-level data type.
+func validateExternalFieldType(collectionName string, field *schemapb.FieldSchema) error {
+	if IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		return merr.WrapErrParameterInvalidMsg("external collection %s does not support recursive ARRAY field %s",
+			collectionName, field.GetName())
+	}
+	if !isExternalFieldTypeSupported(field.GetDataType()) {
+		return merr.WrapErrParameterInvalidMsg("external collection %s does not support field type %s on field %s",
+			collectionName, field.GetDataType().String(), field.GetName())
+	}
+	return nil
 }
 
 // isExternalFieldTypeSupported returns true if the given data type can be
@@ -3101,8 +3552,7 @@ func GetPK(data *schemapb.IDs, idx int64) interface{} {
 }
 
 func GetDataIterator(field *schemapb.FieldData) func(int) any {
-	if field.GetValidData() != nil {
-		validData := field.GetValidData()
+	if validData := GetFieldDataValidData(field); validData != nil {
 		if IsCompactNullableVectorFieldData(field) {
 			idxs, _ := BuildNullableVectorDataIndices(validData)
 			return func(idx int) any {
@@ -3683,16 +4133,41 @@ func GetNeedProcessFunctions(fieldIDs []int64, functions []*schemapb.FunctionSch
 }
 
 func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
-	if !field.GetIsFunctionOutput() || field.GetDataType() != schemapb.DataType_SparseFloatVector {
+	if !IsFunctionOutputField(collSchema, field) || field.GetDataType() != schemapb.DataType_SparseFloatVector {
 		return false
 	}
 
-	for _, fSchema := range collSchema.Functions {
-		if fSchema.Type == schemapb.FunctionType_BM25 {
-			if len(fSchema.OutputFieldNames) != 0 && field.Name == fSchema.OutputFieldNames[0] {
+	for _, fSchema := range collSchema.GetFunctions() {
+		if fSchema.GetType() == schemapb.FunctionType_BM25 {
+			if len(fSchema.GetOutputFieldNames()) != 0 && field.GetName() == fSchema.GetOutputFieldNames()[0] {
 				return true
 			}
-			if len(fSchema.OutputFieldIds) != 0 && field.FieldID == fSchema.OutputFieldIds[0] {
+			if len(fSchema.GetOutputFieldIds()) != 0 && field.GetFieldID() == fSchema.GetOutputFieldIds()[0] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isFunctionInputFieldOfType(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema, fnType schemapb.FunctionType) bool {
+	if coll == nil || field == nil {
+		return false
+	}
+	for _, fn := range coll.GetFunctions() {
+		if fn.GetType() != fnType {
+			continue
+		}
+		if field.GetFieldID() != 0 && len(fn.GetInputFieldIds()) > 0 {
+			for _, id := range fn.GetInputFieldIds() {
+				if field.GetFieldID() == id {
+					return true
+				}
+			}
+			continue
+		}
+		for _, name := range fn.GetInputFieldNames() {
+			if field.GetName() == name {
 				return true
 			}
 		}
@@ -3701,25 +4176,28 @@ func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb
 }
 
 func IsBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
-	for _, fn := range coll.GetFunctions() {
-		if fn.GetType() == schemapb.FunctionType_BM25 && field.GetName() == fn.GetInputFieldNames()[0] {
-			return true
-		}
-	}
-	return false
+	return isFunctionInputFieldOfType(coll, field, schemapb.FunctionType_BM25)
+}
+
+// IsMinHashFunctionInputField reports whether field is the input of a MinHash
+// function. Like BM25, MinHash tokenizes the input text through the field's
+// analyzer, so its analyzer params must not change after backfill or stored
+// signatures would silently disagree with newly written ones.
+func IsMinHashFunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+	return isFunctionInputFieldOfType(coll, field, schemapb.FunctionType_MinHash)
 }
 
 func IsMinHashFunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
-	if !field.GetIsFunctionOutput() || field.GetDataType() != schemapb.DataType_BinaryVector {
+	if !IsFunctionOutputField(collSchema, field) || field.GetDataType() != schemapb.DataType_BinaryVector {
 		return false
 	}
 
-	for _, fSchema := range collSchema.Functions {
-		if fSchema.Type == schemapb.FunctionType_MinHash {
-			if len(fSchema.OutputFieldNames) != 0 && field.Name == fSchema.OutputFieldNames[0] {
+	for _, fSchema := range collSchema.GetFunctions() {
+		if fSchema.GetType() == schemapb.FunctionType_MinHash {
+			if len(fSchema.GetOutputFieldNames()) != 0 && field.GetName() == fSchema.GetOutputFieldNames()[0] {
 				return true
 			}
-			if len(fSchema.OutputFieldIds) != 0 && field.FieldID == fSchema.OutputFieldIds[0] {
+			if len(fSchema.GetOutputFieldIds()) != 0 && field.GetFieldID() == fSchema.GetOutputFieldIds()[0] {
 				return true
 			}
 		}

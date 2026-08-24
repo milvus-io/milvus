@@ -13,6 +13,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Floating.
 	VisitFloating(ctx *FloatingContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#TextMatchFuzzy.
+	VisitTextMatchFuzzy(ctx *TextMatchFuzzyContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#IsNotNull.
 	VisitIsNotNull(ctx *IsNotNullContext) interface{}
 
@@ -81,6 +84,9 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#RandomSample.
 	VisitRandomSample(ctx *RandomSampleContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#RawString.
+	VisitRawString(ctx *RawStringContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#SpatialBinary.
 	VisitSpatialBinary(ctx *SpatialBinaryContext) interface{}

@@ -20,6 +20,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -84,6 +85,31 @@ func ValidateFunction(coll *schemapb.CollectionSchema, needValidateFunctionName 
 		}
 
 		if err := CheckFunctionOutputField(function, outputFields); err != nil {
+			return err
+		}
+	}
+	// No cascade: a function's input must not be another function's output. A field
+	// cannot be a function's own input and output (rejected above), so any input in
+	// usedOutputField belongs to a different function. Enforced here so it holds on
+	// every path (create, legacy add, alter), not only add_function_field.
+	for _, function := range coll.GetFunctions() {
+		for _, name := range function.GetInputFieldNames() {
+			if usedOutputField.Contain(name) {
+				return merr.WrapErrParameterInvalidMsg("function %s input field %s is the output of another function; function cascade is not supported", function.GetName(), name)
+			}
+		}
+	}
+	// MinHash parameter validation (num_hashes vs output dim relation) is pure
+	// schema checking with no external calls; it must run even when the model
+	// runtime checks below are disabled.
+	for _, fn := range coll.GetFunctions() {
+		if fn.GetType() != schemapb.FunctionType_MinHash {
+			continue
+		}
+		if needValidateFunctionName != "" && fn.GetName() != needValidateFunctionName {
+			continue
+		}
+		if err := function.ValidateMinHashFunction(coll, fn); err != nil {
 			return err
 		}
 	}
@@ -178,8 +204,11 @@ func CheckFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 			return err
 		}
 	case schemapb.FunctionType_MinHash:
-		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
-			return merr.WrapErrParameterInvalidMsg("MinHash function input field must be a VARCHAR/TEXT field, got %d field with type %s",
+		// VarChar only: the MinHash runner has never accepted TEXT
+		// (ValidateMinHashFunction), so admitting it here produced
+		// collections whose every insert failed at the function executor.
+		if len(fields) != 1 || fields[0].DataType != schemapb.DataType_VarChar {
+			return merr.WrapErrParameterInvalidMsg("MinHash function input field must be a VARCHAR field, got %d field with type %s",
 				len(fields), fields[0].DataType.String())
 		}
 	default:

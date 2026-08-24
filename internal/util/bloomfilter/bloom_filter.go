@@ -16,13 +16,14 @@
 package bloomfilter
 
 import (
+	"context"
+
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/greatroar/blobloom"
 	"github.com/zeebo/xxh3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -296,7 +297,7 @@ func NewBloomFilterWithType(capacity uint, fp float64, typeName string) BloomFil
 	case BasicBF:
 		return newBasicBloomFilter(capacity, fp)
 	default:
-		log.Info("unsupported bloom filter type, using block bloom filter", zap.String("type", typeName))
+		mlog.Info(context.TODO(), "unsupported bloom filter type, using block bloom filter", mlog.String("type", typeName))
 		return newBlockedBloomFilter(capacity, fp)
 	}
 }
@@ -333,7 +334,7 @@ func Locations(data []byte, k uint, bfType BFType) []uint64 {
 	case AlwaysTrueBF:
 		return nil
 	default:
-		log.Info("unsupported bloom filter type, using block bloom filter", zap.String("type", bfType.String()))
+		mlog.Info(context.TODO(), "unsupported bloom filter type, using block bloom filter", mlog.String("type", bfType.String()))
 		return nil
 	}
 }

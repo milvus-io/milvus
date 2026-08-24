@@ -25,13 +25,13 @@ func Test_extractPropagatedFromMetadata(t *testing.T) {
 
 	props := GetPropagated(ctx)
 	assert.Len(t, props, 2)
-	assert.Equal(t, "my_collection", props["collectionname"])
-	assert.Equal(t, "12345", props["collectionid"])
+	assert.Equal(t, "my_collection", props[keyCollectionName])
+	assert.Equal(t, "12345", props[keyCollectionID])
 
 	// Verify int64 field preserves type
 	fields := FieldsFromContext(ctx)
 	for _, f := range fields {
-		if f.Key == "collectionid" {
+		if f.Key == keyCollectionID {
 			assert.Equal(t, zapcore.Int64Type, f.Type)
 			assert.Equal(t, int64(12345), f.Integer)
 		}
@@ -87,8 +87,8 @@ func Test_extractPropagatedEmptyMetadata(t *testing.T) {
 func Test_injectPropagatedToMetadata(t *testing.T) {
 	ctx := context.Background()
 	ctx = WithFields(ctx,
-		propagatedStringField("collectionName", "my_collection"),
-		propagatedInt64Field("collectionId", 12345),
+		propagatedStringField(keyCollectionName, "my_collection"),
+		propagatedInt64Field(keyCollectionID, 12345),
 	)
 
 	ctx = injectPropagated(ctx)
@@ -124,8 +124,8 @@ func TestRoundTripPropagation(t *testing.T) {
 	// Simulate client side: create context with propagated fields
 	clientCtx := context.Background()
 	clientCtx = WithFields(clientCtx,
-		propagatedStringField("collectionname", "test_collection"),
-		propagatedInt64Field("collectionid", 99999),
+		propagatedStringField(keyCollectionName, "test_collection"),
+		propagatedInt64Field(keyCollectionID, 99999),
 	)
 
 	// Client injects into outgoing metadata
@@ -141,16 +141,16 @@ func TestRoundTripPropagation(t *testing.T) {
 	// Verify propagated fields are preserved with correct types
 	props := GetPropagated(serverCtx)
 	assert.Len(t, props, 2)
-	assert.Equal(t, "test_collection", props["collectionname"])
-	assert.Equal(t, "99999", props["collectionid"])
+	assert.Equal(t, "test_collection", props[keyCollectionName])
+	assert.Equal(t, "99999", props[keyCollectionID])
 
 	// Verify int64 type is preserved across the round trip
 	for _, f := range FieldsFromContext(serverCtx) {
-		if f.Key == "collectionid" {
+		if f.Key == keyCollectionID {
 			assert.Equal(t, zapcore.Int64Type, f.Type)
 			assert.Equal(t, int64(99999), f.Integer)
 		}
-		if f.Key == "collectionname" {
+		if f.Key == keyCollectionName {
 			assert.Equal(t, zapcore.StringType, f.Type)
 			assert.Equal(t, "test_collection", f.String)
 		}
@@ -294,7 +294,6 @@ func TestRegularFieldsNotPropagated(t *testing.T) {
 }
 
 func Test_extractPropagatedWithTraceContext(t *testing.T) {
-	// Create a span context with TraceID and SpanID
 	traceID, _ := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
 	spanID, _ := trace.SpanIDFromHex("0102030405060708")
 	spanCtx := trace.NewSpanContext(trace.SpanContextConfig{
@@ -305,18 +304,11 @@ func Test_extractPropagatedWithTraceContext(t *testing.T) {
 
 	ctx = extractPropagated(ctx)
 
-	// Verify TraceID and SpanID are added as fields (not propagated)
-	fields := FieldsFromContext(ctx)
-	fieldMap := make(map[string]string)
-	for _, f := range fields {
-		fieldMap[f.Key] = f.String
-	}
-	assert.Equal(t, "0102030405060708090a0b0c0d0e0f10", fieldMap[keyTraceID])
-	assert.Equal(t, "0102030405060708", fieldMap[keySpanID])
+	// TraceID and SpanID are appended dynamically at log time, not cached as context fields.
+	assert.Nil(t, FieldsFromContext(ctx))
 }
 
 func Test_extractPropagatedWithTraceContextAndMetadata(t *testing.T) {
-	// Create span context
 	traceID, _ := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
 	spanID, _ := trace.SpanIDFromHex("0102030405060708")
 	spanCtx := trace.NewSpanContext(trace.SpanContextConfig{
@@ -333,20 +325,20 @@ func Test_extractPropagatedWithTraceContextAndMetadata(t *testing.T) {
 
 	ctx = extractPropagated(ctx)
 
-	// Verify all fields are present
+	// Verify only mlog metadata fields are cached on context.
 	fields := FieldsFromContext(ctx)
-	assert.Len(t, fields, 3)
+	assert.Len(t, fields, 1)
 
 	fieldMap := make(map[string]string)
 	for _, f := range fields {
 		fieldMap[f.Key] = f.String
 	}
-	assert.Equal(t, "0102030405060708090a0b0c0d0e0f10", fieldMap[keyTraceID])
-	assert.Equal(t, "0102030405060708", fieldMap[keySpanID])
+	assert.NotContains(t, fieldMap, keyTraceID)
+	assert.NotContains(t, fieldMap, keySpanID)
 
 	// Propagated field should be accessible via GetPropagated
 	props := GetPropagated(ctx)
-	assert.Equal(t, "my_collection", props["collectionname"])
+	assert.Equal(t, "my_collection", props[keyCollectionName])
 }
 
 func Test_extractPropagatedNoTraceContext(t *testing.T) {
@@ -449,7 +441,7 @@ func TestUnaryServerInterceptorModuleWithMetadata(t *testing.T) {
 	assert.Equal(t, "querynode", fieldMap[keyModule])
 
 	props := GetPropagated(handlerCtx)
-	assert.Equal(t, "my_collection", props["collectionname"])
+	assert.Equal(t, "my_collection", props[keyCollectionName])
 }
 
 func TestStreamServerInterceptorWithModule(t *testing.T) {

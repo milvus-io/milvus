@@ -24,11 +24,10 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	pcommon "github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	kafkamqwrapper "github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper/kafka"
 	pulsarmqwrapper "github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper/pulsar"
@@ -38,10 +37,10 @@ import (
 // unsubscribeChannels create consumer first, and unsubscribe channel through msgStream.close()
 // TODO use streamnative pulsarctl
 func UnsubscribeChannels(ctx context.Context, factory Factory, subName string, channels []string) {
-	log.Info("unsubscribe channel", zap.String("subname", subName), zap.Any("channels", channels))
+	mlog.Info(ctx, "unsubscribe channel", mlog.String("subname", subName), mlog.Any("channels", channels))
 	err := factory.NewMsgStreamDisposer(ctx)(channels, subName)
 	if err != nil {
-		log.Warn("failed to unsubscribe channels", zap.String("subname", subName), zap.Any("channels", channels), zap.Error(err))
+		mlog.Warn(ctx, "failed to unsubscribe channels", mlog.String("subname", subName), mlog.Any("channels", channels), mlog.Err(err))
 		panic(err)
 	}
 }
@@ -49,7 +48,7 @@ func UnsubscribeChannels(ctx context.Context, factory Factory, subName string, c
 func GetChannelLatestMsgID(ctx context.Context, factory Factory, channelName string) ([]byte, error) {
 	dmlStream, err := factory.NewMsgStream(ctx)
 	if err != nil {
-		log.Warn("fail to NewMsgStream", zap.String("channelName", channelName), zap.Error(err))
+		mlog.Warn(ctx, "fail to NewMsgStream", mlog.String("channelName", channelName), mlog.Err(err))
 		return nil, err
 	}
 	defer dmlStream.Close()
@@ -57,12 +56,12 @@ func GetChannelLatestMsgID(ctx context.Context, factory Factory, channelName str
 	subName := fmt.Sprintf("get-latest_msg_id-%s-%d", channelName, rand.Int())
 	err = dmlStream.AsConsumer(ctx, []string{channelName}, subName, common.SubscriptionPositionUnknown)
 	if err != nil {
-		log.Warn("fail to AsConsumer", zap.String("channelName", channelName), zap.Error(err))
+		mlog.Warn(ctx, "fail to AsConsumer", mlog.String("channelName", channelName), mlog.Err(err))
 		return nil, err
 	}
 	id, err := dmlStream.GetLatestMsgID(channelName)
 	if err != nil {
-		log.Error("fail to GetLatestMsgID", zap.String("channelName", channelName), zap.Error(err))
+		mlog.Error(ctx, "fail to GetLatestMsgID", mlog.String("channelName", channelName), mlog.Err(err))
 		return nil, err
 	}
 	return id.Serialize(), nil

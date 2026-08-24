@@ -21,11 +21,10 @@ import (
 	"crypto/x509"
 	"sync"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/tracer"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/generic"
@@ -129,7 +128,7 @@ func (c *GRPCClientBase[T]) Call(ctx context.Context, caller func(client T) (any
 
 	ret, err := c.callOnce(ctx, caller)
 	if err != nil {
-		log.Error("GRPCClientBase[T] Call grpc first call get error ", zap.Error(err))
+		mlog.Error(context.TODO(), "GRPCClientBase[T] Call grpc first call get error ", mlog.Err(err))
 		return nil, err
 	}
 	return ret, err
@@ -143,7 +142,7 @@ func (c *GRPCClientBase[T]) ReCall(ctx context.Context, caller func(client T) (a
 	}
 
 	traceErr := merr.WrapErrParameterInvalidMsg("err: %s\n, %s", err.Error(), tracer.StackTrace())
-	log.Warn("GRPCClientBase[T] client grpc first call get error ", zap.Error(traceErr))
+	mlog.Warn(context.TODO(), "GRPCClientBase[T] client grpc first call get error ", mlog.Err(traceErr))
 
 	if !funcutil.CheckCtxValid(ctx) {
 		return nil, ctx.Err()
@@ -152,7 +151,7 @@ func (c *GRPCClientBase[T]) ReCall(ctx context.Context, caller func(client T) (a
 	ret, err = c.callOnce(ctx, caller)
 	if err != nil {
 		traceErr = merr.WrapErrParameterInvalidMsg("err: %s\n, %s", err.Error(), tracer.StackTrace())
-		log.Error("GRPCClientBase[T] client grpc second call get error ", zap.Error(traceErr))
+		mlog.Error(context.TODO(), "GRPCClientBase[T] client grpc second call get error ", mlog.Err(traceErr))
 		return nil, traceErr
 	}
 	return ret, err

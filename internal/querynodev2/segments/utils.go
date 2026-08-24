@@ -2,11 +2,10 @@ package segments
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"io"
 	"strconv"
-
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -15,7 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -112,7 +111,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 		}
 	}
 
-	log.Info(strconv.FormatInt(int64(offset), 10))
+	mlog.Info(context.TODO(), strconv.FormatInt(int64(offset), 10))
 	blobReaders := make([]io.Reader, len(msg.RowData))
 	for i, blob := range msg.RowData {
 		blobReaders[i] = bytes.NewReader(blob.GetValue()[offset : offset+8])
@@ -123,7 +122,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 		var int64PkValue int64
 		err := binary.Read(reader, common.Endian, &int64PkValue)
 		if err != nil {
-			log.Warn("binary read blob value failed", zap.Error(err))
+			mlog.Warn(context.TODO(), "binary read blob value failed", mlog.Err(err))
 			return nil, err
 		}
 		pks[i] = storage.NewInt64PrimaryKey(int64PkValue)
@@ -184,6 +183,13 @@ func FilterZeroValuesFromSlice(intVals []int64) []int64 {
 
 func GetSegmentRelatedDataSize(segment Segment) int64 {
 	if segment.Type() == SegmentTypeSealed {
+		if localSegment, ok := segment.(*LocalSegment); ok {
+			if localSegment.relatedDataSize != nil {
+				if relatedDataSize := localSegment.relatedDataSize.Load(); relatedDataSize >= 0 {
+					return relatedDataSize
+				}
+			}
+		}
 		return calculateSegmentLogSize(segment.LoadInfo())
 	}
 	return segment.MemSize()
@@ -331,13 +337,18 @@ func getScalarDataWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
 	return params.Params.QueryNodeCfg.TieredWarmupScalarField.GetValue()
 }
 
-// isExternalCollectionLazyLoad checks if all external fields in the schema
-// have warmup=disable (lazy load). Returns true only when every external
-// field's resolved warmup policy is "disable", meaning no field data will be
-// downloaded during segment load.
+// isExternalCollectionLazyLoad checks if all external fields in the schema can
+// avoid eager loading during segment load.
 func isExternalCollectionLazyLoad(schema *schemapb.CollectionSchema) bool {
+	resolver := typeutil.NewStorageColumnResolver(schema)
+	if resolver.IsMilvusTable() && HasExternalPrimaryKey(schema) {
+		// Real-PK milvus-table segments always load the source PK column and
+		// source insert timestamps eagerly so source deltas preserve
+		// delete/reinsert ordering.
+		return false
+	}
 	for _, field := range schema.GetFields() {
-		if field.GetExternalField() == "" {
+		if !resolver.IsSourceDataField(field) {
 			continue
 		}
 		policy := getFieldWarmupPolicy(field)
@@ -349,33 +360,41 @@ func isExternalCollectionLazyLoad(schema *schemapb.CollectionSchema) bool {
 }
 
 // GetVirtualPK generates a virtual primary key from segmentID and offset.
-// Virtual PK format: (truncated_segmentID << 32) | offset
-// Only the lower 32 bits of segmentID are preserved. Milvus segment IDs are
-// TSO-allocated 64-bit values that typically exceed 32 bits, so truncation
-// is expected. Use IsVirtualPKFromSegment for safe comparison.
+// Delegates to typeutil, the single source of truth for the virtual PK layout.
 func GetVirtualPK(segmentID int64, offset int64) int64 {
-	return ((segmentID & 0xFFFFFFFF) << 32) | (offset & 0xFFFFFFFF)
+	return typeutil.GetVirtualPK(segmentID, offset)
 }
 
 // ExtractSegmentIDFromVirtualPK extracts the segmentID from a virtual PK.
-// Uses unsigned right shift to avoid sign-extension for large segment IDs.
 func ExtractSegmentIDFromVirtualPK(virtualPK int64) int64 {
-	return int64(uint64(virtualPK) >> 32)
+	return typeutil.ExtractSegmentIDFromVirtualPK(virtualPK)
 }
 
 // ExtractOffsetFromVirtualPK extracts the offset from a virtual PK.
 func ExtractOffsetFromVirtualPK(virtualPK int64) int64 {
-	return virtualPK & 0xFFFFFFFF
+	return typeutil.ExtractOffsetFromVirtualPK(virtualPK)
 }
 
 // IsVirtualPKFromSegment checks if a virtual PK belongs to the given segment.
-// Note: Only the lower 32 bits of segmentID are preserved in the virtual PK,
-// so we compare with the truncated segment ID.
 func IsVirtualPKFromSegment(virtualPK int64, segmentID int64) bool {
-	return ExtractSegmentIDFromVirtualPK(virtualPK) == (segmentID & 0xFFFFFFFF)
+	return typeutil.IsVirtualPKFromSegment(virtualPK, segmentID)
 }
 
 // IsExternalField checks if a field is an external field (data stored externally).
 func IsExternalField(field *schemapb.FieldSchema) bool {
 	return field.GetExternalField() != ""
+}
+
+// HasExternalPrimaryKey reports whether the loaded collection schema uses a
+// user primary key instead of the milvus-table virtual primary key.
+func HasExternalPrimaryKey(schema *schemapb.CollectionSchema) bool {
+	if schema == nil {
+		return false
+	}
+	for _, field := range schema.GetFields() {
+		if field.GetIsPrimaryKey() {
+			return field.GetName() != common.VirtualPKFieldName
+		}
+	}
+	return false
 }

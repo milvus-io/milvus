@@ -17,19 +17,20 @@
 package segments
 
 import (
+	"context"
 	"encoding/base64"
 	"sync"
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -102,43 +103,41 @@ func (m *collectionManager) Get(collectionID int64) *Collection {
 	return m.collections[collectionID]
 }
 
+// acquireCollectionLease keeps a collection alive after the manager lock is
+// released. It intentionally bypasses Collection.Ref because a temporary
+// lease must not refresh storage context or become an externally visible ref.
+func (m *collectionManager) acquireCollectionLease(collectionID int64) (*Collection, bool) {
+	m.mut.RLock()
+	defer m.mut.RUnlock()
+
+	collection, ok := m.collections[collectionID]
+	if ok {
+		collection.refCount.Inc()
+	}
+	return collection, ok
+}
+
 func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error {
-	m.mut.Lock()
-	defer m.mut.Unlock()
 	logicalSchemaVersion := getLoadMetaSchemaVersion(schema, loadMeta)
 	schemaBarrierTs := loadMeta.GetSchemaBarrierTs()
-	if collection, ok := m.collections[collectionID]; ok {
-		// Existing collections may be reached by a later load result or by a
-		// same-version properties refresh. Keep the Go-side logical schema version
-		// separate from the barrier timestamp so stale schema payloads cannot roll
-		// back fields, while newer properties-only payloads can still refresh.
-		if plan, shouldUpdate := prepareCollectionSchemaUpdate(collection, logicalSchemaVersion, schemaBarrierTs); shouldUpdate {
-			if err := collection.ccollection.UpdateSchema(schema, plan.segcoreSchemaVersion); err != nil {
-				return err
-			}
-			collection.setSchema(schema, plan.logicalSchemaVersion, plan.schemaBarrierTs, plan.segcoreSchemaVersion)
-			log.Info("update collection schema",
-				zap.Int64("collectionID", collectionID),
-				zap.Uint64("schemaVersion", plan.logicalSchemaVersion),
-				zap.Uint64("schemaBarrierTs", plan.schemaBarrierTs),
-				zap.Uint64("segcoreSchemaVersion", plan.segcoreSchemaVersion),
-				zap.Any("schema", schema),
-			)
-		}
-		// Always update index meta to ensure newly indexed fields are visible
-		// for search plan creation (CollectionIndexMeta::HasField check).
-		if meta != nil {
-			if err := collection.ccollection.UpdateIndexMeta(meta); err != nil {
-				return err
-			}
-		}
-		collection.Ref(1)
-		return nil
+
+	if collection, ok := m.acquireCollectionLease(collectionID); ok {
+		defer m.Unref(collectionID, 1)
+		return m.putOrRefExisting(collectionID, collection, schema, meta, logicalSchemaVersion, schemaBarrierTs)
 	}
 
-	log.Info("put new collection", zap.Int64("collectionID", collectionID), zap.Any("schema", schema))
+	m.mut.Lock()
+	if collection, ok := m.collections[collectionID]; ok {
+		collection.refCount.Inc()
+		m.mut.Unlock()
+		defer m.Unref(collectionID, 1)
+		return m.putOrRefExisting(collectionID, collection, schema, meta, logicalSchemaVersion, schemaBarrierTs)
+	}
+	defer m.mut.Unlock()
+
+	mlog.Info(context.TODO(), "put new collection", mlog.Int64("collectionID", collectionID), mlog.FieldSchema(schema))
 	collection, err := NewCollection(collectionID, schema, meta, loadMeta)
-	log.Info("new collection created", zap.Int64("collectionID", collectionID), zap.Any("schema", schema), zap.Error(err))
+	mlog.Info(context.TODO(), "new collection created", mlog.Int64("collectionID", collectionID), mlog.FieldSchema(schema), mlog.Err(err))
 	if err != nil {
 		return err
 	}
@@ -149,14 +148,33 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	return nil
 }
 
-func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
-	m.mut.Lock()
-	defer m.mut.Unlock()
+func (m *collectionManager) putOrRefExisting(collectionID int64, collection *Collection, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, logicalSchemaVersion uint64, schemaBarrierTs uint64) error {
+	// Existing collections may be reached by a later load result or by a
+	// same-version properties refresh. Keep the Go-side logical schema version
+	// separate from the barrier timestamp so stale schema payloads cannot roll
+	// back fields, while newer properties-only payloads can still refresh.
+	plan, shouldUpdate, err := collection.applyLoadUpdate(schema, meta, logicalSchemaVersion, schemaBarrierTs)
+	if err != nil {
+		return err
+	}
+	if shouldUpdate {
+		mlog.Info(context.TODO(), "update collection schema",
+			mlog.Int64("collectionID", collectionID),
+			mlog.Uint64("schemaVersion", plan.logicalSchemaVersion),
+			mlog.Uint64("schemaBarrierTs", plan.schemaBarrierTs),
+			mlog.Uint64("segcoreSchemaVersion", plan.segcoreSchemaVersion),
+			mlog.FieldSchema(schema),
+		)
+	}
+	return nil
+}
 
-	collection, ok := m.collections[collectionID]
+func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+	collection, ok := m.acquireCollectionLease(collectionID)
 	if !ok {
 		return merr.WrapErrCollectionNotFound(collectionID, "collection not found in querynode collection manager")
 	}
+	defer m.Unref(collectionID, 1)
 
 	logicalSchemaVersion := getUpdateSchemaVersion(schema, schemaBarrierTs)
 	// A schema update carries two ordering domains:
@@ -164,16 +182,8 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 	//   older schema payloads from overwriting newer fields/functions.
 	// - schemaBarrierTs is the DDL barrier timestamp and advances for
 	//   properties-only schema snapshots such as ttl_field changes.
-	plan, shouldUpdate := prepareCollectionSchemaUpdate(collection, logicalSchemaVersion, schemaBarrierTs)
-	if !shouldUpdate {
-		return nil
-	}
-
-	if err := collection.ccollection.UpdateSchema(schema, plan.segcoreSchemaVersion); err != nil {
-		return err
-	}
-	collection.setSchema(schema, plan.logicalSchemaVersion, plan.schemaBarrierTs, plan.segcoreSchemaVersion)
-	return nil
+	_, _, err := collection.applySchemaUpdate(schema, logicalSchemaVersion, schemaBarrierTs)
+	return err
 }
 
 // ShouldUpdateCollectionSchema reports whether an UpdateSchema payload would
@@ -278,8 +288,8 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 
 	if collection, ok := m.collections[collectionID]; ok {
 		if collection.Unref(count) == 0 {
-			log.Info("release collection due to ref count to 0",
-				zap.Int64("nodeID", paramtable.GetNodeID()), zap.Int64("collectionID", collectionID))
+			mlog.Info(context.TODO(), "release collection due to ref count to 0",
+				mlog.Int64("nodeID", paramtable.GetNodeID()), mlog.Int64("collectionID", collectionID))
 			delete(m.collections, collectionID)
 			DeleteCollection(collection)
 			// Run metrics cleanup in background; DeletePartialMatch is CPU-heavy and should not block Unref.
@@ -307,14 +317,15 @@ type collectionSchemaSnapshot struct {
 // Collection is a wrapper of the underlying C-structure C.CCollection
 // In a query node, `Collection` is a replica info of a collection in these query node.
 type Collection struct {
-	mu            sync.RWMutex // protects colllectionPtr
-	ccollection   *segcore.CCollection
-	id            int64
-	partitions    *typeutil.ConcurrentSet[int64]
-	loadType      querypb.LoadType
-	dbName        string
-	dbProperties  []*commonpb.KeyValuePair
-	resourceGroup string
+	mu                 sync.RWMutex // protects colllectionPtr
+	schemaTransitionMu sync.RWMutex // serializes schema transitions with insert payload conversion and growing writes
+	ccollection        *segcore.CCollection
+	id                 int64
+	partitions         *typeutil.ConcurrentSet[int64]
+	loadType           querypb.LoadType
+	dbName             string
+	dbProperties       []*commonpb.KeyValuePair
+	resourceGroup      string
 	// resource group of node may be changed if node transfer,
 	// but Collection in Manager will be released before assign new replica of new resource group on these node.
 	// so we don't need to update resource group in Collection.
@@ -349,6 +360,129 @@ func (c *Collection) ID() int64 {
 // GetCCollection returns the CCollection of collection
 func (c *Collection) GetCCollection() *segcore.CCollection {
 	return c.ccollection
+}
+
+func (c *Collection) NewSearchRequest(req *querypb.SearchRequest, placeholderGroup []byte) (*segcore.SearchRequest, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.ccollection == nil {
+		return nil, merr.WrapErrServiceInternal("create search request on released collection")
+	}
+	return segcore.NewSearchRequest(c.ccollection, req, placeholderGroup)
+}
+
+func (c *Collection) NewRetrievePlan(req *querypb.QueryRequest) (*segcore.RetrievePlan, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.ccollection == nil {
+		return nil, merr.WrapErrServiceInternal("create retrieve plan on released collection")
+	}
+	return segcore.NewRetrievePlan(
+		c.ccollection,
+		req.Req.GetSerializedExprPlan(),
+		req.Req.GetMvccTimestamp(),
+		req.Req.Base.GetMsgID(),
+		req.Req.GetConsistencyLevel(),
+		req.Req.GetCollectionTtlTimestamps(),
+		req.Req.GetEntityTtlPhysicalTime(),
+	)
+}
+
+func (c *Collection) CreateCSegment(req *segcore.CreateCSegmentRequest) (segcore.CSegment, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.ccollection == nil {
+		return nil, merr.WrapErrServiceInternal("create segment on released collection")
+	}
+	req.Collection = c.ccollection
+	return segcore.CreateCSegment(req)
+}
+
+func (c *Collection) updateIndexMeta(meta *segcorepb.CollectionIndexMeta) error {
+	if meta == nil {
+		return nil
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.ccollection == nil {
+		return merr.WrapErrServiceInternal("update index meta on released collection")
+	}
+	if proto.Equal(c.ccollection.IndexMeta(), meta) {
+		return nil
+	}
+	return c.ccollection.UpdateIndexMeta(meta)
+}
+
+func (c *Collection) updateSchema(schema *schemapb.CollectionSchema, version uint64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.ccollection == nil {
+		return merr.WrapErrServiceInternal("update schema on released collection")
+	}
+	return c.ccollection.UpdateSchema(schema, version)
+}
+
+func (c *Collection) applySchemaUpdate(schema *schemapb.CollectionSchema, logicalSchemaVersion uint64, schemaBarrierTs uint64) (collectionSchemaUpdatePlan, bool, error) {
+	c.lockSchemaTransitionForUpdate()
+	defer c.unlockSchemaTransitionForUpdate()
+
+	return c.applySchemaUpdateLocked(schema, logicalSchemaVersion, schemaBarrierTs)
+}
+
+func (c *Collection) applyLoadUpdate(schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, logicalSchemaVersion uint64, schemaBarrierTs uint64) (collectionSchemaUpdatePlan, bool, error) {
+	c.lockSchemaTransitionForUpdate()
+	defer c.unlockSchemaTransitionForUpdate()
+
+	plan, shouldUpdate, err := c.applySchemaUpdateLocked(schema, logicalSchemaVersion, schemaBarrierTs)
+	if err != nil {
+		return collectionSchemaUpdatePlan{}, false, err
+	}
+	// Always update index meta to ensure newly indexed fields are visible
+	// for search plan creation (CollectionIndexMeta::HasField check).
+	if err := c.updateIndexMeta(meta); err != nil {
+		return collectionSchemaUpdatePlan{}, false, err
+	}
+	// The temporary manager lease keeps the collection alive while this update
+	// waits. Publish the caller-visible ref only after the schema and index meta
+	// that determine its storage context are applied.
+	c.Ref(1)
+	return plan, shouldUpdate, nil
+}
+
+func (c *Collection) applySchemaUpdateLocked(schema *schemapb.CollectionSchema, logicalSchemaVersion uint64, schemaBarrierTs uint64) (collectionSchemaUpdatePlan, bool, error) {
+	plan, shouldUpdate := prepareCollectionSchemaUpdate(c, logicalSchemaVersion, schemaBarrierTs)
+	if !shouldUpdate {
+		return collectionSchemaUpdatePlan{}, false, nil
+	}
+	if err := c.updateSchema(schema, plan.segcoreSchemaVersion); err != nil {
+		return collectionSchemaUpdatePlan{}, false, err
+	}
+	c.setSchema(schema, plan.logicalSchemaVersion, plan.schemaBarrierTs, plan.segcoreSchemaVersion)
+	return plan, true, nil
+}
+
+func (c *Collection) lockSchemaTransitionForUpdate() {
+	c.schemaTransitionMu.Lock()
+}
+
+func (c *Collection) unlockSchemaTransitionForUpdate() {
+	c.schemaTransitionMu.Unlock()
+}
+
+// WithInsertSchemaTransition keeps payload conversion and growing writes in
+// one schema epoch. A schema update cannot change the native collection until
+// fn returns.
+func (c *Collection) WithInsertSchemaTransition(fn func(schema *schemapb.CollectionSchema)) {
+	c.schemaTransitionMu.RLock()
+	defer c.schemaTransitionMu.RUnlock()
+
+	fn(c.Schema())
 }
 
 func (c *Collection) setSchema(schema *schemapb.CollectionSchema, logicalSchemaVersion uint64, schemaBarrierTs uint64, segcoreSchemaVersion uint64) {
@@ -417,13 +551,13 @@ func (c *Collection) AddPartition(partitions ...int64) {
 	for i := range partitions {
 		c.partitions.Insert(partitions[i])
 	}
-	log.Info("add partitions", zap.Int64("collection", c.ID()), zap.Int64s("partitions", partitions))
+	mlog.Info(context.TODO(), "add partitions", mlog.Int64("collection", c.ID()), mlog.Int64s("partitions", partitions))
 }
 
 // removePartitionID removes the partition id from partition id list of collection
 func (c *Collection) RemovePartition(partitionID int64) {
 	c.partitions.Remove(partitionID)
-	log.Info("remove partition", zap.Int64("collection", c.ID()), zap.Int64("partition", partitionID))
+	mlog.Info(context.TODO(), "remove partition", mlog.Int64("collection", c.ID()), mlog.Int64("partition", partitionID))
 }
 
 // getLoadType get the loadType of collection, which is loadTypeCollection or loadTypePartition
@@ -481,7 +615,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 
 	ccollection, err := segcore.CreateCCollection(req)
 	if err != nil {
-		log.Warn("create collection failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "create collection failed", mlog.Err(err))
 		return nil, err
 	}
 	coll := &Collection{
@@ -544,7 +678,7 @@ func DeleteCollection(collection *Collection) {
 		ez := hookutil.GetEzByCollProperties(collection.Schema().GetProperties(), collection.ID())
 		if ez != nil {
 			if err := segcore.UnRefPluginContext(ez); err != nil {
-				log.Error("failed to unref plugin context", zap.Int64("collectionID", collection.ID()), zap.Error(err))
+				mlog.Error(context.TODO(), "failed to unref plugin context", mlog.Int64("collectionID", collection.ID()), mlog.Err(err))
 			}
 		}
 	}
@@ -563,7 +697,7 @@ func putOrUpdateStorageContext(properties []*commonpb.KeyValuePair, collectionID
 			key := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
 			err := segcore.PutOrRefPluginContext(ez, base64.StdEncoding.EncodeToString(key))
 			if err != nil {
-				log.Error("failed to put or update plugin context", zap.Int64("collectionID", collectionID), zap.Error(err))
+				mlog.Error(context.TODO(), "failed to put or update plugin context", mlog.Int64("collectionID", collectionID), mlog.Err(err))
 			}
 		}
 	}

@@ -21,8 +21,6 @@ import (
 	"sort"
 	"strconv"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -30,7 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -44,14 +42,14 @@ import (
 // broadcaster ensures serialization against compaction and other DDL-like
 // operations on the same collection.
 func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error) {
-	log := log.Ctx(ctx).With(zap.String("resultPath", req.GetResultPath()))
+	log := mlog.With(mlog.String("resultPath", req.GetResultPath()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
 	}
 
 	result, err := s.loadBackfillResult(ctx, req.GetResultPath())
 	if err != nil {
-		log.Warn("CommitBackfillResult failed to load result JSON", zap.Error(err))
+		log.Warn(ctx, "CommitBackfillResult failed to load result JSON", mlog.Err(err))
 		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
 	}
 
@@ -72,8 +70,28 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 
 	coll, err := s.broker.DescribeCollectionInternal(ctx, result.CollectionID)
 	if err != nil {
-		log.Warn("CommitBackfillResult failed to describe collection", zap.Error(err), zap.Int64("collectionID", result.CollectionID))
+		log.Warn(ctx, "CommitBackfillResult failed to describe collection", mlog.Err(err), mlog.FieldCollectionID(result.CollectionID))
 		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
+	}
+
+	// Schema-version fence (fast-fail pre-check): a result computed against a
+	// schema that is no longer live (e.g. the function was dropped/changed
+	// while the Spark job was in flight) must not be committed against the
+	// current segments. This read happens outside the broadcast's serialization
+	// boundary, so broadcastBackfillBatch re-validates the version again while
+	// holding the resource keys — a drop/alter-function committing in the
+	// window between this check and the key acquisition is still caught.
+	if err := checkBackfillSchemaVersion(result.CollectionID, result.SchemaVersion, coll); err != nil {
+		log.Warn(ctx, "CommitBackfillResult rejected by schema version fence",
+			mlog.Err(err),
+			mlog.Int32("resultSchemaVersion", result.SchemaVersion),
+			mlog.Int32("collectionSchemaVersion", coll.GetSchema().GetVersion()))
+		return &datapb.CommitBackfillResultResponse{
+			Status:          merr.Status(err),
+			TotalSegments:   total,
+			FailedSegments:  int32(len(result.Segments)),
+			SegmentStatuses: allSegmentsFailed(result, err.Error()),
+		}, nil
 	}
 
 	// Split items across multiple broadcast messages so a single
@@ -91,9 +109,9 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 			end = len(items)
 		}
 		batch := items[start:end]
-		if err := broadcastBackfillBatch(ctx, coll, result.CollectionID, channels, batch); err != nil {
-			log.Error("CommitBackfillResult broadcast batch failed",
-				zap.Error(err), zap.Int("batchStart", start), zap.Int("batchEnd", end))
+		if err := s.broadcastBackfillBatch(ctx, coll, result.CollectionID, result.SchemaVersion, channels, batch); err != nil {
+			log.Error(ctx, "CommitBackfillResult broadcast batch failed",
+				mlog.Err(err), mlog.Int("batchStart", start), mlog.Int("batchEnd", end))
 			lastErr = err
 			appendItemStatuses(&statuses, batch, false, err.Error())
 			continue
@@ -102,10 +120,10 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	}
 
 	committed, failed := countStatuses(statuses)
-	log.Info("CommitBackfillResult broadcast completed",
-		zap.Int32("total", total),
-		zap.Int32("committed", committed),
-		zap.Int32("failed", failed))
+	log.Info(ctx, "CommitBackfillResult broadcast completed",
+		mlog.Int32("total", total),
+		mlog.Int32("committed", committed),
+		mlog.Int32("failed", failed))
 
 	// Top-level Success unless every broadcast failed -- partial failures are
 	// surfaced through per-segment statuses.
@@ -133,10 +151,11 @@ const maxItemsPerBroadcast = 512
 // collection's shared resource keys and issues exactly one broadcast for the
 // given items. broadcasterWithRK nils out its lock guards on the first
 // Broadcast call, so each batch needs its own broadcaster.
-func broadcastBackfillBatch(
+func (s *Server) broadcastBackfillBatch(
 	ctx context.Context,
 	coll *milvuspb.DescribeCollectionResponse,
 	collectionID int64,
+	expectedSchemaVersion int32,
 	channels []string,
 	items []*messagespb.BatchUpdateManifestItem,
 ) error {
@@ -149,6 +168,23 @@ func broadcastBackfillBatch(
 	}
 	defer broadcaster.Close()
 
+	// Schema-version fence, enforced INSIDE the broadcast's serialization
+	// boundary: while we hold the shared collection-name resource key, no
+	// drop/alter-function (which takes the exclusive collection-name key) can
+	// commit, so the version read here cannot change before this broadcast's
+	// ack callback applies the update. The pre-broadcast check in
+	// CommitBackfillResult runs outside this boundary; re-reading here closes
+	// the window where a schema change could slip in between the two.
+	if expectedSchemaVersion != 0 {
+		freshColl, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+		if err != nil {
+			return err
+		}
+		if err := checkBackfillSchemaVersion(collectionID, expectedSchemaVersion, freshColl); err != nil {
+			return err
+		}
+	}
+
 	_, err = broadcaster.Broadcast(ctx, message.NewBatchUpdateManifestMessageBuilderV2().
 		WithHeader(&message.BatchUpdateManifestMessageHeader{
 			CollectionId: collectionID,
@@ -157,6 +193,7 @@ func broadcastBackfillBatch(
 			Items: items,
 		}).
 		WithBroadcast(channels).
+		WithUnreplicable().
 		MustBuildBroadcast(),
 	)
 	return err
@@ -365,6 +402,48 @@ func inferKind(entry *BackfillSegment) string {
 	return "v3"
 }
 
+// checkBackfillSchemaVersion enforces the schema-version fence on a backfill
+// result. A result computed against a schema that is no longer live (e.g. the
+// function was dropped/changed while the Spark job was in flight) must not be
+// committed against the current segments. Results that carry no version (0 —
+// produced before Spark stamped the schema version it read) are exempt from
+// the fence for backward compatibility.
+func checkBackfillSchemaVersion(collectionID int64, expectedSchemaVersion int32, coll *milvuspb.DescribeCollectionResponse) error {
+	if expectedSchemaVersion == 0 {
+		return nil
+	}
+	currentVersion := int32(0)
+	if coll.GetSchema() != nil {
+		currentVersion = coll.GetSchema().GetVersion()
+	}
+	if expectedSchemaVersion != currentVersion {
+		return merr.WrapErrCollectionSchemaMisMatch(
+			collectionID,
+			"backfill result schema version "+strconv.FormatInt(int64(expectedSchemaVersion), 10)+
+				" does not match collection's current schema version "+strconv.FormatInt(int64(currentVersion), 10)+
+				"; re-run the backfill against the current schema")
+	}
+	return nil
+}
+
+// allSegmentsFailed builds a per-segment failure status for every segment in
+// the result. Used when a collection-level rejection (e.g. the schema-version
+// fence) fails the whole result before any broadcast, so callers still see
+// which segments were rejected and why.
+func allSegmentsFailed(result *BackfillResult, reason string) []*datapb.CommitBackfillResultSegmentStatus {
+	statuses := make([]*datapb.CommitBackfillResultSegmentStatus, 0, len(result.Segments))
+	for segIDStr, entry := range result.Segments {
+		segID, perr := strconv.ParseInt(segIDStr, 10, 64)
+		if perr != nil {
+			segID = 0
+		}
+		statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
+			SegmentId: segID, Ok: false, Kind: inferKind(&entry), Reason: reason,
+		})
+	}
+	return sortStatuses(statuses)
+}
+
 func countStatuses(statuses []*datapb.CommitBackfillResultSegmentStatus) (committed, failed int32) {
 	for _, st := range statuses {
 		if st.GetOk() {
@@ -373,7 +452,7 @@ func countStatuses(statuses []*datapb.CommitBackfillResultSegmentStatus) (commit
 			failed++
 		}
 	}
-	return
+	return committed, failed
 }
 
 func sortStatuses(statuses []*datapb.CommitBackfillResultSegmentStatus) []*datapb.CommitBackfillResultSegmentStatus {

@@ -20,15 +20,14 @@ import (
 	"context"
 	"strconv"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -38,14 +37,21 @@ import (
 
 // RateLimitInterceptor returns a new unary server interceptors that performs request rate limiting.
 func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
+	return RateLimitInterceptorWithMetaCache(func() Cache { return nil }, limiter)
+}
+
+// RateLimitInterceptorWithMetaCache returns a new unary server interceptor that performs
+// request rate limiting. getMetaCache is resolved per request so the interceptor observes
+// the meta cache initialized by the proxy after startup instead of a construction-time snapshot.
+func RateLimitInterceptorWithMetaCache(getMetaCache func() Cache, limiter types.Limiter) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		request, ok := req.(proto.Message)
 		if !ok {
 			return nil, merr.WrapErrParameterInvalidMsg("wrong req format when check limiter")
 		}
-		dbID, collectionIDToPartIDs, rt, n, err := GetRequestInfo(ctx, request)
+		dbID, collectionIDToPartIDs, rt, n, err := GetRequestInfo(ctx, getMetaCache(), request)
 		if err != nil {
-			log.Warn("failed to get request info", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to get request info", mlog.Err(err))
 			return handler(ctx, req)
 		}
 		if rt == internalpb.RateType_DMLBulkLoad {
@@ -64,7 +70,7 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 			if rsp != nil {
 				return rsp, nil
 			}
-			log.Warn("failed to get failed response, please check it!", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to get failed response, please check it!", mlog.Err(err))
 			return nil, err
 		}
 		metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.SuccessLabel).Inc()
@@ -89,59 +95,120 @@ type reqCollName interface {
 	requestutil.CollectionNameGetter
 }
 
-func getCollectionAndPartitionID(ctx context.Context, r reqPartName) (int64, map[int64][]int64, error) {
-	db, err := globalMetaCache.GetDatabaseInfo(ctx, r.GetDbName())
+func getRequestNamespace(req any) *string {
+	switch r := req.(type) {
+	case *milvuspb.InsertRequest:
+		return r.Namespace
+	case *milvuspb.UpsertRequest:
+		return r.Namespace
+	case *milvuspb.DeleteRequest:
+		return r.Namespace
+	case *milvuspb.SearchRequest:
+		return r.Namespace
+	case *milvuspb.HybridSearchRequest:
+		return r.Namespace
+	case *milvuspb.QueryRequest:
+		return r.Namespace
+	default:
+		return nil
+	}
+}
+
+func getCollectionAndPartitionID(ctx context.Context, metaCache Cache, r reqPartName) (int64, map[int64][]int64, error) {
+	db, err := metaCache.GetDatabaseInfo(ctx, r.GetDbName())
 	if err != nil {
 		return 0, nil, err
 	}
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, r.GetDbName(), r.GetCollectionName())
+	collectionID, err := metaCache.GetCollectionID(ctx, r.GetDbName(), r.GetCollectionName())
 	if err != nil {
 		return 0, nil, err
 	}
-	if r.GetPartitionName() == "" {
-		collectionSchema, err := globalMetaCache.GetCollectionSchema(ctx, r.GetDbName(), r.GetCollectionName())
+
+	var collectionSchema *schemaInfo
+	if namespace := getRequestNamespace(r); namespace != nil {
+		collectionSchema, err = metaCache.GetCollectionSchema(ctx, r.GetDbName(), r.GetCollectionName())
 		if err != nil {
 			return 0, nil, err
+		}
+		partitionName, namespaceAsPartition, err := resolveNamespacePartitionName(collectionSchema.CollectionSchema, namespace, r.GetPartitionName())
+		if err != nil {
+			return 0, nil, err
+		}
+		if namespaceAsPartition {
+			part, err := metaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), partitionName)
+			if err != nil {
+				return 0, nil, err
+			}
+			return db.DBID, map[int64][]int64{collectionID: {part.PartitionID}}, nil
+		}
+	}
+
+	if r.GetPartitionName() == "" {
+		if collectionSchema == nil {
+			collectionSchema, err = metaCache.GetCollectionSchema(ctx, r.GetDbName(), r.GetCollectionName())
+			if err != nil {
+				return 0, nil, err
+			}
 		}
 		if collectionSchema.IsPartitionKeyCollection() {
-			return db.dbID, map[int64][]int64{collectionID: {}}, nil
+			return db.DBID, map[int64][]int64{collectionID: {}}, nil
 		}
 	}
-	part, err := globalMetaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), r.GetPartitionName())
+	part, err := metaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), r.GetPartitionName())
 	if err != nil {
 		return 0, nil, err
 	}
-	return db.dbID, map[int64][]int64{collectionID: {part.partitionID}}, nil
+	return db.DBID, map[int64][]int64{collectionID: {part.PartitionID}}, nil
 }
 
-func getCollectionAndPartitionIDs(ctx context.Context, r reqPartNames) (int64, map[int64][]int64, error) {
-	db, err := globalMetaCache.GetDatabaseInfo(ctx, r.GetDbName())
+func getCollectionAndPartitionIDs(ctx context.Context, metaCache Cache, r reqPartNames) (int64, map[int64][]int64, error) {
+	db, err := metaCache.GetDatabaseInfo(ctx, r.GetDbName())
 	if err != nil {
 		return 0, nil, err
 	}
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, r.GetDbName(), r.GetCollectionName())
+	collectionID, err := metaCache.GetCollectionID(ctx, r.GetDbName(), r.GetCollectionName())
 	if err != nil {
 		return 0, nil, err
 	}
-	parts := make([]int64, len(r.GetPartitionNames()))
-	for i, s := range r.GetPartitionNames() {
-		part, err := globalMetaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), s)
+	partitionNames := r.GetPartitionNames()
+	if namespace := getRequestNamespace(r); namespace != nil {
+		collectionSchema, err := metaCache.GetCollectionSchema(ctx, r.GetDbName(), r.GetCollectionName())
 		if err != nil {
 			return 0, nil, err
 		}
-		parts[i] = part.partitionID
+		partitionNames, _, err = resolveNamespacePartitionNames(collectionSchema.CollectionSchema, namespace, partitionNames)
+		if err != nil {
+			return 0, nil, err
+		}
 	}
 
-	return db.dbID, map[int64][]int64{collectionID: parts}, nil
+	parts := make([]int64, len(partitionNames))
+	for i, s := range partitionNames {
+		part, err := metaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), s)
+		if err != nil {
+			return 0, nil, err
+		}
+		parts[i] = part.PartitionID
+	}
+
+	return db.DBID, map[int64][]int64{collectionID: parts}, nil
 }
 
-func getCollectionID(r reqCollName) (int64, map[int64][]int64) {
-	db, _ := globalMetaCache.GetDatabaseInfo(context.TODO(), r.GetDbName())
+func getCollectionID(metaCache Cache, r reqCollName) (int64, map[int64][]int64) {
+	db, _ := metaCache.GetDatabaseInfo(context.TODO(), r.GetDbName())
 	if db == nil {
 		return util.InvalidDBID, map[int64][]int64{}
 	}
-	collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-	return db.dbID, map[int64][]int64{collectionID: {}}
+	collectionID, _ := metaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
+	return db.DBID, map[int64][]int64{collectionID: {}}
+}
+
+func getDatabaseID(metaCache Cache, dbName string) int64 {
+	db, _ := metaCache.GetDatabaseInfo(context.TODO(), dbName)
+	if db == nil {
+		return util.InvalidDBID
+	}
+	return db.DBID
 }
 
 // failedMutationResult returns failed mutation result.

@@ -7,14 +7,13 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -111,11 +110,11 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetStatistics-PreExecute")
 	defer sp.End()
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, g.request.GetDbName(), g.collectionName)
+	collID, err := g.getMetaCache().GetCollectionID(ctx, g.request.GetDbName(), g.collectionName)
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
-	partIDs, err := getPartitionIDs(ctx, g.request.GetDbName(), g.collectionName, g.partitionNames)
+	partIDs, err := getPartitionIDs(ctx, g.getMetaCache(), g.request.GetDbName(), g.collectionName, g.partitionNames)
 	if err != nil { // err is not nil if partition not exists
 		return err
 	}
@@ -128,33 +127,33 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 
 	deadline, ok := g.TraceCtx().Deadline()
 	if ok {
-		g.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
+		g.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline)
 	}
 
 	// check if collection/partitions are loaded into query node
-	loaded, unloaded, err := checkFullLoaded(ctx, g.mixc, g.request.GetDbName(), g.collectionName, g.CollectionID, partIDs)
-	log := log.Ctx(ctx).With(
-		zap.String("collectionName", g.collectionName),
-		zap.Int64("collectionID", g.CollectionID),
+	loaded, unloaded, err := checkFullLoaded(ctx, g.getMetaCache(), g.mixc, g.request.GetDbName(), g.collectionName, g.CollectionID, partIDs)
+	log := mlog.With(
+		mlog.String("collectionName", g.collectionName),
+		mlog.Int64("collectionID", g.CollectionID),
 	)
 	if err != nil {
 		g.fromDataCoord = true
 		g.unloadedPartitionIDs = partIDs
-		log.Info("checkFullLoaded failed, try get statistics from DataCoord",
-			zap.Error(err))
+		log.Info(ctx, "checkFullLoaded failed, try get statistics from DataCoord",
+			mlog.Err(err))
 		return nil
 	}
 	if len(unloaded) > 0 {
 		g.fromDataCoord = true
 		g.unloadedPartitionIDs = unloaded
-		log.Info("some partitions has not been loaded, try get statistics from DataCoord",
-			zap.Int64s("unloaded partitions", unloaded))
+		log.Info(ctx, "some partitions has not been loaded, try get statistics from DataCoord",
+			mlog.Int64s("unloaded partitions", unloaded))
 	}
 	if len(loaded) > 0 {
 		g.fromQueryNode = true
 		g.loadedPartitionIDs = loaded
-		log.Info("some partitions has been loaded, try get statistics from QueryNode",
-			zap.Int64s("loaded partitions", loaded))
+		log.Info(ctx, "some partitions has been loaded, try get statistics from QueryNode",
+			mlog.Int64s("loaded partitions", loaded))
 	}
 	return nil
 }
@@ -172,14 +171,14 @@ func (g *getStatisticsTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		log.Ctx(ctx).Debug("get collection statistics from QueryNode execute done")
+		mlog.Debug(ctx, "get collection statistics from QueryNode execute done")
 	}
 	if g.fromDataCoord {
 		err := g.getStatisticsFromDataCoord(ctx)
 		if err != nil {
 			return err
 		}
-		log.Ctx(ctx).Debug("get collection statistics from DataCoord execute done")
+		mlog.Debug(ctx, "get collection statistics from DataCoord execute done")
 	}
 	return nil
 }
@@ -195,14 +194,14 @@ func (g *getStatisticsTask) PostExecute(ctx context.Context) error {
 	toReduceResults := make([]*internalpb.GetStatisticsResponse, 0)
 	select {
 	case <-g.TraceCtx().Done():
-		log.Ctx(ctx).Debug("wait to finish timeout!")
+		mlog.Debug(ctx, "wait to finish timeout!")
 		return merr.Wrapf(g.TraceCtx().Err(), "GetStatistics wait to finish timeout, msgID=%d", g.ID())
 	default:
-		log.Ctx(ctx).Debug("all get statistics are finished or canceled")
+		mlog.Debug(ctx, "all get statistics are finished or canceled")
 		g.resultBuf.Range(func(res *internalpb.GetStatisticsResponse) bool {
 			toReduceResults = append(toReduceResults, res)
-			log.Ctx(ctx).Debug("proxy receives one get statistic response",
-				zap.Int64("sourceID", res.GetBase().GetSourceID()))
+			mlog.Debug(ctx, "proxy receives one get statistic response",
+				mlog.Int64("sourceID", res.GetBase().GetSourceID()))
 			return true
 		})
 	}
@@ -221,7 +220,7 @@ func (g *getStatisticsTask) PostExecute(ctx context.Context) error {
 		Stats:  result,
 	}
 
-	log.Ctx(ctx).Debug("get statistics post execute done", zap.Any("result", result))
+	mlog.Debug(ctx, "get statistics post execute done", mlog.Any("result", result))
 	return nil
 }
 
@@ -284,24 +283,24 @@ func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 	}
 	result, err := qn.GetStatistics(ctx, req)
 	if err != nil {
-		log.Ctx(ctx).Warn("QueryNode statistic return error",
-			zap.Int64("nodeID", nodeID),
-			zap.String("channel", channel),
-			zap.Error(err))
-		g.shardclientMgr.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
+		mlog.Warn(ctx, "QueryNode statistic return error",
+			mlog.Int64("nodeID", nodeID),
+			mlog.String("channel", channel),
+			mlog.Err(err))
+		g.shardclientMgr.InvalidateShardLeaderCache([]int64{g.CollectionID})
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
-		log.Ctx(ctx).Warn("QueryNode is not shardLeader",
-			zap.Int64("nodeID", nodeID),
-			zap.String("channel", channel))
-		g.shardclientMgr.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
+		mlog.Warn(ctx, "QueryNode is not shardLeader",
+			mlog.Int64("nodeID", nodeID),
+			mlog.String("channel", channel))
+		g.shardclientMgr.InvalidateShardLeaderCache([]int64{g.CollectionID})
 		return merr.Error(result.GetStatus())
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Ctx(ctx).Warn("QueryNode statistic result error",
-			zap.Int64("nodeID", nodeID),
-			zap.String("reason", result.GetStatus().GetReason()))
+		mlog.Warn(ctx, "QueryNode statistic result error",
+			mlog.Int64("nodeID", nodeID),
+			mlog.String("reason", result.GetStatus().GetReason()))
 		return errors.Wrapf(merr.Error(result.GetStatus()), "fail to get statistic on QueryNode ID=%d", nodeID)
 	}
 	g.resultBuf.Insert(result)
@@ -311,16 +310,16 @@ func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 
 // checkFullLoaded check if collection / partition was fully loaded into QueryNode
 // return loaded partitions, unloaded partitions and error
-func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName string, collectionName string, collectionID int64, searchPartitionIDs []UniqueID) ([]UniqueID, []UniqueID, error) {
+func checkFullLoaded(ctx context.Context, metaCache Cache, qc types.QueryCoordClient, dbName string, collectionName string, collectionID int64, searchPartitionIDs []UniqueID) ([]UniqueID, []UniqueID, error) {
 	var loadedPartitionIDs []UniqueID
 	var unloadPartitionIDs []UniqueID
 
 	// TODO: Consider to check if partition loaded from cache to save rpc.
-	info, err := globalMetaCache.GetCollectionInfo(ctx, dbName, collectionName, collectionID)
+	info, err := metaCache.GetCollectionInfo(ctx, dbName, collectionName, collectionID)
 	if err != nil {
 		return nil, nil, merr.Wrapf(err, "GetCollectionInfo failed, dbName = %s, collectionName = %s, collectionID = %d", dbName, collectionName, collectionID)
 	}
-	partitionInfos, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
+	partitionInfos, err := metaCache.GetPartitions(ctx, dbName, collectionName)
 	if err != nil {
 		return nil, nil, merr.Wrapf(err, "GetPartitions failed, dbName = %s, collectionName = %s, collectionID = %d", dbName, collectionName, collectionID)
 	}
@@ -332,7 +331,7 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 				commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
-			CollectionID: info.collID,
+			CollectionID: info.CollID,
 			PartitionIDs: searchPartitionIDs,
 		})
 		if err != nil {
@@ -358,7 +357,7 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		CollectionID: info.collID,
+		CollectionID: info.CollID,
 	})
 	if err != nil {
 		return nil, nil, merr.Wrapf(err, "showPartitions failed, collection = %d, partitionIDs = %v", collectionID, searchPartitionIDs)
@@ -445,7 +444,7 @@ func reduceStatisticResponse(results []map[string]string) ([]*commonpb.KeyValueP
 //		if err != nil {
 //			return err
 //		}
-//		log.Debug("get partition statistics from QueryNode execute done", zap.Int64("msgID", g.ID()))
+//		mlog.Debug(context.TODO(), "get partition statistics from QueryNode execute done", mlog.Int64("msgID", g.ID()))
 //	}
 //	if g.fromDataCoord {
 //		collID := g.CollectionID
@@ -473,7 +472,7 @@ func reduceStatisticResponse(results []map[string]string) ([]*commonpb.KeyValueP
 //			Status: merr.Success(),
 //			Stats:  result.Stats,
 //		})
-//		log.Debug("get partition statistics from DataCoord execute done", zap.Int64("msgID", g.ID()))
+//		mlog.Debug(context.TODO(), "get partition statistics from DataCoord execute done", mlog.Int64("msgID", g.ID()))
 //		return nil
 //	}
 //	return nil
@@ -516,7 +515,7 @@ func reduceStatisticResponse(results []map[string]string) ([]*commonpb.KeyValueP
 //		if err != nil {
 //			return err
 //		}
-//		log.Debug("get collection statistics from QueryNode execute done", zap.Int64("msgID", g.ID()))
+//		mlog.Debug(context.TODO(), "get collection statistics from QueryNode execute done", mlog.Int64("msgID", g.ID()))
 //	}
 //	if g.fromDataCoord {
 //		collID := g.CollectionID
@@ -569,7 +568,7 @@ func reduceStatisticResponse(results []map[string]string) ([]*commonpb.KeyValueP
 //				Stats:  result.Stats,
 //			})
 //		}
-//		log.Debug("get collection statistics from DataCoord execute done", zap.Int64("msgID", g.ID()))
+//		mlog.Debug(context.TODO(), "get collection statistics from DataCoord execute done", mlog.Int64("msgID", g.ID()))
 //		return nil
 //	}
 //	return nil
@@ -644,7 +643,7 @@ func (g *getCollectionStatisticsTask) PreExecute(ctx context.Context) error {
 }
 
 func (g *getCollectionStatisticsTask) Execute(ctx context.Context) error {
-	collID, err := globalMetaCache.GetCollectionID(ctx, g.GetDbName(), g.CollectionName)
+	collID, err := g.getMetaCache().GetCollectionID(ctx, g.GetDbName(), g.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -727,12 +726,12 @@ func (g *getPartitionStatisticsTask) PreExecute(ctx context.Context) error {
 }
 
 func (g *getPartitionStatisticsTask) Execute(ctx context.Context) error {
-	collID, err := globalMetaCache.GetCollectionID(ctx, g.GetDbName(), g.CollectionName)
+	collID, err := g.getMetaCache().GetCollectionID(ctx, g.GetDbName(), g.CollectionName)
 	if err != nil {
 		return err
 	}
 	g.collectionID = collID
-	partitionID, err := globalMetaCache.GetPartitionID(ctx, g.GetDbName(), g.CollectionName, g.PartitionName)
+	partitionID, err := g.getMetaCache().GetPartitionID(ctx, g.GetDbName(), g.CollectionName, g.PartitionName)
 	if err != nil {
 		return err
 	}

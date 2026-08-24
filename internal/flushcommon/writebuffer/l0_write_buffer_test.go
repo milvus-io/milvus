@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -55,11 +56,30 @@ func (s fakeGrowingFlushSource) CurrentOffset() int64 {
 	return 10
 }
 
+func (s fakeGrowingFlushSource) MaterializedFieldIDs(ctx context.Context) ([]int64, error) {
+	return []int64{0, 1, 100, 101, 102}, nil
+}
+
+func (s fakeGrowingFlushSource) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
+	pks := make([]storage.PrimaryKey, 0, endOffset-startOffset)
+	for i := startOffset; i < endOffset; i++ {
+		pks = append(pks, storage.NewInt64PrimaryKey(i))
+	}
+	return pks, nil
+}
+
 func (s fakeGrowingFlushSource) FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 	if s.flushFunc != nil {
 		return s.flushFunc(ctx, startOffset, endOffset, config)
 	}
-	return &syncmgr.GrowingFlushResult{ManifestPath: "manifest", NumRows: 10}, nil
+	return &syncmgr.GrowingFlushResult{
+		ManifestPath:           "manifest",
+		NumRows:                10,
+		TimestampFrom:          100,
+		TimestampTo:            200,
+		ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, 80),
+		FieldNullCounts:        map[int64]int64{},
+	}, nil
 }
 
 func (s fakeGrowingFlushSource) Release() {
@@ -73,6 +93,17 @@ type fakeGrowingSourceProvider struct {
 	state  syncmgr.GrowingSourceState
 }
 
+func fakeColumnGroupMemorySizes(config *syncmgr.GrowingFlushConfig, size int64) map[int64]int64 {
+	if config == nil || len(config.ColumnGroups) == 0 {
+		return nil
+	}
+	result := make(map[int64]int64, len(config.ColumnGroups))
+	for _, columnGroup := range config.ColumnGroups {
+		result[columnGroup.GroupID] = size
+	}
+	return result
+}
+
 func (p fakeGrowingSourceProvider) GetGrowingFlushSource(int64, int64, *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 	return p.source, p.state
 }
@@ -81,6 +112,10 @@ type fakeGrowingSourceReleaseHandoffProvider struct {
 	fakeGrowingSourceProvider
 	fenceTs  uint64
 	segments []syncmgr.GrowingSourceReleaseHandoffSegment
+}
+
+func (p *fakeGrowingSourceReleaseHandoffProvider) BeginGrowingSourceReleaseHandoff(segmentIDs []int64) func() {
+	return func() {}
 }
 
 func (p *fakeGrowingSourceReleaseHandoffProvider) PrepareGrowingSourceReleaseHandoff(ctx context.Context, fenceTs uint64, segments []syncmgr.GrowingSourceReleaseHandoffSegment) error {
@@ -157,7 +192,7 @@ func (s *L0WriteBufferSuite) SetupSuite() {
 }
 
 func (s *L0WriteBufferSuite) composeInsertMsg(segmentID int64, rowCount int, dim int, pkType schemapb.DataType) ([]int64, *msgstream.InsertMsg) {
-	tss := lo.RepeatBy(rowCount, func(idx int) int64 { return int64(tsoutil.ComposeTSByTime(time.Now(), int64(idx))) })
+	tss := lo.RepeatBy(rowCount, func(idx int) int64 { return int64(tsoutil.ComposeTSByTimeWithLogical(time.Now(), int64(idx))) })
 	vectors := lo.RepeatBy(rowCount, func(_ int) []float32 {
 		return lo.RepeatBy(dim, func(_ int) float32 { return rand.Float32() })
 	})
@@ -277,7 +312,7 @@ func (s *L0WriteBufferSuite) composeDeleteMsg(pks []storage.PrimaryKey) *msgstre
 	delMsg := &msgstream.DeleteMsg{
 		DeleteRequest: &msgpb.DeleteRequest{
 			PrimaryKeys: storage.ParsePrimaryKeys2IDs(pks),
-			Timestamps:  lo.RepeatBy(len(pks), func(idx int) uint64 { return tsoutil.ComposeTSByTime(time.Now(), int64(idx)+1) }),
+			Timestamps:  lo.RepeatBy(len(pks), func(idx int) uint64 { return tsoutil.ComposeTSByTimeWithLogical(time.Now(), int64(idx)+1) }),
 		},
 	}
 	return delMsg
@@ -289,7 +324,7 @@ func (s *L0WriteBufferSuite) SetupTest() {
 	s.metacache.EXPECT().GetSchema(mock.Anything).Return(s.collSchema).Maybe()
 	s.metacache.EXPECT().Collection().Return(s.collID).Maybe()
 	s.allocator = allocator.NewMockGIDAllocator()
-	s.allocator.AllocOneF = func() (int64, error) { return int64(tsoutil.ComposeTSByTime(time.Now(), 0)), nil }
+	s.allocator.AllocOneF = func() (int64, error) { return int64(tsoutil.ComposeTSByTime(time.Now())), nil }
 }
 
 func (s *L0WriteBufferSuite) newTextMetaCache(schema *schemapb.CollectionSchema) *metacache.MockMetaCache {
@@ -383,11 +418,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 
 	s.Run("usable_source_records_progress_and_pins_checkpoint", func() {
 		textSchema := s.textSchema()
-		metacache := s.newTextMetaCache(textSchema)
+		mc := s.newTextMetaCache(textSchema)
 		var resolvedSegmentID int64
 		var resolvedTargetOffset int64
 		resolveCalls := 0
-		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
+		wb, err := NewL0WriteBuffer(s.channelName, mc, s.syncMgr, &writeBufferOption{
 			idAllocator:                s.allocator,
 			growingSourceRetryInterval: time.Hour,
 			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
@@ -406,11 +441,24 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
 
-		// 3 first-insert path calls plus 1 triggerSync policy check for the
-		// recorded growing source progress.
-		metacache.EXPECT().GetSegmentByID(int64(1001)).Return(nil, false).Times(4)
-		metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
-		metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+		segmentInfo := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             1001,
+			PartitionID:    10,
+			CollectionID:   s.collID,
+			InsertChannel:  s.channelName,
+			StartPosition:  &msgpb.MsgPosition{Timestamp: 100},
+			State:          commonpb.SegmentState_Growing,
+			StorageVersion: storage.StorageV3,
+			SchemaVersion:  100,
+		}, pkoracle.NewBloomFilterSet(), nil, nil)
+
+		// growingSourceBaseOffset and CreateNewGrowingSegment see a new
+		// segment; recordGrowingSourceProgress and triggerSync see the segment
+		// created by AddSegment.
+		mc.EXPECT().GetSegmentByID(int64(1001)).Return(nil, false).Times(3)
+		mc.EXPECT().GetSegmentByID(int64(1001)).Return(segmentInfo, true).Times(2)
+		mc.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
+		mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 		err = wb.BufferData(insertData, nil, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
 		s.NoError(err)
@@ -529,8 +577,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 
 	s.Run("pending_source_records_progress_instead_of_falling_back_to_writebuffer", func() {
 		textSchema := s.textSchema()
-		metacache := s.newTextMetaCache(textSchema)
-		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
+		mc := s.newTextMetaCache(textSchema)
+		wb, err := NewL0WriteBuffer(s.channelName, mc, s.syncMgr, &writeBufferOption{
 			idAllocator:                s.allocator,
 			growingSourceRetryInterval: time.Hour,
 			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
@@ -543,10 +591,24 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
 
-		// 3 first-insert path calls plus 1 triggerSync policy check.
-		metacache.EXPECT().GetSegmentByID(int64(1002)).Return(nil, false).Times(4)
-		metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
-		metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+		segmentInfo := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             1002,
+			PartitionID:    10,
+			CollectionID:   s.collID,
+			InsertChannel:  s.channelName,
+			StartPosition:  &msgpb.MsgPosition{Timestamp: 100},
+			State:          commonpb.SegmentState_Growing,
+			StorageVersion: storage.StorageV3,
+			SchemaVersion:  100,
+		}, pkoracle.NewBloomFilterSet(), nil, nil)
+
+		// growingSourceBaseOffset and CreateNewGrowingSegment see a new
+		// segment; recordGrowingSourceProgress and triggerSync see the segment
+		// created by AddSegment.
+		mc.EXPECT().GetSegmentByID(int64(1002)).Return(nil, false).Times(3)
+		mc.EXPECT().GetSegmentByID(int64(1002)).Return(segmentInfo, true).Times(2)
+		mc.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
+		mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 		err = wb.BufferData(insertData, nil, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
 		s.NoError(err)
@@ -757,11 +819,15 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		metacache := s.newTextRealMetaCache(textSchema)
 		flushCalls := 0
 		source := fakeGrowingFlushSource{
-			flushFunc: func(_ context.Context, startOffset, endOffset int64, _ *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+			flushFunc: func(_ context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 				flushCalls++
 				s.EqualValues(0, startOffset)
 				s.EqualValues(10, endOffset)
-				return &syncmgr.GrowingFlushResult{ManifestPath: "manifest-0-10", NumRows: 10}, nil
+				return &syncmgr.GrowingFlushResult{
+					ManifestPath:           "manifest-0-10",
+					NumRows:                10,
+					ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, 80),
+				}, nil
 			},
 		}
 		metaWriter := syncmgr.NewMockMetaWriter(s.T())
@@ -830,21 +896,24 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		metacache := s.newTextRealMetaCache(textSchema)
 		flushCalls := 0
 		source := fakeGrowingFlushSource{
-			flushFunc: func(context.Context, int64, int64, *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+			flushFunc: func(_ context.Context, _, _ int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 				flushCalls++
 				if flushCalls == 1 {
 					return nil, fmt.Errorf("mock growing source flush error")
 				}
-				return &syncmgr.GrowingFlushResult{ManifestPath: "manifest-retry", NumRows: 10}, nil
+				return &syncmgr.GrowingFlushResult{
+					ManifestPath:           "manifest-retry",
+					NumRows:                10,
+					ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, 80),
+				}, nil
 			},
 		}
-		errorHandlerCalled := false
+		var errorHandlerCalls atomic.Int32
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
 			idAllocator:                s.allocator,
 			growingSourceRetryInterval: time.Hour,
 			errorHandler: func(error) {
-				errorHandlerCalled = true
-				panic("growing source task should not call writebuffer error handler directly")
+				errorHandlerCalls.Add(1)
 			},
 			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return source, syncmgr.GrowingSourceUsable
@@ -862,7 +931,6 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 						done <- textTask
 					}()
 					err := textTask.Run(ctx)
-					textTask.HandleError(err)
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -883,7 +951,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.ErrorContains(conc.AwaitAll(futures...), "mock growing source flush error")
 		firstTask := <-done
 
-		s.False(errorHandlerCalled)
+		s.EqualValues(1, errorHandlerCalls.Load())
 		progress, ok := l0wb.growingSourceProgress[int64(1010)]
 		s.True(ok)
 		s.EqualValues(1, progress.failureCount)
@@ -899,6 +967,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.Require().Len(futures, 1)
 		s.NoError(conc.AwaitAll(futures...))
 		secondTask := <-done
+		s.EqualValues(1, errorHandlerCalls.Load())
 		s.EqualValues(10, secondTask.BatchRows())
 		segment, ok = metacache.GetSegmentByID(1010)
 		s.True(ok)
@@ -907,23 +976,94 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.Equal("manifest-retry", segment.ManifestPath())
 	})
 
-	s.Run("source_task_row_count_mismatch_retries_without_meta_update", func() {
+	s.Run("source_task_layout_mismatch_is_non_retryable", func() {
 		textSchema := s.textSchema()
 		metacache := s.newTextRealMetaCache(textSchema)
 		source := fakeGrowingFlushSource{
 			flushFunc: func(context.Context, int64, int64, *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
-				return &syncmgr.GrowingFlushResult{ManifestPath: "manifest-mismatch", NumRows: 9}, nil
+				return nil, fmt.Errorf("Invalid: Column group size mismatch: existing has 10 groups, but appended has 1 groups: segcore error[segcoreCode=2001]")
+			},
+		}
+		var errorHandlerCalls atomic.Int32
+		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
+			idAllocator:                s.allocator,
+			growingSourceRetryInterval: time.Hour,
+			errorHandler: func(error) {
+				errorHandlerCalls.Add(1)
+			},
+			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+				return source, syncmgr.GrowingSourceUsable
+			},
+		})
+		s.NoError(err)
+
+		done := make(chan struct{})
+		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.AnythingOfType("*syncmgr.GrowingSourceSyncTask"), mock.Anything).
+			RunAndReturn(func(ctx context.Context, task syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+				textTask := task.(*syncmgr.GrowingSourceSyncTask)
+				textTask.WithChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(s.T().TempDir())))
+				return conc.Go(func() (struct{}, error) {
+					defer close(done)
+					err := textTask.Run(ctx)
+					for _, callback := range callbacks {
+						if cbErr := callback(err); cbErr != nil {
+							return struct{}{}, cbErr
+						}
+					}
+					return struct{}{}, err
+				}), nil
+			}).Once()
+
+		_, msg := s.composeTextInsertMsg(1014, 10)
+		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
+		s.NoError(err)
+		err = wb.BufferData(insertData, nil, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
+		s.NoError(err)
+		l0wb := wb.(*l0WriteBuffer)
+		futures := l0wb.syncSegments(context.Background(), []int64{1014})
+		s.Require().Len(futures, 1)
+		s.ErrorContains(conc.AwaitAll(futures...), "Column group size mismatch")
+		<-done
+
+		s.EqualValues(1, errorHandlerCalls.Load())
+		progress, ok := l0wb.growingSourceProgress[int64(1014)]
+		s.True(ok)
+		s.EqualValues(1, progress.failureCount)
+		s.Contains(progress.lastFailure, "Column group size mismatch")
+		s.True(progress.nonRetryableFailure)
+		s.False(l0wb.growingSourceRetryScheduled)
+
+		segments, retry := l0wb.getGrowingSourceSegmentsToRetry()
+		s.Empty(segments)
+		s.False(retry)
+
+		segment, ok := metacache.GetSegmentByID(1014)
+		s.True(ok)
+		s.EqualValues(0, segment.FlushedRows())
+		s.EqualValues(0, segment.SyncingRows())
+		s.EqualValues(10, segment.BufferRows())
+	})
+
+	s.Run("source_task_row_count_mismatch_retries_without_meta_update", func() {
+		textSchema := s.textSchema()
+		metacache := s.newTextRealMetaCache(textSchema)
+		source := fakeGrowingFlushSource{
+			flushFunc: func(_ context.Context, _, _ int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+				return &syncmgr.GrowingFlushResult{
+					ManifestPath:           "manifest-mismatch",
+					NumRows:                9,
+					ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, 80),
+				}, nil
 			},
 		}
 		metaWriter := syncmgr.NewMockMetaWriter(s.T())
-		errorHandlerCalled := false
+		var errorHandlerCalls atomic.Int32
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
 			idAllocator:                s.allocator,
 			metaWriter:                 metaWriter,
 			growingSourceRetryInterval: time.Hour,
 			errorHandler: func(error) {
-				errorHandlerCalled = true
-				panic("growing source row count mismatch should not call writebuffer error handler directly")
+				errorHandlerCalls.Add(1)
 			},
 			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return source, syncmgr.GrowingSourceUsable
@@ -959,7 +1099,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.ErrorContains(conc.AwaitAll(futures...), "row count mismatch")
 		<-done
 
-		s.False(errorHandlerCalled)
+		s.EqualValues(1, errorHandlerCalls.Load())
 		progress, ok := l0wb.growingSourceProgress[int64(1011)]
 		s.True(ok)
 		s.EqualValues(1, progress.failureCount)
@@ -976,9 +1116,13 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		var ranges [][2]int64
 		source := fakeGrowingFlushSource{
 			currentOffset: 15,
-			flushFunc: func(_ context.Context, startOffset, endOffset int64, _ *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+			flushFunc: func(_ context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 				ranges = append(ranges, [2]int64{startOffset, endOffset})
-				return &syncmgr.GrowingFlushResult{ManifestPath: fmt.Sprintf("manifest-%d", endOffset), NumRows: endOffset - startOffset}, nil
+				return &syncmgr.GrowingFlushResult{
+					ManifestPath:           packed.MarshalManifestPath(config.SegmentBasePath, endOffset),
+					NumRows:                endOffset - startOffset,
+					ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, 80),
+				}, nil
 			},
 		}
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
@@ -1042,10 +1186,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		metacache := s.newTextRealMetaCache(textSchema)
 		source := fakeGrowingFlushSource{
 			currentOffset: 10,
-			flushFunc: func(_ context.Context, startOffset, endOffset int64, _ *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+			flushFunc: func(_ context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 				return &syncmgr.GrowingFlushResult{
-					ManifestPath: fmt.Sprintf("manifest-%d-%d", startOffset, endOffset),
-					NumRows:      endOffset - startOffset,
+					ManifestPath:           fmt.Sprintf("manifest-%d-%d", startOffset, endOffset),
+					NumRows:                endOffset - startOffset,
+					ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, 80),
 				}, nil
 			},
 		}
@@ -1493,6 +1638,47 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 		s.Zero(handoffProvider.fenceTs)
 		s.Empty(handoffProvider.segments)
 	})
+
+	s.Run("requested_segments_are_merged_with_tracked_growing_progress", func() {
+		handoffProvider := &fakeGrowingSourceReleaseHandoffProvider{}
+		registration := syncmgr.DefaultGrowingSourceRegistry().Register(s.channelName, handoffProvider)
+		defer syncmgr.DefaultGrowingSourceRegistry().Unregister(registration)
+
+		textSchema := s.textSchema()
+		mc := s.newTextRealMetaCache(textSchema)
+		wb, err := NewL0WriteBuffer(s.channelName, mc, s.syncMgr, &writeBufferOption{
+			idAllocator: s.allocator,
+			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+				return fakeGrowingFlushSource{}, syncmgr.GrowingSourceUsable
+			},
+		})
+		s.NoError(err)
+
+		for _, segmentID := range []int64{1205, 1206} {
+			_, msg := s.composeTextInsertMsg(segmentID, 10)
+			insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
+			s.NoError(err)
+			err = wb.BufferData(insertData, nil, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
+			s.NoError(err)
+		}
+
+		progress, err := wb.GetGrowingFlushProgress(context.Background(), []int64{1204}, 200)
+		s.NoError(err)
+		progressBySegment := lo.SliceToMap(progress, func(progress GrowingFlushSegmentProgress) (int64, GrowingFlushSegmentProgress) {
+			return progress.SegmentID, progress
+		})
+		s.Contains(progressBySegment, int64(1204))
+		s.False(progressBySegment[1204].NeedReleaseHandoff)
+		for _, segmentID := range []int64{1205, 1206} {
+			s.True(progressBySegment[segmentID].NeedReleaseHandoff)
+			s.EqualValues(10, progressBySegment[segmentID].TargetOffset)
+			s.Equal(metacache.FlushSourceGrowing, progressBySegment[segmentID].SourceMode)
+		}
+		s.ElementsMatch([]syncmgr.GrowingSourceReleaseHandoffSegment{
+			{SegmentID: 1205, TargetOffset: 10},
+			{SegmentID: 1206, TargetOffset: 10},
+		}, handoffProvider.segments)
+	})
 }
 
 func (s *L0WriteBufferSuite) TestCheckReleaseManualFlushNeed() {
@@ -1515,11 +1701,25 @@ func (s *L0WriteBufferSuite) TestCheckReleaseManualFlushNeed() {
 	s.False(checker.CheckReleaseManualFlushNeed(nil))
 	s.True(checker.CheckReleaseManualFlushNeed([]int64{1300}))
 
-	wb.CreateNewGrowingSegment(0, 1301, &msgpb.MsgPosition{Timestamp: 100}, 100)
+	err = wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+		PartitionID:    0,
+		SegmentID:      1301,
+		StartPos:       &msgpb.MsgPosition{Timestamp: 100},
+		SchemaVersion:  100,
+		StorageVersion: storage.StorageV3,
+	})
+	s.NoError(err)
 	mc.UpdateSegments(metacache.SetFlushSourceMode(metacache.FlushSourceWriteBuffer), metacache.WithSegmentIDs(1301))
 	s.False(checker.CheckReleaseManualFlushNeed([]int64{1301}))
 
-	wb.CreateNewGrowingSegment(0, 1302, &msgpb.MsgPosition{Timestamp: 100}, 100)
+	err = wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+		PartitionID:    0,
+		SegmentID:      1302,
+		StartPos:       &msgpb.MsgPosition{Timestamp: 100},
+		SchemaVersion:  100,
+		StorageVersion: storage.StorageV3,
+	})
+	s.NoError(err)
 	mc.UpdateSegments(metacache.SetFlushSourceMode(metacache.FlushSourceGrowing), metacache.WithSegmentIDs(1302))
 	s.True(checker.CheckReleaseManualFlushNeed([]int64{1302}))
 
@@ -1527,7 +1727,14 @@ func (s *L0WriteBufferSuite) TestCheckReleaseManualFlushNeed() {
 	s.False(checker.CheckReleaseManualFlushNeed([]int64{1302}))
 	s.True(checker.CheckReleaseManualFlushNeed([]int64{1301, 1300}))
 
-	wb.CreateNewGrowingSegment(0, 1303, &msgpb.MsgPosition{Timestamp: 100}, 100)
+	err = wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+		PartitionID:    0,
+		SegmentID:      1303,
+		StartPos:       &msgpb.MsgPosition{Timestamp: 100},
+		SchemaVersion:  100,
+		StorageVersion: storage.StorageV3,
+	})
+	s.NoError(err)
 	mc.UpdateSegments(metacache.SetFlushSourceMode(metacache.FlushSourceGrowing), metacache.WithSegmentIDs(1303))
 	s.True(checker.CheckReleaseManualFlushNeed([]int64{1300, 1303}))
 }

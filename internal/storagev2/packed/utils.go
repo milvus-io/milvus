@@ -18,14 +18,14 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -154,10 +154,10 @@ func fetchRowCountsConcurrently(
 			return struct{}{}, nil
 		})
 	}
-	if err := conc.AwaitAll(futures...); err != nil {
+	if err := conc.BlockOnAll(futures...); err != nil {
 		return nil, err
 	}
-	// Post-wait ctx check: AwaitAll settles every future, so a ctx canceled
+	// Post-wait ctx check: BlockOnAll settles every future, so a ctx canceled
 	// mid-run whose workers happened to return nil would slip past the err
 	// branch above. Mirrors the pre-conc.Pool behavior.
 	if err := ctx.Err(); err != nil {
@@ -181,8 +181,6 @@ func FetchFragmentsFromExternalSourceWithRange(
 	exploreManifestPath string,
 	opts ExternalFetchOptions,
 ) ([]Fragment, error) {
-	log := log.Ctx(ctx)
-
 	if exploreManifestPath == "" {
 		return nil, merr.WrapErrServiceInternalMsg("explore manifest path is required")
 	}
@@ -194,7 +192,13 @@ func FetchFragmentsFromExternalSourceWithRange(
 	}
 
 	exploreStart := time.Now()
-	fileInfos, err := ReadFileInfosFromManifestPath(exploreManifestPath, storageConfig)
+	var fileInfos []FileInfo
+	var err error
+	if isMilvusTableFormat(format) {
+		fileInfos, err = readMilvusTableExploreManifest(exploreManifestPath, storageConfig)
+	} else {
+		fileInfos, err = ReadFileInfosFromManifestPath(exploreManifestPath, storageConfig)
+	}
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to read explore manifest")
 	}
@@ -208,12 +212,12 @@ func FetchFragmentsFromExternalSourceWithRange(
 	// stay byte-for-byte identical to the DataCoord-side call so both
 	// indexed views agree.
 	fileInfos, skipped := NormalizeFileInfos(fileInfos, format)
-	log.Info("Read file list from explore manifest",
-		zap.String("manifestPath", exploreManifestPath),
-		zap.Int("rawFileCount", rawCount),
-		zap.Int("normalizedFileCount", len(fileInfos)),
-		zap.Int("skippedNonFormat", skipped),
-		zap.Duration("readDuration", time.Since(exploreStart)))
+	mlog.Info(ctx, "Read file list from explore manifest",
+		mlog.String("manifestPath", exploreManifestPath),
+		mlog.Int("rawFileCount", rawCount),
+		mlog.Int("normalizedFileCount", len(fileInfos)),
+		mlog.Int("skippedNonFormat", skipped),
+		mlog.Duration("readDuration", time.Since(exploreStart)))
 
 	// Slice to assigned range.
 	if fileIndexEnd > int64(len(fileInfos)) {
@@ -228,31 +232,107 @@ func FetchFragmentsFromExternalSourceWithRange(
 	}
 
 	getFileInfoStart := time.Now()
-	rowCounts, err := fetchRowCountsConcurrently(ctx, format, fileInfos, storageConfig, extfs)
-	if err != nil {
-		return nil, err
+	var rowCounts []int64
+	if isMilvusTableFormat(format) {
+		rowCounts = make([]int64, len(fileInfos))
+		for i, fi := range fileInfos {
+			rowCounts[i] = fi.NumRows
+			if rowCounts[i] <= 0 {
+				return nil, merr.WrapErrServiceInternalMsg("milvus-table source manifest %s has non-positive row count %d", fi.FilePath, rowCounts[i])
+			}
+		}
+	} else {
+		rowCounts, err = fetchRowCountsConcurrently(ctx, format, fileInfos, storageConfig, extfs)
+		if err != nil {
+			return nil, err
+		}
 	}
-	log.Info("GetFileInfo phase completed",
-		zap.Int("totalFiles", len(fileInfos)),
-		zap.Duration("getFileInfoDuration", time.Since(getFileInfoStart)))
+	mlog.Info(ctx, "GetFileInfo phase completed",
+		mlog.Int("totalFiles", len(fileInfos)),
+		mlog.Duration("getFileInfoDuration", time.Since(getFileInfoStart)))
 
 	rowLimit := opts.rowLimitOrDefault()
 	fragmentIDGenerator := NewFragmentIDGenerator(0)
 	var fragments []Fragment
 	for i, fi := range fileInfos {
+		if isMilvusTableFormat(format) {
+			fragments = append(fragments, Fragment{
+				FragmentID: fragmentIDGenerator(),
+				FilePath:   fi.FilePath,
+				StartRow:   0,
+				EndRow:     rowCounts[i],
+				RowCount:   rowCounts[i],
+				Deltalogs:  fi.Deltalogs,
+			})
+			continue
+		}
 		fragments = append(fragments, SplitFileToFragments(fi.FilePath, rowCounts[i], rowLimit, fragmentIDGenerator)...)
 	}
 	if len(fragments) == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("no data files in range [%d, %d)", fileIndexBegin, fileIndexEnd)
 	}
 
-	log.Info("Created fragments from file range",
-		zap.Int("totalFragments", len(fragments)),
-		zap.Int("fileCount", len(fileInfos)),
-		zap.Int64("fileIndexBegin", fileIndexBegin),
-		zap.Int64("fileIndexEnd", fileIndexEnd))
+	mlog.Info(ctx, "Created fragments from file range",
+		mlog.Int("totalFragments", len(fragments)),
+		mlog.Int("fileCount", len(fileInfos)),
+		mlog.Int64("fileIndexBegin", fileIndexBegin),
+		mlog.Int64("fileIndexEnd", fileIndexEnd))
 
 	return fragments, nil
+}
+
+func buildCurrentSegmentFragmentsForSegment(
+	ctx context.Context,
+	seg *datapb.SegmentInfo,
+	storageConfig *indexpb.StorageConfig,
+	columns []string,
+) ([]Fragment, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	if seg.GetManifestPath() != "" && storageConfig != nil {
+		fragments, err := ReadFragmentsFromManifest(seg.GetManifestPath(), storageConfig, columns)
+		if err != nil {
+			return nil, merr.Wrapf(err, "failed to read manifest for segment %d at %s", seg.GetID(), seg.GetManifestPath())
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if len(fragments) > 0 {
+			return fragments, nil
+		}
+		mlog.Warn(ctx, "manifest returned 0 fragments, using virtual fragment",
+			mlog.FieldSegmentID(seg.GetID()),
+			mlog.String("manifestPath", seg.GetManifestPath()))
+	}
+
+	return []Fragment{
+		{
+			FragmentID: seg.GetID(),
+			FilePath:   "",
+			StartRow:   0,
+			EndRow:     seg.GetNumOfRows(),
+			RowCount:   seg.GetNumOfRows(),
+		},
+	}, nil
+}
+
+func buildCurrentSegmentFragments(
+	ctx context.Context,
+	segments []*datapb.SegmentInfo,
+	storageConfig *indexpb.StorageConfig,
+	columns []string,
+) (SegmentFragments, error) {
+	result := make(SegmentFragments)
+	for _, seg := range segments {
+		fragments, err := buildCurrentSegmentFragmentsForSegment(ctx, seg, storageConfig, columns)
+		if err != nil {
+			return nil, err
+		}
+		result[seg.GetID()] = fragments
+	}
+	return result, nil
 }
 
 // BuildCurrentSegmentFragments builds segment to fragments mapping from current segments.
@@ -265,33 +345,54 @@ func BuildCurrentSegmentFragments(
 	storageConfig *indexpb.StorageConfig,
 	columns []string,
 ) (SegmentFragments, error) {
-	result := make(SegmentFragments)
-	for _, seg := range segments {
-		// Try to read from manifest if available
-		if seg.GetManifestPath() != "" && storageConfig != nil {
-			fragments, err := ReadFragmentsFromManifest(seg.GetManifestPath(), storageConfig, columns)
-			if err != nil {
-				return nil, merr.Wrapf(err, "failed to read manifest for segment %d at %s", seg.GetID(), seg.GetManifestPath())
-			}
-			if len(fragments) > 0 {
-				result[seg.GetID()] = fragments
-				continue
-			}
-			log.Warn("manifest returned 0 fragments, using virtual fragment",
-				zap.Int64("segmentID", seg.GetID()),
-				zap.String("manifestPath", seg.GetManifestPath()))
-		}
+	return buildCurrentSegmentFragments(context.TODO(), segments, storageConfig, columns)
+}
 
-		// Virtual fragment for segments without manifest (initial state)
-		result[seg.GetID()] = []Fragment{
-			{
-				FragmentID: seg.GetID(),
-				FilePath:   "",
-				StartRow:   0,
-				EndRow:     seg.GetNumOfRows(),
-				RowCount:   seg.GetNumOfRows(),
-			},
-		}
+// BuildCurrentSegmentFragmentsConcurrently reads current segment manifests with
+// bounded concurrency. Context cancellation prevents queued reads from starting;
+// an object-store read already executing inside the manifest FFI must still return
+// before its worker can observe cancellation.
+func BuildCurrentSegmentFragmentsConcurrently(
+	ctx context.Context,
+	segments []*datapb.SegmentInfo,
+	storageConfig *indexpb.StorageConfig,
+	columns []string,
+	concurrency int,
+) (SegmentFragments, error) {
+	if len(segments) == 0 || concurrency <= 1 {
+		return buildCurrentSegmentFragments(ctx, segments, storageConfig, columns)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	workers := min(concurrency, len(segments))
+	pool := conc.NewPool[struct{}](workers)
+	defer pool.Release()
+
+	fragmentsBySegment := make([][]Fragment, len(segments))
+	futures := make([]*conc.Future[struct{}], len(segments))
+	for i, seg := range segments {
+		i, seg := i, seg
+		futures[i] = pool.Submit(func() (struct{}, error) {
+			fragments, err := buildCurrentSegmentFragmentsForSegment(ctx, seg, storageConfig, columns)
+			if err != nil {
+				return struct{}{}, err
+			}
+			fragmentsBySegment[i] = fragments
+			return struct{}{}, nil
+		})
+	}
+	if err := conc.BlockOnAll(futures...); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	result := make(SegmentFragments, len(segments))
+	for i, seg := range segments {
+		result[seg.GetID()] = fragmentsBySegment[i]
 	}
 	return result, nil
 }
@@ -305,10 +406,28 @@ func CreateSegmentManifestWithBasePath(
 	fragments []Fragment,
 	storageConfig *indexpb.StorageConfig,
 ) (string, error) {
+	return CreateSegmentManifestWithBasePathAndExtfs(ctx, basePath, format, columns, fragments, storageConfig, ExternalSpecContext{})
+}
+
+// CreateSegmentManifestWithBasePathAndExtfs creates a segment manifest and
+// injects external filesystem context when the format is milvus-table.
+func CreateSegmentManifestWithBasePathAndExtfs(
+	ctx context.Context,
+	basePath string,
+	format string,
+	columns []string,
+	fragments []Fragment,
+	storageConfig *indexpb.StorageConfig,
+	extfs ExternalSpecContext,
+) (string, error) {
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
 	default:
+	}
+
+	if isMilvusTableFormat(format) {
+		return CreateMilvusTableManifestFromSegmentManifests(basePath, columns, fragments, storageConfig, extfs)
 	}
 
 	manifestPath, err := CreateManifestForSegment(
@@ -325,30 +444,30 @@ func CreateSegmentManifestWithBasePath(
 	return manifestPath, nil
 }
 
-// GetColumnNamesFromSchema extracts column names from schema.
-// For external collections: only includes fields with ExternalField set
-// (system fields like __virtual_pk__ are skipped as they don't exist in parquet data).
-// For normal collections: uses field name for all fields.
+// GetColumnNamesFromSchema extracts physical source column names from schema.
 func GetColumnNamesFromSchema(schema *schemapb.CollectionSchema) []string {
-	if schema == nil {
-		return nil
-	}
+	return typeutil.NewStorageColumnResolver(schema).SourceDataColumnNames()
+}
 
-	isExternal := schema.GetExternalSource() != ""
-	var columns []string
-	for _, field := range schema.GetFields() {
-		if field.GetIsFunctionOutput() {
-			continue // function output fields don't exist in external data
-		}
-		extField := field.GetExternalField()
-		if extField != "" {
-			columns = append(columns, extField)
-		} else if !isExternal {
-			// Non-external collections: use field name
-			columns = append(columns, field.GetName())
-		}
-		// External collections: skip fields without ExternalField
-		// (e.g., __virtual_pk__, RowID, Timestamp)
+// HasExternalPrimaryKey reports whether a schema uses a user-provided primary
+// key instead of the milvus-table virtual primary key.
+func HasExternalPrimaryKey(schema *schemapb.CollectionSchema) bool {
+	if schema == nil {
+		return false
 	}
-	return columns
+	for _, field := range schema.GetFields() {
+		if field.GetIsPrimaryKey() {
+			return field.GetName() != common.VirtualPKFieldName
+		}
+	}
+	return false
+}
+
+// MilvusTablePrimaryKeyModeFromSchema returns the deltalog handling mode for a
+// milvus-table schema.
+func MilvusTablePrimaryKeyModeFromSchema(schema *schemapb.CollectionSchema) MilvusTablePrimaryKeyMode {
+	if HasExternalPrimaryKey(schema) {
+		return MilvusTablePrimaryKeyModeExternal
+	}
+	return MilvusTablePrimaryKeyModeVirtual
 }

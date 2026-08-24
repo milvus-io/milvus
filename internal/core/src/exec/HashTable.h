@@ -147,12 +147,6 @@ class BaseHashTable {
     virtual void
     setHashMode(HashMode mode, int32_t numNew) = 0;
 
-    /// Disables use of array or normalized key hash modes.
-    void
-    forceGenericHashMode() {
-        setHashMode(HashMode::kHash, 0);
-    }
-
     /// Populates 'hashes' and 'rows' fields in 'lookup' in preparation for
     /// 'groupProbe' call. Rehashes the table if necessary. Uses lookup.hashes to
     /// decode grouping keys from 'input'.
@@ -301,7 +295,7 @@ class HashTable : public BaseHashTable {
     allocateTables(uint64_t size);
 
     void
-    fullProbe(HashLookup& lookup, ProbeState& state);
+    fullProbe(HashLookup& lookup, ProbeState& state, bool extraCheck);
 
     void
     clear(bool freeTable = false) override;

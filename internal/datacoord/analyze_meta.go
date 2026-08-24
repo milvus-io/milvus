@@ -20,11 +20,10 @@ import (
 	"context"
 	"sync"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -61,14 +60,14 @@ func (m *analyzeMeta) reloadFromKV() error {
 	// load analyze stats
 	analyzeTasks, err := m.catalog.ListAnalyzeTasks(m.ctx)
 	if err != nil {
-		log.Warn("analyzeMeta reloadFromKV load analyze tasks failed", zap.Error(err))
+		mlog.Warn(m.ctx, "analyzeMeta reloadFromKV load analyze tasks failed", mlog.Err(err))
 		return err
 	}
 
 	for _, analyzeTask := range analyzeTasks {
 		m.tasks[analyzeTask.TaskID] = analyzeTask
 	}
-	log.Info("analyzeMeta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
+	mlog.Info(m.ctx, "analyzeMeta reloadFromKV done", mlog.Duration("duration", record.ElapseSpan()))
 	return nil
 }
 
@@ -91,24 +90,18 @@ func (m *analyzeMeta) AddAnalyzeTask(task *indexpb.AnalyzeTask) error {
 	m.Lock()
 	defer m.Unlock()
 
-	log.Info("add analyze task", zap.Int64("taskID", task.TaskID),
-		zap.Int64("collectionID", task.CollectionID), zap.Int64("partitionID", task.PartitionID))
+	mlog.Info(m.ctx, "add analyze task", mlog.FieldTaskID(task.TaskID),
+		mlog.FieldCollectionID(task.CollectionID), mlog.FieldPartitionID(task.PartitionID))
 	return m.saveTask(task)
 }
 
-func (m *analyzeMeta) DropAnalyzeTask(ctx context.Context, taskID int64) error {
-	m.Lock()
-	defer m.Unlock()
-
-	log.Info("drop analyze task", zap.Int64("taskID", taskID))
-	if err := m.catalog.DropAnalyzeTask(ctx, taskID); err != nil {
-		log.Warn("drop analyze task by catalog failed", zap.Int64("taskID", taskID),
-			zap.Error(err))
-		return err
-	}
-
+// dropTaskFromMemoryLocked removes taskID from in-memory state only, issuing
+// no catalog write. The caller must hold m's write lock. It is used by
+// callers (e.g. partition-stats-and-analyze-task cleanup) that persist the
+// drop via a composite catalog.Update and must not mutate memory until that
+// write has already succeeded.
+func (m *analyzeMeta) dropTaskFromMemoryLocked(taskID int64) {
 	delete(m.tasks, taskID)
-	return nil
 }
 
 func (m *analyzeMeta) UpdateVersion(taskID int64, nodeID int64) error {
@@ -123,8 +116,8 @@ func (m *analyzeMeta) UpdateVersion(taskID int64, nodeID int64) error {
 	cloneT := proto.Clone(t).(*indexpb.AnalyzeTask)
 	cloneT.Version++
 	cloneT.NodeID = nodeID
-	log.Info("update task version", zap.Int64("taskID", taskID), zap.Int64("newVersion", cloneT.Version),
-		zap.Int64("nodeID", nodeID))
+	mlog.Info(m.ctx, "update task version", mlog.FieldTaskID(taskID), mlog.Int64("newVersion", cloneT.Version),
+		mlog.FieldNodeID(nodeID))
 	return m.saveTask(cloneT)
 }
 
@@ -139,7 +132,7 @@ func (m *analyzeMeta) BuildingTask(taskID int64) error {
 
 	cloneT := proto.Clone(t).(*indexpb.AnalyzeTask)
 	cloneT.State = indexpb.JobState_JobStateInProgress
-	log.Info("task will be building", zap.Int64("taskID", taskID))
+	mlog.Info(m.ctx, "task will be building", mlog.FieldTaskID(taskID))
 
 	return m.saveTask(cloneT)
 }
@@ -156,8 +149,8 @@ func (m *analyzeMeta) UpdateState(taskID int64, state indexpb.JobState, failReas
 	cloneT := proto.Clone(t).(*indexpb.AnalyzeTask)
 	cloneT.State = state
 	cloneT.FailReason = failReason
-	log.Info("update analyze task state", zap.Int64("taskID", taskID), zap.String("state", state.String()),
-		zap.String("failReason", failReason))
+	mlog.Info(m.ctx, "update analyze task state", mlog.FieldTaskID(taskID), mlog.String("state", state.String()),
+		mlog.String("failReason", failReason))
 
 	return m.saveTask(cloneT)
 }
@@ -171,8 +164,8 @@ func (m *analyzeMeta) FinishTask(taskID int64, result *workerpb.AnalyzeResult) e
 		return merr.WrapErrServiceInternalMsg("there is no task with taskID: %d", taskID)
 	}
 
-	log.Info("finish task meta...", zap.Int64("taskID", taskID), zap.String("state", result.GetState().String()),
-		zap.String("failReason", result.GetFailReason()))
+	mlog.Info(m.ctx, "finish task meta...", mlog.FieldTaskID(taskID), mlog.String("state", result.GetState().String()),
+		mlog.String("failReason", result.GetFailReason()))
 
 	cloneT := proto.Clone(t).(*indexpb.AnalyzeTask)
 	cloneT.State = result.GetState()

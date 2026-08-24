@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -29,8 +28,9 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -142,11 +142,11 @@ func (t *refreshExternalCollectionTask) SetState(state indexpb.JobState, failRea
 
 func (t *refreshExternalCollectionTask) UpdateStateWithMeta(state indexpb.JobState, failReason string) error {
 	if err := t.refreshMeta.UpdateTaskState(t.GetTaskId(), state, failReason); err != nil {
-		log.Warn("update refresh task state failed",
-			zap.Int64("taskID", t.GetTaskId()),
-			zap.String("state", state.String()),
-			zap.String("failReason", failReason),
-			zap.Error(err))
+		mlog.Warn(context.TODO(), "update refresh task state failed",
+			mlog.Int64("taskID", t.GetTaskId()),
+			mlog.String("state", state.String()),
+			mlog.String("failReason", failReason),
+			mlog.Err(err))
 		return err
 	}
 	t.SetState(state, failReason)
@@ -170,10 +170,10 @@ func (t *refreshExternalCollectionTask) UpdateStateWithMeta(state indexpb.JobSta
 
 func (t *refreshExternalCollectionTask) UpdateProgressWithMeta(progress int64) error {
 	if err := t.refreshMeta.UpdateTaskProgress(t.GetTaskId(), progress); err != nil {
-		log.Warn("update refresh task progress failed",
-			zap.Int64("taskID", t.GetTaskId()),
-			zap.Int64("progress", progress),
-			zap.Error(err))
+		mlog.Warn(context.TODO(), "update refresh task progress failed",
+			mlog.Int64("taskID", t.GetTaskId()),
+			mlog.Int64("progress", progress),
+			mlog.Err(err))
 		return err
 	}
 	t.Progress = progress
@@ -187,11 +187,11 @@ func (t *refreshExternalCollectionTask) UpdateResultWithMeta(
 	updatedSegments []*datapb.SegmentInfo,
 ) error {
 	if err := t.refreshMeta.UpdateTaskResult(t.GetTaskId(), state, failReason, keptSegments, updatedSegments); err != nil {
-		log.Warn("update refresh task result failed",
-			zap.Int64("taskID", t.GetTaskId()),
-			zap.String("state", state.String()),
-			zap.String("failReason", failReason),
-			zap.Error(err))
+		mlog.Warn(context.TODO(), "update refresh task result failed",
+			mlog.Int64("taskID", t.GetTaskId()),
+			mlog.String("state", state.String()),
+			mlog.String("failReason", failReason),
+			mlog.Err(err))
 		return err
 	}
 	t.SetState(state, failReason)
@@ -207,37 +207,31 @@ func (t *refreshExternalCollectionTask) UpdateResultWithMeta(
 	return nil
 }
 
-func applyExternalCollectionSegmentUpdate(
+// applyExternalCollectionSegmentUpdateForBaseline applies a caller-supplied
+// immutable baseline: baseline IDs may be kept, patched, or removed, while IDs
+// outside the baseline may only be added as new segments. The job-level path
+// passes the published ownership baseline.
+func applyExternalCollectionSegmentUpdateForBaseline(
 	ctx context.Context,
 	mt *meta,
 	collectionID int64,
+	baselineSegmentIDs []int64,
 	keptSegmentIDs []int64,
 	updatedSegments []*datapb.SegmentInfo,
-	logFields ...zap.Field,
+	logFields ...mlog.Field,
 ) error {
 	if mt == nil {
 		return merr.WrapErrServiceInternalMsg("meta is nil, cannot update segments")
 	}
-	fields := append(logFields, zap.Int64("collectionID", collectionID))
-	log := log.Ctx(ctx).With(fields...)
-
-	log.Info("processing external collection update response",
-		zap.Int("keptSegments", len(keptSegmentIDs)),
-		zap.Int("updatedSegments", len(updatedSegments)))
+	mlog.Info(ctx, "processing external collection update response",
+		append(logFields,
+			mlog.FieldCollectionID(collectionID),
+			mlog.Int("keptSegments", len(keptSegmentIDs)),
+			mlog.Int("updatedSegments", len(updatedSegments)),
+		)...)
 
 	keptSegmentMap := make(map[int64]bool)
 	for _, segID := range keptSegmentIDs {
-		segment := mt.segments.GetSegment(segID)
-		if segment == nil {
-			return merr.WrapErrServiceInternalMsg("kept segment %d not found", segID)
-		}
-		if segment.GetCollectionID() != collectionID {
-			return merr.WrapErrServiceInternalMsg("collection mismatch for kept segment %d: existing %d, want %d",
-				segID, segment.GetCollectionID(), collectionID)
-		}
-		if segment.GetState() == commonpb.SegmentState_Dropped {
-			return merr.WrapErrServiceInternalMsg("cannot keep dropped segment %d", segID)
-		}
 		keptSegmentMap[segID] = true
 	}
 
@@ -260,72 +254,71 @@ func applyExternalCollectionSegmentUpdate(
 		validUpdatedSegments = append(validUpdatedSegments, seg)
 	}
 
-	// Safety validation: count current active segments and segments to be dropped
-	currentSegments := mt.SelectSegments(ctx, CollectionFilter(collectionID))
-	activeSegmentCount := 0
+	// Build the desired final state from the caller-supplied baseline and durable
+	// worker result. Current segment state is validated later while
+	// UpdateSegmentsInfo holds the segment metadata write lock.
 	segmentsToDrop := make([]int64, 0)
-	existingSegmentMap := make(map[int64]*SegmentInfo)
-	finalSegmentCount := 0
-	for _, seg := range currentSegments {
-		existingSegmentMap[seg.GetID()] = seg
-		if seg.GetState() != commonpb.SegmentState_Dropped {
-			activeSegmentCount++
-			if !keptSegmentMap[seg.GetID()] && upsertSegmentMap[seg.GetID()] == nil {
-				segmentsToDrop = append(segmentsToDrop, seg.GetID())
-			} else {
-				finalSegmentCount++
-			}
+	baselineSegmentMap := make(map[int64]struct{}, len(baselineSegmentIDs))
+	for _, segmentID := range baselineSegmentIDs {
+		if _, ok := baselineSegmentMap[segmentID]; ok {
+			return merr.WrapErrServiceInternalMsg("duplicate baseline segment %d", segmentID)
+		}
+		baselineSegmentMap[segmentID] = struct{}{}
+	}
+
+	for segmentID := range keptSegmentMap {
+		if _, ok := baselineSegmentMap[segmentID]; !ok {
+			return merr.WrapErrServiceInternalMsg("kept segment %d is outside the refresh baseline", segmentID)
+		}
+	}
+	for segmentID := range baselineSegmentMap {
+		if !keptSegmentMap[segmentID] && upsertSegmentMap[segmentID] == nil {
+			segmentsToDrop = append(segmentsToDrop, segmentID)
 		}
 	}
 
-	for _, incoming := range upsertSegmentMap {
-		existing := existingSegmentMap[incoming.GetID()]
-		if existing == nil {
-			existing = mt.segments.GetSegment(incoming.GetID())
-		}
-		if existing != nil {
-			if err := validateExternalRefreshPatch(existing, incoming, collectionID); err != nil {
-				return err
-			}
+	for segmentID, incoming := range upsertSegmentMap {
+		if _, isPatch := baselineSegmentMap[segmentID]; isPatch {
 			continue
 		}
 		if err := validateExternalRefreshNewSegment(incoming); err != nil {
 			return err
 		}
-		finalSegmentCount++
 	}
+	baselineSegmentCount := len(baselineSegmentMap)
+	finalSegmentCount := len(keptSegmentMap) + len(upsertSegmentMap)
 
-	log.Info("segment update safety check",
-		zap.Int("currentActiveSegments", activeSegmentCount),
-		zap.Int("segmentsToDrop", len(segmentsToDrop)),
-		zap.Int("keptSegments", len(keptSegmentMap)),
-		zap.Int("upsertSegments", len(upsertSegmentMap)),
-		zap.Int("finalSegmentCount", finalSegmentCount))
+	mlog.Info(ctx, "segment update safety check",
+		mlog.Int("baselineSegments", baselineSegmentCount),
+		mlog.Int("segmentsToDrop", len(segmentsToDrop)),
+		mlog.Int("keptSegments", len(keptSegmentMap)),
+		mlog.Int("upsertSegments", len(upsertSegmentMap)),
+		mlog.Int("finalSegmentCount", finalSegmentCount))
 
 	// Safety check: reject if dropping all segments without adding new ones
 	// This prevents accidental data loss from malformed worker responses
-	if activeSegmentCount > 0 && finalSegmentCount == 0 {
-		log.Error("safety check failed: refusing to drop all segments without replacement",
-			zap.Int("activeSegmentCount", activeSegmentCount),
-			zap.Int("keptSegments", len(keptSegmentMap)),
-			zap.Int("updatedSegments", len(upsertSegmentMap)))
+	if baselineSegmentCount > 0 && finalSegmentCount == 0 {
+		mlog.Error(ctx, "safety check failed: refusing to drop all segments without replacement",
+			mlog.Int("baselineSegmentCount", baselineSegmentCount),
+			mlog.Int("keptSegments", len(keptSegmentMap)),
+			mlog.Int("updatedSegments", len(upsertSegmentMap)))
 		return merr.WrapErrServiceInternalMsg("safety check failed: refusing to drop all %d segments without replacement (keptSegments=%d, updatedSegments=%d)",
-			activeSegmentCount, len(keptSegmentMap), len(upsertSegmentMap))
+			baselineSegmentCount, len(keptSegmentMap), len(upsertSegmentMap))
 	}
 
 	// Safety check: warn if dropping more than configured ratio of segments
-	if activeSegmentCount > 0 && len(segmentsToDrop) > 0 {
-		dropRatio := float64(len(segmentsToDrop)) / float64(activeSegmentCount)
+	if baselineSegmentCount > 0 && len(segmentsToDrop) > 0 {
+		dropRatio := float64(len(segmentsToDrop)) / float64(baselineSegmentCount)
 		threshold := paramtable.Get().DataCoordCfg.ExternalCollectionDropRatioWarn.GetAsFloat()
 		if threshold <= 0 {
 			threshold = 0.9
 		}
 		if dropRatio > threshold {
-			log.Warn("high segment drop ratio detected",
-				zap.Float64("dropRatio", dropRatio),
-				zap.Float64("threshold", threshold),
-				zap.Int64s("segmentsToDrop", segmentsToDrop),
-				zap.Int("activeSegmentCount", activeSegmentCount))
+			mlog.Warn(ctx, "high segment drop ratio detected",
+				mlog.Float64("dropRatio", dropRatio),
+				mlog.Float64("threshold", threshold),
+				mlog.Int64s("segmentsToDrop", segmentsToDrop),
+				mlog.Int("baselineSegmentCount", baselineSegmentCount))
 		}
 	}
 
@@ -354,54 +347,85 @@ func applyExternalCollectionSegmentUpdate(
 
 	// Build update operators
 	var operators []UpdateOperator
-	var patchErr error
+	alreadyAppliedNewSegments := make(map[int64]struct{})
 
 	validationOperator := func(modPack *updateSegmentPack) bool {
-		for _, incoming := range upsertSegmentMap {
-			existing := modPack.meta.segments.GetSegment(incoming.GetID())
-			if existing != nil {
-				if err := validateExternalRefreshPatch(existing, incoming, collectionID); err != nil {
-					patchErr = err
-					log.Warn("invalid external refresh segment patch",
-						zap.Int64("segmentID", incoming.GetID()),
-						zap.Error(err))
-					return false
+		for segmentID := range baselineSegmentMap {
+			existing := modPack.meta.segments.GetSegment(segmentID)
+			incoming := upsertSegmentMap[segmentID]
+			kept := keptSegmentMap[segmentID]
+
+			if existing == nil {
+				if !kept && incoming == nil {
+					// A missing segment already satisfies the desired removal state.
+					continue
 				}
+				return modPack.fail(merr.WrapErrServiceInternalMsg("baseline segment %d not found", segmentID))
 			}
+			if existing.GetCollectionID() != collectionID {
+				return modPack.fail(merr.WrapErrServiceInternalMsg(
+					"baseline segment %d belongs to collection %d, expected %d",
+					segmentID,
+					existing.GetCollectionID(),
+					collectionID,
+				))
+			}
+			if kept {
+				if existing.GetState() == commonpb.SegmentState_Dropped {
+					return modPack.fail(merr.WrapErrServiceInternalMsg("cannot keep dropped segment %d", segmentID))
+				}
+				continue
+			}
+			if incoming == nil {
+				// Dropped is the replay-safe terminal state for an inferred removal.
+				continue
+			}
+			if err := validateExternalRefreshPatch(existing, incoming, collectionID); err != nil {
+				mlog.Warn(ctx, "invalid external refresh segment patch",
+					mlog.FieldSegmentID(incoming.GetID()),
+					mlog.Err(err))
+				return modPack.fail(err)
+			}
+		}
+
+		for segmentID := range upsertSegmentMap {
+			if _, isPatch := baselineSegmentMap[segmentID]; isPatch {
+				continue
+			}
+			existing := modPack.meta.segments.GetSegment(segmentID)
+			if existing == nil {
+				continue
+			}
+			if externalRefreshNewSegmentAlreadyApplied(existing, upsertSegmentMap[segmentID]) {
+				alreadyAppliedNewSegments[segmentID] = struct{}{}
+				mlog.Info(ctx, "new external refresh segment already applied, skipping replay",
+					mlog.FieldSegmentID(segmentID))
+				continue
+			}
+			return modPack.fail(merr.WrapErrServiceInternalMsg(
+				"new external refresh segment %d collides with existing metadata",
+				segmentID,
+			))
 		}
 		return true
 	}
 	operators = append(operators, validationOperator)
 
-	// Operator 1: Drop segments not in kept list
+	// Operator 1: Drop only the segment IDs selected during validation. For an
+	// ownership plan this list is limited to its immutable baseline.
 	dropOperator := func(modPack *updateSegmentPack) bool {
-		if patchErr != nil {
-			return false
-		}
-		currentSegments := modPack.meta.segments.GetSegments()
-		for _, seg := range currentSegments {
-			// Skip segments not in this collection
-			if seg.GetCollectionID() != collectionID {
+		for _, segmentID := range segmentsToDrop {
+			current := modPack.meta.segments.GetSegment(segmentID)
+			if current == nil || current.GetState() == commonpb.SegmentState_Dropped {
 				continue
 			}
-
-			// Skip segments that are already dropped
-			if seg.GetState() == commonpb.SegmentState_Dropped {
-				continue
-			}
-
-			// Drop segment if not kept or upserted by this refresh response.
-			if !keptSegmentMap[seg.GetID()] && upsertSegmentMap[seg.GetID()] == nil {
-				segment := modPack.Get(seg.GetID())
-				if segment != nil {
-					updateSegStateAndPrepareMetrics(segment, commonpb.SegmentState_Dropped, modPack.metricMutation)
-					segment.DroppedAt = uint64(time.Now().UnixNano())
-					modPack.segments[seg.GetID()] = segment
-					log.Info("marking segment as dropped",
-						zap.Int64("segmentID", seg.GetID()),
-						zap.Int64("numRows", seg.GetNumOfRows()))
-				}
-			}
+			segment := modPack.Get(segmentID)
+			updateSegStateAndPrepareMetrics(segment, commonpb.SegmentState_Dropped, modPack.metricMutation)
+			segment.DroppedAt = uint64(time.Now().UnixNano())
+			modPack.segments[segmentID] = segment
+			mlog.Info(ctx, "marking segment as dropped",
+				mlog.FieldSegmentID(segmentID),
+				mlog.Int64("numRows", segment.GetNumOfRows()))
 		}
 		return true
 	}
@@ -411,28 +435,20 @@ func applyExternalCollectionSegmentUpdate(
 	for _, seg := range normalizedUpdatedSegments {
 		incoming := seg
 		upsertOperator := func(modPack *updateSegmentPack) bool {
-			if patchErr != nil {
-				return false
+			if _, ok := alreadyAppliedNewSegments[incoming.GetID()]; ok {
+				return true
 			}
 			existing := modPack.Get(incoming.GetID())
 			if existing != nil {
-				if err := validateExternalRefreshPatch(existing, incoming, collectionID); err != nil {
-					patchErr = err
-					log.Warn("invalid external refresh segment patch",
-						zap.Int64("segmentID", incoming.GetID()),
-						zap.Error(err))
-					return false
-				}
-
 				patched := applyExternalRefreshPatch(existing, incoming)
 				modPack.segments[incoming.GetID()] = patched
 				modPack.increments[incoming.GetID()] = metastore.BinlogsIncrement{
 					Segment: patched.SegmentInfo,
 				}
-				log.Info("patching existing segment",
-					zap.Int64("segmentID", incoming.GetID()),
-					zap.Int64("numRows", incoming.GetNumOfRows()),
-					zap.String("manifestPath", incoming.GetManifestPath()))
+				mlog.Info(ctx, "patching existing segment",
+					mlog.FieldSegmentID(incoming.GetID()),
+					mlog.Int64("numRows", incoming.GetNumOfRows()),
+					mlog.String("manifestPath", incoming.GetManifestPath()))
 				return true
 			}
 
@@ -452,9 +468,9 @@ func applyExternalCollectionSegmentUpdate(
 				incoming.GetNumOfRows(),
 			)
 
-			log.Info("adding new segment",
-				zap.Int64("segmentID", incoming.GetID()),
-				zap.Int64("numRows", incoming.GetNumOfRows()))
+			mlog.Info(ctx, "adding new segment",
+				mlog.FieldSegmentID(incoming.GetID()),
+				mlog.Int64("numRows", incoming.GetNumOfRows()))
 			return true
 		}
 		operators = append(operators, upsertOperator)
@@ -462,16 +478,13 @@ func applyExternalCollectionSegmentUpdate(
 
 	// Execute all operators atomically
 	if err := mt.UpdateSegmentsInfo(ctx, operators...); err != nil {
-		log.Warn("failed to update segments atomically", zap.Error(err))
+		mlog.Warn(ctx, "failed to update segments atomically", mlog.Err(err))
 		return err
 	}
-	if patchErr != nil {
-		return patchErr
-	}
 
-	log.Info("external collection segments updated successfully",
-		zap.Int("updatedSegments", len(updatedSegments)),
-		zap.Int("keptSegments", len(keptSegmentIDs)))
+	mlog.Info(ctx, "external collection segments updated successfully",
+		mlog.Int("updatedSegments", len(updatedSegments)),
+		mlog.Int("keptSegments", len(keptSegmentIDs)))
 
 	return nil
 }
@@ -506,6 +519,28 @@ func normalizeExternalRefreshUpdatedSegment(
 		normalized.PartitionID = partitionID
 	}
 	return normalized
+}
+
+// externalRefreshNewSegmentAlreadyApplied recognizes an idempotent replay of a
+// new, non-baseline segment. A manifest base path belongs to one segment, and
+// its versions move forward as that segment gains later manifest updates. An
+// equal or newer existing version therefore means the incoming refresh result
+// has already been applied or superseded and must not be written again.
+//
+// Do not compare fake binlogs here: V3 catalog persistence intentionally strips
+// them, so their in-memory representation does not survive DataCoord restart.
+func externalRefreshNewSegmentAlreadyApplied(existing *SegmentInfo, incoming *datapb.SegmentInfo) bool {
+	if existing == nil || incoming == nil {
+		return false
+	}
+	if existing.GetID() != incoming.GetID() ||
+		existing.GetCollectionID() != incoming.GetCollectionID() ||
+		existing.GetPartitionID() != incoming.GetPartitionID() {
+		return false
+	}
+
+	comparison, err := packed.CompareManifestPath(existing.GetManifestPath(), incoming.GetManifestPath())
+	return err == nil && comparison >= 0
 }
 
 func validateExternalRefreshNewSegment(incoming *datapb.SegmentInfo) error {
@@ -572,54 +607,70 @@ func applyExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentInfo
 	cloned.ManifestPath = incoming.GetManifestPath()
 	cloned.SchemaVersion = incoming.GetSchemaVersion()
 	cloned.Binlogs = incoming.GetBinlogs()
+	cloned.TextStatsLogs = nil
+	cloned.JsonKeyStats = nil
 	if incoming.GetStorageVersion() != 0 {
 		cloned.StorageVersion = incoming.GetStorageVersion()
 	}
 	return cloned
 }
 
-// SetJobInfo processes a complete job-level response and updates segment information atomically.
-func (t *refreshExternalCollectionTask) SetJobInfo(ctx context.Context, resp *datapb.RefreshExternalCollectionTaskResponse) error {
-	return applyExternalCollectionSegmentUpdate(
-		ctx,
-		t.mt,
-		t.GetCollectionId(),
-		resp.GetKeptSegments(),
-		resp.GetUpdatedSegments(),
-		zap.Int64("taskID", t.GetTaskId()),
-	)
+// getExternalRefreshSegmentSnapshots returns clones in the same order as
+// segmentIDs while holding segMu across the full read, preventing one worker
+// request from observing segment metadata from different update generations.
+func getExternalRefreshSegmentSnapshots(mt *meta, segmentIDs []int64) []*SegmentInfo {
+	mt.segMu.RLock()
+	defer mt.segMu.RUnlock()
+
+	result := make([]*SegmentInfo, len(segmentIDs))
+	for i, segmentID := range segmentIDs {
+		if segment := mt.segments.GetSegment(segmentID); segment != nil {
+			result[i] = segment.Clone()
+		}
+	}
+	return result
 }
 
 func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
-	timeout := paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	log := log.Ctx(ctx).With(
-		zap.Int64("taskID", t.GetTaskId()),
-		zap.Int64("collectionID", t.GetCollectionId()),
-		zap.Int64("nodeID", nodeID),
+	ctx := context.TODO()
+	log := mlog.With(
+		mlog.FieldJobID(t.GetJobId()),
+		mlog.FieldTaskID(t.GetTaskId()),
+		mlog.FieldCollectionID(t.GetCollectionId()),
+		mlog.FieldNodeID(nodeID),
 	)
-
 	var err error
 	defer func() {
 		if err != nil {
-			log.Warn("failed to create refresh task on worker", zap.Error(err))
+			log.Warn(ctx, "failed to create refresh task on worker", mlog.Err(err))
 			if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error()); updateErr != nil {
-				log.Warn("failed to persist Failed state after create error", zap.Error(updateErr))
+				log.Warn(ctx, "failed to persist Failed state after create error", mlog.Err(updateErr))
 			}
 		}
 	}()
 
-	log.Info("creating refresh task on worker")
+	log.Info(ctx, "creating refresh task on worker",
+		mlog.Int64("fileIndexBegin", t.GetFileIndexBegin()),
+		mlog.Int64("fileIndexEnd", t.GetFileIndexEnd()),
+		mlog.Int64("fileCount", t.GetFileIndexEnd()-t.GetFileIndexBegin()),
+		mlog.Int("ownedSegments", len(t.GetOwnedSegmentIds())))
 
 	if t.mt == nil {
 		err = merr.WrapErrServiceInternalMsg("meta is nil, cannot create task on worker")
 		return
 	}
+	if !isSupportedExternalRefreshOwnershipPlanVersion(t.GetOwnershipPlanVersion()) {
+		err = merr.WrapErrServiceInternalMsg(
+			"external refresh task %d has unsupported ownership plan version %d; retry refresh",
+			t.GetTaskId(),
+			t.GetOwnershipPlanVersion(),
+		)
+		return
+	}
 
 	// Persist task version and nodeID before dispatching to worker
 	if err = t.refreshMeta.UpdateTaskVersion(t.GetTaskId(), nodeID); err != nil {
-		log.Warn("failed to update task version", zap.Error(err))
+		log.Warn(ctx, "failed to update task version", mlog.Err(err))
 		return
 	}
 
@@ -631,22 +682,48 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	}
 	t.ExternalCollectionRefreshTask = updatedTask
 
-	// Get current segments for the collection
-	segments := t.mt.SelectSegments(ctx, CollectionFilter(t.GetCollectionId()))
-
-	currentSegments := make([]*datapb.SegmentInfo, 0, len(segments))
-	for _, seg := range segments {
-		currentSegments = append(currentSegments, seg.SegmentInfo)
+	ownedSegmentIDs := t.GetOwnedSegmentIds()
+	currentSegments := make([]*datapb.SegmentInfo, 0, len(ownedSegmentIDs))
+	seenOwnedSegments := make(map[int64]struct{}, len(t.GetOwnedSegmentIds()))
+	for _, segmentID := range ownedSegmentIDs {
+		if _, ok := seenOwnedSegments[segmentID]; ok {
+			err = merr.WrapErrServiceInternalMsg("task %d contains duplicate owned segment %d", t.GetTaskId(), segmentID)
+			return
+		}
+		seenOwnedSegments[segmentID] = struct{}{}
 	}
 
-	log.Info("collected current segments", zap.Int("segmentCount", len(currentSegments)))
+	segmentSnapshots := getExternalRefreshSegmentSnapshots(t.mt, ownedSegmentIDs)
+	for i, segmentID := range ownedSegmentIDs {
+		segment := segmentSnapshots[i]
+		if segment == nil {
+			err = merr.WrapErrServiceInternalMsg("owned segment %d not found for task %d", segmentID, t.GetTaskId())
+			return
+		}
+		if segment.GetCollectionID() != t.GetCollectionId() {
+			err = merr.WrapErrServiceInternalMsg(
+				"owned segment %d belongs to collection %d, expected %d",
+				segmentID,
+				segment.GetCollectionID(),
+				t.GetCollectionId(),
+			)
+			return
+		}
+		if !isSegmentHealthy(segment) {
+			err = merr.WrapErrServiceInternalMsg("owned segment %d is not active", segmentID)
+			return
+		}
+		currentSegments = append(currentSegments, segment.SegmentInfo)
+	}
+
+	log.Info(ctx, "collected owned current segments", mlog.Int("segmentCount", len(currentSegments)))
 
 	// Pre-allocate segment IDs for data mapping
 	preAllocCount := paramtable.Get().DataCoordCfg.ExternalCollectionPreAllocSegments.GetAsInt64()
 
 	idBegin, idEnd, err := t.allocator.AllocN(preAllocCount)
 	if err != nil {
-		log.Warn("failed to batch allocate segment IDs", zap.Error(err))
+		log.Warn(ctx, "failed to batch allocate segment IDs", mlog.Err(err))
 		return
 	}
 
@@ -655,10 +732,10 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		End:   idEnd,
 	}
 
-	log.Info("Pre-allocated segment IDs for external task",
-		zap.Int64("idBegin", idBegin),
-		zap.Int64("idEnd", idEnd),
-		zap.Int64("count", idEnd-idBegin))
+	log.Info(ctx, "Pre-allocated segment IDs for external task",
+		mlog.Int64("idBegin", idBegin),
+		mlog.Int64("idEnd", idEnd),
+		mlog.Int64("count", idEnd-idBegin))
 
 	// Use the current collection schema as this task's snapshot. There is no
 	// job/task-level schema-version gate for the current additive-only refresh
@@ -679,6 +756,7 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	partitionID := collInfo.Partitions[0]
 
 	req := &datapb.RefreshExternalCollectionTaskRequest{
+		ClusterID:              paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 		CollectionID:           t.GetCollectionId(),
 		PartitionID:            partitionID,
 		TaskID:                 t.GetTaskId(),
@@ -692,56 +770,48 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		ExploreManifestPath:    t.GetExploreManifestPath(),
 		FileIndexBegin:         t.GetFileIndexBegin(),
 		FileIndexEnd:           t.GetFileIndexEnd(),
+		TargetRowsPerSegment:   paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64(),
 	}
 
 	// Submit task to worker via unified task system
 	err = cluster.CreateRefreshExternalCollectionTask(nodeID, req)
 	if err != nil {
-		log.Warn("failed to create refresh task on worker", zap.Error(err))
+		log.Warn(ctx, "failed to create refresh task on worker", mlog.Err(err))
 		return
 	}
 
 	// Mark task as in progress - QueryTaskOnWorker will check completion
 	if err = t.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, ""); err != nil {
-		log.Warn("failed to update task state to InProgress", zap.Error(err))
+		log.Warn(ctx, "failed to update task state to InProgress", mlog.Err(err))
 		return
 	}
 
-	log.Info("refresh task submitted successfully")
+	log.Info(ctx, "refresh task submitted successfully")
 }
 
 func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluster) {
-	timeout := paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	log := log.Ctx(ctx).With(
-		zap.Int64("taskID", t.GetTaskId()),
-		zap.Int64("collectionID", t.GetCollectionId()),
-		zap.Int64("nodeID", t.GetNodeId()),
-	)
-
 	// Check if job has been canceled/superseded before querying worker
 	job := t.refreshMeta.GetJob(t.GetJobId())
 	if job == nil {
-		log.Info("job not found, task has been canceled")
+		mlog.Info(context.TODO(), "job not found, task has been canceled")
 		// Best-effort cleanup: try to drop task on worker if it was assigned
 		if t.GetNodeId() != 0 {
 			_ = cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
 		}
 		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job canceled"); err != nil {
-			log.Warn("failed to persist Failed state after job cancellation", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to persist Failed state after job cancellation", mlog.Err(err))
 		}
 		return
 	}
 	if job.GetState() == indexpb.JobState_JobStateFailed {
-		log.Info("job has been marked as failed, canceling task",
-			zap.String("jobFailReason", job.GetFailReason()))
+		mlog.Info(context.TODO(), "job has been marked as failed, canceling task",
+			mlog.String("jobFailReason", job.GetFailReason()))
 		// Best-effort cleanup: try to drop task on worker if it was assigned
 		if t.GetNodeId() != 0 {
 			_ = cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
 		}
 		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job canceled: "+job.GetFailReason()); err != nil {
-			log.Warn("failed to persist Failed state after job cancellation", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to persist Failed state after job cancellation", mlog.Err(err))
 		}
 		return
 	}
@@ -749,10 +819,10 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 	// Query task status from worker
 	resp, err := cluster.QueryRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
 	if err != nil {
-		log.Warn("query refresh task result failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "query refresh task result failed", mlog.Err(err))
 		// If query fails, mark task as failed
 		if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, fmt.Sprintf("query task failed: %v", err)); updateErr != nil {
-			log.Warn("failed to persist Failed state after query error", zap.Error(updateErr))
+			mlog.Warn(context.TODO(), "failed to persist Failed state after query error", mlog.Err(updateErr))
 		}
 		return
 	}
@@ -760,16 +830,16 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 	state := resp.GetState()
 	failReason := resp.GetFailReason()
 
-	log.Info("queried refresh task status",
-		zap.String("state", state.String()),
-		zap.String("failReason", failReason))
+	mlog.Info(context.TODO(), "queried refresh task status",
+		mlog.String("state", state.String()),
+		mlog.String("failReason", failReason))
 
 	// Handle different task states
 	switch state {
 	case indexpb.JobState_JobStateFinished:
 		// Validate source before processing - check if task has been superseded
 		if err := t.validateSource(); err != nil {
-			log.Warn("task validation failed, task has been superseded", zap.Error(err))
+			mlog.Warn(context.TODO(), "task validation failed, task has been superseded", mlog.Err(err))
 			t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error())
 			return
 		}
@@ -783,54 +853,45 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 			resp.GetKeptSegments(),
 			resp.GetUpdatedSegments(),
 		); err != nil {
-			log.Warn("failed to update task state to Finished", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to update task state to Finished", mlog.Err(err))
 			return
 		}
-		log.Info("refresh task completed successfully")
+		mlog.Info(context.TODO(), "refresh task completed successfully")
 
 	case indexpb.JobState_JobStateFailed:
 		// Task failed
 		if err := t.UpdateStateWithMeta(state, failReason); err != nil {
-			log.Warn("failed to update task state to Failed", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to update task state to Failed", mlog.Err(err))
 			return
 		}
-		log.Warn("refresh task failed", zap.String("reason", failReason))
+		mlog.Warn(context.TODO(), "refresh task failed", mlog.String("reason", failReason))
 
 	case indexpb.JobState_JobStateInProgress, indexpb.JobState_JobStateNone, indexpb.JobState_JobStateInit:
 		// Task still in progress or not yet picked up by scheduler, no action needed
-		log.Info("refresh task still in progress",
-			zap.String("state", state.String()))
+		mlog.Info(context.TODO(), "refresh task still in progress",
+			mlog.String("state", state.String()))
 
 	case indexpb.JobState_JobStateRetry:
 		// Task needs retry - mark as failed
-		log.Warn("refresh task in unexpected state, marking as failed",
-			zap.String("state", state.String()))
+		mlog.Warn(context.TODO(), "refresh task in unexpected state, marking as failed",
+			mlog.String("state", state.String()))
 		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, fmt.Sprintf("task in unexpected state: %s", state.String())); err != nil {
-			log.Warn("failed to persist Failed state for retry branch", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to persist Failed state for retry branch", mlog.Err(err))
 		}
 
 	default:
-		log.Warn("refresh task in unknown state",
-			zap.String("state", state.String()))
+		mlog.Warn(context.TODO(), "refresh task in unknown state",
+			mlog.String("state", state.String()))
 	}
 }
 
 func (t *refreshExternalCollectionTask) DropTaskOnWorker(cluster session.Cluster) {
-	timeout := paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	log := log.Ctx(ctx).With(
-		zap.Int64("taskID", t.GetTaskId()),
-		zap.Int64("collectionID", t.GetCollectionId()),
-		zap.Int64("nodeID", t.GetNodeId()),
-	)
-
 	// Drop task on worker to cancel execution and clean up resources
 	err := cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
 	if err != nil {
-		log.Warn("failed to drop refresh task on worker", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to drop refresh task on worker", mlog.Err(err))
 		return
 	}
 
-	log.Info("refresh task dropped successfully")
+	mlog.Info(context.TODO(), "refresh task dropped successfully")
 }

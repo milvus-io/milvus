@@ -35,14 +35,13 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -116,6 +115,19 @@ func (s bm25FunctionSet) IsSupersetOf(old bm25FunctionSet) bool {
 		}
 	}
 	return true
+}
+
+func (s bm25FunctionSet) HasIncompatibleCommonFunction(old bm25FunctionSet) bool {
+	// Do not reuse IsSupersetOf here: loaded collections must allow BM25
+	// function fields to be dropped and re-added with new output field IDs,
+	// while still rejecting in-place changes to an existing output field.
+	for outputFieldID, newFunction := range s {
+		oldFunction, ok := old[outputFieldID]
+		if ok && !sameBM25Function(newFunction, oldFunction) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s bm25FunctionSet) Equal(other bm25FunctionSet) bool {
@@ -209,6 +221,40 @@ func (s *sealedBm25Stats) addFieldsLocked(fieldIDs []int64) {
 	}
 }
 
+func (s *sealedBm25Stats) RetainFields(fieldIDs map[int64]struct{}) int64 {
+	s.Lock()
+	defer s.Unlock()
+
+	kept := s.fieldList[:0]
+	removedDiskSize := int64(0)
+	for _, fieldID := range s.fieldList {
+		if _, ok := fieldIDs[fieldID]; ok {
+			kept = append(kept, fieldID)
+			continue
+		}
+		if s.localDir == "" {
+			continue
+		}
+		fieldDir := path.Join(s.localDir, fmt.Sprintf("%d", fieldID))
+		fieldDiskSize := bm25FieldDirDiskSize(fieldDir)
+		if err := os.RemoveAll(fieldDir); err != nil {
+			// Removal failed: the files remain on disk, so keep tracking the
+			// field and do not count its bytes as freed — tracked disk usage
+			// must match what is physically present.
+			mlog.Warn(context.TODO(), "remove dropped bm25 stats field failed", mlog.Err(err), mlog.String("path", fieldDir))
+			kept = append(kept, fieldID)
+			continue
+		}
+		removedDiskSize += fieldDiskSize
+	}
+	s.fieldList = kept
+	if removedDiskSize > s.diskSize {
+		removedDiskSize = s.diskSize
+	}
+	s.diskSize -= removedDiskSize
+	return removedDiskSize
+}
+
 func (s *sealedBm25Stats) FieldList() []int64 {
 	s.RLock()
 	defer s.RUnlock()
@@ -223,7 +269,7 @@ func (s *sealedBm25Stats) Remove() {
 	if s.localDir != "" {
 		err := os.RemoveAll(s.localDir)
 		if err != nil {
-			log.Warn("remove local bm25 stats failed", zap.Error(err), zap.String("path", s.localDir))
+			mlog.Warn(context.TODO(), "remove local bm25 stats failed", mlog.Err(err), mlog.String("path", s.localDir))
 		}
 	}
 }
@@ -286,14 +332,32 @@ func newBm25Stats(functions []*schemapb.FunctionSchema) bm25Stats {
 	return stats
 }
 
-func (s bm25Stats) AddMissingFunctions(functions []*schemapb.FunctionSchema) {
+func bm25FunctionFieldIDs(functions []*schemapb.FunctionSchema) map[int64]struct{} {
+	fieldIDs := make(map[int64]struct{})
 	for _, function := range functions {
 		if function.GetType() != schemapb.FunctionType_BM25 || len(function.GetOutputFieldIds()) == 0 {
 			continue
 		}
-		fieldID := function.GetOutputFieldIds()[0]
+		fieldIDs[function.GetOutputFieldIds()[0]] = struct{}{}
+	}
+	return fieldIDs
+}
+
+func (s bm25Stats) SyncFunctions(functions []*schemapb.FunctionSchema) map[int64]struct{} {
+	fieldIDs := bm25FunctionFieldIDs(functions)
+	s.RetainFields(fieldIDs)
+	for fieldID := range fieldIDs {
 		if _, ok := s[fieldID]; !ok {
 			s[fieldID] = storage.NewBM25Stats()
+		}
+	}
+	return fieldIDs
+}
+
+func (s bm25Stats) RetainFields(fieldIDs map[int64]struct{}) {
+	for fieldID := range s {
+		if _, ok := fieldIDs[fieldID]; !ok {
+			delete(s, fieldID)
 		}
 	}
 }
@@ -412,7 +476,18 @@ func (o *idfOracle) RegisterGrowing(segmentID int64, stats bm25Stats) {
 
 func (o *idfOracle) SyncFunctions(functions []*schemapb.FunctionSchema) error {
 	o.Lock()
-	o.current.AddMissingFunctions(functions)
+	fieldIDs := o.current.SyncFunctions(functions)
+	for _, stats := range o.growing {
+		stats.RetainFields(fieldIDs)
+	}
+	removedDiskSize := int64(0)
+	o.sealed.Range(func(_ int64, stats *sealedBm25Stats) bool {
+		removedDiskSize += stats.RetainFields(fieldIDs)
+		return true
+	})
+	if removedDiskSize > 0 {
+		o.sealedDiskSize.Add(-removedDiskSize)
+	}
 	o.Unlock()
 	o.syncResource()
 	return nil
@@ -428,9 +503,9 @@ func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *q
 
 		logpaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BM25StatsPaths()
 		if err != nil {
-			log.Warn("load remote segment bm25 stats failed",
-				zap.Int64("segmentID", segmentID),
-				zap.Error(err),
+			mlog.Warn(ctx, "load remote segment bm25 stats failed",
+				mlog.FieldSegmentID(segmentID),
+				mlog.Err(err),
 			)
 			return nil, err
 		}
@@ -446,7 +521,7 @@ func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *q
 			// cleanup on failure
 			cleanupPath := path.Join(o.dirPath, fmt.Sprintf("%d", segmentID))
 			if rmErr := os.RemoveAll(cleanupPath); rmErr != nil {
-				log.Warn("failed to cleanup bm25 stats dir on load failure", zap.Error(rmErr), zap.String("path", cleanupPath))
+				mlog.Warn(ctx, "failed to cleanup bm25 stats dir on load failure", mlog.Err(rmErr), mlog.String("path", cleanupPath))
 			}
 			return nil, err
 		}
@@ -477,10 +552,10 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 	// QueryCoord deduplicates same sealed-segment load/reopen tasks by replica, segment, and scope.
 	// This shared singleflight key only coalesces duplicate calls; it is not relied on to serialize different tasks.
 	_, err, _ := o.sf.Do(fmt.Sprintf("load_sealed_%d", segmentID), func() (any, error) {
-		logger := log.Ctx(ctx).With(zap.Int64("segmentID", segmentID))
+		logger := mlog.With(mlog.FieldSegmentID(segmentID))
 		logpaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BM25StatsPaths()
 		if err != nil {
-			logger.Warn("load remote segment bm25 stats for reopen failed", zap.Error(err))
+			logger.Warn(ctx, "load remote segment bm25 stats for reopen failed", mlog.Err(err))
 			return nil, err
 		}
 		if len(logpaths) == 0 {
@@ -520,7 +595,7 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 			for fieldID := range missingPaths {
 				cleanupPath := path.Join(o.dirPath, fmt.Sprintf("%d", segmentID), fmt.Sprintf("%d", fieldID))
 				if rmErr := os.RemoveAll(cleanupPath); rmErr != nil {
-					logger.Warn("failed to cleanup reopened bm25 stats field dir", zap.Error(rmErr), zap.String("path", cleanupPath))
+					logger.Warn(ctx, "failed to cleanup reopened bm25 stats field dir", mlog.Err(rmErr), mlog.String("path", cleanupPath))
 				}
 			}
 		}
@@ -612,10 +687,31 @@ type streamLoadResult struct {
 	diskSize  int64
 }
 
+func bm25FieldDirDiskSize(fieldDir string) int64 {
+	entries, err := os.ReadDir(fieldDir)
+	if err != nil {
+		return 0
+	}
+
+	size := int64(0)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			mlog.Warn(context.TODO(), "stat bm25 stats field file failed", mlog.Err(err), mlog.String("path", path.Join(fieldDir, entry.Name())))
+			continue
+		}
+		size += info.Size()
+	}
+	return size
+}
+
 // streamLoad downloads BM25 stats from remote storage to local disk.
 // When needParse is true, also parses stats using TeeReader.
 func (o *idfOracle) streamLoad(ctx context.Context, segmentID int64, binlogPaths map[int64][]string, cm storage.ChunkManager, needParse bool) (streamLoadResult, error) {
-	log := log.Ctx(ctx).With(zap.Int64("segmentID", segmentID))
+	log := mlog.With(mlog.FieldSegmentID(segmentID))
 	startTs := time.Now()
 
 	segDir := path.Join(o.dirPath, fmt.Sprintf("%d", segmentID))
@@ -650,11 +746,11 @@ func (o *idfOracle) streamLoad(ctx context.Context, segmentID int64, binlogPaths
 
 		if needParse {
 			stats[fieldID] = fieldStats
-			log.Info("loaded bm25 stats", zap.Duration("time", time.Since(startTs)), zap.Int64("numRow", fieldStats.NumRow()), zap.Int64("fieldID", fieldID))
+			log.Info(ctx, "loaded bm25 stats", mlog.Duration("time", time.Since(startTs)), mlog.Int64("numRow", fieldStats.NumRow()), mlog.FieldFieldID(fieldID))
 		}
 	}
 
-	log.Info("stream load bm25 stats done", zap.Duration("time", time.Since(startTs)), zap.Int64("diskSize", totalDiskSize), zap.Bool("parsed", needParse))
+	log.Info(ctx, "stream load bm25 stats done", mlog.Duration("time", time.Since(startTs)), mlog.Int64("diskSize", totalDiskSize), mlog.Bool("parsed", needParse))
 
 	return streamLoadResult{
 		localDir:  segDir,
@@ -857,7 +953,7 @@ func (o *idfOracle) Close() {
 	o.resourceMu.Unlock()
 
 	if err := os.RemoveAll(o.dirPath); err != nil {
-		log.Warn("failed to remove bm25 stats dir on close", zap.Error(err), zap.String("path", o.dirPath))
+		mlog.Warn(context.TODO(), "failed to remove bm25 stats dir on close", mlog.Err(err), mlog.String("path", o.dirPath))
 	}
 }
 
@@ -886,7 +982,7 @@ func (o *idfOracle) syncloop() {
 		case <-o.syncNotify:
 			err := o.SyncDistribution()
 			if err != nil {
-				log.Warn("idf oracle sync distribution failed", zap.Error(err))
+				mlog.Warn(context.TODO(), "idf oracle sync distribution failed", mlog.Err(err))
 				time.Sleep(time.Second * 10)
 				o.NotifySync()
 			}
@@ -922,7 +1018,7 @@ func (o *idfOracle) SyncDistribution() error {
 			case snapshot.targetVersion:
 				targetMap.Insert(segment.SegmentID)
 				if !o.sealed.Contain(segment.SegmentID) {
-					log.Warn("idf oracle lack some sealed segment", zap.Int64("segment", segment.SegmentID))
+					mlog.Warn(context.TODO(), "idf oracle lack some sealed segment", mlog.Int64("segment", segment.SegmentID))
 				}
 			case unreadableTargetVersion:
 				reserveMap.Insert(segment.SegmentID)
@@ -1020,7 +1116,7 @@ func (o *idfOracle) SyncDistribution() error {
 	o.Unlock()
 
 	o.syncResource()
-	log.Ctx(context.TODO()).Info("sync idf distribution finished", zap.Int64("version", snapshot.targetVersion), zap.Int64("numrow", numRow), zap.Int("growing", growingLen), zap.Int("sealed", sealedLen))
+	mlog.Info(context.TODO(), "sync idf distribution finished", mlog.Int64("version", snapshot.targetVersion), mlog.Int64("numrow", numRow), mlog.Int("growing", growingLen), mlog.Int("sealed", sealedLen))
 	return nil
 }
 

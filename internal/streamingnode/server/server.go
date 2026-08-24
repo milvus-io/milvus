@@ -10,15 +10,15 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/kafka"
 	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
 	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // Server is the streamingnode server.
@@ -37,7 +37,7 @@ type Server struct {
 
 // Init initializes the streamingnode server.
 func (s *Server) init() {
-	log.Info("init streamingnode server...")
+	mlog.Info(context.TODO(), "init streamingnode server...")
 	// init all basic components.
 	s.initBasicComponent()
 
@@ -45,24 +45,28 @@ func (s *Server) init() {
 	s.initService()
 
 	// init file resource manager
-	fileresource.InitManager(resource.Resource().ChunkManager(), fileresource.ParseMode(paramtable.Get().CommonCfg.QNFileResourceMode.GetValue()))
+	fileresource.InitManager(resource.Resource().ChunkManager(), fileresource.GetLocalMode())
 
-	log.Info("init query segcore...")
+	if err := analyzer.InitOptions(); err != nil {
+		panic(fmt.Sprintf("init analyzer options failed, %+v", err))
+	}
+
+	mlog.Info(context.TODO(), "init query segcore...")
 	if err := initcore.InitQueryNode(context.TODO()); err != nil {
 		panic(fmt.Sprintf("init query node segcore failed, %+v", err))
 	}
 
-	log.Info("streamingnode server initialized")
+	mlog.Info(context.TODO(), "streamingnode server initialized")
 }
 
 // Stop stops the streamingnode server.
 func (s *Server) Stop() {
-	log.Info("stopping streamingnode server...")
-	log.Info("close wal manager...")
+	mlog.Info(context.TODO(), "stopping streamingnode server...")
+	mlog.Info(context.TODO(), "close wal manager...")
 	s.walManager.Close()
-	log.Info("release streamingnode resources...")
+	mlog.Info(context.TODO(), "release streamingnode resources...")
 	resource.Release()
-	log.Info("streamingnode server stopped")
+	mlog.Info(context.TODO(), "streamingnode server stopped")
 }
 
 // initBasicComponent initialize all underlying dependency for streamingnode.

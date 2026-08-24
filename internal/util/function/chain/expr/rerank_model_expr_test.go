@@ -21,6 +21,8 @@ package expr
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -28,7 +30,10 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // =============================================================================
@@ -136,7 +141,7 @@ func (s *RerankModelExprTestSuite) TestNewRerankModelExpr_Valid() {
 	expr, err := NewRerankModelExpr(provider, []string{"query1", "query2"})
 	s.Require().NoError(err)
 	s.NotNil(expr)
-	s.Equal("model", expr.Name())
+	s.Equal(RerankModelFuncName, expr.Name())
 }
 
 func (s *RerankModelExprTestSuite) TestNewRerankModelExpr_NilProvider() {
@@ -157,6 +162,62 @@ func (s *RerankModelExprTestSuite) TestNewRerankModelExpr_NilQueries() {
 	_, err := NewRerankModelExpr(provider, nil)
 	s.Error(err)
 	s.Contains(err.Error(), "queries must not be empty")
+}
+
+func (s *RerankModelExprTestSuite) TestNewRerankModelExprFromParams() {
+	paramtable.Init()
+	paramtable.Get().FunctionCfg.RerankModelProviders.GetFunc = func() map[string]string {
+		return map[string]string{}
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"results": [{"index": 0, "relevance_score": 0.1}]}`))
+	}))
+	defer ts.Close()
+
+	fn, err := NewRerankModelExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: map[string]*schemapb.FunctionParamValue{
+		"provider": stringParam("vllm"),
+		"endpoint": stringParam(ts.URL),
+		"queries":  arrayParam(stringParam("query")),
+	}})
+	s.Require().NoError(err)
+	s.Equal(RerankModelFuncName, fn.Name())
+
+	_, err = NewRerankModelExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: map[string]*schemapb.FunctionParamValue{
+		"provider": stringParam("vllm"),
+		"endpoint": stringParam(ts.URL),
+	}})
+	s.ErrorContains(err, "missing required parameter")
+
+	_, err = NewRerankModelExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: map[string]*schemapb.FunctionParamValue{
+		"provider": stringParam("vllm"),
+		"endpoint": stringParam(ts.URL),
+		"queries":  arrayParam(stringParam("query")),
+		"invalid":  arrayParam(stringParam("value")),
+	}})
+	s.ErrorContains(err, "must be scalar")
+}
+
+func (s *RerankModelExprTestSuite) TestModelProviderParamsSkipsQueries() {
+	params, err := modelProviderParams(map[string]*schemapb.FunctionParamValue{
+		"provider": stringParam("vllm"),
+		"enabled":  boolParam(true),
+		"batch":    intParam(8),
+		"ratio":    doubleParam(0.5),
+		"queries":  arrayParam(stringParam("query")),
+	})
+	s.Require().NoError(err)
+
+	values := make(map[string]string, len(params))
+	for _, param := range params {
+		values[param.Key] = param.Value
+	}
+	s.Equal("vllm", values["provider"])
+	s.Equal("true", values["enabled"])
+	s.Equal("8", values["batch"])
+	s.Equal("0.5", values["ratio"])
+	s.NotContains(values, "queries")
 }
 
 // =============================================================================
@@ -380,6 +441,7 @@ func (s *RerankModelExprTestSuite) TestExecute_QueryCountMismatch() {
 	ctx := types.NewFuncContext(s.pool)
 	_, err = expr.Execute(ctx, []*arrow.Chunked{textCol})
 	s.Error(err)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
 	s.Contains(err.Error(), "queries count")
 }
 

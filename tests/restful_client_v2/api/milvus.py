@@ -544,6 +544,43 @@ class CollectionClient(Requests):
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
 
+    def drop_field(self, collection_name, field_name=None, field_id=None, db_name="default"):
+        """Drop field by field name or field ID"""
+        url = f"{self.endpoint}/v2/vectordb/collections/fields/drop"
+        payload = {"collectionName": collection_name}
+        if field_name is not None:
+            payload["fieldName"] = field_name
+        if field_id is not None:
+            payload["fieldId"] = field_id
+        if self.db_name is not None:
+            payload["dbName"] = self.db_name
+        if db_name != "default":
+            payload["dbName"] = db_name
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
+    def add_function_field(self, payload, db_name="default"):
+        """Add a function together with its output field and bound index."""
+        url = f"{self.endpoint}/v2/vectordb/collections/add_function_field"
+        payload = copy.deepcopy(payload)
+        if self.db_name is not None:
+            payload["dbName"] = self.db_name
+        if db_name != "default":
+            payload["dbName"] = db_name
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
+    def drop_function_field(self, payload, db_name="default"):
+        """Drop a function together with its output field and bound index."""
+        url = f"{self.endpoint}/v2/vectordb/collections/drop_function_field"
+        payload = copy.deepcopy(payload)
+        if self.db_name is not None:
+            payload["dbName"] = self.db_name
+        if db_name != "default":
+            payload["dbName"] = db_name
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
     def add_struct_field(self, collection_name, field_params, db_name="default"):
         """Add struct field"""
         url = f"{self.endpoint}/v2/vectordb/collections/struct_fields/add"
@@ -765,6 +802,16 @@ class RoleClient(Requests):
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
+
+    def role_grant_v2(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/roles/grant_privilege_v2"
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
+    def role_revoke_v2(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/roles/revoke_privilege_v2"
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
 
 
 class IndexClient(Requests):
@@ -1036,6 +1083,82 @@ class DatabaseClient(Requests):
         payload = {"dbName": db_name, "propertyKeys": property_keys}
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
+
+
+class FileResourceClient(Requests):
+    def __init__(self, endpoint, token):
+        super().__init__(url=endpoint, api_key=token)
+        self.endpoint = endpoint
+        self.api_key = token
+
+    def file_resource_add(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/file_resources/add"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def file_resource_remove(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/file_resources/remove"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def file_resource_list(self):
+        url = f"{self.endpoint}/v2/vectordb/file_resources/list"
+        return self.post(url, headers=self.update_headers(), data={}).json()
+
+
+class SnapshotClient(Requests):
+    def __init__(self, endpoint, token):
+        super().__init__(url=endpoint, api_key=token)
+        self.endpoint = endpoint
+        self.api_key = token
+
+    def snapshot_create(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/snapshots/create"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def snapshot_drop(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/snapshots/drop"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def snapshot_list(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/snapshots/list"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def snapshot_describe(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/snapshots/describe"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def snapshot_restore(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/snapshots/restore"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def snapshot_pin(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/snapshots/pin"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def snapshot_unpin(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/snapshots/unpin"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def get_restore_snapshot_state(self, job_id):
+        url = f"{self.endpoint}/v2/vectordb/jobs/snapshot/describe"
+        payload = {"jobId": str(job_id)}
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def list_restore_snapshot_jobs(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/jobs/snapshot/list"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def snapshot_export(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/jobs/snapshot/export"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def get_export_snapshot_state(self, job_id):
+        url = f"{self.endpoint}/v2/vectordb/jobs/snapshot/export/describe"
+        payload = {"jobId": str(job_id)}
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def snapshot_restore_external(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/jobs/snapshot/restore_external"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
 
 
 class StorageClient:

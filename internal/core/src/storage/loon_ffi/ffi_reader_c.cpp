@@ -24,6 +24,7 @@
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
 #include "milvus-storage/column_groups.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/ffi_internal/bridge.h"
 #include "milvus-storage/manifest.h"
@@ -93,40 +94,6 @@ GetLoonReader(
 }
 
 CStatus
-NewPackedFFIReader(const char* manifest_path,
-                   struct ArrowSchema* schema,
-                   char** needed_columns,
-                   int64_t needed_columns_size,
-                   CFFIPackedReader* c_packed_reader,
-                   CStorageConfig c_storage_config,
-                   CPluginContext* c_plugin_context) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto properties =
-            MakeInternalPropertiesFromStorageConfig(c_storage_config);
-        AssertInfo(properties != nullptr, "properties is nullptr");
-
-        auto loon_manifest = GetLoonManifest(manifest_path, properties);
-        AssertInfo(loon_manifest != nullptr, "manifest is nullptr");
-
-        auto reader =
-            GetLoonReader(std::make_shared<milvus_storage::api::ColumnGroups>(
-                              loon_manifest->columnGroups()),
-                          schema,
-                          needed_columns,
-                          needed_columns_size,
-                          properties,
-                          c_plugin_context);
-
-        *c_packed_reader = static_cast<CFFIPackedReader>(reader.release());
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
-}
-
-CStatus
 NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
                                struct ArrowSchema* schema,
                                char** needed_columns,
@@ -154,11 +121,59 @@ NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
             std::make_shared<milvus_storage::api::ColumnGroups>();
         auto status = milvus_storage::column_groups_import(
             &loon_manifest->column_groups, column_groups.get());
-        AssertInfo(status.ok(),
-                   "Failed to import column groups: {}",
-                   status.ToString());
+        if (!status.ok()) {
+            auto error = milvus_storage::ToSegcoreError(status);
+            return milvus::FailureCStatus(&error);
+        }
 
         auto reader = GetLoonReader(column_groups,
+                                    schema,
+                                    needed_columns,
+                                    needed_columns_size,
+                                    properties,
+                                    c_plugin_context);
+
+        *c_loon_reader = static_cast<CFFIPackedReader>(reader.release());
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+NewPackedFFIReaderWithColumnGroups(const LoonColumnGroups* column_groups,
+                                   struct ArrowSchema* schema,
+                                   char** needed_columns,
+                                   int64_t needed_columns_size,
+                                   CFFIPackedReader* c_loon_reader,
+                                   CStorageConfig c_storage_config,
+                                   CPluginContext* c_plugin_context,
+                                   int64_t collection_id,
+                                   const char* external_source,
+                                   const char* external_spec) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto properties =
+            MakeInternalPropertiesFromStorageConfig(c_storage_config);
+        if (external_source != nullptr && external_source[0] != '\0') {
+            InjectExternalSpecProperties(*properties,
+                                         collection_id,
+                                         std::string(external_source),
+                                         external_spec != nullptr
+                                             ? std::string(external_spec)
+                                             : std::string());
+        }
+        auto imported_column_groups =
+            std::make_shared<milvus_storage::api::ColumnGroups>();
+        auto status = milvus_storage::column_groups_import(
+            column_groups, imported_column_groups.get());
+        if (!status.ok()) {
+            auto error = milvus_storage::ToSegcoreError(status);
+            return milvus::FailureCStatus(&error);
+        }
+
+        auto reader = GetLoonReader(imported_column_groups,
                                     schema,
                                     needed_columns,
                                     needed_columns_size,
@@ -183,9 +198,10 @@ GetFFIReaderStream(CFFIPackedReader c_packed_reader,
             static_cast<milvus_storage::api::Reader*>(c_packed_reader);
 
         auto result = reader->get_record_batch_reader();
-        AssertInfo(result.ok(),
-                   "failed to get record batch reader, {}",
-                   result.status().ToString());
+        if (!result.ok()) {
+            auto error = milvus_storage::ToSegcoreError(result.status());
+            return milvus::FailureCStatus(&error);
+        }
 
         auto array_stream = result.ValueOrDie();
 

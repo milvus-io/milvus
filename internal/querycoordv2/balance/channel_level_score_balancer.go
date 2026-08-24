@@ -18,19 +18,18 @@ package balance
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"sort"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -66,23 +65,24 @@ func NewChannelLevelScoreBalancer(scheduler task.Scheduler,
 // In exclusive mode, it balances segments and channels per channel among the channel's assigned nodes.
 // If exclusive mode cannot be achieved, it delegates to ScoreBasedBalancer.
 func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) (segmentPlans []assign.SegmentAssignPlan, channelPlans []assign.ChannelAssignPlan) {
-	log := log.With(
-		zap.Int64("collection", replica.GetCollectionID()),
-		zap.Int64("replica id", replica.GetID()),
-		zap.String("replica group", replica.GetResourceGroup()),
+	log := mlog.With(
+		mlog.Int64("collection", replica.GetCollectionID()),
+		mlog.Int64("replica id", replica.GetID()),
+		mlog.String("replica group", replica.GetResourceGroup()),
 	)
 
 	br := NewBalanceReport()
 	defer func() {
 		if len(segmentPlans) == 0 && len(channelPlans) == 0 {
-			log.WithRateGroup(fmt.Sprintf("scorebasedbalance-noplan-%d", replica.GetID()), 1, 60).
-				RatedDebug(60, "no plan generated, balance report", zap.Stringers("records", br.detailRecords))
+			log.
+				RatedDebug(ctx, rate.Limit(60), "no plan generated, balance report", mlog.Stringers("records", br.detailRecords))
 		} else {
-			log.Info("balance plan generated", zap.Stringers("report details", br.records))
+			log.Info(ctx, "balance plan generated", mlog.Stringers("report details", br.records))
 		}
 	}()
 
-	if streamingutil.IsStreamingServiceEnabled() {
+	streamingEnabled := streamingutil.IsStreamingServiceEnabled()
+	if streamingEnabled {
 		// Make a plan to rebalance the channel first.
 		// The Streaming QueryNode doesn't make the channel level score, so just fallback to the ScoreBasedBalancer.
 		channelPlan := b.balanceChannels(ctx, br, replica)
@@ -115,43 +115,56 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 		}
 
 		channelRwNodes := replica.GetChannelRWNodes(channelName)
-		channelRONodes := make([]int64, 0)
-		// mark channel's outbound access node as offline
-		channelRWNode := typeutil.NewUniqueSet(channelRwNodes...)
-		channelDist := b.dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channelName), meta.WithReplica2Channel(replica))
-		for _, channel := range channelDist {
-			if !channelRWNode.Contain(channel.Node) {
-				channelRONodes = append(channelRONodes, channel.Node)
+		channelRWNodeSet := typeutil.NewUniqueSet(channelRwNodes...)
+		channelOutboundNodes := typeutil.NewUniqueSet()
+		segmentOutboundNodes := typeutil.NewUniqueSet()
+
+		// Streaming channel placement is handled by score-based channel balance
+		// and stopping balance. Only derive channel outbound nodes from channel
+		// distribution in legacy mode.
+		if !streamingEnabled {
+			channelDist := b.dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channelName), meta.WithReplica2Channel(replica))
+			for _, channel := range channelDist {
+				if !channelRWNodeSet.Contain(channel.Node) {
+					channelOutboundNodes.Insert(channel.Node)
+				}
 			}
 		}
+
+		// Sealed segments outside the channel's exclusive RW node set are true
+		// outbound workloads regardless of whether streaming service is enabled.
 		segmentDist := b.dist.SegmentDistManager.GetByFilter(meta.WithChannel(channelName), meta.WithReplica(replica))
 		for _, segment := range segmentDist {
-			if !channelRWNode.Contain(segment.Node) {
-				channelRONodes = append(channelRONodes, segment.Node)
+			if !channelRWNodeSet.Contain(segment.Node) {
+				segmentOutboundNodes.Insert(segment.Node)
 			}
 		}
 
-		if len(channelRwNodes) == 0 {
-			// no available nodes to balance
-			return nil, nil
+		hasChannelOutbound := channelOutboundNodes.Len() != 0
+		hasSegmentOutbound := segmentOutboundNodes.Len() != 0
+		if channelOutboundNodes.Len() != 0 {
+			channelPlans = append(channelPlans, b.genChannelPlanForOutboundNodes(ctx, replica, channelName, channelRwNodes, channelOutboundNodes.Collect())...)
 		}
 
-		if len(channelRONodes) != 0 {
-			if !streamingutil.IsStreamingServiceEnabled() {
-				channelPlans = append(channelPlans, b.genChannelPlanForOutboundNodes(ctx, replica, channelName, channelRwNodes, channelRONodes)...)
-			}
+		outboundSegmentPlans := make([]assign.SegmentAssignPlan, 0)
+		if hasSegmentOutbound && len(channelPlans) == 0 {
+			outboundSegmentPlans = b.genSegmentPlanForOutboundNodes(ctx, replica, channelName, channelRwNodes, segmentOutboundNodes.Collect())
+			segmentPlans = append(segmentPlans, outboundSegmentPlans...)
+		}
 
-			if len(channelPlans) == 0 {
-				segmentPlans = append(segmentPlans, b.genSegmentPlanForOutboundNodes(ctx, replica, channelName, channelRwNodes, channelRONodes)...)
-			}
-		} else {
-			if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && !streamingutil.IsStreamingServiceEnabled() {
-				channelPlans = append(channelPlans, b.genChannelPlan(ctx, replica, channelName, channelRwNodes)...)
-			}
+		// Keep channel outbound evacuation and executable segment outbound plans
+		// ahead of normal balancing. If no segment outbound plan can be generated,
+		// continue with normal segment balancing for the channel.
+		if hasChannelOutbound || (hasSegmentOutbound && (len(channelPlans) != 0 || len(outboundSegmentPlans) != 0)) {
+			continue
+		}
 
-			if len(channelPlans) == 0 {
-				segmentPlans = append(segmentPlans, b.genSegmentPlan(ctx, br, replica, channelName, channelRwNodes)...)
-			}
+		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && !streamingEnabled {
+			channelPlans = append(channelPlans, b.genChannelPlan(ctx, replica, channelName, channelRwNodes)...)
+		}
+
+		if len(channelPlans) == 0 {
+			segmentPlans = append(segmentPlans, b.genSegmentPlan(ctx, br, replica, channelName, channelRwNodes)...)
 		}
 	}
 
@@ -204,12 +217,10 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlan(ctx context.Context, br *bala
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
-
-	log.Ctx(ctx).WithRateGroup(fmt.Sprintf("genSegmentPlan-%d-%d", replica.GetCollectionID(), replica.GetID()), 1, 60).
-		RatedInfo(30, "node segment workload status",
-			zap.Int64("collectionID", replica.GetCollectionID()),
-			zap.Int64("replicaID", replica.GetID()),
-			zap.Stringers("nodes", lo.Values(nodeItemsMap)))
+	mlog.RatedInfo(ctx, rate.Limit(30), "node segment workload status",
+		mlog.FieldCollectionID(replica.GetCollectionID()),
+		mlog.Int64("replicaID", replica.GetID()),
+		mlog.Stringers("nodes", lo.Values(nodeItemsMap)))
 
 	segmentDist := make(map[int64][]*meta.Segment)
 	// list all segment which could be balanced, and calculate node's score

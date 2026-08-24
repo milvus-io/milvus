@@ -11,7 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -54,7 +54,7 @@ func OptSession(session sessionutil.SessionInterface) optResourceInit {
 // Should be call when streaming node startup.
 func Init(opts ...optResourceInit) {
 	newR := &resourceImpl{
-		logger: log.With(log.FieldModule(typeutil.StreamingCoordRole)),
+		logger: mlog.With(mlog.FieldModule(typeutil.StreamingCoordRole)),
 	}
 	for _, opt := range opts {
 		opt(newR)
@@ -89,7 +89,7 @@ type resourceImpl struct {
 	etcdClient                 *clientv3.Client
 	streamingCatalog           metastore.StreamingCoordCataLog
 	streamingNodeManagerClient manager.ManagerClient
-	logger                     *log.MLogger
+	logger                     *mlog.Logger
 }
 
 // RootCoordClient returns the root coordinator client.
@@ -121,7 +121,7 @@ func (r *resourceImpl) StreamingNodeManagerClient() manager.ManagerClient {
 	return r.streamingNodeManagerClient
 }
 
-func (r *resourceImpl) Logger() *log.MLogger {
+func (r *resourceImpl) Logger() *mlog.Logger {
 	return r.logger
 }
 

@@ -56,6 +56,9 @@ func (r *redoAppendInterceptor) waitUntilGrowingSegmentReady(ctx context.Context
 			uniqueKey := shards.PartitionUniqueKey{CollectionID: h.CollectionId, PartitionID: partition.PartitionId}
 			ready, err := r.shardManager.WaitUntilGrowingSegmentReady(uniqueKey)
 			if err != nil {
+				if errors.IsAny(err, shards.ErrCollectionNotFound, shards.ErrPartitionNotFound) {
+					return status.NewUnrecoverableError("fail to wait growing segment ready, %s", err.Error())
+				}
 				return err
 			}
 			select {

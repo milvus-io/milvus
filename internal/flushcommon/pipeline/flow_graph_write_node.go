@@ -6,7 +6,6 @@ import (
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -17,8 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
-	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -33,8 +31,7 @@ type writeNode struct {
 	metacache    metacache.MetaCache
 	pkField      *schemapb.FieldSchema
 
-	functionRunners        map[int32][]function.FunctionRunner
-	functionOutputFieldIDs map[int32][]int64
+	functionStore *function.FunctionRunnerLocalStore
 }
 
 // Name returns node name, implementing flowgraph.Node
@@ -47,55 +44,7 @@ func (wNode *writeNode) Free() {
 }
 
 func (wNode *writeNode) releaseFunctionRunners() {
-	for _, runners := range wNode.functionRunners {
-		function.CloseRunners(runners)
-	}
-	wNode.functionRunners = make(map[int32][]function.FunctionRunner)
-	wNode.functionOutputFieldIDs = make(map[int32][]int64)
-}
-
-func (wNode *writeNode) getEmbeddingOutputFieldIDs(schema *schemapb.CollectionSchema) ([]int64, error) {
-	schemaVersion := schema.GetVersion()
-	if outputFieldIDs, ok := wNode.functionOutputFieldIDs[schemaVersion]; ok {
-		return outputFieldIDs, nil
-	}
-
-	if !function.HasEmbeddingFunctions(schema) {
-		wNode.functionOutputFieldIDs[schemaVersion] = nil
-		return nil, nil
-	}
-	outputFieldIDs, err := function.EmbeddingOutputFieldIDs(schema)
-	if err != nil {
-		return nil, err
-	}
-	wNode.functionOutputFieldIDs[schemaVersion] = outputFieldIDs
-	return outputFieldIDs, nil
-}
-
-// fillEmbeddingData is only used to handle old insert messages that were not embedded before WAL append.
-func (wNode *writeNode) fillEmbeddingData(schema *schemapb.CollectionSchema, msg *msgstream.InsertMsg) error {
-	if !function.HasEmbeddingFunctions(schema) {
-		return nil
-	}
-	schemaVersion := schema.GetVersion()
-	_, ok, err := function.TryMaterialize(wNode.collectionID, schemaVersion, msg.InsertRequest)
-	if err != nil {
-		return err
-	}
-	if ok {
-		return nil
-	}
-
-	runners, ok := wNode.functionRunners[schemaVersion]
-	if !ok {
-		runners, err = function.BuildEmbeddingRunners(schema)
-		if err != nil {
-			return err
-		}
-		wNode.functionRunners[schemaVersion] = runners
-	}
-	_, err = function.FillFunctionFields(runners, msg.InsertRequest)
-	return err
+	wNode.functionStore.Close()
 }
 
 func (wNode *writeNode) Operate(in []Msg) []Msg {
@@ -142,37 +91,39 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 	}()
 
 	start, end := fgMsg.StartPositions[0], fgMsg.EndPositions[0]
-	currentSchema := wNode.metacache.GetSchema(fgMsg.TimeTick())
-	schemaVersion := currentSchema.GetVersion()
-	functionOutputFieldIDs, err := wNode.getEmbeddingOutputFieldIDs(currentSchema)
-	if err != nil {
-		log.Error("failed to get embedding output fields", zap.Error(err))
-		panic(err)
-	}
+	ctx := fgMsg.TraceCtx()
+	// The schema version is only consumed while buffering insert data.
+	schemaVersion := int32(0)
 
 	insertData := make([]*writebuffer.InsertData, 0)
 	if len(fgMsg.InsertMessages) > 0 {
+		currentSchema := wNode.metacache.GetSchema(fgMsg.TimeTick())
+		schemaVersion = currentSchema.GetVersion()
+		functionOutputFieldIDs, err := wNode.functionStore.OutputFieldIDs(currentSchema)
+		if err != nil {
+			mlog.Error(ctx, "failed to get embedding output fields", mlog.Err(err))
+			panic(err)
+		}
 		for _, msg := range fgMsg.InsertMessages {
 			if len(functionOutputFieldIDs) == 0 || function.HasAllFieldDataByID(msg.GetFieldsData(), functionOutputFieldIDs) {
 				continue
 			}
-			if err := wNode.fillEmbeddingData(currentSchema, msg); err != nil {
-				log.Error("failed to fill embedding data", zap.Error(err))
+			if err := wNode.functionStore.FillEmbeddingData(wNode.collectionID, currentSchema, msg.InsertRequest); err != nil {
+				mlog.Error(msg.TraceCtx(), "failed to fill embedding data", mlog.Err(err))
 				panic(err)
 			}
 		}
 		preparedInsertData, err := writebuffer.PrepareInsert(currentSchema, wNode.pkField, fgMsg.InsertMessages)
 		if err != nil {
-			log.Error("failed to prepare data", zap.Error(err))
+			mlog.Error(ctx, "failed to prepare data", mlog.Err(err))
 			panic(err)
 		}
 		insertData = preparedInsertData
 	}
 	fgMsg.InsertData = insertData
 
-	err = wNode.wbManager.BufferData(wNode.channelName, fgMsg.InsertData, fgMsg.DeleteMessages, start, end, schemaVersion)
-	if err != nil {
-		log.Error("failed to buffer data", zap.Error(err))
+	if err := wNode.wbManager.BufferData(wNode.channelName, fgMsg.InsertData, fgMsg.DeleteMessages, start, end, schemaVersion); err != nil {
+		mlog.Error(ctx, "failed to buffer data", mlog.Err(err))
 		panic(err)
 	}
 
@@ -181,7 +132,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 		func(id int64, _ int) (*commonpb.SegmentStats, bool) {
 			segInfo, ok := wNode.metacache.GetSegmentByID(id)
 			if !ok {
-				log.Warn("segment not found for stats", zap.Int64("segment", id))
+				mlog.Warn(ctx, "segment not found for stats", mlog.Int64("segment", id))
 				return nil, false
 			}
 			return &commonpb.SegmentStats{
@@ -241,10 +192,9 @@ func newWriteNode(
 		metacache:    config.metacache,
 		pkField:      pkField,
 
-		functionRunners:        make(map[int32][]function.FunctionRunner),
-		functionOutputFieldIDs: make(map[int32][]int64),
+		functionStore: function.NewFunctionRunnerLocalStore(),
 	}
-	if _, err := wNode.getEmbeddingOutputFieldIDs(collSchema); err != nil {
+	if _, err := wNode.functionStore.OutputFieldIDs(collSchema); err != nil {
 		return nil, err
 	}
 	return wNode, nil

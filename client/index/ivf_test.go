@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
 func TestIvfRabitQ(t *testing.T) {
@@ -53,8 +53,26 @@ func TestIvfRabitQAnnParam(t *testing.T) {
 	ap = ap.WithRabitQueryBits(8)
 	result = ap.Params()
 	assert.Equal(t, 8, result[ivfRbqQueryBitsKey])
+	// Pin the wire name: knowhere reads rbq_bits_query, and a transposed key
+	// silently leaves the search on the default instead of erroring.
+	assert.Equal(t, 8, result["rbq_bits_query"])
 
 	ap = ap.WithRefineK(256)
 	result = ap.Params()
 	assert.Equal(t, 256, result[ivfRbqRefineKKey])
+}
+
+func TestIvfRabitQBits(t *testing.T) {
+	idx := NewIvfRabitQIndex(entity.COSINE, 128)
+	// Params() has always reported IVF_RABITQ; IndexType() used to disagree.
+	assert.EqualValues(t, IvfRabitQ, idx.IndexType())
+	assert.EqualValues(t, IvfRabitQ, idx.Params()[IndexTypeKey])
+
+	// Never set: absent, so the server's default applies.
+	assert.NotContains(t, idx.Params(), ivfRbqBitsKey)
+	assert.Equal(t, "5", idx.WithRbqBits(5).Params()[ivfRbqBitsKey])
+
+	// Explicitly set to an out-of-range value: forwarded so the server rejects
+	// it, instead of being mistaken for "unset".
+	assert.Equal(t, "0", NewIvfRabitQIndex(entity.COSINE, 128).WithRbqBits(0).Params()[ivfRbqBitsKey])
 }

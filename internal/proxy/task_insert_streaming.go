@@ -5,15 +5,16 @@ import (
 	"fmt"
 
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -33,29 +34,28 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute insert streaming %d", it.ID()))
 
 	collectionName := it.insertMsg.CollectionName
-	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.insertMsg.GetDbName(), collectionName)
-	log := log.Ctx(ctx)
+	collID, err := it.getMetaCache().GetCollectionID(it.ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
-		log.Warn("fail to get collection id", zap.Error(err))
+		mlog.Warn(ctx, "fail to get collection id", mlog.Err(err))
 		return err
 	}
 	it.insertMsg.CollectionID = collID
 
 	getCacheDur := tr.RecordSpan()
-	channelNames, err := it.chMgr.getVChannels(collID)
+	channelNames, err := it.chMgr.GetVChannels(collID)
 	if err != nil {
-		log.Warn("get vChannels failed", zap.Int64("collectionID", collID), zap.Error(err))
+		mlog.Warn(ctx, "get vChannels failed", mlog.FieldCollectionID(collID), mlog.Err(err))
 		it.result.Status = merr.Status(err)
 		return err
 	}
 
-	log.Debug("send insert request to virtual channels",
-		zap.String("partition", it.insertMsg.GetPartitionName()),
-		zap.Int64("collectionID", collID),
-		zap.Strings("virtual_channels", channelNames),
-		zap.Int64("task_id", it.ID()),
-		zap.Bool("is_parition_key", it.partitionKeys != nil),
-		zap.Duration("get cache duration", getCacheDur))
+	mlog.Debug(ctx, "send insert request to virtual channels",
+		mlog.String("partition", it.insertMsg.GetPartitionName()),
+		mlog.FieldCollectionID(collID),
+		mlog.Strings("virtual_channels", channelNames),
+		mlog.FieldTaskID(it.ID()),
+		mlog.Bool("is_parition_key", it.partitionKeys != nil),
+		mlog.Duration("get cache duration", getCacheDur))
 
 	var ez *message.CipherConfig
 	if hookutil.IsClusterEncryptionEnabled() {
@@ -65,18 +65,18 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	// start to repack insert data
 	var msgs []message.MutableMessage
 	if it.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion)
+		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion, nil)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schemaVersion)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion, nil)
 	}
 	if err != nil {
-		log.Warn("assign segmentID and repack insert data failed", zap.Error(err))
+		mlog.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
 		it.result.Status = merr.Status(err)
 		return err
 	}
 	resp := streaming.WAL().AppendMessages(ctx, msgs...)
 	if err := resp.UnwrapFirstError(); err != nil {
-		log.Warn("append messages to wal failed", zap.Error(err))
+		mlog.Warn(ctx, "append messages to wal failed", mlog.Err(err))
 		if status.AsStreamingError(err).IsSchemaVersionMismatch() {
 			it.result.Status = merr.Status(merr.ErrCollectionSchemaMismatch)
 		} else {
@@ -90,83 +90,96 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 func repackInsertDataForStreamingService(
 	ctx context.Context,
+	metaCache Cache,
 	channelNames []string,
 	insertMsg *msgstream.InsertMsg,
 	result *milvuspb.MutationResult,
 	ez *message.CipherConfig,
 	schemaVersion int32,
+	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
+	walName := channelmgr.GetActiveWALName()
 
-	channel2RowOffsets := assignChannelsByPK(result.IDs, channelNames, insertMsg)
+	channel2RowOffsets, err := assignChannelsByPK(result.IDs, channelNames, insertMsg)
+	if err != nil {
+		return nil, err
+	}
 	partitionName := insertMsg.PartitionName
-	partitionID, err := globalMetaCache.GetPartitionID(ctx, insertMsg.GetDbName(), insertMsg.CollectionName, partitionName)
+	partitionID, err := metaCache.GetPartitionID(ctx, insertMsg.GetDbName(), insertMsg.CollectionName, partitionName)
 	if err != nil {
 		return nil, err
 	}
 
 	for channel, rowOffsets := range channel2RowOffsets {
-		// segment id is assigned at streaming node.
-		msgs, err := genInsertMsgsByPartition(ctx, 0, partitionID, partitionName, rowOffsets, channel, insertMsg)
+		partialUpdateCAS, err := getPartialUpdateCASForStreamingService(partialUpdateCASGroups, channel)
 		if err != nil {
 			return nil, err
 		}
-		for _, msg := range msgs {
-			insertRequest := msg.(*msgstream.InsertMsg).InsertRequest
-			newMsg, err := message.NewInsertMessageBuilderV1().
-				WithVChannel(channel).
-				WithHeader(&message.InsertMessageHeader{
-					CollectionId: insertMsg.CollectionID,
-					Partitions: []*message.PartitionSegmentAssignment{
-						{
-							PartitionId: partitionID,
-							Rows:        insertRequest.GetNumRows(),
-							BinarySize:  0, // TODO: current not used, message estimate size is used.
-						},
-					},
-					SchemaVersion: &schemaVersion,
-				}).
-				WithBody(insertRequest).
-				WithCipher(ez).
-				BuildMutable()
-			if err != nil {
-				return nil, err
-			}
-			messages = append(messages, newMsg)
+
+		// segment id is assigned at streaming node.
+		msgs, err := repackInsertDataByPartitionForStreamingService(
+			ctx,
+			partitionID,
+			partitionName,
+			rowOffsets,
+			channel,
+			insertMsg,
+			ez,
+			schemaVersion,
+			partialUpdateCAS,
+			walName,
+		)
+		if err != nil {
+			return nil, err
 		}
+		messages = append(messages, msgs...)
 	}
 	return messages, nil
 }
 
 func repackInsertDataWithPartitionKeyForStreamingService(
 	ctx context.Context,
+	metaCache Cache,
 	channelNames []string,
 	insertMsg *msgstream.InsertMsg,
 	result *milvuspb.MutationResult,
 	partitionKeys *schemapb.FieldData,
 	ez *message.CipherConfig,
+	schema *schemapb.CollectionSchema,
 	schemaVersion int32,
+	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
+	walName := channelmgr.GetActiveWALName()
 
-	channel2RowOffsets := assignChannelsByPK(result.IDs, channelNames, insertMsg)
-	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, insertMsg.GetDbName(), insertMsg.CollectionName)
+	var channel2RowOffsets map[string][]int
+	var err error
+	if namespacePartitionKeyModeEnabled(schema) && insertMsg.Namespace != nil {
+		channel2RowOffsets, err = assignChannelsByNamespace(*insertMsg.Namespace, channelNames, insertMsg)
+	} else {
+		channel2RowOffsets, err = assignChannelsByPK(result.IDs, channelNames, insertMsg)
+	}
 	if err != nil {
-		log.Ctx(ctx).Warn("get default partition names failed in partition key mode",
-			zap.String("collectionName", insertMsg.CollectionName),
-			zap.Error(err))
+		return nil, err
+	}
+	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, metaCache, insertMsg.GetDbName(), insertMsg.CollectionName)
+	if err != nil {
+		mlog.Warn(ctx, "get default partition names failed in partition key mode",
+			mlog.FieldCollectionName(insertMsg.CollectionName),
+			mlog.Err(err))
 		return nil, err
 	}
 
 	// Get partition ids
 	partitionIDs := make(map[string]int64, 0)
 	for _, partitionName := range partitionNames {
-		partitionID, err := globalMetaCache.GetPartitionID(ctx, insertMsg.GetDbName(), insertMsg.CollectionName, partitionName)
+		partitionID, err := metaCache.GetPartitionID(ctx, insertMsg.GetDbName(), insertMsg.CollectionName, partitionName)
 		if err != nil {
-			log.Ctx(ctx).Warn("get partition id failed",
-				zap.String("collectionName", insertMsg.CollectionName),
-				zap.String("partitionName", partitionName),
-				zap.Error(err))
+			mlog.Warn(ctx, "get partition id failed",
+				mlog.FieldCollectionName(insertMsg.CollectionName),
+				mlog.FieldPartitionName(partitionName),
+				mlog.Err(err))
 			return nil, err
 		}
 		partitionIDs[partitionName] = partitionID
@@ -174,12 +187,17 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 
 	hashValues, err := typeutil.HashKey2Partitions(partitionKeys, partitionNames)
 	if err != nil {
-		log.Ctx(ctx).Warn("has partition keys to partitions failed",
-			zap.String("collectionName", insertMsg.CollectionName),
-			zap.Error(err))
+		mlog.Warn(ctx, "has partition keys to partitions failed",
+			mlog.FieldCollectionName(insertMsg.CollectionName),
+			mlog.Err(err))
 		return nil, err
 	}
 	for channel, rowOffsets := range channel2RowOffsets {
+		partialUpdateCAS, err := getPartialUpdateCASForStreamingService(partialUpdateCASGroups, channel)
+		if err != nil {
+			return nil, err
+		}
+
 		partition2RowOffsets := make(map[string][]int)
 		for _, idx := range rowOffsets {
 			partitionName := partitionNames[hashValues[idx]]
@@ -190,34 +208,160 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 		}
 
 		for partitionName, rowOffsets := range partition2RowOffsets {
-			msgs, err := genInsertMsgsByPartition(ctx, 0, partitionIDs[partitionName], partitionName, rowOffsets, channel, insertMsg)
+			msgs, err := repackInsertDataByPartitionForStreamingService(
+				ctx,
+				partitionIDs[partitionName],
+				partitionName,
+				rowOffsets,
+				channel,
+				insertMsg,
+				ez,
+				schemaVersion,
+				partialUpdateCAS,
+				walName,
+			)
 			if err != nil {
 				return nil, err
 			}
-			for _, msg := range msgs {
-				insertRequest := msg.(*msgstream.InsertMsg).InsertRequest
-				newMsg, err := message.NewInsertMessageBuilderV1().
-					WithVChannel(channel).
-					WithHeader(&message.InsertMessageHeader{
-						CollectionId: insertMsg.CollectionID,
-						Partitions: []*message.PartitionSegmentAssignment{
-							{
-								PartitionId: partitionIDs[partitionName],
-								Rows:        insertRequest.GetNumRows(),
-								BinarySize:  0, // TODO: current not used, message estimate size is used.
-							},
-						},
-						SchemaVersion: &schemaVersion,
-					}).
-					WithBody(insertRequest).
-					WithCipher(ez).
-					BuildMutable()
-				if err != nil {
-					return nil, err
-				}
-				messages = append(messages, newMsg)
-			}
+			messages = append(messages, msgs...)
 		}
 	}
 	return messages, nil
+}
+
+func getPartialUpdateCASForStreamingService(
+	groups map[string]*messagespb.PartialUpdateCAS,
+	channel string,
+) (*messagespb.PartialUpdateCAS, error) {
+	if groups == nil {
+		return nil, nil
+	}
+	meta, ok := groups[channel]
+	if !ok {
+		return nil, merr.WrapErrServiceInternalMsg("partial update insert has no CAS metadata for vchannel %s", channel)
+	}
+	if meta == nil {
+		return nil, merr.WrapErrServiceInternalMsg("partial update insert has nil CAS metadata for vchannel %s", channel)
+	}
+	return meta, nil
+}
+
+func repackInsertDataByPartitionForStreamingService(
+	ctx context.Context,
+	partitionID int64,
+	partitionName string,
+	rowOffsets []int,
+	channel string,
+	insertMsg *msgstream.InsertMsg,
+	ez *message.CipherConfig,
+	schemaVersion int32,
+	partialUpdateCAS *messagespb.PartialUpdateCAS,
+	walName message.WALName,
+) ([]message.MutableMessage, error) {
+	type pendingInsertPack struct {
+		rowOffsets []int
+		insertMsg  *msgstream.InsertMsg
+	}
+
+	maxMessageSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
+	messages := make([]message.MutableMessage, 0)
+	pending := []pendingInsertPack{{rowOffsets: rowOffsets}}
+	for len(pending) > 0 {
+		pack := pending[0]
+		pending = pending[1:]
+		if pack.insertMsg == nil {
+			packedMsgs, err := channelmgr.GenInsertMsgsByPartition(
+				ctx,
+				0,
+				partitionID,
+				partitionName,
+				pack.rowOffsets,
+				channel,
+				insertMsg,
+				walName,
+			)
+			if err != nil {
+				return nil, err
+			}
+
+			generated := make([]pendingInsertPack, 0, len(packedMsgs))
+			rowOffsetCursor := 0
+			for _, packedMsg := range packedMsgs {
+				packedInsertMsg := packedMsg.(*msgstream.InsertMsg)
+				nextRowOffsetCursor := rowOffsetCursor + int(packedInsertMsg.GetNumRows())
+				generated = append(generated, pendingInsertPack{
+					rowOffsets: pack.rowOffsets[rowOffsetCursor:nextRowOffsetCursor],
+					insertMsg:  packedInsertMsg,
+				})
+				rowOffsetCursor = nextRowOffsetCursor
+			}
+			pending = append(generated, pending...)
+			continue
+		}
+
+		msg, err := buildInsertMessageForStreamingService(
+			pack.insertMsg.InsertRequest,
+			insertMsg.CollectionID,
+			partitionID,
+			channel,
+			schemaVersion,
+			ez,
+			partialUpdateCAS,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// Entity-size packing does not include the streaming header or CAS
+		// metadata. Validate the fully built message and split the original row
+		// offsets again when that final envelope crosses the transport limit.
+		if partialUpdateCAS == nil || msg.EstimateSize() <= maxMessageSize {
+			messages = append(messages, msg)
+			continue
+		}
+		if len(pack.rowOffsets) == 1 {
+			return nil, merr.WrapErrParameterTooLarge("single partial update row exceeds max message size")
+		}
+
+		middle := len(pack.rowOffsets) / 2
+		split := []pendingInsertPack{
+			{rowOffsets: pack.rowOffsets[:middle]},
+			{rowOffsets: pack.rowOffsets[middle:]},
+		}
+		pending = append(split, pending...)
+	}
+	return messages, nil
+}
+
+func buildInsertMessageForStreamingService(
+	insertRequest *message.InsertRequest,
+	collectionID int64,
+	partitionID int64,
+	channel string,
+	schemaVersion int32,
+	ez *message.CipherConfig,
+	partialUpdateCAS *messagespb.PartialUpdateCAS,
+) (message.MutableMessage, error) {
+	builder := message.NewInsertMessageBuilderV1().
+		WithVChannel(channel).
+		WithHeader(&message.InsertMessageHeader{
+			CollectionId: collectionID,
+			Partitions: []*message.PartitionSegmentAssignment{
+				{
+					PartitionId: partitionID,
+					Rows:        insertRequest.GetNumRows(),
+					BinarySize:  0, // TODO: current not used, message estimate size is used.
+				},
+			},
+			SchemaVersion: &schemaVersion,
+		}).
+		WithBody(insertRequest)
+	if partialUpdateCAS != nil {
+		if err := builder.AddPartialUpdateCAS(partialUpdateCAS); err != nil {
+			return nil, err
+		}
+	}
+	return builder.
+		WithCipher(ez).
+		BuildMutable()
 }

@@ -17,13 +17,13 @@
 package datacoord
 
 import (
+	"context"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -59,6 +59,15 @@ func WithoutCopyJobStates(states ...datapb.CopySegmentJobState) CopySegmentJobFi
 	}
 }
 
+// CopyJobTimeoutTs returns the job timeout deadline as a hybrid TSO timestamp
+// (physical milliseconds << 18), matching how tryTimeoutJob reads it back via
+// tsoutil.PhysicalTime and how CleanupTs is composed. Storing UnixNano here
+// instead would be interpreted as a TSO landing centuries in the future, so
+// the job timeout would never fire.
+func CopyJobTimeoutTs(timeout time.Duration) uint64 {
+	return tsoutil.AddPhysicalDurationOnTs(tsoutil.ComposeTSByTime(time.Now()), timeout)
+}
+
 type UpdateCopySegmentJobAction func(job CopySegmentJob)
 
 func UpdateCopyJobState(state datapb.CopySegmentJobState) UpdateCopySegmentJobAction {
@@ -69,12 +78,12 @@ func UpdateCopyJobState(state datapb.CopySegmentJobState) UpdateCopySegmentJobAc
 			// Set cleanup ts based on copy segment task retention
 			dur := Params.DataCoordCfg.CopySegmentTaskRetention.GetAsDuration(time.Second)
 			cleanupTime := time.Now().Add(dur)
-			cleanupTs := tsoutil.ComposeTSByTime(cleanupTime, 0)
+			cleanupTs := tsoutil.ComposeTSByTime(cleanupTime)
 			job.(*copySegmentJob).CleanupTs = cleanupTs
-			log.Info("set copy segment job cleanup ts",
-				zap.Int64("jobID", job.GetJobId()),
-				zap.Time("cleanupTime", cleanupTime),
-				zap.Uint64("cleanupTs", cleanupTs))
+			mlog.Info(context.TODO(), "set copy segment job cleanup ts",
+				mlog.FieldJobID(job.GetJobId()),
+				mlog.Time("cleanupTime", cleanupTime),
+				mlog.Uint64("cleanupTs", cleanupTs))
 		}
 	}
 }
@@ -88,6 +97,16 @@ func UpdateCopyJobReason(reason string) UpdateCopySegmentJobAction {
 func UpdateCopyJobProgress(copied, total int64) UpdateCopySegmentJobAction {
 	return func(job CopySegmentJob) {
 		job.(*copySegmentJob).CopiedSegments = copied
+		job.(*copySegmentJob).TotalSegments = total
+	}
+}
+
+// UpdateCopyJobTotalSegments sets only the segment total, leaving CopiedSegments
+// untouched. Used when (re-)entering Executing: on a resume after a restart some
+// tasks may already be completed, and zeroing the copied count here would make
+// the reported progress transiently drop until the next checkCopyingJob tick.
+func UpdateCopyJobTotalSegments(total int64) UpdateCopySegmentJobAction {
+	return func(job CopySegmentJob) {
 		job.(*copySegmentJob).TotalSegments = total
 	}
 }
@@ -123,13 +142,18 @@ type CopySegmentJob interface {
 	GetSnapshotName() string
 	GetSourceCollectionId() int64
 	GetPinId() int64
+	GetExternal() bool
+	GetSnapshotS3Location() string
+	GetExternalSpec() string
+	GetSnapshotFingerprint() string
 	GetTR() *timerecord.TimeRecorder
 	Clone() CopySegmentJob
 }
 
 type copySegmentJob struct {
 	*datapb.CopySegmentJob
-	tr *timerecord.TimeRecorder
+	tr            *timerecord.TimeRecorder
+	snapshotCache *copySegmentSnapshotCache
 }
 
 func (j *copySegmentJob) GetTR() *timerecord.TimeRecorder {
@@ -140,5 +164,6 @@ func (j *copySegmentJob) Clone() CopySegmentJob {
 	return &copySegmentJob{
 		CopySegmentJob: proto.Clone(j.CopySegmentJob).(*datapb.CopySegmentJob),
 		tr:             j.tr,
+		snapshotCache:  j.snapshotCache,
 	}
 }

@@ -812,11 +812,18 @@ func (coord *MixCoordMock) ShowPartitions(ctx context.Context, req *milvuspb.Sho
 	coord.collMtx.RLock()
 	defer coord.collMtx.RUnlock()
 
+	// mirror DescribeCollection: an empty CollectionName means the caller
+	// addressed the collection by id -- the proxy's id-primary partition fill
+	// shows partitions BY id (empty name) -- so resolve from req.CollectionID.
+	usingID := req.CollectionName == ""
 	collID, exist := coord.collName2ID[req.CollectionName]
-	if !exist {
+	if !exist && !usingID {
 		return &milvuspb.ShowPartitionsResponse{
 			Status: merr.Status(merr.WrapErrCollectionNotFound(req.CollectionName)),
 		}, nil
+	}
+	if usingID {
+		collID = req.CollectionID
 	}
 
 	coord.partitionMtx.RLock()
@@ -1726,6 +1733,19 @@ func (coord *MixCoordMock) RestoreSnapshot(ctx context.Context, req *datapb.Rest
 	}, nil
 }
 
+func (coord *MixCoordMock) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotRequest, opts ...grpc.CallOption) (*datapb.ExportSnapshotResponse, error) {
+	return &datapb.ExportSnapshotResponse{
+		Status: merr.Success(),
+		JobId:  1,
+	}, nil
+}
+
+func (coord *MixCoordMock) GetExportSnapshotState(ctx context.Context, req *datapb.GetExportSnapshotStateRequest, opts ...grpc.CallOption) (*datapb.GetExportSnapshotStateResponse, error) {
+	return &datapb.GetExportSnapshotStateResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
 func (coord *MixCoordMock) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest, opts ...grpc.CallOption) (*datapb.GetRestoreSnapshotStateResponse, error) {
 	return &datapb.GetRestoreSnapshotStateResponse{
 		Status: merr.Success(),
@@ -1843,6 +1863,10 @@ func (coord *MixCoordMock) BackupEzk(ctx context.Context, req *internalpb.Backup
 
 func (coord *MixCoordMock) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest, opts ...grpc.CallOption) (*milvuspb.ClientHeartbeatResponse, error) {
 	return &milvuspb.ClientHeartbeatResponse{}, nil
+}
+
+func (coord *MixCoordMock) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest, opts ...grpc.CallOption) (*rootcoordpb.ListClientCommandsResponse, error) {
+	return &rootcoordpb.ListClientCommandsResponse{}, nil
 }
 
 func (coord *MixCoordMock) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error) {

@@ -17,12 +17,13 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -53,7 +54,7 @@ func NewInt64PrimaryKey(v int64) *Int64PrimaryKey {
 func (ip *Int64PrimaryKey) GT(key PrimaryKey) bool {
 	pk, ok := key.(*Int64PrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 	if ip.Value > pk.Value {
@@ -66,7 +67,7 @@ func (ip *Int64PrimaryKey) GT(key PrimaryKey) bool {
 func (ip *Int64PrimaryKey) GE(key PrimaryKey) bool {
 	pk, ok := key.(*Int64PrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 	if ip.Value >= pk.Value {
@@ -79,7 +80,7 @@ func (ip *Int64PrimaryKey) GE(key PrimaryKey) bool {
 func (ip *Int64PrimaryKey) LT(key PrimaryKey) bool {
 	pk, ok := key.(*Int64PrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 
@@ -93,7 +94,7 @@ func (ip *Int64PrimaryKey) LT(key PrimaryKey) bool {
 func (ip *Int64PrimaryKey) LE(key PrimaryKey) bool {
 	pk, ok := key.(*Int64PrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 
@@ -107,7 +108,7 @@ func (ip *Int64PrimaryKey) LE(key PrimaryKey) bool {
 func (ip *Int64PrimaryKey) EQ(key PrimaryKey) bool {
 	pk, ok := key.(*Int64PrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 
@@ -171,7 +172,7 @@ func NewVarCharPrimaryKey(v string) *VarCharPrimaryKey {
 func (vcp *VarCharPrimaryKey) GT(key PrimaryKey) bool {
 	pk, ok := key.(*VarCharPrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not varChar")
+		mlog.Warn(context.TODO(), "type of compared pk is not varChar")
 		return false
 	}
 
@@ -181,7 +182,7 @@ func (vcp *VarCharPrimaryKey) GT(key PrimaryKey) bool {
 func (vcp *VarCharPrimaryKey) GE(key PrimaryKey) bool {
 	pk, ok := key.(*VarCharPrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not varChar")
+		mlog.Warn(context.TODO(), "type of compared pk is not varChar")
 		return false
 	}
 
@@ -191,7 +192,7 @@ func (vcp *VarCharPrimaryKey) GE(key PrimaryKey) bool {
 func (vcp *VarCharPrimaryKey) LT(key PrimaryKey) bool {
 	pk, ok := key.(*VarCharPrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not varChar")
+		mlog.Warn(context.TODO(), "type of compared pk is not varChar")
 		return false
 	}
 
@@ -201,7 +202,7 @@ func (vcp *VarCharPrimaryKey) LT(key PrimaryKey) bool {
 func (vcp *VarCharPrimaryKey) LE(key PrimaryKey) bool {
 	pk, ok := key.(*VarCharPrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not varChar")
+		mlog.Warn(context.TODO(), "type of compared pk is not varChar")
 		return false
 	}
 
@@ -211,7 +212,7 @@ func (vcp *VarCharPrimaryKey) LE(key PrimaryKey) bool {
 func (vcp *VarCharPrimaryKey) EQ(key PrimaryKey) bool {
 	pk, ok := key.(*VarCharPrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not varChar")
+		mlog.Warn(context.TODO(), "type of compared pk is not varChar")
 		return false
 	}
 

@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestProperties_AppendType_AllValidTypes(t *testing.T) {
@@ -55,7 +57,7 @@ func TestProperties_GetTaskType_Unrecognized(t *testing.T) {
 		TaskIDKey: "1",
 	})
 	taskType, err := props.GetTaskType()
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceUnimplemented)
 	assert.Equal(t, "UnknownType", taskType)
 }
 
@@ -98,5 +100,31 @@ func TestProperties_CollectionID(t *testing.T) {
 		collectionID, err := props.GetCollectionID()
 		assert.NoError(t, err)
 		assert.Equal(t, int64(-1), collectionID)
+	})
+}
+
+func TestProperties_CostFields(t *testing.T) {
+	t.Run("append and get", func(t *testing.T) {
+		props := NewProperties(nil)
+		props.AppendCostTime(123)
+		props.AppendCostCPUNum(4)
+
+		assert.Equal(t, int64(123), props.GetCostTime())
+		assert.Equal(t, int64(4), props.GetCostCPUNum())
+	})
+
+	t.Run("missing keys", func(t *testing.T) {
+		props := NewProperties(nil)
+		assert.Equal(t, int64(0), props.GetCostTime())
+		assert.Equal(t, int64(0), props.GetCostCPUNum())
+	})
+
+	t.Run("invalid values", func(t *testing.T) {
+		props := NewProperties(map[string]string{
+			CostTimeKey:   "abc",
+			CostCPUNumKey: "xyz",
+		})
+		assert.Equal(t, int64(0), props.GetCostTime())
+		assert.Equal(t, int64(0), props.GetCostCPUNum())
 	})
 }

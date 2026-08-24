@@ -29,6 +29,9 @@ SegcoreSetChunkRows(const int64_t);
 void
 SegcoreSetEnableInterminSegmentIndex(const bool);
 
+CStatus
+SegcoreSetInterimIndexTargetVersion(const int64_t target_version);
+
 void
 SegcoreSetStorageV3Enabled(const bool);
 
@@ -39,7 +42,14 @@ void
 SegcoreSetEnableGeometryCache(const bool);
 
 void
+SegcoreSetEnableGISSplitFusion(const bool);
+
+void
 SegcoreSetNlist(const int64_t);
+
+// FM-index count-first guard threshold (queryNode.fmindexCostRatio).
+void
+SegcoreSetFMIndexCostRatio(const float);
 
 void
 SegcoreSetNprobe(const int64_t);
@@ -55,9 +65,6 @@ SegcoreSetRefineRatio(const float);
 
 void
 SegcoreSetIndexBuildRatio(const float);
-
-void
-SegcoreInterminDenseIndexType(const char*);
 
 CStatus
 SegcoreSetDenseVectorInterminIndexRefineQuantType(const char*);
@@ -88,14 +95,25 @@ void
 SegcoreSetKnowhereFetchThreadPoolNum(const uint32_t num_threads);
 
 void
+SegcoreSetPrefetchThreadPoolNum(const uint32_t num_threads);
+
+void
 SegcoreSetKnowhereGpuMemoryPoolSize(const uint32_t init_size,
                                     const uint32_t max_size);
 
+// Deprecated: row visibility filtering is always enforced; the value is
+// ignored. Kept so callers built against the v3.0.0 interface keep linking.
 void
 SegcoreSetVisibilityFilterEnabled(const bool value);
 
 void
 SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value);
+
+void
+SegcoreSetTakeForOutputResultCountLimit(const int64_t value);
+
+int64_t
+SegcoreGetTakeForOutputResultCountLimit();
 
 void
 SegcoreCloseGlog();
@@ -141,6 +159,7 @@ ConfigureTieredStorage(
     const char* disk_path,
     const int64_t loading_timeout_ms,
     const int64_t warmup_loading_timeout_ms,
+    const bool reject_remote_vector_output,
     // async warmup prefetch pool threads
     const uint32_t prefetch_pool_threads);
 
@@ -148,6 +167,7 @@ void
 UpdateTieredStorageConfig(const int64_t loading_timeout_ms,
                           const int64_t warmup_loading_timeout_ms,
                           const bool storage_usage_tracking_enabled,
+                          const bool reject_remote_vector_output,
                           const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
                           const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
                           const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,

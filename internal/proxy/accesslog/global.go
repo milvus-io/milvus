@@ -17,16 +17,17 @@
 package accesslog
 
 import (
+	"context"
 	"io"
+	"os"
 	"sync"
 	"time"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
 	configEvent "github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -82,7 +83,7 @@ func (l *AccessLogger) Update(enable bool) error {
 	// close logger
 	if !enable {
 		if l.enable.Load() != enable {
-			log.Info("start close access log")
+			mlog.Info(context.TODO(), "start close access log")
 			if write, ok := l.writer.(*RotateWriter); ok {
 				write.Close()
 				l.writer = nil
@@ -100,11 +101,11 @@ func (l *AccessLogger) Update(enable bool) error {
 	}
 
 	// update access log params
-	log.Info("start update access log params")
+	mlog.Info(context.TODO(), "start update access log params")
 	params := paramtable.Get()
 	err := l.init(params)
 	if err != nil {
-		log.Warn("enable access log failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "enable access log failed", mlog.Err(err))
 		return err
 	}
 
@@ -127,7 +128,7 @@ func (l *AccessLogger) Write(info info.AccessInfo) bool {
 	}
 	_, err := l.writer.Write([]byte(formatter.Format(info)))
 	if err != nil {
-		log.Warn("write access log failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "write access log failed", mlog.Err(err))
 		return false
 	}
 	return true
@@ -140,17 +141,17 @@ func InitAccessLogger(params *paramtable.ComponentParam) {
 		params.WatchKeyPrefix("proxy.accessLog", configEvent.NewHandler("update accesslog", func(event *configEvent.Event) {
 			enable := params.ProxyCfg.AccessLog.Enable.GetAsBool()
 			if err := logger.Update(enable); err != nil {
-				log.Warn("update access log failed", zap.Error(err))
+				mlog.Warn(context.TODO(), "update access log failed", mlog.Err(err))
 			}
 		}))
 
 		err := logger.Init(params)
 		if err != nil {
-			log.Warn("Init access logger failed", zap.Error(err))
+			mlog.Warn(context.TODO(), "Init access logger failed", mlog.Err(err))
 		}
 		_globalL = logger
 		info.ClusterPrefix.Store(params.CommonCfg.ClusterPrefix.GetValue())
-		log.Info("Init access logger success")
+		mlog.Info(context.TODO(), "Init access logger success")
 	})
 }
 
@@ -198,15 +199,10 @@ func initWriter(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.MinioCo
 	}
 
 	// wirte to stdout when filename = ""
-	stdout, _, err := zap.Open([]string{"stdout"}...)
-	if err != nil {
-		return nil, err
-	}
-
 	if logCfg.CacheSize.GetAsInt() > 0 {
-		lg := NewCacheWriter(stdout, logCfg.CacheSize.GetAsInt(), logCfg.CacheFlushInterval.GetAsDuration(time.Second))
+		lg := NewCacheWriter(os.Stdout, logCfg.CacheSize.GetAsInt(), logCfg.CacheFlushInterval.GetAsDuration(time.Second))
 		return lg, nil
 	}
 
-	return stdout, nil
+	return os.Stdout, nil
 }

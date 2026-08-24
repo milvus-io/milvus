@@ -28,13 +28,13 @@
 namespace milvus {
 
 std::atomic<int64_t> FILE_SLICE_SIZE(DEFAULT_INDEX_FILE_SLICE_SIZE);
-std::atomic<double> ENTRY_STREAM_BUDGET_RATIO(3.0);
 std::atomic<int64_t> EXEC_EVAL_EXPR_BATCH_SIZE(
     DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE);
 std::atomic<int64_t> DELETE_DUMP_BATCH_SIZE(DEFAULT_DELETE_DUMP_BATCH_SIZE);
 std::atomic<bool> ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION(
     DEFAULT_ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION);
 std::atomic<bool> OPTIMIZE_EXPR_ENABLED(DEFAULT_OPTIMIZE_EXPR_ENABLED);
+std::atomic<bool> ENABLE_DRIVER_PREFETCH(DEFAULT_ENABLE_DRIVER_PREFETCH);
 
 std::atomic<bool> JSON_KEY_STATS_ENABLED(DEFAULT_JSON_KEY_STATS_ENABLED);
 
@@ -52,16 +52,14 @@ SetIndexSliceSize(const int64_t size) {
 }
 
 void
-SetStreamBudgetRatio(const double ratio) {
-    if (ratio <= 0) {
-        LOG_WARN("ignore invalid entry stream budget ratio: {}", ratio);
+SetLoadTransientBudgetBytes(int64_t bytes) {
+    if (bytes < 0) {
+        LOG_WARN("ignore invalid load transient budget bytes: {}", bytes);
         return;
     }
-    ENTRY_STREAM_BUDGET_RATIO.store(ratio);
-    storage::TransientMemoryBudget::GetEntryStreamBudget()
-        .NotifyCapacityUpdated();
-    LOG_INFO("set entry stream budget ratio: {}",
-             ENTRY_STREAM_BUDGET_RATIO.load());
+    storage::TransientMemoryBudget::SetLoadTransientBudgetBytes(
+        static_cast<size_t>(bytes));
+    LOG_INFO("set load transient budget bytes: {}", bytes);
 }
 
 void
@@ -83,6 +81,13 @@ SetDefaultOptimizeExprEnable(bool val) {
     OPTIMIZE_EXPR_ENABLED.store(val);
     LOG_INFO("set default optimize expr enabled: {}",
              OPTIMIZE_EXPR_ENABLED.load());
+}
+
+void
+SetDefaultDriverPrefetchEnable(bool val) {
+    ENABLE_DRIVER_PREFETCH.store(val);
+    LOG_INFO("set default driver prefetch enabled: {}",
+             ENABLE_DRIVER_PREFETCH.load());
 }
 
 void

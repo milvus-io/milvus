@@ -34,7 +34,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/proto"
@@ -50,16 +49,18 @@ import (
 	grpcstreamingnode "github.com/milvus-io/milvus/internal/distributed/streamingnode"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -251,15 +252,15 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, p *paramtable.GrpcServe
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
 
-	log.Debug("Proxy server about to listen on localhost:0")
+	mlog.Debug(ctx, "Proxy server about to listen on localhost:0")
 	lis, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
-		log.Warn("Proxy server failed to listen on", zap.Error(err))
+		mlog.Warn(ctx, "Proxy server failed to listen on", mlog.Err(err))
 		s.ch <- err
 		return
 	}
 	s.lisAddr = lis.Addr().String()
-	log.Debug("Proxy server listening on", zap.String("addr", s.lisAddr))
+	mlog.Debug(ctx, "Proxy server listening on", mlog.String("addr", s.lisAddr))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -280,16 +281,16 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, p *paramtable.GrpcServe
 	proxypb.RegisterProxyServer(s.grpcServer, s)
 	milvuspb.RegisterMilvusServiceServer(s.grpcServer, s)
 
-	log.Debug("create Proxy grpc server",
-		zap.Any("enforcement policy", kaep),
-		zap.Any("server parameters", kasp))
+	mlog.Debug(ctx, "create Proxy grpc server",
+		mlog.Any("enforcement policy", kaep),
+		mlog.Any("server parameters", kasp))
 
-	log.Debug("waiting for Proxy grpc server to be ready")
+	mlog.Debug(ctx, "waiting for Proxy grpc server to be ready")
 	go funcutil.CheckGrpcReady(ctx, s.ch)
 
-	log.Debug("Proxy grpc server has been ready, serve grpc requests on listen")
+	mlog.Debug(ctx, "Proxy grpc server has been ready, serve grpc requests on listen")
 	if err := s.grpcServer.Serve(lis); err != nil {
-		log.Warn("failed to serve on Proxy's listener", zap.Error(err))
+		mlog.Warn(ctx, "failed to serve on Proxy's listener", mlog.Err(err))
 		s.ch <- err
 	}
 }
@@ -942,19 +943,19 @@ func TestProxy(t *testing.T) {
 	factory := dependency.NewDefaultFactory(false)
 	alias := "TestProxy"
 
-	log.Info("Initialize parameter table of Proxy")
+	mlog.Info(context.TODO(), "Initialize parameter table of Proxy")
 
 	mix := runMixCoord(ctx, localMsg)
-	log.Info("running MixCoord ...")
+	mlog.Info(context.TODO(), "running MixCoord ...")
 
 	dn := runDataNode(ctx, localMsg, alias)
-	log.Info("running DataNode ...")
+	mlog.Info(context.TODO(), "running DataNode ...")
 
 	sn := runStreamingNode(ctx, localMsg, alias)
-	log.Info("running StreamingNode ...")
+	mlog.Info(context.TODO(), "running StreamingNode ...")
 
 	qn := runQueryNode(ctx, localMsg, alias)
-	log.Info("running QueryNode ...")
+	mlog.Info(context.TODO(), "running QueryNode ...")
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -996,14 +997,14 @@ func TestProxy(t *testing.T) {
 	err = componentutil.WaitForComponentHealthy(ctx, rootCoordClient, typeutil.MixCoordRole, attempts, sleepDuration)
 	assert.NoError(t, err)
 	proxy.SetMixCoordClient(rootCoordClient)
-	log.Info("Proxy set mix coordinator client")
+	mlog.Info(context.TODO(), "Proxy set mix coordinator client")
 
 	mockShardMgr := shardclient.NewMockShardClientManager(t)
 	mockShardMgr.EXPECT().SetClientCreatorFunc(mock.Anything).Return().Maybe()
 	proxy.shardMgr = mockShardMgr
 
 	proxy.SetQueryNodeCreator(shardclient.DefaultQueryNodeClientCreator)
-	log.Info("Proxy set query coordinator client")
+	mlog.Info(context.TODO(), "Proxy set query coordinator client")
 
 	proxy.UpdateStateCode(commonpb.StateCode_Initializing)
 	err = proxy.Init()
@@ -1016,34 +1017,34 @@ func TestProxy(t *testing.T) {
 	// register proxy
 	err = proxy.Register()
 	assert.NoError(t, err)
-	log.Info("Register proxy done")
+	mlog.Info(context.TODO(), "Register proxy done")
 	defer func() {
 		a := []any{mix, qn, dn, sn, proxy}
 		fmt.Println(len(a))
 		// HINT: the order of stopping service refers to the `roles.go` file
-		log.Info("start to stop the services")
+		mlog.Info(context.TODO(), "start to stop the services")
 		{
 			err := sn.Stop()
 			assert.NoError(t, err)
-			log.Info("stop StreamingNode")
+			mlog.Info(context.TODO(), "stop StreamingNode")
 		}
 
 		{
 			err := mix.Stop()
 			assert.NoError(t, err)
-			log.Info("stop MixCoord")
+			mlog.Info(context.TODO(), "stop MixCoord")
 		}
 
 		{
 			err := dn.Stop()
 			assert.NoError(t, err)
-			log.Info("stop DataNode")
+			mlog.Info(context.TODO(), "stop DataNode")
 		}
 
 		{
 			err := proxy.Stop()
 			assert.NoError(t, err)
-			log.Info("stop Proxy")
+			mlog.Info(context.TODO(), "stop Proxy")
 		}
 		cancel()
 	}()
@@ -1202,7 +1203,7 @@ func TestProxy(t *testing.T) {
 			CollectionName: "alias",
 		})
 
-		_, err = globalMetaCache.GetCollectionID(ctx, dbName, "alias")
+		_, err = proxy.getMetaCache().GetCollectionID(ctx, dbName, "alias")
 		assert.Error(t, err)
 	})
 
@@ -1230,7 +1231,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("describe collection", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
@@ -1414,7 +1415,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("show partitions", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
@@ -1508,7 +1509,7 @@ func TestProxy(t *testing.T) {
 			mask[i] = true
 		}
 		for _, sf := range mixedStruct.GetStructArrays().GetFields() {
-			sf.ValidData = mask
+			typeutil.SetFieldDataValidData(sf, mask)
 		}
 		mixedReq := &milvuspb.InsertRequest{
 			DbName:         dbName,
@@ -1546,7 +1547,7 @@ func TestProxy(t *testing.T) {
 		// it can only be seen by streamingnode right away, so we need to check the flush state at streamingnode but not here.
 		// use timetick for GetFlushState in-future but not segment list.
 		time.Sleep(5 * time.Second)
-		log.Info("flush collection", zap.Int64s("segments to be flushed", segmentIDs))
+		mlog.Info(context.TODO(), "flush collection", mlog.Int64s("segments to be flushed", segmentIDs))
 
 		// waiting for flush operation to be done
 		counter := 0
@@ -1561,7 +1562,7 @@ func TestProxy(t *testing.T) {
 		}
 	})
 	if !flushed {
-		log.Warn("flush operation was not sure to be done")
+		mlog.Warn(context.TODO(), "flush operation was not sure to be done")
 	}
 
 	t.Run("get statistics after flush", func(t *testing.T) {
@@ -1878,7 +1879,7 @@ func TestProxy(t *testing.T) {
 			if fd.GetFieldName() != subI32Name && fd.GetFieldName() != subFVecName {
 				continue
 			}
-			for i, v := range fd.GetValidData() {
+			for i, v := range typeutil.GetFieldDataValidData(fd) {
 				assert.False(t, v, "row %d of sub-field %s should be null", i, fd.GetFieldName())
 			}
 		}
@@ -1906,7 +1907,7 @@ func TestProxy(t *testing.T) {
 				if fd.GetFieldName() != subI32Name && fd.GetFieldName() != subFVecName {
 					continue
 				}
-				for i, v := range fd.GetValidData() {
+				for i, v := range typeutil.GetFieldDataValidData(fd) {
 					assert.Equal(t, !c.expectNull, v,
 						"%s: sub-field %s row %d ValidData", c.label, fd.GetFieldName(), i)
 				}
@@ -1982,7 +1983,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("get replicas", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
@@ -2231,7 +2232,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("release collection", func(t *testing.T) {
-		_, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		_, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
@@ -2259,7 +2260,7 @@ func TestProxy(t *testing.T) {
 
 	pLoaded := true
 	t.Run("load partitions", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.LoadPartitions(ctx, &milvuspb.LoadPartitionsRequest{
@@ -2309,7 +2310,7 @@ func TestProxy(t *testing.T) {
 	assert.True(t, pLoaded)
 
 	t.Run("show in-memory partitions", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
@@ -2505,7 +2506,7 @@ func TestProxy(t *testing.T) {
 			if fd.GetFieldName() != subI32Name && fd.GetFieldName() != subFVecName {
 				continue
 			}
-			for i, v := range fd.GetValidData() {
+			for i, v := range typeutil.GetFieldDataValidData(fd) {
 				assert.False(t, v, "upserted row %d sub-field %s should be null", i, fd.GetFieldName())
 			}
 		}
@@ -2523,7 +2524,7 @@ func TestProxy(t *testing.T) {
 			mask[i] = true
 		}
 		for _, sf := range mixedStruct.GetStructArrays().GetFields() {
-			sf.ValidData = mask
+			typeutil.SetFieldDataValidData(sf, mask)
 		}
 		mixedUpsertReq := &milvuspb.UpsertRequest{
 			DbName:         dbName,
@@ -2556,7 +2557,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("show in-memory partitions after release partition", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
@@ -2606,7 +2607,7 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		_, err = globalMetaCache.GetPartitionID(ctx, dbName, collectionName, partitionName)
+		_, err = proxy.getMetaCache().GetPartitionID(ctx, dbName, collectionName, partitionName)
 		assert.Error(t, err)
 
 		// drop non-exist partition -> fail
@@ -2645,7 +2646,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("show partitions after drop partition", func(t *testing.T) {
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		collectionID, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
@@ -2686,7 +2687,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("truncate collection", func(t *testing.T) {
-		_, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		_, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{
@@ -2709,7 +2710,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
-		_, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		_, err := proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
@@ -2731,7 +2732,7 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		_, err = globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		_, err = proxy.getMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.Error(t, err)
 
 		resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
@@ -2743,7 +2744,7 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		hasDatabase := globalMetaCache.HasDatabase(ctx, dbName)
+		hasDatabase := proxy.getMetaCache().HasDatabase(ctx, dbName)
 		assert.False(t, hasDatabase)
 	})
 
@@ -3770,7 +3771,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	testServer.gracefulStop()
-	log.Info("case done")
+	mlog.Info(context.TODO(), "case done")
 }
 
 func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
@@ -4417,20 +4418,15 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 
 func Test_GetFlushState(t *testing.T) {
 	t.Run("normal test", func(t *testing.T) {
-		originCache := globalMetaCache
 		m := NewMockCache(t)
 		m.On("GetCollectionID",
 			mock.Anything,
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(UniqueID(1), nil)
-		globalMetaCache = m
-		defer func() {
-			globalMetaCache = originCache
-		}()
 
 		mixCoord := &MixCoordMock{}
-		proxy := &Proxy{mixCoord: mixCoord}
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.GetFlushState(context.TODO(), &milvuspb.GetFlushStateRequest{
 			CollectionName: "coll",
@@ -4448,6 +4444,28 @@ func Test_GetFlushState(t *testing.T) {
 	})
 }
 
+func TestProxy_SyncFileResource(t *testing.T) {
+	oldManager := fileresource.GlobalFileManager
+	defer func() { fileresource.GlobalFileManager = oldManager }()
+
+	t.Run("unhealthy", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
+		status, err := proxy.SyncFileResource(context.Background(), &internalpb.SyncFileResourceRequest{Version: 1})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		fileresource.GlobalFileManager = fileresource.NewManager(nil, fileresource.CloseMode)
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		status, err := proxy.SyncFileResource(context.Background(), &internalpb.SyncFileResourceRequest{Version: 1})
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(status))
+	})
+}
+
 func TestProxy_GetComponentStates(t *testing.T) {
 	n := &Proxy{}
 	n.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -4462,9 +4480,6 @@ func TestProxy_GetComponentStates(t *testing.T) {
 }
 
 func TestProxy_Import(t *testing.T) {
-	cache := globalMetaCache
-	defer func() { globalMetaCache = cache }()
-
 	streaming.SetupNoopWALForTest()
 
 	t.Run("Import failed", func(t *testing.T) {
@@ -4489,12 +4504,12 @@ func TestProxy_Import(t *testing.T) {
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-			dbID: 1,
+			DBID: 1,
 		}, nil)
-		globalMetaCache = mc
+		proxy.metaCache = mc
 
-		chMgr := NewMockChannelsMgr(t)
-		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"foo"}, nil)
+		chMgr := channelmgr.NewMockChannelsMgr(t)
+		chMgr.EXPECT().GetVChannels(mock.Anything).Return([]string{"foo"}, nil)
 		proxy.chMgr = chMgr
 
 		mixCoord := mocks.NewMockMixCoordClient(t)
@@ -4583,9 +4598,12 @@ func TestProxy_RelatedPrivilege(t *testing.T) {
 	}
 	ctx := GetContext(context.Background(), "root:123456")
 
+	metaCache := NewMockCache(t)
+	metaCache.EXPECT().ResolveCollectionAlias(mock.Anything, mock.Anything, "col1").Return("col1", nil).Maybe()
+
 	t.Run("related privilege grpc error", func(t *testing.T) {
 		mixCoord := mocks.NewMockMixCoordClient(t)
-		proxy := &Proxy{mixCoord: mixCoord}
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: metaCache}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		mixCoord.EXPECT().OperatePrivilege(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.OperatePrivilegeRequest, option ...grpc.CallOption) (*commonpb.Status, error) {
@@ -4603,7 +4621,7 @@ func TestProxy_RelatedPrivilege(t *testing.T) {
 
 	t.Run("related privilege status error", func(t *testing.T) {
 		mixCoord := mocks.NewMockMixCoordClient(t)
-		proxy := &Proxy{mixCoord: mixCoord}
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: metaCache}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		mixCoord.EXPECT().OperatePrivilege(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.OperatePrivilegeRequest, option ...grpc.CallOption) (*commonpb.Status, error) {
@@ -4625,7 +4643,6 @@ func TestProxy_GetStatistics(t *testing.T) {
 }
 
 func TestProxy_GetLoadState(t *testing.T) {
-	originCache := globalMetaCache
 	m := NewMockCache(t)
 	m.On("GetCollectionID",
 		mock.Anything, // context.Context
@@ -4638,11 +4655,6 @@ func TestProxy_GetLoadState(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(UniqueID(2), nil)
-	globalMetaCache = m
-	defer func() {
-		globalMetaCache = originCache
-	}()
-
 	{
 		mixCoord := getMixCoordClient()
 		mixCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
@@ -4650,7 +4662,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 			CollectionIDs:       nil,
 			InMemoryPercentages: []int64{},
 		}, nil)
-		proxy := &Proxy{mixCoord: mixCoord}
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
 		assert.NoError(t, err)
@@ -4665,7 +4677,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 		mixCoord := getMixCoordClient()
 		mixCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(nil, merr.WrapErrCollectionNotLoaded("foo"))
 		mixCoord.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(nil, merr.WrapErrPartitionNotLoaded("p1"))
-		proxy := &Proxy{mixCoord: mixCoord}
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
@@ -4706,7 +4718,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 			CollectionIDs:       nil,
 			InMemoryPercentages: []int64{100},
 		}, nil)
-		proxy := &Proxy{mixCoord: mixc}
+		proxy := &Proxy{mixCoord: mixc, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo", Base: &commonpb.MsgBase{}})
@@ -4741,7 +4753,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 			CollectionIDs:       nil,
 			InMemoryPercentages: []int64{50},
 		}, nil)
-		proxy := &Proxy{mixCoord: mixc}
+		proxy := &Proxy{mixCoord: mixc, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
@@ -4775,7 +4787,7 @@ func TestProxy_GetLoadState(t *testing.T) {
 		mixc.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 			Status: merr.Status(mockErr),
 		}, nil)
-		proxy := &Proxy{mixCoord: mixc}
+		proxy := &Proxy{mixCoord: mixc, metaCache: m}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})

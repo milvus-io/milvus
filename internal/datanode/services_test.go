@@ -18,15 +18,17 @@ package datanode
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -35,10 +37,14 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/external"
+	"github.com/milvus-io/milvus/internal/datanode/importv2"
+	"github.com/milvus-io/milvus/internal/datanode/index"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -61,8 +67,69 @@ type DataNodeServicesSuite struct {
 	cancel        context.CancelFunc
 }
 
+type copySegmentTaskTarget struct {
+	importv2.Task
+}
+
+type copySegmentStorageFactoryTarget struct {
+	StorageFactory
+}
+
+type copySegmentCopierTarget struct {
+	storage.CrossBucketCopier
+}
+
 func TestDataNodeServicesSuite(t *testing.T) {
 	suite.Run(t, new(DataNodeServicesSuite))
+}
+
+func TestFirstExternalSourceURI(t *testing.T) {
+	assert.False(t, hasExternalSourceRoot(nil))
+	assert.False(t, hasExternalSourceRoot([]*datapb.CopySegmentSource{{}}))
+	assert.True(t, hasExternalSourceRoot([]*datapb.CopySegmentSource{
+		{},
+		{SourceRootPath: "s3://foreign-bucket/foreign-root"},
+	}))
+
+	got, err := firstExternalSourceURI([]*datapb.CopySegmentSource{
+		{SourceRootPath: "s3://foreign-bucket/foreign-root"},
+		{SourceRootPath: "s3://foreign-bucket/foreign-root"},
+	})
+	if err != nil {
+		t.Fatalf("firstExternalSourceURI returned error: %v", err)
+	}
+	if got != "s3://foreign-bucket/foreign-root" {
+		t.Fatalf("firstExternalSourceURI = %q, want source root URI", got)
+	}
+
+	got, err = firstExternalSourceURI([]*datapb.CopySegmentSource{
+		{SourceRootPath: "s3://foreign-bucket"},
+	})
+	if err != nil {
+		t.Fatalf("firstExternalSourceURI rejected bucket root: %v", err)
+	}
+	if got != "s3://foreign-bucket" {
+		t.Fatalf("firstExternalSourceURI = %q, want bucket root URI", got)
+	}
+
+	_, err = firstExternalSourceURI([]*datapb.CopySegmentSource{
+		{SourceRootPath: "local-root"},
+		{SourceRootPath: "s3://foreign-bucket/foreign-root"},
+	})
+	if err == nil {
+		t.Fatalf("firstExternalSourceURI should validate the first source root")
+	}
+	assert.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+
+	_, err = firstExternalSourceURI([]*datapb.CopySegmentSource{
+		{SourceRootPath: "s3://foreign-bucket/root/../object"},
+	})
+	assert.Error(t, err)
+	assert.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+
+	_, err = firstExternalSourceURI(nil)
+	assert.Error(t, err)
+	assert.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
 }
 
 func (s *DataNodeServicesSuite) SetupSuite() {
@@ -428,9 +495,9 @@ func (s *DataNodeServicesSuite) TestGetMetrics() {
 	resp, err = node.GetMetrics(node.ctx, req)
 	s.Assert().NoError(err)
 	s.Assert().True(merr.Ok(resp.GetStatus()))
-	log.Info("Test DataNode.GetMetrics",
-		zap.String("name", resp.ComponentName),
-		zap.String("response", resp.Response))
+	mlog.Info(s.ctx, "Test DataNode.GetMetrics",
+		mlog.String("name", resp.ComponentName),
+		mlog.String("response", resp.Response))
 }
 
 func (s *DataNodeServicesSuite) TestResendSegmentStats() {
@@ -584,20 +651,21 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 		s.NoError(merr.CheckRPCCall(status, err))
 	})
 
-	s.Run("invalid task type", func() {
+	s.Run("unknown task type is rejected before payload decoding", func() {
 		req := &workerpb.CreateTaskRequest{
 			Properties: map[string]string{
 				taskcommon.ClusterIDKey: "cluster-0",
 				taskcommon.TypeKey:      "invalid",
 			},
-			Payload: []byte{},
+			Payload: []byte{0xff},
 		}
 		status, err := s.node.CreateTask(s.ctx, req)
 		s.NoError(err)
-		// taskcommon.GetTaskType classifies an unrecognized task type as
-		// ServiceInternal: task types are coordinator-assigned, so a mismatch is
-		// an internal protocol violation, not user input.
-		s.Equal(merr.Code(merr.ErrServiceInternal), status.GetCode())
+		// Task types are coordinator-assigned, so an unrecognized type is a
+		// worker capability mismatch rather than invalid user input.
+		s.Equal(merr.Code(merr.ErrServiceUnimplemented), status.GetCode())
+		s.Contains(status.GetReason(), "unrecognized task type")
+		s.ErrorIs(merr.CheckRPCCall(status, nil), merr.ErrServiceUnimplemented)
 	})
 }
 
@@ -679,6 +747,29 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 		s.True(strings.Contains(resp.GetStatus().GetReason(), "not found"))
 	})
 
+	s.Run("query index task with cost", func() {
+		s.node.taskManager.LoadOrStoreIndexTask("cluster-0", 101, &index.IndexTaskInfo{State: commonpb.IndexState_InProgress})
+		s.node.taskManager.StoreIndexTaskExecutionStart("cluster-0", 101, 100, 3)
+		s.node.taskManager.StoreIndexTaskExecutionEndWithState("cluster-0", 101, 180, 80, commonpb.IndexState_Finished, "")
+
+		req := &workerpb.QueryTaskRequest{
+			Properties: map[string]string{
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Index,
+				taskcommon.TaskIDKey:    "101",
+			},
+		}
+		resp, err := s.node.QueryTask(s.ctx, req)
+		s.NoError(merr.CheckRPCCall(resp, err))
+		props := taskcommon.NewProperties(resp.GetProperties())
+		// state and cost come from the same snapshot
+		state, err := props.GetTaskState()
+		s.NoError(err)
+		s.Equal(taskcommon.State(commonpb.IndexState_Finished), state)
+		s.Equal(int64(80), props.GetCostTime())
+		s.Equal(int64(3), props.GetCostCPUNum())
+	})
+
 	s.Run("invalid task type", func() {
 		req := &workerpb.QueryTaskRequest{
 			Properties: map[string]string{
@@ -688,10 +779,9 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 		}
 		resp, err := s.node.QueryTask(s.ctx, req)
 		s.NoError(err)
-		// taskcommon.GetTaskType classifies an unrecognized task type as
-		// ServiceInternal: task types are coordinator-assigned, so a mismatch is
-		// an internal protocol violation, not user input.
-		s.Equal(merr.Code(merr.ErrServiceInternal), resp.GetStatus().GetCode())
+		// Task types are coordinator-assigned, so an unrecognized type is a
+		// worker capability mismatch rather than invalid user input.
+		s.Equal(merr.Code(merr.ErrServiceUnimplemented), resp.GetStatus().GetCode())
 	})
 }
 
@@ -777,14 +867,22 @@ func (s *DataNodeServicesSuite) TestDropTask() {
 		}
 		status, err := s.node.DropTask(s.ctx, req)
 		s.NoError(err)
-		// taskcommon.GetTaskType classifies an unrecognized task type as
-		// ServiceInternal: task types are coordinator-assigned, so a mismatch is
-		// an internal protocol violation, not user input.
-		s.Equal(merr.Code(merr.ErrServiceInternal), status.GetCode())
+		// Task types are coordinator-assigned, so an unrecognized type is a
+		// worker capability mismatch rather than invalid user input.
+		s.Equal(merr.Code(merr.ErrServiceUnimplemented), status.GetCode())
 	})
 }
 
 func (s *DataNodeServicesSuite) TestCopySegment() {
+	s.Run("unhealthy datanode", func() {
+		s.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		defer s.node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		status, err := s.node.copySegment(s.ctx, &datapb.CopySegmentRequest{}, false)
+		s.NoError(err)
+		s.Error(merr.CheckRPCCall(status, nil))
+	})
+
 	s.Run("successful copy segment", func() {
 		req := &datapb.CopySegmentRequest{
 			JobID:         100,
@@ -807,7 +905,7 @@ func (s *DataNodeServicesSuite) TestCopySegment() {
 			},
 		}
 
-		status, err := s.node.CopySegment(s.ctx, req)
+		status, err := s.node.copySegment(s.ctx, req, false)
 		s.NoError(merr.CheckRPCCall(status, err))
 	})
 
@@ -836,10 +934,360 @@ func (s *DataNodeServicesSuite) TestCopySegment() {
 			},
 		}
 
-		status, err := s.node.CopySegment(s.ctx, req)
+		status, err := s.node.copySegment(s.ctx, req, false)
 		s.NoError(err)
 		s.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
 	})
+
+	s.Run("external source resolution failure", func() {
+		targetCM := &struct{ storage.ChunkManager }{}
+		factory := &copySegmentStorageFactoryTarget{}
+		mockFactory := mockey.Mock((*copySegmentStorageFactoryTarget).NewChunkManager).
+			Return(targetCM, nil).
+			Build()
+		defer mockFactory.UnPatch()
+
+		originalFactory := s.node.storageFactory
+		s.node.storageFactory = factory
+		defer func() { s.node.storageFactory = originalFactory }()
+
+		mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).
+			Return(nil, merr.WrapErrServiceInternalMsg("resolve source storage failed")).
+			Build()
+		defer mockResolve.UnPatch()
+
+		req := &datapb.CopySegmentRequest{
+			StorageConfig: s.storageConfig,
+			Sources: []*datapb.CopySegmentSource{
+				{SourceRootPath: "s3://foreign-bucket/foreign-root"},
+			},
+		}
+		status, err := s.node.copySegment(s.ctx, req, true)
+		s.NoError(err)
+		s.Equal(merr.Code(merr.ErrServiceInternal), status.GetCode())
+	})
+}
+
+func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotResolvesForeignSource() {
+	targetCM := &struct{ storage.ChunkManager }{}
+	sourceCM := &struct{ storage.ChunkManager }{}
+	sourceStorageConfig := &indexpb.StorageConfig{
+		BucketName: "foreign-bucket",
+		RootPath:   "foreign-root",
+	}
+	resolvedCopier := &copySegmentCopierTarget{}
+	mockCopy := mockey.Mock((*copySegmentCopierTarget).CopyCrossBucket).Return(nil).Build()
+	defer mockCopy.UnPatch()
+
+	var factoryConfigs []*indexpb.StorageConfig
+	factory := &copySegmentStorageFactoryTarget{}
+	mockFactory := mockey.Mock((*copySegmentStorageFactoryTarget).NewChunkManager).To(
+		func(_ context.Context, config *indexpb.StorageConfig) (storage.ChunkManager, error) {
+			factoryConfigs = append(factoryConfigs, config)
+			return targetCM, nil
+		},
+	).Build()
+	defer mockFactory.UnPatch()
+	s.node.storageFactory = factory
+
+	targetStorageConfig := &indexpb.StorageConfig{
+		Address:         "localhost:9000",
+		BucketName:      "target-bucket",
+		RootPath:        "target-root",
+		StorageType:     "remote",
+		CloudProvider:   "aws",
+		AccessKeyID:     "target-ak",
+		SecretAccessKey: "target-sk",
+	}
+	req := &datapb.CopySegmentRequest{
+		JobID:         100,
+		TaskID:        201,
+		TaskSlot:      1,
+		StorageConfig: targetStorageConfig,
+		ExternalSpec:  `{"extfs":{"cloud_provider":"aws"}}`,
+		Sources: []*datapb.CopySegmentSource{{
+			CollectionId:   111,
+			PartitionId:    222,
+			SegmentId:      333,
+			SourceRootPath: "s3://foreign-bucket/foreign-root",
+		}},
+		Targets: []*datapb.CopySegmentTarget{{
+			CollectionId: 444,
+			PartitionId:  555,
+			SegmentId:    666,
+		}},
+	}
+	task := &copySegmentTaskTarget{}
+	mockTaskID := mockey.Mock((*copySegmentTaskTarget).GetTaskID).Return(req.GetTaskID()).Build()
+	defer mockTaskID.UnPatch()
+
+	resolveCalled := false
+	mResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).To(
+		func(
+			ctx context.Context,
+			instanceCfg *objectstorage.Config,
+			direction snapshotstorage.Direction,
+			foreignURI string,
+			externalSpec string,
+		) (*snapshotstorage.ResolvedForeignStorage, error) {
+			resolveCalled = true
+			s.Equal(snapshotstorage.DirectionCopySource, direction)
+			s.Equal("s3://foreign-bucket/foreign-root", foreignURI)
+			s.Equal(req.GetExternalSpec(), externalSpec)
+			s.Equal("target-bucket", instanceCfg.BucketName)
+			return &snapshotstorage.ResolvedForeignStorage{
+				ForeignBucket:        "foreign-bucket",
+				ForeignCM:            sourceCM,
+				ForeignStorageConfig: sourceStorageConfig,
+				Copier:               resolvedCopier,
+			}, nil
+		}).Build()
+	defer mResolve.UnPatch()
+
+	newTaskCalled := false
+	mNewTask := mockey.Mock(importv2.NewCopySegmentTask).To(
+		func(
+			parentCtx context.Context,
+			gotReq *datapb.CopySegmentRequest,
+			manager importv2.TaskManager,
+			gotSourceCM storage.ChunkManager,
+			gotTargetCM storage.ChunkManager,
+			gotSourceStorageConfig *indexpb.StorageConfig,
+			gotCopier storage.CrossBucketCopier,
+			sourceBucket string,
+			targetBucket string,
+		) importv2.Task {
+			newTaskCalled = true
+			s.True(proto.Equal(req, gotReq))
+			s.Same(sourceCM, gotSourceCM)
+			s.Same(targetCM, gotTargetCM)
+			s.Same(sourceStorageConfig, gotSourceStorageConfig)
+			s.True(gotCopier == resolvedCopier)
+			s.Equal("foreign-bucket", sourceBucket)
+			s.Equal("target-bucket", targetBucket)
+			s.Same(s.node.ctx, parentCtx)
+			return task
+		}).Build()
+	defer mNewTask.UnPatch()
+
+	payload, err := proto.Marshal(req)
+	s.NoError(err)
+	status, err := s.node.CreateTask(s.ctx, &workerpb.CreateTaskRequest{
+		Properties: map[string]string{
+			taskcommon.TypeKey:   taskcommon.CopySegment,
+			taskcommon.TaskIDKey: fmt.Sprint(req.GetTaskID()),
+		},
+		Payload: payload,
+	})
+	s.NoError(merr.CheckRPCCall(status, err))
+	s.True(resolveCalled)
+	s.True(newTaskCalled)
+	s.Len(factoryConfigs, 1)
+	s.True(proto.Equal(targetStorageConfig, factoryConfigs[0]))
+}
+
+func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotResolvesSameBucketSourceRoot() {
+	targetCM := &struct{ storage.ChunkManager }{}
+	sourceCM := &struct{ storage.ChunkManager }{}
+	sourceStorageConfig := &indexpb.StorageConfig{
+		BucketName: "shared-bucket",
+		RootPath:   "source-root",
+	}
+	resolvedCopier := &copySegmentCopierTarget{}
+	mockCopy := mockey.Mock((*copySegmentCopierTarget).CopyCrossBucket).Return(nil).Build()
+	defer mockCopy.UnPatch()
+
+	factory := &copySegmentStorageFactoryTarget{}
+	mockFactory := mockey.Mock((*copySegmentStorageFactoryTarget).NewChunkManager).
+		Return(targetCM, nil).Build()
+	defer mockFactory.UnPatch()
+	s.node.storageFactory = factory
+
+	targetStorageConfig := &indexpb.StorageConfig{
+		Address:       "localhost:9000",
+		BucketName:    "shared-bucket",
+		RootPath:      "target-root",
+		StorageType:   "remote",
+		CloudProvider: "aws",
+	}
+	req := &datapb.CopySegmentRequest{
+		JobID:         100,
+		TaskID:        201,
+		TaskSlot:      1,
+		StorageConfig: targetStorageConfig,
+		Sources: []*datapb.CopySegmentSource{{
+			CollectionId:   111,
+			PartitionId:    222,
+			SegmentId:      333,
+			SourceRootPath: "s3://shared-bucket/source-root",
+		}},
+		Targets: []*datapb.CopySegmentTarget{{
+			CollectionId: 444,
+			PartitionId:  555,
+			SegmentId:    666,
+		}},
+	}
+	task := &copySegmentTaskTarget{}
+	mockTaskID := mockey.Mock((*copySegmentTaskTarget).GetTaskID).Return(req.GetTaskID()).Build()
+	defer mockTaskID.UnPatch()
+
+	resolveCalled := false
+	mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).To(
+		func(
+			_ context.Context,
+			instanceCfg *objectstorage.Config,
+			direction snapshotstorage.Direction,
+			foreignURI string,
+			externalSpec string,
+		) (*snapshotstorage.ResolvedForeignStorage, error) {
+			resolveCalled = true
+			s.Equal(snapshotstorage.DirectionCopySource, direction)
+			s.Equal("s3://shared-bucket/source-root", foreignURI)
+			s.Empty(externalSpec)
+			s.Equal("shared-bucket", instanceCfg.BucketName)
+			s.Equal("target-root", instanceCfg.RootPath)
+			return &snapshotstorage.ResolvedForeignStorage{
+				ForeignBucket:        "shared-bucket",
+				ForeignCM:            sourceCM,
+				ForeignStorageConfig: sourceStorageConfig,
+				Copier:               resolvedCopier,
+			}, nil
+		}).Build()
+	defer mockResolve.UnPatch()
+
+	mockNewTask := mockey.Mock(importv2.NewCopySegmentTask).To(
+		func(
+			parentCtx context.Context,
+			gotReq *datapb.CopySegmentRequest,
+			_ importv2.TaskManager,
+			gotSourceCM storage.ChunkManager,
+			gotTargetCM storage.ChunkManager,
+			gotSourceStorageConfig *indexpb.StorageConfig,
+			gotCopier storage.CrossBucketCopier,
+			sourceBucket string,
+			targetBucket string,
+		) importv2.Task {
+			s.True(proto.Equal(req, gotReq))
+			s.Same(sourceCM, gotSourceCM)
+			s.Same(targetCM, gotTargetCM)
+			s.Same(sourceStorageConfig, gotSourceStorageConfig)
+			s.True(gotCopier == resolvedCopier)
+			s.Equal("shared-bucket", sourceBucket)
+			s.Equal("shared-bucket", targetBucket)
+			s.Same(s.node.ctx, parentCtx)
+			return task
+		}).Build()
+	defer mockNewTask.UnPatch()
+
+	payload, err := proto.Marshal(req)
+	s.NoError(err)
+	status, err := s.node.CreateTask(s.ctx, &workerpb.CreateTaskRequest{
+		Properties: map[string]string{
+			taskcommon.TypeKey:   taskcommon.ExternalCopySegment,
+			taskcommon.TaskIDKey: fmt.Sprint(req.GetTaskID()),
+		},
+		Payload: payload,
+	})
+	s.NoError(merr.CheckRPCCall(status, err))
+	s.True(resolveCalled)
+}
+
+func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotUsesRawCredentialsFromExternalSpec() {
+	targetCM := &struct{ storage.ChunkManager }{}
+
+	targetStorageConfig := &indexpb.StorageConfig{
+		Address:         "s3.us-west-2.amazonaws.com",
+		BucketName:      "target-bucket",
+		RootPath:        "target-root",
+		StorageType:     "remote",
+		CloudProvider:   objectstorage.CloudProviderAWS,
+		Region:          "us-west-2",
+		AccessKeyID:     "target-ak",
+		SecretAccessKey: "target-sk",
+	}
+	var factoryConfigs []*indexpb.StorageConfig
+	factory := &copySegmentStorageFactoryTarget{}
+	mockFactory := mockey.Mock((*copySegmentStorageFactoryTarget).NewChunkManager).To(
+		func(_ context.Context, config *indexpb.StorageConfig) (storage.ChunkManager, error) {
+			factoryConfigs = append(factoryConfigs, config)
+			return targetCM, nil
+		},
+	).Build()
+	defer mockFactory.UnPatch()
+	s.node.storageFactory = factory
+
+	foreignSpec := `{"extfs":{"cloud_provider":"aws","region":"us-west-2","access_key_id":"foreign-ak","access_key_value":"foreign-sk"}}`
+	req := &datapb.CopySegmentRequest{
+		JobID:         100,
+		TaskID:        202,
+		TaskSlot:      1,
+		StorageConfig: targetStorageConfig,
+		ExternalSpec:  foreignSpec,
+		Sources: []*datapb.CopySegmentSource{{
+			CollectionId:   111,
+			PartitionId:    222,
+			SegmentId:      333,
+			SourceRootPath: "s3://foreign-bucket/foreign-root",
+		}},
+		Targets: []*datapb.CopySegmentTarget{{
+			CollectionId: 444,
+			PartitionId:  555,
+			SegmentId:    666,
+		}},
+	}
+	task := &copySegmentTaskTarget{}
+	mockTaskID := mockey.Mock((*copySegmentTaskTarget).GetTaskID).Return(req.GetTaskID()).Build()
+	defer mockTaskID.UnPatch()
+
+	var remoteConfigs []objectstorage.Config
+	mRemoteCM := mockey.Mock(storage.NewRemoteChunkManager).To(
+		func(ctx context.Context, cfg *objectstorage.Config) (*storage.RemoteChunkManager, error) {
+			_ = ctx
+			remoteConfigs = append(remoteConfigs, *cfg)
+			return storage.NewRemoteChunkManagerForTesting(nil, cfg.BucketName, cfg.RootPath), nil
+		}).Build()
+	defer mRemoteCM.UnPatch()
+
+	var sourceStorageConfig *indexpb.StorageConfig
+	mNewTask := mockey.Mock(importv2.NewCopySegmentTask).To(
+		func(
+			parentCtx context.Context,
+			gotReq *datapb.CopySegmentRequest,
+			manager importv2.TaskManager,
+			gotSourceCM storage.ChunkManager,
+			gotTargetCM storage.ChunkManager,
+			gotSourceStorageConfig *indexpb.StorageConfig,
+			gotCopier storage.CrossBucketCopier,
+			sourceBucket string,
+			targetBucket string,
+		) importv2.Task {
+			sourceStorageConfig = gotSourceStorageConfig
+			s.Same(req, gotReq)
+			s.NotNil(gotSourceCM)
+			s.Same(targetCM, gotTargetCM)
+			s.NotNil(gotCopier)
+			s.Equal("foreign-bucket", sourceBucket)
+			s.Equal("target-bucket", targetBucket)
+			s.Same(s.node.ctx, parentCtx)
+			return task
+		}).Build()
+	defer mNewTask.UnPatch()
+
+	status, err := s.node.copySegment(s.ctx, req, true)
+	s.NoError(merr.CheckRPCCall(status, err))
+	s.Len(factoryConfigs, 1)
+	s.Same(targetStorageConfig, factoryConfigs[0])
+	s.Len(remoteConfigs, 2)
+	s.Equal("foreign-ak", remoteConfigs[0].AccessKeyID)
+	s.Equal("foreign-sk", remoteConfigs[0].SecretAccessKeyID)
+	s.Equal("foreign-ak", remoteConfigs[1].AccessKeyID)
+	s.Equal("foreign-sk", remoteConfigs[1].SecretAccessKeyID)
+	s.NotNil(sourceStorageConfig)
+	s.Equal("foreign-ak", sourceStorageConfig.GetAccessKeyID())
+	s.Equal("foreign-sk", sourceStorageConfig.GetSecretAccessKey())
+	s.Equal(foreignSpec, req.GetExternalSpec())
+	s.NotContains(req.GetExternalSpec(), "secret_access_key")
+	s.NotContains(req.GetExternalSpec(), "credential_json")
 }
 
 func (s *DataNodeServicesSuite) TestQueryCopySegment() {
@@ -865,7 +1313,7 @@ func (s *DataNodeServicesSuite) TestQueryCopySegment() {
 		},
 	}
 
-	status, err := s.node.CopySegment(s.ctx, createReq)
+	status, err := s.node.copySegment(s.ctx, createReq, false)
 	s.NoError(merr.CheckRPCCall(status, err))
 
 	s.Run("query existing task", func() {
@@ -913,7 +1361,7 @@ func (s *DataNodeServicesSuite) TestDropCopySegment() {
 		},
 	}
 
-	status, err := s.node.CopySegment(s.ctx, createReq)
+	status, err := s.node.copySegment(s.ctx, createReq, false)
 	s.NoError(merr.CheckRPCCall(status, err))
 
 	s.Run("drop existing task", func() {
@@ -974,7 +1422,7 @@ func (s *DataNodeServicesSuite) TestDropCopySegment_CleanupLogic() {
 			}},
 		}
 
-		status, err := s.node.CopySegment(s.ctx, createReq)
+		status, err := s.node.copySegment(s.ctx, createReq, false)
 		s.NoError(merr.CheckRPCCall(status, err))
 
 		// Verify task exists
@@ -1046,7 +1494,7 @@ func (s *DataNodeServicesSuite) TestImportStateV2ToCopySegmentTaskState() {
 }
 
 func (s *DataNodeServicesSuite) TestCreateTaskRefreshExternalCollection() {
-	s.Run("create refresh-external-collection task", func() {
+	s.Run("fallback cluster ID from properties", func() {
 		refreshReq := &datapb.RefreshExternalCollectionTaskRequest{
 			TaskID:         999,
 			CollectionID:   100,
@@ -1067,11 +1515,25 @@ func (s *DataNodeServicesSuite) TestCreateTaskRefreshExternalCollection() {
 		}
 
 		status, err := s.node.CreateTask(s.ctx, req)
-		// Don't assert NoError — the createRefreshExternalCollectionTask may fail
-		// due to missing dependencies. We only need the code path to execute
-		// so that coverage is recorded for the routing branch.
-		_ = status
-		_ = err
+		s.NoError(err)
+		s.True(merr.Ok(status))
+		s.NotNil(s.node.externalCollectionManager.Get("cluster-0", 999))
+		s.Nil(s.node.externalCollectionManager.Get("", 999))
+	})
+
+	s.Run("missing cluster ID in payload and properties", func() {
+		payload, err := proto.Marshal(&datapb.RefreshExternalCollectionTaskRequest{TaskID: 1000})
+		s.NoError(err)
+
+		status, err := s.node.CreateTask(s.ctx, &workerpb.CreateTaskRequest{
+			Properties: map[string]string{
+				taskcommon.TypeKey:   taskcommon.RefreshExternalCollection,
+				taskcommon.TaskIDKey: "1000",
+			},
+			Payload: payload,
+		})
+		s.NoError(err)
+		s.Error(merr.Error(status))
 	})
 }
 
@@ -1084,6 +1546,7 @@ func (s *DataNodeServicesSuite) TestCreateRefreshExternalCollectionTaskReturnsUp
 	defer s.node.externalCollectionManager.Close()
 
 	req := &datapb.RefreshExternalCollectionTaskRequest{
+		ClusterID:              "cluster",
 		CollectionID:           100,
 		PartitionID:            1,
 		TaskID:                 200,
@@ -1101,7 +1564,12 @@ func (s *DataNodeServicesSuite) TestCreateRefreshExternalCollectionTaskReturnsUp
 	task := external.NewRefreshExternalCollectionTask(s.ctx, req)
 	patched := &datapb.SegmentInfo{ID: 10, CollectionID: 100, NumOfRows: 1}
 
-	mockNewTask := mockey.Mock(external.NewRefreshExternalCollectionTask).Return(task).Build()
+	gotClusterID := make(chan string, 1)
+	mockNewTask := mockey.Mock(external.NewRefreshExternalCollectionTask).
+		To(func(_ context.Context, gotReq *datapb.RefreshExternalCollectionTaskRequest) *external.RefreshExternalCollectionTask {
+			gotClusterID <- gotReq.GetClusterID()
+			return task
+		}).Build()
 	defer mockNewTask.UnPatch()
 	mockPre := mockey.Mock((*external.RefreshExternalCollectionTask).PreExecute).Return(nil).Build()
 	defer mockPre.UnPatch()
@@ -1113,9 +1581,15 @@ func (s *DataNodeServicesSuite) TestCreateRefreshExternalCollectionTaskReturnsUp
 		Return([]*datapb.SegmentInfo{patched}).Build()
 	defer mockUpdated.UnPatch()
 
-	status, err := s.node.createRefreshExternalCollectionTask(s.ctx, "cluster", req)
+	status, err := s.node.createRefreshExternalCollectionTask(s.ctx, req)
 	s.NoError(err)
 	s.True(merr.Ok(status))
+	select {
+	case clusterID := <-gotClusterID:
+		s.Equal("cluster", clusterID)
+	case <-time.After(time.Second):
+		s.Fail("task constructor was not called")
+	}
 
 	s.Eventually(func() bool {
 		info := s.node.externalCollectionManager.Get("cluster", 200)
@@ -1130,42 +1604,69 @@ func (s *DataNodeServicesSuite) TestCreateRefreshExternalCollectionTaskReturnsUp
 }
 
 func (s *DataNodeServicesSuite) TestCreateTaskCopySegment() {
-	s.Run("create copy segment task", func() {
-		copyReq := &datapb.CopySegmentRequest{
-			JobID:         500,
-			TaskID:        501,
-			TaskSlot:      1,
-			StorageConfig: s.storageConfig,
-			Sources: []*datapb.CopySegmentSource{
-				{
-					CollectionId: 111,
-					PartitionId:  222,
-					SegmentId:    333,
+	tests := []struct {
+		name         string
+		taskID       int64
+		taskType     taskcommon.Type
+		expectedCode int32
+	}{
+		{
+			name:         "local copy segment",
+			taskID:       501,
+			taskType:     taskcommon.CopySegment,
+			expectedCode: merr.Success().GetCode(),
+		},
+		{
+			name:         "external copy segment without source root",
+			taskID:       502,
+			taskType:     taskcommon.ExternalCopySegment,
+			expectedCode: merr.Code(merr.ErrServiceInternal),
+		},
+	}
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			copyReq := &datapb.CopySegmentRequest{
+				JobID:         500,
+				TaskID:        test.taskID,
+				TaskSlot:      1,
+				StorageConfig: s.storageConfig,
+				Sources: []*datapb.CopySegmentSource{
+					{
+						CollectionId: 111,
+						PartitionId:  222,
+						SegmentId:    333,
+					},
 				},
-			},
-			Targets: []*datapb.CopySegmentTarget{
-				{
-					CollectionId: 444,
-					PartitionId:  555,
-					SegmentId:    666,
+				Targets: []*datapb.CopySegmentTarget{
+					{
+						CollectionId: 444,
+						PartitionId:  555,
+						SegmentId:    666,
+					},
 				},
-			},
-		}
+			}
 
-		payload, err := proto.Marshal(copyReq)
-		s.NoError(err)
+			payload, err := proto.Marshal(copyReq)
+			s.NoError(err)
 
-		req := &workerpb.CreateTaskRequest{
-			Properties: map[string]string{
-				taskcommon.TypeKey:   taskcommon.CopySegment,
-				taskcommon.TaskIDKey: "501",
-			},
-			Payload: payload,
-		}
+			req := &workerpb.CreateTaskRequest{
+				Properties: map[string]string{
+					taskcommon.TypeKey:   test.taskType,
+					taskcommon.TaskIDKey: fmt.Sprint(test.taskID),
+				},
+				Payload: payload,
+			}
 
-		status, err := s.node.CreateTask(s.ctx, req)
-		s.NoError(merr.CheckRPCCall(status, err))
-	})
+			status, err := s.node.CreateTask(s.ctx, req)
+			s.NoError(err)
+			s.Equal(test.expectedCode, status.GetCode())
+			if test.expectedCode == merr.Success().GetCode() {
+				s.NotNil(s.node.importTaskMgr.Get(test.taskID))
+			} else {
+				s.Nil(s.node.importTaskMgr.Get(test.taskID))
+			}
+		})
+	}
 }
 
 func (s *DataNodeServicesSuite) TestQueryTaskCopySegment() {
@@ -1205,68 +1706,194 @@ func (s *DataNodeServicesSuite) TestQueryTaskCopySegment() {
 	status, err := s.node.CreateTask(s.ctx, createReq)
 	s.NoError(merr.CheckRPCCall(status, err))
 
-	s.Run("query copy segment task", func() {
-		queryReq := &workerpb.QueryTaskRequest{
-			Properties: map[string]string{
-				taskcommon.ClusterIDKey: "cluster-0",
-				taskcommon.TypeKey:      taskcommon.CopySegment,
-				taskcommon.TaskIDKey:    "601",
-			},
-		}
+	for _, taskType := range []taskcommon.Type{taskcommon.CopySegment, taskcommon.ExternalCopySegment} {
+		s.Run(taskType, func() {
+			queryReq := &workerpb.QueryTaskRequest{
+				Properties: map[string]string{
+					taskcommon.ClusterIDKey: "cluster-0",
+					taskcommon.TypeKey:      taskType,
+					taskcommon.TaskIDKey:    "601",
+				},
+			}
 
-		resp, err := s.node.QueryTask(s.ctx, queryReq)
-		s.NoError(merr.CheckRPCCall(resp.GetStatus(), err))
-		s.NotNil(resp.GetPayload())
-	})
+			resp, err := s.node.QueryTask(s.ctx, queryReq)
+			s.NoError(merr.CheckRPCCall(resp.GetStatus(), err))
+			s.NotNil(resp.GetPayload())
+		})
+	}
 }
 
 func (s *DataNodeServicesSuite) TestDropTaskCopySegment() {
-	// First create a copy segment task
-	copyReq := &datapb.CopySegmentRequest{
-		JobID:         700,
-		TaskID:        701,
-		TaskSlot:      1,
-		StorageConfig: s.storageConfig,
-		Sources: []*datapb.CopySegmentSource{
-			{
-				CollectionId: 111,
-				PartitionId:  222,
-				SegmentId:    333,
-			},
-		},
-		Targets: []*datapb.CopySegmentTarget{
-			{
-				CollectionId: 444,
-				PartitionId:  555,
-				SegmentId:    666,
-			},
-		},
+	tests := []struct {
+		taskID   int64
+		taskType taskcommon.Type
+	}{
+		{taskID: 701, taskType: taskcommon.CopySegment},
+		{taskID: 702, taskType: taskcommon.ExternalCopySegment},
 	}
 
-	payload, err := proto.Marshal(copyReq)
-	s.NoError(err)
+	for _, test := range tests {
+		s.Run(test.taskType, func() {
+			copyReq := &datapb.CopySegmentRequest{
+				JobID:         700,
+				TaskID:        test.taskID,
+				TaskSlot:      1,
+				StorageConfig: s.storageConfig,
+				Sources: []*datapb.CopySegmentSource{
+					{
+						CollectionId: 111,
+						PartitionId:  222,
+						SegmentId:    333,
+					},
+				},
+				Targets: []*datapb.CopySegmentTarget{
+					{
+						CollectionId: 444,
+						PartitionId:  555,
+						SegmentId:    666,
+					},
+				},
+			}
+			if test.taskType == taskcommon.ExternalCopySegment {
+				copyReq.Sources[0].SourceRootPath = fmt.Sprintf(
+					"s3://%s/%s",
+					s.storageConfig.GetBucketName(),
+					s.storageConfig.GetRootPath(),
+				)
+			}
 
-	createReq := &workerpb.CreateTaskRequest{
-		Properties: map[string]string{
-			taskcommon.TypeKey:   taskcommon.CopySegment,
-			taskcommon.TaskIDKey: "701",
-		},
-		Payload: payload,
+			payload, err := proto.Marshal(copyReq)
+			s.NoError(err)
+			createReq := &workerpb.CreateTaskRequest{
+				Properties: map[string]string{
+					taskcommon.TypeKey:   test.taskType,
+					taskcommon.TaskIDKey: fmt.Sprint(test.taskID),
+				},
+				Payload: payload,
+			}
+			status, err := s.node.CreateTask(s.ctx, createReq)
+			s.NoError(merr.CheckRPCCall(status, err))
+
+			dropReq := &workerpb.DropTaskRequest{
+				Properties: map[string]string{
+					taskcommon.ClusterIDKey: "cluster-0",
+					taskcommon.TypeKey:      test.taskType,
+					taskcommon.TaskIDKey:    fmt.Sprint(test.taskID),
+				},
+			}
+			status, err = s.node.DropTask(s.ctx, dropReq)
+			s.NoError(merr.CheckRPCCall(status, err))
+		})
 	}
+}
 
-	status, err := s.node.CreateTask(s.ctx, createReq)
-	s.NoError(merr.CheckRPCCall(status, err))
+func captureDataNodeLogs(t *testing.T) *mlog.TestSink {
+	t.Helper()
 
-	s.Run("drop copy segment task", func() {
-		dropReq := &workerpb.DropTaskRequest{
-			Properties: map[string]string{
-				taskcommon.ClusterIDKey: "cluster-0",
-				taskcommon.TypeKey:      taskcommon.CopySegment,
-				taskcommon.TaskIDKey:    "701",
-			},
-		}
-
-		status, err := s.node.DropTask(s.ctx, dropReq)
-		s.NoError(merr.CheckRPCCall(status, err))
+	return mlog.CaptureGlobalLogs(t, &mlog.Config{
+		Level:             "debug",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
 	})
+}
+
+type failingStorageFactory struct{}
+
+func (failingStorageFactory) NewChunkManager(context.Context, *indexpb.StorageConfig) (storage.ChunkManager, error) {
+	return nil, merr.WrapErrIoFailedReason("storage factory unavailable")
+}
+
+func TestChunkManagerFailureDoesNotLogStorageAccessKey(t *testing.T) {
+	logs := captureDataNodeLogs(t)
+	ctx := context.Background()
+	node := NewDataNode(ctx)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	node.storageFactory = failingStorageFactory{}
+
+	accessKey := "DATANODE_ACCESS_KEY_SENTINEL"
+	storageConfig := &indexpb.StorageConfig{
+		BucketName:  "audit-bucket",
+		AccessKeyID: accessKey,
+	}
+
+	testCases := []struct {
+		name string
+		call func() (*commonpb.Status, error)
+	}{
+		{
+			name: "legacy index job",
+			call: func() (*commonpb.Status, error) {
+				return node.CreateJob(ctx, &workerpb.CreateJobRequest{
+					ClusterID:     "cluster",
+					BuildID:       1,
+					StorageConfig: storageConfig,
+				})
+			},
+		},
+		{
+			name: "v2 index job",
+			call: func() (*commonpb.Status, error) {
+				return node.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
+					ClusterID: "cluster",
+					TaskID:    2,
+					JobType:   indexpb.JobType_JobTypeIndexJob,
+					Request: &workerpb.CreateJobV2Request_IndexRequest{
+						IndexRequest: &workerpb.CreateJobRequest{
+							ClusterID:     "cluster",
+							BuildID:       2,
+							StorageConfig: storageConfig,
+						},
+					},
+				})
+			},
+		},
+		{
+			name: "stats job",
+			call: func() (*commonpb.Status, error) {
+				return node.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
+					ClusterID: "cluster",
+					TaskID:    3,
+					JobType:   indexpb.JobType_JobTypeStatsJob,
+					Request: &workerpb.CreateJobV2Request_StatsRequest{
+						StatsRequest: &workerpb.CreateStatsRequest{
+							ClusterID:     "cluster",
+							TaskID:        3,
+							StorageConfig: storageConfig,
+						},
+					},
+				})
+			},
+		},
+		{
+			name: "pre-import",
+			call: func() (*commonpb.Status, error) {
+				return node.PreImport(ctx, &datapb.PreImportRequest{TaskID: 4, StorageConfig: storageConfig})
+			},
+		},
+		{
+			name: "import",
+			call: func() (*commonpb.Status, error) {
+				return node.ImportV2(ctx, &datapb.ImportRequest{TaskID: 5, StorageConfig: storageConfig})
+			},
+		},
+		{
+			name: "copy segment",
+			call: func() (*commonpb.Status, error) {
+				return node.copySegment(ctx, &datapb.CopySegmentRequest{TaskID: 6, StorageConfig: storageConfig}, false)
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			status, err := testCase.call()
+			require.NoError(t, err)
+			assert.Error(t, merr.Error(status))
+		})
+	}
+
+	assert.NotContains(t, logs.String(), accessKey)
+	assert.Contains(t, logs.String(), "audit-bucket")
 }

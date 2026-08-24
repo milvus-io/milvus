@@ -18,11 +18,13 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "cachinglayer/Translator.h"
+#include "segcore/CacheMetricAttribution.h"
 
 namespace milvus::segcore::storagev2translator {
 
@@ -54,7 +56,7 @@ SetCellTargetSizeBytes(int64_t v) {
 // close to cell_target_size_bytes.
 // Templated so it accepts both std::vector<int64_t> (built locally by
 // GroupChunkTranslator) and std::vector<uint64_t>/size_t (returned by
-// milvus-storage's chunk_reader->get_chunk_size()).
+// milvus-storage's chunk_reader->get_chunk_estimated_size()).
 template <typename T>
 inline size_t
 ComputeRowGroupsPerCell(const std::vector<T>& row_group_sizes,
@@ -94,12 +96,16 @@ struct GroupCTMeta : public milvus::cachinglayer::Meta {
                 milvus::cachinglayer::CellIdMappingMode cell_id_mapping_mode,
                 milvus::cachinglayer::CellDataType cell_data_type,
                 CacheWarmupPolicy cache_warmup_policy,
-                bool support_eviction)
-        : milvus::cachinglayer::Meta(storage_type,
-                                     cell_id_mapping_mode,
-                                     cell_data_type,
-                                     cache_warmup_policy,
-                                     support_eviction),
+                bool support_eviction,
+                std::string shard = "")
+        : milvus::cachinglayer::Meta(
+              storage_type,
+              cell_id_mapping_mode,
+              cell_data_type,
+              cache_warmup_policy,
+              support_eviction,
+              std::nullopt,
+              milvus::segcore::MetricAttributionFromShard(std::move(shard))),
           num_fields_(num_fields),
           total_row_groups_(0) {
     }

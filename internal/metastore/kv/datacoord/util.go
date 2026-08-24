@@ -17,14 +17,14 @@
 package datacoord
 
 import (
+	"context"
 	"fmt"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -33,19 +33,19 @@ import (
 )
 
 func ValidateSegment(segment *datapb.SegmentInfo) error {
-	log := log.With(
-		zap.Int64("collection", segment.GetCollectionID()),
-		zap.Int64("partition", segment.GetPartitionID()),
-		zap.Int64("segment", segment.GetID()))
+	log := mlog.With(
+		mlog.Int64("collection", segment.GetCollectionID()),
+		mlog.Int64("partition", segment.GetPartitionID()),
+		mlog.Int64("segment", segment.GetID()))
 	// check stats log and bin log size match
 
 	// check L0 Segment
 	if segment.GetLevel() == datapb.SegmentLevel_L0 {
 		// L0 segment should only have delta logs
 		if len(segment.GetBinlogs()) > 0 || len(segment.GetStatslogs()) > 0 {
-			log.Warn("find invalid segment while L0 segment get more than delta logs",
-				zap.Any("binlogs", segment.GetBinlogs()),
-				zap.Any("stats", segment.GetBinlogs()),
+			log.Warn(context.TODO(), "find invalid segment while L0 segment get more than delta logs",
+				mlog.Any("binlogs", segment.GetBinlogs()),
+				mlog.Any("stats", segment.GetBinlogs()),
 			)
 			return merr.WrapErrServiceInternalMsg("segment can not be saved because of L0 segment get more than delta logs: collection %v, segment %v",
 				segment.GetCollectionID(), segment.GetID())
@@ -59,9 +59,9 @@ func ValidateSegment(segment *datapb.SegmentInfo) error {
 	}
 
 	if len(segment.GetBinlogs()) == 0 || len(segment.GetStatslogs()) == 0 {
-		log.Warn("find segment binlog or statslog was empty",
-			zap.Any("binlogs", segment.GetBinlogs()),
-			zap.Any("stats", segment.GetBinlogs()),
+		log.Warn(context.TODO(), "find segment binlog or statslog was empty",
+			mlog.Any("binlogs", segment.GetBinlogs()),
+			mlog.Any("stats", segment.GetBinlogs()),
 		)
 		return merr.WrapErrServiceInternalMsg("segment can not be saved because of binlog file or stat log file lack: collection %v, segment %v",
 			segment.GetCollectionID(), segment.GetID())
@@ -73,9 +73,9 @@ func ValidateSegment(segment *datapb.SegmentInfo) error {
 	statslogNum := len(segment.GetStatslogs()[0].GetBinlogs())
 
 	if len(segment.GetCompactionFrom()) == 0 && statslogNum != binlogNum && !hasSpecialStatslog(segment) {
-		log.Warn("find invalid segment while bin log size didn't match stat log size",
-			zap.Any("binlogs", segment.GetBinlogs()),
-			zap.Any("stats", segment.GetStatslogs()),
+		log.Warn(context.TODO(), "find invalid segment while bin log size didn't match stat log size",
+			mlog.Any("binlogs", segment.GetBinlogs()),
+			mlog.Any("stats", segment.GetStatslogs()),
 		)
 		return merr.WrapErrServiceInternalMsg("segment can not be saved because of binlog file not match stat log number: collection %v, segment %v",
 			segment.GetCollectionID(), segment.GetID())
@@ -106,15 +106,31 @@ func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.Uniqu
 	return kvs, nil
 }
 
+// isV3Segment reports whether a segment is V3 (manifest-backed). Used as
+// the gate for skipping per-FieldBinlog KV writes and binlog-array-based
+// row-count recomputation: V3 segments resolve paths via the LOON manifest
+// and aggregate metrics via SegmentInfo.Stats, so the per-FieldBinlog KVs
+// are pure write-amplification and the array-iterating ReCalcRowCount
+// would zero out NumOfRows on a freshly-loaded V3 segment whose arrays
+// were never persisted.
+func isV3Segment(segment *datapb.SegmentInfo) bool {
+	return segment.GetManifestPath() != ""
+}
+
 func buildSegmentAndBinlogsKvs(segment *datapb.SegmentInfo) (map[string]string, error) {
 	noBinlogsSegment, binlogs, deltalogs, statslogs, bm25logs := CloneSegmentWithExcludeBinlogs(segment)
-	// `segment` is not mutated above. Also, `noBinlogsSegment` is a cloned version of `segment`.
-	segmentutil.ReCalcRowCount(segment, noBinlogsSegment)
 
-	// save binlogs separately
-	kvs, err := buildBinlogKvsWithLogID(noBinlogsSegment.CollectionID, noBinlogsSegment.PartitionID, noBinlogsSegment.ID, binlogs, deltalogs, statslogs, bm25logs)
-	if err != nil {
-		return nil, err
+	kvs := make(map[string]string)
+	if !isV3Segment(segment) {
+		// Row-count reconciliation is a V2 concern — V3 segments carry
+		// the truth on SegmentInfo.NumOfRows, and their arrays may
+		// legitimately be empty.
+		segmentutil.ReCalcRowCount(segment, noBinlogsSegment)
+		binlogKvs, err := buildBinlogKvsWithLogID(noBinlogsSegment.CollectionID, noBinlogsSegment.PartitionID, noBinlogsSegment.ID, binlogs, deltalogs, statslogs, bm25logs)
+		if err != nil {
+			return nil, err
+		}
+		kvs = binlogKvs
 	}
 
 	// save segment info
@@ -261,6 +277,19 @@ func buildCompactionTaskPath(task *datapb.CompactionTask) string {
 	return fmt.Sprintf("%s/%s/%d/%d", CompactionTaskPrefix, task.GetType(), task.TriggerID, task.PlanID)
 }
 
+func buildCompactionTargetKV(record *datapb.CompactionTarget) (string, string, error) {
+	valueBytes, err := proto.Marshal(record)
+	if err != nil {
+		return "", "", merr.WrapErrSerializationFailed(err, "marshal CompactionTarget: %d/%d", record.GetTargetID(), record.GetCollectionID())
+	}
+	key := buildCompactionTargetPath(record.GetTargetID())
+	return key, string(valueBytes), nil
+}
+
+func buildCompactionTargetPath(targetID int64) string {
+	return fmt.Sprintf("%s/%d", CompactionTargetPrefix, targetID)
+}
+
 func buildPartitionStatsInfoKv(info *datapb.PartitionStatsInfo) (string, string, error) {
 	valueBytes, err := proto.Marshal(info)
 	if err != nil {
@@ -381,4 +410,8 @@ func buildExternalCollectionRefreshTaskKey(taskID int64) string {
 
 func buildSnapshotKey(collectionID int64, snapshotID int64) string {
 	return fmt.Sprintf("%s/%d/%d", SnapshotPrefix, collectionID, snapshotID)
+}
+
+func buildExportSnapshotJobKey(jobID int64) string {
+	return fmt.Sprintf("%s/%d", ExportSnapshotJobPrefix, jobID)
 }

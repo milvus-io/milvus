@@ -6,77 +6,88 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
-	"strconv"
 	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/bm25"
-	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+var defaultManager FunctionRunnerManager = NewFunctionRunnerManager()
+
+// LatestFunctionRunnerVersion asks Materialize to use the version currently
+// registered by the lifecycle key. Zero is a valid schema version.
+const LatestFunctionRunnerVersion int32 = -1
+
 var (
-	defaultFunctionRunnerManager FunctionRunnerManager = NewFunctionRunnerManager()
-	functionRunnerSingleflight   conc.Singleflight[struct{}]
-)
-
-var errFunctionRunnerEntryRemoved = errors.New("function runner manager entry was removed")
-
-type functionRunnerState int
-
-const (
-	functionRunnerStateInitializing functionRunnerState = iota
-	functionRunnerStateReady
-	functionRunnerStateFailed
+	errFunctionRunnerEntryRemoved           = errors.New("function runner manager entry was removed")
+	errFunctionRunnerCollectionEntryRemoved = errors.New("function runner manager collection entry was removed")
 )
 
 type FunctionRunnerManager interface {
-	// Alloc records that a vchannel of the collection is using the schema version
+	// Alloc records that a lifecycle key is using the schema version
 	// and asynchronously tries to initialize function runners for that version.
-	// Initialization failures are logged and retried by later Alloc, Update, or
-	// Materialize calls instead of failing collection recovery.
-	Alloc(collectionID int64, vchannel string, schema *schemapb.CollectionSchema) <-chan error
+	// The key identifies an independent lifecycle scope; for example, WAL uses
+	// "WAL-"+vchannel while delegator uses "DELEGATOR-"+vchannel.
+	// Invalid function metadata is returned synchronously. Runner initialization
+	// failures are logged and retried by later requests instead of failing
+	// collection recovery.
+	Alloc(collectionID int64, key string, schema *schemapb.CollectionSchema) error
 
-	// Update moves a vchannel to a newer schema version and asynchronously
-	// initializes any missing function runners required by that version.
-	// Runners for older versions are kept until no vchannel references them.
-	Update(collectionID int64, vchannel string, schema *schemapb.CollectionSchema) <-chan error
+	// Update moves an allocated lifecycle key to a newer schema version and
+	// asynchronously initializes any missing function runners required by that
+	// version. It is a no-op if Alloc has not registered the key or the key has
+	// already been released. Schema snapshots without runner-backed functions are
+	// still retained so analyzer execution can be resolved entirely by lifecycle key.
+	// Invalid function metadata is returned synchronously. Runners for older
+	// versions are kept until no key uses those versions.
+	Update(collectionID int64, key string, schema *schemapb.CollectionSchema) error
 
-	// Release removes one vchannel reference from a collection. The collection
-	// entry and its runners are closed only after all vchannels are released.
-	Release(collectionID int64, vchannel string)
+	// Release removes one lifecycle key. The collection entry and its runners
+	// are closed only after all keys are released.
+	Release(collectionID int64, key string)
 
-	// Materialize fills missing function output fields for an insert request.
-	// This is the write-before path and will initialize missing runners on demand;
-	// initialization or execution failures are returned to the caller.
-	Materialize(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, body *msgpb.InsertRequest) (bool, error)
+	// Materialize fills missing function output fields for a WAL insert message.
+	// The lifecycle key selects the managed schema snapshot. Passing
+	// LatestFunctionRunnerVersion uses the version currently registered by the key;
+	// an explicit schemaVersion verifies that the WAL and manager snapshots match.
+	// The message body is parsed only when the selected schema has runner-backed
+	// function output fields.
+	Materialize(ctx context.Context, collectionID int64, key string, schemaVersion int32, message InsertMessage) (bool, error)
 
 	// TryMaterialize is used by compatibility paths for old insert messages. It
-	// only uses already cached runners for the given schema version and returns
-	// ok=false when the caller should build short-lived runners instead.
-	TryMaterialize(collectionID int64, schemaVersion int32, body *msgpb.InsertRequest) (bool, bool, error)
+	// uses the exact managed schema version when it is still retained. It returns
+	// ok=false when the caller should build compatibility runners instead.
+	TryMaterialize(ctx context.Context, collectionID int64, schemaVersion int32, body *msgpb.InsertRequest) (bool, bool, error)
 
 	// RunWithRunner runs the callback with the runner that owns the output field.
-	// The callback is executed synchronously while the manager protects the runner
+	// The lifecycle key selects its currently registered schema version. The
+	// callback is executed synchronously while the manager protects the runner
 	// from concurrent close; callers must not retain the runner after the callback.
-	RunWithRunner(ctx context.Context, collectionID int64, schemaVersion int32, outputFieldID int64, run func(schemapb.FunctionType, FunctionRunner) error) (bool, error)
+	RunWithRunner(ctx context.Context, collectionID int64, key string, outputFieldID int64, run func(FunctionRunner) error) (bool, error)
 
 	// RunWithAnalyzer runs the callback with the analyzer service associated with
-	// a function input field. BM25 runners can serve analyzer requests. The
-	// callback is protected from concurrent close and must not retain the analyzer.
-	RunWithAnalyzer(ctx context.Context, collectionID int64, schemaVersion int32, fieldID int64, run func(Analyzer) error) (bool, error)
+	// a field in the lifecycle key's current schema. BM25 runners are reused for
+	// their input fields; other analyzer-enabled fields use a short-lived analyzer.
+	// The callback is protected from concurrent close and must not retain the analyzer.
+	RunWithAnalyzer(ctx context.Context, collectionID int64, key string, fieldID int64, run func(Analyzer) error) (bool, error)
 
 	// Close releases all cached runners managed by this manager.
 	Close()
+}
+
+// InsertMessage is the mutable insert message surface needed by Materialize.
+type InsertMessage interface {
+	MustBody() *msgpb.InsertRequest
+	OverwriteBody(*msgpb.InsertRequest)
 }
 
 type functionRunnerManager struct {
@@ -84,137 +95,148 @@ type functionRunnerManager struct {
 	entries map[int64]*functionRunnerCollectionEntry
 }
 
+// Lock order is functionRunnerManager.mu -> functionRunnerCollectionEntry.mu ->
+// functionRunnerEntry.mu. The manager lock protects collection entry publication
+// and removal; a closed collection entry rejects callers that obtained it before
+// removal. Runner Close calls are always done after releasing the manager and
+// collection locks.
 type functionRunnerCollectionEntry struct {
-	mu               sync.RWMutex
-	collectionID     int64
-	vchannelVersions map[string]int32
-	versionRunners   map[int32]*functionRunnerVersion
-	runners          map[string]*functionRunnerEntry
+	mu             sync.RWMutex
+	collectionID   int64
+	keyVersions    map[string]int32
+	versionRunners map[int32]*functionRunnerVersion
+	runners        map[string]*functionRunnerEntry
+	closed         bool
 }
 
 type functionRunnerVersion struct {
+	schema                  *schemapb.CollectionSchema
 	signatures              []string
 	outputFieldIDs          []int64
+	fieldIDs                map[int64]struct{}
 	outputFieldSignatures   map[int64]string
-	outputFieldTypes        map[int64]schemapb.FunctionType
 	analyzerFieldSignatures map[int64]string
 }
 
 type functionRunnerEntry struct {
-	mu           sync.RWMutex
-	collectionID int64
-	signature    string
-	schema       *schemapb.CollectionSchema
-	function     *schemapb.FunctionSchema
-	runner       FunctionRunner
-	state        functionRunnerState
-	initID       uint64
-	closed       bool
+	mu       sync.RWMutex
+	schema   *schemapb.CollectionSchema
+	function *schemapb.FunctionSchema
+	runner   FunctionRunner
+	init     *functionRunnerInit
+	closed   bool
+}
+
+type functionRunnerInit struct {
+	done chan struct{}
+	err  error
 }
 
 func newFunctionRunnerCollectionEntry(collectionID int64) *functionRunnerCollectionEntry {
 	return &functionRunnerCollectionEntry{
-		collectionID:     collectionID,
-		vchannelVersions: make(map[string]int32),
-		versionRunners:   make(map[int32]*functionRunnerVersion),
-		runners:          make(map[string]*functionRunnerEntry),
+		collectionID:   collectionID,
+		keyVersions:    make(map[string]int32),
+		versionRunners: make(map[int32]*functionRunnerVersion),
+		runners:        make(map[string]*functionRunnerEntry),
 	}
 }
 
-func (e *functionRunnerCollectionEntry) Alloc(vchannel string, schema *schemapb.CollectionSchema) <-chan error {
-	return e.allocOrUpdate(vchannel, schema, "initialize")
-}
-
-func (e *functionRunnerCollectionEntry) Update(vchannel string, schema *schemapb.CollectionSchema) <-chan error {
-	return e.allocOrUpdate(vchannel, schema, "update")
-}
-
-func (e *functionRunnerCollectionEntry) allocOrUpdate(vchannel string, schema *schemapb.CollectionSchema, operation string) <-chan error {
-	schemaVersion := int32(0)
-	if schema != nil {
-		schemaVersion = schema.GetVersion()
-	}
+func (e *functionRunnerCollectionEntry) allocOrUpdate(
+	key string,
+	schema *schemapb.CollectionSchema,
+	versionRunners *functionRunnerVersion,
+	functionsBySignature map[string]*schemapb.FunctionSchema,
+	operation string,
+	allowKeyRegistration bool,
+) error {
+	schemaVersion := schema.GetVersion()
 	warnInitFailure := func(err error) {
-		log.Warn("failed to initialize function runners, will retry on next request",
-			zap.String("operation", operation),
-			zap.Int64("collectionID", e.collectionID),
-			zap.String("vchannel", vchannel),
-			zap.Int32("schemaVersion", schemaVersion),
-			zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to initialize function runners, will retry on next request",
+			mlog.String("operation", operation),
+			mlog.Int64("collectionID", e.collectionID),
+			mlog.String("key", key),
+			mlog.Int32("schemaVersion", schemaVersion),
+			mlog.Err(err))
 	}
-	runnerEntries, err := e.ensureVersion(vchannel, schema)
+	runnerEntries, staleRunnerEntries, err := e.ensureVersion(key, schema, versionRunners, functionsBySignature, allowKeyRegistration)
 	if err != nil {
-		warnInitFailure(err)
-		return nil
+		return err
+	}
+	if len(staleRunnerEntries) > 0 {
+		// New lookups can no longer reach these entries. Let existing callbacks
+		// release their runner leases without blocking the schema update.
+		go closeFunctionRunnerEntries(staleRunnerEntries)
 	}
 	if len(runnerEntries) == 0 {
 		return nil
 	}
-	errCh := make(chan error, 1)
 	go func() {
 		for _, runnerEntry := range runnerEntries {
-			if err := runnerEntry.ensureReady(context.Background()); err != nil {
+			_, unlock, err := runnerEntry.GetRunner(context.Background())
+			if err != nil {
 				if !errors.Is(err, errFunctionRunnerEntryRemoved) {
 					warnInitFailure(err)
 				}
 				break
 			}
+			unlock()
 		}
-		errCh <- nil
 	}()
-	return errCh
+	return nil
 }
 
-func (e *functionRunnerCollectionEntry) Release(vchannel string) bool {
+func (e *functionRunnerCollectionEntry) Release(key string) ([]*functionRunnerEntry, bool) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if _, ok := e.vchannelVersions[vchannel]; !ok {
-		return false
+	if e.closed {
+		e.mu.Unlock()
+		return nil, false
 	}
-	delete(e.vchannelVersions, vchannel)
-	return len(e.vchannelVersions) == 0
-}
-
-func (e *functionRunnerCollectionEntry) Close() {
-	e.mu.Lock()
-	e.vchannelVersions = make(map[string]int32)
+	if _, ok := e.keyVersions[key]; !ok {
+		e.mu.Unlock()
+		return nil, false
+	}
+	delete(e.keyVersions, key)
+	remove := len(e.keyVersions) == 0
+	if remove {
+		e.closed = true
+	}
 	runnerEntries := e.gcLocked()
 	e.mu.Unlock()
-
-	closeFunctionRunnerEntries(runnerEntries)
+	return runnerEntries, remove
 }
 
-func (e *functionRunnerCollectionEntry) GC() {
+func (e *functionRunnerCollectionEntry) detachForClose() []*functionRunnerEntry {
 	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return nil
+	}
+	e.closed = true
+	// Close detaches every lifecycle key so gcLocked collects all runners.
+	e.keyVersions = nil
 	runnerEntries := e.gcLocked()
 	e.mu.Unlock()
-
-	closeFunctionRunnerEntries(runnerEntries)
+	return runnerEntries
 }
 
 func (e *functionRunnerCollectionEntry) gcLocked() []*functionRunnerEntry {
-	if len(e.vchannelVersions) == 0 {
+	if len(e.keyVersions) == 0 {
 		runnerEntries := make([]*functionRunnerEntry, 0, len(e.runners))
 		for _, runnerEntry := range e.runners {
 			runnerEntries = append(runnerEntries, runnerEntry)
 		}
-		e.vchannelVersions = make(map[string]int32)
-		e.versionRunners = make(map[int32]*functionRunnerVersion)
-		e.runners = make(map[string]*functionRunnerEntry)
+		e.keyVersions = nil
+		e.versionRunners = nil
+		e.runners = nil
 		return runnerEntries
 	}
 
-	var minVersion int32
-	first := true
-	for _, version := range e.vchannelVersions {
-		if first || version < minVersion {
-			minVersion = version
-			first = false
-		}
+	activeVersions := make(map[int32]struct{}, len(e.keyVersions))
+	for _, version := range e.keyVersions {
+		activeVersions[version] = struct{}{}
 	}
 	for version := range e.versionRunners {
-		if version < minVersion {
+		if _, ok := activeVersions[version]; !ok {
 			delete(e.versionRunners, version)
 		}
 	}
@@ -237,197 +259,171 @@ func (e *functionRunnerCollectionEntry) gcLocked() []*functionRunnerEntry {
 	return runnerEntries
 }
 
-func (e *functionRunnerCollectionEntry) getVersionRunnerEntries(schemaVersion int32) ([]*functionRunnerEntry, []int64, bool) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-
+func (e *functionRunnerCollectionEntry) getVersionRunnerEntriesLocked(schemaVersion int32) ([]*functionRunnerEntry, []int64, bool, error) {
 	versionRunners, ok := e.versionRunners[schemaVersion]
 	if !ok {
-		return nil, nil, false
+		return nil, nil, false, nil
 	}
-
 	runnerEntries := make([]*functionRunnerEntry, 0, len(versionRunners.signatures))
 	for _, signature := range versionRunners.signatures {
 		runnerEntry := e.runners[signature]
 		if runnerEntry == nil {
-			return nil, nil, false
+			return nil, nil, true, merr.WrapErrServiceInternalMsg("function runner entry not found for schema version %d", schemaVersion)
 		}
 		runnerEntries = append(runnerEntries, runnerEntry)
 	}
-	return runnerEntries, append([]int64(nil), versionRunners.outputFieldIDs...), true
+	return runnerEntries, append([]int64(nil), versionRunners.outputFieldIDs...), true, nil
+}
+
+func (e *functionRunnerCollectionEntry) getVersionRunnerEntries(schemaVersion int32) ([]*functionRunnerEntry, []int64, bool, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	return e.getVersionRunnerEntriesLocked(schemaVersion)
 }
 
 func runWithRunnerEntries(
 	ctx context.Context,
 	runnerEntries []*functionRunnerEntry,
-	initRunner bool,
 	run func([]FunctionRunner) error,
-) (bool, error) {
+) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if initRunner {
-		for _, runnerEntry := range runnerEntries {
-			if err := runnerEntry.ensureReady(ctx); err != nil {
-				return false, err
-			}
-		}
-	}
 
+	// Initialize and lease each runner in one step. Releasing an initialized
+	// runner before reacquiring its lease would leave a window where schema GC
+	// could close it and make strict materialization report a false success.
+	// The read locks are shared, so concurrent materialization is still allowed;
+	// concrete runners protect their own mutable state.
 	runners := make([]FunctionRunner, 0, len(runnerEntries))
 	for _, runnerEntry := range runnerEntries {
-		runner, unlock, ok, err := runnerEntry.lockRunner(initRunner)
+		runner, unlock, err := runnerEntry.GetRunner(ctx)
 		if err != nil {
-			return false, err
-		}
-		if !ok {
-			return false, nil
+			return err
 		}
 		runners = append(runners, runner)
 		defer unlock()
 	}
 
-	return true, run(runners)
+	return run(runners)
 }
 
 func newFunctionRunnerEntry(
-	collectionID int64,
-	signature string,
 	schema *schemapb.CollectionSchema,
 	fn *schemapb.FunctionSchema,
 ) *functionRunnerEntry {
 	return &functionRunnerEntry{
-		collectionID: collectionID,
-		signature:    signature,
-		schema:       proto.Clone(schema).(*schemapb.CollectionSchema),
-		function:     proto.Clone(fn).(*schemapb.FunctionSchema),
-		state:        functionRunnerStateFailed,
+		schema:   proto.Clone(schema).(*schemapb.CollectionSchema),
+		function: proto.Clone(fn).(*schemapb.FunctionSchema),
 	}
 }
 
-func (e *functionRunnerEntry) IsReady() bool {
+func (e *functionRunnerEntry) isReady() bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
-	return e.state == functionRunnerStateReady && e.runner != nil
+	return e.isReadyLocked()
 }
 
-func (e *functionRunnerEntry) ensureReady(ctx context.Context) error {
+func (e *functionRunnerEntry) isReadyLocked() bool {
+	return !e.closed && e.runner != nil
+}
+
+func (e *functionRunnerEntry) GetRunner(ctx context.Context) (FunctionRunner, func(), error) {
+	if err := e.ensureRunner(ctx); err != nil {
+		return nil, nil, err
+	}
+
+	e.mu.RLock()
+	if e.closed || e.runner == nil {
+		e.mu.RUnlock()
+		return nil, nil, errFunctionRunnerEntryRemoved
+	}
+	return e.runner, e.mu.RUnlock, nil
+}
+
+func (e *functionRunnerEntry) ensureRunner(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if e.IsReady() {
+	if e.isReady() {
 		return nil
 	}
 
-	e.mu.Lock()
-	if e.closed {
-		e.mu.Unlock()
-		return errFunctionRunnerEntryRemoved
-	}
-	if e.state == functionRunnerStateReady && e.runner != nil {
-		e.mu.Unlock()
-		return nil
-	}
-	if e.state != functionRunnerStateInitializing {
-		e.initID++
-		e.state = functionRunnerStateInitializing
-	}
-	initID := e.initID
-	e.mu.Unlock()
-
-	resultCh := functionRunnerSingleflight.DoChan(e.singleflightKey(), func() (struct{}, error) {
-		return struct{}{}, e.init(initID)
-	})
-	select {
-	case result := <-resultCh:
-		if result.Err != nil {
-			return result.Err
-		}
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-
-	if !e.IsReady() {
-		return errFunctionRunnerEntryRemoved
-	}
-	return nil
-}
-
-func (e *functionRunnerEntry) run(ctx context.Context, run func(FunctionRunner) error) error {
-	if err := e.ensureReady(ctx); err != nil {
-		return err
-	}
-
-	runner, unlock, _, err := e.lockRunner(true)
+	init, runInit, err := e.getOrCreateInit()
 	if err != nil {
 		return err
 	}
-	defer unlock()
-
-	return run(runner)
-}
-
-func (e *functionRunnerEntry) lockRunner(initRunner bool) (FunctionRunner, func(), bool, error) {
-	e.mu.RLock()
-
-	if e.closed || e.state != functionRunnerStateReady || e.runner == nil {
-		e.mu.RUnlock()
-		if initRunner {
-			return nil, nil, false, errFunctionRunnerEntryRemoved
-		}
-		return nil, nil, false, nil
-	}
-	return e.runner, e.mu.RUnlock, true, nil
-}
-
-func (e *functionRunnerEntry) init(initID uint64) error {
-	if e.IsReady() {
+	if init == nil {
 		return nil
 	}
+	if runInit {
+		go e.runInit(init)
+	}
+	return e.waitInit(ctx, init)
+}
 
+func (e *functionRunnerEntry) getOrCreateInit() (*functionRunnerInit, bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.closed {
+		return nil, false, errFunctionRunnerEntryRemoved
+	}
+	if e.isReadyLocked() {
+		return nil, false, nil
+	}
+	init := e.init
+	if init == nil {
+		init = &functionRunnerInit{done: make(chan struct{})}
+		e.init = init
+		return init, true, nil
+	}
+	return init, false, nil
+}
+
+func (e *functionRunnerEntry) waitInit(ctx context.Context, init *functionRunnerInit) error {
+	select {
+	case <-init.done:
+		return init.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (e *functionRunnerEntry) runInit(init *functionRunnerInit) {
 	runner, err := BuildEmbeddingRunner(e.schema, e.function)
 	if err == nil && runner == nil {
 		err = errors.New("function runner is nil")
 	}
 
 	e.mu.Lock()
-	if e.closed || e.initID != initID || e.state != functionRunnerStateInitializing {
-		e.mu.Unlock()
+	defer e.mu.Unlock()
+	defer close(init.done)
+
+	e.init = nil
+	if err != nil {
 		if runner != nil {
 			runner.Close()
 		}
-		return errFunctionRunnerEntryRemoved
+		init.err = err
+		return
 	}
-
-	var oldRunner FunctionRunner
-	if err != nil {
-		e.state = functionRunnerStateFailed
-	} else {
-		oldRunner = e.runner
-		e.runner = runner
-		e.state = functionRunnerStateReady
-	}
-	e.mu.Unlock()
-
-	if oldRunner != nil {
-		oldRunner.Close()
-	}
-	if err != nil && runner != nil {
+	if e.closed {
+		init.err = errFunctionRunnerEntryRemoved
 		runner.Close()
+		return
 	}
-	return err
-}
 
-func (e *functionRunnerEntry) singleflightKey() string {
-	return strconv.FormatInt(e.collectionID, 10) + "/" + e.signature
+	e.runner = runner
+	init.err = nil
 }
 
 func (e *functionRunnerEntry) Close() {
 	e.mu.Lock()
 	runner := e.runner
 	e.runner = nil
-	e.state = functionRunnerStateFailed
 	e.closed = true
 	e.mu.Unlock()
 
@@ -440,163 +436,148 @@ func NewFunctionRunnerManager() FunctionRunnerManager {
 	return newFunctionRunnerManager()
 }
 
+// GetManager returns the process-wide function runner manager.
+func GetManager() FunctionRunnerManager {
+	return defaultManager
+}
+
 func newFunctionRunnerManager() *functionRunnerManager {
 	return &functionRunnerManager{
 		entries: make(map[int64]*functionRunnerCollectionEntry),
 	}
 }
 
-func (m *functionRunnerManager) Alloc(collectionID int64, vchannel string, schema *schemapb.CollectionSchema) <-chan error {
-	if vchannel == "" {
-		return functionRunnerErrorResult(errors.New("vchannel is empty"))
+func (m *functionRunnerManager) Alloc(
+	collectionID int64,
+	key string,
+	schema *schemapb.CollectionSchema,
+) error {
+	if key == "" {
+		return merr.WrapErrFunctionFailedMsg("function runner key is empty")
 	}
 	if schema == nil {
-		return functionRunnerErrorResult(errors.New("collection schema is nil"))
+		return merr.WrapErrFunctionFailedMsg("collection schema is nil")
 	}
-	if !HasEmbeddingFunctions(schema) {
-		return nil
+	versionRunners, functionsBySignature, err := buildFunctionRunnerVersion(schema)
+	if err != nil {
+		return err
 	}
-	return m.getOrCreateEntry(collectionID).Alloc(vchannel, schema)
+	return m.allocOrUpdate(collectionID, key, schema, versionRunners, functionsBySignature, "initialize")
 }
 
-func (m *functionRunnerManager) Update(collectionID int64, vchannel string, schema *schemapb.CollectionSchema) <-chan error {
-	if vchannel == "" {
-		return functionRunnerErrorResult(errors.New("vchannel is empty"))
+func (m *functionRunnerManager) Update(
+	collectionID int64,
+	key string,
+	schema *schemapb.CollectionSchema,
+) error {
+	if key == "" {
+		return merr.WrapErrFunctionFailedMsg("function runner key is empty")
 	}
 	if schema == nil {
-		return functionRunnerErrorResult(errors.New("collection schema is nil"))
+		return merr.WrapErrFunctionFailedMsg("collection schema is nil")
 	}
-	if !HasEmbeddingFunctions(schema) {
+	entry := m.getEntry(collectionID)
+	if entry == nil {
 		return nil
 	}
-	return m.getOrCreateEntry(collectionID).Update(vchannel, schema)
+	entry.mu.RLock()
+	version, ok := entry.keyVersions[key]
+	entry.mu.RUnlock()
+	if !ok || version >= schema.GetVersion() {
+		return nil
+	}
+	versionRunners, functionsBySignature, err := buildFunctionRunnerVersion(schema)
+	if err != nil {
+		return err
+	}
+	err = entry.allocOrUpdate(key, schema, versionRunners, functionsBySignature, "update", false)
+	if errors.Is(err, errFunctionRunnerCollectionEntryRemoved) {
+		return nil
+	}
+	return err
+}
+
+func (m *functionRunnerManager) allocOrUpdate(
+	collectionID int64,
+	key string,
+	schema *schemapb.CollectionSchema,
+	versionRunners *functionRunnerVersion,
+	functionsBySignature map[string]*schemapb.FunctionSchema,
+	operation string,
+) error {
+	for {
+		entry := m.getOrCreateEntry(collectionID)
+		err := entry.allocOrUpdate(key, schema, versionRunners, functionsBySignature, operation, true)
+		// Final Release may close an entry after it was read from the manager.
+		// Retry registration against the current collection entry only in that case.
+		if errors.Is(err, errFunctionRunnerCollectionEntryRemoved) {
+			continue
+		}
+		return err
+	}
 }
 
 func (e *functionRunnerCollectionEntry) ensureVersion(
-	vchannel string,
+	key string,
 	schema *schemapb.CollectionSchema,
-) ([]*functionRunnerEntry, error) {
-	if schema == nil {
-		return nil, merr.WrapErrFunctionFailedMsg("collection schema is nil")
-	}
-
+	versionRunners *functionRunnerVersion,
+	functionsBySignature map[string]*schemapb.FunctionSchema,
+	allowKeyRegistration bool,
+) ([]*functionRunnerEntry, []*functionRunnerEntry, error) {
 	schemaVersion := schema.GetVersion()
 	e.mu.Lock()
-	if vchannel != "" {
-		if currentVersion, ok := e.vchannelVersions[vchannel]; !ok || currentVersion <= schemaVersion {
-			e.vchannelVersions[vchannel] = schemaVersion
-		}
+	if e.closed {
+		e.mu.Unlock()
+		return nil, nil, errFunctionRunnerCollectionEntryRemoved
 	}
-
-	versionRunners, ok := e.versionRunners[schemaVersion]
+	keyVersion, keyExists := e.keyVersions[key]
+	if !keyExists && !allowKeyRegistration {
+		e.mu.Unlock()
+		return nil, nil, nil
+	}
+	// Update performs a fast version check before building the snapshot. Check
+	// again under the entry lock because another update may have advanced the
+	// lifecycle key while that snapshot was being built.
+	if keyExists && !allowKeyRegistration && keyVersion >= schemaVersion {
+		e.mu.Unlock()
+		return nil, nil, nil
+	}
+	existingVersion, ok := e.versionRunners[schemaVersion]
 	if ok {
-		runnerEntries := make([]*functionRunnerEntry, 0, len(versionRunners.signatures))
-		missingEntry := false
-		for _, signature := range versionRunners.signatures {
-			runnerEntry := e.runners[signature]
-			if runnerEntry == nil {
-				missingEntry = true
-				break
-			}
-			if !runnerEntry.IsReady() {
-				runnerEntries = append(runnerEntries, runnerEntry)
-			}
-		}
-		if !missingEntry {
-			closedRunnerEntries := e.gcLocked()
+		if len(existingVersion.signatures) != len(versionRunners.signatures) {
 			e.mu.Unlock()
-
-			closeFunctionRunnerEntries(closedRunnerEntries)
-			return runnerEntries, nil
+			return nil, nil, merr.WrapErrFunctionFailedMsg("function runner metadata does not match schema version %d", schemaVersion)
 		}
-	}
-	e.mu.Unlock()
-
-	functions := embeddingFunctions(schema)
-	functionsBySignature := make(map[string]*schemapb.FunctionSchema, len(functions))
-	outputFieldIDsBySignature := make(map[string][]int64, len(functions))
-	signatures := make([]string, 0, len(functions))
-	outputFieldIDs := make([]int64, 0, len(functions))
-	outputFieldSignatures := make(map[int64]string)
-	outputFieldTypes := make(map[int64]schemapb.FunctionType)
-	analyzerFieldSignatures := make(map[int64]string)
-	for _, fn := range functions {
-		functionOutputFieldIDs, err := functionOutputFieldIDs(schema, fn)
-		if err != nil {
-			return nil, err
-		}
-		inputFieldIDs, err := functionInputFieldIDs(schema, fn)
-		if err != nil {
-			return nil, err
-		}
-		signature, err := embeddingFunctionSignature(schema, fn)
-		if err != nil {
-			return nil, err
-		}
-		signatures = append(signatures, signature)
-		outputFieldIDs = append(outputFieldIDs, functionOutputFieldIDs...)
-		functionsBySignature[signature] = fn
-		outputFieldIDsBySignature[signature] = append([]int64(nil), functionOutputFieldIDs...)
-		for _, outputFieldID := range functionOutputFieldIDs {
-			outputFieldSignatures[outputFieldID] = signature
-			outputFieldTypes[outputFieldID] = fn.GetType()
-		}
-		if fn.GetType() == schemapb.FunctionType_BM25 && len(inputFieldIDs) > 0 {
-			if _, ok := analyzerFieldSignatures[inputFieldIDs[0]]; !ok {
-				analyzerFieldSignatures[inputFieldIDs[0]] = signature
-			}
-		}
-	}
-
-	e.mu.Lock()
-	if vchannel != "" {
-		if currentVersion, ok := e.vchannelVersions[vchannel]; !ok || currentVersion <= schemaVersion {
-			e.vchannelVersions[vchannel] = schemaVersion
-		}
-	}
-
-	versionRunners, ok = e.versionRunners[schemaVersion]
-	if !ok {
-		versionRunners = &functionRunnerVersion{
-			signatures:              append([]string(nil), signatures...),
-			outputFieldIDs:          append([]int64(nil), outputFieldIDs...),
-			outputFieldSignatures:   cloneMap(outputFieldSignatures),
-			outputFieldTypes:        cloneMap(outputFieldTypes),
-			analyzerFieldSignatures: cloneMap(analyzerFieldSignatures),
-		}
-		for _, signature := range signatures {
-			if e.runners[signature] == nil {
-				e.runners[signature] = newFunctionRunnerEntry(
-					e.collectionID,
-					signature,
-					schema,
-					functionsBySignature[signature],
-				)
-			}
-		}
-		e.versionRunners[schemaVersion] = versionRunners
-	} else {
-		for _, signature := range versionRunners.signatures {
-			_, outputOK := outputFieldIDsBySignature[signature]
-			if _, functionOK := functionsBySignature[signature]; !functionOK || !outputOK {
+		for i, signature := range existingVersion.signatures {
+			if signature != versionRunners.signatures[i] {
 				e.mu.Unlock()
-				return nil, merr.WrapErrFunctionFailedMsg("function runner signature %s not found in schema version %d", signature, schemaVersion)
+				return nil, nil, merr.WrapErrFunctionFailedMsg("function runner metadata does not match schema version %d", schemaVersion)
 			}
-			if e.runners[signature] == nil {
-				e.runners[signature] = newFunctionRunnerEntry(
-					e.collectionID,
-					signature,
-					schema,
-					functionsBySignature[signature],
-				)
-			}
+		}
+		// Same-version metadata refreshes may update collection or standalone
+		// analyzer properties without rebuilding function runners.
+		existingVersion.schema = versionRunners.schema
+		versionRunners = existingVersion
+	} else {
+		e.versionRunners[schemaVersion] = versionRunners
+	}
+	if !keyExists || keyVersion <= schemaVersion {
+		e.keyVersions[key] = schemaVersion
+	}
+
+	for _, signature := range versionRunners.signatures {
+		if e.runners[signature] == nil {
+			e.runners[signature] = newFunctionRunnerEntry(
+				schema,
+				functionsBySignature[signature],
+			)
 		}
 	}
 
 	initRunnerEntries := make([]*functionRunnerEntry, 0, len(versionRunners.signatures))
 	for _, signature := range versionRunners.signatures {
 		runnerEntry := e.runners[signature]
-		if runnerEntry == nil || runnerEntry.IsReady() {
+		if runnerEntry.isReady() {
 			continue
 		}
 		initRunnerEntries = append(initRunnerEntries, runnerEntry)
@@ -604,102 +585,112 @@ func (e *functionRunnerCollectionEntry) ensureVersion(
 	runnerEntries := e.gcLocked()
 	e.mu.Unlock()
 
-	closeFunctionRunnerEntries(runnerEntries)
-	return initRunnerEntries, nil
+	return initRunnerEntries, runnerEntries, nil
 }
 
-func (e *functionRunnerCollectionEntry) getRunnerEntryByOutputField(schemaVersion int32, outputFieldID int64) (*functionRunnerEntry, schemapb.FunctionType, bool) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
+func buildFunctionRunnerVersion(schema *schemapb.CollectionSchema) (*functionRunnerVersion, map[string]*schemapb.FunctionSchema, error) {
+	if schema == nil {
+		return nil, nil, merr.WrapErrFunctionFailedMsg("collection schema is nil")
+	}
 
-	versionRunners, ok := e.versionRunners[schemaVersion]
-	if !ok {
-		return nil, schemapb.FunctionType_Unknown, false
+	functions := embeddingFunctions(schema)
+	versionRunners := &functionRunnerVersion{
+		schema:                  proto.Clone(schema).(*schemapb.CollectionSchema),
+		signatures:              make([]string, 0, len(functions)),
+		outputFieldIDs:          make([]int64, 0, len(functions)),
+		fieldIDs:                make(map[int64]struct{}),
+		outputFieldSignatures:   make(map[int64]string),
+		analyzerFieldSignatures: make(map[int64]string),
 	}
-	signature, ok := versionRunners.outputFieldSignatures[outputFieldID]
-	if !ok {
-		return nil, schemapb.FunctionType_Unknown, false
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		versionRunners.fieldIDs[field.GetFieldID()] = struct{}{}
 	}
-	runnerEntry := e.runners[signature]
-	if runnerEntry == nil {
-		return nil, schemapb.FunctionType_Unknown, false
-	}
-	return runnerEntry, versionRunners.outputFieldTypes[outputFieldID], true
-}
+	functionsBySignature := make(map[string]*schemapb.FunctionSchema, len(functions))
+	for _, fn := range functions {
+		signature, inputFieldIDs, outputFieldIDs, err := embeddingFunctionMetadata(schema, fn)
+		if err != nil {
+			return nil, nil, err
+		}
 
-func (e *functionRunnerCollectionEntry) getRunnerEntryByAnalyzerField(schemaVersion int32, fieldID int64) (*functionRunnerEntry, bool) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-
-	versionRunners, ok := e.versionRunners[schemaVersion]
-	if !ok {
-		return nil, false
+		versionRunners.signatures = append(versionRunners.signatures, signature)
+		versionRunners.outputFieldIDs = append(versionRunners.outputFieldIDs, outputFieldIDs...)
+		functionsBySignature[signature] = fn
+		for _, outputFieldID := range outputFieldIDs {
+			versionRunners.outputFieldSignatures[outputFieldID] = signature
+		}
+		if fn.GetType() == schemapb.FunctionType_BM25 && len(inputFieldIDs) > 0 {
+			if _, ok := versionRunners.analyzerFieldSignatures[inputFieldIDs[0]]; !ok {
+				versionRunners.analyzerFieldSignatures[inputFieldIDs[0]] = signature
+			}
+		}
 	}
-	signature, ok := versionRunners.analyzerFieldSignatures[fieldID]
-	if !ok {
-		return nil, false
-	}
-	runnerEntry := e.runners[signature]
-	if runnerEntry == nil {
-		return nil, false
-	}
-	return runnerEntry, true
-}
-
-func (e *functionRunnerCollectionEntry) RunWithRunnerEntries(
-	ctx context.Context,
-	runnerEntries []*functionRunnerEntry,
-	initRunner bool,
-	run func([]FunctionRunner) error,
-) (bool, error) {
-	return runWithRunnerEntries(ctx, runnerEntries, initRunner, run)
-}
-
-func (e *functionRunnerCollectionEntry) runWithVersionRunners(
-	ctx context.Context,
-	schemaVersion int32,
-	initRunner bool,
-	run func([]FunctionRunner, []int64) error,
-) (bool, error) {
-	runnerEntries, outputFieldIDs, ok := e.getVersionRunnerEntries(schemaVersion)
-	if !ok {
-		return false, nil
-	}
-	return runWithRunnerEntries(ctx, runnerEntries, initRunner, func(runners []FunctionRunner) error {
-		return run(runners, outputFieldIDs)
-	})
+	return versionRunners, functionsBySignature, nil
 }
 
 func (e *functionRunnerCollectionEntry) Materialize(
 	ctx context.Context,
-	schema *schemapb.CollectionSchema,
-	body *msgpb.InsertRequest,
+	key string,
+	schemaVersion int32,
+	message InsertMessage,
 ) (bool, error) {
-	if schema == nil {
-		return false, merr.WrapErrFunctionFailedMsg("collection schema is nil")
+	if message == nil {
+		return false, merr.WrapErrFunctionFailedMsg("insert message is nil")
 	}
-	changed, ok, err := e.TryMaterialize(schema.GetVersion(), body)
+
+	e.mu.RLock()
+	keyVersion, ok := e.keyVersions[key]
+	if !ok {
+		e.mu.RUnlock()
+		if schemaVersion == LatestFunctionRunnerVersion {
+			return false, nil
+		}
+		return false, merr.WrapErrFunctionFailedMsg("function runner schema for key %s is not available", key)
+	}
+	if schemaVersion != LatestFunctionRunnerVersion && keyVersion != schemaVersion {
+		e.mu.RUnlock()
+		return false, merr.WrapErrFunctionFailedMsg("function runner schema version mismatch for key %s: expected %d, actual %d", key, schemaVersion, keyVersion)
+	}
+	runnerEntries, outputFieldIDs, ok, err := e.getVersionRunnerEntriesLocked(keyVersion)
+	e.mu.RUnlock()
 	if err != nil {
 		return false, err
 	}
-	if ok {
-		return changed, nil
+	if !ok {
+		return false, merr.WrapErrServiceInternalMsg("function runner metadata not found for key %s at schema version %d", key, keyVersion)
+	}
+	if len(outputFieldIDs) == 0 {
+		return false, nil
 	}
 
-	if _, err := e.ensureVersion("", schema); err != nil {
-		return false, err
+	body := message.MustBody()
+	if body == nil {
+		return false, merr.WrapErrFunctionFailedMsg("insert request is nil")
+	}
+	changed, err := materializeWithRunnerEntries(ctx, runnerEntries, outputFieldIDs, body)
+	if changed {
+		message.OverwriteBody(body)
+	}
+	return changed, err
+}
+
+func materializeWithRunnerEntries(
+	ctx context.Context,
+	runnerEntries []*functionRunnerEntry,
+	outputFieldIDs []int64,
+	body *msgpb.InsertRequest,
+) (bool, error) {
+	if len(outputFieldIDs) == 0 || HasAllFieldDataByID(body.GetFieldsData(), outputFieldIDs) {
+		return false, nil
 	}
 
-	ok, err = e.runWithVersionRunners(ctx, schema.GetVersion(), true, func(runners []FunctionRunner, _ []int64) error {
+	changed := false
+	err := runWithRunnerEntries(ctx, runnerEntries, func(runners []FunctionRunner) error {
 		var runErr error
 		changed, runErr = FillFunctionFields(runners, body)
 		return runErr
 	})
 	if err != nil {
 		return false, err
-	}
-	if !ok {
-		return false, nil
 	}
 	return changed, nil
 }
@@ -707,6 +698,7 @@ func (e *functionRunnerCollectionEntry) Materialize(
 // TryMaterialize is only used by compatibility logic to try materializing old
 // insert messages with cached runners.
 func (e *functionRunnerCollectionEntry) TryMaterialize(
+	ctx context.Context,
 	schemaVersion int32,
 	body *msgpb.InsertRequest,
 ) (bool, bool, error) {
@@ -714,68 +706,135 @@ func (e *functionRunnerCollectionEntry) TryMaterialize(
 		return false, false, merr.WrapErrFunctionFailedMsg("insert request is nil")
 	}
 
-	runnerEntries, outputFieldIDs, ok := e.getVersionRunnerEntries(schemaVersion)
-	if !ok {
-		return false, false, nil
-	}
-	if len(outputFieldIDs) == 0 || HasAllFieldDataByID(body.GetFieldsData(), outputFieldIDs) {
-		return false, true, nil
-	}
-
-	changed := false
-	ok, err := e.RunWithRunnerEntries(context.Background(), runnerEntries, false, func(runners []FunctionRunner) error {
-		var runErr error
-		changed, runErr = FillFunctionFields(runners, body)
-		return runErr
-	})
+	runnerEntries, outputFieldIDs, ok, err := e.getVersionRunnerEntries(schemaVersion)
 	if err != nil {
 		return false, true, err
 	}
-	return changed, ok, nil
+	if !ok {
+		return false, false, nil
+	}
+	changed, err := materializeWithRunnerEntries(ctx, runnerEntries, outputFieldIDs, body)
+	if err != nil {
+		if errors.Is(err, errFunctionRunnerEntryRemoved) {
+			return false, false, nil
+		}
+		return false, true, err
+	}
+	return changed, true, nil
 }
 
 func (e *functionRunnerCollectionEntry) RunWithRunner(
 	ctx context.Context,
-	schemaVersion int32,
+	key string,
 	outputFieldID int64,
-	run func(schemapb.FunctionType, FunctionRunner) error,
+	run func(FunctionRunner) error,
 ) (bool, error) {
-	runnerEntry, functionType, ok := e.getRunnerEntryByOutputField(schemaVersion, outputFieldID)
+	e.mu.RLock()
+	schemaVersion, ok := e.keyVersions[key]
 	if !ok {
+		e.mu.RUnlock()
+		return false, merr.WrapErrServiceUnavailableMsg("function runner schema for key %s is not available", key)
+	}
+	versionRunners := e.versionRunners[schemaVersion]
+	if versionRunners == nil {
+		e.mu.RUnlock()
+		return true, merr.WrapErrServiceInternalMsg("function runner metadata not found for key %s at schema version %d", key, schemaVersion)
+	}
+	signature, ok := versionRunners.outputFieldSignatures[outputFieldID]
+	if !ok {
+		_, fieldExists := versionRunners.fieldIDs[outputFieldID]
+		e.mu.RUnlock()
+		if !fieldExists {
+			return false, merr.WrapErrServiceUnavailableMsg("field %d is not available in function runner schema for key %s at schema version %d", outputFieldID, key, schemaVersion)
+		}
 		return false, nil
 	}
+	runnerEntry := e.runners[signature]
+	if runnerEntry == nil {
+		e.mu.RUnlock()
+		return true, merr.WrapErrServiceInternalMsg("function runner entry not found for key %s and output field %d", key, outputFieldID)
+	}
+	e.mu.RUnlock()
+	runner, unlock, err := runnerEntry.GetRunner(ctx)
+	if err != nil {
+		return true, err
+	}
+	defer unlock()
 
-	err := runnerEntry.run(ctx, func(runner FunctionRunner) error {
-		return run(functionType, runner)
-	})
-	return true, err
+	return true, run(runner)
 }
 
 func (e *functionRunnerCollectionEntry) RunWithAnalyzer(
 	ctx context.Context,
-	schemaVersion int32,
+	key string,
 	fieldID int64,
 	run func(Analyzer) error,
 ) (bool, error) {
-	runnerEntry, ok := e.getRunnerEntryByAnalyzerField(schemaVersion, fieldID)
+	e.mu.RLock()
+	schemaVersion, ok := e.keyVersions[key]
 	if !ok {
-		return false, nil
+		e.mu.RUnlock()
+		return false, merr.WrapErrServiceUnavailableMsg("function runner schema for key %s is not available", key)
 	}
-	err := runnerEntry.run(ctx, func(runner FunctionRunner) error {
+	versionRunners := e.versionRunners[schemaVersion]
+	if versionRunners == nil {
+		e.mu.RUnlock()
+		return true, merr.WrapErrServiceInternalMsg("function runner metadata not found for key %s at schema version %d", key, schemaVersion)
+	}
+	if signature, ok := versionRunners.analyzerFieldSignatures[fieldID]; ok {
+		runnerEntry := e.runners[signature]
+		if runnerEntry == nil {
+			e.mu.RUnlock()
+			return true, merr.WrapErrServiceInternalMsg("function runner entry not found for key %s and analyzer field %d", key, fieldID)
+		}
+		e.mu.RUnlock()
+
+		runner, unlock, err := runnerEntry.GetRunner(ctx)
+		if err != nil {
+			return true, err
+		}
+		defer unlock()
+
 		analyzer, ok := runner.(Analyzer)
 		if !ok {
-			return merr.WrapErrFunctionFailedMsg("function runner cannot serve analyzer requests")
+			return true, merr.WrapErrFunctionFailedMsg("function runner cannot serve analyzer requests")
 		}
-		return run(analyzer)
-	})
-	return true, err
+		return true, run(analyzer)
+	}
+
+	field := typeutil.GetField(versionRunners.schema, fieldID)
+	if field != nil {
+		field = proto.Clone(field).(*schemapb.FieldSchema)
+	}
+	e.mu.RUnlock()
+	if field == nil {
+		return false, merr.WrapErrServiceUnavailableMsg("field %d is not available in function runner schema for key %s at schema version %d", fieldID, key, schemaVersion)
+	}
+	if !typeutil.CreateFieldSchemaHelper(field).EnableAnalyzer() {
+		return false, nil
+	}
+
+	analyzer, err := NewAnalyzerRunner(field)
+	if err != nil {
+		return true, err
+	}
+	if runner, ok := analyzer.(FunctionRunner); ok {
+		defer runner.Close()
+	}
+	return true, run(analyzer)
 }
 
 func (m *functionRunnerManager) getOrCreateEntry(collectionID int64) *functionRunnerCollectionEntry {
+	m.mu.RLock()
+	entry := m.entries[collectionID]
+	m.mu.RUnlock()
+	if entry != nil {
+		return entry
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	entry := m.entries[collectionID]
+	entry = m.entries[collectionID]
 	if entry == nil {
 		entry = newFunctionRunnerCollectionEntry(collectionID)
 		m.entries[collectionID] = entry
@@ -790,8 +849,8 @@ func (m *functionRunnerManager) getEntry(collectionID int64) *functionRunnerColl
 	return m.entries[collectionID]
 }
 
-func (m *functionRunnerManager) Release(collectionID int64, vchannel string) {
-	if vchannel == "" {
+func (m *functionRunnerManager) Release(collectionID int64, key string) {
+	if key == "" {
 		return
 	}
 
@@ -801,39 +860,35 @@ func (m *functionRunnerManager) Release(collectionID int64, vchannel string) {
 		m.mu.Unlock()
 		return
 	}
-	remove := entry.Release(vchannel)
+	runnerEntries, remove := entry.Release(key)
 	if remove {
 		delete(m.entries, collectionID)
 	}
 	m.mu.Unlock()
 
-	if remove {
-		entry.Close()
-		return
-	}
-	entry.GC()
+	closeFunctionRunnerEntries(runnerEntries)
 }
 
 func (m *functionRunnerManager) Materialize(
 	ctx context.Context,
 	collectionID int64,
-	schema *schemapb.CollectionSchema,
-	body *msgpb.InsertRequest,
+	key string,
+	schemaVersion int32,
+	message InsertMessage,
 ) (bool, error) {
-	if schema == nil {
-		return false, merr.WrapErrFunctionFailedMsg("collection schema is nil")
-	}
-	if !HasEmbeddingFunctions(schema) {
-		return false, nil
-	}
 	entry := m.getEntry(collectionID)
 	if entry == nil {
+		if schemaVersion == LatestFunctionRunnerVersion {
+			return false, nil
+		}
 		return false, merr.WrapErrFunctionFailedMsg("function runners for collection %d are not allocated", collectionID)
 	}
-	return entry.Materialize(ctx, schema, body)
+	changed, err := entry.Materialize(ctx, key, schemaVersion, message)
+	return changed, wrapFunctionRunnerLifecycleError(collectionID, err)
 }
 
 func (m *functionRunnerManager) TryMaterialize(
+	ctx context.Context,
 	collectionID int64,
 	schemaVersion int32,
 	body *msgpb.InsertRequest,
@@ -842,55 +897,60 @@ func (m *functionRunnerManager) TryMaterialize(
 	if entry == nil {
 		return false, false, nil
 	}
-	return entry.TryMaterialize(schemaVersion, body)
+	changed, ok, err := entry.TryMaterialize(ctx, schemaVersion, body)
+	if errors.Is(err, errFunctionRunnerCollectionEntryRemoved) || errors.Is(err, errFunctionRunnerEntryRemoved) {
+		return false, false, nil
+	}
+	return changed, ok, err
 }
 
 func (m *functionRunnerManager) RunWithRunner(
 	ctx context.Context,
 	collectionID int64,
-	schemaVersion int32,
+	key string,
 	outputFieldID int64,
-	run func(schemapb.FunctionType, FunctionRunner) error,
+	run func(FunctionRunner) error,
 ) (bool, error) {
 	entry := m.getEntry(collectionID)
 	if entry == nil {
-		return false, nil
+		return false, merr.WrapErrServiceUnavailableMsg("function runner schema for collection %d is not available", collectionID)
 	}
-	return entry.RunWithRunner(ctx, schemaVersion, outputFieldID, run)
+	ok, err := entry.RunWithRunner(ctx, key, outputFieldID, run)
+	return ok, wrapFunctionRunnerLifecycleError(collectionID, err)
 }
 
 func (m *functionRunnerManager) RunWithAnalyzer(
 	ctx context.Context,
 	collectionID int64,
-	schemaVersion int32,
+	key string,
 	fieldID int64,
 	run func(Analyzer) error,
 ) (bool, error) {
 	entry := m.getEntry(collectionID)
 	if entry == nil {
-		return false, nil
+		return false, merr.WrapErrServiceUnavailableMsg("function runner schema for collection %d is not available", collectionID)
 	}
-	return entry.RunWithAnalyzer(ctx, schemaVersion, fieldID, run)
+	ok, err := entry.RunWithAnalyzer(ctx, key, fieldID, run)
+	return ok, wrapFunctionRunnerLifecycleError(collectionID, err)
+}
+
+func wrapFunctionRunnerLifecycleError(collectionID int64, err error) error {
+	if errors.Is(err, errFunctionRunnerCollectionEntryRemoved) || errors.Is(err, errFunctionRunnerEntryRemoved) {
+		return merr.WrapErrServiceUnavailableMsg("function runners for collection %d changed during execution", collectionID)
+	}
+	return err
 }
 
 func (m *functionRunnerManager) Close() {
 	m.mu.Lock()
-	entries := make([]*functionRunnerCollectionEntry, 0, len(m.entries))
+	runnerEntries := make([]*functionRunnerEntry, 0)
 	for collectionID, entry := range m.entries {
-		entries = append(entries, entry)
+		runnerEntries = append(runnerEntries, entry.detachForClose()...)
 		delete(m.entries, collectionID)
 	}
 	m.mu.Unlock()
 
-	for _, entry := range entries {
-		entry.Close()
-	}
-}
-
-func functionRunnerErrorResult(err error) <-chan error {
-	errCh := make(chan error, 1)
-	errCh <- err
-	return errCh
+	closeFunctionRunnerEntries(runnerEntries)
 }
 
 func BuildEmbeddingRunner(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
@@ -943,29 +1003,13 @@ func EmbeddingOutputFieldIDs(schema *schemapb.CollectionSchema) ([]int64, error)
 	functions := embeddingFunctions(schema)
 	outputFieldIDs := make([]int64, 0, len(functions))
 	for _, fn := range functions {
-		functionOutputFieldIDs, err := functionOutputFieldIDs(schema, fn)
+		_, _, functionOutputFieldIDs, err := embeddingFunctionMetadata(schema, fn)
 		if err != nil {
 			return nil, err
 		}
 		outputFieldIDs = append(outputFieldIDs, functionOutputFieldIDs...)
 	}
 	return outputFieldIDs, nil
-}
-
-func EmbeddingFunctionSignature(schema *schemapb.CollectionSchema) (string, error) {
-	if schema == nil {
-		return "", merr.WrapErrFunctionFailedMsg("collection schema is nil")
-	}
-
-	hasher := sha256.New()
-	for _, fn := range embeddingFunctions(schema) {
-		signature, err := embeddingFunctionSignature(schema, fn)
-		if err != nil {
-			return "", err
-		}
-		fmt.Fprintf(hasher, "runner:%s|", signature)
-	}
-	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 // HasEmbeddingFunctions reports whether the schema has functions backed by FunctionRunner.
@@ -1001,112 +1045,81 @@ func embeddingFunctions(schema *schemapb.CollectionSchema) []*schemapb.FunctionS
 	return functions
 }
 
-func functionOutputFieldIDs(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) ([]int64, error) {
-	if outputIDs := fn.GetOutputFieldIds(); len(outputIDs) > 0 {
-		outputFieldIDs := append([]int64(nil), outputIDs...)
-		for _, outputFieldID := range outputFieldIDs {
-			if typeutil.GetField(schema, outputFieldID) == nil {
-				return nil, merr.WrapErrFunctionFailedMsg("function %s output field %d not found", fn.GetName(), outputFieldID)
-			}
-		}
-		return outputFieldIDs, nil
+func embeddingFunctionMetadata(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (string, []int64, []int64, error) {
+	if schema == nil {
+		return "", nil, nil, merr.WrapErrFunctionFailedMsg("collection schema is nil")
+	}
+	if fn == nil {
+		return "", nil, nil, merr.WrapErrFunctionFailedMsg("function schema is nil")
 	}
 
-	outputNames := fn.GetOutputFieldNames()
-	if len(outputNames) == 0 {
-		return nil, merr.WrapErrFunctionFailedMsg("function %s output fields not found", fn.GetName())
-	}
-
-	outputFieldIDs := make([]int64, 0, len(outputNames))
-	for _, outputName := range outputNames {
-		field := typeutil.GetFieldByName(schema, outputName)
-		if field == nil {
-			return nil, merr.WrapErrFunctionFailedMsg("function %s output field %s not found", fn.GetName(), outputName)
-		}
-		outputFieldIDs = append(outputFieldIDs, field.GetFieldID())
-	}
-	return outputFieldIDs, nil
-}
-
-func functionInputFieldIDs(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) ([]int64, error) {
-	if inputIDs := fn.GetInputFieldIds(); len(inputIDs) > 0 {
-		inputFieldIDs := append([]int64(nil), inputIDs...)
-		for _, inputFieldID := range inputFieldIDs {
-			if typeutil.GetField(schema, inputFieldID) == nil {
-				return nil, merr.WrapErrFunctionFailedMsg("function %s input field %d not found", fn.GetName(), inputFieldID)
-			}
-		}
-		return inputFieldIDs, nil
-	}
-
+	inputIDs := fn.GetInputFieldIds()
 	inputNames := fn.GetInputFieldNames()
-	if len(inputNames) == 0 {
-		return nil, merr.WrapErrFunctionFailedMsg("function %s input fields not found", fn.GetName())
+	if len(inputIDs) == 0 && len(inputNames) == 0 {
+		return "", nil, nil, merr.WrapErrFunctionFailedMsg("function %s input fields not found", fn.GetName())
+	}
+	outputIDs := fn.GetOutputFieldIds()
+	outputNames := fn.GetOutputFieldNames()
+	if len(outputIDs) == 0 && len(outputNames) == 0 {
+		return "", nil, nil, merr.WrapErrFunctionFailedMsg("function %s output fields not found", fn.GetName())
 	}
 
-	inputFieldIDs := make([]int64, 0, len(inputNames))
-	for _, inputName := range inputNames {
-		field := typeutil.GetFieldByName(schema, inputName)
-		if field == nil {
-			return nil, merr.WrapErrFunctionFailedMsg("function %s input field %s not found", fn.GetName(), inputName)
-		}
-		inputFieldIDs = append(inputFieldIDs, field.GetFieldID())
-	}
-	return inputFieldIDs, nil
-}
-
-func embeddingFunctionSignature(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (string, error) {
 	hasher := sha256.New()
 	fmt.Fprintf(hasher, "fn:%d:%d:%s|", fn.GetId(), fn.GetType(), fn.GetName())
-	writeInt64s(hasher, "input_ids", fn.GetInputFieldIds())
-	writeStrings(hasher, "input_names", fn.GetInputFieldNames())
-	writeInt64s(hasher, "output_ids", fn.GetOutputFieldIds())
-	writeStrings(hasher, "output_names", fn.GetOutputFieldNames())
+	writeInt64s(hasher, "input_ids", inputIDs)
+	writeStrings(hasher, "input_names", inputNames)
+	writeInt64s(hasher, "output_ids", outputIDs)
+	writeStrings(hasher, "output_names", outputNames)
 	writeKeyValuePairs(hasher, "fn_params", fn.GetParams())
 
-	for _, fieldID := range fn.GetInputFieldIds() {
+	resolvedInputIDs := append([]int64(nil), inputIDs...)
+	for _, fieldID := range inputIDs {
 		field := typeutil.GetField(schema, fieldID)
 		if field == nil {
-			return "", merr.WrapErrFunctionFailedMsg("function %s input field %d not found", fn.GetName(), fieldID)
+			return "", nil, nil, merr.WrapErrFunctionFailedMsg("function %s input field %d not found", fn.GetName(), fieldID)
 		}
 		writeFieldSignature(hasher, "input", field)
 	}
-	for _, fieldName := range fn.GetInputFieldNames() {
+	for _, fieldName := range inputNames {
 		field := typeutil.GetFieldByName(schema, fieldName)
 		if field == nil {
-			return "", merr.WrapErrFunctionFailedMsg("function %s input field %s not found", fn.GetName(), fieldName)
+			return "", nil, nil, merr.WrapErrFunctionFailedMsg("function %s input field %s not found", fn.GetName(), fieldName)
 		}
 		writeFieldSignature(hasher, "input_name", field)
+		if len(inputIDs) == 0 {
+			resolvedInputIDs = append(resolvedInputIDs, field.GetFieldID())
+		}
 	}
-	for _, fieldID := range fn.GetOutputFieldIds() {
+
+	resolvedOutputIDs := append([]int64(nil), outputIDs...)
+	for _, fieldID := range outputIDs {
 		field := typeutil.GetField(schema, fieldID)
 		if field == nil {
-			return "", merr.WrapErrFunctionFailedMsg("function %s output field %d not found", fn.GetName(), fieldID)
+			return "", nil, nil, merr.WrapErrFunctionFailedMsg("function %s output field %d not found", fn.GetName(), fieldID)
 		}
 		writeFieldSignature(hasher, "output", field)
 	}
-	for _, fieldName := range fn.GetOutputFieldNames() {
+	for _, fieldName := range outputNames {
 		field := typeutil.GetFieldByName(schema, fieldName)
 		if field == nil {
-			return "", merr.WrapErrFunctionFailedMsg("function %s output field %s not found", fn.GetName(), fieldName)
+			return "", nil, nil, merr.WrapErrFunctionFailedMsg("function %s output field %s not found", fn.GetName(), fieldName)
 		}
 		writeFieldSignature(hasher, "output_name", field)
+		if len(outputIDs) == 0 {
+			resolvedOutputIDs = append(resolvedOutputIDs, field.GetFieldID())
+		}
 	}
-	return hex.EncodeToString(hasher.Sum(nil)), nil
+	return hex.EncodeToString(hasher.Sum(nil)), resolvedInputIDs, resolvedOutputIDs, nil
 }
 
 func writeFieldSignature(hasher hashWriter, prefix string, field *schemapb.FieldSchema) {
-	fmt.Fprintf(hasher, "%s:%d:%s:%d:%d:%t:%t:%t:%t|",
+	fmt.Fprintf(hasher, "%s:%d:%s:%d:%d:%t|",
 		prefix,
 		field.GetFieldID(),
 		field.GetName(),
 		field.GetDataType(),
 		field.GetElementType(),
-		field.GetIsPrimaryKey(),
-		field.GetIsPartitionKey(),
-		field.GetIsClusteringKey(),
 		field.GetIsFunctionOutput())
-	writeKeyValuePairs(hasher, prefix+"_type_params", field.GetTypeParams())
 }
 
 func writeKeyValuePairs(hasher hashWriter, prefix string, pairs []*commonpb.KeyValuePair) {
@@ -1136,59 +1149,6 @@ func writeStrings(hasher hashWriter, prefix string, values []string) {
 
 type hashWriter interface {
 	Write([]byte) (int, error)
-}
-
-func cloneMap[K comparable, V any](values map[K]V) map[K]V {
-	cloned := make(map[K]V, len(values))
-	for key, value := range values {
-		cloned[key] = value
-	}
-	return cloned
-}
-
-// FillFunctionData fills function output fields before appending an insert message to WAL.
-// The function runners are expected to have been allocated by collection create or recovery.
-func FillFunctionData(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, body *msgpb.InsertRequest) (bool, error) {
-	return defaultFunctionRunnerManager.Materialize(ctx, collectionID, schema, body)
-}
-
-// TryMaterialize is used by compatibility logic to try materializing old insert
-// messages with cache-managed runners. It returns ok=false when a matching cache
-// is absent so the caller can build a short-lived runner for that message.
-func TryMaterialize(collectionID int64, schemaVersion int32, body *msgpb.InsertRequest) (changed bool, ok bool, err error) {
-	return defaultFunctionRunnerManager.TryMaterialize(collectionID, schemaVersion, body)
-}
-
-func AllocFunctionRunners(collectionID int64, vchannel string, schema *schemapb.CollectionSchema) <-chan error {
-	return defaultFunctionRunnerManager.Alloc(collectionID, vchannel, schema)
-}
-
-func UpdateFunctionRunners(collectionID int64, vchannel string, schema *schemapb.CollectionSchema) <-chan error {
-	return defaultFunctionRunnerManager.Update(collectionID, vchannel, schema)
-}
-
-func ReleaseFunctionRunners(collectionID int64, vchannel string) {
-	defaultFunctionRunnerManager.Release(collectionID, vchannel)
-}
-
-func RunWithRunner(
-	ctx context.Context,
-	collectionID int64,
-	schemaVersion int32,
-	outputFieldID int64,
-	run func(schemapb.FunctionType, FunctionRunner) error,
-) (bool, error) {
-	return defaultFunctionRunnerManager.RunWithRunner(ctx, collectionID, schemaVersion, outputFieldID, run)
-}
-
-func RunWithAnalyzer(
-	ctx context.Context,
-	collectionID int64,
-	schemaVersion int32,
-	fieldID int64,
-	run func(Analyzer) error,
-) (bool, error) {
-	return defaultFunctionRunnerManager.RunWithAnalyzer(ctx, collectionID, schemaVersion, fieldID, run)
 }
 
 func FillFunctionFields(runners []FunctionRunner, body *msgpb.InsertRequest) (bool, error) {

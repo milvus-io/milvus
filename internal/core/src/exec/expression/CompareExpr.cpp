@@ -111,37 +111,55 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
 
         int64_t processed_rows = 0;
         const auto size_per_chunk = segment_chunk_reader_.SizePerChunk();
+        auto get_chunk_id_and_offset =
+            [&](const FieldId field,
+                const int64_t raw_data_chunk_count,
+                int64_t offset) -> std::pair<int64_t, int64_t> {
+            if (segment_chunk_reader_.segment_->type() ==
+                SegmentType::Growing) {
+                return {offset / size_per_chunk, offset % size_per_chunk};
+            } else if (segment_chunk_reader_.segment_->is_chunked() &&
+                       raw_data_chunk_count > 0) {
+                return segment_chunk_reader_.segment_->get_chunk_by_offset(
+                    field, offset);
+            } else {
+                return {0, offset};
+            }
+        };
+        // Consecutive offsets frequently fall in the same left/right chunk;
+        // keep each column's data accessor (which pins its chunk) across
+        // iterations and rebuild it only when that column's chunk id changes.
+        // Safe on both sealed and growing (data and the chunked validity
+        // storage have stable per-chunk buffers). The pinned index views are
+        // chunk-independent, so they are resolved once.
+        const auto left_pinned_index = LeftPinnedIndexForRawLookup();
+        const auto right_pinned_index = RightPinnedIndexForRawLookup();
+        int64_t cached_left_chunk_id = -1;
+        int64_t cached_right_chunk_id = -1;
+        segcore::ChunkDataAccessor left;
+        segcore::ChunkDataAccessor right;
         for (auto i = 0; i < real_batch_size; ++i) {
             auto offset = (*input)[i];
-            auto get_chunk_id_and_offset =
-                [&](const FieldId field, const int64_t raw_data_chunk_count)
-                -> std::pair<int64_t, int64_t> {
-                if (segment_chunk_reader_.segment_->type() ==
-                    SegmentType::Growing) {
-                    return {offset / size_per_chunk, offset % size_per_chunk};
-                } else if (segment_chunk_reader_.segment_->is_chunked() &&
-                           raw_data_chunk_count > 0) {
-                    return segment_chunk_reader_.segment_->get_chunk_by_offset(
-                        field, offset);
-                } else {
-                    return {0, offset};
-                }
-            };
-
-            auto [left_chunk_id, left_chunk_offset] =
-                get_chunk_id_and_offset(left_field_, left_raw_data_chunk_count);
+            auto [left_chunk_id, left_chunk_offset] = get_chunk_id_and_offset(
+                left_field_, left_raw_data_chunk_count, offset);
             auto [right_chunk_id, right_chunk_offset] = get_chunk_id_and_offset(
-                right_field_, right_raw_data_chunk_count);
-            auto left = segment_chunk_reader_.GetChunkDataAccessor(
-                expr_->left_data_type_,
-                expr_->left_field_id_,
-                left_chunk_id,
-                LeftPinnedIndexForRawLookup());
-            auto right = segment_chunk_reader_.GetChunkDataAccessor(
-                expr_->right_data_type_,
-                expr_->right_field_id_,
-                right_chunk_id,
-                RightPinnedIndexForRawLookup());
+                right_field_, right_raw_data_chunk_count, offset);
+            if (left_chunk_id != cached_left_chunk_id) {
+                left = segment_chunk_reader_.GetChunkDataAccessor(
+                    expr_->left_data_type_,
+                    expr_->left_field_id_,
+                    left_chunk_id,
+                    left_pinned_index);
+                cached_left_chunk_id = left_chunk_id;
+            }
+            if (right_chunk_id != cached_right_chunk_id) {
+                right = segment_chunk_reader_.GetChunkDataAccessor(
+                    expr_->right_data_type_,
+                    expr_->right_field_id_,
+                    right_chunk_id,
+                    right_pinned_index);
+                cached_right_chunk_id = right_chunk_id;
+            }
             auto left_opt = left(left_chunk_offset);
             auto right_opt = right(right_chunk_offset);
             if (!left_opt.has_value() || !right_opt.has_value()) {
@@ -302,7 +320,8 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForHybridSegment(
             // case OpType::PostfixMatch: {
             // }
         default: {
-            ThrowInfo(OpTypeInvalid, "unsupported optype: {}", expr_->op_type_);
+            ThrowInfo(
+                UnexpectedError, "unsupported optype: {}", expr_->op_type_);
         }
     }
 }
@@ -320,6 +339,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForBothDataSegment(
         case DataType::INT32:
             return ExecCompareLeftType<int32_t>(context);
         case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
             return ExecCompareLeftType<int64_t>(context);
         case DataType::FLOAT:
             return ExecCompareLeftType<float>(context);
@@ -327,7 +347,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForBothDataSegment(
             return ExecCompareLeftType<double>(context);
         default:
             ThrowInfo(
-                DataTypeInvalid,
+                UnexpectedError,
                 fmt::format("unsupported left datatype:{} of compare expr",
                             expr_->left_data_type_));
     }
@@ -346,6 +366,7 @@ PhyCompareFilterExpr::ExecCompareLeftType(EvalCtx& context) {
         case DataType::INT32:
             return ExecCompareRightType<T, int32_t>(context);
         case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
             return ExecCompareRightType<T, int64_t>(context);
         case DataType::FLOAT:
             return ExecCompareRightType<T, float>(context);
@@ -353,7 +374,7 @@ PhyCompareFilterExpr::ExecCompareLeftType(EvalCtx& context) {
             return ExecCompareRightType<T, double>(context);
         default:
             ThrowInfo(
-                DataTypeInvalid,
+                UnexpectedError,
                 fmt::format("unsupported right datatype:{} of compare expr",
                             expr_->right_data_type_));
     }
@@ -459,7 +480,7 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
                 break;
             }
             default:
-                ThrowInfo(OpTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           fmt::format("unsupported operator type for "
                                       "compare column expr: {}",
                                       expr_type));

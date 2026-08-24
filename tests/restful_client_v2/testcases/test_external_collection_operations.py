@@ -1569,9 +1569,19 @@ class TestRestExternalCollection(TestBase):
         second_rsp = self._refresh_external_collection(payload)
         if second_rsp.get("code") == 0:
             second_job_id = _assert_refresh_response(second_rsp)
-            assert second_job_id == first_job_id, (
-                f"duplicate refresh returned a different job id: first={first_job_id}, second={second_job_id}"
-            )
+            if second_job_id != first_job_id:
+                # On fast machines the first refresh job can reach a terminal state
+                # before the second request's duplicate check runs, in which case the
+                # server legitimately allocates a fresh job id. Only fail when the first
+                # job is still active yet a different job id was returned.
+                first_job_rsp = self._describe_external_collection_job(first_job_id)
+                first_state = first_job_rsp.get("data", {}).get("state")
+                assert first_state in TERMINAL_JOB_STATES, (
+                    f"duplicate refresh returned a different job id while the first job is still active: "
+                    f"first={first_job_id} (state={first_state}), second={second_job_id}"
+                )
+                _, second_finished = self._wait_refresh_completed(second_job_id)
+                assert second_finished
         else:
             _assert_error_response(second_rsp)
             message = second_rsp["message"].lower()

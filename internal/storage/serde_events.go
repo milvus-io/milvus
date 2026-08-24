@@ -18,6 +18,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"io"
 	"math"
@@ -28,13 +29,12 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -340,12 +340,12 @@ func (bsw *BinlogStreamWriter) Finalize() (*Blob, error) {
 		if err != nil {
 			return nil, err
 		}
-		log.Debug("Binlog stream writer encrypted cipher text",
-			zap.Int64("collectionID", bsw.collectionID),
-			zap.Int64("segmentID", bsw.segmentID),
-			zap.Int64("fieldID", bsw.fieldSchema.FieldID),
-			zap.Int("plain size", tmpBuf.Len()),
-			zap.Int("cipher size", len(cipherText)),
+		mlog.Debug(context.TODO(), "Binlog stream writer encrypted cipher text",
+			mlog.FieldCollectionID(bsw.collectionID),
+			mlog.FieldSegmentID(bsw.segmentID),
+			mlog.FieldFieldID(bsw.fieldSchema.FieldID),
+			mlog.Int("plain size", tmpBuf.Len()),
+			mlog.Int("cipher size", len(cipherText)),
 		)
 		if err := binary.Write(&b, common.Endian, cipherText); err != nil {
 			return nil, err
@@ -429,8 +429,37 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 		return nil, err
 	}
 
-	builders := make(map[FieldID]array.Builder, len(allFieldsSchema))
 	types := make(map[FieldID]schemapb.DataType, len(allFieldsSchema))
+	textRefFields := make(map[FieldID]struct{})
+	for _, f := range allFieldsSchema {
+		types[f.FieldID] = f.DataType
+	}
+	for _, vv := range v {
+		m := vv.Value.(map[FieldID]any)
+		for fid, value := range m {
+			if types[fid] != schemapb.DataType_Text {
+				continue
+			}
+			switch value.(type) {
+			case TextLobRef:
+				textRefFields[fid] = struct{}{}
+			}
+		}
+	}
+	if len(textRefFields) > 0 {
+		fields := make([]arrow.Field, arrowSchema.NumFields())
+		for i := 0; i < arrowSchema.NumFields(); i++ {
+			fields[i] = arrowSchema.Field(i)
+			if i < len(allFieldsSchema) {
+				if _, ok := textRefFields[allFieldsSchema[i].FieldID]; ok {
+					fields[i].Type = arrow.BinaryTypes.Binary
+				}
+			}
+		}
+		arrowSchema = arrow.NewSchema(fields, nil)
+	}
+
+	builders := make(map[FieldID]array.Builder, len(allFieldsSchema))
 	elementTypes := make(map[FieldID]schemapb.DataType, len(allFieldsSchema)) // For ArrayOfVector
 	for i, f := range allFieldsSchema {
 		if f.DataType == schemapb.DataType_ArrayOfVector {
@@ -439,7 +468,6 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 
 		builders[f.FieldID] = array.NewBuilder(memory.DefaultAllocator, arrowSchema.Field(i).Type)
 		builders[f.FieldID].Reserve(len(v)) // reserve space to avoid copy
-		types[f.FieldID] = f.DataType
 	}
 
 	for _, vv := range v {
@@ -499,9 +527,10 @@ type CompositeBinlogRecordWriter struct {
 	rowNum        int64
 
 	// results
-	fieldBinlogs map[FieldID]*datapb.FieldBinlog
-	statsLog     *datapb.FieldBinlog
-	bm25StatsLog map[FieldID]*datapb.FieldBinlog
+	fieldBinlogs  map[FieldID]*datapb.FieldBinlog
+	statsLog      *datapb.FieldBinlog
+	bm25StatsLog  map[FieldID]*datapb.FieldBinlog
+	statsBlobSize int64
 
 	flushedUncompressed uint64
 	options             []StreamWriterOption
@@ -694,6 +723,9 @@ func (c *CompositeBinlogRecordWriter) writeStats() error {
 	// Extract single PK stats from map
 	for _, statsLog := range pkStatsMap {
 		c.statsLog = statsLog
+		for _, l := range statsLog.GetBinlogs() {
+			c.statsBlobSize += l.GetMemorySize()
+		}
 		break
 	}
 
@@ -711,8 +743,17 @@ func (c *CompositeBinlogRecordWriter) writeStats() error {
 		return err
 	}
 	c.bm25StatsLog = bm25StatsLog
+	for _, fb := range bm25StatsLog {
+		for _, l := range fb.GetBinlogs() {
+			c.statsBlobSize += l.GetMemorySize()
+		}
+	}
 
 	return nil
+}
+
+func (c *CompositeBinlogRecordWriter) GetStatsBlobSize() int64 {
+	return c.statsBlobSize
 }
 
 func (c *CompositeBinlogRecordWriter) GetExpirQuantiles() []int64 {

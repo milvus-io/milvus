@@ -19,6 +19,7 @@ package storage
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"sort"
 
@@ -73,7 +74,9 @@ type rwOptions struct {
 	useLoonFFI          bool
 	pluginContext       *indexcgopb.StoragePluginContext
 	textColumnConfigs   []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
+	textRefsAsBinary    bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
 	externalReader      packed.ExternalReaderContext
+	writerFormat        string
 }
 
 func (o *rwOptions) validate() error {
@@ -200,6 +203,21 @@ func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption 
 func WithTextColumnConfigs(configs []packed.TextColumnConfig) RwOption {
 	return func(options *rwOptions) {
 		options.textColumnConfigs = configs
+	}
+}
+
+// WithTextRefsAsBinary is for manifest compaction paths that preserve existing
+// TEXT LOB references. The input TEXT columns are already encoded binary refs,
+// so the plain packed writer should use the physical binary schema.
+func WithTextRefsAsBinary() RwOption {
+	return func(options *rwOptions) {
+		options.textRefsAsBinary = true
+	}
+}
+
+func WithWriterFormat(format string) RwOption {
+	return func(options *rwOptions) {
+		options.writerFormat = format
 	}
 }
 
@@ -332,7 +350,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 			}
 		}
 		// FIXME: add needed fields support
-		rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
+		rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader)
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 	}
@@ -364,7 +382,7 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, schema *s
 					pluginContext = &indexcgopb.StoragePluginContext{
 						EncryptionZoneId: ez.EzID,
 						CollectionId:     ez.CollectionID,
-						EncryptionKey:    string(unsafe),
+						EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
 					}
 				}
 			}
@@ -434,6 +452,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 			rwOptions.storageConfig,
 			pluginContext,
+			rwOptions.writerFormat,
 		)
 	case StorageV3:
 		// if TEXT column configs are provided, use the text writer with TEXT column support
@@ -443,6 +462,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 				rwOptions.storageConfig,
 				rwOptions.textColumnConfigs,
+				rwOptions.writerFormat,
 			)
 		}
 		return newPackedManifestRecordWriter(collectionID, partitionID, segmentID, schema,
@@ -450,6 +470,8 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 			rwOptions.storageConfig,
 			pluginContext,
+			rwOptions.textRefsAsBinary,
+			rwOptions.writerFormat,
 		)
 	}
 	return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
@@ -497,6 +519,7 @@ func NewDeltalogWriter(
 }
 
 func NewDeltalogReader(
+	ctx context.Context,
 	pkType schemapb.DataType,
 	paths []string,
 	option ...RwOption,
@@ -517,7 +540,7 @@ func NewDeltalogReader(
 
 	switch rwOptions.version {
 	case StorageV1:
-		return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
+		return NewLegacyDeltalogReader(ctx, pkField, rwOptions.downloader, paths)
 	case StorageV2, StorageV3:
 		pathPos := 0
 		schema := &schemapb.CollectionSchema{
@@ -532,15 +555,120 @@ func NewDeltalogReader(
 		}
 		return &IterativeRecordReader{
 			iterate: func() (RecordReader, error) {
+				// The per-file FFI read below cannot be interrupted; honor
+				// cancellation at the file boundary at least.
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				if pathPos >= len(paths) {
 					return nil, io.EOF
 				}
 				path := paths[pathPos]
 				pathPos++
-				return newPackedRecordReader([]string{path}, schema, rwOptions.bufferSize, rwOptions.storageConfig, nil)
+				return newPackedRecordReader([]string{path}, schema, rwOptions.bufferSize, rwOptions.storageConfig, nil, rwOptions.externalReader)
 			},
 		}, nil
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 	}
+}
+
+// NewDeltalogReaderFromBinlogs opens StorageV2/V3 deltalogs while preserving
+// each binlog's EntriesNum. StorageV3 FFI readers need those row counts to
+// build column groups with stable start/end row offsets.
+func NewDeltalogReaderFromBinlogs(
+	ctx context.Context,
+	pkType schemapb.DataType,
+	binlogs []*datapb.Binlog,
+	option ...RwOption,
+) (RecordReader, error) {
+	rwOptions := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	if err := rwOptions.validate(); err != nil {
+		return nil, err
+	}
+
+	pkField := &schemapb.FieldSchema{
+		FieldID:      0,
+		DataType:     pkType,
+		IsPrimaryKey: true,
+	}
+
+	switch rwOptions.version {
+	case StorageV1:
+		paths := make([]string, 0, len(binlogs))
+		for _, binlog := range binlogs {
+			if binlog == nil || binlog.GetLogPath() == "" {
+				continue
+			}
+			paths = append(paths, binlog.GetLogPath())
+		}
+		return NewLegacyDeltalogReader(ctx, pkField, rwOptions.downloader, paths)
+	case StorageV2, StorageV3:
+		// Unlike NewDeltalogReader, this path builds the FFI reader from all
+		// fragments up front rather than iterating file-by-file, so there is
+		// no per-file boundary to check ctx at; ctx is accepted for signature
+		// symmetry with the V1 branch above but does not bound this call.
+		fragments, err := buildDeltalogFragmentsFromBinlogs(binlogs)
+		if err != nil {
+			return nil, err
+		}
+		if len(fragments) == 0 {
+			return &IterativeRecordReader{
+				iterate: func() (RecordReader, error) {
+					return nil, io.EOF
+				},
+			}, nil
+		}
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				pkField,
+				{
+					FieldID:  common.TimeStampField,
+					Name:     "ts",
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		}
+		return newFFIPackedRecordReaderFromFragments(
+			fragments,
+			"parquet",
+			schema,
+			rwOptions.bufferSize,
+			rwOptions.storageConfig,
+			nil,
+			rwOptions.externalReader,
+		)
+	default:
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
+	}
+}
+
+func buildDeltalogFragmentsFromBinlogs(binlogs []*datapb.Binlog) ([]packed.Fragment, error) {
+	fragments := make([]packed.Fragment, 0, len(binlogs))
+	var offset int64
+	for _, binlog := range binlogs {
+		if binlog == nil {
+			continue
+		}
+		path := binlog.GetLogPath()
+		if path == "" {
+			return nil, merr.WrapErrServiceInternal("deltalog binlog path is empty")
+		}
+		entriesNum := binlog.GetEntriesNum()
+		if entriesNum <= 0 {
+			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("deltalog %s has non-positive entries num %d", path, entriesNum))
+		}
+		end := offset + entriesNum
+		fragments = append(fragments, packed.Fragment{
+			FilePath: path,
+			StartRow: offset,
+			EndRow:   end,
+			RowCount: entriesNum,
+		})
+		offset = end
+	}
+	return fragments, nil
 }

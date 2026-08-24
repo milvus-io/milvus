@@ -366,6 +366,10 @@ func (m *GrpcRootCoordClient) ClientHeartbeat(ctx context.Context, in *milvuspb.
 	return &milvuspb.ClientHeartbeatResponse{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) ListClientCommands(ctx context.Context, in *rootcoordpb.ListClientCommandsRequest, opts ...grpc.CallOption) (*rootcoordpb.ListClientCommandsResponse, error) {
+	return &rootcoordpb.ListClientCommandsResponse{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) DeleteClientCommand(ctx context.Context, in *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error) {
 	return &milvuspb.DeleteClientCommandResponse{}, m.Err
 }

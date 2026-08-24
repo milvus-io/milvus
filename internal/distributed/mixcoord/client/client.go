@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	grpcCodes "google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
@@ -31,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -70,7 +69,7 @@ func NewClient(ctx context.Context) (types.MixCoordClient, error) {
 	sess := sessionutil.NewSession(context.Background())
 	if sess == nil {
 		err := merr.WrapErrServiceUnavailable("new session error, maybe can not connect to etcd")
-		log.Ctx(ctx).Debug("New MixCoord Client failed", zap.Error(err))
+		mlog.Debug(ctx, "New MixCoord Client failed", mlog.Err(err))
 		return nil, err
 	}
 	config := &Params.RootCoordGrpcClientCfg
@@ -88,7 +87,7 @@ func NewClient(ctx context.Context) (types.MixCoordClient, error) {
 		client.grpcClient.EnableEncryption()
 		cp, err := utils.CreateCertPoolforClient(Params.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), "RootCoord")
 		if err != nil {
-			log.Ctx(ctx).Error("Failed to create cert pool for RootCoord client")
+			mlog.Error(ctx, "Failed to create cert pool for RootCoord client")
 			return nil, err
 		}
 		client.grpcClient.SetInternalTLSCertPool(cp)
@@ -107,11 +106,10 @@ func (c *Client) newGrpcClient(cc *grpc.ClientConn) MixCoordClient {
 }
 
 func (c *Client) getMixCoordAddr() (string, error) {
-	log := log.Ctx(c.ctx)
 	key := c.grpcClient.GetRole()
 	msess, _, err := c.sess.GetSessions(c.ctx, key)
 	if err != nil {
-		log.Debug("MixCoordClient GetSessions failed", zap.Any("key", key))
+		mlog.Debug(context.TODO(), "MixCoordClient GetSessions failed", mlog.Any("key", key))
 		return "", err
 	}
 	ms, ok := msess[key]
@@ -119,32 +117,31 @@ func (c *Client) getMixCoordAddr() (string, error) {
 		if paramtable.GetRole() == typeutil.StandaloneRole {
 			return c.getCompatibleMixCoordAddr()
 		} else {
-			log.Warn("MixCoordClient mess key not exist", zap.Any("key", key))
+			mlog.Warn(context.TODO(), "MixCoordClient mess key not exist", mlog.Any("key", key))
 			return "", merr.WrapErrNodeNotFound(0, "find no available mixcoord, check mixcoord state")
 		}
 	}
-	log.Debug("MixCoordClient GetSessions success",
-		zap.String("address", ms.Address),
-		zap.Int64("serverID", ms.ServerID),
-		zap.String("role", key))
+	mlog.Debug(context.TODO(), "MixCoordClient GetSessions success",
+		mlog.String("address", ms.Address),
+		mlog.Int64("serverID", ms.ServerID),
+		mlog.String("role", key))
 	c.grpcClient.SetNodeID(ms.ServerID)
 	return ms.Address, nil
 }
 
 // compatible with standalone mode upgrade from 2.5, shoule be removed in 3.0
 func (c *Client) getCompatibleMixCoordAddr() (string, error) {
-	log := log.Ctx(c.ctx)
 	msess, _, err := c.sess.GetSessions(c.ctx, typeutil.RootCoordRole)
 	if err != nil {
-		log.Debug("mixCoordClient getSessions failed", zap.Any("key", typeutil.RootCoordRole), zap.Error(err))
+		mlog.Debug(context.TODO(), "mixCoordClient getSessions failed", mlog.Any("key", typeutil.RootCoordRole), mlog.Err(err))
 		return "", merr.WrapErrNodeNotFound(0, "find no available mixcoord, check mixcoord state")
 	}
 	ms, ok := msess[typeutil.RootCoordRole]
 	if !ok {
-		log.Warn("MixCoordClient mess key not exist", zap.Any("key", typeutil.RootCoordRole))
+		mlog.Warn(context.TODO(), "MixCoordClient mess key not exist", mlog.Any("key", typeutil.RootCoordRole))
 		return "", merr.WrapErrNodeNotFound(0, "find no available mixcoord, check mixcoord state")
 	}
-	log.Debug("MixCoordClient GetSessions use rootCoord", zap.Any("key", typeutil.RootCoordRole))
+	mlog.Debug(context.TODO(), "MixCoordClient GetSessions use rootCoord", mlog.Any("key", typeutil.RootCoordRole))
 	c.grpcClient.SetNodeID(ms.ServerID)
 	return ms.Address, nil
 }
@@ -2147,6 +2144,28 @@ func (c *Client) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 	})
 }
 
+func (c *Client) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotRequest, opts ...grpc.CallOption) (*datapb.ExportSnapshotResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.ExportSnapshotResponse, error) {
+		return client.ExportSnapshot(ctx, req)
+	})
+}
+
+func (c *Client) GetExportSnapshotState(ctx context.Context, req *datapb.GetExportSnapshotStateRequest, opts ...grpc.CallOption) (*datapb.GetExportSnapshotStateResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.GetExportSnapshotStateResponse, error) {
+		return client.GetExportSnapshotState(ctx, req)
+	})
+}
+
 func (c *Client) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest, opts ...grpc.CallOption) (*datapb.GetRestoreSnapshotStateResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
@@ -2238,5 +2257,12 @@ func (c *Client) PushClientCommand(ctx context.Context, req *milvuspb.PushClient
 func (c *Client) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.DeleteClientCommandResponse, error) {
 		return client.DeleteClientCommand(ctx, req, opts...)
+	})
+}
+
+// ListClientCommands lists the commands currently held for clients
+func (c *Client) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest, opts ...grpc.CallOption) (*rootcoordpb.ListClientCommandsResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*rootcoordpb.ListClientCommandsResponse, error) {
+		return client.ListClientCommands(ctx, req, opts...)
 	})
 }

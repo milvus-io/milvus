@@ -25,8 +25,8 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
 type SearchOptionSuite struct {
@@ -88,6 +88,44 @@ func (s *SearchOptionSuite) TestBasic() {
 	opt = NewSearchOption(collName, topK, []entity.Vector{nonSupportData{}})
 	_, err = opt.Request()
 	s.Error(err)
+}
+
+func (s *SearchOptionSuite) TestWithNamespace() {
+	collName := "namespace_read_option"
+	namespace := "tenant_a"
+
+	searchReq, err := NewSearchOption(collName, 10, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+		WithNamespace(namespace).
+		Request()
+	s.Require().NoError(err)
+	s.Equal(namespace, searchReq.GetNamespace())
+
+	queryReq, err := NewQueryOption(collName).
+		WithNamespace(namespace).
+		Request()
+	s.Require().NoError(err)
+	s.Equal(namespace, queryReq.GetNamespace())
+
+	hybridReq, err := NewHybridSearchOption(collName, 10, NewAnnRequest("vector", 10, entity.FloatVector([]float32{0.1, 0.2}))).
+		WithNamespace(namespace).
+		HybridRequest()
+	s.Require().NoError(err)
+	s.Equal(namespace, hybridReq.GetNamespace())
+}
+
+func (s *SearchOptionSuite) TestQueryOrderByFields() {
+	collName := "query_order_by"
+
+	queryReq, err := NewQueryOption(collName).
+		WithFilter("price > 50").
+		WithLimit(10).
+		WithOrderByFields("price:desc", "name:asc").
+		Request()
+	s.Require().NoError(err)
+
+	queryParams := entity.KvPairsMap(queryReq.GetQueryParams())
+	s.Equal("price:desc,name:asc", queryParams[spOrderByFields])
+	s.Equal("10", queryParams[spLimit])
 }
 
 func (s *SearchOptionSuite) TestPlaceHolder() {

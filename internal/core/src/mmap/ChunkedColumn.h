@@ -31,6 +31,7 @@
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
+#include "common/ColumnarArrayChunk.h"
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
@@ -175,6 +176,10 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
                     fn(true, i);
                 }
             }
+            // Non-nullable is fully handled above; without this return the
+            // control falls through into the nullable block and invokes fn a
+            // second time per row.
+            return;
         }
         // nullable:
         if (offsets == nullptr) {
@@ -234,6 +239,17 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         SemiInlineGet(slot_->PinCells(op_ctx, chunk_ids));
     }
 
+    bool
+    CellsLoaded(const int64_t* offsets, int64_t count) const override {
+        if (count == 0) {
+            return true;
+        }
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        return std::all_of(cids.begin(), cids.end(), [this](cid_t cid) {
+            return slot_->IsCached(cid);
+        });
+    }
+
     PinWrapper<SpanBase>
     Span(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
         ThrowInfo(ErrorCode::Unsupported,
@@ -270,7 +286,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
                   "BulkVectorValueAt only supported for ChunkedColumn");
     }
 
-    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
     StringViews(milvus::OpContext* op_ctx,
                 int64_t chunk_id,
                 std::optional<std::pair<int64_t, int64_t>> offset_len =
@@ -279,7 +295,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
                   "StringViews only supported for VariableColumn");
     }
 
-    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
     ArrayViews(
         milvus::OpContext* op_ctx,
         int64_t chunk_id,
@@ -288,7 +304,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
                   "ArrayViews only supported for ArrayChunkedColumn");
     }
 
-    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     VectorArrayViews(
         milvus::OpContext* op_ctx,
         int64_t chunk_id,
@@ -537,7 +553,7 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
         : ChunkedColumnBase(std::move(slot), field_meta) {
     }
 
-    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
     StringViews(milvus::OpContext* op_ctx,
                 int64_t chunk_id,
                 std::optional<std::pair<int64_t, int64_t>> offset_len =
@@ -545,7 +561,7 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<
-            std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
+            std::pair<std::vector<std::string_view>, ValidityView>>(
             std::move(ca),
             static_cast<StringChunk*>(chunk)->StringViews(offset_len));
     }
@@ -652,7 +668,8 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
  public:
     explicit ChunkedArrayColumn(std::shared_ptr<CacheSlot<Chunk>> slot,
                                 const FieldMeta& field_meta)
-        : ChunkedColumnBase(std::move(slot), field_meta) {
+        : ChunkedColumnBase(std::move(slot), field_meta),
+          is_nested_array_(field_meta.is_nested_array()) {
     }
 
     void
@@ -660,6 +677,10 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
                 std::function<void(const ArrayView&, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) const override {
+        if (is_nested_array_) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "legacy ArrayView API does not support nested ARRAY");
+        }
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
         for (int64_t i = 0; i < count; i++) {
@@ -669,15 +690,35 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
         }
     }
 
-    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    void
+    BulkArrayValueAt(milvus::OpContext* op_ctx,
+                     std::function<void(ScalarFieldProto&&, size_t)> fn,
+                     const int64_t* offsets,
+                     int64_t count) const override {
+        AssertInfo(is_nested_array_,
+                   "BulkArrayValueAt requires a nested ARRAY field");
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
+        for (int64_t i = 0; i < count; ++i) {
+            auto* chunk =
+                static_cast<ColumnarArrayChunk*>(ca->get_cell_of(cids[i]));
+            fn(chunk->output_data(offsets_in_chunk[i]), i);
+        }
+    }
+
+    PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
     ArrayViews(milvus::OpContext* op_ctx,
                int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len =
                    std::nullopt) const override {
+        if (is_nested_array_) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "legacy ArrayViews API does not support nested ARRAY");
+        }
         auto ca = SemiInlineGet(
             slot_->PinCells(op_ctx, {static_cast<cid_t>(chunk_id)}));
         auto chunk = ca->get_cell_of(chunk_id);
-        return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
+        return PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>(
             std::move(ca), static_cast<ArrayChunk*>(chunk)->Views(offset_len));
     }
 
@@ -685,12 +726,20 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
     ArrayViewsByOffsets(milvus::OpContext* op_ctx,
                         int64_t chunk_id,
                         const FixedVector<int32_t>& offsets) const override {
+        if (is_nested_array_) {
+            ThrowInfo(
+                ErrorCode::Unsupported,
+                "legacy ArrayViewsByOffsets API does not support nested ARRAY");
+        }
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
             std::move(ca),
             static_cast<ArrayChunk*>(chunk)->ViewsByOffsets(offsets));
     }
+
+ private:
+    bool is_nested_array_{false};
 };
 
 class ChunkedVectorArrayColumn : public ChunkedColumnBase {
@@ -716,7 +765,7 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
         }
     }
 
-    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     VectorArrayViews(milvus::OpContext* op_ctx,
                      int64_t chunk_id,
                      std::optional<std::pair<int64_t, int64_t>> offset_len =
@@ -725,7 +774,7 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
             slot_->PinCells(op_ctx, {static_cast<cid_t>(chunk_id)}));
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<
-            std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>(
+            std::pair<std::vector<VectorArrayView>, ValidityView>>(
             std::move(ca),
             static_cast<VectorArrayChunk*>(chunk)->Views(offset_len));
     }
@@ -738,6 +787,13 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<const size_t*>(
             std::move(ca), static_cast<VectorArrayChunk*>(chunk)->Offsets());
+    }
+
+ protected:
+    void
+    BuildValidArrayOffsetsInChunks(
+        const std::vector<PinWrapper<Chunk*>>& chunk_pws) override {
+        BuildVectorArrayValidOffsets(chunk_pws);
     }
 };
 

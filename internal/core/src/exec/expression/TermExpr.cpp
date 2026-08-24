@@ -32,7 +32,9 @@
 #include "common/bson_view.h"
 #include "common/type_c.h"
 #include "common/ScopedTimer.h"
+#include "exec/expression/Element.h"
 #include "exec/expression/EvalCtx.h"
+#include "exec/expression/JsonNumberComparison.h"
 #include "exec/expression/Utils.h"
 #include "folly/FBVector.h"
 #include "glog/logging.h"
@@ -56,6 +58,7 @@ namespace exec {
 
 void
 PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    WaitPrefetch();
     tracer::AutoSpan span(
         "PhyTermFilterExpr::Eval", tracer::GetRootSpan(), true);
     span.GetSpan()->SetAttribute("data_type",
@@ -134,7 +137,7 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecVisitorImplTemplateJson<std::string>(context);
                     break;
                 default:
-                    ThrowInfo(DataTypeInvalid, "unknown data type: {}", type);
+                    ThrowInfo(UnexpectedError, "unknown data type: {}", type);
             }
             break;
         }
@@ -158,12 +161,12 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecVisitorImplTemplateArray<std::string>(context);
                     break;
                 default:
-                    ThrowInfo(DataTypeInvalid, "unknown data type: {}", type);
+                    ThrowInfo(UnexpectedError, "unknown data type: {}", type);
             }
             break;
         }
         default:
-            ThrowInfo(DataTypeInvalid,
+            ThrowInfo(UnexpectedError,
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
@@ -172,7 +175,7 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 template <typename T>
 bool
 PhyTermFilterExpr::CanSkipSegment() {
-    const auto& skip_index = segment_->GetSkipIndex();
+    auto skip_index = segment_->GetSkipIndex();
     T min, max;
     for (auto i = 0; i < expr_->vals_.size(); i++) {
         auto val = GetValueFromProto<T>(expr_->vals_[i]);
@@ -182,7 +185,7 @@ PhyTermFilterExpr::CanSkipSegment() {
     auto can_skip = [&]() -> bool {
         bool res = false;
         for (int i = 0; i < num_data_chunk_; ++i) {
-            if (!skip_index.CanSkipBinaryRange<T>(
+            if (!skip_index->CanSkipBinaryRange<T>(
                     op_ctx_, field_id_, i, min, max, true, true)) {
                 return false;
             } else {
@@ -226,7 +229,7 @@ PhyTermFilterExpr::InitPkCacheOffset() {
             break;
         }
         default: {
-            ThrowInfo(DataTypeInvalid, "unsupported data type {}", pk_type_);
+            ThrowInfo(UnexpectedError, "unsupported data type {}", pk_type_);
         }
     }
 
@@ -259,12 +262,14 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(EvalCtx& context) {
         return ExecTermJsonVariableInField<ValueType>(context);
     } else {
         if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
-            // we create double index for json int64 field for now
-            using GetType =
-                std::conditional_t<std::is_same_v<ValueType, int64_t>,
-                                   double,
-                                   ValueType>;
-            return ExecVisitorImplForIndex<GetType>();
+            if constexpr (std::is_same_v<ValueType, int64_t>) {
+                if (PinnedJsonIndexIsFlat()) {
+                    return ExecVisitorImplForIndex<int64_t>();
+                }
+                return ExecVisitorImplForIndex<double>();
+            } else {
+                return ExecVisitorImplForIndex<ValueType>();
+            }
         } else {
             return ExecTermJsonFieldInVariable<ValueType>(context);
         }
@@ -314,7 +319,7 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
         [&processed_cursor, &
          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const ArrayView* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -341,7 +346,7 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -415,13 +420,17 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
         [&processed_cursor, &
          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const ArrayView* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
             int index,
             const std::shared_ptr<MultiElement>& term_set) {
+        if (!term_set->Empty()) {
+            AssertInfo(index >= 0,
+                       "array element term predicate requires nested path");
+        }
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -434,12 +443,17 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            if (term_set->Empty() || index >= data[offset].length()) {
+            if (term_set->Empty()) {
                 res[i] = false;
+                continue;
+            }
+            if (index >= data[offset].length()) {
+                res[i] = false;
+                valid_res[i] = false;
                 continue;
             }
             if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
@@ -512,7 +526,7 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
         [&processed_cursor, &
          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const Json* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -528,18 +542,19 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
         auto executor = [&](size_t i) {
             auto doc = data[i].doc();
             auto array = doc.at_pointer(pointer).get_array();
-            if (array.error())
-                return false;
+            if (array.error()) {
+                return std::make_pair(false, false);
+            }
             for (auto it = array.begin(); it != array.end(); ++it) {
                 auto val = (*it).template get<GetType>();
                 if (val.error()) {
-                    return false;
+                    continue;
                 }
                 if (val.value() == target_val) {
-                    return true;
+                    return std::make_pair(true, true);
                 }
             }
-            return false;
+            return std::make_pair(true, false);
         };
         bool has_bitmap_input = !bitmap_input.empty();
         for (size_t i = 0; i < size; ++i) {
@@ -547,14 +562,19 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
             if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
                 continue;
             }
-            res[i] = executor(offset);
+            auto [valid, matched] = executor(offset);
+            if (!valid) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            res[i] = matched;
         }
         processed_cursor += size;
     };
@@ -590,18 +610,6 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
     auto pointer = milvus::index::JsonPointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
         arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
-        if constexpr (std::is_same_v<GetType, int64_t>) {
-            // for int64_t, we need to a double vector to store the values
-            auto int_arg_set =
-                std::static_pointer_cast<SetElement<int64_t>>(arg_set_);
-            std::vector<double> double_vals;
-            for (const auto& val : int_arg_set->GetElements()) {
-                double_vals.emplace_back(static_cast<double>(val));
-            }
-            arg_set_double_ = std::make_shared<SetElement<double>>(double_vals);
-        } else if constexpr (std::is_same_v<GetType, double>) {
-            arg_set_double_ = arg_set_;
-        }
         arg_inited_ = true;
     }
 
@@ -624,30 +632,36 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
-            std::make_shared<TargetBitmap>(active_count_, true);
+            std::make_shared<TargetBitmap>(active_count_);
         TargetBitmapView res_view(*cached_index_chunk_res_);
         TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
 
         // process shredding data
         auto try_execute = [&](milvus::index::JSONType json_type,
-                               TargetBitmapView& res_view,
-                               TargetBitmapView& valid_res_view,
-                               auto GetType) {
+                               auto get_type) {
             auto target_field = index->GetShreddingField(pointer, json_type);
             if (!target_field.empty()) {
-                using ColType = decltype(GetType);
+                using ColType = decltype(get_type);
+                TargetBitmap target_res(active_count_, false);
+                TargetBitmapView target_res_view(target_res);
+                TargetBitmap target_valid(active_count_, true);
+                TargetBitmapView target_valid_view(target_valid);
                 auto shredding_executor = [this](const ColType* src,
-                                                 const bool* valid,
+                                                 ValidityView valid,
                                                  size_t size,
                                                  TargetBitmapView res,
                                                  TargetBitmapView valid_res) {
                     for (size_t i = 0; i < size; ++i) {
-                        if (valid != nullptr && !valid[i]) {
+                        if (valid && !valid[i]) {
                             res[i] = valid_res[i] = false;
                             continue;
                         }
-                        if constexpr (std::is_same_v<ColType, double>) {
-                            res[i] = this->arg_set_double_->In(src[i]);
+                        if constexpr (std::is_same_v<GetType, int64_t> ||
+                                      std::is_same_v<GetType, double>) {
+                            auto value =
+                                ConvertJsonNumberExact<GetType>(src[i]);
+                            res[i] =
+                                value.has_value() && this->arg_set_->In(*value);
                         } else {
                             res[i] = this->arg_set_->In(src[i]);
                         }
@@ -657,8 +671,11 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                                                          target_field,
                                                          shredding_executor,
                                                          nullptr,
-                                                         res_view,
-                                                         valid_res_view);
+                                                         target_res_view,
+                                                         target_valid_view);
+                res_view.inplace_or_with_count(target_res_view, active_count_);
+                valid_res_view.inplace_or_with_count(target_valid_view,
+                                                     active_count_);
                 LOG_DEBUG("using shredding data's field: {} count {}",
                           target_field,
                           res_view.count());
@@ -671,65 +688,38 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                 [this](double us) { json_stats_shredding_latency_us_ += us; });
 
             if constexpr (std::is_same_v<GetType, bool>) {
-                try_execute(milvus::index::JSONType::BOOL,
-                            res_view,
-                            valid_res_view,
-                            bool{});
+                try_execute(milvus::index::JSONType::BOOL, bool{});
             } else if constexpr (std::is_same_v<GetType, int64_t>) {
-                try_execute(milvus::index::JSONType::INT64,
-                            res_view,
-                            valid_res_view,
-                            int64_t{});
+                try_execute(milvus::index::JSONType::INT64, int64_t{});
                 // and double compare
-                TargetBitmap res_double(active_count_, false);
-                TargetBitmapView res_double_view(res_double);
-                TargetBitmap res_double_valid(active_count_, true);
-                TargetBitmapView valid_res_double_view(res_double_valid);
-                try_execute(milvus::index::JSONType::DOUBLE,
-                            res_double_view,
-                            valid_res_double_view,
-                            double{});
-                res_view.inplace_or_with_count(res_double_view, active_count_);
-                valid_res_view.inplace_or_with_count(valid_res_double_view,
-                                                     active_count_);
+                try_execute(milvus::index::JSONType::DOUBLE, double{});
 
             } else if constexpr (std::is_same_v<GetType, double>) {
-                try_execute(milvus::index::JSONType::DOUBLE,
-                            res_view,
-                            valid_res_view,
-                            double{});
+                try_execute(milvus::index::JSONType::DOUBLE, double{});
                 // and int64 compare
-                TargetBitmap res_int64(active_count_, false);
-                TargetBitmapView res_int64_view(res_int64);
-                TargetBitmap res_int64_valid(active_count_, true);
-                TargetBitmapView valid_res_int64_view(res_int64_valid);
-                try_execute(milvus::index::JSONType::INT64,
-                            res_int64_view,
-                            valid_res_int64_view,
-                            int64_t{});
-                res_view.inplace_or_with_count(res_int64_view, active_count_);
-                valid_res_view.inplace_or_with_count(valid_res_int64_view,
-                                                     active_count_);
+                try_execute(milvus::index::JSONType::INT64, int64_t{});
             } else if constexpr (std::is_same_v<GetType, std::string_view> ||
                                  std::is_same_v<GetType, std::string>) {
                 try_execute(milvus::index::JSONType::STRING,
-                            res_view,
-                            valid_res_view,
                             std::string_view{});
             }
         }
 
         // process shared data
-        auto shared_executor = [this, &res_view](milvus::BsonView bson,
-                                                 uint32_t row_offset,
-                                                 uint32_t value_offset) {
+        auto shared_executor = [this, &res_view, &valid_res_view](
+                                   milvus::BsonView bson,
+                                   uint32_t row_offset,
+                                   uint32_t value_offset) {
             if constexpr (std::is_same_v<GetType, int64_t> ||
                           std::is_same_v<GetType, double>) {
-                auto get_value =
-                    bson.ParseAsValueAtOffset<double>(value_offset);
+                bool is_number = false;
+                auto get_value = ParseBsonNumberExact<GetType>(
+                    bson, value_offset, is_number);
                 if (get_value.has_value()) {
-                    res_view[row_offset] =
-                        this->arg_set_double_->In(get_value.value());
+                    res_view[row_offset] = this->arg_set_->In(*get_value);
+                }
+                if (is_number) {
+                    valid_res_view[row_offset] = true;
                 }
                 return;
             } else {
@@ -738,12 +728,29 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                 if (get_value.has_value()) {
                     res_view[row_offset] =
                         this->arg_set_->In(get_value.value());
+                    valid_res_view[row_offset] = true;
                 }
                 return;
             }
         };
 
-        {
+        bool skip_shared_data = false;
+        if constexpr (std::is_same_v<GetType, bool>) {
+            skip_shared_data = index->HasAllShreddingFields(
+                pointer, {milvus::index::JSONType::BOOL});
+        } else if constexpr (std::is_same_v<GetType, int64_t> ||
+                             std::is_same_v<GetType, double>) {
+            skip_shared_data =
+                index->HasAllShreddingFields(pointer,
+                                             {milvus::index::JSONType::INT64,
+                                              milvus::index::JSONType::DOUBLE});
+        } else if constexpr (std::is_same_v<GetType, std::string_view> ||
+                             std::is_same_v<GetType, std::string>) {
+            skip_shared_data = index->HasAllShreddingFields(
+                pointer, {milvus::index::JSONType::STRING});
+        }
+
+        if (!skip_shared_data) {
             milvus::ScopedTimer timer(
                 "term_json_stats_shared_data",
                 [this](double us) { json_stats_shared_latency_us_ += us; });
@@ -755,8 +762,10 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
         CachePut(CacheElapsedUs(cache_compute_start));
     }
 
-    auto res = MoveOrSliceBitmap(
-        *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+    auto res = MoveOrSliceBitmap(*cached_index_chunk_res_,
+                                 *cached_index_chunk_valid_res_,
+                                 current_data_global_pos_,
+                                 real_batch_size);
     MoveCursor();
     return res;
 }
@@ -810,7 +819,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
         [&processed_cursor, &
          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const Json* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -827,11 +836,12 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             if constexpr (std::is_same_v<GetType, std::int64_t>) {
                 auto x_num = data[i].at_numeric(pointer);
                 if (x_num.error()) {
-                    return false;
+                    return std::make_pair(false, false);
                 }
                 auto n = x_num.value();
                 if (n.is_int64()) {
-                    return terms->In(ValueType(n.get_int64()));
+                    return std::make_pair(true,
+                                          terms->In(ValueType(n.get_int64())));
                 }
                 // uint64 or double → compare as double, consistent with
                 // index/stats paths.
@@ -839,13 +849,15 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
                                           : n.get_double();
                 // if the term set is {1}, and the value is 1.1, we should
                 // not return true.
-                return std::floor(dval) == dval && terms->In(ValueType(dval));
+                return std::make_pair(
+                    true,
+                    std::floor(dval) == dval && terms->In(ValueType(dval)));
             } else {
                 auto x = data[i].template at<GetType>(pointer);
                 if (x.error()) {
-                    return false;
+                    return std::make_pair(false, false);
                 }
-                return terms->In(ValueType(x.value()));
+                return std::make_pair(true, terms->In(ValueType(x.value())));
             }
         };
         bool has_bitmap_input = !bitmap_input.empty();
@@ -854,7 +866,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -866,7 +878,12 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
                 continue;
             }
-            res[i] = executor(offset);
+            auto [valid, matched] = executor(offset);
+            if (!valid) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            res[i] = matched;
         }
         processed_cursor += size;
     };
@@ -912,10 +929,15 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(nullptr, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = AdvanceEmptyElementBatch(
+            nullptr, expr_->column_.element_level_, real_batch_size)) {
+        return res;
     }
 
     if (!arg_inited_) {
@@ -947,6 +969,12 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
     };
     auto args =
         std::dynamic_pointer_cast<FlatVectorElement<IndexInnerType>>(arg_set_);
+    if (field_type_ == DataType::JSON && args->values_.empty()) {
+        MoveCursor();
+        return std::make_shared<ColumnVector>(
+            TargetBitmap(real_batch_size, false),
+            TargetBitmap(real_batch_size, true));
+    }
     auto res = ProcessIndexChunks<T>(execute_sub_batch, args->values_);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -960,10 +988,15 @@ template <>
 VectorPtr
 PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
     using Index = index::ScalarIndex<bool>;
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(nullptr, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = AdvanceEmptyElementBatch(
+            nullptr, expr_->column_.element_level_, real_batch_size)) {
+        return res;
     }
 
     if (!arg_inited_) {
@@ -980,6 +1013,12 @@ PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
         return func(index_ptr, vals.size(), (bool*)vals.data());
     };
     auto args = std::dynamic_pointer_cast<FlatVectorElement<uint8_t>>(arg_set_);
+    if (field_type_ == DataType::JSON && args->values_.empty()) {
+        MoveCursor();
+        return std::make_shared<ColumnVector>(
+            TargetBitmap(real_batch_size, false),
+            TargetBitmap(real_batch_size, true));
+    }
     auto res = ProcessIndexChunks<bool>(execute_sub_batch, args->values_);
     return res;
 }
@@ -990,10 +1029,15 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
 
-    auto real_batch_size =
+    auto next_batch_size =
         GetNextRealBatchSize(input, expr_->column_.element_level_);
-    if (real_batch_size == 0) {
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = AdvanceEmptyElementBatch(
+            input, expr_->column_.element_level_, real_batch_size)) {
+        return res;
     }
 
     auto res_vec =
@@ -1086,7 +1130,7 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
         [&processed_cursor, &bitmap_input, &simd_filter_fn,
          str_set_elem ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -1102,14 +1146,7 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
         if constexpr (filter_type == FilterType::sequential) {
             if (simd_filter_fn) {
                 simd_filter_fn(data, size, res);
-                // Apply validity mask
-                if (valid_data != nullptr) {
-                    for (int i = 0; i < size; ++i) {
-                        if (!valid_data[i]) {
-                            res[i] = valid_res[i] = false;
-                        }
-                    }
-                }
+                ApplyValidMask(valid_data, res, valid_res, size);
                 // Apply bitmap mask
                 if (has_bitmap_input) {
                     for (int i = 0; i < size; ++i) {
@@ -1130,7 +1167,7 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -1206,9 +1243,31 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
 
 void
 PhyTermFilterExpr::DetermineExecPath() {
+    // Validate before execution-path selection or asynchronous prefetch can
+    // consume values using the type selected from vals_[0].
+    if (expr_->column_.data_type_ == DataType::JSON &&
+        expr_->vals_.size() > 1) {
+        const auto expected_type = expr_->vals_[0].val_case();
+        for (size_t i = 1; i < expr_->vals_.size(); ++i) {
+            if (expr_->vals_[i].val_case() != expected_type) {
+                ThrowInfo(DataTypeInvalid,
+                          "TermExpr values must have the same type, value 0 "
+                          "has type {} but value {} has type {}",
+                          static_cast<int>(expected_type),
+                          i,
+                          static_cast<int>(expr_->vals_[i].val_case()));
+            }
+        }
+    }
+
     // PkIndex
     if (is_pk_field_) {
         exec_path_ = ExprExecPath::PkIndex;
+        return;
+    }
+
+    if (expr_->column_.data_type_ == DataType::JSON && expr_->is_in_field_) {
+        exec_path_ = ExprExecPath::RawData;
         return;
     }
 
@@ -1218,20 +1277,116 @@ PhyTermFilterExpr::DetermineExecPath() {
         return;
     }
 
-    SegmentExpr::DetermineExecPath();
-    if (exec_path_ != ExprExecPath::ScalarIndex) {
-        return;
-    }
-
     auto data_type = expr_->column_.data_type_;
     if (expr_->column_.element_level_) {
         data_type = expr_->column_.element_type_;
     }
 
-    // ARRAY type cannot use scalar index
+    // ARRAY type cannot use scalar index.
     if (data_type == DataType::ARRAY) {
         exec_path_ = ExprExecPath::RawData;
+        return;
     }
+
+    SegmentExpr::DetermineExecPath();
+    if (exec_path_ != ExprExecPath::ScalarIndex) {
+        return;
+    }
+
+    if (data_type == DataType::JSON && !expr_->vals_.empty() &&
+        expr_->vals_[0].val_case() ==
+            proto::plan::GenericValue::ValCase::kInt64Val) {
+        const auto has_unsafe_literal = std::any_of(
+            expr_->vals_.begin(), expr_->vals_.end(), [this](const auto& val) {
+                return !IsInt64SafeForJsonDoubleIndex(val.int64_val());
+            });
+        if (has_unsafe_literal && !PinnedJsonIndexIsFlat()) {
+            exec_path_ = ExprExecPath::RawData;
+        }
+        return;
+    }
+
+    // IN / NOT IN is a disjunction of equalities. Ask the pinned string index
+    // whether it wants the equality op (represented as Equal): FMINDEX declines
+    // it (a term set of exact values is better served by the scan / an equality
+    // index), while INVERTED and the others accept it (base default). FMINDEX is
+    // VARCHAR-only, so only the string path needs the check.
+    if ((data_type == DataType::VARCHAR || data_type == DataType::TEXT) &&
+        !SegmentExpr::CanUseIndexForOp<std::string>(
+            proto::plan::OpType::Equal)) {
+        exec_path_ = ExprExecPath::RawData;
+    }
+}
+
+void
+PhyTermFilterExpr::PrefetchRawData() {
+    auto datatype = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        datatype = expr_->column_.element_type_;
+    }
+
+    switch (datatype) {
+        case DataType::BOOL:
+            PrefetchRawData<bool>();
+            break;
+        case DataType::INT8:
+            PrefetchRawData<int8_t>();
+            break;
+        case DataType::INT16:
+            PrefetchRawData<int16_t>();
+            break;
+        case DataType::INT32:
+            PrefetchRawData<int32_t>();
+            break;
+        case DataType::INT64:
+            PrefetchRawData<int64_t>();
+            break;
+        case DataType::TIMESTAMPTZ:
+            PrefetchRawData<int64_t>();
+            break;
+        case DataType::FLOAT:
+            PrefetchRawData<float>();
+            break;
+        case DataType::DOUBLE:
+            PrefetchRawData<double>();
+            break;
+        case DataType::VARCHAR:
+            if (segment_->type() == SegmentType::Growing &&
+                !storage::MmapManager::GetInstance()
+                     .GetMmapConfig()
+                     .growing_enable_mmap) {
+                PrefetchRawData<std::string>();
+            } else {
+                PrefetchRawData<std::string_view>();
+            }
+            break;
+        default:
+            SegmentExpr::PrefetchRawData(expr_->column_.field_id_);
+            break;
+    }
+}
+
+template <typename T>
+void
+PhyTermFilterExpr::PrefetchRawData() {
+    auto skip_index = segment_->GetSkipIndex();
+
+    std::vector<T> elements;
+    elements.reserve(expr_->vals_.size());
+    for (const auto& val : expr_->vals_) {
+        auto e = GetValueWithCastNumber<T>(val);
+        elements.push_back(e);
+    }
+
+    std::vector<int64_t> chunks_may_hit;
+    for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; ++i) {
+        auto skip = skip_index->CanSkipInQuery(field_id_, i, elements);
+        if (!skip) {
+            chunks_may_hit.push_back(i);
+        }
+    }
+
+    segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
 }
 
 }  //namespace exec

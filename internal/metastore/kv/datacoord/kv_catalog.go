@@ -23,7 +23,6 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
@@ -37,10 +36,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -275,14 +273,14 @@ func (kc *Catalog) AddSegment(ctx context.Context, segment *datapb.SegmentInfo) 
 func (kc *Catalog) LoadFromSegmentPath(ctx context.Context, colID, partID, segID typeutil.UniqueID) (*datapb.SegmentInfo, error) {
 	v, err := kc.MetaKv.Load(ctx, buildSegmentPath(colID, partID, segID))
 	if err != nil {
-		log.Ctx(context.TODO()).Error("(testing only) failed to load segment info by segment path")
+		mlog.Error(ctx, "(testing only) failed to load segment info by segment path")
 		return nil, err
 	}
 
 	segInfo := &datapb.SegmentInfo{}
 	err = proto.Unmarshal([]byte(v), segInfo)
 	if err != nil {
-		log.Ctx(context.TODO()).Error("(testing only) failed to unmarshall segment info")
+		mlog.Error(ctx, "(testing only) failed to unmarshall segment info")
 		return nil, err
 	}
 
@@ -293,58 +291,9 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 	if len(segments) == 0 {
 		return nil
 	}
-	kvs := make(map[string]string)
-	for _, segment := range segments {
-		// we don't persist binlog fields, but instead store binlogs as independent kvs
-		cloned := proto.Clone(segment).(*datapb.SegmentInfo)
-		resetBinlogFields(cloned)
-
-		rowCount := segmentutil.CalcRowCountFromBinLog(segment)
-		if rowCount > 0 && cloned.GetNumOfRows() != rowCount {
-			cloned.NumOfRows = rowCount
-		}
-
-		if segment.GetState() == commonpb.SegmentState_Dropped {
-			binlogs, err := kc.handleDroppedSegment(ctx, segment)
-			if err != nil {
-				return err
-			}
-			maps.Copy(kvs, binlogs)
-		}
-
-		k, v, err := buildSegmentKv(cloned)
-		if err != nil {
-			return err
-		}
-		kvs[k] = v
-	}
-
-	var removals []string
-	for _, b := range binlogs {
-		segment := b.Segment
-
-		binlogKvs, err := buildBinlogKvsWithLogID(
-			segment.GetCollectionID(),
-			segment.GetPartitionID(),
-			segment.GetID(),
-			b.GetUpdateBinlogs(),
-			b.GetUpdateDeltalogs(),
-			b.GetUpdateStatslogs(),
-			b.GetUpdateBm25Statslogs())
-		if err != nil {
-			return err
-		}
-
-		maps.Copy(kvs, binlogKvs)
-
-		for _, fid := range b.DroppedBinlogFieldIDs {
-			removals = append(removals,
-				buildFieldBinlogPath(
-					segment.GetCollectionID(),
-					segment.GetPartitionID(),
-					segment.GetID(),
-					fid))
-		}
+	kvs, removals, err := kc.buildAlterSegmentsKvs(ctx, segments, binlogs)
+	if err != nil {
+		return err
 	}
 
 	if err := kc.SaveByBatch(ctx, kvs); err != nil {
@@ -364,20 +313,96 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 	return nil
 }
 
+// buildAlterSegmentsKvs computes the persisted key/value writes and orphan
+// per-FieldBinlog KV removals for an AlterSegments call. Factored out so
+// both Catalog.AlterSegments (batched MultiSave + a follow-up
+// MultiSaveAndRemove) and Catalog.Update's SegmentEntry type-switch case
+// (accumulated into a single txn.Builder) apply the exact same kv encoding.
+func (kc *Catalog) buildAlterSegmentsKvs(ctx context.Context, segments []*datapb.SegmentInfo, binlogs []metastore.BinlogsIncrement) (kvs map[string]string, removals []string, err error) {
+	kvs = make(map[string]string)
+	for _, segment := range segments {
+		// we don't persist binlog fields, but instead store binlogs as independent kvs
+		cloned := proto.Clone(segment).(*datapb.SegmentInfo)
+		resetBinlogFields(cloned)
+
+		// Row-count reconciliation from binlog arrays is V2-only. V3
+		// segments' arrays may be empty (post-cleanup) and their
+		// authoritative row count lives on Stats / NumOfRows already.
+		if !isV3Segment(segment) {
+			segmentutil.ReCalcRowCount(segment, cloned)
+		}
+
+		if segment.GetState() == commonpb.SegmentState_Dropped {
+			binlogs, err := kc.handleDroppedSegment(ctx, segment)
+			if err != nil {
+				return nil, nil, err
+			}
+			maps.Copy(kvs, binlogs)
+		}
+
+		k, v, err := buildSegmentKv(cloned)
+		if err != nil {
+			return nil, nil, err
+		}
+		kvs[k] = v
+	}
+
+	for _, b := range binlogs {
+		segment := b.Segment
+
+		// V3 segments persist paths via the LOON manifest — skip writing the
+		// per-FieldBinlog KVs entirely. DataCoord scheduling reads
+		// SegmentInfo.Stats instead of iterating these arrays.
+		if isV3Segment(segment) {
+			continue
+		}
+
+		binlogKvs, err := buildBinlogKvsWithLogID(
+			segment.GetCollectionID(),
+			segment.GetPartitionID(),
+			segment.GetID(),
+			b.GetUpdateBinlogs(),
+			b.GetUpdateDeltalogs(),
+			b.GetUpdateStatslogs(),
+			b.GetUpdateBm25Statslogs())
+		if err != nil {
+			return nil, nil, err
+		}
+
+		maps.Copy(kvs, binlogKvs)
+
+		for _, fid := range b.DroppedBinlogFieldIDs {
+			removals = append(removals,
+				buildFieldBinlogPath(
+					segment.GetCollectionID(),
+					segment.GetPartitionID(),
+					segment.GetID(),
+					fid))
+		}
+	}
+
+	return kvs, removals, nil
+}
+
 func (kc *Catalog) handleDroppedSegment(ctx context.Context, segment *datapb.SegmentInfo) (kvs map[string]string, err error) {
+	// V3 segments' GC walks the LOON manifest, not the per-FieldBinlog KVs,
+	// so the legacy compatibility write-on-drop has no consumer for them.
+	if isV3Segment(segment) {
+		return nil, nil
+	}
 	var has bool
 	has, err = kc.hasBinlogPrefix(ctx, segment)
 	if err != nil {
-		return
+		return kvs, err
 	}
 	// To be compatible with previous implementation, we have to write binlogs on etcd for correct gc.
 	if !has {
 		kvs, err = buildBinlogKvsWithLogID(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), cloneLogs(segment.GetBinlogs()), cloneLogs(segment.GetDeltalogs()), cloneLogs(segment.GetStatslogs()), cloneLogs(segment.GetBm25Statslogs()))
 		if err != nil {
-			return
+			return kvs, err
 		}
 	}
-	return
+	return kvs, err
 }
 
 func (kc *Catalog) SaveByBatch(ctx context.Context, kvs map[string]string) error {
@@ -387,7 +412,7 @@ func (kc *Catalog) SaveByBatch(ctx context.Context, kvs map[string]string) error
 	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
 	err := etcd.SaveByBatchWithLimit(kvs, maxTxnNum, saveFn)
 	if err != nil {
-		log.Ctx(ctx).Error("failed to save by batch", zap.Error(err))
+		mlog.Error(ctx, "failed to save by batch", mlog.Err(err))
 		return err
 	}
 	return nil
@@ -416,11 +441,14 @@ func (kc *Catalog) hasBinlogPrefix(ctx context.Context, segment *datapb.SegmentI
 	return hasBinlogPrefix || hasDeltaPrefix || hasStatsPrefix, nil
 }
 
-func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error {
-	if len(segments) == 0 {
-		return nil
-	}
-
+// buildDroppedSegmentKvs computes the record-only key/value writes for a
+// batch of segments. Factored out so both Catalog.SaveDroppedSegmentsInBatch
+// (batched MultiSave) and Catalog.Update's ActionUpdate segment path
+// (accumulated into a single txn.Builder) apply the exact same kv encoding:
+// segment-only KVs (no binlog KVs, no handleDroppedSegment compat writes) -
+// deliberately distinct from buildAlterSegmentsKvs, which additionally
+// persists binlog KVs for the ActionAdd path.
+func buildDroppedSegmentKvs(segments []*datapb.SegmentInfo) (map[string]string, error) {
 	kvs := make(map[string]string)
 	for _, s := range segments {
 		key := buildSegmentPath(s.GetCollectionID(), s.GetPartitionID(), s.GetID())
@@ -429,9 +457,21 @@ func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*d
 		segmentutil.ReCalcRowCount(s, noBinlogsSegment)
 		segBytes, err := marshalSegmentInfo(noBinlogsSegment)
 		if err != nil {
-			return merr.WrapErrSerializationFailed(err, "marshal segment: %d", s.GetID())
+			return nil, merr.WrapErrSerializationFailed(err, "marshal segment: %d", s.GetID())
 		}
 		kvs[key] = segBytes
+	}
+	return kvs, nil
+}
+
+func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error {
+	if len(segments) == 0 {
+		return nil
+	}
+
+	kvs, err := buildDroppedSegmentKvs(segments)
+	if err != nil {
+		return err
 	}
 
 	saveFn := func(partialKvs map[string]string) error {
@@ -464,21 +504,10 @@ func (kc *Catalog) MarkChannelAdded(ctx context.Context, channel string) error {
 	key := buildChannelRemovePath(channel)
 	err := kc.MetaKv.Save(ctx, key, NonRemoveFlagTomestone)
 	if err != nil {
-		log.Ctx(ctx).Error("failed to mark channel added", zap.String("channel", channel), zap.Error(err))
+		mlog.Error(ctx, "failed to mark channel added", mlog.String("channel", channel), mlog.Err(err))
 		return err
 	}
-	log.Ctx(ctx).Info("NON remove flag tombstone added", zap.String("channel", channel))
-	return nil
-}
-
-func (kc *Catalog) MarkChannelDeleted(ctx context.Context, channel string) error {
-	key := buildChannelRemovePath(channel)
-	err := kc.MetaKv.Save(ctx, key, RemoveFlagTomestone)
-	if err != nil {
-		log.Ctx(ctx).Error("Failed to mark channel dropped", zap.String("channel", channel), zap.Error(err))
-		return err
-	}
-	log.Ctx(ctx).Info("remove flag tombstone added", zap.String("channel", channel))
+	mlog.Info(ctx, "NON remove flag tombstone added", mlog.String("channel", channel))
 	return nil
 }
 
@@ -500,7 +529,7 @@ func (kc *Catalog) ChannelExists(ctx context.Context, channel string) bool {
 // DropChannel removes channel remove flag after whole procedure is finished
 func (kc *Catalog) DropChannel(ctx context.Context, channel string) error {
 	key := buildChannelRemovePath(channel)
-	log.Ctx(ctx).Info("removing channel remove path", zap.String("channel", channel))
+	mlog.Info(ctx, "removing channel remove path", mlog.String("channel", channel))
 	return kc.MetaKv.Remove(ctx, key)
 }
 
@@ -510,7 +539,7 @@ func (kc *Catalog) ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb
 		channelCP := &msgpb.MsgPosition{}
 		err := proto.Unmarshal(value, channelCP)
 		if err != nil {
-			log.Ctx(ctx).Error("unmarshal channelCP failed when ListChannelCheckpoint", zap.Error(err))
+			mlog.Error(ctx, "unmarshal channelCP failed when ListChannelCheckpoint", mlog.Err(err))
 			return err
 		}
 		ss := strings.Split(string(key), "/")
@@ -596,7 +625,7 @@ func (kc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
 		meta := &indexpb.FieldIndex{}
 		err := proto.Unmarshal(value, meta)
 		if err != nil {
-			log.Ctx(ctx).Warn("unmarshal index info failed", zap.Error(err))
+			mlog.Warn(ctx, "unmarshal index info failed", mlog.Err(err))
 			return err
 		}
 
@@ -642,8 +671,8 @@ func (kc *Catalog) DropIndex(ctx context.Context, collID typeutil.UniqueID, drop
 
 	err := kc.MetaKv.Remove(ctx, key)
 	if err != nil {
-		log.Ctx(ctx).Error("drop collection index meta fail", zap.Int64("collectionID", collID),
-			zap.Int64("indexID", dropIdxID), zap.Error(err))
+		mlog.Error(ctx, "drop collection index meta fail", mlog.FieldCollectionID(collID),
+			mlog.FieldIndexID(dropIdxID), mlog.Err(err))
 		return err
 	}
 
@@ -658,8 +687,8 @@ func (kc *Catalog) CreateSegmentIndex(ctx context.Context, segIdx *model.Segment
 	}
 	err = kc.MetaKv.Save(ctx, key, string(value))
 	if err != nil {
-		log.Ctx(ctx).Error("failed to save segment index meta in etcd", zap.Int64("buildID", segIdx.BuildID),
-			zap.Int64("segmentID", segIdx.SegmentID), zap.Error(err))
+		mlog.Error(ctx, "failed to save segment index meta in etcd", mlog.FieldBuildID(segIdx.BuildID),
+			mlog.FieldSegmentID(segIdx.SegmentID), mlog.Err(err))
 		return err
 	}
 	return nil
@@ -671,7 +700,7 @@ func (kc *Catalog) ListSegmentIndexes(ctx context.Context, collectionID int64) (
 		segmentIndexInfo := &indexpb.SegmentIndex{}
 		err := proto.Unmarshal(value, segmentIndexInfo)
 		if err != nil {
-			log.Ctx(ctx).Warn("unmarshal segment index info failed", zap.Error(err))
+			mlog.Warn(ctx, "unmarshal segment index info failed", mlog.Err(err))
 			return err
 		}
 
@@ -706,7 +735,7 @@ func (kc *Catalog) DropSegmentIndex(ctx context.Context, collID, partID, segID, 
 
 	err := kc.MetaKv.Remove(ctx, key)
 	if err != nil {
-		log.Ctx(ctx).Error("drop segment index meta fail", zap.Int64("buildID", buildID), zap.Error(err))
+		mlog.Error(ctx, "drop segment index meta fail", mlog.FieldBuildID(buildID), mlog.Err(err))
 		return err
 	}
 
@@ -906,12 +935,12 @@ func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID type
 	if partitionID != common.AllPartitionsID {
 		prefix = buildPartitionPrefix(collectionID, partitionID)
 	}
-	keys, values, err := kc.MetaKv.LoadWithPrefix(ctx, prefix)
+	exists, err := kc.MetaKv.HasPrefix(ctx, prefix)
 	if err != nil {
 		// error case can be regarded as not finished.
 		return false
 	}
-	return len(keys) == 0 && len(values) == 0
+	return !exists
 }
 
 func (kc *Catalog) ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error) {
@@ -953,6 +982,65 @@ func (kc *Catalog) DropCompactionTask(ctx context.Context, task *datapb.Compacti
 	return kc.MetaKv.Remove(ctx, key)
 }
 
+func (kc *Catalog) ListCompactionTargets(ctx context.Context) ([]*datapb.CompactionTarget, error) {
+	records := make([]*datapb.CompactionTarget, 0)
+
+	applyFn := func(key []byte, value []byte) error {
+		record := &datapb.CompactionTarget{}
+		if err := proto.Unmarshal(value, record); err != nil {
+			return err
+		}
+		records = append(records, record)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ctx, CompactionTargetPrefix+"/", kc.paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func (kc *Catalog) SaveCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error {
+	if record == nil {
+		return nil
+	}
+	cloned := proto.Clone(record).(*datapb.CompactionTarget)
+	key, value, err := buildCompactionTargetKV(cloned)
+	if err != nil {
+		return err
+	}
+	return kc.SaveByBatch(ctx, map[string]string{key: value})
+}
+
+func (kc *Catalog) UpdateCompactionTargetState(ctx context.Context, targetID int64, state datapb.TargetState, inactivatedAtTS uint64) error {
+	key := buildCompactionTargetPath(targetID)
+	value, err := kc.MetaKv.Load(ctx, key)
+	if err != nil {
+		return err
+	}
+
+	record := &datapb.CompactionTarget{}
+	if err := proto.Unmarshal([]byte(value), record); err != nil {
+		return err
+	}
+	record.State = state
+	if state == datapb.TargetState_TARGET_STATE_INACTIVE {
+		record.InactivatedAtTS = inactivatedAtTS
+	} else {
+		record.InactivatedAtTS = 0
+	}
+	return kc.SaveCompactionTarget(ctx, record)
+}
+
+func (kc *Catalog) DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error {
+	if record == nil {
+		return nil
+	}
+	key := buildCompactionTargetPath(record.GetTargetID())
+	return kc.MetaKv.Remove(ctx, key)
+}
+
 func (kc *Catalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error) {
 	tasks := make([]*indexpb.AnalyzeTask, 0)
 
@@ -988,11 +1076,6 @@ func (kc *Catalog) SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTas
 	return nil
 }
 
-func (kc *Catalog) DropAnalyzeTask(ctx context.Context, taskID typeutil.UniqueID) error {
-	key := buildAnalyzeTaskKey(taskID)
-	return kc.MetaKv.Remove(ctx, key)
-}
-
 func (kc *Catalog) ListPartitionStatsInfos(ctx context.Context) ([]*datapb.PartitionStatsInfo, error) {
 	infos := make([]*datapb.PartitionStatsInfo, 0)
 
@@ -1011,31 +1094,6 @@ func (kc *Catalog) ListPartitionStatsInfos(ctx context.Context) ([]*datapb.Parti
 		return nil, err
 	}
 	return infos, nil
-}
-
-func (kc *Catalog) SavePartitionStatsInfo(ctx context.Context, coll *datapb.PartitionStatsInfo) error {
-	if coll == nil {
-		return nil
-	}
-	cloned := proto.Clone(coll).(*datapb.PartitionStatsInfo)
-	k, v, err := buildPartitionStatsInfoKv(cloned)
-	if err != nil {
-		return err
-	}
-	kvs := make(map[string]string)
-	kvs[k] = v
-	return kc.SaveByBatch(ctx, kvs)
-}
-
-func (kc *Catalog) DropPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error {
-	key := buildPartitionStatsInfoPath(info)
-	return kc.MetaKv.Remove(ctx, key)
-}
-
-func (kc *Catalog) SaveCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string, currentVersion int64) error {
-	key := buildCurrentPartitionStatsVersionPath(collID, partID, vChannel)
-	value := strconv.FormatInt(currentVersion, 10)
-	return kc.MetaKv.Save(ctx, key, value)
 }
 
 func (kc *Catalog) GetCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string) (int64, error) {
@@ -1101,7 +1159,7 @@ func (kc *Catalog) ListExternalCollectionRefreshJobs(ctx context.Context) ([]*da
 	applyFn := func(key []byte, value []byte) error {
 		job := &datapb.ExternalCollectionRefreshJob{}
 		if err := proto.Unmarshal(value, job); err != nil {
-			log.Ctx(ctx).Warn("failed to unmarshal external collection refresh job", zap.Error(err))
+			mlog.Warn(ctx, "failed to unmarshal external collection refresh job", mlog.Err(err))
 			return err
 		}
 		jobs = append(jobs, job)
@@ -1124,19 +1182,13 @@ func (kc *Catalog) SaveExternalCollectionRefreshJob(ctx context.Context, job *da
 	return kc.MetaKv.Save(ctx, key, string(value))
 }
 
-// DropExternalCollectionRefreshJob removes an external collection refresh job from etcd
-func (kc *Catalog) DropExternalCollectionRefreshJob(ctx context.Context, jobID typeutil.UniqueID) error {
-	key := buildExternalCollectionRefreshJobKey(jobID)
-	return kc.MetaKv.Remove(ctx, key)
-}
-
 // ListExternalCollectionRefreshTasks lists all external collection refresh tasks from etcd
 func (kc *Catalog) ListExternalCollectionRefreshTasks(ctx context.Context) ([]*datapb.ExternalCollectionRefreshTask, error) {
 	tasks := make([]*datapb.ExternalCollectionRefreshTask, 0)
 	applyFn := func(key []byte, value []byte) error {
 		task := &datapb.ExternalCollectionRefreshTask{}
 		if err := proto.Unmarshal(value, task); err != nil {
-			log.Ctx(ctx).Warn("failed to unmarshal external collection refresh task", zap.Error(err))
+			mlog.Warn(ctx, "failed to unmarshal external collection refresh task", mlog.Err(err))
 			return err
 		}
 		tasks = append(tasks, task)
@@ -1157,81 +1209,6 @@ func (kc *Catalog) SaveExternalCollectionRefreshTask(ctx context.Context, task *
 		return err
 	}
 	return kc.MetaKv.Save(ctx, key, string(value))
-}
-
-// DropExternalCollectionRefreshTask removes an external collection refresh task from etcd
-func (kc *Catalog) DropExternalCollectionRefreshTask(ctx context.Context, taskID typeutil.UniqueID) error {
-	key := buildExternalCollectionRefreshTaskKey(taskID)
-	return kc.MetaKv.Remove(ctx, key)
-}
-
-func (kc *Catalog) SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error {
-	kvs := make(map[string]string)
-
-	k := BuildFileResourceKey(resource.Id)
-	v, err := proto.Marshal(resource)
-	if err != nil {
-		log.Ctx(ctx).Error("failed to marshal resource info", zap.Error(err))
-		return err
-	}
-	kvs[k] = string(v)
-	kvs[FileResourceVersionKey] = fmt.Sprint(version)
-
-	if err = kc.MetaKv.MultiSave(ctx, kvs); err != nil {
-		log.Ctx(ctx).Warn("fail to save resource info", zap.String("key", k), zap.Error(err))
-		return err
-	}
-	return nil
-}
-
-func (kc *Catalog) RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error {
-	k := BuildFileResourceKey(resourceID)
-	if err := kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{FileResourceVersionKey: fmt.Sprint(version)}, []string{k}); err != nil {
-		log.Ctx(ctx).Warn("fail to remove resource info", zap.String("key", k), zap.Error(err))
-		return err
-	}
-	return nil
-}
-
-func (kc *Catalog) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error) {
-	_, values, err := kc.MetaKv.LoadWithPrefix(ctx, FileResourceMetaPrefix+"/")
-	if err != nil {
-		return nil, 0, err
-	}
-
-	var version uint64 = 0
-	exist, err := kc.MetaKv.Has(ctx, FileResourceVersionKey)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	if exist {
-		strVersion, err := kc.MetaKv.Load(ctx, FileResourceVersionKey)
-		if err != nil {
-			return nil, 0, err
-		}
-		v, err := strconv.ParseUint(strVersion, 10, 64)
-		if err != nil {
-			return nil, 0, err
-		}
-		version = v
-	}
-
-	infos := make([]*internalpb.FileResourceInfo, 0, len(values))
-	for _, v := range values {
-		info := &internalpb.FileResourceInfo{}
-		err := proto.Unmarshal([]byte(v), info)
-		if err != nil {
-			return nil, 0, err
-		}
-		infos = append(infos, info)
-	}
-
-	return infos, version, nil
-}
-
-func BuildFileResourceKey(resourceID typeutil.UniqueID) string {
-	return fmt.Sprintf("%s/%d", FileResourceMetaPrefix, resourceID)
 }
 
 func (kc *Catalog) SaveSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error {
@@ -1266,4 +1243,32 @@ func (kc *Catalog) ListSnapshots(ctx context.Context) ([]*datapb.SnapshotInfo, e
 		return nil, err
 	}
 	return snapshots, nil
+}
+
+func (kc *Catalog) SaveExportSnapshotJob(ctx context.Context, job *datapb.ExportSnapshotJob) error {
+	value, err := proto.Marshal(job)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, buildExportSnapshotJobKey(job.GetJobId()), string(value))
+}
+
+func (kc *Catalog) ListExportSnapshotJobs(ctx context.Context) ([]*datapb.ExportSnapshotJob, error) {
+	jobs := make([]*datapb.ExportSnapshotJob, 0)
+	applyFn := func(key []byte, value []byte) error {
+		job := &datapb.ExportSnapshotJob{}
+		if err := proto.Unmarshal(value, job); err != nil {
+			return err
+		}
+		jobs = append(jobs, job)
+		return nil
+	}
+	if err := kc.MetaKv.WalkWithPrefix(ctx, ExportSnapshotJobPrefix+"/", kc.paginationSize, applyFn); err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
+func (kc *Catalog) DropExportSnapshotJob(ctx context.Context, jobID int64) error {
+	return kc.MetaKv.Remove(ctx, buildExportSnapshotJobKey(jobID))
 }

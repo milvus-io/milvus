@@ -110,16 +110,6 @@ ConvertToAwsString(const std::string& str) {
     return Aws::String(str.c_str(), str.size());
 }
 
-/**
- * @brief convert Aws::string to std::string
- * @param aws_str
- * @return std::string
- */
-inline std::string
-ConvertFromAwsString(const Aws::String& aws_str) {
-    return std::string(aws_str.c_str(), aws_str.size());
-}
-
 void
 AwsLogger::ProcessFormattedStatement(Aws::String&& statement) {
     LOG_INFO("[AWS LOG] {}", statement);
@@ -280,7 +270,7 @@ MinioChunkManager::PreCheck(const StorageConfig& config) {
             check_prefix = remote_root_path_ + "/" + check_prefix;
         }
         ListWithPrefix(check_prefix);
-    } catch (SegcoreError& e) {
+    } catch (const SegcoreError& e) {
         auto err_message = fmt::format(
             "precheck chunk manager client failed, "
             "error:{}, "
@@ -288,7 +278,7 @@ MinioChunkManager::PreCheck(const StorageConfig& config) {
             e.what(),
             config.ToString());
         LOG_ERROR("{}", err_message);
-        throw SegcoreError(S3Error, err_message);
+        throw SegcoreError(e.get_error_code(), err_message);
     } catch (std::exception& e) {
         throw e;
     }

@@ -1,14 +1,14 @@
 package assignment
 
 import (
+	"context"
 	"io"
 	"sync"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -22,7 +22,7 @@ func newAssignmentDiscoverClient(w *watcher, streamClient streamingpb.StreamingC
 		lifetime:              typeutil.NewLifetime(),
 		w:                     w,
 		streamClient:          streamClient,
-		logger:                log.With(),
+		logger:                mlog.With(),
 		requestCh:             make(chan *streamingpb.AssignmentDiscoverRequest, 16),
 		exitCh:                make(chan struct{}),
 		wg:                    sync.WaitGroup{},
@@ -37,7 +37,7 @@ func newAssignmentDiscoverClient(w *watcher, streamClient streamingpb.StreamingC
 type assignmentDiscoverClient struct {
 	lifetime              *typeutil.Lifetime
 	w                     *watcher
-	logger                *log.MLogger
+	logger                *mlog.Logger
 	requestCh             chan *streamingpb.AssignmentDiscoverRequest
 	exitCh                chan struct{}
 	wg                    sync.WaitGroup
@@ -152,7 +152,7 @@ func (c *assignmentDiscoverClient) recvLoop() (err error) {
 		case *streamingpb.AssignmentDiscoverResponse_FullAssignment:
 			if resp.FullAssignment.VersionByRevision == nil {
 				marshaledFullAssignment, _ := protojson.Marshal(resp.FullAssignment)
-				c.logger.Warn("VersionByRevision is nil, from legacy mixcoord server, skipping", zap.String("assignment", string(marshaledFullAssignment)))
+				c.logger.Warn(context.TODO(), "VersionByRevision is nil, from legacy mixcoord server, skipping", mlog.String("assignment", string(marshaledFullAssignment)))
 				continue
 			}
 			newIncomingVersion := typeutil.VersionInt64Pair{

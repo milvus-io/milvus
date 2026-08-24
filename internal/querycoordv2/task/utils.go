@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -32,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -52,24 +51,26 @@ func WrapIDSource(id int64) Source {
 	return idSource(id)
 }
 
-func Wait(ctx context.Context, timeout time.Duration, tasks ...Task) error {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	var err error
-	go func() {
-		for _, task := range tasks {
-			err = task.Wait()
-			if err != nil {
-				cancel()
-				break
-			}
+// Wait blocks until every task in tasks has finished (succeeded, failed, or
+// been canceled) or ctx is done, whichever comes first. It does not impose
+// any timeout of its own; callers that need to bound how long they'll wait
+// should set a deadline on ctx themselves.
+//
+// The wait happens on the caller's goroutine on purpose. Handing it off to a
+// helper goroutine and racing it against ctx would return to the caller on
+// time but leave the helper parked on a task that has no lifetime guarantee
+// of its own: a task's execution deadline is only armed on first dispatch (see
+// Task.ActivateDeadline), so a task repeatedly bounced by the executor's
+// admission cap never arms a deadline, and taskScheduler.checkStale has no
+// time-based staleness check, so on a healthy cluster with a saturated
+// executor the helper would stay parked indefinitely.
+func Wait(ctx context.Context, tasks ...Task) error {
+	for _, task := range tasks {
+		if err := task.Wait(ctx); err != nil {
+			return err
 		}
-		cancel()
-	}()
-	<-ctx.Done()
-
-	return err
+	}
+	return nil
 }
 
 func SetPriority(priority Priority, tasks ...Task) {
@@ -101,8 +102,6 @@ func GetTaskType(task Task) Type {
 		return TaskTypeUpdate
 	case task.Actions()[0].Type() == ActionTypeStatsUpdate:
 		return TaskTypeStatsUpdate
-	case task.Actions()[0].Type() == ActionTypeDropIndex:
-		return TaskTypeDropIndex
 	}
 	return 0
 }
@@ -136,10 +135,6 @@ func packLoadSegmentRequest(
 	indexInfo []*indexpb.IndexInfo,
 ) *querypb.LoadSegmentsRequest {
 	loadScope := querypb.LoadScope_Full
-	if action.Type() == ActionTypeUpdate {
-		loadScope = querypb.LoadScope_Index
-	}
-
 	if action.Type() == ActionTypeStatsUpdate {
 		loadScope = querypb.LoadScope_Stats
 	}
@@ -288,6 +283,19 @@ func applyCollectionSettings(schema *schemapb.CollectionSchema,
 
 	schemaCloned = applyCollectionMmapSetting(schemaCloned, collectionProperties)
 	schemaCloned = applyCollectionWarmupSetting(schemaCloned, collectionProperties)
+
+	// Index warmup is normally materialized into each IndexInfo by
+	// applyIndexWarmupSetting. No-index vector fields have no IndexInfo carrier,
+	// but segcore treats their raw data as the vector-index/search path until an
+	// index exists. Carry QueryCoord's auto-warmup vector-index fallback through
+	// the effective load schema without changing warmup.vectorField semantics.
+	if _, exist := common.GetWarmupPolicyByKey(common.WarmupVectorIndexKey, schemaCloned.GetProperties()...); !exist &&
+		autoWarmupForNonPKIsolationCollection(collectionProperties) {
+		schemaCloned.Properties = append(schemaCloned.Properties, &commonpb.KeyValuePair{
+			Key:   common.WarmupVectorIndexKey,
+			Value: common.WarmupSync,
+		})
+	}
 	return schemaCloned
 }
 
@@ -355,11 +363,11 @@ func autoWarmupForNonPKIsolationCollection(collectionProperties []*commonpb.KeyV
 	}
 	isPKI, isError := common.IsPartitionKeyIsolationKvEnabled(collectionProperties...)
 	if isError != nil {
-		log.Warn("failed to parse partition key isolation, autowarmup is disabled", zap.Error(isError))
+		mlog.Warn(context.TODO(), "failed to parse partition key isolation, autowarmup is disabled", mlog.Err(isError))
 		return false
 	}
 	if !isPKI {
-		log.Info("collection is not partition key isolated and autowarmup is enabled, force scalar field/index and vector index warmup to sync")
+		mlog.Info(context.TODO(), "collection is not partition key isolated and autowarmup is enabled, force scalar field/index and vector index warmup to sync")
 	}
 	return !isPKI
 }
