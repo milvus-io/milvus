@@ -37,6 +37,9 @@ log:
 extraConfigFiles:
   user.yaml: |+
     dataCoord:
+      targetVecIndexVersion: 11
+      forceRebuildScalarSegmentIndex: true
+      targetScalarIndexVersion: 4
       compaction:
         bumpSchemaVersion:
           enabled: true
