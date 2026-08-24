@@ -199,16 +199,12 @@ for _index_type in ["HNSW_SQ", "HNSW_PQ", "HNSW_PRQ", "IVF_FLAT", "IVF_FLAT_CC"]
             "emb_list_rerank": True,
         },
     }
-EMB_LIST_MUVERA_LEMUR_INDEX_TYPES = ["HNSW", "HNSW_SQ", "HNSW_PQ", "HNSW_PRQ", "IVF_FLAT", "IVF_FLAT_CC"]
-EMB_LIST_STRATEGY_INDEX_CASES = (
-    [pytest.param("tokenann", "HNSW", id="tokenann-hnsw")]
-    + [
-        pytest.param(strategy, index_type, id=f"{strategy}-{index_type.lower()}")
-        for strategy in ["muvera", "lemur"]
-        for index_type in EMB_LIST_MUVERA_LEMUR_INDEX_TYPES
-    ]
-    + [pytest.param("tokenann", "DISKANN", id="tokenann-diskann")]
-)
+# Muvera and Lemur require EMB_LIST_META V2 (index engine version >= 11),
+# while Milvus currently resolves new vector indexes to version 10.
+EMB_LIST_STRATEGY_INDEX_CASES = [
+    pytest.param("tokenann", "HNSW", id="tokenann-hnsw"),
+    pytest.param("tokenann", "DISKANN", id="tokenann-diskann"),
+]
 EMB_LIST_UNSUPPORTED_STRATEGY_INDEX_CASES = [
     pytest.param("muvera", "DISKANN", id="muvera-diskann"),
     pytest.param("lemur", "DISKANN", id="lemur-diskann"),
