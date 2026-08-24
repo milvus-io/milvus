@@ -13,9 +13,16 @@ enum IcuPositionMode {
     Token,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum IcuTokenFilter {
+    None,
+    Word,
+}
+
 pub struct IcuTokenizer {
     segmenter: WordSegmenter,
     position_mode: IcuPositionMode,
+    token_filter: IcuTokenFilter,
 }
 
 impl Clone for IcuTokenizer {
@@ -23,6 +30,7 @@ impl Clone for IcuTokenizer {
         IcuTokenizer {
             segmenter: WordSegmenter::try_new_auto(WordBreakOptions::default()).unwrap(),
             position_mode: self.position_mode,
+            token_filter: self.token_filter,
         }
     }
 }
@@ -57,6 +65,7 @@ impl IcuTokenizer {
         IcuTokenizer {
             segmenter: WordSegmenter::try_new_auto(WordBreakOptions::default()).unwrap(),
             position_mode: IcuPositionMode::Char,
+            token_filter: IcuTokenFilter::None,
         }
     }
 
@@ -80,9 +89,29 @@ impl IcuTokenizer {
             },
         };
 
+        let token_filter = match params.get("token_filter") {
+            None => IcuTokenFilter::None,
+            Some(value) => match value.as_str() {
+                Some("none") => IcuTokenFilter::None,
+                Some("word") => IcuTokenFilter::Word,
+                Some(other) => {
+                    return Err(TantivyBindingError::InvalidArgument(format!(
+                        "unsupported ICU tokenizer token_filter: {}",
+                        other
+                    )))
+                }
+                None => {
+                    return Err(TantivyBindingError::InvalidArgument(
+                        "ICU tokenizer token_filter must be a string".to_string(),
+                    ))
+                }
+            },
+        };
+
         Ok(IcuTokenizer {
             segmenter: WordSegmenter::try_new_auto(WordBreakOptions::default()).unwrap(),
             position_mode,
+            token_filter,
         })
     }
 
@@ -104,11 +133,11 @@ impl IcuTokenizer {
                 IcuPositionMode::Char => char_length,
                 IcuPositionMode::Token => 1,
             };
-            let keep_token = match self.position_mode {
-                IcuPositionMode::Char => true,
+            let keep_token = match self.token_filter {
+                IcuTokenFilter::None => true,
                 // Dictionary-segmented CJK spans can retain WordType::None in ICU4X 2.0.
                 // Fall back to character properties so they are not mistaken for separators.
-                IcuPositionMode::Token => word_type.is_word_like() || is_word_or_emoji(token_str),
+                IcuTokenFilter::Word => word_type.is_word_like() || is_word_or_emoji(token_str),
             };
 
             if keep_token {
@@ -213,21 +242,46 @@ mod tests {
                 .iter()
                 .map(|token| token.text.as_str())
                 .collect::<Vec<_>>(),
-            vec!["hello", "world"]
+            vec!["hello", " ", "world"]
         );
         assert_eq!(
             tokens
                 .iter()
                 .map(|token| token.position)
                 .collect::<Vec<_>>(),
-            vec![0, 1]
+            vec![0, 1, 2]
         );
         assert!(tokens.iter().all(|token| token.position_length == 1));
     }
 
     #[test]
-    fn test_icu_tokenizer_token_positions_support_cjk_and_emoji() {
-        let params = json::json!({"position_mode": "token"});
+    fn test_icu_tokenizer_word_filter_preserves_character_positions() {
+        let params = json::json!({"token_filter": "word"});
+        let mut tokenizer = IcuTokenizer::from_json(params.as_object().unwrap()).unwrap();
+        let tokens = collect(&mut tokenizer, "hello, world! 👋");
+
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| token.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["hello", "world", "👋"]
+        );
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| token.position)
+                .collect::<Vec<_>>(),
+            vec![0, 7, 14]
+        );
+    }
+
+    #[test]
+    fn test_icu_tokenizer_word_filter_with_token_positions_supports_cjk_and_emoji() {
+        let params = json::json!({
+            "position_mode": "token",
+            "token_filter": "word"
+        });
         let mut tokenizer = IcuTokenizer::from_json(params.as_object().unwrap()).unwrap();
         let tokens = collect(&mut tokenizer, "龟山岛，龟山岛 👋");
 
@@ -253,6 +307,16 @@ mod tests {
         for params in [
             json::json!({"position_mode": "word"}),
             json::json!({"position_mode": 1}),
+        ] {
+            assert!(IcuTokenizer::from_json(params.as_object().unwrap()).is_err());
+        }
+    }
+
+    #[test]
+    fn test_icu_tokenizer_rejects_invalid_token_filter() {
+        for params in [
+            json::json!({"token_filter": "punctuation"}),
+            json::json!({"token_filter": true}),
         ] {
             assert!(IcuTokenizer::from_json(params.as_object().unwrap()).is_err());
         }

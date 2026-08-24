@@ -288,7 +288,8 @@ mod tests {
         let params = r#"{
             "tokenizer": {
                 "type": "icu",
-                "position_mode": "token"
+                "position_mode": "token",
+                "token_filter": "word"
             }
         }"#;
         let mut analyzer = create_analyzer(params, "").unwrap();
