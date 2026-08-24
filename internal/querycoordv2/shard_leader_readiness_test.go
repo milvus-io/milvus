@@ -285,9 +285,11 @@ func TestShardLeaderReadinessByRG_LeaderInOneRGDoesNotMakeAnotherReady(t *testin
 // second, independent route to the same admission bug. checkLoadStatus, the
 // gate on the native GetShardLeaders path, is collection-wide: it reads
 // CalculateLoadPercentage(collectionID) and then short-circuits to ready
-// whenever the collection's own status is LoadStatus_Loaded. Under
-// per-resource-group loading that passes as soon as ANY resource group
-// finishes.
+// whenever the collection's own status is LoadStatus_Loaded. That status is
+// set only when the collection-wide average reaches 100, and nothing resets
+// it when a later resource group is added, so once a collection has been
+// Loaded the short-circuit is permanently armed for every resource group
+// that comes after -- which is the state this fixture reproduces.
 //
 // This test puts the collection in exactly that state and asserts both sides
 // of the contrast in one place: the native collection-wide path reports the

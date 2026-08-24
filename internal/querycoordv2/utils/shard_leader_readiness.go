@@ -79,9 +79,14 @@ const (
 // It does not reuse checkLoadStatus, which gates the GetShardLeaders path.
 // That gate is collection-wide by construction - it reads
 // CalculateLoadPercentage(collectionID) and then short-circuits to "ready"
-// whenever the collection's own status is LoadStatus_Loaded - so under
-// per-resource-group loading it passes as soon as ANY resource group finishes,
-// which is the same admission bug from a second direction. The gate here is
+// whenever the collection's own status is LoadStatus_Loaded. The status is
+// only ever set once the collection-wide AVERAGE reaches 100, so a group
+// finishing first does not arm it -- but nothing ever disarms it either:
+// UpdateLoadConfigJob spawns replicas for a newly added resource group
+// without touching the collection's status, so once a collection has been
+// Loaded even once, the short-circuit stays permanently armed and the gate
+// answers "ready" for every later resource group from the moment its
+// replicas exist. That is the same admission bug from a second direction. The gate here is
 // derived only from the leaders of the selected replicas: nothing about
 // another resource group's progress, and nothing about the collection's
 // aggregate status, can make this report ready.
