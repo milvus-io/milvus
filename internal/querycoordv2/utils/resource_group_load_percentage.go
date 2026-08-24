@@ -66,7 +66,16 @@ import (
 //     has not picked up any of the collection's current load targets yet.
 //     This is a real, distinct state from "no replica" -- it means loading is
 //     underway but has not made progress, not that the resource group is
-//     unrelated to the collection.
+//     unrelated to the collection. It ALSO covers the empty-target window:
+//     the current target is persisted only on a graceful Stop
+//     (Server.SaveCurrentTarget), so after an ungraceful restart
+//     TargetManager.Recover finds nothing and NextTargetFirst reads empty
+//     until the target observer rebuilds it -- a fully loaded resource group
+//     reads 0 for that window. Waiting is the right response either way,
+//     which is why the two share a value; the sibling surfaces do separate
+//     them, as ShardLeadersReasonNoChannelTarget and
+//     ErrCollectionOnRecovering, so a caller that needs to tell "still
+//     loading" from "targets not rebuilt yet" should ask one of those.
 //   - -1, ErrServiceNotReady (1, retriable): the coordinator's own read
 //     stores are not wired up yet, so no answer about any resource group can
 //     be computed. This is the state initQueryCoord passes through --

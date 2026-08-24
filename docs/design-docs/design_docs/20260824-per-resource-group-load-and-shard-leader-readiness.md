@@ -48,7 +48,7 @@ Its outcome space is deliberately four-valued, because "the collection isn't rea
 | Result | Meaning | What the caller should do |
 |---|---|---|
 | `-1`, no error | The group holds no replica of this collection at all | Terminal *once the load has been registered* — see the startup-window note below. Load it, or ask about a different group. |
-| `0`, no error | A replica is there but carries none of the targets yet | Wait; loading is underway. |
+| `0`, no error | A replica is there but carries none of the targets yet — **or** the target set itself is empty, which after an ungraceful restart lasts until the observer rebuilds it | Wait. To tell the two apart, ask readiness (`ShardLeadersReasonNoChannelTarget`) or scoped routing (`ErrCollectionOnRecovering`). |
 | `-1`, `ErrServiceNotReady` (1, retriable) | The coordinator's own read stores are not wired up yet | Retry. Nothing is known, as opposed to something being known to be absent. |
 | `-1`, `ErrCollectionNotLoaded` (101, non-retriable) | The load failed terminally; `GlobalFailedLoadCache` holds the reason | Stop. Waiting will not help; the cause is in the message. |
 
