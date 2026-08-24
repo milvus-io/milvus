@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -314,6 +315,13 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 		StorageConfig: createStorageConfig(),
 		PluginContext: GetReadPluginContext(job.GetOptions()),
 	}
+	// A preimport holds one base read buffer per file IN FLIGHT, not one for
+	// the whole task; the concurrency comes from the worker's exec pool width.
+	req.TaskResources = taskresource.EstimateImport(taskresource.ImportInput{
+		IsPreImport: true,
+		IsL0:        importutilv2.IsL0Import(job.GetOptions()),
+		FileNum:     len(importFiles),
+	}).ToProto()
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
 	return req
 }
@@ -412,6 +420,21 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		PluginContext:   GetReadPluginContext(job.GetOptions()),
 		UseLoonFfi:      useLoonFFI,
 	}
+	// A real import's per-file buffer is sized by the vchannel x partition
+	// fan-out and capped by the largest file it will actually read.
+	var maxFileSize int64
+	for _, stat := range task.GetFileStats() {
+		if sz := stat.GetTotalMemorySize(); sz > maxFileSize {
+			maxFileSize = sz
+		}
+	}
+	req.TaskResources = taskresource.EstimateImport(taskresource.ImportInput{
+		IsL0:              isL0Import,
+		FileNum:           len(importFiles),
+		VChannelNum:       len(job.GetVchannels()),
+		PartitionNum:      len(job.GetPartitionIDs()),
+		MaxFileMemorySize: maxFileSize,
+	}).ToProto()
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
 	return req, nil
 }

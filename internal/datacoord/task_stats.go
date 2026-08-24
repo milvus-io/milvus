@@ -500,6 +500,9 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		JsonStatsWriteBatchSize:          Params.DataCoordCfg.JSONStatsWriteBatchSize.GetAsInt64(),
 		ManifestPath:                     segment.GetManifestPath(),
 	}
+	// Priced from the fields this sub-job actually reads. task_slot above keeps
+	// its whole-segment meaning for a worker that predates the vector.
+	req.TaskResources = statsRequirement(segment, collInfo.Schema, st.GetSubJobType()).ToProto()
 	WrapPluginContext(segment.GetCollectionID(), collInfo.Schema.GetProperties(), req)
 
 	return req, nil

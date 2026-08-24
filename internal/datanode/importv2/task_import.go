@@ -115,6 +115,9 @@ func (t *ImportTask) GetSlots() int64 {
 // flight, each sized by the vchannel x partition fan-out and capped by the
 // largest file the task will actually read.
 func (t *ImportTask) GetResourceRequirement() taskresource.Requirement {
+	if req, ok := taskresource.RequirementFromProto(t.req.GetTaskResources()); ok {
+		return req
+	}
 	maxFileSize := lo.MaxBy(t.GetFileStats(), func(a, b *datapb.ImportFileStats) bool {
 		return a.GetTotalMemorySize() > b.GetTotalMemorySize()
 	}).GetTotalMemorySize()

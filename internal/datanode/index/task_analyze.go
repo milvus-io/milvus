@@ -85,6 +85,15 @@ func (at *analyzeTask) GetTaskType() taskcommon.Type {
 }
 
 func (at *analyzeTask) GetResourceRequirement() taskresource.Requirement {
+	// The coordinator's figure wins whenever it is there: DataCoord prices from
+	// SegmentInfo.Stats, which every storage version populates, while a local
+	// recompute can only read the request's SegmentStats -- empty for a storage-V3
+	// segment once DataCoord has restarted, which prices the task at the
+	// estimator's floor. The recompute below is the fallback for a coordinator
+	// that predates the vector.
+	if req, ok := taskresource.RequirementFromProto(at.req.GetTaskResources()); ok {
+		return req
+	}
 	return taskresource.RequirementForAnalyze(at.req)
 }
 
