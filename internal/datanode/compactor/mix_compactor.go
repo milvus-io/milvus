@@ -361,29 +361,23 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, merr.WrapErrServiceInternalMsg("illegal compaction plan")
 	}
 
-	sortMergeAppicable := t.compactionParams.UseMergeSort
-	if sortMergeAppicable {
-		for _, segment := range t.plan.GetSegmentBinlogs() {
-			if !segment.GetIsSorted() {
-				sortMergeAppicable = false
-				break
-			}
-		}
-
-		if len(t.plan.GetSegmentBinlogs()) > t.compactionParams.MaxSegmentMergeSort {
-			// sort merge is not applicable if there is only one segment or too many segments
-			sortMergeAppicable = false
-		}
-	}
+	useMergeSort := canMergeSort(t.plan, t.compactionParams)
 
 	var res []*datapb.CompactionSegment
 	var err error
-	if sortMergeAppicable {
+	if useMergeSort {
 		log.Info("compact by merge sort")
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
 			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams, t.sortByFieldIDs)
 		if err != nil {
-			log.Warn("compact wrong, fail to merge sort segments", zap.Error(err))
+			// Compactor-boundary catch-all: mergeSortMultipleSegments can fail
+			// before it ever reaches the merge sort step (reader/writer
+			// construction, deltalog composition, ...), and those paths don't
+			// log on their own, so this line is their only record.
+			log.Warn("compact wrong, merge sort compaction failed (compactor boundary)",
+				zap.Int64("planID", t.GetPlanID()),
+				zap.Int64("collectionID", t.collectionID),
+				zap.Error(err))
 			return nil, err
 		}
 	} else {
@@ -466,6 +460,27 @@ func (t *mixCompactionTask) createTextIndex(ctx context.Context,
 		manifest:      segment.GetManifest(),
 		insertBinlogs: segment.GetInsertLogs(),
 	})
+}
+
+// canMergeSort reports whether this plan is eligible for storage.MergeSort,
+// which merges without sorting and so requires every input to already be
+// ordered by the plan's merge key. A plan that is not eligible falls back to
+// mergeSplit, which does not assume ordering.
+func canMergeSort(plan *datapb.CompactionPlan, params compaction.Params) bool {
+	if !params.UseMergeSort {
+		return false
+	}
+	// The sorted flag records that the compactor which wrote the segment
+	// ordered it by this plan's merge key.
+	for _, segment := range plan.GetSegmentBinlogs() {
+		if !segment.GetIsSorted() {
+			return false
+		}
+	}
+	// Each reader holds a live record, so memory grows with the reader count. A
+	// single segment is allowed: merge sort keeps the output flagged sorted,
+	// whereas mergeSplit emits it unsorted and needs a follow-up sort compaction.
+	return len(plan.GetSegmentBinlogs()) <= params.MaxSegmentMergeSort
 }
 
 func (t *mixCompactionTask) Complete() {

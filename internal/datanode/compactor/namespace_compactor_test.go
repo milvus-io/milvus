@@ -45,6 +45,10 @@ func (s *NamespaceCompactorTestSuite) SetupSuite() {
 	s.binlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.binlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 	s.schema = &schemapb.CollectionSchema{
+		// NamespaceCompactor is only constructed inside the namespaceEnabled
+		// branch of datanode/services.go, and the merge key below is
+		// [partitionKey, pk] accordingly.
+		EnableNamespace: true,
 		Fields: []*schemapb.FieldSchema{
 			{
 				FieldID:  common.RowIDField,
@@ -63,9 +67,10 @@ func (s *NamespaceCompactorTestSuite) SetupSuite() {
 				IsPrimaryKey: true,
 			},
 			{
-				FieldID:  101,
-				Name:     "namespace",
-				DataType: schemapb.DataType_Int64,
+				FieldID:        101,
+				Name:           "namespace",
+				DataType:       schemapb.DataType_Int64,
+				IsPartitionKey: true,
 			},
 		},
 	}

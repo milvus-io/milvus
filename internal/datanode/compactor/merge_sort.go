@@ -120,6 +120,17 @@ func mergeSortMultipleSegments(ctx context.Context,
 	}
 
 	if _, err = storage.MergeSort(compactionParams.BinLogMaxSize, plan.GetSchema(), segmentReaders, writer, predicate, sortByFields); err != nil {
+		// segmentReaders[i] is built from binlogs[i], so the reader index the
+		// error names, when it names one, indexes into this list.
+		segmentIDs := make([]int64, len(binlogs))
+		for i, s := range binlogs {
+			segmentIDs[i] = s.GetSegmentID()
+		}
+		log.Warn("compact wrong, failed to merge sort segments",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64s("segmentIDsByReaderIndex", segmentIDs),
+			zap.Int64s("sortByFields", sortByFields),
+			zap.Error(err))
 		if closeErr := writer.Close(); closeErr != nil {
 			log.Warn("failed to close writer after merge sort error", zap.Error(closeErr))
 		}
