@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -1582,6 +1583,68 @@ func (s *DataNodeServicesSuite) TestDropCopySegment_LegacyNonAbortDropOfLiveTask
 		TaskID: 604, JobID: 303, Abort: true, TaskVersion: 3,
 	})
 	s.NoError(merr.CheckRPCCall(status, err))
+}
+
+// TestDropCopySegment_LegacyCleanupFailureStillRemovesTask covers the abort
+// failure under each caller generation. An epoch-stamped coordinator retries
+// this RPC (processTerminal / the untracked-drop queue), so the failure is
+// returned and the task stays addressable for the next attempt. A legacy
+// coordinator only logs a Drop failure and never retries, and this RPC is the
+// sole removal path — returning the error would strand the task entry (and an
+// InProgress one's slot) until the DataNode restarts, so the task must be
+// removed anyway and the cleanup failure downgraded to a warning; the leftover
+// objects belong to segments the legacy coordinator already failed, which
+// dropped-segment GC reclaims.
+func (s *DataNodeServicesSuite) TestDropCopySegment_LegacyCleanupFailureStillRemovesTask() {
+	createReq := &datapb.CopySegmentRequest{
+		JobID:         305,
+		TaskID:        605,
+		TaskSlot:      1,
+		StorageConfig: s.storageConfig,
+		Sources:       []*datapb.CopySegmentSource{{CollectionId: 111, PartitionId: 222, SegmentId: 333}},
+		Targets:       []*datapb.CopySegmentTarget{{CollectionId: 444, PartitionId: 555, SegmentId: 666}},
+	}
+	status, err := s.node.copySegment(s.ctx, createReq, false)
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	abortMock := mockey.Mock((*importv2.CopySegmentTask).Abort).
+		Return(errors.New("object storage throttled during cleanup")).Build()
+
+	// Legacy drop (no abort bit, no epoch): cleanup fails, the task is removed
+	// anyway — the legacy caller would never send another Drop.
+	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
+		TaskID: 605, JobID: 305,
+	})
+	s.NoError(merr.CheckRPCCall(status, err))
+	resp, err := s.node.QueryCopySegment(s.ctx, &datapb.QueryCopySegmentRequest{TaskID: 605})
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+
+	// Epoch-stamped abort: the failure is returned and the task entry survives,
+	// so the coordinator's retry can reach it again.
+	createReq.TaskID = 606
+	createReq.TaskVersion = 2
+	status, err = s.node.copySegment(s.ctx, createReq, false)
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
+		TaskID: 606, JobID: 305, Abort: true, TaskVersion: 2,
+	})
+	s.Error(merr.CheckRPCCall(status, err))
+	s.ErrorContains(merr.CheckRPCCall(status, err), "abort copy segment task")
+	resp, err = s.node.QueryCopySegment(s.ctx, &datapb.QueryCopySegmentRequest{TaskID: 606})
+	s.NoError(err)
+	s.NotEqual(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+
+	// With cleanup healthy again, the retried drop converges and removes it.
+	abortMock.UnPatch()
+	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
+		TaskID: 606, JobID: 305, Abort: true, TaskVersion: 2,
+	})
+	s.NoError(merr.CheckRPCCall(status, err))
+	resp, err = s.node.QueryCopySegment(s.ctx, &datapb.QueryCopySegmentRequest{TaskID: 606})
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 }
 
 // TestCopySegment_RedispatchAdoptsNewerEpoch covers the same-node redispatch:

@@ -759,7 +759,22 @@ func (node *DataNode) DropCopySegment(ctx context.Context, req *datapb.DropCopyS
 	}
 	if abort {
 		if err := copyTask.Abort(ctx); err != nil {
-			return merr.Status(merr.WrapErrServiceInternalMsg("abort copy segment task %d: %v", req.GetTaskID(), err)), nil
+			if !legacyCoordinator {
+				// An epoch-stamped coordinator retries this RPC (the inspector's
+				// processTerminal and the untracked-drop queue), so returning the
+				// error keeps the task addressable for the next attempt.
+				return merr.Status(merr.WrapErrServiceInternalMsg("abort copy segment task %d: %v", req.GetTaskID(), err)), nil
+			}
+			// A legacy coordinator only logs a Drop failure and never retries,
+			// and this RPC is the sole removal path for a worker task — an error
+			// return would strand the task entry (and, for an InProgress one,
+			// its slot in scheduler.Slots()) until the DataNode restarts, the
+			// very leak the abort exists to prevent. Remove anyway: the abort
+			// canceled the copy runtime even when file cleanup failed, and the
+			// leftover objects belong to segments the legacy coordinator has
+			// already failed, so dropped-segment GC reclaims them.
+			mlog.Warn(ctx, "copy segment task cleanup failed under a legacy caller, removing the task anyway",
+				mlog.Int64("taskID", req.GetTaskID()), mlog.Err(err))
 		}
 	} else if copyTask.GetState() != datapb.ImportTaskStateV2_Completed {
 		// A current coordinator never takes this branch: every same-version
