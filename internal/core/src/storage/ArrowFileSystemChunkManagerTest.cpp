@@ -57,6 +57,13 @@ class ArrowFileSystemChunkManagerTest : public testing::Test {
             LocalStorageConfig(root_path_));
     }
 
+    // LocalChunkManager parity: callers address the local backend with OS
+    // paths, not root-relative keys.
+    std::string
+    Abs(const std::string& rel) const {
+        return root_path_ + "/" + rel;
+    }
+
     void
     TearDown() override {
         cm_.reset();
@@ -76,7 +83,7 @@ TEST_F(ArrowFileSystemChunkManagerTest, BasicMeta) {
 }
 
 TEST_F(ArrowFileSystemChunkManagerTest, WriteReadExistSize) {
-    std::string path = "insert_log/1/2/3";
+    std::string path = Abs("insert_log/1/2/3");
     uint8_t data[5] = {0x17, 0x32, 0x00, 0x34, 0x23};
 
     EXPECT_FALSE(cm_->Exist(path));
@@ -95,7 +102,7 @@ TEST_F(ArrowFileSystemChunkManagerTest, WriteReadExistSize) {
 }
 
 TEST_F(ArrowFileSystemChunkManagerTest, NotFoundSemantics) {
-    std::string path = "insert_log/not/exist";
+    std::string path = Abs("insert_log/not/exist");
 
     // Exist: not-found -> false, no throw
     EXPECT_FALSE(cm_->Exist(path));
@@ -123,8 +130,10 @@ TEST_F(ArrowFileSystemChunkManagerTest, NotFoundSemantics) {
 }
 
 TEST_F(ArrowFileSystemChunkManagerTest, RemoveAndList) {
-    std::vector<std::string> paths = {
-        "list_test/f1", "list_test/f2", "list_test/sub/f3", "list_other/f4"};
+    std::vector<std::string> paths = {Abs("list_test/f1"),
+                                      Abs("list_test/f2"),
+                                      Abs("list_test/sub/f3"),
+                                      Abs("list_other/f4")};
     uint8_t data[4] = {1, 2, 3, 4};
     for (const auto& p : paths) {
         cm_->Write(p, data, sizeof(data));
@@ -132,20 +141,48 @@ TEST_F(ArrowFileSystemChunkManagerTest, RemoveAndList) {
 
     // raw prefix semantics: "list_test" also matches nothing outside it,
     // recursive within
-    auto listed = cm_->ListWithPrefix("list_test");
+    auto listed = cm_->ListWithPrefix(Abs("list_test"));
     std::sort(listed.begin(), listed.end());
     ASSERT_EQ(listed.size(), 3);
-    EXPECT_EQ(listed[0], "list_test/f1");
-    EXPECT_EQ(listed[1], "list_test/f2");
-    EXPECT_EQ(listed[2], "list_test/sub/f3");
+    EXPECT_EQ(listed[0], Abs("list_test/f1"));
+    EXPECT_EQ(listed[1], Abs("list_test/f2"));
+    EXPECT_EQ(listed[2], Abs("list_test/sub/f3"));
 
     // prefix ending mid-segment still matches
-    auto listed2 = cm_->ListWithPrefix("list_test/f");
+    auto listed2 = cm_->ListWithPrefix(Abs("list_test/f"));
     EXPECT_EQ(listed2.size(), 2);
 
-    cm_->Remove("list_test/f1");
-    EXPECT_FALSE(cm_->Exist("list_test/f1"));
-    EXPECT_EQ(cm_->ListWithPrefix("list_test").size(), 2);
+    cm_->Remove(Abs("list_test/f1"));
+    EXPECT_FALSE(cm_->Exist(Abs("list_test/f1")));
+    EXPECT_EQ(cm_->ListWithPrefix(Abs("list_test")).size(), 2);
+}
+
+// LocalChunkManager parity: relative filepaths are plain OS paths resolved
+// against the process CWD (the unittest suite relies on this via
+// kOverrideRootPathForUT = "files"), and list results stay in the caller's
+// relative namespace.
+TEST_F(ArrowFileSystemChunkManagerTest, RelativePathsResolveAgainstCwd) {
+    std::string rel = "arrow_fs_cm_rel_" + std::to_string(::getpid());
+    std::string rel_path = rel + "/sub/f1";
+    uint8_t data[3] = {7, 8, 9};
+    cm_->Write(rel_path, data, sizeof(data));
+    EXPECT_TRUE(cm_->Exist(rel_path));
+    EXPECT_TRUE(
+        std::filesystem::exists(std::filesystem::current_path() / rel_path));
+
+    auto listed = cm_->ListWithPrefix(rel);
+    ASSERT_EQ(listed.size(), 1);
+    EXPECT_EQ(listed[0], rel_path);
+
+    uint8_t buf[3] = {0};
+    EXPECT_EQ(cm_->Read(rel_path, buf, sizeof(buf)), sizeof(buf));
+    EXPECT_EQ(std::memcmp(data, buf, sizeof(buf)), 0);
+
+    cm_->Remove(rel_path);
+    EXPECT_FALSE(cm_->Exist(rel_path));
+
+    std::error_code ec;
+    std::filesystem::remove_all(std::filesystem::current_path() / rel, ec);
 }
 
 TEST_F(ArrowFileSystemChunkManagerTest, OffsetOpsNotImplemented) {
@@ -173,13 +210,23 @@ TEST(ArrowFileSystemChunkManagerSwitch, SupportedProviders) {
 // routing test below therefore only constructs the arrow-fs backend (client
 // build without network) and the local backend.
 TEST(ArrowFileSystemChunkManagerSwitch, CreateChunkManagerRouting) {
-    ASSERT_FALSE(UseArrowFileSystemChunkManager());
+    // The suite-level master switch (MILVUS_USE_ARROW_FS_CHUNK_MANAGER in
+    // init_gtest) may have flipped the flag already; restore whatever was
+    // set when done.
+    const bool prev = UseArrowFileSystemChunkManager();
 
     StorageConfig remote_config;
     remote_config.storage_type = "remote";
     remote_config.cloud_provider = "aws";
     remote_config.address = "localhost:9000";
     remote_config.bucket_name = "a-bucket";
+
+    SetUseArrowFileSystemChunkManager(false);
+    // switch off: legacy backends
+    {
+        auto cm = CreateChunkManager(LocalStorageConfig("/tmp"));
+        EXPECT_EQ(cm->GetName(), "LocalChunkManager");
+    }
 
     SetUseArrowFileSystemChunkManager(true);
     // switch on: arrow filesystem backend
@@ -188,13 +235,15 @@ TEST(ArrowFileSystemChunkManagerSwitch, CreateChunkManagerRouting) {
         EXPECT_EQ(cm->GetName(), "ArrowFileSystemChunkManager");
         EXPECT_EQ(cm->GetBucketName(), "a-bucket");
     }
-    // local storage type is never rerouted
+    // local storage type is rerouted too (OS-path passthrough semantics)
     {
         auto cm = CreateChunkManager(LocalStorageConfig("/tmp"));
-        EXPECT_EQ(cm->GetName(), "LocalChunkManager");
+        EXPECT_EQ(cm->GetName(), "ArrowFileSystemChunkManager");
+        EXPECT_EQ(cm->GetRootPath(), "/tmp");
     }
-    SetUseArrowFileSystemChunkManager(false);
-    ASSERT_FALSE(UseArrowFileSystemChunkManager());
+
+    SetUseArrowFileSystemChunkManager(prev);
+    ASSERT_EQ(UseArrowFileSystemChunkManager(), prev);
 }
 
 // Real object-storage coverage: exercises the milvus-storage S3FileSystem

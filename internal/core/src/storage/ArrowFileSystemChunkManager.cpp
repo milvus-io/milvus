@@ -18,6 +18,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <unordered_set>
 
 #include "arrow/filesystem/filesystem.h"
@@ -137,8 +138,27 @@ ArrowFileSystemChunkManager::ArrowFileSystemChunkManager(
     const StorageConfig& storage_config)
     : default_bucket_name_(storage_config.bucket_name),
       remote_root_path_(storage_config.root_path) {
-    fs_ = StorageV2FSCache::Instance().Get(
-        ToStorageV2FSCacheKey(storage_config));
+    auto key = ToStorageV2FSCacheKey(storage_config);
+    if (storage_config.storage_type == "local") {
+        // LocalChunkManager parity: callers pass OS paths (absolute,
+        // root_path-prefixed), not root-relative keys. Root the filesystem
+        // at "/" so those paths pass through unchanged.
+        key.root_path = "/";
+        local_backend_ = true;
+    }
+    try {
+        fs_ = StorageV2FSCache::Instance().Get(key);
+    } catch (const std::exception& e) {
+        // Producers mostly report failures via arrow::Status (-> nullptr
+        // below), but some paths throw raw exceptions (e.g. endpoint
+        // parsing). Convert them so a classified SegcoreError reaches the
+        // cgo boundary instead of an unclassified std::exception.
+        ThrowInfo(StorageError,
+                  "failed to create arrow filesystem for chunk manager: {}, "
+                  "storage config: {}",
+                  e.what(),
+                  storage_config.ToString());
+    }
     if (fs_ == nullptr) {
         // Init-time failure: the storage config cannot produce a filesystem.
         // Permanent (retrying with the same config fails identically).
@@ -156,41 +176,56 @@ ArrowFileSystemChunkManager::ArrowFileSystemChunkManager(
         storage_config.useSSL);
 }
 
+std::string
+ArrowFileSystemChunkManager::ResolvePath(const std::string& filepath) const {
+    if (!local_backend_ || filepath.empty() || filepath.front() == '/') {
+        return filepath;
+    }
+    // The legacy LocalChunkManager resolves relative paths against the
+    // process CWD (plain OS path semantics); keep that on the "/"-rooted
+    // arrow filesystem.
+    return (std::filesystem::current_path() / filepath).string();
+}
+
 bool
 ArrowFileSystemChunkManager::Exist(const std::string& filepath) {
+    const auto path = ResolvePath(filepath);
     arrow::Result<arrow::fs::FileInfo> info;
     {
         LatencyObserver observer(
             milvus::monitor::internal_storage_request_latency_stat);
-        info = fs_->GetFileInfo(filepath);
+        info = fs_->GetFileInfo(path);
     }
     if (!info.ok()) {
         milvus::monitor::internal_storage_op_count_stat_fail.Increment();
-        ThrowArrowStorageError("Exist", filepath, info.status());
+        ThrowArrowStorageError("Exist", path, info.status());
     }
     milvus::monitor::internal_storage_op_count_stat_suc.Increment();
-    // Only real objects count, mirroring HeadObject semantics of the legacy
-    // implementations (a bare prefix/directory is not an object).
-    return info->type() == arrow::fs::FileType::File;
+    // Remote: only real objects count, mirroring HeadObject semantics of the
+    // legacy implementations (a bare prefix/directory is not an object).
+    // Local: LocalChunkManager::Exist is boost::filesystem::exists, which is
+    // true for directories too.
+    return info->type() == arrow::fs::FileType::File ||
+           (local_backend_ && info->type() == arrow::fs::FileType::Directory);
 }
 
 uint64_t
 ArrowFileSystemChunkManager::Size(const std::string& filepath) {
+    const auto path = ResolvePath(filepath);
     arrow::Result<arrow::fs::FileInfo> info;
     {
         LatencyObserver observer(
             milvus::monitor::internal_storage_request_latency_stat);
-        info = fs_->GetFileInfo(filepath);
+        info = fs_->GetFileInfo(path);
     }
     if (!info.ok()) {
         milvus::monitor::internal_storage_op_count_stat_fail.Increment();
-        ThrowArrowStorageError("Size", filepath, info.status());
+        ThrowArrowStorageError("Size", path, info.status());
     }
     if (info->type() != arrow::fs::FileType::File) {
         milvus::monitor::internal_storage_op_count_stat_fail.Increment();
         std::string error_message = fmt::format(
-            "Error in Size[filepath:{}, errmessage:object not found]",
-            filepath);
+            "Error in Size[filepath:{}, errmessage:object not found]", path);
         LOG_WARN("{}", error_message);
         throw SegcoreError(ObjectNotExist, error_message);
     }
@@ -206,10 +241,11 @@ ArrowFileSystemChunkManager::Read(const std::string& filepath,
         milvus::monitor::internal_storage_request_latency_get);
     milvus::monitor::internal_storage_kv_size_get.Observe(size);
 
-    auto file = fs_->OpenInputFile(filepath);
+    const auto path = ResolvePath(filepath);
+    auto file = fs_->OpenInputFile(path);
     if (!file.ok()) {
         milvus::monitor::internal_storage_op_count_get_fail.Increment();
-        ThrowReadError(fs_, "Read", filepath, file.status());
+        ThrowReadError(fs_, "Read", path, file.status());
     }
     uint64_t total = 0;
     while (total < size) {
@@ -217,7 +253,7 @@ ArrowFileSystemChunkManager::Read(const std::string& filepath,
                                   static_cast<uint8_t*>(buf) + total);
         if (!read.ok()) {
             milvus::monitor::internal_storage_op_count_get_fail.Increment();
-            ThrowReadError(fs_, "Read", filepath, read.status());
+            ThrowReadError(fs_, "Read", path, read.status());
         }
         if (*read == 0) {
             break;
@@ -227,7 +263,7 @@ ArrowFileSystemChunkManager::Read(const std::string& filepath,
     auto close_status = (*file)->Close();
     if (!close_status.ok()) {
         milvus::monitor::internal_storage_op_count_get_fail.Increment();
-        ThrowReadError(fs_, "Read", filepath, close_status);
+        ThrowReadError(fs_, "Read", path, close_status);
     }
     milvus::monitor::internal_storage_op_count_get_suc.Increment();
     return total;
@@ -241,34 +277,34 @@ ArrowFileSystemChunkManager::Write(const std::string& filepath,
         milvus::monitor::internal_storage_request_latency_put);
     milvus::monitor::internal_storage_kv_size_put.Observe(size);
 
-    auto output = fs_->OpenOutputStream(filepath);
+    const auto path = ResolvePath(filepath);
+    auto output = fs_->OpenOutputStream(path);
     if (!output.ok() && IsArrowNotFound(output.status())) {
         // Object stores have no directories, but a local-backed filesystem
         // needs the parent directory to exist. Create it and retry once so
         // the "write object at key" contract holds on every backend.
-        auto slash_pos = filepath.find_last_of('/');
+        auto slash_pos = path.find_last_of('/');
         if (slash_pos != std::string::npos) {
-            auto mkdir_status =
-                fs_->CreateDir(filepath.substr(0, slash_pos), true);
+            auto mkdir_status = fs_->CreateDir(path.substr(0, slash_pos), true);
             if (mkdir_status.ok()) {
-                output = fs_->OpenOutputStream(filepath);
+                output = fs_->OpenOutputStream(path);
             }
         }
     }
     if (!output.ok()) {
         milvus::monitor::internal_storage_op_count_put_fail.Increment();
-        ThrowArrowStorageError("Write", filepath, output.status());
+        ThrowArrowStorageError("Write", path, output.status());
     }
     auto write_status = (*output)->Write(buf, size);
     if (!write_status.ok()) {
         milvus::monitor::internal_storage_op_count_put_fail.Increment();
-        ThrowArrowStorageError("Write", filepath, write_status);
+        ThrowArrowStorageError("Write", path, write_status);
     }
     // Close() finalizes the (multipart) upload; errors surface here.
     auto close_status = (*output)->Close();
     if (!close_status.ok()) {
         milvus::monitor::internal_storage_op_count_put_fail.Increment();
-        ThrowArrowStorageError("Write", filepath, close_status);
+        ThrowArrowStorageError("Write", path, close_status);
     }
     milvus::monitor::internal_storage_op_count_put_suc.Increment();
 }
@@ -282,23 +318,33 @@ ArrowFileSystemChunkManager::ListWithPrefix(const std::string& filepath) {
     // mid-segment), while arrow FileSelector is directory based. Emulate by
     // listing from the parent directory recursively and filtering on the full
     // prefix.
+    const auto resolved = ResolvePath(filepath);
     arrow::fs::FileSelector selector;
-    auto slash_pos = filepath.find_last_of('/');
+    auto slash_pos = resolved.find_last_of('/');
     selector.base_dir =
-        slash_pos == std::string::npos ? "" : filepath.substr(0, slash_pos);
+        slash_pos == std::string::npos ? "" : resolved.substr(0, slash_pos);
     selector.recursive = true;
     selector.allow_not_found = true;
 
     auto infos = fs_->GetFileInfo(selector);
     if (!infos.ok()) {
         milvus::monitor::internal_storage_op_count_list_fail.Increment();
-        ThrowArrowStorageError("ListWithPrefix", filepath, infos.status());
+        ThrowArrowStorageError("ListWithPrefix", resolved, infos.status());
     }
+    // The subtree filesystem strips its base (including any leading '/')
+    // from listed paths, so match on the stripped form of the resolved
+    // prefix, then splice the caller's original prefix back on so results
+    // come back in the caller's namespace (absolute or CWD-relative).
+    const std::string match_prefix = !resolved.empty() &&
+                                             resolved.front() == '/'
+                                         ? resolved.substr(1)
+                                         : resolved;
     std::vector<std::string> result;
     for (const auto& info : *infos) {
         if (info.type() == arrow::fs::FileType::File &&
-            info.path().rfind(filepath, 0) == 0) {
-            result.emplace_back(info.path());
+            info.path().rfind(match_prefix, 0) == 0) {
+            result.emplace_back(filepath +
+                                info.path().substr(match_prefix.size()));
         }
     }
     milvus::monitor::internal_storage_op_count_list_suc.Increment();
@@ -307,20 +353,21 @@ ArrowFileSystemChunkManager::ListWithPrefix(const std::string& filepath) {
 
 void
 ArrowFileSystemChunkManager::Remove(const std::string& filepath) {
+    const auto path = ResolvePath(filepath);
     arrow::Status status;
     {
         LatencyObserver observer(
             milvus::monitor::internal_storage_request_latency_remove);
-        status = fs_->DeleteFile(filepath);
+        status = fs_->DeleteFile(path);
     }
     if (!status.ok()) {
         // Legacy DeleteObject swallows not-found; keep removal idempotent.
-        if (PathMissing(fs_, filepath, status)) {
+        if (PathMissing(fs_, path, status)) {
             milvus::monitor::internal_storage_op_count_remove_suc.Increment();
             return;
         }
         milvus::monitor::internal_storage_op_count_remove_fail.Increment();
-        ThrowArrowStorageError("Remove", filepath, status);
+        ThrowArrowStorageError("Remove", path, status);
     }
     milvus::monitor::internal_storage_op_count_remove_suc.Increment();
 }

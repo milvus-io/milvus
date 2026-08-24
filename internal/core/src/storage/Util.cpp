@@ -1157,13 +1157,18 @@ UseArrowFileSystemChunkManager() {
     return use_arrow_fs_chunk_manager.load();
 }
 
-// Route a remote storage config to the ArrowFileSystem backed chunk manager
-// when the switch is on and milvus-storage has a producer for the provider;
+// Route a storage config to the ArrowFileSystem backed chunk manager
+// when the switch is on and milvus-storage has a producer for the backend;
 // otherwise stay on the legacy implementation.
 static ChunkManagerPtr
 TryCreateArrowFileSystemChunkManager(const StorageConfig& storage_config) {
     if (!UseArrowFileSystemChunkManager()) {
         return nullptr;
+    }
+    // The local backend always has a producer; provider gating only applies
+    // to remote configs.
+    if (storage_config.storage_type == "local") {
+        return std::make_shared<ArrowFileSystemChunkManager>(storage_config);
     }
     if (!ArrowFileSystemChunkManager::SupportsCloudProvider(
             storage_config.cloud_provider)) {
@@ -1183,6 +1188,10 @@ CreateChunkManager(const StorageConfig& storage_config) {
 
     switch (storage_type) {
         case ChunkManagerType::Local: {
+            if (auto cm = TryCreateArrowFileSystemChunkManager(storage_config);
+                cm != nullptr) {
+                return cm;
+            }
             return std::make_shared<LocalChunkManager>(
                 storage_config.root_path);
         }

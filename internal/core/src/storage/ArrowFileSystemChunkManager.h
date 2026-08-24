@@ -33,19 +33,26 @@ namespace milvus::storage {
  * readers), instead of the legacy AWS-SDK-based MinioChunkManager family.
  *
  * The filesystem is obtained from StorageV2FSCache, so it is shared with all
- * other ArrowFileSystem consumers of the same storage config. All producers
- * return a filesystem rooted at the bucket (or at root_path for local
- * storage), so ChunkManager filepaths map 1:1 to filesystem paths.
+ * other ArrowFileSystem consumers of the same storage config. All remote
+ * producers return a filesystem rooted at the bucket, so ChunkManager
+ * filepaths map 1:1 to filesystem paths. For the local backend the
+ * filesystem is rooted at "/" instead: LocalChunkManager callers pass OS
+ * paths (absolute, root_path-prefixed), and rooting at "/" lets them pass
+ * through unchanged.
  *
  * Coexists with the legacy implementations; selected via
  * `common.storage.useArrowFileSystemChunkManager` (see
  * SetUseArrowFileSystemChunkManager / CreateChunkManager).
  *
- * Behavioral parity notes vs MinioChunkManager:
+ * Behavioral parity notes vs MinioChunkManager (and LocalChunkManager for
+ * the local backend):
  * - Exist: not-found -> false, other errors throw.
  * - Size: not-found throws ObjectNotExist.
  * - Remove: not-found is swallowed, other errors throw.
- * - Read/Write with offset: NotImplemented (same as remote legacy impls).
+ * - Read/Write with offset: NotImplemented (same as the remote legacy
+ *   impls; LocalChunkManager does support these, but no CreateChunkManager
+ *   consumer uses them — offset IO goes through LocalChunkManagerSingleton,
+ *   which is never rerouted).
  * - Errors are classified via milvus_storage::ToSegcoreError, which keeps
  *   the transient(2045)/permanent(2044)/not-found(2017) split from the
  *   structured ExtendStatusDetail attached by milvus-storage.
@@ -113,9 +120,17 @@ class ArrowFileSystemChunkManager : public ChunkManager {
     SupportsCloudProvider(const std::string& cloud_provider);
 
  private:
+    // LocalChunkManager parity for the "/"-rooted local backend: relative
+    // filepaths are resolved against the process CWD, exactly like the OS
+    // path semantics of the legacy implementation. Remote paths (object
+    // keys) are returned unchanged.
+    std::string
+    ResolvePath(const std::string& filepath) const;
+
     milvus_storage::ArrowFileSystemPtr fs_;
     std::string default_bucket_name_;
     std::string remote_root_path_;
+    bool local_backend_ = false;
 };
 
 }  // namespace milvus::storage

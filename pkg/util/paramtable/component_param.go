@@ -707,9 +707,9 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Key:          "common.storage.useArrowFileSystemChunkManager",
 		Version:      "2.7.0",
 		DefaultValue: "false",
-		Doc: "Whether segcore routes remote chunk manager IO (segment load, index build/load) " +
+		Doc: "Whether segcore routes chunk manager IO (segment load, index build/load) " +
 			"through the milvus-storage Arrow FileSystem, unified with storage v2. " +
-			"When false, the legacy AWS-SDK based chunk managers are used. " +
+			"Applies to both remote and local storage types; when false, the legacy chunk managers are used. " +
 			"Not effective for cloudProvider=gcpnative, which always uses the legacy implementation.",
 		Export: true,
 	}
