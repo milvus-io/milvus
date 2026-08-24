@@ -18,8 +18,8 @@ import (
 // so nothing is known about any resource group, and -1 with
 // ErrCollectionNotLoaded means the load failed terminally, with the recorded
 // cause in the message. The two must not be conflated -- only the first is
-// worth retrying. Unlike the RPC surfaces on Server this method has no
-// merr.CheckHealthy(s.State()) gate, which reports a coordinator that is not
+// worth retrying. Like the RPC surfaces on Server, this method gates on
+// merr.CheckHealthy(s.State()) first, reporting a coordinator that is not
 // serving yet with that same ErrServiceNotReady.
 //
 // The computation itself lives in the utils package rather than here because
