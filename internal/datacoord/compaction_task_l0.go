@@ -379,6 +379,11 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		segments = append(segments, segInfo)
 	}
 
+	// Priced from the L0 inputs alone. Their delete payload is what
+	// ComposeDeleteDataFromSegments holds all at once; the flushed targets
+	// appended below are tested through bloom filters, not loaded.
+	plan.TaskResources = compactionRequirement(datapb.CompactionType_Level0DeleteCompaction, segments).ToProto()
+
 	flushedSegments, flushedSegBinlogs, err := t.selectFlushedSegment()
 	if err != nil {
 		log.Warn(context.TODO(), "invalid L0 compaction plan, unable to select flushed segments", mlog.Err(err))
