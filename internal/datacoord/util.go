@@ -601,33 +601,54 @@ func isFixedWidthType(dataType schemapb.DataType) bool {
 	}
 }
 
+// fieldSizeEstimate is the schema-derived size of one field, qualified by how
+// far it can be trusted. The two flags serve the two distinct uses of a size:
+//
+//   - exact: the stored size is fully determined by the schema (fixed width,
+//     not nullable). Safe to deduct from the measured group budget — a
+//     deduction must never exceed the field's real bytes, or the remaining
+//     variable length fields get understated.
+//   - fixedWidth: the schema width bounds the stored data from above even when
+//     the field is nullable (null rows only shrink it). Safe to charge the
+//     requested field with, never to deduct.
+type fieldSizeEstimate struct {
+	sizePerRecord int64
+	exact         bool
+	fixedWidth    bool
+}
+
 // fieldSizePerRecord returns the per row size of a field derived from the
-// schema, together with whether that size is exact.
+// schema.
 //
 // A nullable field is never exact, whatever its data type: rows holding null
 // store less than the full width (nullable vectors are even stored with a
-// variable length encoding, see CreateArrowSchema in
-// internal/core/src/storage/Util.cpp), so its real size is data dependent and
-// must come from the measured residual instead.
-func fieldSizePerRecord(schema *schemapb.CollectionSchema, fieldID int64) (int64, bool, error) {
+// variable length encoding, see add_vector_payload in
+// internal/core/src/storage/Util.cpp), so its real size is data dependent.
+// For a fixed width type the schema width still bounds it from above, which
+// fixedWidth records.
+func fieldSizePerRecord(schema *schemapb.CollectionSchema, fieldID int64) (fieldSizeEstimate, error) {
 	field := typeutil.GetFieldByID(schema, fieldID)
 	if field == nil {
-		return 0, false, merr.WrapErrFieldNotFound(fieldID)
+		return fieldSizeEstimate{}, merr.WrapErrFieldNotFound(fieldID)
 	}
 	sizePerRecord, err := typeutil.EstimateSizePerRecord(&schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{field},
 	})
 	if err != nil {
-		return 0, false, err
+		return fieldSizeEstimate{}, err
 	}
 	if sizePerRecord <= 0 {
 		// An unrecognized data type estimates to zero, which would understate
 		// the slot usage. Let the caller keep the conservative binlog size.
-		return 0, false, merr.WrapErrParameterInvalidMsg("cannot estimate size of field %d with data type %s",
+		return fieldSizeEstimate{}, merr.WrapErrParameterInvalidMsg("cannot estimate size of field %d with data type %s",
 			fieldID, field.GetDataType().String())
 	}
-	exact := isFixedWidthType(field.GetDataType()) && !field.GetNullable()
-	return int64(sizePerRecord), exact, nil
+	fixedWidth := isFixedWidthType(field.GetDataType())
+	return fieldSizeEstimate{
+		sizePerRecord: int64(sizePerRecord),
+		exact:         fixedWidth && !field.GetNullable(),
+		fixedWidth:    fixedWidth,
+	}, nil
 }
 
 // columnGroup is a set of fields stored together, which is what a binlog entry
@@ -680,15 +701,21 @@ func segmentColumnGroups(segment *SegmentInfo) map[int64]*columnGroup {
 // internal/datanode/external).
 //
 // The group size is the measured truth for the group as a whole, so it is used
-// as the budget: fields whose schema gives an exact size take exactly that, and
+// as the budget: fields whose schema gives an exact size take exactly that,
+// nullable fixed width fields take their schema width plus the nullable
+// encoding overhead (an upper bound — nulls only shrink the stored data), and
 // whatever remains is charged to the variable length fields. That keeps a 128
-// dim vector at its real size, while a json column is charged what the data
-// really contains instead of the configured per row guess
-// (common.dynamicFieldLengthAvg), which can be an order of magnitude off. The
-// residual is not split proportionally between several variable length fields:
-// the schema weights are guesses, and splitting by them could understate a fat
-// column, i.e. over-admit tasks. Charging it once keeps the result an upper
-// bound, which is what a slot must be.
+// dim vector at (close to) its real size — including on non milvus-table
+// external collections, where every user field is forced nullable at create
+// time — while a json column is charged what the data really contains instead
+// of the configured per row guess (common.dynamicFieldLengthAvg), which can be
+// an order of magnitude off. The residual is not split proportionally between
+// several variable length fields: the schema weights are guesses, and
+// splitting by them could understate a fat column, i.e. over-admit tasks.
+// Charging it once keeps the result an upper bound, which is what a slot must
+// be. The flip side is that a variable length column of a group with nothing
+// exact to deduct (e.g. any non milvus-table external group, all nullable) is
+// charged the whole group.
 func estimateFieldsReadSize(schema *schemapb.CollectionSchema, segment *SegmentInfo, fieldIDs []int64) (int64, error) {
 	if len(fieldIDs) == 0 {
 		return 0, merr.WrapErrParameterInvalidMsg("no field to estimate size for")
@@ -734,8 +761,23 @@ func supportsFieldProjection(segment *SegmentInfo) bool {
 	return segment.GetStorageVersion() == storage.StorageV3 && segment.GetManifestPath() != ""
 }
 
+// nullableFixedWidthPadPerRow bounds the per row encoding overhead a nullable
+// fixed width column adds on top of its schema width: nullable vectors are
+// binary encoded (4 byte offsets, see add_vector_payload in
+// internal/core/src/storage/Util.cpp), and every nullable column carries a
+// validity bitmap (1/8 byte per row).
+const nullableFixedWidthPadPerRow = 8
+
 // estimateGroupFieldsSize attributes the measured size of one column group to
 // the requested fields of that group.
+//
+// Each requested field is charged by the strongest bound available: an exact
+// field its schema size, a nullable fixed width field its schema width plus
+// the nullable encoding overhead (nulls only shrink the stored data), and a
+// variable length field the measured residual of the group — the group size
+// minus the exact fields, which only exact fields may reduce (deducting a
+// nullable field's full width could overstate its real bytes and understate
+// everyone else's).
 func estimateGroupFieldsSize(schema *schemapb.CollectionSchema, group *columnGroup, fieldIDs []int64, numRows int64) (int64, error) {
 	if group.size <= 0 {
 		// nothing measured to attribute, e.g. binlogs written before the size
@@ -752,11 +794,7 @@ func estimateGroupFieldsSize(schema *schemapb.CollectionSchema, group *columnGro
 		requestedFields[fieldID] = struct{}{}
 	}
 
-	type fieldEstimate struct {
-		sizePerRecord int64
-		exact         bool
-	}
-	estimates := make(map[int64]fieldEstimate, len(group.fields))
+	estimates := make(map[int64]fieldSizeEstimate, len(group.fields))
 	var fixedPerRecord int64
 	var hasVariableField bool
 	var externalColumnResolver *typeutil.StorageColumnResolver
@@ -764,7 +802,7 @@ func estimateGroupFieldsSize(schema *schemapb.CollectionSchema, group *columnGro
 		externalColumnResolver = typeutil.NewStorageColumnResolver(schema)
 	}
 	for _, fieldID := range group.fields {
-		size, exact, err := fieldSizePerRecord(schema, fieldID)
+		estimate, err := fieldSizePerRecord(schema, fieldID)
 		if err != nil {
 			if _, requested := requestedFields[fieldID]; requested {
 				return 0, err
@@ -775,8 +813,8 @@ func estimateGroupFieldsSize(schema *schemapb.CollectionSchema, group *columnGro
 			// on the whole group.
 			continue
 		}
-		estimates[fieldID] = fieldEstimate{sizePerRecord: size, exact: exact}
-		if exact {
+		estimates[fieldID] = estimate
+		if estimate.exact {
 			measured := true
 			if externalColumnResolver != nil {
 				field := typeutil.GetFieldByID(schema, fieldID)
@@ -786,7 +824,7 @@ func estimateGroupFieldsSize(schema *schemapb.CollectionSchema, group *columnGro
 				measured = measured || typeutil.IsFunctionOutputField(schema, field)
 			}
 			if measured {
-				fixedPerRecord += size
+				fixedPerRecord += estimate.sizePerRecord
 			}
 			continue
 		}
@@ -809,16 +847,34 @@ func estimateGroupFieldsSize(schema *schemapb.CollectionSchema, group *columnGro
 	var residualCharged bool
 	for _, fieldID := range fieldIDs {
 		estimate := estimates[fieldID]
-		if !estimate.exact && residualBytes > 0 {
-			// every variable length field of the group shares the same residual,
-			// so it is charged once no matter how many of them are requested
+		switch {
+		case estimate.exact:
+			total += estimate.sizePerRecord * numRows
+		case estimate.fixedWidth:
+			// Nullable fixed width: null rows only shrink the stored data, so
+			// the schema width plus the nullable encoding overhead bounds it
+			// from above; the measured residual it lives in caps it further.
+			// This branch is what keeps the attribution alive on non
+			// milvus-table external collections, where create time forces
+			// every user field nullable (see Pass 2 of
+			// NormalizeAndValidateExternalCollectionSchema) and nothing is
+			// left to deduct from the group budget.
+			charge := (estimate.sizePerRecord + nullableFixedWidthPadPerRow) * numRows
+			if residualBytes > 0 && charge > residualBytes {
+				charge = residualBytes
+			}
+			total += charge
+		case residualBytes > 0:
+			// every variable length field of the group shares the same
+			// residual, so it is charged once no matter how many of them are
+			// requested
 			if !residualCharged {
 				total += residualBytes
 				residualCharged = true
 			}
-			continue
+		default:
+			total += estimate.sizePerRecord * numRows
 		}
-		total += estimate.sizePerRecord * numRows
 	}
 	if total > group.size {
 		return group.size, nil

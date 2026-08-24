@@ -298,10 +298,14 @@ func (suite *UtilSuite) TestEstimateFieldsReadSize() {
 		suite.Equal(boolBytes+jsonBytes, size)
 	})
 
-	suite.Run("nullable fixed width field is charged from the residual", func() {
+	suite.Run("nullable fixed width field is charged its bounded width", func() {
 		// a nullable vector is stored with a variable length encoding and rows
 		// holding null store less than the full width, so the schema size is
-		// not exact: the field takes the measured residual of its group
+		// not exact. It is still bounded above by the width plus the nullable
+		// encoding overhead, and by the measured residual of its group —
+		// whichever is smaller.
+
+		// half the rows are null: the measured residual is the tighter bound
 		nullableVecBytes := vecSize * numRows / 2
 		segment := newSegment(group(pkSize*numRows+nullableVecBytes, pkField, nullableVecField))
 
@@ -313,6 +317,50 @@ func (suite *UtilSuite) TestEstimateFieldsReadSize() {
 		size, err = estimateFieldsReadSize(schema, segment, []int64{pkField})
 		suite.NoError(err)
 		suite.Equal(pkSize*numRows, size)
+
+		// no nulls and a fat neighbor: the width bound is the tighter one, the
+		// nullable vector must not absorb the whole residual
+		fatGroupSize := (pkSize+vecSize)*numRows + 10*vecSize*numRows
+		segment = newSegment(group(fatGroupSize, pkField, nullableVecField, jsonField))
+		size, err = estimateFieldsReadSize(schema, segment, []int64{nullableVecField})
+		suite.NoError(err)
+		suite.Equal((vecSize+nullableFixedWidthPadPerRow)*numRows, size)
+	})
+
+	suite.Run("all nullable external group still attributes fixed width columns", func() {
+		// A non milvus-table external collection forces every user field
+		// nullable at create time (Pass 2 of
+		// NormalizeAndValidateExternalCollectionSchema), so nothing in its one
+		// synthetic column group is exact. The indexed vector must still be
+		// charged its bounded width, not the whole 100x bigger group.
+		externalSchema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: pkField, Name: "pk", DataType: schemapb.DataType_Int64, Nullable: true, ExternalField: "pk_col"},
+				{
+					FieldID:       vecField,
+					Name:          "vec",
+					DataType:      schemapb.DataType_FloatVector,
+					Nullable:      true,
+					ExternalField: "vec_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "128"},
+					},
+				},
+				{FieldID: jsonField, Name: "json", DataType: schemapb.DataType_JSON, Nullable: true, ExternalField: "json_col"},
+			},
+		}
+		groupSize := 100 * vecSize * numRows
+		segment := newSegment(group(groupSize, pkField, vecField, jsonField))
+
+		size, err := estimateFieldsReadSize(externalSchema, segment, []int64{vecField})
+		suite.NoError(err)
+		suite.Equal((vecSize+nullableFixedWidthPadPerRow)*numRows, size)
+
+		// a variable length column has no schema bound and nothing exact is
+		// deductible, so it conservatively keeps the whole group
+		size, err = estimateFieldsReadSize(externalSchema, segment, []int64{jsonField})
+		suite.NoError(err)
+		suite.Equal(groupSize, size)
 	})
 
 	suite.Run("schema estimate is used when the group has no residual", func() {
@@ -438,14 +486,17 @@ func (suite *UtilSuite) TestEstimateFieldsReadSize() {
 			virtualPKField      = int64(105)
 			functionOutputField = int64(106)
 		)
+		// production shape: user fields mapped from the source are nullable
+		// (Pass 2 of NormalizeAndValidateExternalCollectionSchema), while
+		// system, virtual, and function output fields keep Nullable=false
 		externalSchema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 0, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
 				{FieldID: 1, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
 				{FieldID: virtualPKField, Name: common.VirtualPKFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-				{FieldID: pkField, Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk_col"},
+				{FieldID: pkField, Name: "pk", DataType: schemapb.DataType_Int64, Nullable: true, ExternalField: "pk_col"},
 				{FieldID: functionOutputField, Name: "generated", DataType: schemapb.DataType_Int64, IsFunctionOutput: true},
-				{FieldID: jsonField, Name: "json", DataType: schemapb.DataType_JSON, ExternalField: "json_col"},
+				{FieldID: jsonField, Name: "json", DataType: schemapb.DataType_JSON, Nullable: true, ExternalField: "json_col"},
 			},
 			Functions: []*schemapb.FunctionSchema{
 				{OutputFieldIds: []int64{functionOutputField}},
@@ -458,9 +509,16 @@ func (suite *UtilSuite) TestEstimateFieldsReadSize() {
 		groupSize := (pkSize + 8 + residualPerRow) * numRows
 		segment := newSegment(group(groupSize, 0, 1, virtualPKField, pkField, functionOutputField, jsonField))
 
+		// only the function output is deductible; the nullable pk stays in
+		// the residual the json column is charged with
 		size, err := estimateFieldsReadSize(externalSchema, segment, []int64{jsonField})
 		suite.NoError(err)
-		suite.Equal(residualPerRow*numRows, size)
+		suite.Equal((pkSize+residualPerRow)*numRows, size)
+
+		// the nullable pk itself is charged its bounded width
+		size, err = estimateFieldsReadSize(externalSchema, segment, []int64{pkField})
+		suite.NoError(err)
+		suite.Equal((pkSize+nullableFixedWidthPadPerRow)*numRows, size)
 
 		// Unmeasured generated fields retain their schema-derived estimate when
 		// requested, but do not consume the sampled source-column budget.
