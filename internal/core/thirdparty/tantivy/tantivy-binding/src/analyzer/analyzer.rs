@@ -289,7 +289,7 @@ mod tests {
             "tokenizer": {
                 "type": "icu",
                 "position_mode": "token",
-                "token_filter": "word"
+                "token_types": ["letter", "number", "emoji"]
             }
         }"#;
         let mut analyzer = create_analyzer(params, "").unwrap();
