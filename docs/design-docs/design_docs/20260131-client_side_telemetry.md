@@ -5,18 +5,19 @@
 - **Status:** Implemented
 - **Component:** SDK | Proxy | Coordinator
 - **Related Issues:** #46934, #47281
-- **Implemented by:** #47523, #47542
+- **Implemented by:** milvus-io/milvus#47523, milvus-io/milvus#47542, milvus-io/pymilvus#3770, milvus-io/milvus-sdk-java#2040, milvus-io/milvus-sdk-node#602, milvus-io/milvus-sdk-cpp#585
 
 > This document was refreshed to match the implementation. Where the original draft
 > described interfaces that were never built (`set_sampling_rate`, `enable_collections`,
 > `update_config`, `NewConfigHash`), those sections have been
 > replaced with what the code actually does. Source of truth is
 > `internal/rootcoord/telemetry/`, `internal/proxy/telemetry_*.go` and
-> `client/milvusclient/telemetry.go`.
+> `client/milvusclient/telemetry.go`. Python, Java, Node, and C++ use that Go
+> implementation as the executable protocol reference.
 
 ## Summary
 
-This MEP introduces a client-side telemetry system for the Go SDK that collects operational metrics, sends periodic heartbeats to the server, and supports bidirectional communication through server-pushed commands. The system provides visibility into client behavior, enables real-time monitoring through a WebUI dashboard, and allows server-initiated configuration changes.
+This MEP introduces a client-side telemetry system shared by the Go, Python, Java, Node, and C++ SDKs. It collects operational metrics, sends periodic heartbeats to the server, and supports bidirectional communication through server-pushed commands. The system provides visibility into client behavior, enables real-time monitoring through a WebUI dashboard, and allows server-initiated configuration changes.
 
 ## Motivation
 
@@ -34,13 +35,16 @@ This feature addresses these gaps by implementing a comprehensive client telemet
 
 ## Public Interfaces
 
-### Go SDK APIs
+### Client SDK configuration
+
+Each SDK exposes these settings through its language-native client configuration. The Go
+type is shown as the protocol reference:
 
 ```go
 // TelemetryConfig holds configurable settings for client telemetry
 type TelemetryConfig struct {
     Enabled           bool          // Enable/disable telemetry collection (default: true)
-    HeartbeatInterval time.Duration // Heartbeat frequency (default: 30s)
+    HeartbeatInterval time.Duration // Heartbeat frequency (default: 10s)
     SamplingRate      float64       // Sampling rate 0.0-1.0 (default: 1.0)
     ErrorMaxCount     int           // Max errors to track (default: 100)
 }
@@ -54,7 +58,7 @@ type ClientConfig struct {
 
 **Telemetry is on by default and must be turned off explicitly.** `New()` always constructs
 and starts the manager; a nil `TelemetryConfig` is replaced by `DefaultTelemetryConfig()`,
-which returns `Enabled: true` with a 30s heartbeat and 100% sampling. A caller who never
+which returns `Enabled: true` with a 10s heartbeat and 100% sampling. A caller who never
 mentions `TelemetryConfig` therefore still reports heartbeats and metrics to the server. To
 disable it:
 
@@ -121,7 +125,7 @@ privilege check on this surface.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Client (Go SDK)                                 │
+│                              Milvus Client SDK                               │
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
 │  │                    ClientTelemetryManager                              │  │
 │  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐       │  │
@@ -133,7 +137,7 @@ privilege check on this surface.
 │  │           └────────────────────┼────────────────────┘                 │  │
 │  │                                ▼                                       │  │
 │  │                    ┌───────────────────────┐                          │  │
-│  │                    │   Heartbeat Loop      │───────── 30s interval    │  │
+│  │                    │   Heartbeat Loop      │───────── 10s default     │  │
 │  │                    │   (Background)        │                          │  │
 │  │                    └───────────┬───────────┘                          │  │
 │  └────────────────────────────────┼──────────────────────────────────────┘  │
@@ -467,7 +471,7 @@ order is unspecified.
 A broadcast command is **not** deleted when the first client answers. It is delivered to
 every matching client, each replying on its own heartbeat, so retiring it on the first reply
 would let whichever client heartbeats soonest cancel delivery to the rest — with clients on
-a 30s and a 5min interval, the slow one would never see the command at all. Only
+a 10s and a 5min interval, the slow one would never see the command at all. Only
 `client:`-scoped commands, which have exactly one recipient, are removed on reply; `global`
 and `database:` ones live until their TTL. Clients skip commands older than their
 `last_command_timestamp` watermark, so retention does not cause re-execution — but a client
@@ -538,7 +542,7 @@ Client                                      Server
    │                                           │
 ```
 
-**Heartbeat interval:** 30 seconds (client default; the server can change it via
+**Heartbeat interval:** 10 seconds (client default; the server can change it via
 `push_config`).
 
 **`report_timestamp`** is accepted but ignored — the server uses its own clock for
@@ -596,7 +600,7 @@ finished.
 
 A `global` or `database:` command is delivered to every matching client and answered by each
 on its own heartbeat. Deleting it on the first reply would let whichever client heartbeats
-soonest cancel delivery to all the others — with clients on a 30s and a 5min interval, the
+soonest cancel delivery to all the others — with clients on a 10s and a 5min interval, the
 slow one would never receive it at all. Those commands are removed only by their TTL.
 
 So: replies are the fast path for reclaiming a **client-scoped** command; the TTL is the
@@ -663,12 +667,52 @@ A telemetry dashboard served at `/webui/telemetry.html` provides:
   returning true before the first heartbeat, so pair it with `LastHeartbeatError()` to tell
   "no evidence of an old server" from "confirmed working".
 
+## Cross-SDK Conformance Contract
+
+Go is the executable reference implementation. Python, Java, Node, and C++ preserve the
+following observable behavior:
+
+- `ClientInfo.reserved` contains `client_id`, string-valued `client_id_stable`, and the
+  current `db_name`. Reconnecting within the same endpoint, user, and telemetry
+  configuration reuses the telemetry manager and client ID.
+- The worker sends one immediate heartbeat, then follows the configured interval. A
+  heartbeat has a 10-second deadline and bypasses normal SDK RPC retry.
+- Only `Search`, `Query` (including Get), `HybridSearch`, `RunAnalyzer`, `Insert`, `Delete`,
+  and `Upsert` are measured. One public logical SDK call produces one final outcome,
+  including validation, retry, and result processing time. `RunAnalyzer` has no
+  collection-level bucket.
+- Sampling uses one deterministic fixed-point accumulator shared by all operations. The
+  sampling gate controls both metrics and error history; counts are not expanded by the
+  inverse sampling rate.
+- Global metrics are always eligible. Collection metrics are disabled by default and are
+  checked both when recording and when serializing a heartbeat. `"*"` enables all
+  collections.
+- P99 uses the most recent 1,000 sampled latencies and index
+  `min(n-1, floor(n*0.99))`. Snapshot history retains 120 windows and uses the actual
+  previous window end.
+- Supported commands are `push_config`, `collection_metrics`, `show_errors`,
+  `show_latency_history`, and `get_config`. Payloads are strictly typed JSON.
+- `push_config` validates the complete payload before one atomic update. Sampling is
+  clamped to `[0,1]`; the success reply contains fixed-order `applied` keys and lexically
+  sorted `ignored` keys.
+- Command replies remain pending across transport or business failures and are removed by
+  successful-snapshot prefix only. Persistent command hashes and command timestamps
+  survive reconnects.
+- Only gRPC `UNIMPLEMENTED` increases the unsupported backoff. Any real RPC response clears
+  that streak before its business status is evaluated; other transport failures neither
+  increase nor clear it. Backoff is capped at 30 minutes but never below the configured
+  interval.
+
+The current reference intentionally has no heartbeat jitter. Disabling telemetry also
+disables its control-plane heartbeat, and command ordering uses a millisecond timestamp
+cursor. Changes to those behaviors require a coordinated protocol revision across all SDKs
+rather than a language-specific fix.
+
 ## Implementation Status
 
-Client-side telemetry is implemented in the **Go SDK only**. pymilvus, the Java, Node.js and
-Rust SDKs do not implement the client half; the generated protobuf stubs exist for some of
-them but are unused. Any operator-facing claim about client coverage should be read as
-"Go SDK clients only".
+Client-side telemetry is merged in the Go SDK. Implementations for pymilvus, Java, Node.js,
+and C++ are under review in the PRs listed above. Rust does not yet implement the client
+half; its generated protobuf stubs are unused.
 
 Server-side components are complete. Two pieces of the original design are present but not
 wired into the live path: `CommandRouter` validates payload shapes but is never invoked from
