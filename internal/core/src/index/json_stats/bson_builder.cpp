@@ -14,12 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstdlib>
 #include <iostream>
 #include <vector>
 #include <string>
 #include <map>
 
 #include "index/json_stats/bson_builder.h"
+#include "common/EasyAssert.h"
 
 namespace milvus::index {
 
@@ -178,7 +180,14 @@ BsonBuilder::CreateValueNode(const std::string& value, JSONType type) {
             return DomNode(bsoncxx::types::b_int64{l});
         }
         case JSONType::DOUBLE: {
-            double d = std::stod(value);
+            // strtod instead of std::stod: stod throws std::out_of_range for
+            // subnormal doubles (e.g. -1.48e-309) because they trip the ERANGE
+            // underflow flag, while strtod simply returns the denormal value.
+            char* end = nullptr;
+            double d = std::strtod(value.c_str(), &end);
+            AssertInfo(end == value.c_str() + value.size(),
+                       "invalid double value: {}",
+                       value);
             return DomNode(bsoncxx::types::b_double{d});
         }
         case JSONType::STRING: {

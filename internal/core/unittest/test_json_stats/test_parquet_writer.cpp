@@ -4,7 +4,9 @@
 #include <arrow/io/interfaces.h>
 #include <arrow/io/memory.h>
 #include <arrow/result.h>
+#include <cmath>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <parquet/arrow/writer.h>
 #include <memory>
@@ -258,6 +260,35 @@ TEST_F(ParquetWriterFactoryTest, ClosePropagatesFinalCloseFailure) {
               std::string::npos);
 
     std::filesystem::remove_all(path_prefix);
+}
+
+// Regression for https://github.com/milvus-io/milvus/issues/52806
+// ConvertValue used to throw std::out_of_range on subnormal / overflowing
+// numbers because it was built on std::stof/std::stod.
+TEST(ConvertValueTest, HandlesSubnormalAndOutOfRangeNumbers) {
+    const double sub = -1.4829972460841e-309;
+    EXPECT_DOUBLE_EQ(
+        ConvertValue<double>(std::string("-1.4829972460841e-309")), sub);
+    EXPECT_DOUBLE_EQ(
+        ConvertValue<double>(std::string("-2.32430876e-316")),
+        -2.32430876e-316);
+
+    // Overflow clamps instead of throwing.
+    EXPECT_TRUE(std::isinf(ConvertValue<double>(std::string("1e400"))));
+    EXPECT_EQ(ConvertValue<double>(std::string("1e400")),
+              std::numeric_limits<double>::infinity());
+    EXPECT_TRUE(std::isinf(ConvertValue<float>(std::string("1e40"))));
+
+    // Underflow-to-zero clamps instead of throwing.
+    EXPECT_DOUBLE_EQ(ConvertValue<double>(std::string("1e-400")), 0.0);
+
+    // Normal values keep exact round-trip.
+    EXPECT_DOUBLE_EQ(ConvertValue<double>(std::string("-1.5")), -1.5);
+    EXPECT_FLOAT_EQ(ConvertValue<float>(std::string("2.5")), 2.5f);
+
+    // Malformed input still fails loudly.
+    EXPECT_ANY_THROW(ConvertValue<double>(std::string("abc")));
+    EXPECT_ANY_THROW(ConvertValue<double>(std::string("1.5xyz")));
 }
 
 }  // namespace milvus::index

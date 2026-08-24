@@ -20,6 +20,7 @@
 class TraverseJsonForBuildStatsAccessor;
 class CollectSingleJsonStatsInfoAccessor;
 
+#include <charconv>
 #include <string>
 #include <boost/filesystem.hpp>
 
@@ -501,33 +502,46 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                num <= std::numeric_limits<int32_t>::max();
     }
 
+    // JSON number sniffing helpers.
+    //
+    // These used to be implemented with std::stof/std::stod plus catch(...),
+    // but libstdc++ throws std::out_of_range for ANY ERANGE result of
+    // strtod/strtof, including underflow into the subnormal range (e.g.
+    // -1.48e-309, a perfectly valid double). Valid JSON numbers were then
+    // misclassified as UNKNOWN and poisoned the whole json key stats build.
+    // std::from_chars never throws and reports out-of-range values through
+    // std::errc::result_out_of_range instead.
+
+    // Strict: only a value fully representable in int64_t counts; anything
+    // else must fall through to the float/double checks.
     bool
     IsInt64(const std::string& str) {
-        std::istringstream iss(str);
         int64_t num;
-        iss >> num;
-
-        return !iss.fail() && iss.eof();
+        auto [ptr, ec] =
+            std::from_chars(str.data(), str.data() + str.size(), num);
+        return ptr == str.data() + str.size() && ec == std::errc();
     }
 
+    // Strict: values outside float's range fall through to the DOUBLE check
+    // so they keep full double precision in the shredding column type.
     bool
     IsFloat(const std::string& str) {
-        try {
-            float d = std::stof(str);
-            return true;
-        } catch (...) {
-            return false;
-        }
+        float num;
+        auto [ptr, ec] =
+            std::from_chars(str.data(), str.data() + str.size(), num);
+        return ptr == str.data() + str.size() && ec == std::errc();
     }
 
+    // Lenient on range: a well-formed JSON number whose magnitude overflows
+    // or underflows double (subnormals such as 1e-309, or 1e400) is still a
+    // valid number and must classify as DOUBLE instead of UNKNOWN.
     bool
     IsDouble(const std::string& str) {
-        try {
-            double d = std::stod(str);
-            return true;
-        } catch (...) {
-            return false;
-        }
+        double num;
+        auto [ptr, ec] =
+            std::from_chars(str.data(), str.data() + str.size(), num);
+        return ptr == str.data() + str.size() &&
+               (ec == std::errc() || ec == std::errc::result_out_of_range);
     }
 
     bool
