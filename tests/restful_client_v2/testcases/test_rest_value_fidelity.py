@@ -61,15 +61,13 @@ class TestRestValueFidelity(TestBase):
                 payload["indexParams"] = index_params
             rsp = self._rest(endpoint, token, "/v2/vectordb/collections/create", payload=payload)
             assert rsp["code"] == 0, f"create failed: {rsp}"
-            self._rest(endpoint, token, "/v2/vectordb/collections/load",
-                       payload={"collectionName": name})
+            self._rest(endpoint, token, "/v2/vectordb/collections/load", payload={"collectionName": name})
             return name
 
         def wait_loaded(name):
             t0 = time.time()
             while time.time() - t0 < 60:
-                rsp = self._rest(endpoint, token, "/v2/vectordb/collections/describe",
-                                 payload={"collectionName": name})
+                rsp = self._rest(endpoint, token, "/v2/vectordb/collections/describe", payload={"collectionName": name})
                 if rsp.get("data", {}).get("load") == "LoadStateLoaded":
                     return
                 time.sleep(2)
@@ -81,12 +79,18 @@ class TestRestValueFidelity(TestBase):
         cls._next_pk = 0
         scalar = build(self._scalar_fields())
         varchar = build(self._scalar_fields(pk="VarChar"))
-        array = build([
-            {"fieldName": "id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-            {"fieldName": "arr", "dataType": "Array", "elementDataType": "Bool",
-             "elementTypeParams": {"max_capacity": "10"}},
-            {"fieldName": "vec", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}},
-        ])
+        array = build(
+            [
+                {"fieldName": "id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                {
+                    "fieldName": "arr",
+                    "dataType": "Array",
+                    "elementDataType": "Bool",
+                    "elementTypeParams": {"max_capacity": "10"},
+                },
+                {"fieldName": "vec", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}},
+            ]
+        )
         cls._scalar_coll = scalar
         cls._varchar_coll = varchar
         cls._array_coll = array
@@ -97,8 +101,7 @@ class TestRestValueFidelity(TestBase):
 
         for c in (scalar, varchar, array):
             try:
-                self._rest(endpoint, token, "/v2/vectordb/collections/drop",
-                           payload={"collectionName": c})
+                self._rest(endpoint, token, "/v2/vectordb/collections/drop", payload={"collectionName": c})
             except Exception:
                 pass
 
@@ -149,8 +152,12 @@ class TestRestValueFidelity(TestBase):
 
     def _scalar_fields(self, pk="Int64"):
         return [
-            {"fieldName": "id", "dataType": pk, "isPrimary": True,
-             "elementTypeParams": {"max_length": "256"} if pk == "VarChar" else {}},
+            {
+                "fieldName": "id",
+                "dataType": pk,
+                "isPrimary": True,
+                "elementTypeParams": {"max_length": "256"} if pk == "VarChar" else {},
+            },
             {"fieldName": "i8", "dataType": "Int8", "elementTypeParams": {}},
             {"fieldName": "i16", "dataType": "Int16", "elementTypeParams": {}},
             {"fieldName": "i32", "dataType": "Int32", "elementTypeParams": {}},
@@ -164,8 +171,19 @@ class TestRestValueFidelity(TestBase):
         ]
 
     def _row(self, pk, **extra):
-        row = {"id": pk, "i8": 1, "i16": 1, "i32": 1, "i64": 1, "f32": 1.0, "f64": 1.0,
-               "b": True, "s": "x", "j": {"k": 1}, "vec": VECTOR}
+        row = {
+            "id": pk,
+            "i8": 1,
+            "i16": 1,
+            "i32": 1,
+            "i64": 1,
+            "f32": 1.0,
+            "f64": 1.0,
+            "b": True,
+            "s": "x",
+            "j": {"k": 1},
+            "vec": VECTOR,
+        }
         row.update(extra)
         return row
 
@@ -189,7 +207,11 @@ class TestRestValueFidelity(TestBase):
     def test_int64_scientific_integer_forms(self):
         # 1e3 is an integer value and must be accepted exactly.
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1e3,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]' % pk)
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1e3,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
+            % pk,
+        )
         assert rsp["code"] == 0, rsp
         self.collection_client.flush(self._scalar_coll)
         time.sleep(1)
@@ -199,7 +221,11 @@ class TestRestValueFidelity(TestBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_int64_decimal_that_is_integer(self):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":9007199254740993.0,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]' % pk)
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":9007199254740993.0,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
+            % pk,
+        )
         assert rsp["code"] == 0, rsp
         self.collection_client.flush(self._scalar_coll)
         time.sleep(1)
@@ -209,7 +235,11 @@ class TestRestValueFidelity(TestBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_varchar_number_literal_kept(self):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":1e300,"j":{"k":1},"vec":[0.1,0.2]}]' % pk)
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":1e300,"j":{"k":1},"vec":[0.1,0.2]}]'
+            % pk,
+        )
         assert rsp["code"] == 0, rsp
         self.collection_client.flush(self._scalar_coll)
         time.sleep(1)
@@ -219,7 +249,11 @@ class TestRestValueFidelity(TestBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_varchar_decimal_literal_kept(self):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":1.50,"j":{"k":1},"vec":[0.1,0.2]}]' % pk)
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":1.50,"j":{"k":1},"vec":[0.1,0.2]}]'
+            % pk,
+        )
         assert rsp["code"] == 0, rsp
         self.collection_client.flush(self._scalar_coll)
         time.sleep(1)
@@ -259,12 +293,16 @@ class TestRestValueFidelity(TestBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_dynamic_field_float_not_zero(self):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"dyn_f":1e19,"vec":[0.1,0.2]}]' % pk)
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"dyn_f":1e19,"vec":[0.1,0.2]}]'
+            % pk,
+        )
         assert rsp["code"] == 0, rsp
         self.collection_client.flush(self._scalar_coll)
         time.sleep(1)
         d = self._query(self._scalar_coll, f"id == {pk}", ["dyn_f"])["data"][0]
-        assert d["dyn_f"] == float(1e19) and d["dyn_f"] != 0
+        assert d["dyn_f"] == 1e19 and d["dyn_f"] != 0
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_double_precision(self):
@@ -281,17 +319,35 @@ class TestRestValueFidelity(TestBase):
         self._insert(self._scalar_coll, [self._row(pk, i64=9007199254740993)])
         # Scope by id so the shared collection's other rows (with the same i64
         # value) do not affect the hit count.
-        hit = self.vector_client.vector_query({"collectionName": self._scalar_coll,
-            "filter": f"id == {pk} && i64 == {{v}}", "exprParams": {"v": 9007199254740993}, "limit": 10})
+        hit = self.vector_client.vector_query(
+            {
+                "collectionName": self._scalar_coll,
+                "filter": f"id == {pk} && i64 == {{v}}",
+                "exprParams": {"v": 9007199254740993},
+                "limit": 10,
+            }
+        )
         assert hit["code"] == 0 and len(hit["data"]) == 1
-        miss = self.vector_client.vector_query({"collectionName": self._scalar_coll,
-            "filter": f"id == {pk} && i64 == {{v}}", "exprParams": {"v": 9007199254740992}, "limit": 10})
+        miss = self.vector_client.vector_query(
+            {
+                "collectionName": self._scalar_coll,
+                "filter": f"id == {pk} && i64 == {{v}}",
+                "exprParams": {"v": 9007199254740992},
+                "limit": 10,
+            }
+        )
         assert len(miss["data"]) == 0
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_exprparams_int64_max_ok(self):
-        rsp = self.vector_client.vector_query({"collectionName": self._scalar_coll,
-            "filter": "i64 == {v}", "exprParams": {"v": 9223372036854775807}, "limit": 10})
+        rsp = self.vector_client.vector_query(
+            {
+                "collectionName": self._scalar_coll,
+                "filter": "i64 == {v}",
+                "exprParams": {"v": 9223372036854775807},
+                "limit": 10,
+            }
+        )
         assert rsp["code"] == 0, rsp
 
     # ================= L0: P. Partial update =================
@@ -300,8 +356,9 @@ class TestRestValueFidelity(TestBase):
     def test_partial_update_null_clears_dynamic_field(self):
         pk = self._new_pk()
         self._insert(self._scalar_coll, [self._row(pk, tag="old", keep=9007199254740993)])
-        rsp = self.vector_client.vector_upsert({"collectionName": self._scalar_coll,
-            "data": [{"id": pk, "tag": None}], "partialUpdate": True})
+        rsp = self.vector_client.vector_upsert(
+            {"collectionName": self._scalar_coll, "data": [{"id": pk, "tag": None}], "partialUpdate": True}
+        )
         assert rsp["code"] == 0, rsp
         self.collection_client.flush(self._scalar_coll)
         time.sleep(1)
@@ -313,8 +370,9 @@ class TestRestValueFidelity(TestBase):
     def test_partial_update_preserves_untouched_keys(self):
         pk = self._new_pk()
         self._insert(self._scalar_coll, [self._row(pk, da=9007199254740993, db="keep")])
-        rsp = self.vector_client.vector_upsert({"collectionName": self._scalar_coll,
-            "data": [{"id": pk, "dc": "new"}], "partialUpdate": True})
+        rsp = self.vector_client.vector_upsert(
+            {"collectionName": self._scalar_coll, "data": [{"id": pk, "dc": "new"}], "partialUpdate": True}
+        )
         assert rsp["code"] == 0, rsp
         self.collection_client.flush(self._scalar_coll)
         time.sleep(1)
@@ -349,10 +407,26 @@ class TestRestValueFidelity(TestBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_json_grpc_write_rest_read(self):
         from pymilvus import Collection
+
         pk = self._new_pk()
         col = Collection(self._scalar_coll)
-        col.insert([{"id": pk, "i8": 1, "i16": 1, "i32": 1, "i64": 1, "f32": 1.0,
-                     "f64": 1.0, "b": True, "s": "x", "j": {"j": "hello"}, "vec": VECTOR}])
+        col.insert(
+            [
+                {
+                    "id": pk,
+                    "i8": 1,
+                    "i16": 1,
+                    "i32": 1,
+                    "i64": 1,
+                    "f32": 1.0,
+                    "f64": 1.0,
+                    "b": True,
+                    "s": "x",
+                    "j": {"j": "hello"},
+                    "vec": VECTOR,
+                }
+            ]
+        )
         col.flush()
         time.sleep(2)
         d = self._query(self._scalar_coll, f"id == {pk}", ["j"])["data"][0]
@@ -361,11 +435,27 @@ class TestRestValueFidelity(TestBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_dynamic_bigint_grpc_write_rest_read(self):
         from pymilvus import Collection
+
         pk = self._new_pk()
         col = Collection(self._scalar_coll)
-        col.insert([{"id": pk, "i8": 1, "i16": 1, "i32": 1, "i64": 1, "f32": 1.0,
-                     "f64": 1.0, "b": True, "s": "x", "j": {"k": 1}, "vec": VECTOR,
-                     "dyn_big": 9007199254740993}])
+        col.insert(
+            [
+                {
+                    "id": pk,
+                    "i8": 1,
+                    "i16": 1,
+                    "i32": 1,
+                    "i64": 1,
+                    "f32": 1.0,
+                    "f64": 1.0,
+                    "b": True,
+                    "s": "x",
+                    "j": {"k": 1},
+                    "vec": VECTOR,
+                    "dyn_big": 9007199254740993,
+                }
+            ]
+        )
         col.flush()
         time.sleep(2)
         d = self._query(self._scalar_coll, f"id == {pk}", ["dyn_big"])["data"][0]
@@ -377,53 +467,85 @@ class TestRestValueFidelity(TestBase):
     @pytest.mark.parametrize("val", [128, -129])
     def test_int8_overflow_rejected(self, val):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":%d,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]' % (pk, val))
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":%d,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
+            % (pk, val),
+        )
         assert rsp["code"] != 0, f"int8={val} should be rejected: {rsp}"
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("val", [32768, -32769])
     def test_int16_overflow_rejected(self, val):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":%d,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]' % (pk, val))
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":%d,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
+            % (pk, val),
+        )
         assert rsp["code"] != 0, f"int16={val} should be rejected: {rsp}"
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("val", [2147483648, -2147483649])
     def test_int32_overflow_rejected(self, val):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":1,"i32":%d,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]' % (pk, val))
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":1,"i32":%d,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
+            % (pk, val),
+        )
         assert rsp["code"] != 0, f"int32={val} should be rejected: {rsp}"
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("val", [9223372036854775808, -9223372036854775809])
     def test_int64_overflow_rejected(self, val):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":%d,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]' % (pk, val))
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":%d,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
+            % (pk, val),
+        )
         assert rsp["code"] != 0, f"int64={val} should be rejected: {rsp}"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_int64_fraction_rejected(self):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1.5,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]' % pk)
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1.5,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
+            % pk,
+        )
         assert rsp["code"] != 0, rsp
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("val", ["3.5e38", "3.4028236e38", "-3.5e38"])
     def test_float32_overflow_rejected(self, val):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":%s,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]' % (pk, val))
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":%s,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
+            % (pk, val),
+        )
         assert rsp["code"] != 0, f"f32={val} should be rejected: {rsp}"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_varchar_object_rejected(self):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":{"a":1},"j":{"k":1},"vec":[0.1,0.2]}]' % pk)
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":{"a":1},"j":{"k":1},"vec":[0.1,0.2]}]'
+            % pk,
+        )
         assert rsp["code"] != 0, rsp
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_json_duplicate_key_rejected(self):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"a":1,"a":2},"vec":[0.1,0.2]}]' % pk)
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"a":1,"a":2},"vec":[0.1,0.2]}]'
+            % pk,
+        )
         assert rsp["code"] != 0, rsp
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -431,13 +553,21 @@ class TestRestValueFidelity(TestBase):
         # 2^64 exceeds the 64-bit range and is rejected; uint64 max (2^64-1) is
         # within range and accepted (see the L0 positive case).
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"big":18446744073709551616},"vec":[0.1,0.2]}]' % pk)
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"big":18446744073709551616},"vec":[0.1,0.2]}]'
+            % pk,
+        )
         assert rsp["code"] != 0, rsp
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_json_uint64_max_accepted(self):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"big":18446744073709551615},"vec":[0.1,0.2]}]' % pk)
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"big":18446744073709551615},"vec":[0.1,0.2]}]'
+            % pk,
+        )
         assert rsp["code"] == 0, rsp
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -445,19 +575,30 @@ class TestRestValueFidelity(TestBase):
         # A missing non-nullable field without a default must be rejected (it
         # used to be stored as an empty value).
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"vec":[0.1,0.2]}]' % pk)
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"vec":[0.1,0.2]}]' % pk,
+        )
         assert rsp["code"] != 0, f"missing required field should be rejected: {rsp}"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_float_vector_string_rejected(self):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":"[0.1,0.2]"}]' % pk)
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":"[0.1,0.2]"}]'
+            % pk,
+        )
         assert rsp["code"] != 0, rsp
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_leading_zero_rejected(self):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":010,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]' % pk)
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":010,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
+            % pk,
+        )
         assert rsp["code"] != 0, rsp
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -471,15 +612,17 @@ class TestRestValueFidelity(TestBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("val", [9223372036854775808, 9223372036854775809, 18446744073709551615])
     def test_exprparams_beyond_int64_rejected(self, val):
-        rsp = self.vector_client.vector_query({"collectionName": self._scalar_coll,
-            "filter": "i64 == {v}", "exprParams": {"v": val}, "limit": 10})
+        rsp = self.vector_client.vector_query(
+            {"collectionName": self._scalar_coll, "filter": "i64 == {v}", "exprParams": {"v": val}, "limit": 10}
+        )
         assert rsp["code"] != 0, f"exprParams v={val} should be rejected: {rsp}"
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("val", [None, [], {}])
     def test_exprparams_null_array_object_rejected(self, val):
-        rsp = self.vector_client.vector_query({"collectionName": self._scalar_coll,
-            "filter": "i64 == {v}", "exprParams": {"v": val}, "limit": 10})
+        rsp = self.vector_client.vector_query(
+            {"collectionName": self._scalar_coll, "filter": "i64 == {v}", "exprParams": {"v": val}, "limit": 10}
+        )
         assert rsp["code"] != 0, f"exprParams v={val!r} should be rejected: {rsp}"
 
     # ================= L2: E. Vectors =================
@@ -489,12 +632,22 @@ class TestRestValueFidelity(TestBase):
         name = gen_collection_name("rvf")
         payload = {
             "collectionName": name,
-            "schema": {"autoId": False, "enableDynamicField": True, "fields": [
-                {"fieldName": "id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                {"fieldName": "bv", "dataType": "BinaryVector", "elementTypeParams": {"dim": "8"}},
-            ]},
-            "indexParams": [{"fieldName": "bv", "indexName": "bv", "metricType": "HAMMING",
-                             "params": {"index_type": "BIN_IVF_FLAT", "nlist": "16"}}],
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": True,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "bv", "dataType": "BinaryVector", "elementTypeParams": {"dim": "8"}},
+                ],
+            },
+            "indexParams": [
+                {
+                    "fieldName": "bv",
+                    "indexName": "bv",
+                    "metricType": "HAMMING",
+                    "params": {"index_type": "BIN_IVF_FLAT", "nlist": "16"},
+                }
+            ],
         }
         rsp = self.collection_client.collection_create(payload)
         assert rsp["code"] == 0, rsp
@@ -505,55 +658,24 @@ class TestRestValueFidelity(TestBase):
         assert rsp["code"] == 0, rsp
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_fp16_bf16_array(self):
-        name = gen_collection_name("rvf")
-        payload = {
-            "collectionName": name,
-            "schema": {"autoId": False, "enableDynamicField": True, "fields": [
-                {"fieldName": "id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                {"fieldName": "f16", "dataType": "Float16Vector", "elementTypeParams": {"dim": "2"}},
-                {"fieldName": "bf16", "dataType": "BFloat16Vector", "elementTypeParams": {"dim": "2"}},
-            ]},
-            "indexParams": [
-                {"fieldName": "f16", "indexName": "f16", "metricType": "L2"},
-                {"fieldName": "bf16", "indexName": "bf16", "metricType": "L2"},
-            ],
-        }
-        rsp = self.collection_client.collection_create(payload)
-        assert rsp["code"] == 0, rsp
-        self.collection_client.collection_load(collection_name=name)
-        self.wait_collection_load_completed(name)
-        rsp = self._raw_insert(name, '[{"id":1,"f16":[0.1,0.2],"bf16":[0.3,0.4]}]')
-        assert rsp["code"] == 0, rsp
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_sparse_vector_roundtrip(self):
-        name = gen_collection_name("rvf")
-        payload = {
-            "collectionName": name,
-            "schema": {"autoId": False, "enableDynamicField": True, "fields": [
-                {"fieldName": "id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                {"fieldName": "sv", "dataType": "SparseFloatVector", "elementTypeParams": {}},
-            ]},
-            "indexParams": [{"fieldName": "sv", "indexName": "sv", "metricType": "IP",
-                             "params": {"index_type": "SPARSE_INVERTED_INDEX"}}],
-        }
-        rsp = self.collection_client.collection_create(payload)
-        assert rsp["code"] == 0, rsp
-        self.collection_client.collection_load(collection_name=name)
-        self.wait_collection_load_completed(name)
-        rsp = self._raw_insert(name, '[{"id":1,"sv":{"1":0.5,"3":0.2}}]')
-        assert rsp["code"] == 0, rsp
-
-    @pytest.mark.tags(CaseLabel.L2)
     def test_int8vector_base64_and_null_rejected(self):
         # Int8Vector was removed from vectorAcceptsBase64 in the PR, so a base64
         # string and a null are both rejected; a plain int8 array is accepted.
-        name = self._create_load([
-            {"fieldName": "id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-            {"fieldName": "iv", "dataType": "Int8Vector", "elementTypeParams": {"dim": "2"}},
-        ], index_params=[{"fieldName": "iv", "indexName": "iv", "indexType": "HNSW",
-                          "metricType": "L2", "params": {"M": 8, "efConstruction": 64}}])
+        name = self._create_load(
+            [
+                {"fieldName": "id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                {"fieldName": "iv", "dataType": "Int8Vector", "elementTypeParams": {"dim": "2"}},
+            ],
+            index_params=[
+                {
+                    "fieldName": "iv",
+                    "indexName": "iv",
+                    "indexType": "HNSW",
+                    "metricType": "L2",
+                    "params": {"M": 8, "efConstruction": 64},
+                }
+            ],
+        )
         rsp = self._raw_insert(name, '[{"id":1,"iv":"AQ=="}]')
         assert rsp["code"] != 0, f"Int8Vector base64 should be rejected: {rsp}"
         rsp = self._raw_insert(name, '[{"id":1,"iv":null}]')
@@ -584,8 +706,9 @@ class TestRestValueFidelity(TestBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_growing_vs_sealed_consistency(self):
         pk = self._new_pk()
-        rsp = self.vector_client.vector_insert({"collectionName": self._scalar_coll,
-            "data": [self._row(pk, dyn_big=9007199254740993, j={"x": 1})]})
+        rsp = self.vector_client.vector_insert(
+            {"collectionName": self._scalar_coll, "data": [self._row(pk, dyn_big=9007199254740993, j={"x": 1})]}
+        )
         assert rsp["code"] == 0, rsp
         # growing read (before flush)
         d_g = self._query(self._scalar_coll, f"id == {pk}", ["dyn_big", "j"])["data"][0]
@@ -598,14 +721,22 @@ class TestRestValueFidelity(TestBase):
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_nullable_scalar_null_roundtrip(self):
-        name = self._create_load([
-            {"fieldName": "id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-            {"fieldName": "ni", "dataType": "Int64", "nullable": True, "elementTypeParams": {}},
-            {"fieldName": "ns", "dataType": "VarChar", "nullable": True, "elementTypeParams": {"max_length": "256"}},
-            {"fieldName": "vec", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}},
-        ])
-        rsp = self.vector_client.vector_insert({"collectionName": name,
-            "data": [{"id": 1, "ni": None, "ns": None, "vec": VECTOR}]})
+        name = self._create_load(
+            [
+                {"fieldName": "id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                {"fieldName": "ni", "dataType": "Int64", "nullable": True, "elementTypeParams": {}},
+                {
+                    "fieldName": "ns",
+                    "dataType": "VarChar",
+                    "nullable": True,
+                    "elementTypeParams": {"max_length": "256"},
+                },
+                {"fieldName": "vec", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}},
+            ]
+        )
+        rsp = self.vector_client.vector_insert(
+            {"collectionName": name, "data": [{"id": 1, "ni": None, "ns": None, "vec": VECTOR}]}
+        )
         assert rsp["code"] == 0, rsp
         self.collection_client.flush(name)
         time.sleep(1)
@@ -614,15 +745,27 @@ class TestRestValueFidelity(TestBase):
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_array_other_element_types(self):
-        name = self._create_load([
-            {"fieldName": "id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-            {"fieldName": "ai", "dataType": "Array", "elementDataType": "Int64", "elementTypeParams": {"max_capacity": "10"}},
-            {"fieldName": "as", "dataType": "Array", "elementDataType": "VarChar",
-             "elementTypeParams": {"max_capacity": "10", "max_length": "256"}},
-            {"fieldName": "vec", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}},
-        ])
-        rsp = self.vector_client.vector_insert({"collectionName": name,
-            "data": [{"id": 1, "ai": [1, 2], "as": ["a", "b"], "vec": VECTOR}]})
+        name = self._create_load(
+            [
+                {"fieldName": "id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                {
+                    "fieldName": "ai",
+                    "dataType": "Array",
+                    "elementDataType": "Int64",
+                    "elementTypeParams": {"max_capacity": "10"},
+                },
+                {
+                    "fieldName": "as",
+                    "dataType": "Array",
+                    "elementDataType": "VarChar",
+                    "elementTypeParams": {"max_capacity": "10", "max_length": "256"},
+                },
+                {"fieldName": "vec", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}},
+            ]
+        )
+        rsp = self.vector_client.vector_insert(
+            {"collectionName": name, "data": [{"id": 1, "ai": [1, 2], "as": ["a", "b"], "vec": VECTOR}]}
+        )
         assert rsp["code"] == 0, rsp
         self.collection_client.flush(name)
         time.sleep(1)
@@ -634,11 +777,18 @@ class TestRestValueFidelity(TestBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_vector_null_rejected(self):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":null}]' % pk)
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":null}]' % pk,
+        )
         assert rsp["code"] != 0, rsp
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_non_nullable_explicit_null_rejected(self):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._scalar_coll, '[{"id":%d,"i8":null,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]' % pk)
+        rsp = self._raw_insert(
+            self._scalar_coll,
+            '[{"id":%d,"i8":null,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
+            % pk,
+        )
         assert rsp["code"] != 0, rsp
