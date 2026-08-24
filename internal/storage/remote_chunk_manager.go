@@ -102,7 +102,7 @@ func NewRemoteChunkManager(ctx context.Context, c *objectstorage.Config) (*Remot
 // NewRemoteChunkManagerForTesting is used for testing.
 func NewRemoteChunkManagerForTesting(c *minio.Client, bucket string, rootPath string) *RemoteChunkManager {
 	mcm := &RemoteChunkManager{
-		client:            &MinioObjectStorage{c},
+		client:            &MinioObjectStorage{Client: c},
 		bucketName:        bucket,
 		rootPath:          rootPath,
 		readRetryAttempts: 10,
