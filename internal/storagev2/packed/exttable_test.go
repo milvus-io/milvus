@@ -1045,6 +1045,37 @@ func TestInjectExternalSpecProperties_Boundaries(t *testing.T) {
 	require.Error(t, injectExternalSpecProperties(props, 42, "invalid", ""))
 }
 
+func TestNormalizeExternalPathForStorage_UsesExplicitEndpointURL(t *testing.T) {
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  "/tmp",
+		RootPath:    "/tmp",
+	}
+	extfs := ExternalSpecContext{
+		CollectionID: 42,
+		Source:       "s3://iceberg-warehouse/metadata/v1.json",
+		Spec:         `{"format":"iceberg-table","extfs":{"endpoint_url":"http://rook-ceph-rgw.storage.svc:80","cloud_provider":"minio","region":"us-east-1","access_key_id":"ak","access_key_value":"sk","use_virtual_host":"false"}}`,
+	}
+
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	require.NoError(t, injectExternalSpecProperties(props, extfs.CollectionID, extfs.Source, extfs.Spec))
+
+	prefix := ExtfsPrefixForCollection(extfs.CollectionID)
+	assert.Equal(t, "http://rook-ceph-rgw.storage.svc:80", loonPropertyString(props, prefix+"address"))
+	assert.Equal(t, "iceberg-warehouse", loonPropertyString(props, prefix+"bucket_name"))
+	assert.Equal(t, "false", loonPropertyString(props, prefix+"use_ssl"))
+
+	got, err := normalizeExternalPathForStorage(extfs.Source, props, extfs)
+	require.NoError(t, err)
+	assert.Equal(t, "s3://rook-ceph-rgw.storage.svc:80/iceberg-warehouse/metadata/v1.json", got)
+
+	got, err = normalizeExternalPathForStorage("s3://iceberg-warehouse/data/part-00001.parquet", props, extfs)
+	require.NoError(t, err)
+	assert.Equal(t, "s3://rook-ceph-rgw.storage.svc:80/iceberg-warehouse/data/part-00001.parquet", got)
+}
+
 func TestNormalizeExternalPathForStorage_EndpointFormUnchanged(t *testing.T) {
 	config := &indexpb.StorageConfig{
 		StorageType: "local",
