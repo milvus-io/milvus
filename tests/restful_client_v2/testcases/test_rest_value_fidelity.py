@@ -792,3 +792,65 @@ class TestRestValueFidelity(TestBase):
             % pk,
         )
         assert rsp["code"] != 0, rsp
+
+    # ================= Struct Array sub-field value handling =================
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_struct_array_subfield_value_handling(self):
+        # Struct Array sub-fields flow through parseStructArrayRow ->
+        # buildStructSubArrayScalar -> parseScalarArrayElements, the same value
+        # checks as a plain Array column: big integers round-trip exactly, and
+        # out-of-range or null elements are rejected.
+        name = gen_collection_name("rvf")
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoID": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "vec", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}},
+                ],
+                "structFields": [
+                    {
+                        "fieldName": "profile",
+                        "typeParams": {"max_capacity": "4"},
+                        "fields": [
+                            {
+                                "fieldName": "p_int",
+                                "dataType": "Array",
+                                "elementDataType": "Int64",
+                                "elementTypeParams": {"max_capacity": "4"},
+                            },
+                            {
+                                "fieldName": "p_tag",
+                                "dataType": "Array",
+                                "elementDataType": "VarChar",
+                                "elementTypeParams": {"max_capacity": "4", "max_length": "128"},
+                            },
+                        ],
+                    }
+                ],
+            },
+            "indexParams": [{"fieldName": "vec", "indexName": "vec", "metricType": "L2"}],
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp["code"] == 0, rsp
+        self.collection_client.collection_load(collection_name=name)
+        self.wait_collection_load_completed(name)
+
+        # bigint sub-field element round-trips exactly
+        rsp = self._raw_insert(name, '[{"id":1,"profile":[{"p_int":9007199254740993,"p_tag":"a"}],"vec":[0.1,0.2]}]')
+        assert rsp["code"] == 0, rsp
+        self.collection_client.flush(name)
+        time.sleep(1)
+        d = self._query(name, "id == 1", ["profile"])["data"][0]
+        assert d["profile"] == [{"p_int": 9007199254740993, "p_tag": "a"}], f"got {d['profile']!r}"
+
+        # out-of-range sub-field element rejected
+        rsp = self._raw_insert(name, '[{"id":2,"profile":[{"p_int":9223372036854775808,"p_tag":"a"}],"vec":[0.1,0.2]}]')
+        assert rsp["code"] != 0, rsp
+
+        # null sub-field element rejected
+        rsp = self._raw_insert(name, '[{"id":3,"profile":[{"p_int":null,"p_tag":"a"}],"vec":[0.1,0.2]}]')
+        assert rsp["code"] != 0, rsp
