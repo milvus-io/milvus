@@ -95,6 +95,19 @@ const (
 // LoadPercentageByResourceGroup: an empty resource group is the absence of a
 // filter, not a filter that matches nothing.
 //
+// At that one scope, this verdict must NOT be paired with scoped
+// GetShardLeaders the way a named group's can. This function never runs the
+// collection-wide full-load gate, for any rgName -- that is the whole point
+// of it -- while GetShardLeadersByResourceGroup("") hands the request back to
+// the unscoped path, gate and all, because the unscoped answer has to stay
+// byte-identical to what it was before the resource-group field existed. Both
+// constraints are deliberate and neither can give way, so "" is the one scope
+// where the two surfaces are gated differently: here it is a pure
+// shard-coverage verdict, and a mid-load collection can read Ready=true while
+// the matching strict route is still refused with the retriable
+// ErrCollectionNotFullyLoaded. A caller gating a switchover wants a NAMED
+// group anyway, which is the case the pairing is built for.
+//
 // It is a free function over the read-only stores it needs, rather than a
 // method on Server, for the same reason LoadPercentageByResourceGroup is: the
 // observers hold these stores and cannot import the querycoordv2 root package.

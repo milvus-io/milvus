@@ -497,8 +497,10 @@ func TestInvisibleOnlyResourceGroupReadsFullButNotServable(t *testing.T) {
 // both sibling surfaces define "" as the absence of a filter; a literal
 // comparison inside GetShardLeadersByResourceGroup would make this the one
 // place where an unset field means "no replica matches", so an empty scope
-// must hand the request back to the unscoped path -- gate included, since the
-// scoped gate is only justified by a named group.
+// must hand the request back to the unscoped path -- gate and all, since the
+// scoped gate is only justified by a named group. That is also why "" is the
+// one scope whose gate differs from the readiness surface's: see the note on
+// ShardLeaderReadinessByResourceGroup.
 //
 // The fixture is mid-load precisely because that is where the two gates
 // disagree: a named group at 100% is served, while "" must keep the

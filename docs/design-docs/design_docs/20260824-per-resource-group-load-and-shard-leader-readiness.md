@@ -130,7 +130,9 @@ Flipping `ErrChannelNotAvailable`'s global retriable bit was rejected: it is rai
 
 #### Empty resource group
 
-All three surfaces agree that `""` is **the absence of a filter, not a filter that matches nothing** — which is also what the proto field documents, since `""` is what an old caller sends. `GetShardLeadersByResourceGroup` implements this by handing an empty request back to the unscoped path whole, gate included: the scoped gate is justified only by a *named* group, and this keeps the unscoped answer byte-identical to what it was before the field existed.
+All three surfaces agree that `""` is **the absence of a filter, not a filter that matches nothing** — which is also what the proto field documents, since `""` is what an old caller sends. `GetShardLeadersByResourceGroup` implements this by handing an empty request back to the unscoped path whole, gate and all: the scoped gate is justified only by a *named* group, and this keeps the unscoped answer byte-identical to what it was before the field existed.
+
+They agree on the *filter*, but `""` is the one scope where they do not agree on the **gate**, and the pairing rule from §2.1 does not hold there. Readiness never runs the collection-wide full-load gate for any `rgName` — that is what it is for — while routing at `""` runs it, because the unscoped answer must not change. Both constraints are deliberate and neither can give way, so with a mid-load collection `GetShardLeaderReadinessByResourceGroup(c, "")` can say `Ready=true` while a strict `GetShardLeaders` with `resource_group=""` is refused with the retriable `ErrCollectionNotFullyLoaded` — self-healing, but a caller pairing the two at `""` would spin until the lagging group finishes. At `""` readiness is a pure shard-coverage verdict; a caller gating a switchover wants a **named** group, which is the case the pairing is built for.
 
 ## 3. Compatibility
 
