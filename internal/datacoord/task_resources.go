@@ -17,8 +17,11 @@
 package datacoord
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/taskresource"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -45,7 +48,7 @@ import (
 // largest single segment, mirroring the two load shapes on the worker --
 // ComposeDeleteDataFromSegments holds every segment's deletes at once, while
 // ComposeDeleteFromDeltalogs holds one segment's at a time.
-func compactionRequirement(compactionType datapb.CompactionType, segments []*SegmentInfo) taskresource.Requirement {
+func compactionRequirement(compactionType datapb.CompactionType, segments []*SegmentInfo, schema *schemapb.CollectionSchema) taskresource.Requirement {
 	var totalMemory, totalRows, deleteBytes, storageVersion int64
 	isL0 := compactionType == datapb.CompactionType_Level0DeleteCompaction
 
@@ -53,7 +56,7 @@ func compactionRequirement(compactionType datapb.CompactionType, segments []*Seg
 		if segment == nil {
 			continue
 		}
-		totalMemory += segment.getSegmentSize()
+		totalMemory += segmentMemorySize(segment, schema)
 		totalRows += segment.GetNumOfRows()
 
 		segDelete := segment.EnsureStats().GetDeltaBinlogSize()
@@ -121,6 +124,43 @@ func fieldMemorySize(segment *SegmentInfo, schema *schemapb.CollectionSchema, fi
 	return fieldBytesFromSchema(segment, schema, map[int64]bool{field.GetFieldID(): true})
 }
 
+// segmentMemorySize is a segment's uncompressed bytes, with a fallback for the
+// segments whose byte figure does not survive a DataCoord restart.
+//
+// getSegmentSize reads EnsureStats(), which is right for every segment whose
+// producer wrote Statistics. EXTERNAL-COLLECTION segments historically did
+// not: the refresh task put the sampled size only into fake FieldBinlogs, and
+// a manifest-bearing segment is a V3 segment to the catalog, which strips
+// those arrays on persist. Such a segment reloads with no Stats and no
+// binlogs, so it reports zero bytes and would be priced at the estimator
+// floor -- the same collapse this whole change exists to remove, arriving by
+// a different route.
+//
+// internal/datanode/external now persists Stats, so newly refreshed segments
+// do not reach this fallback. It stays for the ones already written that way,
+// and it is deliberately not silent: a segment with rows but no bytes is a
+// metadata defect worth seeing rather than papering over.
+func segmentMemorySize(segment *SegmentInfo, schema *schemapb.CollectionSchema) int64 {
+	if size := segment.getSegmentSize(); size > 0 {
+		return size
+	}
+	rows := segment.GetNumOfRows()
+	if rows <= 0 || schema == nil {
+		return 0
+	}
+	perRow, err := typeutil.EstimateSizePerRecord(schema)
+	if err != nil || perRow <= 0 {
+		return 0
+	}
+	size := int64(perRow) * rows
+	mlog.Warn(context.TODO(), "segment reports no bytes; pricing it from the schema instead",
+		mlog.Int64("segmentID", segment.GetID()),
+		mlog.Int64("numRows", rows),
+		mlog.String("manifestPath", segment.GetManifestPath()),
+		mlog.Int64("schemaDerivedBytes", size))
+	return size
+}
+
 // fieldBytesFromSchema apportions a segment's insert bytes across a set of
 // fields when no per-field figure survives in the metadata.
 //
@@ -141,7 +181,7 @@ func fieldBytesFromSchema(segment *SegmentInfo, schema *schemapb.CollectionSchem
 	if len(ids) == 0 {
 		return 0
 	}
-	total := segment.getSegmentSize()
+	total := segmentMemorySize(segment, schema)
 	rows := segment.GetNumOfRows()
 	if schema == nil || rows <= 0 || total <= 0 {
 		return total
@@ -196,7 +236,7 @@ func statsRequirement(segment *SegmentInfo, schema *schemapb.CollectionSchema, s
 		// one that matched nothing has no isolable field. Both charge the whole
 		// segment rather than guessing: under-provisioning is the direction
 		// that causes OOM.
-		touched = segment.getSegmentSize()
+		touched = segmentMemorySize(segment, schema)
 	default:
 		touched = statsTouchedBytes(segment, schema, ids)
 	}

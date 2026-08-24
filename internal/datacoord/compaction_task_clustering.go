@@ -405,7 +405,7 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 			CommitTimestamp:     segInfo.GetCommitTimestamp(),
 		})
 	}
-	plan.TaskResources = compactionRequirement(datapb.CompactionType_ClusteringCompaction, inputSegments).ToProto()
+	plan.TaskResources = compactionRequirement(datapb.CompactionType_ClusteringCompaction, inputSegments, taskProto.GetSchema()).ToProto()
 	WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
 	mlog.Info(context.TODO(), "Compaction handler build clustering compaction plan", mlog.Any("PreAllocatedLogIDs", logIDRange))
 	return plan, nil
