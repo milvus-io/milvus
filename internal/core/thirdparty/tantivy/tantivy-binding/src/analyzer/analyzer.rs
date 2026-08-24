@@ -302,6 +302,28 @@ mod tests {
     }
 
     #[test]
+    fn test_custom_icu_tokenizer_removes_punctuation_from_token_positions() {
+        let params = r#"{
+            "tokenizer": {
+                "type": "icu",
+                "position_mode": "token",
+                "remove_punctuation": true
+            }
+        }"#;
+        let mut analyzer = create_analyzer(params, "").unwrap();
+        let mut stream = analyzer.token_stream("hello, world");
+        let mut tokens = Vec::new();
+        while stream.advance() {
+            tokens.push((stream.token().text.clone(), stream.token().position));
+        }
+
+        assert_eq!(
+            tokens,
+            vec![("hello".to_string(), 0), ("world".to_string(), 1)]
+        );
+    }
+
+    #[test]
     fn test_chinese_analyzer() {
         let params = r#"{
             "type": "chinese"

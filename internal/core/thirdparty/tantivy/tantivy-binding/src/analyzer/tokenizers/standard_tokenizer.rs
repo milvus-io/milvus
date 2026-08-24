@@ -260,7 +260,7 @@ impl<'a> PendingSegment<'a> {
     }
 }
 
-fn is_word_or_emoji(segment: &str) -> bool {
+pub(super) fn is_word_or_emoji(segment: &str) -> bool {
     segment
         .chars()
         .any(|ch| ch.is_alphanumeric() || is_emoji_character(ch))
