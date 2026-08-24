@@ -403,11 +403,12 @@ func (t *bumpSchemaVersionTask) processCompleted() bool {
 }
 
 func (t *bumpSchemaVersionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
+	oldTask := t.GetTaskProto()
 	// if task state is completed, cleaned, failed, timeout, then do append end time and save
-	if t.GetTaskProto().State == datapb.CompactionTaskState_completed ||
-		t.GetTaskProto().State == datapb.CompactionTaskState_cleaned ||
-		t.GetTaskProto().State == datapb.CompactionTaskState_failed ||
-		t.GetTaskProto().State == datapb.CompactionTaskState_timeout {
+	if oldTask.State == datapb.CompactionTaskState_completed ||
+		oldTask.State == datapb.CompactionTaskState_cleaned ||
+		oldTask.State == datapb.CompactionTaskState_failed ||
+		oldTask.State == datapb.CompactionTaskState_timeout {
 		ts := time.Now().Unix()
 		opts = append(opts, setEndTime(ts))
 	}
@@ -417,6 +418,7 @@ func (t *bumpSchemaVersionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt)
 	if err != nil {
 		return err
 	}
+	updateCompactionTaskMetrics(oldTask, task)
 	t.SetTask(task)
 	return nil
 }
