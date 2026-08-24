@@ -326,6 +326,18 @@ message GetShardLeadersRequest {
     // borrow nodes from another resource group, so node-set membership is not
     // replica membership. Only the coordinator still holds the replica each
     // leader belongs to.
+    //
+    // Compatibility runs only one way. An old caller is unaffected: it sends
+    // the empty string, which is the answer it always got. A NEW caller must
+    // not assume the answer is scoped without first establishing that the
+    // coordinator understands the field. Proxy and coordinator deploy
+    // separately, so during a rolling upgrade a request carrying a resource
+    // group can reach a coordinator built before this field existed; proto3
+    // drops the unknown field silently and that coordinator answers with
+    // every replica's leaders, in a response shape indistinguishable from a
+    // scoped one. There is no capability handshake on this path, so a caller
+    // that would be wrong to route on the unscoped answer must gate itself on
+    // the deployed coordinator version.
     string resource_group = 4;
 }
 
