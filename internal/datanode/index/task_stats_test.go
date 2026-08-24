@@ -179,6 +179,35 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 	})
 }
 
+func (s *TaskStatsSuite) TestRedactStorageConfigForLog() {
+	// #nosec G101 -- test-only sentinels verify that credentials are redacted.
+	config := &indexpb.StorageConfig{
+		Address:           "storage.example.test",
+		StorageType:       "s3",
+		BucketName:        "stats-bucket",
+		RootPath:          "stats/root",
+		AccessKeyID:       "STORAGE_ACCESS_KEY_SENTINEL",
+		SecretAccessKey:   "STORAGE_SECRET_KEY_SENTINEL",
+		SslCACert:         "STORAGE_CA_CERT_SENTINEL",
+		GcpCredentialJSON: `{"private_key":"GCP_CREDENTIAL_SENTINEL"}`,
+	}
+
+	redacted := redactStorageConfigForLog(config)
+	s.NotSame(config, redacted)
+	s.Equal("storage.example.test", redacted.GetAddress())
+	s.Equal("s3", redacted.GetStorageType())
+	s.Equal("stats-bucket", redacted.GetBucketName())
+	s.Equal("stats/root", redacted.GetRootPath())
+	s.Equal("<redacted>", redacted.GetAccessKeyID())
+	s.Equal("<redacted>", redacted.GetSecretAccessKey())
+	s.Equal("<redacted>", redacted.GetSslCACert())
+	s.Equal("<redacted>", redacted.GetGcpCredentialJSON())
+	s.Equal("STORAGE_ACCESS_KEY_SENTINEL", config.GetAccessKeyID())
+	s.Equal("STORAGE_SECRET_KEY_SENTINEL", config.GetSecretAccessKey())
+	s.Equal("STORAGE_CA_CERT_SENTINEL", config.GetSslCACert())
+	s.Contains(config.GetGcpCredentialJSON(), "GCP_CREDENTIAL_SENTINEL")
+}
+
 func (s *TaskStatsSuite) TestBuildIndexParams() {
 	s.Run("test storage v2 index params", func() {
 		req := &workerpb.CreateStatsRequest{

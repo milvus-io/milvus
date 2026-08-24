@@ -448,6 +448,23 @@ func restfulSizeMiddleware(handler gin.HandlerFunc, observeOutbound bool) gin.Ha
 	}
 }
 
+func getTraceLogRequestFieldWithoutSensitiveInfo(req any) zap.Field {
+	switch request := req.(type) {
+	case *PasswordReq:
+		if request == nil {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		return zap.Any("request", &UserReq{UserName: request.UserName})
+	case *NewPasswordReq:
+		if request == nil {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		return zap.Any("request", &UserReq{UserName: request.UserName})
+	default:
+		return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+	}
+}
+
 func wrapperTraceLog(v2 handlerFuncV2) handlerFuncV2 {
 	return func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
 		switch proxy.Params.CommonCfg.TraceLogMode.GetAsInt() {
@@ -460,13 +477,13 @@ func wrapperTraceLog(v2 handlerFuncV2) handlerFuncV2 {
 			fields := proxy.GetRequestBaseInfo(ctx, req, &grpc.UnaryServerInfo{
 				FullMethod: c.Request.URL.Path,
 			}, true)
-			fields = append(fields, proxy.GetRequestFieldWithoutSensitiveInfo(req))
+			fields = append(fields, getTraceLogRequestFieldWithoutSensitiveInfo(req))
 			log.Ctx(ctx).Info("trace info: detail", fields...)
 		case 3: // detail info with request and response
 			fields := proxy.GetRequestBaseInfo(ctx, req, &grpc.UnaryServerInfo{
 				FullMethod: c.Request.URL.Path,
 			}, true)
-			fields = append(fields, proxy.GetRequestFieldWithoutSensitiveInfo(req))
+			fields = append(fields, getTraceLogRequestFieldWithoutSensitiveInfo(req))
 			log.Ctx(ctx).Info("trace info: all request", fields...)
 		}
 		resp, err := v2(ctx, c, req, dbName)
