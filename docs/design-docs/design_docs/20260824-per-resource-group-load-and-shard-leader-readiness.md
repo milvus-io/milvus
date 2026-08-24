@@ -43,7 +43,7 @@ The computations are **free functions in `querycoordv2/utils`, not methods on `S
 
 Selects the replicas whose own resource group is `rgName`, computes each one's target coverage, and reports the **minimum**. A caller deciding whether a resource group can be trusted wants the laggard, not the average or the best replica: the group is only "ready" once every replica in it is.
 
-Its outcome space is deliberately three-valued, because "the collection isn't ready here" hides three different states a caller must act on differently:
+Its outcome space is deliberately four-valued, because "the collection isn't ready here" hides four different states a caller must act on differently — and the two `-1`-with-an-error rows are the pair most easily conflated, one being retriable and the other terminal:
 
 | Result | Meaning | What the caller should do |
 |---|---|---|
