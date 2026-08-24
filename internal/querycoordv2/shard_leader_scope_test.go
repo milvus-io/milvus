@@ -360,6 +360,63 @@ func TestZeroPartitionCollectionReadsNotLoadedOnEveryScopedSurface(t *testing.T)
 		"the routing surface's verdict is the one the other two now match")
 }
 
+// TestGetShardLeadersScopedOnRecoveringCollection pins the fourth refusal of
+// the scoped strict form, which the contract comment and the design doc table
+// once omitted: a collection registered as loaded but holding no channel in
+// the current target -- what a collection under recovery looks like -- is
+// refused with the retriable ErrCollectionOnRecovering (106), not with any of
+// the three resource-group-specific codes.
+//
+// The check runs before the with_unserviceable_shards branch, so the loose
+// form reaches it too; both shapes are asserted here so the ordering is
+// pinned and not just described.
+func TestGetShardLeadersScopedOnRecoveringCollection(t *testing.T) {
+	ctx := context.Background()
+	f := newShardLeaderReadinessFixture(t)
+	// Registered as loaded, with a partition, but no target was ever built.
+	require.NoError(t, f.meta.PutCollectionWithoutSave(ctx, &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: 100, Status: querypb.LoadStatus_Loaded},
+		LoadPercentage:     100,
+	}))
+	require.NoError(t, f.meta.PutPartitionWithoutSave(ctx, &meta.Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{
+			CollectionID: 100, PartitionID: 1000, Status: querypb.LoadStatus_Loaded,
+		},
+		LoadPercentage: 100,
+	}))
+	f.putReplica(t, 100, "rg-a", 10)
+
+	server := scopedServer(f)
+
+	strict, err := server.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
+		CollectionID:  100,
+		ResourceGroup: "rg-a",
+	})
+	require.NoError(t, err)
+	assert.ErrorIs(t, merr.Error(strict.GetStatus()), merr.ErrCollectionOnRecovering,
+		"a collection with no channel in the current target is recovering, not missing a replica")
+	assert.NotErrorIs(t, merr.Error(strict.GetStatus()), merr.ErrCollectionNotFullyLoaded)
+	assert.True(t, strict.GetStatus().GetRetriable())
+
+	loose, err := server.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
+		CollectionID:            100,
+		ResourceGroup:           "rg-a",
+		WithUnserviceableShards: true,
+	})
+	require.NoError(t, err)
+	assert.ErrorIs(t, merr.Error(loose.GetStatus()), merr.ErrCollectionOnRecovering,
+		"the recovering check precedes the with_unserviceable_shards branch, so the loose form gets it too")
+
+	// And the group that holds nothing is still refused by name, ahead of any
+	// channel reasoning -- the ordering the contract depends on.
+	unheld, err := server.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
+		CollectionID:  100,
+		ResourceGroup: "rg-nowhere",
+	})
+	require.NoError(t, err)
+	assert.ErrorIs(t, merr.Error(unheld.GetStatus()), merr.ErrReplicaNotFound)
+}
+
 // TestInvisibleOnlyResourceGroupReadsFullButNotServable nails the one state
 // where the three surfaces deliberately disagree, in a single fixture, so the
 // pairing rule they carry is pinned rather than only asserted in prose.

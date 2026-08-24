@@ -316,10 +316,13 @@ func GetShardLeadersWithReplicaFilter(ctx context.Context,
 //     query-visible leader inside this group -- and refuses with the same
 //     retriable ErrCollectionNotFullyLoaded the unscoped gate uses.
 //
-// The strict form (withUnserviceableShards == false) therefore has exactly
-// three refusals, and the retry semantics of each are part of the contract
-// because merr.Status copies the sentinel's retriable bit onto the wire and
-// the generic gRPC wrapper re-issues the call only when it is set:
+// The strict form (withUnserviceableShards == false) therefore has four
+// refusals, and the retry semantics of each are part of the contract because
+// merr.Status copies the sentinel's retriable bit onto the wire and the
+// generic gRPC wrapper re-issues the call only when it is set. Two of them --
+// the first and the last below -- run before the withUnserviceableShards
+// branch, so a loose caller can reach those two as well; what it never gets
+// is the middle pair.
 //
 //   - ErrCollectionNotLoaded (101, non-retriable): the collection is not
 //     registered as loaded at all. Same family, same code as the unscoped
@@ -332,6 +335,12 @@ func GetShardLeadersWithReplicaFilter(ctx context.Context,
 //     channel is fine (a sibling group may be serving it right now), and it
 //     invites a retry that will never succeed. This is the shard-leader
 //     counterpart of LoadPercentageByResourceGroup's -1.
+//   - ErrCollectionOnRecovering (106, retriable): the collection is
+//     registered as loaded but has no channel in the current target, which is
+//     what a collection under recovery looks like. Not resource-group
+//     specific -- the unscoped path answers it for the same state -- and, like
+//     the not-loaded refusal above, it precedes the withUnserviceableShards
+//     branch, so a loose caller gets it too.
 //   - ErrCollectionNotFullyLoaded (103, retriable): this group holds a
 //     replica, but not every shard has a serviceable leader in it yet.
 //     Waiting is exactly the right response, so this must NOT be the
@@ -344,7 +353,9 @@ func GetShardLeadersWithReplicaFilter(ctx context.Context,
 //     only in whose progress they measure.
 //
 // A caller accepting unserviceable shards (the proxy refreshing its cache)
-// gets none of the last two: it wants the empty answer instead.
+// gets neither the name-refusal nor the coverage refusal -- for a group that
+// holds nothing, or holds a replica that cannot serve yet, it wants the empty
+// answer instead.
 func GetShardLeadersByResourceGroup(ctx context.Context,
 	m *meta.Meta,
 	targetMgr meta.TargetManagerInterface,

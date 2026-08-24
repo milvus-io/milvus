@@ -109,13 +109,16 @@ This is a separate entry point rather than a `replicaFilter` over the existing o
 
 #### The refusal contract
 
-`merr.Status` copies each sentinel's retriable bit onto the wire, and the generic gRPC client wrapper re-issues the call only when that bit is set — so the choice of sentinel *is* the caller's wait-or-give-up decision, not decoration. The strict scoped form has exactly three refusals:
+`merr.Status` copies each sentinel's retriable bit onto the wire, and the generic gRPC client wrapper re-issues the call only when that bit is set — so the choice of sentinel *is* the caller's wait-or-give-up decision, not decoration. The strict scoped form has four refusals:
 
 | State | Sentinel | Retriable | Why |
 |---|---|---|---|
 | Collection not registered as loaded | `ErrCollectionNotLoaded` (101) | no | Same family and code as the unscoped shape for the same state. |
 | Loaded, but this group holds no replica | `ErrReplicaNotFound` (400) | no | Terminal by construction: the answer cannot change until someone loads the collection into this group. Refused up front, **by name** — falling through to the channel walk would blame a channel that is fine (a sibling group may be serving it right now) and invite a retry that can never succeed. This is the shard-leader counterpart of the progress figure's `-1`. |
+| Loaded, but no channel in the current target | `ErrCollectionOnRecovering` (106) | yes | Not resource-group specific; the unscoped path answers it for the same state. |
 | Holds a replica, not every shard covered yet | `ErrCollectionNotFullyLoaded` (103) | **yes** | Ordinary load progress; waiting is the right response. |
+
+The first and third rows run **before** the `with_unserviceable_shards` branch, so a loose caller can reach them too; the two resource-group-specific refusals are what it never gets.
 
 The third row is why the scoped path must **not** reuse the per-channel `ErrChannelNotAvailable` (503, non-retriable) that the native path raises. On the native path that error only occurs *after* the full-load gate has already passed, so a missing leader there really is channel-level unavailability. On the scoped path the gate is gone, so the same code would be reached by a group that is simply still coming up — telling a caller "permanent failure" about a state that self-heals in seconds. Reserving 103 for it also keeps the two shapes on one story: both answer 103 while the collection is still coming up, differing only in *whose* progress they measure.
 
