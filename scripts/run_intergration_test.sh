@@ -29,6 +29,16 @@ echo "mode: atomic" > ${FILE_COVERAGE_INFO}
 echo "MILVUS_WORK_DIR: $MILVUS_WORK_DIR"
 
 TEST_CMD=$@
+INTEGRATION_PACKAGE=""
+if [ "${1:-}" = "--package" ]; then
+    if [ -z "${2:-}" ]; then
+        echo "--package requires a Go package pattern" >&2
+        exit 2
+    fi
+    INTEGRATION_PACKAGE="$2"
+    shift 2
+    TEST_CMD=$@
+fi
 if [ -z "$TEST_CMD" ]; then
    TEST_CMD="go test" 
 fi
@@ -51,7 +61,11 @@ TEST_CMD_WITH_ARGS=(
 )
 
 function test_cmd() {
-    mapfile -t PKGS < <(go list -tags dynamic,test ./...)
+    if [ -n "$INTEGRATION_PACKAGE" ]; then
+        mapfile -t PKGS < <(go list -tags dynamic,test "$INTEGRATION_PACKAGE")
+    else
+        mapfile -t PKGS < <(go list -tags dynamic,test ./...)
+    fi
     for pkg in "${PKGS[@]}"; do
         echo -e "-----------------------------------\nRunning test cases at $pkg ..." 
         "${TEST_CMD_WITH_ARGS[@]}" "$pkg"

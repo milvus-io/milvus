@@ -282,11 +282,22 @@ func (c *MiniClusterV3) ShowReplicas() ([]*querypb.Replica, error) {
 
 // ShowSegments shows the segments of a collection.
 func (c *MiniClusterV3) ShowSegments(collectionName string) ([]*datapb.SegmentInfo, error) {
-	resp, err := c.MilvusClient.ShowCollections(c.ctx, &milvuspb.ShowCollectionsRequest{
+	return c.ShowSegmentsWithDB("", collectionName)
+}
+
+// ShowSegmentsWithDB shows the segments of a collection in the given database.
+func (c *MiniClusterV3) ShowSegmentsWithDB(dbName, collectionName string) ([]*datapb.SegmentInfo, error) {
+	ctx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
+	defer cancel()
+	resp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		return nil, err
+	}
+	if len(resp.GetCollectionIds()) == 0 {
+		return nil, fmt.Errorf("collection %q not found in database %q", collectionName, dbName)
 	}
 	return c.metaWatcher.ShowSegments(resp.CollectionIds[0])
 }

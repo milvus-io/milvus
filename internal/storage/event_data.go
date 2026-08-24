@@ -17,8 +17,10 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
+	"math"
 	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -102,9 +104,25 @@ func (data *descriptorEventData) GetEzID() (int64, bool) {
 		return 0, false
 	}
 
-	// won't be not ok, already checked format when write with FinishExtra
-	ezid, _ := ezidInterface.(int64)
-	return ezid, true
+	// Go-written descriptors keep the int64 value in memory, while descriptors
+	// written by the C++ JSON serializer are decoded as float64 by sonic.
+	switch ezid := ezidInterface.(type) {
+	case int64:
+		return ezid, true
+	case float64:
+		if math.IsNaN(ezid) || math.IsInf(ezid, 0) || math.Trunc(ezid) != ezid {
+			return 0, false
+		}
+		return int64(ezid), true
+	case json.Number:
+		value, err := ezid.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return value, true
+	default:
+		return 0, false
+	}
 }
 
 // GetMemoryUsageInBytes returns the memory size of DescriptorEventDataFixPart.
@@ -203,7 +221,9 @@ func readDescriptorEventData(buffer io.Reader) (*descriptorEventData, error) {
 	if err := binary.Read(buffer, common.Endian, &event.ExtraBytes); err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(event.ExtraBytes, &event.Extras); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(event.ExtraBytes))
+	decoder.UseNumber()
+	if err := decoder.Decode(&event.Extras); err != nil {
 		// Malformed extras read back from a stored descriptor event is corrupt
 		// stored data, consistent with the other ErrDataIntegrity checks here.
 		return nil, merr.WrapErrDataIntegrity(err, "failed to unmarshal descriptor event extras")

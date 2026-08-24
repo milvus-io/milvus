@@ -257,6 +257,10 @@ integration-test: getdeps
 	@echo "Building integration tests ..."
 	@(env bash $(PWD)/scripts/run_intergration_test.sh "$(INSTALL_PATH)/gotestsum --")
 
+integration-test-cmek: getdeps
+	@echo "Running CMEK scalar-index integration tests ..."
+	@(bash $(PWD)/scripts/run_intergration_test.sh --package ./cmek "$(INSTALL_PATH)/gotestsum --")
+
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
 BUILD_TAGS_GPU = ${BUILD_TAGS}-gpu
 BUILD_TIME = $(shell date -u)
