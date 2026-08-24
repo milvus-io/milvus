@@ -117,6 +117,9 @@ message CreateJobRequest {
   // Path format version for index files on object storage.
   // See milvus.proto.index.IndexStorePathVersion for value semantics.
   index.IndexStorePathVersion index_store_path_version = 36;
+  // task_resources supersedes task_slot; task_slot stays populated with the
+  // fold of this vector for an un-upgraded worker.
+  data.TaskResources task_resources = 37;
 }
 
 message QueryJobsRequest {
@@ -148,6 +151,7 @@ message GetJobStatsResponse {
   // deprecated
   bool enable_disk = 7;
   int64 total_slots = 8;
+  data.NodeResources resources = 9;
 }
 
 message AnalyzeRequest {
@@ -170,6 +174,7 @@ message AnalyzeRequest {
   int64 max_cluster_size = 17;
   int64 task_slot = 18;
   repeated common.KeyValuePair plugin_context = 19;
+  data.TaskResources task_resources = 20;
 }
 
 message CreateStatsRequest {
@@ -210,6 +215,7 @@ message CreateStatsRequest {
   int64 json_stats_write_batch_size = 30;
   string manifest_path = 31;
   repeated internal.FileResourceInfo file_resources = 32;
+  data.TaskResources task_resources = 33;
 }
 
 message CreateJobV2Request {
