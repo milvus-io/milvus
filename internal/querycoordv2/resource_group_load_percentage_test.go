@@ -91,7 +91,10 @@ func (f *rgLoadPercentageFixture) freeFn(ctx context.Context, collectionID int64
 // putTarget registers collectionID as loaded with a single partition, and
 // gives it a next target containing one channel and the given segments, all
 // on that channel. This is what GetSealedSegmentsByCollection and
-// GetDmChannelsByCollection (both read with meta.NextTarget) will report.
+// GetDmChannelsByCollection (both read with meta.NextTargetFirst) will
+// report. NextTargetFirst, not NextTarget: replicaLoadPercentage reads it
+// that way on purpose, and TestGetLoadPercentageByResourceGroup_SurvivesTargetPromotion
+// exists to forbid changing it back.
 func (f *rgLoadPercentageFixture) putTarget(t *testing.T, collectionID, partitionID int64, channelName string, segmentIDs ...int64) {
 	ctx := context.Background()
 	require.NoError(t, f.meta.PutCollectionWithoutSave(ctx, &meta.Collection{
