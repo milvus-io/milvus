@@ -589,16 +589,20 @@ func statsTaskFieldIDs(schema *schemapb.CollectionSchema, subJobType indexpb.Sta
 // columns they index, while the segment size covers every column. This is worst
 // for external segments, which report one synthetic column group holding all
 // of them. StorageV2 and any other stats task read conservatively as the whole
-// segment. The segment size is also kept whenever estimation is not possible.
+// segment. The segment size is also kept whenever estimation is not possible,
+// including for V3 segments recovered after a restart, whose FieldBinlog
+// arrays are not persisted (see isV3Segment in the datacoord catalog).
 func (si *statsInspector) estimateStatsTaskSize(coll *collectionInfo, segment *SegmentInfo, subJobType indexpb.StatsSubJob) int64 {
 	segmentSize := segment.getSegmentSize()
 
 	readSize := segmentSize
-	if coll != nil && supportsFieldProjection(segment) {
+	if coll != nil && supportsFieldProjection(segment) && len(segment.GetBinlogs()) > 0 {
 		if fieldIDs := statsTaskFieldIDs(coll.Schema, subJobType); len(fieldIDs) > 0 {
 			fieldsSize, err := estimateFieldsReadSize(coll.Schema, segment, fieldIDs)
 			if err != nil {
-				mlog.Warn(si.ctx, "failed to estimate stats task field size, fallback to segment size",
+				// rated: the trigger loop re-estimates pending segments every
+				// tick, before the duplicate-task check can suppress them
+				mlog.RatedWarn(si.ctx, rate.Limit(1), "failed to estimate stats task field size, fallback to segment size",
 					mlog.FieldSegmentID(segment.GetID()),
 					mlog.String("subJobType", subJobType.String()),
 					mlog.Int64("segmentSize", segmentSize),
@@ -610,8 +614,11 @@ func (si *statsInspector) estimateStatsTaskSize(coll *collectionInfo, segment *S
 	}
 
 	if subJobType == indexpb.StatsSubJob_JsonKeyIndexJob {
-		// the json key index task also writes an index of comparable size, so
-		// it handles roughly twice the data it reads.
+		// The json key index task also writes shredded column data of a size
+		// comparable to what it reads, so it handles roughly twice the data.
+		// The text index task is deliberately not doubled: its inverted index
+		// is bounded by the tokenized column, and the pre-existing whole
+		// segment estimation never doubled it either.
 		return readSize * 2
 	}
 	return readSize
