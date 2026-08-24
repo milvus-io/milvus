@@ -690,6 +690,9 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			return err
 		}
 		if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, internalSubReq.FieldId) {
+			if err := validateSparseFloatVectorPlaceholderGroup(internalSubReq.GetPlaceholderGroup()); err != nil {
+				return err
+			}
 			metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.HybridSearchLabel, strconv.FormatInt(internalSubReq.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(internalSubReq.PlaceholderGroup, int(internalSubReq.GetNq()))))
 		}
 		internalSubReq.PlaceholderGroup = convertedPlaceholder
@@ -1043,6 +1046,9 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	}
 	t.PkFilter = checkSegmentFilter(plan)
 	if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, t.FieldId) {
+		if err := validateSparseFloatVectorPlaceholderGroup(t.request.GetPlaceholderGroup()); err != nil {
+			return err
+		}
 		metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.SearchLabel, strconv.FormatInt(t.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.GetPlaceholderGroup(), int(t.request.GetNq()))))
 	}
 	// Convert placeholder group vector type if needed (e.g., fp32 -> fp16/bf16)
