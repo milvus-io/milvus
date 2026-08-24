@@ -635,20 +635,14 @@ func Test_compactionTrigger_force(t *testing.T) {
 					PreAllocatedSegmentIDs: &datapb.IDRange{Begin: preAllocatedSegmentIDBegin, End: preAllocatedSegmentIDEnd},
 					PreAllocatedLogIDs:     &datapb.IDRange{Begin: preAllocatedSegmentIDBegin, End: preAllocatedLogIDEnd},
 					MaxSize:                1073741824,
-					// seg1/seg2 above carry no binlog MemorySize, so the
-					// estimator (internal/util/taskresource) sees a zero-byte
+					// The scalar keeps the meaning an un-upgraded worker
+					// accounts in: the flat mix constant.
+					SlotUsage: Params.DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
+					// The estimate travels here instead. seg1/seg2 above carry
+					// no binlog MemorySize, so the estimator sees a zero-byte
 					// input and falls to the fixed streaming reader/writer
-					// buffer cost (BinLogMaxSize-derived), independent of
-					// segment or row count -- computed the same way
-					// mixCompactionTask.GetTaskSlot does, rather than the old
-					// flat dataCoord.slot.mixCompactionUsage constant.
-					SlotUsage: memoryToSlots(taskresource.EstimateCompaction(taskresource.CompactionInput{
-						Type: datapb.CompactionType_MixCompaction,
-					}).Memory),
-					// The same estimate, unfolded: task_resources is what a
-					// current worker reads, and slot_usage above is only its
-					// fold for one that predates the vector. Both are asserted
-					// so a change to either has to be deliberate.
+					// buffer cost. Both fields are asserted so a change to
+					// either has to be deliberate.
 					TaskResources: taskresource.EstimateCompaction(taskresource.CompactionInput{
 						Type: datapb.CompactionType_MixCompaction,
 					}).ToProto(),

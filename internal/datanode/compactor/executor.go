@@ -256,7 +256,7 @@ func (e *executor) executeTask(ctx context.Context, task Compactor) {
 	// convert waiting into a re-dispatch of the same task by the coordinator,
 	// which is the same wait with a round trip added.
 	req := taskRequirement(task)
-	if err := resource.GetGuard().Acquire(ctx, planID, taskcommon.Compaction, req); err != nil {
+	if err := resource.GetGuard().Accept(ctx, planID, taskcommon.Compaction, req); err != nil {
 		log.Warn(ctx, "compaction gave up waiting for the node's budget",
 			mlog.String("requirement", req.String()), mlog.Err(err))
 		// Nothing was reserved, so nothing is released. The executor's own slot

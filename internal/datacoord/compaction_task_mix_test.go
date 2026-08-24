@@ -356,16 +356,20 @@ func newMixCompactionTaskForTest(t *testing.T, storageVersion int64, memorySize 
 	}, nil, meta, newMockVersionManager())
 }
 
-// issue #52180 incident 1: eight mix compactions totalling 36GiB of input
-// were each charged the flat mixCompactionUsage of 4.
-func TestMixCompactionSlotScalesWithInput(t *testing.T) {
+// issue #52180 incident 1: eight mix compactions totalling 36GiB of input were
+// each charged the flat mixCompactionUsage of 4. The requirement is where that
+// is fixed -- the scalar deliberately keeps the flat constant, because that is
+// the currency an un-upgraded worker accounts in.
+func TestMixCompactionRequirementScalesWithInput(t *testing.T) {
 	paramtable.Init()
 
 	small := newMixCompactionTaskForTest(t, 3 /* storageVersion */, 100*1024*1024)
 	large := newMixCompactionTaskForTest(t, 3 /* storageVersion */, 8*1024*1024*1024)
 
-	assert.Greater(t, large.GetTaskSlot(), small.GetTaskSlot(),
-		"a 8GiB compaction must not cost the same as a 100MiB one")
+	assert.Greater(t, large.taskRequirement().Memory, small.taskRequirement().Memory,
+		"an 8GiB compaction must not cost the same as a 100MiB one")
+	assert.Equal(t, small.GetTaskSlot(), large.GetTaskSlot(),
+		"the scalar stays flat: it is the un-upgraded worker's currency, not the estimate")
 }
 
 func TestMixCompactionSlotIsPositive(t *testing.T) {
@@ -382,7 +386,7 @@ func TestMixCompactionSlotIsPositive(t *testing.T) {
 // order is varied to catch an implementation that silently reads only the
 // first segment in the slice, which "max across inputs" logic can easily
 // regress to.
-func TestMixCompactionSlotAggregatesAcrossSegments(t *testing.T) {
+func TestMixCompactionRequirementAggregatesAcrossSegments(t *testing.T) {
 	paramtable.Init()
 
 	newSeg := func(id, storageVersion, memorySize, deltaSize int64) *SegmentInfo {
@@ -409,12 +413,15 @@ func TestMixCompactionSlotAggregatesAcrossSegments(t *testing.T) {
 	// correct implementation must derive (max storage version 3, summed
 	// memory, max delete payload) -- an independent check that does not just
 	// re-run GetTaskSlot's own arithmetic.
-	want := memoryToSlots(taskresource.EstimateCompaction(taskresource.CompactionInput{
+	// getSegmentSize sums insert AND delta logs, and the largest single
+	// segment's delete payload is then charged again on top -- the compactors
+	// really do hold the delete set alongside the record batches.
+	want := taskresource.EstimateCompaction(taskresource.CompactionInput{
 		Type:                  datapb.CompactionType_MixCompaction,
 		StorageVersion:        3,
-		TotalMemorySize:       mem1 + mem2,
+		TotalMemorySize:       mem1 + mem2 + delta1 + delta2,
 		MaxSegmentDeleteBytes: delta2,
-	}).Memory)
+	})
 
 	for _, order := range [][]int64{{200, 201}, {201, 200}} {
 		meta := NewMockCompactionMeta(t)
@@ -427,7 +434,7 @@ func TestMixCompactionSlotAggregatesAcrossSegments(t *testing.T) {
 			InputSegments: order,
 		}, nil, meta, newMockVersionManager())
 
-		assert.Equal(t, want, task.GetTaskSlot(), "input order %v must not change the aggregated result", order)
+		assert.Equal(t, want, task.taskRequirement(), "input order %v must not change the aggregated result", order)
 	}
 }
 
@@ -461,19 +468,19 @@ func TestMixCompactionSlotUnresolvedSegmentDoesNotCache(t *testing.T) {
 		InputSegments: []int64{200, 201},
 	}, nil, meta, newMockVersionManager())
 
-	first := task.GetTaskSlot()
-	assert.Greater(t, first, int64(0), "a partial estimate is still a usable, positive number")
-	assert.Zero(t, task.slotUsage.Load(), "an incomplete estimate must not be cached")
+	first := task.taskRequirement()
+	assert.Greater(t, first.Memory, int64(0), "a partial estimate is still a usable, positive number")
+	assert.Nil(t, task.requirement.Load(), "an incomplete estimate must not be cached")
 
-	second := task.GetTaskSlot()
+	second := task.taskRequirement()
 	assert.Equal(t, first, second, "the same (still partial) inputs must produce the same estimate")
-	assert.Zero(t, task.slotUsage.Load())
+	assert.Nil(t, task.requirement.Load())
 }
 
 // Complement to the above: once every input segment resolves, the estimate
 // must start being cached (and stop re-fetching) -- the fix is "don't cache a
 // wrong number", not "never cache".
-func TestMixCompactionSlotCachesOnceAllSegmentsResolve(t *testing.T) {
+func TestMixCompactionRequirementCachesOnceAllSegmentsResolve(t *testing.T) {
 	paramtable.Init()
 
 	resolved := func(id int64) *SegmentInfo {
@@ -499,55 +506,52 @@ func TestMixCompactionSlotCachesOnceAllSegmentsResolve(t *testing.T) {
 		InputSegments: []int64{200, 201},
 	}, nil, meta, newMockVersionManager())
 
-	task.GetTaskSlot() // partial: 201 unresolved, must not cache
-	assert.Zero(t, task.slotUsage.Load())
+	task.taskRequirement() // partial: 201 unresolved, must not cache
+	assert.Nil(t, task.requirement.Load())
 
-	full := task.GetTaskSlot() // now fully resolved: caches
-	assert.NotZero(t, task.slotUsage.Load())
+	full := task.taskRequirement() // now fully resolved: caches
+	assert.NotNil(t, task.requirement.Load())
 
 	// A third call must not touch meta again: the exact expectation counts
 	// above (Twice / Once+Once, both now exhausted) make any further
 	// GetHealthySegment call fail the test.
-	again := task.GetTaskSlot()
+	again := task.taskRequirement()
 	assert.Equal(t, full, again)
 }
 
-// dataCoord.resource.enableCompactionEstimate is the coordinator side's
-// rollback path. The estimate is folded back onto the same scalar slot field
-// the wire has always carried, but with a different scale: a 4.5GiB storage-v3
-// compaction moves from a flat 4 slots to about 36. Against a DataNode that has
-// not restarted yet -- an ordinary partial rollout, or a rollback -- a new
-// DataCoord therefore reads that node as full roughly nine times too early, on
-// every task rather than on rare ones.
-//
-// It is deliberately NOT a switch for the whole feature: the DataNode ledger
-// stays on. Hence the name.
-func TestMixCompactionSlotHonoursTheResourceKillSwitch(t *testing.T) {
+// The scalar slot field keeps its ORIGINAL meaning: it is what an un-upgraded
+// worker reads, and such a worker accounts against it with the pricing it has
+// always understood. Folding a byte estimate onto it instead would keep the
+// name and change the scale -- a 4.5GiB storage-v3 compaction moves from a flat
+// 4 slots to about 36 -- so a new coordinator would read a not-yet-restarted
+// worker as full roughly nine times too early, on every task. That collision is
+// what an earlier version needed a kill switch to undo; sending each worker the
+// currency it understands removes it instead.
+func TestMixCompactionScalarKeepsItsOriginalMeaning(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
 
-	// 8GiB of storage-v3 input: comfortably more than the flat constant.
 	const inputBytes = int64(8) * 1024 * 1024 * 1024
+	task := newMixCompactionTaskForTest(t, 3, inputBytes)
 
-	estimated := newMixCompactionTaskForTest(t, 3, inputBytes).GetTaskSlot()
 	flat := pt.DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
-	require.Greater(t, estimated, flat,
-		"setup: the estimate must differ from the constant, or this switch changes nothing")
+	assert.Equal(t, flat, task.GetTaskSlot(),
+		"the scalar must stay on the scale an un-upgraded worker accounts in")
 
-	pt.Save(pt.DataCoordCfg.ResourceEnableCompactionEstimate.Key, "false")
-	defer pt.Reset(pt.DataCoordCfg.ResourceEnableCompactionEstimate.Key)
-
-	off := newMixCompactionTaskForTest(t, 3, inputBytes).GetTaskSlot()
-	assert.Equal(t, flat, off, "with the switch off, mix compaction reports the pre-branch constant")
+	// The estimate is not lost -- it travels in its own field, where it cannot
+	// be misread against the old scale.
+	req, ok := taskresource.RequirementFromProto(task.TaskResources())
+	require.True(t, ok)
+	assert.Greater(t, req.Memory, int64(4)<<30,
+		"the vector must carry the real figure the scalar cannot express")
 }
 
-// Sort compaction had its own pre-branch formula -- the segment-size step
-// function -- so the rollback has to restore that, not the mix constant.
-func TestSortCompactionSlotKillSwitchRestoresTheStepFunction(t *testing.T) {
+// Sort compaction has always had its own scalar formula -- the segment-size
+// step function -- so the compatibility currency for it is that, not the mix
+// constant.
+func TestSortCompactionScalarKeepsTheStepFunction(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
-	pt.Save(pt.DataCoordCfg.ResourceEnableCompactionEstimate.Key, "false")
-	defer pt.Reset(pt.DataCoordCfg.ResourceEnableCompactionEstimate.Key)
 
 	const segSize = int64(2) * 1024 * 1024 * 1024
 	meta := NewMockCompactionMeta(t)

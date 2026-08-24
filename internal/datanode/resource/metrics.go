@@ -19,55 +19,17 @@ package resource
 import (
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// Reasons an admission attempt did not reserve. There is no "rejected" among
-// them, and no "oversized" either: nothing is refused permanently, so every one
-// of these says why a task is waiting rather than why it was turned away.
-//
-// They are split the way an operator's response splits. A frozen node is a
-// memory problem and the tasks are innocent; a node short of budget is doing
-// exactly what it should; a node held by one oversized task will not admit
-// anything however small, and no amount of waiting changes that until the task
-// finishes; and a task held out by the head-of-line reservation is being made
-// to queue on purpose. Collapsing any two of these would leave the dashboard
-// unable to tell a healthy busy node from a stuck one.
-const (
-	// reasonFrozen: measured memory is above the high watermark.
-	reasonFrozen = "frozen"
-	// reasonExclusive: one task larger than the node holds it alone.
-	reasonExclusive = "exclusive"
-	// reasonAwaitingDrain: this request needs the whole node, and the node is
-	// not empty yet.
-	reasonAwaitingDrain = "awaiting_drain"
-	// reasonHeadOfLine: budget is being held for a task that has waited longer,
-	// or the request wants the whole node from behind someone else in the queue.
-	reasonHeadOfLine = "head_of_line"
-	// reasonInsufficient: the ledger has no room for this request.
-	reasonInsufficient = "insufficient"
-)
-
-// deferLocked records one deferred admission and returns what tryAcquireLocked
-// hands back. Recording it here, at the branch that decided it, is what keeps
-// the reason from drifting away from the rule it names.
-func (g *guard) deferLocked(taskType taskcommon.Type, reason string, budget taskresource.Capacity) (bool, taskresource.Capacity) {
-	metrics.DataNodeTaskAdmissionDeferred.
-		WithLabelValues(paramtable.GetStringNodeID(), taskType, reason).
-		Inc()
-	return false, g.availLocked(budget)
-}
-
-// observeAdmissionWait records how long a task sat in Acquire before it
-// started. Admissions that did not wait are recorded too: without them every
-// quantile drawn from this histogram would describe a permanently congested
-// node. A caller whose context ended is not recorded at all -- it never became
-// an admission, and a wait that ended in no work does not belong in a
-// distribution of waits that ended in work. Those show up as queue depth
-// (resource_waiting_tasks) and as deferrals instead.
+// observeAdmissionWait records how long a task sat in Accept before it started.
+// That is zero unless the memory safety valve was engaged, which is the point:
+// a non-zero quantile here means the node was holding work back on measured
+// memory, and nothing else in the system produces that signal. Accepts that did
+// not wait are recorded too, so the quantiles describe the node rather than
+// only its bad moments.
 func observeAdmissionWait(taskType taskcommon.Type, waited time.Duration) {
 	metrics.DataNodeTaskAdmissionWait.
 		WithLabelValues(paramtable.GetStringNodeID(), taskType).
@@ -89,18 +51,19 @@ func observeAdmissionWait(taskType taskcommon.Type, waited time.Duration) {
 // hand, and admission never consults it -- deciding from measured memory is the
 // failure this package exists to prevent.
 func (g *guard) publishLocked(observedMemory int64) {
-	budget := g.budgetLocked()
 	nodeID := paramtable.GetStringNodeID()
 
-	metrics.DataNodeResourceReservedMemory.WithLabelValues(nodeID).Set(float64(g.reserved.Memory))
-	metrics.DataNodeResourceReservedCPU.WithLabelValues(nodeID).Set(g.reserved.CPU)
-	metrics.DataNodeResourceBudgetMemory.WithLabelValues(nodeID).Set(float64(budget.Memory))
-	metrics.DataNodeResourceBudgetCPU.WithLabelValues(nodeID).Set(budget.CPU)
-	metrics.DataNodeResourceNonTaskMemory.WithLabelValues(nodeID).Set(float64(g.nonTask))
+	capacity := g.capacityLocked()
+	metrics.DataNodeResourceReservedMemory.WithLabelValues(nodeID).Set(float64(g.committed.Memory))
+	metrics.DataNodeResourceReservedCPU.WithLabelValues(nodeID).Set(g.committed.CPU)
+	metrics.DataNodeResourceBudgetMemory.WithLabelValues(nodeID).Set(float64(capacity.Memory))
+	metrics.DataNodeResourceBudgetCPU.WithLabelValues(nodeID).Set(capacity.CPU)
+	// The observed figure is the estimate-versus-actual signal for tuning the
+	// memory factors by hand. Comparing it against reserved above is the only
+	// way to tell a systematically low estimate from a correct one, and nothing
+	// in the admission path consults it.
 	metrics.DataNodeResourceObservedMemory.WithLabelValues(nodeID).Set(float64(observedMemory))
 	metrics.DataNodeResourceFrozen.WithLabelValues(nodeID).Set(boolGauge(g.frozen))
-	metrics.DataNodeResourceExclusive.WithLabelValues(nodeID).Set(boolGauge(g.exclusiveTaskID != 0))
-	metrics.DataNodeResourceWaitingTasks.WithLabelValues(nodeID).Set(float64(len(g.waiters)))
 }
 
 func boolGauge(b bool) float64 {

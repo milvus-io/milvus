@@ -51,10 +51,9 @@ func saturatingMul(left, right int64) int64 {
 // raw node memory: WorkerSlotUnit x BuildParallel, times StandaloneSlotRatio
 // when the worker is embedded in a standalone deployment.
 //
-// It is the divisor both bytes<->slots conversions invert CalculateNodeSlots
-// with -- fmIndexBuildTaskSlots (internal/datacoord/util.go) for FM-index
-// builds, LegacyMemoryPerSlot below for the phase-0 scalar slot -- and the two
-// must not drift apart, so they share this one definition.
+// It is the divisor that inverts CalculateNodeSlots, shared by
+// fmIndexBuildTaskSlots (internal/datacoord/util.go) and by
+// LegacySlotToRequirement, so the two cannot drift apart.
 func WorkerSlotsPerMemoryUnit() int64 {
 	cfg := &paramtable.Get().DataNodeCfg
 	slots := saturatingMul(
@@ -66,47 +65,4 @@ func WorkerSlotsPerMemoryUnit() int64 {
 	}
 	// Never zero: it is always used as a divisor.
 	return max(slots, 1)
-}
-
-// LegacyMemoryPerSlot is the exchange rate between the scalar slot the wire
-// protocol still carries in phase 0 and the byte budget the DataNode's ledger
-// actually reasons in. It is read in both directions -- DataCoord folds a byte
-// estimate down to slots with it (memoryToSlots), the DataNode unfolds a slot
-// back into a requirement with it (LegacySlotToRequirement) -- so the two sides
-// must compute the same number.
-//
-// It is derived rather than configured, because the node's own reported
-// availability already fixes it. legacyAvailableSlots
-// (internal/datanode/services.go) reports CalculateNodeSlots x (1 - budget
-// utilization), so one reported slot is worth exactly (ledger budget /
-// CalculateNodeSlots) bytes. On a memory-bound node the hardware term cancels:
-//
-//	CalculateNodeSlots = mem/8GiB x WorkerSlotUnit x BuildParallel
-//	ledger budget      = mem x memoryRatio          (see NodeCapacity)
-//	budget per slot    = 8GiB / (WorkerSlotUnit x BuildParallel) x memoryRatio
-//
-// which is 512MiB x 0.75 = 384MiB at the defaults. The cancellation is what
-// lets a coordinator that has never seen the worker's hardware compute the
-// same rate the worker does.
-//
-// The first factor is exactly the inversion fmIndexBuildTaskSlots
-// (internal/datacoord/util.go) performs, and is shared with it. The memoryRatio
-// factor is this function's own: fmIndexBuildTaskSlots prices against raw node
-// memory, while a slot reported by legacyAvailableSlots is a slice of the
-// ledger's budget, which is raw memory already scaled by memoryRatio. Dropping
-// that factor would make each slot look 1/memoryRatio times larger than the
-// node will charge for it (a third larger at the default), and DataCoord would
-// go back to over-dispatching against a budget the node does not have.
-//
-// On a CPU-bound node CalculateNodeSlots is smaller than the memory-bound
-// expression above, so a slot is worth more budget than this returns. The rate
-// then understates a slot, DataCoord charges a task more slots than the node
-// deducts, and it dispatches less than the node would admit -- the safe
-// direction for an estimate the wire cannot carry precisely.
-func LegacyMemoryPerSlot() int64 {
-	rawPerSlot := max(BytesPerWorkerMemoryUnit/WorkerSlotsPerMemoryUnit(), 1)
-	perSlot := int64(float64(rawPerSlot) * paramtable.Get().DataNodeCfg.ResourceMemoryRatio.GetAsFloat())
-	// Never zero: it is used as a divisor on the DataCoord side, and as the
-	// per-slot charge on the DataNode side where zero would mean "free".
-	return max(perSlot, 1)
 }

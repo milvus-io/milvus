@@ -126,7 +126,7 @@ func (s *scheduler) scheduleTasks() {
 		// refuses permanently -- a task larger than the whole node waits for it
 		// to drain and then runs alone -- so a timeout would only put the same
 		// task back at the end of the same queue.
-		if err := resource.GetGuard().Acquire(s.ctx, taskID, ledgerTaskType(task.GetType()), req); err != nil {
+		if err := resource.GetGuard().Accept(s.ctx, taskID, ledgerTaskType(task.GetType()), req); err != nil {
 			mlog.Warn(context.TODO(), "import task gave up waiting for the node's budget",
 				mlog.FieldTaskID(taskID), mlog.String("requirement", req.String()), mlog.Err(err))
 			// Nothing was reserved, so nothing is released. The task stays

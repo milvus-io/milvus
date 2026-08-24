@@ -5778,12 +5778,11 @@ type dataCoordConfig struct {
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
 
 	// Task resource estimation
-	ResourceEnableCompactionEstimate ParamItem `refreshable:"true"`
-	ResourceMixCompactionV3Factor    ParamItem `refreshable:"true"`
-	ResourceClusteringFactor         ParamItem `refreshable:"true"`
-	ResourceClusteringMinMemory      ParamItem `refreshable:"true"`
-	ResourceClusteringMaxMemory      ParamItem `refreshable:"true"`
-	ResourceArrowExpansionFactor     ParamItem `refreshable:"true"`
+	ResourceMixCompactionV3Factor ParamItem `refreshable:"true"`
+	ResourceClusteringFactor      ParamItem `refreshable:"true"`
+	ResourceClusteringMinMemory   ParamItem `refreshable:"true"`
+	ResourceClusteringMaxMemory   ParamItem `refreshable:"true"`
+	ResourceArrowExpansionFactor  ParamItem `refreshable:"true"`
 
 	ResourceIndexBuildFactorDefault ParamItem `refreshable:"true"`
 	ResourceIndexBuildCPU           ParamItem `refreshable:"true"`
@@ -7512,24 +7511,6 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 	}
 	p.JSONStatsWriteBatchSize.Init(base.mgr)
 
-	p.ResourceEnableCompactionEstimate = ParamItem{
-		Key:          "dataCoord.resource.enableCompactionEstimate",
-		Version:      "3.0.0",
-		DefaultValue: "true",
-		Doc: "whether DataCoord derives a compaction task's slot count from its input data. When false, " +
-			"each compaction family reverts to the pricing it used before resource estimation existed: " +
-			"mix compaction to the flat dataCoord.slot.mixCompactionSlotUsage constant, and sort " +
-			"compaction to the step function over segment size (it was never flat). Turn it off during " +
-			"a partial rollout or a rollback: the byte estimate is folded onto the same scalar slot " +
-			"field the wire has always carried but on a different scale, so a new DataCoord talking to " +
-			"a DataNode that has not restarted yet reads that node as full far too early and " +
-			"cluster-wide compaction throughput collapses. This switch affects DataCoord's pricing " +
-			"ONLY. The DataNode's own admission ledger, which is what prevents the out-of-memory kills " +
-			"this feature exists for, stays on and has no switch",
-		Export: true,
-	}
-	p.ResourceEnableCompactionEstimate.Init(base.mgr)
-
 	p.ResourceMixCompactionV3Factor = ParamItem{
 		Key:          "dataCoord.resource.mixCompactionV3MemoryFactor",
 		Version:      "3.0.0",
@@ -7728,13 +7709,10 @@ type dataNodeConfig struct {
 	SlotCap ParamItem `refreshable:"true"`
 
 	// resource guard
-	ResourceCPURatio           ParamItem `refreshable:"true"`
-	ResourceMemoryRatio        ParamItem `refreshable:"true"`
-	ResourceHighWatermark      ParamItem `refreshable:"true"`
-	ResourceLowWatermark       ParamItem `refreshable:"true"`
-	ResourceNonTaskMemoryFloor ParamItem `refreshable:"true"`
-	ResourceSlowGrowPeriods    ParamItem `refreshable:"true"`
-	ResourceHeadOfLineReserve  ParamItem `refreshable:"true"`
+	ResourceCPURatio      ParamItem `refreshable:"true"`
+	ResourceMemoryRatio   ParamItem `refreshable:"true"`
+	ResourceHighWatermark ParamItem `refreshable:"true"`
+	ResourceLowWatermark  ParamItem `refreshable:"true"`
 
 	// clustering compaction
 	ClusteringCompactionMemoryBufferRatio ParamItem `refreshable:"true"`
@@ -8368,33 +8346,6 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 	}
 	p.ResourceLowWatermark.Init(base.mgr)
 
-	p.ResourceNonTaskMemoryFloor = ParamItem{
-		Key:          "dataNode.resource.nonTaskMemoryFloor",
-		Version:      "3.0.0",
-		DefaultValue: "1073741824",
-		Doc:          "lower bound in bytes reserved for memory outside the task ledger",
-		Export:       true,
-	}
-	p.ResourceNonTaskMemoryFloor.Init(base.mgr)
-
-	p.ResourceSlowGrowPeriods = ParamItem{
-		Key:          "dataNode.resource.slowGrowPeriods",
-		Version:      "3.0.0",
-		DefaultValue: "5",
-		Doc: "consecutive lower samples required before the non-task memory reservation is allowed to shrink, " +
-			"i.e. before the task budget grows; samples are taken every 3s, so this is that many 3s periods",
-		Export: true,
-	}
-	p.ResourceSlowGrowPeriods.Init(base.mgr)
-
-	p.ResourceHeadOfLineReserve = ParamItem{
-		Key:          "dataNode.resource.headOfLineReservation",
-		Version:      "3.0.0",
-		DefaultValue: "true",
-		Doc:          "reserve budget for the longest-waiting task so large tasks cannot starve",
-		Export:       true,
-	}
-	p.ResourceHeadOfLineReserve.Init(base.mgr)
 }
 
 type streamingConfig struct {

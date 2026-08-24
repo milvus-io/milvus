@@ -54,37 +54,50 @@ func (t *mixCompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
 }
 
-func (t *mixCompactionTask) GetTaskSlot() int64 {
-	if slotUsage := t.slotUsage.Load(); slotUsage != 0 {
-		return slotUsage
+// price resolves the input segments ONCE and derives both currencies from that
+// single walk: the scalar an un-upgraded worker accounts in, and the vector a
+// current coordinator places on. Two independent walks would double the meta
+// lookups on the scheduler's per-round path, and could disagree about which
+// segments still exist.
+func (t *mixCompactionTask) price() (int64, taskresource.Requirement) {
+	if slot, req := t.slotUsage.Load(), t.requirement.Load(); slot != 0 && req != nil {
+		return slot, *req
 	}
-
-	// No pre-fetched segments on hand (this is the standalone path, e.g. the
-	// global scheduler sizing the task before a node is even picked), so
-	// resolve them here. BuildCompactionRequest below has its own segments
-	// already in hand by the time it needs a slot count and calls
-	// computeAndCacheTaskSlot directly to avoid fetching them a second time.
 	segments, allResolved := t.resolveInputSegments(context.TODO())
-	return memoryToSlots(t.computeAndCacheRequirement(segments, allResolved).Memory)
+	return t.legacyTaskSlot(segments), t.computeAndCacheRequirement(segments, allResolved)
+}
+
+// GetTaskSlot is the scalar an un-upgraded worker reads, and it deliberately
+// reports the LEGACY figure -- the flat constant for mix, the segment-size step
+// function for sort.
+//
+// The estimate does not go here. Folding a byte estimate onto this field would
+// keep its name and change its scale, and a worker that has not restarted would
+// read the new number against the old scale: a 4.5GiB storage-v3 compaction
+// moves from 4 slots to about 36, so a new coordinator reads such a worker as
+// full roughly nine times too early, on every compaction. That is a
+// cluster-wide throughput collapse reachable by an ordinary partial rollout,
+// and it is what an earlier kill switch existed to undo. Sending each worker
+// the currency it understands -- the vector to those that understand it, the
+// old constants to those that do not -- removes the collision instead of
+// providing a lever for it.
+func (t *mixCompactionTask) GetTaskSlot() int64 {
+	slot, _ := t.price()
+	return slot
 }
 
 // TaskResources states this task's requirement to the scheduler BEFORE it is
 // dispatched, which is what lets the node be chosen for having room rather
-// than for a scalar that stands in for it. It reuses the same cached estimate
-// the plan ships, so stating it costs nothing extra.
+// than for a scalar that stands in for it.
 func (t *mixCompactionTask) TaskResources() *datapb.TaskResources {
-	return t.taskRequirement().ToProto()
+	_, req := t.price()
+	return req.ToProto()
 }
 
-// taskRequirement is the two-dimensional estimate that goes on the wire. It
-// reuses whatever GetTaskSlot already resolved, so asking for both costs one
-// meta walk rather than two.
+// taskRequirement is the two-dimensional estimate that goes on the wire.
 func (t *mixCompactionTask) taskRequirement() taskresource.Requirement {
-	if cached := t.requirement.Load(); cached != nil {
-		return *cached
-	}
-	segments, allResolved := t.resolveInputSegments(context.TODO())
-	return t.computeAndCacheRequirement(segments, allResolved)
+	_, req := t.price()
+	return req
 }
 
 // resolveInputSegments fetches every input segment via meta.GetHealthySegment.
@@ -125,48 +138,38 @@ func (t *mixCompactionTask) computeAndCacheRequirement(segments []*SegmentInfo, 
 		return *cached
 	}
 
-	if !paramtable.Get().DataCoordCfg.ResourceEnableCompactionEstimate.GetAsBool() {
-		return taskresource.LegacySlotToRequirement(t.legacyTaskSlot(segments))
-	}
-
 	req := compactionRequirement(t.GetTaskProto().GetType(), segments, t.GetTaskProto().GetSchema())
+	// Cache only a complete estimate: a partial one is immediately usable but
+	// caching it would turn a transient resolution failure into a permanently
+	// wrong figure for this task instance.
 	if allResolved {
 		t.requirement.Store(&req)
-		t.slotUsage.Store(memoryToSlots(req.Memory))
 	}
 	mlog.Info(context.TODO(), "mixCompactionTask priced task",
 		mlog.Int64("planID", t.GetTaskID()),
 		mlog.String("requirement", req.String()),
-		mlog.Int64("foldedTaskSlot", memoryToSlots(req.Memory)),
 		mlog.Bool("cached", allResolved))
 	return req
 }
 
-// legacyTaskSlot is what this task reported before resource estimation existed:
-// a flat constant for mix, and the segment-size step function for sort. It is
-// the rollback path for dataCoord.resource.enableCompactionEstimate.
-//
-// The switch is needed because the wire protocol did not change in this phase.
-// The slot field still carries a scalar, but the estimator changed what a slot
-// MEANS for this task family -- a 4.5GiB storage-v3 compaction moves from 4
-// slots to about 36. A DataNode that has not restarted yet still reports its
-// availability on the old CPU-derived scale, so a new DataCoord reads it as
-// full roughly nine times too early, on every compaction rather than on rare
-// ones. That is a cluster-wide throughput collapse with no other way out, and
-// it is reachable by an ordinary partial rollout or a rollback.
-//
-// The switch is named for what it does rather than for the feature, because it
-// turns off exactly this pricing and nothing else. The DataNode's admission
-// ledger -- the half that actually prevents the OOM kills in issue #52180 --
-// keeps running, and deliberately has no switch of its own: one would be a way
-// to re-enable the outage.
+// legacyTaskSlot is the pricing this task has always reported on the scalar
+// field: a flat constant for mix, the segment-size step function for sort. It
+// is not a fallback -- it is what the scalar field MEANS, and it keeps meaning
+// that so an un-upgraded worker's own accounting stays self-consistent.
 func (t *mixCompactionTask) legacyTaskSlot(segments []*SegmentInfo) int64 {
+	isSort := t.GetTaskProto().GetType() == datapb.CompactionType_SortCompaction
 	slotUsage := paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
-	if t.GetTaskProto().GetType() == datapb.CompactionType_SortCompaction && len(segments) > 0 {
+	if isSort && len(segments) > 0 {
 		segSize := segments[0].getSegmentSize()
 		slotUsage = calculateStatsTaskSlot(segSize)
 		mlog.Info(context.TODO(), "mixCompactionTask get legacy task slot",
 			mlog.Int64("segmentSize", segSize), mlog.Int64("taskSlot", slotUsage))
+	}
+	if isSort && len(segments) == 0 {
+		// A sort compaction whose segment did not resolve would otherwise be
+		// pinned at the mix constant for the rest of this task instance's life,
+		// because the cache short-circuits every later call.
+		return slotUsage
 	}
 	t.slotUsage.Store(slotUsage)
 	return slotUsage
@@ -518,11 +521,10 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 	// GetSlotUsage do its own independent meta fetch, which would both
 	// double the lookups and open a window where the two fetches disagree
 	// about which segments actually exist.
-	req := t.computeAndCacheRequirement(segments, true)
-	plan.TaskResources = req.ToProto()
-	// slot_usage stays populated with the fold so a worker that predates
-	// task_resources keeps the number it has always read.
-	plan.SlotUsage = memoryToSlots(req.Memory)
+	plan.TaskResources = t.computeAndCacheRequirement(segments, true).ToProto()
+	// The scalar keeps its original meaning for a worker that predates the
+	// vector; see GetTaskSlot.
+	plan.SlotUsage = t.legacyTaskSlot(segments)
 
 	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments, taskSchema)
 	if err != nil {

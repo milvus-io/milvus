@@ -198,28 +198,19 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 	// work, so a node with a full index queue would report itself free here too.
 	available := availableSlots(snap, legacyTotal, indexStatsUsed, compactionUsed, importUsed)
 
-	// A sustained watermark freeze can leave tasks parked in Acquire
-	// indefinitely (Acquire only returns on ctx cancellation), reporting
-	// nothing to DataCoord. The log line makes that state unmistakable so an
-	// operator does not mistake it for "genuinely busy": both otherwise read
-	// as availableSlots=0.
-	if snap.Frozen {
-		mlog.Warn(ctx, "query slots done: node frozen by memory watermark, reporting zero available slots",
+	// A node that has stopped taking work reports zero, which is otherwise
+	// indistinguishable from being genuinely busy.
+	if !snap.Admitting {
+		mlog.Warn(ctx, "query slots done: node has stopped taking tasks on measured memory",
 			mlog.Int64("legacyTotalSlots", legacyTotal),
-			mlog.Float64("reservedCPU", snap.Reserved.CPU),
-			mlog.Int64("reservedMemoryMiB", snap.Reserved.Memory>>20),
-			mlog.Int64("budgetMemoryMiB", snap.Total.Memory>>20),
-			mlog.Int64("nonTaskMemoryMiB", snap.NonTask>>20),
-			mlog.Int64("exclusiveTaskID", snap.ExclusiveTaskID))
+			mlog.Int64("committedMemoryMiB", snap.Committed.Memory>>20),
+			mlog.Int64("capacityMemoryMiB", snap.Capacity.Memory>>20))
 	} else {
 		mlog.Info(ctx, "query slots done",
 			mlog.Int64("legacyTotalSlots", legacyTotal),
 			mlog.Int64("legacyAvailableSlots", available),
-			mlog.Float64("reservedCPU", snap.Reserved.CPU),
-			mlog.Int64("reservedMemoryMiB", snap.Reserved.Memory>>20),
-			mlog.Int64("budgetMemoryMiB", snap.Total.Memory>>20),
-			mlog.Int64("nonTaskMemoryMiB", snap.NonTask>>20),
-			mlog.Int64("exclusiveTaskID", snap.ExclusiveTaskID))
+			mlog.Int64("committedMemoryMiB", snap.Committed.Memory>>20),
+			mlog.Int64("capacityMemoryMiB", snap.Capacity.Memory>>20))
 	}
 
 	return &workerpb.GetJobStatsResponse{

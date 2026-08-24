@@ -920,7 +920,6 @@ dataCoord:
   jsonShreddingRatioThreshold: 0.3 # the ratio threshold to shred
   jsonShreddingWriteBatchSize: 81920 # the batch size to write
   resource:
-    enableCompactionEstimate: true # whether DataCoord derives a compaction task's slot count from its input data. When false, each compaction family reverts to the pricing it used before resource estimation existed: mix compaction to the flat dataCoord.slot.mixCompactionSlotUsage constant, and sort compaction to the step function over segment size (it was never flat). Turn it off during a partial rollout or a rollback: the byte estimate is folded onto the same scalar slot field the wire has always carried but on a different scale, so a new DataCoord talking to a DataNode that has not restarted yet reads that node as full far too early and cluster-wide compaction throughput collapses. This switch affects DataCoord's pricing ONLY. The DataNode's own admission ledger, which is what prevents the out-of-memory kills this feature exists for, stays on and has no switch
     mixCompactionV3MemoryFactor: 1 # memory per byte of input for storage-v3 mix compaction; empirically ~0.9 from issue #52180, kept at 1.0 as a conservative bound
     clusteringMemoryFactor: 0.3 # memory per byte of input granted to clustering compaction
     clusteringMinMemory: 536870912 # lower bound in bytes of the clustering compaction grant
@@ -1011,9 +1010,6 @@ dataNode:
     memoryRatio: 0.75 # ratio of node memory usable by scheduled tasks
     highWatermark: 0.85 # measured memory ratio above which the node stops admitting new tasks
     lowWatermark: 0.75 # measured memory ratio below which admission resumes
-    nonTaskMemoryFloor: 1073741824 # lower bound in bytes reserved for memory outside the task ledger
-    slowGrowPeriods: 5 # consecutive lower samples required before the non-task memory reservation is allowed to shrink, i.e. before the task budget grows; samples are taken every 3s, so this is that many 3s periods
-    headOfLineReservation: true # reserve budget for the longest-waiting task so large tasks cannot starve
   clusteringCompaction:
     memoryBufferRatio: 0.3 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.
     workPoolSize: 8 # worker pool size for one clustering compaction job.

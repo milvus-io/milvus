@@ -128,6 +128,13 @@ func (p *nodePicker) pickDimensioned(req taskresource.Requirement, taskSlot int6
 		if roomiest == nil || n.capacity.Memory > roomiest.capacity.Memory {
 			roomiest = n
 		}
+		if n.slots != nil && n.slots.AvailableSlots <= 0 {
+			// The dimensions cover tasks the worker has STARTED. Its scalar
+			// still carries what is merely queued there -- the executors charge
+			// that at enqueue -- so a node whose queue is full is not a
+			// candidate however much memory the ledger says is free.
+			continue
+		}
 		free := n.free()
 		if free.Memory < req.Memory {
 			// Memory gates. This is the only dimension a task can be refused a

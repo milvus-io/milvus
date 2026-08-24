@@ -32,44 +32,38 @@ func TestRecordingGuardRecordsWhatItWasAsked(t *testing.T) {
 	g := NewRecordingGuard()
 	req := taskresource.Requirement{CPU: 1, Memory: 2 << 30}
 
-	require.NoError(t, g.Acquire(context.Background(), 1, taskcommon.Compaction, req))
+	require.NoError(t, g.Accept(context.Background(), 1, taskcommon.Compaction, req))
 	g.Note("work")
-
-	// TryAcquire admits too, but lands in its own list: the executors' tests
-	// assert that list is empty, which is only meaningful if a call would in
-	// fact show up in it.
-	admitted, _ := g.TryAcquire(2, taskcommon.Index, req)
-	assert.True(t, admitted)
-	assert.Equal(t, []AcquireCall{{TaskID: 2, Type: taskcommon.Index, Req: req}}, g.TryAcquires())
-
 	g.Release(1)
 
 	assert.Equal(t, []AcquireCall{{TaskID: 1, Type: taskcommon.Compaction, Req: req}}, g.Acquires())
 	assert.Equal(t, []int64{1}, g.Releases())
-	assert.Equal(t, []string{"acquire", "work", "tryAcquire", "release"}, g.Events())
+	// The ORDER is the point: an executor that ran work before accepting, or
+	// released before finishing, would show up here and nowhere else.
+	assert.Equal(t, []string{"acquire", "work", "release"}, g.Events())
 	// Snapshot is inert: nothing under test reads the ledger through the double.
 	assert.Equal(t, Snapshot{}, g.Snapshot())
 }
 
-func TestRecordingGuardFailAcquireRecordsNothing(t *testing.T) {
+func TestRecordingGuardFailedAcceptRecordsNothing(t *testing.T) {
 	g := NewRecordingGuard()
 	boom := errors.New("boom")
 	g.FailAcquire(boom)
 
-	err := g.Acquire(context.Background(), 1, taskcommon.Import, taskresource.Requirement{})
+	err := g.Accept(context.Background(), 1, taskcommon.Import, taskresource.Requirement{})
 
 	assert.ErrorIs(t, err, boom)
 	assert.Empty(t, g.Acquires())
 	assert.Empty(t, g.Events())
 }
 
-func TestRecordingGuardBlockedAcquireHonoursContext(t *testing.T) {
+func TestRecordingGuardBlockedAcceptHonoursContext(t *testing.T) {
 	g := NewRecordingGuard()
 	g.Block()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := g.Acquire(ctx, 1, taskcommon.Stats, taskresource.Requirement{})
+	err := g.Accept(ctx, 1, taskcommon.Stats, taskresource.Requirement{})
 
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Empty(t, g.Acquires())

@@ -758,10 +758,9 @@ func TestExecutorAdmission(t *testing.T) {
 		// that has not started, and would make waiting look like a stalled RPC
 		// instead of a queued task.
 		assert.Empty(t, g.Acquires())
-		assert.Empty(t, g.TryAcquires())
 	})
 
-	t.Run("parks in Acquire instead of polling TryAcquire", func(t *testing.T) {
+	t.Run("waits in Accept before starting any work", func(t *testing.T) {
 		g := useRecordingGuard(t)
 		g.Block()
 		planID := int64(4004)
@@ -789,10 +788,6 @@ func TestExecutorAdmission(t *testing.T) {
 			require.Fail(t, "compaction started before its reservation was granted")
 		case <-time.After(100 * time.Millisecond):
 		}
-		// ...and the wait must happen inside Acquire, where the guard can hold
-		// the queue's head. A TryAcquire poll loop is invisible to that and can
-		// starve a large task forever.
-		assert.Empty(t, g.TryAcquires())
 
 		g.Unblock()
 		select {

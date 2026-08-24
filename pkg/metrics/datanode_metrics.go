@@ -406,14 +406,6 @@ var (
 			Help:      "CPU cores available to tasks",
 		}, []string{nodeIDLabelName})
 
-	DataNodeResourceNonTaskMemory = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.DataNodeRole,
-			Name:      "resource_non_task_memory_bytes",
-			Help:      "memory observed outside the task ledger, held back from the task budget",
-		}, []string{nodeIDLabelName})
-
 	// DataNodeResourceObservedMemory is the measured figure the estimates are
 	// checked against: divided by resource_reserved_memory_bytes it is the
 	// estimate-versus-actual ratio the memory factors are tuned from. It is
@@ -436,22 +428,6 @@ var (
 			Help:      "1 while admission is frozen by the high memory watermark",
 		}, []string{nodeIDLabelName})
 
-	DataNodeResourceExclusive = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.DataNodeRole,
-			Name:      "resource_exclusive",
-			Help:      "1 while one task larger than the node occupies it alone",
-		}, []string{nodeIDLabelName})
-
-	DataNodeResourceWaitingTasks = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.DataNodeRole,
-			Name:      "resource_waiting_tasks",
-			Help:      "tasks parked waiting for a reservation",
-		}, []string{nodeIDLabelName})
-
 	// DataNodeTaskAdmissionWait is in milliseconds, like every other DataNode
 	// latency histogram in this file, so that one dashboard does not mix units.
 	DataNodeTaskAdmissionWait = prometheus.NewHistogramVec(
@@ -462,17 +438,6 @@ var (
 			Help:      "time a task spent waiting for a reservation before it started",
 			Buckets:   longTaskBuckets,
 		}, []string{nodeIDLabelName, "task_type"})
-
-	// DataNodeTaskAdmissionDeferred counts admission attempts that did not
-	// reserve. Deferred, not rejected: no request is refused permanently, so
-	// this is a rate to watch rather than a count of failures.
-	DataNodeTaskAdmissionDeferred = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.DataNodeRole,
-			Name:      "task_admission_deferred_total",
-			Help:      "admission attempts that did not reserve, by reason",
-		}, []string{nodeIDLabelName, "task_type", "reason"})
 )
 
 // DataNode pool metric descriptors (used by dataNodePoolMetricsCollector).
@@ -589,13 +554,9 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeResourceReservedCPU)
 	registry.MustRegister(DataNodeResourceBudgetMemory)
 	registry.MustRegister(DataNodeResourceBudgetCPU)
-	registry.MustRegister(DataNodeResourceNonTaskMemory)
 	registry.MustRegister(DataNodeResourceObservedMemory)
 	registry.MustRegister(DataNodeResourceFrozen)
-	registry.MustRegister(DataNodeResourceExclusive)
-	registry.MustRegister(DataNodeResourceWaitingTasks)
 	registry.MustRegister(DataNodeTaskAdmissionWait)
-	registry.MustRegister(DataNodeTaskAdmissionDeferred)
 
 	registry.MustRegister(&dataNodePoolMetricsCollector{})
 	RegisterLoggingMetrics(registry)

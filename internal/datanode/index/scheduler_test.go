@@ -470,7 +470,7 @@ func TestSchedulerAdmission(t *testing.T) {
 		assert.Equal(t, 0, atNum)
 	})
 
-	t.Run("parks in Acquire instead of polling TryAcquire", func(t *testing.T) {
+	t.Run("waits in Accept before running any stage", func(t *testing.T) {
 		g := useRecordingGuard(t)
 		g.Block()
 		task := newAdmissionProbeTask(context.Background(), g)
@@ -484,9 +484,6 @@ func TestSchedulerAdmission(t *testing.T) {
 		// No stage may run before the budget is granted...
 		time.Sleep(100 * time.Millisecond)
 		assert.NotContains(t, g.Events(), "preExecute")
-		// ...and the wait must sit in Acquire, the only path the guard can hold
-		// a queue head open for. A TryAcquire poll loop is invisible there.
-		assert.Empty(t, g.TryAcquires())
 
 		g.Unblock()
 		select {

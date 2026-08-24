@@ -691,7 +691,6 @@ func TestImportSchedulerAdmission(t *testing.T) {
 
 		time.Sleep(100 * time.Millisecond)
 		assert.NotContains(t, g.Events(), "execute", "import started before its reservation was granted")
-		assert.Empty(t, g.TryAcquires(), "waiting must happen in Acquire, where the guard can hold the queue head")
 
 		g.Unblock()
 		select {
