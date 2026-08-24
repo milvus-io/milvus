@@ -121,7 +121,7 @@ func (t *mixCompactionTask) computeAndCacheRequirement(segments []*SegmentInfo, 
 		return taskresource.LegacySlotToRequirement(t.legacyTaskSlot(segments))
 	}
 
-	req := compactionRequirement(t.GetTaskProto().GetType(), segments)
+	req := compactionRequirement(t.GetTaskProto().GetType(), segments, t.GetTaskProto().GetSchema())
 	if allResolved {
 		t.requirement.Store(&req)
 		t.slotUsage.Store(memoryToSlots(req.Memory))

@@ -145,7 +145,7 @@ func (t *bumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan
 	}
 	plan.PreAllocatedLogIDs = logIDRange
 	plan.BeginLogID = logIDRange.Begin
-	plan.TaskResources = compactionRequirement(datapb.CompactionType_BumpSchemaVersionCompaction, segments).ToProto()
+	plan.TaskResources = compactionRequirement(datapb.CompactionType_BumpSchemaVersionCompaction, segments, taskProto.GetSchema()).ToProto()
 	WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
 	return plan, nil
 }
