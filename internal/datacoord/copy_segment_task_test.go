@@ -1345,13 +1345,14 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
 	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
-		ID:             segmentID,
-		CollectionID:   collectionID,
-		PartitionID:    10,
-		InsertChannel:  "ch1",
-		State:          commonpb.SegmentState_Importing,
-		IsImporting:    true,
-		StorageVersion: 3,
+		ID:                       segmentID,
+		CollectionID:             collectionID,
+		PartitionID:              10,
+		InsertChannel:            "ch1",
+		State:                    commonpb.SegmentState_Importing,
+		IsImporting:              true,
+		StorageVersion:           3,
+		FilterManifestIndexStats: true,
 	}))
 
 	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
@@ -1381,6 +1382,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 	s.Equal(commonpb.SegmentState_Flushed, updated.GetState())
 	s.False(updated.GetIsImporting())
 	s.Equal(manifestPath, updated.GetManifestPath())
+	s.True(updated.GetFilterManifestIndexStats())
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnFailure() {
@@ -2015,6 +2017,71 @@ func TestAssembleCopySegmentRequest_AllocatesTextAndJsonBuildIDs(t *testing.T) {
 		assert.False(t, seenIDs[newID], "new build IDs should be unique")
 		seenIDs[newID] = true
 	}
+}
+
+func TestAssembleCopySegmentRequest_SkipIndex(t *testing.T) {
+	snapshotData := &snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Id:           1,
+			CollectionId: 100,
+			Name:         "test_snapshot",
+		},
+		Segments: []*datapb.SegmentDescription{{
+			SegmentId:   1,
+			PartitionId: 10,
+			IndexFiles: []*indexpb.IndexFilePathInfo{
+				{BuildID: 3001, FieldID: 100, IndexID: 1001},
+			},
+			TextIndexFiles: map[int64]*datapb.TextIndexStats{
+				200: {FieldID: 200, BuildID: 4001},
+			},
+			JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
+				300: {FieldID: 300, BuildID: 5001},
+			},
+		}},
+	}
+
+	snapshotMeta := &snapshotMeta{}
+	mockRead := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(snapshotData, nil).Build()
+	defer mockRead.UnPatch()
+	mockStorageConfig := mockey.Mock(createStorageConfig).Return(nil).Build()
+	defer mockStorageConfig.UnPatch()
+
+	task := &copySegmentTask{
+		ctx:          context.Background(),
+		snapshotMeta: snapshotMeta,
+		alloc:        &embeddedAllocator{},
+		tr:           timerecord.NewTimeRecorder("test"),
+		times:        taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        100,
+		CollectionId: 100,
+		IdMappings: []*datapb.CopySegmentIDMapping{
+			{SourceSegmentId: 1, TargetSegmentId: 2001, PartitionId: 10},
+		},
+	})
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        100,
+			CollectionId: 100,
+			SnapshotName: "test_snapshot",
+			SkipIndex:    true,
+		},
+		tr:            timerecord.NewTimeRecorder("test_job"),
+		snapshotCache: &copySegmentSnapshotCache{},
+	}
+
+	req, err := AssembleCopySegmentRequest(task, job)
+	require.NoError(t, err)
+	require.Len(t, req.GetSources(), 1)
+	require.Len(t, req.GetTargets(), 1)
+	assert.True(t, req.GetSources()[0].GetSkipIndex())
+	assert.Empty(t, req.GetSources()[0].GetIndexFiles())
+	assert.Empty(t, req.GetSources()[0].GetTextIndexFiles())
+	assert.Empty(t, req.GetSources()[0].GetJsonKeyIndexFiles())
+	assert.Empty(t, req.GetTargets()[0].GetNewBuildIds())
 }
 
 func TestAssembleCopySegmentRequest_RedispatchAllocatesFreshBuildIDs(t *testing.T) {

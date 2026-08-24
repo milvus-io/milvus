@@ -33,6 +33,7 @@ type createSnapshotOption struct {
 	collectionName string
 	name           string
 	description    string
+	skipIndex      bool
 }
 
 func (opt *createSnapshotOption) Request() *milvuspb.CreateSnapshotRequest {
@@ -42,6 +43,7 @@ func (opt *createSnapshotOption) Request() *milvuspb.CreateSnapshotRequest {
 		Description:    opt.description,
 		DbName:         opt.dbName,
 		CollectionName: opt.collectionName,
+		SkipIndex:      opt.skipIndex,
 	}
 }
 
@@ -52,6 +54,12 @@ func (opt *createSnapshotOption) WithDescription(description string) *createSnap
 
 func (opt *createSnapshotOption) WithDbName(dbName string) *createSnapshotOption {
 	opt.dbName = dbName
+	return opt
+}
+
+// WithSkipIndex controls whether reusable index definitions and artifacts are omitted.
+func (opt *createSnapshotOption) WithSkipIndex(skipIndex bool) *createSnapshotOption {
+	opt.skipIndex = skipIndex
 	return opt
 }
 
@@ -174,6 +182,7 @@ type restoreSnapshotOption struct {
 	collectionName       string
 	targetDbName         string
 	targetCollectionName string
+	skipIndex            bool
 }
 
 func (opt *restoreSnapshotOption) Request() *milvuspb.RestoreSnapshotRequest {
@@ -184,6 +193,7 @@ func (opt *restoreSnapshotOption) Request() *milvuspb.RestoreSnapshotRequest {
 		CollectionName:       opt.collectionName,
 		TargetDbName:         opt.targetDbName,
 		TargetCollectionName: opt.targetCollectionName,
+		SkipIndex:            opt.skipIndex,
 	}
 }
 
@@ -194,6 +204,12 @@ func (opt *restoreSnapshotOption) WithDbName(dbName string) *restoreSnapshotOpti
 
 func (opt *restoreSnapshotOption) WithTargetDbName(targetDbName string) *restoreSnapshotOption {
 	opt.targetDbName = targetDbName
+	return opt
+}
+
+// WithSkipIndex controls whether the snapshot is restored without indexes.
+func (opt *restoreSnapshotOption) WithSkipIndex(skipIndex bool) *restoreSnapshotOption {
+	opt.skipIndex = skipIndex
 	return opt
 }
 
@@ -219,6 +235,7 @@ type restoreExternalSnapshotOption struct {
 	snapshotMetadataURI  string
 	externalSpec         string
 	requestTimeout       time.Duration
+	skipIndex            bool
 }
 
 func (opt *restoreExternalSnapshotOption) Request() *milvuspb.RestoreExternalSnapshotRequest {
@@ -228,6 +245,7 @@ func (opt *restoreExternalSnapshotOption) Request() *milvuspb.RestoreExternalSna
 		TargetCollectionName: opt.targetCollectionName,
 		SnapshotMetadataUri:  opt.snapshotMetadataURI,
 		ExternalSpec:         opt.externalSpec,
+		SkipIndex:            opt.skipIndex,
 	}
 }
 
@@ -243,6 +261,12 @@ func (opt *restoreExternalSnapshotOption) WithExternalSpec(externalSpec string) 
 
 func (opt *restoreExternalSnapshotOption) WithRequestTimeout(timeout time.Duration) *restoreExternalSnapshotOption {
 	opt.requestTimeout = timeout
+	return opt
+}
+
+// WithSkipIndex controls whether the external snapshot is restored without indexes.
+func (opt *restoreExternalSnapshotOption) WithSkipIndex(skipIndex bool) *restoreExternalSnapshotOption {
+	opt.skipIndex = skipIndex
 	return opt
 }
 

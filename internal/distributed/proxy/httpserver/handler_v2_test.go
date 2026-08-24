@@ -2968,6 +2968,7 @@ func (m *externalCollectionRESTProxy) DescribeSnapshot(ctx context.Context, requ
 		PartitionNames: []string{"_default"},
 		CreateTs:       100,
 		S3Location:     "s3://bucket/snapshot_1",
+		SkipIndex:      true,
 	}, nil
 }
 
@@ -3198,7 +3199,8 @@ func TestSnapshotCRUDRESTV2(t *testing.T) {
 		"collectionName": "source_books",
 		"snapshotName": "snapshot_1",
 		"description": "daily backup",
-		"compactionProtectionSeconds": 3600
+		"compactionProtectionSeconds": 3600,
+		"skipIndex": true
 	}`)))
 	w := httptest.NewRecorder()
 	testEngine.ServeHTTP(w, req)
@@ -3210,6 +3212,7 @@ func TestSnapshotCRUDRESTV2(t *testing.T) {
 	assert.Equal(t, "snapshot_1", proxy.createSnapshotReq.GetName())
 	assert.Equal(t, "daily backup", proxy.createSnapshotReq.GetDescription())
 	assert.Equal(t, int64(3600), proxy.createSnapshotReq.GetCompactionProtectionSeconds())
+	assert.True(t, proxy.createSnapshotReq.GetSkipIndex())
 
 	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, ListAction), bytes.NewReader([]byte(`{
 		"dbName": "default",
@@ -3242,6 +3245,7 @@ func TestSnapshotCRUDRESTV2(t *testing.T) {
 	assert.Equal(t, "_default", gjson.Get(w.Body.String(), "data.partitionNames.0").String())
 	assert.Equal(t, int64(100), gjson.Get(w.Body.String(), "data.createTs").Int())
 	assert.Equal(t, "s3://bucket/snapshot_1", gjson.Get(w.Body.String(), "data.s3Location").String())
+	assert.True(t, gjson.Get(w.Body.String(), "data.skipIndex").Bool())
 
 	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, DropAction), bytes.NewReader([]byte(`{
 		"dbName": "default",
@@ -3386,7 +3390,8 @@ func TestRestoreSnapshotRESTV2(t *testing.T) {
 		"sourceCollectionName": "source_books",
 		"targetDbName": "target_db",
 		"targetCollectionName": "restored_books",
-		"snapshotName": "snapshot_1"
+		"snapshotName": "snapshot_1",
+		"skipIndex": true
 	}`)))
 	w := httptest.NewRecorder()
 	testEngine.ServeHTTP(w, req)
@@ -3400,6 +3405,7 @@ func TestRestoreSnapshotRESTV2(t *testing.T) {
 	assert.Equal(t, "restored_books", proxy.restoreSnapshotReq.GetTargetCollectionName())
 	assert.Equal(t, "snapshot_1", proxy.restoreSnapshotReq.GetName())
 	assert.False(t, proxy.restoreSnapshotReq.GetRewriteData())
+	assert.True(t, proxy.restoreSnapshotReq.GetSkipIndex())
 
 	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, RestoreAction), bytes.NewReader([]byte(`{
 		"sourceDbName": "source_db",
@@ -3536,7 +3542,8 @@ func TestRestoreExternalSnapshotRESTV2(t *testing.T) {
 		"dbName": "default",
 		"targetCollectionName": "restored_books",
 		"snapshotMetadataURI": "s3://bucket/files/snapshots/meta.json",
-		"externalSpec": "{\"extfs\":{\"cloud_provider\":\"aws\",\"region\":\"us-west-2\",\"use_iam\":\"true\"}}"
+		"externalSpec": "{\"extfs\":{\"cloud_provider\":\"aws\",\"region\":\"us-west-2\",\"use_iam\":\"true\"}}",
+		"skipIndex": true
 	}`)))
 	w := httptest.NewRecorder()
 	testEngine.ServeHTTP(w, req)
@@ -3546,6 +3553,7 @@ func TestRestoreExternalSnapshotRESTV2(t *testing.T) {
 	assert.Equal(t, "restored_books", proxy.restoreReq.GetTargetCollectionName())
 	assert.Equal(t, "s3://bucket/files/snapshots/meta.json", proxy.restoreReq.GetSnapshotMetadataUri())
 	assert.Equal(t, `{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`, proxy.restoreReq.GetExternalSpec())
+	assert.True(t, proxy.restoreReq.GetSkipIndex())
 	assert.Contains(t, w.Body.String(), `"jobId":2001`)
 }
 

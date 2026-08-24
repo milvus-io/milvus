@@ -601,6 +601,7 @@ message CreateSnapshotMessageHeader {
     string name         = 2;
     string description  = 3;
     int64 compaction_protection_seconds = 4; // duration in seconds to protect referenced segments from compaction
+    bool skip_index = 5; // if true, omit reusable index definitions and artifacts from the snapshot
 }
 
 // CreateSnapshotMessageBody is the body of create snapshot message.
@@ -640,6 +641,7 @@ message RestoreSnapshotMessageHeader {
     string snapshot_s3_location = 7; // Metadata file path for external snapshot restore
     string external_spec = 8; // Optional external storage spec for external snapshot restore
     string snapshot_fingerprint = 9; // SHA-256 of validated external snapshot metadata
+    bool skip_index = 10; // if true, restore data without creating or copying indexes
 }
 
 // RestoreSnapshotMessageBody is the body of restore snapshot message.

@@ -726,15 +726,18 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			InsertBinlogs:        sourceSegDesc.GetBinlogs(),
 			StatsBinlogs:         sourceSegDesc.GetStatslogs(),
 			DeltaBinlogs:         sourceSegDesc.GetDeltalogs(),
-			IndexFiles:           sourceSegDesc.GetIndexFiles(),        // vector/scalar index file info
-			Bm25Binlogs:          sourceSegDesc.GetBm25Statslogs(),     // BM25 stats logs
-			TextIndexFiles:       sourceSegDesc.GetTextIndexFiles(),    // Text index files
-			JsonKeyIndexFiles:    sourceSegDesc.GetJsonKeyIndexFiles(), // JSON key index files
-			ManifestPath:         sourceSegDesc.GetManifestPath(),      // manifest path for StorageV3+
-			StorageVersion:       sourceSegDesc.GetStorageVersion(),    // storage version for binlog format decision
+			Bm25Binlogs:          sourceSegDesc.GetBm25Statslogs(),  // BM25 stats logs
+			ManifestPath:         sourceSegDesc.GetManifestPath(),   // manifest path for StorageV3+
+			StorageVersion:       sourceSegDesc.GetStorageVersion(), // storage version for binlog format decision
 			IsExternalCollection: isExternalCollection,
 			SourceRootPath:       sourceRootPath,
+			SkipIndex:            job.GetSkipIndex(),
 			NumOfRows:            sourceSegDesc.GetNumOfRows(),
+		}
+		if !job.GetSkipIndex() {
+			source.IndexFiles = sourceSegDesc.GetIndexFiles()
+			source.TextIndexFiles = sourceSegDesc.GetTextIndexFiles()
+			source.JsonKeyIndexFiles = sourceSegDesc.GetJsonKeyIndexFiles()
 		}
 		sources = append(sources, source)
 
@@ -752,22 +755,24 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			}
 			return nil
 		}
-		for _, indexFile := range sourceSegDesc.GetIndexFiles() {
-			if err := allocNewBuildID(indexFile.GetBuildID()); err != nil {
-				return nil, err
-			}
-		}
-		for _, textIndex := range sourceSegDesc.GetTextIndexFiles() {
-			if textIndex.GetBuildID() != 0 {
-				if err := allocNewBuildID(textIndex.GetBuildID()); err != nil {
+		if !job.GetSkipIndex() {
+			for _, indexFile := range sourceSegDesc.GetIndexFiles() {
+				if err := allocNewBuildID(indexFile.GetBuildID()); err != nil {
 					return nil, err
 				}
 			}
-		}
-		for _, jsonKeyIndex := range sourceSegDesc.GetJsonKeyIndexFiles() {
-			if jsonKeyIndex.GetBuildID() != 0 {
-				if err := allocNewBuildID(jsonKeyIndex.GetBuildID()); err != nil {
-					return nil, err
+			for _, textIndex := range sourceSegDesc.GetTextIndexFiles() {
+				if textIndex.GetBuildID() != 0 {
+					if err := allocNewBuildID(textIndex.GetBuildID()); err != nil {
+						return nil, err
+					}
+				}
+			}
+			for _, jsonKeyIndex := range sourceSegDesc.GetJsonKeyIndexFiles() {
+				if jsonKeyIndex.GetBuildID() != 0 {
+					if err := allocNewBuildID(jsonKeyIndex.GetBuildID()); err != nil {
+						return nil, err
+					}
 				}
 			}
 		}

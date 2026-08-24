@@ -64,6 +64,7 @@ func (s *CopySegmentJobSuite) TestCopySegmentJob_GettersAndSetters() {
 			CopiedSegments: 5,
 			TotalRows:      1000,
 			SnapshotName:   "test_snapshot",
+			SkipIndex:      true,
 		},
 		tr: timerecord.NewTimeRecorder("test job"),
 	}
@@ -85,6 +86,7 @@ func (s *CopySegmentJobSuite) TestCopySegmentJob_GettersAndSetters() {
 	s.Equal(int64(5), job.GetCopiedSegments())
 	s.Equal(int64(1000), job.GetTotalRows())
 	s.Equal("test_snapshot", job.GetSnapshotName())
+	s.True(job.GetSkipIndex())
 	s.NotNil(job.GetTR())
 }
 
@@ -96,6 +98,7 @@ func (s *CopySegmentJobSuite) TestCopySegmentJob_Clone() {
 			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
 			Reason:       "original reason",
 			TotalRows:    1000,
+			SkipIndex:    true,
 		},
 		tr: timerecord.NewTimeRecorder("test job"),
 	}
@@ -109,6 +112,7 @@ func (s *CopySegmentJobSuite) TestCopySegmentJob_Clone() {
 	s.Equal(original.GetState(), cloned.GetState())
 	s.Equal(original.GetReason(), cloned.GetReason())
 	s.Equal(original.GetTotalRows(), cloned.GetTotalRows())
+	s.Equal(original.GetSkipIndex(), cloned.GetSkipIndex())
 
 	// Verify time recorder is same reference
 	s.Equal(original.GetTR(), cloned.GetTR())

@@ -2390,6 +2390,45 @@ func TestCollectSegmentFiles_WithManifest(t *testing.T) {
 	assert.Contains(t, files.InsertBinlogs, "files/insert_log/111/222/333/_metadata/manifest.json")
 }
 
+func TestCollectSegmentFiles_WithManifestSkipIndex(t *testing.T) {
+	mockNoManifestLobFiles(t)
+
+	basePath := "files/insert_log/111/222/333"
+	manifestPath := packed.MarshalManifestPath(basePath, 2)
+	mList := mockey.Mock(listAllFiles).Return([]string{
+		basePath + "/_data/100/file1.log",
+		basePath + "/_metadata/manifest.json",
+		basePath + "/_stats/pk.100/bloom_filter",
+		basePath + "/_stats/bm25.101/stats",
+		basePath + "/_stats/text_index.102/tokenizer.json",
+		basePath + "/_stats/text_index.102/index.data",
+		basePath + "/_stats/json_stats.103/shared_key_index/index.data",
+	}, nil).Build()
+	defer mList.UnPatch()
+
+	files, err := collectSegmentFiles(
+		context.Background(),
+		&struct{ storage.ChunkManager }{},
+		&indexpb.StorageConfig{BucketName: "test-bucket"},
+		&datapb.CopySegmentSource{
+			CollectionId:   111,
+			PartitionId:    222,
+			SegmentId:      333,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   manifestPath,
+			SkipIndex:      true,
+		},
+	)
+
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{
+		basePath + "/_data/100/file1.log",
+		basePath + "/_metadata/manifest.json",
+		basePath + "/_stats/pk.100/bloom_filter",
+		basePath + "/_stats/bm25.101/stats",
+	}, files.InsertBinlogs)
+}
+
 func TestCollectSegmentFiles_V3MissingManifestPath(t *testing.T) {
 	ctx := context.Background()
 

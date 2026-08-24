@@ -5809,10 +5809,12 @@ func TestServer_RestoreSnapshot_SourceCollectionID(t *testing.T) {
 		ctx := context.Background()
 
 		var capturedSourceCollectionID int64
+		var capturedSkipIndex bool
 		var capturedSnapshotName, capturedTargetCollName, capturedTargetDbName string
 		mockRestore := mockey.Mock((*snapshotManager).RestoreSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, sourceCollectionID int64, snapshotName, targetCollectionName, targetDbName string, startRestoreLock StartRestoreLockFunc, startBroadcaster StartBroadcasterFunc, rollback RollbackFunc, validateResources ValidateResourcesFunc) (int64, error) {
+			func(sm *snapshotManager, ctx context.Context, sourceCollectionID int64, snapshotName, targetCollectionName, targetDbName string, skipIndex bool, startRestoreLock StartRestoreLockFunc, startBroadcaster StartBroadcasterFunc, rollback RollbackFunc, validateResources ValidateResourcesFunc) (int64, error) {
 				capturedSourceCollectionID = sourceCollectionID
+				capturedSkipIndex = skipIndex
 				capturedSnapshotName = snapshotName
 				capturedTargetCollName = targetCollectionName
 				capturedTargetDbName = targetDbName
@@ -5830,6 +5832,7 @@ func TestServer_RestoreSnapshot_SourceCollectionID(t *testing.T) {
 			SourceCollectionId:   12345,
 			TargetDbName:         "test_db",
 			TargetCollectionName: "restored_collection",
+			SkipIndex:            true,
 		})
 
 		assert.NoError(t, err)
@@ -5839,6 +5842,7 @@ func TestServer_RestoreSnapshot_SourceCollectionID(t *testing.T) {
 		assert.Equal(t, "my_snapshot", capturedSnapshotName)
 		assert.Equal(t, "restored_collection", capturedTargetCollName)
 		assert.Equal(t, "test_db", capturedTargetDbName)
+		assert.True(t, capturedSkipIndex)
 	})
 
 	t.Run("source_collection_id_zero", func(t *testing.T) {
@@ -5846,7 +5850,7 @@ func TestServer_RestoreSnapshot_SourceCollectionID(t *testing.T) {
 
 		var capturedSourceCollectionID int64
 		mockRestore := mockey.Mock((*snapshotManager).RestoreSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, sourceCollectionID int64, snapshotName, targetCollectionName, targetDbName string, startRestoreLock StartRestoreLockFunc, startBroadcaster StartBroadcasterFunc, rollback RollbackFunc, validateResources ValidateResourcesFunc) (int64, error) {
+			func(sm *snapshotManager, ctx context.Context, sourceCollectionID int64, snapshotName, targetCollectionName, targetDbName string, skipIndex bool, startRestoreLock StartRestoreLockFunc, startBroadcaster StartBroadcasterFunc, rollback RollbackFunc, validateResources ValidateResourcesFunc) (int64, error) {
 				capturedSourceCollectionID = sourceCollectionID
 				return 99, nil
 			}).Build()
@@ -5893,6 +5897,7 @@ func TestServer_RestoreSnapshot_External(t *testing.T) {
 
 		var capturedLocation, capturedTargetCollName, capturedTargetDbName string
 		var capturedExternalSpec string
+		var capturedSkipIndex bool
 		mockRestore := mockey.Mock((*snapshotManager).RestoreExternalSnapshot).To(
 			func(
 				sm *snapshotManager,
@@ -5901,6 +5906,7 @@ func TestServer_RestoreSnapshot_External(t *testing.T) {
 				targetCollectionName string,
 				targetDbName string,
 				externalSpec string,
+				skipIndex bool,
 				startExternalRestoreLock StartExternalRestoreLockFunc,
 				startBroadcaster StartBroadcasterFunc,
 				rollback RollbackFunc,
@@ -5910,6 +5916,7 @@ func TestServer_RestoreSnapshot_External(t *testing.T) {
 				capturedTargetCollName = targetCollectionName
 				capturedTargetDbName = targetDbName
 				capturedExternalSpec = externalSpec
+				capturedSkipIndex = skipIndex
 				return 10001, nil
 			}).Build()
 		defer mockRestore.UnPatch()
@@ -5925,6 +5932,7 @@ func TestServer_RestoreSnapshot_External(t *testing.T) {
 			TargetDbName:         "target_db",
 			TargetCollectionName: "restored_collection",
 			ExternalSpec:         `{"extfs":{"region":"us-west-2"}}`,
+			SkipIndex:            true,
 		})
 
 		assert.NoError(t, err)
@@ -5934,6 +5942,7 @@ func TestServer_RestoreSnapshot_External(t *testing.T) {
 		assert.Equal(t, "restored_collection", capturedTargetCollName)
 		assert.Equal(t, "target_db", capturedTargetDbName)
 		assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, capturedExternalSpec)
+		assert.True(t, capturedSkipIndex)
 	})
 }
 
