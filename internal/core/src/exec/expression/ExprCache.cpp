@@ -91,7 +91,19 @@ ExprResCacheManager::Instance() {
 
 void
 ExprResCacheManager::SetEnabled(bool enabled) {
-    enabled_.store(enabled);
+    auto current = enabled_.load(std::memory_order_acquire);
+    while (current != enabled) {
+        // Invalidate old tickets before publishing an enabled state. A Put
+        // that observes enabled=true with acquire ordering must also observe
+        // this epoch change.
+        Instance().config_epoch_.fetch_add(1, std::memory_order_release);
+        if (enabled_.compare_exchange_weak(current,
+                                           enabled,
+                                           std::memory_order_release,
+                                           std::memory_order_acquire)) {
+            return;
+        }
+    }
 }
 
 bool
@@ -102,6 +114,7 @@ ExprResCacheManager::IsEnabled() {
 bool
 ExprResCacheManager::SetConfig(const CacheConfig& config) {
     std::unique_lock state_lock(state_mutex_);
+    config_epoch_.fetch_add(1, std::memory_order_relaxed);
     const auto old_mode = config_.mode;
     const auto old_disk_base_path = config_.disk_base_path;
 
@@ -188,6 +201,14 @@ ExprResCacheManager::GetMode() const {
     return config_.mode;
 }
 
+bool
+ExprResCacheManager::CanCacheSegment(SegmentType segment_type) const {
+    std::shared_lock state_lock(state_mutex_);
+    return segment_type == SegmentType::Sealed ||
+           (segment_type == SegmentType::Growing &&
+            config_.mode == CacheMode::Memory && config_.mem_enable_growing);
+}
+
 void
 ExprResCacheManager::SetDiskConfig(const std::string& base_path,
                                    uint64_t max_total_size,
@@ -213,6 +234,7 @@ ExprResCacheManager::SetDiskConfig(const std::string& base_path,
 void
 ExprResCacheManager::SetCapacityBytes(size_t capacity_bytes) {
     std::unique_lock state_lock(state_mutex_);
+    config_epoch_.fetch_add(1, std::memory_order_relaxed);
     // Backward compatibility: ensure memory-mode EntryPool exists.
     // Old callers used SetCapacityBytes to configure the cache size;
     // the V2 manager needs an EntryPool to actually store entries.
@@ -220,6 +242,7 @@ ExprResCacheManager::SetCapacityBytes(size_t capacity_bytes) {
     // to match the old manager's unconditional caching behavior.
     config_.mode = CacheMode::Memory;
     config_.mem_max_bytes = capacity_bytes;
+    config_.mem_enable_growing = false;
     config_.admission_threshold = 1;
     config_.mem_min_eval_duration_us = 0;
     if (!entry_pool_) {
@@ -310,6 +333,56 @@ ExprResCacheManager::Get(const Key& key, Value& out_value) {
 
 void
 ExprResCacheManager::Put(const Key& key, const Value& value) {
+    PutInternal(key, value, nullptr);
+}
+
+ExprResCacheManager::AdmissionTicket
+ExprResCacheManager::ObserveMiss(const Key& key) {
+    AdmissionTicket ticket;
+    if (!IsEnabled()) {
+        return ticket;
+    }
+
+    std::shared_lock state_lock(state_mutex_);
+    if (!IsEnabled()) {
+        return ticket;
+    }
+
+    ticket.config_epoch = config_epoch_.load(std::memory_order_relaxed);
+    ticket.signature_hash =
+        XXH64(key.signature.data(), key.signature.size(), 0);
+
+    if (config_.mode == CacheMode::Memory) {
+        if (!entry_pool_) {
+            return ticket;
+        }
+    } else {
+        if (config_.disk_base_path.empty()) {
+            return ticket;
+        }
+        std::shared_lock lock(disk_files_mutex_);
+        if (disk_ineligible_segments_.find(key.segment_id) !=
+            disk_ineligible_segments_.end()) {
+            return ticket;
+        }
+    }
+
+    ticket.admitted = frequency_tracker_.RecordAndCheck(
+        ticket.signature_hash, config_.admission_threshold);
+    return ticket;
+}
+
+void
+ExprResCacheManager::PutAdmitted(const Key& key,
+                                 const Value& value,
+                                 const AdmissionTicket& ticket) {
+    PutInternal(key, value, &ticket);
+}
+
+void
+ExprResCacheManager::PutInternal(const Key& key,
+                                 const Value& value,
+                                 const AdmissionTicket* ticket) {
     if (!IsEnabled()) {
         return;
     }
@@ -321,18 +394,28 @@ ExprResCacheManager::Put(const Key& key, const Value& value) {
     if (!IsEnabled()) {
         return;
     }
+
+    if (ticket != nullptr) {
+        const auto signature_hash =
+            XXH64(key.signature.data(), key.signature.size(), 0);
+        if (!ticket->admitted ||
+            ticket->config_epoch !=
+                config_epoch_.load(std::memory_order_relaxed) ||
+            ticket->signature_hash != signature_hash) {
+            return;
+        }
+    }
+
     if (config_.mode == CacheMode::Memory) {
         if (!entry_pool_) {
             return;
         }
-        const bool same_signature_cached =
-            entry_pool_->HasSignature(key.segment_id, key.signature);
-        if (!same_signature_cached && config_.mem_min_eval_duration_us > 0 &&
+        if (config_.mem_min_eval_duration_us > 0 &&
             value.eval_duration_us > 0 &&
             value.eval_duration_us < config_.mem_min_eval_duration_us) {
             return;
         }
-        if (!same_signature_cached &&
+        if (ticket == nullptr &&
             !frequency_tracker_.RecordAndCheck(
                 XXH64(key.signature.data(), key.signature.size(), 0),
                 config_.admission_threshold)) {
@@ -351,21 +434,16 @@ ExprResCacheManager::Put(const Key& key, const Value& value) {
             return;
         }
 
-        bool replacing_existing = false;
         {
             std::shared_lock lock(disk_files_mutex_);
             if (disk_ineligible_segments_.find(key.segment_id) !=
                 disk_ineligible_segments_.end()) {
                 return;
             }
-            auto it = disk_files_.find(key.segment_id);
-            if (it != disk_files_.end()) {
-                replacing_existing = it->second->HasSignature(key.signature);
-            }
         }
 
         // Latency admission (disk mode)
-        if (!replacing_existing && config_.disk_min_eval_duration_us > 0 &&
+        if (config_.disk_min_eval_duration_us > 0 &&
             value.eval_duration_us > 0 &&
             value.eval_duration_us < config_.disk_min_eval_duration_us) {
             return;
@@ -374,7 +452,7 @@ ExprResCacheManager::Put(const Key& key, const Value& value) {
         // Frequency admission is mode-independent. Applying it before opening
         // the segment file avoids one-off expressions consuming disk slots and
         // issuing unnecessary pwrite calls.
-        if (!replacing_existing &&
+        if (ticket == nullptr &&
             !frequency_tracker_.RecordAndCheck(
                 XXH64(key.signature.data(), key.signature.size(), 0),
                 config_.admission_threshold)) {
@@ -419,6 +497,7 @@ ExprResCacheManager::Put(const Key& key, const Value& value) {
 void
 ExprResCacheManager::Clear() {
     std::unique_lock state_lock(state_mutex_);
+    config_epoch_.fetch_add(1, std::memory_order_relaxed);
     if (entry_pool_) {
         entry_pool_->Clear();
     }

@@ -423,6 +423,35 @@ class SegmentExpr : public Expr {
                    : static_cast<int64_t>(chunk) * size_per_chunk_ + chunk_pos;
     }
 
+    // Opt-in contract for the composition-based RawData expression-cache
+    // adapter. These accessors add no cache state to SegmentExpr, so an
+    // undecorated expression keeps its original execution hot path.
+    virtual bool
+    SupportsRawExprCache() const {
+        return false;
+    }
+
+    ExprExecPath
+    GetExecPathForRawExprCache() const {
+        EnsureExecPathDetermined();
+        return exec_path_;
+    }
+
+    const segcore::SegmentInternalInterface*
+    GetSegmentForRawExprCache() const {
+        return segment_;
+    }
+
+    int64_t
+    GetActiveCountForRawExprCache() const {
+        return active_count_;
+    }
+
+    int64_t
+    GetNextBatchSizeForRawExprCache() {
+        return GetNextBatchSize();
+    }
+
     void
     MoveCursorForData() {
         int64_t processed_size = 0;
@@ -505,15 +534,15 @@ class SegmentExpr : public Expr {
         if (!ExprResCacheManager::IsEnabled() || segment_ == nullptr) {
             return false;
         }
-        if (ExprResCacheManager::Instance().GetMode() == CacheMode::Disk &&
-            segment_->type() != SegmentType::Sealed) {
+        auto& manager = ExprResCacheManager::Instance();
+        if (!manager.CanCacheSegment(segment_->type())) {
             return false;
         }
         ExprResCacheManager::Key key{segment_->get_segment_id(),
                                      this->ToString()};
         ExprResCacheManager::Value got;
         got.active_count = active_count_;
-        if (ExprResCacheManager::Instance().Get(key, got)) {
+        if (manager.Get(key, got)) {
             cached_index_chunk_res_ = got.result;
             cached_index_chunk_valid_res_ = got.valid_result;
             cached_index_chunk_id_ = 0;
@@ -529,8 +558,8 @@ class SegmentExpr : public Expr {
         if (!ExprResCacheManager::IsEnabled() || segment_ == nullptr) {
             return;
         }
-        if (ExprResCacheManager::Instance().GetMode() == CacheMode::Disk &&
-            segment_->type() != SegmentType::Sealed) {
+        auto& manager = ExprResCacheManager::Instance();
+        if (!manager.CanCacheSegment(segment_->type())) {
             return;
         }
         if (!cached_index_chunk_res_ || !cached_index_chunk_valid_res_) {
@@ -543,7 +572,7 @@ class SegmentExpr : public Expr {
         v.valid_result = cached_index_chunk_valid_res_;
         v.active_count = active_count_;
         v.eval_duration_us = eval_duration_us;
-        ExprResCacheManager::Instance().Put(key, v);
+        manager.Put(key, v);
     }
 
     using CacheClock = std::chrono::steady_clock;
@@ -2890,20 +2919,28 @@ class SegmentExpr : public Expr {
                       prefetch_pool) override {
         auto self = std::static_pointer_cast<SegmentExpr>(shared_from_this());
         prefetch_future_.emplace(folly::via(prefetch_pool.get(), [self]() {
-            if (self->op_ctx_ != nullptr &&
-                self->op_ctx_->cancellation_token.isCancellationRequested()) {
-                return;
-            }
-            self->EnsureExecPathDetermined();
-            if (self->exec_path_ == ExprExecPath::RawData) {
-                if (self->ShouldPrefetchRawDataEagerly()) {
-                    self->PrefetchRawData();
-                    self->prefetched_ = true;
-                } else {
-                    self->raw_data_prefetch_deferred_ = true;
-                }
-            }
+            self->PrefetchOnCurrentThread();
         }));
+    }
+
+    // Execute the prefetch body without scheduling another task. This keeps
+    // composition wrappers that already run on the prefetch pool from adding
+    // a second queueing hop.
+    void
+    PrefetchOnCurrentThread() {
+        if (op_ctx_ != nullptr &&
+            op_ctx_->cancellation_token.isCancellationRequested()) {
+            return;
+        }
+        EnsureExecPathDetermined();
+        if (exec_path_ == ExprExecPath::RawData) {
+            if (ShouldPrefetchRawDataEagerly()) {
+                PrefetchRawData();
+                prefetched_ = true;
+            } else {
+                raw_data_prefetch_deferred_ = true;
+            }
+        }
     }
 
     bool
