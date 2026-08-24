@@ -465,15 +465,19 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 		return
 	case taskDispatchCleanupTracked:
 		// The worker accepted the task, but metadata does not want this dispatch
-		// executed: either the task/job went terminal while the RPC was in
-		// flight, or the authoritative task is already assigned to this same
-		// node. Either way CommitTaskDispatch left the assignment pointing here,
-		// so the drop goes through the task's own handle — and derives its abort
-		// flag from the task and job state, which is what keeps a Completed
-		// task's published output from being deleted.
-		mlog.Info(ctx, "copy segment task dispatch superseded by tracked metadata, dropping accepted worker task",
+		// executed: the task or its job went terminal while the RPC was in
+		// flight. CommitTaskDispatch persisted the terminal state with the
+		// assignment pointing here, which is exactly the shape the inspector's
+		// processTerminal retries every round through its bounded drop pool —
+		// deriving the abort flag from the task and job state, which is what
+		// keeps a Completed task's published output from being deleted. Do NOT
+		// drop inline: this closure runs inside the global scheduler's dispatch
+		// round, which ends with an AwaitAll over every task type, and
+		// DropCopySegment blocks for up to RequestTimeoutSeconds (default 600s)
+		// against an unresponsive node — one black-holing DataNode would stall
+		// cluster-wide dispatch for the full timeout.
+		mlog.Info(ctx, "copy segment task dispatch superseded by tracked metadata, leaving worker task to inspector cleanup",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
-		t.DropTaskOnWorker(cluster)
 		return
 	case taskDispatchCleanupUntracked:
 		mlog.Info(ctx, "copy segment task dispatch no longer matches metadata, dropping accepted worker task",
