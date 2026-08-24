@@ -2259,7 +2259,8 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 
 	mlog.Info(context.TODO(), "receive CreateSnapshot request", mlog.String("name", req.GetName()),
 		mlog.String("description", req.GetDescription()),
-		mlog.Int64("compactionProtectionSeconds", req.GetCompactionProtectionSeconds()))
+		mlog.Int64("compactionProtectionSeconds", req.GetCompactionProtectionSeconds()),
+		mlog.Bool("skipIndex", req.GetSkipIndex()))
 
 	// Defense-in-depth: re-validate compaction_protection_seconds on the DataCoord side.
 	// Proxy also validates this, but a buggy or malicious client could bypass Proxy by
@@ -2346,6 +2347,7 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 			Name:                        req.GetName(),
 			Description:                 req.GetDescription(),
 			CompactionProtectionSeconds: req.GetCompactionProtectionSeconds(),
+			SkipIndex:                   req.GetSkipIndex(),
 		}).
 		WithBody(&message.CreateSnapshotMessageBody{}).
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
@@ -2570,7 +2572,8 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 		mlog.String("targetCollectionName", req.GetTargetCollectionName()),
 		mlog.Bool("external", req.GetExternal()),
 		mlog.String("snapshotS3Location", snapshotstorage.RedactSnapshotObjectPath(req.GetSnapshotS3Location())),
-		mlog.Bool("externalSpecSet", req.GetExternalSpec() != ""))
+		mlog.Bool("externalSpecSet", req.GetExternalSpec() != ""),
+		mlog.Bool("skipIndex", req.GetSkipIndex()))
 
 	// Validate parameters
 	if !req.GetExternal() && req.GetName() == "" {
@@ -2602,6 +2605,7 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 			req.GetTargetCollectionName(),
 			req.GetTargetDbName(),
 			req.GetExternalSpec(),
+			req.GetSkipIndex(),
 			s.startExternalRestoreSnapshotLock,
 			s.startBroadcastForRestoreSnapshot,
 			s.rollbackRestoreSnapshot,
@@ -2628,6 +2632,7 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 		req.GetName(),
 		req.GetTargetCollectionName(),
 		req.GetTargetDbName(),
+		req.GetSkipIndex(),
 		s.startRestoreSnapshotLock,
 		s.startBroadcastForRestoreSnapshot,
 		s.rollbackRestoreSnapshot,
