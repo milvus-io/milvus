@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // LoadPercentageByResourceGroup answers a narrower question than the
@@ -26,16 +27,28 @@ import (
 // of a filter. This keeps the resource-group concept inert for callers that do
 // not use it.
 //
-// Two distinct outcomes are both spelled "the collection isn't ready in this
-// resource group", and callers must be able to tell them apart:
+// Three distinct outcomes are all spelled "the collection isn't ready in this
+// resource group", and callers must be able to tell them apart. The
+// percentage alone separates the first two; the error separates the third:
 //
-//   - -1: rgName has no replica of this collection at all. There is nothing
-//     to report a percentage for.
-//   - 0: rgName has a replica of this collection, but that replica has not
-//     picked up any of the collection's current load targets yet. This is a
-//     real, distinct state from "no replica" -- it means loading is underway
-//     but has not made progress, not that the resource group is unrelated to
-//     the collection.
+//   - -1, nil error: rgName has no replica of this collection at all. There
+//     is nothing to report a percentage for.
+//   - 0, nil error: rgName has a replica of this collection, but that replica
+//     has not picked up any of the collection's current load targets yet.
+//     This is a real, distinct state from "no replica" -- it means loading is
+//     underway but has not made progress, not that the resource group is
+//     unrelated to the collection.
+//   - -1, ErrServiceNotReady: the coordinator's own read stores are not wired
+//     up yet, so no answer about any resource group can be computed. This is
+//     the state initQueryCoord passes through -- initMeta assigns the meta
+//     before the distribution and target managers -- and it is neither of the
+//     two above: nothing is known, rather than something being known to be
+//     absent. Reusing a bare -1 for it would tell a caller "this resource
+//     group holds no replica", which is a claim this function is in no
+//     position to make. The sentinel is the retriable one because the state
+//     resolves on its own within the init window, and it mirrors the
+//     ShardLeadersReasonCoordinatorNotReady that
+//     ShardLeaderReadinessByResourceGroup reports for the same window.
 //
 // When the collection itself is not currently registered as loaded (for
 // example the load request failed), this surfaces the recorded
@@ -93,7 +106,7 @@ func LoadPercentageByResourceGroup(
 	rgName string,
 ) (int32, error) {
 	if m == nil || targetMgr == nil || dist == nil {
-		return -1, nil
+		return -1, merr.WrapErrServiceNotReadyMsg("querycoord read stores are not wired up yet")
 	}
 
 	// The load-registration check comes BEFORE the replica scan: the terminal

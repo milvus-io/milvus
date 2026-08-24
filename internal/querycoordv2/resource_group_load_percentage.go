@@ -11,7 +11,13 @@ import (
 // rgName means every replica of the collection. See
 // utils.LoadPercentageByResourceGroup for the semantics of the returned
 // percentage, including the deliberate difference between -1 ("no replica in
-// this resource group") and 0 ("a replica is there but carries nothing yet").
+// this resource group") and 0 ("a replica is there but carries nothing yet"),
+// and the third state that only the error distinguishes: -1 with
+// ErrServiceNotReady means the coordinator's read stores are not wired up yet,
+// so nothing is known about any resource group. Unlike the RPC surfaces on
+// Server this method has no merr.CheckHealthy(s.State()) gate of its own -- it
+// is an in-process entry point, and that sentinel is how it reports the same
+// condition.
 //
 // The computation itself lives in the utils package rather than here because
 // CollectionObserver needs the same figure and cannot import this package.

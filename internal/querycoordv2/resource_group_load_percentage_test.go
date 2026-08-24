@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // rgLoadPercentageFixture wires up the same trio of read-only stores
@@ -352,9 +353,16 @@ func TestGetLoadPercentageByResourceGroup_FailedLoadSurvivesReplicaCleanup(t *te
 }
 
 // TestGetLoadPercentageByResourceGroup_NilDist asserts that a Server whose
-// distribution manager has not been wired up yet answers -1 rather than
+// distribution manager has not been wired up yet answers rather than
 // panicking, extending the nil-meta guard to the rest of the dependency set
 // the same way ShardLeaderReadinessByResourceGroup guards all of its stores.
+//
+// The answer is -1 WITH ErrServiceNotReady, not a bare -1: the fixture has a
+// replica of the collection in rg-target, so a bare -1 would state the
+// opposite of the truth ("no replica in this resource group") for a state in
+// which nothing is known at all. The sentinel is the counterpart of the
+// ShardLeadersReasonCoordinatorNotReady its sibling surface reports for the
+// same init window.
 func TestGetLoadPercentageByResourceGroup_NilDist(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	f.putTarget(t, 1100, 11000, "1100-dmc0", 1)
@@ -364,22 +372,23 @@ func TestGetLoadPercentageByResourceGroup_NilDist(t *testing.T) {
 
 	assert.NotPanics(t, func() {
 		percentage, err := s.GetLoadPercentageByResourceGroup(context.Background(), 1100, "rg-target")
-		assert.NoError(t, err)
+		assert.ErrorIs(t, err, merr.ErrServiceNotReady,
+			"a partially wired coordinator must say so, not report the resource group as empty")
 		assert.EqualValues(t, -1, percentage)
 	})
 }
 
 // TestGetLoadPercentageByResourceGroup_NilMeta asserts that a Server whose
-// meta has not been initialized yet answers -1 rather than panicking.
-// Deleting the "if s.meta == nil { return -1, nil }" guard turns this test
-// into a nil-pointer-dereference panic on the following
-// s.meta.GetByCollection call.
+// meta has not been initialized yet answers rather than panicking. Deleting
+// the nil-store guard turns this test into a nil-pointer-dereference panic on
+// the following s.meta.Exist call.
 func TestGetLoadPercentageByResourceGroup_NilMeta(t *testing.T) {
 	s := &Server{}
 
 	assert.NotPanics(t, func() {
 		percentage, err := s.GetLoadPercentageByResourceGroup(context.Background(), 1, "rg-target")
-		assert.NoError(t, err)
+		assert.ErrorIs(t, err, merr.ErrServiceNotReady,
+			"a coordinator with no meta yet knows nothing about the resource group, which is not the same as it being empty")
 		assert.EqualValues(t, -1, percentage)
 	})
 }
