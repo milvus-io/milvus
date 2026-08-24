@@ -674,7 +674,9 @@ following observable behavior:
 
 - `ClientInfo.reserved` contains `client_id`, string-valued `client_id_stable`, and the
   current `db_name`. Reconnecting within the same endpoint, user, and telemetry
-  configuration reuses the telemetry manager and client ID.
+  configuration preserves the telemetry runtime state and client ID. Endpoint failover
+  validates a complete candidate before publishing it; failure leaves the old lifecycle
+  active, and a generation fence discards late heartbeat responses from the old endpoint.
 - The worker sends one immediate heartbeat, then follows the configured interval. A
   heartbeat has a 10-second deadline and bypasses normal SDK RPC retry.
 - Only `Search`, `Query` (including Get), `HybridSearch`, `RunAnalyzer`, `Insert`, `Delete`,
