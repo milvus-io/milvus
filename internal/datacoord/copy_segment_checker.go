@@ -594,12 +594,16 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 	// failed restore queryable. Losing this race means the job is failed, so the
 	// inspector's job-scoped cleanup owns the segments from here.
 	//
-	// All segment operators are passed to one UpdateSegmentsInfo call. That call
-	// holds meta.segMu across catalog persistence and the in-memory swap, so live
-	// readers cannot observe segment A as Flushed while segment B is still
-	// Importing. NewCopySegmentMeta also reconciles active/failed jobs before the
-	// server becomes healthy, covering a crash between etcd batches for restores
-	// larger than metastore.maxEtcdTxnNum.
+	// The operators are handed to FinalizeJobPublication as one group per
+	// segment; it publishes them in bounded chunks (holding meta.segMu only per
+	// chunk — one unbounded hold would stall every segment reader and writer
+	// for the whole restore) and writes the Completed record last. A reader can
+	// transiently see segment A Flushed while segment B is still Importing, but
+	// the job completes only after every chunk landed; a crash or mid-way
+	// failure leaves the job Publishing, NewCopySegmentMeta re-hides the
+	// partial publication before the server becomes healthy, and this retry
+	// path republishes only what is still needed (the per-segment operators
+	// below are built from current state, so it is idempotent).
 	current := c.copyMeta.GetJob(c.ctx, job.GetJobId())
 	if current == nil || (current.GetState() != datapb.CopySegmentJobState_CopySegmentJobExecuting &&
 		current.GetState() != datapb.CopySegmentJobState_CopySegmentJobPublishing) {
@@ -620,25 +624,31 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 		}
 	}
 
-	operators := make([]UpdateOperator, 0, len(targetSegmentIDs)*2)
+	// One operator group per segment, so chunking can never split a segment's
+	// state flip from its importing-flag clear across two writes.
+	segmentOperators := make([][]UpdateOperator, 0, len(targetSegmentIDs))
 	for _, segID := range targetSegmentIDs {
 		segment := c.meta.GetSegment(c.ctx, segID)
 		if segment == nil {
 			continue
 		}
+		group := make([]UpdateOperator, 0, 2)
 		if segment.GetState() != commonpb.SegmentState_Flushed {
-			operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Flushed))
+			group = append(group, UpdateStatusOperator(segID, commonpb.SegmentState_Flushed))
 		}
 		if segment.GetIsImporting() {
-			operators = append(operators, UpdateIsImporting(segID, false))
+			group = append(group, UpdateIsImporting(segID, false))
+		}
+		if len(group) > 0 {
+			segmentOperators = append(segmentOperators, group)
 		}
 	}
 
-	// Step 3: Persist every target update and Completed in one composite update.
+	// Step 3: Persist the target updates in bounded chunks and Completed last.
 	// Publishing is an outcome fence: write failures leave the job there for a
 	// retry and can never turn a partially published success into Failed.
 	completeTs := uint64(time.Now().UnixNano())
-	applied, err := c.copyMeta.FinalizeJobPublication(c.ctx, job.GetJobId(), totalRows, completeTs, operators...)
+	applied, err := c.copyMeta.FinalizeJobPublication(c.ctx, job.GetJobId(), totalRows, completeTs, segmentOperators...)
 	if err != nil {
 		log.Error(c.ctx, "finishJob: target publication failed; retrying from Publishing",
 			mlog.Int("totalSegments", len(targetSegmentIDs)), mlog.Err(err))

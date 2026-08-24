@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -1603,37 +1604,175 @@ func (s *CopySegmentMetaSuite) TestFinalizeJobPublication_MirrorsUpdateSegmentsI
 
 	// An operator that produces a binlog increment is refused before any write.
 	applied, err := s.copyMeta.FinalizeJobPublication(ctx, 705, 3, 1,
-		UpdateStatusOperator(7051, commonpb.SegmentState_Flushed),
-		AddBinlogsOperator(7051, []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogID: 9, EntriesNum: 3}}}}, nil, nil, nil))
+		[]UpdateOperator{
+			UpdateStatusOperator(7051, commonpb.SegmentState_Flushed),
+			AddBinlogsOperator(7051, []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogID: 9, EntriesNum: 3}}}}, nil, nil, nil),
+		})
 	s.Error(err)
 	s.False(applied)
 	s.Contains(err.Error(), "must not carry binlog increments")
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobPublishing, s.copyMeta.GetJob(ctx, 705).GetState())
 	s.Equal(commonpb.SegmentState_Importing, s.meta.GetSegment(ctx, 7051).GetState())
 
-	// The visibility-only publication goes through, with the AlterSegments
-	// encoding for every segment record and the job as the last action.
-	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+	// The visibility-only publication goes through: the segment chunk with the
+	// AlterSegments encoding first, then the Completed job record as its own
+	// final write — the marker that publication finished.
+	var updateCalls int
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything).RunAndReturn(
 		func(_ context.Context, actions ...metastore.UpdateAction) error {
-			s.Require().Len(actions, 2)
-			entry, ok := actions[0].Entry.(metastore.SegmentEntry)
-			s.Require().True(ok)
-			s.Equal(metastore.ActionUpdate, actions[0].Type)
-			s.True(entry.AlterEncoding, "publication must use the AlterSegments encoding, not the record-only one")
-			s.EqualValues(7051, entry.Segment.GetID())
-			s.Equal(commonpb.SegmentState_Flushed, entry.Segment.GetState())
-			s.False(entry.Segment.GetIsImporting())
-			_, ok = actions[1].Entry.(metastore.CopySegmentJobEntry)
-			s.True(ok, "the Completed job record is the commit marker and comes last")
+			updateCalls++
+			s.Require().Len(actions, 1)
+			switch updateCalls {
+			case 1:
+				entry, ok := actions[0].Entry.(metastore.SegmentEntry)
+				s.Require().True(ok)
+				s.Equal(metastore.ActionUpdate, actions[0].Type)
+				s.True(entry.AlterEncoding, "publication must use the AlterSegments encoding, not the record-only one")
+				s.EqualValues(7051, entry.Segment.GetID())
+				s.Equal(commonpb.SegmentState_Flushed, entry.Segment.GetState())
+				s.False(entry.Segment.GetIsImporting())
+			case 2:
+				_, ok := actions[0].Entry.(metastore.CopySegmentJobEntry)
+				s.True(ok, "the Completed job record is the commit marker and comes last")
+			}
 			return nil
-		}).Once()
+		}).Times(2)
 	applied, err = s.copyMeta.FinalizeJobPublication(ctx, 705, 3, 1,
-		UpdateStatusOperator(7051, commonpb.SegmentState_Flushed),
-		UpdateIsImporting(7051, false))
+		[]UpdateOperator{
+			UpdateStatusOperator(7051, commonpb.SegmentState_Flushed),
+			UpdateIsImporting(7051, false),
+		})
 	s.NoError(err)
 	s.True(applied)
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted, s.copyMeta.GetJob(ctx, 705).GetState())
 	s.Equal(commonpb.SegmentState_Flushed, s.meta.GetSegment(ctx, 7051).GetState())
+}
+
+// TestFinalizeJobPublication_ChunksSegmentWrites pins the bounded-lock-window
+// property: a restore larger than copySegmentPublicationChunk must be
+// published in several bounded catalog writes (each under its own
+// m.mu + segMu window) instead of one composite write whose etcd fallback
+// would hold the global segment lock across sequential transactions, and the
+// Completed job record must still come last.
+func (s *CopySegmentMetaSuite) TestFinalizeJobPublication_ChunksSegmentWrites() {
+	ctx := context.TODO()
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        708,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPublishing,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(ctx, job))
+
+	total := copySegmentPublicationChunk + 1
+	segmentOperators := make([][]UpdateOperator, 0, total)
+	for i := 0; i < total; i++ {
+		segID := int64(80000 + i)
+		s.NoError(s.meta.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: segID, CollectionID: s.collectionID, PartitionID: 10, InsertChannel: "ch1",
+			State: commonpb.SegmentState_Importing, IsImporting: true,
+		}}))
+		segmentOperators = append(segmentOperators, []UpdateOperator{
+			UpdateStatusOperator(segID, commonpb.SegmentState_Flushed),
+			UpdateIsImporting(segID, false),
+		})
+	}
+
+	// The generated expecter matches variadic actions positionally, so the
+	// full-chunk write needs one matcher per action.
+	fullChunkArgs := make([]interface{}, 0, copySegmentPublicationChunk+1)
+	for i := 0; i <= copySegmentPublicationChunk; i++ {
+		fullChunkArgs = append(fullChunkArgs, mock.Anything)
+	}
+	var sequence []string
+	record := func(args mock.Arguments) {
+		n := len(args) - 1
+		if n == 1 {
+			if action, ok := args.Get(1).(metastore.UpdateAction); ok {
+				if _, isJob := action.Entry.(metastore.CopySegmentJobEntry); isJob {
+					sequence = append(sequence, "job")
+					return
+				}
+			}
+		}
+		sequence = append(sequence, fmt.Sprintf("segments:%d", n))
+	}
+	s.catalog.Mock.On("Update", fullChunkArgs...).Run(record).Return(nil).Once()
+	s.catalog.Mock.On("Update", mock.Anything, mock.Anything).Run(record).Return(nil).Times(2)
+
+	applied, err := s.copyMeta.FinalizeJobPublication(ctx, 708, 9, 1, segmentOperators...)
+	s.NoError(err)
+	s.True(applied)
+	// Full chunk, remainder chunk, then the job marker alone and last.
+	s.Equal([]string{fmt.Sprintf("segments:%d", copySegmentPublicationChunk), "segments:1", "job"}, sequence)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted, s.copyMeta.GetJob(ctx, 708).GetState())
+	for i := 0; i < total; i++ {
+		s.Equal(commonpb.SegmentState_Flushed, s.meta.GetSegment(ctx, int64(80000+i)).GetState())
+	}
+}
+
+// TestFinalizeJobPublication_StopsWhenOutcomeClaimedBetweenChunks pins the
+// per-chunk outcome fence: a terminal transition landing between chunks (the
+// TimeoutJob deadline serializes with each chunk on m.mu) must stop the
+// publication at the next chunk boundary — no further segment writes and no
+// Completed record — leaving the already-published chunks to the failed-job
+// cleanup exactly like a crash would.
+func (s *CopySegmentMetaSuite) TestFinalizeJobPublication_StopsWhenOutcomeClaimedBetweenChunks() {
+	ctx := context.TODO()
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        709,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPublishing,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(ctx, job))
+
+	total := copySegmentPublicationChunk + 1
+	segmentOperators := make([][]UpdateOperator, 0, total)
+	for i := 0; i < total; i++ {
+		segID := int64(90000 + i)
+		s.NoError(s.meta.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: segID, CollectionID: s.collectionID, PartitionID: 10, InsertChannel: "ch1",
+			State: commonpb.SegmentState_Importing, IsImporting: true,
+		}}))
+		segmentOperators = append(segmentOperators, []UpdateOperator{
+			UpdateStatusOperator(segID, commonpb.SegmentState_Flushed),
+		})
+	}
+
+	// The first chunk lands; a concurrent timeout claims the outcome before the
+	// second. The catalog callback runs on the goroutine that holds m.mu, so
+	// mutating the cached job here is exactly a transition serialized between
+	// this chunk and the next one's re-check. Only this one write is expected:
+	// a second chunk write or a Completed record would be an unexpected call
+	// and fail the test.
+	fullChunkArgs := make([]interface{}, 0, copySegmentPublicationChunk+1)
+	for i := 0; i <= copySegmentPublicationChunk; i++ {
+		fullChunkArgs = append(fullChunkArgs, mock.Anything)
+	}
+	s.catalog.Mock.On("Update", fullChunkArgs...).Run(func(mock.Arguments) {
+		cm := s.copyMeta.(*copySegmentMeta)
+		failed := cm.jobs[709].Clone()
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed)(failed)
+		cm.jobs[709] = failed
+	}).Return(nil).Once()
+
+	applied, err := s.copyMeta.FinalizeJobPublication(ctx, 709, 9, 1, segmentOperators...)
+	s.NoError(err)
+	s.False(applied)
+	// Only one catalog write happened (the mock allows exactly one), the job
+	// was never marked Completed, and the second chunk's segment stayed hidden.
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, s.copyMeta.GetJob(ctx, 709).GetState())
+	s.Equal(commonpb.SegmentState_Importing,
+		s.meta.GetSegment(ctx, int64(90000+copySegmentPublicationChunk)).GetState())
 }
 
 // TestUpdateJobStateAndReleaseRef_AppliesOnNonTerminalJob is the positive

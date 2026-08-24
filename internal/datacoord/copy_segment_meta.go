@@ -87,7 +87,7 @@ type CopySegmentMeta interface {
 	UpdateJobInState(ctx context.Context, jobID int64, expectedState datapb.CopySegmentJobState, actions ...UpdateCopySegmentJobAction) (bool, error)
 	UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) (bool, error)
 	TimeoutJob(ctx context.Context, jobID int64, reason string) (bool, error)
-	FinalizeJobPublication(ctx context.Context, jobID int64, totalRows int64, completeTs uint64, operators ...UpdateOperator) (bool, error)
+	FinalizeJobPublication(ctx context.Context, jobID int64, totalRows int64, completeTs uint64, segmentOperators ...[]UpdateOperator) (bool, error)
 	GetJob(ctx context.Context, jobID int64) CopySegmentJob
 	GetJobBy(ctx context.Context, filters ...CopySegmentJobFilter) []CopySegmentJob
 	CountJobBy(ctx context.Context, filters ...CopySegmentJobFilter) int
@@ -706,13 +706,14 @@ func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID
 // source pin held until the pin TTL expires.
 //
 // Failing a Publishing job is safe with respect to the outcome fence:
-// FinalizeJobPublication commits target visibility and Completed in one
-// catalog write under m.mu, so this transition either lands before it (and
-// FinalizeJobPublication then sees Failed and does nothing) or after it (and
-// the terminal-state guard here rejects). Target segments that a chunked
-// fallback write already persisted as Flushed are dropped by the inspector's
-// failed-job cleanup and hidden by reconcileRestoredTargetSegments on
-// restart, exactly as for any other Failed job.
+// FinalizeJobPublication re-checks the Publishing state under m.mu on every
+// chunk and before the Completed record, so this transition either lands
+// between chunks (the publication stops at the next boundary and never writes
+// Completed) or after the Completed record (and the terminal-state guard here
+// rejects). Target segments that earlier chunks already persisted as Flushed
+// are dropped by the inspector's failed-job cleanup and hidden by
+// reconcileRestoredTargetSegments on restart, exactly as for any other Failed
+// job.
 func (m *copySegmentMeta) TimeoutJob(ctx context.Context, jobID int64, reason string) (bool, error) {
 	return m.transitionJobAndReleaseRef(ctx, jobID, isTerminalCopyJobState,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
@@ -787,14 +788,50 @@ func (m *copySegmentMeta) transitionJobAndReleaseRef(ctx context.Context, jobID 
 	return true, nil
 }
 
-// FinalizeJobPublication atomically persists all target segment visibility
-// changes followed by the Completed job record as the commit marker. The
-// in-memory segment and job caches are swapped only after the composite write
-// succeeds, so live readers never observe a partial publication. On an
-// oversized etcd update, the catalog's ordered fallback writes segment chunks
-// first and the Completed marker last; a crash before that marker leaves the
-// durable job in Publishing for startup reconciliation and retry.
-func (m *copySegmentMeta) FinalizeJobPublication(ctx context.Context, jobID int64, totalRows int64, completeTs uint64, operators ...UpdateOperator) (bool, error) {
+// copySegmentPublicationChunk bounds how many target segments one publication
+// write covers. Each chunk is cloned, persisted, and applied under one
+// m.mu + meta.segMu window; 64 matches the etcd single-transaction op budget
+// (metastore's maxEtcdTxnNum), so a chunk commits in one transaction instead
+// of the catalog's sequential fallback. Without the bound, publishing an
+// N-segment restore held the GLOBAL segment lock across ceil(N/64) sequential
+// etcd transactions — for a 10k-segment restore that is one segMu window over
+// ~157 transactions, stalling every segment reader and writer (AssignSegmentID,
+// SaveBinlogPaths, compaction commit, GC) for the whole publication.
+const copySegmentPublicationChunk = 64
+
+// FinalizeJobPublication persists all target segment visibility changes in
+// bounded chunks and then commits the Completed job record as the marker.
+//
+// Trade-off, made deliberately: publication is no longer one atomic catalog
+// write, so a reader can transiently observe some target segments Flushed
+// while later chunks are still Importing and the job is still Publishing.
+// What stays guaranteed:
+//   - Completed is written only after EVERY chunk landed, and only under a
+//     re-check that the job is still Publishing (serialized on m.mu against
+//     TimeoutJob), so the outcome fence holds unchanged.
+//   - A crash or failure between chunks leaves the durable job in Publishing:
+//     startup reconciliation (reconcileRestoredTargetSegments) re-hides the
+//     partially published targets, and the checker retries publication —
+//     finishJob rebuilds only the operators still needed, so the retry is
+//     idempotent. A Publishing job that exhausts its deadline converges to
+//     Failed (TimeoutJob) and the inspector's failed-job cleanup drops every
+//     target, published chunks included.
+//
+// Each chunk re-checks the job state, so a concurrent Failed transition stops
+// the publication between chunks instead of racing it.
+func (m *copySegmentMeta) FinalizeJobPublication(ctx context.Context, jobID int64, totalRows int64, completeTs uint64, segmentOperators ...[]UpdateOperator) (bool, error) {
+	for start := 0; start < len(segmentOperators); start += copySegmentPublicationChunk {
+		end := min(start+copySegmentPublicationChunk, len(segmentOperators))
+		chunk := make([]UpdateOperator, 0, (end-start)*2)
+		for _, group := range segmentOperators[start:end] {
+			chunk = append(chunk, group...)
+		}
+		applied, err := m.publishTargetSegmentsChunk(ctx, jobID, chunk)
+		if err != nil || !applied {
+			return false, err
+		}
+	}
+
 	m.mu.Lock()
 	job, ok := m.jobs[jobID]
 	if !ok || job.GetState() != datapb.CopySegmentJobState_CopySegmentJobPublishing {
@@ -802,53 +839,16 @@ func (m *copySegmentMeta) FinalizeJobPublication(ctx context.Context, jobID int6
 		return false, nil
 	}
 
-	m.meta.segMu.Lock()
-	updatePack, err := m.meta.prepareUpdateSegmentsInfoLocked(ctx, operators...)
-	if err != nil {
-		m.meta.segMu.Unlock()
-		m.mu.Unlock()
-		return false, err
-	}
-	// This path hand-builds its catalog actions instead of going through
-	// meta.UpdateSegmentsInfo, so it must not silently diverge from it. The
-	// publication operators only flip visibility (state, IsImporting); binlog
-	// increments would be dropped on the floor here, so reject any operator
-	// that produces one rather than persist a segment record without its logs.
-	if updatePack != nil && len(updatePack.increments) > 0 {
-		m.meta.segMu.Unlock()
-		m.mu.Unlock()
-		return false, merr.WrapErrServiceInternalMsg(
-			"copy segment publication of job %d must not carry binlog increments (%d segments)",
-			jobID, len(updatePack.increments))
-	}
-
 	updatedJob := job.Clone()
 	UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted)(updatedJob)
 	UpdateCopyJobCompleteTs(completeTs)(updatedJob)
 	UpdateCopyJobTotalRows(totalRows)(updatedJob)
 
-	actions := make([]metastore.UpdateAction, 0, 1)
-	if updatePack != nil {
-		actions = make([]metastore.UpdateAction, 0, len(updatePack.segments)+1)
-		for _, segment := range updatePack.segments {
-			// AlterSegment is the encoding meta.UpdateSegmentsInfo uses
-			// (catalog.AlterSegments): it keeps the V3 guard on binlog-based
-			// row-count reconciliation, which the record-only UpdateSegment
-			// encoding bypasses — and every restore target looks V3 from
-			// pre-registration onward.
-			actions = append(actions, metastore.AlterSegment(segment.SegmentInfo))
-		}
-	}
-	actions = append(actions, metastore.SaveCopySegmentJob(updatedJob.(*copySegmentJob).CopySegmentJob))
-	if err := m.catalog.Update(ctx, actions...); err != nil {
-		m.meta.segMu.Unlock()
+	if err := m.catalog.Update(ctx, metastore.SaveCopySegmentJob(updatedJob.(*copySegmentJob).CopySegmentJob)); err != nil {
 		m.mu.Unlock()
 		return false, err
 	}
 
-	if updatePack != nil {
-		m.meta.applyUpdateSegmentsInfoLocked(updatePack)
-	}
 	// Completed is terminal, so the snapshot cache can never be read again.
 	// Clone() shares it by pointer and it holds the whole SnapshotData, so
 	// keeping it here would pin that memory on the finished job until checkGC
@@ -856,7 +856,6 @@ func (m *copySegmentMeta) FinalizeJobPublication(ctx context.Context, jobID int6
 	// UpdateJobStateAndReleaseRef, drops it for the same reason.
 	updatedJob.(*copySegmentJob).snapshotCache = nil
 	m.jobs[jobID] = updatedJob
-	m.meta.segMu.Unlock()
 	m.mu.Unlock()
 
 	if updatedJob.GetPinId() > 0 {
@@ -870,6 +869,62 @@ func (m *copySegmentMeta) FinalizeJobPublication(ctx context.Context, jobID int6
 			setSnapshotActivePinsGauge(unpinCollID, unpinName, remaining)
 		}
 	}
+	return true, nil
+}
+
+// publishTargetSegmentsChunk persists and applies one bounded batch of target
+// visibility updates. The Publishing re-check runs under m.mu on every chunk,
+// so a concurrent terminal transition (TimeoutJob, a late failure) stops the
+// publication at the next chunk boundary; (false, nil) tells the caller the
+// outcome was claimed elsewhere. meta.segMu is held only for this chunk's
+// prepare + single catalog transaction + in-memory apply.
+func (m *copySegmentMeta) publishTargetSegmentsChunk(ctx context.Context, jobID int64, operators []UpdateOperator) (bool, error) {
+	if len(operators) == 0 {
+		return true, nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	job, ok := m.jobs[jobID]
+	if !ok || job.GetState() != datapb.CopySegmentJobState_CopySegmentJobPublishing {
+		return false, nil
+	}
+
+	m.meta.segMu.Lock()
+	defer m.meta.segMu.Unlock()
+	updatePack, err := m.meta.prepareUpdateSegmentsInfoLocked(ctx, operators...)
+	if err != nil {
+		return false, err
+	}
+	if updatePack == nil {
+		return true, nil
+	}
+	// This path hand-builds its catalog actions instead of going through
+	// meta.UpdateSegmentsInfo, so it must not silently diverge from it. The
+	// publication operators only flip visibility (state, IsImporting); binlog
+	// increments would be dropped on the floor here, so reject any operator
+	// that produces one rather than persist a segment record without its logs.
+	if len(updatePack.increments) > 0 {
+		return false, merr.WrapErrServiceInternalMsg(
+			"copy segment publication of job %d must not carry binlog increments (%d segments)",
+			jobID, len(updatePack.increments))
+	}
+
+	actions := make([]metastore.UpdateAction, 0, len(updatePack.segments))
+	for _, segment := range updatePack.segments {
+		// AlterSegment is the encoding meta.UpdateSegmentsInfo uses
+		// (catalog.AlterSegments): it keeps the V3 guard on binlog-based
+		// row-count reconciliation, which the record-only UpdateSegment
+		// encoding bypasses — and every restore target looks V3 from
+		// pre-registration onward.
+		actions = append(actions, metastore.AlterSegment(segment.SegmentInfo))
+	}
+	if len(actions) == 0 {
+		return true, nil
+	}
+	if err := m.catalog.Update(ctx, actions...); err != nil {
+		return false, err
+	}
+	m.meta.applyUpdateSegmentsInfoLocked(updatePack)
 	return true, nil
 }
 

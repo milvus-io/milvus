@@ -1314,8 +1314,9 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_PublicationFailureStaysPublishin
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Maybe()
-	// The composite publication fails before its Completed commit marker.
-	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+	// The segment-chunk write (both targets in one bounded chunk) fails before
+	// the Completed marker is ever attempted.
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).
 		Return(errors.New("etcd unavailable")).Once()
 
 	// Setup: Create job in Executing state
@@ -1381,9 +1382,12 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_PublicationFailureStaysPublishin
 		s.True(updatedSegment.GetIsImporting())
 	}
 
-	// A later checker round retries from Publishing and commits visibility plus
-	// Completed together; no task work is re-run.
-	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+	// A later checker round retries from Publishing: the segment chunk lands
+	// first, then the Completed record as the final marker; no task work is
+	// re-run.
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).
+		Return(nil).Once()
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything).
 		Return(nil).Once()
 	s.checker.retryPublishingJob(updatedJob)
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted,
@@ -1440,7 +1444,10 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_PublishesAllTargetSegments() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	// One bounded chunk carrying both target segment records, then the
+	// Completed job record as its own final write.
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything).Return(nil).Once()
 
 	for _, segID := range []int64{3101, 3102} {
 		s.NoError(s.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
