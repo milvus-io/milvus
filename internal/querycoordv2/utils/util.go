@@ -206,9 +206,7 @@ func GetShardLeadersWithChannelsAndReplicaFilter(
 // changes which replicas the second read selects. GetShardLeadersByResourceGroup
 // runs its scoped full-load stand-in over its selection and would otherwise
 // have the walk re-derive a different one, turning ordinary in-flight
-// reconfiguration into a non-retriable ChannelNotAvailable. Sharing the
-// snapshot also drops the duplicate per-(channel, replica) GetShardLeader
-// walk that the scoped strict path performed.
+// reconfiguration into a non-retriable ChannelNotAvailable.
 func buildShardLeadersFromReplicas(
 	ctx context.Context,
 	dist *meta.DistributionManager,
