@@ -179,7 +179,7 @@ func TestGetLoadPercentageByResourceGroup_NoReplicaOnRG(t *testing.T) {
 // reported at their own real progress -- 100 and 0 -- not the collection-wide
 // average (50) the old, CalculateLoadPercentage-based implementation would
 // have given to both. Deleting the per-replica restriction inside
-// calculateReplicaLoadPercentage (i.e. checking "replica.Contains(delegator.Node)"
+// replicaLoadPercentage (i.e. checking "replica.Contains(delegator.Node)"
 // instead of aggregating over every replica) collapses both results back to
 // the same number.
 func TestGetLoadPercentageByResourceGroup_TwoResourceGroupsDiffer(t *testing.T) {
@@ -256,7 +256,7 @@ func TestGetLoadPercentageByResourceGroup_ChannelWatchedNoSegments(t *testing.T)
 // TestGetLoadPercentageByResourceGroup_NoTargetYet asserts that a replica in
 // the requested resource group, on a collection whose next target has not
 // been computed yet (targetNum == 0), reports 0 without panicking. Deleting
-// the "if targetNum == 0 { return 0 }" guard in calculateReplicaLoadPercentage
+// the "if targetNum == 0 { return 0 }" guard in replicaLoadPercentage
 // turns this into an integer-divide-by-zero panic.
 func TestGetLoadPercentageByResourceGroup_NoTargetYet(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
