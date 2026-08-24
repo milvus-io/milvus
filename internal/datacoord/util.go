@@ -543,9 +543,7 @@ func estimateFMIndexBuildPeakBytes(fieldSize, numRows int64, indexParams []*comm
 func fmIndexBuildTaskSlots(fieldSize, numRows int64, indexParams []*commonpb.KeyValuePair) int64 {
 	// CalculateNodeSlots exposes WorkerSlotUnit * BuildParallel slots per 8 GiB
 	// memory unit. Use the inverse conversion so the coordinator and worker
-	// account for the same amount of memory per slot. The inversion is shared
-	// with taskresource.LegacyMemoryPerSlot, which needs the same divisor for
-	// the phase-0 scalar slot, so that the two cannot drift apart.
+	// account for the same amount of memory per slot.
 	bytesPerSlot := max(bytesPerWorkerMemoryUnit/taskresource.WorkerSlotsPerMemoryUnit(), 1)
 	return max(ceilDiv(estimateFMIndexBuildPeakBytes(fieldSize, numRows, indexParams), bytesPerSlot), 1)
 }
@@ -582,17 +580,6 @@ func calculateStatsTaskSlot(segmentSize int64) int64 {
 		return max(defaultSlots/4, 1)
 	}
 	return max(defaultSlots/8, 1)
-}
-
-// memoryToSlots converts a byte estimate into the scalar slot the wire
-// protocol still carries in phase 0. It folds bytes to slots at the rate
-// taskresource.LegacyMemoryPerSlot derives from CalculateNodeSlots -- the same
-// rate the DataNode uses when it has to go the other way
-// (taskresource.LegacySlotToRequirement), and the same one the availability it
-// reports back is folded at -- so the two sides agree on what a slot is worth.
-func memoryToSlots(memory int64) int64 {
-	// LegacyMemoryPerSlot is >= 1 by construction, so this cannot divide by zero.
-	return max(memory/taskresource.LegacyMemoryPerSlot(), 1)
 }
 
 func enableSortCompaction() bool {

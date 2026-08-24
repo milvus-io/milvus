@@ -734,56 +734,34 @@ func (node *DataNode) DropCopySegment(ctx context.Context, req *datapb.DropCopyS
 	return merr.Success(), nil
 }
 
-// legacyAvailableSlots folds the guard's two-dimensional state into the
-// scalar an old DataCoord still reads.
+// legacyAvailableSlots folds what this node has committed onto the scalar an
+// old coordinator still reads.
 //
-// It takes the worse of the two utilizations on purpose: the folded value
-// must be conservative, so an old coordinator sees the node as full earlier
-// than it truly is, never later. legacyTotal is left at whatever
-// CalculateNodeSlots reports so the old coordinator's own arithmetic keeps
-// its established meaning.
+// A coordinator that understands `resources` ignores this entirely. This is
+// only for one that predates it, so it stays as simple as the thing it stands
+// in for: the free FRACTION of the memory budget, applied to the slot total
+// CalculateNodeSlots has always reported. There is no byte<->slot exchange rate
+// any more, because a fraction does not need one -- the earlier version derived
+// one, and having to keep two sides of an RPC agreeing on it was the reason
+// that pricing needed a kill switch.
 //
-// Two states read as a full node (0) regardless of the utilization
-// arithmetic:
-//   - Frozen: the watermark loop has stopped admission outright.
-//   - ExclusiveTaskID != 0: an oversized task is running alone and nothing
-//     else will be admitted until it finishes. The ordinary formula usually
-//     already lands on zero here too, because Reserved equals that one
-//     task's requirement and it does not fit in Total in whichever dimension
-//     made it oversized -- but node capacity is runtime config and can grow
-//     while the task holds the node, which can pull the ratio back under 1.
-//     Checking the flag directly keeps the scalar correct regardless of that
-//     race.
+// It is expressed as the free fraction rather than as 1 - utilization on
+// purpose. `1 - reserved/total` rounds twice: for a nine-tenths-consumed
+// dimension, 900/1000 is the double just ABOVE 0.9, and subtracting it from 1
+// lands just BELOW a tenth, so a node with exactly a tenth free reported 7
+// slots out of 80 instead of 8. Dividing the free capacity by the total is one
+// rounding instead of two.
+//
+// A node that has stopped taking work reports zero regardless of the
+// arithmetic. The old coordinator has no other way to be told.
 func legacyAvailableSlots(snap resource.Snapshot, legacyTotal int64) int64 {
-	if snap.Frozen || snap.ExclusiveTaskID != 0 {
+	if !snap.Admitting {
 		return 0
 	}
 
-	// The fold is expressed as the FREE fraction rather than as
-	// 1 - utilization, and the minimum of the free fractions is the same
-	// fold as the maximum of the utilizations.
-	//
-	// This is not a stylistic choice. `1 - reserved/total` rounds twice: for a
-	// nine-tenths-consumed dimension, 900/1000 is the double just ABOVE 0.9,
-	// and subtracting it from 1 lands on 0.09999999999999998, just BELOW a
-	// tenth. Multiplying by a legacyTotal that is a multiple of ten then lands
-	// just under an integer, and int64() truncates towards zero, so a node with
-	// exactly a tenth of its budget free reported 7 slots out of 80 instead of
-	// 8. Dividing the free capacity by the total directly is one rounding
-	// instead of two and lands on the nearest double to a tenth.
-	//
-	// The error was always in the same direction -- under-reporting -- so it hid
-	// capacity from DataCoord rather than over-committing the node, but it is
-	// systematic, not noise. See
-	// TestLegacyAvailableSlotsDoesNotLoseASlotToFloatingPoint.
 	free := 1.0
-	if snap.Total.CPU > 0 {
-		free = (snap.Total.CPU - snap.Reserved.CPU) / snap.Total.CPU
-	}
-	if snap.Total.Memory > 0 {
-		if memFree := float64(snap.Total.Memory-snap.Reserved.Memory) / float64(snap.Total.Memory); memFree < free {
-			free = memFree
-		}
+	if snap.Capacity.Memory > 0 {
+		free = float64(snap.Capacity.Memory-snap.Committed.Memory) / float64(snap.Capacity.Memory)
 	}
 	if free < 0 {
 		free = 0
@@ -797,104 +775,32 @@ func legacyAvailableSlots(snap resource.Snapshot, legacyTotal int64) int64 {
 }
 
 // queuedSlots is what the three executors have accepted but the ledger does not
-// know about: their own counters are incremented at ENQUEUE, the ledger only at
-// admission.
+// know about: their counters move at ENQUEUE, the ledger only when a task
+// actually starts.
 func (node *DataNode) queuedSlots() (indexStats, compaction, imports int64) {
 	return node.taskScheduler.TaskQueue.GetUsingSlot(),
 		node.compactionExecutor.Slots(),
 		node.importScheduler.Slots()
 }
 
-// queueUtilization is how full the three executors' own queues say the node is,
-// as a fraction, so it can be compared with the ledger's.
+// availableSlots is the scalar this node reports.
 //
-// A fraction rather than a slot count, because the three counters are NOT all
-// denominated in the same unit and subtracting them from one total is a units
-// error:
+// Two inputs, and the reason is that they see different things. The ledger is
+// memory-aware but counts only tasks that have STARTED, so a node holding five
+// hundred queued compactions would advertise itself free. The executors'
+// counters are charged at enqueue and so do see the queue, but know nothing
+// about memory. Whichever currently reports the node busier wins.
 //
-//   - indexStatsUsed and importUsed are on the CalculateNodeSlots scale, the
-//     same scale legacyTotal is on. Their fraction is used/legacyTotal.
-//   - compactionUsed is not. Under this branch DataCoord prices a mix or sort
-//     compaction with memoryToSlots(bytes) = bytes /
-//     taskresource.LegacyMemoryPerSlot(), so the counter is denominated in
-//     units of memory, not in slots of this node. The two denominators
-//     coincide only on a node whose ledger budget happens to be exactly
-//     legacyTotal x LegacyMemoryPerSlot() -- which is what the derived rate
-//     buys on a memory-bound node at full budget, but not on a CPU-bound one,
-//     and not once the guard has subtracted non-task memory from the budget.
-//     Dividing by legacyTotal in those cases makes the node report itself full
-//     before its budget is, a throughput cut with nothing behind it.
-//
-// So the compaction arm is converted back into the currency it came from --
-// slots x LegacyMemoryPerSlot() recovers the memory memoryToSlots divided --
-// and measured against the ledger's own budget. memoryToSlots floors, so the
-// reconstruction understates by up to one slot per task; that direction makes
-// this arm slightly less binding, which is the safe way round for a backstop.
-//
-// Two honest imprecisions, neither fixable here. The executors' counters
-// include tasks that are already ADMITTED as well as queued ones, so this arm
-// double-counts whatever the ledger has already charged; it is a backstop
-// against an empty ledger, not an accounting. And with
-// enableCompactionEstimate off, or against a DataCoord too old to send an
-// estimate, the compaction counter carries flat pre-branch constants instead,
-// which reconstruct to far fewer bytes than the tasks really hold -- in that
-// configuration this arm simply stops binding and the ledger governs alone,
-// which is what that switch is asking for anyway.
-func queueUtilization(snap resource.Snapshot, legacyTotal, indexStatsUsed, compactionUsed, importUsed int64) float64 {
-	var util float64
-	if legacyTotal > 0 {
-		util = float64(indexStatsUsed+importUsed) / float64(legacyTotal)
-	}
-	if compactionUsed <= 0 {
-		return util
-	}
-
-	perSlot := taskresource.LegacyMemoryPerSlot()
-	if snap.Total.Memory <= 0 {
-		// No budget to measure against (a guard that has not reported one).
-		// Fall back to the legacy scale: it is the wrong unit, but it is the
-		// only one available and it errs towards reporting the node busier.
-		if legacyTotal > 0 {
-			if u := float64(compactionUsed) / float64(legacyTotal); u > util {
-				util = u
-			}
-		}
-		return util
-	}
-
-	if u := float64(compactionUsed*perSlot) / float64(snap.Total.Memory); u > util {
-		util = u
-	}
-	return util
-}
-
-// availableSlots is the scalar this node reports to DataCoord.
-//
-// It needs two inputs. legacyAvailableSlots folds the ledger, which is the
-// memory-aware half and the reason this branch exists -- but the ledger counts
-// only ADMITTED tasks. A node holding five hundred queued compactions that have
-// not been admitted yet has an empty ledger and would advertise itself
-// completely free, so DataCoord's water-filling would keep choosing it and one
-// node would hoard the whole cluster's work. The compaction executor's taskCh
-// is capped (maxTaskQueueNum), and once it fills, Enqueue blocks inside the
-// gRPC handler.
-//
-// The executors' own counters are the pre-branch answer to that: they are
-// charged at enqueue and released at completion, so they see the queue. They
-// are not memory-aware, which is why they cannot be the only input either.
-// Whichever of the two currently reports the node busier wins.
+// Both arms are now on the same scale. DataCoord sends an un-upgraded worker
+// the legacy slot constants -- the pricing it has always understood -- so
+// subtracting the executors' counters from legacyTotal is the arithmetic that
+// predates this work, restored rather than reinterpreted.
 func availableSlots(snap resource.Snapshot, legacyTotal, indexStatsUsed, compactionUsed, importUsed int64) int64 {
 	available := legacyAvailableSlots(snap, legacyTotal)
-	if snap.Frozen || snap.ExclusiveTaskID != 0 {
-		// Already zero, and the queue arm must not be able to raise it.
+	if !snap.Admitting {
 		return available
 	}
-
-	util := queueUtilization(snap, legacyTotal, indexStatsUsed, compactionUsed, importUsed)
-	if util > 1 {
-		util = 1
-	}
-	if fromQueue := int64(float64(legacyTotal) * (1 - util)); fromQueue < available {
+	if fromQueue := legacyTotal - indexStatsUsed - compactionUsed - importUsed; fromQueue < available {
 		available = fromQueue
 	}
 	if available < 0 {
@@ -915,28 +821,22 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	indexStatsUsed, compactionUsed, importUsed := node.queuedSlots()
 	available := availableSlots(snap, legacyTotal, indexStatsUsed, compactionUsed, importUsed)
 
-	// A sustained watermark freeze can leave tasks parked in Acquire
-	// indefinitely (Acquire only returns on ctx cancellation), reporting
-	// nothing to DataCoord. The log line makes that state unmistakable so an
-	// operator does not mistake it for "genuinely busy": both otherwise read
-	// as availableSlots=0.
-	if snap.Frozen {
-		mlog.Warn(ctx, "query slots done: node frozen by memory watermark, reporting zero available slots",
+	// A node that has stopped taking work reports zero, which is otherwise
+	// indistinguishable from being genuinely busy. The log line is what tells
+	// an operator which of the two they are looking at.
+	if !snap.Admitting {
+		mlog.Warn(ctx, "query slots done: node has stopped taking tasks on measured memory",
 			mlog.Int64("legacyTotalSlots", legacyTotal),
-			mlog.Float64("reservedCPU", snap.Reserved.CPU),
-			mlog.Int64("reservedMemoryMiB", snap.Reserved.Memory>>20),
-			mlog.Int64("budgetMemoryMiB", snap.Total.Memory>>20),
-			mlog.Int64("nonTaskMemoryMiB", snap.NonTask>>20),
-			mlog.Int64("exclusiveTaskID", snap.ExclusiveTaskID))
+			mlog.Float64("committedCPU", snap.Committed.CPU),
+			mlog.Int64("committedMemoryMiB", snap.Committed.Memory>>20),
+			mlog.Int64("capacityMemoryMiB", snap.Capacity.Memory>>20))
 	} else {
 		mlog.Info(ctx, "query slots done",
 			mlog.Int64("legacyTotalSlots", legacyTotal),
 			mlog.Int64("legacyAvailableSlots", available),
-			mlog.Float64("reservedCPU", snap.Reserved.CPU),
-			mlog.Int64("reservedMemoryMiB", snap.Reserved.Memory>>20),
-			mlog.Int64("budgetMemoryMiB", snap.Total.Memory>>20),
-			mlog.Int64("nonTaskMemoryMiB", snap.NonTask>>20),
-			mlog.Int64("exclusiveTaskID", snap.ExclusiveTaskID))
+			mlog.Float64("committedCPU", snap.Committed.CPU),
+			mlog.Int64("committedMemoryMiB", snap.Committed.Memory>>20),
+			mlog.Int64("capacityMemoryMiB", snap.Capacity.Memory>>20))
 	}
 
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(available))
@@ -972,7 +872,7 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 // the coordinator needs to tell "this node is full" from "this node has stopped
 // taking work", because only the second is a reason to look at the node itself.
 func nodeResources(snap resource.Snapshot) *datapb.NodeResources {
-	return taskresource.NodeResourcesOf(snap.Total, snap.Reserved, !snap.Frozen && snap.ExclusiveTaskID == 0)
+	return taskresource.NodeResourcesOf(snap.Capacity, snap.Committed, snap.Admitting)
 }
 
 // Not in used now

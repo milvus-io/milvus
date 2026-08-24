@@ -512,7 +512,7 @@ func TestLegacySlotToRequirement(t *testing.T) {
 	paramtable.Init()
 
 	cfg := &paramtable.Get().DataNodeCfg
-	perSlot := LegacyMemoryPerSlot()
+	perSlot := max(BytesPerWorkerMemoryUnit/WorkerSlotsPerMemoryUnit(), 1)
 	unit := cfg.WorkerSlotUnit.GetAsFloat()
 
 	got := LegacySlotToRequirement(4)

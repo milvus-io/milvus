@@ -259,7 +259,7 @@ func (sched *TaskScheduler) processTask(t Task) {
 	// when the job is dropped or the node shuts down, which are the two cases
 	// where waiting has stopped being useful.
 	req := t.GetResourceRequirement()
-	if err := resource.GetGuard().Acquire(t.Ctx(), t.GetTaskID(), t.GetTaskType(), req); err != nil {
+	if err := resource.GetGuard().Accept(t.Ctx(), t.GetTaskID(), t.GetTaskType(), req); err != nil {
 		mlog.Warn(t.Ctx(), "task gave up waiting for the node's budget",
 			mlog.String("task", t.Name()), mlog.String("requirement", req.String()), mlog.Err(err))
 		// Nothing was reserved, so nothing is released. The wait ending says

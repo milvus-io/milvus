@@ -418,20 +418,26 @@ func RequirementForAnalyze(req *workerpb.AnalyzeRequest) Requirement {
 
 // LegacySlotToRequirement converts a scalar slot into a requirement. It is the
 // last resort of the compatibility table, used only when a request carries too
-// little information to recompute, and it deliberately floors at one slot so an
-// absent or non-positive slot is never read as "this task is free".
+// little information to derive anything better, and it deliberately floors at
+// one slot so an absent or non-positive slot is never read as "this task is
+// free".
+//
+// The rate is the one CalculateNodeSlots implies -- a worker exposes
+// WorkerSlotUnit x BuildParallel slots per 8GiB -- inverted. It is a rough
+// conversion and is meant to be: it exists so that a task nobody could price
+// still costs something, not so that it is priced well.
 func LegacySlotToRequirement(slot int64) Requirement {
 	if slot <= 0 {
 		slot = 1
 	}
 	cfg := &paramtable.Get().DataNodeCfg
-	perSlot := LegacyMemoryPerSlot()
+	perSlot := max(BytesPerWorkerMemoryUnit/WorkerSlotsPerMemoryUnit(), 1)
 	unit := cfg.WorkerSlotUnit.GetAsFloat()
 	if unit <= 0 {
 		unit = 1
 	}
 	return Requirement{
 		CPU:    float64(slot) / unit,
-		Memory: slot * perSlot,
+		Memory: saturatingMul(slot, perSlot),
 	}
 }
