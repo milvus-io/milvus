@@ -18,17 +18,157 @@ package datacoord
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
+
+func TestCompactionTaskMetaMetricsUsePersistedState(t *testing.T) {
+	ctx := context.Background()
+	m := newTestCompactionTaskMeta(t)
+	task := &datapb.CompactionTask{
+		TriggerID: 99530,
+		PlanID:    99530,
+		NodeID:    99530,
+		Type:      datapb.CompactionType_SortCompaction,
+		State:     datapb.CompactionTaskState_meta_saved,
+	}
+	executing := metrics.DataCoordCompactionTaskNum.WithLabelValues("99530", task.Type.String(), metrics.Executing)
+	done := metrics.DataCoordCompactionTaskNum.WithLabelValues("99530", task.Type.String(), metrics.Done)
+	initialExecuting, initialDone := testutil.ToFloat64(executing), testutil.ToFloat64(done)
+	t.Cleanup(func() {
+		executing.Set(initialExecuting)
+		done.Set(initialDone)
+	})
+
+	// The first save does not admit a task to the inspector.
+	require.NoError(t, m.SaveCompactionTask(ctx, task))
+	require.Equal(t, initialExecuting, testutil.ToFloat64(executing))
+	incCompactionTaskMetric(task)
+
+	// Two callers can both hold the same old task snapshot. The second save
+	// must compare with the first persisted result, not that caller's snapshot.
+	first := proto.Clone(task).(*datapb.CompactionTask)
+	second := proto.Clone(task).(*datapb.CompactionTask)
+	first.State, second.State = datapb.CompactionTaskState_completed, datapb.CompactionTaskState_completed
+	require.NoError(t, m.SaveCompactionTask(ctx, first))
+	require.NoError(t, m.SaveCompactionTask(ctx, second))
+	require.Equal(t, initialExecuting, testutil.ToFloat64(executing))
+	require.Equal(t, initialDone+1, testutil.ToFloat64(done))
+}
+
+func TestCompactionTaskMetaMetricsTransitions(t *testing.T) {
+	for _, taskType := range []datapb.CompactionType{
+		datapb.CompactionType_MixCompaction,
+		datapb.CompactionType_SortCompaction,
+		datapb.CompactionType_Level0DeleteCompaction,
+		datapb.CompactionType_ClusteringCompaction,
+		datapb.CompactionType_BumpSchemaVersionCompaction,
+	} {
+		for _, terminal := range []datapb.CompactionTaskState{
+			datapb.CompactionTaskState_completed,
+			datapb.CompactionTaskState_failed,
+			datapb.CompactionTaskState_timeout,
+		} {
+			t.Run(taskType.String()+"/"+terminal.String(), func(t *testing.T) {
+				ctx := context.Background()
+				var saveErr error
+				catalog := mocks.NewDataCoordCatalog(t)
+				catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Once()
+				catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).RunAndReturn(
+					func(context.Context, *datapb.CompactionTask) error { return saveErr },
+				)
+				catalog.EXPECT().DropCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
+				m, err := newCompactionTaskMeta(ctx, catalog)
+				require.NoError(t, err)
+
+				type labels struct {
+					node   int64
+					status string
+				}
+				gauges := map[labels]float64{}
+				gauge := func(key labels) prometheus.Gauge {
+					return metrics.DataCoordCompactionTaskNum.WithLabelValues(strconv.FormatInt(key.node, 10), taskType.String(), key.status)
+				}
+				for _, node := range []int64{NullNodeID, 99540, 99541} {
+					for _, status := range []string{metrics.Pending, metrics.Executing, metrics.Done} {
+						key := labels{node, status}
+						gauges[key] = testutil.ToFloat64(gauge(key))
+					}
+				}
+				t.Cleanup(func() {
+					for key, initial := range gauges {
+						gauge(key).Set(initial)
+					}
+				})
+				check := func(current labels) {
+					t.Helper()
+					for key, initial := range gauges {
+						want := initial
+						if key == current {
+							want++
+						}
+						got := testutil.ToFloat64(gauge(key))
+						require.Equal(t, want, got, "node=%d status=%s", key.node, key.status)
+					}
+				}
+
+				p := &datapb.CompactionTask{TriggerID: 99540, PlanID: 99540, Type: taskType, State: datapb.CompactionTaskState_pipelining, NodeID: NullNodeID}
+				require.NoError(t, m.SaveCompactionTask(ctx, p))
+				incCompactionTaskMetric(p)
+				check(labels{NullNodeID, metrics.Pending})
+				steps := []struct {
+					state  datapb.CompactionTaskState
+					node   int64
+					metric labels
+				}{
+					{datapb.CompactionTaskState_executing, 99540, labels{99540, metrics.Executing}},
+					{datapb.CompactionTaskState_executing, 99541, labels{99541, metrics.Executing}},
+					{datapb.CompactionTaskState_pipelining, NullNodeID, labels{NullNodeID, metrics.Pending}},
+					{datapb.CompactionTaskState_pipelining, 99540, labels{NullNodeID, metrics.Pending}},
+					{datapb.CompactionTaskState_executing, 99541, labels{99541, metrics.Executing}},
+					{datapb.CompactionTaskState_analyzing, 99541, labels{99541, metrics.Executing}},
+					{datapb.CompactionTaskState_indexing, 99541, labels{99541, metrics.Executing}},
+					{datapb.CompactionTaskState_statistic, 99541, labels{99541, metrics.Executing}},
+					{datapb.CompactionTaskState_meta_saved, 99541, labels{99541, metrics.Executing}},
+					{terminal, 99541, labels{99541, metrics.Done}},
+					{datapb.CompactionTaskState_cleaned, 99541, labels{99541, metrics.Done}},
+				}
+				previous := labels{NullNodeID, metrics.Pending}
+				for _, step := range steps {
+					next := proto.Clone(p).(*datapb.CompactionTask)
+					next.State, next.NodeID = step.state, step.node
+					// Failed persistence must leave both metadata and metrics intact.
+					saveErr = errors.New("catalog unavailable")
+					require.Error(t, m.SaveCompactionTask(ctx, next))
+					check(previous)
+					require.True(t, proto.Equal(p, m.GetCompactionTasksByTriggerID(p.TriggerID)[0]))
+					saveErr = nil
+					require.NoError(t, m.SaveCompactionTask(ctx, next))
+					require.NoError(t, m.SaveCompactionTask(ctx, next))
+					check(step.metric)
+					p, previous = next, step.metric
+				}
+				require.NoError(t, m.DropCompactionTask(ctx, p))
+				check(labels{99541, metrics.Done})
+			})
+		}
+	}
+}
 
 func TestCompactionTaskMetaSuite(t *testing.T) {
 	suite.Run(t, new(CompactionTaskMetaSuite))

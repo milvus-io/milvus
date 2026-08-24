@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -493,6 +494,36 @@ func (s *ClusteringCompactionTaskSuite) TestCreateTaskOnWorker() {
 		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		task.CreateTaskOnWorker(1, cluster)
 		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
+	})
+
+	s.Run("CreateTaskOnWorker refusal remains retryable", func() {
+		task := s.generateBasicTask(false)
+		task.maxRetryTimes = 3
+		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining))
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:    101,
+				State: commonpb.SegmentState_Flushed,
+				Level: datapb.SegmentLevel_L1,
+			},
+		})
+		s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:                    102,
+				State:                 commonpb.SegmentState_Flushed,
+				Level:                 datapb.SegmentLevel_L2,
+				PartitionStatsVersion: 10000,
+			},
+		})
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).
+			Return(errors.New("compaction already exists"))
+		task.CreateTaskOnWorker(1, cluster)
+
+		s.Equal(datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
+		s.EqualValues(NullNodeID, task.GetTaskProto().GetNodeID())
+		s.EqualValues(1, task.GetTaskProto().GetRetryTimes())
 	})
 
 	s.Run("CreateTaskOnWorker succeed, vector clustering key", func() {

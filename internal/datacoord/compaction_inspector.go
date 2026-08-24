@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -300,8 +299,6 @@ func (c *compactionInspector) schedule() []CompactionTask {
 			mlog.Int64s("inputSegments", t.GetTaskProto().GetInputSegments()),
 		)
 		c.executingGuard.Unlock()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Dec()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Executing).Inc()
 	}
 	return selected
 }
@@ -535,7 +532,7 @@ func (c *compactionInspector) removeTasksByChannel(channel string) {
 				mlog.Int64("planID", task.GetTaskProto().GetPlanID()),
 				mlog.Int64("node", task.GetTaskProto().GetNodeID()),
 			)
-			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", task.GetTaskProto().GetNodeID()), task.GetTaskProto().GetType().String(), metrics.Pending).Dec()
+			decCompactionTaskMetric(task.GetTaskProto())
 			return true
 		}
 		return false
@@ -551,18 +548,23 @@ func (c *compactionInspector) removeTasksByChannel(channel string) {
 				mlog.Int64("planID", task.GetTaskProto().GetPlanID()),
 				mlog.Int64("node", task.GetTaskProto().GetNodeID()),
 			)
+			c.scheduler.AbortAndRemoveTask(id)
 			delete(c.executingTasks, id)
-			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", task.GetTaskProto().GetNodeID()), task.GetTaskProto().GetType().String(), metrics.Executing).Dec()
+			c.meta.GetCompactionTaskMeta().removeTaskMetric(task.GetTaskProto())
 		}
 	}
 	c.executingGuard.Unlock()
 }
 
 func (c *compactionInspector) submitTask(t CompactionTask) error {
+	// Account for admission before the queue publishes the task. Roll back the
+	// same metric if admission fails, even when the initial state is terminal.
+	metric := getCompactionTaskMetric(t.GetTaskProto())
+	updateCompactionTaskMetric(metric, 1)
 	if err := c.queueTasks.Enqueue(t); err != nil {
+		updateCompactionTaskMetric(metric, -1)
 		return err
 	}
-	metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
 	return nil
 }
 
@@ -570,9 +572,9 @@ func (c *compactionInspector) submitTask(t CompactionTask) error {
 func (c *compactionInspector) restoreTask(t CompactionTask) {
 	c.executingGuard.Lock()
 	c.executingTasks[t.GetTaskProto().GetPlanID()] = t
+	incCompactionTaskMetric(t.GetTaskProto())
 	c.scheduler.Enqueue(t)
 	c.executingGuard.Unlock()
-	metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Executing).Inc()
 }
 
 // getCompactionTask return compaction
@@ -693,8 +695,6 @@ func (c *compactionInspector) checkCompaction() error {
 			mlog.Int64s("inputSegments", t.GetTaskProto().GetInputSegments()),
 			mlog.String("reason", t.GetTaskProto().GetFailReason()),
 		)
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Done).Inc()
 	}
 	c.executingGuard.Unlock()
 
