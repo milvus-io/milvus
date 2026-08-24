@@ -64,7 +64,7 @@ That state is reachable and can persist. `job_load.go` calls `RemovePartition` �
 
 Under `m.Exist`, readiness would report `Ready=true` and the percentage `100` for a collection whose scoped routing is refused with `ErrCollectionNotLoaded` (101, non-retriable, so the gRPC layer does not even resend) — a caller gating a switchover on the first two would cut traffic over and then have every route permanently refused. Using one test everywhere makes the three surfaces structurally incapable of that disagreement, and matches what `ShowLoadCollections` has always used.
 
-Per-replica coverage is measured against `meta.NextTargetFirst`, the same target the `CollectionObserver` measures progress against. `NextTargetFirst`, not `NextTarget`: promotion clears the next target until the observer re-pulls it ~10s later, and a plain `NextTarget` read in that window sees an empty target and reports 0 — so a fully loaded, serving group would flap 100/0 on every promotion.
+Per-replica coverage is measured against `meta.NextTargetFirst` — deliberately *not* the `meta.NextTarget` the `CollectionObserver` itself reads. `NextTarget` resolves to the next target alone, and `UpdateCollectionCurrentTarget` clears it on promotion until the observer re-pulls it ~10s later, so a `NextTarget` read in that window sees an empty target and reports 0 — a fully loaded, serving group would flap 100/0 on every promotion. `NextTargetFirst` falls back to the current target and closes that window.
 
 Query-**invisible** replicas (load-config spawns replicas invisible until every one of them is serviceable) are deliberately **included** here. This is a progress figure, and those replicas are exactly the ones whose progress the load-config path is waiting on.
 

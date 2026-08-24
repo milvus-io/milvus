@@ -232,13 +232,18 @@ func LoadPercentageByResourceGroup(
 
 // replicaLoadPercentage is the per-replica analog of what
 // CollectionObserver.observePartitionLoadStatus computes for a whole
-// collection: it reads the collection's segment and channel targets from
-// meta.NextTarget -- the target the observer itself measures progress
-// against, i.e. the one that gives "load percentage" its meaning in this
-// codebase -- and, for each target, checks whether one of replica's own
-// nodes carries it. The percentage is the fraction of targets this one
-// replica already carries; no aggregation across other replicas happens
-// here.
+// collection: it reads the collection's segment and channel targets and, for
+// each target, checks whether one of replica's own nodes carries it. The
+// percentage is the fraction of targets this one replica already carries; no
+// aggregation across other replicas happens here.
+//
+// The targets are read with meta.NextTargetFirst, NOT the meta.NextTarget the
+// observer uses (collection_observer.go). That is a deliberate divergence,
+// not an inherited choice: NextTarget reads the next target alone, and
+// UpdateCollectionCurrentTarget clears it on promotion until the observer
+// re-pulls it, so a NextTarget read in that window would report 0 for a fully
+// loaded group. NextTargetFirst falls back to the current target and closes
+// exactly that window. See the note at the read itself.
 func replicaLoadPercentage(
 	ctx context.Context,
 	targetMgr meta.TargetManagerInterface,
