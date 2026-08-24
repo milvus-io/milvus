@@ -70,7 +70,10 @@ func (s *FileResourceObserverSuite) TestNewFileResourceObserver() {
 }
 
 func (s *FileResourceObserverSuite) TestStartStop() {
-	s.Run("start_with_sync_mode", func() {
+	s.Run("start_with_sync_mode_and_no_resources", func() {
+		qnManager := qcsession.NewNodeManager()
+		qnManager.Add(qcsession.NewNodeInfo(qcsession.ImmutableNodeInfo{NodeID: 1}))
+		mockCluster := qcsession.NewMockCluster(s.T())
 		observer := &FileResourceObserver{
 			ctx:          s.ctx,
 			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
@@ -78,21 +81,25 @@ func (s *FileResourceObserverSuite) TestStartStop() {
 			closeCh:      make(chan struct{}),
 			qnMode:       fileresource.SyncMode,
 			dnMode:       fileresource.CloseMode,
-
-			qnManager: qcsession.NewNodeManager(),
+			qnManager:    qnManager,
+			cluster:      mockCluster,
 		}
 
-		// Mock meta to avoid nil pointer
+		// A non-zero version with no current resources represents a restart after
+		// all resources were removed. Startup and node notifications should not
+		// issue empty sync RPCs in this state.
 		mockMeta := mockrootcoord.NewIMetaTable(s.T())
-		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0)).Maybe()
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(2)).Maybe()
 		observer.meta = mockMeta
 
 		observer.Start()
 		// Start should be idempotent
 		observer.Start()
+		observer.Notify()
 
-		// Give syncLoop time to start
-		time.Sleep(50 * time.Millisecond)
+		s.Eventually(func() bool {
+			return len(observer.notifyCh) == 0
+		}, time.Second, 10*time.Millisecond)
 
 		observer.Stop()
 		// Stop should be idempotent
@@ -129,6 +136,36 @@ func (s *FileResourceObserverSuite) TestNotify() {
 	// Second notify should not block (channel already has a message)
 	observer.Notify()
 	s.Len(observer.notifyCh, 1)
+}
+
+func (s *FileResourceObserverSuite) TestShouldSyncOnNotify() {
+	s.Run("meta_not_ready", func() {
+		observer := &FileResourceObserver{ctx: s.ctx}
+		s.False(observer.shouldSyncOnNotify())
+	})
+
+	s.Run("skip_empty_resources_after_startup_or_node_registration", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(2))
+		observer := &FileResourceObserver{ctx: s.ctx, meta: mockMeta}
+
+		s.False(observer.shouldSyncOnNotify())
+	})
+
+	s.Run("sync_active_resources", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{Name: "test"}}, uint64(1))
+		observer := &FileResourceObserver{ctx: s.ctx, meta: mockMeta}
+
+		s.True(observer.shouldSyncOnNotify())
+	})
+
+	s.Run("retry_failed_empty_sync", func() {
+		observer := &FileResourceObserver{ctx: s.ctx}
+		observer.retryEmptySync.Store(true)
+
+		s.True(observer.shouldSyncOnNotify())
+	})
 }
 
 func (s *FileResourceObserverSuite) TestCheckNodeSynced() {
@@ -313,9 +350,36 @@ func (s *FileResourceObserverSuite) TestSync() {
 			qnMode:       fileresource.SyncMode,
 			dnMode:       fileresource.CloseMode,
 		}
+		observer.retryEmptySync.Store(true)
 
 		err := observer.Sync()
 		s.NoError(err)
+		s.False(observer.retryEmptySync.Load())
+	})
+
+	s.Run("retry_empty_resources_when_clear_fails", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(2))
+
+		mockCluster := qcsession.NewMockCluster(s.T())
+		mockCluster.EXPECT().SyncFileResource(mock.Anything, int64(1), mock.Anything).Return(nil, errors.New("rpc error"))
+
+		qnManager := qcsession.NewNodeManager()
+		qnManager.Add(qcsession.NewNodeInfo(qcsession.ImmutableNodeInfo{NodeID: 1}))
+
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			qnManager:    qnManager,
+			cluster:      mockCluster,
+			qnMode:       fileresource.SyncMode,
+			dnMode:       fileresource.CloseMode,
+		}
+
+		err := observer.Sync()
+		s.Error(err)
+		s.True(observer.retryEmptySync.Load())
 	})
 
 	s.Run("sync_query_nodes_success", func() {

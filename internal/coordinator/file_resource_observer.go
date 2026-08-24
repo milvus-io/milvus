@@ -19,6 +19,7 @@ package coordinator
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -73,12 +74,15 @@ type FileResourceObserver struct {
 	dnMode    fileresource.Mode
 	proxyMode fileresource.Mode
 
-	notifyCh  chan struct{}
-	closeCh   chan struct{}
-	wg        sync.WaitGroup
-	sf        conc.Singleflight[any]
-	startonce sync.Once
-	closeOnce sync.Once
+	notifyCh chan struct{}
+	closeCh  chan struct{}
+	wg       sync.WaitGroup
+	sf       conc.Singleflight[any]
+	// retryEmptySync is set when clearing the last file resource fails. Empty
+	// resource notifications are otherwise startup/node-registration no-ops.
+	retryEmptySync atomic.Bool
+	startonce      sync.Once
+	closeOnce      sync.Once
 }
 
 func NewFileResourceObserver(ctx context.Context) *FileResourceObserver {
@@ -111,6 +115,9 @@ func (m *FileResourceObserver) syncLoop() {
 	for {
 		select {
 		case <-m.notifyCh:
+			if !m.shouldSyncOnNotify() {
+				continue
+			}
 			err := m.Sync()
 			if err != nil {
 				// retry if error exist
@@ -124,6 +131,20 @@ func (m *FileResourceObserver) syncLoop() {
 			return
 		}
 	}
+}
+
+// shouldSyncOnNotify filters background synchronization triggered by startup
+// or node registration. An empty resource list needs no sync for those events,
+// unless an earlier removal failed and still needs to clear node-local files.
+func (m *FileResourceObserver) shouldSyncOnNotify() bool {
+	if m.retryEmptySync.Load() {
+		return true
+	}
+	if m.meta == nil {
+		return false
+	}
+	resources, _ := m.meta.ListFileResource(m.ctx)
+	return len(resources) > 0
 }
 
 func (m *FileResourceObserver) Start() {
@@ -197,10 +218,10 @@ func (m *FileResourceObserver) Sync() error {
 	activeNodes := make(map[int64]struct{})
 	resources, targetVersion := m.meta.ListFileResource(m.ctx)
 	// Version 0 means no file resource has ever been added successfully. Avoid
-	// sending an empty initial state to nodes before file resources are in use.
-	// Do not check len(resources) here: after the last resource is removed, the
-	// non-zero version and empty list still need to be synced to clear nodes.
+	// syncing regardless of whether this call comes from a direct operation or a
+	// background notification.
 	if targetVersion == 0 {
+		m.retryEmptySync.Store(false)
 		return nil
 	}
 
@@ -324,10 +345,8 @@ func (m *FileResourceObserver) Sync() error {
 		return true
 	})
 
-	if syncErr != nil {
-		return syncErr
-	}
-	return nil
+	m.retryEmptySync.Store(syncErr != nil && len(resources) == 0)
+	return syncErr
 }
 
 func (m *FileResourceObserver) InitMeta(meta rootcoord.IMetaTable) {
