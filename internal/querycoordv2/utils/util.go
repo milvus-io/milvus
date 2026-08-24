@@ -320,9 +320,9 @@ func GetShardLeadersWithReplicaFilter(ctx context.Context,
 // refusals, and the retry semantics of each are part of the contract because
 // merr.Status copies the sentinel's retriable bit onto the wire and the
 // generic gRPC wrapper re-issues the call only when it is set. Two of them --
-// the first and the last below -- run before the withUnserviceableShards
+// the FIRST and the THIRD below -- run before the withUnserviceableShards
 // branch, so a loose caller can reach those two as well; what it never gets
-// is the middle pair.
+// is the second and the fourth, which are the resource-group-specific pair.
 //
 //   - ErrCollectionNotLoaded (101, non-retriable): the collection is not
 //     registered as loaded at all. Same family, same code as the unscoped
