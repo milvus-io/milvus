@@ -169,6 +169,10 @@ struct MmapConfig {
     GetEnableGrowingMmap() const {
         return growing_enable_mmap;
     }
+    void
+    SetEnableGrowingMmap(bool enable) {
+        growing_enable_mmap = enable;
+    }
     bool
     GetScalarIndexEnableMmap() const {
         return scalar_index_enable_mmap;
