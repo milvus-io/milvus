@@ -17,9 +17,12 @@
 package importv2
 
 import (
+	"context"
 	"fmt"
 	"testing"
+	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -29,6 +32,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
 
 func Test_AppendSystemFieldsData(t *testing.T) {
@@ -720,4 +725,37 @@ func TestUtil_FillDynamicData(t *testing.T) {
 	err = FillDynamicData(schema, insertData, count)
 	assert.NoError(t, err)
 	assert.Equal(t, count, insertData.Data[dynamicFieldID].RowNum())
+}
+
+func TestNewWriteRetryOptions(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+
+	// A failing write under the shipped defaults must back off, not spin: the first
+	// sleep is writeRetryInitialInterval (1s), so a ctx canceled well before that
+	// lets exactly one attempt through.
+	runUntilCancel := func() int {
+		// Mirror the import task ctx (task_import.go): cancellable but without a
+		// deadline, so retry.Do's deadline escape hatch cannot end the loop.
+		ctx, cancel := context.WithCancel(context.Background())
+		time.AfterFunc(100*time.Millisecond, cancel)
+		defer cancel()
+		calls := 0
+		err := retry.Do(ctx, func() error {
+			calls++
+			return errors.New("write failed")
+		}, newWriteRetryOptions()...)
+		assert.Error(t, err)
+		return calls
+	}
+	assert.LessOrEqual(t, runUntilCancel(), 2)
+
+	// A non-positive interval is rejected by the paramtable formatter, so it cannot
+	// degenerate into retry.Sleep(0) — which, combined with the default
+	// maxWriteRetryAttempts=0 (unlimited), would spin with zero delay.
+	params.Save(params.DataNodeCfg.ImportWriteRetryInitialInterval.Key, "0")
+	params.Save(params.DataNodeCfg.ImportWriteRetryMaxInterval.Key, "0")
+	defer params.Reset(params.DataNodeCfg.ImportWriteRetryInitialInterval.Key)
+	defer params.Reset(params.DataNodeCfg.ImportWriteRetryMaxInterval.Key)
+	assert.LessOrEqual(t, runUntilCancel(), 2)
 }
