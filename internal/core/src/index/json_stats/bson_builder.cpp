@@ -19,6 +19,7 @@
 #include "common/FastMem.h"
 #include <string.h>
 #include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <map>
 #include <string>
@@ -193,7 +194,14 @@ BsonBuilder::CreateValueNode(const std::string& value, JSONType type) {
         case JSONType::DOUBLE: {
             DomScalar s;
             s.type = JSONType::DOUBLE;
-            s.d = std::stod(value);
+            // strtod instead of std::stod: stod throws std::out_of_range for
+            // subnormal doubles (e.g. -1.48e-309) because they trip the ERANGE
+            // underflow flag, while strtod simply returns the denormal value.
+            char* end = nullptr;
+            s.d = std::strtod(value.c_str(), &end);
+            AssertInfo(end == value.c_str() + value.size(),
+                       "invalid double value: {}",
+                       value);
             return DomNode(std::move(s));
         }
         case JSONType::STRING: {

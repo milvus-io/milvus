@@ -147,3 +147,60 @@ TEST(CollectSingleJsonStatsInfoTest, EmptyJsonStringThrows) {
     EXPECT_NO_THROW(
         { CollectSingleJsonStatsInfoAccessor::Call(stats, json, infos); });
 }
+
+// Regression for https://github.com/milvus-io/milvus/issues/52806
+// Subnormal doubles (e.g. -1.48e-309) used to be misclassified as UNKNOWN by
+// the std::stof/std::stod based sniffing and aborted the whole stats build.
+TEST(TraverseJsonForBuildStatsTest, HandlesSubnormalAndOutOfRangeNumbers) {
+    const char* json =
+        R"({"sub": -1.4829972460841e-309, "tiny": -2.32430876e-316,)"
+        R"( "huge": 1e400, "normal": 1.5})";
+
+    auto tokens = Tokenize(json);
+
+    milvus::storage::FieldDataMeta field_meta{1, 2, 3, 100, {}};
+    milvus::storage::IndexMeta index_meta{3, 100, 1, 1};
+    milvus::storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestLocalPath;
+    auto cm = milvus::storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
+    JsonKeyStats stats(ctx, true);
+
+    int index = 0;
+    std::vector<std::string> path;
+    std::map<JsonKey, std::string> values;
+    TraverseJsonForBuildStatsAccessor::Call(
+        stats, json, tokens.data(), index, path, values);
+
+    // All four values must be classified DOUBLE with raw text preserved.
+    EXPECT_EQ(values.at(JsonKey{"/sub", JSONType::DOUBLE}),
+              "-1.4829972460841e-309");
+    EXPECT_EQ(values.at(JsonKey{"/tiny", JSONType::DOUBLE}),
+              "-2.32430876e-316");
+    EXPECT_EQ(values.at(JsonKey{"/huge", JSONType::DOUBLE}), "1e400");
+    EXPECT_EQ(values.at(JsonKey{"/normal", JSONType::DOUBLE}), "1.5");
+}
+
+TEST(CollectSingleJsonStatsInfoTest, ClassifiesSubnormalNumbersAsDouble) {
+    const char* json =
+        R"({"sub": -1.4829972460841e-309, "tiny": -2.32430876e-316})";
+
+    milvus::storage::FieldDataMeta field_meta{1, 2, 3, 100, {}};
+    milvus::storage::IndexMeta index_meta{3, 100, 1, 1};
+    milvus::storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestLocalPath;
+    auto cm = milvus::storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
+    JsonKeyStats stats(ctx, true);
+
+    std::map<JsonKey, milvus::index::KeyStatsInfo> infos;
+    EXPECT_NO_THROW(
+        { CollectSingleJsonStatsInfoAccessor::Call(stats, json, infos); });
+
+    ASSERT_NE(infos.find(JsonKey{"/sub", JSONType::DOUBLE}), infos.end());
+    ASSERT_NE(infos.find(JsonKey{"/tiny", JSONType::DOUBLE}), infos.end());
+}

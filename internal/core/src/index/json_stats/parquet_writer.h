@@ -18,6 +18,7 @@
 
 #include <stdint.h>
 #include <cstddef>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <string>
@@ -66,12 +67,25 @@ ConvertValue<int64_t>(const std::string& value) {
 template <>
 inline float
 ConvertValue<float>(const std::string& value) {
-    return std::stof(value);
+    // strtof never throws: on ERANGE (overflow / subnormal underflow) it
+    // returns the clamped value instead, unlike std::stof which throws
+    // std::out_of_range and poisoned the json stats build.
+    char* end = nullptr;
+    float v = std::strtof(value.c_str(), &end);
+    AssertInfo(end == value.c_str() + value.size(),
+               "invalid float value: {}",
+               value);
+    return v;
 }
 template <>
 inline double
 ConvertValue<double>(const std::string& value) {
-    return std::stod(value);
+    char* end = nullptr;
+    double v = std::strtod(value.c_str(), &end);
+    AssertInfo(end == value.c_str() + value.size(),
+               "invalid double value: {}",
+               value);
+    return v;
 }
 template <>
 inline bool
