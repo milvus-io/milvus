@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -54,10 +55,14 @@ func newShardLeaderReadinessFixture(t *testing.T) *shardLeaderReadinessFixture {
 	}
 }
 
-// server builds a *Server wired to this fixture's stores, ready to call
-// GetShardLeaderReadinessByResourceGroup on.
+// server builds a *Server wired to this fixture's stores. The status has to
+// be set explicitly: the entry points gate on merr.CheckHealthy(s.State()),
+// and a zero Server reports StateCode_Initializing, so without this every
+// test would be exercising that gate instead of the computation.
 func (f *shardLeaderReadinessFixture) server() *Server {
-	return &Server{meta: f.meta, targetMgr: f.targetMgr, dist: f.dist, nodeMgr: f.nodeMgr}
+	s := &Server{meta: f.meta, targetMgr: f.targetMgr, dist: f.dist, nodeMgr: f.nodeMgr}
+	s.status.Store(int32(commonpb.StateCode_Healthy))
+	return s
 }
 
 // putLoadedCollection registers collectionID as fully loaded -- collection
@@ -587,18 +592,56 @@ func TestShardLeaderReadinessByRG_QueryInvisibleReplicaDoesNotCount(t *testing.T
 		"after visibility is flipped the very same leader must count, proving visibility was the only gate")
 }
 
-// TestShardLeaderReadinessByRG_UninitializedServer asserts that a Server whose
-// stores have not been wired up yet answers not-ready rather than panicking,
-// the same way GetLoadPercentageByResourceGroup answers -1.
-func TestShardLeaderReadinessByRG_UninitializedServer(t *testing.T) {
-	s := &Server{}
+// TestShardLeaderReadinessByRG_NotHealthy asserts what actually protects this
+// entry point from a Server that is still coming up: the
+// merr.CheckHealthy(s.State()) gate, the same one the rest of Server's
+// surface takes -- see the matching note on
+// TestGetLoadPercentageByResourceGroup_NotHealthy for why the nil checks
+// downstream cannot supply that ordering on their own. The Server here is
+// fully wired; only its status says it is not serving yet.
+func TestShardLeaderReadinessByRG_NotHealthy(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	s := &Server{meta: f.meta, targetMgr: f.targetMgr, dist: f.dist, nodeMgr: f.nodeMgr}
+	require.Equal(t, commonpb.StateCode_Initializing, s.State())
 
-	assert.NotPanics(t, func() {
-		got, err := s.GetShardLeaderReadinessByResourceGroup(context.Background(), 1, "rg-a")
-		assert.NoError(t, err)
-		assert.False(t, got.Ready)
-		assert.Equal(t, utils.ShardLeadersReasonCoordinatorNotReady, got.Reason)
-	})
+	got, err := s.GetShardLeaderReadinessByResourceGroup(context.Background(), 1, "rg-a")
+	assert.NoError(t, err)
+	assert.False(t, got.Ready)
+	assert.Equal(t, utils.ShardLeadersReasonCoordinatorNotReady, got.Reason,
+		"a coordinator that is not serving yet reports the same not-ready reason the computation uses for it")
+}
+
+// TestShardLeaderReadinessByRG_NilStores covers the utils-level nil guard on
+// its own terms: defence in depth for a direct caller (the observers hold
+// these stores and bypass Server), deliberately not reached through Server,
+// whose health gate would answer first.
+func TestShardLeaderReadinessByRG_NilStores(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	ctx := context.Background()
+
+	for name, call := range map[string]func() (utils.ShardLeaderReadiness, error){
+		"nil meta": func() (utils.ShardLeaderReadiness, error) {
+			return utils.ShardLeaderReadinessByResourceGroup(ctx, nil, f.targetMgr, f.dist, f.nodeMgr, 1, "rg")
+		},
+		"nil targetMgr": func() (utils.ShardLeaderReadiness, error) {
+			return utils.ShardLeaderReadinessByResourceGroup(ctx, f.meta, nil, f.dist, f.nodeMgr, 1, "rg")
+		},
+		"nil dist": func() (utils.ShardLeaderReadiness, error) {
+			return utils.ShardLeaderReadinessByResourceGroup(ctx, f.meta, f.targetMgr, nil, f.nodeMgr, 1, "rg")
+		},
+		"nil nodeMgr": func() (utils.ShardLeaderReadiness, error) {
+			return utils.ShardLeaderReadinessByResourceGroup(ctx, f.meta, f.targetMgr, f.dist, nil, 1, "rg")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				got, err := call()
+				assert.NoError(t, err)
+				assert.False(t, got.Ready)
+				assert.Equal(t, utils.ShardLeadersReasonCoordinatorNotReady, got.Reason)
+			})
+		})
+	}
 }
 
 // TestShardLeaderReadinessByRG_LeavesNativeShardLeadersUnchanged is the

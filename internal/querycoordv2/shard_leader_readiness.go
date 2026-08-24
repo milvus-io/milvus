@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // GetShardLeaderReadinessByResourceGroup reports whether the replicas of
@@ -19,5 +20,13 @@ import (
 // reach querycoord through Server, keep a stable entry point - the same split
 // GetLoadPercentageByResourceGroup uses.
 func (s *Server) GetShardLeaderReadinessByResourceGroup(ctx context.Context, collectionID int64, rgName string) (utils.ShardLeaderReadiness, error) {
+	// The health gate is what actually makes this safe to call on a Server
+	// that is still coming up -- see the note on
+	// GetLoadPercentageByResourceGroup for why the nil checks downstream
+	// cannot supply that on their own. Not healthy answers the same
+	// not-ready verdict the computation itself reports for the condition.
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		return utils.ShardLeaderReadiness{Reason: utils.ShardLeadersReasonCoordinatorNotReady}, nil
+	}
 	return utils.ShardLeaderReadinessByResourceGroup(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr, collectionID, rgName)
 }

@@ -160,11 +160,14 @@ func LoadPercentageByResourceGroup(
 	// then refused with a non-retriable 101. This is also the test
 	// ShowLoadCollections has always used.
 	if m.CalculateLoadPercentage(ctx, collectionID) < 0 {
-		// The nil check is part of the partially-wired tolerance:
-		// GlobalFailedLoadCache is the LAST piece initQueryCoord wires --
-		// after initMeta has wired the three stores -- and Get dereferences
-		// a nil receiver. In that window the collection simply reads as not
-		// loaded, without the recorded-failure detail.
+		// Defence in depth, not a tolerance this function can promise:
+		// GlobalFailedLoadCache is the LAST piece initQueryCoord wires and
+		// Get dereferences a nil receiver, so a caller reaching a Server
+		// mid-Init would panic here. Server's own entry point gates on
+		// CheckHealthy, which is what actually orders this against Init; the
+		// check below only keeps a direct utils-level caller (the observers,
+		// and the tests) from panicking. In that window the collection reads
+		// as not loaded, without the recorded-failure detail.
 		if meta.GlobalFailedLoadCache != nil {
 			if err := meta.GlobalFailedLoadCache.Get(collectionID); err != nil {
 				// Normalized to ErrCollectionNotLoaded rather than returned

@@ -104,11 +104,12 @@ func ShardLeaderReadinessByResourceGroup(
 	// scoped GetShardLeaders path refuses with a non-retriable 101, which is
 	// exactly the disagreement the invariant above forbids.
 	if m.CalculateLoadPercentage(ctx, collectionID) < 0 {
-		// The nil check is part of the partially-wired tolerance:
-		// GlobalFailedLoadCache is the LAST piece initQueryCoord wires --
-		// after initMeta has wired the stores -- and Get dereferences a nil
-		// receiver. In that window the collection simply reads as not
-		// loaded, without the recorded-failure detail.
+		// Defence in depth, not a tolerance this function can promise --
+		// see the matching note in LoadPercentageByResourceGroup.
+		// GlobalFailedLoadCache is the LAST piece initQueryCoord wires and
+		// Get dereferences a nil receiver; Server's entry point gates on
+		// CheckHealthy, and this check only keeps a direct utils-level
+		// caller from panicking.
 		//
 		// A recorded failure is normalized to ErrCollectionNotLoaded for the
 		// same reason LoadPercentageByResourceGroup normalizes it: the cache

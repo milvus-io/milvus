@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -53,8 +54,14 @@ func newRGLoadPercentageFixture(t *testing.T) *rgLoadPercentageFixture {
 
 // server builds a *Server wired to this fixture's stores, ready to call
 // GetLoadPercentageByResourceGroup on.
+// server builds a *Server wired to this fixture's stores. The status has to
+// be set explicitly: GetLoadPercentageByResourceGroup gates on
+// merr.CheckHealthy(s.State()), and a zero Server reports
+// StateCode_Initializing.
 func (f *rgLoadPercentageFixture) server() *Server {
-	return &Server{meta: f.meta, targetMgr: f.targetMgr, dist: f.dist}
+	s := &Server{meta: f.meta, targetMgr: f.targetMgr, dist: f.dist}
+	s.status.Store(int32(commonpb.StateCode_Healthy))
+	return s
 }
 
 // freeFn calls utils.LoadPercentageByResourceGroup with nothing but the three
@@ -398,45 +405,65 @@ func TestGetLoadPercentageByResourceGroup_FailedLoadSurvivesReplicaCleanup(t *te
 	assert.Contains(t, err.Error(), loadErr.Error())
 }
 
-// TestGetLoadPercentageByResourceGroup_NilDist asserts that a Server whose
-// distribution manager has not been wired up yet answers rather than
-// panicking, extending the nil-meta guard to the rest of the dependency set
-// the same way ShardLeaderReadinessByResourceGroup guards all of its stores.
+// TestGetLoadPercentageByResourceGroup_NotHealthy asserts what actually
+// protects this entry point from a Server that is still coming up: the
+// merr.CheckHealthy(s.State()) gate, the same one the rest of Server's
+// surface takes. The Server here is fully wired -- only its status says it is
+// not serving yet -- so the nil checks downstream would let the read through;
+// the gate is what stops it.
+//
+// The gate, not those nil checks, is also the only one of the two that can
+// order the read against Init: s.meta/s.dist/s.targetMgr are plain fields
+// with no synchronization, while the status is an atomic stored after
+// everything is wired.
 //
 // The answer is -1 WITH ErrServiceNotReady, not a bare -1: the fixture has a
 // replica of the collection in rg-target, so a bare -1 would state the
 // opposite of the truth ("no replica in this resource group") for a state in
-// which nothing is known at all. The sentinel is the counterpart of the
-// ShardLeadersReasonCoordinatorNotReady its sibling surface reports for the
-// same init window.
-func TestGetLoadPercentageByResourceGroup_NilDist(t *testing.T) {
+// which nothing is known at all.
+func TestGetLoadPercentageByResourceGroup_NotHealthy(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	f.putTarget(t, 1100, 11000, "1100-dmc0", 1)
 	f.putReplica(t, 1100, 110, "rg-target")
 
-	s := &Server{meta: f.meta, targetMgr: f.targetMgr} // dist not wired yet
+	s := &Server{meta: f.meta, targetMgr: f.targetMgr, dist: f.dist} // wired, but not serving
+	require.Equal(t, commonpb.StateCode_Initializing, s.State(),
+		"a zero Server must report Initializing, which is the state this test is about")
 
-	assert.NotPanics(t, func() {
-		percentage, err := s.GetLoadPercentageByResourceGroup(context.Background(), 1100, "rg-target")
-		assert.ErrorIs(t, err, merr.ErrServiceNotReady,
-			"a partially wired coordinator must say so, not report the resource group as empty")
-		assert.EqualValues(t, -1, percentage)
-	})
+	percentage, err := s.GetLoadPercentageByResourceGroup(context.Background(), 1100, "rg-target")
+	assert.ErrorIs(t, err, merr.ErrServiceNotReady,
+		"a coordinator that is not serving yet must say so, not report the resource group as empty")
+	assert.EqualValues(t, -1, percentage)
 }
 
-// TestGetLoadPercentageByResourceGroup_NilMeta asserts that a Server whose
-// meta has not been initialized yet answers rather than panicking. Deleting
-// the nil-store guard turns this test into a nil-pointer-dereference panic on
-// the following s.meta.Exist call.
-func TestGetLoadPercentageByResourceGroup_NilMeta(t *testing.T) {
-	s := &Server{}
+// TestLoadPercentageByResourceGroup_NilStores covers the utils-level nil
+// guard on its own terms. It is defence in depth for a direct caller -- the
+// observers hold these stores and call the free function, bypassing Server
+// and its health gate -- and it is deliberately NOT reached through Server,
+// because the gate above would answer first.
+//
+// Deleting the guard turns each of these into a nil-pointer dereference.
+func TestLoadPercentageByResourceGroup_NilStores(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	ctx := context.Background()
 
-	assert.NotPanics(t, func() {
-		percentage, err := s.GetLoadPercentageByResourceGroup(context.Background(), 1, "rg-target")
-		assert.ErrorIs(t, err, merr.ErrServiceNotReady,
-			"a coordinator with no meta yet knows nothing about the resource group, which is not the same as it being empty")
-		assert.EqualValues(t, -1, percentage)
-	})
+	for name, call := range map[string]func() (int32, error){
+		"nil meta": func() (int32, error) {
+			return utils.LoadPercentageByResourceGroup(ctx, nil, f.targetMgr, f.dist, 1, "rg")
+		},
+		"nil targetMgr": func() (int32, error) { return utils.LoadPercentageByResourceGroup(ctx, f.meta, nil, f.dist, 1, "rg") },
+		"nil dist": func() (int32, error) {
+			return utils.LoadPercentageByResourceGroup(ctx, f.meta, f.targetMgr, nil, 1, "rg")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				percentage, err := call()
+				assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+				assert.EqualValues(t, -1, percentage)
+			})
+		})
+	}
 }
 
 // TestLoadPercentageByResourceGroup_EmptyRGCoversEveryResourceGroup asserts
