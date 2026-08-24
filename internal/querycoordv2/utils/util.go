@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
+	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -184,17 +185,45 @@ func GetShardLeadersWithChannelsAndReplicaFilter(
 	withUnserviceableShards bool,
 	replicaFilter func(*meta.Replica) bool,
 ) ([]*querypb.ShardLeadersList, error) {
+	replicas := m.GetByCollection(ctx, collectionID)
+	if replicaFilter != nil {
+		replicas = lo.Filter(replicas, func(replica *meta.Replica, _ int) bool {
+			return replicaFilter(replica)
+		})
+	}
+	return buildShardLeadersFromReplicas(ctx, dist, nodeMgr, channels, withUnserviceableShards, replicas)
+}
+
+// buildShardLeadersFromReplicas is the leader-assembly half of
+// GetShardLeadersWithChannelsAndReplicaFilter, split out so a caller that has
+// already selected its replicas can hand that exact slice over instead of
+// having the walk re-read the replica set.
+//
+// That matters wherever a caller decided something about the replicas before
+// calling: two unsynchronized reads of the same concurrent map are two
+// different snapshots, and TransferReplica / MoveReplica rewrite a replica's
+// resource group by replacing the object, so a commit landing between them
+// changes which replicas the second read selects. GetShardLeadersByResourceGroup
+// runs its scoped full-load stand-in over its selection and would otherwise
+// have the walk re-derive a different one, turning ordinary in-flight
+// reconfiguration into a non-retriable ChannelNotAvailable. Sharing the
+// snapshot also drops the duplicate per-(channel, replica) GetShardLeader
+// walk that the scoped strict path performed.
+func buildShardLeadersFromReplicas(
+	ctx context.Context,
+	dist *meta.DistributionManager,
+	nodeMgr *session.NodeManager,
+	channels map[string]*meta.DmChannel,
+	withUnserviceableShards bool,
+	replicas []*meta.Replica,
+) ([]*querypb.ShardLeadersList, error) {
 	ret := make([]*querypb.ShardLeadersList, 0)
 
-	replicas := m.GetByCollection(ctx, collectionID)
 	for _, channel := range channels {
 		ids := make([]int64, 0, len(replicas))
 		addrs := make([]string, 0, len(replicas))
 		serviceable := make([]bool, 0, len(replicas))
 		for _, replica := range replicas {
-			if replicaFilter != nil && !replicaFilter(replica) {
-				continue
-			}
 			leader := dist.ChannelDistManager.GetShardLeader(channel.GetChannelName(), replica)
 			if leader == nil || (!withUnserviceableShards && !leader.IsServiceable()) {
 				mlog.RatedWarn(ctx, rate.Limit(1.0/60.0), "leader is not available in replica",
@@ -355,6 +384,9 @@ func GetShardLeadersByResourceGroup(ctx context.Context,
 	// leader, so it cannot make a shard count as covered. This is the same
 	// split ShardLeaderReadinessByResourceGroup makes between inRG and its
 	// replica list.
+	// One read of the replica set feeds everything below: the holds verdict,
+	// the coverage gate, and the leader assembly. See the note at the
+	// buildShardLeadersFromReplicas call for why re-reading would be a bug.
 	holds := false
 	scoped := make([]*meta.Replica, 0)
 	for _, replica := range m.GetByCollection(ctx, collectionID) {
@@ -385,11 +417,13 @@ func GetShardLeadersByResourceGroup(ctx context.Context,
 	}
 
 	// The scoped stand-in for the full-load gate. It uses the same three
-	// per-leader conditions GetShardLeadersWithChannelsAndReplicaFilter
-	// applies below, so a group that clears this walk clears that one too and
-	// the call below cannot fail on ChannelNotAvailable except in the race
-	// where a leader stops being serviceable between the two reads -- which is
-	// genuine channel-level unavailability, and is what that error means.
+	// per-leader conditions the assembly below applies, over the same replica
+	// snapshot, so a group that clears this walk clears that one too: the
+	// remaining way the call below can answer ChannelNotAvailable is a leader
+	// ceasing to be serviceable between the two reads of the DISTRIBUTION,
+	// which is genuine channel-level unavailability and is what that error
+	// means. The replica set cannot shift underneath, which is the point of
+	// passing scoped down rather than letting the walk re-read it.
 	if !withUnserviceableShards {
 		uncovered := make([]string, 0, len(channels))
 		for _, channel := range channels {
@@ -414,10 +448,17 @@ func GetShardLeadersByResourceGroup(ctx context.Context,
 	// the response flattens every replica into one list per channel, and a
 	// replica may borrow nodes from another resource group, so node-set
 	// membership is not replica membership. The replica is only in hand here.
-	return GetShardLeadersWithChannelsAndReplicaFilter(ctx, m, dist, nodeMgr, collectionID, channels, withUnserviceableShards,
-		func(replica *meta.Replica) bool {
-			return replica.IsQueryVisible() && replica.GetResourceGroup() == resourceGroup
-		})
+	//
+	// scoped is handed over rather than re-derived by the walk so that the
+	// coverage gate above and the assembly below see ONE snapshot of the
+	// replica set. Re-reading would take a second, unsynchronized snapshot,
+	// and TransferReplica / MoveReplica rewrite a replica's resource group by
+	// replacing the object: a transfer out of this group committing between
+	// the two reads would leave the walk with no replica to serve from and
+	// answer the non-retriable ChannelNotAvailable -- for ordinary in-flight
+	// reconfiguration, and with the exact code the contract above argues must
+	// not be used for a group in transition.
+	return buildShardLeadersFromReplicas(ctx, dist, nodeMgr, channels, withUnserviceableShards, scoped)
 }
 
 // CheckCollectionsQueryable check all channels are watched and all segments are loaded for this collection
