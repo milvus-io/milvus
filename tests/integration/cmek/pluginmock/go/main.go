@@ -118,16 +118,7 @@ func (c *fixtureCipher) key(ezID int64) ([]byte, bool) {
 	c.mu.RLock()
 	key, ok := c.keys[ezID]
 	c.mu.RUnlock()
-	if ok {
-		return append([]byte(nil), key...), true
-	}
-	if ezID <= 0 {
-		return nil, false
-	}
-	// Each Milvus role loads its own copy of this fixture plugin. When a role
-	// has not received Update yet, derive the same deterministic root key from
-	// the EZ ID so the fixture remains usable across processes.
-	return []byte("fixture-root/" + strconv.FormatInt(ezID, 10)), true
+	return append([]byte(nil), key...), ok
 }
 
 type fixtureEncryptor struct{ key []byte }

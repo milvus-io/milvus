@@ -7,6 +7,12 @@
 // with the License. You may obtain a copy of the License at
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package inspector
 
@@ -19,6 +25,12 @@ import (
 	"strconv"
 )
 
+// The V3 layout is specified in
+// docs/design-docs/design_docs/20260209-scalar-index-unified-format.md and is
+// implemented by internal/core/src/storage/IndexEntryWriter.h and
+// IndexEntryReader.cpp. Keep this test decoder independent from the production
+// reader so format regressions cannot make both the implementation and oracle
+// pass together.
 const (
 	v3Magic       = "MVSIDXV3"
 	v3FooterSize  = 32

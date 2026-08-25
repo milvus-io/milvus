@@ -14,26 +14,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cmek
+package main
 
 import (
 	"testing"
 
-	"github.com/stretchr/testify/suite"
+	"github.com/stretchr/testify/require"
 )
 
-func TestScalarIndexFMINDEXCampaign(t *testing.T) {
-	suite.Run(t, new(ScalarIndexFMINDEXSuite))
-}
+func TestFixtureCipherRequiresInitializedEZ(t *testing.T) {
+	cipher := fixtureCipher{keys: make(map[int64][]byte)}
 
-func (s *ScalarIndexFMINDEXSuite) SetupSuite() {
-	s.setup(fmindexCampaign)
-}
-
-func (s *ScalarIndexFMINDEXSuite) TearDownSuite() {
-	s.tearDown()
-}
-
-func (s *ScalarIndexFMINDEXSuite) TestScalarFMINDEXV3() {
-	s.runCell(likeCell("fmindex", "FMINDEX"))
+	_, _, err := cipher.GetEncryptor(17, 23)
+	require.ErrorContains(t, err, "EZ 17 is not initialized")
 }

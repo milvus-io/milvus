@@ -47,8 +47,8 @@ struct ContextKeyHash {
     operator()(const ContextKey& key) const {
         auto ez_hash = std::hash<int64_t>{}(key.ez_id);
         auto coll_hash = std::hash<int64_t>{}(key.coll_id);
-        return ez_hash ^ (coll_hash + 0x9e3779b9 + (ez_hash << 6) +
-                          (ez_hash >> 2));
+        return ez_hash ^
+               (coll_hash + 0x9e3779b9 + (ez_hash << 6) + (ez_hash >> 2));
     }
 };
 
@@ -93,8 +93,8 @@ xorBytes(const void* data, size_t len, const std::string& key) {
     const auto* input = static_cast<const uint8_t*>(data);
     std::string output(len, '\0');
     for (size_t i = 0; i < len; ++i) {
-        output[i] = static_cast<char>(input[i] ^
-                                      static_cast<uint8_t>(key[i % key.size()]));
+        output[i] = static_cast<char>(
+            input[i] ^ static_cast<uint8_t>(key[i % key.size()]));
     }
     return output;
 }
@@ -165,9 +165,16 @@ class FixtureCipherPlugin final : public ICipherPlugin {
     }
 
     void
-    Update(int64_t ez_id, int64_t coll_id, const std::string&) override {
+    Update(int64_t ez_id,
+           int64_t coll_id,
+           const std::string& root_key) override {
         std::lock_guard<std::mutex> lock(mutex_);
-        keys_[{ez_id, coll_id}] = rootKeyForEz(ez_id);
+        ContextKey context{ez_id, coll_id};
+        if (root_key.empty()) {
+            keys_.erase(context);
+            return;
+        }
+        keys_[context] = root_key;
     }
 
     std::pair<std::shared_ptr<IEncryptor>, std::string>
@@ -176,8 +183,8 @@ class FixtureCipherPlugin final : public ICipherPlugin {
         auto sequence = sequence_.fetch_add(1, std::memory_order_relaxed);
         // The EDEK is embedded in V3 directory JSON, so keep it printable
         // while retaining the EDEK-dependent cipher key derivation.
-        auto edek = hexEncode(
-            makeKey(root_key + "/edek/" + std::to_string(sequence)));
+        auto edek =
+            hexEncode(makeKey(root_key + "/edek/" + std::to_string(sequence)));
         auto cipher_key = makeKey(root_key + "/" + edek);
         return {std::make_shared<FixtureEncryptor>(cipher_key), edek};
     }
@@ -193,14 +200,6 @@ class FixtureCipherPlugin final : public ICipherPlugin {
 
  private:
     std::string
-    rootKeyForEz(int64_t ez_id) const {
-        if (ez_id <= 0) {
-            throw std::runtime_error("fixture cipher EZ id is invalid");
-        }
-        return "fixture-root/" + std::to_string(ez_id);
-    }
-
-    std::string
     getRootKey(int64_t ez_id, int64_t coll_id) const {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = keys_.find({ez_id, coll_id});
@@ -211,11 +210,10 @@ class FixtureCipherPlugin final : public ICipherPlugin {
         if (it != keys_.end()) {
             return it->second;
         }
-        // Each Milvus role loads its own copy of this fixture plugin. When a
-        // role has not received Update yet, derive the same deterministic
-        // root key from the EZ ID so the fixture remains usable across
-        // processes.
-        return rootKeyForEz(ez_id);
+        throw std::runtime_error(
+            "fixture cipher key is not initialized for EZ " +
+            std::to_string(ez_id) + " and collection " +
+            std::to_string(coll_id));
     }
 
     mutable std::mutex mutex_;
