@@ -808,8 +808,9 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
             AssertInfo(default_value->has_bytes_data(),
                        "json type default_value shall be bytes data");
 
-            auto data = default_value->bytes_data();
-            Json default_json = Json(data.data(), data.size());
+            const auto& data = default_value->bytes_data();
+            Json default_json{
+                simdjson::padded_string(data.data(), data.size())};
             std::fill(data_.data() + length_,
                       data_.data() + length_ + element_count,
                       default_json);

@@ -507,6 +507,27 @@ TEST(chunk, test_variable_field_sliced_binary_batches) {
     }
 }
 
+TEST(field_data, json_default_value_backfill_owns_bytes) {
+    constexpr int64_t row_count = 5;
+    auto field_data = milvus::storage::CreateFieldData(
+        DataType::JSON, DataType::NONE, true, 1, row_count);
+    DefaultValueType default_value;
+    default_value.set_bytes_data("{}");
+
+    field_data->FillFieldData(std::optional<DefaultValueType>{default_value},
+                              row_count);
+
+    ASSERT_EQ(field_data->Length(), row_count);
+    ASSERT_EQ(field_data->get_null_count(), 0);
+    for (int64_t i = 0; i < row_count; ++i) {
+        ASSERT_TRUE(field_data->is_valid(i));
+        auto json = static_cast<const Json*>(field_data->RawValue(i));
+        ASSERT_NE(json, nullptr);
+        EXPECT_EQ(json->data(), std::string_view("{}"));
+        EXPECT_EQ(json->doc().error(), simdjson::SUCCESS);
+    }
+}
+
 TEST(chunk, test_json_field) {
     auto row_num = 100;
     FixedVector<Json> data;

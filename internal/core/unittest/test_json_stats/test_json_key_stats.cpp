@@ -406,33 +406,37 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
 
     void
     BuildAndUpload(int64_t lack_binlog_rows = 0) {
-        auto field_data =
-            storage::CreateFieldData(DataType::JSON, DataType::NONE, false);
-        field_data->FillFieldData(data_.data(), data_.size());
+        std::vector<std::string> insert_files;
+        if (!data_.empty()) {
+            auto field_data =
+                storage::CreateFieldData(DataType::JSON, DataType::NONE, false);
+            field_data->FillFieldData(data_.data(), data_.size());
 
-        auto payload_reader =
-            std::make_shared<milvus::storage::PayloadReader>(field_data);
-        storage::InsertData insert_data(payload_reader);
-        insert_data.SetFieldDataMeta(field_meta_);
-        insert_data.SetTimestamps(0, 100);
+            auto payload_reader =
+                std::make_shared<milvus::storage::PayloadReader>(field_data);
+            storage::InsertData insert_data(payload_reader);
+            insert_data.SetFieldDataMeta(field_meta_);
+            insert_data.SetTimestamps(0, 100);
 
-        auto serialized_bytes = insert_data.Serialize(storage::Remote);
+            auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
-        auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
-                                    root_path_,
-                                    collection_id_,
-                                    partition_id_,
-                                    segment_id_,
-                                    field_id_,
-                                    0);
-        chunk_manager_->Write(
-            log_path, serialized_bytes.data(), serialized_bytes.size());
+            auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
+                                        root_path_,
+                                        collection_id_,
+                                        partition_id_,
+                                        segment_id_,
+                                        field_id_,
+                                        0);
+            chunk_manager_->Write(
+                log_path, serialized_bytes.data(), serialized_bytes.size());
+            insert_files.push_back(std::move(log_path));
+        }
 
         storage::FileManagerContext ctx(
             field_meta_, index_meta_, chunk_manager_, fs_);
 
         Config config;
-        config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+        config[INSERT_FILES_KEY] = std::move(insert_files);
         config[INDEX_NUM_ROWS_KEY] =
             static_cast<int64_t>(data_.size()) + lack_binlog_rows;
 
@@ -541,6 +545,20 @@ TEST_F(JsonKeyStatsUploadLoadTest, TestSimpleJson) {
     VerifyJsonType("/double_DOUBLE", JSONType::DOUBLE);
     VerifyJsonType("/string_STRING", JSONType::STRING);
     VerifyJsonType("/bool_BOOL", JSONType::BOOL);
+}
+
+TEST_F(JsonKeyStatsUploadLoadTest, TestMissingBinlogRowsWithJsonDefault) {
+    InitContext();
+    field_meta_.field_schema.set_nullable(true);
+    field_meta_.field_schema.mutable_default_value()->set_bytes_data("{}");
+    PrepareData({});
+
+    constexpr int64_t missing_rows = 5;
+    BuildAndUpload(missing_rows);
+    EXPECT_EQ(build_index_->Count(), missing_rows);
+
+    Load();
+    EXPECT_EQ(load_index_->Count(), missing_rows);
 }
 
 TEST_F(JsonKeyStatsUploadLoadTest, TestNestedJson) {
