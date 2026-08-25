@@ -367,8 +367,23 @@ TEST(JsonStatsInvalidNumberTest,
               std::vector<proto::plan::GenericValue>())),
           {false, true, false},
           {false, true, false});
+    check(compare(std::make_shared<expr::UnaryRangeFilterExpr>(
+              bad_column,
+              proto::plan::OpType::GreaterThan,
+              one_point_five,
+              std::vector<proto::plan::GenericValue>())),
+          {false, false, false},
+          {false, true, false});
     check(compare(std::make_shared<expr::BinaryRangeFilterExpr>(
               bad_column, zero, two, true, true)),
+          {false, true, false},
+          {false, true, false});
+    proto::plan::GenericValue one;
+    one.set_float_val(1.0);
+    proto::plan::GenericValue two_point_zero;
+    two_point_zero.set_float_val(2.0);
+    check(compare(std::make_shared<expr::BinaryRangeFilterExpr>(
+              bad_column, one, two_point_zero, true, true)),
           {false, true, false},
           {false, true, false});
     check(compare(std::make_shared<expr::ExistsExpr>(bad_column)),
