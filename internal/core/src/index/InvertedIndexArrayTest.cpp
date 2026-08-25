@@ -362,10 +362,10 @@ class NullableInt64ArrayInvertedIndex
         schema_.set_nullable(true);
         null_offset_ = std::move(offsets);
         if (is_nested_index_) {
-            validity_mode_ = ValidityMode::ImplicitAllValid;
+            validity_mode_ = milvus::index::ValidityMode::ImplicitAllValid;
             return;
         }
-        validity_mode_ = ValidityMode::NullOffsets;
+        validity_mode_ = milvus::index::ValidityMode::NullOffsets;
     }
 };
 
