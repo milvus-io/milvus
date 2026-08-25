@@ -184,7 +184,7 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 		return nil, err
 	}
 
-	shards := parseShardLeaderList2QueryNode(resp.GetShards())
+	shards := parseShardLeaderList2QueryNode(ctx, resp.GetShards())
 
 	// convert shards map to string for logging
 	if mlog.LevelEnabled(mlog.DebugLevel) {
@@ -212,7 +212,7 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 	return newShardLeaders, nil
 }
 
-func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) map[string][]NodeInfo {
+func parseShardLeaderList2QueryNode(ctx context.Context, shardsLeaders []*querypb.ShardLeadersList) map[string][]NodeInfo {
 	shard2QueryNodes := make(map[string][]NodeInfo)
 
 	for _, leaders := range shardsLeaders {
@@ -234,7 +234,7 @@ func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) m
 		// exist or admits leaders from another group. Say so rather than let
 		// it look like an ordinary upgrade.
 		if len(resourceGroups) != 0 && len(resourceGroups) != len(leaders.GetNodeIds()) {
-			mlog.RatedWarn(context.TODO(), rate.Limit(1.0/60.0),
+			mlog.RatedWarn(ctx, rate.Limit(1.0/60.0),
 				"shard leader resource groups are not parallel to node ids, tags will read as unknown",
 				mlog.String("channel", leaders.GetChannelName()),
 				mlog.Int("nodeIDs", len(leaders.GetNodeIds())),

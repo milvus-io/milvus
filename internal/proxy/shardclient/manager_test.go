@@ -102,7 +102,7 @@ func TestShardCacheAliasRepointResolvesByCollectionID(t *testing.T) {
 // The cache is what every routing decision reads, so a tag that is dropped or
 // shifted here is one no caller can recover.
 func TestParseShardLeaderListCarriesResourceGroup(t *testing.T) {
-	shards := parseShardLeaderList2QueryNode([]*querypb.ShardLeadersList{
+	shards := parseShardLeaderList2QueryNode(context.Background(), []*querypb.ShardLeadersList{
 		{
 			ChannelName:    "dmc0",
 			NodeIds:        []int64{1, 2},
@@ -128,7 +128,7 @@ func TestParseShardLeaderListCarriesResourceGroup(t *testing.T) {
 // cache refresh, for the whole upgrade window.
 func TestParseShardLeaderListToleratesMissingResourceGroups(t *testing.T) {
 	assert.NotPanics(t, func() {
-		shards := parseShardLeaderList2QueryNode([]*querypb.ShardLeadersList{
+		shards := parseShardLeaderList2QueryNode(context.Background(), []*querypb.ShardLeadersList{
 			{
 				ChannelName: "dmc0",
 				NodeIds:     []int64{1, 2},
@@ -154,7 +154,7 @@ func TestParseShardLeaderListToleratesMissingResourceGroups(t *testing.T) {
 // takes the whole query path down with it.
 func TestParseShardLeaderListToleratesShortResourceGroups(t *testing.T) {
 	assert.NotPanics(t, func() {
-		shards := parseShardLeaderList2QueryNode([]*querypb.ShardLeadersList{
+		shards := parseShardLeaderList2QueryNode(context.Background(), []*querypb.ShardLeadersList{
 			{
 				ChannelName:    "dmc0",
 				NodeIds:        []int64{1, 2},
