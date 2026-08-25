@@ -201,7 +201,7 @@ TEST(JsonFieldDataTest, FillFieldDataWithDefaultValueOwnsData) {
     // FillFieldData, leaving every filled row dangling.
     std::string default_json =
         R"({"default_key": 12345, "another_key": "value"})";
-    proto::schema::ValueField default_value;
+    milvus::proto::schema::ValueField default_value;
     default_value.set_bytes_data(default_json);
 
     auto field_data = milvus::storage::CreateFieldData(
