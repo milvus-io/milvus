@@ -447,7 +447,7 @@ func CheckDiskQuota(ctx context.Context, job ImportJob, meta *meta, importMeta I
 	quotaInfo := meta.GetQuotaInfo()
 	totalUsage, collectionsUsage := quotaInfo.TotalBinlogSize, quotaInfo.CollectionBinlogSize
 
-	tasks := importMeta.GetTaskBy(ctx, WithJob(job.GetJobID()), WithType(PreImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, job.GetJobID(), WithType(PreImportTaskType))
 	files := make([]*datapb.ImportFileStats, 0)
 	for _, task := range tasks {
 		files = append(files, task.GetFileStats()...)
@@ -481,7 +481,7 @@ func CheckDiskQuota(ctx context.Context, job ImportJob, meta *meta, importMeta I
 }
 
 func getPendingProgress(ctx context.Context, jobID int64, importMeta ImportMeta) float32 {
-	tasks := importMeta.GetTaskBy(context.TODO(), WithJob(jobID), WithType(PreImportTaskType))
+	tasks := importMeta.GetTaskByJob(context.TODO(), jobID, WithType(PreImportTaskType))
 	preImportingFiles := lo.SumBy(tasks, func(task ImportTask) int {
 		return len(task.GetFileStats())
 	})
@@ -493,7 +493,7 @@ func getPendingProgress(ctx context.Context, jobID int64, importMeta ImportMeta)
 }
 
 func getPreImportingProgress(ctx context.Context, jobID int64, importMeta ImportMeta) float32 {
-	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(PreImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(PreImportTaskType))
 	completedTasks := lo.Filter(tasks, func(task ImportTask, _ int) bool {
 		return task.GetState() == datapb.ImportTaskStateV2_Completed
 	})
@@ -504,7 +504,7 @@ func getPreImportingProgress(ctx context.Context, jobID int64, importMeta Import
 }
 
 func getImportRowsInfo(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) (importedRows, totalRows int64) {
-	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	segmentIDs := make([]int64, 0)
 	for _, task := range tasks {
 		totalRows += lo.SumBy(task.GetFileStats(), func(file *datapb.ImportFileStats) int64 {
@@ -528,7 +528,7 @@ func getStatsProgress(ctx context.Context, jobID int64, importMeta ImportMeta, m
 	if !enableSortCompaction() {
 		return 1
 	}
-	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	targetSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetSortedSegmentIDs()
 	})
@@ -550,7 +550,7 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 	if !Params.DataCoordCfg.WaitForIndex.GetAsBool() {
 		return 1
 	}
-	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetSegmentIDs()
 	})
@@ -633,7 +633,7 @@ func GetJobProgress(ctx context.Context, jobID int64,
 
 func GetTaskProgresses(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) []*internalpb.ImportTaskProgress {
 	progresses := make([]*internalpb.ImportTaskProgress, 0)
-	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	for _, task := range tasks {
 		totalRows := lo.SumBy(task.GetFileStats(), func(file *datapb.ImportFileStats) int64 {
 			return file.GetTotalRows()
