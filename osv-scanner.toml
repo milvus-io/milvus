@@ -1,0 +1,49 @@
+# Accepted vulnerability findings for `make vuln-check` and the Vulnerability
+# Scan workflow.
+#
+# An entry here means "we looked at this and it cannot be fixed by bumping
+# today", never "this is noisy". Every entry carries a reason and an
+# ignoreUntil date, so it comes back on the report instead of quietly living
+# forever. When adding one, say what the reachability argument is - a reviewer
+# has to be able to check it.
+
+[[IgnoredVulns]]
+id = "GO-2026-5046"
+ignoreUntil = 2026-11-30
+reason = """
+CPU exhaustion in the Avro decoder (CVE-2026-46385), github.com/hamba/avro/v2.
+Upstream has no fixed release: the advisory's affected range is `introduced: 0`
+with no fix event, and the newest tag (v2.31.0, 2025-12-30) predates the
+advisory. Only the iskorotkov fork carries a fix. Avro is used in one place,
+internal/snapshotio, to read and write snapshot manifests we produced
+ourselves; it does not decode untrusted user traffic. Re-check for an upstream
+release at the review date.
+"""
+
+[[IgnoredVulns]]
+id = "GO-2026-5047"
+ignoreUntil = 2026-11-30
+reason = """
+Integer overflow in the Avro decoder (CVE-2026-46384), github.com/hamba/avro/v2.
+Same situation and same reachability argument as GO-2026-5046.
+"""
+
+[[IgnoredVulns]]
+id = "GO-2026-5048"
+ignoreUntil = 2026-11-30
+reason = """
+Denial of service via unbounded map allocations in the Avro decoder,
+github.com/hamba/avro/v2. Same situation and same reachability argument as
+GO-2026-5046.
+"""
+
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+ignoreUntil = 2026-11-30
+reason = """
+golang.org/x/crypto/openpgp is unmaintained and unsafe by design. This is a
+permanent advisory on the package, not a defect with a fixed version, so no
+x/crypto release will clear it. Milvus does not import it: `go mod why
+golang.org/x/crypto/openpgp` reports "main module does not need package".
+Keep x/crypto current for its other fixes.
+"""

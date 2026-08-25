@@ -19,3 +19,14 @@ repos:
         name: ruff-format (tests/)
         args: [--config=tests/ruff.toml]
         files: ^tests/.*\.py$
+  # Only fires when a go.mod/go.sum actually changes, which is rare - so the
+  # network round-trip does not sit on every commit. Set SKIP=vuln-check to
+  # bypass it when you are offline.
+  - repo: local
+    hooks:
+      - id: vuln-check
+        name: go dependency vulnerability scan
+        entry: scripts/vuln_check.sh
+        language: script
+        pass_filenames: false
+        files: (^|/)go\.(mod|sum)$

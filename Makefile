@@ -235,6 +235,12 @@ static-check: getdeps
 	@echo "Start check go_client e2e package"
 	@source $(PWD)/scripts/setenv.sh && cd tests/go_client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --build-tags L0,L1,L2,test --timeout=30m --config $(PWD)/tests/go_client/.golangci.yml
 
+# Scan every Go module for known vulnerabilities. Does not build the tree, so
+# it runs without the cgo core libraries. See scripts/vuln_check.sh.
+vuln-check:
+	@echo "Running $@"
+	@env bash $(PWD)/scripts/vuln_check.sh
+
 verifiers: build-cpp getdeps cppcheck rustcheck fmt static-check
 
 # Build various components locally.
