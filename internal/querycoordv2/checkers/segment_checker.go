@@ -19,6 +19,8 @@ package checkers
 import (
 	"context"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/samber/lo"
@@ -499,8 +501,17 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		return s.GetInsertChannel()
 	})
 
-	plans := make([]assign.SegmentAssignPlan, 0)
-	for shard, segments := range shardSegments {
+	type segmentAssignGroup struct {
+		rwNodes  []int64
+		segments []*datapb.SegmentInfo
+	}
+
+	groupKeys := make([]string, 0)
+	segmentGroups := make(map[string]*segmentAssignGroup)
+	shards := lo.Keys(shardSegments)
+	sort.Strings(shards)
+	for _, shard := range shards {
+		segments := shardSegments[shard]
 		// if channel is not subscribed yet, skip load segments
 		leader := c.dist.ChannelDistManager.GetShardLeader(shard, replica)
 		if leader == nil {
@@ -513,13 +524,27 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		if len(rwNodes) == 0 {
 			rwNodes = replica.GetRWNodes()
 		}
+		rwNodes = sortedNodes(rwNodes)
+		key := segmentAssignGroupKey(rwNodes)
+		if _, ok := segmentGroups[key]; !ok {
+			groupKeys = append(groupKeys, key)
+			segmentGroups[key] = &segmentAssignGroup{
+				rwNodes: rwNodes,
+			}
+		}
+		segmentGroups[key].segments = append(segmentGroups[key].segments, segments...)
+	}
 
-		segmentInfos := lo.Map(segments, func(s *datapb.SegmentInfo, _ int) *meta.Segment {
+	sort.Strings(groupKeys)
+	plans := make([]assign.SegmentAssignPlan, 0)
+	for _, key := range groupKeys {
+		group := segmentGroups[key]
+		segmentInfos := lo.Map(group.segments, func(s *datapb.SegmentInfo, _ int) *meta.Segment {
 			return &meta.Segment{
 				SegmentInfo: s,
 			}
 		})
-		shardPlans := c.assignPolicy.AssignSegment(ctx, replica.GetCollectionID(), segmentInfos, rwNodes, true)
+		shardPlans := c.assignPolicy.AssignSegment(ctx, replica.GetCollectionID(), segmentInfos, group.rwNodes, true)
 		for i := range shardPlans {
 			shardPlans[i].Replica = replica
 			shardPlans[i].LoadPriority = priorityMap[shardPlans[i].Segment.GetID()]
@@ -535,6 +560,23 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 	// either backoff/a retry cap on repeated DeadlineExceeded rebuilds, or a
 	// no-progress timeout instead of a flat per-task wall-clock budget.
 	return balance.CreateSegmentTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), plans)
+}
+
+func sortedNodes(nodes []int64) []int64 {
+	sorted := make([]int64, len(nodes))
+	copy(sorted, nodes)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i] < sorted[j]
+	})
+	return sorted
+}
+
+func segmentAssignGroupKey(nodes []int64) string {
+	parts := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		parts = append(parts, strconv.FormatInt(node, 10))
+	}
+	return strings.Join(parts, ",")
 }
 
 func (c *SegmentChecker) createSegmentReopenTasks(ctx context.Context, segments []*meta.Segment, replica *meta.Replica) []task.Task {
