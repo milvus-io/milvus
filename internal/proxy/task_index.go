@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
@@ -172,7 +173,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("TEXT field does not support user-created scalar index")
 	}
 
-	if err := ValidateAutoIndexMmapConfig(isVecIndex, indexParamsMap); err != nil {
+	if err := fieldvalidator.ValidateAutoIndexMmapConfig(isVecIndex, indexParamsMap); err != nil {
 		return err
 	}
 
