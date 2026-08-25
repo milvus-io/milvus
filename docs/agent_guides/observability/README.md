@@ -9,7 +9,6 @@ configuration.
 | Guide | Use When |
 |---|---|
 | [mlog - AI Agent Logging Guide](logging.md) | Adding or changing application logs. Covers `mlog` usage, context requirements, fields, levels, and logging rules. |
-| [Collection / VChannel metrics cardinality mode](collection-level-metrics-mode.md) | Understanding `full` / `aggregate` behavior and the per-family compatibility matrix for collection- and VChannel-scoped Prometheus metrics. |
 | [WAL Tracing](../streaming-system/wal/tracing.md) | Understanding or changing WAL trace span semantics across append, consume, transaction, broadcast, and replication paths. |
 
 ## Rules of Thumb
