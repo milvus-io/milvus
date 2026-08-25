@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
 
 
 # Install go
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.26.4.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.26.6.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
 # Install conan
 RUN pip3 install conan==2.25.1
 # Install rust
@@ -33,4 +33,3 @@ RUN mkdir -p /home/milvus/.vscode-server/extensions \
 
 RUN wget -O /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
     chmod +x /tini
-
