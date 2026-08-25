@@ -45,6 +45,12 @@ type NodeInfo struct {
 	// the two are not the same thing. Empty means unknown: the coordinator
 	// predates the field, or the entry came from somewhere that does not set
 	// it. It must not be read as "no resource group".
+	//
+	// NOTHING ROUTES ON THIS YET. It is carried here so the cache holds it
+	// when a per-resource-group router needs it; that router is not in this
+	// PR, and LBPolicyImpl still builds its candidate sets purely from
+	// Serviceable. A reader finding only String() using this field has not
+	// missed a call site -- there is none.
 	ResourceGroup string
 }
 
