@@ -82,6 +82,10 @@ func getMaxSingleRowSize(walName message.WALName) (int, bool) {
 
 // GenInsertMsgsByPartition splits the insert payload of a partition into
 // per-segment messages, honoring the cross-WAL packing threshold.
+//
+// To avoid copying contiguous batches, returned messages may share backing
+// storage with insertMsg. Callers must treat insertMsg and the returned
+// messages as read-only until the returned messages have been serialized.
 func GenInsertMsgsByPartition(ctx context.Context,
 	segmentID typeutil.UniqueID,
 	partitionID typeutil.UniqueID,

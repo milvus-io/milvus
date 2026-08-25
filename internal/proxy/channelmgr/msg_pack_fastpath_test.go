@@ -112,6 +112,28 @@ func TestGenInsertMsgsByPartitionContiguousFastPath(t *testing.T) {
 	assert.True(t, &hashValues[1] == &got.HashValues[0])
 	assert.True(t, &timestamps[1] == &got.Timestamps[0])
 	assert.True(t, &rowIDs[1] == &got.RowIDs[0])
+
+	serialized, err := message.NewInsertMessageBuilderV1().
+		WithVChannel("test_channel").
+		WithHeader(&message.InsertMessageHeader{}).
+		WithBody(got.InsertRequest).
+		BuildMutable()
+	require.NoError(t, err)
+
+	longData[1] = 999
+	jsonData[1][0] = 'X'
+	floatData[2] = 999
+	validData[1] = true
+	timestamps[1] = 999
+	rowIDs[1] = 999
+
+	body := message.MustAsMutableInsertMessageV1(serialized).MustBody()
+	assert.Equal(t, []int64{20, 30, 40}, body.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	assert.Equal(t, []byte(`{"row":1}`), body.GetFieldsData()[1].GetScalars().GetJsonData().GetData()[0])
+	assert.Equal(t, []float32{3, 4, 5, 6}, body.GetFieldsData()[2].GetVectors().GetFloatVector().GetData())
+	assert.Equal(t, []bool{false, true, true}, typeutil.GetFieldDataValidData(body.GetFieldsData()[2]))
+	assert.Equal(t, []uint64{101, 102, 103}, body.GetTimestamps())
+	assert.Equal(t, []int64{201, 202, 203}, body.GetRowIDs())
 }
 
 func TestGenInsertMsgsByPartitionNonContiguousFallback(t *testing.T) {
