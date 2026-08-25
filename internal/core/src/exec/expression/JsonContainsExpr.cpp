@@ -23,6 +23,7 @@
 #include <vector>
 #include "common/ScopedTimer.h"
 #include "common/Types.h"
+#include "exec/expression/JsonNumberComparison.h"
 
 namespace milvus {
 namespace exec {
