@@ -162,6 +162,80 @@ TEST_F(BsonBuilderTest, CreateValueNodeTest) {
                  std::runtime_error);
 }
 
+TEST_F(BsonBuilderTest, UndefinedSentinelPreservesExistsAndSibling) {
+    DomNode root(DomNode::Type::DOCUMENT);
+    BsonBuilder::AppendUndefinedToDom(root, {"bad"});
+    BsonBuilder::AppendDoubleToDom(root, {"ok"}, 1.5);
+
+    bsoncxx::builder::basic::document bson_builder;
+    BsonBuilder::ConvertDomToBson(root, bson_builder);
+    auto bson_doc = bson_builder.extract();
+    auto offsets = BsonBuilder::ExtractBsonKeyOffsets(bson_doc.view());
+    ASSERT_EQ(offsets.size(), 2);
+    EXPECT_EQ(offsets[0].first, "/bad");
+    EXPECT_EQ(offsets[1].first, "/ok");
+
+    BsonView view(bson_doc.view().data(), bson_doc.view().length());
+    EXPECT_FALSE(view.IsBsonValueEmpty(offsets[0].second));
+    EXPECT_FALSE(
+        view.ParseAsValueAtOffset<double>(offsets[0].second).has_value());
+    ASSERT_TRUE(
+        view.ParseAsValueAtOffset<double>(offsets[1].second).has_value());
+    EXPECT_DOUBLE_EQ(
+        view.ParseAsValueAtOffset<double>(offsets[1].second).value(), 1.5);
+
+    auto bad = view.FindByPath(bson_doc.view(), {"bad"});
+    ASSERT_TRUE(bad.has_value());
+    EXPECT_EQ(bad->type(), bsoncxx::type::k_undefined);
+}
+
+TEST_F(BsonBuilderTest, ArrayInvalidNumberKeepsValidElementsQueryable) {
+    const std::string json =
+        R"([1e400,7,{"bad":18446744073709551616,"ok":9},[1e400,11]])";
+
+    auto bytes = BuildBsonArrayBytesFromJsonString(json);
+    bsoncxx::array::view array(bytes.data(), bytes.size());
+    ASSERT_EQ(std::distance(array.begin(), array.end()), 4);
+
+    auto it = array.begin();
+    EXPECT_EQ(it->type(), bsoncxx::type::k_undefined);
+    ++it;
+    EXPECT_EQ(it->type(), bsoncxx::type::k_int64);
+    EXPECT_EQ(it->get_int64().value, 7);
+    ++it;
+    ASSERT_EQ(it->type(), bsoncxx::type::k_document);
+    auto object = it->get_document().value;
+    auto object_it = object.begin();
+    ASSERT_NE(object_it, object.end());
+    EXPECT_EQ(object_it->type(), bsoncxx::type::k_undefined);
+    ++object_it;
+    ASSERT_NE(object_it, object.end());
+    EXPECT_EQ(object_it->get_int64().value, 9);
+    ++it;
+    ASSERT_EQ(it->type(), bsoncxx::type::k_array);
+    auto nested = it->get_array().value;
+    auto nested_it = nested.begin();
+    EXPECT_EQ(nested_it->type(), bsoncxx::type::k_undefined);
+    ++nested_it;
+    EXPECT_EQ(nested_it->get_int64().value, 11);
+
+    // Skipping over a zero-payload undefined element must still reach later
+    // array indexes.
+    auto seven = BsonView::GetNthElementInArray<int64_t>(bytes.data(), 1);
+    ASSERT_TRUE(seven.has_value());
+    EXPECT_EQ(seven.value(), 7);
+
+    DomNode root(DomNode::Type::DOCUMENT);
+    BsonBuilder::AppendArrayToDom(root, {"array"}, std::move(bytes));
+    bsoncxx::builder::basic::document bson_builder;
+    BsonBuilder::ConvertDomToBson(root, bson_builder);
+    auto bson_doc = bson_builder.extract();
+    auto offsets = BsonBuilder::ExtractBsonKeyOffsets(bson_doc.view());
+    ASSERT_EQ(offsets.size(), 1);
+    BsonView view(bson_doc.view().data(), bson_doc.view().length());
+    EXPECT_FALSE(view.IsBsonValueEmpty(offsets[0].second));
+}
+
 TEST_F(BsonBuilderTest, AppendToDomTest) {
     BsonBuilder builder;
     DomNode root(DomNode::Type::DOCUMENT);
