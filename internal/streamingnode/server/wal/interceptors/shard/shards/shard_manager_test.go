@@ -6,8 +6,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -175,6 +177,23 @@ func TestShardManager(t *testing.T) {
 	assert.NoError(t, m.CheckIfPartitionExists(PartitionUniqueKey{CollectionID: 7, PartitionID: 8}))
 	assert.NoError(t, m.CheckIfPartitionExists(PartitionUniqueKey{CollectionID: 7, PartitionID: 9}))
 	assert.NoError(t, m.CheckIfPartitionExists(PartitionUniqueKey{CollectionID: 7, PartitionID: common.AllPartitionsID}))
+
+	legacySchema := &schemapb.CollectionSchema{Name: "legacy", Version: 5}
+	legacySchemaBytes, err := proto.Marshal(legacySchema)
+	assert.NoError(t, err)
+	createCollectionWithLegacySchema := message.NewCreateCollectionMessageBuilderV1().
+		WithVChannel("v4").
+		WithHeader(&message.CreateCollectionMessageHeader{
+			CollectionId: 11,
+			PartitionIds: []int64{12},
+		}).
+		WithBody(&msgpb.CreateCollectionRequest{Schema: legacySchemaBytes}).
+		MustBuildMutable().
+		WithTimeTick(450).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(9))
+	m.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(createCollectionWithLegacySchema))
+	assert.True(t, proto.Equal(legacySchema, m.collections[11].Schema.GetSchema()))
 
 	createPartitionMsg := message.NewCreatePartitionMessageBuilderV1().
 		WithVChannel("v3").

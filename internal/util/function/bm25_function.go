@@ -190,13 +190,13 @@ func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error 
 		}
 		embeddingMap := map[uint32]float32{}
 		tokenStream := tokenizer.NewTokenStream(data[i])
-		defer tokenStream.Destroy()
 		for tokenStream.Advance() {
 			token := tokenStream.Token()
 			// TODO More Hash Option
 			hash := typeutil.HashString2LessUint32(token)
 			embeddingMap[hash] += 1
 		}
+		tokenStream.Destroy()
 		dst[i] = embeddingMap
 	}
 	return nil
@@ -264,7 +264,6 @@ func (v *BM25FunctionRunner) analyze(data []string, dst [][]*milvuspb.AnalyzerTo
 	for i := 0; i < len(data); i++ {
 		result := []*milvuspb.AnalyzerToken{}
 		tokenStream := tokenizer.NewTokenStream(data[i])
-		defer tokenStream.Destroy()
 		for tokenStream.Advance() {
 			var token *milvuspb.AnalyzerToken
 			if withDetail {
@@ -280,6 +279,7 @@ func (v *BM25FunctionRunner) analyze(data []string, dst [][]*milvuspb.AnalyzerTo
 			}
 			result = append(result, token)
 		}
+		tokenStream.Destroy()
 		dst[i] = result
 	}
 	return nil

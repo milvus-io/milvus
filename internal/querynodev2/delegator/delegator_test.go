@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -60,6 +62,14 @@ func TestMain(m *testing.M) {
 	streaming.SetupNoopWALForTest()
 
 	os.Exit(m.Run())
+}
+
+var delegatorTestSchemaVersion = atomic.NewUint64(tsoutil.ComposeTSByTime(time.Now().Add(24*time.Hour), 0))
+
+func nextSchemaVersionLoadMeta() *querypb.LoadMetaInfo {
+	return &querypb.LoadMetaInfo{
+		SchemaVersion: delegatorTestSchemaVersion.Inc(),
+	}
 }
 
 type DelegatorSuite struct {
@@ -163,7 +173,7 @@ func (s *DelegatorSuite) SetupTest() {
 		},
 	}, &querypb.LoadMetaInfo{
 		PartitionIDs:  s.partitionIDs,
-		SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0),
+		SchemaVersion: nextSchemaVersionLoadMeta().GetSchemaVersion(),
 	})
 
 	s.mq = &msgstream.MockMsgStream{}
@@ -180,14 +190,19 @@ func (s *DelegatorSuite) SetupTest() {
 }
 
 func (s *DelegatorSuite) TearDownTest() {
-	s.delegator.Close()
+	if s.delegator != nil {
+		s.delegator.Close()
+	}
+	function.GetManager().Release(s.collectionID, "WAL-"+s.vchannelName)
 	s.delegator = nil
 }
 
 func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
-	s.Run("init function failed", func() {
+	s.Run("invalid function metadata blocks delegator", func() {
+		collectionID := s.collectionID + 10001
+		vchannel := s.vchannelName + "-invalid-function"
 		manager := segments.NewManager()
-		manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		manager.Collection.PutOrRef(collectionID, &schemapb.CollectionSchema{
 			Name: "TestCollection",
 			Fields: []*schemapb.FieldSchema{
 				{
@@ -208,15 +223,18 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 				InputFieldIds:  []int64{102},
 				OutputFieldIds: []int64{101, 103}, // invalid output field
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, nextSchemaVersionLoadMeta())
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		delegator, err := NewShardDelegator(context.Background(), collectionID, s.replicaID, vchannel, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.Error(err)
+		s.Nil(delegator)
 	})
 
-	s.Run("init function failed", func() {
+	s.Run("function runner initialized", func() {
+		collectionID := s.collectionID + 10002
+		vchannel := s.vchannelName + "-function-runner"
 		manager := segments.NewManager()
-		manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		manager.Collection.PutOrRef(collectionID, &schemapb.CollectionSchema{
 			Name: "TestCollection",
 			Fields: []*schemapb.FieldSchema{
 				{
@@ -247,10 +265,11 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 				InputFieldIds:  []int64{102},
 				OutputFieldIds: []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, nextSchemaVersionLoadMeta())
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		delegator, err := NewShardDelegator(context.Background(), collectionID, s.replicaID, vchannel, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.NoError(err)
+		defer delegator.Close()
 	})
 }
 
@@ -495,7 +514,7 @@ func (s *DelegatorSuite) TestSearch() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		results, err := s.delegator.Search(ctx, &querypb.SearchRequest{
-			Req:         &internalpb.SearchRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.SearchRequest{Base: commonpbutil.NewMsgBase(), FieldId: 101},
 			DmlChannels: []string{s.vchannelName},
 		})
 
@@ -631,6 +650,7 @@ func (s *DelegatorSuite) TestSearch() {
 		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
 				Base:               commonpbutil.NewMsgBase(),
+				FieldId:            101,
 				GuaranteeTimestamp: uint64(paramtable.Get().QueryNodeCfg.MaxTimestampLag.GetAsDuration(time.Second)) + 10001,
 			},
 			DmlChannels: []string{s.vchannelName},
@@ -695,6 +715,7 @@ func (s *DelegatorSuite) TestSearch() {
 		results, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
 				Base:               commonpbutil.NewMsgBase(),
+				FieldId:            101,
 				GuaranteeTimestamp: uint64(paramtable.Get().QueryNodeCfg.MaxTimestampLag.GetAsDuration(time.Second)) + 10001,
 			},
 			DmlChannels: []string{s.vchannelName},
@@ -1387,6 +1408,11 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 	s.delegator.Start()
 	paramtable.SetNodeID(1)
 	s.initSegments()
+	currentSchema := func() *schemapb.CollectionSchema {
+		sd, ok := s.delegator.(*shardDelegator)
+		s.Require().True(ok)
+		return proto.Clone(sd.collection.Schema()).(*schemapb.CollectionSchema)
+	}
 
 	s.Run("normal", func() {
 		workers := make(map[int64]*cluster.MockWorker)
@@ -1411,7 +1437,7 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{}, 100)
+		err := s.delegator.UpdateSchema(ctx, currentSchema(), 100)
 		s.NoError(err)
 	})
 
@@ -1438,7 +1464,7 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{}, 100)
+		err := s.delegator.UpdateSchema(ctx, currentSchema(), 100)
 		s.Error(err)
 	})
 
@@ -1449,7 +1475,7 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{}, 100)
+		err := s.delegator.UpdateSchema(ctx, currentSchema(), 100)
 		s.Error(err)
 	})
 
@@ -1461,7 +1487,7 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
 
-		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{}, 100)
+		err := s.delegator.UpdateSchema(ctx, currentSchema(), 100)
 		s.Error(err)
 	})
 
@@ -1471,7 +1497,7 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{}, 100)
+		err := s.delegator.UpdateSchema(ctx, currentSchema(), 100)
 		s.Error(err)
 	})
 }
@@ -1497,10 +1523,20 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
-					FieldID:    100,
-					Name:       "text",
-					DataType:   schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "analyzer_params", Value: "{}"}},
+					FieldID:      200,
+					Name:         "id",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+					AutoID:       true,
+				},
+				{
+					FieldID:  100,
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "analyzer_params", Value: "{}"},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1515,7 +1551,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, nextSchemaVersionLoadMeta())
 		s.ResetDelegator()
 
 		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
@@ -1526,19 +1562,42 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 		s.Equal(2, len(result[0].GetTokens()))
 	})
 
+	s.Run("standalone field analyzer", func() {
+		err := s.manager.Collection.PutOrRef(s.collectionID, newFunctionRuntimeTestSchema(), nil, nextSchemaVersionLoadMeta())
+		s.Require().NoError(err)
+		s.ResetDelegator()
+
+		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+			FieldId:     103,
+			Placeholder: [][]byte{[]byte("test doc")},
+		})
+		s.Require().NoError(err)
+		s.Equal(2, len(result[0].GetTokens()))
+	})
+
 	s.Run("multi analyzer", func() {
 		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
+					FieldID:      200,
+					Name:         "id",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+					AutoID:       true,
+				},
+				{
 					FieldID:  100,
 					Name:     "text",
 					DataType: schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "multi_analyzer_params", Value: `{
-						"by_field": "analyzer",
-    					"analyzers": {
-							"default": {}
-						}
-					}`}},
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "multi_analyzer_params", Value: `{
+							"by_field": "analyzer",
+							"analyzers": {
+								"default": {}
+							}
+						}`},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1549,6 +1608,9 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 					FieldID:  102,
 					Name:     "analyzer",
 					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+					},
 				},
 			},
 			Functions: []*schemapb.FunctionSchema{{
@@ -1558,7 +1620,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, nextSchemaVersionLoadMeta())
 		s.ResetDelegator()
 
 		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
@@ -1575,15 +1637,25 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
+					FieldID:      200,
+					Name:         "id",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+					AutoID:       true,
+				},
+				{
 					FieldID:  100,
 					Name:     "text",
 					DataType: schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "multi_analyzer_params", Value: `{
-						"by_field": "analyzer",
-    					"analyzers": {
-							"default": {}
-						}
-					}`}},
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "multi_analyzer_params", Value: `{
+							"by_field": "analyzer",
+							"analyzers": {
+								"default": {}
+							}
+						}`},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1594,6 +1666,9 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 					FieldID:  102,
 					Name:     "analyzer",
 					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+					},
 				},
 			},
 			Functions: []*schemapb.FunctionSchema{{
@@ -1603,7 +1678,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, nextSchemaVersionLoadMeta())
 		s.ResetDelegator()
 
 		_, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
@@ -1634,10 +1709,20 @@ func (s *DelegatorSuite) TestGetHighlight() {
 		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
-					FieldID:    100,
-					Name:       "text",
-					DataType:   schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "analyzer_params", Value: "{}"}},
+					FieldID:      200,
+					Name:         "id",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+					AutoID:       true,
+				},
+				{
+					FieldID:  100,
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "analyzer_params", Value: "{}"},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1652,7 +1737,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, nextSchemaVersionLoadMeta())
 		s.ResetDelegator()
 
 		result, err := s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
@@ -1673,20 +1758,53 @@ func (s *DelegatorSuite) TestGetHighlight() {
 		s.Require().NotNil(result[1].Fragments)
 	})
 
+	s.Run("highlight with standalone analyzer", func() {
+		err := s.manager.Collection.PutOrRef(s.collectionID, newFunctionRuntimeTestSchema(), nil, nextSchemaVersionLoadMeta())
+		s.Require().NoError(err)
+		s.ResetDelegator()
+
+		result, err := s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Topks: []int64{2},
+			Tasks: []*querypb.HighlightTask{
+				{
+					FieldId:       103,
+					FieldName:     "standalone_text",
+					Texts:         []string{"test", "this is a test document", "another test case"},
+					SearchTextNum: 1,
+					CorpusTextNum: 2,
+				},
+			},
+		})
+		s.Require().NoError(err)
+		s.Require().Equal(2, len(result))
+		s.Require().NotNil(result[0].Fragments)
+		s.Require().NotNil(result[1].Fragments)
+	})
+
 	s.Run("highlight with multi analyzer", func() {
 		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
+					FieldID:      200,
+					Name:         "id",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+					AutoID:       true,
+				},
+				{
 					FieldID:  100,
 					Name:     "text",
 					DataType: schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "multi_analyzer_params", Value: `{
-						"by_field": "analyzer",
-    					"analyzers": {
-							"standard": {},
-							"default": {}
-						}
-					}`}},
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "multi_analyzer_params", Value: `{
+							"by_field": "analyzer",
+							"analyzers": {
+								"standard": {},
+								"default": {}
+							}
+						}`},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1697,6 +1815,9 @@ func (s *DelegatorSuite) TestGetHighlight() {
 					FieldID:  102,
 					Name:     "analyzer",
 					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+					},
 				},
 			},
 			Functions: []*schemapb.FunctionSchema{{
@@ -1706,7 +1827,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, nextSchemaVersionLoadMeta())
 		s.ResetDelegator()
 
 		// two target with two analyzer
@@ -1730,10 +1851,20 @@ func (s *DelegatorSuite) TestGetHighlight() {
 		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
-					FieldID:    100,
-					Name:       "text",
-					DataType:   schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "analyzer_params", Value: "{}"}},
+					FieldID:      200,
+					Name:         "id",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+					AutoID:       true,
+				},
+				{
+					FieldID:  100,
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "analyzer_params", Value: "{}"},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1748,7 +1879,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, nextSchemaVersionLoadMeta())
 		s.ResetDelegator()
 
 		result, err := s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
@@ -1938,19 +2069,120 @@ func TestDelegatorSuite(t *testing.T) {
 	suite.Run(t, new(DelegatorSuite))
 }
 
+func newFunctionRuntimeTestSchema(functions ...*schemapb.FunctionSchema) *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name: "TestCollection",
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:         "id",
+				FieldID:      100,
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+				AutoID:       true,
+			},
+			{
+				Name:     "text",
+				FieldID:  101,
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "256"},
+					{Key: common.EnableAnalyzerKey, Value: "true"},
+					{Key: common.AnalyzerParamKey, Value: "{}"},
+				},
+			},
+			{
+				Name:     "sparse",
+				FieldID:  102,
+				DataType: schemapb.DataType_SparseFloatVector,
+			},
+			{
+				Name:     "standalone_text",
+				FieldID:  103,
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "256"},
+					{Key: common.EnableAnalyzerKey, Value: "true"},
+					{Key: common.AnalyzerParamKey, Value: "{}"},
+				},
+			},
+			{
+				Name:     "sparse_additive",
+				FieldID:  105,
+				DataType: schemapb.DataType_SparseFloatVector,
+			},
+		},
+		Functions: functions,
+	}
+}
+
+func newBM25FunctionSchema() *schemapb.FunctionSchema {
+	return &schemapb.FunctionSchema{
+		Type:             schemapb.FunctionType_BM25,
+		InputFieldNames:  []string{"text"},
+		InputFieldIds:    []int64{101},
+		OutputFieldNames: []string{"sparse"},
+		OutputFieldIds:   []int64{102},
+	}
+}
+
+func TestDelegatorFunctionExecutionEligibility(t *testing.T) {
+	sd := &shardDelegator{
+		collectionID: 1002,
+		vchannelName: "static-function-schema-test-channel",
+		isBM25Field: map[UniqueID]bool{
+			102: true,
+		},
+		analyzerFields: map[UniqueID]bool{
+			101: true,
+		},
+	}
+
+	t.Run("added vector field skips function manager", func(t *testing.T) {
+		avgdl, skip, err := sd.prepareSearchFunction(context.Background(), &internalpb.SearchRequest{FieldId: 104})
+		require.NoError(t, err)
+		assert.Zero(t, avgdl)
+		assert.False(t, skip)
+	})
+
+	t.Run("BM25 field fails when managed runner is missing", func(t *testing.T) {
+		key := delegatorFunctionRunnerKey(sd.vchannelName)
+		require.NoError(t, function.GetManager().Alloc(sd.collectionID, key, newFunctionRuntimeTestSchema()))
+		defer function.GetManager().Release(sd.collectionID, key)
+
+		_, _, err := sd.prepareSearchFunction(context.Background(), &internalpb.SearchRequest{FieldId: 102})
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
+
+	t.Run("added field skips analyzer manager", func(t *testing.T) {
+		_, err := sd.RunAnalyzer(context.Background(), &querypb.RunAnalyzerRequest{
+			FieldId: 104,
+		})
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+}
+
 func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {
 	paramtable.Init()
+	schema := newFunctionRuntimeTestSchema(newBM25FunctionSchema())
+	key := delegatorFunctionRunnerKey("metric-test-channel")
+	require.NoError(t, function.GetManager().Alloc(1002, key, schema))
+	t.Cleanup(func() {
+		function.GetManager().Release(1002, key)
+	})
 	searchReq := &querypb.SearchRequest{
 		Req: &internalpb.SearchRequest{
 			Base: commonpbutil.NewMsgBase(),
 		},
 	}
 
-	searchReq.Req.FieldId = 101
+	searchReq.Req.FieldId = 102
 	searchReq.Req.MetricType = metric.IP
 
 	sd := &shardDelegator{
-		isBM25Field:                map[int64]bool{101: true},
+		collectionID:               1002,
+		vchannelName:               "metric-test-channel",
+		collection:                 segments.NewCollectionWithoutSegcoreForTest(1002, schema),
+		isBM25Field:                map[UniqueID]bool{102: true},
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 
