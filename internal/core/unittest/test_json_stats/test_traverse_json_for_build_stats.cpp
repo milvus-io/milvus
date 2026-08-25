@@ -22,6 +22,7 @@
 #include "gtest/gtest.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "index/json_stats/utils.h"
+#include "pb/schema.pb.h"
 #include "storage/FileManager.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
