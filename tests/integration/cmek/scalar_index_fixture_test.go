@@ -157,7 +157,8 @@ func buildFixturePlugins(tmpDir string) (string, string, string, error) {
 
 	goPluginRace := filepath.Join(tmpDir, "libGoCipherPluginRace.so")
 	goRaceBuild := exec.Command("go", "build", "-race", "-buildmode=plugin", "-buildvcs=false",
-		"-tags", "dynamic,test", "-o", goPluginRace, "./tests/integration/cmek/pluginmock/go")
+		"-tags", "dynamic,test", "-gcflags", "all=-N -l", "-o", goPluginRace,
+		"./tests/integration/cmek/pluginmock/go")
 	goRaceBuild.Dir = repoRoot
 	if output, err := goRaceBuild.CombinedOutput(); err != nil {
 		return "", "", "", fmt.Errorf("build race Go cipher fixture: %w: %s", err, output)
