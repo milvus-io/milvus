@@ -24,6 +24,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"strconv"
 	"sync"
 	"time"
 
@@ -239,10 +240,55 @@ type SyncManager struct {
 
 	version     *atomic.Uint64
 	resourceMap map[string]int64 // resource name -> resource id
+
+	localResourcesLoaded bool
+	localResourceIDs     map[int64]struct{}
 }
 
 func (m *SyncManager) GetVersion() uint64 {
 	return m.version.Load()
+}
+
+// loadLocalResources restores the resource IDs persisted in the manager's
+// local directory. The resource names and source paths are recovered from the
+// next Sync request, which remains the source of truth.
+func (m *SyncManager) loadLocalResources() error {
+	if m.localResourcesLoaded {
+		return nil
+	}
+
+	entries, err := os.ReadDir(m.localPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return merr.WrapErrIoFailed(m.localPath, err)
+	}
+
+	m.localResourceIDs = make(map[int64]struct{})
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		resourceID, err := strconv.ParseInt(entry.Name(), 10, 64)
+		if err != nil || resourceID <= 0 {
+			continue
+		}
+		m.localResourceIDs[resourceID] = struct{}{}
+	}
+	m.localResourcesLoaded = true
+	return nil
+}
+
+func (m *SyncManager) hasLocalResourceFile(resourceID int64, localFilePath string) (bool, error) {
+	if _, ok := m.localResourceIDs[resourceID]; !ok {
+		return false, nil
+	}
+	info, err := os.Stat(localFilePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, merr.WrapErrIoFailed(localFilePath, err)
+	}
+	return info.Mode().IsRegular(), nil
 }
 
 // sync file to local if file mode was Sync
@@ -253,6 +299,9 @@ func (m *SyncManager) Sync(ctx context.Context, version uint64, resourceList []*
 	if version <= m.version.Load() {
 		return nil
 	}
+	if err := m.loadLocalResources(); err != nil {
+		return err
+	}
 
 	newResourceMap := make(map[string]int64)
 	resolvedResources := make([]*ResolvedFileResource, 0, len(resourceList))
@@ -261,7 +310,11 @@ func (m *SyncManager) Sync(ctx context.Context, version uint64, resourceList []*
 		newResourceMap[resource.GetName()] = resource.GetId()
 		localResourcePath := path.Join(m.localPath, fmt.Sprint(resource.GetId()))
 		localFilePath := path.Join(localResourcePath, path.Base(resource.GetPath()))
-		if id, ok := m.resourceMap[resource.GetName()]; ok && id == resource.GetId() {
+		localFileReady, err := m.hasLocalResourceFile(resource.GetId(), localFilePath)
+		if err != nil {
+			return err
+		}
+		if localFileReady {
 			resolvedResources = append(resolvedResources, &ResolvedFileResource{
 				ID:        resource.GetId(),
 				Name:      resource.GetName(),
@@ -281,6 +334,7 @@ func (m *SyncManager) Sync(ctx context.Context, version uint64, resourceList []*
 				mlog.Err(err))
 			return err
 		}
+		m.localResourceIDs[resource.GetId()] = struct{}{}
 		mlog.Info(ctx, "sync file resource to local", mlog.String("path", localResourcePath), mlog.Int64("resourceID", resource.GetId()))
 		resolvedResources = append(resolvedResources, &ResolvedFileResource{
 			ID:        resource.GetId(),
@@ -298,13 +352,15 @@ func (m *SyncManager) Sync(ctx context.Context, version uint64, resourceList []*
 	for _, id := range newResourceMap {
 		activeIDs[id] = struct{}{}
 	}
-	for _, id := range m.resourceMap {
+	for id := range m.localResourceIDs {
 		if _, ok := activeIDs[id]; ok {
 			continue
 		}
 		if err := os.RemoveAll(path.Join(m.localPath, fmt.Sprint(id))); err != nil {
 			mlog.Warn(ctx, "remove local file resource failed", mlog.Int64("resourceID", id), mlog.Err(err))
+			continue
 		}
+		delete(m.localResourceIDs, id)
 	}
 
 	m.resourceMap = newResourceMap
@@ -316,12 +372,16 @@ func (m *SyncManager) Sync(ctx context.Context, version uint64, resourceList []*
 func (m *SyncManager) Mode() Mode { return SyncMode }
 
 func NewSyncManager(downloader storage.ChunkManager) *SyncManager {
-	return &SyncManager{
+	manager := &SyncManager{
 		BaseManager: newBaseManager(),
 		downloader:  downloader,
 		resourceMap: make(map[string]int64),
 		version:     atomic.NewUint64(0),
 	}
+	if err := manager.loadLocalResources(); err != nil {
+		mlog.Warn(context.TODO(), "load local file resources failed", mlog.String("path", manager.localPath), mlog.Err(err))
+	}
+	return manager
 }
 
 // RefManager only used for datanode.
