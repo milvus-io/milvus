@@ -200,51 +200,6 @@ func TestNewReplicateMessageRejectsMalformedReservedProperties(t *testing.T) {
 	}
 }
 
-func TestNewReplicateMessageRejectsMalformedPayload(t *testing.T) {
-	msg := message.NewInsertMessageBuilderV1().
-		WithVChannel("v1").
-		WithHeader(&message.InsertMessageHeader{}).
-		WithBody(&msgpb.InsertRequest{}).
-		MustBuildMutable()
-	msgID := walimplstest.NewTestMessageID(1)
-	immutableMsg := msg.WithTimeTick(100).WithLastConfirmed(msgID).IntoImmutableMessage(msgID).IntoImmutableMessageProto()
-	immutableMsg.Payload = []byte{0xff}
-
-	replicateMsg, err := message.NewReplicateMessage("by-dev", immutableMsg)
-
-	require.Error(t, err)
-	assert.Nil(t, replicateMsg)
-	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-}
-
-func TestNewReplicateMessageRejectsCipherHeaderWithUndecryptablePayload(t *testing.T) {
-	msg := message.NewInsertMessageBuilderV1().
-		WithVChannel("v1").
-		WithHeader(&message.InsertMessageHeader{}).
-		WithBody(&msgpb.InsertRequest{}).
-		MustBuildMutable()
-	msgID := walimplstest.NewTestMessageID(1)
-	immutableMsg := msg.WithTimeTick(100).WithLastConfirmed(msgID).IntoImmutableMessage(msgID).IntoImmutableMessageProto()
-	cipherHeader, err := message.EncodeProto(&messagespb.CipherHeader{
-		EzId:         1,
-		CollectionId: 2,
-		SafeKey:      []byte("safe-key"),
-		PayloadBytes: 12,
-	})
-	require.NoError(t, err)
-	immutableMsg.Properties["_ch"] = cipherHeader
-	immutableMsg.Payload = []byte("garbage-body")
-
-	var replicateMsg message.ReplicateMutableMessage
-	require.NotPanics(t, func() {
-		replicateMsg, err = message.NewReplicateMessage("by-dev", immutableMsg)
-	})
-
-	require.Error(t, err)
-	assert.Nil(t, replicateMsg)
-	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-}
-
 func TestNewReplicateMessageRejectsCipherHeaderOnNonCipherMessage(t *testing.T) {
 	msgID := walimplstest.NewTestMessageID(1)
 	msg := message.NewTimeTickMessageBuilderV1().

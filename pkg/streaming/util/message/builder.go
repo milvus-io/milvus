@@ -134,9 +134,6 @@ func validateReplicateMessageProperties(msg *immutableMessageImpl) error {
 	if err := validateReplicateCipherHeader(msg); err != nil {
 		return err
 	}
-	if err := validateReplicatePayload(msg); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -177,56 +174,6 @@ func validateReplicateCipherHeader(msg *immutableMessageImpl) error {
 		return merr.WrapErrParameterInvalidMsg("message type %s cannot enable cipher", msg.MessageType().String())
 	}
 	return validateReplicateProtoProperty(msg, messageCipherHeader, "cipher header", &messagespb.CipherHeader{})
-}
-
-func validateReplicatePayload(msg *immutableMessageImpl) error {
-	messageType := msg.MessageTypeWithVersion()
-	specializedType, ok := GetSerializeType(messageType)
-	if !ok {
-		return merr.WrapErrParameterInvalidMsg("unsupported message type version: %s", messageType.String())
-	}
-
-	payload := msg.payload
-	if msg.properties.Exist(messageCipherHeader) {
-		decryptedPayload, err := decryptReplicatePayloadForValidation(msg)
-		if err != nil {
-			return err
-		}
-		payload = decryptedPayload
-	}
-
-	body := reflect.New(specializedType.BodyType.Elem()).Interface().(proto.Message)
-	if err := proto.Unmarshal(payload, body); err != nil {
-		return merr.WrapErrParameterInvalidMsg("invalid message payload: %s", err.Error())
-	}
-	return nil
-}
-
-func decryptReplicatePayloadForValidation(msg *immutableMessageImpl) ([]byte, error) {
-	value, ok := msg.properties.Get(messageCipherHeader)
-	if !ok {
-		return msg.payload, nil
-	}
-	header := &messagespb.CipherHeader{}
-	if err := DecodeProto(value, header); err != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("invalid cipher header: %s", err.Error())
-	}
-	if cipher == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("invalid cipher header: cipher not registered")
-	}
-
-	decryptor, err := getDecryptorWithRetry(header.EzId, header.CollectionId, header.SafeKey)
-	if err != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("invalid cipher header: failed to get decryptor: %s", err.Error())
-	}
-	if decryptor == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("invalid cipher header: decryptor is nil")
-	}
-	payload, err := decryptor.Decrypt(msg.payload)
-	if err != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("invalid encrypted message payload: %s", err.Error())
-	}
-	return payload, nil
 }
 
 func lastConfirmedMessageID(msg *immutableMessageImpl) (MessageID, error) {
