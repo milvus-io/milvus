@@ -353,16 +353,23 @@ func (s *scalarIndexSuite) runCell(cell scalarCell) {
 	}
 	var objects []inspector.Object
 	var lastLocateErr error
-	locateDeadline := time.Now().Add(5 * time.Minute)
+	locateCtx, locateCancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer locateCancel()
+
+locate:
 	for {
+		if err := locateCtx.Err(); err != nil {
+			lastLocateErr = fmt.Errorf("locate index: %w", err)
+			break
+		}
 		if cell.textLog {
 			segments = s.sealedSegments(collectionName)
 		}
 		if cell.textLog {
 			objects, err = inspector.LocateTextLog(s.Cluster.RootPath(), segments, fieldID, s.campaign.engineVersion)
 		} else {
-			locateCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			objects, err = inspector.LocateScalarIndex(locateCtx, s.Cluster.MixCoordClient, segments,
+			requestCtx, cancel := context.WithTimeout(locateCtx, 5*time.Second)
+			objects, err = inspector.LocateScalarIndex(requestCtx, s.Cluster.MixCoordClient, segments,
 				cell.indexType, fieldID, s.campaign.engineVersion)
 			cancel()
 		}
@@ -370,10 +377,12 @@ func (s *scalarIndexSuite) runCell(cell scalarCell) {
 		if err == nil && len(objects) > 0 {
 			break
 		}
-		if time.Now().After(locateDeadline) {
-			break
+		select {
+		case <-locateCtx.Done():
+			lastLocateErr = fmt.Errorf("locate index: %w", locateCtx.Err())
+			break locate
+		case <-time.After(500 * time.Millisecond):
 		}
-		time.Sleep(500 * time.Millisecond)
 	}
 	s.Require().NoError(lastLocateErr)
 	s.Require().NotEmpty(objects)

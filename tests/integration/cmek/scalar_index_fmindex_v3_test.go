@@ -27,6 +27,11 @@ func TestScalarIndexFMINDEXCampaign(t *testing.T) {
 }
 
 func (s *ScalarIndexFMINDEXSuite) SetupSuite() {
+	// Make the query oracle exercise FMINDEX even for this small fixture. The
+	// default cost ratio intentionally falls back to a raw scan for the
+	// fixture's match cardinality, which would make the oracle weaker than it
+	// appears.
+	s.WithMilvusConfig("queryNode.fmindexCostRatio", "1.0")
 	s.setup(fmindexCampaign)
 }
 
