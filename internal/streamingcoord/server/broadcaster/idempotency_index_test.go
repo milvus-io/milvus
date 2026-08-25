@@ -4,9 +4,11 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
@@ -16,12 +18,15 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	internaltypes "github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 func TestIdempotencyIndex(t *testing.T) {
@@ -56,14 +61,24 @@ func TestIdempotencyIndex(t *testing.T) {
 	require.False(t, ok)
 }
 
+// testCollectionID is the collection every scoped test key below is bound to, unless
+// a test names another one to prove two collections stay apart.
+const testCollectionID = int64(7)
+
 // newImportMsgWithKey builds an import broadcast message carrying the given client
-// idempotency key ("" means the message carries no key at all), as it looks when it
-// reaches the broadcaster: not yet stamped with a broadcastID or resource keys.
+// idempotency key ("" means the message carries no key at all), scoped to
+// testCollectionID, as it looks when it reaches the broadcaster: not yet stamped with
+// a broadcastID or resource keys.
 func newImportMsgWithKey(key string) message.BroadcastMutableMessage {
+	return newImportMsgScoped(testCollectionID, key)
+}
+
+// newImportMsgScoped is newImportMsgWithKey against a named collection.
+func newImportMsgScoped(collectionID int64, key string) message.BroadcastMutableMessage {
 	return message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
 		WithBody(&msgpb.ImportMsg{}).
-		WithIdempotencyKey(key).
+		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(collectionID, key)).
 		WithBroadcast([]string{"v1"}).
 		MustBuildBroadcast()
 }
@@ -75,7 +90,7 @@ func newCreateCollectionMsgWithKey(key string) message.BroadcastMutableMessage {
 	return message.NewCreateCollectionMessageBuilderV1().
 		WithHeader(&message.CreateCollectionMessageHeader{}).
 		WithBody(&msgpb.CreateCollectionRequest{}).
-		WithIdempotencyKey(key).
+		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(testCollectionID, key)).
 		WithBroadcast([]string{"v1"}).
 		MustBuildBroadcast()
 }
@@ -168,7 +183,7 @@ func TestIdempotencyIndexRecovery(t *testing.T) {
 	// recovery rebuild must derive the very same scope the broadcast path derives.
 	scopeOf := func(clientKey string) string {
 		return idempotencyScope(message.MessageTypeImport,
-			[]message.ResourceKey{message.NewSharedClusterResourceKey()}, clientKey)
+			message.NewCollectionScopedIdempotencyKey(testCollectionID, clientKey))
 	}
 
 	original, _, ok := bm.getOriginalBroadcast(scopeOf("import/1/pending"))
@@ -259,7 +274,8 @@ func TestBroadcastReturnsDuplicatedOnKeyHit(t *testing.T) {
 	// BroadcastID must be the ORIGINAL broadcast's ID, not the freshly allocated
 	// 999 that went unused.
 	require.Equal(t, uint64(100), result.BroadcastID)
-	require.Equal(t, "import/1/k", message.IdempotencyKeyOf(result.Duplicated))
+	require.Equal(t, message.NewCollectionScopedIdempotencyKey(testCollectionID, "import/1/k"),
+		message.IdempotencyKeyOf(result.Duplicated))
 
 	// On a hit the guards were never consumed, so Close() must actually release
 	// them — a leaked guard would block every later import on that collection
@@ -315,71 +331,67 @@ func TestBroadcastWithoutKeyIsUnaffected(t *testing.T) {
 }
 
 // TestIdempotencyScopeEncoding pins what makes two broadcasts the same operation.
-// A client key alone is not an identity: it only deduplicates within
-// (messageType, sorted unique resource keys, clientKey).
+// A client key alone is not an identity: it deduplicates within
+// (messageType, the scope the caller bound the key to).
 func TestIdempotencyScopeEncoding(t *testing.T) {
-	cluster := message.NewSharedClusterResourceKey()
-	collA := message.NewSharedCollectionNameResourceKey("db1", "coll1")
-	collB := message.NewSharedCollectionNameResourceKey("db1", "coll2")
+	keyA := message.NewCollectionScopedIdempotencyKey(7, "k")
 
-	base := idempotencyScope(message.MessageTypeImport, []message.ResourceKey{cluster, collA}, "k")
+	base := idempotencyScope(message.MessageTypeImport, keyA)
 	require.NotEmpty(t, base)
 
 	// A broadcast without a client key is not idempotent and has no scope at all.
-	require.Empty(t, idempotencyScope(message.MessageTypeImport, []message.ResourceKey{cluster, collA}, ""))
+	require.Empty(t, idempotencyScope(message.MessageTypeImport, ""))
 
 	// Same identity, same scope.
-	require.Equal(t, base, idempotencyScope(message.MessageTypeImport, []message.ResourceKey{cluster, collA}, "k"))
-	// The resource keys are a SET: order and duplicates must not change the scope.
-	require.Equal(t, base, idempotencyScope(message.MessageTypeImport, []message.ResourceKey{collA, cluster}, "k"))
-	require.Equal(t, base, idempotencyScope(message.MessageTypeImport, []message.ResourceKey{collA, cluster, collA}, "k"))
+	require.Equal(t, base, idempotencyScope(message.MessageTypeImport, keyA))
 
 	// The message type is part of the identity: CreateIndex and DropIndex on one
-	// collection carry identical resource keys, so without it the same client key on
+	// collection carry the same scope otherwise, so without it the same client key on
 	// two different operations would collide and the second would be swallowed.
-	require.NotEqual(t, base, idempotencyScope(message.MessageTypeCreateCollection, []message.ResourceKey{cluster, collA}, "k"))
-	// So are the resource keys: the same key against another collection is another operation.
-	require.NotEqual(t, base, idempotencyScope(message.MessageTypeImport, []message.ResourceKey{cluster, collB}, "k"))
-	// A missing resource key is a different scope too, not a prefix of this one.
-	require.NotEqual(t, base, idempotencyScope(message.MessageTypeImport, []message.ResourceKey{cluster}, "k"))
+	require.NotEqual(t, base, idempotencyScope(message.MessageTypeCreateCollection, keyA))
+
+	// So is the scope the caller bound the key to.
+	require.NotEqual(t, base, idempotencyScope(message.MessageTypeImport,
+		message.NewCollectionScopedIdempotencyKey(8, "k")))
+	require.NotEqual(t, base, idempotencyScope(message.MessageTypeImport,
+		message.NewDatabaseScopedIdempotencyKey(7, "k")))
+	require.NotEqual(t, base, idempotencyScope(message.MessageTypeImport,
+		message.NewClusterScopedIdempotencyKey("k")))
+
 	// And so is the client key itself.
-	require.NotEqual(t, base, idempotencyScope(message.MessageTypeImport, []message.ResourceKey{cluster, collA}, "k2"))
+	require.NotEqual(t, base, idempotencyScope(message.MessageTypeImport,
+		message.NewCollectionScopedIdempotencyKey(7, "k2")))
+
+	// The message type is decimal digits followed by a separator, and the key is the
+	// unbounded tail, so a client key that embeds the separator cannot pose as another
+	// message type's scope.
+	require.NotEqual(t,
+		idempotencyScope(message.MessageTypeImport,
+			message.NewCollectionScopedIdempotencyKey(7, "/"+strconv.Itoa(int(message.MessageTypeCreateCollection)))),
+		idempotencyScope(message.MessageTypeCreateCollection, message.NewCollectionScopedIdempotencyKey(7, "")))
 }
 
-// TestIdempotencyScopeResistsCraftedClientKey proves the encoding is unforgeable.
-// The client key is attacker-controlled, so it must not be able to impersonate a
-// different scope by embedding the encoding's own separators. The crafted key below
-// reproduces, character for character, the fields a second resource key contributes:
-// under a plain separator-joined encoding it would collide with the legitimate scope
-// of an operation holding that extra key.
-func TestIdempotencyScopeResistsCraftedClientKey(t *testing.T) {
-	collA := message.NewSharedCollectionNameResourceKey("db1", "coll1")
-	collB := message.NewSharedCollectionNameResourceKey("db1", "coll2")
-	require.Less(t, collA.Key, collB.Key, "the crafted key below assumes collA sorts before collB")
+// TestIdempotencyScopeIgnoresResourceKeys is the property that closes the rename hole.
+//
+// The scope used to be derived from the broadcast's resource keys, which name a
+// collection rather than identify it: renaming a collection between a request and its
+// retry changed the scope, the lookup missed, and the same import ran a second time.
+// The scope now comes from the message alone, so the resource keys a broadcast happens
+// to hold -- and any rename that changes them -- cannot move it.
+func TestIdempotencyScopeIgnoresResourceKeys(t *testing.T) {
+	msg := newImportMsgWithKey("k")
+	bare := idempotencyScopeOfMessage(msg)
+	require.NotEmpty(t, bare)
 
-	crafted := strconv.Itoa(int(collB.Domain)) + ":" + collB.Key + ":v"
-	craftedScope := idempotencyScope(message.MessageTypeImport, []message.ResourceKey{collA}, crafted)
-	legitScope := idempotencyScope(message.MessageTypeImport, []message.ResourceKey{collA, collB}, "v")
-
-	require.NotEqual(t, legitScope, craftedScope)
-}
-
-// TestIdempotencyScopeOfMessageIsDeterministic guards the sort on the path that reads
-// the resource keys back out of a message header. They live in a Set there, so Collect()
-// hands them back in an arbitrary order on every call; without the sort the recovery
-// rebuild and the broadcast path would compute different scopes for one message and
-// dedup would silently never hit.
-func TestIdempotencyScopeOfMessageIsDeterministic(t *testing.T) {
-	msg := newImportMsgWithKey("k").OverwriteBroadcastHeader(100,
-		message.NewSharedClusterResourceKey(),
+	beforeRename := msg.OverwriteBroadcastHeader(100,
 		message.NewSharedDBNameResourceKey("db1"),
-		message.NewSharedCollectionNameResourceKey("db1", "coll1"),
-		message.NewSharedCollectionNameResourceKey("db1", "coll2"))
+		message.NewExclusiveCollectionNameResourceKey("db1", "coll1"))
+	afterRename := newImportMsgWithKey("k").OverwriteBroadcastHeader(101,
+		message.NewSharedDBNameResourceKey("db1"),
+		message.NewExclusiveCollectionNameResourceKey("db1", "coll1-renamed"))
 
-	first := idempotencyScopeOfMessage(msg)
-	for i := 0; i < 100; i++ {
-		require.Equal(t, first, idempotencyScopeOfMessage(msg))
-	}
+	require.Equal(t, bare, idempotencyScopeOfMessage(beforeRename))
+	require.Equal(t, bare, idempotencyScopeOfMessage(afterRename))
 }
 
 // TestBroadcastDedupIsScopedToTheBroadcast drives the write side and the read side
@@ -413,8 +425,8 @@ func TestBroadcastDedupIsScopedToTheBroadcast(t *testing.T) {
 	require.Nil(t, otherType.Duplicated)
 	require.Equal(t, uint64(3), otherType.BroadcastID)
 
-	// Different resource keys (another collection), everything else identical.
-	otherKeys := broadcastForTest(t, bm, 4, newImportMsgWithKey("k"), dbKey, collB)
+	// Another collection scope, everything else identical: a distinct operation.
+	otherKeys := broadcastForTest(t, bm, 4, newImportMsgScoped(testCollectionID+1, "k"), dbKey, collB)
 	require.Nil(t, otherKeys.Duplicated)
 	require.Equal(t, uint64(4), otherKeys.BroadcastID)
 
@@ -428,9 +440,18 @@ func TestBroadcastDedupIsScopedToTheBroadcast(t *testing.T) {
 	require.NotNil(t, dupOtherType.Duplicated)
 	require.Equal(t, uint64(3), dupOtherType.BroadcastID)
 
-	dupOtherKeys := broadcastForTest(t, bm, 7, newImportMsgWithKey("k"), dbKey, collB)
+	dupOtherKeys := broadcastForTest(t, bm, 7, newImportMsgScoped(testCollectionID+1, "k"), dbKey, collB)
 	require.NotNil(t, dupOtherKeys.Duplicated)
 	require.Equal(t, uint64(4), dupOtherKeys.BroadcastID)
+
+	// A retry that arrives after the collection was renamed holds DIFFERENT resource
+	// keys and still resolves to its original broadcast: the scope is the collection's
+	// identity, not its name. Under the resource-key scope this was a miss, and the
+	// same files were imported a second time.
+	renamedColl := message.NewSharedCollectionNameResourceKey("db1", "coll1-renamed")
+	afterRename := broadcastForTest(t, bm, 8, newImportMsgWithKey("k"), dbKey, renamedColl)
+	require.NotNil(t, afterRename.Duplicated)
+	require.Equal(t, uint64(1), afterRename.BroadcastID)
 }
 
 // TestDuplicatedBroadcastReturnsOriginalAppendResults asserts the duplicate carries the
@@ -532,7 +553,11 @@ func TestBroadcastAcceptsIdempotencyKeyAtTheConfiguredLimit(t *testing.T) {
 	dup := broadcastForTest(t, bm, 2, newImportMsgWithKey(atLimit), collKey)
 	require.NotNil(t, dup.Duplicated)
 	require.Equal(t, uint64(1), dup.BroadcastID)
-	require.Equal(t, atLimit, message.IdempotencyKeyOf(dup.Duplicated))
+	require.Equal(t, atLimit, message.IdempotencyKeyOf(dup.Duplicated).ClientKey())
+	// The scoping prefix really does push the stored value past the advertised limit;
+	// that is exactly why the bound is taken over the client portion and not over the
+	// encoded key.
+	require.Greater(t, len(message.IdempotencyKeyOf(dup.Duplicated)), limit)
 
 	// One byte past the limit is where rejection starts.
 	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 3, guards: bm.resourceKeyLocker.Lock(collKey)}
@@ -622,4 +647,119 @@ func TestBroadcasterChecksKeyLengthAfterTheLookup(t *testing.T) {
 	defer api.Close()
 	_, err := api.Broadcast(context.Background(), newImportMsgWithKey("87654321"))
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+// newBroadcastTaskManagerWithEntrypointForTest is newBroadcastTaskManagerForTest plus
+// the ID allocator broadcastTaskManager.WithResourceKeys needs, so a test can drive the
+// real entrypoint instead of constructing broadcasterWithRK by hand.
+//
+// The cluster-role check is the one step of WithResourceKeys that is stubbed. It reads a
+// process-wide balancer singleton that can only be Set once and has no reset, and
+// TestBroadcaster in this package already claims it; registering a second one panics.
+// The lock acquisition and the ID allocation -- the work that actually sits between
+// taking the resource lock and reaching the idempotency lookup -- are the real ones.
+func newBroadcastTaskManagerWithEntrypointForTest(t *testing.T, protos ...*streamingpb.BroadcastTask) *broadcastTaskManager {
+	paramtable.Init()
+	registry.ResetRegistration()
+	registry.RegisterImportV1AckCallback(func(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
+		return nil
+	})
+
+	roleCheck := mockey.Mock((*broadcastTaskManager).checkClusterRole).Return(nil).Build()
+	t.Cleanup(func() { roleCheck.UnPatch() })
+
+	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	rc := idalloc.NewMockRootCoordClient(t)
+	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	f.Set(rc)
+	resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
+
+	operator := mock_streaming.NewMockWALAccesser(t)
+	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
+			resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
+			for idx := range msgs {
+				resps.Responses[idx] = types.AppendResponse{
+					AppendResult: &types.AppendResult{
+						MessageID: walimplstest.NewTestMessageID(int64(idx + 1)),
+						TimeTick:  uint64(time.Now().UnixMilli()),
+					},
+				}
+			}
+			return resps
+		}).Maybe()
+	streaming.SetWALForTest(operator)
+
+	bm := newBroadcastTaskManager(protos)
+	t.Cleanup(bm.Close)
+	return bm
+}
+
+// TestConcurrentSameKeyBroadcastsCreateExactlyOneTask is the invariant import's dedup
+// correctness rests on, driven through the REAL entrypoint.
+//
+// Every other test in this file builds broadcasterWithRK directly, which means it never
+// exercises what makes concurrency safe: the lookup lives behind resource keys that
+// WithResourceKeys acquires, and WithResourceKeys does non-trivial work between taking
+// the lock and reaching the lookup (allocating a broadcastID, checking the cluster
+// role). If the second request were not serialized behind the first's ack, it would
+// miss the index and create a second import job -- exactly the duplication this feature
+// exists to prevent, and invisible to every direct-construction test.
+func TestConcurrentSameKeyBroadcastsCreateExactlyOneTask(t *testing.T) {
+	bm := newBroadcastTaskManagerWithEntrypointForTest(t)
+
+	// Exclusive, and on the collection the key is scoped to: that pairing is what the
+	// serialization guarantee is stated in terms of.
+	collKey := message.NewExclusiveCollectionNameResourceKey("db1", "coll1")
+
+	const concurrency = 8
+	results := make([]*types.BroadcastAppendResult, concurrency)
+	errs := make([]error, concurrency)
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			api, err := bm.WithResourceKeys(context.Background(), collKey)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			defer api.Close()
+			results[i], errs[i] = api.Broadcast(context.Background(), newImportMsgWithKey("k"))
+		}(i)
+	}
+	close(start)
+
+	finished := make(chan struct{})
+	go func() { wg.Wait(); close(finished) }()
+	select {
+	case <-finished:
+	case <-time.After(30 * time.Second):
+		t.Fatal("concurrent same-key broadcasts did not all finish: a guard was leaked or an ack never completed")
+	}
+
+	fresh := 0
+	var originalID uint64
+	for i := 0; i < concurrency; i++ {
+		require.NoError(t, errs[i])
+		require.NotNil(t, results[i])
+		if results[i].Duplicated == nil {
+			fresh++
+			originalID = results[i].BroadcastID
+		}
+	}
+	require.Equal(t, 1, fresh, "exactly one of the concurrent same-key broadcasts may create a task")
+
+	// Every request, the winner included, answers with the same broadcastID: a client
+	// that retried while its original was still in flight gets the original's job.
+	for i := 0; i < concurrency; i++ {
+		require.Equal(t, originalID, results[i].BroadcastID)
+	}
+	// And the index holds exactly that one entry for the scope.
+	require.Len(t, bm.idempotencyIndex.scopeToBroadcastID, 1)
 }

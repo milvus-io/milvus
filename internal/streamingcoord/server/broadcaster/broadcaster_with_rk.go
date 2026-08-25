@@ -20,19 +20,15 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 	// it cannot be called before the resource keys are held: this object only
 	// exists once StartBroadcastWithResourceKeys acquired them. Two concurrent
 	// same-key requests are then serialized by the resource lock rather than both
-	// missing -- but only if the keys they hold are exclusive. Under a shared key
-	// both requests hold a read lock, both can miss, and each creates a task; the
-	// index keeps the first broadcastID while the second has already reached the
-	// WAL. The only keyed caller today (import) holds an exclusive collection key.
+	// missing -- but only if the lock they hold is an exclusive lock on the object
+	// the key is scoped to. Under a shared lock both requests hold a read lock, both
+	// can miss, and each creates a task; the index keeps the first broadcastID while
+	// the second has already reached the WAL. The only keyed caller today (import)
+	// scopes to a collection and holds that collection's exclusive key.
+	//
 	// The guards are deliberately NOT consumed on a hit, so the caller's deferred
 	// Close() releases the locks.
-	if clientKey := message.IdempotencyKeyOf(msg); clientKey != "" {
-		// The scope is derived from the resource keys the guards hold, not from the
-		// message header: the header is only stamped with them a few lines below, so
-		// reading it here would scope every broadcast against an empty key set. The
-		// guards carry exactly what OverwriteBroadcastHeader is about to write, which
-		// is what makes this read side agree with the write side in addBroadcastTask.
-		scope := idempotencyScope(msg.MessageType(), b.guards.ResourceKeys(), clientKey)
+	if scope := idempotencyScopeOfMessage(msg); scope != "" {
 		if dup, results, ok := b.broadcaster.getOriginalBroadcast(scope); ok {
 			return &types.BroadcastAppendResult{
 				BroadcastID:   dup.BroadcastHeader().BroadcastID,
@@ -50,7 +46,7 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 		// a request can reach here, so a lowered limit does reject in-window retries at the
 		// edge. What this order still buys is that the broadcaster adds no second rejection
 		// of its own once a key has been admitted.
-		if err := validateIdempotencyKeyLength(clientKey); err != nil {
+		if err := validateIdempotencyKeyLength(message.IdempotencyKeyOf(msg)); err != nil {
 			return nil, err
 		}
 	}

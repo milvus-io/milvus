@@ -185,32 +185,16 @@ func (s *Server) isReplicatingClusterNow(ctx context.Context) (bool, error) {
 // message the broadcaster returned on an idempotency hit. The broadcaster does not
 // know about import-specific structures, so the decode happens here.
 //
-// The collectionID IS compared, because the dedup scope cannot distinguish incarnations
-// of a collection: it is derived from resource keys that name a collection rather than
-// identify it, so dropping db1.c1 and recreating a same-named db1.c1 leaves the scope
-// unchanged. A key reused across that recreation would otherwise resolve to the dropped
-// incarnation's job, and nothing downstream would notice -- importChecker.checkCollection
-// filters Completed jobs out before failing the ones whose collection vanished, and
-// GetImportProgress reports a job's state without checking that its collection still
-// exists, so the client would be told Completed for data that was never imported.
+// The request payload is deliberately NOT compared against the original: keeping the
+// key unique per logical request is the client's contract, and enforcing it
+// server-side would mean inventing an equality predicate over file lists whose false
+// mismatches would reject legitimate retries -- pushing the caller to mint a new key
+// and import the data twice, the very outcome this feature exists to prevent.
 //
-// That closes ONE HALF of the name-vs-identity gap, not the whole of it. The mirror
-// direction is a rename: RenameCollection keeps the collectionID and changes the name
-// (and can move the collection to another DB), so the scope changes and the lookup
-// MISSES. A miss never reaches this function -- it goes down the normal path and creates
-// a second job -- so the same key imports the same files twice, with no rejection or
-// warning. The window simply ends early. Guarding that would require scoping on identity
-// rather than names, which is a broadcaster-side change; it is recorded as a known
-// limitation in docs/agent_guides/streaming-system/coordination/broadcaster.md.
-//
-// The request payload beyond the collectionID is deliberately NOT compared: keeping the
-// key unique per logical request is the client's contract, and enforcing it server-side
-// would mean inventing an equality predicate over file lists whose false mismatches
-// would reject legitimate retries -- pushing the caller to mint a new key and import the
-// data twice, the very outcome this feature exists to prevent. The collectionID is not
-// such a predicate. It is an exact int64 with no false-mismatch mode: a retry into the
-// same collection carries the same ID and resolves normally, and only a genuinely
-// different target is rejected.
+// The collectionID comparison is not such a predicate and is not a semantic guard: the
+// idempotency key is scoped to this collection's ID, so a hit already means both
+// broadcasts targeted it. It is checked as an invariant, to fail loudly on an encoding
+// or scoping bug rather than hand back a jobID for another collection's import.
 func jobIDFromDuplicatedBroadcast(msg message.BroadcastMutableMessage, collectionID int64) (int64, error) {
 	importMsg, err := message.AsBroadcastImportMessageV1(msg)
 	if err != nil {
@@ -221,8 +205,8 @@ func jobIDFromDuplicatedBroadcast(msg message.BroadcastMutableMessage, collectio
 		return 0, merr.Wrap(err, "malformed duplicated import broadcast message body")
 	}
 	if body.GetCollectionID() != collectionID {
-		return 0, merr.WrapErrParameterInvalidMsg(
-			"idempotency key already identifies an import into collection %d, not %d; use a fresh key",
+		return 0, merr.WrapErrServiceInternalMsg(
+			"idempotency scope resolved to an import into collection %d, not %d",
 			body.GetCollectionID(), collectionID)
 	}
 	return body.GetJobID(), nil
@@ -320,17 +304,11 @@ func (s *Server) broadcastImport(ctx context.Context,
 			Schema:         schema, // TODO: should we use the schema from the collection?
 			JobID:          jobID,
 		}).
-		// The raw client key travels as-is. The broadcaster derives the dedup identity
-		// itself from the message type and the resource keys this broadcast holds
-		// (SharedDBName + ExclusiveCollectionName, see startBroadcastWithCollectionID),
-		// so the collection is already part of the scope. Prefixing the key here would
-		// only eat into the length budget the broadcaster validates against.
-		//
-		// Those resource keys name the collection, they do not identify it: dropping a
-		// collection and recreating one with the same name keeps the same scope, so a key
-		// reused across the recreation still hits the index. jobIDFromDuplicatedBroadcast
-		// catches that by comparing the collectionID the original broadcast carried.
-		WithIdempotencyKey(idempotencyKey).
+		// Scoped to the collection by ID, so the same client key stays a distinct
+		// operation against another collection, and a retry that arrives after the
+		// collection was renamed still resolves to its original job. The broadcaster adds
+		// the message type; everything else about the dedup identity is this scope.
+		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(collectionID, idempotencyKey)).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
 

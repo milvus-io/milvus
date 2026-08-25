@@ -1243,7 +1243,7 @@ func TestJobIDFromDuplicatedBroadcast(t *testing.T) {
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
 		WithBody(&msgpb.ImportMsg{JobID: 4242, CollectionID: 100}).
-		WithIdempotencyKey("run-1").
+		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(100, "run-1")).
 		WithBroadcast([]string{"v1"}).
 		MustBuildBroadcast()
 
@@ -1252,24 +1252,19 @@ func TestJobIDFromDuplicatedBroadcast(t *testing.T) {
 	assert.Equal(t, int64(4242), jobID)
 }
 
-// The dedup scope is built from resource keys that name a collection rather than
-// identify it, so drop db1.c1 -> recreate db1.c1 keeps the same scope and a reused key
-// still hits the index. Without this guard the caller would be handed the dropped
-// incarnation's jobID, and nothing downstream would catch it: checkCollection leaves a
-// Completed job alone when its collection vanishes, and GetImportProgress reports that
-// state without checking the collection still exists -- so the client would read
-// Completed for data that was never imported.
+// The collectionID comparison is an invariant check, not a semantic guard: the key is
+// scoped to a collection ID, so a hit already means both broadcasts targeted the same
+// collection. A mismatch can only come from an encoding or scoping bug, which must fail
+// loudly rather than hand back another collection's jobID.
 func TestJobIDFromDuplicatedBroadcast_RejectsADifferentCollection(t *testing.T) {
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
 		WithBody(&msgpb.ImportMsg{JobID: 4242, CollectionID: 100}).
-		WithIdempotencyKey("run-1").
+		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(100, "run-1")).
 		WithBroadcast([]string{"v1"}).
 		MustBuildBroadcast()
 
-	// 101 is the recreated same-named collection: same scope, different identity.
 	_, err := jobIDFromDuplicatedBroadcast(msg, 101)
 	assert.Error(t, err)
-	assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
-	assert.Contains(t, err.Error(), "use a fresh key")
+	assert.True(t, errors.Is(err, merr.ErrServiceInternal))
 }

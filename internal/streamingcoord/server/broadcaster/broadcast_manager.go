@@ -305,9 +305,8 @@ func (bm *broadcastTaskManager) addBroadcastTask(msg message.BroadcastMutableMes
 
 	bm.mu.Lock()
 	bm.tasks[broadcastID] = newIncomingTask
-	// The message header carries the broadcast's resource keys at this point
-	// (OverwriteBroadcastHeader stamped them), so the scope derived here is exactly
-	// the one broadcasterWithRK.Broadcast derives from its own lock guards.
+	// Same derivation the lookup in broadcasterWithRK.Broadcast used: the scope comes
+	// from the message alone, so read side and write side cannot drift apart.
 	bm.idempotencyIndex.Add(idempotencyScopeOfMessage(msg), broadcastID)
 	bm.mu.Unlock()
 	return newIncomingTask

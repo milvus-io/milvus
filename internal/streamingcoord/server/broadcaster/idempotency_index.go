@@ -2,79 +2,46 @@ package broadcaster
 
 import (
 	"strconv"
-	"strings"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// idempotencyScope derives the dedup identity of a broadcast from the broadcast
-// itself: a client-supplied key only deduplicates within
-// (messageType, sorted unique resource keys, clientKey).
+// idempotencyScope derives the dedup identity of a broadcast: a client key only
+// deduplicates within (messageType, the scope the key was built with).
 //
-// Both qualifiers are load-bearing:
-//   - messageType, because CreateIndex and DropIndex on one collection carry
-//     identical resource keys. Without it the same client key on those two
-//     operations collides and the second one is silently swallowed.
-//   - resource keys, because they name the objects the operation acts on, so the
-//     same key reused against another collection stays a distinct operation.
+// messageType is load-bearing and is added here rather than by the caller, because
+// CreateIndex and DropIndex on one collection carry the same scope otherwise, and
+// the second one would be silently swallowed. It is a property of the broadcast, so
+// the broadcaster owns it; the scope is a property of the operation, so the caller
+// owns it (see message.IdempotencyKey).
 //
-// Returns "" when the client key is empty, i.e. the broadcast is not idempotent.
+// Returns "" when the key is zero, i.e. the broadcast is not idempotent.
 //
-// Encoding: every field is emitted length-prefixed as "<byteLen>:<bytes>", so the
-// framing is carried by the lengths and never by the field content. The client key
-// is attacker-controlled; length prefixing is what makes the encoding injective, so
-// no crafted key can embed a separator and impersonate another scope.
-//
-// ResourceKey.Shared is deliberately left out. The set of resource keys may hold
-// the same (domain, key) twice with different Shared flags, and uniqueSortResourceKeys
-// does not order by Shared — including the flag would make the encoding depend on an
-// unspecified sort order. Dropping it keeps the encoding deterministic, at the cost of
-// merging scopes that differ only in lock mode. The concrete case is the cluster key:
-// NewSharedClusterResourceKey and NewExclusiveClusterResourceKey are both
-// (ResourceDomainCluster, ""), so a broadcast started through WithResourceKeys, which
-// auto-appends the shared cluster key, encodes the same as one started through
-// WithSecondaryClusterResourceKey. That is harmless today — neither carries an
-// idempotency key, and the lock mode is fixed per message type — but a future caller
-// that gives those two paths the same client key would see them share one scope.
-func idempotencyScope(msgType message.MessageType, resourceKeys []message.ResourceKey, clientKey string) string {
-	if clientKey == "" {
+// The encoding needs no framing: messageType is decimal digits, so the first
+// separator delimits it and the key is the unbounded tail -- and the key is itself
+// injectively encoded. This string is a map key only. It embeds the raw client key,
+// so it must never be logged; log message.IdempotencyKeyFingerprint of the client
+// portion instead.
+func idempotencyScope(msgType message.MessageType, key message.IdempotencyKey) string {
+	if key == "" {
 		return ""
 	}
-	keys := uniqueSortResourceKeys(resourceKeys)
-
-	var b strings.Builder
-	writeLengthPrefixed(&b, strconv.Itoa(int(msgType)))
-	writeLengthPrefixed(&b, strconv.Itoa(len(keys)))
-	for _, key := range keys {
-		writeLengthPrefixed(&b, strconv.Itoa(int(key.Domain)))
-		writeLengthPrefixed(&b, key.Key)
-	}
-	writeLengthPrefixed(&b, clientKey)
-	return b.String()
+	return strconv.Itoa(int(msgType)) + "/" + string(key)
 }
 
-// idempotencyScopeOfMessage derives the scope from the message's own broadcast header.
-// Only valid once the header carries the resource keys of the broadcast, which is true
-// for every message that reached a broadcast task (OverwriteBroadcastHeader stamps them
-// before the task is created) and therefore for every recovered message.
+// idempotencyScopeOfMessage derives the scope from the message alone.
 //
-// The empty-key case returns before touching the header on purpose: BroadcastHeader()
-// is uncached, decoding a proto and rebuilding a Set on every call, and most broadcasts
-// carry no idempotency key at all.
+// Everything the scope is built from travels in the message itself -- the type, and
+// the `_ik` property the caller scoped -- so this is the single derivation, used by
+// the lookup, by task creation and by recovery alike. It deliberately does not read
+// the broadcast header: an earlier revision derived the scope from the broadcast's
+// resource keys, which meant the lookup (which runs before the header is stamped)
+// and task creation (which runs after) had to derive it from two different places
+// and agree.
 func idempotencyScopeOfMessage(msg message.BroadcastMutableMessage) string {
-	clientKey := message.IdempotencyKeyOf(msg)
-	if clientKey == "" {
-		return ""
-	}
-	return idempotencyScope(msg.MessageType(), msg.BroadcastHeader().ResourceKeys.Collect(), clientKey)
-}
-
-func writeLengthPrefixed(b *strings.Builder, s string) {
-	b.WriteString(strconv.Itoa(len(s)))
-	b.WriteByte(':')
-	b.WriteString(s)
+	return idempotencyScope(msg.MessageType(), message.IdempotencyKeyOf(msg))
 }
 
 // validateIdempotencyKeyLength rejects an oversized client key at the broadcaster.
@@ -84,15 +51,21 @@ func writeLengthPrefixed(b *strings.Builder, s string) {
 // interceptor.ValidateIdempotencyKey, which they must, because by the time the key
 // reaches here it has already been copied onto every coordinator RPC of the
 // request. What this check still owns is the broadcaster's own admission: it is
-// where the key is retained for the whole idempotency window.
+// where the key is retained for the whole idempotency window, and it is the one
+// point every entry path passes through, including a future caller that mints a key
+// without going through a proxy door.
+//
+// The bound is taken over the CLIENT portion, not the encoded key: the scope prefix
+// is added by this process, and measuring it would reject a key the door already
+// accepted.
 //
 // The bound is inclusive and fails closed: a limit of 0 or less rejects every
 // non-empty key, i.e. the cluster accepts no idempotency keys at all. A broadcast that
 // carries no key is not idempotent and is never rejected here.
-func validateIdempotencyKeyLength(key string) error {
+func validateIdempotencyKeyLength(key message.IdempotencyKey) error {
 	limit := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()
-	if len(key) > limit {
-		return merr.WrapErrParameterInvalidMsg("idempotency key length %d exceeds limit %d", len(key), limit)
+	if clientKey := key.ClientKey(); len(clientKey) > limit {
+		return merr.WrapErrParameterInvalidMsg("idempotency key length %d exceeds limit %d", len(clientKey), limit)
 	}
 	return nil
 }

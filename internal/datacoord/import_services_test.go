@@ -361,7 +361,7 @@ func newDuplicatedImportBroadcastResultForCollection(originalJobID int64, origin
 				return &msgpb.ImportFile{Paths: []string{path}}
 			}),
 		}).
-		WithIdempotencyKey("import/100/run-1").
+		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(originalCollectionID, "run-1")).
 		WithBroadcast([]string{"v1"}).
 		MustBuildBroadcast()
 	return &types.BroadcastAppendResult{
@@ -543,8 +543,12 @@ func (s *ImportServicesSuite) TestImportV2_ForwardsIdempotencyKeyUnmodifiedAtThe
 
 	s.Require().NotNil(broadcastAPI.capturedMsg)
 	forwarded := message.IdempotencyKeyOf(broadcastAPI.capturedMsg)
-	s.Equal(atLimit, forwarded)
-	s.LessOrEqual(len(forwarded), limit, "DataCoord inflated the key past the bound the broadcaster enforces")
+	// DataCoord must hand the client key through untouched. It is scoped on the way --
+	// that is the mechanism, and the broadcaster bounds the client portion, not the
+	// encoded value -- but nothing may alter, truncate or re-prefix the bytes the
+	// client sent, or a key sitting on the advertised limit would stop deduplicating.
+	s.Equal(atLimit, forwarded.ClientKey())
+	s.Equal(message.NewCollectionScopedIdempotencyKey(importV2RequestCollectionID, atLimit), forwarded)
 }
 
 func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
@@ -1106,12 +1110,16 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_L0ImportEnabledCreatesP
 
 // Helper types are defined in import_callbacks_test.go (mockBalancerImpl, mockBroadcastAPIImpl, newMockBroadcastAPIImpl)
 
-// Drop db1.c1, recreate a same-named db1.c1, reuse the key: the resource keys that
-// build the dedup scope carry names, not identities, so the scope is unchanged and the
-// index still hits. Returning the dropped incarnation's jobID here would be silent and
-// unrecoverable -- checkCollection leaves a Completed job alone when its collection
-// vanishes and GetImportProgress does not re-check collection existence, so the client
-// would poll that jobID and read Completed while the new collection stays empty.
+// The dedup scope carries the collection's ID, so a duplicate resolving to another
+// collection is unreachable through the normal path: dropping db1.c1 and recreating a
+// same-named db1.c1 changes the ID, hence the scope, hence the lookup misses and a
+// fresh job is created. This pins the invariant behind that reasoning at the ImportV2
+// level -- if an encoding or scoping bug ever did hand back another collection's
+// broadcast, the request must fail rather than return that jobID. Returning it would be
+// silent and unrecoverable: checkCollection leaves a Completed job alone when its
+// collection vanishes and GetImportProgress does not re-check collection existence, so
+// the client would poll that jobID and read Completed while the new collection stays
+// empty.
 func (s *ImportServicesSuite) TestImportV2_DuplicateFromAnotherCollectionIsRejected() {
 	importMeta := NewMockImportMeta(s.T())
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(0)
@@ -1125,8 +1133,8 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateFromAnotherCollectionIsRejec
 
 	s.NoError(err)
 	s.NotEqual(int32(0), resp.GetStatus().GetCode())
-	s.Contains(resp.GetStatus().GetReason(), "use a fresh key")
-	s.NotEqual("4242", resp.GetJobID(), "the dropped incarnation's jobID must not be handed back")
+	s.Contains(resp.GetStatus().GetReason(), "idempotency scope resolved to an import into collection 99")
+	s.NotEqual("4242", resp.GetJobID(), "another collection's jobID must not be handed back")
 }
 
 // The documented edge of the retry contract. Everything datacoord validates runs before
