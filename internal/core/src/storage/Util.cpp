@@ -1930,8 +1930,7 @@ IterateFieldDataFromManifest(
     } else {  // read specific rows with chunk_reader
         auto reader_result = reader->get_chunk_reader(column_group_index);
         if (!reader_result.ok()) {
-            auto error =
-                milvus_storage::ToSegcoreError(reader_result.status());
+            auto error = milvus_storage::ToSegcoreError(reader_result.status());
             ThrowInfo(error.get_error_code(),
                       "Failed to get chunk reader: {}",
                       error.what());
@@ -1997,8 +1996,7 @@ IterateFieldDataFromManifest(
         auto chunks_result =
             chunk_reader->get_chunks(chunk_indices, parallel_degree);
         if (!chunks_result.ok()) {
-            auto error =
-                milvus_storage::ToSegcoreError(chunks_result.status());
+            auto error = milvus_storage::ToSegcoreError(chunks_result.status());
             ThrowInfo(error.get_error_code(),
                       "Failed to read chunks: {}",
                       error.what());
