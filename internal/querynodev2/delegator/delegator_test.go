@@ -2144,6 +2144,15 @@ func TestDelegatorFunctionExecutionEligibility(t *testing.T) {
 		assert.False(t, skip)
 	})
 
+	t.Run("BM25 field fails when managed runner is missing", func(t *testing.T) {
+		key := delegatorFunctionRunnerKey(sd.vchannelName)
+		require.NoError(t, function.GetManager().Alloc(sd.collectionID, key, newFunctionRuntimeTestSchema()))
+		defer function.GetManager().Release(sd.collectionID, key)
+
+		_, _, err := sd.prepareSearchFunction(context.Background(), &internalpb.SearchRequest{FieldId: 102})
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
+
 	t.Run("added field skips analyzer manager", func(t *testing.T) {
 		_, err := sd.RunAnalyzer(context.Background(), &querypb.RunAnalyzerRequest{
 			FieldId: 104,

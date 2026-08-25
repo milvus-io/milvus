@@ -258,7 +258,10 @@ func (sd *shardDelegator) prepareSearchFunction(ctx context.Context, req *intern
 		return 0, false, err
 	}
 	if !ok {
-		return 0, false, nil
+		// isBM25Field and the managed runner snapshot are derived from the
+		// same creation-time schema on 2.6. A missing runner here violates
+		// that internal invariant and must not silently bypass IDF weighting.
+		return 0, false, merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
 	}
 	return avgdl, isBM25 && avgdl <= 0, nil
 }

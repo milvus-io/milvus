@@ -2623,16 +2623,6 @@ func GetFieldByName(schema *schemapb.CollectionSchema, fieldName string) *schema
 	return nil
 }
 
-func GetFunctionOutputField(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) *schemapb.FieldSchema {
-	if outputIDs := fn.GetOutputFieldIds(); len(outputIDs) > 0 {
-		return GetField(schema, outputIDs[0])
-	}
-	if outputNames := fn.GetOutputFieldNames(); len(outputNames) > 0 {
-		return GetFieldByName(schema, outputNames[0])
-	}
-	return nil
-}
-
 // GetFieldByID returns the field schema with the given field ID, searching both
 // top-level fields and struct array sub-fields, or nil if not found.
 func GetFieldByID(schema *schemapb.CollectionSchema, fieldID int64) *schemapb.FieldSchema {

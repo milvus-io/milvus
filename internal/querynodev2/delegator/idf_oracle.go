@@ -288,7 +288,7 @@ func (o *idfOracle) RegisterGrowing(segmentID int64, stats bm25Stats) {
 		bm25Stats: clonedStats,
 		activate:  true,
 	}
-	o.current.Merge(stats)
+	o.current.Merge(clonedStats)
 	o.Unlock()
 	o.syncResource()
 }

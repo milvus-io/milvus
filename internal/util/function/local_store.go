@@ -25,6 +25,8 @@ import (
 
 // FunctionRunnerLocalStore owns short-lived runners used when a managed runner
 // is unavailable. It is intended for consumer-side old insert message handling.
+// It is not concurrency-safe; each consumer pipeline node owns one store and
+// invokes it serially.
 type FunctionRunnerLocalStore struct {
 	runners        map[int32][]FunctionRunner
 	outputFieldIDs map[int32][]int64

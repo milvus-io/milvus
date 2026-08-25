@@ -1714,7 +1714,12 @@ func newTestFunctionRunner(schema *schemapb.CollectionSchema, fn *schemapb.Funct
 	if inputField == nil {
 		return nil, errors.New("input field not found")
 	}
-	outputField := typeutil.GetFunctionOutputField(schema, fn)
+	var outputField *schemapb.FieldSchema
+	if outputIDs := fn.GetOutputFieldIds(); len(outputIDs) > 0 {
+		outputField = typeutil.GetField(schema, outputIDs[0])
+	} else if outputNames := fn.GetOutputFieldNames(); len(outputNames) > 0 {
+		outputField = typeutil.GetFieldByName(schema, outputNames[0])
+	}
 	if outputField == nil {
 		return nil, errors.New("output field not found")
 	}

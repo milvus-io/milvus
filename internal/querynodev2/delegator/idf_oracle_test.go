@@ -254,6 +254,17 @@ func (suite *IDFOracleSuite) TestRegisterGrowingClonesStats() {
 	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
 }
 
+func (suite *IDFOracleSuite) TestRegisterGrowingSkipsNilStats() {
+	suite.NotPanics(func() {
+		suite.idfOracle.RegisterGrowing(1, bm25Stats{102: nil})
+	})
+
+	registered, ok := suite.idfOracle.growing[1]
+	suite.True(ok)
+	suite.Empty(registered.bm25Stats)
+	suite.Equal(int64(0), suite.idfOracle.current.NumRow())
+}
+
 func (suite *IDFOracleSuite) TestUpdateGrowingAfterEmptyRegistration() {
 	suite.idfOracle.RegisterGrowing(1, bm25Stats{})
 
