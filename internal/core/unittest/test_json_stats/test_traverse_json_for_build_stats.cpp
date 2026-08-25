@@ -205,7 +205,7 @@ TEST(JsonFieldDataTest, FillFieldDataWithDefaultValueOwnsData) {
     default_value.set_bytes_data(default_json);
 
     auto field_data = milvus::storage::CreateFieldData(
-        milvus::DataType::JSON, milvus::DataType::NONE, false, 1, 5);
+        milvus::DataType::JSON, milvus::DataType::NONE, true, 1, 5);
     field_data->FillFieldData(milvus::DefaultValueType{default_value}, 5);
 
     ClobberStackAndHeap(default_json);
