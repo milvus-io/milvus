@@ -130,6 +130,18 @@ class TestRestValueFidelity(TestBase):
             payload["outputFields"] = output_fields
         return self.vector_client.vector_query(payload)
 
+    def _get(self, coll, ids, timeout=30):
+        # vector_get has no empty-result retry, so wait here until the flushed
+        # (sealed) data is loaded on the query node, which can lag in CI.
+        t0 = time.time()
+        rsp = {}
+        while time.time() - t0 < timeout:
+            rsp = self.vector_client.vector_get({"collectionName": coll, "id": ids})
+            if rsp.get("data"):
+                return rsp
+            time.sleep(1)
+        return rsp
+
     def _create_load(self, fields, index_params=None, enable_dynamic=True):
         name = gen_collection_name("rvf")
         payload = {
@@ -415,7 +427,7 @@ class TestRestValueFidelity(TestBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_get_multiple_ids_exact(self):
         self._insert(self._varchar_coll, [self._row("alice"), self._row("carol")])
-        rsp = self.vector_client.vector_get({"collectionName": self._varchar_coll, "id": ["alice", "bob"]})
+        rsp = self._get(self._varchar_coll, ["alice", "bob"])
         assert rsp["code"] == 0, rsp
         ids = [d["id"] for d in rsp["data"]]
         assert ids == ["alice"], f"should hit only alice, got {ids}"
@@ -423,13 +435,13 @@ class TestRestValueFidelity(TestBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_get_id_with_quote(self):
         self._insert(self._varchar_coll, [self._row('a"b')])
-        rsp = self.vector_client.vector_get({"collectionName": self._varchar_coll, "id": ['a"b']})
+        rsp = self._get(self._varchar_coll, ['a"b'])
         assert rsp["code"] == 0 and len(rsp["data"]) == 1, rsp
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_varchar_pk_numeric_id(self):
         self._insert(self._varchar_coll, [self._row("1000000")])
-        rsp = self.vector_client.vector_get({"collectionName": self._varchar_coll, "id": [1000000]})
+        rsp = self._get(self._varchar_coll, [1000000])
         assert rsp["code"] == 0 and len(rsp["data"]) == 1, f"numeric id should hit, got {rsp}"
 
     # ================= L0: G. gRPC/REST consistency =================
@@ -738,8 +750,24 @@ class TestRestValueFidelity(TestBase):
             {"collectionName": self._scalar_coll, "data": [self._row(pk, dyn_big=9007199254740993, j={"x": 1})]}
         )
         assert rsp["code"] == 0, rsp
-        # growing read (before flush)
-        d_g = self._query(self._scalar_coll, f"id == {pk}", ["dyn_big", "j"])["data"][0]
+        # growing read (before flush): retry until the growing data reaches the
+        # query node, which can take longer in a distributed deployment
+        d_g = None
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            rsp = self.vector_client.vector_query(
+                {
+                    "collectionName": self._scalar_coll,
+                    "filter": f"id == {pk}",
+                    "outputFields": ["dyn_big", "j"],
+                    "limit": 10,
+                }
+            )
+            if rsp.get("data"):
+                d_g = rsp["data"][0]
+                break
+            time.sleep(2)
+        assert d_g is not None, "growing data not visible within 60s"
         # sealed read (after flush)
         self.collection_client.flush(self._scalar_coll)
         time.sleep(1)
