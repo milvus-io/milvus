@@ -34,6 +34,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
@@ -4573,30 +4575,8 @@ func (node *Proxy) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milv
 	}
 
 	if drt.RequestType == "query" {
-		drr, err := parseDummyQueryRequest(req.RequestType)
-		if err != nil {
-			log.Warn("Failed to parse dummy query request",
-				zap.Error(err))
-			return failedResponse, nil
-		}
-
-		request := &milvuspb.QueryRequest{
-			DbName:         drr.DbName,
-			CollectionName: drr.CollectionName,
-			PartitionNames: drr.PartitionNames,
-			OutputFields:   drr.OutputFields,
-		}
-
-		_, err = node.Query(ctx, request)
-		if err != nil {
-			log.Warn("Failed to execute dummy query",
-				zap.Error(err))
-			return failedResponse, err
-		}
-
-		return &milvuspb.DummyResponse{
-			Response: `{"status": "success"}`,
-		}, nil
+		log.Warn("Dummy query request is disabled")
+		return failedResponse, nil
 	}
 
 	log.Debug("cannot find specify dummy request type")
@@ -6897,6 +6877,14 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 		}, nil
 	}
 
+	var err error
+	ctx, err = authorizeRunAnalyzerCollection(ctx, req)
+	if err != nil {
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
 	// build and run analyzer at any streaming node/query node
 	// if collection and field not set
 	if req.GetCollectionName() == "" {
@@ -6946,6 +6934,28 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 		}, nil
 	}
 	return task.result, nil
+}
+
+func authorizeRunAnalyzerCollection(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (context.Context, error) {
+	if req.GetCollectionName() == "" {
+		return ctx, nil
+	}
+
+	nextCtx, err := PrivilegeInterceptor(ctx, &milvuspb.SearchRequest{
+		DbName:         req.GetDbName(),
+		CollectionName: req.GetCollectionName(),
+	})
+	if err == nil {
+		return nextCtx, nil
+	}
+	if grpcstatus.Code(err) == codes.PermissionDenied {
+		return ctx, merr.WrapErrPrivilegeNotPermitted(
+			"RunAnalyzer requires %s on collection %s",
+			commonpb.ObjectPrivilege_PrivilegeSearch.String(),
+			req.GetCollectionName(),
+		)
+	}
+	return ctx, err
 }
 
 func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
