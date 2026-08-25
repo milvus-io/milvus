@@ -779,26 +779,6 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		}, nil
 	}
 
-	// A request that names a resource group is asking which leaders THAT group
-	// can serve from, which needs both a different replica filter and a
-	// different load gate than the unscoped answer -- see
-	// utils.GetShardLeadersByResourceGroup for why neither can be expressed
-	// as a replicaFilter over the native path.
-	if resourceGroup := req.GetResourceGroup(); resourceGroup != "" {
-		leaders, err := utils.GetShardLeadersByResourceGroup(ctx,
-			s.meta,
-			s.targetMgr,
-			s.dist,
-			s.nodeMgr,
-			req.GetCollectionID(),
-			resourceGroup,
-			req.GetWithUnserviceableShards())
-		return &querypb.GetShardLeadersResponse{
-			Status: merr.Status(err),
-			Shards: leaders,
-		}, nil
-	}
-
 	leaders, err := utils.GetShardLeadersWithReplicaFilter(ctx,
 		s.meta,
 		s.targetMgr,

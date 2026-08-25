@@ -315,30 +315,6 @@ message GetShardLeadersRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
     bool with_unserviceable_shards = 3;
-    // resource_group restricts the answer to the leaders that sit in replicas
-    // whose own resource group is this one. The empty string is the absence of
-    // a filter, not a filter that matches nothing, so a caller that does not
-    // set it gets every replica of the collection - the only answer this
-    // request could give before the field existed.
-    //
-    // The filter cannot be applied by the caller afterwards: the response
-    // flattens every replica into one list per channel, and a replica may
-    // borrow nodes from another resource group, so node-set membership is not
-    // replica membership. Only the coordinator still holds the replica each
-    // leader belongs to.
-    //
-    // Compatibility runs only one way. An old caller is unaffected: it sends
-    // the empty string, which is the answer it always got. A NEW caller must
-    // not assume the answer is scoped without first establishing that the
-    // coordinator understands the field. Proxy and coordinator deploy
-    // separately, so during a rolling upgrade a request carrying a resource
-    // group can reach a coordinator built before this field existed; proto3
-    // drops the unknown field silently and that coordinator answers with
-    // every replica's leaders, in a response shape indistinguishable from a
-    // scoped one. There is no capability handshake on this path, so a caller
-    // that would be wrong to route on the unscoped answer must gate itself on
-    // the deployed coordinator version.
-    string resource_group = 4;
 }
 
 message GetShardLeadersResponse {
