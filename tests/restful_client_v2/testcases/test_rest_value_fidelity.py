@@ -202,6 +202,25 @@ class TestRestValueFidelity(TestBase):
         self._insert(self._scalar_coll, [self._row(pk, i64=9007199254740993)])
         d = self._query(self._scalar_coll, f"id == {pk}", ["i64"])["data"][0]
         assert d["i64"] == 9007199254740993
+        # filter on the exact value hits; the adjacent rounded value does not
+        hit = self.vector_client.vector_query(
+            {
+                "collectionName": self._scalar_coll,
+                "filter": f"id == {pk} && i64 == {{v}}",
+                "exprParams": {"v": 9007199254740993},
+                "limit": 10,
+            }
+        )
+        assert hit["code"] == 0 and len(hit["data"]) == 1
+        miss = self.vector_client.vector_query(
+            {
+                "collectionName": self._scalar_coll,
+                "filter": f"id == {pk} && i64 == {{v}}",
+                "exprParams": {"v": 9007199254740992},
+                "limit": 10,
+            }
+        )
+        assert len(miss["data"]) == 0
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_int64_scientific_integer_forms(self):
@@ -340,15 +359,26 @@ class TestRestValueFidelity(TestBase):
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_exprparams_int64_max_ok(self):
-        rsp = self.vector_client.vector_query(
+        pk = self._new_pk()
+        self._insert(self._scalar_coll, [self._row(pk, i64=9223372036854775807)])
+        hit = self.vector_client.vector_query(
             {
                 "collectionName": self._scalar_coll,
-                "filter": "i64 == {v}",
+                "filter": f"id == {pk} && i64 == {{v}}",
                 "exprParams": {"v": 9223372036854775807},
                 "limit": 10,
             }
         )
-        assert rsp["code"] == 0, rsp
+        assert hit["code"] == 0 and len(hit["data"]) == 1
+        miss = self.vector_client.vector_query(
+            {
+                "collectionName": self._scalar_coll,
+                "filter": f"id == {pk} && i64 == {{v}}",
+                "exprParams": {"v": 9223372036854775806},
+                "limit": 10,
+            }
+        )
+        assert len(miss["data"]) == 0
 
     # ================= L0: P. Partial update =================
 
@@ -658,9 +688,9 @@ class TestRestValueFidelity(TestBase):
         assert rsp["code"] == 0, rsp
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_int8vector_base64_and_null_rejected(self):
-        # Int8Vector was removed from vectorAcceptsBase64 in the PR, so a base64
-        # string and a null are both rejected; a plain int8 array is accepted.
+    def test_int8vector_quoted_null_rejected(self):
+        # #52261 removed Int8Vector from vectorAcceptsBase64: a quoted "null"
+        # used to decode to an empty vector (nil slice) and is now rejected.
         name = self._create_load(
             [
                 {"fieldName": "id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
@@ -676,10 +706,8 @@ class TestRestValueFidelity(TestBase):
                 }
             ],
         )
-        rsp = self._raw_insert(name, '[{"id":1,"iv":"AQ=="}]')
-        assert rsp["code"] != 0, f"Int8Vector base64 should be rejected: {rsp}"
-        rsp = self._raw_insert(name, '[{"id":1,"iv":null}]')
-        assert rsp["code"] != 0, f"Int8Vector null should be rejected: {rsp}"
+        rsp = self._raw_insert(name, '[{"id":1,"iv":"null"}]')
+        assert rsp["code"] != 0, f"Int8Vector quoted null should be rejected: {rsp}"
         rsp = self._raw_insert(name, '[{"id":1,"iv":[1,2]}]')
         assert rsp["code"] == 0, rsp
 
@@ -775,11 +803,11 @@ class TestRestValueFidelity(TestBase):
     # ================= L1: additional rejection =================
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_vector_null_rejected(self):
-        pk = self._new_pk()
-        rsp = self._raw_insert(
-            self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":null}]' % pk,
+    def test_search_null_vector_rejected(self):
+        # #52261 refuses a whole-value null query vector on the search path; it
+        # used to decode to an empty vector and pass the required-field check.
+        rsp = self.vector_client.vector_search(
+            {"collectionName": self._scalar_coll, "data": [None], "annsField": "vec", "limit": 10}
         )
         assert rsp["code"] != 0, rsp
 
