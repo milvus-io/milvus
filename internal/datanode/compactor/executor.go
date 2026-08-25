@@ -122,7 +122,7 @@ func getTaskSlotUsage(task Compactor) int64 {
 // order of how much the request still says:
 //
 //   - No vector but a plan: recompute from the binlog arrays. Correct on V1/V2,
-//     and on V3 no worse than the pre-branch behaviour of not charging at all.
+//     and on V3 no worse than the pre-branch behavior of not charging at all.
 //   - No plan: the legacy scalar slot, floored at one so an absent slot is
 //     never read as "this task is free".
 func taskRequirement(task Compactor) taskresource.Requirement {
