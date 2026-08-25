@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type ImportChecker interface {
@@ -60,14 +62,23 @@ type importCheckerHooks struct {
 	isReplicatingCluster func(ctx context.Context) (bool, error)
 }
 
+// scopedIndexCreator lets the import checker drive index creation for a segment
+// with an era attestation (fields whose data the import itself materialized),
+// routed onto the inspector's single creation goroutine. Implemented by
+// indexInspector — the sole owner of the creation mechanics.
+type scopedIndexCreator interface {
+	enqueueScopedCreation(segmentID int64, attestedFields typeutil.Set[int64])
+}
+
 type importChecker struct {
-	ctx        context.Context
-	meta       *meta
-	broker     broker.Broker
-	alloc      allocator.Allocator
-	importMeta ImportMeta
-	ci         CompactionInspector
-	handler    Handler
+	ctx          context.Context
+	meta         *meta
+	broker       broker.Broker
+	alloc        allocator.Allocator
+	importMeta   ImportMeta
+	ci           CompactionInspector
+	handler      Handler
+	indexCreator scopedIndexCreator
 
 	hooks importCheckerHooks
 
@@ -82,18 +93,20 @@ func NewImportChecker(ctx context.Context,
 	importMeta ImportMeta,
 	ci CompactionInspector,
 	handler Handler,
+	indexCreator scopedIndexCreator,
 	hooks importCheckerHooks,
 ) ImportChecker {
 	return &importChecker{
-		ctx:        ctx,
-		meta:       meta,
-		broker:     broker,
-		alloc:      alloc,
-		importMeta: importMeta,
-		ci:         ci,
-		handler:    handler,
-		hooks:      hooks,
-		closeChan:  make(chan struct{}),
+		ctx:          ctx,
+		meta:         meta,
+		broker:       broker,
+		alloc:        alloc,
+		importMeta:   importMeta,
+		ci:           ci,
+		handler:      handler,
+		indexCreator: indexCreator,
+		hooks:        hooks,
+		closeChan:    make(chan struct{}),
 	}
 }
 
@@ -464,17 +477,21 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 		targetSegmentIDs = originSegmentIDs
 	}
 
-	healthySegments := c.meta.GetSegments(targetSegmentIDs, isSegmentHealthy)
-	unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), healthySegments)
-	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 && !importutilv2.IsL0Import(job.GetOptions()) {
-		for _, segmentID := range unindexed {
-			select {
-			case getBuildIndexChSingleton() <- segmentID: // accelerate index building:
-			default:
-			}
+	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && !importutilv2.IsL0Import(job.GetOptions()) {
+		snapshotFields := importJobSnapshotFields(job)
+		healthySegments := c.meta.GetSegments(targetSegmentIDs, isSegmentHealthy)
+		unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), healthySegments)
+		kept, needsCreation, excluded := filterUnindexedBySnapshotSchema(snapshotFields, job.GetCollectionID(), c.meta.indexMeta, unindexed)
+		if len(kept) > 0 {
+			c.ensureImportSegmentIndexes(job, snapshotFields, needsCreation)
+			log.Debug(c.ctx, "waiting for import segments building index...", mlog.Int64s("unindexed", kept))
+			return
 		}
-		log.Debug(c.ctx, "waiting for import segments building index...", mlog.Int64s("unindexed", unindexed))
-		return
+		if len(excluded) > 0 {
+			log.Info(c.ctx, "import job proceeds without waiting for indexes on fields outside its schema snapshot; they build after commit via schema-bump backfill",
+				mlog.Int64s("excludedIndexIDs", lo.Map(excluded, func(index *model.Index, _ int) int64 { return index.IndexID })),
+				mlog.Int64s("excludedFieldIDs", lo.Map(excluded, func(index *model.Index, _ int) int64 { return index.FieldID })))
+		}
 	}
 	buildIndexDuration := job.GetTR().RecordSpan()
 	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageBuildIndex).Observe(float64(buildIndexDuration.Milliseconds()))
@@ -492,6 +509,52 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	LogResultSegmentsInfo(job.GetJobID(), c.meta, targetSegmentIDs)
 	log.Info(c.ctx, "import job indexes built, transitioned to Uncommitted",
 		mlog.Bool("autoCommit", job.GetAutoCommit()))
+}
+
+// ensureImportSegmentIndexes drives index creation for segments whose snapshot-scoped
+// index has no SegmentIndex row yet (needsCreation), routing by whether the inspector's
+// own periodic scan can handle it:
+//   - common path — the inspector will build the index on its next scan; just send the
+//     cheap acceleration nudge (bare segment ID), no clones, no attestation.
+//   - wedge path — the segment's schema version lags the collection's while the
+//     collection has functions, so the inspector whole-segment-defers it and the lag
+//     cannot heal before commit (sort is one-shot, schema-bump skips is_importing
+//     segments). Route an attested request onto the inspector's single creation
+//     goroutine, marking the job's snapshot fields as materialized.
+//
+// The wedge test needs the CURRENT collection schema version (not the job snapshot's).
+// It is read once per call from the local meta cache (non-blocking): an unresolved
+// collection only skips the wedge optimization for this tick (the segment falls to the
+// nudge and retries next tick once the cache warms), so it must not block the shared
+// state-machine loop with a rootcoord lazy-load.
+func (c *importChecker) ensureImportSegmentIndexes(job ImportJob, snapshotFields typeutil.Set[int64], needsCreation []int64) {
+	if len(needsCreation) == 0 {
+		return
+	}
+	hasFunctions, collectionVersion := false, int32(0)
+	if collection := c.meta.GetCollection(job.GetCollectionID()); collection != nil && collection.Schema != nil {
+		hasFunctions = len(collection.Schema.GetFunctions()) > 0
+		collectionVersion = collection.Schema.GetVersion()
+	} else {
+		mlog.Warn(c.ctx, "cannot resolve collection schema from cache, skip wedge index routing this tick",
+			mlog.FieldJobID(job.GetJobID()), mlog.FieldCollectionID(job.GetCollectionID()),
+			mlog.Int64s("segments", needsCreation))
+	}
+	for _, segmentID := range needsCreation {
+		if c.indexCreator != nil && hasFunctions {
+			// GetSegment is a light read (no index clones); reached only for
+			// function-bearing collections, and only these segments enqueue.
+			if segment := c.meta.GetSegment(c.ctx, segmentID); segment != nil &&
+				segment.GetSchemaVersion() < collectionVersion {
+				c.indexCreator.enqueueScopedCreation(segmentID, snapshotFields)
+				continue
+			}
+		}
+		select {
+		case getBuildIndexChSingleton() <- segmentID: // accelerate index building
+		default:
+		}
+	}
 }
 
 // checkUncommittedJob handles jobs in the Uncommitted state.

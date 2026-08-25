@@ -736,3 +736,47 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 		assert.Contains(t, m.indexMeta.GetSegmentIndexes(collID, segment.GetID()), UniqueID(14))
 	})
 }
+
+func TestCanCreateIndexForSegmentAttestedFields(t *testing.T) {
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID: 1,
+		Schema: &schemapb.CollectionSchema{
+			Version: 2,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{{Name: "bm25", OutputFieldIds: []int64{101}}},
+		},
+	}, nil)
+	inspector := &indexInspector{handler: handler}
+	// segment schema version (1) lags the collection version (2) and the
+	// collection has functions -> version deferral engages.
+	segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 10, CollectionID: 1, SchemaVersion: 1}}
+	indexOnPk := &model.Index{IndexID: 1, CollectionID: 1, FieldID: 100}
+	indexOnOutput := &model.Index{IndexID: 2, CollectionID: 1, FieldID: 101}
+
+	// no attestation: whole segment deferred.
+	assert.False(t, inspector.canCreateIndexForSegment(context.TODO(), segment, indexOnPk, nil))
+	// attested field bypasses the version deferral.
+	assert.True(t, inspector.canCreateIndexForSegment(context.TODO(), segment, indexOnPk, typeutil.NewSet[int64](100)))
+	// non-attested field stays deferred.
+	assert.False(t, inspector.canCreateIndexForSegment(context.TODO(), segment, indexOnOutput, typeutil.NewSet[int64](100)))
+	// caught-up segment needs no attestation.
+	caughtUp := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 11, CollectionID: 1, SchemaVersion: 2}}
+	assert.True(t, inspector.canCreateIndexForSegment(context.TODO(), caughtUp, indexOnPk, nil))
+}
+
+func TestEnqueueScopedCreation(t *testing.T) {
+	i := &indexInspector{scopedCreateCh: make(chan scopedCreateRequest, 1)}
+
+	i.enqueueScopedCreation(1, typeutil.NewSet[int64](100))
+	// buffer full -> second enqueue is dropped, never blocks.
+	i.enqueueScopedCreation(2, typeutil.NewSet[int64](200))
+
+	assert.Len(t, i.scopedCreateCh, 1)
+	req := <-i.scopedCreateCh
+	assert.Equal(t, int64(1), req.segmentID)
+	assert.True(t, req.attestedFields.Contain(100))
+}

@@ -2411,7 +2411,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			CollectionID: updated.GetCollectionID(),
 			FieldID:      102,
 			IndexID:      1,
-		}), "materialized function-output field must be index-eligible")
+		}, nil), "materialized function-output field must be index-eligible")
 	})
 
 	suite.Run("in-place result with stale base manifest is rejected", func() {

@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -42,7 +43,20 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// fakeScopedIndexCreator records the checker's scoped-creation enqueues.
+type fakeScopedIndexCreator struct {
+	scopedCalls map[int64]typeutil.Set[int64] // segmentID -> attested fields of last enqueue
+}
+
+func (f *fakeScopedIndexCreator) enqueueScopedCreation(segmentID int64, attestedFields typeutil.Set[int64]) {
+	if f.scopedCalls == nil {
+		f.scopedCalls = make(map[int64]typeutil.Set[int64])
+	}
+	f.scopedCalls[segmentID] = attestedFields
+}
 
 type ImportCheckerSuite struct {
 	suite.Suite
@@ -51,6 +65,7 @@ type ImportCheckerSuite struct {
 	importMeta ImportMeta
 	checker    *importChecker
 	alloc      *allocator.MockAllocator
+	creator    *fakeScopedIndexCreator
 }
 
 func (s *ImportCheckerSuite) SetupTest() {
@@ -91,7 +106,9 @@ func (s *ImportCheckerSuite) SetupTest() {
 		}, nil
 	}).Maybe()
 
-	checker := NewImportChecker(context.TODO(), meta, broker, s.alloc, importMeta, ci, handler, importCheckerHooks{}).(*importChecker)
+	s.creator = &fakeScopedIndexCreator{}
+	checker := NewImportChecker(context.TODO(), meta, broker, s.alloc, importMeta, ci, handler,
+		s.creator, importCheckerHooks{}).(*importChecker)
 	s.checker = checker
 
 	job := &importJob{
@@ -288,6 +305,112 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 		}
 	}
 	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
+}
+
+// TestCheckIndexBuildingJobSnapshotScope: an index bound to a field absent from the
+// job's schema snapshot (e.g. created by a concurrent add_function_field) must not
+// block the IndexBuilding -> Uncommitted transition; it cannot build before commit (#52154).
+func (s *ImportCheckerSuite) TestCheckIndexBuildingJobSnapshotScope() {
+	const (
+		segmentID     = int64(700)
+		sortedSegID   = int64(701)
+		snapshotIndex = int64(10)
+		boundIndex    = int64(11)
+	)
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+
+	// The collection (in the local meta cache) has a function and its schema version
+	// (2) is ahead of the import segment's (1): the inspector would whole-segment-defer,
+	// so the checker must route an attested scoped-creation request.
+	s.checker.meta.AddCollection(&collectionInfo{
+		ID: 1,
+		Schema: &schemapb.CollectionSchema{
+			Version: 2,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{{Name: "bm25", OutputFieldIds: []int64{101}}},
+		},
+	})
+
+	taskProto := &datapb.ImportTaskV2{
+		JobID:            s.jobID,
+		TaskID:           7,
+		State:            datapb.ImportTaskStateV2_Completed,
+		SegmentIDs:       []int64{segmentID},
+		SortedSegmentIDs: []int64{sortedSegID},
+	}
+	task := &importTask{tr: timerecord.NewTimeRecorder("import task")}
+	task.task.Store(taskProto)
+	s.NoError(s.importMeta.AddTask(context.TODO(), task))
+
+	s.NoError(s.checker.meta.AddSegment(context.Background(), &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            sortedSegID,
+			CollectionID:  1,
+			State:         commonpb.SegmentState_Flushed,
+			IsImporting:   true,
+			InsertChannel: "ch0",
+			IsSorted:      true,
+			SchemaVersion: 1,
+		},
+	}))
+
+	// The snapshot field (100) index has NO segment-index row yet (the inspector
+	// version-gate defers it); the bound index on post-snapshot field (101) is
+	// out of the snapshot entirely.
+	indexMeta := s.checker.meta.indexMeta
+	indexMeta.indexes[1] = map[UniqueID]*model.Index{
+		snapshotIndex: {CollectionID: 1, IndexID: snapshotIndex, FieldID: 100},
+		boundIndex:    {CollectionID: 1, IndexID: boundIndex, FieldID: 101},
+	}
+
+	s.manuallyUpdateJob(s.jobID, UpdateJobState(internalpb.ImportJobState_IndexBuilding))
+
+	// Snapshot-scoped index has no row -> needsCreation -> keep waiting, and the checker
+	// must route an attested scoped-creation request for exactly the snapshot fields.
+	s.checker.checkIndexBuildingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(internalpb.ImportJobState_IndexBuilding, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+	attested, ok := s.creator.scopedCalls[sortedSegID]
+	s.True(ok, "checker must hand the era attestation to the index creator")
+	s.True(attested.Contain(int64(100)))
+	s.False(attested.Contain(int64(101)))
+
+	// Snapshot-scoped index finished -> the missing bound index alone must not block commit.
+	segmentIndexes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segmentIndexes.Insert(snapshotIndex, &model.SegmentIndex{SegmentID: sortedSegID, IndexID: snapshotIndex, IndexState: commonpb.IndexState_Finished})
+	indexMeta.segmentIndexes.Insert(sortedSegID, segmentIndexes)
+	s.checker.checkIndexBuildingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+}
+
+// TestEnsureImportSegmentIndexesCommonPath: a resolved, function-less collection is
+// not a wedge, so the checker must not drive scoped creation — the inspector's own scan
+// builds the index; the cheap nudge is used instead.
+func (s *ImportCheckerSuite) TestEnsureImportSegmentIndexesCommonPath() {
+	s.checker.meta.AddCollection(&collectionInfo{
+		ID: 1,
+		Schema: &schemapb.CollectionSchema{
+			Version: 2,
+			Fields:  []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+		},
+	})
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+	s.checker.ensureImportSegmentIndexes(job, importJobSnapshotFields(job), []int64{12345})
+	s.Empty(s.creator.scopedCalls, "function-less collection -> no scoped enqueue")
+}
+
+// TestEnsureImportSegmentIndexesUnresolvedSchema: when the collection cannot be resolved
+// from the local meta cache, the wedge routing is skipped for this tick (segments fall to
+// the nudge and retry next tick) rather than blocking; no scoped creation is driven.
+func (s *ImportCheckerSuite) TestEnsureImportSegmentIndexesUnresolvedSchema() {
+	// meta has no collection for this job -> meta.GetCollection returns nil.
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+	s.checker.ensureImportSegmentIndexes(job, importJobSnapshotFields(job), []int64{12345})
+	s.Empty(s.creator.scopedCalls, "unresolved schema -> no scoped enqueue, falls to nudge")
 }
 
 func (s *ImportCheckerSuite) manuallyUpdateJob(jobID int64, actions ...UpdateJobAction) {
@@ -878,7 +1001,7 @@ func TestImportCheckerCompaction(t *testing.T) {
 	cim := NewMockCompactionInspector(t)
 	handler := NewNMockHandler(t)
 
-	checker := NewImportChecker(context.TODO(), meta, broker, alloc, importMeta, cim, handler, importCheckerHooks{}).(*importChecker)
+	checker := NewImportChecker(context.TODO(), meta, broker, alloc, importMeta, cim, handler, nil, importCheckerHooks{}).(*importChecker)
 
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{

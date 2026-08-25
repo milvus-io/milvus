@@ -33,12 +33,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// scopedCreateRequest carries an era-attested index-creation request from the
+// import checker to the inspector's single creation goroutine (see
+// enqueueScopedCreation).
+type scopedCreateRequest struct {
+	segmentID      int64
+	attestedFields typeutil.Set[int64]
+}
+
 type indexInspector struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
 	notifyIndexChan chan int64
+	// scopedCreateCh funnels the import checker's attested creation requests onto
+	// the same goroutine as the periodic scan, so all creation stays single-owner.
+	scopedCreateCh chan scopedCreateRequest
 
 	meta                      *meta
 	scheduler                 task.GlobalScheduler
@@ -64,11 +75,23 @@ func newIndexInspector(
 		cancel:                    cancel,
 		meta:                      meta,
 		notifyIndexChan:           notifyIndexChan,
+		scopedCreateCh:            make(chan scopedCreateRequest, 256),
 		scheduler:                 scheduler,
 		allocator:                 allocator,
 		handler:                   handler,
 		storageCli:                storageCli,
 		indexEngineVersionManager: indexEngineVersionManager,
+	}
+}
+
+// enqueueScopedCreation asks the inspector to create the segment's still-missing
+// indexes, attesting attestedFields as materialized so the schema-version deferral
+// does not apply to them. Non-blocking: a full buffer drops the request and the
+// import checker re-enqueues on its next tick.
+func (i *indexInspector) enqueueScopedCreation(segmentID int64, attestedFields typeutil.Set[int64]) {
+	select {
+	case i.scopedCreateCh <- scopedCreateRequest{segmentID: segmentID, attestedFields: attestedFields}:
+	default:
 	}
 }
 
@@ -126,6 +149,16 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 				mlog.Warn(ctx, "create index for segment fail, wait for retry", mlog.FieldSegmentID(segment.ID))
 				continue
 			}
+		case req := <-i.scopedCreateCh:
+			segment := i.meta.GetSegment(ctx, req.segmentID)
+			if segment == nil {
+				mlog.Warn(ctx, "segment is not exist, no need to build index", mlog.FieldSegmentID(req.segmentID))
+				continue
+			}
+			if err := i.createIndexesForSegmentWithScope(ctx, segment, req.attestedFields); err != nil {
+				mlog.Warn(ctx, "create scoped index for segment fail, wait for retry", mlog.FieldSegmentID(segment.ID))
+				continue
+			}
 		}
 	}
 }
@@ -143,6 +176,15 @@ func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentI
 }
 
 func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *SegmentInfo) error {
+	return i.createIndexesForSegmentWithScope(ctx, segment, nil)
+}
+
+// createIndexesForSegmentWithScope is createIndexesForSegment with an era
+// attestation: attestedFields are fields whose data the caller guarantees is
+// already materialized in this segment (e.g. an import job's schema snapshot —
+// the import wrote those fields itself), so the schema-version deferral does not
+// apply to their indexes. nil means no attestation.
+func (i *indexInspector) createIndexesForSegmentWithScope(ctx context.Context, segment *SegmentInfo, attestedFields typeutil.Set[int64]) error {
 	if enableSortCompaction() && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() && !i.isExternalCollection(segment.CollectionID) {
 		mlog.Debug(ctx, "segment is not sorted by pk, skip create indexes", mlog.FieldSegmentID(segment.GetID()))
 		return nil
@@ -159,7 +201,7 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 		if _, ok := indexIDToSegIndexes[index.IndexID]; ok {
 			continue
 		}
-		if !i.canCreateIndexForSegment(ctx, segment, index) {
+		if !i.canCreateIndexForSegment(ctx, segment, index, attestedFields) {
 			continue
 		}
 		if err := i.createIndexForSegment(ctx, segment, index.IndexID); err != nil {
@@ -175,7 +217,7 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 // index. The schema is resolved through the handler (lazy-loading on cache miss,
 // e.g. right after a datacoord restart); the check fails closed, deferring to
 // the next inspection round on an unresolvable or inconsistent view.
-func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *SegmentInfo, index *model.Index) bool {
+func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *SegmentInfo, index *model.Index, attestedFields typeutil.Set[int64]) bool {
 	collection, err := i.handler.GetCollection(ctx, segment.CollectionID)
 	if err != nil || collection == nil || collection.Schema == nil {
 		mlog.Warn(ctx, "cannot resolve collection schema, defer index build",
@@ -184,9 +226,11 @@ func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *
 	}
 	// Function outputs are materialized by schema-bump reconciliation, which
 	// advances the segment schema version. A segment behind the collection schema
-	// version may lack them, so defer the whole segment until it catches up.
+	// version may lack them, so defer the whole segment until it catches up —
+	// unless the caller attests the indexed field's data is already materialized.
 	if len(collection.Schema.GetFunctions()) > 0 &&
-		segment.GetSchemaVersion() < collection.Schema.GetVersion() {
+		segment.GetSchemaVersion() < collection.Schema.GetVersion() &&
+		!attestedFields.Contain(index.FieldID) {
 		mlog.Debug(ctx, "segment schema behind collection, function outputs may be unmaterialized, defer index build",
 			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID),
 			mlog.Int32("segmentSchemaVersion", segment.GetSchemaVersion()), mlog.Int32("collectionSchemaVersion", collection.Schema.GetVersion()))

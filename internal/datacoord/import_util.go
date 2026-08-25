@@ -30,8 +30,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -545,6 +547,69 @@ func getStatsProgress(ctx context.Context, jobID int64, importMeta ImportMeta, m
 	return float32(doneCnt) / float32(len(targetSegmentIDs))
 }
 
+// importJobSnapshotFields returns the field IDs of the job's schema snapshot
+// (struct sub-fields included), or nil when the job carries no snapshot.
+func importJobSnapshotFields(job ImportJob) typeutil.Set[int64] {
+	schema := job.GetSchema()
+	if schema == nil {
+		return nil
+	}
+	return typeutil.NewSet(lo.Map(typeutil.GetAllFieldSchemas(schema), func(field *schemapb.FieldSchema, _ int) int64 {
+		return field.GetFieldID()
+	})...)
+}
+
+// filterUnindexedBySnapshotSchema narrows the import's index wait to the job's own
+// schema snapshot. An index on a field absent from the snapshot is one the job never
+// wrote (e.g. added by a concurrent DDL); it can only build after commit + schema-bump
+// backfill (StorageV3 segments), so waiting on it deadlocks the job (#52154). Returns:
+//   - kept: segments still to wait on — a snapshot-scoped index is not yet Finished;
+//   - needsCreation: segments whose snapshot-scoped index has no SegmentIndex row yet,
+//     i.e. creation must be driven (a segment whose row exists but is still building is
+//     kept-but-not-needsCreation, so the checker does not re-drive an in-flight build);
+//   - excluded: the out-of-snapshot indexes dropped from the wait, for the caller to log.
+//
+// snapshotFields is passed in (computed once by the caller) to avoid recomputing it.
+func filterUnindexedBySnapshotSchema(snapshotFields typeutil.Set[int64], collectionID int64, indexMeta *indexMeta, unindexed []int64) ([]int64, []int64, []*model.Index) {
+	if len(unindexed) == 0 {
+		return unindexed, nil, nil
+	}
+	if snapshotFields == nil {
+		// No snapshot to scope by: preserve the drive-all-unindexed behavior.
+		return unindexed, unindexed, nil
+	}
+	snapshotIndexes, excluded := lo.FilterReject(indexMeta.GetIndexesForCollection(collectionID, ""), func(index *model.Index, _ int) bool {
+		return snapshotFields.Contain(index.FieldID)
+	})
+	if len(snapshotIndexes) == 0 {
+		return nil, nil, excluded
+	}
+	// Single batch read of state-only objects; avoids per-segment locking and
+	// SegmentIndex deep clones (IndexFileKeys) on the checker hot path.
+	states := indexMeta.getSegmentsIndexStates(collectionID, unindexed)
+	kept := make([]int64, 0, len(unindexed))
+	needsCreation := make([]int64, 0, len(unindexed))
+	for _, segmentID := range unindexed {
+		segmentStates := states[segmentID]
+		keep, create := false, false
+		for _, index := range snapshotIndexes {
+			state, ok := segmentStates[index.IndexID]
+			if !ok {
+				create, keep = true, true // no row yet -> drive creation, and wait
+			} else if state.GetState() != commonpb.IndexState_Finished {
+				keep = true // row exists but building -> wait, do not re-drive
+			}
+		}
+		if keep {
+			kept = append(kept, segmentID)
+		}
+		if create {
+			needsCreation = append(needsCreation, segmentID)
+		}
+	}
+	return kept, needsCreation, excluded
+}
+
 func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) float32 {
 	job := importMeta.GetJob(ctx, jobID)
 	if !Params.DataCoordCfg.WaitForIndex.GetAsBool() {
@@ -564,7 +629,8 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 		targetSegmentIDs = originSegmentIDs
 	}
 	unindexed := meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)
-	return float32(len(targetSegmentIDs)-len(unindexed)) / float32(len(targetSegmentIDs))
+	kept, _, _ := filterUnindexedBySnapshotSchema(importJobSnapshotFields(job), job.GetCollectionID(), meta.indexMeta, unindexed)
+	return float32(len(targetSegmentIDs)-len(kept)) / float32(len(targetSegmentIDs))
 }
 
 // GetJobProgress calculates the importing job progress.
