@@ -88,6 +88,11 @@ func (p *preImportTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromImportState(p.GetState())
 }
 
+// TaskResources prices this preimport before a node is picked for it.
+func (p *preImportTask) TaskResources() *datapb.TaskResources {
+	return importTaskResources(p, p.importMeta.GetJob(context.TODO(), p.GetJobID()))
+}
+
 func (p *preImportTask) GetTaskSlot() int64 {
 	return int64(CalculateTaskSlot(p, p.importMeta))
 }

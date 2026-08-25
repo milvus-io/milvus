@@ -315,13 +315,8 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 		StorageConfig: createStorageConfig(),
 		PluginContext: GetReadPluginContext(job.GetOptions()),
 	}
-	// A preimport holds one base read buffer per file IN FLIGHT, not one for
-	// the whole task; the concurrency comes from the worker's exec pool width.
-	req.TaskResources = taskresource.EstimateImport(taskresource.ImportInput{
-		IsPreImport: true,
-		IsL0:        importutilv2.IsL0Import(job.GetOptions()),
-		FileNum:     len(importFiles),
-	}).ToProto()
+	// The same figure the scheduler placed this task on.
+	req.TaskResources = importTaskResources(task, job)
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
 	return req
 }
@@ -420,21 +415,8 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		PluginContext:   GetReadPluginContext(job.GetOptions()),
 		UseLoonFfi:      useLoonFFI,
 	}
-	// A real import's per-file buffer is sized by the vchannel x partition
-	// fan-out and capped by the largest file it will actually read.
-	var maxFileSize int64
-	for _, stat := range task.GetFileStats() {
-		if sz := stat.GetTotalMemorySize(); sz > maxFileSize {
-			maxFileSize = sz
-		}
-	}
-	req.TaskResources = taskresource.EstimateImport(taskresource.ImportInput{
-		IsL0:              isL0Import,
-		FileNum:           len(importFiles),
-		VChannelNum:       len(job.GetVchannels()),
-		PartitionNum:      len(job.GetPartitionIDs()),
-		MaxFileMemorySize: maxFileSize,
-	}).ToProto()
+	// The same figure the scheduler placed this task on.
+	req.TaskResources = importTaskResources(task, job)
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
 	return req, nil
 }
@@ -981,4 +963,28 @@ func createSortCompactionTask(ctx context.Context,
 	log.Info(ctx, "create sort compaction task success", mlog.FieldSegmentID(originSegment.GetID()),
 		mlog.Int64("targetSegmentID", targetSegmentID), mlog.Int64("num rows", originSegment.GetNumOfRows()))
 	return task, nil
+}
+
+// importTaskResources prices an import or preimport before a node is picked for
+// it. Both kinds hold one read buffer per file IN FLIGHT, not one for the whole
+// task; the concurrency is the worker's exec pool width.
+func importTaskResources(task ImportTask, job ImportJob) *datapb.TaskResources {
+	isPreImport := task.GetType() == PreImportTaskType
+
+	in := taskresource.ImportInput{
+		IsPreImport: isPreImport,
+		IsL0:        importutilv2.IsL0Import(job.GetOptions()),
+		FileNum:     len(task.GetFileStats()),
+	}
+	if !isPreImport {
+		// Only a real import writes, so only it pays the fan-out.
+		in.VChannelNum = len(job.GetVchannels())
+		in.PartitionNum = len(job.GetPartitionIDs())
+		for _, stat := range task.GetFileStats() {
+			if sz := stat.GetTotalMemorySize(); sz > in.MaxFileMemorySize {
+				in.MaxFileMemorySize = sz
+			}
+		}
+	}
+	return taskresource.EstimateImport(in).ToProto()
 }

@@ -49,6 +49,18 @@ type l0CompactionTask struct {
 
 	times                *taskcommon.Times
 	committedV3Manifests map[int64]string
+
+	pricing compactionPricing
+}
+
+// TaskResources prices this L0 compaction before a node is picked for it. The
+// delete payload is what ComposeDeleteDataFromSegments holds all at once, so
+// the estimate is dominated by the inputs rather than by the targets.
+func (t *l0CompactionTask) TaskResources() *datapb.TaskResources {
+	taskProto := t.GetTaskProto()
+	return t.pricing.requirement(t.meta, taskProto.GetPlanID(),
+		datapb.CompactionType_Level0DeleteCompaction,
+		taskProto.GetInputSegments(), taskProto.GetSchema()).ToProto()
 }
 
 func (t *l0CompactionTask) GetTaskID() int64 {
@@ -379,10 +391,12 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		segments = append(segments, segInfo)
 	}
 
-	// Priced from the L0 inputs alone. Their delete payload is what
-	// ComposeDeleteDataFromSegments holds all at once; the flushed targets
-	// appended below are tested through bloom filters, not loaded.
-	plan.TaskResources = compactionRequirement(datapb.CompactionType_Level0DeleteCompaction, segments, taskProto.GetSchema()).ToProto()
+	// The same figure the scheduler placed this task on, or -- if it has not
+	// priced this task yet -- one derived from the segments already resolved
+	// above, rather than a second walk over the same ids.
+	plan.TaskResources = t.pricing.fill(
+		compactionRequirement(datapb.CompactionType_Level0DeleteCompaction, segments, taskProto.GetSchema()),
+	).ToProto()
 
 	flushedSegments, flushedSegBinlogs, err := t.selectFlushedSegment()
 	if err != nil {

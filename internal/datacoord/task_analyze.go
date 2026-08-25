@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -44,6 +45,43 @@ type analyzeTask struct {
 
 	schema *schemapb.CollectionSchema
 	meta   *meta
+
+	pricing requirementCache
+}
+
+// TaskResources prices this analyze task before a node is picked for it.
+//
+// EstimateAnalyze is a BOUND on what the task allocates rather than a model of
+// what it needs: TrainSize is whole-node memory x the ratio regardless of how
+// much data there is, so the charge is min(dataset, that). The dataset is
+// recomputed from Dim x rows because AnalyzeTask carries row counts, not bytes.
+func (at *analyzeTask) TaskResources() *datapb.TaskResources {
+	return at.pricing.get(func() (taskresource.Requirement, bool) {
+		var totalRows int64
+		complete := true
+		for _, segID := range at.GetSegmentIDs() {
+			segment := at.meta.GetHealthySegment(context.TODO(), segID)
+			if segment == nil {
+				complete = false
+				continue
+			}
+			totalRows += segment.GetNumOfRows()
+		}
+
+		var dataType schemapb.DataType
+		for _, f := range typeutil.GetAllFieldSchemas(at.schema) {
+			if f.GetFieldID() == at.GetFieldID() {
+				dataType = f.GetDataType()
+				break
+			}
+		}
+
+		req := taskresource.EstimateAnalyze(
+			taskresource.VectorFieldByteSize(dataType, at.GetDim(), totalRows),
+			Params.DataCoordCfg.ClusteringCompactionMaxTrainSizeRatio.GetAsFloat(),
+		)
+		return req, complete
+	}).ToProto()
 }
 
 var _ globalTask.Task = (*analyzeTask)(nil)
@@ -232,15 +270,11 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 	req.MaxClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxClusterSizeRatio.GetAsFloat()
 	req.MaxClusterSize = Params.DataCoordCfg.ClusteringCompactionMaxClusterSize.GetAsSize()
 	req.TaskSlot = Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64()
-	// EstimateAnalyze is a bound on what the task allocates rather than a model
-	// of what it needs: TrainSize is node memory x this ratio regardless of how
-	// much data there is, so the charge is min(dataset, that). The dataset is
-	// recomputed from Dim x rows because AnalyzeRequest's SegmentStats carry
-	// row counts and log IDs but no byte figure.
-	req.TaskResources = taskresource.EstimateAnalyze(
+	// The same figure the scheduler placed this task on.
+	req.TaskResources = at.pricing.fill(taskresource.EstimateAnalyze(
 		taskresource.VectorFieldByteSize(task.FieldType, task.Dim, totalSegmentsRows),
 		req.GetMaxTrainSizeRatio(),
-	).ToProto()
+	)).ToProto()
 
 	WrapPluginContext(task.CollectionID, at.schema.GetProperties(), req)
 

@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -298,6 +299,13 @@ func (t *copySegmentTask) GetTaskState() taskcommon.State {
 // Used for resource quota enforcement across different task types.
 func (t *copySegmentTask) GetTaskSlot() int64 {
 	return t.task.Load().GetTaskSlot()
+}
+
+// TaskResources prices a segment copy, which moves no segment bytes through the
+// worker: ChunkManager.Copy resolves to a server-side object-store copy. Only
+// the concurrency it can reach costs anything.
+func (t *copySegmentTask) TaskResources() *datapb.TaskResources {
+	return taskresource.EstimateCopySegment(len(t.task.Load().GetIdMappings())).ToProto()
 }
 
 // SetTaskTime records a task lifecycle timestamp.
