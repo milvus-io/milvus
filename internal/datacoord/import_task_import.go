@@ -130,6 +130,13 @@ func (t *importTask) GetTaskSlot() int64 {
 	return int64(CalculateTaskSlot(t, t.importMeta))
 }
 
+// TaskResources prices this import before a node is picked for it. It is
+// deliberately not cached: the job's file stats are filled in as preimport
+// completes, so an early answer would pin the task at a size it has outgrown.
+func (t *importTask) TaskResources() *datapb.TaskResources {
+	return importTaskResources(t, t.importMeta.GetJob(context.TODO(), t.GetJobID()))
+}
+
 func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	mlog.Info(context.TODO(), "processing pending import task...", WrapTaskLog(t)...)
 	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())

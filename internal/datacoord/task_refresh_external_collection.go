@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -91,6 +92,12 @@ func (t *refreshExternalCollectionTask) GetTaskState() taskcommon.State {
 func (t *refreshExternalCollectionTask) GetTaskSlot() int64 {
 	// External collection tasks are lightweight, use 1 slot
 	return 1
+}
+
+// TaskResources prices an external-collection refresh: a metadata walk that
+// reads no segment or file data.
+func (t *refreshExternalCollectionTask) TaskResources() *datapb.TaskResources {
+	return taskresource.EstimateRefreshExternalCollection().ToProto()
 }
 
 func (t *refreshExternalCollectionTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {

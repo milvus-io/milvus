@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/taskresource"
@@ -250,4 +251,92 @@ func statsTouchedBytes(segment *SegmentInfo, schema *schemapb.CollectionSchema, 
 		return size
 	}
 	return fieldBytesFromSchema(segment, schema, ids)
+}
+
+// ---------------------------------------------------------------------------
+// Pre-dispatch pricing
+// ---------------------------------------------------------------------------
+//
+// A task has to be able to state its requirement BEFORE a node is picked for
+// it, or the scheduler has nothing to place it on but the scalar. Computing it
+// at request-build time is too late: by then the node is already chosen.
+//
+// Every family below therefore prices itself once and caches the answer for the
+// life of the task instance. The cache matters: GetTaskSlot and TaskResources
+// sit on the scheduler's per-round path, and re-walking meta for every pending
+// task on every round would turn a config read into an O(tasks x segments)
+// sweep under the meta lock.
+
+// requirementCache holds a task's price once it has been computed. A partial
+// answer is deliberately not cached -- see compactionPricing.
+type requirementCache struct {
+	cached atomic.Pointer[taskresource.Requirement]
+}
+
+func (c *requirementCache) get(compute func() (taskresource.Requirement, bool)) taskresource.Requirement {
+	if req := c.cached.Load(); req != nil {
+		return *req
+	}
+	req, complete := compute()
+	if complete {
+		c.cached.Store(&req)
+	}
+	return req
+}
+
+// fill records a price the CALLER already computed, and returns whatever the
+// cache ends up holding.
+//
+// It exists so the request builders -- which have already resolved the segments
+// they need for other reasons -- do not pay for a second meta walk just to
+// state the price again. Whichever side computes first wins, and both then read
+// the same value, which is the property that matters: the figure the scheduler
+// PLACED the task on and the figure the worker is CHARGED must not be two
+// independent computations that happen to agree.
+func (c *requirementCache) fill(req taskresource.Requirement) taskresource.Requirement {
+	if cached := c.cached.Load(); cached != nil {
+		return *cached
+	}
+	c.cached.Store(&req)
+	return req
+}
+
+// compactionPricing is the shared shape of the compaction families other than
+// mix, which needs its own because it derives the legacy scalar from the same
+// segment walk.
+type compactionPricing struct {
+	requirementCache
+}
+
+func (p *compactionPricing) requirement(
+	meta CompactionMeta,
+	planID int64,
+	compactionType datapb.CompactionType,
+	inputSegments []int64,
+	schema *schemapb.CollectionSchema,
+) taskresource.Requirement {
+	return p.get(func() (taskresource.Requirement, bool) {
+		segments, allResolved := resolveCompactionSegments(context.TODO(), meta, planID, inputSegments)
+		return compactionRequirement(compactionType, segments, schema), allResolved
+	})
+}
+
+// resolveCompactionSegments fetches every input segment, reporting whether all
+// of them resolved. A segment that does not is logged by ID rather than
+// silently dropped: it under-counts the estimate, and an operator has nothing
+// else to go on.
+func resolveCompactionSegments(ctx context.Context, meta CompactionMeta, planID int64, ids []int64) ([]*SegmentInfo, bool) {
+	segments := make([]*SegmentInfo, 0, len(ids))
+	allResolved := true
+	for _, segID := range ids {
+		segment := meta.GetHealthySegment(ctx, segID)
+		if segment == nil {
+			allResolved = false
+			mlog.Warn(ctx, "could not resolve input segment for pricing, the estimate will under-count it",
+				mlog.Int64("planID", planID), mlog.Int64("segmentID", segID))
+			continue
+		}
+		segments = append(segments, segment)
+	}
+	return segments, allResolved
 }
