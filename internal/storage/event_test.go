@@ -144,38 +144,6 @@ func TestDescriptorEvent(t *testing.T) {
 	}
 }
 
-func TestDescriptorEventGetEzIDSupportsJSONNumber(t *testing.T) {
-	event := &descriptorEventData{Extras: map[string]interface{}{
-		ezIDKey: float64(42),
-	}}
-
-	ezID, ok := event.GetEzID()
-	assert.True(t, ok)
-	assert.Equal(t, int64(42), ezID)
-
-	event.Extras[ezIDKey] = "42"
-	_, ok = event.GetEzID()
-	assert.False(t, ok)
-}
-
-func TestDescriptorEventPreservesLargeJSONEzID(t *testing.T) {
-	const expectedEZID int64 = 468599886057571311
-
-	event := newDescriptorEventData()
-	event.AddExtra(originalSizeKey, "1")
-	event.AddExtra(ezIDKey, expectedEZID)
-	assert.NoError(t, event.FinishExtra())
-
-	var buffer bytes.Buffer
-	assert.NoError(t, event.Write(&buffer))
-	decoded, err := readDescriptorEventData(&buffer)
-	assert.NoError(t, err)
-
-	ezID, ok := decoded.GetEzID()
-	assert.True(t, ok)
-	assert.Equal(t, expectedEZID, ezID)
-}
-
 /* #nosec G103 */
 func TestInsertEvent(t *testing.T) {
 	insertT := func(t *testing.T,

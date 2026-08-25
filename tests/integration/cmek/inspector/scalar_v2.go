@@ -11,6 +11,7 @@
 package inspector
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/milvus-io/milvus/internal/storage"
@@ -27,9 +28,18 @@ func InspectV2(raw []byte, expectedEZID int64) error {
 	if !ok || edek == "" {
 		return fmt.Errorf("V2 IndexData envelope has no EDEK")
 	}
-	ezID, ok := reader.GetEzID()
-	if !ok {
+	var extras struct {
+		EZID json.Number `json:"encryption_zone"`
+	}
+	if err := json.Unmarshal(reader.ExtraBytes, &extras); err != nil {
+		return fmt.Errorf("parse V2 IndexData descriptor extras: %w", err)
+	}
+	if extras.EZID == "" {
 		return fmt.Errorf("V2 IndexData envelope has no EZ id")
+	}
+	ezID, err := extras.EZID.Int64()
+	if err != nil {
+		return fmt.Errorf("V2 IndexData envelope has invalid EZ id %q: %w", extras.EZID, err)
 	}
 	if ezID != expectedEZID {
 		return fmt.Errorf("V2 IndexData envelope EZ id %d, want %d", ezID, expectedEZID)
