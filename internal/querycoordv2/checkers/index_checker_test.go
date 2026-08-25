@@ -182,12 +182,10 @@ func (suite *IndexCheckerSuite) TestJSONStatsRequiresExactFormat() {
 	}
 
 	suite.Empty(suite.checker.checkSegmentStats(segment, schema, []int64{fieldID}))
-	segment.JSONStatsField[fieldID].DataFormatVersion =
-		common.JSONStatsDataFormatVersion - 1
+	segment.JSONStatsField[fieldID].DataFormatVersion = common.JSONStatsDataFormatVersion - 1
 	suite.Equal([]int64{fieldID},
 		suite.checker.checkSegmentStats(segment, schema, []int64{fieldID}))
-	segment.JSONStatsField[fieldID].DataFormatVersion =
-		common.JSONStatsDataFormatVersion + 1
+	segment.JSONStatsField[fieldID].DataFormatVersion = common.JSONStatsDataFormatVersion + 1
 	suite.Equal([]int64{fieldID},
 		suite.checker.checkSegmentStats(segment, schema, []int64{fieldID}))
 }

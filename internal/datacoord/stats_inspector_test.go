@@ -519,11 +519,9 @@ func (s *statsInspectorSuite) TestNeedJSONKeyIndexRequiresExactFormat() {
 	})
 
 	s.False(needDoJSONKeyIndex(segment, []UniqueID{fieldID}, true))
-	segment.JsonKeyStats[fieldID].JsonKeyStatsDataFormat =
-		common.JSONStatsDataFormatVersion - 1
+	segment.JsonKeyStats[fieldID].JsonKeyStatsDataFormat = common.JSONStatsDataFormatVersion - 1
 	s.True(needDoJSONKeyIndex(segment, []UniqueID{fieldID}, true))
-	segment.JsonKeyStats[fieldID].JsonKeyStatsDataFormat =
-		common.JSONStatsDataFormatVersion + 1
+	segment.JsonKeyStats[fieldID].JsonKeyStatsDataFormat = common.JSONStatsDataFormatVersion + 1
 	s.True(needDoJSONKeyIndex(segment, []UniqueID{fieldID}, true))
 }
 
