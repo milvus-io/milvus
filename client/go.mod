@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus/client/v3
 
-go 1.24.9
+go 1.25.14
 
 require (
 	github.com/RoaringBitmap/roaring/v2 v2.8.0
@@ -17,8 +17,8 @@ require (
 	github.com/tidwall/gjson v1.17.1
 	github.com/x448/float16 v0.8.4
 	go.uber.org/atomic v1.11.0
-	golang.org/x/sync v0.19.0
-	google.golang.org/grpc v1.80.0
+	golang.org/x/sync v0.22.0
+	google.golang.org/grpc v1.82.1
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -43,10 +43,10 @@ require (
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
 	golang.org/x/arch v0.11.0 // indirect
-	golang.org/x/net v0.49.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
-	golang.org/x/text v0.33.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120221211-b8f7ae30c516 // indirect
+	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
