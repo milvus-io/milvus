@@ -190,6 +190,11 @@ func GetShardLeadersWithChannelsAndReplicaFilter(
 		ids := make([]int64, 0, len(replicas))
 		addrs := make([]string, 0, len(replicas))
 		serviceable := make([]bool, 0, len(replicas))
+		// The replica's resource group, not the node's: a replica may borrow
+		// nodes from another group, so node-set membership is not replica
+		// membership. The replica is in hand here and nowhere downstream --
+		// this list flattens every replica into one entry per channel.
+		resourceGroups := make([]string, 0, len(replicas))
 		for _, replica := range replicas {
 			if replicaFilter != nil && !replicaFilter(replica) {
 				continue
@@ -205,6 +210,7 @@ func GetShardLeadersWithChannelsAndReplicaFilter(
 				ids = append(ids, info.ID())
 				addrs = append(addrs, info.Addr())
 				serviceable = append(serviceable, leader.IsServiceable())
+				resourceGroups = append(resourceGroups, replica.GetResourceGroup())
 			}
 		}
 
@@ -216,10 +222,11 @@ func GetShardLeadersWithChannelsAndReplicaFilter(
 		}
 
 		ret = append(ret, &querypb.ShardLeadersList{
-			ChannelName: channel.GetChannelName(),
-			NodeIds:     ids,
-			NodeAddrs:   addrs,
-			Serviceable: serviceable,
+			ChannelName:    channel.GetChannelName(),
+			NodeIds:        ids,
+			NodeAddrs:      addrs,
+			Serviceable:    serviceable,
+			ResourceGroups: resourceGroups,
 		})
 	}
 
