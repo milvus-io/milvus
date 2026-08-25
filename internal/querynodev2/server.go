@@ -109,6 +109,7 @@ type QueryNode struct {
 
 	// internal components
 	manager               *segments.Manager
+	collectionMetricsMu   sync.Mutex
 	clusterManager        cluster.Manager
 	pipelineManager       pipeline.Manager
 	subscribingChannels   *typeutil.ConcurrentSet[string]
