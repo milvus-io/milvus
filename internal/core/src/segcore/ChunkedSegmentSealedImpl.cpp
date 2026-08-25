@@ -6216,18 +6216,14 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
 
     if (!IsVectorDataType(field_meta.get_data_type())) {
         // === Scalar field ===
-        if (!use_field_data) {
+        if (!use_field_data && IndexHasRawData(field_id)) {
             // Try index first: if scalar index exists and has raw data, read from index
             PinWrapper<const index::IndexBase*> pin_scalar_index_ptr;
             auto scalar_indexes = PinIndex(op_ctx, field_id);
             if (!scalar_indexes.empty()) {
                 pin_scalar_index_ptr = std::move(scalar_indexes[0]);
-                if (IndexHasRawData(field_id)) {
-                    return ReverseDataFromIndex(pin_scalar_index_ptr.get(),
-                                                seg_offsets,
-                                                count,
-                                                field_meta);
-                }
+                return ReverseDataFromIndex(
+                    pin_scalar_index_ptr.get(), seg_offsets, count, field_meta);
             }
         }
         return get_raw_data(op_ctx, field_id, field_meta, seg_offsets, count);
