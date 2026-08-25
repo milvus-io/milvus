@@ -60,10 +60,11 @@ func init() {
 }
 
 type mergeSpec struct {
-	strategy  MergeStrategy
-	rrfK      float64
-	weights   []float64
-	normalize bool
+	strategy   MergeStrategy
+	rrfK       float64
+	weights    []float64
+	weightsSet bool
+	normalize  bool
 }
 
 // NewMergeOpFromReprWithContext creates a MergeOp from its declarative
@@ -86,6 +87,14 @@ func NewMergeOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBu
 	switch spec.strategy {
 	case MergeStrategyRRF:
 		opts = append(opts, WithRRFK(spec.rrfK))
+		if spec.weightsSet {
+			if len(spec.weights) != len(metricTypes) {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"merge_op: weights count %d does not match search input count %d",
+					len(spec.weights), len(metricTypes))
+			}
+			opts = append(opts, WithWeights(spec.weights))
+		}
 	case MergeStrategyWeighted:
 		if len(spec.weights) != len(metricTypes) {
 			return nil, merr.WrapErrParameterInvalidMsg(
@@ -135,6 +144,7 @@ func parseMergeSpec(repr *OperatorRepr) (*mergeSpec, error) {
 	switch strategy {
 	case MergeStrategyRRF:
 		allowed[MergeParamK] = struct{}{}
+		allowed[MergeParamWeights] = struct{}{}
 	case MergeStrategyWeighted:
 		allowed[MergeParamWeights] = struct{}{}
 		allowed[MergeParamNormScore] = struct{}{}
@@ -160,18 +170,17 @@ func parseMergeSpec(repr *OperatorRepr) (*mergeSpec, error) {
 		if !isFiniteFloat64(spec.rrfK) || spec.rrfK <= 0 || spec.rrfK >= 16384 {
 			return nil, merr.WrapErrParameterInvalidMsg("merge_op: k must be finite and in range (0, 16384)")
 		}
+		_, spec.weightsSet = repr.Params[MergeParamWeights]
+		if spec.weightsSet {
+			spec.weights, err = parseMergeWeights(reader)
+			if err != nil {
+				return nil, err
+			}
+		}
 	case MergeStrategyWeighted:
-		spec.weights, err = reader.Float64Slice(MergeParamWeights, true)
+		spec.weights, err = parseMergeWeights(reader)
 		if err != nil {
 			return nil, err
-		}
-		if len(spec.weights) == 0 {
-			return nil, merr.WrapErrParameterInvalidMsg("merge_op: weights must not be empty")
-		}
-		for i, weight := range spec.weights {
-			if !isFiniteFloat64(weight) || weight < 0 || weight > 1 {
-				return nil, merr.WrapErrParameterInvalidMsg("merge_op: weights[%d] must be finite and in range [0, 1]", i)
-			}
 		}
 		spec.normalize, err = reader.Bool(MergeParamNormScore, false, false)
 		if err != nil {
@@ -184,6 +193,22 @@ func parseMergeSpec(repr *OperatorRepr) (*mergeSpec, error) {
 		}
 	}
 	return spec, nil
+}
+
+func parseMergeWeights(reader types.ParamReader) ([]float64, error) {
+	weights, err := reader.Float64Slice(MergeParamWeights, true)
+	if err != nil {
+		return nil, err
+	}
+	if len(weights) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("merge_op: weights must not be empty")
+	}
+	for i, weight := range weights {
+		if !isFiniteFloat64(weight) || weight < 0 || weight > 1 {
+			return nil, merr.WrapErrParameterInvalidMsg("merge_op: weights[%d] must be finite and in range [0, 1]", i)
+		}
+	}
+	return weights, nil
 }
 
 func isFiniteFloat64(value float64) bool {

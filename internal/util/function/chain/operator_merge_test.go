@@ -2541,7 +2541,24 @@ func TestNewMergeOpFromReprWithContext(t *testing.T) {
 			sortDescending: true,
 			verify: func(t *testing.T, op *MergeOp) {
 				assert.Equal(t, float64(60), op.rrfK)
+				assert.False(t, op.weightsSet)
+				assert.Empty(t, op.weights)
 				assert.Empty(t, op.scoreNormFuncs)
+			},
+		},
+		{
+			name: "rrf weighted typed params",
+			repr: mergeRepr("rrf", map[string]*schemapb.FunctionParamValue{
+				MergeParamK:       intParam(30),
+				MergeParamWeights: arrayParam(doubleParam(0.8), doubleParam(0.2)),
+			}),
+			metrics:        []string{"COSINE", "IP"},
+			strategy:       MergeStrategyRRF,
+			sortDescending: true,
+			verify: func(t *testing.T, op *MergeOp) {
+				assert.Equal(t, float64(30), op.rrfK)
+				assert.True(t, op.weightsSet)
+				assert.Equal(t, []float64{0.8, 0.2}, op.weights)
 			},
 		},
 		{
@@ -2619,7 +2636,10 @@ func TestMergeReprRejectsInvalidPublicConfiguration(t *testing.T) {
 		{"outputs", &OperatorRepr{Type: types.OpTypeMerge, Outputs: []string{"$score"}}},
 		{"missing strategy", &OperatorRepr{Type: types.OpTypeMerge}},
 		{"unsupported strategy", mergeRepr("median", nil)},
-		{"rrf incompatible weights", mergeRepr("rrf", map[string]*schemapb.FunctionParamValue{MergeParamWeights: arrayParam(doubleParam(1))})},
+		{"rrf empty weights", mergeRepr("rrf", map[string]*schemapb.FunctionParamValue{MergeParamWeights: arrayParam()})},
+		{"rrf bad weight", mergeRepr("rrf", map[string]*schemapb.FunctionParamValue{MergeParamWeights: arrayParam(doubleParam(math.NaN()))})},
+		{"rrf wrong weights type", mergeRepr("rrf", map[string]*schemapb.FunctionParamValue{MergeParamWeights: stringParam("[1]")})},
+		{"rrf weights count mismatch", mergeRepr("rrf", map[string]*schemapb.FunctionParamValue{MergeParamWeights: arrayParam(doubleParam(0.8), doubleParam(0.2))})},
 		{"rrf wrong k type", mergeRepr("rrf", map[string]*schemapb.FunctionParamValue{MergeParamK: stringParam("60")})},
 		{"rrf non finite k", mergeRepr("rrf", map[string]*schemapb.FunctionParamValue{MergeParamK: doubleParam(math.Inf(1))})},
 		{"rrf zero k", mergeRepr("rrf", map[string]*schemapb.FunctionParamValue{MergeParamK: intParam(0)})},
