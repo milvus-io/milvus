@@ -55,18 +55,10 @@ namespace milvus::segcore {
 // ApplyFieldValidData and InsertRecord::get_span_base), so this holds.
 //
 // The borrow is a raw pointer, not a lock: a reader dereferences it after
-// releasing the shared lock. Nothing then separates it from a writer's bits
-// except WHERE the writer writes. So a rewrite of a range already below
-// length_ is safe ONLY when no reader can be holding a borrow into it, which
-// today means one of:
-//   - the segment is not published yet (SegmentGrowingImpl::Load, and the
-//     FillAbsentFields backfill that follows it), or
-//   - the range belongs to a field Reopen has not published in schema_ yet,
-//     with sch_mutex_ held unique (fill_empty_field).
-// Everything else must write at or past length_. set_data_raw enforces the
-// weaker "no gaps" half of this (see there); the no-concurrent-reader half is
-// a caller obligation this class cannot check. Do not read "rewrites are
-// allowed" as "rewrites are always safe".
+// releasing the shared lock. A caller that rewrites an already-addressable
+// range must therefore guarantee that no reader can hold a borrow into that
+// range. set_data_raw enforces the separate "no gaps" invariant, but cannot
+// enforce this external quiescence requirement.
 class ThreadSafeValidData {
  public:
     explicit ThreadSafeValidData(int64_t size_per_chunk)
@@ -84,10 +76,9 @@ class ThreadSafeValidData {
     // No gaps: length_ advances to the end of the write, and is_valid() admits
     // every offset below it, so a write starting past the current length would
     // publish a range nobody ever wrote -- validity bits read back as garbage
-    // rather than as null. Rewriting an already written range is NOT rejected:
-    // that is what makes a Reopen backfill retry idempotent. It is also the
-    // one case this class cannot make safe on its own -- see the borrow
-    // discussion on the class.
+    // rather than as null. Rewriting an already written range is permitted for
+    // idempotent retries, subject to the external quiescence requirement in
+    // the class contract above.
     void
     set_data_raw(size_t element_offset,
                  const std::vector<FieldDataPtr>& datas) {
@@ -112,9 +103,8 @@ class ThreadSafeValidData {
                  const FieldMeta& field_meta) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
         if (field_meta.is_nullable()) {
-            // The ingest path (SegmentGrowingImpl's Insert and the
-            // fill_empty_field backfill) comes through here, so the
-            // source-span check belongs on this overload.
+            // This overload copies a contiguous validity buffer, so validate
+            // its source span before reading it.
             check_source_span(num_rows, data, field_meta);
             const auto end = element_offset + num_rows;
             check_no_gap(element_offset);

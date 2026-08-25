@@ -3495,17 +3495,6 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
     }
 }
 
-// NOT offset-addressed, unlike everything load_field_data_common writes.
-// SimpleGeometryCache is append-on-write but GetByOffset-on-read (see
-// common/GeometryCache.h), so it carries the same latent misalignment this
-// file's other per-row writers just shed: a batch loaded at a reserved offset
-// past the cache's current size would land on the wrong rows. It is not fixed
-// here because the fix is a different shape -- the cache needs an
-// offset-addressed store with its own no-gap check, and the Insert path
-// (BuildGeometryCacheForInsert) and the sealed builder append the same way, so
-// converting only this one would create the asymmetry rather than remove it.
-// Harmless today for the same reason the others were: reserved_offset is 0 on
-// every growing load.
 void
 SegmentGrowingImpl::BuildGeometryCacheForLoad(
     FieldId field_id,

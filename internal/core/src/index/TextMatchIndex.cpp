@@ -308,7 +308,8 @@ TextMatchIndex::BuildIndexFromFieldData(
         }
         {
             std::unique_lock<folly::SharedMutex> lock(mutex_);
-            null_offset_.reserve(total);
+            null_offset_.reserve(null_offset_.size() +
+                                 static_cast<size_t>(total));
         }
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();

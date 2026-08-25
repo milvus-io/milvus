@@ -157,6 +157,19 @@ AssertTextMatchUploadReturnsRelativePaths(
     }
 }
 
+void
+ExpectOnlyTextMatchHit(index::TextMatchIndex& index,
+                       const std::string& term,
+                       int64_t expected,
+                       int64_t row_count) {
+    auto result = index.MatchQuery(term, 1);
+    ASSERT_EQ(result.size(), static_cast<size_t>(row_count)) << term;
+    for (int64_t i = 0; i < row_count; ++i) {
+        EXPECT_EQ(static_cast<bool>(result[i]), i == expected)
+            << term << " unexpected at offset " << i;
+    }
+}
+
 std::shared_ptr<milvus::plan::FilterBitsNode>
 GetMatchExpr(SchemaPtr schema,
              const std::string& query,
@@ -551,28 +564,31 @@ TEST(TextMatch, BuildIndexFromFieldDataAtOffsetBegin) {
     index->AddTextsGrowing(
         inserted.size(), inserted.data(), nullptr, /*offset_begin=*/0);
 
-    // Rows [3, 5) arrive through the load path, at the offset it reserved.
-    const std::vector<std::string> loaded = {"delta", "epsilon"};
+    // Rows [3, 6) arrive through the load path, at the offset it reserved;
+    // row 4 is null, so its null bitmap entry must use the same doc-id space.
+    const std::vector<std::string> loaded = {"delta", "", "epsilon"};
+    const std::vector<uint8_t> loaded_valid = {0b00000101};
     auto field_data = storage::CreateFieldData(
-        DataType::VARCHAR, DataType::NONE, false, 1, loaded.size());
-    field_data->FillFieldData(loaded.data(), loaded.size());
-    index->BuildIndexFromFieldData({field_data}, false, /*offset_begin=*/3);
+        DataType::VARCHAR, DataType::NONE, true, 1, loaded.size());
+    field_data->FillFieldData(
+        loaded.data(), loaded_valid.data(), loaded.size(), 0);
+    index->BuildIndexFromFieldData({field_data}, true, /*offset_begin=*/3);
     index->Commit();
     index->Reload();
 
-    auto expect_only_hit = [&](const std::string& term, int64_t expected) {
-        auto res = index->MatchQuery(term, 1);
-        ASSERT_EQ(res.size(), 5) << term;
-        for (int64_t i = 0; i < 5; ++i) {
-            EXPECT_EQ(static_cast<bool>(res[i]), i == expected)
-                << term << " unexpected at offset " << i;
-        }
-    };
+    auto nulls = index->IsNull();
+    auto not_nulls = index->IsNotNull();
+    ASSERT_EQ(nulls.size(), 6);
+    ASSERT_EQ(not_nulls.size(), 6);
+    for (int64_t i = 0; i < 6; ++i) {
+        EXPECT_EQ(static_cast<bool>(nulls[i]), i == 4);
+        EXPECT_EQ(static_cast<bool>(not_nulls[i]), i != 4);
+    }
 
-    expect_only_hit("alpha", 0);
-    expect_only_hit("gamma", 2);
-    expect_only_hit("delta", 3);
-    expect_only_hit("epsilon", 4);
+    ExpectOnlyTextMatchHit(*index, "alpha", 0, 6);
+    ExpectOnlyTextMatchHit(*index, "gamma", 2, 6);
+    ExpectOnlyTextMatchHit(*index, "delta", 3, 6);
+    ExpectOnlyTextMatchHit(*index, "epsilon", 5, 6);
 }
 
 // The wiring, not the index: BuildIndexFromFieldDataAtOffsetBegin covers the
@@ -615,19 +631,11 @@ TEST(TextMatch, GrowingLoadBuildsTextIndexAtReservedOffset) {
 
     auto pinned = seg_impl->GetTextIndex(nullptr, str_field);
     auto* index = pinned.get();
-    auto expect_only_hit = [&](const std::string& term, int64_t expected) {
-        auto res = index->MatchQuery(term, 1);
-        ASSERT_EQ(res.size(), 4) << term;
-        for (int64_t i = 0; i < 4; ++i) {
-            EXPECT_EQ(static_cast<bool>(res[i]), i == expected)
-                << term << " unexpected at offset " << i;
-        }
-    };
 
-    expect_only_hit("football", 0);
-    expect_only_hit("tennis", 1);
-    expect_only_hit("cricket", 2);
-    expect_only_hit("curling", 3);
+    ExpectOnlyTextMatchHit(*index, "football", 0, 4);
+    ExpectOnlyTextMatchHit(*index, "tennis", 1, 4);
+    ExpectOnlyTextMatchHit(*index, "cricket", 2, 4);
+    ExpectOnlyTextMatchHit(*index, "curling", 3, 4);
 }
 
 TEST(TextMatch, BuildIndexFromTextFieldData) {
