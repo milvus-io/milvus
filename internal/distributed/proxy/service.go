@@ -285,6 +285,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	log.Debug("Get proxy rate limiter done")
 
 	var unaryServerOption grpc.ServerOption
+	var streamServerOption grpc.ServerOption
 	if enableCustomInterceptor {
 		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			streaming.ForwardLegacyProxyUnaryServerInterceptor(),
@@ -300,8 +301,16 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 			proxy.TraceLogInterceptor,
 			connection.KeepActiveInterceptor,
 		))
+		// Streaming RPCs (e.g. CreateReplicateStream, DumpMessages) bypass the
+		// unary chain, so they must be authenticated and authorized through a
+		// dedicated stream interceptor chain. Without this the external server
+		// would accept unauthenticated/unauthorized streaming calls on the
+		// client port. The order mirrors the unary chain: first authenticate
+		// (resolve the user into ctx), then enforce authorization on that user.
+		streamServerOption = newStreamInterceptorOption()
 	} else {
 		unaryServerOption = grpc.EmptyServerOption{}
+		streamServerOption = grpc.EmptyServerOption{}
 	}
 
 	grpcOpts := []grpc.ServerOption{
@@ -310,6 +319,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		unaryServerOption,
+		streamServerOption,
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
 		grpc.StatsHandler(metrics.NewGRPCSizeStatsHandler().
 			// both inbound and outbound
@@ -385,6 +395,23 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		return
 	}
 	log.Info("Proxy external grpc server exited")
+}
+
+// newStreamInterceptorOption builds the security-critical stream interceptor
+// chain for the external gRPC server: authentication, then RBAC (fail-closed).
+// It mirrors the unary chain's auth-before-RBAC ordering; streaming RPCs carry
+// no request object at the interceptor layer, so the required authorization is
+// resolved per full-method name by StreamPrivilegeInterceptor and unregistered
+// stream methods are denied by default. It is extracted so the wiring is
+// testable independently of the full Server lifecycle — a regression here would
+// silently reopen the stream auth bypass (#52387), so the chain is covered by a
+// dedicated test.
+func newStreamInterceptorOption() grpc.ServerOption {
+	return grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+		proxy.GrpcAuthStreamInterceptor(proxy.AuthenticationInterceptor),
+		proxy.PrivilegeStreamInterceptor(proxy.StreamPrivilegeInterceptor),
+		logutil.StreamTraceLoggerInterceptor,
+	))
 }
 
 func (s *Server) startInternalGrpc(errChan chan error) {
