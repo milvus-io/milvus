@@ -623,10 +623,11 @@ func TestShardLeaderReadinessByRG_NotHealthy(t *testing.T) {
 	require.Equal(t, commonpb.StateCode_Initializing, s.State())
 
 	got, err := s.GetShardLeaderReadinessByResourceGroup(context.Background(), 1, "rg-a")
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceNotReady,
+		"a coordinator restart must be distinguishable from a resource group whose shards have no leader yet -- the sibling percentage surface answers the same code for the same condition")
 	assert.False(t, got.Ready)
 	assert.Equal(t, utils.ShardLeadersReasonCoordinatorNotReady, got.Reason,
-		"a coordinator that is not serving yet reports the same not-ready reason the computation uses for it")
+		"the reason stays set alongside the error, so a caller that only logs is unaffected")
 }
 
 // TestShardLeaderReadinessByRG_NilStores covers the utils-level nil guard on

@@ -39,10 +39,23 @@ func (s *Server) GetShardLeaderReadinessByResourceGroup(ctx context.Context, col
 	// The health gate is what actually makes this safe to call on a Server
 	// that is still coming up -- see the note on
 	// GetLoadPercentageByResourceGroup for why the nil checks downstream
-	// cannot supply that on their own. Not healthy answers the same
-	// not-ready verdict the computation itself reports for the condition.
+	// cannot supply that on their own.
+	//
+	// The error is RETURNED, not swallowed into a bare not-ready verdict.
+	// Reason alone cannot carry it: ShardLeadersReasonCoordinatorNotReady is
+	// also what the utils function reports when its stores are nil, and more
+	// importantly a caller polling this surface while waiting for a group to
+	// come up cannot otherwise tell a coordinator restart (retriable, and not
+	// about this resource group at all) from "this group's shards have no
+	// serviceable leader yet". One burns a caller's timeout budget and should
+	// not count against it; the other is exactly what the budget is for.
+	// CheckHealthy also distinguishes "still starting" from "abnormal or
+	// stopping", which a bare verdict erases. Reason stays set so a caller
+	// that only logs still gets the same string; the two are not in conflict.
+	// This matches GetLoadPercentageByResourceGroup, which returns
+	// ErrServiceNotReady for the identical condition.
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		return utils.ShardLeaderReadiness{Reason: utils.ShardLeadersReasonCoordinatorNotReady}, nil
+		return utils.ShardLeaderReadiness{Reason: utils.ShardLeadersReasonCoordinatorNotReady}, err
 	}
 	return utils.ShardLeaderReadinessByResourceGroup(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr, collectionID, rgName)
 }
