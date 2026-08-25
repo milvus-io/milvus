@@ -20,6 +20,7 @@ import (
 	"context"
 	"math"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -50,7 +51,7 @@ type fileSizing struct {
 
 // assignPKRangesToFiles computes a per-file row upper bound, allocates one
 // contiguous primary-namespace id block sized Σ reservedIDs via allocN, then writes each
-// file its own contiguous [PkIdBegin, PkIdEnd) slice in the given files order.
+// file its own contiguous pre_allocated_auto_ids slice in the given files order.
 // It is called on the PRIMARY at import broadcast for non-backup autoID imports;
 // the ranges then travel on the replicated ImportMsg so both clusters derive
 // identical primary keys. The layout is bound to each file object, so it survives
@@ -171,7 +172,7 @@ func sizeReservations(sizings []fileSizing) error {
 	return nil
 }
 
-// reserveRanges writes each file its own contiguous [PkIdBegin, PkIdEnd) slice,
+// reserveRanges writes each file its own contiguous pre_allocated_auto_ids slice,
 // chunking the allocation so that no single allocN call exceeds the allocator's
 // per-batch ceiling. Files are packed greedily and a file's range never straddles
 // two batches, so every range stays contiguous while the import as a whole is not
@@ -210,9 +211,11 @@ func reserveRanges(sizings []fileSizing,
 		}
 		cur := begin
 		for k := i; k < j; k++ {
-			sizings[k].file.PkIdBegin = cur
-			sizings[k].file.PkIdEnd = cur + sizings[k].reservedIDs
-			cur = sizings[k].file.PkIdEnd
+			sizings[k].file.PreAllocatedAutoIds = &commonpb.IDRange{
+				Begin: cur,
+				End:   cur + sizings[k].reservedIDs,
+			}
+			cur = sizings[k].file.GetPreAllocatedAutoIds().GetEnd()
 		}
 		i = j
 	}

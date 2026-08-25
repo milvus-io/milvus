@@ -1378,7 +1378,7 @@ func TestImportUtil_AssembleRequestCarriesPKRange(t *testing.T) {
 		SegmentIDs:   []int64{5},
 		FileStats: []*datapb.ImportFileStats{
 			{
-				ImportFile: &internalpb.ImportFile{Id: 1, Paths: []string{"f1"}, PkIdBegin: 5000, PkIdEnd: 5100},
+				ImportFile: &internalpb.ImportFile{Id: 1, Paths: []string{"f1"}, PreAllocatedAutoIds: &commonpb.IDRange{Begin: 5000, End: 5100}},
 				TotalRows:  50,
 			},
 		},
@@ -1416,8 +1416,8 @@ func TestImportUtil_AssembleRequestCarriesPKRange(t *testing.T) {
 	importReq, err := AssembleImportRequest(task, job, meta, alloc)
 	assert.NoError(t, err)
 	// PK range is carried through to the datanode request, per file.
-	assert.Equal(t, int64(5000), importReq.GetFiles()[0].GetPkIdBegin())
-	assert.Equal(t, int64(5100), importReq.GetFiles()[0].GetPkIdEnd())
+	assert.Equal(t, int64(5000), importReq.GetFiles()[0].GetPreAllocatedAutoIds().GetBegin())
+	assert.Equal(t, int64(5100), importReq.GetFiles()[0].GetPreAllocatedAutoIds().GetEnd())
 	// logID IDRange is still allocated locally and independently.
 	assert.Greater(t, importReq.GetIDRange().GetEnd(), importReq.GetIDRange().GetBegin())
 }
@@ -1442,7 +1442,7 @@ func TestImportUtil_AssembleRefusesAnUnderSizedPKRange(t *testing.T) {
 		// No segments, so the guard is reached without a meta to look them up in.
 		FileStats: []*datapb.ImportFileStats{
 			{
-				ImportFile: &internalpb.ImportFile{Id: 1, Paths: []string{"f1"}, PkIdBegin: 5000, PkIdEnd: 5100},
+				ImportFile: &internalpb.ImportFile{Id: 1, Paths: []string{"f1"}, PreAllocatedAutoIds: &commonpb.IDRange{Begin: 5000, End: 5100}},
 				TotalRows:  101,
 			},
 		},

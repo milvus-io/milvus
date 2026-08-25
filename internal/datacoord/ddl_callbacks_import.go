@@ -70,10 +70,9 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 			// Carry the primary-allocated PK range (nil for legacy/non-autoID/backup)
 			// so both clusters derive identical autoID primary keys.
 			return &internalpb.ImportFile{
-				Id:        file.GetId(),
-				Paths:     file.GetPaths(),
-				PkIdBegin: file.GetPreAllocatedAutoIds().GetBegin(),
-				PkIdEnd:   file.GetPreAllocatedAutoIds().GetEnd(),
+				Id:                  file.GetId(),
+				Paths:               file.GetPaths(),
+				PreAllocatedAutoIds: file.GetPreAllocatedAutoIds(),
 			}
 		}),
 		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
@@ -219,10 +218,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 		// msgFiles is a 1:1 lo.Map of files; bound the walk by both lengths so the
 		// pairing stays provable rather than assumed.
 		for i := 0; i < len(files) && i < len(msgFiles); i++ {
-			msgFiles[i].PreAllocatedAutoIds = &commonpb.IDRange{
-				Begin: files[i].GetPkIdBegin(),
-				End:   files[i].GetPkIdEnd(),
-			}
+			msgFiles[i].PreAllocatedAutoIds = files[i].GetPreAllocatedAutoIds()
 		}
 	}
 

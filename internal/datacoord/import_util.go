@@ -377,7 +377,8 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	// written, instead of letting pkCursor.take trip mid-import on the datanode.
 	for _, fileStat := range task.GetFileStats() {
 		f := fileStat.GetImportFile()
-		reserved := f.GetPkIdEnd() - f.GetPkIdBegin()
+		r := f.GetPreAllocatedAutoIds()
+		reserved := r.GetEnd() - r.GetBegin()
 		if reserved > 0 && fileStat.GetTotalRows() > reserved {
 			// Marked so the scheduler can tell this apart from the retriable
 			// failures AssembleImportRequest also returns. The merr code stays

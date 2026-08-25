@@ -57,12 +57,12 @@ func Test_assignPKRangesToFiles(t *testing.T) {
 	err := assignPKRangesToFiles(context.TODO(), cm, schema, files, alloc, 1 /*clusterID*/)
 	assert.NoError(t, err)
 	// each file's range width equals its own bound
-	assert.Equal(t, int64(10), files[0].GetPkIdEnd()-files[0].GetPkIdBegin())
-	assert.Equal(t, int64(20), files[1].GetPkIdEnd()-files[1].GetPkIdBegin())
+	assert.Equal(t, int64(10), rangeWidth(files[0]))
+	assert.Equal(t, int64(20), rangeWidth(files[1]))
 	// files are contiguous, second begins where first ends
-	assert.Equal(t, files[0].GetPkIdEnd(), files[1].GetPkIdBegin())
+	assert.Equal(t, files[0].GetPreAllocatedAutoIds().GetEnd(), files[1].GetPreAllocatedAutoIds().GetBegin())
 	// cluster bits are applied to the high bits
-	assert.NotZero(t, files[0].GetPkIdBegin())
+	assert.NotZero(t, files[0].GetPreAllocatedAutoIds().GetBegin())
 }
 
 func Test_assignPKRangesToFiles_zeroTotal(t *testing.T) {
@@ -106,10 +106,16 @@ func recordingAlloc(calls *[]int64, blocks *[]allocBlock) func(int64) (int64, in
 	}
 }
 
+// rangeWidth is how many ids one file reserved.
+func rangeWidth(f *internalpb.ImportFile) int64 {
+	r := f.GetPreAllocatedAutoIds()
+	return r.GetEnd() - r.GetBegin()
+}
+
 func rangeWidths(files []*internalpb.ImportFile) []int64 {
 	out := make([]int64, len(files))
 	for i, f := range files {
-		out[i] = f.GetPkIdEnd() - f.GetPkIdBegin()
+		out[i] = rangeWidth(f)
 	}
 	return out
 }
@@ -184,7 +190,7 @@ func Test_assignPKRangesToFiles_pinsReservationSizing(t *testing.T) {
 		for i, f := range files {
 			inOneBlock := false
 			for _, b := range blocks {
-				if f.GetPkIdBegin() >= b.begin && f.GetPkIdEnd() <= b.end {
+				if f.GetPreAllocatedAutoIds().GetBegin() >= b.begin && f.GetPreAllocatedAutoIds().GetEnd() <= b.end {
 					inOneBlock = true
 				}
 			}
@@ -323,7 +329,7 @@ func Test_reserveRanges(t *testing.T) {
 	}
 	within := func(f *internalpb.ImportFile, blocks []block) bool {
 		for _, b := range blocks {
-			if f.GetPkIdBegin() >= b.begin && f.GetPkIdEnd() <= b.end {
+			if f.GetPreAllocatedAutoIds().GetBegin() >= b.begin && f.GetPreAllocatedAutoIds().GetEnd() <= b.end {
 				return true
 			}
 		}
@@ -332,7 +338,7 @@ func Test_reserveRanges(t *testing.T) {
 	widths := func(files []*internalpb.ImportFile) []int64 {
 		out := make([]int64, len(files))
 		for i, f := range files {
-			out[i] = f.GetPkIdEnd() - f.GetPkIdBegin()
+			out[i] = rangeWidth(f)
 		}
 		return out
 	}
@@ -344,8 +350,8 @@ func Test_reserveRanges(t *testing.T) {
 		files := sizingFiles(sizings)
 		assert.Equal(t, []int64{60}, calls)
 		assert.Equal(t, []int64{10, 20, 30}, widths(files))
-		assert.Equal(t, files[0].GetPkIdEnd(), files[1].GetPkIdBegin())
-		assert.Equal(t, files[1].GetPkIdEnd(), files[2].GetPkIdBegin())
+		assert.Equal(t, files[0].GetPreAllocatedAutoIds().GetEnd(), files[1].GetPreAllocatedAutoIds().GetBegin())
+		assert.Equal(t, files[1].GetPreAllocatedAutoIds().GetEnd(), files[2].GetPreAllocatedAutoIds().GetBegin())
 	})
 
 	t.Run("a total above the ceiling is split, and every file keeps its full width", func(t *testing.T) {
@@ -433,7 +439,7 @@ func Test_assignPKRangesToFiles_largeVarcharJSONIsAccepted(t *testing.T) {
 	err := assignPKRangesToFiles(context.TODO(), cm, schema, files, alloc, 1)
 	require.NoError(t, err)
 	assert.LessOrEqual(t, asked, maxIDsPerAllocBatch, "the reservation must fit one allocation batch")
-	assert.Positive(t, files[0].GetPkIdEnd()-files[0].GetPkIdBegin())
+	assert.Positive(t, rangeWidth(files[0]))
 }
 
 // An exact row count above one allocation batch cannot be reserved contiguously.
@@ -478,7 +484,7 @@ func Test_assignPKRangesToFiles_singleColumnCSVAboveOneBatchIsCapped(t *testing.
 		cm.EXPECT().Size(mock.Anything, "ok.csv").Return(maxIDsPerAllocBatch-2, nil)
 		files := []*internalpb.ImportFile{{Paths: []string{"ok.csv"}}}
 		require.NoError(t, assignPKRangesToFiles(context.TODO(), cm, schema, files, alloc, 1))
-		assert.Equal(t, maxIDsPerAllocBatch-1, files[0].GetPkIdEnd()-files[0].GetPkIdBegin())
+		assert.Equal(t, maxIDsPerAllocBatch-1, rangeWidth(files[0]))
 	})
 
 	t.Run("above one batch is accepted with a capped range", func(t *testing.T) {
@@ -486,7 +492,7 @@ func Test_assignPKRangesToFiles_singleColumnCSVAboveOneBatchIsCapped(t *testing.
 		cm.EXPECT().Size(mock.Anything, "big.csv").Return(int64(5)<<30, nil)
 		files := []*internalpb.ImportFile{{Paths: []string{"big.csv"}}}
 		require.NoError(t, assignPKRangesToFiles(context.TODO(), cm, schema, files, alloc, 1))
-		assert.Equal(t, maxIDsPerAllocBatch, files[0].GetPkIdEnd()-files[0].GetPkIdBegin(),
+		assert.Equal(t, maxIDsPerAllocBatch, rangeWidth(files[0]),
 			"the range is capped at one batch, not refused")
 	})
 }
@@ -517,7 +523,7 @@ func Test_assignPKRangesToFiles_twoColumnCSVAboveOneBatchIsAccepted(t *testing.T
 	files := []*internalpb.ImportFile{{Paths: []string{"two-col.csv"}}}
 	require.NoError(t, assignPKRangesToFiles(context.TODO(), cm, schema, files, alloc, 1))
 
-	reserved := files[0].GetPkIdEnd() - files[0].GetPkIdBegin()
+	reserved := rangeWidth(files[0])
 	assert.Positive(t, reserved)
 	assert.LessOrEqual(t, reserved, maxIDsPerAllocBatch)
 }
