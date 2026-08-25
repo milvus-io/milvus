@@ -734,9 +734,14 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
                    "staged vector index load requires committer");
         committer->StageVectorIndexMutationLocked(
             field_id, metric_type, std::move(info.cache_index), drop_existing);
-        LOG_INFO("Has staged vec index load, fieldID:{}. segmentID:{}, ",
-                 info.field_id,
-                 id_);
+        stats_.mem_size += info.index_mem_size;
+        LOG_INFO(
+            "Has staged vec index load, fieldID:{}. segmentID:{}, "
+            "index_mem_size: {}, mem_size: {}",
+            info.field_id,
+            id_,
+            info.index_mem_size,
+            stats_.mem_size.load());
 
         clear_bit_if_present(staged_state->published_binlog_index_ready_bitset,
                              field_id);
