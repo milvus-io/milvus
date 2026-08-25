@@ -634,6 +634,12 @@ func TestShardLeaderReadinessByRG_NotHealthy(t *testing.T) {
 // its own terms: defense in depth for a direct caller (the observers hold
 // these stores and bypass Server), deliberately not reached through Server,
 // whose health gate would answer first.
+//
+// It answers ErrServiceNotReady alongside the Reason, the same as the
+// percentage surface and the Server entry points do for the same condition.
+// A direct caller reading only the struct cannot otherwise tell "the
+// coordinator cannot answer" -- retriable, and not about this resource group
+// -- from any other not-ready verdict, all of which are about it.
 func TestShardLeaderReadinessByRG_NilStores(t *testing.T) {
 	f := newShardLeaderReadinessFixture(t)
 	ctx := context.Background()
@@ -655,9 +661,11 @@ func TestShardLeaderReadinessByRG_NilStores(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			assert.NotPanics(t, func() {
 				got, err := call()
-				assert.NoError(t, err)
+				assert.ErrorIs(t, err, merr.ErrServiceNotReady,
+					"the utils layer must answer the same sentinel its siblings and the Server entry points do")
 				assert.False(t, got.Ready)
-				assert.Equal(t, utils.ShardLeadersReasonCoordinatorNotReady, got.Reason)
+				assert.Equal(t, utils.ShardLeadersReasonCoordinatorNotReady, got.Reason,
+					"the reason stays set alongside the error")
 			})
 		})
 	}

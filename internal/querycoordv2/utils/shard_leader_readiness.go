@@ -120,8 +120,15 @@ func ShardLeaderReadinessByResourceGroup(
 	collectionID int64,
 	rgName string,
 ) (ShardLeaderReadiness, error) {
+	// Returns the sentinel as well as the Reason, matching
+	// LoadPercentageByResourceGroup and the Server entry points. Reason alone
+	// cannot carry it: ShardLeadersReasonCoordinatorNotReady is a not-ready
+	// verdict like any other to a caller that only reads the struct, and
+	// "the coordinator cannot answer" is retriable and not about this
+	// resource group at all, while every other not-ready reason is about it.
 	if m == nil || targetMgr == nil || dist == nil || nodeMgr == nil {
-		return ShardLeaderReadiness{Reason: ShardLeadersReasonCoordinatorNotReady}, nil
+		return ShardLeaderReadiness{Reason: ShardLeadersReasonCoordinatorNotReady},
+			merr.WrapErrServiceNotReadyMsg("querycoord read stores are not wired up yet")
 	}
 
 	// The load-registration check comes BEFORE the replica scan, and surfaces
