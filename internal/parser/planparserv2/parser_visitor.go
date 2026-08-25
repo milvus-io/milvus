@@ -52,6 +52,20 @@ func NewParserVisitor(schema *typeutil.SchemaHelper, args *ParserVisitorArgs) *P
 	return &ParserVisitor{schema: schema, args: args}
 }
 
+// fieldName resolves the field name for a column expression through the
+// schema, or returns an empty string for constants and computed expressions.
+func (v *ParserVisitor) fieldName(expr *ExprWithType) string {
+	info := toColumnInfo(expr)
+	if info == nil {
+		return ""
+	}
+	field, err := v.schema.GetFieldFromID(info.GetFieldId())
+	if err != nil {
+		return ""
+	}
+	return field.GetName()
+}
+
 // VisitParens unpack the parentheses.
 func (v *ParserVisitor) VisitParens(ctx *parser.ParensContext) interface{} {
 	return ctx.Expr().Accept(v)
@@ -482,7 +496,7 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 			return merr.WrapErrParameterInvalidMsg("'%s' %s", arithNameMap[ctx.GetOp().GetTokenType()], err.Error())
 		}
 
-		if err = checkValidModArith(arithExprMap[ctx.GetOp().GetTokenType()], leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr)); err != nil {
+		if err = checkValidModArith(arithExprMap[ctx.GetOp().GetTokenType()], leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr), v.fieldName(leftExpr), v.fieldName(rightExpr)); err != nil {
 			return err
 		}
 
@@ -1746,7 +1760,7 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 		if err := canArithmetic(childExpr.dataType, getArrayElementType(childExpr), minusOne.dataType, getArrayElementType(minusOne), false); err != nil {
 			return merr.WrapErrParameterInvalidMsg("'bitnot' %s", err.Error())
 		}
-		if err := checkValidModArith(planpb.ArithOpType_BitXor, childExpr.dataType, getArrayElementType(childExpr), minusOne.dataType, getArrayElementType(minusOne)); err != nil {
+		if err := checkValidModArith(planpb.ArithOpType_BitXor, childExpr.dataType, getArrayElementType(childExpr), minusOne.dataType, getArrayElementType(minusOne), v.fieldName(childExpr), ""); err != nil {
 			return err
 		}
 		dataType, err := calcDataType(childExpr, minusOne, false)
@@ -2026,7 +2040,7 @@ func (v *ParserVisitor) visitBitwiseBinaryOp(leftCtx, rightCtx parser.IExprConte
 		if err = canArithmetic(leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr), reverse); err != nil {
 			return merr.WrapErrParameterInvalidMsg("'%s' %s", arithNameMap[tokenType], err.Error())
 		}
-		if err = checkValidModArith(arithExprMap[tokenType], leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr)); err != nil {
+		if err = checkValidModArith(arithExprMap[tokenType], leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr), v.fieldName(leftExpr), v.fieldName(rightExpr)); err != nil {
 			return err
 		}
 		dataType, err = calcDataType(leftExpr, rightExpr, reverse)

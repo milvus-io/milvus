@@ -261,6 +261,15 @@ func toColumnInfo(left *ExprWithType) *planpb.ColumnInfo {
 	return left.expr.GetColumnExpr().GetInfo()
 }
 
+// formatDataTypeForError renders the data type a field was declared with in
+// uppercase, keeping the element type for array fields.
+func formatDataTypeForError(dataType, elementType schemapb.DataType) string {
+	if typeutil.IsArrayType(dataType) && elementType != schemapb.DataType_None {
+		return fmt.Sprintf("ARRAY(%s)", strings.ToUpper(elementType.String()))
+	}
+	return strings.ToUpper(dataType.String())
+}
+
 func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
 	// A raw-bytes value has exactly two consumers — the bloom_match filter blob
 	// and the roaring_match bitmap blob — each validated and embedded by its own
@@ -744,17 +753,29 @@ func hexDigit(n uint32) byte {
 	return byte(n-10) + 'a'
 }
 
-func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType, rightType, rightElementType schemapb.DataType) error {
+func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType, rightType, rightElementType schemapb.DataType, leftName, rightName string) error {
+	leftValid := canConvertToIntegerType(leftType, leftElementType)
+	rightValid := canConvertToIntegerType(rightType, rightElementType)
+	if leftValid && rightValid {
+		return nil
+	}
+
+	// Name the offending field and its declared type so the caller does not
+	// have to guess which side of the expression broke the operator.
+	var offending string
+	switch {
+	case !leftValid && leftName != "":
+		offending = fmt.Sprintf(", but field '%s' is %s", leftName, formatDataTypeForError(leftType, leftElementType))
+	case !rightValid && rightName != "":
+		offending = fmt.Sprintf(", but field '%s' is %s", rightName, formatDataTypeForError(rightType, rightElementType))
+	}
+
 	switch tokenType {
 	case planpb.ArithOpType_Mod:
-		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
-			return merr.WrapErrQueryPlanMsg("modulo can only apply on integer types")
-		}
+		return merr.WrapErrQueryPlanMsg("modulo can only apply on integer types%s", offending)
 	case planpb.ArithOpType_BitAnd, planpb.ArithOpType_BitOr, planpb.ArithOpType_BitXor,
 		planpb.ArithOpType_Shl, planpb.ArithOpType_Shr:
-		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
-			return merr.WrapErrQueryPlanMsg("bitwise operations can only apply on integer types")
-		}
+		return merr.WrapErrQueryPlanMsg("bitwise operations can only apply on integer types%s", offending)
 	default:
 	}
 	return nil

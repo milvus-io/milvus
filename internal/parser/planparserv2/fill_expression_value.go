@@ -271,7 +271,7 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 		}
 
 		if err = checkValidModArith(expr.GetArithOp(), expr.GetColumnInfo().GetDataType(), expr.GetColumnInfo().GetElementType(),
-			rDataType, schemapb.DataType_None); err != nil {
+			rDataType, schemapb.DataType_None, "", ""); err != nil {
 			return err
 		}
 
