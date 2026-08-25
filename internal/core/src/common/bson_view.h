@@ -304,6 +304,7 @@ class BsonView {
                 }
                 break;
             case milvus::bson::type::k_null:
+            case milvus::bson::type::k_undefined:
             case milvus::bson::type::k_document:
             case milvus::bson::type::k_array:
                 break;
@@ -427,6 +428,9 @@ class BsonView {
                             return ParseAsArray(ptr);
                         }
                         break;
+                    case milvus::bson::type::k_undefined:
+                    case milvus::bson::type::k_null:
+                        return std::nullopt;
                     default:
                         return std::nullopt;
                 }
@@ -449,6 +453,9 @@ class BsonView {
                     break;
                 case milvus::bson::type::k_bool:
                     ptr += 1;
+                    break;
+                case milvus::bson::type::k_undefined:
+                case milvus::bson::type::k_null:
                     break;
                 case milvus::bson::type::k_array:
                 case milvus::bson::type::k_document: {

@@ -19,6 +19,7 @@
 
 #include "common/FieldData.h"
 #include "common/Json.h"
+#include "common/JsonCastFunction.h"
 #include "common/JsonCastType.h"
 #include "common/Schema.h"
 #include "common/Types.h"
@@ -107,6 +108,7 @@ TEST(JsonPathIndexTest, ConvertDouble_PathNotExist) {
         R"({"b": 1})",    // path /a doesn't exist
         R"({"a": 2.0})",  // exists
         R"(100)",         // not an object, /a doesn't exist
+        R"([1, 2])",      // non-numeric array path doesn't exist
     });
     auto schema = MakeJsonSchema();
     auto result = ConvertJsonToTypedFieldData<double>(
@@ -117,15 +119,17 @@ TEST(JsonPathIndexTest, ConvertDouble_PathNotExist) {
         JsonCastFunction::FromString("unknown"));
 
     auto& fd = result.field_data;
-    EXPECT_EQ(fd->get_num_rows(), 3);
+    EXPECT_EQ(fd->get_num_rows(), 4);
     EXPECT_FALSE(fd->is_valid(0));  // path not exist
     EXPECT_TRUE(fd->is_valid(1));   // valid
     EXPECT_FALSE(fd->is_valid(2));  // path not exist
+    EXPECT_FALSE(fd->is_valid(3));  // path not exist
 
-    // non_exist_offsets should contain 0 and 2
-    ASSERT_EQ(result.non_exist_offsets.size(), 2);
+    // non_exist_offsets should contain 0, 2, and 3
+    ASSERT_EQ(result.non_exist_offsets.size(), 3);
     EXPECT_EQ(result.non_exist_offsets[0], 0);
     EXPECT_EQ(result.non_exist_offsets[1], 2);
+    EXPECT_EQ(result.non_exist_offsets[2], 3);
 }
 
 TEST(JsonPathIndexTest, ConvertDouble_PathExistsButCastFails) {
@@ -152,6 +156,90 @@ TEST(JsonPathIndexTest, ConvertDouble_PathExistsButCastFails) {
 
     // Key: non_exist_offsets should be EMPTY because path exists in all rows
     EXPECT_TRUE(result.non_exist_offsets.empty());
+}
+
+TEST(JsonPathIndexTest, ConvertDouble_NumberErrorKeepsPathPresent) {
+    auto json_fd = MakeJsonFieldData({
+        R"({"a": -1.48e-309})",             // representable subnormal
+        R"({"a": 1e-400})",                 // underflows to zero
+        R"({"a": 1e400})",                  // out of double range
+        R"({"sibling": 1e400, "a": 2.5})",  // unrelated bad number
+        R"({"a": 18446744073709551616})",   // larger than uint64_t
+        R"({"b": 1})",                      // path missing
+    });
+    auto schema = MakeJsonSchema();
+    auto result = ConvertJsonToTypedFieldData<double>(
+        {json_fd},
+        schema,
+        "/a",
+        JsonCastType::FromString("DOUBLE"),
+        JsonCastFunction::FromString("unknown"));
+
+    auto& fd = result.field_data;
+    ASSERT_EQ(fd->get_num_rows(), 6);
+    EXPECT_TRUE(fd->is_valid(0));
+    EXPECT_TRUE(fd->is_valid(1));
+    EXPECT_FALSE(fd->is_valid(2));
+    EXPECT_TRUE(fd->is_valid(3));
+    EXPECT_FALSE(fd->is_valid(4));
+    EXPECT_FALSE(fd->is_valid(5));
+
+    EXPECT_DOUBLE_EQ(*static_cast<const double*>(fd->RawValue(0)), -1.48e-309);
+    EXPECT_EQ(*static_cast<const double*>(fd->RawValue(1)), 0.0);
+    EXPECT_DOUBLE_EQ(*static_cast<const double*>(fd->RawValue(3)), 2.5);
+
+    // Numeric parse/conversion errors are invalid values, not missing paths.
+    // Only the row that truly lacks /a is excluded from EXISTS.
+    ASSERT_EQ(result.non_exist_offsets.size(), 1);
+    EXPECT_EQ(result.non_exist_offsets[0], 5);
+}
+
+TEST(JsonPathIndexTest, ConvertDouble_StringCastUsesSimdjsonNumberSemantics) {
+    auto json_fd = MakeJsonFieldData({
+        R"({"a": "-1.48e-309"})",            // representable subnormal
+        R"({"a": "1e-400"})",                // underflows to zero
+        R"({"a": "1e400"})",                 // overflows double
+        R"({"a": "1.5junk"})",               // not a complete number token
+        R"({"a": "2.5"})",                   // ordinary finite value
+        R"({"a": "18446744073709551616"})",  // larger than uint64_t
+        R"({"a": 18446744073709551616})",    // same numeric JSON value
+        R"({"b": 1})",                       // path missing
+    });
+    auto schema = MakeJsonSchema();
+    auto result = ConvertJsonToTypedFieldData<double>(
+        {json_fd},
+        schema,
+        "/a",
+        JsonCastType::FromString("DOUBLE"),
+        JsonCastFunction::FromString("STRING_TO_DOUBLE"));
+
+    auto& fd = result.field_data;
+    ASSERT_EQ(fd->get_num_rows(), 8);
+    EXPECT_TRUE(fd->is_valid(0));
+    EXPECT_TRUE(fd->is_valid(1));
+    EXPECT_FALSE(fd->is_valid(2));
+    EXPECT_FALSE(fd->is_valid(3));
+    EXPECT_TRUE(fd->is_valid(4));
+    EXPECT_FALSE(fd->is_valid(5));
+    EXPECT_FALSE(fd->is_valid(6));
+    EXPECT_FALSE(fd->is_valid(7));
+
+    EXPECT_DOUBLE_EQ(*static_cast<const double*>(fd->RawValue(0)), -1.48e-309);
+    EXPECT_EQ(*static_cast<const double*>(fd->RawValue(1)), 0.0);
+    EXPECT_DOUBLE_EQ(*static_cast<const double*>(fd->RawValue(4)), 2.5);
+
+    // Invalid numeric values still have a present /a path. Only the genuinely
+    // missing row is false for EXISTS.
+    ASSERT_EQ(result.non_exist_offsets.size(), 1);
+    EXPECT_EQ(result.non_exist_offsets[0], 7);
+
+    auto cast = JsonCastFunction::FromString("STRING_TO_DOUBLE");
+    Json out_of_range(simdjson::padded_string(std::string(R"({"a": 1e400})")));
+    EXPECT_NO_THROW({
+        auto value =
+            JsonCastFunction::CastJsonValue<double>(cast, out_of_range, "/a");
+        EXPECT_FALSE(value.has_value());
+    });
 }
 
 TEST(JsonPathIndexTest, ConvertDouble_MixedRows) {
@@ -380,6 +468,45 @@ TEST(JsonPathIndexTest, SortDouble_ComparisonUnknowns) {
 
     idx.BuildWithFieldData({json_fd});
     AssertDoubleComparisonUnknowns(idx);
+}
+
+TEST(JsonPathIndexTest, SortDouble_NumberErrorIsUnknownButExists) {
+    auto json_fd = MakeJsonFieldData({
+        R"({"a": 1.0})",
+        R"({"a": 1e400})",
+        R"({"b": 2.0})",
+        R"({"a": 3.0})",
+    });
+    auto schema = MakeJsonSchema();
+    auto ctx = MakeTestContext();
+
+    JsonScalarIndexWrapper<double, ScalarIndexSort<double>> idx(
+        JsonCastType::FromString("DOUBLE"),
+        "/a",
+        JsonCastFunction::FromString("unknown"),
+        schema,
+        ctx);
+    idx.BuildWithFieldData({json_fd});
+
+    auto valid = idx.IsNotNull();
+    ASSERT_EQ(valid.size(), 4);
+    EXPECT_TRUE(valid[0]);
+    EXPECT_FALSE(valid[1]);
+    EXPECT_FALSE(valid[2]);
+    EXPECT_TRUE(valid[3]);
+
+    auto exists = idx.Exists();
+    ASSERT_EQ(exists.size(), 4);
+    EXPECT_TRUE(exists[0]);
+    EXPECT_TRUE(exists[1]);
+    EXPECT_FALSE(exists[2]);
+    EXPECT_TRUE(exists[3]);
+
+    auto range = idx.Range(0.0, OpType::GreaterThan);
+    EXPECT_TRUE(range[0]);
+    EXPECT_FALSE(range[1]);
+    EXPECT_FALSE(range[2]);
+    EXPECT_TRUE(range[3]);
 }
 
 TEST(JsonPathIndexTest, InvertedDouble_ComparisonUnknowns) {

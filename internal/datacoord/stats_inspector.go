@@ -229,9 +229,9 @@ func needDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted
 		if segment.GetJsonKeyStats()[fieldID] == nil {
 			return true
 		}
-		// if the data format version is less than the current version, we need to do the stats task again
-		// because the data format is updated, the old data format need to be converted to the new data format
-		if segment.GetJsonKeyStats()[fieldID].GetJsonKeyStatsDataFormat() < common.JSONStatsDataFormatVersion {
+		// Readers require an exact data-format match. Rebuild both older stats
+		// and stats produced by a newer binary after a downgrade.
+		if segment.GetJsonKeyStats()[fieldID].GetJsonKeyStatsDataFormat() != common.JSONStatsDataFormatVersion {
 			return true
 		}
 	}

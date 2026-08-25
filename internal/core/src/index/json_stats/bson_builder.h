@@ -34,6 +34,7 @@ namespace milvus::index {
 // append it to a libbson document at conversion time.
 struct DomScalar {
     JSONType type{JSONType::NONE};
+    bool undefined{false};
     bool b{false};
     int32_t i32{0};
     int64_t i64{0};
@@ -101,8 +102,30 @@ class BsonBuilder {
                 const std::string& value,
                 const JSONType& type);
 
+    static void
+    AppendDoubleToDom(DomNode& root,
+                      const std::vector<std::string>& keys,
+                      double value);
+
+    static void
+    AppendUndefinedToDom(DomNode& root, const std::vector<std::string>& keys);
+
+    static void
+    AppendArrayToDom(DomNode& root,
+                     const std::vector<std::string>& keys,
+                     std::vector<uint8_t> array_bytes);
+
     static DomNode
     CreateValueNode(const std::string& value, JSONType type);
+
+    static DomNode
+    CreateDoubleValueNode(double value);
+
+    static DomNode
+    CreateUndefinedValueNode();
+
+    static DomNode
+    CreateArrayValueNode(std::vector<uint8_t> array_bytes);
 
     static void
     ConvertDomToBson(const DomNode& node, bson_t* builder);

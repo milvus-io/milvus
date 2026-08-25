@@ -17,6 +17,7 @@
 #include <nlohmann/json.hpp>
 #include <string.h>
 #include <chrono>
+#include <cctype>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -38,7 +39,6 @@
 #include "common/GroupChunk.h"
 #include "common/Json.h"
 #include "common/Tracer.h"
-#include "common/jsmn.h"
 #include "fmt/core.h"
 #include "index/Utils.h"
 #include "index/json_stats/JsonKeyStats.h"
@@ -96,6 +96,15 @@ GetJsonStatsReadProperties() {
 std::string
 NoopParquetKeyRetriever(const std::string&) {
     return {};
+}
+
+std::string_view
+TrimJsonToken(std::string_view token) {
+    while (!token.empty() &&
+           std::isspace(static_cast<unsigned char>(token.back()))) {
+        token.remove_suffix(1);
+    }
+    return token;
 }
 
 JsonStatsParquetMetadata
@@ -256,115 +265,122 @@ JsonKeyStats::AddKeyStatsInfo(const std::vector<std::string>& paths,
     // TODO: update min and max value
 }
 
-void
-JsonKeyStats::TraverseJsonForStats(const char* json,
-                                   jsmntok* tokens,
-                                   int& index,
-                                   std::vector<std::string>& path,
-                                   std::map<JsonKey, KeyStatsInfo>& infos) {
-    jsmntok current = tokens[0];
-    AssertInfo(current.type != JSMN_UNDEFINED,
-               "current token type is undefined for json: {}.",
-               json);
-    if (current.type == JSMN_OBJECT) {
-        if (!path.empty()) {
-            AddKeyStatsInfo(path, JSONType::OBJECT, nullptr, infos);
-        }
-        int j = 1;
-        for (int i = 0; i < current.size; i++) {
-            AssertInfo(tokens[j].type == JSMN_STRING && tokens[j].size != 0,
-                       "current token type is not string for json: {} at "
-                       "type: {}, size: {}, value: {}",
-                       json,
-                       int(tokens[j].type),
-                       tokens[j].size,
-                       std::string(json + tokens[j].start,
-                                   tokens[j].end - tokens[j].start));
-            std::string key(json + tokens[j].start,
-                            tokens[j].end - tokens[j].start);
-            path.push_back(key);
-            j++;
-            int consumed = 0;
-            TraverseJsonForStats(json, tokens + j, consumed, path, infos);
-            path.pop_back();
-            j += consumed;
-        }
-        index = j;
-    } else if (current.type == JSMN_PRIMITIVE) {
-        std::string value(json + current.start, current.end - current.start);
-        auto type = getType(value);
+std::pair<JSONType, JsonStatsValue>
+JsonKeyStats::ParsePrimitiveValue(simdjson::ondemand::value value) {
+    auto type_result = value.type();
+    AssertInfo(type_result.error() == simdjson::SUCCESS,
+               "failed to read json value type: {}",
+               simdjson::error_message(type_result.error()));
 
-        if (type == JSONType::INT64) {
-            AddKeyStatsInfo(path, JSONType::INT64, nullptr, infos);
-        } else if (type == JSONType::FLOAT || type == JSONType::DOUBLE) {
-            AddKeyStatsInfo(path, JSONType::DOUBLE, nullptr, infos);
-        } else if (type == JSONType::BOOL) {
-            AddKeyStatsInfo(path, JSONType::BOOL, nullptr, infos);
-        } else if (type == JSONType::NONE) {
-            AddKeyStatsInfo(path, JSONType::NONE, nullptr, infos);
-        } else {
-            ThrowInfo(ErrorCode::UnexpectedError,
-                      "unsupported json type: {} for build json stats",
-                      type);
-        }
-        index++;
-    } else if (current.type == JSMN_ARRAY) {
-        AddKeyStatsInfo(path, JSONType::ARRAY, nullptr, infos);
-        // skip array parse
-        int count = current.size;
-        int j = 1;
-        while (count > 0) {
-            count--;
-            if (tokens[j].size != 0) {
-                count += tokens[j].size;
+    switch (type_result.value()) {
+        case simdjson::ondemand::json_type::number: {
+            auto raw = TrimJsonToken(value.raw_json_token());
+            JsonStatsValue stats_value{std::string(raw)};
+            // Use the same get_number() contract as raw JSON predicates.  In
+            // particular, get_double() alone accepts integers above uint64
+            // (for example 18446744073709551616), while get_number() rejects
+            // them; indexing such a value as a valid double would make stats
+            // disagree with the raw path.
+            auto number_result = value.get_number();
+            if (number_result.error() != simdjson::SUCCESS) {
+                stats_value.state = JsonStatsValueState::INVALID_NUMBER;
+                return {JSONType::DOUBLE, std::move(stats_value)};
             }
-            j++;
+
+            auto number = number_result.value();
+            if (number.is_int64()) {
+                return {JSONType::INT64, std::move(stats_value)};
+            }
+
+            stats_value.double_value = number.as_double();
+            return {JSONType::DOUBLE, std::move(stats_value)};
         }
-        index = j;
-    } else if (current.type == JSMN_STRING) {
-        Assert(current.size == 0);
-        AddKeyStatsInfo(path, JSONType::STRING, nullptr, infos);
-        index++;
+        case simdjson::ondemand::json_type::boolean: {
+            auto boolean = value.get_bool();
+            AssertInfo(boolean.error() == simdjson::SUCCESS,
+                       "failed to read json boolean: {}",
+                       simdjson::error_message(boolean.error()));
+            return {JSONType::BOOL,
+                    JsonStatsValue{boolean.value() ? "true" : "false"}};
+        }
+        case simdjson::ondemand::json_type::null:
+            return {JSONType::NONE, JsonStatsValue{"null"}};
+        case simdjson::ondemand::json_type::string: {
+            auto string = value.get_string();
+            AssertInfo(string.error() == simdjson::SUCCESS,
+                       "failed to read json string: {}",
+                       simdjson::error_message(string.error()));
+            return {JSONType::STRING,
+                    JsonStatsValue{std::string(string.value())}};
+        }
+        default:
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "json value is not a primitive type");
     }
 }
 
 void
-JsonKeyStats::CollectSingleJsonStatsInfo(
-    const char* json_str, std::map<JsonKey, KeyStatsInfo>& infos) {
-    jsmn_parser parser;
-    jsmn_init(&parser);
+JsonKeyStats::TraverseJsonForStats(simdjson::ondemand::value value,
+                                   std::vector<std::string>& path,
+                                   std::map<JsonKey, KeyStatsInfo>& infos) {
+    auto type_result = value.type();
+    AssertInfo(type_result.error() == simdjson::SUCCESS,
+               "failed to read json value type: {}",
+               simdjson::error_message(type_result.error()));
 
-    int num_tokens = 0;
-    int token_capacity = 16;
-    std::vector<jsmntok_t> tokens(token_capacity);
-
-    while (1) {
-        int r = jsmn_parse(
-            &parser, json_str, strlen(json_str), tokens.data(), token_capacity);
-        if (r < 0) {
-            if (r == JSMN_ERROR_NOMEM) {
-                // Reallocate tokens array if not enough space
-                token_capacity *= 2;
-                tokens.resize(token_capacity);
-                continue;
-            } else {
-                ThrowInfo(ErrorCode::UnexpectedError,
-                          "Failed to parse Json: {}, error: {}",
-                          json_str,
-                          int(r));
-            }
+    if (type_result.value() == simdjson::ondemand::json_type::object) {
+        if (!path.empty()) {
+            AddKeyStatsInfo(path, JSONType::OBJECT, nullptr, infos);
         }
-        num_tokens = r;
-        break;
-    }
-
-    if (num_tokens == 0) {
+        auto object = value.get_object();
+        AssertInfo(object.error() == simdjson::SUCCESS,
+                   "failed to read json object: {}",
+                   simdjson::error_message(object.error()));
+        for (auto field : object.value()) {
+            auto key = field.unescaped_key();
+            AssertInfo(key.error() == simdjson::SUCCESS,
+                       "failed to read json object key: {}",
+                       simdjson::error_message(key.error()));
+            path.emplace_back(key.value());
+            auto child = field.value();
+            AssertInfo(child.error() == simdjson::SUCCESS,
+                       "failed to read json object value: {}",
+                       simdjson::error_message(child.error()));
+            TraverseJsonForStats(child.value(), path, infos);
+            path.pop_back();
+        }
         return;
     }
 
-    int index = 0;
+    if (type_result.value() == simdjson::ondemand::json_type::array) {
+        auto raw = value.raw_json();
+        AssertInfo(raw.error() == simdjson::SUCCESS,
+                   "failed to read json array: {}",
+                   simdjson::error_message(raw.error()));
+        AddKeyStatsInfo(path, JSONType::ARRAY, nullptr, infos);
+        return;
+    }
+
+    auto type = ParsePrimitiveValue(value).first;
+    AddKeyStatsInfo(path, type, nullptr, infos);
+}
+
+void
+JsonKeyStats::CollectSingleJsonStatsInfo(
+    const milvus::Json& json, std::map<JsonKey, KeyStatsInfo>& infos) {
+    if (json.data().empty()) {
+        return;
+    }
+    auto document = json.doc();
+    AssertInfo(document.error() == simdjson::SUCCESS,
+               "failed to parse json for stats: {}",
+               simdjson::error_message(document.error()));
+    auto root = document.get_value();
+    AssertInfo(root.error() == simdjson::SUCCESS,
+               "failed to read json root for stats: {}",
+               simdjson::error_message(root.error()));
     std::vector<std::string> paths;
-    TraverseJsonForStats(json_str, tokens.data(), index, paths, infos);
+    TraverseJsonForStats(root.value(), paths, infos);
 }
 
 std::map<JsonKey, KeyStatsInfo>
@@ -378,10 +394,9 @@ JsonKeyStats::CollectKeyInfo(const std::vector<FieldDataPtr>& field_datas,
             if ((nullable || data->IsNullable()) && !data->is_valid(i)) {
                 continue;
             }
-            auto json_str = static_cast<const milvus::Json*>(data->RawValue(i))
-                                ->data()
-                                .data();
-            CollectSingleJsonStatsInfo(json_str, infos);
+            const auto& json =
+                *static_cast<const milvus::Json*>(data->RawValue(i));
+            CollectSingleJsonStatsInfo(json, infos);
         }
         num_rows += n;
     }
@@ -494,107 +509,63 @@ JsonKeyStats::ClassifyJsonKeyLayoutType(
 void
 JsonKeyStats::AddKeyStats(const std::vector<std::string>& path,
                           JSONType type,
-                          const std::string& value,
-                          std::map<JsonKey, std::string>& values) {
+                          JsonStatsValue value,
+                          std::map<JsonKey, JsonStatsValue>& values) {
     auto path_str = JsonPointer(path);
     auto key = JsonKey(path_str, type);
-    values[key] = value;
+    values[key] = std::move(value);
 }
 
 void
 JsonKeyStats::TraverseJsonForBuildStats(
-    const char* json,
-    jsmntok* tokens,
-    int& index,
+    simdjson::ondemand::value value,
     std::vector<std::string>& path,
-    std::map<JsonKey, std::string>& values) {
-    jsmntok current = tokens[0];
-    AssertInfo(current.type != JSMN_UNDEFINED,
-               "current token type is undefined for json: {}",
-               json);
-    if (current.type == JSMN_OBJECT) {
-        if (!path.empty() && current.size == 0) {
-            AddKeyStats(
-                path,
-                JSONType::OBJECT,
-                std::string(json + current.start, current.end - current.start),
-                values);
-            index++;
-            return;
-        }
-        int j = 1;
-        for (int i = 0; i < current.size; i++) {
-            AssertInfo(tokens[j].type == JSMN_STRING && tokens[j].size != 0,
-                       "current token type is not string for json: {} at "
-                       "type: {}, size: {}, value: {}",
-                       json,
-                       int(tokens[j].type),
-                       tokens[j].size,
-                       std::string(json + tokens[j].start,
-                                   tokens[j].end - tokens[j].start));
+    std::map<JsonKey, JsonStatsValue>& values) {
+    auto type_result = value.type();
+    AssertInfo(type_result.error() == simdjson::SUCCESS,
+               "failed to read json value type: {}",
+               simdjson::error_message(type_result.error()));
 
-            std::string key(json + tokens[j].start,
-                            tokens[j].end - tokens[j].start);
-            path.push_back(key);
-            j++;
-            int consumed = 0;
-            TraverseJsonForBuildStats(json, tokens + j, consumed, path, values);
+    if (type_result.value() == simdjson::ondemand::json_type::object) {
+        auto object = value.get_object();
+        AssertInfo(object.error() == simdjson::SUCCESS,
+                   "failed to read json object: {}",
+                   simdjson::error_message(object.error()));
+        bool empty = true;
+        for (auto field : object.value()) {
+            empty = false;
+            auto key = field.unescaped_key();
+            AssertInfo(key.error() == simdjson::SUCCESS,
+                       "failed to read json object key: {}",
+                       simdjson::error_message(key.error()));
+            path.emplace_back(key.value());
+            auto child = field.value();
+            AssertInfo(child.error() == simdjson::SUCCESS,
+                       "failed to read json object value: {}",
+                       simdjson::error_message(child.error()));
+            TraverseJsonForBuildStats(child.value(), path, values);
             path.pop_back();
-            j += consumed;
         }
-        index = j;
-    } else if (current.type == JSMN_PRIMITIVE) {
-        std::string value(json + current.start, current.end - current.start);
-        JSONType type;
-        try {
-            type = getType(value);
-        } catch (const std::exception& e) {
-            ThrowInfo(ErrorCode::UnexpectedError,
-                      "failed to get json type for value: {} with error: {}",
-                      value,
-                      e.what());
+        if (empty && !path.empty()) {
+            AddKeyStats(path, JSONType::OBJECT, JsonStatsValue{"{}"}, values);
         }
-
-        if (type == JSONType::INT64) {
-            AddKeyStats(path, JSONType::INT64, value, values);
-        } else if (type == JSONType::FLOAT || type == JSONType::DOUBLE) {
-            AddKeyStats(path, JSONType::DOUBLE, value, values);
-        } else if (type == JSONType::BOOL) {
-            AddKeyStats(path, JSONType::BOOL, value, values);
-        } else if (type == JSONType::NONE) {
-            AddKeyStats(path, JSONType::NONE, value, values);
-        } else {
-            ThrowInfo(ErrorCode::UnexpectedError,
-                      "unsupported json type: {} for build json stats",
-                      type);
-        }
-        index++;
-    } else if (current.type == JSMN_ARRAY) {
-        // Collect array as raw JSON string so it can be shredded into a dedicated column
-        AddKeyStats(
-            path,
-            JSONType::ARRAY,
-            std::string(json + current.start, current.end - current.start),
-            values);
-        // Skip array subtree
-        int count = current.size;
-        int j = 1;
-        while (count > 0) {
-            count--;
-            if (tokens[j].size != 0) {
-                count += tokens[j].size;
-            }
-            j++;
-        }
-        index = j;
-    } else if (current.type == JSMN_STRING) {
-        auto value =
-            std::string(json + current.start, current.end - current.start);
-        auto unescaped = UnescapeJsonString(value);
-        Assert(current.size == 0);
-        AddKeyStats(path, JSONType::STRING, unescaped, values);
-        index++;
+        return;
     }
+
+    if (type_result.value() == simdjson::ondemand::json_type::array) {
+        auto raw = value.raw_json();
+        AssertInfo(raw.error() == simdjson::SUCCESS,
+                   "failed to read json array: {}",
+                   simdjson::error_message(raw.error()));
+        AddKeyStats(path,
+                    JSONType::ARRAY,
+                    JsonStatsValue{std::string(raw.value())},
+                    values);
+        return;
+    }
+
+    auto [type, stats_value] = ParsePrimitiveValue(value);
+    AddKeyStats(path, type, std::move(stats_value), values);
 }
 
 void
@@ -612,65 +583,68 @@ JsonKeyStats::BuildKeyStatsForNullRow() {
 }
 
 void
-JsonKeyStats::BuildKeyStatsForRow(const char* json_str, uint32_t row_id) {
+JsonKeyStats::BuildKeyStatsForRow(const milvus::Json& json, uint32_t row_id) {
     LOG_TRACE("build key stats for row {} with json {} for segment {}",
               row_id,
-              json_str,
+              json.data(),
               segment_id_);
-    jsmn_parser parser;
-    jsmn_init(&parser);
-
-    int num_tokens = 0;
-    int token_capacity = 16;
-    std::vector<jsmntok_t> tokens(token_capacity);
-
-    while (1) {
-        int r = jsmn_parse(
-            &parser, json_str, strlen(json_str), tokens.data(), token_capacity);
-        if (r < 0) {
-            if (r == JSMN_ERROR_NOMEM) {
-                // Reallocate tokens array if not enough space
-                token_capacity *= 2;
-                tokens.resize(token_capacity);
-                continue;
-            } else {
-                ThrowInfo(ErrorCode::UnexpectedError,
-                          "Failed to parse Json: {}, error: {}",
-                          json_str,
-                          int(r));
-            }
-        }
-        num_tokens = r;
-        break;
-    }
-
-    if (num_tokens == 0) {
-        return;
-    }
-
-    int index = 0;
+    auto document = json.doc();
+    AssertInfo(document.error() == simdjson::SUCCESS,
+               "failed to parse json for stats: {}",
+               simdjson::error_message(document.error()));
+    auto root_value = document.get_value();
+    AssertInfo(root_value.error() == simdjson::SUCCESS,
+               "failed to read json root for stats: {}",
+               simdjson::error_message(root_value.error()));
     std::vector<std::string> paths;
-    std::map<JsonKey, std::string> values;
-    TraverseJsonForBuildStats(json_str, tokens.data(), index, paths, values);
+    std::map<JsonKey, JsonStatsValue> values;
+    TraverseJsonForBuildStats(root_value.value(), paths, values);
     DomNode root;
     std::set<JsonKey> hit_keys;
     for (const auto& [key, value] : values) {
         AssertInfo(key_types_.find(key) != key_types_.end(),
                    "key {} not found in key types",
                    key.key_);
-        if (key_types_[key] == JsonKeyLayoutType::SHARED) {
-            auto path_vec = ParseJsonPointerPath(key.key_);
-            BsonBuilder::AppendToDom(root, path_vec, value, key.type_);
-        } else {
-            if (key.type_ == JSONType::ARRAY) {
-                auto bson_bytes = BuildBsonArrayBytesFromJsonString(value);
+        auto path_vec = ParseJsonPointerPath(key.key_);
+        if (value.IsInvalidNumber()) {
+            BsonBuilder::AppendUndefinedToDom(root, path_vec);
+            if (key_types_[key] != JsonKeyLayoutType::SHARED) {
+                parquet_writer_->AppendNull(key.ToColumnName());
+            }
+        } else if (key.type_ == JSONType::ARRAY) {
+            auto bson_bytes =
+                BuildBsonArrayBytesFromJsonString(value.raw_value);
+            if (key_types_[key] == JsonKeyLayoutType::SHARED) {
+                BsonBuilder::AppendArrayToDom(
+                    root, path_vec, std::move(bson_bytes));
+            } else {
                 parquet_writer_->AppendValue(
                     key.ToColumnName(),
                     std::string(
                         reinterpret_cast<const char*>(bson_bytes.data()),
                         bson_bytes.size()));
+            }
+        } else if (key_types_[key] == JsonKeyLayoutType::SHARED) {
+            if (key.type_ == JSONType::DOUBLE) {
+                AssertInfo(value.double_value.has_value(),
+                           "parsed double is missing for key {}",
+                           key.key_);
+                BsonBuilder::AppendDoubleToDom(
+                    root, path_vec, value.double_value.value());
             } else {
-                parquet_writer_->AppendValue(key.ToColumnName(), value);
+                BsonBuilder::AppendToDom(
+                    root, path_vec, value.raw_value, key.type_);
+            }
+        } else {
+            if (key.type_ == JSONType::DOUBLE) {
+                AssertInfo(value.double_value.has_value(),
+                           "parsed double is missing for key {}",
+                           key.key_);
+                parquet_writer_->AppendDouble(key.ToColumnName(),
+                                              value.double_value.value());
+            } else {
+                parquet_writer_->AppendValue(key.ToColumnName(),
+                                             value.raw_value);
             }
         }
         hit_keys.insert(key);
@@ -715,17 +689,15 @@ JsonKeyStats::BuildKeyStats(const std::vector<FieldDataPtr>& field_datas,
             if ((nullable || data->IsNullable()) && !data->is_valid(i)) {
                 BuildKeyStatsForNullRow();
             } else {
-                auto json_str =
-                    static_cast<const milvus::Json*>(data->RawValue(i))
-                        ->data()
-                        .data();
+                const auto& json =
+                    *static_cast<const milvus::Json*>(data->RawValue(i));
 
                 // some situations, such as empty json string,
                 // should be handled as null row
-                if (strlen(json_str) == 0) {
+                if (json.data().empty()) {
                     BuildKeyStatsForNullRow();
                 } else {
-                    BuildKeyStatsForRow(json_str, row_id);
+                    BuildKeyStatsForRow(json, row_id);
                 }
             }
             row_id++;

@@ -173,6 +173,81 @@ TEST_F(BsonBuilderTest, CreateValueNodeTest) {
                  std::runtime_error);
 }
 
+TEST_F(BsonBuilderTest, UndefinedSentinelPreservesExistsAndSibling) {
+    DomNode root(DomNode::Type::DOCUMENT);
+    BsonBuilder::AppendUndefinedToDom(root, {"bad"});
+    BsonBuilder::AppendDoubleToDom(root, {"ok"}, 1.5);
+
+    BsonDocument bson_doc;
+    BsonBuilder::ConvertDomToBson(root, bson_doc.get());
+    auto offsets =
+        BsonBuilder::ExtractBsonKeyOffsets(bson_doc.data(), bson_doc.length());
+    ASSERT_EQ(offsets.size(), 2);
+    EXPECT_EQ(offsets[0].first, "/bad");
+    EXPECT_EQ(offsets[1].first, "/ok");
+
+    BsonView view(bson_doc.data(), bson_doc.length());
+    EXPECT_FALSE(view.IsBsonValueEmpty(offsets[0].second));
+    EXPECT_FALSE(
+        view.ParseAsValueAtOffset<double>(offsets[0].second).has_value());
+    ASSERT_TRUE(
+        view.ParseAsValueAtOffset<double>(offsets[1].second).has_value());
+    EXPECT_DOUBLE_EQ(
+        view.ParseAsValueAtOffset<double>(offsets[1].second).value(), 1.5);
+
+    milvus::bson::document_view document(bson_doc.data(), bson_doc.length());
+    auto bad = view.FindByPath(document, {"bad"});
+    ASSERT_TRUE(bad.has_value());
+    EXPECT_EQ(bad->type(), milvus::bson::type::k_undefined);
+}
+
+TEST_F(BsonBuilderTest, ArrayInvalidNumberKeepsValidElementsQueryable) {
+    const std::string json =
+        R"([1e400,7,{"bad":18446744073709551616,"ok":9},[1e400,11]])";
+
+    auto bytes = BuildBsonArrayBytesFromJsonString(json);
+    milvus::bson::array_view array(bytes.data(), bytes.size());
+    ASSERT_EQ(std::distance(array.begin(), array.end()), 4);
+
+    auto it = array.begin();
+    EXPECT_EQ(it->type(), milvus::bson::type::k_undefined);
+    ++it;
+    EXPECT_EQ(it->type(), milvus::bson::type::k_int64);
+    EXPECT_EQ(it->get_int64().value, 7);
+    ++it;
+    ASSERT_EQ(it->type(), milvus::bson::type::k_document);
+    auto object = it->get_value().get_document().value;
+    auto object_it = object.begin();
+    ASSERT_NE(object_it, object.end());
+    EXPECT_EQ(object_it->type(), milvus::bson::type::k_undefined);
+    ++object_it;
+    ASSERT_NE(object_it, object.end());
+    EXPECT_EQ(object_it->get_int64().value, 9);
+    ++it;
+    ASSERT_EQ(it->type(), milvus::bson::type::k_array);
+    auto nested = it->get_value().get_array().value;
+    auto nested_it = nested.begin();
+    EXPECT_EQ(nested_it->type(), milvus::bson::type::k_undefined);
+    ++nested_it;
+    EXPECT_EQ(nested_it->get_int64().value, 11);
+
+    // Skipping over a zero-payload undefined element must still reach later
+    // array indexes.
+    auto seven = BsonView::GetNthElementInArray<int64_t>(bytes.data(), 1);
+    ASSERT_TRUE(seven.has_value());
+    EXPECT_EQ(seven.value(), 7);
+
+    DomNode root(DomNode::Type::DOCUMENT);
+    BsonBuilder::AppendArrayToDom(root, {"array"}, std::move(bytes));
+    BsonDocument bson_doc;
+    BsonBuilder::ConvertDomToBson(root, bson_doc.get());
+    auto offsets =
+        BsonBuilder::ExtractBsonKeyOffsets(bson_doc.data(), bson_doc.length());
+    ASSERT_EQ(offsets.size(), 1);
+    BsonView view(bson_doc.data(), bson_doc.length());
+    EXPECT_FALSE(view.IsBsonValueEmpty(offsets[0].second));
+}
+
 TEST_F(BsonBuilderTest, AppendToDomTest) {
     BsonBuilder builder;
     DomNode root(DomNode::Type::DOCUMENT);

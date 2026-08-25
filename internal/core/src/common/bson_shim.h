@@ -46,6 +46,7 @@ enum class type : uint8_t {
     k_document = 0x03,
     k_array = 0x04,
     k_binary = 0x05,
+    k_undefined = 0x06,
     k_bool = 0x08,
     k_null = 0x0A,
     k_int32 = 0x10,

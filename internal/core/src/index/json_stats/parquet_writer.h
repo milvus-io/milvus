@@ -37,12 +37,30 @@
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/packed/writer.h"
 #include "parquet/properties.h"
+#include "simdjson.h"
 
 namespace milvus::index {
 
 template <typename T>
 inline T
 ConvertValue(const std::string& value);
+
+inline double
+ParseJsonDoubleValue(const std::string& value) {
+    simdjson::padded_string padded(value.data(), value.size());
+    simdjson::ondemand::parser parser;
+    auto document = parser.iterate(padded);
+    AssertInfo(document.error() == simdjson::SUCCESS,
+               "invalid json number {}: {}",
+               value,
+               simdjson::error_message(document.error()));
+    auto number = document.get_number();
+    AssertInfo(number.error() == simdjson::SUCCESS,
+               "invalid json number {}: {}",
+               value,
+               simdjson::error_message(number.error()));
+    return number.value().as_double();
+}
 
 template <>
 inline int8_t
@@ -67,25 +85,12 @@ ConvertValue<int64_t>(const std::string& value) {
 template <>
 inline float
 ConvertValue<float>(const std::string& value) {
-    // strtof never throws: on ERANGE (overflow / subnormal underflow) it
-    // returns the clamped value instead, unlike std::stof which throws
-    // std::out_of_range and poisoned the json stats build.
-    char* end = nullptr;
-    float v = std::strtof(value.c_str(), &end);
-    AssertInfo(end == value.c_str() + value.size(),
-               "invalid float value: {}",
-               value);
-    return v;
+    return static_cast<float>(ParseJsonDoubleValue(value));
 }
 template <>
 inline double
 ConvertValue<double>(const std::string& value) {
-    char* end = nullptr;
-    double v = std::strtod(value.c_str(), &end);
-    AssertInfo(end == value.c_str() + value.size(),
-               "invalid double value: {}",
-               value);
-    return v;
+    return ParseJsonDoubleValue(value);
 }
 template <>
 inline bool
@@ -205,6 +210,12 @@ class JsonStatsParquetWriter {
 
     void
     AppendValue(const std::string& key, const std::string& value);
+
+    void
+    AppendNull(const std::string& key);
+
+    void
+    AppendDouble(const std::string& key, double value);
 
     void
     AppendRow(const std::map<std::string, std::string>& row_data);
