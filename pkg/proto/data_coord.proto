@@ -1671,6 +1671,15 @@ message ExternalCollectionRefreshJob {
   int64 end_time = 9;            // Job end timestamp (Unix ms, 0 if not completed)
   int64 progress = 10;           // Aggregated progress percentage (0-100)
   repeated int64 task_ids = 11;  // Task IDs belonging to this job
+  // Timestamp (Unix ms) at which the job entered the index wait, set in the
+  // same write that applies its segment results. Only written when
+  // dataCoord.externalCollection.refreshWaitForIndex is on.
+  //
+  // It is both the sub-state marker ("applied, now waiting for indexes") and
+  // the apply-once guard: the apply and this field land together, so a job
+  // carrying it has already committed its segments and must not apply again.
+  // 0 when unset.
+  int64 index_wait_started_time = 13;
 }
 
 // ExternalCollectionRefreshTask - Task level abstraction for scheduler and worker execution
