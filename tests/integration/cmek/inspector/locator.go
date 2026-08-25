@@ -38,12 +38,15 @@ type Object struct {
 }
 
 // LocateScalarIndex resolves final scalar-index objects through the public
-// segment view and DataCoord's GetIndexInfos response. The returned paths are
+// segment view and DataCoord's GetIndexInfos response. DataCoord currently
+// ignores GetIndexInfoRequest.IndexName and rewrites each finished segment
+// index's response IndexName to its scalar index type, so indexType is
+// intentionally not the user-facing CreateIndex name. The returned paths are
 // deliberately not reconstructed or prefixed by the test.
 func LocateScalarIndex(ctx context.Context,
 	client types.MixCoordClient,
 	segments []*datapb.SegmentInfo,
-	indexName string,
+	indexType string,
 	fieldID int64,
 	expectedEngineVersion int32,
 ) ([]Object, error) {
@@ -59,7 +62,6 @@ func LocateScalarIndex(ctx context.Context,
 	response, err := client.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{
 		CollectionID: collectionID,
 		SegmentIDs:   segmentIDs,
-		IndexName:    indexName,
 	})
 	if err = merr.CheckRPCCall(response, err); err != nil {
 		return nil, err
@@ -73,7 +75,7 @@ func LocateScalarIndex(ctx context.Context,
 		}
 		found := false
 		for _, indexInfo := range segmentInfo.GetIndexInfos() {
-			if indexInfo.GetFieldID() != fieldID || indexInfo.GetIndexName() != indexName {
+			if indexInfo.GetFieldID() != fieldID || indexInfo.GetIndexName() != indexType {
 				continue
 			}
 			found = true
@@ -98,7 +100,7 @@ func LocateScalarIndex(ctx context.Context,
 		}
 		if !found {
 			return nil, fmt.Errorf("missing index metadata for segment %d field %d index %q",
-				segment.GetID(), fieldID, indexName)
+				segment.GetID(), fieldID, indexType)
 		}
 	}
 	return objects, nil
