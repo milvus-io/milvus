@@ -200,9 +200,8 @@ HybridScalarIndex<T>::SelectBuildTypeForArrayType(
     // fields keep INVERTED because the sort index cannot handle array values.
     // These are hardcoded and config parameters don't apply to arrays.
     if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
-        internal_index_type_ = is_nested_index_
-                                   ? ScalarIndexType::STLSORT
-                                   : ScalarIndexType::INVERTED;
+        internal_index_type_ = is_nested_index_ ? ScalarIndexType::STLSORT
+                                                : ScalarIndexType::INVERTED;
     } else {
         internal_index_type_ = ScalarIndexType::BITMAP;
     }
