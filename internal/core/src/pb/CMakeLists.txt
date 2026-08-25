@@ -14,3 +14,8 @@ find_package(Protobuf REQUIRED)
 add_source_at_current_directory_recursively()
 add_library(milvus_pb OBJECT ${SOURCE_FILES})
 target_link_libraries(milvus_pb PUBLIC milvus_conan_deps)
+
+# Protobuf-generated .pb.cc files declare non-static globals (schemas[],
+# file_default_instances[], _static_init2_*) that collide when CMake Unity Build
+# merges several of them into one jumbo TU. Keep generated code out of batches.
+set_target_properties(milvus_pb PROPERTIES UNITY_BUILD OFF)

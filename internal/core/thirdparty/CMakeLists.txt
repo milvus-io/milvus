@@ -14,6 +14,12 @@
 # Thirdpart cxx and c flags
 append_flags(CMAKE_CXX_FLAGS FLAGS "-O3 -fPIC -Wno-error -fopenmp -Wno-macro-redefined")
 
+# Unity build is scoped to Milvus' own src (set in the parent CMakeLists.txt).
+# Third-party sub-builds (knowhere/faiss, rocksdb, rdkafka, ...) are excluded:
+# merging their TUs triggers file-scope symbol collisions (e.g. faiss::SL,
+# faiss::roundup) and these trees are rarely recompiled during the dev loop.
+set(CMAKE_UNITY_BUILD OFF)
+
 if (NOT KNOWHERE_VERBOSE_THIRDPARTY_BUILD)
     set(EP_LOG_OPTIONS LOG_CONFIGURE 1 LOG_BUILD 1 LOG_INSTALL 1 LOG_DOWNLOAD 1)
 else ()

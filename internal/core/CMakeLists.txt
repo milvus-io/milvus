@@ -50,14 +50,6 @@ else ()
     message(FATAL_ERROR "Unsupported platform!" )
 endif ()
 
-# Use -g1 (minimal debug info) for Release to speed up compile & link;
-# full -g for Debug/RelWithDebInfo where detailed debugging matters.
-if (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g1")
-else ()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
-endif ()
-
 # Use pipes between compiler stages instead of temp files (faster I/O)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pipe")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pipe")
@@ -114,15 +106,6 @@ set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
 
 # **************************** Project ****************************
 project( milvus VERSION "${MILVUS_VERSION}" )
-
-# Unity (jumbo) build: merge multiple .cpp files per target into fewer
-# translation units, dramatically reducing redundant header parsing.
-if ( MILVUS_UNITY_BUILD )
-    set( CMAKE_UNITY_BUILD ON )
-    # ~8 sources per unity chunk is a good balance between speed and memory.
-    set( CMAKE_UNITY_BUILD_BATCH_SIZE 8 )
-    message( STATUS "Unity build enabled (batch size ${CMAKE_UNITY_BUILD_BATCH_SIZE})" )
-endif ()
 
 set( CMAKE_CXX_STANDARD 20 )
 set( CMAKE_CXX_STANDARD_REQUIRED on )
@@ -204,6 +187,61 @@ include( CTest )
 include( BuildUtils )
 include( DefineOptions )
 using_ccache_if_defined(MILVUS_USE_CCACHE)
+
+# Use -g1 (minimal debug info) for Release to speed up compile & link;
+# full -g for Debug/RelWithDebInfo where detailed debugging matters.
+# MILVUS_DEV_DEBUG_INFO=line-tables is an opt-in mode mapping to clang's
+# -gline-tables-only (GCC's -g1): stack traces + file:line only, no
+# variable-level DWARF. The default remains "full"; pass line-tables only when
+# faster/smaller developer builds do not need variable inspection. Defined via
+# define_option_string in DefineOptions.cmake so the configure summary reports
+# it and the allowed values are enumerated.
+if (MILVUS_DEV_DEBUG_INFO STREQUAL "line-tables")
+    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        set(MILVUS_DEV_DEBUG_FLAG "-gline-tables-only")
+    else ()
+        set(MILVUS_DEV_DEBUG_FLAG "-g1")
+    endif ()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MILVUS_DEV_DEBUG_FLAG}")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${MILVUS_DEV_DEBUG_FLAG}")
+    # CMake emits the per-config flags (CMAKE_CXX_FLAGS_DEBUG /
+    # CMAKE_CXX_FLAGS_RELWITHDEBINFO, both "-g" by default) AFTER the general
+    # CMAKE_CXX_FLAGS, and the last -g option wins, which would silently
+    # override the line-tables flag above. Re-apply it in the per-config flags
+    # so line-tables stays effective in Debug/RelWithDebInfo.
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${MILVUS_DEV_DEBUG_FLAG}")
+    set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} ${MILVUS_DEV_DEBUG_FLAG}")
+    set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} ${MILVUS_DEV_DEBUG_FLAG}")
+    set(CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO} ${MILVUS_DEV_DEBUG_FLAG}")
+elseif (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g1")
+else ()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+endif ()
+
+# Unity (jumbo) build: merge multiple .cpp files per target into fewer
+# translation units, dramatically reducing redundant header parsing.
+# Defined after include(DefineOptions) so MILVUS_UNITY_BUILD is defined on a
+# fresh configure. The CMake option defaults to OFF to preserve per-source
+# compile_commands.json for clangd/clang-tidy; scripts/core_build.sh opts in
+# for its normal development path.
+if ( MILVUS_UNITY_BUILD )
+    set( CMAKE_UNITY_BUILD ON )
+    # ~8 sources per unity chunk is a good balance between speed and memory.
+    set( CMAKE_UNITY_BUILD_BATCH_SIZE 8 )
+    message( STATUS "Unity build enabled (batch size ${CMAKE_UNITY_BUILD_BATCH_SIZE})" )
+    if ( CMAKE_EXPORT_COMPILE_COMMANDS )
+        # CMAKE_EXPORT_COMPILE_COMMANDS does not work well with unity builds:
+        # the generated compile_commands.json only lists the jumbo
+        # Unity/unity_*.cxx entries, not the real per-source entries, so
+        # clangd / YouCompleteMe / run_clang_tidy.py cannot resolve individual
+        # sources against this database. Configure with
+        # -DMILVUS_UNITY_BUILD=OFF for IDE tooling and clang-tidy.
+        message( STATUS "Note: unity build is ON; compile_commands.json will only contain "
+                        "unity batch entries. Use -DMILVUS_UNITY_BUILD=OFF for clangd / "
+                        "clang-tidy / other per-source tooling." )
+    endif ()
+endif ()
 
 include( ExternalProject )
 include( GNUInstallDirs )

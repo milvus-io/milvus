@@ -40,3 +40,15 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/plugin)
 
 add_library(milvus_storage OBJECT ${SOURCE_FILES})
 target_link_libraries(milvus_storage PUBLIC milvus_conan_deps)
+
+# Unity-build escape hatches: cloud-provider credential files carry identical
+# file-scope constants (STS_* log tags / expiration grace periods) copied from
+# AWS SDK samples. Merging them into one jumbo TU triggers redefinitions, so
+# exclude them from unity batches via the flag-neutral SKIP_UNITY_BUILD_INCLUSION
+# source property (no compile-flag change in any build type).
+set_source_files_properties(
+    ${CMAKE_CURRENT_SOURCE_DIR}/tencent/TencentCloudCredentialsProvider.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/tencent/TencentCloudSTSClient.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/huawei/HuaweiCloudCredentialsProvider.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/huawei/HuaweiCloudSTSClient.cpp
+    PROPERTIES SKIP_UNITY_BUILD_INCLUSION TRUE)

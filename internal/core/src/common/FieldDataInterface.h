@@ -28,9 +28,10 @@
 
 #include "log/Log.h"
 #include "Types.h"
-#include "arrow/api.h"
+#include "arrow/array/array_base.h"
 #include "arrow/array/array_binary.h"
 #include "arrow/chunked_array.h"
+#include "arrow/type.h"
 #include "common/FieldMeta.h"
 #include "common/Utils.h"
 #include "common/VectorTrait.h"

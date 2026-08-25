@@ -14,6 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Benchmarks stay out of the unity build (see unittest/CMakeLists.txt).
+set(CMAKE_UNITY_BUILD OFF)
+
 add_executable(fastmem_benchmark FastMemBenchmark.cpp)
 target_include_directories(fastmem_benchmark PRIVATE ${CMAKE_HOME_DIRECTORY}/src)
 target_link_libraries(fastmem_benchmark PRIVATE benchmark::benchmark)

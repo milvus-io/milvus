@@ -34,10 +34,9 @@
 #include "storage/loon_ffi/util.h"
 #include "type_c.h"
 
-using namespace milvus;
-
 milvus::storage::StorageConfig
 get_storage_config(const milvus::proto::clustering::StorageConfig& config) {
+    using namespace milvus;
     auto storage_config = milvus::storage::StorageConfig();
     storage_config.address = config.address();
     storage_config.bucket_name = config.bucket_name();
@@ -66,6 +65,7 @@ Analyze(CAnalyze* res_analyze,
         const uint8_t* serialized_analyze_info,
         const uint64_t len,
         const CPluginContext* plugin_context) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -171,6 +171,7 @@ Analyze(CAnalyze* res_analyze,
 
 CStatus
 DeleteAnalyze(CAnalyze analyze) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -194,6 +195,7 @@ GetAnalyzeResultMeta(CAnalyze analyze,
                      int64_t* centroid_file_size,
                      void* id_mapping_paths,
                      int64_t* id_mapping_sizes) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();

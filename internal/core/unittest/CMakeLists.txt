@@ -9,6 +9,13 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
+# Unit tests stay out of the unity build: all_tests GLOB_RECURSEs hundreds of
+# *Test.cpp files that declare identical file-scope names (e.g.
+# `constexpr int64_t nb = 100;` in ScalarIndexTest.cpp / StringIndexSortTest.cpp
+# / StringIndexTest.cpp / ScalarIndexCreatorTest.cpp), which collide when
+# merged into one jumbo TU.
+set(CMAKE_UNITY_BUILD OFF)
+
 include_directories(${CMAKE_HOME_DIRECTORY}/src)
 include_directories(${CMAKE_HOME_DIRECTORY}/src/thirdparty)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})

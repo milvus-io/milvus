@@ -63,6 +63,12 @@ define_option(MILVUS_USE_PCH "Use precompiled headers to speed up compilation" O
 
 define_option(MILVUS_UNITY_BUILD "Use CMake unity (jumbo) build to speed up compilation" OFF)
 
+define_option_string(MILVUS_DEV_DEBUG_INFO
+        "Debug info level: full | line-tables (line-tables = -gline-tables-only/-g1)"
+        "full"
+        "full"
+        "line-tables")
+
 define_option(MILVUS_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)
 

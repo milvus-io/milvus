@@ -23,17 +23,12 @@
 #include "x86/avx2.h"
 #include "x86/avx512.h"
 #include "x86/instruction_set.h"
-
-using namespace milvus::bitset::detail::x86;
 #endif
 
 #if defined(__aarch64__)
 #include "arm/instruction_set.h"
 #include "arm/neon.h"
 #include "arm/sve.h"
-
-using namespace milvus::bitset::detail::arm;
-
 #endif
 
 #include "vectorized_ref.h"
@@ -482,6 +477,14 @@ static void
 init_dynamic_hook() {
     using namespace milvus::bitset;
     using namespace milvus::bitset::detail;
+
+#if defined(__x86_64__)
+    using namespace milvus::bitset::detail::x86;
+#endif
+
+#if defined(__aarch64__)
+    using namespace milvus::bitset::detail::arm;
+#endif
 
 #if defined(__x86_64__)
     // AVX512 ?

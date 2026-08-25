@@ -14,3 +14,11 @@ add_library(milvus_index OBJECT ${SOURCE_FILES})
 # libsais (PUBLIC) propagates its include dir so the vendored FM-index sources
 # under fmindex/ can #include "libsais.h"; milvus_core links the objects (below).
 target_link_libraries(milvus_index PUBLIC milvus_conan_deps libsais)
+
+# Unity-build escape hatch: VectorDiskIndex.cpp and VectorMemIndex.cpp both
+# declare the same helpers in an anonymous namespace (EmptyEmbListState,
+# EMPTY_EMB_LIST_OFFSET_KEY); merging them collides. Exclude VectorDiskIndex.cpp
+# via the flag-neutral SKIP_UNITY_BUILD_INCLUSION source property.
+set_source_files_properties(
+    ${CMAKE_CURRENT_SOURCE_DIR}/VectorDiskIndex.cpp
+    PROPERTIES SKIP_UNITY_BUILD_INCLUSION TRUE)

@@ -56,12 +56,12 @@
 #include "storage/loon_ffi/util.h"
 #include "storage/plugin/PluginInterface.h"
 
-using namespace milvus;
 CStatus
 CreateIndexForUT(enum CDataType dtype,
                  const char* serialized_type_params,
                  const char* serialized_index_params,
                  CIndex* res_index) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -113,6 +113,7 @@ CreateIndexForUT(enum CDataType dtype,
 
 milvus::storage::StorageConfig
 get_storage_config(const milvus::proto::indexcgo::StorageConfig& config) {
+    using namespace milvus;
     auto storage_config = milvus::storage::StorageConfig();
     storage_config.address = std::string(config.address());
     storage_config.bucket_name = std::string(config.bucket_name());
@@ -139,6 +140,7 @@ get_storage_config(const milvus::proto::indexcgo::StorageConfig& config) {
 milvus::OptFieldT
 get_opt_field(const ::google::protobuf::RepeatedPtrField<
               milvus::proto::indexcgo::OptionalFieldInfo>& field_infos) {
+    using namespace milvus;
     milvus::OptFieldT opt_fields_map;
     for (const auto& field_info : field_infos) {
         auto field_id = field_info.fieldid();
@@ -165,6 +167,7 @@ get_opt_field(const ::google::protobuf::RepeatedPtrField<
 milvus::SegmentInsertFiles
 get_segment_insert_files(
     const milvus::proto::indexcgo::SegmentInsertFiles& segment_insert_files) {
+    using namespace milvus;
     milvus::SegmentInsertFiles files;
     for (const auto& column_group_files :
          segment_insert_files.field_insert_files()) {
@@ -182,6 +185,7 @@ milvus::storage::StorageColumnMapping
 get_storage_column_mapping(
     const milvus::proto::schema::FieldSchema& field_schema,
     bool is_milvus_table) {
+    using namespace milvus;
     auto physical_mapping =
         milvus::ResolvePhysicalColumnMapping(is_milvus_table, field_schema);
     milvus::storage::StorageColumnMapping mapping;
@@ -195,6 +199,7 @@ milvus::storage::StorageColumnMapping
 get_storage_column_mapping(
     const milvus::proto::indexcgo::OptionalFieldInfo& field_info,
     bool is_milvus_table) {
+    using namespace milvus;
     milvus::storage::StorageColumnMapping mapping;
     mapping.schema_column_name = field_info.field_name();
     mapping.storage_column_name = std::to_string(field_info.fieldid());
@@ -207,6 +212,7 @@ configure_manifest_file_manager_context(
     milvus::storage::FileManagerContext& file_manager_context,
     const milvus::proto::indexcgo::BuildIndexInfo& build_index_info,
     const milvus::storage::StorageConfig& storage_config) {
+    using namespace milvus;
     if (build_index_info.manifest().empty()) {
         return;
     }
@@ -244,6 +250,7 @@ configure_manifest_file_manager_context(
 
 milvus::Config
 get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
+    using namespace milvus;
     milvus::Config config;
     for (auto i = 0; i < info->index_params().size(); ++i) {
         const auto& param = info->index_params(i);
@@ -288,6 +295,7 @@ CStatus
 CreateIndex(CIndex* res_index,
             const uint8_t* serialized_build_index_info,
             const uint64_t len) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -404,6 +412,7 @@ CStatus
 BuildJsonKeyIndex(ProtoLayoutInterface result,
                   const uint8_t* serialized_build_index_info,
                   const uint64_t len) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -507,6 +516,7 @@ CStatus
 BuildTextIndex(ProtoLayoutInterface result,
                const uint8_t* serialized_build_index_info,
                const uint64_t len) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -608,6 +618,7 @@ BuildTextIndex(ProtoLayoutInterface result,
 
 CStatus
 DeleteIndex(CIndex index) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -629,6 +640,7 @@ CStatus
 BuildFloatVecIndex(CIndex index,
                    int64_t float_value_num,
                    const float* vectors) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -658,6 +670,7 @@ BuildFloatVecIndexWithValidData(CIndex index,
                                 const float* vectors,
                                 const bool* valid_data,
                                 int64_t valid_data_len) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -685,6 +698,7 @@ CStatus
 BuildFloat16VecIndex(CIndex index,
                      int64_t float16_value_num,
                      const uint8_t* vectors) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -715,6 +729,7 @@ BuildFloat16VecIndexWithValidData(CIndex index,
                                   const uint8_t* vectors,
                                   const bool* valid_data,
                                   int64_t valid_data_len) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -743,6 +758,7 @@ CStatus
 BuildBFloat16VecIndex(CIndex index,
                       int64_t bfloat16_value_num,
                       const uint8_t* vectors) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -773,6 +789,7 @@ BuildBFloat16VecIndexWithValidData(CIndex index,
                                    const uint8_t* vectors,
                                    const bool* valid_data,
                                    int64_t valid_data_len) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -799,6 +816,7 @@ BuildBFloat16VecIndexWithValidData(CIndex index,
 
 CStatus
 BuildBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -829,6 +847,7 @@ BuildBinaryVecIndexWithValidData(CIndex index,
                                  const uint8_t* vectors,
                                  const bool* valid_data,
                                  int64_t valid_data_len) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -858,6 +877,7 @@ BuildSparseFloatVecIndex(CIndex index,
                          int64_t row_num,
                          int64_t dim,
                          const uint8_t* vectors) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -888,6 +908,7 @@ BuildSparseFloatVecIndexWithValidData(CIndex index,
                                       const uint8_t* vectors,
                                       const bool* valid_data,
                                       int64_t valid_data_len) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -913,6 +934,7 @@ BuildSparseFloatVecIndexWithValidData(CIndex index,
 
 CStatus
 BuildInt8VecIndex(CIndex index, int64_t int8_value_num, const int8_t* vectors) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -942,6 +964,7 @@ BuildInt8VecIndexWithValidData(CIndex index,
                                const int8_t* vectors,
                                const bool* valid_data,
                                int64_t valid_data_len) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -972,6 +995,7 @@ BuildInt8VecIndexWithValidData(CIndex index,
 // TODO: optimize here if necessary.
 CStatus
 BuildScalarIndex(CIndex c_index, int64_t size, const void* field_data) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -996,6 +1020,7 @@ BuildScalarIndex(CIndex c_index, int64_t size, const void* field_data) {
 
 CStatus
 SerializeIndexToBinarySet(CIndex index, CBinarySet* c_binary_set) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -1019,6 +1044,7 @@ SerializeIndexToBinarySet(CIndex index, CBinarySet* c_binary_set) {
 
 CStatus
 LoadIndexFromBinarySet(CIndex index, CBinarySet c_binary_set) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -1041,6 +1067,7 @@ LoadIndexFromBinarySet(CIndex index, CBinarySet c_binary_set) {
 
 CStatus
 CleanLocalData(CIndex index) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -1063,6 +1090,7 @@ CleanLocalData(CIndex index) {
 
 CStatus
 SerializeIndexAndUpLoad(CIndex index, ProtoLayoutInterface result) {
+    using namespace milvus;
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
