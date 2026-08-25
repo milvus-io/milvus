@@ -94,7 +94,7 @@ extraConfigFiles:
     dataCoord:
       targetVecIndexVersion: 11
       forceRebuildScalarSegmentIndex: true
-      targetScalarIndexVersion: 4
+      targetScalarIndexVersion: 5
       compaction:
         storageVersion:
           enabled: true
