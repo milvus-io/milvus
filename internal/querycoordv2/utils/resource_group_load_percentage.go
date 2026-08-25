@@ -20,7 +20,9 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // LoadPercentageByResourceGroup answers a narrower question than the
@@ -242,44 +244,81 @@ func LoadPercentageByResourceGroup(
 		return -1, nil
 	}
 
+	// The targets are read ONCE for every selected replica, not per replica.
+	// A promotion landing between two per-replica reads would have the
+	// min-across-replicas comparison below weigh two different denominators
+	// against each other -- the same class of inconsistency that two
+	// unsynchronized reads of any shared store produce.
+	//
+	// NextTargetFirst, not NextTarget: promotion clears the next target until
+	// the observer re-pulls it ~10s later, and a plain NextTarget read in that
+	// window sees an empty target and reports 0 - so a fully loaded, serving
+	// resource group would flap 100/0 on every promotion to any caller of
+	// GetLoadPercentageByResourceGroup. CollectionObserver reads NextTarget;
+	// this deliberately does not.
+	channelTargets := targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.NextTargetFirst)
+	segmentTargets := targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.NextTargetFirst)
+
+	// One distribution lookup per CHANNEL, shared by every replica and by the
+	// segment walk. ChannelDistManager.GetByFilter with no node filter walks
+	// every node's channel collection under an RLock and allocates a result
+	// slice, so doing it per segment costs that once per sealed segment per
+	// replica -- tens of thousands of times on a large collection, on a path a
+	// caller waiting for a resource group polls. A collection has single-digit
+	// channels.
+	delegators := prefetchDelegatorsByChannel(dist, channelTargets, segmentTargets)
+
 	percentage := int32(100)
 	for _, replica := range replicas {
-		if p := replicaLoadPercentage(ctx, targetMgr, dist, replica); p < percentage {
+		if p := replicaLoadPercentage(replica, channelTargets, segmentTargets, delegators); p < percentage {
 			percentage = p
 		}
 	}
 	return percentage, nil
 }
 
+// prefetchDelegatorsByChannel resolves every channel named by the target set
+// -- the channel targets themselves plus the insert channel of every sealed
+// segment target -- to its delegators, once per distinct channel.
+//
+// It exists so replicaLoadPercentage never touches the distribution manager:
+// one snapshot serves every replica, which keeps the min-across-replicas
+// comparison consistent for the same reason reading the targets once does.
+func prefetchDelegatorsByChannel(
+	dist *meta.DistributionManager,
+	channelTargets map[string]*meta.DmChannel,
+	segmentTargets map[int64]*datapb.SegmentInfo,
+) map[string][]*meta.DmChannel {
+	names := typeutil.NewSet[string]()
+	for _, channel := range channelTargets {
+		names.Insert(channel.GetChannelName())
+	}
+	for _, segment := range segmentTargets {
+		names.Insert(segment.GetInsertChannel())
+	}
+
+	delegators := make(map[string][]*meta.DmChannel, names.Len())
+	for name := range names {
+		delegators[name] = dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(name))
+	}
+	return delegators
+}
+
 // replicaLoadPercentage is the per-replica analog of what
 // CollectionObserver.observePartitionLoadStatus computes for a whole
-// collection: it reads the collection's segment and channel targets and, for
-// each target, checks whether one of replica's own nodes carries it. The
-// percentage is the fraction of targets this one replica already carries; no
-// aggregation across other replicas happens here.
+// collection: for each target it checks whether one of replica's own nodes
+// carries it. The percentage is the fraction of targets this one replica
+// already carries; no aggregation across other replicas happens here.
 //
-// The targets are read with meta.NextTargetFirst, NOT the meta.NextTarget the
-// observer uses (collection_observer.go). That is a deliberate divergence,
-// not an inherited choice: NextTarget reads the next target alone, and
-// UpdateCollectionCurrentTarget clears it on promotion until the observer
-// re-pulls it, so a NextTarget read in that window would report 0 for a fully
-// loaded group. NextTargetFirst falls back to the current target and closes
-// exactly that window. See the note at the read itself.
+// The target set and the channel->delegators map are passed in rather than
+// read here, so every replica is measured against one snapshot of both. See
+// the notes at the call site for why each matters.
 func replicaLoadPercentage(
-	ctx context.Context,
-	targetMgr meta.TargetManagerInterface,
-	dist *meta.DistributionManager,
 	replica *meta.Replica,
+	channelTargets map[string]*meta.DmChannel,
+	segmentTargets map[int64]*datapb.SegmentInfo,
+	delegators map[string][]*meta.DmChannel,
 ) int32 {
-	collectionID := replica.GetCollectionID()
-	// NextTargetFirst, not NextTarget: promotion clears the next target until
-	// the observer re-pulls it ~10s later, and a plain NextTarget read in that
-	// window sees an empty target and reports 0 - so a fully loaded, serving
-	// resource group would flap 100/0 on every promotion to any caller of
-	// GetLoadPercentageByResourceGroup.
-	channelTargets := targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.NextTargetFirst)
-	segmentTargets := targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.NextTargetFirst)
-
 	targetNum := len(channelTargets) + len(segmentTargets)
 	if targetNum == 0 {
 		return 0
@@ -287,7 +326,7 @@ func replicaLoadPercentage(
 
 	loadedCount := 0
 	for _, channel := range channelTargets {
-		for _, delegator := range dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channel.GetChannelName())) {
+		for _, delegator := range delegators[channel.GetChannelName()] {
 			if replica.Contains(delegator.Node) {
 				loadedCount++
 				break
@@ -295,7 +334,7 @@ func replicaLoadPercentage(
 		}
 	}
 	for _, segment := range segmentTargets {
-		for _, delegator := range dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(segment.GetInsertChannel())) {
+		for _, delegator := range delegators[segment.GetInsertChannel()] {
 			if replica.Contains(delegator.Node) && delegator.View.Segments[segment.GetID()] != nil {
 				loadedCount++
 				break
