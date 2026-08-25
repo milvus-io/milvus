@@ -74,6 +74,11 @@ const (
 
 	PreserveFieldIdsKey = "preserve_field_ids"
 
+	// PrivilegeExpr is retained only for backward compatibility. The /expr
+	// endpoint it guarded was removed, so granting it confers nothing. It stays
+	// recognized so that grants created on releases that shipped the endpoint
+	// remain listable and, more importantly, revocable -- grant and revoke share
+	// the same validation path, so dropping the name would strand them.
 	PrivilegeExpr = "PrivilegeExpr"
 )
 
