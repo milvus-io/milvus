@@ -703,3 +703,54 @@ func TestGetLoadPercentageByResourceGroup_SurvivesTargetPromotion(t *testing.T) 
 	assert.EqualValues(t, 100, percentage,
 		"a promoted target must keep reporting the loaded figure, not flap to 0")
 }
+
+// countingTargetManager wraps a real TargetManager and counts the two reads
+// LoadPercentageByResourceGroup makes, so a test can pin that they happen
+// once per CALL rather than once per replica. Everything else delegates.
+type countingTargetManager struct {
+	meta.TargetManagerInterface
+	channelReads int
+	segmentReads int
+}
+
+func (c *countingTargetManager) GetDmChannelsByCollection(ctx context.Context, collectionID int64, scope meta.TargetScope) map[string]*meta.DmChannel {
+	c.channelReads++
+	return c.TargetManagerInterface.GetDmChannelsByCollection(ctx, collectionID, scope)
+}
+
+func (c *countingTargetManager) GetSealedSegmentsByCollection(ctx context.Context, collectionID int64, scope meta.TargetScope) map[int64]*datapb.SegmentInfo {
+	c.segmentReads++
+	return c.TargetManagerInterface.GetSealedSegmentsByCollection(ctx, collectionID, scope)
+}
+
+// TestLoadPercentageByResourceGroup_ReadsTargetsOncePerCall pins the
+// correctness half of the target hoist. Each replica used to take its own
+// snapshot of the channel and segment targets, so a promotion landing
+// mid-loop left the min-across-replicas comparison below weighing two
+// different denominators against each other.
+//
+// Counting the reads is what makes that falsifiable: the returned percentage
+// is identical either way on a static fixture, so only the call count can
+// tell a shared snapshot from a per-replica one. Moving either read back
+// inside replicaLoadPercentage turns these into 3.
+func TestLoadPercentageByResourceGroup_ReadsTargetsOncePerCall(t *testing.T) {
+	ctx := context.Background()
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 1600, 16000, "1600-dmc0", 1, 2)
+	// Three replicas in one resource group: a per-replica read would be 3.
+	f.putReplica(t, 1600, 160, "rg-target")
+	f.putReplica(t, 1600, 161, "rg-target")
+	f.putReplica(t, 1600, 162, "rg-target")
+	f.putDelegator(1600, 160, "1600-dmc0", 1, 2)
+
+	counting := &countingTargetManager{TargetManagerInterface: f.targetMgr}
+	percentage, err := utils.LoadPercentageByResourceGroup(ctx, f.meta, counting, f.dist, 1600, "rg-target")
+
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, percentage,
+		"the laggards carry nothing, so the min is 0 -- the figure itself is unchanged by the hoist")
+	assert.Equal(t, 1, counting.channelReads,
+		"the channel targets must be read once per call, not once per replica")
+	assert.Equal(t, 1, counting.segmentReads,
+		"and so must the segment targets")
+}
