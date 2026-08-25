@@ -374,7 +374,7 @@ func buildRRFChain(fc *FuncChain, funcSchema *schemapb.FunctionSchema, searchMet
 		return err
 	}
 	if weightsSet && len(weights) != len(searchMetrics) {
-		return merr.WrapErrParameterInvalid(fmt.Sprint(len(searchMetrics)), fmt.Sprint(len(weights)), "the length of weights param mismatch with ann search requests")
+		return merr.WrapErrParameterInvalidMsg("the length of weights param mismatch with ann search requests: got %d, want %d", len(weights), len(searchMetrics))
 	}
 
 	// RRF scores are computed purely from rank position, not from original scores,
@@ -409,10 +409,10 @@ func parseRRFWeights(funcSchema *schemapb.FunctionSchema) ([]float64, bool, erro
 		if strings.ToLower(param.Key) == weightsKey {
 			weights, err := parseRRFWeightArray(param.Value)
 			if err != nil {
-				return nil, true, err
+				return nil, false, err
 			}
 			if len(weights) == 0 {
-				return nil, true, merr.WrapErrParameterInvalidMsg("rerank_builder: rrf weights parameter must be a non-empty array")
+				return nil, false, merr.WrapErrParameterInvalidMsg("rerank_builder: rrf weights parameter must be a non-empty array")
 			}
 			return weights, true, nil
 		}

@@ -34,7 +34,12 @@ func (r *rrfReranker) WithK(k float64) *rrfReranker {
 // The server requires a non-empty slice, one value in [0, 1] per ANN request;
 // nil and empty slices are serialized so the server can reject them.
 func (r *rrfReranker) WithWeights(weights []float64) *rrfReranker {
-	r.weights = &weights
+	var copied []float64
+	if weights != nil {
+		copied = make([]float64, len(weights))
+		copy(copied, weights)
+	}
+	r.weights = &copied
 	return r
 }
 

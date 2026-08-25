@@ -156,6 +156,9 @@ This change is backward-compatible:
   enhancement silently ignore unknown RRF function parameters, while their
   legacy converter drops RRF weights, so clients must version-gate weighted
   RRF rather than assume an older server will reject it.
+- Requests with invalid reranker parameters now return a parameter error even
+  when every sub-search returns empty results (previously they succeeded with
+  empty results). Validation is now independent of result content.
 
 No migration or deprecation is required. Omitting the parameter restores
 classic RRF. Rolling back to an older server also silently restores classic
