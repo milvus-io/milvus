@@ -135,9 +135,8 @@ func GetEtcdClient(
 // GetRemoteEtcdClient returns client of remote etcd by given endpoints
 func GetRemoteEtcdClient(endpoints []string, opts ...ClientOption) (*clientv3.Client, error) {
 	cfg := clientv3.Config{
-		Endpoints:          endpoints,
-		MaxCallSendMsgSize: 536870912,
-		DialTimeout:        5 * time.Second,
+		Endpoints:   endpoints,
+		DialTimeout: 5 * time.Second,
 		DialOptions: []grpc.DialOption{
 			grpc.WithBlock(),
 		},
@@ -148,11 +147,10 @@ func GetRemoteEtcdClient(endpoints []string, opts ...ClientOption) (*clientv3.Cl
 
 func GetRemoteEtcdClientWithAuth(endpoints []string, userName, password string, opts ...ClientOption) (*clientv3.Client, error) {
 	cfg := clientv3.Config{
-		Endpoints:          endpoints,
-		MaxCallSendMsgSize: 536870912,
-		DialTimeout:        5 * time.Second,
-		Username:           userName,
-		Password:           password,
+		Endpoints:   endpoints,
+		DialTimeout: 5 * time.Second,
+		Username:    userName,
+		Password:    password,
 		DialOptions: []grpc.DialOption{
 			grpc.WithBlock(),
 		},
@@ -169,7 +167,6 @@ func GetRemoteEtcdSSLClient(endpoints []string, certFile string, keyFile string,
 func GetRemoteEtcdSSLClientWithCfg(endpoints []string, certFile string, keyFile string, caCertFile string, minVersion string, cfg clientv3.Config, opts ...ClientOption) (*clientv3.Client, error) {
 	cfg.Endpoints = endpoints
 	cfg.DialTimeout = 5 * time.Second
-	cfg.MaxCallSendMsgSize = 536870912
 
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {

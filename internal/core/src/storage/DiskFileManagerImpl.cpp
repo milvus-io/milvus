@@ -1021,7 +1021,11 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     // all_remote_files collection and returns the full field.  Calling it once
     // outside the loop avoids redundant downloads when the segment has multiple
     // column groups.
-    if (dim <= 0) {
+    // VECTOR_ARRAY has a positive dim (the element vector dimension), but a
+    // variable number of vectors per row, so GetDataTypeSize() is not defined
+    // for it. Route it through the full-read path to avoid the fixed-width
+    // pagination that would throw DataTypeInvalid.
+    if (dim <= 0 || is_vector_array) {
         if (manifest_path_str == "") {
             field_datas =
                 GetFieldDatasFromStorageV2(all_remote_files,

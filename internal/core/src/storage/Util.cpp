@@ -1929,14 +1929,22 @@ IterateFieldDataFromManifest(
         }
     } else {  // read specific rows with chunk_reader
         auto reader_result = reader->get_chunk_reader(column_group_index);
-        AssertInfo(
-            reader_result.ok(),
-            "Failed to get chunk reader: " + reader_result.status().ToString());
+        if (!reader_result.ok()) {
+            auto error =
+                milvus_storage::ToSegcoreError(reader_result.status());
+            ThrowInfo(error.get_error_code(),
+                      "Failed to get chunk reader: {}",
+                      error.what());
+        }
         auto chunk_reader = std::move(reader_result).ValueOrDie();
         auto chunk_rows_result = chunk_reader->get_chunk_rows();
-        AssertInfo(chunk_rows_result.ok(),
-                   "Failed to get chunk rows: " +
-                       chunk_rows_result.status().ToString());
+        if (!chunk_rows_result.ok()) {
+            auto error =
+                milvus_storage::ToSegcoreError(chunk_rows_result.status());
+            ThrowInfo(error.get_error_code(),
+                      "Failed to get chunk rows: {}",
+                      error.what());
+        }
         auto chunk_rows = chunk_rows_result.ValueOrDie();
         int64_t segment_total_rows =
             std::accumulate(chunk_rows.begin(), chunk_rows.end(), int64_t{0});
@@ -1969,12 +1977,12 @@ IterateFieldDataFromManifest(
         auto chunk_indices_result =
             chunk_reader->get_chunk_indices(row_indices);
         if (!chunk_indices_result.ok()) {
-            LOG_DEBUG(
-                "[StorageV3] Could not fetch indices status: {} assume "
-                "offset: {} out of range",
-                chunk_indices_result.status().ToString(),
-                offset);
-            return;
+            auto error =
+                milvus_storage::ToSegcoreError(chunk_indices_result.status());
+            ThrowInfo(error.get_error_code(),
+                      "Failed to get chunk indices at offset {}: {}",
+                      offset,
+                      error.what());
         }
         auto chunk_indices = chunk_indices_result.ValueOrDie();
         auto parallel_degree = static_cast<uint64_t>(
@@ -1988,9 +1996,13 @@ IterateFieldDataFromManifest(
 
         auto chunks_result =
             chunk_reader->get_chunks(chunk_indices, parallel_degree);
-        AssertInfo(
-            chunks_result.ok(),
-            "Failed to read chunks: " + chunks_result.status().ToString());
+        if (!chunks_result.ok()) {
+            auto error =
+                milvus_storage::ToSegcoreError(chunks_result.status());
+            ThrowInfo(error.get_error_code(),
+                      "Failed to read chunks: {}",
+                      error.what());
+        }
         auto batches = chunks_result.ValueOrDie();
 
         // Compute the intra-chunk offset for the first batch.
