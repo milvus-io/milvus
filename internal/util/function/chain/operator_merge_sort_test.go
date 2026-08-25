@@ -60,13 +60,25 @@ func TestSortAndExtractResultsMatchesPreviousOrdering(t *testing.T) {
 	newOrder := func(idScores map[any]float32, descending bool) []any {
 		entries := make([]scoredID, 0, len(idScores))
 		for id, score := range idScores {
-			entries = append(entries, scoredID{id: id, score: score})
+			key := candidateKey{}
+			switch value := id.(type) {
+			case int64:
+				key.intID = value
+			case string:
+				key.kind = candidateIDString
+				key.stringID = value
+			}
+			entries = append(entries, scoredID{key: key, score: score})
 		}
-		sort.Slice(entries, func(i, j int) bool { return compareIDs(entries[i].id, entries[j].id) < 0 })
+		sort.Slice(entries, func(i, j int) bool { return compareCandidateKeys(entries[i].key, entries[j].key) < 0 })
 		sortScoredIDs(entries, descending)
 		ids := make([]any, len(entries))
 		for i, e := range entries {
-			ids[i] = e.id
+			if e.key.kind == candidateIDString {
+				ids[i] = e.key.stringID
+			} else {
+				ids[i] = e.key.intID
+			}
 		}
 		return ids
 	}
@@ -109,17 +121,14 @@ func TestSortAndExtractResultsMatchesPreviousOrdering(t *testing.T) {
 
 // sortAndExtractResults must keep ids, scores and locs aligned.
 func TestSortAndExtractResultsKeepsTuplesAligned(t *testing.T) {
-	idScores := map[any]float32{int64(1): 0.1, int64(2): 0.9, int64(3): 0.5}
-	idLocs := map[any]idLocation{
-		int64(1): {inputIdx: 10, rowIdx: 100},
-		int64(2): {inputIdx: 20, rowIdx: 200},
-		int64(3): {inputIdx: 30, rowIdx: 300},
+	idScores := map[candidateKey]float32{{intID: 1}: 0.1, {intID: 2}: 0.9, {intID: 3}: 0.5}
+	idLocs := map[candidateKey]idLocation{
+		{intID: 1}: {inputIdx: 10, rowIdx: 100},
+		{intID: 2}: {inputIdx: 20, rowIdx: 200},
+		{intID: 3}: {inputIdx: 30, rowIdx: 300},
 	}
 
-	ids, scores, locs := sortAndExtractResults(idScores, idLocs, true)
-	assert.Equal(t, []any{int64(2), int64(3), int64(1)}, ids)
-	for i, id := range ids {
-		assert.Equal(t, idScores[id], scores[i])
-		assert.Equal(t, idLocs[id], locs[i])
-	}
+	scores, locs := sortAndExtractResults(idScores, idLocs, true)
+	assert.Equal(t, []float32{0.9, 0.5, 0.1}, scores)
+	assert.Equal(t, []idLocation{{inputIdx: 20, rowIdx: 200}, {inputIdx: 30, rowIdx: 300}, {inputIdx: 10, rowIdx: 100}}, locs)
 }
