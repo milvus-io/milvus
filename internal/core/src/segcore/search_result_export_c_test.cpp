@@ -1604,6 +1604,81 @@ TEST(SearchResultExport,
     free(const_cast<char*>(status.error_msg));
 }
 
+TEST(SearchResultExport, FillOutputFieldsOrdered_MultipleSegments) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto output_fid = schema->AddDebugField("output_i32", DataType::INT32);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+
+    constexpr int64_t row_count = 4;
+    auto raw_data = DataGen(schema, row_count, /*seed=*/1);
+    auto segment_a = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    auto segment_b = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    auto plan_bytes = BuildSimpleVectorSearchPlan(vec_fid, /*topk=*/2);
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_bytes.data(), plan_bytes.size());
+    plan->target_entries_ = {pk_fid, output_fid};
+
+    SearchResult sr_a;
+    SearchResult sr_b;
+    AttachSealedRequestLease(sr_a, segment_a.get());
+    AttachSealedRequestLease(sr_b, segment_b.get());
+    std::vector<CSearchResult> c_results = {
+        reinterpret_cast<CSearchResult>(&sr_a),
+        reinterpret_cast<CSearchResult>(&sr_b)};
+
+    int32_t seg_indices[] = {0, 1, 0, 1};
+    int64_t seg_offsets[] = {0, 1, 2, 3};
+    CProto c_proto{};
+    auto status =
+        FillOutputFieldsOrdered(c_results.data(),
+                                c_results.size(),
+                                reinterpret_cast<CSearchPlan>(plan.get()),
+                                seg_indices,
+                                seg_offsets,
+                                /*total_rows=*/4,
+                                &c_proto,
+                                nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    ASSERT_GT(c_proto.proto_size, 0);
+
+    milvus::proto::schema::SearchResultData result_data;
+    ASSERT_TRUE(
+        result_data.ParseFromArray(c_proto.proto_blob, c_proto.proto_size));
+    ASSERT_EQ(result_data.fields_data_size(), 2);
+    EXPECT_EQ(result_data.fields_data(0).field_id(), pk_fid.get());
+    EXPECT_EQ(result_data.fields_data(1).field_id(), output_fid.get());
+
+    const auto pk = raw_data.get_col<int64_t>(pk_fid);
+    const std::vector<int64_t> expected_pk = {pk[0], pk[1], pk[2], pk[3]};
+    const auto& actual_pk =
+        result_data.fields_data(0).scalars().long_data().data();
+    ASSERT_EQ(actual_pk.size(), expected_pk.size());
+    for (size_t i = 0; i < expected_pk.size(); ++i) {
+        EXPECT_EQ(actual_pk.Get(i), expected_pk[i]);
+    }
+
+    const auto output = raw_data.get_col<int32_t>(output_fid);
+    const std::vector<int32_t> expected_output = {
+        output[0], output[1], output[2], output[3]};
+    const auto& actual_output =
+        result_data.fields_data(1).scalars().int_data().data();
+    ASSERT_EQ(actual_output.size(), expected_output.size());
+    for (size_t i = 0; i < expected_output.size(); ++i) {
+        EXPECT_EQ(actual_output.Get(i), expected_output[i])
+            << "position=" << i << ", segment=" << seg_indices[i]
+            << ", offset=" << seg_offsets[i];
+    }
+
+    free(const_cast<void*>(c_proto.proto_blob));
+}
+
 TEST(SearchResultExport, HasTargetEntries) {
     using namespace milvus;
 
