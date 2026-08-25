@@ -439,8 +439,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 // load bm25 stats for sealed segments.
 // idf oracle owns the full lifecycle: download, disk write, register, cleanup.
 func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
-	idfOracle := sd.idfOracle
-	if idfOracle == nil {
+	if sd.idfOracle == nil {
 		return nil
 	}
 
@@ -451,7 +450,7 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 	for _, info := range infos {
 		info := info
 		futures = append(futures, pool.Submit(func() (any, error) {
-			if err := idfOracle.LoadSealed(ctx, info.GetSegmentID(), info.GetBm25Logs(), cm); err != nil {
+			if err := sd.idfOracle.LoadSealed(ctx, info.GetSegmentID(), info.GetBm25Logs(), cm); err != nil {
 				log.Warn("failed to load bm25 stats for segment",
 					zap.Int64("collectionID", req.GetCollectionID()),
 					zap.Int64("segmentID", info.GetSegmentID()),
@@ -1171,8 +1170,7 @@ func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
 }
 
 func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest, functionRunner function.FunctionRunner) (float64, error) {
-	idfOracle := sd.idfOracle
-	if idfOracle == nil {
+	if sd.idfOracle == nil {
 		return 0, merr.WrapErrServiceInternal("bm25 oracle is not initialized")
 	}
 
@@ -1220,7 +1218,7 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest, functionRu
 		return 0, merr.WrapErrFunctionFailedMsg("functionRunner return unknown data")
 	}
 
-	idfSparseVector, avgdl, err := idfOracle.BuildIDF(req.GetFieldId(), tfArray)
+	idfSparseVector, avgdl, err := sd.idfOracle.BuildIDF(req.GetFieldId(), tfArray)
 	if err != nil {
 		return 0, err
 	}

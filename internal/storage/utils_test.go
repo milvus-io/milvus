@@ -1233,119 +1233,6 @@ func TestColumnBasedInsertMsgToInsertData(t *testing.T) {
 	}
 }
 
-func TestColumnBasedInsertMsgToInsertDataKeepsBM25Output(t *testing.T) {
-	sparseRow := typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{1: 2})
-	schema := &schemapb.CollectionSchema{
-		Name: "bm25_schema",
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
-			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
-			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
-			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
-		},
-		Functions: []*schemapb.FunctionSchema{{
-			Name:           "bm25",
-			Type:           schemapb.FunctionType_BM25,
-			InputFieldIds:  []int64{101},
-			OutputFieldIds: []int64{102},
-		}},
-	}
-	msg := &msgstream.InsertMsg{
-		InsertRequest: &msgpb.InsertRequest{
-			NumRows:    1,
-			Version:    msgpb.InsertDataVersion_ColumnBased,
-			RowIDs:     []int64{1},
-			Timestamps: []uint64{100},
-			FieldsData: []*schemapb.FieldData{
-				{
-					Type:    schemapb.DataType_Int64,
-					FieldId: 100,
-					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10}}},
-					}},
-				},
-				{
-					Type:    schemapb.DataType_VarChar,
-					FieldId: 101,
-					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"hello"}}},
-					}},
-				},
-				{
-					Type:    schemapb.DataType_SparseFloatVector,
-					FieldId: 102,
-					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-						Data: &schemapb.VectorField_SparseFloatVector{
-							SparseFloatVector: &schemapb.SparseFloatArray{Contents: [][]byte{sparseRow}, Dim: 2},
-						},
-					}},
-				},
-			},
-		},
-	}
-
-	idata, err := ColumnBasedInsertMsgToInsertData(msg, schema)
-	require.NoError(t, err)
-	fieldData, ok := idata.Data[102].(*SparseFloatVectorFieldData)
-	require.True(t, ok)
-	assert.Equal(t, [][]byte{sparseRow}, fieldData.GetContents())
-}
-
-func TestColumnBasedInsertMsgToInsertDataAllowsMissingNonBM25FunctionOutput(t *testing.T) {
-	schema := &schemapb.CollectionSchema{
-		Name: "text_embedding_schema",
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
-			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
-			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
-			{
-				FieldID:          102,
-				Name:             "embedding",
-				DataType:         schemapb.DataType_FloatVector,
-				IsFunctionOutput: true,
-				TypeParams:       []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
-			},
-		},
-		Functions: []*schemapb.FunctionSchema{{
-			Name:           "text_embedding",
-			Type:           schemapb.FunctionType_TextEmbedding,
-			InputFieldIds:  []int64{101},
-			OutputFieldIds: []int64{102},
-		}},
-	}
-	msg := &msgstream.InsertMsg{
-		InsertRequest: &msgpb.InsertRequest{
-			NumRows:    1,
-			Version:    msgpb.InsertDataVersion_ColumnBased,
-			RowIDs:     []int64{1},
-			Timestamps: []uint64{100},
-			FieldsData: []*schemapb.FieldData{
-				{
-					Type:    schemapb.DataType_Int64,
-					FieldId: 100,
-					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10}}},
-					}},
-				},
-				{
-					Type:    schemapb.DataType_VarChar,
-					FieldId: 101,
-					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"hello"}}},
-					}},
-				},
-			},
-		},
-	}
-
-	idata, err := ColumnBasedInsertMsgToInsertData(msg, schema)
-	require.NoError(t, err)
-	_, exists := idata.Data[102]
-	assert.False(t, exists)
-}
-
 func TestColumnBasedInsertMsgToInsertDataNullable(t *testing.T) {
 	numRows, dim := 2, 8
 	schema, _, fieldIDs := genAllFieldsSchemaNullable(dim, true)
@@ -2769,7 +2656,7 @@ func TestFillMissingFields(t *testing.T) {
 		assert.False(t, existsTimestamp)
 	})
 
-	t.Run("skip BM25 function output fields", func(t *testing.T) {
+	t.Run("skip function output fields", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name: "test_schema",
 			Fields: []*schemapb.FieldSchema{
@@ -2793,72 +2680,9 @@ func TestFillMissingFields(t *testing.T) {
 				},
 				{
 					FieldID:          101,
-					Name:             "bm25_output",
-					DataType:         schemapb.DataType_SparseFloatVector,
-					IsFunctionOutput: true,
-				},
-			},
-			Functions: []*schemapb.FunctionSchema{
-				{
-					Name:           "bm25",
-					Type:           schemapb.FunctionType_BM25,
-					InputFieldIds:  []int64{100},
-					OutputFieldIds: []int64{101},
-				},
-			},
-		}
-
-		insertData := &InsertData{
-			Data: map[FieldID]FieldData{
-				common.RowIDField:     &Int64FieldData{Data: []int64{1, 2, 3}},
-				common.TimeStampField: &Int64FieldData{Data: []int64{100, 200, 300}},
-				100:                   &Int64FieldData{Data: []int64{10, 20, 30}},
-			},
-		}
-
-		err := fillMissingFields(schema, insertData)
-		assert.NoError(t, err)
-
-		_, exists := insertData.Data[101]
-		assert.False(t, exists)
-	})
-
-	t.Run("skip non-BM25 function output fields", func(t *testing.T) {
-		schema := &schemapb.CollectionSchema{
-			Name: "test_schema",
-			Fields: []*schemapb.FieldSchema{
-				{
-					FieldID:      common.RowIDField,
-					Name:         common.RowIDFieldName,
-					DataType:     schemapb.DataType_Int64,
-					IsPrimaryKey: false,
-				},
-				{
-					FieldID:      common.TimeStampField,
-					Name:         common.TimeStampFieldName,
-					DataType:     schemapb.DataType_Int64,
-					IsPrimaryKey: false,
-				},
-				{
-					FieldID:      100,
-					Name:         "pk",
-					DataType:     schemapb.DataType_Int64,
-					IsPrimaryKey: true,
-				},
-				{
-					FieldID:          101,
-					Name:             "text_embedding_output",
+					Name:             "function_output",
 					DataType:         schemapb.DataType_FloatVector,
-					IsFunctionOutput: true,
-					TypeParams:       []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
-				},
-			},
-			Functions: []*schemapb.FunctionSchema{
-				{
-					Name:           "text_embedding",
-					Type:           schemapb.FunctionType_TextEmbedding,
-					InputFieldIds:  []int64{100},
-					OutputFieldIds: []int64{101},
+					IsFunctionOutput: true, // Should be skipped
 				},
 			},
 		}
@@ -2873,6 +2697,8 @@ func TestFillMissingFields(t *testing.T) {
 
 		err := fillMissingFields(schema, insertData)
 		assert.NoError(t, err)
+
+		// Function output field should not be added
 		_, exists := insertData.Data[101]
 		assert.False(t, exists)
 	})

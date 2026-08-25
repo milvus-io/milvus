@@ -73,19 +73,6 @@ type IDFOracle interface {
 
 type bm25Stats map[int64]*storage.BM25Stats
 
-func (s bm25Stats) Clone() bm25Stats {
-	if len(s) == 0 {
-		return bm25Stats{}
-	}
-	cloned := make(bm25Stats, len(s))
-	for fieldID, stats := range s {
-		if stats != nil {
-			cloned[fieldID] = stats.Clone()
-		}
-	}
-	return cloned
-}
-
 func (s bm25Stats) Merge(stats bm25Stats) {
 	for fieldID, newstats := range stats {
 		if stats, ok := s[fieldID]; ok {
@@ -277,18 +264,16 @@ func (o *idfOracle) preloadSealed(segmentID int64, stats *sealedBm25Stats, memor
 }
 
 func (o *idfOracle) RegisterGrowing(segmentID int64, stats bm25Stats) {
-	clonedStats := stats.Clone()
-
 	o.Lock()
 	if _, ok := o.growing[segmentID]; ok {
 		o.Unlock()
 		return
 	}
 	o.growing[segmentID] = &growingBm25Stats{
-		bm25Stats: clonedStats,
+		bm25Stats: stats,
 		activate:  true,
 	}
-	o.current.Merge(clonedStats)
+	o.current.Merge(stats)
 	o.Unlock()
 	o.syncResource()
 }
