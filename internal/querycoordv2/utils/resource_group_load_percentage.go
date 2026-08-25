@@ -58,10 +58,9 @@ import (
 //     the next poll answers correctly; it is left as-is rather than
 //     special-cased because telling it apart from a registered collection
 //     with no partitions -- which must answer -1, so that this figure agrees
-//     with what scoped routing will do -- would mean layering an Exist check
-//     back on top of the registration test the three surfaces just unified
-//     on. A caller treating -1 as terminal should confirm it across two
-//     polls.
+//     with what GetShardLeaders will do -- would mean layering an Exist check
+//     back on top of the registration test these surfaces just unified on.
+//     A caller treating -1 as terminal should confirm it across two polls.
 //   - 0, nil error: rgName has a replica of this collection, but that replica
 //     has not picked up any of the collection's current load targets yet.
 //     This is a real, distinct state from "no replica" -- it means loading is
@@ -137,11 +136,12 @@ import (
 // 100 IS NOT A SERVABILITY VERDICT, and a caller gating a switchover must
 // pair it with ShardLeaderReadinessByResourceGroup rather than act on it
 // alone. This figure counts query-invisible replicas (see the note at the
-// selection loop); readiness and scoped GetShardLeaders both exclude them,
-// because a leader the proxy can never be routed to cannot serve. A resource
-// group whose replicas are all still query-invisible therefore reads 100
-// here while readiness says Ready=false and scoped GetShardLeaders refuses
-// every shard with the retriable ErrCollectionNotFullyLoaded.
+// selection loop); readiness and the GetShardLeaders routing path both
+// exclude them, because a leader the proxy can never be routed to cannot
+// serve. A resource group whose replicas are all still query-invisible
+// therefore reads 100 here while readiness says Ready=false -- and while the
+// group does not appear in the GetShardLeaders answer at all, since its
+// leaders are dropped before the per-leader resource-group tag is applied.
 //
 // That is a normal product state, not a corner case: UpdateLoadConfig with
 // needWaitRGReady spawns a new group's replicas WithQueryInvisible, and
@@ -191,11 +191,11 @@ func LoadPercentageByResourceGroup(
 	// commit that does not touch the collection key, so the window is
 	// observable concurrently and survives a crash inside it, with Recover
 	// restoring the Loaded record over zero partitions. Exist would call that
-	// state loaded while the scoped GetShardLeaders path (which gates on
-	// checkLoadStatus, i.e. this same figure) calls it not loaded, and the
-	// caller would be told to cut traffic over to a group whose routing is
-	// then refused with a non-retriable 101. This is also the test
-	// ShowLoadCollections has always used.
+	// state loaded while GetShardLeaders (which gates on checkLoadStatus,
+	// i.e. this same figure) calls it not loaded, and the caller would be told
+	// to cut traffic over to a collection whose routing is then refused with a
+	// non-retriable 101. This is also the test ShowLoadCollections has always
+	// used.
 	if m.CalculateLoadPercentage(ctx, collectionID) < 0 {
 		// Defense in depth, not a tolerance this function can promise:
 		// GlobalFailedLoadCache is the LAST piece initQueryCoord wires and

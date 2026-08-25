@@ -67,8 +67,8 @@ const (
 // This function therefore keeps the replica in hand throughout: it selects the
 // replicas whose own resource group is rgName, and asks whether each shard has
 // a serviceable leader inside one of THOSE replicas. Only query-visible
-// replicas count as able to serve, matching the IsQueryVisible filter both
-// GetShardLeaders ROUTING paths apply -- a leader the proxy can never be
+// replicas count as able to serve, matching the IsQueryVisible filter the
+// GetShardLeaders ROUTING path applies -- a leader the proxy can never be
 // routed to must not make its resource group look ready. Not every caller of
 // the shard-leader machinery filters: checkCollectionQueryable, on the
 // CheckHealth path, goes through GetShardLeadersWithChannels with no replica
@@ -95,18 +95,16 @@ const (
 // LoadPercentageByResourceGroup: an empty resource group is the absence of a
 // filter, not a filter that matches nothing.
 //
-// At that one scope, this verdict must NOT be paired with scoped
-// GetShardLeaders the way a named group's can. This function never runs the
-// collection-wide full-load gate, for any rgName -- that is the whole point
-// of it -- while GetShardLeadersByResourceGroup("") hands the request back to
-// the unscoped path, gate and all, because the unscoped answer has to stay
-// byte-identical to what it was before the resource-group field existed. Both
-// constraints are deliberate and neither can give way, so "" is the one scope
-// where the two surfaces are gated differently: here it is a pure
-// shard-coverage verdict, and a mid-load collection can read Ready=true while
-// the matching strict route is still refused with the retriable
-// ErrCollectionNotFullyLoaded. A caller gating a switchover wants a NAMED
-// group anyway, which is the case the pairing is built for.
+// This verdict is NOT the same question GetShardLeaders answers, at any
+// rgName. GetShardLeaders is gated collection-wide: its strict form refuses
+// the whole request while the collection's percentage is below 100, however
+// far along the group being asked about is. This function never runs that
+// gate -- being independent of the collection's aggregate state is what it is
+// for -- so on a mid-load collection it can call a finished group Ready while
+// a strict GetShardLeaders for the same collection is still refused. Both
+// behaviors are deliberate: the gate has to stay for the unscoped answer,
+// and it has to be absent here. Read this as a shard-coverage verdict about
+// one group, not as a prediction of what a strict route will return.
 //
 // It is a free function over the read-only stores it needs, rather than a
 // method on Server, for the same reason LoadPercentageByResourceGroup is: the
@@ -135,13 +133,13 @@ func ShardLeaderReadinessByResourceGroup(
 	// registration AND every replica record removed, and a no-replica early
 	// return would swallow the recorded failure into "nothing is loading
 	// here".
-	// The test is CalculateLoadPercentage(...) < 0, NOT m.Exist, so that all
-	// three resource-group-scoped surfaces and the scoped GetShardLeaders gate
-	// answer "is this collection loaded" the same way -- see the longer note
-	// in LoadPercentageByResourceGroup. Exist would report Ready for a
-	// collection record left with zero partitions, a state whose routing the
-	// scoped GetShardLeaders path refuses with a non-retriable 101, which is
-	// exactly the disagreement the invariant above forbids.
+	// The test is CalculateLoadPercentage(...) < 0, NOT m.Exist, so that both
+	// resource-group surfaces and the GetShardLeaders gate answer "is this
+	// collection loaded" the same way -- see the longer note in
+	// LoadPercentageByResourceGroup. Exist would report Ready for a collection
+	// record left with zero partitions, a state GetShardLeaders refuses with a
+	// non-retriable 101, which is exactly the disagreement the invariant above
+	// forbids.
 	if m.CalculateLoadPercentage(ctx, collectionID) < 0 {
 		// Defense in depth, not a tolerance this function can promise --
 		// see the matching note in LoadPercentageByResourceGroup.
@@ -170,11 +168,12 @@ func ShardLeaderReadinessByResourceGroup(
 			continue
 		}
 		inRG++
-		// Only query-visible replicas can serve: both the native and the
-		// resource-group-scoped GetShardLeaders filter on IsQueryVisible, so
-		// a leader on a not-yet-promoted load-config replica is one no query
-		// can be routed to, and counting it would report Ready for a resource
-		// group whose scoped GetShardLeaders answer is empty. The replica
+		// Only query-visible replicas can serve: the GetShardLeaders routing
+		// path filters on IsQueryVisible, so a leader on a not-yet-promoted
+		// load-config replica is one no query can be routed to, and counting
+		// it would report Ready for a resource group that does not appear in
+		// the routing answer at all -- its leaders are dropped before the
+		// per-leader resource-group tag is applied. The replica
 		// still counts as "living here" -- its shards are merely unready
 		// until tryPromoteReadyLoadConfigReplicas flips it visible -- so it
 		// keeps the resource group out of the no-replica bucket below, whose

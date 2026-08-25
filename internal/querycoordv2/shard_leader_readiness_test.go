@@ -582,10 +582,10 @@ func TestShardLeaderReadinessByRG_NilFailedLoadCache(t *testing.T) {
 
 // TestShardLeaderReadinessByRG_QueryInvisibleReplicaDoesNotCount asserts that
 // readiness agrees with the routing surface about which replicas exist for
-// queries. Both the native and the resource-group-scoped GetShardLeaders
+// queries. The GetShardLeaders routing path
 // filter on replica.IsQueryVisible(), so a query-invisible replica's leader is
 // one the proxy can never route to; counting it here would report Ready for a
-// resource group whose scoped GetShardLeaders answer is empty — exactly the
+// resource group that does not appear in the GetShardLeaders answer at all — exactly the
 // load-config switch window this check exists to keep honest. Once visibility
 // is flipped (the same all-or-nothing promotion tryPromoteReadyLoadConfigReplicas
 // performs), the same leader must start counting.
