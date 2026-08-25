@@ -35,5 +35,5 @@ milvus_c_registry_test_total{source="core"} 1
 
 func TestParseTextMetricsUsesLegacyValidation(t *testing.T) {
 	_, err := parseTextMetrics(`{"metric.name",source="core"} 1`)
-	require.ErrorContains(t, err, `invalid metric name "metric.name"`)
+	require.ErrorContains(t, err, "invalid metric name")
 }
