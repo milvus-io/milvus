@@ -1308,6 +1308,49 @@ func TestExternalCollectionRefreshManager_GetJobProgress(t *testing.T) {
 		assert.Equal(t, indexpb.JobState_JobStateInit, job.GetState())
 	})
 
+	t.Run("index_wait_progress_reaches_the_client", func(t *testing.T) {
+		// During the wait every task is Finished, so the task aggregate is a
+		// flat 100 and says nothing about it. The job's persisted progress is
+		// the indexed fraction - the only signal there is - so a client polling
+		// DescribeRefresh must see that, not a constant 99.
+		existingJob := &datapb.ExternalCollectionRefreshJob{
+			JobId:                1,
+			CollectionId:         100,
+			State:                indexpb.JobState_JobStateInProgress,
+			Progress:             94,
+			IndexWaitStartedTime: time.Now().UnixMilli(),
+		}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
+		}
+		refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{existingJob}, tasks)
+		manager := NewExternalCollectionRefreshManager(ctx, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, nil, nil, nil)
+
+		job, err := manager.GetJobProgress(ctx, 1)
+		assert.NoError(t, err)
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, job.GetState())
+		assert.Equal(t, int64(94), job.GetProgress(),
+			"the index-wait progress must reach the client, not a flat 99")
+	})
+
+	t.Run("a_job_outside_the_index_wait_still_reads_as_good_as_done", func(t *testing.T) {
+		// Same shape, no wait marker: the persisted number is just the last
+		// ingest progress and must not be mistaken for an indexed fraction.
+		existingJob := &datapb.ExternalCollectionRefreshJob{
+			JobId: 1, CollectionId: 100,
+			State: indexpb.JobState_JobStateInProgress, Progress: 94,
+		}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
+		}
+		refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{existingJob}, tasks)
+		manager := NewExternalCollectionRefreshManager(ctx, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, nil, nil, nil)
+
+		job, err := manager.GetJobProgress(ctx, 1)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(99), job.GetProgress())
+	})
+
 	t.Run("finished_tasks_do_not_expose_finished_before_job_persisted", func(t *testing.T) {
 		existingJob := &datapb.ExternalCollectionRefreshJob{
 			JobId:        1,

@@ -223,7 +223,7 @@ func NewExternalCollectionRefreshManager(
 	// forgetJob cleans up the notifiedJobs dedup map when the checker GC's
 	// a job, preventing unbounded growth.
 	m.inspector = newRefreshInspector(ctx, refreshMeta, scheduler, closeChan)
-	m.checker = newRefreshChecker(ctx, refreshMeta, closeChan, m.handleJobFinished, m.applyFinishedJobSegments, m.handleJobFailed, m.forgetJob, m.ensureTasksForInitJob)
+	m.checker = newRefreshChecker(ctx, mt, refreshMeta, closeChan, m.handleJobFinished, m.applyFinishedJobSegments, m.handleJobFailed, m.forgetJob, m.ensureTasksForInitJob)
 	m.inspector.wrapTask = m.wrapTask
 
 	return m
@@ -988,6 +988,15 @@ func normalizeRefreshJobProgress(job *datapb.ExternalCollectionRefreshJob, state
 
 	if state == indexpb.JobState_JobStateFinished {
 		job.State = indexpb.JobState_JobStateInProgress
+		// A job in the index wait has every task Finished, so the task
+		// aggregate is a flat 100 and says nothing about the wait. Its
+		// persisted progress is the indexed fraction - the only signal there
+		// is - so prefer it. Keyed on the wait marker, not on the value: below
+		// the wait, the persisted number is just the last ingest progress and
+		// the brief pre-transition window must still read "as good as done".
+		if job.GetIndexWaitStartedTime() != 0 {
+			progress = job.GetProgress()
+		}
 		if progress > 99 {
 			progress = 99
 		}

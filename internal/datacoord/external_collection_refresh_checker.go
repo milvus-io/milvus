@@ -51,7 +51,11 @@ import (
 // 3. InProgress → Failed: Any task failed or job timeout
 // 4. Finished/Failed → GC: Remove job and tasks after retention period
 type externalCollectionRefreshChecker struct {
-	ctx         context.Context
+	ctx context.Context
+	// mt is datacoord's segment/index meta, read directly for the index wait -
+	// the same way importChecker reads it. Nil in tests that do not exercise
+	// the wait.
+	mt          *meta
 	refreshMeta *externalCollectionRefreshMeta
 	closeChan   chan struct{}
 	// onJobFinished is the manager-side callback that pushes the refreshed
@@ -87,6 +91,7 @@ type externalCollectionRefreshChecker struct {
 
 func newRefreshChecker(
 	ctx context.Context,
+	mt *meta,
 	refreshMeta *externalCollectionRefreshMeta,
 	closeChan chan struct{},
 	onJobFinished func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob),
@@ -97,6 +102,7 @@ func newRefreshChecker(
 ) *externalCollectionRefreshChecker {
 	return &externalCollectionRefreshChecker{
 		ctx:              ctx,
+		mt:               mt,
 		refreshMeta:      refreshMeta,
 		closeChan:        closeChan,
 		onJobFinished:    onJobFinished,
@@ -207,6 +213,123 @@ func (c *externalCollectionRefreshChecker) processJobByID(jobID int64) {
 	c.processJob(job)
 }
 
+// indexWaitProgressFloor is what a job reports the moment it enters the index
+// wait; it walks from there to 99 as segments get indexed. 100 is reserved for
+// done, which pollers key on.
+const indexWaitProgressFloor = int64(90)
+
+func (c *externalCollectionRefreshChecker) indexWaitEnabled() bool {
+	return c.mt != nil &&
+		c.applyJobInfo != nil &&
+		Params.DataCoordCfg.RefreshWaitForIndex.GetAsBool()
+}
+
+// beginIndexWait applies the job's results and puts it into the index wait, in
+// one catalog write. The job stays InProgress; processJob fires the finished
+// callback right after aggregateJobState returns, which publishes the refreshed
+// source/spec exactly as the ungated path does.
+func (c *externalCollectionRefreshChecker) beginIndexWait(job *datapb.ExternalCollectionRefreshJob) {
+	applied, err := c.refreshMeta.BeginIndexWait(
+		job.GetJobId(),
+		func(latestJob *datapb.ExternalCollectionRefreshJob) error {
+			return c.applyJobInfo(c.ctx, latestJob)
+		})
+	if err != nil {
+		mlog.Warn(c.ctx, "failed to apply external collection refresh result",
+			mlog.FieldJobID(job.GetJobId()),
+			mlog.Err(err))
+		// applied here means the failure was persisted as a terminal Failed
+		// state, exactly as on the ungated path.
+		if applied && c.onJobFailed != nil {
+			c.onJobFailed(job.GetJobId())
+		}
+		return
+	}
+	if !applied {
+		// A concurrent path already drove the job terminal and owns the
+		// one-time side effects.
+		return
+	}
+	mlog.Info(c.ctx, "external collection refresh applied, waiting for its segments to be indexed",
+		mlog.FieldJobID(job.GetJobId()),
+		mlog.FieldCollectionID(job.GetCollectionId()))
+}
+
+// indexWaitDone reports whether every segment of the collection carries an
+// index, nudging the unindexed ones into the build channel on the way and
+// tracking the indexed fraction as progress.
+//
+// The debt is the collection's whole flushed segment set, not a snapshot of
+// what this refresh produced: a refresh DEFINES the collection's contents - it
+// keeps, patches, adds and drops until what remains is exactly the external
+// source - so once its apply has landed, "this refresh's segments" and "the
+// collection's segments" are the same set. That is what lets this stay
+// stateless where import needs a per-task segment list.
+func (c *externalCollectionRefreshChecker) indexWaitDone(job *datapb.ExternalCollectionRefreshJob) bool {
+	segments := c.mt.SelectSegments(c.ctx,
+		WithCollection(job.GetCollectionId()),
+		SegmentFilterFunc(func(s *SegmentInfo) bool {
+			// Flushed only, and never L0: createIndexesForSegment skips L0
+			// outright, so an L0 segment never acquires an index record and
+			// would read as unindexed for as long as the wait lasts.
+			return isFlushed(s) && s.GetLevel() != datapb.SegmentLevel_L0
+		}))
+	segmentIDs := lo.Map(segments, func(s *SegmentInfo, _ int) int64 { return s.GetID() })
+	if len(segmentIDs) == 0 {
+		return true
+	}
+
+	unindexed := c.mt.indexMeta.GetUnindexedSegments(job.GetCollectionId(), segmentIDs)
+	if len(unindexed) == 0 {
+		return true
+	}
+
+	for _, segmentID := range unindexed {
+		select {
+		case getBuildIndexChSingleton() <- segmentID: // accelerate index building
+		default:
+		}
+	}
+
+	held := indexWaitProgressFloor +
+		int64(10*(len(segmentIDs)-len(unindexed))/len(segmentIDs))
+	if held > 99 {
+		held = 99
+	}
+	if held != job.GetProgress() {
+		if err := c.refreshMeta.UpdateJobProgress(job.GetJobId(), held); err != nil {
+			mlog.Warn(c.ctx, "failed to update job progress while waiting for indexes",
+				mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+		}
+	}
+	mlog.Debug(c.ctx, "waiting for external collection refresh segments building index...",
+		mlog.FieldJobID(job.GetJobId()),
+		mlog.Int64s("unindexed", unindexed))
+	return false
+}
+
+// finishAfterIndexWait completes a job whose wait is over. No pre-apply: the
+// segments were applied when the wait began.
+func (c *externalCollectionRefreshChecker) finishAfterIndexWait(job *datapb.ExternalCollectionRefreshJob) {
+	applied, err := c.refreshMeta.UpdateJobState(job.GetJobId(), indexpb.JobState_JobStateFinished, "")
+	if err != nil {
+		mlog.Warn(c.ctx, "failed to finish external collection refresh after the index wait",
+			mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+		return
+	}
+	if !applied {
+		return
+	}
+	if err := c.refreshMeta.ClearTaskResultsByJobID(job.GetJobId()); err != nil {
+		mlog.Warn(c.ctx, "failed to clear external collection refresh task results",
+			mlog.FieldJobID(job.GetJobId()),
+			mlog.Err(err))
+	}
+	mlog.Info(c.ctx, "external collection refresh finished, its segments are indexed",
+		mlog.FieldJobID(job.GetJobId()),
+		mlog.FieldCollectionID(job.GetCollectionId()))
+}
+
 // aggregateJobState updates job state based on its tasks.
 func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.ExternalCollectionRefreshJob) {
 	// Skip if job is already in terminal state
@@ -236,6 +359,27 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 	}
 	if state == indexpb.JobState_JobStateNone {
 		// No tasks yet
+		return
+	}
+
+	// The index wait. Off (the default) this is not reached at all and the
+	// transition below is untouched.
+	//
+	// It sits ahead of the generic transition because while the wait is on, the
+	// aggregate says Finished and the job says InProgress on every tick - the
+	// generic path would replay the apply and finish the job immediately.
+	if state == indexpb.JobState_JobStateFinished && c.indexWaitEnabled() {
+		if job.GetIndexWaitStartedTime() == 0 {
+			c.beginIndexWait(job)
+			return
+		}
+		if !c.indexWaitDone(job) {
+			return
+		}
+		// Every segment is indexed. Finish WITHOUT a pre-apply: the segments
+		// were applied by BeginIndexWait, and replaying that here would be a
+		// second apply of the same results.
+		c.finishAfterIndexWait(job)
 		return
 	}
 
@@ -360,7 +504,17 @@ func (c *externalCollectionRefreshChecker) ensureJobFinishedNotified(job *datapb
 	}
 	// Re-read job from meta to get latest state (may have been updated eagerly)
 	latestJob := c.refreshMeta.GetJob(job.GetJobId())
-	if latestJob == nil || latestJob.GetState() != indexpb.JobState_JobStateFinished {
+	if latestJob == nil {
+		return
+	}
+	// Finished, OR applied and now waiting for indexes. The callback publishes
+	// the refreshed source/spec and reclaims the explore temp dir, and both
+	// become due the moment the segments are applied - which with the index
+	// wait on happens before Finished. Waiting for Finished would hold the
+	// schema back for the whole wait, and index builds take the external
+	// source/spec from the collection schema.
+	if latestJob.GetState() != indexpb.JobState_JobStateFinished &&
+		latestJob.GetIndexWaitStartedTime() == 0 {
 		return
 	}
 	c.onJobFinished(c.ctx, latestJob)

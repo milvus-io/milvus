@@ -396,6 +396,41 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 	failReason string,
 	preApply func(*datapb.ExternalCollectionRefreshJob) error,
 ) (bool, error) {
+	return m.updateJobStateWithPreApply(jobID, state, failReason, preApply, nil)
+}
+
+// BeginIndexWait applies the job's segment results and marks it as waiting for
+// those segments to be indexed - in ONE catalog write, the same one the
+// Finished transition would have used. The job stays InProgress.
+//
+// Keeping the apply welded to a state write is what makes the index wait cheap:
+// there is never a moment where the segments are committed but no persisted
+// field says so, so nothing downstream needs to reason about a half-applied
+// job. IndexWaitStartedTime doubles as the apply-once guard - a job carrying it
+// has already committed and must not apply again.
+func (m *externalCollectionRefreshMeta) BeginIndexWait(
+	jobID int64,
+	preApply func(*datapb.ExternalCollectionRefreshJob) error,
+) (bool, error) {
+	return m.updateJobStateWithPreApply(jobID, indexpb.JobState_JobStateInProgress, "", preApply,
+		func(job *datapb.ExternalCollectionRefreshJob) {
+			job.IndexWaitStartedTime = time.Now().UnixMilli()
+			// Enter the reserved band in the same write. Two reasons: the value
+			// a poller sees changes phase exactly when the job does, and no
+			// later write is needed to get it out of whatever the ingest last
+			// reported - which could be 100, and an InProgress job reporting
+			// 100 reads as done to a poller waiting for it.
+			job.Progress = indexWaitProgressFloor
+		})
+}
+
+func (m *externalCollectionRefreshMeta) updateJobStateWithPreApply(
+	jobID int64,
+	state indexpb.JobState,
+	failReason string,
+	preApply func(*datapb.ExternalCollectionRefreshJob) error,
+	mutate func(*datapb.ExternalCollectionRefreshJob),
+) (bool, error) {
 	job, ok := m.jobs.Get(jobID)
 	if !ok {
 		return false, merr.WrapErrServiceInternalMsg("job %d not found", jobID)
@@ -443,6 +478,9 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 	cloneJob := proto.Clone(job).(*datapb.ExternalCollectionRefreshJob)
 	cloneJob.State = state
 	cloneJob.FailReason = failReason
+	if mutate != nil {
+		mutate(cloneJob)
+	}
 	if state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed {
 		cloneJob.EndTime = time.Now().UnixMilli()
 		if state == indexpb.JobState_JobStateFinished {
@@ -468,6 +506,15 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 // UpdateJobProgress updates job progress
 func (m *externalCollectionRefreshMeta) UpdateJobProgress(jobID int64, progress int64) error {
 	_, err := m.mutateJob(jobID, "update job progress", func(job *datapb.ExternalCollectionRefreshJob) (bool, error) {
+		// A terminal job owns its progress: Finished pins 100. Without this a
+		// held-progress write racing the terminal transition - the index wait
+		// and the eager finish run on different goroutines - would leave a
+		// Finished job reporting 95 forever, and pollers waiting for 100 would
+		// never see it.
+		if job.GetState() == indexpb.JobState_JobStateFinished ||
+			job.GetState() == indexpb.JobState_JobStateFailed {
+			return true, nil
+		}
 		job.Progress = progress
 		return false, nil
 	})
