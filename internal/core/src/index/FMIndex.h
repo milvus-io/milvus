@@ -130,7 +130,7 @@ class FMIndex : public ScalarIndex<std::string> {
                 const Config& config) override;
 
     bool
-    SupportsDirectPlainLoad() const override {
+    SupportsPlannedLoad() const override {
         return true;
     }
 

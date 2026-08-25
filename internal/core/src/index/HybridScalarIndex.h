@@ -192,6 +192,19 @@ class HybridScalarIndex : public ScalarIndex<T> {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
+    bool
+    SupportsPlannedLoad() const override {
+        return true;
+    }
+
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
+    void
+    FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+                 const Config& config) override;
+
  protected:
     ScalarIndexType
     SelectIndexBuildType(const std::vector<FieldDataPtr>& field_datas);

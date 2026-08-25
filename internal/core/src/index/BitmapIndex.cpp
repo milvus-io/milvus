@@ -49,6 +49,25 @@ constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
 constexpr const char* BITMAP_INDEX_IS_NESTED = "is_nested_index";
 constexpr const char* BITMAP_INDEX_IS_NESTED_META = "is_nested";
 
+namespace {
+
+struct BitmapLoadContext {
+    size_t index_length{0};
+    size_t total_num_rows{0};
+    bool is_nested{false};
+    bool has_valid_bitset{false};
+    bool rebuild_validity_from_postings{false};
+    bool enable_offset_cache{false};
+    bool use_mmap{false};
+    proto::common::LoadPriority priority{proto::common::LoadPriority::HIGH};
+    std::string final_mmap_path;
+    std::shared_ptr<std::vector<uint8_t>> index_data;
+    std::shared_ptr<std::vector<uint8_t>> valid_bitset;
+    std::shared_ptr<storage::MmapFileTarget> index_data_file;
+};
+
+}  // namespace
+
 template <typename T>
 BitmapIndex<T>::BitmapIndex(
     const storage::FileManagerContext& file_manager_context,
@@ -1438,6 +1457,151 @@ BitmapIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     LOG_INFO("write bitmap index entries with cardinality = {}, num_rows = {}",
              data_.size(),
              total_num_rows_);
+}
+
+template <typename T>
+storage::IndexLoadPlan
+BitmapIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
+                         const Config& config) {
+    auto context = std::make_shared<BitmapLoadContext>();
+    context->index_length = catalog.GetMeta<size_t>(BITMAP_INDEX_LENGTH);
+    context->total_num_rows = catalog.GetMeta<size_t>(BITMAP_INDEX_NUM_ROWS);
+    context->is_nested =
+        catalog.GetMeta<bool>(BITMAP_INDEX_IS_NESTED_META, is_nested_index_);
+    context->has_valid_bitset = catalog.HasEntry(BITMAP_INDEX_VALID_BITSET);
+    context->rebuild_validity_from_postings =
+        schema_.nullable() && !context->is_nested && !context->has_valid_bitset;
+    context->enable_offset_cache =
+        GetValueFromConfig<bool>(config, ENABLE_OFFSET_CACHE).value_or(false);
+    context->priority =
+        GetValueFromConfig<proto::common::LoadPriority>(config, LOAD_PRIORITY)
+            .value_or(proto::common::LoadPriority::HIGH);
+
+    auto raw_data_size = catalog.At(BITMAP_INDEX_DATA).plaintext_size;
+    context->use_mmap =
+        config.contains(MMAP_FILE_PATH) &&
+        context->index_length > DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND;
+
+    storage::IndexLoadPlan plan;
+    plan.finalize_context = context;
+    auto slice_size = storage::DefaultEntryStreamSliceSize();
+    if (context->use_mmap) {
+        context->final_mmap_path =
+            GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
+        context->index_data_file = std::make_shared<storage::MmapFileTarget>(
+            storage::MmapFileTarget{context->final_mmap_path + ".raw.tmp_load",
+                                    raw_data_size,
+                                    false,
+                                    nullptr});
+        plan.entries.push_back(storage::MakePlainEntryLoadPlan(
+            catalog,
+            BITMAP_INDEX_DATA,
+            storage::MmapEntryTarget{
+                context->index_data_file, 0, raw_data_size},
+            slice_size));
+    } else {
+        context->index_data =
+            std::make_shared<std::vector<uint8_t>>(raw_data_size);
+        plan.entries.push_back(storage::MakePlainEntryLoadPlan(
+            catalog,
+            BITMAP_INDEX_DATA,
+            storage::MemoryEntryTarget{context->index_data,
+                                       context->index_data->data(),
+                                       context->index_data->size()},
+            slice_size));
+    }
+
+    if (context->has_valid_bitset) {
+        auto valid_bitset_size =
+            catalog.At(BITMAP_INDEX_VALID_BITSET).plaintext_size;
+        auto expected_valid_bitset_size = (context->total_num_rows + 7) / 8;
+        AssertInfo(valid_bitset_size == expected_valid_bitset_size,
+                   "bitmap valid_bitset size mismatch, expect {}, got {}",
+                   expected_valid_bitset_size,
+                   valid_bitset_size);
+        context->valid_bitset =
+            std::make_shared<std::vector<uint8_t>>(valid_bitset_size);
+        plan.entries.push_back(storage::MakePlainEntryLoadPlan(
+            catalog,
+            BITMAP_INDEX_VALID_BITSET,
+            storage::MemoryEntryTarget{context->valid_bitset,
+                                       context->valid_bitset->data(),
+                                       context->valid_bitset->size()},
+            slice_size));
+    }
+    return plan;
+}
+
+template <typename T>
+void
+BitmapIndex<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+                             const Config& config) {
+    (void)config;
+    auto context =
+        artifact.FinalizeContext<std::shared_ptr<BitmapLoadContext>>();
+    AssertInfo(context != nullptr, "Bitmap FinalizeLoad context is null");
+
+    total_num_rows_ = context->total_num_rows;
+    is_nested_index_ = context->is_nested;
+    valid_bitset_ =
+        TargetBitmap(total_num_rows_, is_nested_index_ || !schema_.nullable());
+    if (context->has_valid_bitset) {
+        AssertInfo(context->valid_bitset != nullptr,
+                   "Bitmap valid_bitset memory target is null");
+        DeserializeValidBitsetData(context->valid_bitset->data(),
+                                   context->valid_bitset->size());
+    }
+
+    ChooseIndexLoadMode(context->index_length);
+    if (context->use_mmap) {
+        AssertInfo(context->index_data_file != nullptr &&
+                       context->index_data_file->file != nullptr,
+                   "Bitmap raw mmap target is not prepared");
+        auto raw_size = context->index_data_file->file_size;
+        AssertInfo(raw_size > 0, "Bitmap raw mmap target must not be empty");
+        auto raw_file = File::Open(context->index_data_file->path, O_RDONLY);
+        auto* raw_map = mmap(nullptr,
+                             raw_size,
+                             PROT_READ,
+                             MAP_PRIVATE,
+                             raw_file.Descriptor(),
+                             0);
+        auto mmap_errno = errno;
+        raw_file.Close();
+        AssertInfo(raw_map != MAP_FAILED,
+                   "failed to mmap Bitmap raw staging file: {}",
+                   strerror(mmap_errno));
+        auto raw_map_guard = folly::makeGuard(
+            [raw_map, raw_size]() { munmap(raw_map, raw_size); });
+        MMapIndexData(context->final_mmap_path,
+                      static_cast<const uint8_t*>(raw_map),
+                      raw_size,
+                      context->index_length,
+                      context->priority,
+                      context->rebuild_validity_from_postings);
+    } else {
+        AssertInfo(context->index_data != nullptr,
+                   "Bitmap raw memory target is null");
+        DeserializeIndexData(context->index_data->data(),
+                             context->index_length,
+                             context->rebuild_validity_from_postings);
+    }
+
+    if (context->enable_offset_cache) {
+        BuildOffsetCache();
+    }
+
+    auto file_index_meta = this->file_manager_->GetIndexMeta();
+    LOG_INFO(
+        "FinalizeLoad bitmap index with cardinality = {}, num_rows = {} for "
+        "segment_id = {}, field_id = {}, mmap = {}",
+        Cardinality(),
+        total_num_rows_,
+        file_index_meta.segment_id,
+        file_index_meta.field_id,
+        is_mmap_);
+    is_built_ = true;
+    ComputeByteSize();
 }
 
 template <typename T>

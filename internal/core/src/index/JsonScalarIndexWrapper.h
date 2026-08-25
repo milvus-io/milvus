@@ -194,8 +194,61 @@ class JsonScalarIndexWrapper : public BaseIndex {
     }
 
     bool
-    SupportsDirectPlainLoad() const override {
-        return false;
+    SupportsPlannedLoad() const override {
+        return BaseIndex::SupportsPlannedLoad();
+    }
+
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override {
+        auto plan = BaseIndex::PlanLoad(catalog, config);
+        if (!catalog.GetMeta<bool>("has_non_exist", false)) {
+            return plan;
+        }
+
+        auto bytes =
+            catalog.At(INDEX_NON_EXIST_OFFSET_FILE_NAME).plaintext_size;
+        AssertInfo(bytes % sizeof(size_t) == 0,
+                   "invalid non_exist_offsets Entry size {}",
+                   bytes);
+        auto offsets =
+            std::make_shared<std::vector<size_t>>(bytes / sizeof(size_t));
+        plan.entries.push_back(storage::MakePlainEntryLoadPlan(
+            catalog,
+            INDEX_NON_EXIST_OFFSET_FILE_NAME,
+            storage::MemoryEntryTarget{
+                offsets, reinterpret_cast<uint8_t*>(offsets->data()), bytes},
+            storage::DefaultEntryStreamSliceSize()));
+        return plan;
+    }
+
+    void
+    FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+                 const Config& config) override {
+        std::vector<size_t> new_non_exist_offsets;
+        auto entry = std::find_if(artifact.Entries().begin(),
+                                  artifact.Entries().end(),
+                                  [](const auto& value) {
+                                      return value.name ==
+                                             INDEX_NON_EXIST_OFFSET_FILE_NAME;
+                                  });
+        if (entry != artifact.Entries().end()) {
+            AssertInfo(entry->ready, "non_exist_offsets Entry is not ready");
+            const auto& target =
+                std::get<storage::MemoryEntryTarget>(entry->target);
+            AssertInfo(target.bytes % sizeof(size_t) == 0,
+                       "invalid materialized non_exist_offsets size {}",
+                       target.bytes);
+            new_non_exist_offsets.resize(target.bytes / sizeof(size_t));
+            milvus::fastmem::FastMemcpy(
+                new_non_exist_offsets.data(), target.data, target.bytes);
+        }
+
+        BaseIndex::FinalizeLoad(std::move(artifact), config);
+        non_exist_offsets_ = std::move(new_non_exist_offsets);
+        BuildExistsBitset(this->Count());
+        LOG_INFO("FinalizeLoad JsonScalarIndexWrapper done, has_non_exist: {}",
+                 !non_exist_offsets_.empty());
     }
 
     // v2 format: override Load() to defer the eager exists bitmap build

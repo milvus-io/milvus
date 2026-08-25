@@ -927,9 +927,8 @@ TEST_F(IndexEntryWriterV3Test,
     EXPECT_EQ(direct_file->PeakInflight(), 1);
 }
 
-TEST_F(IndexEntryWriterV3Test,
-       DirectPlainSliceDoesNotFallbackToArrowBufferRead) {
-    const std::string file_path = kV3FilePath + "_direct_no_fallback";
+TEST_F(IndexEntryWriterV3Test, PlainSliceFallsBackToArrowBufferRead) {
+    const std::string file_path = kV3FilePath + "_buffered_fallback";
     auto data = GeneratePattern(kStreamSliceAlignment);
     {
         auto output = CreateOutputStream(file_path);
@@ -947,10 +946,12 @@ TEST_F(IndexEntryWriterV3Test,
     fallback_file->ResetCounters();
 
     std::vector<uint8_t> target(128);
-    EXPECT_THROW(folly::coro::blockingWait(reader->ReadPlainSliceIntoAsync(
-                     "data", 0, target.data(), target.size())),
-                 milvus::SegcoreError);
-    EXPECT_EQ(fallback_file->AsyncReadCalls(), 0);
+    folly::coro::blockingWait(reader->ReadPlainSliceIntoAsync(
+        "data", 0, target.data(), target.size()));
+
+    EXPECT_TRUE(std::equal(target.begin(), target.end(), data.begin()));
+    EXPECT_EQ(fallback_file->AsyncReadCalls(), 1);
+    EXPECT_EQ(fallback_file->ReadAtCalls(), 0);
 }
 
 TEST_F(IndexEntryWriterV3Test, DirectPlainSliceRejectsShortRead) {
@@ -1072,6 +1073,46 @@ TEST_F(IndexEntryWriterV3Test,
     EXPECT_TRUE(artifact.At("a").ready);
     EXPECT_TRUE(artifact.At("b").ready);
     EXPECT_EQ(direct_file->PeakInflight(), 4);
+}
+
+TEST_F(IndexEntryWriterV3Test,
+       MaterializerUsesBufferedAsyncReadWhenNativeReadIntoIsUnavailable) {
+    milvus::test::ScopedLoadTransientBudget budget(/*capacity_bytes=*/0);
+    const std::string file_path = kV3FilePath + "_materialize_buffered";
+    const size_t slice_size = kStreamSliceAlignment;
+    auto data = GeneratePattern(2 * slice_size);
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto packed = ReadLocalFileBytes(GetRootPath() + "/" + file_path);
+    milvus::test::AsyncTrackingRandomAccessFile* fallback_file = nullptr;
+    auto reader = milvus::test::OpenAsyncIndexEntryReader(std::move(packed),
+                                                          &fallback_file);
+    ASSERT_NE(fallback_file, nullptr);
+    ASSERT_TRUE(reader->SupportsAsyncPlainSliceRead());
+    ASSERT_FALSE(reader->SupportsNativePlainSliceRead());
+    fallback_file->ResetCounters();
+
+    auto target = std::make_shared<std::vector<uint8_t>>(data.size());
+    IndexLoadPlan plan;
+    plan.max_inflight_slices = 2;
+    plan.entries.push_back(MakePlainEntryLoadPlan(
+        reader->Catalog(),
+        "data",
+        MemoryEntryTarget{target, target->data(), target->size()},
+        slice_size));
+
+    auto artifact = folly::coro::blockingWait(
+        MaterializeIndexAsync(*reader, std::move(plan)));
+
+    EXPECT_TRUE(artifact.At("data").ready);
+    EXPECT_EQ(*target, data);
+    EXPECT_EQ(fallback_file->AsyncReadCalls(), 2);
+    EXPECT_EQ(fallback_file->ReadAtCalls(), 0);
 }
 
 TEST_F(IndexEntryWriterV3Test, MaterializerHonorsMaxInflightSlices) {

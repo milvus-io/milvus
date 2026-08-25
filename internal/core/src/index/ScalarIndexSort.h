@@ -202,7 +202,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
                 const Config& config) override;
 
     bool
-    SupportsDirectPlainLoad() const override {
+    SupportsPlannedLoad() const override {
         return true;
     }
 

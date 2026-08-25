@@ -639,6 +639,11 @@ IndexEntryReader::SupportsNativePlainSliceRead() const noexcept {
     return remote != nullptr && remote->SupportsNativeAsyncReadInto();
 }
 
+bool
+IndexEntryReader::SupportsAsyncPlainSliceRead() const noexcept {
+    return std::dynamic_pointer_cast<RemoteInputStream>(input_) != nullptr;
+}
+
 folly::coro::Task<void>
 IndexEntryReader::ReadPlainSliceIntoAsync(
     std::string_view name,
@@ -653,20 +658,20 @@ IndexEntryReader::ReadPlainSliceIntoAsync(
 
     const auto& entry = catalog_.At(name);
     AssertInfo(std::holds_alternative<PlainEntrySource>(entry.source),
-               "Direct plaintext Slice read does not support encrypted Entry "
+               "Async plaintext Slice read does not support encrypted Entry "
                "'{}'",
                name);
     AssertInfo(destination != nullptr || destination_bytes == 0,
-               "Direct plaintext Slice target is null for Entry '{}'",
+               "Async plaintext Slice target is null for Entry '{}'",
                name);
     AssertInfo(entry_offset <= entry.plaintext_size,
-               "Direct plaintext Slice offset {} exceeds Entry '{}' size {}",
+               "Async plaintext Slice offset {} exceeds Entry '{}' size {}",
                entry_offset,
                name,
                entry.plaintext_size);
     auto remaining = entry.plaintext_size - static_cast<size_t>(entry_offset);
     AssertInfo(destination_bytes <= remaining,
-               "Direct plaintext Slice range [{}, {}) exceeds Entry '{}' size "
+               "Async plaintext Slice range [{}, {}) exceeds Entry '{}' size "
                "{}",
                entry_offset,
                entry_offset + destination_bytes,
@@ -674,9 +679,9 @@ IndexEntryReader::ReadPlainSliceIntoAsync(
                entry.plaintext_size);
 
     auto remote = std::dynamic_pointer_cast<RemoteInputStream>(input_);
-    AssertInfo(remote != nullptr && remote->SupportsNativeAsyncReadInto(),
-               "Native async read into caller-owned memory is required for "
-               "Entry '{}'",
+    AssertInfo(remote != nullptr,
+               "Async plaintext Slice read requires a remote input stream "
+               "for Entry '{}'",
                name);
     if (destination_bytes == 0) {
         co_return;
@@ -685,26 +690,26 @@ IndexEntryReader::ReadPlainSliceIntoAsync(
     const auto& source = std::get<PlainEntrySource>(entry.source);
     AssertInfo(entry_offset <=
                    std::numeric_limits<uint64_t>::max() - source.remote_offset,
-               "Direct plaintext Slice remote offset overflow for Entry '{}'",
+               "Async plaintext Slice remote offset overflow for Entry '{}'",
                name);
     auto remote_offset = source.remote_offset + entry_offset;
     AssertInfo(remote_offset <=
                    static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
-               "Direct plaintext Slice remote offset {} exceeds int64 range",
+               "Async plaintext Slice remote offset {} exceeds int64 range",
                remote_offset);
     AssertInfo(destination_bytes <=
                    static_cast<size_t>(std::numeric_limits<int64_t>::max()),
-               "Direct plaintext Slice size {} exceeds int64 range",
+               "Async plaintext Slice size {} exceeds int64 range",
                destination_bytes);
 
     auto bytes_read = co_await BridgeArrowReadCoroFuture(
-        remote->ReadAtAsyncIntoNative(static_cast<int64_t>(remote_offset),
-                                      static_cast<int64_t>(destination_bytes),
-                                      destination));
+        remote->ReadAtAsyncInto(static_cast<int64_t>(remote_offset),
+                                static_cast<int64_t>(destination_bytes),
+                                destination));
     ThrowIfCancelled(effective_cancellation_token,
                      "IndexEntryReader::ReadPlainSliceIntoAsync");
     AssertInfo(bytes_read == static_cast<int64_t>(destination_bytes),
-               "Direct plaintext Slice short read for Entry '{}': got {}, "
+               "Async plaintext Slice short read for Entry '{}': got {}, "
                "expected {}",
                name,
                bytes_read,

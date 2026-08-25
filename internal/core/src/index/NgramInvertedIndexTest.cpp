@@ -221,6 +221,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
         auto ngram_params = index::NgramParams{true, 2, 4};
         auto index =
             std::make_unique<index::NgramInvertedIndex>(ctx, ngram_params);
+        ASSERT_TRUE(index->SupportsPlannedLoad());
         index->LoadUnified(config);
 
         auto cnt = index->Count();

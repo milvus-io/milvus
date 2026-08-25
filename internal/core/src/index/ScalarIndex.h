@@ -266,9 +266,10 @@ class ScalarIndex : public IndexBase {
     IndexStatsPtr
     UploadUnified(const Config& config) override;
 
-    // Packed single-file load. V3 plaintext entries with native caller-owned
-    // async reads use PlanLoad() -> common materialization -> FinalizeLoad();
-    // unsupported, encrypted, and non-native paths retain LoadEntries().
+    // Packed single-file load. V3 plaintext entries with async range reads use
+    // PlanLoad() -> common materialization -> FinalizeLoad(). Native
+    // caller-owned reads are an optional fast path; unsupported and encrypted
+    // paths retain LoadEntries().
     void
     LoadUnified(const Config& config,
                 milvus::OpContext* op_ctx = nullptr) override;
@@ -284,7 +285,7 @@ class ScalarIndex : public IndexBase {
     }
 
     virtual bool
-    SupportsDirectPlainLoad() const {
+    SupportsPlannedLoad() const {
         return false;
     }
 

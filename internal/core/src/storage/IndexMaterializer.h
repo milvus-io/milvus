@@ -127,7 +127,7 @@ ValidatePlan(const IndexEntryCatalog& catalog, const IndexLoadPlan& plan) {
         const auto& catalog_entry = catalog.At(entry.name);
         AssertInfo(
             std::holds_alternative<PlainEntrySource>(catalog_entry.source),
-            "Async direct materialization only supports plaintext Entry '{}'",
+            "Planned async materialization only supports plaintext Entry '{}'",
             entry.name);
         AssertInfo(entry.entry_size == catalog_entry.plaintext_size,
                    "Entry '{}' plan size {} differs from catalog size {}",
@@ -445,9 +445,8 @@ MaterializeIndexAsync(
     auto cleanup_targets = CollectMmapFileTargets(plan.entries);
     auto cleanup_guard = folly::makeGuard(
         [&]() { CleanupUncommittedMmapTargets(cleanup_targets); });
-    AssertInfo(reader.SupportsNativePlainSliceRead(),
-               "Index materialization requires native caller-owned async "
-               "reads");
+    AssertInfo(reader.SupportsAsyncPlainSliceRead(),
+               "Index materialization requires async plaintext Slice reads");
     ValidatePlan(reader.Catalog(), plan);
     auto work_executor = GetLoadExecutorForPriority(plan.priority);
     AssertInfo(static_cast<bool>(work_executor),

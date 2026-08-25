@@ -91,9 +91,13 @@ class IndexEntryReader {
     bool
     SupportsNativePlainSliceRead() const noexcept;
 
-    // Read one range of a plaintext Entry directly into caller-owned target
-    // memory. The range is relative to the Entry, and this method never falls
-    // back to an allocating Arrow Buffer read.
+    bool
+    SupportsAsyncPlainSliceRead() const noexcept;
+
+    // Read one range of a plaintext Entry into caller-owned target memory. The
+    // range is relative to the Entry. Native read-into is used when available;
+    // otherwise the remote reader may allocate a temporary Arrow Buffer and
+    // copy it into the target.
     folly::coro::Task<void>
     ReadPlainSliceIntoAsync(std::string_view name,
                             uint64_t entry_offset,

@@ -154,7 +154,7 @@ class StringIndexSort : public StringIndex {
                 const Config& config) override;
 
     bool
-    SupportsDirectPlainLoad() const override {
+    SupportsPlannedLoad() const override {
         return true;
     }
 

@@ -49,6 +49,7 @@
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "segcore/memory_planner.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
@@ -95,12 +96,14 @@ TEST(HybridScalarIndexPlannerPolicy, ShouldUseOpDelegatesToInternalIndex) {
     HybridScalarIndex<int64_t> int_index(7);
     std::vector<int64_t> int_data{1, 2, 3, 4};
     int_index.Build(int_data.size(), int_data.data());
+    EXPECT_TRUE(int_index.SupportsPlannedLoad());
     EXPECT_FALSE(int_index.ShouldUseOp(proto::plan::OpType::Match));
     EXPECT_TRUE(int_index.ShouldUseOp(proto::plan::OpType::Equal));
 
     HybridScalarIndex<std::string> string_index(7);
     std::vector<std::string> string_data{"alpha", "beta", "alphabet"};
     string_index.Build(string_data.size(), string_data.data());
+    EXPECT_TRUE(string_index.SupportsPlannedLoad());
     EXPECT_TRUE(string_index.ShouldUseOp(proto::plan::OpType::Match));
     EXPECT_TRUE(string_index.ShouldUseOp(proto::plan::OpType::PrefixMatch));
     EXPECT_TRUE(string_index.ShouldUseOp(proto::plan::OpType::RegexMatch));
@@ -1251,6 +1254,20 @@ TYPED_TEST_P(HybridIndexTestNullable, TestRangeCompareFuncTest) {
 template <typename T>
 class HybridIndexTestV3 : public HybridIndexTestV1<T> {
  public:
+    void
+    SetUp() override {
+        old_async_load_enabled_ =
+            segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(true);
+        HybridIndexTestV1<T>::SetUp();
+    }
+
+    void
+    TearDown() override {
+        HybridIndexTestV1<T>::TearDown();
+        RestoreAsyncLoadFlag();
+    }
+
     virtual void
     SetParam() override {
         this->nb_ = 10000;
@@ -1264,7 +1281,21 @@ class HybridIndexTestV3 : public HybridIndexTestV1<T> {
     }
 
     virtual ~HybridIndexTestV3() {
+        RestoreAsyncLoadFlag();
     }
+
+ private:
+    void
+    RestoreAsyncLoadFlag() {
+        if (!old_async_load_enabled_.has_value()) {
+            return;
+        }
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
+            *old_async_load_enabled_);
+        old_async_load_enabled_.reset();
+    }
+
+    std::optional<bool> old_async_load_enabled_;
 };
 
 TYPED_TEST_SUITE_P(HybridIndexTestV3);

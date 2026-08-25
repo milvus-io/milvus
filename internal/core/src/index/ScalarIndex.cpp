@@ -293,8 +293,8 @@ ScalarIndex<T>::LoadUnified(const Config& config, milvus::OpContext* op_ctx) {
         });
     auto async_load_enabled =
         milvus::segcore::storagev2translator::StorageV2AsyncLoadEnabled();
-    if (async_load_enabled && SupportsDirectPlainLoad() &&
-        reader->SupportsNativePlainSliceRead() && all_entries_plain) {
+    if (async_load_enabled && SupportsPlannedLoad() &&
+        reader->SupportsAsyncPlainSliceRead() && all_entries_plain) {
         auto executor = storage::GetLoadExecutorForPriority(load_priority);
         AssertInfo(static_cast<bool>(executor),
                    "Shared LoadExecutor is unavailable");

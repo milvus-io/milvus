@@ -159,7 +159,7 @@ class StringIndexMarisa : public StringIndex {
 
  protected:
     bool
-    SupportsDirectPlainLoad() const override {
+    SupportsPlannedLoad() const override {
         return true;
     }
 

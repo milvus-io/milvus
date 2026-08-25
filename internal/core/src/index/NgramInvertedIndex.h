@@ -118,9 +118,17 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
                 const Config& config) override;
 
     bool
-    SupportsDirectPlainLoad() const override {
-        return false;
+    SupportsPlannedLoad() const override {
+        return true;
     }
+
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
+    void
+    FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+                 const Config& config) override;
 
  private:
     void

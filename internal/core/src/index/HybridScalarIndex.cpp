@@ -452,6 +452,34 @@ HybridScalarIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     ComputeByteSize();
 }
 
+template <typename T>
+storage::IndexLoadPlan
+HybridScalarIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
+                               const Config& config) {
+    internal_index_type_ =
+        static_cast<ScalarIndexType>(catalog.GetMeta<uint8_t>("index_type"));
+    LOG_INFO("PlanLoad hybrid index with internal index type: {}",
+             ToString(internal_index_type_));
+    auto index = GetInternalIndex();
+    AssertInfo(index->SupportsPlannedLoad(),
+               "Hybrid internal index type {} does not support planned load",
+               ToString(internal_index_type_));
+    return index->PlanLoad(catalog, config);
+}
+
+template <typename T>
+void
+HybridScalarIndex<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+                                   const Config& config) {
+    AssertInfo(internal_index_ != nullptr,
+               "Hybrid internal index is unavailable during FinalizeLoad");
+    internal_index_->FinalizeLoad(std::move(artifact), config);
+    is_built_ = true;
+    ComputeByteSize();
+    LOG_INFO("FinalizeLoad hybrid index with internal index type: {}",
+             ToString(internal_index_type_));
+}
+
 template class HybridScalarIndex<bool>;
 template class HybridScalarIndex<int8_t>;
 template class HybridScalarIndex<int16_t>;

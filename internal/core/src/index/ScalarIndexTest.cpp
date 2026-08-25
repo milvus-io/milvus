@@ -200,7 +200,39 @@ class TestScalarIndexV3AsyncFallback
         load_entries_calls_++;
     }
 
+    bool
+    SupportsPlannedLoad() const override {
+        return true;
+    }
+
+    milvus::storage::IndexLoadPlan
+    PlanLoad(const milvus::storage::IndexEntryCatalog& catalog,
+             const milvus::Config&) override {
+        auto payload = std::make_shared<std::vector<uint8_t>>(
+            catalog.At("payload").plaintext_size);
+        milvus::storage::IndexLoadPlan plan;
+        plan.entries.push_back(milvus::storage::MakePlainEntryLoadPlan(
+            catalog,
+            "payload",
+            milvus::storage::MemoryEntryTarget{
+                payload, payload->data(), payload->size()},
+            milvus::storage::DefaultEntryStreamSliceSize()));
+        return plan;
+    }
+
+    void
+    FinalizeLoad(milvus::storage::IndexLoadArtifact&& artifact,
+                 const milvus::Config&) override {
+        const auto& target = std::get<milvus::storage::MemoryEntryTarget>(
+            artifact.At("payload").target);
+        ASSERT_EQ(target.bytes, sizeof(int32_t));
+        std::memcpy(&finalized_payload_, target.data, sizeof(int32_t));
+        finalize_load_calls_++;
+    }
+
     int load_entries_calls_{0};
+    int finalize_load_calls_{0};
+    int32_t finalized_payload_{0};
 };
 
 TEST(ScalarIndexV3AsyncLoadConfigTest,
@@ -226,10 +258,11 @@ TEST(ScalarIndexV3AsyncLoadConfigTest,
     load_index.LoadUnified(load_config, &op_ctx);
 
     EXPECT_EQ(load_index.load_entries_calls_, 1);
+    EXPECT_EQ(load_index.finalize_load_calls_, 0);
 }
 
 TEST(ScalarIndexV3AsyncLoadConfigTest,
-     LoadUnifiedFallsBackWhenDirectLoadIsUnsupported) {
+     LoadUnifiedUsesPlannedLoadWhenSharedFlagEnabled) {
     auto old_enabled =
         milvus::segcore::storagev2translator::StorageV2AsyncLoadEnabled();
     auto guard = folly::makeGuard([old_enabled]() {
@@ -250,7 +283,9 @@ TEST(ScalarIndexV3AsyncLoadConfigTest,
     milvus::OpContext op_ctx;
     load_index.LoadUnified(load_config, &op_ctx);
 
-    EXPECT_EQ(load_index.load_entries_calls_, 1);
+    EXPECT_EQ(load_index.load_entries_calls_, 0);
+    EXPECT_EQ(load_index.finalize_load_calls_, 1);
+    EXPECT_EQ(load_index.finalized_payload_, 42);
 }
 
 TYPED_TEST_P(TypedScalarIndexTest, Constructor) {
