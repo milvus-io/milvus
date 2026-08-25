@@ -217,8 +217,25 @@ func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) m
 	for _, leaders := range shardsLeaders {
 		qns := make([]NodeInfo, len(leaders.GetNodeIds()))
 
+		// resource_groups is parallel to the other three arrays, but a
+		// coordinator built before that field existed fills the others and
+		// leaves this one empty -- proto3 offers no other signal, and proxy
+		// and coordinator deploy separately. Index defensively rather than
+		// assuming the lengths match, so a rolling upgrade degrades to
+		// "unknown group" instead of panicking on every cache refresh.
+		resourceGroups := leaders.GetResourceGroups()
+
 		for j := range qns {
-			qns[j] = NodeInfo{leaders.GetNodeIds()[j], leaders.GetNodeAddrs()[j], leaders.GetServiceable()[j]}
+			resourceGroup := ""
+			if j < len(resourceGroups) {
+				resourceGroup = resourceGroups[j]
+			}
+			qns[j] = NodeInfo{
+				NodeID:        leaders.GetNodeIds()[j],
+				Address:       leaders.GetNodeAddrs()[j],
+				Serviceable:   leaders.GetServiceable()[j],
+				ResourceGroup: resourceGroup,
+			}
 		}
 
 		shard2QueryNodes[leaders.GetChannelName()] = qns

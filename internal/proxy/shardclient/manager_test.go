@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
@@ -94,4 +95,53 @@ func TestShardCacheAliasRepointResolvesByCollectionID(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, nodes, 1)
 	require.Equal(t, int64(12), nodes[0].NodeID)
+}
+
+// TestParseShardLeaderListCarriesResourceGroup pins that the per-leader
+// resource group reaches the cache, index-aligned with the node it describes.
+// The cache is what every routing decision reads, so a tag that is dropped or
+// shifted here is one no caller can recover.
+func TestParseShardLeaderListCarriesResourceGroup(t *testing.T) {
+	shards := parseShardLeaderList2QueryNode([]*querypb.ShardLeadersList{
+		{
+			ChannelName:    "dmc0",
+			NodeIds:        []int64{1, 2},
+			NodeAddrs:      []string{"addr1", "addr2"},
+			Serviceable:    []bool{true, false},
+			ResourceGroups: []string{"rg-a", "rg-b"},
+		},
+	})
+
+	assert.Equal(t, []NodeInfo{
+		{NodeID: 1, Address: "addr1", Serviceable: true, ResourceGroup: "rg-a"},
+		{NodeID: 2, Address: "addr2", Serviceable: false, ResourceGroup: "rg-b"},
+	}, shards["dmc0"])
+}
+
+// TestParseShardLeaderListToleratesMissingResourceGroups pins the rolling
+// upgrade shape: a coordinator built before resource_groups existed fills the
+// other three arrays and leaves this one empty. proto3 gives the proxy no
+// other signal, and proxy and coordinator deploy separately, so this is a
+// reachable state on every upgrade -- not a malformed response.
+//
+// Indexing resource_groups without the length guard panics here, on every
+// cache refresh, for the whole upgrade window.
+func TestParseShardLeaderListToleratesMissingResourceGroups(t *testing.T) {
+	assert.NotPanics(t, func() {
+		shards := parseShardLeaderList2QueryNode([]*querypb.ShardLeadersList{
+			{
+				ChannelName: "dmc0",
+				NodeIds:     []int64{1, 2},
+				NodeAddrs:   []string{"addr1", "addr2"},
+				Serviceable: []bool{true, true},
+				// ResourceGroups deliberately absent
+			},
+		})
+
+		assert.Equal(t, []NodeInfo{
+			{NodeID: 1, Address: "addr1", Serviceable: true, ResourceGroup: ""},
+			{NodeID: 2, Address: "addr2", Serviceable: true, ResourceGroup: ""},
+		}, shards["dmc0"],
+			"an unknown resource group must read as empty, leaving the rest of the entry intact")
+	})
 }

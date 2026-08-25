@@ -40,10 +40,16 @@ type NodeInfo struct {
 	NodeID      UniqueID
 	Address     string
 	Serviceable bool
+	// ResourceGroup is the resource group of the REPLICA this node leads, not
+	// of the node itself -- a replica may borrow nodes from another group, so
+	// the two are not the same thing. Empty means unknown: the coordinator
+	// predates the field, or the entry came from somewhere that does not set
+	// it. It must not be read as "no resource group".
+	ResourceGroup string
 }
 
 func (n NodeInfo) String() string {
-	return fmt.Sprintf("<NodeID: %d, serviceable: %v, address: %s>", n.NodeID, n.Serviceable, n.Address)
+	return fmt.Sprintf("<NodeID: %d, serviceable: %v, address: %s, rg: %s>", n.NodeID, n.Serviceable, n.Address, n.ResourceGroup)
 }
 
 type shardClient struct {
