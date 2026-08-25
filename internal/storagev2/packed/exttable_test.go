@@ -1320,6 +1320,12 @@ func TestResolveMilvusTableSnapshotMetadataPathRejectsNonJSONPath(t *testing.T) 
 		_, err := resolveMilvusTableSnapshotMetadataPath("s3://bucket", spec)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		// The refresh classifier in createTasksForJob keys off the merr error
+		// type, so the origin must keep its InputError classification through
+		// any wrapping. Assert it here so a future merr.Wrap that drops the
+		// type is caught at the source instead of silently turning the refresh
+		// terminal error back into a retryable one.
+		assert.Equal(t, merr.InputError, merr.GetErrorType(err))
 		assert.Contains(t, err.Error(), "snapshot metadata JSON path")
 	})
 }

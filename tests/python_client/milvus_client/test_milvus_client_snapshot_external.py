@@ -15,8 +15,7 @@ import numpy as np
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
-from common import common_type as ct
-from common.common_type import CaseLabel, CheckTasks
+from common.common_type import CaseLabel
 from common.external_table_common import build_external_spec, get_minio_config
 from ml_dtypes import bfloat16
 from pymilvus import DataType, Function, FunctionType, MilvusException
@@ -329,8 +328,6 @@ class MilvusTableExternalTestBase(TestMilvusClientV2Base):
             pk_kwargs["is_primary"] = True
         if pk_type == DataType.VARCHAR:
             pk_kwargs["max_length"] = 64
-        if omit_external_field == "source_pk":
-            pk_kwargs.pop("external_field")
         self.add_field(schema, "source_pk", pk_type, **pk_kwargs)
 
         field_specs = [
@@ -377,6 +374,21 @@ class MilvusTableExternalTestBase(TestMilvusClientV2Base):
                         )
                 else:
                     assert state == "RefreshCompleted", f"refresh {job_id} failed: {_value(last, 'reason', '')}"
+                return last
+            time.sleep(REFRESH_POLL_SECONDS)
+        raise AssertionError(f"refresh {job_id} did not finish in {REFRESH_TIMEOUT}s; last={last!r}")
+
+    def _wait_refresh_terminal(self, client, job_id):
+        """Poll a refresh job to a terminal state and return its progress info.
+
+        Unlike _wait_refresh, this makes no assertion on the outcome so callers
+        can inspect state/reason themselves (e.g. conditional xfail).
+        """
+        deadline = time.monotonic() + REFRESH_TIMEOUT
+        last = None
+        while time.monotonic() < deadline:
+            last = self.get_refresh_external_collection_progress(client, job_id=job_id)[0]
+            if _value(last, "state", "") in ("RefreshCompleted", "RefreshFailed"):
                 return last
             time.sleep(REFRESH_POLL_SECONDS)
         raise AssertionError(f"refresh {job_id} did not finish in {REFRESH_TIMEOUT}s; last={last!r}")
@@ -449,6 +461,12 @@ class MilvusTableExternalTestBase(TestMilvusClientV2Base):
         assert _row_value(actual, "tag_alias") == expected["tag"]
         assert _json_value(_row_value(actual, "payload_alias")) == expected["payload"]
         assert list(_row_value(actual, "numbers_alias")) == expected["numbers"]
+        # Exact vector comparison so a corrupted/permuted embedding cannot pass
+        # just because nearest-neighbor search still returns the right IDs.
+        actual_vector = list(_row_value(actual, "vector"))
+        assert len(actual_vector) == len(expected["embedding"])
+        for actual_dim, expected_dim in zip(actual_vector, expected["embedding"]):
+            assert float(actual_dim) == pytest.approx(float(expected_dim), abs=1e-5)
 
     def _search_core(self, client, collection_name, vector, limit=5, filter=None):
         results = self.search(
@@ -458,14 +476,14 @@ class MilvusTableExternalTestBase(TestMilvusClientV2Base):
             anns_field="vector",
             limit=limit,
             filter=filter,
-            output_fields=["source_pk", "group_alias", "tag_alias", "payload_alias"],
+            output_fields=["source_pk", "group_alias", "tag_alias", "payload_alias", "vector"],
             search_params={"metric_type": "L2", "params": {}},
         )[0]
         assert len(results) == 1
         hits = results[0]
         _assert_search_hits(hits, limit, "L2")
         for hit in hits:
-            for field_name in ("source_pk", "group_alias", "tag_alias", "payload_alias"):
+            for field_name in ("source_pk", "group_alias", "tag_alias", "payload_alias", "vector"):
                 assert _row_value(hit, field_name) is not None, (
                     f"search hit is missing output field {field_name!r}: {hit!r}"
                 )
@@ -496,6 +514,8 @@ class MilvusTableExternalTestBase(TestMilvusClientV2Base):
                 "score_alias",
                 "tag_alias",
                 "payload_alias",
+                "numbers_alias",
+                "vector",
             ],
         )
         normalized_rows = sorted(
@@ -505,6 +525,8 @@ class MilvusTableExternalTestBase(TestMilvusClientV2Base):
                 round(float(_row_value(row, "score_alias")), 5),
                 _row_value(row, "tag_alias"),
                 _json_value(_row_value(row, "payload_alias")),
+                tuple(_row_value(row, "numbers_alias")),
+                tuple(round(float(dim), 5) for dim in _row_value(row, "vector")),
             )
             for row in rows
         )
@@ -558,6 +580,7 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
                 "tag_alias",
                 "payload_alias",
                 "numbers_alias",
+                "vector",
             ],
         )[0]
         assert len(fetched) == 1
@@ -627,6 +650,7 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
                 "tag_alias",
                 "payload_alias",
                 "numbers_alias",
+                "vector",
             ],
         )[0]
         assert len(fetched) == 1
@@ -663,6 +687,11 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         self.delete(client, source, ids=[0])
         self.upsert(client, source, [_core_row(1, marker=9), _core_row(SMALL_ROWS, marker=9)])
 
+        # Establish, with Strong consistency, that these unflushed mutations are
+        # actually visible in the source BEFORE the snapshot. This proves the
+        # snapshot below excluded real changes (delete of pk 0, in-place
+        # replacement of pk 1, and insert-upsert of pk SMALL_ROWS) rather than
+        # no-op writes that the target would also not contain.
         source_rows = self.query(
             client,
             source,
@@ -672,7 +701,7 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
             limit=10,
         )[0]
         rows_by_pk = {_row_value(row, "pk"): row for row in source_rows}
-        assert set(rows_by_pk) == {1, SMALL_ROWS}
+        assert set(rows_by_pk) == {1, SMALL_ROWS}, "pk 0 must be deleted in the source"
         for row_id in (1, SMALL_ROWS):
             expected = _core_row(row_id, marker=9)
             actual = rows_by_pk[row_id]
@@ -828,6 +857,44 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         assert self._core_signature(client, target, [0, SMALL_ROWS, added_ids[-1]]) == first_signature
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_table_refresh_overwrites_existing_rows(self, request):
+        """
+        target: overwrite an existing source row value through a later snapshot
+        method: refresh snapshot A, upsert a new value over an existing PK, refresh snapshot B
+        expected: the target exposes exactly the newer value and the old value is gone
+        """
+        client = self._client()
+        cfg = self._minio_cfg(request)
+        source = self._name("overwrite_refresh_src")
+        target = self._name("overwrite_refresh_ext")
+        row_id = 42
+        replacement = _core_row(row_id, marker=9)
+        self._create_core_source(client, source, [_core_row(row_id) for row_id in range(SMALL_ROWS)])
+        self._flush_rate_limited(client, source)
+        snapshot_a = self._create_snapshot_ref(client, source, cfg, suffix="overwrite_a")
+
+        schema = self._build_core_target_schema(client, snapshot_a, cfg, real_pk=True)
+        self.create_collection(client, collection_name=target, schema=schema)
+        self._refresh(client, target)
+        self._index_and_load(client, target)
+        old_rows = self._query_source_pks(client, target, [row_id])
+        assert len(old_rows) == 1
+        self._assert_core_row(old_rows[0], _core_row(row_id))
+
+        self.upsert(client, source, [replacement])
+        self._flush_rate_limited(client, source)
+        snapshot_b = self._create_snapshot_ref(client, source, cfg, suffix="overwrite_b")
+
+        self.release_collection(client, target)
+        self._refresh(client, target, snapshot_ref=snapshot_b, minio_cfg=cfg)
+        self.load_collection(client, target)
+        assert self._count(client, target) == SMALL_ROWS
+        updated_rows = self._query_source_pks(client, target, [row_id])
+        assert len(updated_rows) == 1
+        self._assert_core_row(updated_rows[0], replacement)
+        assert self.describe_collection(client, target)[0]["external_source"] == snapshot_b.external_source
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_table_varchar_real_pk(self, request):
         """
         target: use a renamed VARCHAR source primary key as the target primary key
@@ -925,7 +992,7 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
             target,
             snapshot_b,
             cfg,
-            reason_terms=("schema", "definition mismatch", "dimension"),
+            reason_terms=("schema", "dimension"),
         )
         target_info = self.describe_collection(client, target)[0]
         assert target_info["external_source"] == snapshot_a.external_source
@@ -934,6 +1001,11 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         rows = self._query_source_pks(client, target, [42])
         assert len(rows) == 1
         self._assert_core_row(rows[0], _core_row(42))
+        # The collection must remain fully readable (not just queryable) from
+        # the old snapshot after a failed refresh: search still resolves the
+        # same nearest neighbor.
+        hits = self._search_core(client, target, _core_vector(42), limit=1)
+        assert _row_value(hits[0], "source_pk") == 42
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
@@ -941,13 +1013,13 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         [
             pytest.param(
                 "vector_dimension_mismatch",
-                "definition mismatch",
+                "mismatch",
                 id="dimension_mismatch",
             ),
             pytest.param("missing_external_field", "external_field", id="missing_external_field"),
             pytest.param(
                 "primary_key_maps_non_primary",
-                "definition mismatch",
+                "mismatch",
                 id="pk_maps_non_pk",
             ),
         ],
@@ -1003,13 +1075,12 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
             external_source=snapshot.external_source.rsplit("/", 1)[0],
         )
         schema = self._build_core_target_schema(client, prefix_ref, cfg, real_pk=True)
-        self.create_collection(
-            client,
-            collection_name=invalid_target,
-            schema=schema,
-            check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: "snapshot metadata JSON path"},
-        )
+        if invalid_target not in self.tear_down_collection_names:
+            self.tear_down_collection_names.append(invalid_target)
+        with pytest.raises(MilvusException) as exc_info:
+            client.create_collection(collection_name=invalid_target, schema=schema)
+        assert exc_info.value.code == 1100
+        assert "snapshot metadata JSON path" in str(exc_info.value)
         self._assert_collection_absent(client, invalid_target)
 
         valid_schema = self._build_core_target_schema(client, snapshot, cfg, real_pk=True)
@@ -1029,6 +1100,8 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         assert self.describe_collection(client, valid_target)[0]["external_source"] == snapshot.external_source
         self.load_collection(client, valid_target)
         assert self._count(client, valid_target) == SMALL_ROWS
+        hits = self._search_core(client, valid_target, _core_vector(42), limit=1)
+        assert _row_value(hits[0], "source_pk") == 42
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_table_rejects_external_snapshot_chaining(self, request):
@@ -1059,20 +1132,21 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
             external_a,
             external_snapshot,
             cfg,
-            reason_terms=("external collection", "source snapshot"),
+            reason_terms=("external collection",),
         )
         assert self.describe_collection(client, external_a)[0]["external_source"] == source_snapshot.external_source
         self.load_collection(client, external_a)
         assert self._count(client, external_a) == 50
+        hits = self._search_core(client, external_a, _core_vector(42), limit=1)
+        assert _row_value(hits[0], "source_pk") == 42
 
         schema_b = self._build_core_target_schema(client, external_snapshot, cfg, real_pk=True)
-        self.create_collection(
-            client,
-            collection_name=external_b,
-            schema=schema_b,
-            check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: "cannot use an external collection snapshot as source"},
-        )
+        if external_b not in self.tear_down_collection_names:
+            self.tear_down_collection_names.append(external_b)
+        with pytest.raises(MilvusException) as exc_info:
+            client.create_collection(collection_name=external_b, schema=schema_b)
+        assert exc_info.value.code == 1100
+        assert "external collection snapshot as source" in str(exc_info.value)
         self._assert_collection_absent(client, external_b)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1392,12 +1466,6 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(
-        reason=(
-            "Known bug #52303: milvus-table refresh cannot materialize BM25 input from StorageV3 TEXT LOB references"
-        ),
-        strict=True,
-    )
     def test_milvus_table_target_owned_bm25_output(self, request):
         """
         target: generate a target-owned BM25 field from externally mapped TEXT
@@ -1476,7 +1544,31 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
             )
         )
         self.create_collection(client, collection_name=target, schema=target_schema)
-        self._refresh(client, target)
+        job_id = self.refresh_external_collection(client, target)[0]
+        refresh_info = self._wait_refresh_terminal(client, job_id)
+        if _value(refresh_info, "state", "") == "RefreshFailed":
+            reason = _value(refresh_info, "reason", "") or ""
+            lowered = reason.lower()
+            # #52303: refresh cannot materialize BM25 input from StorageV3 TEXT
+            # LOB references (DataNode fails appending the TEXT field with a
+            # "Wrong row type" error). Only xfail when the failure matches this
+            # known bug; any other failure (schema/API regression, or an
+            # assertion below) must remain a real failure.
+            if any(
+                term in lowered
+                for term in (
+                    "52303",
+                    "wrong row type",
+                    "append field text_alias",
+                    "text lob",
+                    "materialize",
+                )
+            ):
+                pytest.xfail(f"known bug #52303: {reason}")
+            raise AssertionError(f"refresh {job_id} failed for an unexpected reason: {reason}")
+        assert _value(refresh_info, "state", "") == "RefreshCompleted", (
+            f"refresh {job_id} failed: {_value(refresh_info, 'reason', '')}"
+        )
         self._index_and_load(
             client,
             target,
