@@ -40,7 +40,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
-	"github.com/prometheus/common/model"
 	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
@@ -175,7 +174,10 @@ func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
 }
 
 func parseTextMetrics(metricsStr string) (map[string]*dto.MetricFamily, error) {
-	parser := expfmt.NewTextParser(model.LegacyValidation)
+	// prometheus/common v0.55.0 (pinned in go.mod) has no expfmt.NewTextParser;
+	// the zero-value TextParser honors model.NameValidationScheme, whose default
+	// is LegacyValidation, matching the legacy name validation intent.
+	parser := expfmt.TextParser{}
 	return parser.TextToMetricFamilies(strings.NewReader(metricsStr))
 }
 
