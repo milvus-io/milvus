@@ -454,6 +454,9 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
 	// validateImportRequest runs before the broadcaster's idempotency lookup, so even a
 	// request that will deduplicate is counted against the job limit first.
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(0)
+	// The duplicate branch logs the original job's state, so it looks the job up.
+	// nil is the "gone" case: the key outlived the job's own metadata retention.
+	importMeta.EXPECT().GetJob(mock.Anything, int64(4242)).Return(nil).Once()
 
 	server, _ := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
 
@@ -462,6 +465,31 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
 	s.NoError(err)
 	s.NotNil(resp)
 	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal("4242", resp.GetJobID())
+}
+
+// The duplicate branch logs the ORIGINAL job's state, not just its ID. A key whose
+// original ended Failed resolves to that same job for the rest of the window, so a
+// client retrying it never makes progress; without the state in the log that is
+// indistinguishable from a key waiting on a healthy job. GetJob is expected exactly
+// once, so this asserts the lookup actually runs rather than assuming it.
+func (s *ImportServicesSuite) TestImportV2_DuplicateLooksUpAFailedOriginal() {
+	ctx := newImportV2IdempotentContext("run-1")
+
+	importMeta := NewMockImportMeta(s.T())
+	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(0)
+	importMeta.EXPECT().GetJob(mock.Anything, int64(4242)).Return(&importJob{
+		ImportJob: &datapb.ImportJob{JobID: 4242, State: internalpb.ImportJobState_Failed},
+	}).Once()
+
+	server, _ := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
+
+	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
+
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	// A failed original still resolves to its own jobID: the key names an attempt that
+	// did happen. Recovering from it is the client's call, which is why the state is logged.
 	s.Equal("4242", resp.GetJobID())
 }
 
@@ -476,6 +504,9 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateWithZeroJobIDStaysDuplicate(
 	// validateImportRequest runs before the broadcaster's idempotency lookup, so even a
 	// request that will deduplicate is counted against the job limit first.
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(0)
+	// The duplicate branch logs the original job's state, so it looks the job up.
+	// nil is the "gone" case: the key outlived the job's own metadata retention.
+	importMeta.EXPECT().GetJob(mock.Anything, int64(0)).Return(nil).Once()
 
 	server, _ := s.setupImportV2DuplicateBroadcast(importMeta, 0, importV2RequestFilePath)
 
@@ -494,6 +525,9 @@ func (s *ImportServicesSuite) TestImportV2_ForwardsIdempotencyKeyUnmodifiedAtThe
 	// validateImportRequest runs before the broadcaster's idempotency lookup, so even a
 	// request that will deduplicate is counted against the job limit first.
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(0)
+	// The duplicate branch logs the original job's state, so it looks the job up.
+	// nil is the "gone" case: the key outlived the job's own metadata retention.
+	importMeta.EXPECT().GetJob(mock.Anything, int64(4242)).Return(nil).Once()
 
 	server, broadcastAPI := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
 

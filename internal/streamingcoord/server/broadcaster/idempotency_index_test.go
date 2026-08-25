@@ -590,13 +590,16 @@ func TestNonImportBroadcastIsDeduplicated(t *testing.T) {
 	require.Equal(t, uint64(1), appendResult.TimeTick)
 }
 
-// TestLoweringTheKeyLengthLimitDoesNotEndTheWindow guards the order of the length check
-// against the index lookup. streaming.idempotency.maxKeyLength is refreshable, so an
-// operator can lower it while keys accepted under the old value are still inside their
-// idempotency window. The limit is admission control over NEW keys; enforcing it on a
-// lookup would reject those retries before they could recover the original broadcastID,
-// and a client that then re-sends under a fresh key imports its data twice.
-func TestLoweringTheKeyLengthLimitDoesNotEndTheWindow(t *testing.T) {
+// TestBroadcasterChecksKeyLengthAfterTheLookup pins the order of the length check
+// against the index lookup inside broadcasterWithRK: the limit is admission control
+// over NEW keys, so an already-indexed key resolves without being re-measured.
+//
+// This is a statement about the broadcaster only. It is NOT the cluster-level claim
+// that lowering streaming.idempotency.maxKeyLength leaves an open idempotency window
+// intact: the REST middleware and the propagation interceptor apply the same
+// refreshable bound at the edge, so a real client's in-window retry is rejected there
+// before it ever reaches this code. See the comment at broadcasterWithRK.Broadcast.
+func TestBroadcasterChecksKeyLengthAfterTheLookup(t *testing.T) {
 	bm := newBroadcastTaskManagerForTest(t)
 	collKey := message.NewExclusiveCollectionNameResourceKey("db1", "coll1")
 
@@ -606,7 +609,8 @@ func TestLoweringTheKeyLengthLimitDoesNotEndTheWindow(t *testing.T) {
 	first := broadcastForTest(t, bm, 1, newImportMsgWithKey("12345678"), collKey)
 	require.Nil(t, first.Duplicated)
 
-	// The operator lowers the bound below a key that is already indexed.
+	// The operator lowers the bound below a key that is already indexed. A request that
+	// got this far has already cleared the edge check, which is what makes this reachable.
 	paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue("4")
 
 	retry := broadcastForTest(t, bm, 2, newImportMsgWithKey("12345678"), collKey)

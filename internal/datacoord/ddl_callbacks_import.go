@@ -194,6 +194,15 @@ func (s *Server) isReplicatingClusterNow(ctx context.Context) (bool, error) {
 // GetImportProgress reports a job's state without checking that its collection still
 // exists, so the client would be told Completed for data that was never imported.
 //
+// That closes ONE HALF of the name-vs-identity gap, not the whole of it. The mirror
+// direction is a rename: RenameCollection keeps the collectionID and changes the name
+// (and can move the collection to another DB), so the scope changes and the lookup
+// MISSES. A miss never reaches this function -- it goes down the normal path and creates
+// a second job -- so the same key imports the same files twice, with no rejection or
+// warning. The window simply ends early. Guarding that would require scoping on identity
+// rather than names, which is a broadcaster-side change; it is recorded as a known
+// limitation in docs/agent_guides/streaming-system/coordination/broadcaster.md.
+//
 // The request payload beyond the collectionID is deliberately NOT compared: keeping the
 // key unique per logical request is the client's contract, and enforcing it server-side
 // would mean inventing an equality predicate over file lists whose false mismatches

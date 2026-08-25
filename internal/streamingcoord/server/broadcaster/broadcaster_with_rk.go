@@ -40,11 +40,16 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 				Duplicated:    dup,
 			}, nil
 		}
-		// Checked after the lookup, not before: the bound is an admission limit on new
-		// index entries, and the parameter behind it is refreshable. Enforcing it on a
-		// lookup would let a lowered limit cut the idempotency window short for keys
-		// that were accepted under the old one -- the retry would be rejected before it
-		// could recover the original broadcastID.
+		// Checked after the lookup, not before: the bound is admission control over new
+		// index entries, so it has nothing to decide about a key that is already indexed.
+		//
+		// This ordering is local to the broadcaster. It is NOT a cluster guarantee that
+		// lowering the bound leaves an open idempotency window alone: both doors a client
+		// key enters through -- the REST middleware and the propagation interceptor -- run
+		// interceptor.ValidateIdempotencyKey against the same refreshable parameter before
+		// a request can reach here, so a lowered limit does reject in-window retries at the
+		// edge. What this order still buys is that the broadcaster adds no second rejection
+		// of its own once a key has been admitted.
 		if err := validateIdempotencyKeyLength(clientKey); err != nil {
 			return nil, err
 		}

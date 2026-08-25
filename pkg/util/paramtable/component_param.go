@@ -7063,16 +7063,22 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Key:     "dataCoord.import.taskRetention",
 		Version: "2.4.0",
 		Doc: `The retention period in seconds for tasks in the Completed or Failed state.
-Must be >= streaming.walBroadcaster.tombstone.maxLifetime: the BulkImport
-idempotency window is bounded by the tombstone retention, so a job GC'd earlier
-than its tombstone would let an in-window retry resolve to a jobID that
-GetImportProgress can no longer find. The default is twice the tombstone default
-rather than equal to it, because a tombstone's age is measured from the last
-StreamingCoord start: every restart extends its remaining life by up to another
-maxLifetime, while this retention keeps counting from the job's own completion.
-Equal values hold only for a window with no restart, which is not a property a
-default may assume. Raise it further if StreamingCoord restarts more than once
-inside one tombstone lifetime.`,
+Nothing else bounds the terminal set -- maxImportJobNum counts only jobs that are
+neither Completed nor Failed -- so this value alone decides how many finished
+importJob entries stay in etcd, each carrying its schema, file list and options
+plus every preimport and import task under it.
+The 48h default exists for BulkImport idempotency and only for it: the idempotency
+window is bounded by streaming.walBroadcaster.tombstone.maxLifetime, so a job GC'd
+earlier than its tombstone lets an in-window retry resolve to a jobID that
+GetImportProgress can no longer find. Keep this at >= 2x that lifetime for as long
+as clients send an Idempotency-Key. Twice rather than equal because a tombstone's
+age is measured from the last StreamingCoord start: every restart extends its
+remaining life by up to another maxLifetime, while this retention keeps counting
+from the job's own completion. Equal values hold only for a window with no restart,
+which is not a property a default may assume. Raise it further if StreamingCoord
+restarts more than once inside one tombstone lifetime.
+A cluster whose clients never send an Idempotency-Key is under no such requirement
+and can lower this freely; 10800 was the default before idempotency keys existed.`,
 		DefaultValue: "172800",
 		PanicIfEmpty: false,
 		Export:       true,
