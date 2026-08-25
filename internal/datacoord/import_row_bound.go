@@ -114,10 +114,15 @@ func computeFileRowUpperBounds(ctx context.Context, cm storage.ChunkManager,
 // range" and silently falls back to its local allocator, which is the divergence
 // this whole mechanism exists to prevent, so a zero-row file still gets a slice.
 //
-// Reservations are never shrunk to fit an allocation ceiling: the JSON/CSV bound
-// is only usable because it is guaranteed not to under-count, and scaling it down
-// would break that guarantee and surface as a mid-import failure on the datanode.
-// reserveRanges splits the allocation across batches instead.
+// An exact count is never shrunk to fit the allocation ceiling: it is the file's
+// real row count, so handing back fewer ids than that is a silent
+// under-reservation. A byte-derived estimate is capped instead of refused. It
+// tracks bytes rather than rows -- a single-column CSV has no provable per-row
+// floor, so its bound is simply the file size -- and refusing on that number
+// rejects a legal import for being large rather than for holding too many rows.
+// Capping is safe because the estimate is not the last word: AssembleImportRequest
+// compares pre-import's exact row count against the reservation and fails the job,
+// with both numbers, before any segment is written.
 func sizeReservations(sizings []fileSizing) error {
 	factor := paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.GetAsInt64()
 	if factor < 1 {
@@ -147,6 +152,16 @@ func sizeReservations(sizings []fileSizing) error {
 			} else {
 				b = maxIDsPerAllocBatch
 			}
+		} else if b > maxIDsPerAllocBatch {
+			// A json/csv bound is the file size divided by a provable per-row byte
+			// floor, and that floor collapses to 1 for a schema whose source columns
+			// may all be empty (a single VarChar column, say). The bound then counts
+			// bytes, not rows: a 4 GiB CSV of 500-byte rows bounds at ~4.3e9 for
+			// ~8.6M real rows. Reserve one batch -- the most a contiguous range can
+			// hold -- rather than refuse the file. A genuine overrun is caught at
+			// assemble time against the exact count, which is where an estimate
+			// should be settled.
+			b = maxIDsPerAllocBatch
 		}
 		if b < 1 {
 			b = 1
@@ -170,14 +185,13 @@ func reserveRanges(sizings []fileSizing,
 		j := i
 		for ; j < len(sizings); j++ {
 			if sizings[j].reservedIDs > maxIDsPerAllocBatch {
-				// For a format that records no row count the number below is an upper
-				// bound derived from the file size, so it can exceed the ceiling on a
-				// file holding far fewer rows. Say so, or the operator reads it as a
-				// real row count and has nowhere to go.
-				return merr.WrapErrParameterInvalidMsg(
-					"import file %d needs up to %d primary keys, more than one allocation batch holds (max %d); "+
-						"for json/csv this is an upper bound derived from the file size -- split the file, "+
-						"or use parquet/numpy, which record their row count exactly",
+				// Unreachable through sizeReservations, which refuses an exact count
+				// above the ceiling and caps an estimate at it. Kept because a change
+				// there would otherwise produce a range straddling two batches, which
+				// the datanode's one cursor per file cannot walk -- an internal
+				// invariant, not something the request content can provoke.
+				return merr.WrapErrImportSysFailedMsg(
+					"import file %d reserved %d primary keys, more than one allocation batch holds (max %d)",
 					j, sizings[j].reservedIDs, maxIDsPerAllocBatch)
 			}
 			if batch+sizings[j].reservedIDs > maxIDsPerAllocBatch {

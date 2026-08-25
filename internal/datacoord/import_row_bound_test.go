@@ -42,8 +42,10 @@ func Test_assignPKRangesToFiles(t *testing.T) {
 	cm := mocks.NewChunkManager(t)
 	// A JSON row floors at 776 for this schema: 768 for the vector, 8 for the
 	// braces and "vec": around it.
-	cm.EXPECT().Size(mock.Anything, "a.json").Return(int64(768*10), nil) // 7680/776 + 1 = 10
-	cm.EXPECT().Size(mock.Anything, "b.json").Return(int64(768*20), nil) // 15360/776 + 1 = 20
+	// The floor is provable here, so the bound charges the n-1 row separators:
+	// (total+1)/(minRow+1) + 1.
+	cm.EXPECT().Size(mock.Anything, "a.json").Return(int64(768*10), nil) // 7681/777 + 1 = 10
+	cm.EXPECT().Size(mock.Anything, "b.json").Return(int64(768*20), nil) // 15361/777 + 1 = 20
 
 	files := []*internalpb.ImportFile{
 		{Paths: []string{"a.json"}},
@@ -204,18 +206,22 @@ func Test_assignPKRangesToFiles_pinsReservationSizing(t *testing.T) {
 		assert.Contains(t, err.Error(), "more than one allocation batch can reserve")
 	})
 
-	t.Run("an estimate above one batch is refused with the estimate wording", func(t *testing.T) {
+	t.Run("an estimate above one batch is capped, and the file is still assigned", func(t *testing.T) {
 		withExpansionFactor(t, "2")
 		defer stubRowCounts(map[string]count{
 			"huge.json": {rows: maxIDsPerAllocBatch + 1, exact: false},
 		}).UnPatch()
 
+		// The mirror of the exact case above: an exact count is refused on the raw
+		// row count, an estimate is capped. The estimate counts bytes rather than
+		// rows, so refusing on it would reject a legal import for being large.
 		files := filesFor("huge.json")
-		err := assignPKRangesToFiles(context.TODO(), cm, schema, files,
-			func(int64) (int64, int64, error) { t.Fatal("allocN must not be called"); return 0, 0, nil }, 1)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "more than one allocation batch holds")
+		var calls []int64
+		require.NoError(t, assignPKRangesToFiles(context.TODO(), cm, schema, files,
+			recordingAlloc(&calls, nil), 1))
+		assert.Equal(t, []int64{maxIDsPerAllocBatch}, rangeWidths(files))
+		assert.Equal(t, []int64{maxIDsPerAllocBatch}, calls,
+			"exactly one batch is allocated, never more than the ceiling")
 	})
 }
 
@@ -261,13 +267,23 @@ func Test_sizeReservations(t *testing.T) {
 		assert.Equal(t, []int64{1, 1}, reservedIDs(sizings))
 	})
 
-	t.Run("bounds are never shrunk to fit an allocation ceiling", func(t *testing.T) {
+	t.Run("an estimate above the ceiling is capped, not refused", func(t *testing.T) {
 		withExpansionFactor(t, "1")
-		// Scaling an estimate down would break the upper-bound guarantee that makes
-		// it usable at all; reserveRanges splits the allocation instead.
+		// A byte-derived bound counts bytes, not rows, so refusing on it rejects a
+		// legal import for being large. One batch is the most a contiguous range can
+		// hold; a genuine overrun is settled at assemble time against the exact count.
 		sizings := sized([]int64{3 * math.MaxUint32, math.MaxUint32}, []bool{false, false})
 		require.NoError(t, sizeReservations(sizings))
-		assert.Equal(t, []int64{3 * math.MaxUint32, math.MaxUint32}, reservedIDs(sizings))
+		assert.Equal(t, []int64{maxIDsPerAllocBatch, maxIDsPerAllocBatch}, reservedIDs(sizings))
+	})
+
+	t.Run("an estimate at or below the ceiling is left alone", func(t *testing.T) {
+		withExpansionFactor(t, "10")
+		// The cap must not double as headroom: an estimate is already inflated, and
+		// the expansion factor stays an exact-count-only concern.
+		sizings := sized([]int64{maxIDsPerAllocBatch, 100}, []bool{false, false})
+		require.NoError(t, sizeReservations(sizings))
+		assert.Equal(t, []int64{maxIDsPerAllocBatch, 100}, reservedIDs(sizings))
 	})
 }
 
@@ -431,24 +447,21 @@ func Test_sizeReservations_rejectsExactCountOverOneBatch(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	assert.Contains(t, err.Error(), "more than one allocation batch can reserve")
 
-	// An estimate is not an exact count and keeps its own path: reserveRanges
-	// still reports it, with the wording that explains the estimate.
-	assert.NoError(t, sizeReservations(sized([]int64{maxIDsPerAllocBatch + 1}, []bool{false})))
+	// An estimate is not an exact count and keeps its own path: it is capped at the
+	// ceiling rather than refused, so reserveRanges never sees an over-wide file.
+	estimate := sized([]int64{maxIDsPerAllocBatch + 1}, []bool{false})
+	require.NoError(t, sizeReservations(estimate))
+	assert.Equal(t, []int64{maxIDsPerAllocBatch}, reservedIDs(estimate))
 }
 
-func Test_assignPKRangesToFiles_singleColumnCSVAboveOneBatchIsRefused(t *testing.T) {
-	// Behavior change introduced by this PR, pinned deliberately: a single-column
-	// all-VarChar CSV larger than maxIDsPerAllocBatch is refused at broadcast,
-	// because its per-row floor proves nothing and one file's range may not
-	// straddle two allocation batches. See the release note.
-	//
-	// The tightening -- n*minRow + (n-1) <= size, giving (size+1)/(minRow+1) -- is
-	// applied only when the floor is provable, which this schema's is not: it
-	// assumes each row really occupies minRow bytes, and a single-column CSV of
-	// empty values is one newline per row, so n rows occupy n bytes and (n+1)/2
-	// would under-count and fail a legal import. Hence the refusal below stands.
-	// See Test_assignPKRangesToFiles_twoColumnCSVAboveOneBatchIsAccepted for the
-	// provable-floor case, where the same file size is accepted.
+func Test_assignPKRangesToFiles_singleColumnCSVAboveOneBatchIsCapped(t *testing.T) {
+	// A single-column all-VarChar CSV has no provable per-row floor -- column names
+	// live in the header and a VarChar value may be empty -- so minRowTextBytes
+	// clamps to one byte and the bound degenerates to the file size. Refusing on
+	// that number would reject a file for being large rather than for holding too
+	// many rows: a 5 GiB BM25 corpus of ~500-byte rows holds ~10M rows and bounds
+	// at ~5.4e9. The reservation is capped at one batch instead, and pre-import's
+	// exact count settles it at assemble time.
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
@@ -460,21 +473,21 @@ func Test_assignPKRangesToFiles_singleColumnCSVAboveOneBatchIsRefused(t *testing
 	}
 	alloc := func(n int64) (int64, int64, error) { return 1000, 1000 + n, nil }
 
-	t.Run("just below one batch is accepted", func(t *testing.T) {
+	t.Run("just below one batch keeps its full bound", func(t *testing.T) {
 		cm := mocks.NewChunkManager(t)
 		cm.EXPECT().Size(mock.Anything, "ok.csv").Return(maxIDsPerAllocBatch-2, nil)
 		files := []*internalpb.ImportFile{{Paths: []string{"ok.csv"}}}
 		require.NoError(t, assignPKRangesToFiles(context.TODO(), cm, schema, files, alloc, 1))
-		assert.Positive(t, files[0].GetPkIdEnd()-files[0].GetPkIdBegin())
+		assert.Equal(t, maxIDsPerAllocBatch-1, files[0].GetPkIdEnd()-files[0].GetPkIdBegin())
 	})
 
-	t.Run("above one batch is refused", func(t *testing.T) {
+	t.Run("above one batch is accepted with a capped range", func(t *testing.T) {
 		cm := mocks.NewChunkManager(t)
 		cm.EXPECT().Size(mock.Anything, "big.csv").Return(int64(5)<<30, nil)
 		files := []*internalpb.ImportFile{{Paths: []string{"big.csv"}}}
-		err := assignPKRangesToFiles(context.TODO(), cm, schema, files, alloc, 1)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.NoError(t, assignPKRangesToFiles(context.TODO(), cm, schema, files, alloc, 1))
+		assert.Equal(t, maxIDsPerAllocBatch, files[0].GetPkIdEnd()-files[0].GetPkIdBegin(),
+			"the range is capped at one batch, not refused")
 	})
 }
 
