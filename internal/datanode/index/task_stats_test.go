@@ -449,7 +449,7 @@ func TestStandaloneJSONKeyJobSkipsManifestBake(t *testing.T) {
 	require.True(t, baked, "Sort sub-job must bake stats into the target-segment manifest inline")
 }
 
-// TestStandaloneTextIndexJobSkipsManifestBake is the text-index analogue of
+// TestStandaloneTextIndexJobSkipsManifestBake is the text-index analog of
 // TestStandaloneJSONKeyJobSkipsManifestBake: a standalone TextIndexJob ships raw
 // stats without baking, while Sort bakes inline.
 func TestStandaloneTextIndexJobSkipsManifestBake(t *testing.T) {

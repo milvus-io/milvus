@@ -417,7 +417,7 @@ func isMaterializationResult(result *datapb.CompactionPlanResult) bool {
 // upserts the new column groups, advances the schema version, and folds in the
 // Stats increment. It returns the segment IDs to enqueue for index building.
 //
-// This is the schema-bump analogue of l0CompactionTask.buildL0V3ManifestCommit
+// This is the schema-bump analog of l0CompactionTask.buildL0V3ManifestCommit
 // (which now batches its targets through CommitSegmentManifests) and obeys the
 // same lock contract: it never runs while segMu is held.
 func (t *bumpSchemaVersionTask) commitBumpV3Materialization(ctx context.Context, result *datapb.CompactionPlanResult) ([]UniqueID, error) {

@@ -641,7 +641,7 @@ func (st *statsTask) commitTextIndexStats(ctx context.Context, result *workerpb.
 	}))
 }
 
-// commitJSONKeyStats is the JsonKeyIndexJob analogue of commitTextIndexStats.
+// commitJSONKeyStats is the JsonKeyIndexJob analog of commitTextIndexStats.
 // The manifest requires absolute stat-file paths, while the result ships
 // manifest-relative paths (kept relative for the SegmentInfo dual-write and read
 // reconstruction), so it rebuilds the absolute form against the segment's stable

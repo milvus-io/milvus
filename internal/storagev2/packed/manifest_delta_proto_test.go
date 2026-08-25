@@ -20,7 +20,7 @@ import (
 // TestColumnGroupEntriesProtoRoundTrip pins the wire fidelity the DataCoord-side
 // manifest commit depends on: every field a loon column-group add needs — column
 // names, format, and per-file path / inclusive-start / exclusive-end / arbitrary
-// properties — must survive datanode->DataCoord marshalling unchanged, or the
+// properties — must survive datanode->DataCoord marshaling unchanged, or the
 // rebuilt transaction would register different files than the datanode wrote.
 func TestColumnGroupEntriesProtoRoundTrip(t *testing.T) {
 	entries := []ColumnGroupEntry{
