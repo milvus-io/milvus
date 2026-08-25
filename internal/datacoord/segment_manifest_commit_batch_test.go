@@ -349,26 +349,86 @@ func TestCommitSegmentManifestsAbortsWhenPointerAdvancesDuringManifestIO(t *test
 	require.EqualValues(t, 1, catalog.alterCalls.Load())
 }
 
-// A batch that can never win its whole lock set must not spin until shutdown: it
-// fails at the hard ceiling with a retriable ServiceUnavailable so the caller's
-// scheduler re-drives the task.
-func TestAcquireSegmentManifestLocksTimesOut(t *testing.T) {
+// Extreme contention must not fail the batch: past the escalation threshold the
+// acquisition joins each key's FIFO queue and completes once the holder releases,
+// replacing the old timed-out ServiceUnavailable + scheduler re-drive loop.
+func TestAcquireSegmentManifestLocksEscalatesInsteadOfTimingOut(t *testing.T) {
 	locks := lock.NewKeyLock[int64]()
-	// Hold one requested key for the whole test so TryLockMany can never win {5,7}.
+	// Hold one requested key so TryLockMany can never win {5,7}.
 	locks.Lock(7)
-	defer locks.Unlock(7)
 
-	restore := segmentManifestLockAcquireTimeout
-	segmentManifestLockAcquireTimeout = 30 * time.Millisecond
-	defer func() { segmentManifestLockAcquireTimeout = restore }()
+	restore := segmentManifestLockEscalationThreshold
+	segmentManifestLockEscalationThreshold = 20 * time.Millisecond
+	defer func() { segmentManifestLockEscalationThreshold = restore }()
 
-	start := time.Now()
-	err := acquireSegmentManifestLocks(context.Background(), locks, []int64{5, 7})
-	elapsed := time.Since(start)
-	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-	// Bounded by the ceiling (returns only once elapsed crosses it), and does not hang.
-	require.GreaterOrEqual(t, elapsed, 30*time.Millisecond)
-	require.Less(t, elapsed, 5*time.Second)
+	done := make(chan error, 1)
+	go func() {
+		done <- acquireSegmentManifestLocks(context.Background(), locks, []int64{5, 7})
+	}()
+
+	// Well past the threshold the batch must be parked in phase 2, not failed.
+	select {
+	case err := <-done:
+		t.Fatalf("acquisition finished while key 7 was held: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	locks.Unlock(7)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("escalated acquisition did not complete after the holder released")
+	}
+	// The batch really holds the whole set now.
+	require.False(t, locks.TryLock(5))
+	require.False(t, locks.TryLock(7))
+	locks.UnlockMany([]int64{5, 7})
+}
+
+// The starvation regression this design exists for: a sustained stream of
+// single-segment lockers keeps the hot key's mutex in Go's starvation mode,
+// where TryLock — and so TryLockMany — fails unconditionally on every retry.
+// The batch must still complete in bounded time via escalation.
+func TestAcquireSegmentManifestLocksCompletesUnderSustainedContention(t *testing.T) {
+	locks := lock.NewKeyLock[int64]()
+	restore := segmentManifestLockEscalationThreshold
+	segmentManifestLockEscalationThreshold = 20 * time.Millisecond
+	defer func() { segmentManifestLockEscalationThreshold = restore }()
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				locks.Lock(7)
+				// Hold long enough that competing waiters queue past the 1ms
+				// starvation-mode trigger.
+				time.Sleep(2 * time.Millisecond)
+				locks.Unlock(7)
+			}
+		}()
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- acquireSegmentManifestLocks(context.Background(), locks, []int64{5, 7})
+	}()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("batch acquisition starved under sustained single-segment contention")
+	}
+	locks.UnlockMany([]int64{5, 7})
+	close(stop)
+	wg.Wait()
 }
 
 // Cancellation still short-circuits with ctx.Err() rather than waiting out the

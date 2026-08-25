@@ -445,14 +445,27 @@ const (
 	segmentManifestLockRetryMax     = 20 * time.Millisecond
 )
 
-// segmentManifestLockAcquireTimeout is the hard ceiling on how long one batch
-// acquisition may retry before failing. TryLockMany guarantees system-wide progress
-// (some committer always wins) but not per-caller starvation-freedom, and the batch
-// runs under the DataCoord lifecycle context (no request deadline), so without this
-// bound a perpetually-unlucky caller would retry until shutdown. On timeout the batch
-// fails retriably so the scheduler re-drives the task instead of pinning a goroutine.
-// It is a var only so tests can shorten it; production never mutates it.
-var segmentManifestLockAcquireTimeout = 60 * time.Second
+// segmentManifestLockEscalationThreshold bounds how long one batch acquisition
+// polls TryLockMany before escalating to the fair blocking path. TryLockMany
+// guarantees system-wide progress (some committer always wins) but not
+// per-caller progress: a key whose mutex sits in Go's starvation mode — a
+// persistent stream of blocked single-segment Lock waiters — fails TryLock
+// unconditionally, so no retry schedule can ever win it. Past the threshold
+// the batch stops polling and joins each key's FIFO queue via LockManyOrdered, which
+// completes in bounded time; the hold-and-wait convoy that ordered blocking
+// acquisition creates is confined to this escalated path.
+//
+// The threshold is deliberately many multiples of a single commit's lock hold
+// time (hundreds of ms to seconds of manifest I/O): the all-or-nothing attempt
+// over a large target set routinely loses to one ordinary in-flight commit, so
+// a threshold near one hold time would escalate on everyday contention and
+// make the convoy common. At 30s phase 1 virtually always wins first unless a
+// key sees a near-continuous commit stream — actual starvation — keeping
+// escalation (and its Warn log) a genuine starvation signal, while a starved
+// batch still completes far sooner than the timeout + scheduler re-drive loop
+// this replaced. It is a var only so tests can shorten it; production never
+// mutates it.
+var segmentManifestLockEscalationThreshold = 30 * time.Second
 
 // CommitSegmentManifests is the batched form of CommitSegmentManifest. It creates a
 // StorageV3 manifest revision for several segments and advances their
@@ -461,9 +474,11 @@ var segmentManifestLockAcquireTimeout = 60 * time.Second
 // protects the manifest pointer from concurrent writers (stats, index, GC, compaction).
 //
 // It runs the three stages the caller specified:
-//  1. Atomically acquire every target segment's manifest lock (all-or-nothing via
-//     KeyLock.TryLockMany, retried with backoff): no ordered blocking acquire, so no
-//     hold-and-wait convoy and no deadlock against single-segment CommitSegmentManifest.
+//  1. Acquire every target segment's manifest lock in two phases: the atomic
+//     all-or-nothing KeyLock.TryLockMany with backoff (holds nothing while waiting,
+//     so no hold-and-wait convoy), escalating after a bounded window to ordered
+//     blocking acquisition so extreme single-segment contention cannot starve the
+//     batch (see acquireSegmentManifestLocks for the deadlock-safety argument).
 //  2. Generate each segment's new manifest revision in parallel, OUTSIDE segMu — the
 //     loon transaction is object-storage I/O — each generated from the segment's
 //     current in-lock manifest pointer (a Noop member may pin an ExpectedManifest CAS).
@@ -551,13 +566,20 @@ func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentMani
 	return m.UpdateSegmentsInfo(ctx, operators...)
 }
 
-// acquireSegmentManifestLocks takes every segment's manifest lock as one atomic
-// all-or-nothing operation, retrying with bounded backoff until it wins the whole
-// set, ctx is cancelled, or segmentManifestLockAcquireTimeout is exceeded (then it
-// fails retriably so the scheduler re-drives the task). segmentIDs must be sorted
-// and de-duplicated. Because a failed TryLockMany releases everything it briefly
-// touched, a waiter never holds a subset, so this cannot deadlock against — or
-// convoy — single-segment commits.
+// acquireSegmentManifestLocks takes every segment's manifest lock in two phases.
+// Phase 1 is the atomic all-or-nothing TryLockMany with bounded backoff: it holds
+// nothing while it waits, so it cannot convoy single-segment commits, and it wins
+// on the first conflict-free attempt in the common low-contention case. If phase 1
+// cannot win the whole set within segmentManifestLockEscalationThreshold (extreme
+// contention: some key never leaves starvation-mode handoff, so TryLock on it can
+// never succeed), phase 2 acquires the sorted keys with blocking Lock in order.
+// Go's starvation mode hands each mutex over FIFO-fairly, so the batch then
+// completes in bounded time instead of failing and being re-driven; the escalated
+// acquisition is not cancellable mid-way, but each wait is bounded by the queue of
+// in-flight commits ahead of it. segmentIDs must be sorted and de-duplicated —
+// that order, plus the manifest-lock discipline (single-segment commits never take
+// a second manifest lock while holding one; no caller enters this protocol holding
+// segMu), is what makes phase 2 deadlock-free (see lock.LockManyOrdered).
 func acquireSegmentManifestLocks(ctx context.Context, locks *lock.KeyLock[int64], segmentIDs []int64) error {
 	backoff := segmentManifestLockRetryInitial
 	start := time.Now()
@@ -569,21 +591,27 @@ func acquireSegmentManifestLocks(ctx context.Context, locks *lock.KeyLock[int64]
 			return err
 		}
 		elapsed := time.Since(start)
-		// One line per failed attempt so a task starving on lock contention is
+		if elapsed >= segmentManifestLockEscalationThreshold {
+			// Escalation is itself a signal worth watching: it means at least one
+			// target segment saw a sustained stream of single-segment commits for
+			// the whole polling window.
+			mlog.Warn(ctx, "segment manifest lock acquisition escalating to blocking path",
+				mlog.Int64s("segmentIDs", segmentIDs),
+				mlog.Int("attempts", attempt),
+				mlog.Duration("elapsed", elapsed))
+			// segmentIDs is already sorted and de-duplicated; LockManyOrdered
+			// re-enforces both rather than trusting the caller invariant on the
+			// path where getting it wrong would deadlock.
+			lock.LockManyOrdered(locks, segmentIDs)
+			return nil
+		}
+		// One line per failed attempt so a task queueing on lock contention is
 		// visible under debug; silent in production unless debug logging is on.
 		mlog.Debug(ctx, "segment manifest lock acquisition contended; retrying",
 			mlog.Int64s("segmentIDs", segmentIDs),
 			mlog.Int("attempt", attempt),
 			mlog.Duration("elapsed", elapsed),
 			mlog.Duration("nextBackoff", backoff))
-		// Hard ceiling: never retry past the timeout under the deadline-less
-		// lifecycle context. Fail retriably (ServiceUnavailable) so the caller's
-		// scheduler re-drives the task rather than blocking this goroutine.
-		if elapsed >= segmentManifestLockAcquireTimeout {
-			return merr.WrapErrServiceUnavailableMsg(
-				"timed out acquiring segment manifest locks for %v after %s (%d attempts)",
-				segmentIDs, elapsed, attempt)
-		}
 		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():

@@ -17,7 +17,9 @@
 package lock
 
 import (
+	"cmp"
 	"context"
+	"slices"
 	"sync"
 
 	pool "github.com/jolestar/go-commons-pool/v2"
@@ -191,10 +193,55 @@ func (k *KeyLock[K]) TryLockMany(keys []K) bool {
 	return true
 }
 
-// UnlockMany releases write locks previously acquired together via TryLockMany.
-// The same slice need not be passed; only that every key is currently held by the
-// caller. Releasing under a single map-mutex acquisition keeps batch release
-// symmetric with the batch acquire.
+// lockMany acquires write locks for every key by blocking on each in order. It
+// is deliberately unexported: safe use requires keys already sorted into the
+// one global total order and de-duplicated (a repeated key self-deadlocks on
+// its second Lock), and a method cannot enforce either — K is only comparable,
+// so it cannot even sort. LockManyOrdered is the public entry point and
+// enforces both itself.
+func (k *KeyLock[K]) lockMany(keys []K) {
+	for _, key := range keys {
+		k.Lock(key)
+	}
+}
+
+// LockManyOrdered acquires write locks for every key in keys, blocking on each
+// in the natural total order (it sorts a copy and drops duplicates first).
+// Unlike TryLockMany it joins each key's FIFO wait queue, so Go's mutex
+// starvation mode guarantees the caller wins every key in bounded time even
+// against a persistent stream of single-key Lock callers — the situation in
+// which TryLockMany can never win however it is retried: a mutex whose wait
+// queue never empties stays in starvation mode, where unlock hands the lock
+// directly to the queue head and TryLock fails unconditionally. The price is
+// hold-and-wait: keys already acquired stay held while blocking on the next,
+// so single-key callers on those keys queue behind this caller until the whole
+// set is held. Use TryLockMany as the convoy-free fast path and fall back to
+// LockManyOrdered only when the fast path cannot win (see its caller for the
+// two-phase pattern).
+//
+// Deadlock safety: the internal sort collapses every LockManyOrdered caller
+// onto the same global acquisition order, so all waits-for edges point forward
+// along it and no cycle can form with other LockManyOrdered callers, with
+// TryLockMany (which holds nothing while failing), or with single-key Lock
+// callers (which hold at most one key and wait for none). The one discipline
+// left to callers: while holding any key of this KeyLock, do not block
+// acquiring another of its keys outside a LockManyOrdered call — that edge can
+// point backward along the order and close a cycle.
+//
+// It is a free function because a method cannot constrain K beyond the type's
+// own comparable bound. Release with UnlockMany or per-key Unlock over the
+// de-duplicated key set.
+func LockManyOrdered[K cmp.Ordered](k *KeyLock[K], keys []K) {
+	sorted := slices.Clone(keys)
+	slices.Sort(sorted)
+	sorted = slices.Compact(sorted)
+	k.lockMany(sorted)
+}
+
+// UnlockMany releases write locks previously acquired together via TryLockMany
+// or LockManyOrdered. The same slice need not be passed; only that every key is
+// currently held by the caller. Releasing under a single map-mutex acquisition
+// keeps batch release symmetric with the batch acquire.
 func (k *KeyLock[K]) UnlockMany(keys []K) {
 	k.keyLocksMutex.Lock()
 	defer k.keyLocksMutex.Unlock()

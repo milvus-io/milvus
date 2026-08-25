@@ -209,3 +209,118 @@ func TestTryLockManyAtomicity(t *testing.T) {
 	wg.Wait()
 	assert.Zero(t, keyLock.size())
 }
+
+func TestLockManyAcquiresAndReleases(t *testing.T) {
+	keyLock := NewKeyLock[int64]()
+	keys := []int64{1, 2, 3}
+	LockManyOrdered(keyLock, keys)
+	for _, key := range keys {
+		assert.False(t, keyLock.TryLock(key))
+	}
+	keyLock.UnlockMany(keys)
+	assert.Zero(t, keyLock.size())
+	assert.True(t, keyLock.TryLockMany(keys))
+	keyLock.UnlockMany(keys)
+}
+
+func TestLockManyWaitsForHeldKey(t *testing.T) {
+	keyLock := NewKeyLock[int64]()
+	keyLock.Lock(2)
+
+	done := make(chan struct{})
+	go func() {
+		LockManyOrdered(keyLock, []int64{1, 2, 3})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("LockManyOrdered completed while a key was held elsewhere")
+	case <-time.After(50 * time.Millisecond):
+	}
+	keyLock.Unlock(2)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("LockManyOrdered did not complete after the held key was released")
+	}
+	keyLock.UnlockMany([]int64{1, 2, 3})
+	assert.Zero(t, keyLock.size())
+}
+
+// The starvation regression LockManyOrdered exists for: a sustained stream of
+// single-key Lock callers keeps the hot key's mutex in Go's starvation mode,
+// in which unlock hands the mutex directly to the queue head and TryLock —
+// and therefore TryLockMany — fails unconditionally no matter when it retries.
+// LockManyOrdered joins the FIFO queue instead and must complete in bounded time.
+func TestLockManyBoundedUnderSustainedSingleKeyContention(t *testing.T) {
+	keyLock := NewKeyLock[int64]()
+	const hotKey = int64(7)
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				keyLock.Lock(hotKey)
+				// Hold long enough that competing waiters queue past the 1ms
+				// starvation-mode trigger.
+				time.Sleep(2 * time.Millisecond)
+				keyLock.Unlock(hotKey)
+			}
+		}()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		LockManyOrdered(keyLock, []int64{5, hotKey, 9})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("LockManyOrdered starved under sustained single-key contention")
+	}
+	keyLock.UnlockMany([]int64{5, hotKey, 9})
+	close(stop)
+	wg.Wait()
+	assert.Zero(t, keyLock.size())
+}
+
+func TestLockManyOrderedSortsAndDeduplicates(t *testing.T) {
+	keyLock := NewKeyLock[int64]()
+	// Unsorted input with a duplicate: the raw ordered-blocking loop would self-deadlock on the
+	// repeated key; LockManyOrdered must normalize and complete.
+	LockManyOrdered(keyLock, []int64{3, 1, 3, 2})
+	for _, key := range []int64{1, 2, 3} {
+		assert.False(t, keyLock.TryLock(key))
+	}
+	keyLock.UnlockMany([]int64{1, 2, 3})
+	assert.Zero(t, keyLock.size())
+}
+
+// Two acquirers handing LockManyOrdered opposite input orders must not deadlock:
+// the internal sort is what collapses both onto the one global acquisition order.
+func TestLockManyOrderedConcurrentReversedInputs(t *testing.T) {
+	keyLock := NewKeyLock[int64]()
+	var wg sync.WaitGroup
+	worker := func(keys []int64) {
+		defer wg.Done()
+		for i := 0; i < 500; i++ {
+			LockManyOrdered(keyLock, keys)
+			keyLock.UnlockMany([]int64{1, 2, 3})
+		}
+	}
+	wg.Add(2)
+	go worker([]int64{1, 2, 3})
+	go worker([]int64{3, 2, 1})
+	wg.Wait()
+	assert.Zero(t, keyLock.size())
+}
