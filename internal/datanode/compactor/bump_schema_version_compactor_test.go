@@ -1477,3 +1477,34 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionInputSchemaByF
 	s.ErrorContains(err, "references by_field lang of type")
 	s.ErrorContains(err, "only VarChar is allowed")
 }
+
+// TestNewCompactionSegmentRecordReaderWithFieldsThreadsPresentFields pins that on
+// the manifest path the compactor hands its already-computed existingFields to the
+// reader via WithPresentFields, so the reader does not re-open the manifest with a
+// second GetManifestFieldIDs (the P5 perf fix).
+func TestNewCompactionSegmentRecordReaderWithFieldsThreadsPresentFields(t *testing.T) {
+	seg := &datapb.CompactionSegmentBinlogs{Manifest: "manifest-json"}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64},
+	}}
+	existing := map[int64]struct{}{100: {}}
+
+	mockEnc := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(false).Build()
+	defer mockEnc.UnPatch()
+	mockFieldIDs := mockey.Mock(packed.GetManifestFieldIDs).To(
+		func(string, *indexpb.StorageConfig) (map[int64]struct{}, error) {
+			t.Fatal("reader must not re-derive present fields; the compactor already passed existingFields")
+			return nil, nil
+		}).Build()
+	defer mockFieldIDs.UnPatch()
+	mockReader := mockey.Mock(storage.NewRecordReaderFromManifest).Return(nil, nil).Build()
+	defer mockReader.UnPatch()
+
+	_, got, err := newCompactionSegmentRecordReaderWithFields(context.Background(), seg, schema,
+		&indexpb.StorageConfig{RootPath: "root"}, existing,
+		storage.WithVersion(storage.StorageV3),
+		storage.WithStorageConfig(&indexpb.StorageConfig{RootPath: "root"}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, existing, got)
+}

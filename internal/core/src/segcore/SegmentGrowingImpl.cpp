@@ -302,10 +302,9 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
         // ARRAY: extract from scalars().array_data().data(i)
         const auto& array_data = field_data.scalars().array_data();
         if (field_meta.is_nested_array()) {
-            const auto has_valid_data =
-                field_data.valid_data_size() == num_rows;
+            const auto has_valid_data = valid_data.size() == num_rows;
             for (int64_t i = 0; i < num_rows; ++i) {
-                if (has_valid_data && !field_data.valid_data(i)) {
+                if (has_valid_data && !valid_data[i]) {
                     array_lengths[i] = 0;
                     continue;
                 }
@@ -1562,6 +1561,90 @@ SegmentGrowingImpl::chunk_array_view_impl(
               "chunk array view impl not implement for growing segment");
 }
 
+PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
+SegmentGrowingImpl::chunk_array_value_view_impl(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t chunk_id,
+    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
+    (void)op_ctx;
+
+    auto schema = get_schema_snapshot();
+    const auto& field_meta = (*schema)[field_id];
+    AssertInfo(field_meta.is_nested_array(),
+               "chunk_array_value_view_impl only supports recursive ARRAY "
+               "fields");
+
+    const auto* array_data = insert_record_.get_data<ArrayValue>(field_id);
+    const auto size_per_chunk = array_data->get_size_per_chunk();
+    const auto active_count = insert_record_.ack_responder_.GetAck();
+    AssertInfo(chunk_id >= 0,
+               "Retrieve array value views with invalid chunk id:{}",
+               chunk_id);
+
+    int64_t start_offset = 0;
+    int64_t len = size_per_chunk;
+    if (offset_len.has_value()) {
+        start_offset = offset_len->first;
+        len = offset_len->second;
+        AssertInfo(start_offset >= 0 && start_offset < size_per_chunk,
+                   "Retrieve array value views with out-of-bound offset:{}, "
+                   "len:{}, wrong",
+                   start_offset,
+                   len);
+        AssertInfo(len > 0 && len <= size_per_chunk,
+                   "Retrieve array value views with out-of-bound offset:{}, "
+                   "len:{}, wrong",
+                   start_offset,
+                   len);
+        AssertInfo(start_offset + len <= size_per_chunk,
+                   "Retrieve array value views with out-of-bound offset:{}, "
+                   "len:{}, wrong",
+                   start_offset,
+                   len);
+    }
+
+    const auto logical_start = chunk_id * size_per_chunk + start_offset;
+    AssertInfo(logical_start >= 0 && logical_start < active_count,
+               "Retrieve array value views with out-of-bound chunk:{}, "
+               "offset:{}, len:{}",
+               chunk_id,
+               start_offset,
+               len);
+    if (offset_len.has_value()) {
+        AssertInfo(logical_start + len <= active_count,
+                   "Retrieve array value views with out-of-bound chunk:{}, "
+                   "offset:{}, len:{}",
+                   chunk_id,
+                   start_offset,
+                   len);
+    } else {
+        len = std::min(len, active_count - logical_start);
+    }
+
+    std::vector<ArrayValueView> views;
+    views.reserve(len);
+    if (field_meta.is_nullable()) {
+        auto valid_data = insert_record_.get_valid_data(field_id);
+        const auto* row_valid = valid_data->get_chunk_data(logical_start);
+        for (int64_t i = 0; i < len; ++i) {
+            views.push_back(array_data->view_element(logical_start + i));
+        }
+        std::pair<std::vector<ArrayValueView>, ValidityView> content{
+            std::move(views), ValidityView::FromExpanded(row_valid)};
+        return PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>(
+            std::move(valid_data), std::move(content));
+    }
+
+    for (int64_t i = 0; i < len; ++i) {
+        views.push_back(array_data->view_element(logical_start + i));
+    }
+    std::pair<std::vector<ArrayValueView>, ValidityView> content{
+        std::move(views), ValidityView{}};
+    return PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>(
+        std::move(content));
+}
+
 PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
 SegmentGrowingImpl::chunk_vector_array_view_impl(
     milvus::OpContext* op_ctx,
@@ -1699,6 +1782,67 @@ SegmentGrowingImpl::chunk_array_views_by_offsets(
     ThrowInfo(
         ErrorCode::NotImplemented,
         "chunk array views by offsets not implemented for growing segment");
+}
+
+PinWrapper<std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+SegmentGrowingImpl::chunk_array_value_views_by_offsets(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t chunk_id,
+    const FixedVector<int32_t>& offsets) const {
+    (void)op_ctx;
+
+    auto schema = get_schema_snapshot();
+    const auto& field_meta = (*schema)[field_id];
+    AssertInfo(field_meta.is_nested_array(),
+               "chunk_array_value_views_by_offsets only supports recursive "
+               "ARRAY fields");
+
+    const auto* array_data = insert_record_.get_data<ArrayValue>(field_id);
+    const auto size_per_chunk = array_data->get_size_per_chunk();
+    const auto active_count = insert_record_.ack_responder_.GetAck();
+    AssertInfo(chunk_id >= 0,
+               "Retrieve array value views with invalid chunk id:{}",
+               chunk_id);
+    const auto logical_chunk_start = chunk_id * size_per_chunk;
+    AssertInfo(logical_chunk_start >= 0 && logical_chunk_start < active_count,
+               "Retrieve array value views with out-of-bound chunk:{}",
+               chunk_id);
+
+    std::vector<ArrayValueView> views;
+    views.reserve(offsets.size());
+    std::vector<int64_t> logical_offsets;
+    logical_offsets.reserve(offsets.size());
+    for (auto offset : offsets) {
+        AssertInfo(offset >= 0 && offset < size_per_chunk,
+                   "Retrieve array value view with out-of-bound offset:{} "
+                   "for chunk size:{}",
+                   offset,
+                   size_per_chunk);
+        const auto logical_offset = logical_chunk_start + offset;
+        AssertInfo(logical_offset >= 0 && logical_offset < active_count,
+                   "Retrieve array value view with out-of-bound chunk:{}, "
+                   "offset:{}",
+                   chunk_id,
+                   offset);
+        logical_offsets.push_back(logical_offset);
+    }
+
+    FixedVector<bool> valid_data;
+    if (field_meta.is_nullable()) {
+        valid_data.resize(offsets.size());
+        insert_record_.get_valid_data(field_id)->bulk_is_valid(
+            logical_offsets.data(), logical_offsets.size(), valid_data.data());
+    }
+    for (auto logical_offset : logical_offsets) {
+        views.push_back(array_data->view_element(logical_offset));
+    }
+
+    std::pair<std::vector<ArrayValueView>, FixedVector<bool>> content{
+        std::move(views), std::move(valid_data)};
+    return PinWrapper<
+        std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>(
+        std::move(content));
 }
 
 int64_t

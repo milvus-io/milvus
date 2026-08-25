@@ -2973,7 +2973,7 @@ func Test_ArrayLength(t *testing.T) {
 	}
 }
 
-func Test_ArrayLengthRejectsNestedArray(t *testing.T) {
+func Test_ArrayLengthNestedArray(t *testing.T) {
 	schema := newTestSchema(true)
 	nestedType := &schemapb.TypeSchema{
 		Kind: &schemapb.TypeSchema_ArrayElement{
@@ -3005,16 +3005,60 @@ func Test_ArrayLengthRejectsNestedArray(t *testing.T) {
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	require.NoError(t, err)
 
-	for _, expr := range []string{
+	validRowLevelExprs := []string{
 		`array_length(NestedArrayField) == 1`,
 		`array_length(struct_array[nested]) == 1`,
-	} {
-		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
-		require.ErrorContains(t, err, "array_length operation is not supported on nested array field", expr)
 	}
+	for _, expr := range validRowLevelExprs {
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		require.NoError(t, err, expr)
+	}
+
+	rowLevelExpr, err := ParseExpr(helper, validRowLevelExprs[0], nil)
+	require.NoError(t, err)
+	rowLevelLengthExpr := rowLevelExpr.GetBinaryArithOpEvalRangeExpr()
+	require.NotNil(t, rowLevelLengthExpr)
+	rowLevelColumnInfo := rowLevelLengthExpr.GetColumnInfo()
+	require.NotNil(t, rowLevelColumnInfo)
+	assert.Equal(t, int64(10000), rowLevelColumnInfo.GetFieldId())
+	assert.False(t, rowLevelColumnInfo.GetIsElementLevel())
 
 	_, err = CreateSearchPlan(helper, `array_length(struct_array) == 1`, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
 	require.NoError(t, err)
+
+	validMatchExprs := []string{
+		`MATCH_ANY(struct_array, array_length($[nested]) == 1)`,
+		`MATCH_ALL(struct_array, array_length($[nested]) >= 0)`,
+		`MATCH_LEAST(struct_array, array_length($[nested]) > 0, threshold=1)`,
+		`MATCH_MOST(struct_array, array_length($[nested]) <= 1, threshold=1)`,
+		`MATCH_EXACT(struct_array, array_length($[nested]) != 0, threshold=1)`,
+	}
+	for _, expr := range validMatchExprs {
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		require.NoError(t, err, expr)
+	}
+
+	expr, err := ParseExpr(helper, validMatchExprs[0], nil)
+	require.NoError(t, err)
+	matchExpr := expr.GetMatchExpr()
+	require.NotNil(t, matchExpr)
+	lengthExpr := matchExpr.GetPredicate().GetBinaryArithOpEvalRangeExpr()
+	require.NotNil(t, lengthExpr)
+	assert.Equal(t, planpb.ArithOpType_ArrayLength, lengthExpr.GetArithOp())
+	columnInfo := lengthExpr.GetColumnInfo()
+	require.NotNil(t, columnInfo)
+	assert.Equal(t, int64(10001), columnInfo.GetFieldId())
+	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
+	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetElementType())
+	assert.True(t, columnInfo.GetIsElementLevel())
+
+	for _, expr := range []string{
+		`array_length($[nested]) == 1`,
+		`MATCH_ANY(struct_array, array_length($[sub_int]) == 1)`,
+	} {
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		require.Error(t, err, expr)
+	}
 }
 
 // Test randome sample with all other predicate expressions.
@@ -3996,6 +4040,160 @@ func TestExpr_ArrayContains(t *testing.T) {
 
 	for _, expr := range validExprs {
 		assertValidExpr(t, helper, expr)
+	}
+}
+
+func TestExpr_NestedArrayContainsInMatch(t *testing.T) {
+	schema := newTestSchema(true)
+	schema.StructArrayFields[0].Fields = append(
+		schema.StructArrayFields[0].Fields,
+		&schemapb.FieldSchema{
+			FieldID:     10001,
+			Name:        "struct_array[nested]",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeSchema: &schemapb.TypeSchema{
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_ArrayElement{
+							ArrayElement: &schemapb.TypeSchema{
+								Kind: &schemapb.TypeSchema_LeafType{
+									LeafType: schemapb.DataType_VarChar,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		&schemapb.FieldSchema{
+			FieldID:     10002,
+			Name:        "struct_array[deeper]",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeSchema: &schemapb.TypeSchema{
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_ArrayElement{
+							ArrayElement: &schemapb.TypeSchema{
+								Kind: &schemapb.TypeSchema_ArrayElement{
+									ArrayElement: &schemapb.TypeSchema{
+										Kind: &schemapb.TypeSchema_LeafType{
+											LeafType: schemapb.DataType_Int64,
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name string
+		expr string
+		op   planpb.JSONContainsExpr_JSONOp
+	}{
+		{
+			name: "contains",
+			expr: `MATCH_ANY(struct_array, array_contains($[nested], "abc"))`,
+			op:   planpb.JSONContainsExpr_Contains,
+		},
+		{
+			name: "contains any",
+			expr: `MATCH_ANY(struct_array, array_contains_any($[nested], ["abc", "efg"]))`,
+			op:   planpb.JSONContainsExpr_ContainsAny,
+		},
+		{
+			name: "contains all",
+			expr: `MATCH_ALL(struct_array, array_contains_all($[nested], ["abc"]))`,
+			op:   planpb.JSONContainsExpr_ContainsAll,
+		},
+		{
+			name: "contains any empty",
+			expr: `MATCH_ANY(struct_array, array_contains_any($[nested], []))`,
+			op:   planpb.JSONContainsExpr_ContainsAny,
+		},
+		{
+			name: "contains all empty",
+			expr: `MATCH_ALL(struct_array, array_contains_all($[nested], []))`,
+			op:   planpb.JSONContainsExpr_ContainsAll,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			expr, err := ParseExpr(helper, test.expr, nil)
+			require.NoError(t, err)
+
+			contains := expr.GetMatchExpr().GetPredicate().GetJsonContainsExpr()
+			require.NotNil(t, contains)
+			assert.Equal(t, test.op, contains.GetOp())
+
+			columnInfo := contains.GetColumnInfo()
+			require.NotNil(t, columnInfo)
+			assert.Equal(t, int64(10001), columnInfo.GetFieldId())
+			assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
+			assert.Equal(t, schemapb.DataType_VarChar, columnInfo.GetElementType())
+			assert.True(t, columnInfo.GetIsElementLevel())
+		})
+	}
+
+	t.Run("template values use logical leaf type", func(t *testing.T) {
+		expr, err := ParseExpr(
+			helper,
+			`MATCH_ANY(struct_array, array_contains_any($[nested], {values}))`,
+			map[string]*schemapb.TemplateValue{
+				"values": generateTemplateValue(
+					schemapb.DataType_Array,
+					generateTemplateArrayValue(
+						schemapb.DataType_VarChar,
+						[]string{"abc", "efg"},
+					),
+				),
+			},
+		)
+		require.NoError(t, err)
+
+		contains := expr.GetMatchExpr().GetPredicate().GetJsonContainsExpr()
+		require.NotNil(t, contains)
+		require.Len(t, contains.GetElements(), 2)
+		assert.Equal(t, "abc", contains.GetElements()[0].GetStringVal())
+		assert.Equal(t, "efg", contains.GetElements()[1].GetStringVal())
+
+		_, err = ParseExpr(
+			helper,
+			`MATCH_ANY(struct_array, array_contains_any($[nested], {values}))`,
+			map[string]*schemapb.TemplateValue{
+				"values": generateTemplateValue(
+					schemapb.DataType_Array,
+					generateTemplateArrayValue(
+						schemapb.DataType_Int64,
+						[]int64{1, 2},
+					),
+				),
+			},
+		)
+		require.Error(t, err)
+	})
+
+	invalidExprs := []string{
+		`MATCH_ANY(struct_array, array_contains($[sub_int], 1))`,
+		`MATCH_ANY(struct_array, array_contains_any($[deeper], [1]))`,
+		`MATCH_ANY(struct_array, array_contains_any($[nested], [1]))`,
+		`MATCH_ANY(struct_array, $[nested] == "abc")`,
+		`MATCH_ANY(struct_array, $[nested] > "abc")`,
+		`MATCH_ANY(struct_array, $[nested] in ["abc"])`,
+		`array_contains(struct_array[nested], "abc")`,
+		`array_contains_any(struct_array[nested], ["abc"])`,
+		`array_contains_any(struct_array[nested], [])`,
+		`array_contains_all(struct_array[nested], [])`,
+	}
+	for _, expr := range invalidExprs {
+		assertInvalidExpr(t, helper, expr)
 	}
 }
 
