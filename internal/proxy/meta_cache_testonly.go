@@ -31,6 +31,8 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -61,6 +63,31 @@ func InitEmptyMetaCacheForTest() *MetaCache {
 		panic(err)
 	}
 	mixcoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil)
+	credResponse := func(username, password string) *rootcoordpb.GetCredentialResponse {
+		encryptedPassword, err := crypto.PasswordEncrypt(password)
+		if err != nil {
+			panic(err)
+		}
+		return &rootcoordpb.GetCredentialResponse{
+			Status:   merr.Success(),
+			Username: username,
+			Password: encryptedPassword,
+		}
+	}
+	mixcoord.EXPECT().GetCredential(
+		mock.Anything,
+		mock.MatchedBy(func(req *rootcoordpb.GetCredentialRequest) bool {
+			return req.GetUsername() == "mockUser"
+		}),
+		mock.Anything,
+	).Return(credResponse("mockUser", "mockPass"), nil)
+	mixcoord.EXPECT().GetCredential(
+		mock.Anything,
+		mock.MatchedBy(func(req *rootcoordpb.GetCredentialRequest) bool {
+			return req.GetUsername() == "root"
+		}),
+		mock.Anything,
+	).Return(credResponse("root", "pwd"), nil)
 	privilege.InitPrivilegeCache(context.Background(), mixcoord)
 	return metaCache
 }

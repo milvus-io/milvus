@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -52,6 +53,7 @@ func TestAuthorizeWALRead(t *testing.T) {
 		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
 		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
 		defer privilege.CleanPrivilegeCache()
+		privilege.InitPrivilegeGroups()
 
 		t.Run("root is exempt", func(t *testing.T) {
 			_, err := authorizeWALRead(GetContext(context.Background(), "root:pwd"))
@@ -95,6 +97,26 @@ func TestAuthorizeWALRead(t *testing.T) {
 			require.NoError(t, err)
 
 			_, err = authorizeWALRead(GetContext(context.Background(), "super:pwd"))
+			assert.NoError(t, err)
+		})
+
+		t.Run("custom superuser with Global PrivilegeManageOwnership is allowed (v2 ClusterAdmin group materialization)", func(t *testing.T) {
+			superClient := &MockMixCoordClientInterface{}
+			superClient.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+				return &internalpb.ListPolicyResponse{
+					Status: merr.Success(),
+					PolicyInfos: []string{
+						funcutil.PolicyForPrivilege("role_clusadmin", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeManageOwnership.String(), util.AnyWord),
+					},
+					UserRoles: []string{
+						funcutil.EncodeUserRoleCache("clusadmin", "role_clusadmin"),
+					},
+				}, nil
+			}
+			_, err := initMetaCache(context.Background(), superClient)
+			require.NoError(t, err)
+
+			_, err = authorizeWALRead(GetContext(context.Background(), "clusadmin:pwd"))
 			assert.NoError(t, err)
 		})
 
@@ -371,7 +393,7 @@ func TestStreamHealthWatch_FullChain(t *testing.T) {
 
 	t.Run("unauthenticated health watch is rejected", func(t *testing.T) {
 		handlerCalled := false
-		stream := &mockDumpMessagesServer{ctx: context.Background()}
+		stream := &mockDumpMessagesServer{ctx: metadata.NewIncomingContext(context.Background(), metadata.MD{})}
 		err := chain(nil, stream, &grpc.StreamServerInfo{
 			FullMethod: grpc_health_v1.Health_Watch_FullMethodName,
 		}, func(srv interface{}, ss grpc.ServerStream) error {

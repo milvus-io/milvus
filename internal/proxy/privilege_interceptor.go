@@ -323,13 +323,15 @@ func enforceClusterPrivilege(ctx context.Context, objectPrivilege string) (conte
 
 // authorizeWALRead gates DumpMessages, which exposes raw WAL contents for
 // CDC/data salvage. Reading raw WAL is the widest data-exposure surface on the
-// port (unfiltered, cluster-wide), so it requires the cluster-admin grant:
+// port (unfiltered, cluster-wide), so it requires a cluster-admin-level grant:
 // root, the built-in admin role, or a custom role holding Global
-// PrivilegeGroupAdmin / PrivilegeAll. A role granted only the narrow
+// PrivilegeManageOwnership (a member of both the legacy v1 PrivilegeGroupAdmin
+// group and the modern v2 PrivilegeGroupClusterAdmin group, so both group-grant
+// styles are covered) or PrivilegeAll. A role granted only the narrow
 // PrivilegeUpdateReplicateConfiguration (replication config) is still denied,
 // so CreateReplicateStream rights do not imply WAL dump rights.
 func authorizeWALRead(ctx context.Context) (context.Context, error) {
-	return enforceClusterPrivilege(ctx, commonpb.ObjectPrivilege_PrivilegeGroupAdmin.String())
+	return enforceClusterPrivilege(ctx, commonpb.ObjectPrivilege_PrivilegeManageOwnership.String())
 }
 
 // StreamPrivilegeFunc is the streaming counterpart of PrivilegeFunc. It
@@ -358,9 +360,9 @@ type StreamPrivilegeFunc func(ctx context.Context, fullMethod string) (context.C
 //     dedicated role can be granted replication rights.
 //   - DumpMessages streams raw WAL messages out for data salvage. It exposes
 //     raw, unfiltered cluster data, so it requires the cluster-admin grant
-//     (Global PrivilegeGroupAdmin / PrivilegeAll / built-in admin / root) via
-//     authorizeWALRead — intentionally stricter than CreateReplicateStream, so
-//     replication rights do not imply raw WAL export rights.
+//     (Global PrivilegeManageOwnership / PrivilegeAll / built-in admin / root)
+//     via authorizeWALRead — intentionally stricter than CreateReplicateStream,
+//     so replication rights do not imply raw WAL export rights.
 //
 // Any streaming method NOT present in this table is denied by default
 // (fail-closed) in StreamPrivilegeInterceptor, which prevents a newly-added
