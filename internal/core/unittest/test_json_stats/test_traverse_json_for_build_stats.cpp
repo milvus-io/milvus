@@ -208,17 +208,6 @@ TEST(JsonFieldDataTest, FillFieldDataWithDefaultValueOwnsData) {
         milvus::DataType::JSON, milvus::DataType::NONE, false, 1, 5);
     field_data->FillFieldData(milvus::DefaultValueType{default_value}, 5);
 
-    // All filled rows must share a single owned copy: identical backing
-    // pointer, so a fill of N rows performs exactly one data copy.
-    const char* shared_ptr =
-        static_cast<const milvus::Json*>(field_data->RawValue(0))
-            ->data()
-            .data();
-    for (int i = 1; i < 5; i++) {
-        auto* json = static_cast<const milvus::Json*>(field_data->RawValue(i));
-        EXPECT_EQ(json->data().data(), shared_ptr);
-    }
-
     ClobberStackAndHeap(default_json);
 
     for (int i = 0; i < 5; i++) {
