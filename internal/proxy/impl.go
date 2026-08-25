@@ -3614,9 +3614,25 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 			fmt.Sprintf("some of the provided primary key IDs do not exist: missing IDs = %v", missingIDs))
 	}
 
+	// The query pipeline merges per-segment results by primary key ascending
+	// (queryutil.NewSortAndCheckPKOperator), while search treats the Nq
+	// dimension positionally: result block N belongs to ids[N]. Reorder the
+	// rows into the requested ID order first, so both the vectors packed into
+	// the placeholder group and the validData returned below follow it.
+	pkOffset := make(map[any]int, returnedPKCount)
+	pkItr := typeutil.GetDataIterator(pkFieldData)
+	for i := 0; i < returnedPKCount; i++ {
+		pkOffset[pkItr(i)] = i
+	}
+	orderedFieldsData, err := pickFieldData(ids, pkOffset, queryResult.GetFieldsData(),
+		collectionInfo.Schema.CollectionSchema, collectionInfo.CollID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Extract the field data from query result
 	// For BM25: extract text field; for vector search: extract vector field
-	fieldData := lo.FindOrElse(queryResult.GetFieldsData(), nil, func(f *schemapb.FieldData) bool {
+	fieldData := lo.FindOrElse(orderedFieldsData, nil, func(f *schemapb.FieldData) bool {
 		return f.GetFieldName() == fieldToFetch || f.GetType() == schemapb.DataType_ArrayOfStruct
 	})
 
