@@ -265,7 +265,11 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionMa
 
 	segment := result.GetSegments()[0]
 	s.EqualValues(3, segment.GetNumOfRows())
-	s.NotEmpty(segment.GetManifest())
+	// In-place materialization ships a manifest delta for DataCoord to commit on
+	// the segment's current manifest; the datanode no longer bakes a path.
+	s.Empty(segment.GetManifest())
+	s.Require().NotNil(segment.GetManifestDelta())
+	s.NotEmpty(segment.GetManifestDelta().GetColumnGroups())
 	s.Empty(segment.GetBm25Logs())
 
 	const minHashOutputFieldID = int64(102)
@@ -481,9 +485,13 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionSu
 	s.NotZero(segment.GetSegmentID())
 	s.EqualValues(3, segment.GetNumOfRows())
 	s.NotEmpty(segment.GetInsertLogs())
-	// BM25 stats are embedded in the V3 manifest atomically with column groups.
+	// BM25 stats ride in the V3 manifest delta atomically with the column groups;
+	// the datanode ships the delta and DataCoord commits it on the current base.
 	s.Empty(segment.GetBm25Logs())
-	s.NotEmpty(segment.GetManifest())
+	s.Empty(segment.GetManifest())
+	s.Require().NotNil(segment.GetManifestDelta())
+	s.NotEmpty(segment.GetManifestDelta().GetColumnGroups())
+	s.NotEmpty(segment.GetManifestDelta().GetStats())
 
 	// The materialized output field (ID=102) must carry a non-zero LogID in its insert binlog.
 	const materializedOutputFieldID = int64(102)

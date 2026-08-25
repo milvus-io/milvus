@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -638,83 +639,92 @@ func (s *statsTaskSuite) TestSetJobInfo() {
 	s.mt.segments = origSegments
 }
 
+// TestSetJobInfoJSONStatsResultManifestHandling exercises the structured-delta
+// publish path for a standalone JsonKeyIndexJob: DataCoord rebuilds the JSON key
+// StatEntries from the worker's raw result and runs the manifest transaction
+// itself, rebasing on the segment's CURRENT manifest.
 func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
-	oldManifest := `{"base_path":"files/insert_log/1/2/1179","ver":1}`
-	currentManifest := `{"base_path":"files/insert_log/1/2/1179","ver":2}`
-	resultManifest := `{"base_path":"files/insert_log/1/2/1179","ver":3}`
+	basePath := "files/insert_log/1/2/1179"
+	currentManifest := packed.MarshalManifestPath(basePath, 2)
+	committedManifest := packed.MarshalManifestPath(basePath, 3)
 
-	statsLogs := map[int64]*datapb.JsonKeyStats{
+	// The worker ships manifest-relative paths (kept relative in SegmentInfo for
+	// read reconstruction); DataCoord rebuilds the absolute form for the manifest.
+	relativeFiles := []string{"shared_key_index/.managed.json_0"}
+	absoluteFiles := []string{basePath + "/_stats/json_stats.500/shared_key_index/.managed.json_0"}
+	freshStats := map[int64]*datapb.JsonKeyStats{
 		500: {
 			FieldID:                500,
 			Version:                1,
 			BuildID:                s.taskID,
+			Files:                  relativeFiles,
 			JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
 		},
 	}
 
 	testCases := []struct {
 		name           string
-		current        string
-		base           string
-		result         string
+		preStats       map[int64]*datapb.JsonKeyStats
 		logs           map[int64]*datapb.JsonKeyStats
+		expectCommit   bool
 		expectManifest string
 		expectStats    bool
-		expectCatalog  bool
-		expectErr      error
 	}{
 		{
-			name:           "stale_result",
-			current:        currentManifest,
-			base:           oldManifest,
-			result:         resultManifest,
-			logs:           statsLogs,
-			expectManifest: currentManifest,
-			expectErr:      errStatsResultStale,
+			name:           "fresh_commit",
+			logs:           freshStats,
+			expectCommit:   true,
+			expectManifest: committedManifest,
+			expectStats:    true,
 		},
 		{
-			name:           "fresh_result",
-			current:        currentManifest,
-			base:           currentManifest,
-			result:         resultManifest,
-			logs:           statsLogs,
-			expectManifest: resultManifest,
+			// Result already persisted (same BuildID): the idempotent-replay guard
+			// short-circuits before any manifest transaction.
+			name:           "already_applied_skip",
+			preStats:       map[int64]*datapb.JsonKeyStats{500: {FieldID: 500, BuildID: s.taskID}},
+			logs:           freshStats,
+			expectCommit:   false,
+			expectManifest: currentManifest,
 			expectStats:    true,
-			expectCatalog:  true,
 		},
 		{
 			name:           "empty_stats_noop",
-			current:        currentManifest,
-			base:           currentManifest,
-			result:         currentManifest,
 			logs:           map[int64]*datapb.JsonKeyStats{},
+			expectCommit:   false,
 			expectManifest: currentManifest,
+			expectStats:    false,
 		},
 	}
 
 	for _, testCase := range testCases {
 		s.Run(testCase.name, func() {
-			restore := s.installJSONStatsSegment(testCase.current)
+			restore := s.installJSONStatsSegment(currentManifest)
 			defer restore()
+			if testCase.preStats != nil {
+				s.mt.segments.segments[s.segID].JsonKeyStats = testCase.preStats
+			}
 
-			alterSegmentsCount := 0
-			mockAlterSegments := mockey.Mock((*mockeyDataCoordCatalog).AlterSegments).To(
-				func(
-					_ *mockeyDataCoordCatalog,
-					_ context.Context,
-					_ []*datapb.SegmentInfo,
-					_ ...metastore.BinlogsIncrement,
-				) error {
-					alterSegmentsCount++
-					return nil
+			commitCalled := false
+			mockCommit := mockey.Mock(packed.CommitManifestUpdates).To(
+				func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+					commitCalled = true
+					// Rebased on the segment's current manifest (version 2), not the
+					// worker's plan-time base.
+					s.Equal(basePath, base)
+					s.EqualValues(2, version)
+					s.Require().Len(updates.Stats, 1)
+					s.Equal("json_stats.500", updates.Stats[0].Key)
+					// Manifest stores absolute paths reconstructed from the relative result.
+					s.Equal(absoluteFiles, updates.Stats[0].Files)
+					return committedManifest, nil
 				}).Build()
-			defer mockAlterSegments.UnPatch()
+			defer mockCommit.UnPatch()
+
+			catalogWrites := 0
 			s.mt.catalog = &mockeyDataCoordCatalog{}
-			// The StorageV3 publish path commits via catalog.Update, not
-			// AlterSegments; count it as the catalog write for expectCatalog.
 			mockUpdate := mockey.Mock((*mockeyDataCoordCatalog).Update).To(
 				func(_ *mockeyDataCoordCatalog, _ context.Context, _ ...metastore.UpdateAction) error {
-					alterSegmentsCount++
+					catalogWrites++
 					return nil
 				}).Build()
 			defer mockUpdate.UnPatch()
@@ -725,15 +735,10 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 				PartitionID:      s.partID,
 				SegmentID:        s.segID,
 				Channel:          "ch1",
-				BaseManifest:     testCase.base,
-				Manifest:         testCase.result,
 				JsonKeyStatsLogs: testCase.logs,
 			})
-			if testCase.expectErr != nil {
-				s.ErrorIs(err, testCase.expectErr)
-			} else {
-				s.NoError(err)
-			}
+			s.NoError(err)
+			s.Equal(testCase.expectCommit, commitCalled)
 
 			segment := s.mt.GetHealthySegment(context.Background(), s.segID)
 			s.Require().NotNil(segment)
@@ -744,92 +749,103 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 			} else {
 				s.Empty(segment.GetJsonKeyStats())
 			}
-			if testCase.expectCatalog {
-				s.Equal(1, alterSegmentsCount)
+			if testCase.expectCommit {
+				s.Equal(1, catalogWrites)
+				// The SegmentInfo dual-write keeps paths relative; only the manifest
+				// entry carries the reconstructed absolute form.
+				s.Equal(relativeFiles, segment.GetJsonKeyStats()[500].GetFiles())
 			} else {
-				s.Equal(0, alterSegmentsCount)
+				s.Equal(0, catalogWrites)
 			}
 		})
 	}
 }
 
+// TestSetJobInfoTextStatsResultManifestHandling exercises the structured-delta
+// publish path for a standalone TextIndexJob: DataCoord rebuilds the text-index
+// StatEntries from the worker's raw result (pinning the scalar index version the
+// index was built with) and runs the manifest transaction itself, rebasing on the
+// segment's CURRENT manifest.
 func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
-	oldManifest := `{"base_path":"files/insert_log/1/2/1179","ver":1}`
-	currentManifest := `{"base_path":"files/insert_log/1/2/1179","ver":2}`
-	resultManifest := `{"base_path":"files/insert_log/1/2/1179","ver":3}`
+	basePath := "files/insert_log/1/2/1179"
+	currentManifest := packed.MarshalManifestPath(basePath, 2)
+	committedManifest := packed.MarshalManifestPath(basePath, 3)
 
-	statsLogs := map[int64]*datapb.TextIndexStats{
+	files := []string{basePath + "/_stats/text_index.500/tokenizer.json"}
+	freshStats := map[int64]*datapb.TextIndexStats{
 		500: {
-			FieldID: 500,
-			Version: 1,
-			BuildID: s.taskID,
-			Files:   []string{"files/insert_log/1/2/1179/_stats/text_index.500/tokenizer.json"},
+			FieldID:                   500,
+			Version:                   1,
+			BuildID:                   s.taskID,
+			Files:                     files,
+			CurrentScalarIndexVersion: 7,
 		},
 	}
 
 	testCases := []struct {
 		name           string
-		current        string
-		base           string
-		result         string
+		preStats       map[int64]*datapb.TextIndexStats
 		logs           map[int64]*datapb.TextIndexStats
+		expectCommit   bool
 		expectManifest string
 		expectStats    bool
-		expectCatalog  bool
-		expectErr      error
 	}{
 		{
-			name:           "stale_result",
-			current:        currentManifest,
-			base:           oldManifest,
-			result:         resultManifest,
-			logs:           statsLogs,
-			expectManifest: currentManifest,
-			expectErr:      errStatsResultStale,
+			name:           "fresh_commit",
+			logs:           freshStats,
+			expectCommit:   true,
+			expectManifest: committedManifest,
+			expectStats:    true,
 		},
 		{
-			name:           "fresh_result",
-			current:        currentManifest,
-			base:           currentManifest,
-			result:         resultManifest,
-			logs:           statsLogs,
-			expectManifest: resultManifest,
+			// Result already persisted (same BuildID): the idempotent-replay guard
+			// short-circuits before any manifest transaction.
+			name:           "already_applied_skip",
+			preStats:       map[int64]*datapb.TextIndexStats{500: {FieldID: 500, BuildID: s.taskID}},
+			logs:           freshStats,
+			expectCommit:   false,
+			expectManifest: currentManifest,
 			expectStats:    true,
-			expectCatalog:  true,
 		},
 		{
 			name:           "empty_stats_noop",
-			current:        currentManifest,
-			base:           currentManifest,
-			result:         currentManifest,
 			logs:           map[int64]*datapb.TextIndexStats{},
+			expectCommit:   false,
 			expectManifest: currentManifest,
+			expectStats:    false,
 		},
 	}
 
 	for _, testCase := range testCases {
 		s.Run(testCase.name, func() {
-			restore := s.installJSONStatsSegment(testCase.current)
+			restore := s.installJSONStatsSegment(currentManifest)
 			defer restore()
+			if testCase.preStats != nil {
+				s.mt.segments.segments[s.segID].TextStatsLogs = testCase.preStats
+			}
 
-			alterSegmentsCount := 0
-			mockAlterSegments := mockey.Mock((*mockeyDataCoordCatalog).AlterSegments).To(
-				func(
-					_ *mockeyDataCoordCatalog,
-					_ context.Context,
-					_ []*datapb.SegmentInfo,
-					_ ...metastore.BinlogsIncrement,
-				) error {
-					alterSegmentsCount++
-					return nil
+			commitCalled := false
+			mockCommit := mockey.Mock(packed.CommitManifestUpdates).To(
+				func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+					commitCalled = true
+					// Rebased on the segment's current manifest (version 2), not the
+					// worker's plan-time base.
+					s.Equal(basePath, base)
+					s.EqualValues(2, version)
+					s.Require().Len(updates.Stats, 1)
+					s.Equal("text_index.500", updates.Stats[0].Key)
+					s.Equal(files, updates.Stats[0].Files)
+					// Scalar index version pinned to the value the worker built with.
+					s.Equal("7", updates.Stats[0].Metadata["current_scalar_index_version"])
+					return committedManifest, nil
 				}).Build()
-			defer mockAlterSegments.UnPatch()
+			defer mockCommit.UnPatch()
+
+			catalogWrites := 0
 			s.mt.catalog = &mockeyDataCoordCatalog{}
-			// The StorageV3 publish path commits via catalog.Update, not
-			// AlterSegments; count it as the catalog write for expectCatalog.
 			mockUpdate := mockey.Mock((*mockeyDataCoordCatalog).Update).To(
 				func(_ *mockeyDataCoordCatalog, _ context.Context, _ ...metastore.UpdateAction) error {
-					alterSegmentsCount++
+					catalogWrites++
 					return nil
 				}).Build()
 			defer mockUpdate.UnPatch()
@@ -840,15 +856,10 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 				PartitionID:   s.partID,
 				SegmentID:     s.segID,
 				Channel:       "ch1",
-				BaseManifest:  testCase.base,
-				Manifest:      testCase.result,
 				TextStatsLogs: testCase.logs,
 			})
-			if testCase.expectErr != nil {
-				s.ErrorIs(err, testCase.expectErr)
-			} else {
-				s.NoError(err)
-			}
+			s.NoError(err)
+			s.Equal(testCase.expectCommit, commitCalled)
 
 			segment := s.mt.GetHealthySegment(context.Background(), s.segID)
 			s.Require().NotNil(segment)
@@ -859,10 +870,10 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 			} else {
 				s.Empty(segment.GetTextStatsLogs())
 			}
-			if testCase.expectCatalog {
-				s.Equal(1, alterSegmentsCount)
+			if testCase.expectCommit {
+				s.Equal(1, catalogWrites)
 			} else {
-				s.Equal(0, alterSegmentsCount)
+				s.Equal(0, catalogWrites)
 			}
 		})
 	}
@@ -981,6 +992,15 @@ func (s *statsTaskSuite) TestQueryTaskOnWorkerDiscardsStaleStatsResult() {
 			defer restoreSegment()
 			restoreCollection := s.installStatsTaskCollection(testCase.external)
 			defer restoreCollection()
+
+			// The delta commit rebases on the current manifest under the per-segment
+			// lock, so it does not itself reject on a concurrent advance; this guards
+			// the remaining defensive wiring: if CommitSegmentManifest ever surfaces a
+			// classified stale conflict, QueryTaskOnWorker must discard (not retry) the
+			// obsolete worker result. Mock the commit to return that classified error.
+			mockCommit := mockey.Mock((*meta).CommitSegmentManifest).Return(
+				staleSegmentManifestError(s.segID, oldManifest, currentManifest)).Build()
+			defer mockCommit.UnPatch()
 
 			task := &indexpb.StatsTask{
 				CollectionID:    s.collID,

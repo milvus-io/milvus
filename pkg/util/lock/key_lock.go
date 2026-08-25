@@ -114,6 +114,105 @@ func (k *KeyLock[K]) Unlock(lockedKey K) {
 	keyLock.mutex.Unlock()
 }
 
+// TryLockMany atomically acquires write locks for every key in keys, or acquires
+// none. It is the multi-key form of TryLock: the whole attempt runs under the
+// internal map mutex using the non-blocking mutex.TryLock on each key, so
+// competing lockers never observe a partially-held set and this call never blocks
+// while holding a subset. That is what lets a caller take an arbitrary set of keys
+// without the hold-and-wait convoy (or deadlock) that ordered blocking Lock()
+// calls create: on the first key already held elsewhere it rolls back every key
+// it just took and returns false, leaving nothing held for the caller to retry.
+//
+// Holding keyLocksMutex across the attempt is safe precisely because TryLock never
+// blocks (unlike Lock, which releases keyLocksMutex before parking). keys must be
+// de-duplicated; a repeated key makes the second TryLock on the same mutex fail,
+// after which the call can never succeed.
+//
+// A separate "check every key first, then lock them all" pass is not cheaper. A
+// sync.RWMutex exposes no non-acquiring "is-lockable" test — TryLock is itself the
+// check and commits on success — and refCounter cannot stand in for one (readers,
+// blocked writers, and lockers that ref before their TryLock all inflate it, so a
+// count-based pre-check would reject lockable keys). Because the whole scan already
+// runs under keyLocksMutex, this per-key TryLock-then-rollback is exactly that atomic
+// check-and-commit with no TOCTOU window: on the conflict-free common path it does
+// len(keys) TryLocks and never rolls back, and the rollback cost is paid only when a
+// key is genuinely held elsewhere.
+func (k *KeyLock[K]) TryLockMany(keys []K) bool {
+	k.keyLocksMutex.Lock()
+	defer k.keyLocksMutex.Unlock()
+
+	// unlockLocked releases a key this attempt already acquired, mirroring Unlock's
+	// ref-count/pool bookkeeping but assuming keyLocksMutex is already held.
+	unlockLocked := func(key K) {
+		keyLock := k.refLocks[key]
+		keyLock.unref()
+		if keyLock.refCounter == 0 {
+			_ = refLockPoolPool.ReturnObject(ctx, keyLock)
+			delete(k.refLocks, key)
+		}
+		keyLock.mutex.Unlock()
+	}
+	rollback := func(upto int) {
+		for j := upto - 1; j >= 0; j-- {
+			unlockLocked(keys[j])
+		}
+	}
+
+	for i, key := range keys {
+		if keyLock, ok := k.refLocks[key]; ok {
+			keyLock.ref()
+			if keyLock.mutex.TryLock() {
+				continue
+			}
+			// Undo the ref taken for this contended key, then release the prefix.
+			keyLock.unref()
+			if keyLock.refCounter == 0 {
+				_ = refLockPoolPool.ReturnObject(ctx, keyLock)
+				delete(k.refLocks, key)
+			}
+			rollback(i)
+			return false
+		}
+		obj, err := refLockPoolPool.BorrowObject(ctx)
+		if err != nil {
+			mlog.Error(ctx, "BorrowObject failed", mlog.Err(err))
+			rollback(i)
+			return false
+		}
+		newKLock := obj.(*RefLock)
+		if !newKLock.mutex.TryLock() {
+			_ = refLockPoolPool.ReturnObject(ctx, newKLock)
+			rollback(i)
+			return false
+		}
+		k.refLocks[key] = newKLock
+		newKLock.ref()
+	}
+	return true
+}
+
+// UnlockMany releases write locks previously acquired together via TryLockMany.
+// The same slice need not be passed; only that every key is currently held by the
+// caller. Releasing under a single map-mutex acquisition keeps batch release
+// symmetric with the batch acquire.
+func (k *KeyLock[K]) UnlockMany(keys []K) {
+	k.keyLocksMutex.Lock()
+	defer k.keyLocksMutex.Unlock()
+	for _, key := range keys {
+		keyLock, ok := k.refLocks[key]
+		if !ok {
+			mlog.Warn(context.TODO(), "Unlocking non-existing key", mlog.Any("key", key))
+			continue
+		}
+		keyLock.unref()
+		if keyLock.refCounter == 0 {
+			_ = refLockPoolPool.ReturnObject(ctx, keyLock)
+			delete(k.refLocks, key)
+		}
+		keyLock.mutex.Unlock()
+	}
+}
+
 // RLock acquires a read lock for a given key.
 func (k *KeyLock[K]) RLock(key K) {
 	_ = k.tryLockInternal(key, func(mutex *sync.RWMutex) bool {

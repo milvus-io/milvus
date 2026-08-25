@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -30,8 +31,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // ManifestMutationType is deliberately a closed set.  Callers supply data;
@@ -84,10 +87,12 @@ type SegmentCatalogMutation struct {
 }
 
 // SegmentManifestCommit describes one segment-scoped StorageV3 commit.
-// ExpectedManifest is an optional optimistic CAS condition. When non-empty,
-// publication proceeds only if the current pointer matches it. When empty,
-// the per-segment transaction lock serializes publication without requiring a
-// caller to know the current pointer.
+// ExpectedManifest is an optional optimistic CAS condition for Noop mutations,
+// whose revision was prepared outside this framework against a base the caller
+// knows: when non-empty, publication proceeds only if the current pointer still
+// matches it. A structured (CommitUpdates) mutation must leave it empty — its
+// revision is generated from the in-lock pointer, so publication is guarded by
+// base stability rather than a caller-pinned pointer.
 type SegmentManifestCommit struct {
 	SegmentID        int64
 	ExpectedManifest string
@@ -105,6 +110,9 @@ type SegmentManifestCommit struct {
 func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifestCommit) error {
 	if commit.SegmentID == 0 {
 		return merr.WrapErrServiceInternalMsg("segment manifest commit requires a segment ID")
+	}
+	if err := validateExpectedManifestUsage(commit); err != nil {
+		return err
 	}
 
 	// KeyLock.Lock is synchronous: a caller blocks here only when another
@@ -194,8 +202,25 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 			// I/O is treated as not-found so callers discard rather than retry.
 			return merr.WrapErrSegmentNotFound(commit.SegmentID, "segment dropped or unhealthy during manifest commit")
 		}
-		if !matchesExpectedManifest(commit.ExpectedManifest, latest.GetManifestPath()) {
-			return staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, latest.GetManifestPath())
+		if commit.Mutation.Type == ManifestMutationNoop {
+			// A Noop mutation publishes a revision prepared outside this framework;
+			// it was not generated from the in-lock base, so publication is guarded
+			// by the caller's optional CAS plus the monotonic check below rather
+			// than base stability.
+			if !matchesExpectedManifest(commit.ExpectedManifest, latest.GetManifestPath()) {
+				return staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, latest.GetManifestPath())
+			}
+		} else if latest.GetManifestPath() != segment.GetManifestPath() {
+			// A structured mutation was generated from the in-lock snapshot. The
+			// manifest lock serializes every framework writer, so a pointer that
+			// moved between that snapshot and this publication section can only
+			// come from an out-of-lock writer (the DDL/backfill ack path adopting
+			// an externally minted version). The loon OVERWRITE transaction built
+			// the prepared revision from the snapshot base alone — it does not
+			// merge the concurrent revision's contents — so publishing here would
+			// silently drop that revision. Fail as stale so the caller discards or
+			// re-drives against the fresh base.
+			return staleSegmentManifestError(commit.SegmentID, segment.GetManifestPath(), latest.GetManifestPath())
 		}
 		if err := validatePreparedManifest(latest.GetManifestPath(), manifestPath); err != nil {
 			return merr.Wrap(err, "validate manifest before publication")
@@ -337,6 +362,43 @@ func (m *meta) applySegmentCatalogMutation(current *SegmentInfo, mutation Segmen
 	if segment == nil {
 		segment = current.Clone()
 	}
+	applySegmentCatalogTypedFields(segment, mutation)
+	if err := pack.Validate(); err != nil {
+		return nil, nil, err
+	}
+	// Operators prepare metric transitions as part of UpdateSegmentsInfo.
+	// Do this after applying the typed fields too, so a state mutation is
+	// reflected only once the catalog write succeeds.
+	pack.prepareSegmentMetricUpdates()
+	return segment, pack.metricMutation, nil
+}
+
+func staleSegmentManifestError(segmentID int64, expected, current string) error {
+	return merr.WrapErrServiceUnavailableErr(errSegmentManifestStale,
+		"stale segment manifest, segmentID=%d expected=%q current=%q", segmentID, expected, current)
+}
+
+func matchesExpectedManifest(expected, current string) bool {
+	return expected == "" || expected == current
+}
+
+// validateExpectedManifestUsage enforces the CAS contract described on
+// SegmentManifestCommit: only a Noop mutation may pin an ExpectedManifest. A
+// structured mutation is generated from the in-lock pointer, so a caller-pinned
+// pointer read outside the lock could only spuriously abort a commit the lock
+// already serializes correctly; base stability covers the mid-I/O case.
+func validateExpectedManifestUsage(commit SegmentManifestCommit) error {
+	if commit.Mutation.Type != ManifestMutationNoop && commit.ExpectedManifest != "" {
+		return merr.WrapErrServiceInternalMsg(
+			"segment manifest commit with a structured mutation must not set ExpectedManifest, segmentID=%d", commit.SegmentID)
+	}
+	return nil
+}
+
+// applySegmentCatalogTypedFields folds the manifest commit's typed catalog fields
+// onto a segment clone. It is shared by the single-segment applySegmentCatalogMutation
+// and the batch publish operator so both make the exact same field-level changes.
+func applySegmentCatalogTypedFields(segment *SegmentInfo, mutation SegmentCatalogMutation) {
 	if len(mutation.TextStats) > 0 {
 		if segment.TextStatsLogs == nil {
 			segment.TextStatsLogs = make(map[int64]*datapb.TextIndexStats)
@@ -359,21 +421,310 @@ func (m *meta) applySegmentCatalogMutation(current *SegmentInfo, mutation Segmen
 	if mutation.IsImporting != nil {
 		segment.IsImporting = *mutation.IsImporting
 	}
-	if err := pack.Validate(); err != nil {
-		return nil, nil, err
+}
+
+// preparedSegmentManifest pairs a commit with the immutable manifest revision that
+// stage 2 produced for it, ready to be published under segMu in stage 3.
+type preparedSegmentManifest struct {
+	commit       SegmentManifestCommit
+	manifestPath string
+	// baseManifest is the pointer the revision was generated from (the stage-2
+	// snapshot). Stage 3 re-checks it so a pointer advanced mid-I/O by an
+	// out-of-lock writer aborts the batch instead of being silently overwritten:
+	// the loon transaction does not merge concurrent revisions into the prepared
+	// one.
+	baseManifest string
+}
+
+const (
+	// segmentManifestLockRetryInitial/Max bound the backoff between atomic
+	// multi-lock attempts. A failed TryLockMany holds nothing, so retrying cannot
+	// convoy other writers; the backoff only avoids hot-spinning while another
+	// holder (a single-segment commit or a competing batch) works and releases.
+	segmentManifestLockRetryInitial = 200 * time.Microsecond
+	segmentManifestLockRetryMax     = 20 * time.Millisecond
+)
+
+// segmentManifestLockAcquireTimeout is the hard ceiling on how long one batch
+// acquisition may retry before failing. TryLockMany guarantees system-wide progress
+// (some committer always wins) but not per-caller starvation-freedom, and the batch
+// runs under the DataCoord lifecycle context (no request deadline), so without this
+// bound a perpetually-unlucky caller would retry until shutdown. On timeout the batch
+// fails retriably so the scheduler re-drives the task instead of pinning a goroutine.
+// It is a var only so tests can shorten it; production never mutates it.
+var segmentManifestLockAcquireTimeout = 60 * time.Second
+
+// CommitSegmentManifests is the batched form of CommitSegmentManifest. It creates a
+// StorageV3 manifest revision for several segments and advances their
+// SegmentInfo.manifest_path in a SINGLE catalog transaction (one AlterSegments via
+// UpdateSegmentsInfo), while preserving the per-segment single-writer invariant that
+// protects the manifest pointer from concurrent writers (stats, index, GC, compaction).
+//
+// It runs the three stages the caller specified:
+//  1. Atomically acquire every target segment's manifest lock (all-or-nothing via
+//     KeyLock.TryLockMany, retried with backoff): no ordered blocking acquire, so no
+//     hold-and-wait convoy and no deadlock against single-segment CommitSegmentManifest.
+//  2. Generate each segment's new manifest revision in parallel, OUTSIDE segMu — the
+//     loon transaction is object-storage I/O — each generated from the segment's
+//     current in-lock manifest pointer (a Noop member may pin an ExpectedManifest CAS).
+//  3. Publish every prepared pointer plus the caller's extraOperators in one
+//     m.UpdateSegmentsInfo call: a single segMu critical section, one catalog write.
+//
+// Lock order stays segmentManifestLocks -> segMu -> indexMeta.keyLock (the manifest
+// locks are all held before UpdateSegmentsInfo takes segMu). No caller may hold segMu.
+//
+// commits must target existing StorageV3 segments; NewSegment is rejected because the
+// single AlterSegments batch cannot create a segment, and duplicate segment IDs are
+// rejected. A segment dropped/unhealthy when its revision is generated — or between
+// generation and publication — is skipped as a benign terminal outcome (logged),
+// matching how single-segment callers treat ErrSegmentNotFound; it does not fail the
+// batch. Any other failure (manifest I/O error, a stale pointer — Noop CAS conflict or
+// mid-I/O base movement, prepared-version regression, a failing caller operator) aborts the whole batch with nothing
+// committed, so the caller retries on a fresh base. extraOperators are committed in the
+// same transaction and must be pure catalog mutations: they must not advance a V3
+// manifest pointer (which would require its own per-segment manifest lock).
+func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentManifestCommit, extraOperators ...UpdateOperator) error {
+	idSet := make(map[int64]struct{}, len(commits))
+	for i := range commits {
+		commit := commits[i]
+		if commit.SegmentID == 0 {
+			return merr.WrapErrServiceInternalMsg("segment manifest commit requires a segment ID")
+		}
+		if err := validateExpectedManifestUsage(commit); err != nil {
+			return err
+		}
+		if commit.CatalogMutation.NewSegment != nil {
+			return merr.WrapErrServiceInternalMsg("batch segment manifest commit cannot create a new segment, segmentID=%d", commit.SegmentID)
+		}
+		if _, dup := idSet[commit.SegmentID]; dup {
+			return merr.WrapErrServiceInternalMsg("duplicate segment ID %d in batch manifest commit", commit.SegmentID)
+		}
+		idSet[commit.SegmentID] = struct{}{}
 	}
-	// Operators prepare metric transitions as part of UpdateSegmentsInfo.
-	// Do this after applying the typed fields too, so a state mutation is
-	// reflected only once the catalog write succeeds.
-	pack.prepareSegmentMetricUpdates()
-	return segment, pack.metricMutation, nil
+
+	if len(commits) == 0 {
+		// A manifest-free batch still needs to publish the caller's operators, but
+		// those never touch a V3 pointer so they need no manifest lock.
+		if len(extraOperators) == 0 {
+			return nil
+		}
+		return m.UpdateSegmentsInfo(ctx, extraOperators...)
+	}
+
+	segmentIDs := make([]int64, 0, len(idSet))
+	for id := range idSet {
+		segmentIDs = append(segmentIDs, id)
+	}
+	sort.Slice(segmentIDs, func(i, j int) bool { return segmentIDs[i] < segmentIDs[j] })
+
+	// Stage 1: acquire all manifest locks as one atomic operation.
+	locks := m.getSegmentManifestLocks()
+	lockStart := time.Now()
+	if err := acquireSegmentManifestLocks(ctx, locks, segmentIDs); err != nil {
+		return err
+	}
+	lockWait := time.Since(lockStart)
+	holdStart := time.Now()
+	defer func() {
+		locks.UnlockMany(segmentIDs)
+		mlog.Debug(ctx, "batch segment manifest commit completed",
+			mlog.Int("segments", len(segmentIDs)),
+			mlog.Duration("lockWait", lockWait),
+			mlog.Duration("lockHold", time.Since(holdStart)))
+	}()
+
+	// Stage 2: generate every segment's manifest revision in parallel, off segMu.
+	prepared, err := m.prepareSegmentManifests(ctx, commits)
+	if err != nil {
+		return err
+	}
+	if len(prepared) == 0 && len(extraOperators) == 0 {
+		return nil
+	}
+
+	// Stage 3: publish all prepared pointers and the extra operators in one shot.
+	operators := make([]UpdateOperator, 0, len(prepared)+len(extraOperators))
+	for i := range prepared {
+		operators = append(operators, m.publishSegmentManifestOperator(prepared[i]))
+	}
+	operators = append(operators, extraOperators...)
+	return m.UpdateSegmentsInfo(ctx, operators...)
 }
 
-func staleSegmentManifestError(segmentID int64, expected, current string) error {
-	return merr.WrapErrServiceUnavailableErr(errSegmentManifestStale,
-		"stale segment manifest, segmentID=%d expected=%q current=%q", segmentID, expected, current)
+// acquireSegmentManifestLocks takes every segment's manifest lock as one atomic
+// all-or-nothing operation, retrying with bounded backoff until it wins the whole
+// set, ctx is cancelled, or segmentManifestLockAcquireTimeout is exceeded (then it
+// fails retriably so the scheduler re-drives the task). segmentIDs must be sorted
+// and de-duplicated. Because a failed TryLockMany releases everything it briefly
+// touched, a waiter never holds a subset, so this cannot deadlock against — or
+// convoy — single-segment commits.
+func acquireSegmentManifestLocks(ctx context.Context, locks *lock.KeyLock[int64], segmentIDs []int64) error {
+	backoff := segmentManifestLockRetryInitial
+	start := time.Now()
+	for attempt := 1; ; attempt++ {
+		if locks.TryLockMany(segmentIDs) {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		elapsed := time.Since(start)
+		// One line per failed attempt so a task starving on lock contention is
+		// visible under debug; silent in production unless debug logging is on.
+		mlog.Debug(ctx, "segment manifest lock acquisition contended; retrying",
+			mlog.Int64s("segmentIDs", segmentIDs),
+			mlog.Int("attempt", attempt),
+			mlog.Duration("elapsed", elapsed),
+			mlog.Duration("nextBackoff", backoff))
+		// Hard ceiling: never retry past the timeout under the deadline-less
+		// lifecycle context. Fail retriably (ServiceUnavailable) so the caller's
+		// scheduler re-drives the task rather than blocking this goroutine.
+		if elapsed >= segmentManifestLockAcquireTimeout {
+			return merr.WrapErrServiceUnavailableMsg(
+				"timed out acquiring segment manifest locks for %v after %s (%d attempts)",
+				segmentIDs, elapsed, attempt)
+		}
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+		if backoff < segmentManifestLockRetryMax {
+			backoff *= 2
+			if backoff > segmentManifestLockRetryMax {
+				backoff = segmentManifestLockRetryMax
+			}
+		}
+	}
 }
 
-func matchesExpectedManifest(expected, current string) bool {
-	return expected == "" || expected == current
+// prepareSegmentManifests snapshots the target segments once, then generates each
+// segment's new manifest revision in parallel outside segMu. A segment that is gone
+// or unhealthy at snapshot time is skipped (nil result); any real generation failure
+// aborts the batch. The returned slice holds only the segments that produced a
+// revision, in unspecified order.
+func (m *meta) prepareSegmentManifests(ctx context.Context, commits []SegmentManifestCommit) ([]preparedSegmentManifest, error) {
+	m.segMu.RLock()
+	snapshots := make(map[int64]*SegmentInfo, len(commits))
+	for i := range commits {
+		id := commits[i].SegmentID
+		if segment := m.segments.GetSegment(id); segment != nil {
+			snapshots[id] = segment.Clone()
+		}
+	}
+	m.segMu.RUnlock()
+
+	poolSize := paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.GetAsInt()
+	if poolSize < 1 {
+		poolSize = 1
+	}
+	if poolSize > len(commits) {
+		poolSize = len(commits)
+	}
+	pool := conc.NewPool[*preparedSegmentManifest](poolSize)
+	defer pool.Release()
+
+	futures := make([]*conc.Future[*preparedSegmentManifest], 0, len(commits))
+	for i := range commits {
+		commit := commits[i]
+		snapshot := snapshots[commit.SegmentID]
+		futures = append(futures, pool.Submit(func() (*preparedSegmentManifest, error) {
+			return prepareSegmentManifest(ctx, commit, snapshot)
+		}))
+	}
+	if err := conc.BlockOnAll(futures...); err != nil {
+		return nil, err
+	}
+	prepared := make([]preparedSegmentManifest, 0, len(futures))
+	for _, future := range futures {
+		if result := future.Value(); result != nil {
+			prepared = append(prepared, *result)
+		}
+	}
+	return prepared, nil
+}
+
+// prepareSegmentManifest is the per-segment stage-2 worker: validate the snapshot and
+// run the manifest mutation to produce the prepared revision. A dropped/unhealthy
+// segment returns (nil, nil) to be skipped; a stale CAS or I/O error returns a real
+// error to abort the batch.
+func prepareSegmentManifest(ctx context.Context, commit SegmentManifestCommit, snapshot *SegmentInfo) (*preparedSegmentManifest, error) {
+	if snapshot == nil || !isSegmentHealthy(snapshot) {
+		mlog.Warn(ctx, "segment dropped or unhealthy before batch manifest generation; skipping",
+			mlog.Int64("segmentID", commit.SegmentID))
+		return nil, nil
+	}
+	if snapshot.GetStorageVersion() != storage.StorageV3 {
+		return nil, merr.WrapErrServiceInternalMsg("segment manifest commit requires StorageV3, segmentID=%d", commit.SegmentID)
+	}
+	if !matchesExpectedManifest(commit.ExpectedManifest, snapshot.GetManifestPath()) {
+		return nil, staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, snapshot.GetManifestPath())
+	}
+	manifestPath, err := commitManifestMutation(snapshot.GetManifestPath(), commit)
+	if err != nil {
+		return nil, err
+	}
+	return &preparedSegmentManifest{
+		commit:       commit,
+		manifestPath: manifestPath,
+		baseManifest: snapshot.GetManifestPath(),
+	}, nil
+}
+
+// publishSegmentManifestOperator produces the stage-3 operator that publishes one
+// prepared revision inside UpdateSegmentsInfo's segMu section: it rebases onto the
+// latest record, re-checks the CAS and monotonic-version guards, applies the commit's
+// caller operators and typed fields, then advances the manifest pointer. A segment
+// dropped during manifest I/O is skipped without failing the batch.
+func (m *meta) publishSegmentManifestOperator(prepared preparedSegmentManifest) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		commit := prepared.commit
+		// Peek the latest record without seeding the pack, so a skip leaves nothing
+		// to persist. We hold segMu (via UpdateSegmentsInfo) and every manifest lock.
+		latest := modPack.meta.segments.GetSegment(commit.SegmentID)
+		if latest == nil || !isSegmentHealthy(latest) {
+			mlog.Warn(modPack.meta.ctx, "segment dropped or unhealthy during batch manifest commit; skipping publication",
+				mlog.Int64("segmentID", commit.SegmentID))
+			return true
+		}
+		if latest.GetStorageVersion() != storage.StorageV3 {
+			return modPack.fail(merr.WrapErrServiceInternalMsg("segment manifest commit requires StorageV3, segmentID=%d", commit.SegmentID))
+		}
+		if commit.Mutation.Type == ManifestMutationNoop {
+			// Externally prepared revision: guarded by the caller's optional CAS
+			// plus the monotonic check below, not base stability.
+			if !matchesExpectedManifest(commit.ExpectedManifest, latest.GetManifestPath()) {
+				return modPack.fail(staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, latest.GetManifestPath()))
+			}
+		} else if latest.GetManifestPath() != prepared.baseManifest {
+			// Same rule as CommitSegmentManifest: the pointer moved since the stage-2
+			// snapshot, so an out-of-lock writer advanced it during manifest I/O and
+			// the prepared revision does not contain that revision's contents. Abort
+			// the whole batch so the caller retries on the fresh base.
+			return modPack.fail(staleSegmentManifestError(commit.SegmentID, prepared.baseManifest, latest.GetManifestPath()))
+		}
+		if err := validatePreparedManifest(latest.GetManifestPath(), prepared.manifestPath); err != nil {
+			return modPack.fail(merr.Wrap(err, "validate manifest before publication"))
+		}
+
+		for _, operator := range commit.CatalogMutation.Operators {
+			operator(modPack)
+			if modPack.err != nil {
+				return false
+			}
+		}
+		if len(modPack.l0ManifestUpdates) > 0 {
+			return modPack.fail(merr.WrapErrServiceInternalMsg("segment manifest commit catalog mutation must not contain L0 manifest updates, segmentID=%d", commit.SegmentID))
+		}
+		segment := modPack.Get(commit.SegmentID)
+		if segment == nil {
+			// Raced to a drop between the peek and Get; skip rather than fail.
+			return true
+		}
+		applySegmentCatalogTypedFields(segment, commit.CatalogMutation)
+		segment.ManifestPath = prepared.manifestPath
+		return true
+	}
 }

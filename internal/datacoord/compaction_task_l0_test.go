@@ -75,7 +75,7 @@ func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
 	defer commit.UnPatch()
 
 	task := &l0CompactionTask{meta: meta, committedV3Manifests: make(map[int64]string)}
-	require.NoError(t, task.commitL0V3Deltalogs(context.Background(), 200, deltalogs))
+	require.NoError(t, task.commitL0V3DeltalogsBatch(context.Background(), map[int64][]*datapb.FieldBinlog{200: deltalogs}))
 
 	updated := meta.GetSegment(context.Background(), 200)
 	require.Equal(t, newManifest, updated.GetManifestPath())
@@ -115,10 +115,10 @@ func TestL0CompactionV3ManifestCommitIsIdempotentOnRetry(t *testing.T) {
 
 	task := &l0CompactionTask{meta: meta}
 	// First attempt publishes the manifest and records the deltalog on the segment.
-	require.NoError(t, task.commitL0V3Deltalogs(context.Background(), 201, freshDeltalogs()))
+	require.NoError(t, task.commitL0V3DeltalogsBatch(context.Background(), map[int64][]*datapb.FieldBinlog{201: freshDeltalogs()}))
 	// A retry (saveSegmentMeta re-run after a failed meta_saved/etcd write) with
 	// the same output must not append the deltalog to the manifest a second time.
-	require.NoError(t, task.commitL0V3Deltalogs(context.Background(), 201, freshDeltalogs()))
+	require.NoError(t, task.commitL0V3DeltalogsBatch(context.Background(), map[int64][]*datapb.FieldBinlog{201: freshDeltalogs()}))
 
 	require.Equal(t, 1, commitCount, "manifest must be committed exactly once across retries")
 	updated := meta.GetSegment(context.Background(), 201)
@@ -178,9 +178,9 @@ func TestL0CompactionSaveSegmentMetaSkipsDroppedV3Target(t *testing.T) {
 	})
 
 	var commitCount atomic.Int32
-	mockCommit := mockey.Mock((*meta).CommitSegmentManifest).To(
-		func(m *meta, ctx context.Context, commit SegmentManifestCommit) error {
-			commitCount.Add(1)
+	mockCommit := mockey.Mock((*meta).CommitSegmentManifests).To(
+		func(m *meta, ctx context.Context, commits []SegmentManifestCommit, extraOps ...UpdateOperator) error {
+			commitCount.Add(int32(len(commits)))
 			return nil
 		}).Build()
 	defer mockCommit.UnPatch()
@@ -193,16 +193,17 @@ func TestL0CompactionSaveSegmentMetaSkipsDroppedV3Target(t *testing.T) {
 
 	require.NoError(t, task.saveSegmentMeta([]*datapb.CompactionSegment{l0DeltaOutput(240, basePath)}))
 
-	require.Zero(t, commitCount.Load(), "dropped target must not reach CommitSegmentManifest")
+	require.Zero(t, commitCount.Load(), "dropped target must not reach CommitSegmentManifests")
 	require.Equal(t, manifest7, mt.GetSegment(context.Background(), 240).GetManifestPath())
 	requireL0InputsRetired(t, mt, inputs)
 }
 
 // A target that passes the saveSegmentMeta health check but drops before the
-// commit lands surfaces as ErrSegmentNotFound from CommitSegmentManifest. That
-// is the same benign terminal outcome as the pre-check — the contract the
-// stats caller already honors — so the save still succeeds and the input
-// segments retire.
+// commit lands is skipped inside CommitSegmentManifests as a benign terminal
+// outcome, so the batch still returns success. saveSegmentMeta must invoke the
+// batch for the healthy target and let the input segments retire on its success;
+// the per-target ErrSegmentNotFound swallow now lives in the primitive
+// (TestCommitSegmentManifestsSkipsDroppedSegment).
 func TestL0CompactionSaveSegmentMetaSwallowsNotFoundFromManifestCommit(t *testing.T) {
 	basePath := "/tmp/milvus/insert_log/1/10/241"
 	mt, err := newMemoryMeta(t)
@@ -215,11 +216,14 @@ func TestL0CompactionSaveSegmentMetaSwallowsNotFoundFromManifestCommit(t *testin
 		ManifestPath:   packed.MarshalManifestPath(basePath, 7),
 	})
 
-	var commitCount atomic.Int32
-	mockCommit := mockey.Mock((*meta).CommitSegmentManifest).To(
-		func(m *meta, ctx context.Context, commit SegmentManifestCommit) error {
-			commitCount.Add(1)
-			return merr.WrapErrSegmentNotFound(commit.SegmentID, "segment dropped or unhealthy during manifest commit")
+	var batchCalls atomic.Int32
+	mockCommit := mockey.Mock((*meta).CommitSegmentManifests).To(
+		func(m *meta, ctx context.Context, commits []SegmentManifestCommit, extraOps ...UpdateOperator) error {
+			batchCalls.Add(1)
+			// The primitive skips a target that vanished during manifest I/O and
+			// still returns success, but the input-segment retirement folded into
+			// the same batch (extraOps) still commits — simulate both.
+			return m.UpdateSegmentsInfo(ctx, extraOps...)
 		}).Build()
 	defer mockCommit.UnPatch()
 
@@ -231,7 +235,7 @@ func TestL0CompactionSaveSegmentMetaSwallowsNotFoundFromManifestCommit(t *testin
 
 	require.NoError(t, task.saveSegmentMeta([]*datapb.CompactionSegment{l0DeltaOutput(241, basePath)}))
 
-	require.EqualValues(t, 1, commitCount.Load())
+	require.EqualValues(t, 1, batchCalls.Load())
 	requireL0InputsRetired(t, mt, inputs)
 }
 
@@ -250,8 +254,8 @@ func TestL0CompactionSaveSegmentMetaFailsOnManifestCommitError(t *testing.T) {
 		ManifestPath:   packed.MarshalManifestPath(basePath, 7),
 	})
 
-	mockCommit := mockey.Mock((*meta).CommitSegmentManifest).To(
-		func(m *meta, ctx context.Context, commit SegmentManifestCommit) error {
+	mockCommit := mockey.Mock((*meta).CommitSegmentManifests).To(
+		func(m *meta, ctx context.Context, commits []SegmentManifestCommit, extraOps ...UpdateOperator) error {
 			return merr.WrapErrServiceInternalMsg("manifest commit failed")
 		}).Build()
 	defer mockCommit.UnPatch()
@@ -269,10 +273,11 @@ func TestL0CompactionSaveSegmentMetaFailsOnManifestCommitError(t *testing.T) {
 	require.False(t, seg.GetCompacted())
 }
 
-// The V3 manifest commits must overlap rather than run serially on the
-// scheduler goroutine: each mocked commit blocks until all targets have
-// entered, so a serial implementation stalls on the first call and fails via
-// the timeout error instead of hanging.
+// The batch's manifest generation must overlap rather than run serially: each
+// mocked loon transaction (CommitSegmentManifests stage 2) blocks until all
+// targets have entered, so a serial implementation stalls on the first and fails
+// via the timeout error instead of hanging. This drives the real primitive end to
+// end — atomic multi-lock acquisition, then the parallel per-target manifest I/O.
 func TestL0CompactionSaveSegmentMetaCommitsV3TargetsInParallel(t *testing.T) {
 	const targets = 3
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key, "16")
@@ -300,16 +305,16 @@ func TestL0CompactionSaveSegmentMetaCommitsV3TargetsInParallel(t *testing.T) {
 
 	release := make(chan struct{})
 	var entered atomic.Int32
-	mockCommit := mockey.Mock((*meta).CommitSegmentManifest).To(
-		func(m *meta, ctx context.Context, commit SegmentManifestCommit) error {
+	mockCommit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
 			if entered.Add(1) == targets {
 				close(release)
 			}
 			select {
 			case <-release:
-				return nil
+				return packed.MarshalManifestPath(base, version+1), nil
 			case <-time.After(30 * time.Second):
-				return errors.New("v3 manifest commits did not overlap; fan-out is serial")
+				return "", errors.New("v3 manifest commits did not overlap; batch fan-out is serial")
 			}
 		}).Build()
 	defer mockCommit.UnPatch()

@@ -61,9 +61,8 @@ func TestCommitSegmentManifestPublishesOnlyAfterCatalogSuccess(t *testing.T) {
 	defer commit.UnPatch()
 
 	err = meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
-		SegmentID:        200,
-		ExpectedManifest: oldManifest,
-		StorageConfig:    &indexpb.StorageConfig{},
+		SegmentID:     200,
+		StorageConfig: &indexpb.StorageConfig{},
 		Mutation: ManifestMutation{
 			Type: ManifestMutationCommitUpdates,
 			Updates: &packed.ManifestUpdates{DeltaLogs: []packed.DeltaLogEntry{{
@@ -206,9 +205,8 @@ func TestCommitSegmentManifestLeavesMemoryUntouchedOnCatalogFailure(t *testing.T
 	defer commit.UnPatch()
 
 	err = meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
-		SegmentID:        201,
-		ExpectedManifest: oldManifest,
-		StorageConfig:    &indexpb.StorageConfig{},
+		SegmentID:     201,
+		StorageConfig: &indexpb.StorageConfig{},
 		Mutation: ManifestMutation{
 			Type:    ManifestMutationCommitUpdates,
 			Updates: &packed.ManifestUpdates{DeltaLogs: []packed.DeltaLogEntry{{Path: basePath + "/_delta/9001", NumEntries: 1}}},
@@ -251,11 +249,9 @@ func TestCommitSegmentManifestDoesNotSerializeDifferentSegmentsDuringManifestIO(
 		wg.Add(1)
 		go func(segmentID int64, basePath string) {
 			defer wg.Done()
-			baseManifest := packed.MarshalManifestPath(basePath, 1)
 			errs <- meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
-				SegmentID:        segmentID,
-				ExpectedManifest: baseManifest,
-				StorageConfig:    &indexpb.StorageConfig{},
+				SegmentID:     segmentID,
+				StorageConfig: &indexpb.StorageConfig{},
 				Mutation: ManifestMutation{
 					Type:    ManifestMutationCommitUpdates,
 					Updates: &packed.ManifestUpdates{DeltaLogs: []packed.DeltaLogEntry{{Path: basePath + "/_delta/1", NumEntries: 1}}},
@@ -307,9 +303,8 @@ func TestCommitSegmentManifestRebasesCatalogMutationAfterManifestIO(t *testing.T
 	result := make(chan error, 1)
 	go func() {
 		result <- meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
-			SegmentID:        segmentID,
-			ExpectedManifest: oldManifest,
-			StorageConfig:    &indexpb.StorageConfig{},
+			SegmentID:     segmentID,
+			StorageConfig: &indexpb.StorageConfig{},
 			Mutation: ManifestMutation{
 				Type:    ManifestMutationCommitUpdates,
 				Updates: &packed.ManifestUpdates{},
@@ -325,6 +320,67 @@ func TestCommitSegmentManifestRebasesCatalogMutationAfterManifestIO(t *testing.T
 	updated := meta.GetSegment(context.Background(), segmentID)
 	require.Equal(t, newManifest, updated.GetManifestPath())
 	require.True(t, updated.GetIsImporting())
+}
+
+// A CAS-free commit (the stats path) whose manifest pointer is advanced mid-I/O by
+// an out-of-lock writer (the DDL/backfill ack adopting an externally minted version)
+// must fail stale instead of publishing: the loon transaction does not merge the
+// concurrent revision, and the prepared version (base+2 here, loon skips past the
+// concurrent one) passes the monotonic guard, so only the base-stability check
+// stands between publication and silently dropping the concurrent revision.
+func TestCommitSegmentManifestFailsStaleWhenPointerAdvancesDuringManifestIO(t *testing.T) {
+	const segmentID = 212
+	basePath := "/tmp/milvus/insert_log/1/10/212"
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath(basePath, 7),
+	})))
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	commit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+			close(entered)
+			<-release
+			return packed.MarshalManifestPath(base, version+2), nil
+		},
+	).Build()
+	defer commit.UnPatch()
+
+	result := make(chan error, 1)
+	go func() {
+		// A structured commit (the stats shape) carries no CAS by contract, so the
+		// base-stability check is the only guard against the mid-I/O movement.
+		result <- meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+			SegmentID:     segmentID,
+			StorageConfig: &indexpb.StorageConfig{},
+			Mutation: ManifestMutation{
+				Type:    ManifestMutationCommitUpdates,
+				Updates: &packed.ManifestUpdates{},
+			},
+			CatalogMutation: SegmentCatalogMutation{Operators: []UpdateOperator{
+				UpdateIsImporting(segmentID, true),
+			}},
+		})
+	}()
+
+	<-entered
+	// The real out-of-lock writer: the batch-update-manifest ack adopting v8.
+	require.NoError(t, meta.UpdateSegmentsInfo(context.Background(), UpdateManifestVersion(segmentID, 8)))
+	close(release)
+
+	err = <-result
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.ErrorIs(t, err, errSegmentManifestStale)
+
+	// The ack's pointer survives and nothing from the aborted commit leaks out.
+	updated := meta.GetSegment(context.Background(), segmentID)
+	require.Equal(t, packed.MarshalManifestPath(basePath, 8), updated.GetManifestPath())
+	require.False(t, updated.GetIsImporting())
 }
 
 func TestCommitSegmentManifestSerializesCatalogWritesForDifferentSegments(t *testing.T) {
@@ -392,35 +448,41 @@ func (c *blockingManifestCatalog) Update(context.Context, ...metastore.UpdateAct
 	return nil
 }
 
+// Two structured commits for the same segment are serialized by the per-segment
+// manifest lock, and the queued one is generated from the pointer the first
+// published — the in-lock base is the sole authority, so a queued CommitUpdates
+// caller rebases instead of failing a caller-pinned CAS.
 func TestCommitSegmentManifestSerializesSameSegment(t *testing.T) {
 	const segmentID = 204
 	basePath := "/tmp/milvus/insert_log/1/10/204"
-	oldManifest := packed.MarshalManifestPath(basePath, 1)
-	newManifest := packed.MarshalManifestPath(basePath, 2)
 	meta, err := newMemoryMeta(t)
 	require.NoError(t, err)
 	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             segmentID,
 		State:          commonpb.SegmentState_Flushed,
 		StorageVersion: storage.StorageV3,
-		ManifestPath:   oldManifest,
+		ManifestPath:   packed.MarshalManifestPath(basePath, 1),
 	})))
 
-	entered := make(chan struct{})
+	versions := make(chan int64, 2)
+	firstEntered := make(chan struct{})
 	release := make(chan struct{})
+	var once sync.Once
 	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(string, int64, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error) {
-			close(entered)
-			<-release
-			return newManifest, nil
+		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+			versions <- version
+			once.Do(func() {
+				close(firstEntered)
+				<-release
+			})
+			return packed.MarshalManifestPath(base, version+1), nil
 		},
 	).Build()
 	defer commit.UnPatch()
 
 	request := SegmentManifestCommit{
-		SegmentID:        segmentID,
-		ExpectedManifest: oldManifest,
-		StorageConfig:    &indexpb.StorageConfig{},
+		SegmentID:     segmentID,
+		StorageConfig: &indexpb.StorageConfig{},
 		Mutation: ManifestMutation{
 			Type:    ManifestMutationCommitUpdates,
 			Updates: &packed.ManifestUpdates{},
@@ -428,18 +490,45 @@ func TestCommitSegmentManifestSerializesSameSegment(t *testing.T) {
 	}
 	results := make(chan error, 2)
 	go func() { results <- meta.CommitSegmentManifest(context.Background(), request) }()
-	<-entered
+	<-firstEntered
 	go func() { results <- meta.CommitSegmentManifest(context.Background(), request) }()
 	close(release)
 
-	first, second := <-results, <-results
-	require.True(t, first == nil || second == nil)
-	stale := first
-	if stale == nil {
-		stale = second
-	}
-	require.ErrorIs(t, stale, merr.ErrServiceUnavailable)
-	require.Equal(t, newManifest, meta.GetSegment(context.Background(), segmentID).GetManifestPath())
+	require.NoError(t, <-results)
+	require.NoError(t, <-results)
+	// The queued transaction saw the first's published pointer as its base — it
+	// was serialized behind the lock, not run against the stale snapshot.
+	require.Equal(t, int64(1), <-versions)
+	require.Equal(t, int64(2), <-versions)
+	require.Equal(t, packed.MarshalManifestPath(basePath, 3), meta.GetSegment(context.Background(), segmentID).GetManifestPath())
+}
+
+// A structured mutation must not pin ExpectedManifest: its base is whatever is
+// current under the commit lock, so a caller-pinned pointer is rejected outright
+// rather than silently honored as a CAS.
+func TestCommitSegmentManifestRejectsExpectedManifestOnStructuredMutation(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/213"
+	manifest7 := packed.MarshalManifestPath(basePath, 7)
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             213,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   manifest7,
+	})))
+
+	err = meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID:        213,
+		ExpectedManifest: manifest7,
+		StorageConfig:    &indexpb.StorageConfig{},
+		Mutation: ManifestMutation{
+			Type:    ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{},
+		},
+	})
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.Equal(t, manifest7, meta.GetSegment(context.Background(), 213).GetManifestPath())
 }
 
 // A StorageV3 segment's manifest is advanced inline via UpdateManifest by its

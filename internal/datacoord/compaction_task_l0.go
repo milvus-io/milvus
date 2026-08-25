@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
@@ -36,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -506,10 +504,13 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 		}
 	}
 
-	if err := t.commitL0V3DeltalogsParallel(ctx, v3Deltalogs); err != nil {
-		return err
-	}
-
+	// Retire the compacted L0 input segments in the same catalog transaction that
+	// publishes the targets' merged deltalogs, so the whole L0 result is atomic:
+	// either every target gains its deltalogs and every input turns
+	// Dropped/Compacted, or nothing changes. For V3 targets both halves fold into
+	// one CommitSegmentManifests call (manifest pointer advance + these operators
+	// in a single UpdateSegmentsInfo); with no V3 target the operators alone go
+	// through UpdateSegmentsInfo.
 	for _, segID := range t.GetTaskProto().InputSegments {
 		operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped), UpdateCompactedOperator(segID))
 	}
@@ -518,62 +519,62 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 		mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
 	)
 
+	if len(v3Deltalogs) > 0 {
+		return t.commitL0V3DeltalogsBatch(ctx, v3Deltalogs, operators...)
+	}
 	return t.meta.UpdateSegmentsInfo(ctx, operators...)
 }
 
-// commitL0V3DeltalogsParallel publishes the V3 targets' deltalogs through
-// CommitSegmentManifest with bounded concurrency. The expensive half of each
-// commit — the loon manifest transaction — is object-storage I/O performed
-// outside segMu, so the fan-out restores the parallelism the legacy operator
-// path gets from the same dataCoord.compaction.levelzero.manifestUpdatePoolSize
-// pool, while each segment keeps the per-segment ExpectedManifest CAS
-// semantics unchanged. The catalog half still lands as one catalog.Update per
-// segment; collapsing those into a single batched transaction is the batched
-// CommitSegmentManifests follow-up (see the TODO in
-// ddl_callbacks_batch_update_manifest.go).
-func (t *l0CompactionTask) commitL0V3DeltalogsParallel(ctx context.Context, deltalogsBySegment map[int64][]*datapb.FieldBinlog) error {
-	if len(deltalogsBySegment) == 0 {
-		return nil
-	}
-	poolSize := paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.GetAsInt()
-	if poolSize < 1 {
-		poolSize = 1
-	}
-	if poolSize > len(deltalogsBySegment) {
-		poolSize = len(deltalogsBySegment)
-	}
-	pool := conc.NewPool[struct{}](poolSize)
-	defer pool.Release()
-
-	futures := make([]*conc.Future[struct{}], 0, len(deltalogsBySegment))
+// commitL0V3DeltalogsBatch publishes every V3 target's deltalogs together with
+// extraOperators — the L0 input-segment retirement — in ONE catalog transaction.
+// CommitSegmentManifests acquires all targets' manifest locks as a single atomic
+// operation, runs the loon transactions in parallel outside segMu (from the same
+// dataCoord.compaction.levelzero.manifestUpdatePoolSize pool), and lands every pointer
+// advance plus extraOperators in one catalog transaction (a single UpdateSegmentsInfo).
+// Folding the input drops in makes the whole L0 result atomic — the targets gain their
+// merged deltalogs and the inputs turn Dropped/Compacted together, or nothing does —
+// while also collapsing the former per-segment CommitSegmentManifest fan-out that issued
+// one catalog.Update each.
+// A target dropped during the plan is skipped by the primitive itself as a benign
+// terminal outcome, so no ErrSegmentNotFound reaches here; only a real failure (stale
+// manifest, manifest I/O error) is returned, failing the save so the scheduler retries.
+// extraOperators still commit even when every target was skipped (commits empty).
+func (t *l0CompactionTask) commitL0V3DeltalogsBatch(ctx context.Context, deltalogsBySegment map[int64][]*datapb.FieldBinlog, extraOperators ...UpdateOperator) error {
+	commits := make([]SegmentManifestCommit, 0, len(deltalogsBySegment))
 	for segmentID, deltalogs := range deltalogsBySegment {
-		futures = append(futures, pool.Submit(func() (struct{}, error) {
-			err := t.commitL0V3Deltalogs(ctx, segmentID, deltalogs)
-			// A target dropped between the saveSegmentMeta health check and the
-			// commit (or during manifest I/O) is the same benign terminal
-			// outcome as the pre-check there: the deltalogs are obsolete along
-			// with the segment. Swallow it so the input-segment retirement still
-			// runs — the ErrSegmentNotFound contract the stats caller already
-			// honors in SetJobInfo.
-			if err != nil && errors.Is(err, merr.ErrSegmentNotFound) {
-				mlog.Warn(ctx, "L0 target segment dropped during manifest commit; skipping deltalog publication",
-					mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
-					mlog.FieldSegmentID(segmentID), mlog.Err(err))
-				return struct{}{}, nil
-			}
-			return struct{}{}, err
-		}))
+		commit, err := t.buildL0V3ManifestCommit(ctx, segmentID, deltalogs)
+		if err != nil {
+			return err
+		}
+		if commit != nil {
+			commits = append(commits, *commit)
+		}
 	}
-	return conc.BlockOnAll(futures...)
+	manifestMeta, ok := t.meta.(interface {
+		CommitSegmentManifests(context.Context, []SegmentManifestCommit, ...UpdateOperator) error
+	})
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("L0 StorageV3 batch manifest commit requires DataCoord meta implementation")
+	}
+	// Delegate even when commits is empty: CommitSegmentManifests still publishes
+	// extraOperators through a plain UpdateSegmentsInfo, so the input retirement
+	// lands when every target was skipped mid-plan.
+	return manifestMeta.CommitSegmentManifests(ctx, commits, extraOperators...)
 }
 
-func (t *l0CompactionTask) commitL0V3Deltalogs(ctx context.Context, segmentID int64, deltalogs []*datapb.FieldBinlog) error {
+// buildL0V3ManifestCommit assembles one target's manifest commit, or returns a nil
+// commit to skip it. A target dropped between the saveSegmentMeta health check and
+// here is skipped (its deltalogs are obsolete with the segment), matching how the
+// per-segment path swallowed the resulting ErrSegmentNotFound.
+func (t *l0CompactionTask) buildL0V3ManifestCommit(ctx context.Context, segmentID int64, deltalogs []*datapb.FieldBinlog) (*SegmentManifestCommit, error) {
 	current := t.meta.GetSegment(ctx, segmentID)
-	if current == nil {
-		return merr.WrapErrSegmentNotFound(segmentID)
+	if current == nil || !isSegmentHealthy(current) {
+		mlog.Warn(ctx, "L0 target segment dropped before batch manifest commit; skipping deltalog publication",
+			mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.FieldSegmentID(segmentID))
+		return nil, nil
 	}
 	if current.GetStorageVersion() != storage.StorageV3 || current.GetManifestPath() == "" {
-		return merr.WrapErrServiceInternalMsg("L0 StorageV3 manifest commit requires a published manifest, segmentID=%d", segmentID)
+		return nil, merr.WrapErrServiceInternalMsg("L0 StorageV3 manifest commit requires a published manifest, segmentID=%d", segmentID)
 	}
 
 	// Drop deltalogs already registered on the in-memory segment before building
@@ -585,34 +586,32 @@ func (t *l0CompactionTask) commitL0V3Deltalogs(ctx context.Context, segmentID in
 	// catalog write already succeeded, so the in-memory Deltalogs reflect the
 	// committed manifest and a full duplicate short-circuits before any
 	// object-storage I/O (mirroring the catalog dedup in addDeltalogsToSegment).
-	// It does NOT cover a retry after catalog.Update itself fails: CommitSegmentManifest
-	// installs the in-memory Deltalogs only after its catalog write succeeds, so on
-	// that path they are stale and the new entries survive this filter. Closing that
-	// window needs durable dedup (persisted deltalog identity / a key-based manifest
-	// add); tracked as a follow-up.
+	// It does NOT cover a retry after the batch catalog write itself fails:
+	// CommitSegmentManifests installs the in-memory Deltalogs only after its catalog
+	// write succeeds, so on that path they are stale and the new entries survive this
+	// filter. Closing that window needs durable dedup (persisted deltalog identity /
+	// a key-based manifest add); tracked as a follow-up.
 	deltalogs = filterDuplicateFieldBinlogs(current.GetDeltalogs(), deltalogs)
 	if len(deltalogs) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	entries, err := buildL0V3DeltaLogEntries(segmentID, deltalogs)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(entries) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	manifestMeta, ok := t.meta.(interface {
-		CommitSegmentManifest(context.Context, SegmentManifestCommit) error
-	})
-	if !ok {
-		return merr.WrapErrServiceInternalMsg("L0 StorageV3 manifest commit requires DataCoord meta implementation")
-	}
-	if err := manifestMeta.CommitSegmentManifest(ctx, SegmentManifestCommit{
-		SegmentID:        segmentID,
-		ExpectedManifest: current.GetManifestPath(),
-		StorageConfig:    compaction.CreateStorageConfig(),
+	// No ExpectedManifest: the batch generates each revision from the pointer
+	// current under the atomically held manifest locks, and publication aborts on
+	// mid-I/O pointer movement. Pinning this pre-lock read would abort the whole
+	// batch whenever a benign commit (e.g. a stats publication) advanced any
+	// target's pointer between here and lock acquisition.
+	return &SegmentManifestCommit{
+		SegmentID:     segmentID,
+		StorageConfig: compaction.CreateStorageConfig(),
 		Mutation: ManifestMutation{
 			Type:    ManifestMutationCommitUpdates,
 			Updates: &packed.ManifestUpdates{DeltaLogs: entries},
@@ -623,10 +622,7 @@ func (t *l0CompactionTask) commitL0V3Deltalogs(ctx context.Context, segmentID in
 			// shared with the legacy implementation.
 			Operators: []UpdateOperator{AddL0DeltalogsOperator(segmentID, deltalogs)},
 		},
-	}); err != nil {
-		return err
-	}
-	return nil
+	}, nil
 }
 
 func (t *l0CompactionTask) context() context.Context {

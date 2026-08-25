@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -508,38 +509,14 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 	var err error
 	switch st.GetSubJobType() {
 	case indexpb.StatsSubJob_TextIndexJob:
-		if st.shouldPublishPreparedManifest(ctx, st.GetSegmentID(), result) {
-			err = classifyStatsManifestCommitError(st.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
-				SegmentID:        st.GetSegmentID(),
-				ExpectedManifest: result.GetBaseManifest(),
-				Mutation: ManifestMutation{
-					Type:         ManifestMutationNoop,
-					ManifestPath: result.GetManifest(),
-				},
-				CatalogMutation: SegmentCatalogMutation{TextStats: result.GetTextStatsLogs()},
-			}))
-		} else {
-			err = st.meta.UpdateSegmentsInfo(ctx, updateStatsResultIfManifestMatches(ctx, st.GetSegmentID(), st.GetTaskID(), result))
-		}
+		err = st.commitTextIndexStats(ctx, result)
 		if err != nil {
 			mlog.Warn(ctx, "save text index stats result failed", mlog.FieldTaskID(st.GetTaskID()),
 				mlog.FieldSegmentID(st.GetSegmentID()), mlog.Err(err))
 			break
 		}
 	case indexpb.StatsSubJob_JsonKeyIndexJob:
-		if st.shouldPublishPreparedManifest(ctx, st.GetSegmentID(), result) {
-			err = classifyStatsManifestCommitError(st.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
-				SegmentID:        st.GetSegmentID(),
-				ExpectedManifest: result.GetBaseManifest(),
-				Mutation: ManifestMutation{
-					Type:         ManifestMutationNoop,
-					ManifestPath: result.GetManifest(),
-				},
-				CatalogMutation: SegmentCatalogMutation{JSONKeyStats: result.GetJsonKeyStatsLogs()},
-			}))
-		} else {
-			err = st.meta.UpdateSegmentsInfo(ctx, updateStatsResultIfManifestMatches(ctx, st.GetSegmentID(), st.GetTaskID(), result))
-		}
+		err = st.commitJSONKeyStats(ctx, result)
 		if err != nil {
 			mlog.Warn(ctx, "save json key index stats result failed", mlog.Int64("taskId", st.GetTaskID()),
 				mlog.FieldSegmentID(st.GetSegmentID()), mlog.Err(err))
@@ -614,6 +591,156 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		mlog.Int64("oldSegmentID", st.GetSegmentID()), mlog.Int64("targetSegmentID", st.GetTargetSegmentID()),
 		mlog.String("subJobType", st.GetSubJobType().String()), mlog.String("state", st.GetState().String()))
 	return nil
+}
+
+// commitTextIndexStats publishes a completed standalone TextIndexJob. For a
+// StorageV3 segment DataCoord runs the manifest transaction itself: it rebuilds
+// the text-index StatEntries from the worker's raw result and commits them onto
+// the segment's *current* manifest via CommitSegmentManifest (a structured
+// ManifestMutationCommitUpdates), rebasing rather than adopting a manifest the
+// worker pre-baked against a possibly stale base. TextStatsLogs already carries
+// full object keys, so the same entries feed both the loon transaction and the
+// SegmentInfo dual-write. For a V2 segment (no manifest) it falls back to the
+// ordinary operator that persists the stats into SegmentInfo.
+func (st *statsTask) commitTextIndexStats(ctx context.Context, result *workerpb.StatsResult) error {
+	segment := st.meta.GetSegment(ctx, st.GetSegmentID())
+	if !canCommitStatsManifestDelta(segment) {
+		// V2 segment, or one retired by compaction while the task ran: the operator
+		// persists stats when no manifest is present and discards the obsolete
+		// result otherwise, so the task still reaches a terminal state.
+		return st.meta.UpdateSegmentsInfo(ctx, updateStatsResultIfManifestMatches(ctx, st.GetSegmentID(), st.GetTaskID(), result))
+	}
+	textStats := result.GetTextStatsLogs()
+	if len(textStats) == 0 {
+		return nil
+	}
+	if statsAlreadyCommitted(segment.GetTextStatsLogs(), textStats, func(s *datapb.TextIndexStats) int64 { return s.GetBuildID() }) {
+		mlog.Info(ctx, "text index stats already applied; skipping manifest commit",
+			mlog.FieldTaskID(st.GetTaskID()), mlog.FieldSegmentID(st.GetSegmentID()))
+		return nil
+	}
+	// No ExpectedManifest CAS: the per-segment commit lock serializes framework
+	// writers, so the transaction is generated from whatever pointer is current
+	// under that lock, and CommitSegmentManifest itself fails publication as stale
+	// if the pointer moves during manifest I/O (an out-of-lock writer). Pinning the
+	// pointer read a moment ago would only spuriously discard a result a concurrent
+	// sibling sub-job (e.g. the JSON-key commit) merely committed past.
+	return classifyStatsManifestCommitError(st.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
+		SegmentID:     st.GetSegmentID(),
+		StorageConfig: createStorageConfig(),
+		Mutation: ManifestMutation{
+			Type: ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{
+				// Pin current_scalar_index_version to the value the worker actually
+				// built the index with (echoed per entry), not a fresh resolve which
+				// could drift from the shipped index.
+				Stats: packed.TextIndexStatEntries(textStats, pinnedScalarIndexVersion(textStats)),
+			},
+		},
+		CatalogMutation: SegmentCatalogMutation{TextStats: textStats},
+	}))
+}
+
+// commitJSONKeyStats is the JsonKeyIndexJob analogue of commitTextIndexStats.
+// The manifest requires absolute stat-file paths, while the result ships
+// manifest-relative paths (kept relative for the SegmentInfo dual-write and read
+// reconstruction), so it rebuilds the absolute form against the segment's stable
+// base path — exactly the conversion the worker applied before it stopped baking.
+func (st *statsTask) commitJSONKeyStats(ctx context.Context, result *workerpb.StatsResult) error {
+	segment := st.meta.GetSegment(ctx, st.GetSegmentID())
+	if !canCommitStatsManifestDelta(segment) {
+		return st.meta.UpdateSegmentsInfo(ctx, updateStatsResultIfManifestMatches(ctx, st.GetSegmentID(), st.GetTaskID(), result))
+	}
+	jsonStats := result.GetJsonKeyStatsLogs()
+	if len(jsonStats) == 0 {
+		return nil
+	}
+	if statsAlreadyCommitted(segment.GetJsonKeyStats(), jsonStats, func(s *datapb.JsonKeyStats) int64 { return s.GetBuildID() }) {
+		mlog.Info(ctx, "json key stats already applied; skipping manifest commit",
+			mlog.FieldTaskID(st.GetTaskID()), mlog.FieldSegmentID(st.GetSegmentID()))
+		return nil
+	}
+	entries, err := jsonKeyStatEntriesForManifest(segment.GetManifestPath(), jsonStats)
+	if err != nil {
+		return err
+	}
+	// No ExpectedManifest CAS: the per-segment commit lock serializes framework
+	// writers, so the transaction is generated from whatever pointer is current
+	// under that lock, and CommitSegmentManifest itself fails publication as stale
+	// if the pointer moves during manifest I/O (an out-of-lock writer). Pinning the
+	// pointer read a moment ago would only spuriously discard a result a concurrent
+	// sibling sub-job (e.g. the text-index commit) merely committed past.
+	return classifyStatsManifestCommitError(st.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
+		SegmentID:     st.GetSegmentID(),
+		StorageConfig: createStorageConfig(),
+		Mutation: ManifestMutation{
+			Type: ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{
+				Stats: entries,
+			},
+		},
+		CatalogMutation: SegmentCatalogMutation{JSONKeyStats: jsonStats},
+	}))
+}
+
+// canCommitStatsManifestDelta reports whether the DataCoord-run manifest
+// transaction applies: a live StorageV3 segment with a published manifest. A
+// nil/unhealthy segment or a V2 segment routes to the non-manifest fallback.
+func canCommitStatsManifestDelta(segment *SegmentInfo) bool {
+	return segment != nil &&
+		isSegmentHealthy(segment) &&
+		segment.GetStorageVersion() == storage.StorageV3 &&
+		segment.GetManifestPath() != ""
+}
+
+// statsAlreadyCommitted is a restart-safe idempotent-replay guard. Every field's
+// BuildID equals its stats task's globally unique task ID, and CommitSegmentManifest
+// dual-writes the stats into SegmentInfo atomically with the manifest pointer, so a
+// persisted BuildID that matches this result is an exactly-once token: the commit
+// already landed (even across a DataCoord restart, since TextStatsLogs/JsonKeyStats
+// are persisted to etcd and reloaded, unlike a V3 segment's manifest-only binlogs).
+// A different or absent BuildID means this is a fresh build to publish. Stats commits
+// overwrite by key and are therefore idempotent regardless, so this guard only avoids
+// minting a redundant manifest revision on a retry, never a correctness hazard.
+func statsAlreadyCommitted[T any](existing, incoming map[int64]T, buildID func(T) int64) bool {
+	for fieldID, in := range incoming {
+		cur, ok := existing[fieldID]
+		if !ok || buildID(cur) != buildID(in) {
+			return false
+		}
+	}
+	return true
+}
+
+// pinnedScalarIndexVersion returns the current_scalar_index_version the worker
+// built the text index with, echoed identically on every entry.
+func pinnedScalarIndexVersion(textStats map[int64]*datapb.TextIndexStats) int32 {
+	for _, ts := range textStats {
+		return ts.GetCurrentScalarIndexVersion()
+	}
+	return 0
+}
+
+// jsonKeyStatEntriesForManifest rebuilds JSON key StatEntries with absolute file
+// paths for the manifest transaction. The segment base path is version-independent,
+// so reconstructing against the current manifest yields the same physical location
+// the worker uploaded to. It clones so the caller's manifest-relative result (reused
+// for the SegmentInfo dual-write) is left untouched.
+func jsonKeyStatEntriesForManifest(manifestPath string, jsonStats map[int64]*datapb.JsonKeyStats) ([]packed.StatEntry, error) {
+	basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return nil, merr.Wrap(err, "parse manifest path for json stats base path")
+	}
+	manifestStats := make(map[int64]*datapb.JsonKeyStats, len(jsonStats))
+	for fieldID, stats := range jsonStats {
+		cloned := proto.Clone(stats).(*datapb.JsonKeyStats)
+		prefix := fmt.Sprintf("%s/_stats/json_stats.%d", basePath, fieldID)
+		for i, f := range cloned.GetFiles() {
+			cloned.Files[i] = prefix + "/" + f
+		}
+		manifestStats[fieldID] = cloned
+	}
+	return packed.JSONKeyStatEntries(manifestStats), nil
 }
 
 // classifyStatsManifestCommitError preserves the typed manifest conflict while

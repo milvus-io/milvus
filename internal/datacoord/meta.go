@@ -1626,6 +1626,63 @@ func UpdateSegmentColumnGroupsOperator(segmentID int64, groups map[int64]*datapb
 	}
 }
 
+// UpdateBumpSchemaVersionMaterializationOperator applies the catalog half of an
+// in-place schema-bump materialization to a segment clone. It is the operator
+// counterpart of the pre-CommitSegmentManifest completeBumpSchemaVersionCompactionMutation
+// in-place branch, minus the manifest CAS and pointer write, which
+// CommitSegmentManifest now owns. It:
+//   - upserts the freshly written column groups onto SegmentInfo.Binlogs
+//     (mergeSegmentColumnGroups, idempotent by FieldID) so the materialized
+//     field becomes indexable — this is load-bearing, see buildNewInsertLogsV3;
+//   - advances the schema version (never regresses it);
+//   - folds the reported footprint INCREMENT into Stats.
+//
+// It must NOT set ManifestPath: CommitSegmentManifest sets it from the revision
+// it commits. Replay idempotency is enforced by the caller
+// (commitBumpV3Materialization short-circuits once the persisted schema version
+// has reached the target), and the column-group merge is itself idempotent by
+// FieldID, so this operator is a straight apply.
+func UpdateBumpSchemaVersionMaterializationOperator(segmentID int64, newSchemaVersion int32, newGroups []*datapb.FieldBinlog, statsDelta *datapb.Statistics) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			modPack.err = merr.WrapErrSegmentNotFound(segmentID)
+			return false
+		}
+		before := proto.Clone(segment.SegmentInfo).(*datapb.SegmentInfo)
+
+		if len(newGroups) > 0 {
+			merged, droppedFieldIDs := mergeSegmentColumnGroups(segment.Binlogs,
+				lo.KeyBy(newGroups, func(fb *datapb.FieldBinlog) int64 { return fb.GetFieldID() }))
+			segment.Binlogs = merged
+			if len(droppedFieldIDs) > 0 {
+				// Materialization only ADDS output-field column groups; it must
+				// never empty a pre-existing group. A non-empty drop set means the
+				// result collides with existing data — refuse rather than silently
+				// orphan a group's KV.
+				modPack.err = merr.WrapErrServiceInternalMsg("schema bump materialization dropped column groups %v for segment %d", droppedFieldIDs, segmentID)
+				return false
+			}
+		}
+
+		if newSchemaVersion > segment.GetSchemaVersion() {
+			segment.SchemaVersion = newSchemaVersion
+		}
+
+		if statsDelta != nil {
+			segment.Stats = addStatsDelta(modPack.meta.ctx, segmentID, segment.GetStats(), statsDelta)
+		}
+
+		// Bump DataVersion so querynodes with the segment loaded Reopen and pick
+		// up the new column group. Materialization always changes Binlogs, so this
+		// fires; guard on equality anyway to stay a no-op on an empty apply.
+		if !proto.Equal(before, segment.SegmentInfo) {
+			segment.DataVersion++
+		}
+		return true
+	}
+}
+
 // update startPosition
 func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
