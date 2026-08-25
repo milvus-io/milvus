@@ -33,9 +33,9 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865 // indirect
 	github.com/tikv/client-go/v2 v2.0.8-0.20260610031342-e999c1f9c7c3
-	go.etcd.io/etcd/api/v3 v3.5.23
-	go.etcd.io/etcd/client/v3 v3.5.23
-	go.etcd.io/etcd/server/v3 v3.5.23
+	go.etcd.io/etcd/api/v3 v3.5.33
+	go.etcd.io/etcd/client/v3 v3.5.33
+	go.etcd.io/etcd/server/v3 v3.5.33
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/trace v1.43.0
 	go.uber.org/atomic v1.11.0
@@ -89,12 +89,15 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cloudfoundry/gosigar v1.3.6 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
+	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/gopherjs/gopherjs v1.12.80 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jtolds/gls v4.20.0+incompatible // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/smartystreets/assertions v1.2.0 // indirect
 	github.com/smartystreets/goconvey v1.7.2 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
+	github.com/spf13/cobra v1.8.1 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 )
 
@@ -265,10 +268,10 @@ require (
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	github.com/zilliztech/woodpecker v0.1.38 // indirect
 	go.etcd.io/bbolt v1.3.12 // indirect
-	go.etcd.io/etcd/client/pkg/v3 v3.5.23 // indirect
-	go.etcd.io/etcd/client/v2 v2.305.23 // indirect
-	go.etcd.io/etcd/pkg/v3 v3.5.23 // indirect
-	go.etcd.io/etcd/raft/v3 v3.5.23 // indirect
+	go.etcd.io/etcd/client/pkg/v3 v3.5.33 // indirect
+	go.etcd.io/etcd/client/v2 v2.305.33 // indirect
+	go.etcd.io/etcd/pkg/v3 v3.5.33 // indirect
+	go.etcd.io/etcd/raft/v3 v3.5.33 // indirect
 	go.mongodb.org/mongo-driver v1.13.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.43.0 // indirect
