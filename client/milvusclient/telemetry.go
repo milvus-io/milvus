@@ -1483,7 +1483,6 @@ type ConfigPayload struct {
 	Enabled           *bool    `json:"enabled,omitempty"`
 	HeartbeatInterval *int64   `json:"heartbeat_interval_ms,omitempty"`
 	SamplingRate      *float64 `json:"sampling_rate,omitempty"`
-	TTLSeconds        int64    `json:"ttl_seconds,omitempty"`
 }
 
 // ConfigApplyResult is what a push_config reply carries back, so the sender can tell a
