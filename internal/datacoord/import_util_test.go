@@ -59,6 +59,7 @@ func TestCalculatePreAllocIDNum(t *testing.T) {
 		binlogNum        int64
 		expansion        int64
 		expectedNum      uint32
+		expectedCapped   bool
 		expectedError    error
 		errorContains    string
 		errorNotContains string
@@ -71,11 +72,12 @@ func TestCalculatePreAllocIDNum(t *testing.T) {
 			expectedNum: 11110,
 		},
 		{
-			name:        "expanded IDs exceed single batch",
-			totalRows:   78201209,
-			binlogNum:   11,
-			expansion:   10,
-			expectedNum: math.MaxUint32,
+			name:           "expanded IDs exceed single batch",
+			totalRows:      78201209,
+			binlogNum:      11,
+			expansion:      10,
+			expectedNum:    math.MaxUint32,
+			expectedCapped: true,
 		},
 		{
 			name:             "minimum required IDs exceed single batch",
@@ -113,7 +115,7 @@ func TestCalculatePreAllocIDNum(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			num, err := calculatePreAllocIDNum(test.totalRows, test.binlogNum, test.expansion)
+			num, capped, err := calculatePreAllocIDNum(test.totalRows, test.binlogNum, test.expansion)
 			if test.expectedError != nil {
 				require.ErrorIs(t, err, test.expectedError)
 				assert.ErrorContains(t, err, test.errorContains)
@@ -124,6 +126,7 @@ func TestCalculatePreAllocIDNum(t *testing.T) {
 			}
 			assert.NoError(t, err)
 			assert.Equal(t, test.expectedNum, num)
+			assert.Equal(t, test.expectedCapped, capped)
 		})
 	}
 }
