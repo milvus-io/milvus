@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/registry"
@@ -224,6 +225,21 @@ func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) m
 		// assuming the lengths match, so a rolling upgrade degrades to
 		// "unknown group" instead of panicking on every cache refresh.
 		resourceGroups := leaders.GetResourceGroups()
+
+		// Two ways the array can be short, meaning opposite things, and only
+		// one of them is expected. Empty is the documented downgrade above.
+		// Non-empty but short is a broken parallel-array invariant on the
+		// coordinator side -- which is the premise the whole tag rests on, so
+		// once anything routes on it that state either drops leaders that
+		// exist or admits leaders from another group. Say so rather than let
+		// it look like an ordinary upgrade.
+		if len(resourceGroups) != 0 && len(resourceGroups) != len(leaders.GetNodeIds()) {
+			mlog.RatedWarn(context.TODO(), rate.Limit(1.0/60.0),
+				"shard leader resource groups are not parallel to node ids, tags will read as unknown",
+				mlog.String("channel", leaders.GetChannelName()),
+				mlog.Int("nodeIDs", len(leaders.GetNodeIds())),
+				mlog.Int("resourceGroups", len(resourceGroups)))
+		}
 
 		for j := range qns {
 			resourceGroup := ""

@@ -145,3 +145,29 @@ func TestParseShardLeaderListToleratesMissingResourceGroups(t *testing.T) {
 			"an unknown resource group must read as empty, leaving the rest of the entry intact")
 	})
 }
+
+// TestParseShardLeaderListToleratesShortResourceGroups covers the OTHER way
+// the array can be short: non-empty but not parallel. That is a coordinator
+// bug rather than the documented old-coordinator downgrade, so it is logged
+// loudly -- but it must still not panic and must still leave the rest of
+// each entry intact, because a proxy that crashes on a malformed response
+// takes the whole query path down with it.
+func TestParseShardLeaderListToleratesShortResourceGroups(t *testing.T) {
+	assert.NotPanics(t, func() {
+		shards := parseShardLeaderList2QueryNode([]*querypb.ShardLeadersList{
+			{
+				ChannelName:    "dmc0",
+				NodeIds:        []int64{1, 2},
+				NodeAddrs:      []string{"addr1", "addr2"},
+				Serviceable:    []bool{true, true},
+				ResourceGroups: []string{"rg-a"}, // one short
+			},
+		})
+
+		assert.Equal(t, []NodeInfo{
+			{NodeID: 1, Address: "addr1", Serviceable: true, ResourceGroup: "rg-a"},
+			{NodeID: 2, Address: "addr2", Serviceable: true, ResourceGroup: ""},
+		}, shards["dmc0"],
+			"the entries that do have a tag keep it; the one past the end reads as unknown")
+	})
+}
