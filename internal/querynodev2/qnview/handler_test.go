@@ -1,3 +1,5 @@
+//go:build test && dynamic
+
 package qnview
 
 import (
@@ -6,7 +8,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -432,46 +433,6 @@ func TestQNHandler_ApplyViews_CoordDroppedWhileDropping(t *testing.T) {
 	mgr.invokeReleaseCallback(key)
 	require.Equal(t, 1, rc.count())
 	assert.Equal(t, qviews.QueryViewStateDropped, rc.last().State())
-}
-
-func TestQNHandler_ApplyRetriesAfterShardDetached(t *testing.T) {
-	mgr := newMockSegmentManager()
-	h := NewQNQueryViewHandler(mgr)
-	first := newPreparingQNView(1, 1)
-	firstKey := first.QueryViewKey()
-	h.ApplyViews([]handler.ApplyView{{View: first}})
-	h.ApplyViews([]handler.ApplyView{{View: newDroppedQNView(1, 1)}})
-	require.Equal(t, 1, mgr.releasedCount())
-
-	resolved := make(chan struct{})
-	resume := make(chan struct{})
-	var blockOnce sync.Once
-	var origin func(*QNQueryViewHandler, qviews.ShardID) *qnShardView
-	mock := mockey.Mock((*QNQueryViewHandler).getOrCreateShard).
-		To(func(handler *QNQueryViewHandler, shardID qviews.ShardID) *qnShardView {
-			shard := origin(handler, shardID)
-			blockOnce.Do(func() {
-				close(resolved)
-				<-resume
-			})
-			return shard
-		}).Origin(&origin).Build()
-	t.Cleanup(func() { mock.UnPatch() })
-
-	second := newPreparingQNView(1, 2)
-	applyDone := make(chan struct{})
-	go func() {
-		h.ApplyViews([]handler.ApplyView{{View: second}})
-		close(applyDone)
-	}()
-	<-resolved
-
-	mgr.invokeReleaseCallback(firstKey)
-	close(resume)
-	<-applyDone
-
-	h.ApplyViews([]handler.ApplyView{{View: newDroppedQNView(1, 2)}})
-	assert.Equal(t, 2, mgr.releasedCount(), "replacement view must remain reachable for release")
 }
 
 // ---------------------------------------------------------------------------

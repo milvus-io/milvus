@@ -80,12 +80,8 @@ func (h *QNQueryViewHandler) ApplyViews(views []handler.ApplyView) {
 
 	// Apply each group atomically under the shard lock.
 	for shardID, shardViews := range grouped {
-		for {
-			shard := h.getOrCreateShard(shardID)
-			if shard.ApplyViews(shardViews) {
-				break
-			}
-		}
+		shard := h.getOrCreateShard(shardID)
+		shard.ApplyViews(shardViews)
 	}
 }
 
@@ -97,12 +93,10 @@ func (h *QNQueryViewHandler) getOrCreateShard(shardID qviews.ShardID) *qnShardVi
 		shard = &qnShardView{
 			views:  make(map[qviews.QueryViewVersion]*qnViewEntry),
 			segMgr: h.segMgr,
-			onEmpty: func(emptyShard *qnShardView) {
+			onEmpty: func() {
 				h.mu.Lock()
 				defer h.mu.Unlock()
-				if h.shards[shardID] == emptyShard {
-					delete(h.shards, shardID)
-				}
+				delete(h.shards, shardID)
 			},
 		}
 		h.shards[shardID] = shard

@@ -1,3 +1,5 @@
+//go:build test && dynamic
+
 package syncer
 
 import (
@@ -201,47 +203,6 @@ func TestReliable_QueryNodeLostViaWatch(t *testing.T) {
 
 	assert.True(t, waitForCond(lostCalled.Load, 2*time.Second),
 		"OnQueryNodeLost should be called after node removal")
-}
-
-func TestReliable_NodeChangedNotifierIsNonBlocking(t *testing.T) {
-	node := qviews.NewQueryNode(1)
-	setup := newReliableTestSetup(t, node)
-	defer setup.syncer.Close()
-
-	require.NoError(t, setup.syncer.SyncViews(context.Background(), newTestSyncGroup(
-		newTestSyncView(1, 1, func(qviews.QueryViewAtWorkNode) bool { return false }, nil),
-	)))
-	setup.waitStream(t)
-
-	drainStarted := make(chan struct{})
-	releaseDrain := make(chan struct{})
-	var startedOnce sync.Once
-	setup.client.isNodeAliveFn = func(context.Context, qviews.WorkNode) bool {
-		startedOnce.Do(func() { close(drainStarted) })
-		<-releaseDrain
-		return true
-	}
-
-	notifierReturned := make(chan struct{})
-	go func() {
-		setup.client.notifyNodeChanged()
-		close(notifierReturned)
-	}()
-
-	select {
-	case <-drainStarted:
-	case <-time.After(time.Second):
-		close(releaseDrain)
-		t.Fatal("node-change drain did not start")
-	}
-
-	select {
-	case <-notifierReturned:
-	case <-time.After(50 * testTimeUnit):
-		close(releaseDrain)
-		t.Fatal("node-changed notifier waited for drain work")
-	}
-	close(releaseDrain)
 }
 
 func TestReliable_StreamBreakRecovery(t *testing.T) {
@@ -461,10 +422,7 @@ func TestReliable_NodeChangeDrainCannotInterleaveWithLazyCreation(t *testing.T) 
 		return setup.client.aliveNodes[node.Key()]
 	}
 
-	var lostCalled atomic.Bool
-	sv := newTestSyncView(1, 1, nil, func(qviews.QueryNode) {
-		lostCalled.Store(true)
-	})
+	sv := newTestSyncView(1, 1, nil, nil)
 	syncReturned := make(chan error, 1)
 	go func() {
 		syncReturned <- setup.syncer.SyncViews(context.Background(), newTestSyncGroup(sv))
@@ -485,8 +443,8 @@ func TestReliable_NodeChangeDrainCannotInterleaveWithLazyCreation(t *testing.T) 
 
 	select {
 	case <-notifyReturned:
-	case <-time.After(time.Second):
-		t.Fatal("node-changed notifier should not wait for drain work")
+		t.Fatal("node-change drain should not interleave between IsNodeAlive and syncer insertion")
+	case <-time.After(50 * testTimeUnit):
 	}
 
 	close(releaseFirstAlive)
@@ -496,8 +454,11 @@ func TestReliable_NodeChangeDrainCannotInterleaveWithLazyCreation(t *testing.T) 
 	case <-time.After(time.Second):
 		t.Fatal("SyncViews should finish after IsNodeAlive is released")
 	}
-	assert.True(t, waitForCond(lostCalled.Load, time.Second),
-		"node-change drain should run after lazy syncer creation")
+	select {
+	case <-notifyReturned:
+	case <-time.After(time.Second):
+		t.Fatal("node-change drain should finish after lazy syncer creation leaves the critical section")
+	}
 }
 
 func TestReliable_SyncViewsToNodeEnqueuesBeforeNodeChangeDrain(t *testing.T) {

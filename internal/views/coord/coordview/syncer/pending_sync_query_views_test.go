@@ -1,3 +1,5 @@
+//go:build test && dynamic
+
 package syncer
 
 import (
@@ -9,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 func TestPending_UpsertAndDrainUnsent(t *testing.T) {
@@ -29,24 +30,23 @@ func TestPending_UpsertAndDrainUnsent(t *testing.T) {
 	assert.Nil(t, protos)
 }
 
-func TestPending_UpsertReplaceKeepsLatestUnsent(t *testing.T) {
+func TestPending_UpsertReplace(t *testing.T) {
 	p := newPendingSyncQueryViews()
 
 	var callCount atomic.Int32
 	cb1 := func(qviews.QueryViewAtWorkNode) bool { callCount.Add(1); return true }
 	cb2 := func(qviews.QueryViewAtWorkNode) bool { callCount.Add(10); return true }
 
-	sv1 := newTestSyncViewWithState(1, 1, qviews.QueryViewStatePreparing, cb1, nil)
-	sv2 := newTestSyncViewWithState(1, 1, qviews.QueryViewStateDropped, cb2, nil) // same key as sv1
+	sv1 := newTestSyncView(1, 1, cb1, nil)
+	sv2 := newTestSyncView(1, 1, cb2, nil) // same key as sv1
 
 	p.Upsert(sv1)
 	p.Upsert(sv2)
 
 	// entries should have the latest callback (cb2).
-	// unsent should keep only the latest proto for the key.
+	// unsent should have both protos (duplicate is expected).
 	protos := p.DrainUnsent()
-	require.Len(t, protos, 1)
-	assert.Equal(t, viewpb.QueryViewState_QueryViewStateDropped, protos[0].GetMeta().GetState())
+	assert.Len(t, protos, 2, "both upserts should produce unsent protos")
 
 	// Only one entry should exist in entries map.
 	collected := p.CollectProtos()

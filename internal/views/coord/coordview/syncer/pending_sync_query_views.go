@@ -14,8 +14,8 @@ type pendingSyncQueryViews struct {
 	mu       sync.Mutex
 	entries  map[qviews.QueryViewKey]pendingSyncEntry
 	revision uint64
-	unsent   map[qviews.QueryViewKey]*viewpb.QueryViewOfShard
-	notify   chan struct{} // cap 1, signaled by Upsert
+	unsent   []*viewpb.QueryViewOfShard // protos accumulated by Upsert, drained by sendLoop
+	notify   chan struct{}              // cap 1, signaled by Upsert
 }
 
 type pendingSyncEntry struct {
@@ -26,7 +26,6 @@ type pendingSyncEntry struct {
 func newPendingSyncQueryViews() *pendingSyncQueryViews {
 	return &pendingSyncQueryViews{
 		entries: make(map[qviews.QueryViewKey]pendingSyncEntry),
-		unsent:  make(map[qviews.QueryViewKey]*viewpb.QueryViewOfShard),
 		notify:  make(chan struct{}, 1),
 	}
 }
@@ -42,7 +41,7 @@ func (p *pendingSyncQueryViews) Upsert(sv SyncView) {
 		revision: p.revision,
 		view:     sv,
 	}
-	p.unsent[key] = sv.View.IntoProto()
+	p.unsent = append(p.unsent, sv.View.IntoProto())
 	p.mu.Unlock()
 
 	// Non-blocking notify: if already signaled, sendLoop will drain all.
@@ -61,15 +60,9 @@ func (p *pendingSyncQueryViews) Ready() <-chan struct{} {
 // Used by sendLoop for incremental sends.
 func (p *pendingSyncQueryViews) DrainUnsent() []*viewpb.QueryViewOfShard {
 	p.mu.Lock()
-	protos := make([]*viewpb.QueryViewOfShard, 0, len(p.unsent))
-	for _, view := range p.unsent {
-		protos = append(protos, view)
-	}
-	clear(p.unsent)
+	protos := p.unsent
+	p.unsent = nil
 	p.mu.Unlock()
-	if len(protos) == 0 {
-		return nil
-	}
 	return protos
 }
 
@@ -111,7 +104,7 @@ func (p *pendingSyncQueryViews) Drain(node qviews.WorkNode) {
 		drained = append(drained, sv.view)
 	}
 	p.entries = make(map[qviews.QueryViewKey]pendingSyncEntry)
-	clear(p.unsent)
+	p.unsent = nil
 	p.mu.Unlock()
 
 	qn, ok := node.(qviews.QueryNode)

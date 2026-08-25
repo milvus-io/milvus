@@ -29,23 +29,19 @@ func newPendingReports() *pendingReports {
 // pending state, and signals the send loop.
 func (p *pendingReports) Update(report qviews.QueryViewAtWorkNode) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.stopped {
-		return
-	}
 	p.reports[report.QueryViewKey()] = report
-	p.signalLocked()
+	p.mu.Unlock()
+
+	p.signal()
 }
 
 // SetCloseResponse marks that a close response should be sent during the next drain.
 func (p *pendingReports) SetCloseResponse() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.stopped {
-		return
-	}
 	p.closing = true
-	p.signalLocked()
+	p.mu.Unlock()
+
+	p.signal()
 }
 
 // Ready returns a channel that is signaled when new reports or a close response are available.
@@ -80,9 +76,11 @@ func (p *pendingReports) Close() {
 	}
 }
 
-// signalLocked wakes the send loop without blocking. Caller must hold p.mu.
-func (p *pendingReports) signalLocked() {
-	if p.stopped {
+func (p *pendingReports) signal() {
+	p.mu.Lock()
+	stopped := p.stopped
+	p.mu.Unlock()
+	if stopped {
 		return
 	}
 	// Non-blocking notify: if already signaled, send loop will drain all.

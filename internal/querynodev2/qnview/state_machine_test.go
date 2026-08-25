@@ -295,19 +295,23 @@ func TestSegments_IncrementalProgress(t *testing.T) {
 	assert.Equal(t, qviews.QueryViewStateReady, sm.State())
 }
 
-func TestSegments_PendingReportIsEventSnapshot(t *testing.T) {
+func TestSegments_ReportBuiltLazilyAndCoalescesProgress(t *testing.T) {
 	sm := newTestSM()
-	sm.OnSegmentsReady(map[int64][]int64{10: {1000}})
 
-	// Mutate the tracked progress without producing another state-machine event.
-	// ConsumeReport must return the snapshot built by OnSegmentsReady, not rebuild
-	// it from the later in-memory state.
-	sm.readySegments[10][1001] = struct{}{}
-	sm.readyCount++
+	sm.OnSegmentsReady(map[int64][]int64{10: {1000}})
+	assert.True(t, sm.reportPending)
+
+	// A second event before ConsumeReport should update the tracked state while
+	// keeping a single pending report intent.
+	sm.OnSegmentsReady(map[int64][]int64{10: {1001}, 20: {2000}})
+	assert.True(t, sm.reportPending)
 
 	report := sm.ConsumeReport()
 	require.NotNil(t, report)
-	assert.Equal(t, []int64{1000}, getReadySegments(report, 10))
+	assert.ElementsMatch(t, []int64{1000, 1001}, getReadySegments(report, 10))
+	assert.ElementsMatch(t, []int64{2000}, getReadySegments(report, 20))
+	assert.False(t, sm.reportPending)
+	assertNoReport(t, sm)
 }
 
 func TestSegments_DuplicateIdempotent(t *testing.T) {
