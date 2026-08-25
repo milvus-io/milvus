@@ -1331,9 +1331,9 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
 
 			debt := []int64{556}
-			refreshMeta, mt, job := stage(t, nil, &debt)
+			refreshMeta, mt, _ := stage(t, nil, &debt)
 			require.NoError(t, refreshMeta.UpdateJobProgress(1, 100))
-			job = refreshMeta.GetJob(1)
+			job := refreshMeta.GetJob(1)
 
 			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
