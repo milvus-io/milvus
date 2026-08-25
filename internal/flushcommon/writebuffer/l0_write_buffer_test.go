@@ -188,7 +188,7 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 		metrics.DataNodeFlowGraphBufferDataSize.Reset()
-		insertData, err := PrepareInsert(s.collSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
+		insertData, err := PrepareInsert(s.collSchema, s.pkSchema, nil, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
 		err = wb.BufferData(insertData, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 		s.NoError(err)

@@ -1275,3 +1275,64 @@ func BenchmarkMixCompactor(b *testing.B) {
 
 	s.TearDownTest()
 }
+
+func TestCanMergeSort(t *testing.T) {
+	params := compaction.Params{UseMergeSort: true, MaxSegmentMergeSort: 30}
+	// EnableNamespace is false here, so the merge key is [pk] and IsSorted is
+	// the flag canMergeSort requires. TestCanMergeSortMatchesMergeKey covers
+	// the namespace-enabled half.
+	namespaceDisabledSchema := &schemapb.CollectionSchema{}
+
+	t.Run("disabled by param", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema:         namespaceDisabledSchema,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{SegmentID: 1, IsSorted: true}},
+		}
+		assert.False(t, canMergeSort(plan, compaction.Params{UseMergeSort: false, MaxSegmentMergeSort: 30}))
+	})
+
+	t.Run("unsorted segment rejected", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema:         namespaceDisabledSchema,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{SegmentID: 1}},
+		}
+		assert.False(t, canMergeSort(plan, params))
+	})
+
+	t.Run("single sorted segment allowed", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema:         namespaceDisabledSchema,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{SegmentID: 1, IsSorted: true}},
+		}
+		assert.True(t, canMergeSort(plan, params))
+	})
+
+	t.Run("too many segments rejected", func(t *testing.T) {
+		segs := make([]*datapb.CompactionSegmentBinlogs, params.MaxSegmentMergeSort+1)
+		for i := range segs {
+			segs[i] = &datapb.CompactionSegmentBinlogs{SegmentID: int64(i), IsSorted: true}
+		}
+		plan := &datapb.CompactionPlan{Schema: namespaceDisabledSchema, SegmentBinlogs: segs}
+		assert.False(t, canMergeSort(plan, params))
+	})
+
+	t.Run("exactly max segments allowed", func(t *testing.T) {
+		segs := make([]*datapb.CompactionSegmentBinlogs, params.MaxSegmentMergeSort)
+		for i := range segs {
+			segs[i] = &datapb.CompactionSegmentBinlogs{SegmentID: int64(i), IsSorted: true}
+		}
+		plan := &datapb.CompactionPlan{Schema: namespaceDisabledSchema, SegmentBinlogs: segs}
+		assert.True(t, canMergeSort(plan, params))
+	})
+
+	t.Run("later unsorted segment rejected", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema: namespaceDisabledSchema,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1, IsSorted: true},
+				{SegmentID: 2},
+			},
+		}
+		assert.False(t, canMergeSort(plan, params))
+	})
+}

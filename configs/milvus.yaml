@@ -827,6 +827,13 @@ dataNode:
     readBufferSizeInMB: 16 # The base insert buffer size (in MB) during import. The actual buffer size will be dynamically calculated based on the number of shards.
     readDeleteBufferSizeInMB: 16 # The delete buffer size (in MB) during import.
     memoryLimitPercentage: 10 # The percentage of memory limit for import/pre-import tasks.
+    # Initial backoff interval in seconds for import write retry. Must be a positive integer;
+    # a non-positive or unparseable value falls back to the default.
+    writeRetryInitialInterval: 1
+    # Maximum backoff interval in seconds for import write retry. Must be a positive integer;
+    # a non-positive or unparseable value falls back to the default. Set it to at least twice
+    # writeRetryInitialInterval, otherwise the effective cap is raised to twice the initial interval.
+    writeRetryMaxInterval: 60
   compaction:
     levelZeroBatchMemoryRatio: 0.5 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
     levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.
@@ -1024,7 +1031,7 @@ common:
     threshold:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
-    maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
+    maxWLockConditionalWaitTime: 600 # seconds before logging a wlock conditional wait that is taking long; the wait itself is not bounded by this value
   storage:
     stv2:
       splitSystemColumn:

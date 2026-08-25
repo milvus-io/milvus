@@ -2623,10 +2623,17 @@ func GetFieldByName(schema *schemapb.CollectionSchema, fieldName string) *schema
 	return nil
 }
 
-// GetFieldByID returns the field schema with the given field ID, or nil if not found.
+// GetFieldByID returns the field schema with the given field ID, searching both
+// top-level fields and struct array sub-fields, or nil if not found.
 func GetFieldByID(schema *schemapb.CollectionSchema, fieldID int64) *schemapb.FieldSchema {
-	for _, field := range schema.GetFields() {
-		if field.GetFieldID() == fieldID {
+	predicate := func(field *schemapb.FieldSchema) bool {
+		return field.GetFieldID() == fieldID
+	}
+	if field := lo.FindOrElse(schema.GetFields(), nil, predicate); field != nil {
+		return field
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		if field := lo.FindOrElse(structField.Fields, nil, predicate); field != nil {
 			return field
 		}
 	}

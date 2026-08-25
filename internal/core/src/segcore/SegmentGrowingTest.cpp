@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "common/Types.h"
+#include "common/Geometry.h"
 #include "common/IndexMeta.h"
 #include "knowhere/comp/index_param.h"
 #include "query/Plan.h"
@@ -1465,4 +1466,111 @@ TEST(Growing, MultipleFieldsResourceEstimation) {
                            N * sizeof(float) + N * sizeof(double) +
                            N * sizeof(Timestamp);
     EXPECT_GE(resource.memory_bytes, min_expected);
+}
+
+// Regression for PR #50951 review (round Dc417b11277): the valid_data shape
+// guard used to sit only on the appending set_data_raw() overload, which no
+// production path calls. Every nullable field on the ingest path goes through
+// the offset-addressed overload (SegmentGrowingImpl::Insert), so a producer
+// payload with fewer validity entries than rows made write_from() read past
+// the end of the protobuf RepeatedField and publish adjacent heap bytes as
+// validity bits. GEOMETRY is separately covered by
+// ValidateGeometryInsertDataShape; this pins the guard for every other
+// nullable type.
+
+TEST(Growing, InsertRejectsTruncatedGeometryBeforeWritingSegmentData) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto geometry = schema->AddDebugField("geometry", DataType::GEOMETRY, true);
+    schema->set_primary_field_id(pk);
+
+    constexpr int64_t row_count = 2;
+    std::array<int64_t, row_count> row_ids = {10, 11};
+    std::array<Timestamp, row_count> timestamps = {100, 101};
+    std::array<int64_t, row_count> pks = {1, 2};
+    std::array<bool, row_count> valid = {true, true};
+
+    auto geos_ctx = GEOS_init_r();
+    std::array<std::string, row_count> geometries = {
+        Geometry(geos_ctx, "POINT (1 1)").to_wkb_string(),
+        Geometry(geos_ctx, "POINT (2 2)").to_wkb_string()};
+    GEOS_finish_r(geos_ctx);
+
+    auto make_record = [&]() {
+        auto record = std::make_unique<InsertRecordProto>();
+        record->set_num_rows(row_count);
+        record->mutable_fields_data()->AddAllocated(
+            CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk])
+                .release());
+        record->mutable_fields_data()->AddAllocated(
+            CreateDataArrayFrom(
+                geometries.data(), valid.data(), row_count, (*schema)[geometry])
+                .release());
+        return record;
+    };
+
+    auto expect_rejected_without_ack = [&](auto mutate) {
+        auto segment = CreateGrowingSegment(schema, empty_index_meta);
+        auto record = make_record();
+        mutate(record->mutable_fields_data(1));
+        auto offset = segment->PreInsert(row_count);
+
+        try {
+            segment->Insert(offset,
+                            row_count,
+                            row_ids.data(),
+                            timestamps.data(),
+                            record.get());
+            FAIL() << "expected malformed geometry insert to be rejected";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
+        }
+        EXPECT_EQ(segment->get_row_count(), 0);
+    };
+
+    expect_rejected_without_ack([](DataArray* field_data) {
+        field_data->mutable_valid_data()->RemoveLast();
+    });
+    expect_rejected_without_ack([](DataArray* field_data) {
+        field_data->mutable_scalars()
+            ->mutable_geometry_data()
+            ->mutable_data()
+            ->RemoveLast();
+    });
+}
+
+TEST(Growing, InsertRejectsShortValidDataForNullableVarchar) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto text = schema->AddDebugField("text", DataType::VARCHAR, true);
+    schema->set_primary_field_id(pk);
+
+    constexpr int64_t row_count = 2;
+    std::array<int64_t, row_count> row_ids = {10, 11};
+    std::array<Timestamp, row_count> timestamps = {100, 101};
+    std::array<int64_t, row_count> pks = {1, 2};
+    std::array<bool, row_count> valid = {true, true};
+    std::array<std::string, row_count> texts = {"a", "b"};
+
+    auto record = std::make_unique<InsertRecordProto>();
+    record->set_num_rows(row_count);
+    record->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk])
+            .release());
+    record->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            texts.data(), valid.data(), row_count, (*schema)[text])
+            .release());
+    // One validity entry short of the row count.
+    record->mutable_fields_data(1)->mutable_valid_data()->RemoveLast();
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = segment->PreInsert(row_count);
+    try {
+        segment->Insert(
+            offset, row_count, row_ids.data(), timestamps.data(), record.get());
+        FAIL() << "expected short valid_data to be rejected";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
+    }
 }

@@ -458,9 +458,7 @@ TEST(GISCoarseRefineExprTest, EquivalenceFusionWithGeometryCache) {
     // would silently fall back to the WKB path and this test would not cover
     // the cache branch it is meant to lock down.
     auto geo_fid = schema->get_field_id(FieldName("geo"));
-    ASSERT_NE(milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
-                  seg->get_segment_id(), geo_fid),
-              nullptr);
+    ASSERT_NE(seg->GetGeometryCache(geo_fid), nullptr);
 
     AssertFusionEquivalence(schema, handle, seg.get(), N);
 }

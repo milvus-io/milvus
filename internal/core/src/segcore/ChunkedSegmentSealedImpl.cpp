@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <ctime>
 #include <memory>
+#include <new>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -1627,12 +1628,7 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
 ChunkedSegmentSealedImpl::~ChunkedSegmentSealedImpl() {
     // Clean up geometry cache for all fields in this segment
     auto& cache_manager = milvus::exec::SimpleGeometryCacheManager::Instance();
-    cache_manager.RemoveSegmentCaches(ctx_, get_segment_id());
-
-    if (ctx_) {
-        GEOS_finish_r(ctx_);
-        ctx_ = nullptr;
-    }
+    cache_manager.RemoveSegmentCaches(segment_instance_uid(), get_segment_id());
 
     if (mmap_descriptor_ != nullptr) {
         auto mm = storage::MmapManager::GetInstance().GetMmapChunkManager();
@@ -3101,27 +3097,33 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
     FieldId field_id, const std::shared_ptr<ChunkedColumnInterface>& column) {
     try {
         // Get geometry cache for this segment+field
-        auto& geometry_cache =
+        auto geometry_cache =
             milvus::exec::SimpleGeometryCacheManager::Instance()
-                .GetOrCreateCache(get_segment_id(), field_id);
+                .GetOrCreateCache(
+                    segment_instance_uid(), get_segment_id(), field_id);
 
-        // Iterate through all chunks and collect WKB data
+        // Iterate through all chunks and collect WKB data. Rows are written
+        // at their absolute segment offsets (see
+        // SimpleGeometryCache::AppendDataAt), so a retried load overwrites
+        // in place instead of re-appending after a partial prefix.
         auto num_chunks = column->num_chunks();
+        size_t absolute_offset = 0;
         for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
             // Get all string views from this chunk
             auto pw = column->StringViews(nullptr, chunk_id);
             auto [string_views, valid_data] = pw.get();
 
             // Add each string view to the geometry cache
-            for (size_t i = 0; i < string_views.size(); ++i) {
+            for (size_t i = 0; i < string_views.size();
+                 ++i, ++absolute_offset) {
                 if (!valid_data || valid_data[i]) {
                     // Valid geometry data
                     const auto& wkb_data = string_views[i];
-                    geometry_cache.AppendData(
-                        ctx_, wkb_data.data(), wkb_data.size());
+                    geometry_cache->AppendDataAt(
+                        absolute_offset, wkb_data.data(), wkb_data.size());
                 } else {
                     // Null/invalid geometry
-                    geometry_cache.AppendData(ctx_, nullptr, 0);
+                    geometry_cache->AppendDataAt(absolute_offset, nullptr, 0);
                 }
             }
         }
@@ -3131,8 +3133,23 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
             "{} geometries",
             get_segment_id(),
             field_id.get(),
-            geometry_cache.Size());
+            geometry_cache->Size());
 
+    } catch (const SegcoreError&) {
+        // Already typed (e.g. a retriable MemAllocateFailed from a transient
+        // GEOS allocation failure) -- rethrow as-is; re-wrapping would collapse
+        // the code into a non-retriable UnexpectedError.
+        throw;
+    } catch (const std::bad_alloc&) {
+        // Container/std allocation OOM (e.g. the cache's geometries_.resize)
+        // is the same transient resource failure as a GEOS allocation failure
+        // and must stay retriable -- the generic handler below would collapse
+        // it into a non-retriable UnexpectedError.
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "out of memory building geometry cache for segment {} field "
+                  "{}",
+                  get_segment_id(),
+                  field_id.get());
     } catch (const std::exception& e) {
         ThrowInfo(UnexpectedError,
                   "Failed to load geometry cache for segment {} field {}: {}",

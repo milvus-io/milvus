@@ -17,6 +17,7 @@
 #include "segcore/plan_c.h"
 #include "segcore/segment_c.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/c_api_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 #include "test_utils/cachinglayer_test_utils.h"
@@ -692,6 +693,104 @@ TEST(GroupBY, GrowingRawData) {
             idx++;
         }
     }
+}
+
+TEST(GroupBY, GrowingRawDataDeleteReinsertWithEmptyLeadingChunk) {
+    constexpr int64_t chunk_rows = 2;
+    constexpr int64_t dim = 4;
+    constexpr int64_t topk = 2;
+    constexpr int64_t group_size = 2;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto group_fid = schema->AddDebugField("group", DataType::BOOL);
+    auto vec_fid = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_fid);
+
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    config.set_chunk_rows(chunk_rows);
+    config.set_enable_interim_segment_index(false);
+    auto segment = CreateGrowingSegment(schema, nullptr, 1, config);
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+
+    auto insert = [&](GeneratedData& data) {
+        const auto rows = data.raw_->num_rows();
+        const auto offset = growing->PreInsert(rows);
+        growing->Insert(offset,
+                        rows,
+                        data.row_ids_.data(),
+                        data.timestamps_.data(),
+                        data.raw_);
+        return offset;
+    };
+
+    // The first physical chunk contains the versions that will be deleted.
+    auto old_data = DataGen(schema, chunk_rows, 42, 0, 1, 10, 1, false, false);
+    ASSERT_EQ(insert(old_data), 0);
+
+    auto old_pks = old_data.get_col<int64_t>(pk_fid);
+    auto delete_pks = GenPKs(old_pks.begin(), old_pks.end());
+    auto delete_tss = GenTss(chunk_rows, 2);
+    ASSERT_TRUE(
+        growing->Delete(chunk_rows, delete_pks.get(), delete_tss.data()).ok());
+
+    // The two following chunks contain live replacements and additional rows.
+    auto live_data =
+        DataGen(schema, 2 * chunk_rows, 42, 4, 1, 10, 1, false, false);
+    for (auto& row_id : live_data.row_ids_) {
+        row_id += chunk_rows;
+    }
+    ASSERT_EQ(insert(live_data), chunk_rows);
+
+    const auto* vec_data = growing->get_insert_record().get_data_base(vec_fid);
+    ASSERT_NE(vec_data, nullptr);
+    ASSERT_EQ(vec_data->get_size_per_chunk(), chunk_rows);
+    ASSERT_EQ(vec_data->num_chunk(), 3);
+
+    BitsetType delete_mask(3 * chunk_rows, false);
+    auto delete_view = delete_mask.view();
+    growing->mask_with_delete(delete_view, 3 * chunk_rows, MAX_TIMESTAMP);
+    ASSERT_EQ(delete_mask.count(), chunk_rows);
+    for (int64_t i = 0; i < 3 * chunk_rows; ++i) {
+        EXPECT_EQ(delete_mask[i], i < chunk_rows);
+    }
+
+    ScopedSchemaHandle handle(*schema);
+    auto plan_blob = handle.ParseGroupBySearch("",
+                                               "vec",
+                                               topk,
+                                               "L2",
+                                               "{}",
+                                               group_fid.get(),
+                                               group_size,
+                                               "",
+                                               proto::schema::DataType::None,
+                                               true);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_blob.data(), plan_blob.size());
+
+    auto live_vectors = live_data.get_col<float>(vec_fid);
+    auto raw_ph = CreatePlaceholderGroupFromBlob(1, dim, live_vectors.data());
+    auto ph = ParsePlaceholderGroup(plan.get(), raw_ph.SerializeAsString());
+    auto result = growing->Search(plan.get(), ph.get(), MAX_TIMESTAMP);
+
+    CheckGroupBySearchResult(*result, topk, 1, true);
+    ASSERT_EQ(result->seg_offsets_.size(), 2 * topk);
+    auto offsets = result->seg_offsets_;
+    std::sort(offsets.begin(), offsets.end());
+    EXPECT_EQ(offsets, (std::vector<int64_t>{2, 3, 4, 5}));
+
+    std::unordered_map<bool, int> group_counts;
+    for (const auto& value : result->group_by_values_.value()) {
+        ASSERT_TRUE(value.has_value());
+        ASSERT_TRUE(std::holds_alternative<bool>(value.value()));
+        ++group_counts[std::get<bool>(value.value())];
+    }
+    EXPECT_EQ(group_counts[false], group_size);
+    EXPECT_EQ(group_counts[true], group_size);
 }
 
 TEST(GroupBY, GrowingIndex) {

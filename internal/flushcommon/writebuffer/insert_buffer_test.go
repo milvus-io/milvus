@@ -134,7 +134,7 @@ func (s *InsertBufferSuite) TestBuffer() {
 	insertBuffer, err := NewInsertBuffer(s.collSchema)
 	s.Require().NoError(err)
 
-	groups, err := PrepareInsert(s.collSchema, s.pkField, []*msgstream.InsertMsg{insertMsg})
+	groups, err := PrepareInsert(s.collSchema, s.pkField, nil, []*msgstream.InsertMsg{insertMsg})
 	s.Require().NoError(err)
 	s.Require().Len(groups, 1)
 
@@ -155,7 +155,7 @@ func (s *InsertBufferSuite) TestYield() {
 	s.Require().NoError(err)
 
 	pks, insertMsg := s.composeInsertMsg(10, 128)
-	groups, err := PrepareInsert(s.collSchema, s.pkField, []*msgstream.InsertMsg{insertMsg})
+	groups, err := PrepareInsert(s.collSchema, s.pkField, nil, []*msgstream.InsertMsg{insertMsg})
 	s.Require().NoError(err)
 	s.Require().Len(groups, 1)
 

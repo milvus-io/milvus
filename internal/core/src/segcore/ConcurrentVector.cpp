@@ -151,6 +151,10 @@ VectorBase::set_data_raw(ssize_t element_offset,
         case DataType::GEOMETRY: {
             // get the geometry array of a column from proto message
             auto& geometry_data = FIELD_DATA(data, geometry);
+            AssertInfo(geometry_data.size() == element_count,
+                       "geometry payload size {} must match element count {}",
+                       geometry_data.size(),
+                       element_count);
             std::vector<std::string> data_raw{};
             data_raw.reserve(geometry_data.size());
             for (auto& geometry_bytes : geometry_data) {

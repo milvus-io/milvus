@@ -26,6 +26,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "common/ArrayOffsets.h"
 #include "common/EasyAssert.h"
+#include "common/Geometry.h"
 #include "common/Json.h"
 #include "common/OpContext.h"
 #include "common/Schema.h"
@@ -50,6 +51,10 @@
 #include "index/NgramInvertedIndex.h"
 #include "index/json_stats/JsonKeyStats.h"
 
+namespace milvus::exec {
+class SimpleGeometryCache;
+}
+
 namespace milvus::segcore {
 
 using namespace milvus::cachinglayer;
@@ -59,6 +64,14 @@ struct SegmentStats {
     // including the insert data and delete data.
     std::atomic<size_t> mem_size{};
 };
+
+// Monotonic source for SegmentInternalInterface::segment_instance_uid().
+// Starts at 1 so 0 can never collide with a live instance.
+inline uint64_t
+NextSegmentInstanceUid() {
+    static std::atomic<uint64_t> counter{0};
+    return counter.fetch_add(1, std::memory_order_relaxed) + 1;
+}
 
 // common interface of SegmentSealed and SegmentGrowing used by C API
 class SegmentInterface {
@@ -262,6 +275,28 @@ class SegmentInterface {
 // only for implementation
 class SegmentInternalInterface : public SegmentInterface {
  public:
+    // Process-unique id for THIS segment OBJECT, distinct from
+    // get_segment_id() which identifies the logical segment.
+    //
+    // Two live objects can share a logical segment id: a growing and a sealed
+    // twin during handoff, and -- because segmentManager::Put installs the new
+    // instance and releases the replaced one asynchronously
+    // (querynodev2/segments/manager.go:409-441) -- two sealed instances of
+    // different versions. Anything whose lifetime is tied to the object rather
+    // than to the logical segment (the geometry cache) must key on this, or
+    // the departing instance's teardown will take the incoming instance's
+    // state with it.
+    uint64_t
+    segment_instance_uid() const {
+        return segment_instance_uid_;
+    }
+
+    // Growing segments use the process-level cache manager. Sealed segments
+    // override this to return the cache from their immutable published runtime
+    // snapshot, so a column replacement and its cache become visible together.
+    virtual std::shared_ptr<milvus::exec::SimpleGeometryCache>
+    GetGeometryCache(FieldId field_id) const;
+
     virtual void
     prefetch_chunks(milvus::OpContext* op_ctx,
                     FieldId field_id,
@@ -668,11 +703,6 @@ class SegmentInternalInterface : public SegmentInterface {
                     bool upper_inclusive,
                     BitsetTypeView& bitset) const = 0;
 
-    virtual GEOSContextHandle_t
-    get_ctx() const {
-        return ctx_;
-    };
-
  protected:
     // mutex protecting rw options on schema_
     std::shared_mutex sch_mutex_;
@@ -699,7 +729,8 @@ class SegmentInternalInterface : public SegmentInterface {
         std::unordered_map<FieldId, index::CacheJsonKeyStatsPtr>>
         json_stats_;
 
-    GEOSContextHandle_t ctx_ = GEOS_init_r();
+    // Assigned once per constructed object; never reused within a process.
+    const uint64_t segment_instance_uid_ = NextSegmentInstanceUid();
 };
 
 }  // namespace milvus::segcore

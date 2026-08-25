@@ -168,12 +168,10 @@ type shardDelegator struct {
 	growingSegmentLock sync.RWMutex
 	partitionStatsMut  sync.RWMutex
 
-	// outputFieldId -> functionRunner map for search function field
-	functionRunners map[UniqueID]function.FunctionRunner
-	isBM25Field     map[UniqueID]bool
-
-	// analyzerFieldID -> analyzerRunner map for run analyzer.
-	analyzerRunners map[UniqueID]function.Analyzer
+	// 2.6 does not update the delegator's function lifecycle after schema changes,
+	// so execution eligibility stays fixed to the schema used during creation.
+	isBM25Field    map[UniqueID]bool
+	analyzerFields map[UniqueID]bool
 
 	// current forward policy
 	l0ForwardPolicy string
@@ -232,6 +230,40 @@ func (sd *shardDelegator) Serviceable() bool {
 
 func (sd *shardDelegator) Stopped() bool {
 	return sd.NotStopped(sd.lifetime.GetState()) != nil
+}
+
+func (sd *shardDelegator) prepareSearchFunction(ctx context.Context, req *internalpb.SearchRequest) (float64, bool, error) {
+	if !sd.isBM25Field[req.GetFieldId()] {
+		return 0, false, nil
+	}
+
+	var avgdl float64
+	isBM25 := false
+	ok, err := function.GetManager().RunWithRunner(ctx, sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), req.GetFieldId(), func(runner function.FunctionRunner) error {
+		functionType := runner.GetSchema().GetType()
+		switch functionType {
+		case schemapb.FunctionType_BM25:
+			isBM25 = true
+			if req.GetMetricType() != metric.BM25 && req.GetMetricType() != metric.EMPTY {
+				return merr.WrapErrParameterInvalid("BM25", req.GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
+			}
+			var runErr error
+			avgdl, runErr = sd.buildBM25IDF(req, runner)
+			return runErr
+		default:
+			return merr.WrapErrServiceInternalMsg("unsupported managed function type %s", functionType.String())
+		}
+	})
+	if err != nil {
+		return 0, false, err
+	}
+	if !ok {
+		// isBM25Field and the managed runner snapshot are derived from the
+		// same creation-time schema on 2.6. A missing runner here violates
+		// that internal invariant and must not silently bypass IDF weighting.
+		return 0, false, merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
+	}
+	return avgdl, isBM25 && avgdl <= 0, nil
 }
 
 // Start sets delegator to working state.
@@ -390,22 +422,13 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		)
 	}
 
-	searchAgainstBM25Field := sd.isBM25Field[req.GetReq().GetFieldId()]
-
-	if searchAgainstBM25Field {
-		if req.GetReq().GetMetricType() != metric.BM25 && req.GetReq().GetMetricType() != metric.EMPTY {
-			return nil, merr.WrapErrParameterInvalid("BM25", req.GetReq().GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
-		}
-		// build idf for bm25 search
-		avgdl, err := sd.buildBM25IDF(req.GetReq())
-		if err != nil {
-			return nil, err
-		}
-
-		if avgdl <= 0 {
-			log.Warn("search bm25 from empty data, skip search", zap.String("channel", sd.vchannelName), zap.Float64("avgdl", avgdl))
-			return []*internalpb.SearchResults{}, nil
-		}
+	avgdl, skipSearch, err := sd.prepareSearchFunction(ctx, req.GetReq())
+	if err != nil {
+		return nil, err
+	}
+	if skipSearch {
+		log.Warn("search bm25 from empty data, skip search", zap.String("channel", sd.vchannelName), zap.Float64("avgdl", avgdl))
+		return []*internalpb.SearchResults{}, nil
 	}
 
 	// get final sealedNum after possible segment prune
@@ -415,7 +438,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		zap.Int("growingNum", len(growing)),
 	)
 
-	req, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, sealedNum)
+	req, err = optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, sealedNum)
 	if err != nil {
 		log.Warn("failed to optimize search params", zap.Error(err))
 		return nil, err
@@ -1272,11 +1295,7 @@ func (sd *shardDelegator) Close() {
 		paramtable.Get().Unwatch(paramtable.Get().QueryNodeCfg.DelegatorPostLoadConcurrencyFactor.Key, sd.postLoadConfigHandler)
 	}
 
-	if sd.functionRunners != nil {
-		for _, function := range sd.functionRunners {
-			function.Close()
-		}
-	}
+	function.GetManager().Release(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName))
 
 	// clean up l0 segment in delete buffer
 	start := time.Now()
@@ -1285,6 +1304,10 @@ func (sd *shardDelegator) Close() {
 
 	metrics.QueryNodeDeleteBufferSize.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)
 	metrics.QueryNodeDeleteBufferRowNum.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)
+}
+
+func delegatorFunctionRunnerKey(vchannel string) string {
+	return "DELEGATOR-" + vchannel
 }
 
 // As partition stats is an optimization for search/query which is not mandatory for milvus instance,
@@ -1351,6 +1374,10 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	if collection == nil {
 		return nil, merr.WrapErrCollectionNotFound(collectionID, "not in delegator manager")
 	}
+	schema := collection.Schema()
+	if err := function.GetManager().Alloc(collectionID, delegatorFunctionRunnerKey(channel), schema); err != nil {
+		return nil, err
+	}
 
 	sizePerBlock := paramtable.Get().QueryNodeCfg.DeleteBufferBlockSize.GetAsInt64()
 	log.Info("Init delete cache with list delete buffer", zap.Int64("sizePerBlock", sizePerBlock), zap.Time("startTime", tsoutil.PhysicalTime(startTs)))
@@ -1386,9 +1413,8 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		chunkManager:               chunkManager,
 		partitionStats:             make(map[UniqueID]*storage.PartitionStatsSnapshot),
 		excludedSegments:           excludedSegments,
-		functionRunners:            make(map[int64]function.FunctionRunner),
-		analyzerRunners:            make(map[UniqueID]function.Analyzer),
-		isBM25Field:                make(map[int64]bool),
+		isBM25Field:                make(map[UniqueID]bool),
+		analyzerFields:             make(map[UniqueID]bool),
 		l0ForwardPolicy:            policy,
 		postLoadSem:                postLoadSem,
 		postLoadConfigHandler:      postLoadConfigHandler,
@@ -1399,34 +1425,25 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		opt(sd)
 	}
 
-	for _, tf := range collection.Schema().GetFunctions() {
-		if tf.GetType() == schemapb.FunctionType_BM25 {
-			functionRunner, err := function.NewFunctionRunner(collection.Schema(), tf)
-			if err != nil {
-				return nil, err
-			}
-			sd.functionRunners[tf.OutputFieldIds[0]] = functionRunner
-			// bm25 input field could use same runner between function and analyzer.
-			sd.analyzerRunners[tf.InputFieldIds[0]] = functionRunner.(function.Analyzer)
-			if tf.GetType() == schemapb.FunctionType_BM25 {
-				sd.isBM25Field[tf.OutputFieldIds[0]] = true
-			}
+	for _, functionSchema := range schema.GetFunctions() {
+		if functionSchema.GetType() != schemapb.FunctionType_BM25 {
+			continue
+		}
+		for _, outputFieldID := range functionSchema.GetOutputFieldIds() {
+			sd.isBM25Field[outputFieldID] = true
+		}
+		for _, inputFieldID := range functionSchema.GetInputFieldIds() {
+			sd.analyzerFields[inputFieldID] = true
 		}
 	}
-
-	for _, field := range collection.Schema().GetFields() {
-		helper := typeutil.CreateFieldSchemaHelper(field)
-		if helper.EnableAnalyzer() && sd.analyzerRunners[field.GetFieldID()] == nil {
-			analyzerRunner, err := function.NewAnalyzerRunner(field)
-			if err != nil {
-				return nil, err
-			}
-			sd.analyzerRunners[field.GetFieldID()] = analyzerRunner
+	for _, field := range schema.GetFields() {
+		if typeutil.CreateFieldSchemaHelper(field).EnableAnalyzer() {
+			sd.analyzerFields[field.GetFieldID()] = true
 		}
 	}
 
 	if len(sd.isBM25Field) > 0 {
-		sd.idfOracle = NewIDFOracle(sd.vchannelName, collection.Schema().GetFunctions())
+		sd.idfOracle = NewIDFOracle(sd.vchannelName, schema.GetFunctions())
 		sd.distribution.SetIDFOracle(sd.idfOracle)
 		sd.idfOracle.Start()
 	}
@@ -1437,24 +1454,29 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	return sd, nil
 }
 
-func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
-	analyzer, ok := sd.analyzerRunners[req.GetFieldId()]
-	if !ok {
-		return nil, merr.WrapErrParameterInvalidMsg("analyzer runner for field %d not exist, now only support run analyzer by field if field was bm25 input field", req.GetFieldId())
+func (sd *shardDelegator) runWithAnalyzer(ctx context.Context, fieldID int64, run func(function.Analyzer) error) (bool, error) {
+	if !sd.analyzerFields[fieldID] {
+		return false, nil
 	}
+	return function.GetManager().RunWithAnalyzer(ctx, sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), fieldID, run)
+}
 
+func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
 	var result [][]*milvuspb.AnalyzerToken
+	var analyzeErr error
 	texts := lo.Map(req.GetPlaceholder(), func(bytes []byte, _ int) string {
 		return string(bytes)
 	})
 
-	var err error
-	if len(analyzer.GetInputFields()) == 1 {
-		result, err = analyzer.BatchAnalyze(req.WithDetail, req.WithHash, texts)
-	} else {
+	ok, err := sd.runWithAnalyzer(ctx, req.GetFieldId(), func(analyzer function.Analyzer) error {
+		if len(analyzer.GetInputFields()) == 1 {
+			result, analyzeErr = analyzer.BatchAnalyze(req.WithDetail, req.WithHash, texts)
+			return analyzeErr
+		}
+
 		analyzerNames := req.GetAnalyzerNames()
 		if len(analyzerNames) == 0 {
-			return nil, merr.WrapErrParameterMissingMsg("analyzer names must be set for multi analyzer")
+			return merr.WrapErrParameterMissingMsg("analyzer names must be set for multi analyzer")
 		}
 
 		if len(analyzerNames) == 1 && len(texts) > 1 {
@@ -1463,11 +1485,14 @@ func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnaly
 				analyzerNames[i] = req.AnalyzerNames[0]
 			}
 		}
-		result, err = analyzer.BatchAnalyze(req.WithDetail, req.WithHash, texts, analyzerNames)
-	}
-
+		result, analyzeErr = analyzer.BatchAnalyze(req.WithDetail, req.WithHash, texts, analyzerNames)
+		return analyzeErr
+	})
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, merr.WrapErrParameterInvalidMsg("analyzer runner for field %d not exist, now only support run analyzer by field if field was bm25 input field", req.GetFieldId())
 	}
 
 	return lo.Map(result, func(tokens []*milvuspb.AnalyzerToken, _ int) *milvuspb.AnalyzerResult {
