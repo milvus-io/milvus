@@ -104,6 +104,9 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
       inverted_index_single_segment_(inverted_index_single_segment),
       user_specified_doc_id_(user_specified_doc_id),
       is_nested_index_(is_nested_index) {
+    validity_mode_ = !is_nested_index_ && schema_.nullable()
+                         ? ValidityMode::NullOffsets
+                         : ValidityMode::ImplicitAllValid;
     this->file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
     // push init wrapper to load process
@@ -132,6 +135,41 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::finish() {
     wrapper_->finish();
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::LoadNullOffsets(const uint8_t* data, size_t size) {
+    const auto offset_count = size / sizeof(size_t);
+    null_offset_.resize(offset_count);
+    milvus::fastmem::FastMemcpy(
+        null_offset_.data(), data, offset_count * sizeof(size_t));
+    validity_mode_ = ValidityMode::NullOffsets;
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::FinalizeLoadedValidity() {
+    AssertInfo(!is_growing_,
+               "loaded inverted index must not be a growing index");
+
+    if (!schema_.nullable() || is_nested_index_) {
+        validity_mode_ = ValidityMode::ImplicitAllValid;
+        std::vector<size_t>().swap(null_offset_);
+        return;
+    }
+
+    const auto count = static_cast<size_t>(Count());
+    valid_bitset_ = TargetBitmap(count, true);
+    for (auto offset : null_offset_) {
+        AssertInfo(offset < count,
+                   "inverted index null offset {} out of range {}",
+                   offset,
+                   count);
+        valid_bitset_.reset(offset);
+    }
+    validity_mode_ = ValidityMode::ValidBitmap;
+    std::vector<size_t>().swap(null_offset_);
 }
 
 template <typename T>
@@ -244,6 +282,7 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         prefix.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
+    FinalizeLoadedValidity();
 
     if (!load_in_mmap) {
         // the index is loaded in ram, so we can remove files in advance
@@ -257,8 +296,7 @@ void
 InvertedIndexTantivy<T>::LoadIndexMetas(
     const std::vector<std::string>& index_files, const Config& config) {
     auto fill_null_offsets = [&](const uint8_t* data, int64_t size) {
-        null_offset_.resize((size_t)size / sizeof(size_t));
-        milvus::fastmem::FastMemcpy(null_offset_.data(), data, (size_t)size);
+        LoadNullOffsets(data, static_cast<size_t>(size));
     };
     auto null_offset_file_itr = std::find_if(
         index_files.begin(), index_files.end(), [&](const std::string& file) {
@@ -349,15 +387,31 @@ const TargetBitmap
 InvertedIndexTantivy<T>::IsNull() {
     tracer::AutoSpan span("InvertedIndexTantivy::IsNull",
                           tracer::GetRootSpan());
-    int64_t count = Count();
-    TargetBitmap bitset(count);
-
-    // For nested index, null rows don't have elements in the index,
-    // so all elements in the index are valid (none are null).
-    // null_offset_ stores row offsets, not element offsets.
-    if (is_nested_index_) {
-        return bitset;  // All false - no element is null
+    const auto count = static_cast<size_t>(Count());
+    if (validity_mode_ == ValidityMode::ValidBitmap) {
+        AssertInfo(null_offset_.empty(),
+                   "bitmap-backed inverted index must not retain null "
+                   "offsets");
+        AssertInfo(valid_bitset_.size() == count,
+                   "inverted index validity bitmap size mismatch, expect {}, "
+                   "got {}",
+                   count,
+                   valid_bitset_.size());
+        auto bitset = valid_bitset_.clone();
+        bitset.flip();
+        return bitset;
     }
+
+    TargetBitmap bitset(count, false);
+    if (validity_mode_ == ValidityMode::ImplicitAllValid) {
+        return bitset;
+    }
+
+    AssertInfo(validity_mode_ == ValidityMode::NullOffsets,
+               "unexpected inverted index validity mode {}",
+               static_cast<int>(validity_mode_));
+    AssertInfo(!is_nested_index_,
+               "nested inverted index must use implicit validity");
 
     auto fill_bitset = [this, count, &bitset]() {
         auto end =
@@ -382,15 +436,29 @@ TargetBitmap
 InvertedIndexTantivy<T>::IsNotNull() {
     tracer::AutoSpan span("InvertedIndexTantivy::IsNotNull",
                           tracer::GetRootSpan());
-    int64_t count = Count();
-    TargetBitmap bitset(count, true);
-
-    // For nested index, null rows don't have elements in the index,
-    // so all elements in the index are valid.
-    // null_offset_ stores row offsets, not element offsets.
-    if (is_nested_index_) {
-        return bitset;  // All true - all elements are valid
+    const auto count = static_cast<size_t>(Count());
+    if (validity_mode_ == ValidityMode::ValidBitmap) {
+        AssertInfo(null_offset_.empty(),
+                   "bitmap-backed inverted index must not retain null "
+                   "offsets");
+        AssertInfo(valid_bitset_.size() == count,
+                   "inverted index validity bitmap size mismatch, expect {}, "
+                   "got {}",
+                   count,
+                   valid_bitset_.size());
+        return valid_bitset_.clone();
     }
+
+    TargetBitmap bitset(count, true);
+    if (validity_mode_ == ValidityMode::ImplicitAllValid) {
+        return bitset;
+    }
+
+    AssertInfo(validity_mode_ == ValidityMode::NullOffsets,
+               "unexpected inverted index validity mode {}",
+               static_cast<int>(validity_mode_));
+    AssertInfo(!is_nested_index_,
+               "nested inverted index must use implicit validity");
 
     auto fill_bitset = [this, count, &bitset]() {
         auto end =
@@ -439,13 +507,36 @@ template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
     tracer::AutoSpan span("InvertedIndexTantivy::NotIn", tracer::GetRootSpan());
-    int64_t count = Count();
+    const auto count = static_cast<size_t>(Count());
     TargetBitmap bitset(count);
     wrapper_->terms_query(values, n, &bitset);
     // The expression is "not" in, so we flip the bit.
     bitset.flip();
 
-    auto fill_bitset = [this, count, &bitset]() {
+    if (validity_mode_ == ValidityMode::ImplicitAllValid) {
+        return bitset;
+    }
+
+    if (validity_mode_ == ValidityMode::ValidBitmap) {
+        AssertInfo(null_offset_.empty(),
+                   "bitmap-backed inverted index must not retain null "
+                   "offsets");
+        AssertInfo(valid_bitset_.size() == count,
+                   "inverted index validity bitmap size mismatch, expect {}, "
+                   "got {}",
+                   count,
+                   valid_bitset_.size());
+        bitset &= valid_bitset_;
+        return bitset;
+    }
+
+    AssertInfo(validity_mode_ == ValidityMode::NullOffsets,
+               "unexpected inverted index validity mode {}",
+               static_cast<int>(validity_mode_));
+    AssertInfo(!is_nested_index_,
+               "nested inverted index must use implicit validity");
+
+    auto exclude_nulls = [this, count, &bitset]() {
         auto end =
             std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
         for (auto iter = null_offset_.begin(); iter != end; ++iter) {
@@ -455,9 +546,9 @@ InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
 
     if (is_growing_) {
         std::shared_lock<folly::SharedMutex> lock(mutex_);
-        fill_bitset();
+        exclude_nulls();
     } else {
-        fill_bitset();
+        exclude_nulls();
     }
 
     return bitset;
@@ -645,6 +736,9 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::BuildWithFieldData(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+    validity_mode_ = !is_nested_index_ && schema_.nullable()
+                         ? ValidityMode::NullOffsets
+                         : ValidityMode::ImplicitAllValid;
     if (schema_.nullable()) {
         int64_t total = 0;
         for (const auto& data : field_datas) {
@@ -940,16 +1034,14 @@ InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
 
     if (has_null) {
         auto null_entry = reader.ReadEntry(INDEX_NULL_OFFSET_FILE_NAME);
-        null_offset_.resize(null_entry.data.size() / sizeof(size_t));
-        milvus::fastmem::FastMemcpy(null_offset_.data(),
-                                    null_entry.data.data(),
-                                    null_entry.data.size());
+        LoadNullOffsets(null_entry.data.data(), null_entry.data.size());
     }
 
     auto load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         path_.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
+    FinalizeLoadedValidity();
 
     if (!load_in_mmap) {
         disk_file_manager_->RemoveIndexFiles();

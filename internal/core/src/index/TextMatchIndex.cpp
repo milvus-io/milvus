@@ -84,6 +84,8 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
     schema_ = ctx.fieldDataMeta.field_schema;
+    validity_mode_ = schema_.nullable() ? ValidityMode::NullOffsets
+                                        : ValidityMode::ImplicitAllValid;
     this->file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
     is_index_file_ = false;
@@ -107,6 +109,8 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
     schema_ = ctx.fieldDataMeta.field_schema;
+    validity_mode_ = schema_.nullable() ? ValidityMode::NullOffsets
+                                        : ValidityMode::ImplicitAllValid;
     this->file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
     is_index_file_ = false;
@@ -231,10 +235,8 @@ TextMatchIndex::Load(const Config& config) {
         // clear index_datas to free memory early
         index_datas.clear();
         auto index_valid_data = binary_set.GetByName("index_null_offset");
-        null_offset_.resize((size_t)index_valid_data->size / sizeof(size_t));
-        milvus::fastmem::FastMemcpy(null_offset_.data(),
-                                    index_valid_data->data.get(),
-                                    (size_t)index_valid_data->size);
+        LoadNullOffsets(index_valid_data->data.get(),
+                        static_cast<size_t>(index_valid_data->size));
     }
     disk_file_manager_->CacheTextLogToDisk(files_value, load_priority);
     AssertInfo(
@@ -245,11 +247,14 @@ TextMatchIndex::Load(const Config& config) {
 
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         prefix.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
+    FinalizeLoadedValidity();
 
     if (!load_in_mmap) {
         // the index is loaded in ram, so we can remove files in advance
         disk_file_manager_->RemoveTextLogFiles();
     }
+
+    ComputeByteSize();
 }
 
 // Add text for sealed segment
@@ -267,6 +272,7 @@ TextMatchIndex::AddTextSealed(const std::string& text,
 // Add null for sealed segment
 void
 TextMatchIndex::AddNullSealed(int64_t offset) {
+    validity_mode_ = ValidityMode::NullOffsets;
     null_offset_.push_back(offset);
     // still need to add null to make offset is correct
     static const std::string empty;
@@ -300,6 +306,7 @@ TextMatchIndex::BuildIndexFromFieldData(
     const std::vector<FieldDataPtr>& field_datas, bool nullable) {
     int64_t offset = 0;
     if (nullable) {
+        validity_mode_ = ValidityMode::NullOffsets;
         int64_t total = 0;
         for (const auto& data : field_datas) {
             total += data->get_null_count();

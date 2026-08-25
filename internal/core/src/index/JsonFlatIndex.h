@@ -800,6 +800,10 @@ JsonFlatIndexQueryExecutor<T>::JsonFlatIndexQueryExecutor(
     json_path_ = json_path;
     use_comparable_value_mask_ = use_comparable_value_mask;
     this->wrapper_ = json_flat_index.wrapper_;
-    this->null_offset_ = json_flat_index.null_offset_;
+    if (!use_comparable_value_mask_) {
+        this->null_offset_ = json_flat_index.null_offset_;
+        this->valid_bitset_ = json_flat_index.valid_bitset_.clone();
+        this->validity_mode_ = json_flat_index.validity_mode_;
+    }
 }
 }  // namespace milvus::index

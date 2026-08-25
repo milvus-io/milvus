@@ -639,16 +639,17 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
                                            index_meta_buffer->size);
     auto index_length = index_meta.first;
     total_num_rows_ = index_meta.second;
-    valid_bitset_ =
-        TargetBitmap(total_num_rows_, is_nested_index_ || !schema_.nullable());
-    bool rebuild_validity_from_postings =
-        schema_.nullable() && !is_nested_index_;
 
     auto valid_bitset_buffer = binary_set.GetByName(BITMAP_INDEX_VALID_BITSET);
+    bool rebuild_validity_from_postings = false;
     if (valid_bitset_buffer != nullptr) {
         DeserializeValidBitsetData(valid_bitset_buffer->data.get(),
                                    valid_bitset_buffer->size);
-        rebuild_validity_from_postings = false;
+    } else {
+        valid_bitset_ = TargetBitmap(total_num_rows_,
+                                     is_nested_index_ || !schema_.nullable());
+        rebuild_validity_from_postings =
+            schema_.nullable() && !is_nested_index_;
     }
 
     auto index_data_buffer = binary_set.GetByName(BITMAP_INDEX_DATA);
@@ -817,8 +818,7 @@ BitmapIndex<T>::IsNull() {
     tracer::AutoSpan span("BitmapIndex::IsNull", tracer::GetRootSpan());
 
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap res(total_num_rows_, true);
-    res &= valid_bitset_;
+    auto res = valid_bitset_.clone();
     res.flip();
     return res;
 }
@@ -829,9 +829,7 @@ BitmapIndex<T>::IsNotNull() {
     tracer::AutoSpan span("BitmapIndex::IsNotNull", tracer::GetRootSpan());
 
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap res(total_num_rows_, true);
-    res &= valid_bitset_;
-    return res;
+    return valid_bitset_.clone();
 }
 
 template <typename T>
@@ -1453,19 +1451,20 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     total_num_rows_ = reader.GetMeta<size_t>(BITMAP_INDEX_NUM_ROWS);
     is_nested_index_ =
         reader.GetMeta<bool>(BITMAP_INDEX_IS_NESTED_META, is_nested_index_);
-    valid_bitset_ =
-        TargetBitmap(total_num_rows_, is_nested_index_ || !schema_.nullable());
-    bool rebuild_validity_from_postings =
-        schema_.nullable() && !is_nested_index_;
 
     auto entry_names = reader.GetEntryNames();
+    bool rebuild_validity_from_postings = false;
     if (std::find(entry_names.begin(),
                   entry_names.end(),
                   BITMAP_INDEX_VALID_BITSET) != entry_names.end()) {
         auto valid_bitset_entry = reader.ReadEntry(BITMAP_INDEX_VALID_BITSET);
         DeserializeValidBitsetData(valid_bitset_entry.data.data(),
                                    valid_bitset_entry.data.size());
-        rebuild_validity_from_postings = false;
+    } else {
+        valid_bitset_ = TargetBitmap(total_num_rows_,
+                                     is_nested_index_ || !schema_.nullable());
+        rebuild_validity_from_postings =
+            schema_.nullable() && !is_nested_index_;
     }
 
     ChooseIndexLoadMode(index_length);

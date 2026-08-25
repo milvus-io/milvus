@@ -85,6 +85,8 @@ NgramInvertedIndex::NgramInvertedIndex(const storage::FileManagerContext& ctx,
                                        const NgramParams& params)
     : min_gram_(params.min_gram), max_gram_(params.max_gram) {
     schema_ = ctx.fieldDataMeta.field_schema;
+    validity_mode_ = schema_.nullable() ? ValidityMode::NullOffsets
+                                        : ValidityMode::ImplicitAllValid;
     field_id_ = ctx.fieldDataMeta.field_id;
     file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
@@ -312,11 +314,14 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         path_.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
+    FinalizeLoadedValidity();
 
     if (!load_in_mmap) {
         // the index is loaded in ram, so we can remove files in advance
         disk_file_manager_->RemoveNgramIndexFiles();
     }
+
+    ComputeByteSize();
 
     LOG_INFO(
         "load ngram index done for field id:{} with dir:{}", field_id_, path_);

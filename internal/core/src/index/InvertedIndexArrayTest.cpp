@@ -359,7 +359,13 @@ class NullableInt64ArrayInvertedIndex
  public:
     void
     SetNullOffsets(std::vector<size_t> offsets) {
+        schema_.set_nullable(true);
         null_offset_ = std::move(offsets);
+        if (is_nested_index_) {
+            validity_mode_ = ValidityMode::ImplicitAllValid;
+            return;
+        }
+        validity_mode_ = ValidityMode::NullOffsets;
     }
 };
 

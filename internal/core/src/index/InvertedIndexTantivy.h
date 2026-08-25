@@ -89,6 +89,16 @@ get_tantivy_data_type(proto::schema::DataType data_type) {
 using TantivyIndexWrapper = milvus::tantivy::TantivyIndexWrapper;
 using RustArrayWrapper = milvus::tantivy::RustArrayWrapper;
 
+enum class ValidityMode {
+    // Non-nullable indexes and nested indexes need no row-validity storage at
+    // query time.
+    ImplicitAllValid,
+    // Used by growing indexes and build-side sealed indexes.
+    NullOffsets,
+    // Used after loading a nullable, non-nested sealed index.
+    ValidBitmap,
+};
+
 template <typename T>
 class InvertedIndexTantivy : public ScalarIndex<T> {
  public:
@@ -229,7 +239,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         // Tantivy index size
         total += wrapper_->index_size_bytes();
 
-        // null_offset_: vector<size_t>
+        // Loaded nullable sealed validity bitmap and null offsets used while
+        // building or growing the index.
+        total += valid_bitset_.size_in_bytes();
         total += null_offset_.capacity() * sizeof(size_t);
 
         this->cached_byte_size_ = total;
@@ -318,6 +330,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     void
     set_is_growing(bool is_growing) {
         is_growing_ = is_growing;
+        if (is_growing) {
+            validity_mode_ = ValidityMode::NullOffsets;
+        }
     }
 
     void
@@ -366,6 +381,14 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     virtual nlohmann::json
     BuildTantivyMeta(const std::vector<std::string>& file_names, bool has_null);
 
+    // Load the existing persisted null-offset format. After the Tantivy reader
+    // is ready, FinalizeLoadedValidity converts it to the runtime bitmap.
+    void
+    LoadNullOffsets(const uint8_t* data, size_t size);
+
+    void
+    FinalizeLoadedValidity();
+
  protected:
     std::shared_ptr<TantivyIndexWrapper> wrapper_;
     TantivyDataType d_type_;
@@ -382,8 +405,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     DiskFileManagerPtr disk_file_manager_;
 
     folly::SharedMutexWritePriority mutex_{};
-    // all data need to be built to align the offset
-    // so need to store null_offset_ in inverted index additionally
+    // Runtime validity representation is explicit because build-side sealed
+    // indexes and growing indexes both keep the persisted null-offset format,
+    // while loaded nullable sealed indexes use a bitmap.
+    ValidityMode validity_mode_{ValidityMode::ImplicitAllValid};
+    TargetBitmap valid_bitset_{};
     std::vector<size_t> null_offset_{};
 
     // `inverted_index_single_segment_` is used to control whether to build tantivy index with single segment.
