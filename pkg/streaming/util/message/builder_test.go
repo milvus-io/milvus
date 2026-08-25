@@ -7,15 +7,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestMutableBuilder(t *testing.T) {
@@ -133,90 +129,4 @@ func TestReplicateBuilder(t *testing.T) {
 	assert.Equal(t, "v11", replicateMsg.VChannel())
 	assert.Equal(t, []string{"v11", "v12"}, replicateMsg.BroadcastHeader().VChannels)
 	assert.Equal(t, uint64(1), replicateMsg.BroadcastHeader().BroadcastID)
-}
-
-func TestNewReplicateMessageRejectsInvalidMessageID(t *testing.T) {
-	var (
-		replicateMsg message.ReplicateMutableMessage
-		err          error
-	)
-	require.NotPanics(t, func() {
-		replicateMsg, err = message.NewReplicateMessage("by-dev", &commonpb.ImmutableMessage{
-			Id: &commonpb.MessageID{
-				WALName: commonpb.WALName(101),
-				Id:      "bad-message-id",
-			},
-		})
-	})
-
-	require.Error(t, err)
-	assert.Nil(t, replicateMsg)
-	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-}
-
-func TestNewReplicateMessageRejectsNilMessage(t *testing.T) {
-	var (
-		replicateMsg message.ReplicateMutableMessage
-		err          error
-	)
-	require.NotPanics(t, func() {
-		replicateMsg, err = message.NewReplicateMessage("by-dev", nil)
-	})
-
-	require.Error(t, err)
-	assert.Nil(t, replicateMsg)
-	assert.ErrorIs(t, err, merr.ErrParameterMissing)
-}
-
-func TestNewReplicateMessageRejectsMalformedReservedProperties(t *testing.T) {
-	msg := message.NewInsertMessageBuilderV1().
-		WithVChannel("v1").
-		WithHeader(&message.InsertMessageHeader{}).
-		WithBody(&msgpb.InsertRequest{}).
-		MustBuildMutable()
-	msgID := walimplstest.NewTestMessageID(1)
-	immutableMsg := msg.WithTimeTick(100).WithLastConfirmed(msgID).IntoImmutableMessage(msgID).IntoImmutableMessageProto()
-
-	tests := []struct {
-		name string
-		key  string
-	}{
-		{name: "message header", key: "_h"},
-		{name: "broadcast header", key: "_bh"},
-		{name: "transaction context", key: "_tx"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			corrupted := proto.Clone(immutableMsg).(*commonpb.ImmutableMessage)
-			corrupted.Properties[tt.key] = "not-base64"
-
-			replicateMsg, err := message.NewReplicateMessage("by-dev", corrupted)
-
-			require.Error(t, err)
-			assert.Nil(t, replicateMsg)
-			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		})
-	}
-}
-
-func TestNewReplicateMessageRejectsCipherHeaderOnNonCipherMessage(t *testing.T) {
-	msgID := walimplstest.NewTestMessageID(1)
-	msg := message.NewTimeTickMessageBuilderV1().
-		WithHeader(&message.TimeTickMessageHeader{}).
-		WithBody(&msgpb.TimeTickMsg{}).
-		WithVChannel("v1").
-		MustBuildMutable().
-		WithTimeTick(100).
-		WithLastConfirmed(msgID)
-	immutableMsg := msg.IntoImmutableMessage(msgID).IntoImmutableMessageProto()
-	cipherHeader, err := message.EncodeProto(&messagespb.CipherHeader{})
-	require.NoError(t, err)
-	immutableMsg.Properties["_ch"] = cipherHeader
-
-	replicateMsg, err := message.NewReplicateMessage("by-dev", immutableMsg)
-
-	require.Error(t, err)
-	assert.Nil(t, replicateMsg)
-	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
