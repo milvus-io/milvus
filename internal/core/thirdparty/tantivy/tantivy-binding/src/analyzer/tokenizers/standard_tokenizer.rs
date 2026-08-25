@@ -266,10 +266,6 @@ pub(super) fn is_word_or_emoji(segment: &str) -> bool {
         .any(|ch| ch.is_alphanumeric() || is_emoji_character(ch))
 }
 
-pub(super) fn is_emoji(segment: &str) -> bool {
-    segment.chars().any(is_emoji_character)
-}
-
 fn is_emoji_character(ch: char) -> bool {
     EXTENDED_PICTOGRAPHIC.contains(ch)
         || EMOJI_PRESENTATION.contains(ch)

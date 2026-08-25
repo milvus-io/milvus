@@ -5,8 +5,6 @@ use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 
 use crate::error::{Result, TantivyBindingError};
 
-use super::standard_tokenizer::is_emoji;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum IcuPositionMode {
     Char,
@@ -18,18 +16,16 @@ enum IcuTokenType {
     None,
     Number,
     Letter,
-    Emoji,
 }
 
 impl IcuTokenType {
-    const ALL: [Self; 4] = [Self::None, Self::Number, Self::Letter, Self::Emoji];
+    const ALL: [Self; 3] = [Self::None, Self::Number, Self::Letter];
 
     fn from_str(value: &str) -> Option<Self> {
         match value {
             "none" => Some(Self::None),
             "number" => Some(Self::Number),
             "letter" => Some(Self::Letter),
-            "emoji" => Some(Self::Emoji),
             _ => None,
         }
     }
@@ -130,9 +126,8 @@ impl IcuTokenizer {
             }
 
             let token_str = &text[offset..breakpoint];
-            let char_length = token_str.chars().count();
-            let token_length = match self.position_mode {
-                IcuPositionMode::Char => char_length,
+            let position_length = match self.position_mode {
+                IcuPositionMode::Char => token_str.chars().count(),
                 IcuPositionMode::Token => 1,
             };
             let token_type = classify_token(word_type, token_str);
@@ -144,13 +139,13 @@ impl IcuTokenizer {
                     offset_from: offset,
                     offset_to: breakpoint,
                     position,
-                    position_length: token_length,
+                    position_length,
                 });
             }
 
             offset = breakpoint;
             position += match self.position_mode {
-                IcuPositionMode::Char => char_length,
+                IcuPositionMode::Char => position_length,
                 IcuPositionMode::Token if keep_token => 1,
                 IcuPositionMode::Token => 0,
             };
@@ -193,10 +188,6 @@ fn parse_token_types(value: &json::Value) -> Result<Vec<IcuTokenType>> {
 }
 
 fn classify_token(word_type: WordType, text: &str) -> IcuTokenType {
-    if is_emoji(text) {
-        return IcuTokenType::Emoji;
-    }
-
     match word_type {
         WordType::Number => IcuTokenType::Number,
         WordType::Letter => IcuTokenType::Letter,
@@ -303,7 +294,7 @@ mod tests {
 
     #[test]
     fn test_icu_tokenizer_token_types_preserve_character_positions() {
-        let params = json::json!({"token_types": ["letter", "number", "emoji"]});
+        let params = json::json!({"token_types": ["letter", "number"]});
         let mut tokenizer = IcuTokenizer::from_json(params.as_object().unwrap()).unwrap();
         let tokens = collect(&mut tokenizer, "hello, world! 👋");
 
@@ -312,22 +303,22 @@ mod tests {
                 .iter()
                 .map(|token| token.text.as_str())
                 .collect::<Vec<_>>(),
-            vec!["hello", "world", "👋"]
+            vec!["hello", "world"]
         );
         assert_eq!(
             tokens
                 .iter()
                 .map(|token| token.position)
                 .collect::<Vec<_>>(),
-            vec![0, 7, 14]
+            vec![0, 7]
         );
     }
 
     #[test]
-    fn test_icu_tokenizer_token_types_with_token_positions_support_cjk_and_emoji() {
+    fn test_icu_tokenizer_token_types_with_token_positions_support_cjk() {
         let params = json::json!({
             "position_mode": "token",
-            "token_types": ["letter", "number", "emoji"]
+            "token_types": ["letter", "number"]
         });
         let mut tokenizer = IcuTokenizer::from_json(params.as_object().unwrap()).unwrap();
         let tokens = collect(&mut tokenizer, "龟山岛，龟山岛 👋");
@@ -337,14 +328,14 @@ mod tests {
                 .iter()
                 .map(|token| token.text.as_str())
                 .collect::<Vec<_>>(),
-            vec!["龟山岛", "龟山岛", "👋"]
+            vec!["龟山岛", "龟山岛"]
         );
         assert_eq!(
             tokens
                 .iter()
                 .map(|token| token.position)
                 .collect::<Vec<_>>(),
-            vec![0, 1, 2]
+            vec![0, 1]
         );
         assert!(tokens.iter().all(|token| token.position_length == 1));
     }
@@ -354,8 +345,7 @@ mod tests {
         let cases = [
             ("letter", vec!["hello", "中文"]),
             ("number", vec!["42"]),
-            ("emoji", vec!["👋"]),
-            ("none", vec![",", " ", " ", " "]),
+            ("none", vec![",", " ", " ", " ", "👋"]),
         ];
 
         for (token_type, expected) in cases {
@@ -387,6 +377,7 @@ mod tests {
         for params in [
             json::json!({"token_types": []}),
             json::json!({"token_types": "letter"}),
+            json::json!({"token_types": ["emoji"]}),
             json::json!({"token_types": ["punctuation"]}),
             json::json!({"token_types": [true]}),
         ] {
