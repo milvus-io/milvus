@@ -8575,7 +8575,6 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export:       true,
 	}
 	p.ResourceLowWatermark.Init(base.mgr)
-
 }
 
 type streamingConfig struct {
