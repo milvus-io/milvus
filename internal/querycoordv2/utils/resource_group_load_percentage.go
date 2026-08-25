@@ -45,6 +45,8 @@ import (
 // of a filter. This keeps the resource-group concept inert for callers that do
 // not use it.
 //
+// # Outcomes
+//
 // Four distinct outcomes are all spelled "the collection isn't ready in this
 // resource group", and callers must be able to tell them apart. The
 // percentage alone separates the first two; the error separates the rest,
@@ -104,6 +106,8 @@ import (
 // ShowLoadPartitions normalize the same cache the same way, so this also
 // restores the parity with them that this comment claims.
 //
+// # What the figure measures
+//
 // The percentage is a LIVE target-coverage figure: the fraction of the
 // collection's current work set -- its channel targets plus sealed-segment
 // targets, pooled across partitions -- that the selected replica carries
@@ -135,6 +139,8 @@ import (
 //     gate to re-arm whenever new work lands, where ShowLoadCollections
 //     would keep saying 100.
 //
+// # Pairing rule
+//
 // 100 IS NOT A SERVABILITY VERDICT, and a caller gating a switchover must
 // pair it with ShardLeaderReadinessByResourceGroup rather than act on it
 // alone. This figure counts query-invisible replicas (see the note at the
@@ -164,6 +170,8 @@ import (
 // while readiness, which cannot see that channel yet, can still say Ready.
 // Both answers are correct for their own question; they are not two views of
 // one number.
+//
+// # Multiple replicas
 //
 // When more than one replica is selected -- either because Spawn put several
 // replicas of the collection in rgName, or because rgName is empty and every
