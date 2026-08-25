@@ -1554,4 +1554,182 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 				"the debt is unpaid, but the hold was disabled - release the job")
 		})
 	})
+
+	t.Run("a collection with no index defined does not wait forever", func(t *testing.T) {
+		// The wait's liveness here rests entirely on GetUnindexedSegments
+		// returning nil when the collection has no index at all - otherwise
+		// enabling the parameter would hang every refresh of such a collection
+		// until its timeout. That contract lives in another file, so pin the
+		// coupling here with a REAL indexMeta rather than the stubbed oracle.
+		mockey.PatchConvey("no index defined", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			catalog := &stubCatalog{}
+			mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(
+				[]*datapb.ExternalCollectionRefreshJob{
+					{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, TaskIds: []int64{1001}},
+				}, nil).Build()
+			mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(
+				[]*datapb.ExternalCollectionRefreshTask{
+					{TaskId: 1001, JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFinished, Progress: 100},
+				}, nil).Build()
+			refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+			require.NoError(t, err)
+
+			mt := &meta{segments: NewSegmentsInfo(), indexMeta: &indexMeta{}}
+			mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			}})
+
+			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
+				nil, nil, nil)
+
+			checker.aggregateJobState(refreshMeta.GetJob(1))
+			require.Equal(t, indexpb.JobState_JobStateInProgress, refreshMeta.GetJob(1).GetState())
+
+			checker.aggregateJobState(refreshMeta.GetJob(1))
+			assert.Equal(t, indexpb.JobState_JobStateFinished, refreshMeta.GetJob(1).GetState(),
+				"a collection with nothing to index owes nothing; the wait must clear at once")
+		})
+	})
+
+	t.Run("a job already in the wait before a restart resumes without re-applying", func(t *testing.T) {
+		// The marker exists to survive a DataCoord restart. Model that: the
+		// catalog listing carries a job that is already past its apply, which
+		// is what meta reconstruction produces on startup.
+		mockey.PatchConvey("restart mid-wait", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			catalog := &stubCatalog{}
+			mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(
+				[]*datapb.ExternalCollectionRefreshJob{{
+					JobId: 1, CollectionId: 100, TaskIds: []int64{1001},
+					State:                indexpb.JobState_JobStateInProgress,
+					IndexWaitStartedTime: time.Now().UnixMilli(),
+					Progress:             indexWaitProgressFloor,
+				}}, nil).Build()
+			mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(
+				[]*datapb.ExternalCollectionRefreshTask{
+					{TaskId: 1001, JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFinished, Progress: 100},
+				}, nil).Build()
+			refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+			require.NoError(t, err)
+
+			debt := []int64{556}
+			mt := &meta{segments: NewSegmentsInfo(), indexMeta: &indexMeta{}}
+			mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			}})
+			mockey.Mock((*indexMeta).GetUnindexedSegments).To(
+				func(_ *indexMeta, _ int64, _ []int64) []int64 { return debt }).Build()
+
+			var applied int
+			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { applied++; return nil },
+				nil, nil, nil)
+
+			checker.aggregateJobState(refreshMeta.GetJob(1))
+			require.Equal(t, indexpb.JobState_JobStateInProgress, refreshMeta.GetJob(1).GetState(),
+				"the debt is unpaid, so the recovered job keeps waiting")
+			assert.Zero(t, applied, "its segments were applied before the restart")
+
+			debt = nil
+			checker.aggregateJobState(refreshMeta.GetJob(1))
+			assert.Equal(t, indexpb.JobState_JobStateFinished, refreshMeta.GetJob(1).GetState())
+			assert.Zero(t, applied, "and finishing the wait never applies either")
+		})
+	})
+
+	t.Run("task results are released when the wait begins, not when it ends", func(t *testing.T) {
+		// They are dead weight once the apply lands, and an index build can run
+		// for a long time - longer still if the job then times out and the
+		// results sit until GC. The ungated path clears them immediately
+		// because there the apply and Finished are the same write.
+		mockey.PatchConvey("results released at entry", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			catalog := &stubCatalog{}
+			mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(
+				[]*datapb.ExternalCollectionRefreshJob{
+					{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, TaskIds: []int64{1001}},
+				}, nil).Build()
+			mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(
+				[]*datapb.ExternalCollectionRefreshTask{{
+					TaskId: 1001, JobId: 1, CollectionId: 100,
+					State: indexpb.JobState_JobStateFinished, Progress: 100,
+					UpdatedSegments: []*datapb.SegmentInfo{{ID: 556, CollectionID: 100}},
+					ResultPath:      "files/refresh/1/1001",
+				}}, nil).Build()
+			refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+			require.NoError(t, err)
+
+			debt := []int64{556}
+			mt := &meta{segments: NewSegmentsInfo(), indexMeta: &indexMeta{}}
+			mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			}})
+			mockey.Mock((*indexMeta).GetUnindexedSegments).To(
+				func(_ *indexMeta, _ int64, _ []int64) []int64 { return debt }).Build()
+
+			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
+				nil, nil, nil)
+
+			checker.aggregateJobState(refreshMeta.GetJob(1))
+			require.Equal(t, indexpb.JobState_JobStateInProgress, refreshMeta.GetJob(1).GetState(),
+				"still waiting - so this is mid-wait, not after it")
+
+			tasks, err := refreshMeta.GetCommittedTasksByJobID(1)
+			require.NoError(t, err)
+			require.Len(t, tasks, 1)
+			assert.Empty(t, tasks[0].GetUpdatedSegments(),
+				"the produced SegmentInfos must not sit in the catalog for the length of an index build")
+			assert.Empty(t, tasks[0].GetResultPath())
+		})
+	})
+
+	t.Run("a held job does not rewrite its progress every tick", func(t *testing.T) {
+		// The wait is evaluated on every checker tick for as long as index
+		// builds take. Persisting the same number each time would put a write
+		// per job per tick on the catalog for no new information.
+		mockey.PatchConvey("no per-tick writes", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			debt := []int64{556}
+			refreshMeta, mt, job := stage(t, []int64{555}, &debt)
+
+			var saves int
+			mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).To(
+				func(_ *stubCatalog, _ context.Context, _ *datapb.ExternalCollectionRefreshJob) error {
+					saves++
+					return nil
+				}).Build()
+
+			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
+				nil, nil, nil)
+
+			checker.aggregateJobState(job) // entry: applies, marks, sets 90
+			require.Equal(t, 1, saves)
+
+			checker.aggregateJobState(refreshMeta.GetJob(1)) // 1 of 2 indexed -> 95
+			require.Equal(t, 2, saves)
+			require.Equal(t, int64(95), refreshMeta.GetJob(1).GetProgress())
+
+			for i := 0; i < 5; i++ {
+				checker.aggregateJobState(refreshMeta.GetJob(1))
+			}
+			assert.Equal(t, 2, saves,
+				"an unchanged debt is not news; the catalog must not be written again")
+		})
+	})
 }

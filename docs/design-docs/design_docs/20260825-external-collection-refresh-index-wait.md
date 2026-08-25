@@ -151,6 +151,35 @@ index wait did not complete in budget. Re-run the refresh to try again. This is
 the same shape as the native path when the apply succeeds and the state write
 fails, and it is stated in the parameter documentation.
 
+### 3.5 What the wait costs while it holds
+
+The wait can last as long as an index build, so everything it does per tick is
+sized for that rather than for a single pass.
+
+- **Task results are released at wait entry**, not at the end. They are dead
+  weight the moment the apply lands — the marker guarantees no replay, and the
+  state aggregate reads task *states*, never results — and they are not small:
+  a `SegmentInfo` per produced segment, inline in the task's catalog record plus
+  a blob in the result store. Holding them for an index build, and for the
+  retention period on top when a job times out mid-wait, is a cost the ungated
+  path never pays, because there the apply and Finished are the same write and
+  the clear follows immediately.
+- **Progress is persisted only when it changes.** `UpdateJobProgress` skips a
+  write that changes nothing, under the job lock, so a held job writes at most
+  ten times across the whole wait instead of once per tick.
+- **The debt is logged only when the band moves**, with a bounded sample of ids
+  rather than the whole list — the debt can be the entire collection, and one
+  line per tick per waiting job says nothing new in between.
+- **The per-tick query is `O(segments of this collection)`**: `WithCollection`
+  narrows through the `coll2Segments` secondary index, and `GetUnindexedSegments`
+  is map-based throughout. `getSegmentsIndexStates` no longer allocates a map
+  for a segment that has no index records at all, which matters once the caller
+  is scanning a whole collection on a timer.
+- **A waiting job is counted separately in the checker's stats log.** It is
+  `InProgress` like any other, so the state histogram alone cannot tell "still
+  ingesting" from "waiting for indexes" — the distinction an operator looking at
+  a long-lived `InProgress` count actually needs.
+
 ## 4. What this deliberately does not do
 
 **It does not close the apply→publish window.** Between the apply and the

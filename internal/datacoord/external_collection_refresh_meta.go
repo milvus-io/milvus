@@ -552,6 +552,13 @@ func (m *externalCollectionRefreshMeta) UpdateJobProgress(jobID int64, progress 
 			job.GetState() == indexpb.JobState_JobStateFailed {
 			return true, nil
 		}
+		// Nothing to persist when the value already matches. Callers compare
+		// against their own snapshot, which can be a tick stale; this is the
+		// authoritative check, and it keeps a job that sits in the index wait
+		// from rewriting the same number every tick.
+		if job.GetProgress() == progress {
+			return true, nil
+		}
 		job.Progress = progress
 		return false, nil
 	})

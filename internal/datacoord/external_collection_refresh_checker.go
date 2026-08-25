@@ -220,6 +220,7 @@ const indexWaitProgressFloor = int64(90)
 
 func (c *externalCollectionRefreshChecker) indexWaitEnabled() bool {
 	return c.mt != nil &&
+		c.mt.indexMeta != nil &&
 		c.applyJobInfo != nil &&
 		Params.DataCoordCfg.RefreshWaitForIndex.GetAsBool()
 }
@@ -252,6 +253,23 @@ func (c *externalCollectionRefreshChecker) beginIndexWait(job *datapb.ExternalCo
 		// side effects.
 		return
 	}
+	// Release the task results now, not at the end of the wait. They are dead
+	// weight the moment the apply lands - the marker guarantees it is never
+	// replayed, and the state aggregate reads task states, never results - and
+	// they are not small: each carries a SegmentInfo per produced segment,
+	// inline in the task's catalog record plus a blob in the result store.
+	// Holding them for the length of an index build, and for the retention
+	// period on top of that when a job times out mid-wait, is a cost the
+	// ungated path never pays, because there the apply and Finished are the
+	// same write and this clear follows immediately.
+	if err := c.refreshMeta.ClearTaskResultsByJobID(job.GetJobId()); err != nil {
+		// Not fatal: finishAfterIndexWait clears again, and DropJob sweeps the
+		// job prefix at GC.
+		mlog.Warn(c.ctx, "failed to clear external collection refresh task results on index wait entry",
+			mlog.FieldJobID(job.GetJobId()),
+			mlog.Err(err))
+	}
+
 	mlog.Info(c.ctx, "external collection refresh applied, waiting for its segments to be indexed",
 		mlog.FieldJobID(job.GetJobId()),
 		mlog.FieldCollectionID(job.GetCollectionId()))
@@ -298,15 +316,27 @@ func (c *externalCollectionRefreshChecker) indexWaitDone(job *datapb.ExternalCol
 	if held > 99 {
 		held = 99
 	}
-	if held != job.GetProgress() {
-		if err := c.refreshMeta.UpdateJobProgress(job.GetJobId(), held); err != nil {
-			mlog.Warn(c.ctx, "failed to update job progress while waiting for indexes",
-				mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
-		}
+	// UpdateJobProgress skips a write that changes nothing, so this may be
+	// called every tick; it persists at most ten times across a whole wait.
+	if err := c.refreshMeta.UpdateJobProgress(job.GetJobId(), held); err != nil {
+		mlog.Warn(c.ctx, "failed to update job progress while waiting for indexes",
+			mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
 	}
-	mlog.Debug(c.ctx, "waiting for external collection refresh segments building index...",
-		mlog.FieldJobID(job.GetJobId()),
-		mlog.Int64s("unindexed", unindexed))
+
+	// Log when the band moves, not every tick: a wait lasts for as long as the
+	// index builds do, and one line per tick per waiting job says nothing new
+	// in between. `job` is the tick's snapshot and can be one tick stale, which
+	// only ever costs a duplicated or skipped line - the write above is the
+	// authoritative one. The id list is sampled because the debt can be the
+	// whole collection.
+	if held != job.GetProgress() {
+		mlog.Info(c.ctx, "waiting for external collection refresh segments building index...",
+			mlog.FieldJobID(job.GetJobId()),
+			mlog.FieldCollectionID(job.GetCollectionId()),
+			mlog.Int("unindexedCount", len(unindexed)),
+			mlog.Int("totalSegments", len(segmentIDs)),
+			mlog.Int64s("unindexedSample", lo.Slice(unindexed, 0, 10)))
+	}
 	return false
 }
 
@@ -547,8 +577,19 @@ func (c *externalCollectionRefreshChecker) logJobStats(jobs map[int64]*datapb.Ex
 		stateNum[state] = len(byState[state])
 	}
 
+	// A job in the index wait is InProgress like any other, so the state
+	// histogram alone cannot tell "still ingesting" from "waiting for indexes"
+	// - the distinction an operator looking at a long-lived InProgress count
+	// actually needs.
+	waitingForIndex := lo.CountBy(lo.Values(jobs), func(job *datapb.ExternalCollectionRefreshJob) bool {
+		return job.GetState() == indexpb.JobState_JobStateInProgress &&
+			job.GetIndexWaitStartedTime() != 0
+	})
+
 	if len(jobs) > 0 {
-		mlog.Info(c.ctx, "external collection job stats", mlog.Any("stateNum", stateNum))
+		mlog.Info(c.ctx, "external collection job stats",
+			mlog.Any("stateNum", stateNum),
+			mlog.Int("waitingForIndex", waitingForIndex))
 	}
 }
 
