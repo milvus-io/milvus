@@ -1,10 +1,11 @@
+//go:build test && dynamic
+
 package syncer
 
 import (
 	"context"
 	"io"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc/metadata"
@@ -18,24 +19,18 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockStream struct {
-	ctx                   context.Context
-	sendCh                chan *viewpb.SyncRequest  // captures what syncer sends
-	recvCh                chan *viewpb.SyncResponse // test injects responses
-	sendMu                sync.Mutex
-	sendErr               error // if non-nil, Send returns this immediately
-	closed                atomic.Int32
-	blockNextSend         atomic.Bool
-	sendEntered           chan struct{}
-	sendReturned          atomic.Bool
-	closeBeforeSendReturn atomic.Bool
+	ctx     context.Context
+	sendCh  chan *viewpb.SyncRequest  // captures what syncer sends
+	recvCh  chan *viewpb.SyncResponse // test injects responses
+	sendMu  sync.Mutex
+	sendErr error // if non-nil, Send returns this immediately
 }
 
 func newMockStream(ctx context.Context) *mockStream {
 	return &mockStream{
-		ctx:         ctx,
-		sendCh:      make(chan *viewpb.SyncRequest, 100),
-		recvCh:      make(chan *viewpb.SyncResponse, 100),
-		sendEntered: make(chan struct{}, 1),
+		ctx:    ctx,
+		sendCh: make(chan *viewpb.SyncRequest, 100),
+		recvCh: make(chan *viewpb.SyncResponse, 100),
 	}
 }
 
@@ -45,13 +40,6 @@ func (s *mockStream) Send(req *viewpb.SyncRequest) error {
 	s.sendMu.Unlock()
 	if err != nil {
 		return err
-	}
-	if s.blockNextSend.Swap(false) {
-		s.sendReturned.Store(false)
-		s.sendEntered <- struct{}{}
-		<-s.ctx.Done()
-		s.sendReturned.Store(true)
-		return s.ctx.Err()
 	}
 
 	select {
@@ -76,26 +64,16 @@ func (s *mockStream) Recv() (*viewpb.SyncResponse, error) {
 
 func (s *mockStream) Header() (metadata.MD, error) { return nil, nil }
 func (s *mockStream) Trailer() metadata.MD         { return nil }
-func (s *mockStream) CloseSend() error {
-	s.closed.Add(1)
-	if !s.sendReturned.Load() {
-		s.closeBeforeSendReturn.Store(true)
-	}
-	return nil
-}
-func (s *mockStream) Context() context.Context    { return s.ctx }
-func (s *mockStream) SendMsg(m interface{}) error { return nil }
-func (s *mockStream) RecvMsg(m interface{}) error { return nil }
+func (s *mockStream) CloseSend() error             { return nil }
+func (s *mockStream) Context() context.Context     { return s.ctx }
+func (s *mockStream) SendMsg(m interface{}) error  { return nil }
+func (s *mockStream) RecvMsg(m interface{}) error  { return nil }
 
 // setSendErr sets the error returned by future Send calls.
 func (s *mockStream) setSendErr(err error) {
 	s.sendMu.Lock()
 	s.sendErr = err
 	s.sendMu.Unlock()
-}
-
-func (s *mockStream) closeCount() int32 {
-	return s.closed.Load()
 }
 
 // collectSent drains all currently buffered SyncRequests from sendCh.

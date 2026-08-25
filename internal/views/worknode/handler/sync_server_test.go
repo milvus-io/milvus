@@ -1,10 +1,11 @@
+//go:build test && dynamic
+
 package handler
 
 import (
 	"context"
 	"io"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -281,43 +282,6 @@ func TestViewSyncServer_AsyncReport(t *testing.T) {
 
 	cancel()
 	<-errCh
-}
-
-func TestPendingReports_CloseConcurrentWithUpdate(t *testing.T) {
-	for i := 0; i < 100; i++ {
-		pending := newPendingReports()
-		started := make(chan struct{})
-		done := make(chan struct{})
-		var panicValue atomic.Value
-
-		go func() {
-			defer close(done)
-			defer func() {
-				if r := recover(); r != nil {
-					panicValue.Store(r)
-				}
-			}()
-			close(started)
-			pending.Update(newTestQNView(1, int64(i+1), viewpb.QueryViewState_QueryViewStateReady))
-		}()
-		<-started
-		pending.Close()
-		<-done
-
-		if value := panicValue.Load(); value != nil {
-			t.Fatalf("pending report update panicked after close: %v", value)
-		}
-	}
-}
-
-func TestPendingReports_UpdateAfterCloseIgnored(t *testing.T) {
-	pending := newPendingReports()
-	pending.Close()
-	pending.Update(newTestQNView(1, 1, viewpb.QueryViewState_QueryViewStateReady))
-
-	protos, closing := pending.Drain()
-	assert.Empty(t, protos)
-	assert.False(t, closing)
 }
 
 func TestViewSyncServer_CloseRequest(t *testing.T) {

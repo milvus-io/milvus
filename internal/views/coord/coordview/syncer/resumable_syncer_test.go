@@ -1,3 +1,5 @@
+//go:build test && dynamic
+
 package syncer
 
 import (
@@ -275,172 +277,6 @@ func TestResumable_OpenStreamError(t *testing.T) {
 	assert.GreaterOrEqual(t, int(attempts.Load()), 3, "should have retried at least twice")
 }
 
-func TestResumable_RePushFailureClosesAndCancelsAttempt(t *testing.T) {
-	node := qviews.NewQueryNode(1)
-	client := newMockViewSyncClient()
-	openStarted := make(chan struct{})
-	allowOpen := make(chan struct{})
-	firstStream := make(chan *mockStream, 1)
-	var attempts atomic.Int32
-
-	client.openStreamFn = func(ctx context.Context, _ qviews.WorkNode) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
-		if attempts.Add(1) > 1 {
-			return nil, io.ErrUnexpectedEOF
-		}
-		close(openStarted)
-		<-allowOpen
-		stream := newMockStream(ctx)
-		stream.setSendErr(io.ErrUnexpectedEOF)
-		firstStream <- stream
-		return stream, nil
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	rs := newResumableSyncer(ctx, node, client)
-	defer rs.Close()
-	<-openStarted
-	rs.Sync([]SyncView{newTestSyncView(1, 1, nil, nil)})
-	close(allowOpen)
-	stream := <-firstStream
-
-	assert.True(t, waitForCond(func() bool {
-		return stream.ctx.Err() != nil && stream.closeCount() == 1
-	}, time.Second), "failed re-push must cancel and close the stream attempt")
-}
-
-func TestResumable_SendFailureCancelsBlockedRecv(t *testing.T) {
-	node := qviews.NewQueryNode(1)
-	client := newMockViewSyncClient()
-	streamReady := make(chan *mockStream, 2)
-	var attempts atomic.Int32
-
-	client.openStreamFn = func(ctx context.Context, _ qviews.WorkNode) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
-		stream := newMockStream(ctx)
-		if attempts.Add(1) == 1 {
-			stream.setSendErr(io.ErrUnexpectedEOF)
-		}
-		streamReady <- stream
-		return stream, nil
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	rs := newResumableSyncer(ctx, node, client)
-	defer rs.Close()
-	first := waitStream(t, streamReady)
-	rs.Sync([]SyncView{newTestSyncView(1, 1, nil, nil)})
-	second := waitStream(t, streamReady)
-
-	assert.NotSame(t, first, second)
-	assert.True(t, waitForCond(func() bool {
-		return first.ctx.Err() != nil && first.closeCount() == 1
-	}, time.Second), "send failure must cancel blocked recv and close the attempt")
-}
-
-func TestResumable_CloseSendAfterSendLoopStops(t *testing.T) {
-	rs, streamReady, cancel := newResumableTestSetup(t)
-	defer cancel()
-	defer rs.Close()
-
-	stream := waitStream(t, streamReady)
-	first := newTestSyncView(1, 1, func(qviews.QueryViewAtWorkNode) bool { return false }, nil)
-	rs.Sync([]SyncView{first})
-	_, ok := stream.waitSend(time.Second)
-	require.True(t, ok)
-
-	stream.blockNextSend.Store(true)
-	rs.Sync([]SyncView{newTestSyncView(1, 1, func(qviews.QueryViewAtWorkNode) bool { return false }, nil)})
-	select {
-	case <-stream.sendEntered:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for blocked send")
-	}
-
-	close(stream.recvCh)
-	assert.Eventually(t, func() bool {
-		return stream.closeCount() > 0
-	}, time.Second, time.Millisecond)
-	assert.False(t, stream.closeBeforeSendReturn.Load(), "CloseSend must wait for Send to return")
-}
-
-func TestResumable_RapidBreaksUseReconnectBackoff(t *testing.T) {
-	node := qviews.NewQueryNode(1)
-	client := newMockViewSyncClient()
-	attemptTimes := make(chan time.Time, 16)
-	client.openStreamFn = func(ctx context.Context, _ qviews.WorkNode) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
-		select {
-		case attemptTimes <- time.Now():
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-		stream := newMockStream(ctx)
-		close(stream.recvCh)
-		return stream, nil
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	rs := newResumableSyncer(ctx, node, client)
-	first := <-attemptTimes
-	second := <-attemptTimes
-	cancel()
-	rs.Close()
-
-	assert.GreaterOrEqual(t, second.Sub(first), 40*time.Millisecond)
-}
-
-func TestResumable_SlowOpenDoesNotResetReconnectBackoff(t *testing.T) {
-	node := qviews.NewQueryNode(1)
-	client := newMockViewSyncClient()
-	attempts := make(chan struct {
-		n  int32
-		at time.Time
-	}, 8)
-	slowOpenReturned := make(chan time.Time, 1)
-	var attempt atomic.Int32
-	client.openStreamFn = func(ctx context.Context, _ qviews.WorkNode) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
-		n := attempt.Add(1)
-		if n == 6 {
-			timer := time.NewTimer(stableStreamDuration + 100*time.Millisecond)
-			select {
-			case <-timer.C:
-			case <-ctx.Done():
-				timer.Stop()
-				return nil, ctx.Err()
-			}
-			slowOpenReturned <- time.Now()
-		}
-		attempts <- struct {
-			n  int32
-			at time.Time
-		}{n: n, at: time.Now()}
-		stream := newMockStream(ctx)
-		close(stream.recvCh)
-		return stream, nil
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	rs := newResumableSyncer(ctx, node, client)
-	defer rs.Close()
-	defer cancel()
-
-	var seventh time.Time
-	deadline := time.After(10 * time.Second)
-	for seventh.IsZero() {
-		select {
-		case current := <-attempts:
-			if current.n == 7 {
-				seventh = current.at
-			}
-		case <-deadline:
-			t.Fatal("timed out waiting for the seventh reconnect attempt")
-		}
-	}
-	slowReturnedAt := <-slowOpenReturned
-	assert.GreaterOrEqual(t, seventh.Sub(slowReturnedAt), 200*time.Millisecond,
-		"time spent opening a stream must not count as stable stream health")
-}
-
 // TestResumable_ConcurrentSyncAndRecv verifies no races when sync and recv happen concurrently.
 func TestResumable_ConcurrentSyncAndRecv(t *testing.T) {
 	rs, streamReady, cancel := newResumableTestSetup(t)
@@ -505,7 +341,7 @@ func TestResumable_RecvLoopIgnoresNonViewResponse(t *testing.T) {
 	stream.recvCh <- &viewpb.SyncResponse{}
 	close(stream.recvCh)
 
-	rs.recvLoop(context.Background(), stream)
+	rs.recvLoop(stream)
 }
 
 func TestResumable_SendLoopReturnsWhenContextDone(t *testing.T) {

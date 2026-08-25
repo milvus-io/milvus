@@ -42,7 +42,7 @@ type QNQueryViewStateMachine struct {
 	totalSegments int
 	readyCount    int
 
-	pendingReport  *viewpb.QueryViewOfShard
+	reportPending  bool
 	pendingRelease bool
 }
 
@@ -50,7 +50,7 @@ type QNQueryViewStateMachine struct {
 // a Preparing push from Coord.
 //
 // After construction:
-//   - State is Preparing. No pendingReport (subsequent OnSegmentsReady /
+//   - State is Preparing. No report is pending (subsequent OnSegmentsReady /
 //     OnUnrecoverable will drive progress and generate reports).
 func NewQNQueryViewStateMachine(meta *viewpb.QueryViewMeta, qnView *viewpb.QueryViewOfQueryNode) *QNQueryViewStateMachine {
 	readySegments := make(map[int64]map[int64]struct{}, len(qnView.Partitions))
@@ -134,13 +134,15 @@ func (sm *QNQueryViewStateMachine) OnSegmentsReady(readySegmentIDs map[int64][]i
 	}
 
 	if sm.state == qviews.QueryViewStateReady {
-		if !changed {
-			return
+		if changed {
+			sm.reportPending = true
 		}
-	} else if sm.readyCount >= sm.totalSegments {
+		return
+	}
+	if sm.readyCount >= sm.totalSegments {
 		sm.state = qviews.QueryViewStateReady
 	}
-	sm.pendingReport = sm.buildReport()
+	sm.reportPending = true
 }
 
 func buildAssignedSegmentSet(qnView *viewpb.QueryViewOfQueryNode) (map[int64]map[int64]struct{}, int) {
@@ -165,15 +167,17 @@ func (sm *QNQueryViewStateMachine) OnUnrecoverable() {
 		return
 	}
 	sm.state = qviews.QueryViewStateUnrecoverable
-	sm.pendingReport = sm.buildReport()
+	sm.reportPending = true
 }
 
 // ConsumeReport returns the view to report to the Coordinator and clears the flag.
 // Returns nil if no report is needed.
 func (sm *QNQueryViewStateMachine) ConsumeReport() *viewpb.QueryViewOfShard {
-	v := sm.pendingReport
-	sm.pendingReport = nil
-	return v
+	if !sm.reportPending {
+		return nil
+	}
+	sm.reportPending = false
+	return sm.buildReport()
 }
 
 // ConsumeRelease returns true if the SM has a pending Release operation
@@ -192,7 +196,7 @@ func (sm *QNQueryViewStateMachine) OnDropped() {
 		return
 	}
 	sm.state = qviews.QueryViewStateDropped
-	sm.pendingReport = sm.buildReport()
+	sm.reportPending = true
 }
 
 // --- Coord push handlers ---
@@ -204,7 +208,7 @@ func (sm *QNQueryViewStateMachine) handleCoordPreparing() {
 	}
 	// Node has advanced past Preparing: re-report current state so Coord
 	// can fast-forward (e.g., Ready, Unrecoverable, Dropped).
-	sm.pendingReport = sm.buildReport()
+	sm.reportPending = true
 }
 
 func (sm *QNQueryViewStateMachine) handleCoordDropped() {
@@ -214,13 +218,13 @@ func (sm *QNQueryViewStateMachine) handleCoordDropped() {
 		return
 	case qviews.QueryViewStateDropped:
 		// Terminal state: re-report for Coord fast-forward.
-		sm.pendingReport = sm.buildReport()
+		sm.reportPending = true
 		return
 	default:
 		// Transition to Dropping: signal that Release should be called.
 		// Clear any stale pending report (e.g., from prior OnSegmentsReady).
 		sm.state = qviews.QueryViewStateDropping
-		sm.pendingReport = nil
+		sm.reportPending = false
 		sm.pendingRelease = true
 	}
 }

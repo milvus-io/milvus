@@ -6323,6 +6323,7 @@ func TestHandleCommitVchannelRPC(t *testing.T) {
 	ctx := context.Background()
 
 	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().GetJob(mock.Anything, int64(3001)).Return(nil)
 	importMetaMock.EXPECT().HandleCommitVchannel(mock.Anything, int64(3001), "vchan-0", mock.AnythingOfType("func() error")).
 		RunAndReturn(func(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
 			// Execute the callback to verify it works correctly.
@@ -6421,6 +6422,7 @@ func TestHandleCommitVchannelRPC_RejectsCommitTimestampBelowBinlogTimestamp(t *t
 	ctx := context.Background()
 
 	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().GetJob(mock.Anything, int64(3001)).Return(nil)
 	importMetaMock.EXPECT().HandleCommitVchannel(mock.Anything, int64(3001), "vchan-0", mock.AnythingOfType("func() error")).
 		RunAndReturn(func(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
 			return callback()
@@ -6585,6 +6587,7 @@ func TestHandleCommitVchannelRPC_V3SegmentIsNotFencedYet(t *testing.T) {
 	ctx := context.Background()
 
 	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().GetJob(mock.Anything, int64(3002)).Return(nil)
 	importMetaMock.EXPECT().HandleCommitVchannel(mock.Anything, int64(3002), "vchan-0", mock.AnythingOfType("func() error")).
 		RunAndReturn(func(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
 			return callback()
