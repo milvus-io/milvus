@@ -1512,6 +1512,69 @@ func (s *MergeHelperTestSuite) TestMergeWeightedWithFieldColumns() {
 	s.Equal(int64(3), result.NumRows())
 }
 
+func (s *MergeHelperTestSuite) TestMergeWeightedByGroupKey() {
+	dense := s.createDFWithField(
+		[]int64{1, 3}, []float32{0.95, 0.70},
+		"group_key", []string{"A", "B"}, []int64{2},
+	)
+	sparse := s.createDFWithField(
+		[]int64{2, 3}, []float32{0.95, 0.70},
+		"group_key", []string{"A", "B"}, []int64{2},
+	)
+	defer dense.Release()
+	defer sparse.Release()
+
+	op := NewMergeOp(
+		MergeStrategyWeighted,
+		WithWeights([]float64{0.5, 0.5}),
+		WithNormalize(false),
+		WithMergeKeyField("group_key"),
+	)
+	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
+
+	result, err := op.ExecuteMulti(ctx, []*DataFrame{dense, sparse})
+	s.Require().NoError(err)
+	defer result.Release()
+
+	s.Equal(int64(2), result.NumRows())
+	ids := result.Column(types.IDFieldName).Chunk(0).(*array.Int64)
+	scores := result.Column(types.ScoreFieldName).Chunk(0).(*array.Float32)
+	groups := result.Column("group_key").Chunk(0).(*array.String)
+	s.Equal(int64(1), ids.Value(0))
+	s.Equal("A", groups.Value(0))
+	s.InDelta(0.95, float64(scores.Value(0)), 1e-6)
+	s.Equal("B", groups.Value(1))
+	s.InDelta(0.70, float64(scores.Value(1)), 1e-6)
+}
+
+func (s *MergeHelperTestSuite) TestMergeRRFByGroupKey() {
+	dense := s.createDFWithField(
+		[]int64{1, 3}, []float32{0.95, 0.70},
+		"group_key", []string{"A", "B"}, []int64{2},
+	)
+	sparse := s.createDFWithField(
+		[]int64{2, 3}, []float32{0.95, 0.70},
+		"group_key", []string{"A", "B"}, []int64{2},
+	)
+	defer dense.Release()
+	defer sparse.Release()
+
+	op := NewMergeOp(MergeStrategyRRF, WithRRFK(60), WithMergeKeyField("group_key"))
+	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
+
+	result, err := op.ExecuteMulti(ctx, []*DataFrame{dense, sparse})
+	s.Require().NoError(err)
+	defer result.Release()
+
+	s.Equal(int64(2), result.NumRows())
+	groups := result.Column("group_key").Chunk(0).(*array.String)
+	scores := result.Column(types.ScoreFieldName).Chunk(0).(*array.Float32)
+	s.Equal("A", groups.Value(0))
+	s.InDelta(2.0/61.0, float64(scores.Value(0)), 1e-6)
+	s.Equal("B", groups.Value(1))
+	s.InDelta(2.0/62.0, float64(scores.Value(1)), 1e-6)
+}
+
 func (s *MergeHelperTestSuite) TestMergeSumWithFieldColumns() {
 	df1 := s.createDFWithField([]int64{1}, []float32{0.5}, "tag", []string{"x"}, []int64{1})
 	df2 := s.createDFWithField([]int64{1, 2}, []float32{0.3, 0.8}, "tag", []string{"x", "y"}, []int64{2})

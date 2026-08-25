@@ -684,6 +684,25 @@ func (s *RerankBuilderTestSuite) TestBuildRRFChainWithGrouping() {
 	s.Equal("Merge", fc.operators[0].Name())
 	s.Equal("GroupBy", fc.operators[1].Name())
 	s.Equal("Select", fc.operators[2].Name())
+	s.Empty(fc.operators[0].(*MergeOp).mergeKeyField)
+}
+
+func (s *RerankBuilderTestSuite) TestBuildRRFChainWithSingleResultPerGroupFusesByGroupKey() {
+	collSchema := s.createCollectionSchemaWithCategory()
+	searchParams := NewSearchParamsWithGrouping(1, 10, 0, -1, "category", 1)
+	searchMetrics := []string{"COSINE", "IP"}
+	funcScoreSchema := &schemapb.FunctionScore{
+		Functions: []*schemapb.FunctionSchema{{
+			Type: schemapb.FunctionType_Rerank,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "reranker", Value: "rrf"},
+			},
+		}},
+	}
+
+	fc, err := BuildRerankChain(collSchema, funcScoreSchema, searchMetrics, searchParams, s.pool)
+	s.Require().NoError(err)
+	s.Equal("category", fc.operators[0].(*MergeOp).mergeKeyField)
 }
 
 func (s *RerankBuilderTestSuite) createCollectionSchemaWithCategory() *schemapb.CollectionSchema {
