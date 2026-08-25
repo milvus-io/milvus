@@ -1243,7 +1243,7 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
 
     this->mmap_file_raii_ =
         std::make_unique<MmapFileRAII>(local_filepath.value());
-    LOG_INFO(
+    LOG_DEBUG(
         "load vector index done, mmap_file_path:{}, download_duration:{}, "
         "write_files_duration:{}, deserialize_duration:{}",
         local_filepath.value(),
