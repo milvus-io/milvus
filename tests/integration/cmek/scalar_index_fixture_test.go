@@ -70,7 +70,7 @@ func TestMain(m *testing.M) {
 		_ = os.RemoveAll(tmpDir)
 		os.Exit(1)
 	}
-	if _, err := os.Stat(filepath.Join(os.Getenv("MILVUSCONF"), "hook.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(os.Getenv("MILVUSCONF"), "hook.yaml")); err != nil { //nolint:gosec // MILVUSCONF is the test-owned fixture directory.
 		_, _ = fmt.Fprintln(os.Stderr, "fixture hook config is not visible:", err)
 		os.Exit(1)
 	}
@@ -100,7 +100,7 @@ func configureFixtureConfig(tmpDir, goPluginPath, cppPluginPath string) error {
 		if err != nil {
 			return fmt.Errorf("read default %s: %w", configFile, err)
 		}
-		if err := os.WriteFile(filepath.Join(configDir, configFile), defaultConfig, 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(configDir, configFile), defaultConfig, 0o600); err != nil { //nolint:gosec // configFile is selected from a fixed test-owned list.
 			return fmt.Errorf("write fixture %s: %w", configFile, err)
 		}
 	}
@@ -148,7 +148,7 @@ func buildFixturePlugins(tmpDir string) (string, string, string, error) {
 	}
 
 	goPlugin := filepath.Join(tmpDir, "libGoCipherPlugin.so")
-	goBuild := exec.Command("go", "build", "-buildmode=plugin", "-buildvcs=false",
+	goBuild := exec.Command("go", "build", "-buildmode=plugin", "-buildvcs=false", //nolint:gosec // command and arguments are fixed test build inputs.
 		"-tags", "dynamic,test", "-o", goPlugin, "./tests/integration/cmek/pluginmock/go")
 	goBuild.Dir = repoRoot
 	if output, err := goBuild.CombinedOutput(); err != nil {
@@ -156,7 +156,7 @@ func buildFixturePlugins(tmpDir string) (string, string, string, error) {
 	}
 
 	goPluginRace := filepath.Join(tmpDir, "libGoCipherPluginRace.so")
-	goRaceBuild := exec.Command("go", "build", "-race", "-buildmode=plugin", "-buildvcs=false",
+	goRaceBuild := exec.Command("go", "build", "-race", "-buildmode=plugin", "-buildvcs=false", //nolint:gosec // command and arguments are fixed test build inputs.
 		"-tags", "dynamic,test", "-gcflags", "all=-N -l", "-o", goPluginRace,
 		"./tests/integration/cmek/pluginmock/go")
 	goRaceBuild.Dir = repoRoot
@@ -166,12 +166,12 @@ func buildFixturePlugins(tmpDir string) (string, string, string, error) {
 
 	cppSource := filepath.Join(cmekDir, "pluginmock", "cpp")
 	cppBuild := filepath.Join(tmpDir, "cpp-build")
-	configure := exec.Command("cmake", "-S", cppSource, "-B", cppBuild,
+	configure := exec.Command("cmake", "-S", cppSource, "-B", cppBuild, //nolint:gosec // paths are created inside the test-owned temporary directory.
 		"-DMILVUS_SOURCE_DIR="+repoRoot, "-DCMAKE_BUILD_TYPE=Release")
 	if output, err := configure.CombinedOutput(); err != nil {
 		return "", "", "", fmt.Errorf("configure C++ cipher fixture: %w: %s", err, output)
 	}
-	compile := exec.Command("cmake", "--build", cppBuild, "--parallel", "2")
+	compile := exec.Command("cmake", "--build", cppBuild, "--parallel", "2") //nolint:gosec // cppBuild is created inside the test-owned temporary directory.
 	if output, err := compile.CombinedOutput(); err != nil {
 		return "", "", "", fmt.Errorf("build C++ cipher fixture: %w: %s", err, output)
 	}
@@ -197,9 +197,17 @@ type scalarIndexSuite struct {
 	ezID     int64
 }
 
-type ScalarIndexV2Suite struct{ scalarIndexSuite }
-type ScalarIndexV3Suite struct{ scalarIndexSuite }
-type ScalarIndexFMINDEXSuite struct{ scalarIndexSuite }
+type ScalarIndexV2Suite struct {
+	scalarIndexSuite
+}
+
+type ScalarIndexV3Suite struct {
+	scalarIndexSuite
+}
+
+type ScalarIndexFMINDEXSuite struct {
+	scalarIndexSuite
+}
 
 func (s *scalarIndexSuite) setup(c campaign) {
 	s.campaign = c
@@ -207,7 +215,7 @@ func (s *scalarIndexSuite) setup(c campaign) {
 	s.WithMilvusConfig("dataCoord.targetScalarIndexVersion", strconv.Itoa(int(c.engineVersion)))
 	s.WithMilvusConfig("dataCoord.forceRebuildScalarSegmentIndex", "true")
 	s.WithMilvusConfig("common.storage.useLoonFFI", "false")
-	s.MiniClusterSuite.SetupSuite()
+	s.SetupSuite()
 
 	ctx := s.Cluster.GetContext()
 	s.dbName = "cmek_scalar_" + c.name + "_" + funcutil.GenRandomStr()
@@ -237,7 +245,7 @@ func (s *scalarIndexSuite) tearDown() {
 		})
 		s.NoError(merr.CheckRPCCall(status, err))
 	}
-	s.MiniClusterSuite.TearDownSuite()
+	s.TearDownSuite()
 }
 
 func (s *scalarIndexSuite) runCell(cell scalarCell) {
@@ -250,8 +258,10 @@ func (s *scalarIndexSuite) runCell(cell scalarCell) {
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: fixturePrimaryKey, IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
 			{FieldID: fieldID, Name: fixtureFieldName, DataType: cell.dataType},
-			{FieldID: 102, Name: fixtureVectorName, DataType: schemapb.DataType_FloatVector,
-				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: strconv.Itoa(fixtureVectorDim)}}},
+			{
+				FieldID: 102, Name: fixtureVectorName, DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: strconv.Itoa(fixtureVectorDim)}},
+			},
 		},
 	}
 	if cell.dataType == schemapb.DataType_VarChar {
@@ -342,7 +352,6 @@ func (s *scalarIndexSuite) runCell(cell scalarCell) {
 		if cell.textLog {
 			segments = s.sealedSegments(collectionName)
 		}
-		objects = nil
 		if cell.textLog {
 			objects, err = inspector.LocateTextLog(s.Cluster.RootPath(), segments, fieldID, s.campaign.engineVersion)
 		} else {

@@ -82,10 +82,12 @@ func bitmapCell() scalarCell {
 			for i := range values {
 				values[i] = i%3 == 0
 			}
-			return &schemapb.FieldData{Type: schemapb.DataType_Bool, FieldName: field,
+			return &schemapb.FieldData{
+				Type: schemapb.DataType_Bool, FieldName: field,
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: values}},
-				}}}
+				}},
+			}
 		},
 		expr:  func(field string) string { return field + " == true" },
 		match: func(i int) bool { return i%3 == 0 },
@@ -153,10 +155,12 @@ func geometryCell() scalarCell {
 					values[i] = "POINT (10 10)"
 				}
 			}
-			return &schemapb.FieldData{Type: schemapb.DataType_Geometry, FieldName: field,
+			return &schemapb.FieldData{
+				Type: schemapb.DataType_Geometry, FieldName: field,
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_GeometryWktData{GeometryWktData: &schemapb.GeometryWktArray{Data: values}},
-				}}}
+				}},
+			}
 		},
 		expr: func(field string) string {
 			return fmt.Sprintf("ST_INTERSECTS(%s, 'POLYGON ((-1 -1, 1 -1, 1 1, -1 1, -1 -1))')", field)
@@ -166,8 +170,10 @@ func geometryCell() scalarCell {
 }
 
 func stringFieldData(field string, values []string) *schemapb.FieldData {
-	return &schemapb.FieldData{Type: schemapb.DataType_VarChar, FieldName: field,
+	return &schemapb.FieldData{
+		Type: schemapb.DataType_VarChar, FieldName: field,
 		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: values}},
-		}}}
+		}},
+	}
 }
