@@ -72,6 +72,32 @@ welded means `index_wait_started_time` is simultaneously the sub-state marker
 and the apply-once guard: a job carrying it has already committed, so the
 Finished transition at the end of the wait runs with **no** pre-apply.
 
+Two consequences of that marker are load-bearing in their own right, because
+this is the one transition through `updateJobStateWithPreApply` that does *not*
+write a terminal state — so the terminal re-read, which serializes every other
+caller for free, cannot serialize this one:
+
+- **The guard is evaluated under the job lock**, as a `skip` predicate, not in
+  the caller. The eager task path and the periodic tick run on different
+  goroutines, and two tasks of one job can finish at once; both can read the
+  job before either writes the marker. Only a read ordered against the write —
+  i.e. under the same lock — makes the apply once.
+- **The wait phase is entered on the marker, not on the parameter.** A job that
+  has applied belongs to the wait path for the rest of its life, because that
+  path is the only exit that does not re-run the apply. Turning the parameter
+  off mid-wait therefore *releases* such a job — it finishes at once, without
+  waiting — rather than sending it down the generic transition, whose pre-apply
+  would replay the apply.
+
+A replayed apply is not a harmless no-op: `applyExternalRefreshPatch` clears
+`TextStatsLogs` and `JsonKeyStats` unconditionally, so a second write discards a
+text index or JSON key stats built since the first one and orphans their files.
+Newly created segments have always short-circuited on the manifest they would
+install; patched baseline segments now do the same
+(`externalRefreshManifestAlreadyApplied`), which makes the apply idempotent at
+its source rather than only at the callers this feature happens to add — and is
+the only defense against a replay by an older binary after a downgrade.
+
 ### 3.2 The debt is the whole collection
 
 Each tick asks `GetUnindexedSegments(collectionID, <every flushed segment of the
@@ -154,6 +180,15 @@ native path rejects it for one checker tick. Documented in the parameter doc.
   jobs that simply do not carry it.
 - No RPC or field change. `DescribeRefresh` / `ListRefreshJobs` report the same
   fields; only the progress a *waiting* job reports is new.
+- A waiting job is still an *active* job, so `SubmitRefreshJob` refuses a new
+  refresh of that collection until the wait ends — the same rule that already
+  applies during an ingest, over a longer window. A caller refreshing on a fixed
+  schedule shorter than its index builds will start seeing
+  `refresh job already in progress`.
+- Downgrade: an older binary does not know the marker, so it would see an
+  applied job as merely in progress and apply again. The manifest short-circuit
+  in §3.1 is what makes that replay a no-op rather than a loss of text-index and
+  JSON-key-stats metadata.
 
 ## 6. Key packages
 

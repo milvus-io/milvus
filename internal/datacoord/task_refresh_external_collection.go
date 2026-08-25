@@ -347,7 +347,10 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 
 	// Build update operators
 	var operators []UpdateOperator
-	alreadyAppliedNewSegments := make(map[int64]struct{})
+	// Segments whose incoming result the collection already carries - a new
+	// segment written by an earlier apply, or a baseline patch already
+	// installed. Both are skipped by the upsert operators below.
+	alreadyAppliedSegments := make(map[int64]struct{})
 
 	validationOperator := func(modPack *updateSegmentPack) bool {
 		for segmentID := range baselineSegmentMap {
@@ -380,6 +383,17 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 				// Dropped is the replay-safe terminal state for an inferred removal.
 				continue
 			}
+			if externalRefreshManifestAlreadyApplied(existing, incoming) {
+				// Replaying a patch is NOT harmless: applyExternalRefreshPatch
+				// clears TextStatsLogs and JsonKeyStats, so a second write
+				// would discard a text index or JSON key stats built since the
+				// first one, orphaning their files. A genuine patch always
+				// installs a strictly newer manifest, so it still applies.
+				alreadyAppliedSegments[segmentID] = struct{}{}
+				mlog.Info(ctx, "external refresh segment patch already applied, skipping replay",
+					mlog.FieldSegmentID(segmentID))
+				continue
+			}
 			if err := validateExternalRefreshPatch(existing, incoming, collectionID); err != nil {
 				mlog.Warn(ctx, "invalid external refresh segment patch",
 					mlog.FieldSegmentID(incoming.GetID()),
@@ -397,7 +411,7 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 				continue
 			}
 			if externalRefreshNewSegmentAlreadyApplied(existing, upsertSegmentMap[segmentID]) {
-				alreadyAppliedNewSegments[segmentID] = struct{}{}
+				alreadyAppliedSegments[segmentID] = struct{}{}
 				mlog.Info(ctx, "new external refresh segment already applied, skipping replay",
 					mlog.FieldSegmentID(segmentID))
 				continue
@@ -435,7 +449,7 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	for _, seg := range normalizedUpdatedSegments {
 		incoming := seg
 		upsertOperator := func(modPack *updateSegmentPack) bool {
-			if _, ok := alreadyAppliedNewSegments[incoming.GetID()]; ok {
+			if _, ok := alreadyAppliedSegments[incoming.GetID()]; ok {
 				return true
 			}
 			existing := modPack.Get(incoming.GetID())
@@ -521,14 +535,30 @@ func normalizeExternalRefreshUpdatedSegment(
 	return normalized
 }
 
-// externalRefreshNewSegmentAlreadyApplied recognizes an idempotent replay of a
-// new, non-baseline segment. A manifest base path belongs to one segment, and
-// its versions move forward as that segment gains later manifest updates. An
-// equal or newer existing version therefore means the incoming refresh result
-// has already been applied or superseded and must not be written again.
+// externalRefreshManifestAlreadyApplied recognizes an idempotent replay by the
+// manifest a result would install. A manifest base path belongs to one segment,
+// and its versions move forward as that segment gains later manifest updates.
+// An equal or newer existing version therefore means the incoming refresh
+// result has already been applied or superseded and must not be written again.
+//
+// Anything it cannot compare - an unparseable path, a different base path -
+// reports false, so an unrecognized shape still takes the normal write path
+// and its own validation.
 //
 // Do not compare fake binlogs here: V3 catalog persistence intentionally strips
 // them, so their in-memory representation does not survive DataCoord restart.
+func externalRefreshManifestAlreadyApplied(existing *SegmentInfo, incoming *datapb.SegmentInfo) bool {
+	if existing == nil || incoming == nil {
+		return false
+	}
+	comparison, err := packed.CompareManifestPath(existing.GetManifestPath(), incoming.GetManifestPath())
+	return err == nil && comparison >= 0
+}
+
+// externalRefreshNewSegmentAlreadyApplied recognizes an idempotent replay of a
+// new, non-baseline segment: the identity must match as well, because for a new
+// segment a colliding ID that is NOT this result is a hard error rather than a
+// replay.
 func externalRefreshNewSegmentAlreadyApplied(existing *SegmentInfo, incoming *datapb.SegmentInfo) bool {
 	if existing == nil || incoming == nil {
 		return false
@@ -538,9 +568,7 @@ func externalRefreshNewSegmentAlreadyApplied(existing *SegmentInfo, incoming *da
 		existing.GetPartitionID() != incoming.GetPartitionID() {
 		return false
 	}
-
-	comparison, err := packed.CompareManifestPath(existing.GetManifestPath(), incoming.GetManifestPath())
-	return err == nil && comparison >= 0
+	return externalRefreshManifestAlreadyApplied(existing, incoming)
 }
 
 func validateExternalRefreshNewSegment(incoming *datapb.SegmentInfo) error {

@@ -246,8 +246,10 @@ func (c *externalCollectionRefreshChecker) beginIndexWait(job *datapb.ExternalCo
 		return
 	}
 	if !applied {
-		// A concurrent path already drove the job terminal and owns the
-		// one-time side effects.
+		// Either a concurrent path already drove the job terminal, or it
+		// already entered the wait - BeginIndexWait rejects a second entry
+		// under the job lock. Both mean another caller owns the one-time
+		// side effects.
 		return
 	}
 	mlog.Info(c.ctx, "external collection refresh applied, waiting for its segments to be indexed",
@@ -362,24 +364,33 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 		return
 	}
 
-	// The index wait. Off (the default) this is not reached at all and the
-	// transition below is untouched.
+	// The index wait. Off (the default) neither branch is reached and the
+	// generic transition below is untouched.
 	//
-	// It sits ahead of the generic transition because while the wait is on, the
+	// Both sit ahead of that transition because while the wait is on, the
 	// aggregate says Finished and the job says InProgress on every tick - the
 	// generic path would replay the apply and finish the job immediately.
-	if state == indexpb.JobState_JobStateFinished && c.indexWaitEnabled() {
-		if job.GetIndexWaitStartedTime() == 0 {
-			c.beginIndexWait(job)
+
+	// A job that has already applied its segments belongs to this path for the
+	// rest of its life, whatever the parameter says NOW. This is the only exit
+	// that does not re-run the apply, so keying it on the parameter instead of
+	// the marker would make turning the parameter off mid-wait replay the
+	// apply - and applyExternalRefreshPatch clears TextStatsLogs/JsonKeyStats,
+	// so that replay would discard indexes built during the very wait it was
+	// disabling. Off now simply means release the job: finish it at once
+	// without waiting, which is what an operator disabling the hold wants.
+	if state == indexpb.JobState_JobStateFinished && job.GetIndexWaitStartedTime() != 0 {
+		if c.indexWaitEnabled() && !c.indexWaitDone(job) {
 			return
 		}
-		if !c.indexWaitDone(job) {
-			return
-		}
-		// Every segment is indexed. Finish WITHOUT a pre-apply: the segments
-		// were applied by BeginIndexWait, and replaying that here would be a
-		// second apply of the same results.
+		// Finish WITHOUT a pre-apply: the segments were applied by
+		// BeginIndexWait, and replaying that here would be a second apply of
+		// the same results.
 		c.finishAfterIndexWait(job)
+		return
+	}
+	if state == indexpb.JobState_JobStateFinished && c.indexWaitEnabled() {
+		c.beginIndexWait(job)
 		return
 	}
 

@@ -7246,7 +7246,11 @@ publishes the refreshed external source/spec exactly as before, then keeps repor
 tracks the indexed fraction) until every segment is indexed. What waits is the job's completion signal, not the
 data: the segments are applied and served either way. Deployments that load collections on demand per query
 enable this - their queries key on refresh completion and have no warm replica to hide the unindexed window
-behind. The wait is bounded by dataCoord.externalCollectionJobTimeout, measured from the job's START like any
+behind. Because the job stays in progress for the whole wait, a new refresh of the same collection is refused
+until it ends, exactly as during an ingest - a caller that refreshes on a fixed schedule shorter than its index
+builds will start seeing "refresh job already in progress". Turning this off while jobs are waiting releases
+them: each finishes as soon as it is next inspected, without waiting for its indexes. The wait is bounded by
+dataCoord.externalCollectionJobTimeout, measured from the job's START like any
 other refresh - so the time the ingest already spent counts against it, and a long ingest leaves the wait
 correspondingly less. A job that exceeds it is marked Failed; raise that parameter if refreshes are large enough
 for the wait to run out. Two things to know about a Failed refresh here: it does NOT roll back - its segments are

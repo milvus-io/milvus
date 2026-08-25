@@ -1487,4 +1487,71 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 				"the wait runs on the job's own clock; outrunning it is an ordinary refresh timeout")
 		})
 	})
+
+	t.Run("two callers holding a pre-marker snapshot apply once between them", func(t *testing.T) {
+		// The eager task path and the periodic tick run on different
+		// goroutines, and two tasks of one job can finish at once - so two
+		// callers can both read the job before either wrote the marker.
+		// Checking the marker in the caller cannot order that; only the job
+		// lock can. Master is safe for free because its Finished write IS the
+		// guard; this transition stays InProgress and needs its own.
+		mockey.PatchConvey("apply once under concurrency", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			debt := []int64{556}
+			refreshMeta, mt, job := stage(t, nil, &debt)
+
+			var applies int32
+			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
+					atomic.AddInt32(&applies, 1)
+					return nil
+				}, nil, nil, nil)
+
+			snapshotA, snapshotB := job, refreshMeta.GetJob(1)
+			checker.aggregateJobState(snapshotA)
+			checker.aggregateJobState(snapshotB)
+
+			assert.Equal(t, int32(1), atomic.LoadInt32(&applies),
+				"segment results must be applied exactly once")
+		})
+	})
+
+	t.Run("turning the parameter off mid-wait releases the job without re-applying", func(t *testing.T) {
+		// Keying the branch on the parameter rather than the marker would send
+		// an already-applied job down the generic transition, which carries a
+		// pre-apply - and applyExternalRefreshPatch clears TextStatsLogs and
+		// JsonKeyStats, so the replay would discard indexes built during the
+		// very wait being disabled. An operator turning the hold off wants the
+		// held jobs released, so the job finishes at once instead.
+		mockey.PatchConvey("parameter off mid-wait", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			debt := []int64{556}
+			refreshMeta, mt, job := stage(t, nil, &debt)
+
+			var applies int32
+			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
+					atomic.AddInt32(&applies, 1)
+					return nil
+				}, nil, nil, nil)
+
+			checker.aggregateJobState(job)
+			require.Equal(t, int32(1), atomic.LoadInt32(&applies))
+			require.NotZero(t, refreshMeta.GetJob(1).GetIndexWaitStartedTime())
+
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "false")
+			checker.aggregateJobState(refreshMeta.GetJob(1))
+
+			assert.Equal(t, int32(1), atomic.LoadInt32(&applies),
+				"a job that already applied must never apply again")
+			assert.Equal(t, indexpb.JobState_JobStateFinished, refreshMeta.GetJob(1).GetState(),
+				"the debt is unpaid, but the hold was disabled - release the job")
+		})
+	})
 }
