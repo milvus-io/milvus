@@ -196,6 +196,12 @@ func ShardLeaderReadinessByResourceGroup(
 	// CurrentTarget, not NextTarget: a shard is only servable once the leader
 	// is serving what the collection is currently expected to hold, which is
 	// the same target the native shard-leader path reads.
+	//
+	// Note this is a different scope from the one LoadPercentageByResourceGroup
+	// measures against (NextTargetFirst). A caller pairing the two -- which
+	// the percentage's contract tells it to -- can therefore see "below 100"
+	// and "Ready" together right after a next-target re-pull adds a channel
+	// that has not been promoted. Both are correct for their own question.
 	channels := targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
 	if len(channels) == 0 {
 		return ShardLeaderReadiness{Reason: ShardLeadersReasonNoChannelTarget}, nil

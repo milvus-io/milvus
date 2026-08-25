@@ -155,6 +155,16 @@ import (
 // TestInvisibleOnlyResourceGroupReadsFullButNotServable pins the three-way
 // state.
 //
+// The pair is also measured against DIFFERENT target scopes, which a caller
+// must expect rather than read as a contradiction. This figure uses
+// NextTargetFirst -- "is this group carrying everything currently asked of
+// it" -- while readiness uses CurrentTarget -- "can it serve what the
+// collection is currently expected to hold". So when a next-target re-pull
+// adds a channel that has not been promoted, this figure drops below 100
+// while readiness, which cannot see that channel yet, can still say Ready.
+// Both answers are correct for their own question; they are not two views of
+// one number.
+//
 // When more than one replica is selected -- either because Spawn put several
 // replicas of the collection in rgName, or because rgName is empty and every
 // replica is selected -- this returns the minimum percentage across them. A
@@ -249,6 +259,15 @@ func LoadPercentageByResourceGroup(
 	// min-across-replicas comparison below weigh two different denominators
 	// against each other -- the same class of inconsistency that two
 	// unsynchronized reads of any shared store produce.
+	//
+	// This covers the target and distribution reads, NOT the whole figure.
+	// The replica set was read further up, in a third independent read, so a
+	// TransferReplica committing between there and here leaves a replica in
+	// the loop that no longer belongs to rgName -- and since the result is a
+	// min, a transferred-away laggard drags it down. That needs an operator
+	// action landing inside one call and self-corrects on the next poll, so
+	// it is left as-is; but this is a best-effort composition over three
+	// reads, not a snapshot of one.
 	//
 	// NextTargetFirst, not NextTarget: promotion clears the next target until
 	// the observer re-pulls it ~10s later, and a plain NextTarget read in that
