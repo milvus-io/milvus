@@ -297,19 +297,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return stats_.mem_size.load() + deleted_record_.mem_size();
     }
 
-    // Returns the total disk usage of TEXT LOB spillover files in bytes.
-    // Used by Go-side sync policies for back-pressure.
-    uint64_t
-    GetTextSpilloverDiskUsage() const {
-        uint64_t total = 0;
-        for (const auto& [field_id, spillover] : text_lob_spillovers_) {
-            if (spillover) {
-                total += spillover->GetDiskUsage();
-            }
-        }
-        return total;
-    }
-
     int64_t
     get_row_count() const override {
         return insert_record_.ack_responder_.GetAck();

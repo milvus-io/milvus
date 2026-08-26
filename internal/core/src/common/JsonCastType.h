@@ -17,7 +17,6 @@
 
 #include "common/Types.h"
 #include "fmt/core.h"
-#include "tantivy-binding.h"
 
 namespace milvus {
 
@@ -37,9 +36,6 @@ class JsonCastType {
     // Returns the element type if it's an array, otherwise the data type itself.
     DataType
     element_type() const;
-
-    TantivyDataType
-    ToTantivyType() const;
 
     MilvusDataType
     ToMilvusDataType() const;

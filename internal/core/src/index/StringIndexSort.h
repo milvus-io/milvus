@@ -77,9 +77,6 @@ class StringIndexSort : public StringIndex {
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
-    void
-    BuildWithArrayDataNested(const std::vector<FieldDataPtr>& datas);
-
     // See detailed format in StringIndexSortMemoryImpl::SerializeToBinary
     BinarySet
     Serialize(const Config& config) override;

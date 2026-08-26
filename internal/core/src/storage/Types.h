@@ -169,41 +169,21 @@ struct MmapConfig {
     GetEnableGrowingMmap() const {
         return growing_enable_mmap;
     }
-    void
-    SetEnableGrowingMmap(bool flag) {
-        this->growing_enable_mmap = flag;
-    }
     bool
     GetScalarIndexEnableMmap() const {
         return scalar_index_enable_mmap;
-    }
-    void
-    SetScalarIndexEnableMmap(bool flag) {
-        this->scalar_index_enable_mmap = flag;
     }
     bool
     GetScalarFieldEnableMmap() const {
         return scalar_field_enable_mmap;
     }
-    void
-    SetScalarFieldEnableMmap(bool flag) {
-        this->scalar_field_enable_mmap = flag;
-    }
     bool
     GetVectorIndexEnableMmap() const {
         return vector_index_enable_mmap;
     }
-    void
-    SetVectorIndexEnableMmap(bool flag) {
-        this->vector_index_enable_mmap = flag;
-    }
     bool
     GetVectorFieldEnableMmap() const {
         return vector_field_enable_mmap;
-    }
-    void
-    SetVectorFieldEnableMmap(bool flag) {
-        this->vector_field_enable_mmap = flag;
     }
     [[nodiscard]] bool
     GetMmapPopulate() const {

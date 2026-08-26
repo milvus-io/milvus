@@ -67,16 +67,6 @@ class SubSearchResult {
     }
 
  public:
-    int64_t
-    get_num_queries() const {
-        return num_queries_;
-    }
-
-    int64_t
-    get_topk() const {
-        return topk_;
-    }
-
     const int64_t*
     get_ids() const {
         return offsets_.data();

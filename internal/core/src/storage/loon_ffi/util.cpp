@@ -49,125 +49,6 @@
 
 using json = nlohmann::json;
 
-std::shared_ptr<LoonProperties>
-MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
-    // Prepare key-value pairs from CStorageConfig
-    std::vector<const char*> keys;
-    std::vector<const char*> values;
-
-    // Add non-null string fields
-    if (c_storage_config.address != nullptr) {
-        keys.emplace_back(PROPERTY_FS_ADDRESS);
-        values.emplace_back(c_storage_config.address);
-    }
-    if (c_storage_config.bucket_name != nullptr) {
-        keys.emplace_back(PROPERTY_FS_BUCKET_NAME);
-        values.emplace_back(c_storage_config.bucket_name);
-    }
-    if (c_storage_config.access_key_id != nullptr) {
-        keys.emplace_back(PROPERTY_FS_ACCESS_KEY_ID);
-        values.emplace_back(c_storage_config.access_key_id);
-    }
-    if (c_storage_config.access_key_value != nullptr) {
-        keys.emplace_back(PROPERTY_FS_ACCESS_KEY_VALUE);
-        values.emplace_back(c_storage_config.access_key_value);
-    }
-    if (c_storage_config.root_path != nullptr) {
-        keys.emplace_back(PROPERTY_FS_ROOT_PATH);
-        values.emplace_back(c_storage_config.root_path);
-    }
-    if (c_storage_config.storage_type != nullptr) {
-        keys.emplace_back(PROPERTY_FS_STORAGE_TYPE);
-        values.emplace_back(c_storage_config.storage_type);
-    }
-    if (c_storage_config.cloud_provider != nullptr) {
-        keys.emplace_back(PROPERTY_FS_CLOUD_PROVIDER);
-        values.emplace_back(c_storage_config.cloud_provider);
-    }
-    if (c_storage_config.iam_endpoint != nullptr) {
-        keys.emplace_back(PROPERTY_FS_IAM_ENDPOINT);
-        values.emplace_back(c_storage_config.iam_endpoint);
-    }
-    if (c_storage_config.log_level != nullptr) {
-        keys.emplace_back(PROPERTY_FS_LOG_LEVEL);
-        values.emplace_back("Warn");
-    }
-    if (c_storage_config.region != nullptr) {
-        keys.emplace_back(PROPERTY_FS_REGION);
-        values.emplace_back(c_storage_config.region);
-    }
-    if (c_storage_config.sslCACert != nullptr) {
-        keys.emplace_back(PROPERTY_FS_SSL_CA_CERT);
-        values.emplace_back(c_storage_config.sslCACert);
-    }
-    if (c_storage_config.gcp_credential_json != nullptr) {
-        keys.emplace_back(PROPERTY_FS_GCP_CREDENTIAL_JSON);
-        values.emplace_back(c_storage_config.gcp_credential_json);
-    }
-
-    // Add boolean fields
-    keys.emplace_back(PROPERTY_FS_USE_SSL);
-    values.emplace_back(c_storage_config.useSSL ? "true" : "false");
-
-    keys.emplace_back(PROPERTY_FS_USE_IAM);
-    values.emplace_back(c_storage_config.useIAM ? "true" : "false");
-
-    keys.emplace_back(PROPERTY_FS_USE_VIRTUAL_HOST);
-    values.emplace_back(c_storage_config.useVirtualHost ? "true" : "false");
-
-    keys.emplace_back(PROPERTY_FS_USE_CUSTOM_PART_UPLOAD);
-    values.emplace_back(c_storage_config.use_custom_part_upload ? "true"
-                                                                : "false");
-
-    // Add integer field
-    std::string timeout_str = std::to_string(c_storage_config.requestTimeoutMs);
-    keys.emplace_back(PROPERTY_FS_REQUEST_TIMEOUT_MS);
-    values.emplace_back(timeout_str.c_str());
-
-    // 0 means "not set by the producer": leave the key absent so
-    // milvus-storage applies its registered default (100) instead of taking an
-    // explicit 0, which would drop the S3 connection cap to
-    // max(io_capacity, 25) and change the filesystem cache key. Same
-    // convention as ChunkManager.cpp / MinioChunkManager.cpp and the Go
-    // producer in storagev2/packed/ffi_common.go.
-    std::string max_connections_str =
-        std::to_string(c_storage_config.max_connections);
-    if (c_storage_config.max_connections > 0) {
-        keys.emplace_back(PROPERTY_FS_MAX_CONNECTIONS);
-        values.emplace_back(max_connections_str.c_str());
-    }
-
-    if (c_storage_config.tls_min_version != nullptr) {
-        std::string tls_ver(c_storage_config.tls_min_version);
-        if (!tls_ver.empty() && tls_ver != "default") {
-            keys.emplace_back(PROPERTY_FS_TLS_MIN_VERSION);
-            values.emplace_back(c_storage_config.tls_min_version);
-        }
-    }
-    // No extfs.default.* properties in FFI path. Per-collection extfs properties
-    // (extfs.{collectionID}.*) are passed as extraKVs by Go-side BuildExtfsOverrides.
-
-    keys.emplace_back(PROPERTY_FS_USE_CRC32C_CHECKSUM);
-    values.emplace_back(c_storage_config.use_crc32c_checksum ? "true"
-                                                             : "false");
-
-    // Create Properties using FFI
-    auto properties = std::make_shared<LoonProperties>();
-    LoonFFIResult result = loon_properties_create(
-        keys.data(), values.data(), keys.size(), properties.get());
-
-    if (!loon_ffi_is_success(&result)) {
-        auto message = loon_ffi_get_errmsg(&result);
-        // Copy the error message before freeing the LoonFFIResult
-        std::string error_msg = message ? message : "Unknown error";
-        loon_ffi_free_result(&result);
-        throw std::runtime_error(error_msg);
-    }
-
-    loon_ffi_free_result(&result);
-    return properties;
-}
-
 std::shared_ptr<milvus_storage::api::Properties>
 MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     auto properties_map = std::make_shared<milvus_storage::api::Properties>();
@@ -251,7 +132,8 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
         *properties_map,
         PROPERTY_FS_REQUEST_TIMEOUT_MS,
         std::to_string(c_storage_config.requestTimeoutMs).c_str());
-    // Absent when unset -- see the note in MakePropertiesFromStorageConfig.
+    // Absent when unset: leave the key absent so milvus-storage applies its
+    // registered default instead of taking an explicit 0.
     if (c_storage_config.max_connections > 0) {
         milvus_storage::api::SetValue(
             *properties_map,
