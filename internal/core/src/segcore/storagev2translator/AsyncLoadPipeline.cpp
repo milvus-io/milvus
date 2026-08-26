@@ -27,6 +27,7 @@
 
 #include "arrow/api.h"
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 #include "folly/coro/AsyncScope.h"
 #include "folly/coro/WithCancellation.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
@@ -59,7 +60,7 @@ using ChunkReadResult =
 class WindowFailureState {
  public:
     folly::CancellationToken
-    GetToken() const {
+    GetCancellationToken() const {
         return cancellation_source_.getToken();
     }
 
@@ -96,14 +97,6 @@ class PriorityThreadPoolExecutor final : public folly::CPUThreadPoolExecutor {
                   "MILVUS_ASYNC_LOAD_")) {
     }
 };
-
-size_t
-SaturatingAdd(size_t left, size_t right) {
-    if (right > std::numeric_limits<size_t>::max() - left) {
-        return std::numeric_limits<size_t>::max();
-    }
-    return left + right;
-}
 
 int8_t
 ExecutorPriority(milvus::proto::common::LoadPriority priority) {
@@ -355,7 +348,7 @@ LoadCellsAsyncImpl(
         WithExecutorPriority(std::move(executor_keep_alive), executor_priority);
     auto window_failure_state = std::make_shared<WindowFailureState>();
     auto window_cancellation_token = folly::cancellation_token_merge(
-        cancellation_token, window_failure_state->GetToken());
+        cancellation_token, window_failure_state->GetCancellationToken());
     auto request_count = cells.size();
     std::vector<std::optional<WindowLoadResult>> window_results(windows.size());
     folly::coro::AsyncScope scope;

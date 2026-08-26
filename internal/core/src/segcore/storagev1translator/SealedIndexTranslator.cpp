@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 #include "common/common_type_c.h"
 #include "common/resource_c.h"
 #include "fmt/core.h"
@@ -108,7 +109,7 @@ SealedIndexTranslator::SealedIndexTranslator(
             auto max_task_overhead =
                 stream_load_info->encrypted
                     ? stream_load_info->max_task_transient_bytes
-                    : milvus::storage::SaturatingMultiply(
+                    : milvus::SaturatingMultiply(
                           milvus::storage::MaxEntryStreamTaskBytes(),
                           milvus::storage::kFileStreamBufferMultiplier);
             auto memory_group =

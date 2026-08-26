@@ -34,6 +34,7 @@
 
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
+#include "common/Utils.h"
 #include "nlohmann/json.hpp"
 #include "storage/EntryStreamUtils.h"
 #include "storage/Crc32cUtil.h"
@@ -119,14 +120,6 @@ EncryptedStreamBudgetBytes(size_t cipher_len, size_t plain_len) {
             cipher_len <= std::numeric_limits<size_t>::max() - 2 * plain_len,
         "Encrypted stream budget size overflow");
     return cipher_len + 2 * plain_len;
-}
-
-size_t
-SaturatingAdd(size_t lhs, size_t rhs) {
-    if (rhs > std::numeric_limits<size_t>::max() - lhs) {
-        return std::numeric_limits<size_t>::max();
-    }
-    return lhs + rhs;
 }
 
 constexpr size_t kEntryDownloadRangeSize = 16 * 1024 * 1024;

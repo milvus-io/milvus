@@ -35,6 +35,7 @@
 #include "folly/ScopeGuard.h"
 #include "common/Common.h"
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 #include "filemanager/InputStream.h"
 #include "test_utils/Constants.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -1563,7 +1564,7 @@ TEST_F(IndexEntryWriterV3Test, EncryptedEntryStreamUsesThreeBufferPoolBound) {
     const auto per_task_bound =
         EntryStreamTransientBytes(MaxEntryStreamTaskBytes(), true);
     const auto encrypted_pool_bound =
-        SaturatingMultiply(max_tasks, per_task_bound);
+        milvus::SaturatingMultiply(max_tasks, per_task_bound);
 
     EXPECT_EQ(EntryStreamMaxTransientBytes(std::numeric_limits<size_t>::max(),
                                            per_task_bound),
@@ -1584,13 +1585,14 @@ TEST_F(IndexEntryWriterV3Test,
        PlainEntryFileStreamAccountsForAlignedWriteCopy) {
     constexpr size_t stream_bytes = 8 * 1024 * 1024;
 
-    EXPECT_EQ(SaturatingMultiply(stream_bytes, kFileStreamBufferMultiplier),
-              2 * stream_bytes);
-    EXPECT_EQ(SaturatingMultiply(MaxEntryStreamTaskBytes(),
-                                 kFileStreamBufferMultiplier),
+    EXPECT_EQ(
+        milvus::SaturatingMultiply(stream_bytes, kFileStreamBufferMultiplier),
+        2 * stream_bytes);
+    EXPECT_EQ(milvus::SaturatingMultiply(MaxEntryStreamTaskBytes(),
+                                         kFileStreamBufferMultiplier),
               2 * (DefaultStreamSliceSize() + kTailMergeGrace));
-    EXPECT_EQ(SaturatingMultiply(std::numeric_limits<size_t>::max(),
-                                 kFileStreamBufferMultiplier),
+    EXPECT_EQ(milvus::SaturatingMultiply(std::numeric_limits<size_t>::max(),
+                                         kFileStreamBufferMultiplier),
               std::numeric_limits<size_t>::max());
 }
 
@@ -1631,7 +1633,7 @@ TEST_F(IndexEntryWriterV3Test, PlainEntryStreamPoolBoundCountsTailPerTask) {
 
     EXPECT_EQ(EntryStreamMaxTransientBytes(std::numeric_limits<size_t>::max(),
                                            per_task_bound),
-              SaturatingMultiply(configured_tasks, per_task_bound));
+              milvus::SaturatingMultiply(configured_tasks, per_task_bound));
 }
 
 TEST_F(IndexEntryWriterV3Test, EntryStreamPoolBoundUsesLiveWorkerFloor) {
@@ -1649,7 +1651,7 @@ TEST_F(IndexEntryWriterV3Test, EntryStreamPoolBoundUsesLiveWorkerFloor) {
     EXPECT_EQ(
         EntryStreamMaxTransientBytes(
             std::numeric_limits<size_t>::max(), per_task_bound, live_workers),
-        SaturatingMultiply(live_workers, per_task_bound));
+        milvus::SaturatingMultiply(live_workers, per_task_bound));
 }
 
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamMergesSmallTail) {
