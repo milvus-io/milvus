@@ -1218,7 +1218,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestSegmentHasFunctionOutputColumns
 	mock.UnPatch()
 
 	mock = mockey.Mock(packed.ManifestHasColumns).Return(false, fmt.Errorf("manifest read failed")).Build()
-	hasColumns, err = task.segmentHasFunctionOutputColumns(&datapb.SegmentInfo{
+	_, err = task.segmentHasFunctionOutputColumns(&datapb.SegmentInfo{
 		ID:           10,
 		ManifestPath: "manifest",
 	}, []string{"101"})
