@@ -17,7 +17,9 @@
 package main
 
 import (
+	"encoding/json"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 )
@@ -27,4 +29,26 @@ func TestFixtureCipherRequiresInitializedEZ(t *testing.T) {
 
 	_, _, err := cipher.GetEncryptor(17, 23)
 	require.ErrorContains(t, err, "EZ 17 is not initialized")
+}
+
+func TestFixtureCipherEdekSurvivesJSONRoundTrip(t *testing.T) {
+	cipher := fixtureCipher{keys: map[int64][]byte{17: []byte("fixture-root")}}
+
+	encryptor, edek, err := cipher.GetEncryptor(17, 23)
+	require.NoError(t, err)
+	require.Len(t, edek, 64)
+	require.True(t, utf8.Valid(edek))
+
+	serialized, err := json.Marshal(string(edek))
+	require.NoError(t, err)
+	var persisted string
+	require.NoError(t, json.Unmarshal(serialized, &persisted))
+
+	decryptor, err := cipher.GetDecryptor(17, 23, []byte(persisted))
+	require.NoError(t, err)
+	ciphertext, err := encryptor.Encrypt([]byte("fixture payload"))
+	require.NoError(t, err)
+	plaintext, err := decryptor.Decrypt(ciphertext)
+	require.NoError(t, err)
+	require.Equal(t, []byte("fixture payload"), plaintext)
 }

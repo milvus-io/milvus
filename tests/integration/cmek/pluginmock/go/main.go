@@ -19,6 +19,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -91,7 +92,8 @@ func (c *fixtureCipher) GetEncryptor(ezID, collectionID int64) (hook.Encryptor, 
 	sequence := c.counter
 	c.mu.Unlock()
 
-	edek := digest(string(key), ezID, collectionID, sequence)
+	rawEdek := digest(string(key), ezID, collectionID, sequence)
+	edek := []byte(hex.EncodeToString(rawEdek))
 	return &fixtureEncryptor{key: digestWithEdek(key, ezID, collectionID, edek)}, edek, nil
 }
 
