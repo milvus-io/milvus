@@ -234,6 +234,10 @@ func (r *StatsResolver) TextAndJSONIndexStats() (
 // For V3 (manifest): basePaths are extracted from the manifest stat paths.
 // For V2 (legacy): basePaths are empty (backward compat).
 func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr {
+	return r.textAndJSONIndexStatsWithBasePaths(false)
+}
+
+func (r *StatsResolver) textAndJSONIndexStatsWithBasePaths(includeAllJSON bool) *StatsResultWithErr {
 	if !r.isManifest() {
 		return &StatsResultWithErr{
 			StatsResult: StatsResult{
@@ -290,7 +294,7 @@ func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr
 			}
 
 		case "json_stats":
-			if _, ok := r.jsonKeyStats[fieldID]; !ok {
+			if _, ok := r.jsonKeyStats[fieldID]; !includeAllJSON && !ok {
 				continue
 			}
 			// For V3: extract basePath and convert to relative paths
@@ -330,6 +334,21 @@ func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr
 			JSONBasePaths:  jsonBasePaths,
 		},
 	}
+}
+
+// resolveManifestStatsPlaceholders converts the already-resolved stats of a
+// final manifest into the protobuf metadata retained by DataCoord. Unlike the
+// query path, it includes every JSON stat because it is constructing the
+// placeholder map itself rather than using that map as an enablement gate.
+func resolveManifestStatsPlaceholders(
+	manifestPath string,
+	manifestStats map[string]ManifestStat,
+) (map[int64]*datapb.TextIndexStats, map[int64]*datapb.JsonKeyStats) {
+	resolver := NewStatsResolver(manifestPath, nil)
+	resolver.manifestStats = manifestStats
+	resolver.manifestLoaded = true
+	result := resolver.textAndJSONIndexStatsWithBasePaths(true)
+	return result.TextIndexStats, result.JSONKeyStats
 }
 
 // StatsResultWithErr wraps StatsResult with an error.

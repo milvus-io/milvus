@@ -85,6 +85,37 @@ func WriteFile(
 	return HandleLoonFFIResult(result)
 }
 
+// DeleteFile removes one exact file through the milvus-storage filesystem.
+// Callers must resolve and validate the file path before invoking this helper;
+// it intentionally never performs prefix deletion.
+func DeleteFile(storageConfig *indexpb.StorageConfig, filePath string) error {
+	if filePath == "" {
+		return merr.WrapErrServiceInternalMsg("cannot delete an empty file path")
+	}
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return merr.Wrap(err, "create properties for file deletion")
+	}
+	defer C.loon_properties_free(cProperties)
+
+	cPath := C.CString(filePath)
+	defer C.free(unsafe.Pointer(cPath))
+	pathLen := C.uint32_t(len(filePath))
+
+	var fsHandle C.FileSystemHandle
+	result := C.loon_filesystem_get(cProperties, cPath, pathLen, &fsHandle)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return merr.WrapErrStorage(err, "get filesystem for deleting %s", filePath)
+	}
+	defer C.loon_filesystem_destroy(fsHandle)
+
+	result = C.loon_filesystem_delete_file(fsHandle, cPath, pathLen)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return merr.WrapErrStorage(err, "delete file %s", filePath)
+	}
+	return nil
+}
+
 // ReadFile reads an entire file using milvus-storage filesystem FFI.
 func ReadFile(
 	storageConfig *indexpb.StorageConfig,
