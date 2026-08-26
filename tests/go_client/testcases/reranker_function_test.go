@@ -339,13 +339,17 @@ func TestRerankFunctionRRF(t *testing.T) {
 	queryVec2 := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloat16Vector)
 
 	testCases := []struct {
-		name string
-		k    int
+		name    string
+		k       int
+		weights []float64
 	}{
-		{"default_k", 60},
-		{"small_k", 10},
-		{"large_k", 100},
-		{"very_large_k", 1000},
+		{name: "default_k", k: 60},
+		{name: "small_k", k: 10},
+		{name: "large_k", k: 100},
+		{name: "very_large_k", k: 1000},
+		{name: "weighted_rrf", k: 60, weights: []float64{0.8, 0.2}},
+		{name: "weights_not_normalized", k: 60, weights: []float64{0.2, 0.3}},
+		{name: "all_zero_weights", k: 60, weights: []float64{0, 0}},
 	}
 
 	for _, tc := range testCases {
@@ -356,6 +360,9 @@ func TestRerankFunctionRRF(t *testing.T) {
 				WithInputFields().
 				WithParam("reranker", "rrf").
 				WithParam("k", tc.k)
+			if tc.weights != nil {
+				rrfReranker.WithParam("weights", tc.weights)
+			}
 
 			annReq1 := client.NewAnnRequest(common.DefaultFloatVecFieldName, common.DefaultLimit, queryVec1...)
 			annReq2 := client.NewAnnRequest(common.DefaultFloat16VecFieldName, common.DefaultLimit, queryVec2...)
@@ -366,6 +373,14 @@ func TestRerankFunctionRRF(t *testing.T) {
 
 			common.CheckErr(t, err, true)
 			validateRerankFunctionResults(t, results, common.DefaultLimit)
+			if tc.name == "all_zero_weights" {
+				for _, result := range results {
+					require.Positive(t, result.ResultCount)
+					for _, score := range result.Scores {
+						require.Zero(t, score)
+					}
+				}
+			}
 		})
 	}
 }
@@ -628,6 +643,48 @@ func TestRerankFunctionRRFNegative(t *testing.T) {
 				WithInputFields().
 				WithParam("reranker", "rrf").
 				WithParam("k", tc.k)
+
+			_, err := mc.HybridSearch(ctx, client.NewHybridSearchOption(
+				schema.CollectionName, common.DefaultLimit, annReq1, annReq2,
+			).WithFunctionRerankers(rrfReranker))
+
+			common.CheckErr(t, err, false, tc.expectedError)
+		})
+	}
+}
+
+func TestRerankFunctionRRFWeightsNegative(t *testing.T) {
+	t.Parallel()
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	_, schema := createRerankFunctionTestCollection(ctx, t, mc, false)
+
+	queryVec1 := hp.GenSearchVectors(1, common.DefaultDim, entity.FieldTypeFloatVector)
+	queryVec2 := hp.GenSearchVectors(1, common.DefaultDim, entity.FieldTypeFloat16Vector)
+	annReq1 := client.NewAnnRequest(common.DefaultFloatVecFieldName, common.DefaultLimit, queryVec1...)
+	annReq2 := client.NewAnnRequest(common.DefaultFloat16VecFieldName, common.DefaultLimit, queryVec2...)
+
+	testCases := []struct {
+		name          string
+		weights       interface{}
+		expectedError string
+	}{
+		{name: "empty", weights: []float64{}, expectedError: "non-empty array"},
+		{name: "null", weights: nil, expectedError: "non-empty array"},
+		{name: "negative", weights: []float64{-0.1, 0.2}, expectedError: "range [0, 1]"},
+		{name: "greater_than_one", weights: []float64{0.8, 1.1}, expectedError: "range [0, 1]"},
+		{name: "count_mismatch", weights: []float64{0.8}, expectedError: "length of weights param mismatch"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			rrfReranker := entity.NewFunction().
+				WithName("test_rrf_weights_negative_"+tc.name).
+				WithType(entity.FunctionTypeRerank).
+				WithInputFields().
+				WithParam("reranker", "rrf").
+				WithParam("weights", tc.weights)
 
 			_, err := mc.HybridSearch(ctx, client.NewHybridSearchOption(
 				schema.CollectionName, common.DefaultLimit, annReq1, annReq2,

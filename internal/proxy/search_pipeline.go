@@ -1110,6 +1110,35 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 			}
 		}
 	}
+	// Build search params and validate the rerank chain before the empty-result
+	// fast path so invalid reranker configurations never return success.
+	var searchParams *chain.SearchParams
+	if op.groupByFieldName != "" && op.groupSize > 0 {
+		scorer := chain.GroupScorer(op.groupScorerStr)
+		searchParams = chain.NewSearchParamsWithGroupingAndScorer(
+			op.nq, op.topK, op.offset, op.roundDecimal,
+			op.groupByFieldName, op.groupSize, scorer)
+	} else {
+		searchParams = chain.NewSearchParams(op.nq, op.topK, op.offset, op.roundDecimal)
+	}
+	if op.rerankMeta == nil {
+		for _, df := range dataframes {
+			df.Release()
+		}
+		return nil, merr.WrapErrFunctionFailedMsg("rerank operator: rerankMeta is nil, cannot build rerank chain")
+	}
+	searchParams.ModelExtraInfo = &models.ModelExtraInfo{
+		ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
+		DBName:    op.dbName,
+	}
+	fc, err := buildChainFromMeta(op.rerankMeta, op.collSchema, inputMetrics, searchParams, alloc)
+	if err != nil {
+		for _, df := range dataframes {
+			df.Release()
+		}
+		return nil, err
+	}
+
 	if allEmpty {
 		var elementIndices *schemapb.LongArray
 		for _, df := range dataframes {
@@ -1134,35 +1163,6 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 				ElementIndices: elementIndices,
 			},
 		}}, nil
-	}
-
-	// Build search params
-	var searchParams *chain.SearchParams
-	if op.groupByFieldName != "" && op.groupSize > 0 {
-		scorer := chain.GroupScorer(op.groupScorerStr)
-		searchParams = chain.NewSearchParamsWithGroupingAndScorer(
-			op.nq, op.topK, op.offset, op.roundDecimal,
-			op.groupByFieldName, op.groupSize, scorer)
-	} else {
-		searchParams = chain.NewSearchParams(op.nq, op.topK, op.offset, op.roundDecimal)
-	}
-	// Build chain
-	if op.rerankMeta == nil {
-		for _, df := range dataframes {
-			df.Release()
-		}
-		return nil, merr.WrapErrFunctionFailedMsg("rerank operator: rerankMeta is nil, cannot build rerank chain")
-	}
-	searchParams.ModelExtraInfo = &models.ModelExtraInfo{
-		ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
-		DBName:    op.dbName,
-	}
-	fc, err := buildChainFromMeta(op.rerankMeta, op.collSchema, inputMetrics, searchParams, alloc)
-	if err != nil {
-		for _, df := range dataframes {
-			df.Release()
-		}
-		return nil, err
 	}
 
 	// Execute chain. Liveness pruning removes scalar inputs after their last use;
