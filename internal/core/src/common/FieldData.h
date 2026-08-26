@@ -42,6 +42,14 @@ class FieldData : public FieldDataImpl<Type, true> {
         : FieldDataImpl<Type, true>::FieldDataImpl(
               1, data_type, nullable, buffered_num_rows) {
     }
+
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       int64_t num_rows,
+                       const std::optional<Type>& default_value)
+        : FieldDataImpl<Type, true>::FieldDataImpl(
+              1, data_type, nullable, num_rows, default_value) {
+    }
     static_assert(IsScalar<Type> || std::is_same_v<Type, PkType>);
     explicit FieldData(DataType data_type,
                        bool nullable,
@@ -63,6 +71,13 @@ class FieldData<std::string> : public FieldDataStringImpl {
 
     explicit FieldData(DataType data_type,
                        bool nullable,
+                       int64_t num_rows,
+                       const std::optional<std::string>& default_value)
+        : FieldDataStringImpl(data_type, nullable, num_rows, default_value) {
+    }
+
+    explicit FieldData(DataType data_type,
+                       bool nullable,
                        FixedVector<std::string>&& inner_data)
         : FieldDataStringImpl(data_type, nullable, std::move(inner_data)) {
     }
@@ -76,6 +91,13 @@ class FieldData<Json> : public FieldDataJsonImpl {
                        bool nullable,
                        int64_t buffered_num_rows = 0)
         : FieldDataJsonImpl(data_type, nullable, buffered_num_rows) {
+    }
+
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       int64_t num_rows,
+                       const std::optional<DefaultValueType>& default_value)
+        : FieldDataJsonImpl(data_type, nullable, num_rows, default_value) {
     }
 
     explicit FieldData(DataType data_type,
@@ -94,6 +116,13 @@ class FieldData<Geometry> : public FieldDataGeometryImpl {
                        int64_t buffered_num_rows = 0)
         : FieldDataGeometryImpl(data_type, nullable, buffered_num_rows) {
     }
+
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       int64_t num_rows,
+                       const std::optional<std::string>& default_value)
+        : FieldDataGeometryImpl(data_type, nullable, num_rows, default_value) {
+    }
 };
 
 template <>
@@ -104,6 +133,13 @@ class FieldData<Array> : public FieldDataArrayImpl {
                        bool nullable,
                        int64_t buffered_num_rows = 0)
         : FieldDataArrayImpl(data_type, nullable, buffered_num_rows) {
+    }
+
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       int64_t num_rows,
+                       const std::optional<Array>& default_value)
+        : FieldDataArrayImpl(data_type, nullable, num_rows, default_value) {
     }
 };
 

@@ -1280,6 +1280,123 @@ CreateFieldData(const DataType& type,
     }
 }
 
+template <typename Type, typename Getter>
+std::optional<Type>
+GetTypedDefaultValue(const std::optional<DefaultValueType>& default_value,
+                     Getter getter) {
+    if (!default_value.has_value()) {
+        return std::nullopt;
+    }
+    return getter(*default_value);
+}
+
+FieldDataPtr
+CreateFieldDataFromDefaultValue(
+    const DataType& type,
+    bool nullable,
+    int64_t element_count,
+    const std::optional<DefaultValueType>& default_value) {
+    AssertInfo(nullable, "default value field data must be nullable");
+
+    switch (type) {
+        case DataType::BOOL:
+            return std::make_shared<FieldData<bool>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<bool>(
+                    default_value,
+                    [](const auto& value) { return value.bool_data(); }));
+        case DataType::INT8:
+            return std::make_shared<FieldData<int8_t>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<int8_t>(
+                    default_value,
+                    [](const auto& value) { return value.int_data(); }));
+        case DataType::INT16:
+            return std::make_shared<FieldData<int16_t>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<int16_t>(
+                    default_value,
+                    [](const auto& value) { return value.int_data(); }));
+        case DataType::INT32:
+            return std::make_shared<FieldData<int32_t>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<int32_t>(
+                    default_value,
+                    [](const auto& value) { return value.int_data(); }));
+        case DataType::INT64:
+            return std::make_shared<FieldData<int64_t>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<int64_t>(
+                    default_value,
+                    [](const auto& value) { return value.long_data(); }));
+        case DataType::FLOAT:
+            return std::make_shared<FieldData<float>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<float>(
+                    default_value,
+                    [](const auto& value) { return value.float_data(); }));
+        case DataType::DOUBLE:
+            return std::make_shared<FieldData<double>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<double>(
+                    default_value,
+                    [](const auto& value) { return value.double_data(); }));
+        case DataType::TIMESTAMPTZ:
+            return std::make_shared<FieldData<int64_t>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<int64_t>(
+                    default_value, [](const auto& value) {
+                        return value.timestamptz_data();
+                    }));
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+            return std::make_shared<FieldData<std::string>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<std::string>(
+                    default_value,
+                    [](const auto& value) { return value.string_data(); }));
+        case DataType::JSON:
+            return std::make_shared<FieldData<Json>>(
+                type, nullable, element_count, default_value);
+        case DataType::GEOMETRY:
+            return std::make_shared<FieldData<Geometry>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<std::string>(
+                    default_value,
+                    [](const auto& value) { return value.string_data(); }));
+        case DataType::ARRAY:
+            AssertInfo(!default_value.has_value(),
+                       "ARRAY default values are not supported");
+            return std::make_shared<FieldData<Array>>(
+                type, nullable, element_count, std::optional<Array>{});
+        default:
+            ThrowInfo(DataTypeInvalid,
+                      "CreateFieldDataFromDefaultValue not support data type " +
+                          GetDataTypeName(type));
+    }
+}
+
 int64_t
 GetByteSizeOfFieldDatas(const std::vector<FieldDataPtr>& field_datas) {
     int64_t result = 0;
@@ -2078,13 +2195,11 @@ CacheRawDataAndFillMissing(const MemFileManagerImplPtr& file_manager,
             }
             return field_schema.default_value();
         }();
-        auto field_data = storage::CreateFieldData(
+        auto field_data = storage::CreateFieldDataFromDefaultValue(
             static_cast<DataType>(field_schema.data_type()),
-            static_cast<DataType>(field_schema.element_type()),
             true,
-            1,
-            lack_binlog_rows);
-        field_data->FillFieldData(default_value, lack_binlog_rows);
+            lack_binlog_rows,
+            default_value);
         field_datas.insert(field_datas.begin(), field_data);
     }
 
