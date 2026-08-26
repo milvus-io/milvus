@@ -234,14 +234,32 @@ var gatedPathPrefixes = []string{
 	TelemetryUIPath,
 }
 
-// mustBeGated reports whether path is one that Register refuses to publish with
-// AdminAuth unset. The zero value is "open", right for /healthz and wrong for
-// the operator surface, where the next route added would otherwise ship
+// serveMuxPatternPath extracts the path from the patterns accepted by Go's
+// ServeMux: [METHOD ][HOST]/[PATH]. The registration guard must classify the
+// same path the mux will serve; checking the raw pattern would let a method or
+// host qualifier hide an operator route from the gate.
+func serveMuxPatternPath(pattern string) string {
+	if fields := strings.Fields(pattern); len(fields) > 1 {
+		pattern = fields[len(fields)-1]
+	}
+	if strings.HasPrefix(pattern, "/") {
+		return pattern
+	}
+	if slash := strings.IndexByte(pattern, '/'); slash >= 0 {
+		return pattern[slash:]
+	}
+	return pattern
+}
+
+// mustBeGated reports whether pattern is one that Register refuses to publish
+// with AdminAuth unset. The zero value is "open", right for /healthz and wrong
+// for the operator surface, where the next route added would otherwise ship
 // anonymous with nothing to say so.
 //
 // It covers what goes through Register only; the proxy's /api/v1 tree is
 // classified by its /_ prefix and covered by a route-enumerating test.
-func mustBeGated(path string) bool {
+func mustBeGated(pattern string) bool {
+	path := serveMuxPatternPath(pattern)
 	if _, ok := openOperatorPaths[path]; ok {
 		return false
 	}

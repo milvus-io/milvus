@@ -248,6 +248,26 @@ func TestTelemetryAuthMiddleware_UsesManagementCheckWhenAdminAuthEnabled(t *test
 		assert.True(t, called)
 		assert.Equal(t, http.StatusOK, recorder.Code)
 	})
+
+	t.Run("root survives the outer metrics-port gate", func(t *testing.T) {
+		router := gin.New()
+		router.Use(internalhttp.GinAdminAuthMiddleware(false))
+		router.GET("/", TelemetryAuthMiddleware(), func(c *gin.Context) {
+			err := checkTelemetryAdmin(c.Request.Context(), "test")
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.Status(http.StatusOK)
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.SetBasicAuth(util.UserRoot, "s3cr3t")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	})
 }
 
 func TestGetTelemetryClientsHandler(t *testing.T) {

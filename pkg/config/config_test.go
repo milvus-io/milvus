@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -398,4 +399,25 @@ func TestFormatKeyMemoIsBounded(t *testing.T) {
 	// A real key still normalizes correctly with the memo full.
 	assert.Equal(t, "commonsecurityadminauthenabled",
 		FormatKey("common.security.adminAuthEnabled"))
+}
+
+func TestFormatKeyMemoIsStrictlyBoundedUnderConcurrency(t *testing.T) {
+	saved := formattedKeys
+	formattedKeys = typeutil.NewConcurrentMap[string, string]()
+	t.Cleanup(func() { formattedKeys = saved })
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < maxFormattedKeys*2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			FormatKey(fmt.Sprintf("concurrent.caller.key_%d", i))
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	assert.LessOrEqual(t, formattedKeys.Len(), maxFormattedKeys)
 }

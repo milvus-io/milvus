@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -41,6 +40,7 @@ import (
 // credentials against Milvus's authentication system.
 // It checks if authentication is enabled and validates username/password.
 func TelemetryAuthMiddleware() gin.HandlerFunc {
+	adminAuth := internalhttp.GinAdminAuthMiddleware(false)
 	return func(c *gin.Context) {
 		// These routes push commands to connected clients and delete queued
 		// ones, so once the gate is on they run the root check themselves
@@ -48,22 +48,16 @@ func TelemetryAuthMiddleware() gin.HandlerFunc {
 		// installed the group middleware: a second mount point would publish
 		// them anonymously and every test here would stay green.
 		//
-		// The marker says the group already did it, in which case repeating it
-		// would charge a second bcrypt and count the decision twice.
-		if _, checked := c.Get(internalhttp.AdminAuthCheckedKey); checked {
+		// The typed request context says the parent group already verified root.
+		// Reusing that principal avoids both another bcrypt and a second metric,
+		// without relying on an untyped Gin marker that can lose the identity.
+		if _, checked := internalhttp.AuthenticatedAdminFromContext(c.Request.Context()); checked {
 			c.Next()
 			return
 		}
 		if internalhttp.AdminAuthEnabled() {
-			status, msg, ok := internalhttp.CheckAdminRequest(c.Request, c.FullPath(), false)
-			if !ok {
-				// The group middleware's shape, not this file's legacy
-				// {"error": ...}: the same route must not change reply shape
-				// depending on which check answered.
-				c.AbortWithStatusJSON(status, gin.H{
-					internalhttp.HTTPReturnCode:    internalhttp.AuthErrorCode(status),
-					internalhttp.HTTPReturnMessage: msg,
-				})
+			adminAuth(c)
+			if c.IsAborted() {
 				return
 			}
 			c.Next()
@@ -97,7 +91,7 @@ func TelemetryAuthMiddleware() gin.HandlerFunc {
 		encoded := strings.TrimPrefix(authHeader, "Basic ")
 		decoded, err := crypto.Base64Decode(encoded)
 		if err != nil {
-			mlog.Warn(context.TODO(), "TelemetryAuthMiddleware: failed to decode credentials", mlog.Err(err))
+			mlog.Warn(c.Request.Context(), "TelemetryAuthMiddleware: failed to decode credentials", mlog.Err(err))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": "invalid credentials encoding",
 			})
@@ -118,7 +112,7 @@ func TelemetryAuthMiddleware() gin.HandlerFunc {
 
 		// Validate credentials using Milvus auth system
 		if !passwordVerify(c.Request.Context(), username, password, privilege.GetPrivilegeCache()) {
-			mlog.Warn(context.TODO(), "TelemetryAuthMiddleware: authentication failed", mlog.String("username", username))
+			mlog.Warn(c.Request.Context(), "TelemetryAuthMiddleware: authentication failed", mlog.String("username", username))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": "invalid username or password",
 			})

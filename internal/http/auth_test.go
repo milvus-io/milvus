@@ -205,6 +205,25 @@ func TestWrapAdminAuth_ValidRootCredentialsPass(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
+func TestCheckAdminRequestCarriesAuthenticatedPrincipal(t *testing.T) {
+	enableAdminAuth(t)
+	setVerifyFunc(t, func(_ context.Context, username, password string) bool {
+		return username == util.UserRoot && password == "correct-horse"
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/management/stop", nil)
+	req.SetBasicAuth(util.UserRoot, "correct-horse")
+	decision := CheckAdminRequest(req, "/management/stop", false)
+	require.True(t, decision.Allowed())
+
+	authenticated := decision.AuthenticatedRequest(req)
+	username, ok := AuthenticatedAdminFromContext(authenticated.Context())
+	require.True(t, ok)
+	assert.Equal(t, util.UserRoot, username)
+	assert.Empty(t, req.Context().Value(authenticatedAdminContextKey{}),
+		"the original request context must not be mutated")
+}
+
 func TestWrapAdminAuth_VerifierUnavailableReturns503(t *testing.T) {
 	enableAdminAuth(t)
 	// No verifier at all means this node cannot judge the credential. The
@@ -372,6 +391,9 @@ func TestRegisterRejectsUngatedOperatorPaths(t *testing.T) {
 	for _, path := range []string{
 		"/management/some/new/route", "/debug/pprof/newprofile",
 		LogLevelRouterPath, EventLogRouterPath, RouteWebUI, TelemetryUIPath,
+		"GET /management/some/new/route",
+		"milvus.local/management/some/new/route",
+		"POST milvus.local/debug/pprof/profile",
 	} {
 		t.Run(path, func(t *testing.T) {
 			// The message is asserted, not just the panic: it is what tells
@@ -671,12 +693,15 @@ func TestRejectCrossSiteFailsClosed(t *testing.T) {
 // it: the gate and the data plane's own check both reply on the same paths, and
 // a script parsing one of them cannot be expected to know which ran.
 func TestAuthErrorCodeMatchesTheDataPlaneCodes(t *testing.T) {
-	assert.Equal(t, merr.Code(merr.ErrNeedAuthenticate), AuthErrorCode(http.StatusUnauthorized))
-	assert.Equal(t, merr.Code(merr.ErrPrivilegeNotPermitted), AuthErrorCode(http.StatusForbidden))
-	assert.Equal(t, merr.Code(merr.ErrServiceUnavailable), AuthErrorCode(http.StatusServiceUnavailable))
+	assert.Equal(t, merr.Code(merr.ErrNeedAuthenticate),
+		rejectedAuthDecision(http.StatusUnauthorized, "").ErrorCode())
+	assert.Equal(t, merr.Code(merr.ErrPrivilegeNotPermitted),
+		rejectedAuthDecision(http.StatusForbidden, "").ErrorCode())
+	assert.Equal(t, merr.Code(merr.ErrServiceUnavailable),
+		rejectedAuthDecision(http.StatusServiceUnavailable, "").ErrorCode())
 	// Anything the gate has no name for still carries a code, not a zero that a
 	// client would read as success.
-	assert.NotZero(t, AuthErrorCode(http.StatusInternalServerError))
+	assert.NotZero(t, rejectedAuthDecision(http.StatusInternalServerError, "").ErrorCode())
 }
 
 // The registry is written by component startup and shutdown while requests are
@@ -718,8 +743,8 @@ func TestManagementVerifierRegistryIsRaceFree(t *testing.T) {
 				// Either verdict is fine: which one depends on whether a
 				// verifier happens to be registered. Not crashing, and not
 				// tripping the race detector, is the point.
-				status, _, _ := CheckAdminRequest(req, "/management/stop", false)
-				assert.Contains(t, []int{http.StatusOK, http.StatusServiceUnavailable}, status)
+				decision := CheckAdminRequest(req, "/management/stop", false)
+				assert.Contains(t, []int{http.StatusOK, http.StatusServiceUnavailable}, decision.Status)
 			}
 		}()
 	}
