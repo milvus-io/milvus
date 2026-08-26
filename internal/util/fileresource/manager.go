@@ -238,11 +238,11 @@ type SyncManager struct {
 	sync.RWMutex
 	downloader storage.ChunkManager
 
-	version     *atomic.Uint64
-	resourceMap map[string]int64 // resource name -> resource id
+	version *atomic.Uint64
 
 	localResourcesLoaded bool
 	localResourceIDs     map[int64]struct{}
+	restoredResourceIDs  map[int64]struct{}
 }
 
 func (m *SyncManager) GetVersion() uint64 {
@@ -263,6 +263,7 @@ func (m *SyncManager) loadLocalResources() error {
 	}
 
 	m.localResourceIDs = make(map[int64]struct{})
+	m.restoredResourceIDs = make(map[int64]struct{})
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -272,6 +273,7 @@ func (m *SyncManager) loadLocalResources() error {
 			continue
 		}
 		m.localResourceIDs[resourceID] = struct{}{}
+		m.restoredResourceIDs[resourceID] = struct{}{}
 	}
 	m.localResourcesLoaded = true
 	return nil
@@ -281,14 +283,27 @@ func (m *SyncManager) hasLocalResourceFile(resourceID int64, localFilePath strin
 	if _, ok := m.localResourceIDs[resourceID]; !ok {
 		return false, nil
 	}
+	if _, restored := m.restoredResourceIDs[resourceID]; !restored {
+		return true, nil
+	}
+
 	info, err := os.Stat(localFilePath)
 	if errors.Is(err, os.ErrNotExist) {
+		delete(m.localResourceIDs, resourceID)
+		delete(m.restoredResourceIDs, resourceID)
 		return false, nil
 	}
 	if err != nil {
 		return false, merr.WrapErrIoFailed(localFilePath, err)
 	}
-	return info.Mode().IsRegular(), nil
+	if !info.Mode().IsRegular() {
+		delete(m.localResourceIDs, resourceID)
+		delete(m.restoredResourceIDs, resourceID)
+		return false, nil
+	}
+
+	delete(m.restoredResourceIDs, resourceID)
+	return true, nil
 }
 
 // sync file to local if file mode was Sync
@@ -335,6 +350,7 @@ func (m *SyncManager) Sync(ctx context.Context, version uint64, resourceList []*
 			return err
 		}
 		m.localResourceIDs[resource.GetId()] = struct{}{}
+		delete(m.restoredResourceIDs, resource.GetId())
 		mlog.Info(ctx, "sync file resource to local", mlog.String("path", localResourcePath), mlog.Int64("resourceID", resource.GetId()))
 		resolvedResources = append(resolvedResources, &ResolvedFileResource{
 			ID:        resource.GetId(),
@@ -361,9 +377,9 @@ func (m *SyncManager) Sync(ctx context.Context, version uint64, resourceList []*
 			continue
 		}
 		delete(m.localResourceIDs, id)
+		delete(m.restoredResourceIDs, id)
 	}
 
-	m.resourceMap = newResourceMap
 	m.version.Store(version)
 	notifyListeners(SyncEvent{Version: version, Resources: resolvedResources})
 	return nil
@@ -375,7 +391,6 @@ func NewSyncManager(downloader storage.ChunkManager) *SyncManager {
 	manager := &SyncManager{
 		BaseManager: newBaseManager(),
 		downloader:  downloader,
-		resourceMap: make(map[string]int64),
 		version:     atomic.NewUint64(0),
 	}
 	if err := manager.loadLocalResources(); err != nil {
