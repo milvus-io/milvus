@@ -29,9 +29,10 @@ import (
 )
 
 const (
-	createEZKey = "cipher.ez.create"
-	unsafeEZK   = "cipher.ezk"
-	kmsKeyARN   = "cipher.kmsKeyArn"
+	createEZKey            = "cipher.ez.create"
+	unsafeEZK              = "cipher.ezk"
+	kmsKeyARN              = "cipher.kmsKeyArn"
+	expectedFixtureRootKey = "fixture-root-key"
 )
 
 // CipherPlugin is intentionally a concrete exported value. Go's plugin
@@ -72,6 +73,9 @@ func (c *fixtureCipher) Init(params map[string]string) error {
 		if key == "" {
 			return fmt.Errorf("fixture cipher: missing EZ key for EZ %d", ezID)
 		}
+		if key != expectedFixtureRootKey {
+			return fmt.Errorf("fixture cipher: unexpected root key %q for EZ %d", key, ezID)
+		}
 		key = "fixture-root/" + key
 	}
 
@@ -94,7 +98,7 @@ func (c *fixtureCipher) GetEncryptor(ezID, collectionID int64) (hook.Encryptor, 
 
 	rawEdek := digest(string(key), ezID, collectionID, sequence)
 	edek := []byte(hex.EncodeToString(rawEdek))
-	return &fixtureEncryptor{key: digestWithEdek(key, ezID, collectionID, edek)}, edek, nil
+	return &fixtureEncryptor{key: deriveDataKey(key, edek)}, edek, nil
 }
 
 func (c *fixtureCipher) GetDecryptor(ezID, collectionID int64, safeKey []byte) (hook.Decryptor, error) {
@@ -105,7 +109,7 @@ func (c *fixtureCipher) GetDecryptor(ezID, collectionID int64, safeKey []byte) (
 	if len(safeKey) == 0 {
 		return nil, fmt.Errorf("fixture cipher: empty EDEK for EZ %d", ezID)
 	}
-	return &fixtureDecryptor{key: digestWithEdek(key, ezID, collectionID, safeKey)}, nil
+	return &fixtureDecryptor{key: deriveDataKey(key, safeKey)}, nil
 }
 
 func (c *fixtureCipher) GetUnsafeKey(ezID, _ int64) []byte {
@@ -150,9 +154,35 @@ func digest(key string, ezID, collectionID int64, sequence uint64) []byte {
 	return digestBytes([]byte(key), ezID, collectionID, sequence)
 }
 
-func digestWithEdek(key []byte, ezID, collectionID int64, edek []byte) []byte {
-	seed := append(append([]byte(nil), key...), edek...)
-	return digestBytes(seed, ezID, collectionID, 0)
+func deriveDataKey(key, edek []byte) []byte {
+	// The Go layer Base64-encodes the unsafe key before passing it to the C++
+	// plugin context. Derive from that exact representation so both fixtures
+	// can decrypt artifacts written by the other side.
+	encodedKey := base64.StdEncoding.EncodeToString(key)
+	seed := make([]byte, 0, len(encodedKey)+1+len(edek))
+	seed = append(seed, encodedKey...)
+	seed = append(seed, '/')
+	seed = append(seed, edek...)
+
+	const (
+		fnvOffset = uint64(1469598103934665603)
+		fnvPrime  = uint64(1099511628211)
+		xorScale  = uint64(2685821657736338717)
+	)
+	hash := fnvOffset
+	for _, value := range seed {
+		hash ^= uint64(value)
+		hash *= fnvPrime
+	}
+
+	result := make([]byte, sha256.Size)
+	for i := range result {
+		hash ^= hash >> 12
+		hash ^= hash << 25
+		hash ^= hash >> 27
+		result[i] = byte((hash * xorScale) >> 56)
+	}
+	return result
 }
 
 func digestBytes(key []byte, ezID, collectionID int64, sequence uint64) []byte {

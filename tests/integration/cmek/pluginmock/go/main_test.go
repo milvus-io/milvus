@@ -17,6 +17,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"testing"
 	"unicode/utf8"
@@ -29,6 +30,25 @@ func TestFixtureCipherRequiresInitializedEZ(t *testing.T) {
 
 	_, _, err := cipher.GetEncryptor(17, 23)
 	require.ErrorContains(t, err, "EZ 17 is not initialized")
+}
+
+func TestFixtureCipherRejectsUnexpectedRootKey(t *testing.T) {
+	cipher := fixtureCipher{keys: make(map[int64][]byte)}
+
+	err := cipher.Init(map[string]string{
+		createEZKey: "17",
+		kmsKeyARN:   "unexpected-root-key",
+	})
+	require.ErrorContains(t, err, "unexpected root key")
+}
+
+func TestFixtureDataKeyMatchesCppFixture(t *testing.T) {
+	key := deriveDataKey(
+		[]byte("fixture-root/fixture-root-key"),
+		[]byte("fixture-edek"),
+	)
+
+	require.Equal(t, "0da22159f596deb7593ba6cb73ad0825653d81431468d0483076d66e7d217066", hex.EncodeToString(key))
 }
 
 func TestFixtureCipherEdekSurvivesJSONRoundTrip(t *testing.T) {
