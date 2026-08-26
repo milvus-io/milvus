@@ -166,6 +166,7 @@ func TestHybridSearchMultiVectorsDefault(t *testing.T) {
 		// search with different reranker
 		for _, reranker := range []client.Reranker{
 			client.NewRRFReranker(),
+			client.NewRRFReranker().WithWeights([]float64{0.2, 0.3}),
 			client.NewWeightedReranker([]float64{0.8, 0.2}),
 			client.NewWeightedReranker([]float64{0.0, 0.2}),
 			client.NewWeightedReranker([]float64{0.4, 1.0}),
@@ -223,6 +224,18 @@ func TestHybridSearchInvalidParams(t *testing.T) {
 	} {
 		_, errReranker := mc.HybridSearch(ctx, client.NewHybridSearchOption(schema.CollectionName, common.DefaultLimit, annReq1, annReq2).WithReranker(invalidRanker))
 		common.CheckErr(t, errReranker, false, "rank param weight should be in range [0, 1]",
+			"the length of weights param mismatch with ann search requests")
+	}
+
+	// hybrid search with invalid weighted RRF params
+	for _, invalidRanker := range []client.Reranker{
+		client.NewRRFReranker().WithWeights([]float64{}),
+		client.NewRRFReranker().WithWeights(nil),
+		client.NewRRFReranker().WithWeights([]float64{-0.1, 0.2}),
+		client.NewRRFReranker().WithWeights([]float64{0.8}),
+	} {
+		_, errReranker := mc.HybridSearch(ctx, client.NewHybridSearchOption(schema.CollectionName, common.DefaultLimit, annReq1, annReq2).WithReranker(invalidRanker))
+		common.CheckErr(t, errReranker, false, "non-empty array", "rank param weight should be in range [0, 1]",
 			"the length of weights param mismatch with ann search requests")
 	}
 

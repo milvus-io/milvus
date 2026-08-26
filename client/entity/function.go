@@ -77,7 +77,10 @@ func (f *Function) WithType(funcType FunctionType) *Function {
 
 func (f *Function) WithParam(key string, value any) *Function {
 	// Handle slices by converting to JSON format
-	if reflect.TypeOf(value).Kind() == reflect.Slice {
+	valueType := reflect.TypeOf(value)
+	if valueType == nil {
+		f.Params[key] = "null"
+	} else if valueType.Kind() == reflect.Slice {
 		if jsonBytes, err := json.Marshal(value); err == nil {
 			f.Params[key] = string(jsonBytes)
 		} else {
