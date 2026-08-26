@@ -84,10 +84,11 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 	p.Domain = domain
 	p.base = base
 	p.IPItem = ParamItem{
-		Key:     p.Domain + ".ip",
-		Version: "2.3.3",
-		Doc:     "TCP/IP address of " + p.Domain + ". If not specified, use the first unicastable address",
-		Export:  true,
+		Key:       p.Domain + ".ip",
+		Version:   "2.3.3",
+		Doc:       "TCP/IP address of " + p.Domain + ". If not specified, use the first unicastable address",
+		Export:    true,
+		Sensitive: true,
 	}
 	p.IPItem.Init(base.mgr)
 	p.IP = funcutil.GetIP(p.IPItem.GetValue())
@@ -98,6 +99,7 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		DefaultValue: strconv.FormatInt(ProxyExternalPort, 10),
 		Doc:          "TCP port of " + p.Domain,
 		Export:       true,
+		Sensitive:    true,
 	}
 	p.Port.Init(base.mgr)
 
@@ -105,6 +107,7 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Key:          p.Domain + ".internalPort",
 		Version:      "2.0.0",
 		DefaultValue: strconv.FormatInt(ProxyInternalPort, 10),
+		Sensitive:    true,
 	}
 	p.InternalPort.Init(base.mgr)
 
@@ -113,6 +116,7 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Version:      "2.0.0",
 		DefaultValue: "0",
 		Export:       true,
+		Sensitive:    true,
 	}
 	p.TLSMode.Init(base.mgr)
 
@@ -136,6 +140,22 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Export:  true,
 	}
 	p.CaPemPath.Init(base.mgr)
+
+	// The per-cluster CDC namespaces are keyed by cluster ID and read by exact
+	// key through base.Get, not as a group — GetClusterTLSConfig and
+	// GetClusterAuthority below. They are declared anyway because a namespace
+	// nothing declares is invisible to the configuration projections and refused
+	// by the management endpoints, which would leave cross-cluster TLS
+	// unconfigurable through them.
+	//
+	// Registered directly rather than through a ParamGroup field: a field would
+	// buy a GetValue nothing calls, and grpcConfig is embedded in fifteen
+	// server and client configs, so it would buy thirty of them.
+	//
+	base.mgr.RegisterConfigPrefix("tls.clusters.")
+	base.mgr.RegisterConfigPrefix("grpc.clusters.")
+	base.mgr.RegisterSensitivePrefix("tls.clusters.")
+	base.mgr.RegisterSensitivePrefix("grpc.clusters.")
 }
 
 // GetClusterTLSConfig returns per-cluster outbound TLS cert paths for CDC connections.
@@ -574,6 +594,7 @@ func (p *InternalTLSConfig) Init(base *BaseTable) {
 		Version:      "2.5.0",
 		DefaultValue: "false",
 		Export:       true,
+		Sensitive:    true,
 	}
 	p.InternalTLSEnabled.Init(base.mgr)
 

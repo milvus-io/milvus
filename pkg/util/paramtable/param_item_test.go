@@ -24,6 +24,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 )
 
+func TestParamGroupDeleteDoesNotSurfaceTombstone(t *testing.T) {
+	manager := config.NewManager()
+	group := ParamGroup{KeyPrefix: "dynamic."}
+	group.Init(manager)
+
+	manager.SetMapConfig("dynamic.member", "value")
+	assert.Equal(t, map[string]string{"member": "value"}, group.GetValue())
+
+	manager.DeleteConfig("dynamic.member")
+	assert.Empty(t, group.GetValue())
+}
+
 func TestGetWithRaw_FallbackKeyCacheSuccess(t *testing.T) {
 	// When primary key equals DefaultValue and a fallback key has a different value,
 	// getWithRaw should return the fallback value as result but the primary key's

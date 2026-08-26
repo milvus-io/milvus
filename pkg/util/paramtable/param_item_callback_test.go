@@ -17,13 +17,17 @@
 package paramtable
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 func TestParamItem_RegisterCallback(t *testing.T) {
@@ -109,6 +113,71 @@ func TestParamItem_CallbackErrorHandling(t *testing.T) {
 	param.handleConfigChange(event)
 
 	assert.True(t, callbackCalled)
+}
+
+type paramLogBuffer struct {
+	bytes.Buffer
+}
+
+func (*paramLogBuffer) Sync() error { return nil }
+
+func TestParamItem_SensitiveCallbackLogsAreRedacted(t *testing.T) {
+	var logs paramLogBuffer
+	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+		Level:             "debug",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+	}, &logs)
+	require.NoError(t, err)
+
+	originalLogger := mlog.L()
+	originalLevel := mlog.GetAtomicLevel()
+	mlog.ReplaceGlobals(logger, props)
+	t.Cleanup(func() {
+		mlog.ReplaceGlobals(originalLogger, &mlog.ZapProperties{Level: originalLevel})
+	})
+
+	priorValue := strings.Repeat("old-cipher-sentinel-", 2)
+	updatedValue := strings.Repeat("new-cipher-sentinel-", 2)
+
+	for _, test := range []struct {
+		name        string
+		callbackErr error
+		message     string
+	}{
+		{name: "success", message: "param value changed"},
+		{name: "error", callbackErr: fmt.Errorf("callback error"), message: "param change callback failed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			logs.Reset()
+			manager := config.NewManager()
+			param := &ParamItem{
+				Key:          "cipherPlugin.kms.defaultKey",
+				DefaultValue: priorValue,
+				Sensitive:    true,
+			}
+			param.Init(manager)
+
+			param.RegisterCallback(func(_ context.Context, _ string, oldValue, newValue string) error {
+				assert.Equal(t, priorValue, oldValue)
+				assert.Equal(t, updatedValue, newValue)
+				return test.callbackErr
+			})
+			param.handleConfigChange(&config.Event{
+				EventType: config.UpdateType,
+				Key:       param.Key,
+				Value:     updatedValue,
+			})
+
+			output := logs.String()
+			assert.Contains(t, output, test.message)
+			assert.GreaterOrEqual(t, strings.Count(output, config.RedactedValue), 2)
+			assert.NotContains(t, output, priorValue)
+			assert.NotContains(t, output, updatedValue)
+		})
+	}
 }
 
 func TestParamItem_NoValueChange(t *testing.T) {

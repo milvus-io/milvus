@@ -161,13 +161,14 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 	}); err != nil {
 		return nil, errors.Wrap(err, "failed to save recovery snapshot to catalog")
 	}
-	r.Logger().Info(ctx, "initialize checkpoint done",
+	fields := []mlog.Field{
 		mlog.Int("vchannels", len(vchannels)),
 		mlog.String("checkpoint", checkpoint.MessageId.String()),
 		mlog.Uint64("timetick", checkpoint.TimeTick),
 		mlog.Int64("magic", checkpoint.RecoveryMagic),
-		mlog.Any("alterWALState", checkpoint.AlterWalState),
-	)
+	}
+	fields = append(fields, utility.AlterWALStateLogFields(checkpoint.AlterWalState)...)
+	r.Logger().Info(ctx, "initialize checkpoint done", fields...)
 	return checkpoint, nil
 }
 
