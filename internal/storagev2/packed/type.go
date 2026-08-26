@@ -57,9 +57,10 @@ type PackedReader struct {
 }
 
 type FFIPackedReader struct {
-	cPackedReader C.CFFIPackedReader
-	recordReader  arrio.Reader
-	schema        *arrow.Schema
+	cPackedReader  C.CFFIPackedReader
+	cSegmentReader C.LoonSegmentReaderHandle
+	recordReader   arrio.Reader
+	schema         *arrow.Schema
 }
 
 type (
