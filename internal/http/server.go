@@ -74,7 +74,7 @@ type Handler struct {
 	Handler     http.Handler
 }
 
-func writeJSONError(w http.ResponseWriter, status int, msg string) {
+func writeJSONWithMsg(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"msg": msg})
@@ -105,8 +105,8 @@ func registerDefaults() {
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			// Check if expr endpoint is enabled
 			if !paramtable.Get().CommonCfg.ExprEnabled.GetAsBool() {
-				w.WriteHeader(http.StatusForbidden)
-				w.Write([]byte(`{"msg": "expr endpoint is disabled. Set common.security.exprEnabled to true to enable it."}`))
+				writeJSONWithMsg(w, http.StatusForbidden,
+					"expr endpoint is disabled. Set common.security.exprEnabled to true to enable it.")
 				return
 			}
 
@@ -115,13 +115,13 @@ func registerDefaults() {
 
 			// Only Proxy nodes can access /expr endpoint
 			if !expr.HasRegistered("proxy") || passwordVerifyFunc == nil {
-				w.WriteHeader(http.StatusForbidden)
-				w.Write([]byte(`{"msg": "/expr endpoint is only available on Proxy nodes"}`))
+				writeJSONWithMsg(w, http.StatusForbidden,
+					"/expr endpoint is only available on Proxy nodes")
 				return
 			}
 
 			if err := CheckExprAuth(req.Context(), req); err != nil {
-				writeJSONError(w, HTTPStatusFromPrivilegeError(err), err.Error())
+				writeJSONWithMsg(w, HTTPStatusFromPrivilegeError(err), err.Error())
 				return
 			}
 			// Use bypass since we've already authenticated
@@ -129,7 +129,7 @@ func registerDefaults() {
 
 			output, err := expr.Exec(code, auth)
 			if err != nil {
-				writeJSONError(w, http.StatusInternalServerError,
+				writeJSONWithMsg(w, http.StatusInternalServerError,
 					fmt.Sprintf("failed to execute expression, %s", err.Error()))
 				return
 			}
@@ -160,13 +160,12 @@ func RegisterStopComponent(triggerComponentStop func(role string) error) {
 			mlog.Info(ctx, "start to trigger component stop", mlog.String("role", role))
 			if err := triggerComponentStop(role); err != nil {
 				mlog.Warn(ctx, "failed to trigger component stop", mlog.Err(err))
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, `{"msg": "failed to trigger component stop, %s"}`, err.Error())
+				writeJSONWithMsg(w, http.StatusInternalServerError,
+					fmt.Sprintf("failed to trigger component stop, %s", err.Error()))
 				return
 			}
 			mlog.Info(ctx, "finish to trigger component stop", mlog.String("role", role))
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"msg": "OK"}`))
+			writeJSONWithMsg(w, http.StatusOK, "OK")
 		},
 	})
 }
@@ -181,13 +180,12 @@ func RegisterCheckComponentReady(checkActive func(role string) error) {
 			mlog.Info(ctx, "start to check component ready", mlog.String("role", role))
 			if err := checkActive(role); err != nil {
 				mlog.Warn(ctx, "failed to check component ready", mlog.Err(err))
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, `{"msg": "failed to to check component ready, %s"}`, err.Error())
+				writeJSONWithMsg(w, http.StatusInternalServerError,
+					fmt.Sprintf("failed to to check component ready, %s", err.Error()))
 				return
 			}
 			mlog.Info(ctx, "finish to check component ready", mlog.String("role", role))
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"msg": "OK"}`))
+			writeJSONWithMsg(w, http.StatusOK, "OK")
 		},
 	})
 }
