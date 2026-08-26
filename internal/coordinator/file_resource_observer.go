@@ -19,7 +19,6 @@ package coordinator
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -74,15 +73,12 @@ type FileResourceObserver struct {
 	dnMode    fileresource.Mode
 	proxyMode fileresource.Mode
 
-	notifyCh chan struct{}
-	closeCh  chan struct{}
-	wg       sync.WaitGroup
-	sf       conc.Singleflight[any]
-	// retryEmptySync is set when clearing the last file resource fails. Empty
-	// resource notifications are otherwise startup/node-registration no-ops.
-	retryEmptySync atomic.Bool
-	startonce      sync.Once
-	closeOnce      sync.Once
+	notifyCh  chan struct{}
+	closeCh   chan struct{}
+	wg        sync.WaitGroup
+	sf        conc.Singleflight[any]
+	startonce sync.Once
+	closeOnce sync.Once
 }
 
 func NewFileResourceObserver(ctx context.Context) *FileResourceObserver {
@@ -115,7 +111,7 @@ func (m *FileResourceObserver) syncLoop() {
 	for {
 		select {
 		case <-m.notifyCh:
-			err := m.sync(true)
+			err := m.Sync()
 			if err != nil {
 				// retry if error exist
 				m.RetryNotify()
@@ -133,9 +129,20 @@ func (m *FileResourceObserver) syncLoop() {
 func (m *FileResourceObserver) Start() {
 	if m.qnMode == fileresource.SyncMode || m.dnMode == fileresource.SyncMode || m.proxyMode == fileresource.SyncMode {
 		m.startonce.Do(func() {
+			resources, _ := m.meta.ListFileResource(m.ctx)
+			if len(resources) == 0 {
+				// Node registrations can enqueue a notification before the observer
+				// starts. Drop that startup notification when there is nothing to sync.
+				select {
+				case <-m.notifyCh:
+				default:
+				}
+			}
 			m.wg.Add(1)
 			go m.syncLoop()
-			m.Notify()
+			if len(resources) > 0 {
+				m.Notify()
+			}
 		})
 	}
 }
@@ -195,26 +202,13 @@ func (m *FileResourceObserver) CheckAllQnReady() error {
 }
 
 func (m *FileResourceObserver) Sync() error {
-	return m.sync(false)
-}
-
-// sync skips an empty resource list only for background notifications from
-// startup or node registration. Direct synchronization after a removal still
-// sends the empty list to clear node-local files.
-func (m *FileResourceObserver) sync(background bool) error {
 	m.syncMu.Lock()
 	defer m.syncMu.Unlock()
 	var syncErr error
 	activeNodes := make(map[int64]struct{})
 	resources, targetVersion := m.meta.ListFileResource(m.ctx)
-	// Version 0 means no file resource has ever been added successfully. Avoid
-	// syncing regardless of whether this call comes from a direct operation or a
-	// background notification.
+	// Version 0 means no file resource has ever been added successfully.
 	if targetVersion == 0 {
-		m.retryEmptySync.Store(false)
-		return nil
-	}
-	if background && len(resources) == 0 && !m.retryEmptySync.Load() {
 		return nil
 	}
 
@@ -338,7 +332,6 @@ func (m *FileResourceObserver) sync(background bool) error {
 		return true
 	})
 
-	m.retryEmptySync.Store(syncErr != nil && len(resources) == 0)
 	return syncErr
 }
 
