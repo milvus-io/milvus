@@ -72,12 +72,15 @@ type externalCollectionRefreshChecker struct {
 	// transitions into Failed state (via aggregateJobState or tryTimeoutJob).
 	// Used to reclaim per-job resources (e.g. the explore temp directory)
 	// without waiting for the retention-gated GC path. The callback itself
-	// is idempotent — the manager dedups against notifiedJobs so concurrent
-	// eager and periodic paths only fire one cleanup per jobID.
+	// is idempotent — the manager dedups on its own cleanup key so concurrent
+	// eager and periodic paths only fire one cleanup per jobID. That key is
+	// deliberately NOT the schema-publish key: a job that applied its
+	// segments and then failed still owes the publish.
 	onJobFailed func(jobID int64)
 	// onJobGC is invoked after the checker successfully drops a job during
-	// GC so the manager can release any per-job bookkeeping (notifiedJobs
-	// dedup entry). Keeps the dedup map bounded across DataCoord lifetime.
+	// GC so the manager can release any per-job bookkeeping (the publish and
+	// cleanup dedup entries). Keeps those maps bounded across DataCoord
+	// lifetime.
 	onJobGC func(jobID int64)
 	// onInitJobPending is fired for jobs still in Init state with no tasks
 	// yet. This is the retry hook for the two-phase submission scheme: the
@@ -548,12 +551,19 @@ func (c *externalCollectionRefreshChecker) ensureJobFinishedNotified(job *datapb
 	if latestJob == nil {
 		return
 	}
-	// Finished, OR applied and now waiting for indexes. The callback publishes
-	// the refreshed source/spec and reclaims the explore temp dir, and both
-	// become due the moment the segments are applied - which with the index
-	// wait on happens before Finished. Waiting for Finished would hold the
-	// schema back for the whole wait, and index builds take the external
-	// source/spec from the collection schema.
+	// Finished, OR applied - waiting for indexes, or done waiting one way or
+	// the other. The callback publishes the refreshed source/spec and reclaims
+	// the explore temp dir, and both become due the moment the segments are
+	// applied - which with the index wait on happens before Finished. Waiting
+	// for Finished would hold the schema back for the whole wait, and index
+	// builds take the external source/spec from the collection schema.
+	//
+	// The marker also holds for a job that FAILED after applying (it outran
+	// the job timeout mid-wait). Such a job still owes the publish: its
+	// segments are the collection's contents and are being served, so the
+	// schema must describe them - Failed only says the wait did not finish in
+	// budget. That is why the Failed path may not claim the publish dedup key;
+	// see handleJobFailed.
 	if latestJob.GetState() != indexpb.JobState_JobStateFinished &&
 		latestJob.GetIndexWaitStartedTime() == 0 {
 		return
@@ -627,10 +637,8 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 		if !applied {
 			// Terminal-state guard fired — while the checker was about to
 			// time out this job a concurrent eager path already transitioned
-			// it to Finished/Failed. Firing onJobFailed here would poison
-			// the manager's notifiedJobs dedup map and cause a subsequent
-			// handleJobFinished to skip the schemaUpdater. Bail out and let
-			// the path that actually persisted the transition do cleanup.
+			// it to Finished/Failed. Bail out and let the path that actually
+			// persisted the transition own the one-time side effects.
 			mlog.Info(c.ctx, "skip timeout fail path, job already in terminal state",
 				mlog.FieldJobID(job.GetJobId()))
 			return
@@ -697,8 +705,8 @@ func (c *externalCollectionRefreshChecker) checkGC(job *datapb.ExternalCollectio
 			return
 		}
 		mlog.Info(c.ctx, "external collection job removed", mlog.FieldJobID(job.GetJobId()))
-		// Release per-job bookkeeping in the manager (notifiedJobs dedup map)
-		// so it stays bounded across DataCoord lifetime.
+		// Release per-job bookkeeping in the manager (the publish and cleanup
+		// dedup entries) so it stays bounded across DataCoord lifetime.
 		if c.onJobGC != nil {
 			c.onJobGC(job.GetJobId())
 		}

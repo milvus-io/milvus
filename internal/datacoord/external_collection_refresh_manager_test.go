@@ -1963,11 +1963,12 @@ func TestHandleJobFinished_TriggersExploreTempCleanup(t *testing.T) {
 	assert.Equal(t, []string{"__explore_temp__/coord_555/"}, prefixes, "Finished path must clean up the job-specific prefix")
 	assert.Equal(t, []string{"__explore_temp__/coord_555"}, removes)
 
-	// notifiedJobs must hold an entry so forgetJob later skips redundant cleanup.
 	mgr.notifiedMu.Lock()
-	_, present := mgr.notifiedJobs[555]
+	_, notified := mgr.notifiedJobs[555]
+	_, cleaned := mgr.cleanedJobs[555]
 	mgr.notifiedMu.Unlock()
-	assert.True(t, present, "handleJobFinished should mark jobID in notifiedJobs")
+	assert.True(t, notified, "handleJobFinished should mark jobID in notifiedJobs")
+	assert.True(t, cleaned, "handleJobFinished should mark jobID as cleaned so forgetJob skips it")
 }
 
 // ==================== handleJobFailed Tests ====================
@@ -1977,16 +1978,21 @@ func TestHandleJobFailed_TriggersCleanupAndDedups(t *testing.T) {
 	mgr := newManagerWithChunkManager(t, cm)
 
 	mgr.handleJobFailed(777)
-	mgr.handleJobFailed(777) // second call must no-op via notifiedJobs dedup
+	mgr.handleJobFailed(777) // second call must no-op via the cleanup dedup
 
 	prefixes, removes := cm.snapshot()
 	assert.Equal(t, []string{"__explore_temp__/coord_777/"}, prefixes)
 	assert.Equal(t, []string{"__explore_temp__/coord_777"}, removes)
 
 	mgr.notifiedMu.Lock()
-	_, present := mgr.notifiedJobs[777]
+	_, cleaned := mgr.cleanedJobs[777]
+	_, notified := mgr.notifiedJobs[777]
 	mgr.notifiedMu.Unlock()
-	assert.True(t, present, "handleJobFailed should mark jobID in notifiedJobs")
+	assert.True(t, cleaned, "handleJobFailed should mark jobID as cleaned")
+	// The load-bearing half: a job applied by the index wait and then failed
+	// still owes its schema publish, and handleJobFinished is what delivers it.
+	// Claiming the publish key here would suppress that publish permanently.
+	assert.False(t, notified, "handleJobFailed must not claim the schema-publish dedup key")
 }
 
 // ==================== forgetJob Tests ====================
@@ -1995,21 +2001,24 @@ func TestForgetJob_SkipsCleanupWhenAlreadyHandled(t *testing.T) {
 	cm := &recordingChunkManager{}
 	mgr := newManagerWithChunkManager(t, cm)
 
-	// Simulate the Finished path having already cleaned the job.
+	// Simulate a terminal path having already cleaned the job.
 	mgr.notifiedMu.Lock()
 	mgr.notifiedJobs[321] = struct{}{}
+	mgr.cleanedJobs[321] = struct{}{}
 	mgr.notifiedMu.Unlock()
 
 	mgr.forgetJob(321)
 
 	prefixes, removes := cm.snapshot()
-	assert.Empty(t, prefixes, "forgetJob must skip cleanup when notifiedJobs entry is present")
-	assert.Empty(t, removes, "forgetJob must skip root removal when notifiedJobs entry is present")
+	assert.Empty(t, prefixes, "forgetJob must skip cleanup when the job was already cleaned")
+	assert.Empty(t, removes, "forgetJob must skip root removal when the job was already cleaned")
 
 	mgr.notifiedMu.Lock()
-	_, stillPresent := mgr.notifiedJobs[321]
+	_, stillNotified := mgr.notifiedJobs[321]
+	_, stillCleaned := mgr.cleanedJobs[321]
 	mgr.notifiedMu.Unlock()
-	assert.False(t, stillPresent, "forgetJob must still delete the dedup entry")
+	assert.False(t, stillNotified, "forgetJob must still delete the publish dedup entry")
+	assert.False(t, stillCleaned, "forgetJob must still delete the cleanup dedup entry")
 }
 
 func TestForgetJob_CleansUpWhenNeverHandled(t *testing.T) {

@@ -30,9 +30,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // ==================== Test Functions ====================
@@ -332,11 +334,10 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 	// path and observes a stale InProgress snapshot that a concurrent
 	// task-success path has already transitioned to Finished, the
 	// UpdateJobState terminal guard silently returns applied=false. In
-	// that case tryTimeoutJob MUST NOT fire onJobFailed — firing it would
-	// poison the manager's notifiedJobs dedup map and cause the eager
-	// path's later handleJobFinished to short-circuit, so schemaUpdater
-	// would never be called and the external collection would silently
-	// never pick up its refreshed schema.
+	// that case tryTimeoutJob MUST NOT fire onJobFailed — the path that
+	// actually persisted the transition owns the one-time side effects, and
+	// a Failed-path callback for a job that finished would reclaim the
+	// explore temp dir on behalf of a transition it did not make.
 	t.Run("timeout_guard_skip_does_not_fire_onJobFailed", func(t *testing.T) {
 		timeout := Params.DataCoordCfg.ExternalCollectionJobTimeout.GetAsDuration(time.Second)
 		oldStartTime := time.Now().Add(-timeout - time.Hour).UnixMilli()
@@ -1731,5 +1732,90 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			assert.Equal(t, 2, saves,
 				"an unchanged debt is not news; the catalog must not be written again")
 		})
+	})
+}
+
+// TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassPublishes
+// pins the one ordering in which the wait can commit segments without ever
+// telling the collection where they came from.
+//
+// A job whose ingest ran past the job timeout enters the wait and times out in
+// the SAME processJob pass: aggregateJobState applies its segments and stamps
+// the marker (the job stays InProgress), tryTimeoutJob then persists Failed and
+// fires onJobFailed, and ensureJobFinishedNotified fires onJobFinished right
+// after. The two callbacks must not share a dedup key, or the Failed one
+// claims it first and the publish is skipped for good - the collection would
+// serve the refreshed segments under the pre-refresh external_source/spec, and
+// nothing re-publishes it: the job is terminal and the key only clears at GC.
+//
+// This drives the REAL manager callbacks through processJob, which is the only
+// place the ordering exists; calling the two methods directly cannot see it.
+func TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassPublishes(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	mockey.PatchConvey("timeout in the entry pass", t, func() {
+		pt := paramtable.Get()
+		pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+		defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+		catalog := &stubCatalog{}
+		// StartTime already older than the job timeout: the first pass that
+		// sees every task Finished is also the pass that times the job out.
+		jobs := []*datapb.ExternalCollectionRefreshJob{{
+			JobId: 1, CollectionId: 100,
+			State:          indexpb.JobState_JobStateInProgress,
+			TaskIds:        []int64{1001},
+			StartTime:      time.Now().Add(-1000 * time.Hour).UnixMilli(),
+			ExternalSource: "s3://new",
+			ExternalSpec:   `{"format":"parquet","v":2}`,
+		}}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFinished, Progress: 100},
+		}
+		mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
+		mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
+		refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+		require.NoError(t, err)
+
+		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{
+			Name:           "coll",
+			ExternalSource: "s3://old",
+			ExternalSpec:   `{"format":"parquet"}`,
+		}})
+		// indexMeta only has to be non-nil: the entry pass never reaches the
+		// debt oracle, it applies and is timed out in the same pass.
+		mt := &meta{segments: NewSegmentsInfo(), indexMeta: &indexMeta{}, collections: collections}
+
+		cm := &recordingChunkManager{}
+		var published [][2]string
+		mgr := NewExternalCollectionRefreshManager(ctx, mt, newStubScheduler(), &stubAllocator{},
+			refreshMeta, nil, testCollectionGetter(mt),
+			func(_ context.Context, _ int64, source, spec string) error {
+				published = append(published, [2]string{source, spec})
+				return nil
+			}, cm).(*externalCollectionRefreshManager)
+
+		// The manager's own callbacks, wired to a stub apply - what is under
+		// test is the callback ordering, not the segment update.
+		checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}),
+			mgr.handleJobFinished,
+			func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
+			mgr.handleJobFailed, mgr.forgetJob, nil)
+
+		checker.processJob(refreshMeta.GetJob(1))
+
+		applied := refreshMeta.GetJob(1)
+		require.NotZero(t, applied.GetIndexWaitStartedTime(),
+			"the pass must have applied the segments before timing the job out")
+		require.Equal(t, indexpb.JobState_JobStateFailed, applied.GetState(),
+			"a job that outruns its budget mid-wait fails like any refresh")
+
+		assert.Equal(t, [][2]string{{"s3://new", `{"format":"parquet","v":2}`}}, published,
+			"segments applied means the refreshed source/spec is owed, whatever state the job ends in")
+
+		prefixes, _ := cm.snapshot()
+		assert.Len(t, prefixes, 1, "the explore temp dir is still reclaimed exactly once")
 	})
 }
