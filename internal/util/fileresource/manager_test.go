@@ -127,7 +127,6 @@ func (suite *SyncManagerSuite) SetupTest() {
 		BaseManager: BaseManager{localPath: suite.tempDir},
 		downloader:  suite.mockStorage,
 		version:     atomic.NewUint64(0),
-		resourceMap: make(map[string]int64),
 	}
 }
 
@@ -185,10 +184,29 @@ func (suite *SyncManagerSuite) TestSync_RestoreLocalResourcesAfterRestart() {
 	suite.Require().NoError(suite.manager.Sync(context.Background(), 3, resources))
 
 	suite.Equal(uint64(3), suite.manager.GetVersion())
-	suite.Equal(map[string]int64{"active": 1}, suite.manager.resourceMap)
 	suite.Equal(map[int64]struct{}{1: {}}, suite.manager.localResourceIDs)
+	suite.Empty(suite.manager.restoredResourceIDs)
 	suite.FileExists(path.Join(activeDir, "active.file"))
 	suite.NoDirExists(orphanDir)
+}
+
+func (suite *SyncManagerSuite) TestSync_VerifiesRestoredResourceOnlyOnce() {
+	resourceDir := path.Join(suite.tempDir, "1")
+	localFilePath := path.Join(resourceDir, "active.file")
+	suite.Require().NoError(os.MkdirAll(resourceDir, os.ModePerm))
+	suite.Require().NoError(os.WriteFile(localFilePath, []byte("active content"), 0o600))
+
+	resources := []*internalpb.FileResourceInfo{
+		{Id: 1, Name: "active", Path: "/storage/active.file"},
+	}
+	suite.Require().NoError(suite.manager.Sync(context.Background(), 1, resources))
+	suite.Empty(suite.manager.restoredResourceIDs)
+
+	// Once a restored resource has been verified, subsequent syncs trust the
+	// in-memory state and do not stat or download the file again.
+	suite.Require().NoError(os.Remove(localFilePath))
+	suite.Require().NoError(suite.manager.Sync(context.Background(), 2, resources))
+	suite.Equal(uint64(2), suite.manager.GetVersion())
 }
 
 func (suite *SyncManagerSuite) TestSync_ClearRestoredResourcesWithEmptyList() {
@@ -200,6 +218,7 @@ func (suite *SyncManagerSuite) TestSync_ClearRestoredResourcesWithEmptyList() {
 
 	suite.Equal(uint64(2), suite.manager.GetVersion())
 	suite.Empty(suite.manager.localResourceIDs)
+	suite.Empty(suite.manager.restoredResourceIDs)
 	suite.NoDirExists(orphanDir)
 }
 
@@ -373,7 +392,6 @@ func (suite *SyncManagerSuite) TestSync_AnalyzerUpdateFailureDoesNotAdvanceVersi
 		oldResourcePath := path.Join(suite.tempDir, "1")
 		suite.Require().NoError(os.MkdirAll(oldResourcePath, os.ModePerm))
 		suite.Require().NoError(os.WriteFile(path.Join(oldResourcePath, "old.file"), []byte("old content"), 0o600))
-		suite.manager.resourceMap = map[string]int64{"test.file": 1}
 		suite.manager.version.Store(1)
 
 		listener := &mockFileResourceListener{}
@@ -391,7 +409,6 @@ func (suite *SyncManagerSuite) TestSync_AnalyzerUpdateFailureDoesNotAdvanceVersi
 		err := suite.manager.Sync(context.Background(), 2, resources)
 		suite.ErrorIs(err, expectedErr)
 		suite.Equal(uint64(1), suite.manager.GetVersion())
-		suite.Equal(map[string]int64{"test.file": 1}, suite.manager.resourceMap)
 		suite.Empty(listener.events)
 		suite.FileExists(path.Join(suite.tempDir, "1", "old.file"))
 		suite.FileExists(path.Join(suite.tempDir, "2", "new.file"))
@@ -402,7 +419,6 @@ func (suite *SyncManagerSuite) TestSync_AnalyzerUpdateFailureDoesNotAdvanceVersi
 
 		suite.Require().NoError(suite.manager.Sync(context.Background(), 2, resources))
 		suite.Equal(uint64(2), suite.manager.GetVersion())
-		suite.Equal(map[string]int64{"test.file": 2}, suite.manager.resourceMap)
 		suite.Require().Len(listener.events, 1)
 		suite.NoDirExists(path.Join(suite.tempDir, "1"))
 		content, err := os.ReadFile(path.Join(suite.tempDir, "2", "new.file"))
