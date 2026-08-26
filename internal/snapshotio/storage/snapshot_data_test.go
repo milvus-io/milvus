@@ -1632,7 +1632,7 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 	assert.Equal(t, int64(8), rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[1].GetLogID())
 }
 
-func TestListSnapshotDataFiles_StorageV3SkipIndex(t *testing.T) {
+func TestListSnapshotDataFiles_StorageV3SkipIndexCopiesManifestRoot(t *testing.T) {
 	tempDir := t.TempDir()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 	ctx := context.Background()
@@ -1679,8 +1679,8 @@ func TestListSnapshotDataFiles_StorageV3SkipIndex(t *testing.T) {
 	assert.Contains(t, byPath, path.Join(basePath, "_data/cg0.parquet"))
 	assert.Contains(t, byPath, path.Join(basePath, "_stats/pk.10/1"))
 	assert.Contains(t, byPath, path.Join(basePath, "_stats/bm25.11/1"))
-	assert.NotContains(t, byPath, path.Join(basePath, "_stats/text_index.12/posting"))
-	assert.NotContains(t, byPath, path.Join(basePath, "_stats/json_stats.13/shredding"))
+	assert.Contains(t, byPath, path.Join(basePath, "_stats/text_index.12/posting"))
+	assert.Contains(t, byPath, path.Join(basePath, "_stats/json_stats.13/shredding"))
 }
 
 func validateSnapshotDataFiles(

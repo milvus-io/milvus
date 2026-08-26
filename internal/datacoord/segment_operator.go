@@ -31,18 +31,6 @@ func SetMaxRowCount(maxRow int64) SegmentOperator {
 	}
 }
 
-func SetTextIndexLogs(textIndexLogs map[int64]*datapb.TextIndexStats) SegmentOperator {
-	return func(segment *SegmentInfo) bool {
-		if segment.TextStatsLogs == nil {
-			segment.TextStatsLogs = make(map[int64]*datapb.TextIndexStats)
-		}
-		for field, logs := range textIndexLogs {
-			segment.TextStatsLogs[field] = logs
-		}
-		return true
-	}
-}
-
 func SetStatslogs(statslogs []*datapb.FieldBinlog) SegmentOperator {
 	return func(segment *SegmentInfo) bool {
 		segment.Statslogs = statslogs
@@ -53,18 +41,6 @@ func SetStatslogs(statslogs []*datapb.FieldBinlog) SegmentOperator {
 func SetBm25Statslogs(bm25Statslogs []*datapb.FieldBinlog) SegmentOperator {
 	return func(segment *SegmentInfo) bool {
 		segment.Bm25Statslogs = bm25Statslogs
-		return true
-	}
-}
-
-func SetJSONKeyIndexLogs(jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats) SegmentOperator {
-	return func(segment *SegmentInfo) bool {
-		if segment.JsonKeyStats == nil {
-			segment.JsonKeyStats = make(map[int64]*datapb.JsonKeyStats)
-		}
-		for field, logs := range jsonKeyIndexLogs {
-			segment.JsonKeyStats[field] = logs
-		}
 		return true
 	}
 }

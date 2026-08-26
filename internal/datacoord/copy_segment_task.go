@@ -1206,7 +1206,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 				result.GetStatslogs(), result.GetDeltalogs(), result.GetBm25Logs())
 			op2 := UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
 			op3 := UpdateIsImporting(result.GetSegmentId(), false)
-			operators := []UpdateOperator{op1, op2, op3}
+			operators := []UpdateOperator{op1}
 			// A copy target is a freshly created, exclusively owned segment and the
 			// worker returns a complete manifest pointer - including the copied
 			// index entries, which it re-derives rather than inheriting from the
@@ -1229,6 +1229,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 					operators = append(operators, UpdateManifestHasIndex(result.GetSegmentId()))
 				}
 			}
+			operators = append(operators, updateCopiedSegmentIndexMetadata(result), op3, op2)
 			err := validateCopiedManifestIndexPlacement(result, task, meta, publishedBuilds)
 			if err == nil {
 				err = meta.UpdateSegmentsInfo(ctx, operators...)
@@ -1239,16 +1240,6 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 
 			// Sync vector/scalar indexes
 			if err = syncVectorScalarIndexes(ctx, result, task, meta, copyMeta, publishedBuilds); err != nil {
-				return err
-			}
-
-			// Sync text indexes
-			if err = syncTextIndexes(ctx, result, task, meta, copyMeta); err != nil {
-				return err
-			}
-
-			// Sync JSON key indexes
-			if err = syncJSONKeyIndexes(ctx, result, task, meta, copyMeta); err != nil {
 				return err
 			}
 
@@ -1293,7 +1284,6 @@ func failCopySegmentSync(ctx context.Context, task CopySegmentTask, copyMeta Cop
 		mlog.Warn(ctx, "failed to update task state to Failed",
 			mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
 	}
-
 	updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 		UpdateCopyJobReason(err.Error()))
@@ -1301,7 +1291,6 @@ func failCopySegmentSync(ctx context.Context, task CopySegmentTask, copyMeta Cop
 		mlog.Warn(ctx, "failed to update job state to Failed",
 			mlog.FieldJobID(task.GetJobId()), mlog.Err(updateErr))
 	}
-
 	mlog.Warn(ctx, "update copy segment binlogs failed",
 		WrapCopySegmentTaskLog(task, mlog.String("err", err.Error()))...)
 	return err
@@ -1505,7 +1494,6 @@ func taskIndexWriteToManifest(task CopySegmentTask) (bool, bool) {
 	}
 	return writeSegmentIndexToManifest(), false
 }
-
 func cloneOptionalBool(value *bool) *bool {
 	if value == nil {
 		return nil
@@ -1674,137 +1662,5 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 				mlog.Int64("sourceIndexID", indexInfo.GetIndexId()),
 				mlog.FieldBuildID(indexInfo.GetBuildId()))...)
 	}
-	return nil
-}
-
-// ===========================================================================================
-// Index Synchronization: Text Indexes
-// ===========================================================================================
-
-// syncTextIndexes synchronizes text index metadata to segment.
-//
-// Process flow:
-//  1. Update segment with text index logs
-//  2. Log success or mark task/job as failed
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - result: Segment copy result from DataNode
-//   - task: Copy segment task
-//   - meta: Metadata manager for updating segment
-//   - copyMeta: For marking task/job as failed on error
-//
-// Returns:
-//   - nil on success
-//   - error on failure (task and job will be marked as failed)
-//
-// Text indexes:
-// - Full-text search indexes for VARCHAR fields
-// - Stored inline with segment metadata (not in indexMeta)
-// - Enables text search queries on restored collection
-func syncTextIndexes(ctx context.Context, result *datapb.CopySegmentResult,
-	task CopySegmentTask, meta *meta, copyMeta CopySegmentMeta,
-) error {
-	if len(result.GetTextIndexInfos()) == 0 {
-		return nil
-	}
-
-	err := meta.UpdateSegment(result.GetSegmentId(),
-		SetTextIndexLogs(result.GetTextIndexInfos()))
-	if err != nil {
-		mlog.Warn(ctx, "failed to update text index",
-			WrapCopySegmentTaskLog(task,
-				mlog.FieldSegmentID(result.GetSegmentId()),
-				mlog.Err(err))...)
-
-		// Mark task and job as failed
-		updateErr := copyMeta.UpdateTask(ctx, task.GetTaskId(),
-			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
-			UpdateCopyTaskReason(err.Error()))
-		if updateErr != nil {
-			mlog.Warn(ctx, "failed to update task state to Failed",
-				mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
-		}
-
-		updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
-			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-			UpdateCopyJobReason(err.Error()))
-		if updateErr != nil {
-			mlog.Warn(ctx, "failed to update job state to Failed",
-				mlog.FieldJobID(task.GetJobId()), mlog.Err(updateErr))
-		}
-		return err
-	}
-
-	mlog.Info(ctx, "synced text indexes",
-		WrapCopySegmentTaskLog(task,
-			mlog.FieldSegmentID(result.GetSegmentId()),
-			mlog.Int("count", len(result.GetTextIndexInfos())))...)
-	return nil
-}
-
-// ===========================================================================================
-// Index Synchronization: JSON Key Indexes
-// ===========================================================================================
-
-// syncJSONKeyIndexes synchronizes JSON key index metadata to segment.
-//
-// Process flow:
-//  1. Update segment with JSON key index logs
-//  2. Log success or mark task/job as failed
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - result: Segment copy result from DataNode
-//   - task: Copy segment task
-//   - meta: Metadata manager for updating segment
-//   - copyMeta: For marking task/job as failed on error
-//
-// Returns:
-//   - nil on success
-//   - error on failure (task and job will be marked as failed)
-//
-// JSON key indexes:
-// - Indexes on keys within JSON fields
-// - Stored inline with segment metadata (not in indexMeta)
-// - Enables efficient queries on JSON field contents
-func syncJSONKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
-	task CopySegmentTask, meta *meta, copyMeta CopySegmentMeta,
-) error {
-	if len(result.GetJsonKeyIndexInfos()) == 0 {
-		return nil
-	}
-
-	err := meta.UpdateSegment(result.GetSegmentId(),
-		SetJSONKeyIndexLogs(result.GetJsonKeyIndexInfos()))
-	if err != nil {
-		mlog.Warn(ctx, "failed to update json key index",
-			WrapCopySegmentTaskLog(task,
-				mlog.FieldSegmentID(result.GetSegmentId()),
-				mlog.Err(err))...)
-
-		// Mark task and job as failed
-		updateErr := copyMeta.UpdateTask(ctx, task.GetTaskId(),
-			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
-			UpdateCopyTaskReason(err.Error()))
-		if updateErr != nil {
-			mlog.Warn(ctx, "failed to update task state to Failed",
-				mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
-		}
-
-		updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
-			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-			UpdateCopyJobReason(err.Error()))
-		if updateErr != nil {
-			mlog.Warn(ctx, "failed to update job state to Failed",
-				mlog.FieldJobID(task.GetJobId()), mlog.Err(updateErr))
-		}
-		return err
-	}
-
-	mlog.Info(ctx, "synced json key indexes",
-		WrapCopySegmentTaskLog(task,
-			mlog.FieldSegmentID(result.GetSegmentId()),
-			mlog.Int("count", len(result.GetJsonKeyIndexInfos())))...)
 	return nil
 }
