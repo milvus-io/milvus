@@ -58,7 +58,11 @@ func NewXGBoostExpr(modelResource string, output string, cache *xgboostModelCach
 		cache = globalXGBoostModelCache
 	}
 	return &XGBoostExpr{
-		BaseExpr:      *NewBaseExpr(XGBoostFuncName, []string{types.StageL0Rerank}),
+		BaseExpr: *NewBaseExpr(XGBoostFuncName, []string{
+			types.StageL0Rerank,
+			types.StageL1Rerank,
+			types.StageL2Rerank,
+		}),
 		modelResource: modelResource,
 		output:        output,
 		cache:         cache,

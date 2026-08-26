@@ -2369,11 +2369,6 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
-	if len(httpReq.FunctionChains) != 0 {
-		err := merr.WrapErrParameterInvalidMsg("functionChains is not supported for hybrid search yet")
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-		return nil, err
-	}
 	for _, subReq := range httpReq.Search {
 		if subReq.SearchAggregation != nil {
 			err := merr.WrapErrParameterInvalidMsg("searchAggregation is not supported for hybrid search")
@@ -2423,6 +2418,15 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			PartitionNames: httpReq.PartitionNames,
 			SearchParams:   searchParams,
 		}
+		if len(subReq.FunctionChains) > 0 {
+			if searchReq.FunctionChains, err = genFunctionChains(subReq.FunctionChains); err != nil {
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+					HTTPReturnMessage: err.Error(),
+				})
+				return nil, err
+			}
+		}
 		subTemplateValues, err := generateExpressionTemplate(subReq.ExprParams)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
@@ -2437,13 +2441,19 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	}
 
 	bs, _ := json.Marshal(httpReq.Rerank.Params)
-	// leave the rerank check to proxy side
+	// Leave the rerank check to proxy side.
 	req.RankParams = []*commonpb.KeyValuePair{
 		{Key: proxy.RankTypeKey, Value: httpReq.Rerank.Strategy},
 		{Key: proxy.ParamsKey, Value: string(bs)},
 		{Key: proxy.LimitKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)},
 		{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)},
 		{Key: ParamRoundDecimal, Value: "-1"},
+	}
+	if len(httpReq.FunctionChains) > 0 {
+		if req.FunctionChains, err = genFunctionChains(httpReq.FunctionChains); err != nil {
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
 	}
 	req.RankParams, err = appendGroupParams(req.RankParams, httpReq.GroupByField, httpReq.GroupSize, httpReq.StrictGroupSize)
 	if err != nil {

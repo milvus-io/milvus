@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -1225,7 +1226,7 @@ func TestExecuteFilterOnly(t *testing.T) {
 	assert.NotNil(t, result.CostAggregation)
 }
 
-func TestExecuteEmptySearchReturnsNQEmptyResult(t *testing.T) {
+func TestExecuteEmptySearchReturnsNQEmptyResultWithoutFunctionChainValidation(t *testing.T) {
 	const (
 		nq   int64 = 1
 		topK int64 = 10
@@ -1246,6 +1247,18 @@ func TestExecuteEmptySearchReturnsNQEmptyResult(t *testing.T) {
 	ctx := context.Background()
 	queryReq, err := mock_segcore.GenQueryRequest(
 		collection.GetCCollection(), nil, nq, topK, testCollectionID)
+	require.NoError(t, err)
+
+	// QueryNode deliberately prepares Function Chains only after ANN produces
+	// candidates. An unsupported L2 chain therefore must not turn an empty
+	// search result into a validation error.
+	plan := &planpb.PlanNode{}
+	require.NoError(t, proto.Unmarshal(queryReq.GetReq().GetSerializedExprPlan(), plan))
+	plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{{
+		Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+		Ops:   []*schemapb.FunctionChainOp{{Op: chaintypes.OpTypeMap}},
+	}}
+	queryReq.Req.SerializedExprPlan, err = proto.Marshal(plan)
 	require.NoError(t, err)
 
 	task := NewSearchTask(ctx, collection, manager, queryReq, 1)
@@ -1272,6 +1285,53 @@ func TestExecuteEmptySearchReturnsNQEmptyResult(t *testing.T) {
 	assert.Empty(t, resultData.Scores)
 	assert.Zero(t, typeutil.GetSizeOfIDs(resultData.GetIds()))
 	assert.Empty(t, resultData.FieldsData)
+}
+
+func TestExecuteNonEmptySearchValidatesFunctionChain(t *testing.T) {
+	const (
+		nq   int64 = 1
+		topK int64 = 10
+	)
+
+	paramtable.Init()
+	schema := mock_segcore.GenTestCollectionSchema("test-non-empty-search", schemapb.DataType_Int64, true)
+	indexMeta := mock_segcore.GenTestIndexMeta(testCollectionID, schema)
+	manager := segments.NewManager()
+	manager.Collection.PutOrRef(testCollectionID, schema, indexMeta, &querypb.LoadMetaInfo{
+		LoadType:     querypb.LoadType_LoadCollection,
+		CollectionID: testCollectionID,
+		PartitionIDs: []int64{testPartitionID},
+	})
+	collection := manager.Collection.Get(testCollectionID)
+	defer manager.Collection.Unref(collection.ID(), 1)
+
+	queryReq, err := mock_segcore.GenQueryRequest(
+		collection.GetCCollection(), nil, nq, topK, testCollectionID)
+	require.NoError(t, err)
+
+	plan := &planpb.PlanNode{}
+	require.NoError(t, proto.Unmarshal(queryReq.GetReq().GetSerializedExprPlan(), plan))
+	plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{{
+		Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+		Ops:   []*schemapb.FunctionChainOp{{Op: chaintypes.OpTypeMap}},
+	}}
+	queryReq.Req.SerializedExprPlan, err = proto.Marshal(plan)
+	require.NoError(t, err)
+
+	searchResult := new(segments.SearchResult)
+	mockSearch := mockey.Mock(segments.SearchHistorical).Return(
+		[]*segments.SearchResult{searchResult}, []segments.Segment(nil), nil,
+	).Build()
+	defer mockSearch.UnPatch()
+	mockPrepare := mockey.Mock(segcore.PrepareSearchResultsForExport).Return(int64(0), nil).Build()
+	defer mockPrepare.UnPatch()
+
+	task := NewSearchTask(context.Background(), collection, manager, queryReq, 1)
+	require.NoError(t, task.PreExecute())
+	err = task.Execute()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "stage FunctionChainStageL2Rerank is not supported")
 }
 
 // TestExecuteMergedSubTasks exercises the multi-sub-task slicing path: after

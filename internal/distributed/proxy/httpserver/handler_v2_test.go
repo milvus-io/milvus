@@ -1305,6 +1305,186 @@ func TestHybridSearchWithRerank(t *testing.T) {
 	sendReqAndVerify(t, testEngine, queryTestCases.path, http.MethodPost, queryTestCases)
 }
 
+func TestHybridSearchWithFunctionChain(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	testEngine := initHTTPServerV2(mp, false)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, true, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+
+	mp.EXPECT().HybridSearch(mock.Anything, mock.MatchedBy(func(req *milvuspb.HybridSearchRequest) bool {
+		if len(req.GetFunctionChains()) != 1 {
+			return false
+		}
+		if len(req.GetRequests()) != 2 || len(req.GetRequests()[0].GetFunctionChains()) != 2 ||
+			len(req.GetRequests()[1].GetFunctionChains()) != 0 {
+			return false
+		}
+		subL0ChainPB := req.GetRequests()[0].GetFunctionChains()[0]
+		if subL0ChainPB.GetStage() != schemapb.FunctionChainStage_FunctionChainStageL0Rerank ||
+			len(subL0ChainPB.GetOps()) != 1 || subL0ChainPB.GetOps()[0].GetOp() != "map" {
+			return false
+		}
+		subL0Expr := subL0ChainPB.GetOps()[0].GetExpr()
+		if subL0Expr.GetName() != "xgboost" || len(subL0Expr.GetArgs()) != 1 ||
+			subL0Expr.GetArgs()[0].GetColumn().GetName() != "book_id" ||
+			subL0Expr.GetParams()["model_resource"].GetStringValue() != "test-model" {
+			return false
+		}
+		subL1ChainPB := req.GetRequests()[0].GetFunctionChains()[1]
+		if subL1ChainPB.GetStage() != schemapb.FunctionChainStage_FunctionChainStageL1Rerank ||
+			len(subL1ChainPB.GetOps()) != 1 || subL1ChainPB.GetOps()[0].GetOp() != "limit" ||
+			subL1ChainPB.GetOps()[0].GetParams()["limit"].GetInt64Value() != 2 {
+			return false
+		}
+		chainPB := req.GetFunctionChains()[0]
+		if chainPB.GetStage() != schemapb.FunctionChainStage_FunctionChainStageL2Rerank ||
+			len(chainPB.GetOps()) != 1 || chainPB.GetOps()[0].GetOp() != "merge" {
+			return false
+		}
+
+		keys := make(map[string]string, len(req.GetRankParams()))
+		for _, param := range req.GetRankParams() {
+			keys[param.GetKey()] = param.GetValue()
+		}
+		_, hasStrategy := keys[proxy.RankTypeKey]
+		_, hasParams := keys[proxy.ParamsKey]
+		return hasStrategy && hasParams && keys[proxy.RankTypeKey] == "" && keys[proxy.ParamsKey] == "null" &&
+			keys[proxy.LimitKey] == "2" && keys[proxy.OffsetKey] == "1" && keys[ParamRoundDecimal] == "-1"
+	})).Return(&milvuspb.SearchResults{
+		Status:  commonSuccessStatus,
+		Results: &schemapb.SearchResultData{},
+	}, nil).Once()
+
+	testcase := requestBodyTestCase{
+		path: versionalV2(EntityCategory, HybridSearchAction),
+		requestBody: []byte(`{
+			"collectionName": "hello_milvus",
+			"search": [
+				{
+					"data": [[0.1, 0.2]],
+					"annsField": "book_intro",
+					"metricType": "L2",
+					"limit": 3,
+					"functionChains": [
+						{
+							"name": "sub_l0_rerank",
+							"stage": "FunctionChainStageL0Rerank",
+							"ops": [{
+								"op": "map",
+								"outputs": ["$score"],
+								"expr": {
+									"name": "xgboost",
+									"args": [{"column": "book_id"}],
+									"params": {"model_resource": "test-model"}
+								}
+							}]
+						},
+						{
+							"name": "sub_l1_rerank",
+							"stage": "FunctionChainStageL1Rerank",
+							"ops": [{"op": "limit", "params": {"limit": 2}}]
+						}
+					]
+				},
+				{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}
+			],
+			"limit": 2,
+			"offset": 1,
+			"functionChains": [{
+				"name": "hybrid_rerank",
+				"stage": "FunctionChainStageL2Rerank",
+				"ops": [{"op": "merge", "params": {"strategy": "rrf"}}]
+			}]
+		}`),
+	}
+	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
+}
+
+func TestHybridSearchRejectsInvalidSubSearchFunctionChain(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	testEngine := initHTTPServerV2(mp, false)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, true, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+
+	testcase := requestBodyTestCase{
+		path: versionalV2(EntityCategory, HybridSearchAction),
+		requestBody: []byte(`{
+			"collectionName": "hello_milvus",
+			"search": [{
+				"data": [[0.1, 0.2]],
+				"annsField": "book_intro",
+				"metricType": "L2",
+				"limit": 3,
+				"functionChains": [{"stage": "BadStage", "ops": [{"op": "limit"}]}]
+			}]
+		}`),
+		errCode: 1100,
+		errMsg:  "unsupported function chain stage",
+	}
+	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
+}
+
+func TestHybridSearchKeepsFunctionChainWithRerank(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+	mp := mocks.NewMockProxy(t)
+	testEngine := initHTTPServerV2(mp, false)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, true, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().HybridSearch(mock.Anything, mock.MatchedBy(func(req *milvuspb.HybridSearchRequest) bool {
+		if len(req.GetFunctionChains()) != 1 {
+			return false
+		}
+		params := make(map[string]string, len(req.GetRankParams()))
+		for _, param := range req.GetRankParams() {
+			params[param.GetKey()] = param.GetValue()
+		}
+		return params[proxy.RankTypeKey] == "rrf" && params[proxy.ParamsKey] == `{"k":60}`
+	})).Return(&milvuspb.SearchResults{
+		Status:  commonSuccessStatus,
+		Results: &schemapb.SearchResultData{},
+	}, nil).Once()
+
+	testcase := requestBodyTestCase{
+		path: versionalV2(EntityCategory, HybridSearchAction),
+		requestBody: []byte(`{
+			"collectionName": "hello_milvus",
+			"search": [
+				{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}
+			],
+			"limit": 2,
+			"rerank": {"strategy": "rrf", "params": {"k": 60}},
+			"functionChains": [{
+				"name": "hybrid_rerank",
+				"stage": "FunctionChainStageL2Rerank",
+				"ops": [{"op": "merge", "params": {"strategy": "rrf"}}]
+			}]
+		}`),
+	}
+	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
+}
+
 func TestDocInDocOutSearch(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
