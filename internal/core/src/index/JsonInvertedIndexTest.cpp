@@ -299,6 +299,10 @@ TEST(JsonIndexTest, TestJsonContains) {
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
     json_index->create_reader(milvus::index::SetBitsetSealed);
+    auto valid = json_index->IsNotNull();
+    ASSERT_EQ(valid.size(), json_raw_data.size());
+    EXPECT_EQ(valid.count(), json_raw_data.size());
+    EXPECT_EQ(json_index->IsNull().count(), 0);
 
     auto segment = segcore::CreateSealedSegment(schema);
     segcore::LoadIndexInfo load_index_info;

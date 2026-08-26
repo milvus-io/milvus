@@ -9,13 +9,25 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <boost/filesystem.hpp>
 #include <gtest/gtest.h>
+#include <cstdint>
+#include <limits>
+#include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
+#include "common/Common.h"
 #include "common/Schema.h"
+#include "common/Slice.h"
+#include "index/Meta.h"
+#include "index/TextMatchIndex.h"
+#include "storage/FileManager.h"
+#include "storage/Util.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/storagev1translator/TextMatchIndexTranslator.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "query/PlanProto.h"
@@ -67,6 +79,35 @@ GenTestSchema(std::map<std::string, std::string> params = {},
     }
     return schema;
 }
+
+storage::FileManagerContext
+CreateTextMatchTestFileManagerContext(int64_t build_id) {
+    auto storage_config = get_default_local_storage_config();
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+
+    storage::FieldDataMeta field_meta{1, 2, 3, 101};
+    field_meta.field_schema.set_data_type(proto::schema::DataType::VarChar);
+    storage::IndexMeta index_meta{3, 101, build_id, 10000};
+    return storage::FileManagerContext(
+        field_meta, index_meta, chunk_manager, fs);
+}
+
+class FileSliceSizeGuard {
+ public:
+    explicit FileSliceSizeGuard(int64_t slice_size)
+        : old_slice_size_(FILE_SLICE_SIZE.load()) {
+        FILE_SLICE_SIZE.store(slice_size);
+    }
+
+    ~FileSliceSizeGuard() {
+        FILE_SLICE_SIZE.store(old_slice_size_);
+    }
+
+ private:
+    int64_t old_slice_size_;
+};
+
 std::shared_ptr<milvus::plan::FilterBitsNode>
 GetMatchExpr(SchemaPtr schema,
              const std::string& query,
@@ -219,6 +260,215 @@ TEST(TextMatch, Index) {
         ASSERT_FALSE(res4[0]);
         ASSERT_FALSE(res4[1]);
         ASSERT_TRUE(res4[2]);
+    }
+}
+
+TEST(TextMatch, RawSealedFinalizationMaterializesOnlyWhenNeeded) {
+    using Index = index::TextMatchIndex;
+
+    auto with_null =
+        std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
+                                "raw_sealed_with_null",
+                                "milvus_tokenizer",
+                                "{}");
+    with_null->AddTextSealed("alpha", true, 0);
+    with_null->AddNullSealed(1);
+    with_null->AddTextSealed("beta", true, 2);
+    with_null->CreateReader(milvus::index::SetBitsetSealed);
+    with_null->Finish();
+    with_null->Reload();
+    with_null->FinalizeSealed();
+    with_null->FinalizeSealed();  // Idempotent for converging sealed paths.
+
+    auto nulls = with_null->IsNull();
+    ASSERT_EQ(nulls.size(), 3);
+    EXPECT_FALSE(nulls[0]);
+    EXPECT_TRUE(nulls[1]);
+    EXPECT_FALSE(nulls[2]);
+    EXPECT_EQ(with_null->ValidityBitmapByteSize(), sizeof(uint64_t));
+
+    auto all_valid =
+        std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
+                                "raw_sealed_all_valid",
+                                "milvus_tokenizer",
+                                "{}");
+    all_valid->AddTextSealed("alpha", true, 0);
+    all_valid->AddTextSealed("beta", true, 1);
+    all_valid->CreateReader(milvus::index::SetBitsetSealed);
+    all_valid->Finish();
+    all_valid->Reload();
+    all_valid->FinalizeSealed();
+
+    EXPECT_EQ(all_valid->ValidityBitmapByteSize(), 0);
+    auto valid = all_valid->IsNotNull();
+    ASSERT_EQ(valid.size(), 2);
+    EXPECT_TRUE(valid[0]);
+    EXPECT_TRUE(valid[1]);
+    auto no_nulls = all_valid->IsNull();
+    EXPECT_EQ(no_nulls.count(), 0);
+}
+
+TEST(TextMatch, V2LoadFinalizesValidityBitmap) {
+    auto ctx = CreateTextMatchTestFileManagerContext(1003);
+    auto builder = std::make_unique<index::TextMatchIndex>(
+        ctx, index::TANTIVY_INDEX_LATEST_VERSION, "milvus_tokenizer", "{}");
+
+    std::vector<std::string> texts = {"alpha", "", "beta"};
+    std::vector<uint8_t> valid_bytes = {0b00000101};
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
+    field_data->FillFieldData(
+        texts.data(), valid_bytes.data(), texts.size(), 0);
+    builder->BuildIndexFromFieldData({field_data}, true);
+    auto stats = builder->Upload({});
+    auto files = stats->GetIndexFiles();
+
+    for (bool mmap_enabled : {false, true}) {
+        Config config;
+        config[index::INDEX_FILES] = files;
+        config[index::ENABLE_MMAP] = mmap_enabled;
+
+        auto loaded = std::make_unique<index::TextMatchIndex>(ctx);
+        loaded->Load(config);
+
+        EXPECT_EQ(loaded->ValidityBitmapByteSize(), sizeof(uint64_t));
+        auto nulls = loaded->IsNull();
+        ASSERT_EQ(nulls.size(), texts.size());
+        EXPECT_FALSE(nulls[0]);
+        EXPECT_TRUE(nulls[1]);
+        EXPECT_FALSE(nulls[2]);
+
+        std::string excluded = "alpha";
+        auto not_in = loaded->NotIn(1, &excluded);
+        ASSERT_EQ(not_in.size(), texts.size());
+        EXPECT_FALSE(not_in[0]);
+        EXPECT_FALSE(not_in[1]);
+        EXPECT_TRUE(not_in[2]);
+    }
+}
+
+TEST(TextMatch, V2LoadSlicedNullOffsets) {
+    constexpr int64_t kSliceSize = 4 * 1024;
+    constexpr size_t kRows = kSliceSize / sizeof(size_t) + 1;
+
+    auto ctx = CreateTextMatchTestFileManagerContext(1004);
+    auto builder = std::make_unique<index::TextMatchIndex>(
+        ctx, index::TANTIVY_INDEX_LATEST_VERSION, "milvus_tokenizer", "{}");
+
+    std::vector<std::string> texts(kRows);
+    std::vector<uint8_t> valid_bytes((kRows + 7) / 8, 0);
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
+    field_data->FillFieldData(
+        texts.data(), valid_bytes.data(), texts.size(), 0);
+    builder->BuildIndexFromFieldData({field_data}, true);
+    auto stats = [&]() {
+        FileSliceSizeGuard slice_size_guard(kSliceSize);
+        return builder->Upload({});
+    }();
+
+    auto files = stats->GetIndexFiles();
+    bool found_null_offset_slice = false;
+    bool found_slice_meta = false;
+    for (const auto& file : files) {
+        auto file_name = boost::filesystem::path(file).filename().string();
+        found_null_offset_slice |=
+            file_name.find(index::INDEX_NULL_OFFSET_FILE_NAME +
+                           std::string("_")) == 0;
+        found_slice_meta |= file_name == INDEX_FILE_SLICE_META;
+    }
+    ASSERT_TRUE(found_null_offset_slice);
+    ASSERT_TRUE(found_slice_meta);
+
+    for (bool mmap_enabled : {false, true}) {
+        Config config;
+        config[index::INDEX_FILES] = files;
+        config[index::ENABLE_MMAP] = mmap_enabled;
+
+        auto loaded = std::make_unique<index::TextMatchIndex>(ctx);
+        loaded->Load(config);
+
+        EXPECT_EQ(loaded->ValidityBitmapByteSize(),
+                  TargetBitmap(kRows).size_in_bytes());
+        auto nulls = loaded->IsNull();
+        ASSERT_EQ(nulls.size(), kRows);
+        EXPECT_EQ(nulls.count(), kRows);
+
+        auto valid = loaded->IsNotNull();
+        ASSERT_EQ(valid.size(), kRows);
+        EXPECT_EQ(valid.count(), 0);
+
+        std::string excluded = "alpha";
+        auto not_in = loaded->NotIn(1, &excluded);
+        ASSERT_EQ(not_in.size(), kRows);
+        EXPECT_EQ(not_in.count(), 0);
+    }
+}
+
+TEST(TextMatch, TranslatorResourceAccountsForValidityBitmap) {
+    auto ctx = CreateTextMatchTestFileManagerContext(1005);
+    auto builder = std::make_unique<index::TextMatchIndex>(
+        ctx, index::TANTIVY_INDEX_LATEST_VERSION, "milvus_tokenizer", "{}");
+
+    std::vector<std::string> texts = {"alpha", "", "beta"};
+    std::vector<uint8_t> valid_bytes = {0b00000101};
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
+    field_data->FillFieldData(
+        texts.data(), valid_bytes.data(), texts.size(), 0);
+    builder->BuildIndexFromFieldData({field_data}, true);
+    auto stats = builder->Upload({});
+
+    auto files = stats->GetIndexFiles();
+    auto index_size = stats->GetMemSize();
+    auto bitmap_bytes =
+        static_cast<int64_t>(TargetBitmap(texts.size()).size_in_bytes());
+
+    for (bool mmap_enabled : {false, true}) {
+        Config config;
+        config[index::INDEX_FILES] = files;
+        config[index::ENABLE_MMAP] = mmap_enabled;
+
+        storagev1translator::TextMatchIndexLoadInfo load_info{
+            mmap_enabled,
+            3,
+            101,
+            "{}",
+            index_size,
+            static_cast<int64_t>(texts.size()),
+            ""};
+        storagev1translator::TextMatchIndexTranslator translator(
+            load_info, ctx, config);
+
+        auto [estimated_loaded, estimated_total_loading] =
+            translator.estimated_byte_size_of_cell(0);
+        if (mmap_enabled) {
+            EXPECT_EQ(estimated_loaded.memory_bytes, bitmap_bytes);
+            EXPECT_EQ(estimated_loaded.file_bytes, index_size);
+            EXPECT_EQ(estimated_total_loading.memory_bytes,
+                      index_size + bitmap_bytes);
+            EXPECT_EQ(estimated_total_loading.file_bytes, index_size);
+        } else {
+            EXPECT_EQ(estimated_loaded.memory_bytes, index_size + bitmap_bytes);
+            EXPECT_EQ(estimated_loaded.file_bytes, 0);
+            EXPECT_EQ(estimated_total_loading.memory_bytes,
+                      index_size + bitmap_bytes);
+            EXPECT_EQ(estimated_total_loading.file_bytes, index_size);
+        }
+
+        auto cells = translator.get_cells(nullptr, {0});
+        ASSERT_EQ(cells.size(), 1);
+        auto* loaded = cells.front().second.get();
+        ASSERT_NE(loaded, nullptr);
+        EXPECT_EQ(loaded->ValidityBitmapByteSize(), bitmap_bytes);
+        if (mmap_enabled) {
+            EXPECT_EQ(loaded->CellByteSize().memory_bytes, bitmap_bytes);
+            EXPECT_EQ(loaded->CellByteSize().file_bytes,
+                      loaded->ByteSize() - bitmap_bytes);
+        } else {
+            EXPECT_EQ(loaded->CellByteSize().memory_bytes, loaded->ByteSize());
+            EXPECT_EQ(loaded->CellByteSize().file_bytes, 0);
+        }
     }
 }
 

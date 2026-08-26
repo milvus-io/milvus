@@ -72,6 +72,7 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
     void
     create_reader(SetBitsetFn set_bitset) {
         this->wrapper_->create_reader(set_bitset);
+        this->FinalizeSealed();
     }
 
     void
