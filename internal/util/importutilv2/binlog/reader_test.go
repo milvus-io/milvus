@@ -19,10 +19,16 @@ package binlog
 import (
 	"context"
 	"fmt"
+	"io"
 	"math"
+	"path"
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -34,8 +40,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -62,6 +71,31 @@ type ReaderSuite struct {
 
 	tsStart uint64
 	tsEnd   uint64
+}
+
+type storageV3DeltaRecordReader struct {
+	record storage.Record
+	read   bool
+}
+
+func (r *storageV3DeltaRecordReader) Next() (storage.Record, error) {
+	if r.read {
+		if r.record != nil {
+			r.record.Release()
+			r.record = nil
+		}
+		return nil, io.EOF
+	}
+	r.read = true
+	return r.record, nil
+}
+
+func (r *storageV3DeltaRecordReader) Close() error {
+	if r.record != nil {
+		r.record.Release()
+		r.record = nil
+	}
+	return nil
 }
 
 func (suite *ReaderSuite) SetupSuite() {
@@ -833,6 +867,173 @@ func (suite *ReaderSuite) TestZeroDeltaRead() {
 
 func TestBinlogReader(t *testing.T) {
 	suite.Run(t, new(ReaderSuite))
+}
+
+func TestFilterReadableStorageV3Deltalogs_MarkerOnly(t *testing.T) {
+	marker := &datapb.Binlog{LogPath: "target/_delta/1", EntriesNum: 0}
+
+	binlogs, err := filterReadableStorageV3Deltalogs([]*datapb.FieldBinlog{
+		nil,
+		{Binlogs: []*datapb.Binlog{nil, marker}},
+	})
+
+	assert.NoError(t, err)
+	assert.Empty(t, binlogs)
+}
+
+func TestFilterReadableStorageV3Deltalogs_MixedMarkerAndReadableLog(t *testing.T) {
+	marker := &datapb.Binlog{LogPath: "target/_delta/1", EntriesNum: 0}
+	readable := &datapb.Binlog{LogPath: "target/_delta/2", EntriesNum: 3}
+
+	binlogs, err := filterReadableStorageV3Deltalogs([]*datapb.FieldBinlog{
+		{Binlogs: []*datapb.Binlog{marker}},
+		{Binlogs: []*datapb.Binlog{readable}},
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, []*datapb.Binlog{readable}, binlogs)
+}
+
+func TestFilterReadableStorageV3Deltalogs_NegativeEntries(t *testing.T) {
+	binlogs, err := filterReadableStorageV3Deltalogs([]*datapb.FieldBinlog{{
+		Binlogs: []*datapb.Binlog{{LogPath: "target/_delta/1", EntriesNum: -1}},
+	}})
+
+	assert.Nil(t, binlogs)
+	assert.ErrorIs(t, err, merr.ErrImportFailed)
+	assert.ErrorContains(t, err, "negative entries num -1")
+}
+
+func TestFilterReadableStorageV3Deltalogs_EmptyReadablePath(t *testing.T) {
+	binlogs, err := filterReadableStorageV3Deltalogs([]*datapb.FieldBinlog{{
+		Binlogs: []*datapb.Binlog{{EntriesNum: 1}},
+	}})
+
+	assert.Nil(t, binlogs)
+	assert.ErrorIs(t, err, merr.ErrImportFailed)
+	assert.ErrorContains(t, err, "has an empty path")
+}
+
+func TestStorageV3Reader_FiltersManifestDeltalogMarkers(t *testing.T) {
+	segmentPath := "backup/insert_log/1/2/3"
+	marker := &datapb.Binlog{LogPath: segmentPath + "/_delta/1", EntriesNum: 0}
+	readable := &datapb.Binlog{LogPath: segmentPath + "/_delta/2", EntriesNum: 3}
+
+	manifestReaderPatch := mockey.Mock(storage.NewManifestRecordReader).
+		Return(&storageV3DeltaRecordReader{read: true}, nil).Build()
+	defer manifestReaderPatch.UnPatch()
+	walkPatch := mockey.Mock(importcommon.WalkWithPrefixRetry).To(
+		func(_ context.Context, _ storage.ChunkManager, _ string, _ bool, _ uint,
+			reset func(), _ storage.ChunkObjectWalkFunc,
+		) error {
+			reset()
+			return nil
+		}).Build()
+	defer walkPatch.UnPatch()
+	lobPatch := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo(nil), nil).Build()
+	defer lobPatch.UnPatch()
+	deltaManifestPatch := mockey.Mock(packed.GetDeltaLogsFromManifestWithExtfs).
+		Return([]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{marker, readable}}}, nil).Build()
+	defer deltaManifestPatch.UnPatch()
+
+	var readerPaths []string
+	deltaReaderPatch := mockey.Mock(storage.NewDeltalogReader).To(
+		func(_ context.Context, _ schemapb.DataType, paths []string, _ ...storage.RwOption) (storage.RecordReader, error) {
+			readerPaths = append([]string(nil), paths...)
+			return &storageV3DeltaRecordReader{read: true}, nil
+		}).Build()
+	defer deltaReaderPatch.UnPatch()
+
+	r := &reader{
+		ctx: context.Background(),
+		schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		}},
+		storageConfig:  &indexpb.StorageConfig{},
+		storageVersion: storage.StorageV3,
+		retryAttempts:  1,
+	}
+	assert.NoError(t, r.initStorageV3(segmentPath, 0, math.MaxUint64))
+	assert.Equal(t, []string{readable.GetLogPath()}, readerPaths)
+	assert.Len(t, r.filters, 1)
+	r.Close()
+}
+
+func TestStorageV3Reader_RejectsCMEKBackup(t *testing.T) {
+	r := &reader{importEz: "encrypted-backup-key"}
+
+	err := r.initStorageV3("backup/insert_log/1/2/3", 0, math.MaxUint64)
+	assert.ErrorIs(t, err, merr.ErrOperationNotSupported)
+	assert.ErrorContains(t, err, "CMEK-protected StorageV3 backup import is not supported")
+}
+
+func TestStorageV3Reader_CollectsSegmentAndManifestLobFiles(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	partitionPath := path.Join(root, "backup/insert_log/1/2")
+	segmentPath := path.Join(partitionPath, "10")
+	siblingSegmentPath := path.Join(partitionPath, "100")
+	manifestPath := packed.MarshalManifestPath(segmentPath, packed.ManifestLatest)
+	segmentDataPath := path.Join(segmentPath, "_data/0.parquet")
+	segmentManifestPath := path.Join(segmentPath, "_metadata/manifest.json")
+	siblingDataPath := path.Join(siblingSegmentPath, "_data/0.parquet")
+	lobWithSizePath := path.Join(partitionPath, "lobs/101/_data/a.vx")
+	lobWithoutSizePath := path.Join(partitionPath, "lobs/101/_data/b.vx")
+	cm := storage.NewLocalChunkManager()
+	assert.NoError(t, cm.Write(ctx, segmentDataPath, []byte("segment-10")))
+	assert.NoError(t, cm.Write(ctx, segmentManifestPath, []byte("manifest-10")))
+	assert.NoError(t, cm.Write(ctx, siblingDataPath, []byte("segment-100")))
+	assert.NoError(t, cm.Write(ctx, lobWithoutSizePath, []byte("lob")))
+
+	lobPatch := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo{
+		{Path: lobWithSizePath, FileSizeBytes: 64},
+		{Path: lobWithoutSizePath},
+	}, nil).Build()
+	defer lobPatch.UnPatch()
+
+	r := &reader{ctx: ctx, cm: cm, retryAttempts: 1}
+	assert.NoError(t, r.collectStorageV3Files(segmentPath, manifestPath))
+	assert.ElementsMatch(t, []string{
+		segmentDataPath,
+		segmentManifestPath,
+		lobWithoutSizePath,
+	}, r.storageV3Files)
+	assert.NotContains(t, r.storageV3Files, siblingDataPath)
+	assert.Equal(t, int64(64), r.storageV3LobSize)
+}
+
+func TestStorageV3Reader_ReadsManifestDeletes(t *testing.T) {
+	arrowSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "ts", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	builder.Field(0).(*array.Int64Builder).AppendValues([]int64{1, 2, 2, 3}, nil)
+	builder.Field(1).(*array.Int64Builder).AppendValues([]int64{5, 12, 18, 25}, nil)
+	rawRecord := builder.NewRecord()
+	builder.Release()
+	record := storage.NewSimpleArrowRecord(rawRecord, map[storage.FieldID]int{
+		0:                     0,
+		common.TimeStampField: 1,
+	})
+
+	readerPatch := mockey.Mock(storage.NewDeltalogReader).To(
+		func(_ context.Context, pkType schemapb.DataType, paths []string, _ ...storage.RwOption) (storage.RecordReader, error) {
+			assert.Equal(t, schemapb.DataType_Int64, pkType)
+			assert.Equal(t, []string{"delta.parquet"}, paths)
+			return &storageV3DeltaRecordReader{record: record}, nil
+		}).Build()
+	defer readerPatch.UnPatch()
+
+	r := &reader{
+		ctx: context.Background(),
+		schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		}},
+	}
+	deletes, err := r.readDeleteV3([]*datapb.Binlog{{LogPath: "delta.parquet", EntriesNum: 4}}, 10, 20)
+	assert.NoError(t, err)
+	assert.Equal(t, map[any]typeutil.Timestamp{int64(2): 18}, deletes)
 }
 
 func TestDeltaLogListing_RetryOnTransientError(t *testing.T) {

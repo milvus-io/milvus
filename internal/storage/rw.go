@@ -76,6 +76,7 @@ type rwOptions struct {
 	pluginContext       *indexcgopb.StoragePluginContext
 	textColumnConfigs   []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
 	textRefsAsBinary    bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
+	resolveTextLob      bool                      // decode manifest TEXT LOB refs into ordinary UTF8 values
 	externalReader      packed.ExternalReaderContext
 	writerFormat        string
 	presentFields       map[FieldID]struct{} // reader: caller-known physically-present field IDs, skips a manifest re-read
@@ -223,6 +224,15 @@ func WithTextColumnConfigs(configs []packed.TextColumnConfig) RwOption {
 func WithTextRefsAsBinary() RwOption {
 	return func(options *rwOptions) {
 		options.textRefsAsBinary = true
+	}
+}
+
+// WithResolveTextLob makes a manifest reader resolve internal TEXT LOB
+// references into ordinary UTF8 values. It is opt-in because compaction paths
+// need the physical binary references for reuse and rewrite strategies.
+func WithResolveTextLob() RwOption {
+	return func(options *rwOptions) {
+		options.resolveTextLob = true
 	}
 }
 
@@ -395,9 +405,23 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, neededSch
 	if err := rwOptions.validate(); err != nil {
 		return nil, err
 	}
+	// WithResolveTextLob selects milvus-storage SegmentReader, whose current C
+	// API cannot receive the source backup's key-retriever context. Reject the
+	// explicit source key here even when cluster encryption is disabled; letting
+	// it fall through would silently discard the key before opening the backup.
+	if rwOptions.resolveTextLob && rwOptions.pluginContext != nil {
+		return nil, merr.WrapErrOperationNotSupportedMsg(
+			"CMEK-protected StorageV3 backup import is not supported",
+		)
+	}
 
 	var pluginContext *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncryptionEnabled() {
+	// In backup import, neededSchema describes the destination collection. Its
+	// CMEK properties must not be used to decrypt a plaintext source backup.
+	// ResolveTextLob rejects an explicit source context above and deliberately
+	// skips destination-derived context here; destination encryption is applied
+	// independently by the import write path.
+	if hookutil.IsClusterEncryptionEnabled() && !rwOptions.resolveTextLob {
 		// Reader pluginContext from import tasks
 		if rwOptions.pluginContext != nil {
 			pluginContext = rwOptions.pluginContext

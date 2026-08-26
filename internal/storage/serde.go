@@ -815,21 +815,33 @@ func getFieldWriterProps(field *schemapb.FieldSchema) *parquet.WriterProperties 
 }
 
 type DeserializeReader[T any] interface {
+	// NextValue returns the next deserialized value. Values that borrow Arrow
+	// buffers remain valid only until this reader advances to the next source
+	// record or Close is called.
 	NextValue() (*T, error)
+	// Close closes the underlying RecordReader. Values returned by zero-copy
+	// deserializers are invalid after Close.
 	Close() error
 }
 
 type DeserializeReaderImpl[T any] struct {
 	rr           RecordReader
 	deserializer Deserializer[T]
-	rec          Record
-	values       []T
-	pos          int
+	// rec is borrowed from rr and must not be released here. RecordReader owns
+	// it and releases it when Next or Close invalidates the borrowed record.
+	rec    Record
+	values []T
+	pos    int
 }
 
-// Iterate to next value, return error or EOF if no more value.
+// NextValue iterates to the next value and returns an error or EOF when no
+// more values are available. The current record stays alive while its values
+// are yielded so zero-copy deserializers can safely borrow Arrow buffers.
 func (deser *DeserializeReaderImpl[T]) NextValue() (*T, error) {
 	if deser.pos == 0 || deser.pos >= len(deser.values) {
+		// rr.Next invalidates and releases the previously borrowed record. Do not
+		// release deser.rec directly or readers such as PackedReader will release
+		// the same Arrow record a second time.
 		r, err := deser.rr.Next()
 		if err != nil {
 			return nil, err
@@ -852,6 +864,9 @@ func (deser *DeserializeReaderImpl[T]) Close() error {
 	return deser.rr.Close()
 }
 
+// NewDeserializeReader creates a value iterator over records borrowed from rr.
+// The adapter and deserializer must not release those records; rr owns their
+// lifecycle according to the RecordReader contract.
 func NewDeserializeReader[T any](rr RecordReader, deserializer Deserializer[T]) *DeserializeReaderImpl[T] {
 	return &DeserializeReaderImpl[T]{
 		rr:           rr,
