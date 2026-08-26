@@ -84,7 +84,8 @@ import (
 //     loading" from "targets not rebuilt yet" should ask one of those.
 //   - -1, ErrServiceNotReady (1, retriable): the coordinator's own read
 //     stores are not wired up yet, so no answer about any resource group can
-//     be computed. This is the state initQueryCoord passes through --
+//     be computed (for a named group this includes the resource manager; the
+//     unscoped form never consults it, so it never fails on it). This is the state initQueryCoord passes through --
 //     initMeta assigns the meta before the distribution and target managers
 //     -- and it is neither of the two above: nothing is known, rather than
 //     something being known to be absent. Reusing a bare -1 for it would tell
@@ -216,19 +217,27 @@ func LoadPercentageByResourceGroup(
 	collectionID int64,
 	rgName string,
 ) (int32, error) {
-	if m == nil || m.ResourceManager == nil || targetMgr == nil || dist == nil {
+	if m == nil || targetMgr == nil || dist == nil {
 		return -1, merr.WrapErrServiceNotReadyMsg("querycoord read stores are not wired up yet")
 	}
 
-	// A resource group that does not exist is the request's own content
-	// forcing this branch, so it is an input error -- which
-	// ErrResourceGroupNotFound (300) already is -- rather than the terminal
-	// "-1, this group holds no replica" the replica scan below would answer,
-	// telling the caller to stop for the wrong reason. It runs before the
-	// registration check: the name is wrong whatever the collection's state.
-	// The empty name is the absence of a filter, never a name to validate.
-	if rgName != "" && !m.ContainResourceGroup(ctx, rgName) {
-		return -1, merr.WrapErrResourceGroupNotFound(rgName)
+	// Only the scoped form consults the resource manager, so only the scoped
+	// form requires it: rgName == "" is the absence of a filter and must stay
+	// answerable by a caller that does not use resource groups at all -- the
+	// inertness this surface promises a few lines up. A resource group that
+	// does not exist is the request's own content forcing this branch, so it
+	// is an input error -- which ErrResourceGroupNotFound (300) already is --
+	// rather than the terminal "-1, this group holds no replica" the replica
+	// scan below would answer, telling the caller to stop for the wrong
+	// reason. It runs before the registration check: the name is wrong
+	// whatever the collection's state.
+	if rgName != "" {
+		if m.ResourceManager == nil {
+			return -1, merr.WrapErrServiceNotReadyMsg("querycoord resource manager is not wired up yet")
+		}
+		if !m.ContainResourceGroup(ctx, rgName) {
+			return -1, merr.WrapErrResourceGroupNotFound(rgName)
+		}
 	}
 
 	// The load-registration check comes BEFORE the replica scan: the terminal

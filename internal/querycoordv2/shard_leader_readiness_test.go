@@ -784,3 +784,25 @@ func TestShardLeaderReadinessByRG_EmptyRGWithNoReplicaReadsNoReplica(t *testing.
 	assert.Equal(t, utils.ShardLeadersReasonNoReplicaInResourceGroup, named.Reason,
 		"a named group keeps the group-scoped wording")
 }
+
+// TestShardLeaderReadinessByRG_UnscopedNeedsNoResourceManager is the readiness
+// half of TestLoadPercentageByResourceGroup_UnscopedNeedsNoResourceManager: a
+// Meta without a ResourceManager still answers the unscoped question, and only
+// a named group is refused with the coordinator-not-ready verdict.
+func TestShardLeaderReadinessByRG_UnscopedNeedsNoResourceManager(t *testing.T) {
+	ctx := context.Background()
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 1600, 16000, "1600-dmc0")
+	f.putReplica(t, 1600, "rg-a", 160)
+	f.putLeader(1600, 160, "1600-dmc0", true)
+	partial := &meta.Meta{CollectionManager: f.meta.CollectionManager, ReplicaManager: f.meta.ReplicaManager}
+
+	all, err := utils.ShardLeaderReadinessByResourceGroup(ctx, partial, f.targetMgr, f.dist, f.nodeMgr, 1600, "")
+	assert.NoError(t, err, "the unscoped form never consults the resource manager")
+	assert.True(t, all.Ready)
+
+	scoped, err := utils.ShardLeaderReadinessByResourceGroup(ctx, partial, f.targetMgr, f.dist, f.nodeMgr, 1600, "rg-a")
+	assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+	assert.False(t, scoped.Ready)
+	assert.Equal(t, utils.ShardLeadersReasonCoordinatorNotReady, scoped.Reason)
+}

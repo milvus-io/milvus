@@ -134,22 +134,30 @@ func ShardLeaderReadinessByResourceGroup(
 	// verdict like any other to a caller that only reads the struct, and
 	// "the coordinator cannot answer" is retriable and not about this
 	// resource group at all, while every other not-ready reason is about it.
-	if m == nil || m.ResourceManager == nil || targetMgr == nil || dist == nil || nodeMgr == nil {
+	if m == nil || targetMgr == nil || dist == nil || nodeMgr == nil {
 		return ShardLeaderReadiness{Reason: ShardLeadersReasonCoordinatorNotReady},
 			merr.WrapErrServiceNotReadyMsg("querycoord read stores are not wired up yet")
 	}
 
-	// A resource group that does not exist is the request's own content
+	// Only the scoped form consults the resource manager, so only the scoped
+	// form requires it -- rgName == "" is the absence of a filter and stays
+	// answerable without one, matching LoadPercentageByResourceGroup. A
+	// resource group that does not exist is the request's own content
 	// forcing this branch, so it is an input error -- ErrResourceGroupNotFound
 	// (300) -- rather than the NoReplicaInResourceGroup verdict the replica
 	// scan below would give, whose meaning is "waiting will never help": true
 	// for a typo as well, but for a reason the caller could not learn from
-	// it. Checked before the registration test, matching
-	// LoadPercentageByResourceGroup: the name is wrong whatever the
-	// collection's state. The empty name is the absence of a filter.
-	if rgName != "" && !m.ContainResourceGroup(ctx, rgName) {
-		return ShardLeaderReadiness{Reason: ShardLeadersReasonResourceGroupNotFound},
-			merr.WrapErrResourceGroupNotFound(rgName)
+	// it. Checked before the registration test: the name is wrong whatever
+	// the collection's state.
+	if rgName != "" {
+		if m.ResourceManager == nil {
+			return ShardLeaderReadiness{Reason: ShardLeadersReasonCoordinatorNotReady},
+				merr.WrapErrServiceNotReadyMsg("querycoord resource manager is not wired up yet")
+		}
+		if !m.ContainResourceGroup(ctx, rgName) {
+			return ShardLeaderReadiness{Reason: ShardLeadersReasonResourceGroupNotFound},
+				merr.WrapErrResourceGroupNotFound(rgName)
+		}
 	}
 
 	// The load-registration check comes BEFORE the replica scan, and surfaces

@@ -1182,3 +1182,160 @@ func (s *LBPolicySuite) TestExecuteScopedFanOutCoversEveryShard() {
 	s.False(executed.Contain(s.channels[1]), "the shard rg-b cannot serve is never executed on another group's leader")
 	s.mgr.AssertCalled(s.T(), "GetShard", mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[1])
 }
+
+// TestCollectionWorkLoadForChannelCarriesScope pins the one way a
+// ChannelWorkload may be built from a CollectionWorkLoad: every
+// collection-level field, the resource-group scope included, is carried, and
+// the preferred node is whatever the caller resolved. This is what keeps the
+// namespace single-shard fast paths from silently running unscoped.
+func (s *LBPolicySuite) TestCollectionWorkLoadForChannelCarriesScope() {
+	exec := func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string) error { return nil }
+	collection := CollectionWorkLoad{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Nq:             7,
+		Exec:           exec,
+		ResourceGroup:  "rg-b",
+		PreferredNodes: map[string]int64{s.channels[0]: 3},
+	}
+
+	got := collection.ForChannel(s.channels[0], 42)
+
+	s.Equal(s.dbName, got.Db)
+	s.Equal(s.collectionName, got.CollectionName)
+	s.Equal(s.collectionID, got.CollectionID)
+	s.Equal(s.channels[0], got.Channel)
+	s.EqualValues(7, got.Nq)
+	s.NotNil(got.Exec)
+	s.Equal("rg-b", got.ResourceGroup, "the scope must reach the per-channel workload")
+	s.EqualValues(42, got.PreferredNodeID, "the preferred node is the caller's, not derived")
+
+	s.Equal("", CollectionWorkLoad{}.ForChannel("c", 0).ResourceGroup, "no scope stays no scope")
+}
+
+// TestExecuteWithRetryScopedRecoversAfterGroupExhausted pins the request-level
+// exclusion recovery under a scope. Both rg-b leaders fail with a retriable
+// error and are excluded; the group is then exhausted while the channel still
+// has unexcluded rg-a leaders, so the "every leader excluded" recovery has to
+// be judged on the scoped set or it never fires. The third attempt must land
+// on an rg-b leader again and succeed -- never on an rg-a one.
+func (s *LBPolicySuite) TestExecuteWithRetryScopedRecoversAfterGroupExhausted() {
+	ctx := context.Background()
+	s.lbPolicy.retryOnReplica = 1
+	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(rgNodes(), nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	// The balancer picks the first offered rg-b leader each time; the
+	// exclusion set decides which ones are offered.
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, ids []int64, nq int64) (int64, error) {
+			s.Subset([]int64{2, 3}, ids, "only rg-b leaders may be offered")
+			s.NotEmpty(ids)
+			return lo.Min(ids), nil
+		})
+
+	var attempts []int64
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        s.channels[0],
+		Nq:             1,
+		ResourceGroup:  "rg-b",
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			attempts = append(attempts, nodeID)
+			if len(attempts) <= 2 {
+				return merr.ErrServiceUnavailable // retriable: excludes the node for this request
+			}
+			return nil
+		},
+	})
+
+	s.NoError(err)
+	s.Equal([]int64{2, 3, 2}, attempts, "both rg-b leaders excluded, then the exclusion cleared and rg-b tried again")
+}
+
+// TestExecuteWithRetryScopedRetriableSelectErrorIsNotMasked pins the ordering
+// fix on the retry loop: the group's only leader fails with a NON-retriable
+// error and then disappears from the channel, so the next selection is the
+// retriable ErrCollectionNotFullyLoaded. The request must end on that, not
+// on the earlier exec error -- reporting the non-retriable one would tell
+// the layer waiting for the group to stop, undoing the code in exactly the
+// case it was added for.
+func (s *LBPolicySuite) TestExecuteWithRetryScopedRetriableSelectErrorIsNotMasked() {
+	ctx := context.Background()
+	s.lbPolicy.retryOnReplica = 1
+	withLeader := lo.Filter(rgNodes(), func(n NodeInfo, _ int) bool { return n.NodeID == 1 || n.NodeID == 2 })
+	withoutLeader := lo.Filter(rgNodes(), func(n NodeInfo, _ int) bool { return n.NodeID == 1 })
+	// The retry-budget read plus the first selection see the rg-b leader;
+	// every read after that sees it gone.
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(withLeader, nil).Times(2)
+	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(withoutLeader, nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	execErr := merr.WrapErrSegmentNotLoaded(1, "not retriable")
+	s.Require().False(merr.IsRetryableErr(execErr))
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        s.channels[0],
+		Nq:             1,
+		ResourceGroup:  "rg-b",
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			return execErr
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrCollectionNotFullyLoaded, "the fresh retriable refusal must win over the stale non-retriable exec error")
+	s.True(merr.IsRetryableErr(err))
+}
+
+// TestExecuteOneChannelScopedPrefersAServableChannel pins that a scoped
+// ExecuteOneChannel does not hand back the group's refusal for the first
+// channel in map order when a sibling channel could have served: channel1 has
+// no rg-b leader, channel2 does, and the request must succeed on channel2.
+// Unscoped keeps its take-the-first behavior.
+func (s *LBPolicySuite) TestExecuteOneChannelScopedPrefersAServableChannel() {
+	ctx := context.Background()
+	s.lbPolicy.retryOnReplica = 1
+	onlyRGA := lo.Filter(rgNodes(), func(n NodeInfo, _ int) bool { return n.ResourceGroup == "rg-a" })
+	s.mgr.EXPECT().GetShardLeaderList(mock.Anything, s.dbName, s.collectionName, s.collectionID, true).Return(s.channels, nil)
+	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(onlyRGA, nil)
+	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[1]).Return(rgNodes(), nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	var executed []string
+	err := s.lbPolicy.ExecuteOneChannel(ctx, CollectionWorkLoad{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Nq:             1,
+		ResourceGroup:  "rg-b",
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			executed = append(executed, channel)
+			return nil
+		},
+	})
+
+	s.NoError(err)
+	s.Equal([]string{s.channels[1]}, executed, "the channel rg-b cannot serve is skipped for the one it can")
+
+	// When no channel can serve, the refusal is what comes back.
+	s.mgr.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShardLeaderList(mock.Anything, s.dbName, s.collectionName, s.collectionID, true).Return(s.channels, nil)
+	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, mock.Anything).Return(onlyRGA, nil)
+	err = s.lbPolicy.ExecuteOneChannel(ctx, CollectionWorkLoad{
+		Db: s.dbName, CollectionName: s.collectionName, CollectionID: s.collectionID, Nq: 1, ResourceGroup: "rg-b",
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error { return nil },
+	})
+	s.ErrorIs(err, merr.ErrCollectionNotFullyLoaded)
+}

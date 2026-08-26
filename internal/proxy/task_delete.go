@@ -622,23 +622,20 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 	if err != nil {
 		return err
 	}
+	// One workload for both paths: the namespace fast path derives its
+	// single-channel workload from it, so every collection-level field -- the
+	// resource-group scope included -- reaches both paths or neither.
+	workload := shardclient.CollectionWorkLoad{
+		Db:             dr.req.GetDbName(),
+		CollectionName: dr.req.GetCollectionName(),
+		CollectionID:   dr.collectionID,
+		Nq:             1,
+		Exec:           exec,
+	}
 	if useNamespaceChannel {
-		err = dr.lb.ExecuteWithRetry(ctx, shardclient.ChannelWorkload{
-			Db:             dr.req.GetDbName(),
-			CollectionName: dr.req.GetCollectionName(),
-			CollectionID:   dr.collectionID,
-			Channel:        channelName,
-			Nq:             1,
-			Exec:           exec,
-		})
+		err = dr.lb.ExecuteWithRetry(ctx, workload.ForChannel(channelName, 0))
 	} else {
-		err = dr.lb.Execute(ctx, shardclient.CollectionWorkLoad{
-			Db:             dr.req.GetDbName(),
-			CollectionName: dr.req.GetCollectionName(),
-			CollectionID:   dr.collectionID,
-			Nq:             1,
-			Exec:           exec,
-		})
+		err = dr.lb.Execute(ctx, workload)
 	}
 	dr.result.DeleteCnt = dr.count.Load()
 	dr.result.Timestamp = dr.sessionTS.Load()

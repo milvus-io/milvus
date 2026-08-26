@@ -1244,6 +1244,17 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	defer tr.CtxElapse(ctx, "done")
 
 	t.queryChannelsNode = typeutil.NewConcurrentMap[string, int64]()
+	// Built once, ahead of the namespace fast path below, so that the fast
+	// path derives its single-channel workload from the same value Execute
+	// would fan out -- every collection-level field, the resource-group scope
+	// included, reaches both paths or neither.
+	workload := shardclient.CollectionWorkLoad{
+		Db:             t.request.GetDbName(),
+		CollectionID:   t.CollectionID,
+		CollectionName: t.collectionName,
+		Nq:             t.Nq,
+		Exec:           t.searchShard,
+	}
 	if namespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
 		channelNames, err := t.chMgr.GetVChannels(t.CollectionID)
 		if err != nil {
@@ -1255,15 +1266,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 			return err
 		}
 		if ok {
-			if err := t.lb.ExecuteWithRetry(ctx, shardclient.ChannelWorkload{
-				Db:              t.request.GetDbName(),
-				CollectionName:  t.collectionName,
-				CollectionID:    t.CollectionID,
-				Channel:         channelName,
-				Nq:              t.Nq,
-				Exec:            t.searchShard,
-				PreferredNodeID: preferredNodeFromConcurrentMap(t.queryChannelsNode, channelName),
-			}); err != nil {
+			if err := t.lb.ExecuteWithRetry(ctx, workload.ForChannel(channelName, preferredNodeFromConcurrentMap(t.queryChannelsNode, channelName))); err != nil {
 				log.Warn(ctx, "search execute failed", mlog.Err(err))
 				return errors.Wrap(err, "failed to search")
 			}
@@ -1274,13 +1277,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 			return nil
 		}
 	}
-	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
-		Db:             t.request.GetDbName(),
-		CollectionID:   t.CollectionID,
-		CollectionName: t.collectionName,
-		Nq:             t.Nq,
-		Exec:           t.searchShard,
-	})
+	err := t.lb.Execute(ctx, workload)
 	if err != nil {
 		log.Warn(ctx, "search execute failed", mlog.Err(err))
 		return errors.Wrap(err, "failed to search")

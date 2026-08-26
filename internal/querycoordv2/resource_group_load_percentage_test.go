@@ -568,13 +568,16 @@ func TestLoadPercentageByResourceGroup_EmptyRGCoversEveryResourceGroup(t *testin
 
 // TestLoadPercentageByResourceGroup_EmptyRGMatchesCollectionWideFigure is the
 // equivalence assertion the resource-group concept has to earn, on the ONE
-// shape where the two figures coincide exactly: a single-partition collection
-// with one replica (replicaNum 1). There an empty rgName must reproduce the
+// shape where the two figures coincide: a single-partition collection with
+// one replica (replicaNum 1). There an empty rgName must reproduce the
 // collection-wide percentage CollectionObserver.observePartitionLoadStatus
-// computes, which is loadedCount * 100 / (targetNum * replicaNum). With more
-// partitions the two weight intermediate progress differently (see
-// TestGetLoadPercentageByResourceGroup_PoolsTargetsAcrossPartitions) while
-// still agreeing at -1 and at 100.
+// computes, loadedCount * 100 / (targetNum * replicaNum), wherever progress
+// is at or above 1% -- below that this figure rounds up to 1 where the
+// observer truncates to 0 (TestGetLoadPercentageByResourceGroup_AnyProgressReadsAtLeastOne),
+// so "exactly" holds for -1, 100, and the whole range from 1% up, not for
+// the sub-1% band. With more partitions the two weight intermediate progress
+// differently (see TestGetLoadPercentageByResourceGroup_PoolsTargetsAcrossPartitions)
+// while still agreeing at -1 and at 100.
 //
 // Here targetNum is 4 (one channel plus three segments), the single replica
 // carries the channel and one of the three segments so loadedCount is 2, and
@@ -874,4 +877,28 @@ func TestLoadPercentageByResourceGroup_InvisibleReplicaCounts(t *testing.T) {
 	assert.False(t, readiness.Ready, "100 is not a servability verdict")
 	assert.Equal(t, utils.ShardLeadersReasonShardsWithoutLeader, readiness.Reason,
 		"the group holds a replica that is coming up, so waiting helps")
+}
+
+// TestLoadPercentageByResourceGroup_UnscopedNeedsNoResourceManager pins the
+// inertness promise on the resource-group concept: a caller that never names
+// a group must not be able to fail on one. Only the scoped form consults the
+// ResourceManager, so only the scoped form requires it; a Meta assembled
+// without one -- what an observer-level caller or a hand-built fixture may
+// hold -- still answers the unscoped question, and reports ErrServiceNotReady
+// only for a named group.
+func TestLoadPercentageByResourceGroup_UnscopedNeedsNoResourceManager(t *testing.T) {
+	ctx := context.Background()
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 1900, 19000, "1900-dmc0", 1)
+	f.putReplica(t, 1900, 190, "rg-target")
+	f.putDelegator(1900, 190, "1900-dmc0", 1)
+	partial := &meta.Meta{CollectionManager: f.meta.CollectionManager, ReplicaManager: f.meta.ReplicaManager}
+
+	all, err := utils.LoadPercentageByResourceGroup(ctx, partial, f.targetMgr, f.dist, 1900, "")
+	assert.NoError(t, err, "the unscoped form never consults the resource manager")
+	assert.EqualValues(t, 100, all)
+
+	scoped, err := utils.LoadPercentageByResourceGroup(ctx, partial, f.targetMgr, f.dist, 1900, "rg-target")
+	assert.ErrorIs(t, err, merr.ErrServiceNotReady, "the scoped form does, and says so with the retriable sentinel")
+	assert.EqualValues(t, -1, scoped)
 }
