@@ -6591,6 +6591,7 @@ func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 
 	// update property "evictable" but the collection is loaded
 	task = &alterCollectionFieldTask{
+		baseTask: baseTask{metaCache: cache},
 		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
 			Base:           &commonpb.MsgBase{},
 			CollectionName: collectionName,
@@ -6603,6 +6604,7 @@ func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 
 	// delete property "evictable" but the collection is loaded
 	task = &alterCollectionFieldTask{
+		baseTask: baseTask{metaCache: cache},
 		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
 			Base:           &commonpb.MsgBase{},
 			CollectionName: collectionName,

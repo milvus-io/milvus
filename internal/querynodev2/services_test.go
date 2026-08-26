@@ -1036,34 +1036,7 @@ func (suite *ServiceSuite) TestLoadSegmentsReopenReportsDelta() {
 				LoadScope:     querypb.LoadScope_Reopen,
 				IndexInfoList: indexInfos,
 			}
-			mockLoader.EXPECT().ReopenSegments(mock.Anything, mock.MatchedBy(func(actual []*querypb.SegmentLoadInfo) bool {
-				if len(actual) != len(infos) {
-					return false
-				}
-				schemaHelper, err := typeutil.CreateSchemaHelper(schema)
-				if err != nil {
-					return false
-				}
-				for i := range actual {
-					expected := typeutil.Clone(infos[i])
-					for _, indexInfo := range expected.GetIndexInfos() {
-						if _, exist := common.IsEvictableEnabled(indexInfo.GetIndexParams()...); !exist {
-							field, err := schemaHelper.GetFieldFromID(indexInfo.GetFieldID())
-							if err != nil {
-								return false
-							}
-							indexInfo.IndexParams = append(indexInfo.IndexParams, &commonpb.KeyValuePair{
-								Key:   common.EvictableKey,
-								Value: strconv.FormatBool(typeutil.IsVectorType(field.GetDataType())),
-							})
-						}
-					}
-					if !proto.Equal(expected, actual[i]) {
-						return false
-					}
-				}
-				return true
-			})).Return(test.reopenErr).Once()
+			mockLoader.EXPECT().ReopenSegments(mock.Anything, req.GetInfos()).Return(test.reopenErr).Once()
 
 			time.Sleep(time.Nanosecond)
 			status, err := suite.node.LoadSegments(ctx, req)

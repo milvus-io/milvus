@@ -2136,7 +2136,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_TextIndexU
 
 		usage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor)
 		suite.NoError(err)
-		suite.EqualValues(0, usage.MemorySize)
+		suite.EqualValues(estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows()), usage.MemorySize)
 		suite.EqualValues(textIndexSize, usage.DiskSize)
 	})
 
@@ -2152,7 +2152,8 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_TextIndexU
 
 		usage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor)
 		suite.NoError(err)
-		suite.EqualValues(textIndexSize, usage.MemorySize)
+		expectedMemorySize := uint64(textIndexSize) + estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+		suite.EqualValues(expectedMemorySize, usage.MemorySize)
 		suite.EqualValues(0, usage.DiskSize)
 	})
 }
@@ -2176,6 +2177,30 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_TieredEvic
 	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
 	suite.EqualValues(0, usage.MemorySize, "text index must be skipped when tiered eviction is enabled")
+	suite.EqualValues(0, usage.DiskSize)
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_TieredEvictionEnabled_NonEvictableTextIndexCounted() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	schema := typeutil.Clone(suite.schema)
+	schema.Fields[1].TypeParams = append(schema.Fields[1].TypeParams,
+		&commonpb.KeyValuePair{Key: common.EvictableKey, Value: "false"})
+	const textIndexSize = int64(50 * 1024 * 1024)
+	loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+		101: {FieldID: 101, MemorySize: textIndexSize},
+	})
+
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:    true,
+		textIndexExpansionFactor: 1.0,
+		deltaDataExpansionFactor: 2.0,
+	}
+	usage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor)
+	suite.NoError(err)
+	expectedMemorySize := uint64(textIndexSize) + estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	suite.EqualValues(expectedMemorySize, usage.MemorySize, "non-evictable text index files and validity bitmap must reserve loading memory")
 	suite.EqualValues(0, usage.DiskSize)
 }
 
@@ -2457,7 +2482,8 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_NonEvictab
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(textIndexSize, usage.MemorySize, "non-evictable text stats must not be multiplied by cache ratio")
+	expectedMemorySize := uint64(textIndexSize) + estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	suite.EqualValues(expectedMemorySize, usage.MemorySize, "non-evictable text stats and validity bitmap must not be multiplied by cache ratio")
 }
 
 func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_NonEvictableRawFieldNotCacheRatioed() {
