@@ -74,7 +74,6 @@ require (
 	github.com/milvus-io/milvus/client/v3 v3.0.0
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/shirou/gopsutil/v4 v4.25.10
-	github.com/spaolacci/murmur3 v1.1.0
 	github.com/tidwall/gjson v1.17.1
 	github.com/twpayne/go-geom v1.6.1
 	github.com/zeebo/xxh3 v1.0.2
@@ -95,6 +94,7 @@ require (
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/smartystreets/assertions v1.2.0 // indirect
 	github.com/smartystreets/goconvey v1.7.2 // indirect
+	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 )
 
@@ -157,7 +157,6 @@ require (
 	github.com/ebitengine/purego v0.9.0 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
-	github.com/expr-lang/expr v1.15.7 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.8 // indirect
@@ -314,7 +313,6 @@ require (
 replace (
 	github.com/apache/arrow/go/v17 => github.com/milvus-io/arrow/go/v17 v17.0.2
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
-	github.com/expr-lang/expr => github.com/SimFG/expr v0.0.0-20250513112851-9b981e8400b9
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
 	github.com/greatroar/blobloom => github.com/milvus-io/blobloom v0.0.0-20240603110411-471ae49f3b93
 	github.com/ianlancetaylor/cgosymbolizer => github.com/milvus-io/cgosymbolizer v0.0.0-20260810014817-f3b338cf6824

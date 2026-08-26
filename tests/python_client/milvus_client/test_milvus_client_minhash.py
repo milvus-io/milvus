@@ -28,6 +28,10 @@ default_num_hashes = 16
 default_shingle_size = 3
 default_dim = default_num_hashes * 32
 
+# ---- shared collection (T2): default-schema MinHash tests share one collection ----
+MINHASH_SHARED_COLLECTION = "test_minhash_shared_" + cf.gen_unique_str("_")
+MINHASH_SHARED_NB = default_nb
+
 
 def gen_text_data(nb, min_words=5, max_words=50):
     """Generate random text data for testing."""
@@ -202,135 +206,6 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         stats = self.get_collection_stats(client, collection_name)[0]
         assert stats["row_count"] == default_nb
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_minhash_search_basic(self):
-        """
-        target: test basic MinHash search
-        method: search using text query with MHJACCARD metric
-        expected: search returns results with valid distances
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-
-        # 1. create collection with MinHash function
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=default_dim)
-
-        schema.add_function(
-            Function(
-                name="text_to_minhash",
-                function_type=FunctionType.MINHASH,
-                input_field_names=[default_text_field_name],
-                output_field_names=[default_minhash_field_name],
-                params={"num_hashes": default_num_hashes, "shingle_size": default_shingle_size},
-            )
-        )
-
-        # 2. create index and collection
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(
-            field_name=default_minhash_field_name,
-            index_type="MINHASH_LSH",
-            metric_type="MHJACCARD",
-            params={"mh_lsh_band": 8},
-        )
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-        # 3. insert data
-        rows = gen_minhash_rows(default_nb)
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-
-        # 4. load collection
-        self.load_collection(client, collection_name)
-
-        # 5. search using text
-        query_text = rows[0][default_text_field_name]
-        results = self.search(
-            client,
-            collection_name,
-            [query_text],
-            anns_field=default_minhash_field_name,
-            search_params={
-                "metric_type": "MHJACCARD",
-                "params": {},
-            },
-            limit=default_limit,
-            output_fields=[default_primary_key_field_name, default_text_field_name],
-        )[0]
-
-        # 6. verify results
-        assert len(results) == 1
-        assert len(results[0]) <= default_limit
-        # First result should be the query itself (exact match)
-        assert results[0][0]["id"] == rows[0][default_primary_key_field_name]
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_minhash_search_with_filter(self):
-        """
-        target: test MinHash search with scalar filter
-        method: search with filter expression
-        expected: results satisfy filter condition
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-
-        # 1. create schema with additional scalar field
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field("category", DataType.INT64)
-        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=default_dim)
-
-        schema.add_function(
-            Function(
-                name="text_to_minhash",
-                function_type=FunctionType.MINHASH,
-                input_field_names=[default_text_field_name],
-                output_field_names=[default_minhash_field_name],
-                params={"num_hashes": default_num_hashes, "shingle_size": default_shingle_size},
-            )
-        )
-
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(
-            field_name=default_minhash_field_name,
-            index_type="MINHASH_LSH",
-            metric_type="MHJACCARD",
-            params={"mh_lsh_band": 8},
-        )
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-        # 2. insert data with category field
-        texts = gen_text_data(default_nb)
-        rows = [
-            {default_primary_key_field_name: i, default_text_field_name: texts[i], "category": i % 5}
-            for i in range(default_nb)
-        ]
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
-
-        # 3. search with filter
-        query_text = texts[0]
-        filter_expr = "category == 0"
-        results = self.search(
-            client,
-            collection_name,
-            [query_text],
-            anns_field=default_minhash_field_name,
-            search_params={"metric_type": "MHJACCARD", "params": {}},
-            filter=filter_expr,
-            limit=default_limit,
-            output_fields=[default_primary_key_field_name, "category"],
-        )[0]
-
-        # 4. verify all results satisfy filter
-        for hit in results[0]:
-            assert hit["entity"]["category"] == 0
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_minhash_deterministic_signature(self):
@@ -1010,60 +885,6 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
         assert results[0][0]["entity"][default_text_field_name] == updated_text
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_minhash_query_by_id(self):
-        """
-        target: test query by primary key in MinHash collection
-        method: insert data, then query by ID
-        expected: query returns correct text and MinHash signature
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=default_dim)
-
-        schema.add_function(
-            Function(
-                name="text_to_minhash",
-                function_type=FunctionType.MINHASH,
-                input_field_names=[default_text_field_name],
-                output_field_names=[default_minhash_field_name],
-                params={"num_hashes": default_num_hashes, "shingle_size": default_shingle_size},
-            )
-        )
-
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(
-            field_name=default_minhash_field_name,
-            index_type="MINHASH_LSH",
-            metric_type="MHJACCARD",
-            params={"mh_lsh_band": 8},
-        )
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-        # Insert data
-        rows = gen_minhash_rows(100)
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
-
-        # Query by ID
-        query_ids = [0, 1, 2]
-        results = self.query(
-            client,
-            collection_name,
-            filter=f"{default_primary_key_field_name} in {query_ids}",
-            output_fields=[default_primary_key_field_name, default_text_field_name],
-        )[0]
-
-        assert len(results) == 3
-        for result in results:
-            assert result[default_primary_key_field_name] in query_ids
-            assert default_text_field_name in result
-
-    @pytest.mark.tags(CaseLabel.L1)
     def test_minhash_delete(self):
         """
         target: test delete operation in MinHash collection
@@ -1298,6 +1119,148 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
         # All results should have ID < 50 (from partition_a)
         for hit in results[0]:
             assert hit["id"] < 50
+
+
+@pytest.mark.xdist_group("TestMilvusClientMinHashDefaultShared")
+class TestMilvusClientMinHashDefaultShared(TestMilvusClientV2Base):
+    """Default-schema MinHash read tests sharing one collection (T2: one setup, many checks)."""
+
+    @pytest.fixture(scope="module", autouse=True)
+    def prepare_minhash_shared_collection(self, request):
+        cls = self.__class__
+        client = self._client()
+        # Reuse one client across the class instead of reconnecting per test.
+        cls.shared_client = client
+        collection_name = MINHASH_SHARED_COLLECTION
+        if self.has_collection(client, collection_name)[0]:
+            self.drop_collection(client, collection_name)
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field("category", DataType.INT64)
+        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        schema.add_function(
+            Function(
+                name="text_to_minhash",
+                function_type=FunctionType.MINHASH,
+                input_field_names=[default_text_field_name],
+                output_field_names=[default_minhash_field_name],
+                params={"num_hashes": default_num_hashes, "shingle_size": default_shingle_size},
+            )
+        )
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name=default_minhash_field_name,
+            index_type="MINHASH_LSH",
+            metric_type="MHJACCARD",
+            params={"mh_lsh_band": 8},
+        )
+        # force_teardown=False: module-scoped shared collection; per-test teardown_method
+        # would otherwise drop it after the first test. Cleanup via request.addfinalizer.
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params, force_teardown=False)
+
+        texts = gen_text_data(MINHASH_SHARED_NB)
+        rows = [
+            {default_primary_key_field_name: i, default_text_field_name: texts[i], "category": i % 5}
+            for i in range(MINHASH_SHARED_NB)
+        ]
+        cls.rows = rows
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        def teardown():
+            try:
+                if self.has_collection(client, MINHASH_SHARED_COLLECTION)[0]:
+                    self.drop_collection(client, MINHASH_SHARED_COLLECTION)
+            except Exception:
+                pass
+
+        request.addfinalizer(teardown)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_minhash_search_basic(self):
+        """
+        target: test basic MinHash search
+        method: search using text query with MHJACCARD metric
+        expected: search returns results with valid distances
+        """
+        client = type(self).shared_client
+        rows = type(self).rows
+
+        # search using text
+        query_text = rows[0][default_text_field_name]
+        results = self.search(
+            client,
+            MINHASH_SHARED_COLLECTION,
+            [query_text],
+            anns_field=default_minhash_field_name,
+            search_params={
+                "metric_type": "MHJACCARD",
+                "params": {},
+            },
+            limit=default_limit,
+            output_fields=[default_primary_key_field_name, default_text_field_name],
+        )[0]
+
+        # verify results
+        assert len(results) == 1
+        assert len(results[0]) <= default_limit
+        # First result should be the query itself (exact match)
+        assert results[0][0]["id"] == rows[0][default_primary_key_field_name]
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_minhash_search_with_filter(self):
+        """
+        target: test MinHash search with scalar filter
+        method: search with filter expression
+        expected: results satisfy filter condition
+        """
+        client = type(self).shared_client
+        rows = type(self).rows
+
+        # search with filter
+        query_text = rows[0][default_text_field_name]
+        filter_expr = "category == 0"
+        results = self.search(
+            client,
+            MINHASH_SHARED_COLLECTION,
+            [query_text],
+            anns_field=default_minhash_field_name,
+            search_params={"metric_type": "MHJACCARD", "params": {}},
+            filter=filter_expr,
+            limit=default_limit,
+            output_fields=[default_primary_key_field_name, "category"],
+        )[0]
+
+        # verify all results satisfy filter
+        for hit in results[0]:
+            assert hit["entity"]["category"] == 0
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_minhash_query_by_id(self):
+        """
+        target: test query by primary key in MinHash collection
+        method: query shared collection by ID
+        expected: query returns correct text and MinHash signature
+        """
+        client = type(self).shared_client
+
+        # query by ID
+        query_ids = [0, 1, 2]
+        results = self.query(
+            client,
+            MINHASH_SHARED_COLLECTION,
+            filter=f"{default_primary_key_field_name} in {query_ids}",
+            output_fields=[default_primary_key_field_name, default_text_field_name],
+        )[0]
+
+        assert len(results) == 3
+        for result in results:
+            assert result[default_primary_key_field_name] in query_ids
+            assert default_text_field_name in result
 
 
 class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):

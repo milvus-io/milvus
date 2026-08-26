@@ -19,6 +19,7 @@
 package chain
 
 import (
+	"math"
 	"runtime"
 	"testing"
 
@@ -243,19 +244,109 @@ func (s *ConverterSuite) TestFromSearchResultData_NeededFieldsFilter() {
 	df.Release()
 }
 
-func (s *ConverterSuite) TestFromSearchResultData_EmptyResult() {
+func (s *ConverterSuite) TestElementIndicesRoundTrip() {
 	resultData := &schemapb.SearchResultData{
-		NumQueries: 0,
-		TopK:       0,
-		Topks:      []int64{},
+		NumQueries:     2,
+		TopK:           3,
+		Topks:          []int64{3, 2},
+		Scores:         []float32{0.9, 0.8, 0.7, 0.6, 0.5},
+		Ids:            &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 1, 2, 3, 3}}}},
+		ElementIndices: &schemapb.LongArray{Data: []int64{0, 2, 1, 3, 4}},
 	}
 
 	df, err := FromSearchResultData(resultData, s.pool, nil)
 	s.Require().NoError(err)
 	defer df.Release()
 
-	s.Equal(0, df.NumChunks())
+	s.True(df.HasColumn(types.ElementIndicesFieldName))
+	elementColumn := df.Column(types.ElementIndicesFieldName)
+	s.Equal(arrow.INT32, elementColumn.DataType().ID())
+	s.Equal(3, elementColumn.Chunk(0).Len())
+	s.Equal(2, elementColumn.Chunk(1).Len())
+
+	exported, err := ToSearchResultData(df)
+	s.Require().NoError(err)
+	s.Equal(resultData.GetElementIndices().GetData(), exported.GetElementIndices().GetData())
+	for _, field := range exported.GetFieldsData() {
+		s.NotEqual(types.ElementIndicesFieldName, field.GetFieldName())
+	}
+}
+
+func (s *ConverterSuite) TestElementIndicesValidation() {
+	base := func(indices []int64) *schemapb.SearchResultData {
+		return &schemapb.SearchResultData{
+			NumQueries:     1,
+			TopK:           2,
+			Topks:          []int64{2},
+			Scores:         []float32{0.9, 0.8},
+			Ids:            &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}},
+			ElementIndices: &schemapb.LongArray{Data: indices},
+		}
+	}
+
+	_, err := FromSearchResultData(base([]int64{0}), s.pool, nil)
+	s.ErrorContains(err, "element_indices length")
+
+	_, err = FromSearchResultData(base([]int64{0, math.MaxInt32 + 1}), s.pool, nil)
+	s.ErrorContains(err, "out of Int32 range")
+}
+
+func (s *ConverterSuite) TestExportElementIndicesValidation() {
+	s.Run("missing column", func() {
+		df := NewDataFrameBuilder().SetChunkSizes([]int64{0}).Build()
+		defer df.Release()
+
+		_, err := exportElementIndices(df)
+		s.ErrorContains(err, "column $element_indices not found")
+	})
+
+	s.Run("wrong arrow type", func() {
+		builder := NewDataFrameBuilder().SetChunkSizes([]int64{1})
+		elementBuilder := array.NewInt64Builder(s.pool)
+		elementBuilder.Append(0)
+		s.Require().NoError(builder.AddColumnFromChunks(
+			types.ElementIndicesFieldName,
+			[]arrow.Array{elementBuilder.NewArray()},
+		))
+		elementBuilder.Release()
+		df := builder.Build()
+		defer df.Release()
+
+		_, err := ToSearchResultData(df)
+		s.ErrorContains(err, "exportElementIndices")
+	})
+}
+
+func (s *ConverterSuite) TestFromSearchResultData_EmptyResult() {
+	resultData := &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       0,
+		Topks:      []int64{0},
+		Ids:        &schemapb.IDs{},
+	}
+
+	df, err := FromSearchResultData(resultData, s.pool, nil)
+	s.Require().NoError(err)
+	defer df.Release()
+
+	s.Equal(1, df.NumChunks())
 	s.Equal(int64(0), df.NumRows())
+	s.True(df.HasColumn(types.IDFieldName))
+	s.Equal(arrow.INT64, df.Column(types.IDFieldName).DataType().ID())
+}
+
+func (s *ConverterSuite) TestFromSearchResultData_UnsetIDsWithRows() {
+	resultData := &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       1,
+		Topks:      []int64{1},
+		Ids:        &schemapb.IDs{},
+		Scores:     []float32{0.9},
+	}
+
+	df, err := FromSearchResultData(resultData, s.pool, nil)
+	s.ErrorContains(err, "unsupported ID type")
+	s.Nil(df)
 }
 
 func (s *ConverterSuite) TestFromSearchResultData_NilResult() {

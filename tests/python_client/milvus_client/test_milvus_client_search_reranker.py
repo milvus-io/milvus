@@ -2473,6 +2473,11 @@ class TestMilvusClientSearchDecayRerankShared(TestMilvusClientV2Base):
             params={"reranker": "decay", "function": function, "origin": 0, "scale": 100},
         )
         rng = np.random.default_rng(seed=19530)
+        # Reproduce the ORIGINAL test's query vector: the original generated `default_nb`
+        # row vectors from this same seed-19530 RNG before taking the query, so its query was
+        # the (default_nb+1)-th chunk (not rows[0]'s vector). Advance the RNG accordingly.
+        for _ in range(default_nb):
+            rng.random((1, DECAY_RERANK_SHARED_DIM))
         vectors_to_search = rng.random((1, DECAY_RERANK_SHARED_DIM))
         self.search(
             client,

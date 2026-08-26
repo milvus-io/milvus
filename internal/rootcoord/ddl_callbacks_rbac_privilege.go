@@ -39,6 +39,10 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 		return merr.Wrap(err, "failed to operate privilege common check")
 	}
 	privName := in.Entity.Grantor.Privilege.Name
+	if in.Type == milvuspb.OperatePrivilegeType_Grant && isDeprecatedExprPrivilege(privName) {
+		return merr.WrapErrParameterInvalidMsg(
+			"privilege %q is deprecated: the /expr endpoint it granted access to has been removed", privName)
+	}
 	switch in.Version {
 	case "v2":
 		if err := c.isValidPrivilegeV2(ctx, privName); err != nil {
@@ -82,6 +86,18 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
+}
+
+// isDeprecatedExprPrivilege reports whether name refers to the Expr privilege,
+// in either its API form ("Expr") or its metastore form ("PrivilegeExpr").
+//
+// The /expr endpoint that this privilege guarded has been removed, so granting
+// it confers nothing. New grants are rejected, but the name stays valid
+// everywhere else so that grants created on releases which shipped the endpoint
+// can still be listed and revoked -- grant and revoke otherwise share one
+// validation path, and rejecting both would strand them.
+func isDeprecatedExprPrivilege(name string) bool {
+	return name == util.PrivilegeExpr || util.PrivilegeNameForMetastore(name) == util.PrivilegeExpr
 }
 
 func (c *DDLCallback) alterPrivilegeV2AckCallback(ctx context.Context, result message.BroadcastResultAlterPrivilegeMessageV2) error {

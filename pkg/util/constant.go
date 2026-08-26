@@ -74,6 +74,9 @@ const (
 
 	PreserveFieldIdsKey = "preserve_field_ids"
 
+	// PrivilegeExpr is deprecated: the /expr endpoint it guarded has been removed.
+	// It is retained so that grants made on v3.0.0 stay revocable. See
+	// isPrivilegeNameForMetastoreDefined.
 	PrivilegeExpr = "PrivilegeExpr"
 )
 
@@ -518,8 +521,10 @@ func isPrivilegeNameForMetastoreDefined(name string) bool {
 	if _, ok := commonpb.ObjectPrivilege_value[name]; ok {
 		return true
 	}
-	// TODO: drop this special case once PrivilegeExpr is promoted to a proto enum value
-	// in milvus-io/milvus-proto (commonpb.ObjectPrivilege_PrivilegeExpr).
+	// PrivilegeExpr is deprecated and never became a proto enum value. It stays
+	// recognized here so that grants created on v3.0.0, the only release that
+	// shipped the /expr endpoint, remain listable and revocable. New grants are
+	// rejected in rootcoord. Drop this once no supported release has the endpoint.
 	return name == PrivilegeExpr
 }
 
