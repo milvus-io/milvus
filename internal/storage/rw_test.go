@@ -203,6 +203,30 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	s.Equal(err, io.EOF)
 	err = r.Close()
 	s.NoError(err)
+
+	// Fill contract on the packed (StorageV2) path: schema fields absent from the
+	// written files are backfilled by the reader (#52781) — a plain nullable field
+	// comes back all-null, a field with a declared default comes back default-filled.
+	extSchema := typeutil.Clone(s.schema)
+	extSchema.Fields = append(extSchema.Fields,
+		&schemapb.FieldSchema{FieldID: 200, Name: "added_nullable", DataType: schemapb.DataType_Int64, Nullable: true},
+		&schemapb.FieldSchema{
+			FieldID: 201, Name: "added_default", DataType: schemapb.DataType_Int64, Nullable: true,
+			DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}},
+		},
+	)
+	fr, err := NewBinlogRecordReader(s.ctx, binlogs, extSchema, rOption...)
+	s.NoError(err)
+	defer fr.Close()
+	frec, err := fr.Next()
+	s.NoError(err)
+	s.Positive(frec.Len())
+	s.Equal(frec.Len(), frec.Column(200).NullN(), "absent nullable column arrives all-null")
+	s.Equal(0, frec.Column(201).NullN(), "absent default-carrying column arrives default-filled (#52781)")
+	col201 := frec.Column(201).(*array.Int64)
+	for i := 0; i < col201.Len(); i++ {
+		s.EqualValues(42, col201.Value(i))
+	}
 }
 
 // TestManifestReadFillsAbsentDefaultField is the StorageV3/manifest analog: an
