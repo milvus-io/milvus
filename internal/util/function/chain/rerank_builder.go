@@ -210,14 +210,13 @@ func convertLegacyParams(rankParams []*commonpb.KeyValuePair) (*schemapb.Functio
 				return nil, merr.WrapErrParameterInvalidMsg("the type of rank param k should be float")
 			}
 		}
+		if err := appendLegacyWeightsParam(fSchema, params); err != nil {
+			return nil, err
+		}
 	case "weighted":
 		fSchema.Params = append(fSchema.Params, &commonpb.KeyValuePair{Key: rerankerKey, Value: WeightedRerankerName})
-		if v, ok := params[weightsKey]; ok {
-			if d, err := json.Marshal(v); err != nil {
-				return nil, merr.WrapErrParameterInvalidMsg("the weights param should be an array")
-			} else {
-				fSchema.Params = append(fSchema.Params, &commonpb.KeyValuePair{Key: weightsKey, Value: string(d)})
-			}
+		if err := appendLegacyWeightsParam(fSchema, params); err != nil {
+			return nil, err
 		}
 		if normScore, ok := params[normScoreKey]; ok {
 			switch ns := normScore.(type) {
@@ -238,6 +237,17 @@ func convertLegacyParams(rankParams []*commonpb.KeyValuePair) (*schemapb.Functio
 	}
 
 	return fSchema, nil
+}
+
+func appendLegacyWeightsParam(funcSchema *schemapb.FunctionSchema, params map[string]interface{}) error {
+	if value, ok := params[weightsKey]; ok {
+		data, err := json.Marshal(value)
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg("the weights param should be an array")
+		}
+		funcSchema.Params = append(funcSchema.Params, &commonpb.KeyValuePair{Key: weightsKey, Value: string(data)})
+	}
+	return nil
 }
 
 // buildRerankChainInternal builds a FuncChain from FunctionSchema.
@@ -369,11 +379,21 @@ func buildRRFChain(fc *FuncChain, funcSchema *schemapb.FunctionSchema, searchMet
 	if err != nil {
 		return err
 	}
+	weights, weightsSet, err := parseRRFWeights(funcSchema)
+	if err != nil {
+		return err
+	}
+	if weightsSet && len(weights) != len(searchMetrics) {
+		return merr.WrapErrParameterInvalidMsg("the length of weights param mismatch with ann search requests: got %d, want %d", len(weights), len(searchMetrics))
+	}
 
 	// RRF scores are computed purely from rank position, not from original scores,
 	// so metricTypes and normalize are not needed.
-	fc.Merge(MergeStrategyRRF,
-		WithRRFK(rrfK))
+	options := []MergeOption{WithRRFK(rrfK)}
+	if weightsSet {
+		options = append(options, WithWeights(weights))
+	}
+	fc.Merge(MergeStrategyRRF, options...)
 
 	return nil
 }
@@ -392,6 +412,22 @@ func parseRRFK(funcSchema *schemapb.FunctionSchema) (float64, error) {
 		}
 	}
 	return defaultRRFK, nil
+}
+
+func parseRRFWeights(funcSchema *schemapb.FunctionSchema) ([]float64, bool, error) {
+	for _, param := range funcSchema.Params {
+		if strings.ToLower(param.Key) == weightsKey {
+			weights, err := parseRRFWeightArray(param.Value)
+			if err != nil {
+				return nil, false, err
+			}
+			if len(weights) == 0 {
+				return nil, false, merr.WrapErrParameterInvalidMsg("rerank_builder: rrf weights parameter must be a non-empty array")
+			}
+			return weights, true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 // =============================================================================
@@ -429,14 +465,9 @@ func parseWeightedParams(funcSchema *schemapb.FunctionSchema) ([]float64, bool, 
 	for _, param := range funcSchema.Params {
 		switch strings.ToLower(param.Key) {
 		case weightsKey:
-			var ws []float64
-			if err := json.Unmarshal([]byte(param.Value), &ws); err != nil {
-				return nil, false, merr.WrapErrParameterInvalidMsg("failed to parse weights: %v", err)
-			}
-			for _, w := range ws {
-				if w < 0 || w > 1 {
-					return nil, false, merr.WrapErrParameterInvalidMsg("rank param weight should be in range [0, 1]")
-				}
+			ws, err := parseWeights(param.Value)
+			if err != nil {
+				return nil, false, err
 			}
 			weights = ws
 		case normScoreKey:
@@ -449,6 +480,43 @@ func parseWeightedParams(funcSchema *schemapb.FunctionSchema) ([]float64, bool, 
 	}
 
 	return weights, normalize, nil
+}
+
+func parseWeights(value string) ([]float64, error) {
+	var weights []float64
+	if err := json.Unmarshal([]byte(value), &weights); err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("failed to parse weights: %v", err)
+	}
+	for _, weight := range weights {
+		if weight < 0 || weight > 1 {
+			return nil, merr.WrapErrParameterInvalidMsg("rank param weight should be in range [0, 1]")
+		}
+	}
+	return weights, nil
+}
+
+// parseRRFWeightArray preserves the existing weighted-score parser while
+// enforcing that every optional RRF weight is an actual JSON number. In
+// particular, encoding/json otherwise decodes a null array element as zero.
+func parseRRFWeightArray(value string) ([]float64, error) {
+	var rawWeights []json.RawMessage
+	if err := json.Unmarshal([]byte(value), &rawWeights); err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("failed to parse weights: %v", err)
+	}
+	weights := make([]float64, len(rawWeights))
+	for index, rawWeight := range rawWeights {
+		if string(rawWeight) == "null" {
+			return nil, merr.WrapErrParameterInvalidMsg("failed to parse weights: weight at index %d must be a number", index)
+		}
+		if err := json.Unmarshal(rawWeight, &weights[index]); err != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("failed to parse weights: weight at index %d must be a number", index)
+		}
+		weight := weights[index]
+		if weight < 0 || weight > 1 {
+			return nil, merr.WrapErrParameterInvalidMsg("rank param weight should be in range [0, 1]")
+		}
+	}
+	return weights, nil
 }
 
 // =============================================================================

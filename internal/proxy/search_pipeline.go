@@ -1254,25 +1254,8 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 			}
 		}
 	}
-	if allEmpty {
-		for _, df := range dataframes {
-			df.Release()
-		}
-		return []any{&milvuspb.SearchResults{
-			Status: merr.Success(),
-			Results: &schemapb.SearchResultData{
-				NumQueries:     op.nq,
-				TopK:           op.topK,
-				FieldsData:     make([]*schemapb.FieldData, 0),
-				Scores:         []float32{},
-				Ids:            &schemapb.IDs{},
-				Topks:          make([]int64, op.nq),
-				AllSearchCount: aggregatedAllSearchCount(reducedResults),
-			},
-		}}, nil
-	}
-
-	// Build search params
+	// Build search params and validate the rerank chain before the empty-result
+	// fast path so invalid reranker configurations never return success.
 	var searchParams *chain.SearchParams
 	if op.groupByFieldName != "" && op.groupSize > 0 {
 		scorer := chain.GroupScorer(op.groupScorerStr)
@@ -1282,7 +1265,6 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 	} else {
 		searchParams = chain.NewSearchParams(op.nq, op.topK, op.offset, op.roundDecimal)
 	}
-	// Build chain
 	if op.rerankMeta == nil {
 		for _, df := range dataframes {
 			df.Release()
@@ -1299,6 +1281,24 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 			df.Release()
 		}
 		return nil, err
+	}
+
+	if allEmpty {
+		for _, df := range dataframes {
+			df.Release()
+		}
+		return []any{&milvuspb.SearchResults{
+			Status: merr.Success(),
+			Results: &schemapb.SearchResultData{
+				NumQueries:     op.nq,
+				TopK:           op.topK,
+				FieldsData:     make([]*schemapb.FieldData, 0),
+				Scores:         []float32{},
+				Ids:            &schemapb.IDs{},
+				Topks:          make([]int64, op.nq),
+				AllSearchCount: aggregatedAllSearchCount(reducedResults),
+			},
+		}}, nil
 	}
 
 	// Execute chain. Column pruning is an execution optimization only;

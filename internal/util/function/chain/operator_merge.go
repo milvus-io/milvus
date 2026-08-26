@@ -72,7 +72,8 @@ const (
 type MergeOp struct {
 	BaseOp
 	strategy       MergeStrategy
-	weights        []float64       // for weighted strategy
+	weights        []float64       // for weighted strategy and optional RRF path weights
+	weightsSet     bool            // distinguishes omitted RRF weights from an explicit empty value
 	rrfK           float64         // for rrf strategy, default 60
 	sortDescending bool            // pre-computed: true means larger score = better match
 	scoreNormFuncs []normalizeFunc // pre-computed per-input normalization; nil entry = no-op
@@ -83,6 +84,7 @@ type MergeOp struct {
 // on MergeOp, then discarded.
 type mergeConfig struct {
 	weights         []float64
+	weightsSet      bool
 	rrfK            float64
 	metricTypes     []string
 	normalize       bool
@@ -92,10 +94,11 @@ type mergeConfig struct {
 // MergeOption is a functional option for MergeOp.
 type MergeOption func(*mergeConfig)
 
-// WithWeights sets the weights for weighted merge strategy.
+// WithWeights sets the per-input weights for weighted or RRF merge strategy.
 func WithWeights(weights []float64) MergeOption {
 	return func(cfg *mergeConfig) {
-		cfg.weights = weights
+		cfg.weights = append([]float64(nil), weights...)
+		cfg.weightsSet = true
 	}
 }
 
@@ -158,7 +161,8 @@ func NewMergeOp(strategy MergeStrategy, opts ...MergeOption) *MergeOp {
 			outputs: []string{},
 		},
 		strategy:       strategy,
-		weights:        cfg.weights,
+		weights:        append([]float64(nil), cfg.weights...),
+		weightsSet:     cfg.weightsSet,
 		rrfK:           cfg.rrfK,
 		sortDescending: sortDesc,
 		scoreNormFuncs: normFuncs,
@@ -201,10 +205,16 @@ func (op *MergeOp) ExecuteMulti(ctx *types.FuncContext, inputs []*DataFrame) (*D
 		return nil, merr.WrapErrServiceInternalMsg("merge_op: scoreNormFuncs count %d != inputs count %d", len(op.scoreNormFuncs), len(inputs))
 	}
 
-	// Validate weights for weighted strategy
-	if op.strategy == MergeStrategyWeighted {
+	// Weighted score fusion always requires weights. RRF validates them only
+	// when the optional weights setting was explicitly supplied.
+	if op.strategy == MergeStrategyWeighted || (op.strategy == MergeStrategyRRF && op.weightsSet) {
 		if len(op.weights) != len(inputs) {
 			return nil, merr.WrapErrServiceInternalMsg("merge_op: weights count %d != inputs count %d", len(op.weights), len(inputs))
+		}
+		for index, weight := range op.weights {
+			if math.IsNaN(weight) || math.IsInf(weight, 0) || weight < 0 || weight > 1 {
+				return nil, merr.WrapErrServiceInternalMsg("merge_op: weight[%d] must be finite and in range [0, 1]", index)
+			}
 		}
 	}
 
@@ -330,6 +340,10 @@ func (op *MergeOp) collectRRFScores(inputs []*DataFrame, chunkIdx int) (map[any]
 		if idCol == nil {
 			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] missing %s column", inputIdx, types.IDFieldName)
 		}
+		pathWeight := 1.0
+		if op.weightsSet {
+			pathWeight = op.weights[inputIdx]
+		}
 
 		idChunk := idCol.Chunk(chunkIdx)
 		for rowIdx := 0; rowIdx < idChunk.Len(); rowIdx++ {
@@ -338,8 +352,9 @@ func (op *MergeOp) collectRRFScores(inputs []*DataFrame, chunkIdx int) (map[any]
 				continue
 			}
 
-			// RRF score: 1 / (k + rank), rank is 1-based
-			rrfScore := float32(1.0 / (op.rrfK + float64(rowIdx+1)))
+			// Weighted RRF score: pathWeight / (k + rank), rank is 1-based.
+			// pathWeight defaults to 1 to preserve classic RRF scores.
+			rrfScore := float32(pathWeight / (op.rrfK + float64(rowIdx+1)))
 
 			if existingScore, exists := idScores[id]; exists {
 				idScores[id] = existingScore + rrfScore
