@@ -83,7 +83,7 @@ impl CharFilter for MappingCharFilter {
                 .flatten()
                 .find(|(source, _)| input.text[cursor..].starts_with(source))
             {
-                replacements.push((cursor, cursor + source.len(), target.clone()));
+                replacements.push((cursor, cursor + source.len(), target.as_str()));
                 cursor += source.len();
                 continue;
             }
@@ -100,7 +100,7 @@ impl CharFilter for MappingCharFilter {
 }
 
 fn parse_mapping(mapping: &str) -> Result<(String, String)> {
-    let separator = find_last_unescaped_separator(mapping).ok_or_else(|| {
+    let separator = mapping.rfind("=>").ok_or_else(|| {
         TantivyBindingError::InvalidArgument(format!(
             "invalid mapping char_filter mapping: {}",
             mapping
@@ -119,25 +119,6 @@ fn parse_mapping(mapping: &str) -> Result<(String, String)> {
     }
 
     Ok((source, target))
-}
-
-fn find_last_unescaped_separator(mapping: &str) -> Option<usize> {
-    let mut escaped = false;
-    let mut separator = None;
-    for (offset, ch) in mapping.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if ch == '\\' {
-            escaped = true;
-            continue;
-        }
-        if mapping[offset..].starts_with("=>") {
-            separator = Some(offset);
-        }
-    }
-    separator
 }
 
 fn unescape_mapping_side(input: &str) -> Result<String> {
@@ -305,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mapping_char_filter_uses_last_unescaped_separator() {
+    fn test_mapping_char_filter_uses_last_raw_separator() {
         let params = r#"{
             "type": "mapping",
             "mappings": ["a=>b=>c"]
@@ -315,6 +296,17 @@ mod tests {
         let output = filter.apply(FilteredText::new("a=>b"));
 
         assert_eq!(output.text, "c");
+    }
+
+    #[test]
+    fn test_mapping_char_filter_rejects_backslash_before_raw_separator() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["a=>b\\=>c"]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+
+        assert!(MappingCharFilter::from_json(&params).is_err());
     }
 
     #[test]

@@ -118,8 +118,6 @@ impl FilteredText {
     }
 
     pub(crate) fn correct_offsets(&self, offset_from: usize, offset_to: usize) -> (usize, usize) {
-        let offset_from = offset_from.min(self.text.len());
-        let offset_to = offset_to.min(self.text.len());
         debug_assert!(offset_from <= offset_to);
 
         match &self.corrections {
@@ -204,7 +202,10 @@ impl FilteredText {
 
     /// Replacements must be sorted, non-overlapping, and aligned to UTF-8 byte
     /// boundaries in the current filtered text.
-    pub(crate) fn replace_ranges(self, replacements: Vec<(usize, usize, String)>) -> Self {
+    pub(crate) fn replace_ranges<S: AsRef<str>>(
+        self,
+        replacements: Vec<(usize, usize, S)>,
+    ) -> Self {
         debug_assert!(
             Self::valid_replacements(&self.text, &replacements),
             "char filter replacements must be sorted, non-overlapping, and valid UTF-8 ranges"
@@ -231,7 +232,7 @@ impl FilteredText {
         let mut correction_index = 0;
         for (start, end, replacement) in replacements {
             self.push_original_segment(cursor, start, &mut correction_index, &mut output);
-            self.push_replacement(start, end, &replacement, &mut output);
+            self.push_replacement(start, end, replacement.as_ref(), &mut output);
             cursor = end;
         }
         self.push_original_segment(cursor, self.text.len(), &mut correction_index, &mut output);
@@ -246,7 +247,7 @@ impl FilteredText {
         }
     }
 
-    fn valid_replacements(text: &str, replacements: &[(usize, usize, String)]) -> bool {
+    fn valid_replacements<S>(text: &str, replacements: &[(usize, usize, S)]) -> bool {
         let mut cursor = 0;
         for (start, end, _) in replacements {
             if *start < cursor || *start > *end || *end > text.len() {
