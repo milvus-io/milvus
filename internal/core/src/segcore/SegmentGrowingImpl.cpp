@@ -1050,14 +1050,12 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
                 field_meta.is_nested_array()) {
                 array_type = field_meta.get_array_type_schema();
             }
-            auto field_data =
-                storage::CreateFieldData(field_meta.get_data_type(),
-                                         field_meta.get_element_type(),
-                                         true,
-                                         1,
-                                         lack_num,
-                                         std::move(array_type));
-            field_data->FillFieldData(field_meta.default_value(), lack_num);
+            auto field_data = storage::CreateFieldDataFromDefaultValue(
+                field_meta.get_data_type(),
+                true,
+                lack_num,
+                field_meta.default_value(),
+                std::move(array_type));
             channel->push(field_data);
         }
 
