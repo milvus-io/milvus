@@ -293,7 +293,6 @@ TextMatchIndex::AddTextsGrowing(size_t n,
     // below that count to be available already.
     if (!local_null_offsets.empty()) {
         std::unique_lock<folly::SharedMutex> lock(mutex_);
-        null_offset_.reserve(null_offset_.size() + local_null_offsets.size());
         null_offset_.insert(null_offset_.end(),
                             local_null_offsets.begin(),
                             local_null_offsets.end());
