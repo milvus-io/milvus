@@ -27,15 +27,17 @@ NewCollection(const void* schema_proto_blob,
               CCollection* collection);
 
 CStatus
+NewCollectionWithId(const int64_t collection_id,
+                    const uint64_t runtime_version,
+                    const void* schema_proto_blob,
+                    const int64_t length,
+                    CCollection* collection);
+
+CStatus
 UpdateSchema(CCollection collection,
              const void* proto_blob,
              const int64_t length,
-             const uint64_t version);
-
-CStatus
-UpdateLoadFields(CCollection collection,
-                 const int64_t* field_ids,
-                 const int64_t length);
+             const uint64_t runtime_version);
 
 CStatus
 SetIndexMeta(CCollection collection,

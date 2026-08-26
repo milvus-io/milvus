@@ -142,4 +142,7 @@ message SegmentLoadInfo {
   // When non-zero, segcore overwrites the in-memory timestamp column so all
   // MVCC/TTL/delete logic uses the commit time instead of raw row timestamps.
   uint64 commit_timestamp = 24;
+  // Collection load policy is kept separate from the immutable logical schema.
+  repeated int64 load_fields = 25;
+  schema.CollectionSchema load_schema = 26;
 }

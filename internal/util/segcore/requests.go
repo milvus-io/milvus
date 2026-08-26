@@ -128,4 +128,6 @@ type ReopenRequest struct {
 	LoadInfo      *querypb.SegmentLoadInfo
 	Schema        *schemapb.CollectionSchema
 	SchemaVersion uint64
+	LoadSchema    *schemapb.CollectionSchema
+	LoadFields    []int64
 }
