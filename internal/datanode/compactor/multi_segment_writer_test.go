@@ -406,6 +406,7 @@ func (s *MultiSegmentWriterSuite) TestSegmentRotation() {
 
 	// Track segments as they are created
 	initialSegments := len(writer.GetCompactionSegments())
+	initialRwOptionLen := len(writer.rwOption)
 
 	// Write data until we trigger rotation
 	for i := 0; i < 1000; i++ {
@@ -415,7 +416,9 @@ func (s *MultiSegmentWriterSuite) TestSegmentRotation() {
 
 		// Check if rotation happened
 		if len(writer.GetCompactionSegments()) > initialSegments {
-			// First rotation detected
+			// First rotation detected; verify rwOption slice has not grown.
+			s.Equal(initialRwOptionLen, len(writer.rwOption),
+				"rwOption must not grow after the first rotation")
 			break
 		}
 	}
@@ -436,6 +439,9 @@ func (s *MultiSegmentWriterSuite) TestSegmentRotation() {
 	// Should have multiple segments
 	finalSegments := writer.GetCompactionSegments()
 	s.GreaterOrEqual(len(finalSegments), 2)
+	// rwOption must remain stable across all rotations
+	s.Equal(initialRwOptionLen, len(writer.rwOption),
+		"rwOption must not grow across multiple rotations")
 }
 
 func (s *MultiSegmentWriterSuite) TestSegmentIDExhaustionGrowsCurrentSegment() {

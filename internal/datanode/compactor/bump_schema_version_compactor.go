@@ -814,7 +814,7 @@ func (t *bumpSchemaVersionCompactionTask) newV3WriterResult(schema *schemapb.Col
 	writerFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
 	columnGroups = storagecommon.FillColumnGroupFormats(columnGroups, writerFormat)
 	schemaBasedFormats := storagecommon.ColumnGroupFormats(columnGroups, writerFormat)
-	writer, err := storage.NewPartialPackedRecordBatchWriter(basePath, schema, int64(t.compactionParams.BinLogMaxSize), packed.DefaultMultiPartUploadSize, columnGroups, t.compactionParams.StorageConfig, pluginContext, writerFormat, schemaBasedFormats)
+	writer, err := storage.NewPartialPackedRecordBatchWriter(basePath, schema, int64(t.compactionParams.BinLogMaxSize), paramtable.Get().DataNodeCfg.MultiPartUploadSize.GetAsInt64(), columnGroups, t.compactionParams.StorageConfig, pluginContext, writerFormat, schemaBasedFormats)
 	if err != nil {
 		return nil, err
 	}
