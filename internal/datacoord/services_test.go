@@ -411,78 +411,69 @@ func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
 			},
 		},
 	})
-	err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
-		ID:            10,
-		CollectionID:  0,
-		PartitionID:   1,
-		InsertChannel: "ch1",
-		State:         commonpb.SegmentState_Sealed,
-		Level:         datapb.SegmentLevel_L1,
-		NumOfRows:     1,
-	}))
-	s.Require().NoError(err)
 
-	resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
-		Base:           &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
-		SegmentID:      10,
-		CollectionID:   0,
-		PartitionID:    1,
-		Channel:        "ch1",
-		SegLevel:       datapb.SegmentLevel_L1,
-		Flushed:        true,
-		StorageVersion: storage.StorageV2,
-	})
-	s.NoError(err)
+	addSegment := func(segmentID int64, state commonpb.SegmentState, storageVersion int64) {
+		err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             segmentID,
+			CollectionID:   0,
+			PartitionID:    1,
+			InsertChannel:  "ch1",
+			State:          state,
+			Level:          datapb.SegmentLevel_L1,
+			NumOfRows:      1,
+			StorageVersion: storageVersion,
+		}))
+		s.Require().NoError(err)
+	}
+
+	saveBinlog := func(segmentID int64, flushed bool, storageVersion int64, binlogs []*datapb.FieldBinlog) *commonpb.Status {
+		resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+			Base:              &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
+			SegmentID:         segmentID,
+			CollectionID:      0,
+			PartitionID:       1,
+			Channel:           "ch1",
+			SegLevel:          datapb.SegmentLevel_L1,
+			Flushed:           flushed,
+			StorageVersion:    storageVersion,
+			Field2BinlogPaths: binlogs,
+		})
+		s.NoError(err)
+		return resp
+	}
+
+	// Reject: a V3 segment requires a non-empty StorageV3 manifest path.
+	addSegment(10, commonpb.SegmentState_Sealed, storage.StorageV3)
+	resp := saveBinlog(10, true, storage.StorageV3, nil)
 	s.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
 
-	resp, err = s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
-		Base:           &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
-		SegmentID:      10,
-		CollectionID:   0,
-		PartitionID:    1,
-		Channel:        "ch1",
-		SegLevel:       datapb.SegmentLevel_L1,
-		Flushed:        true,
-		StorageVersion: storage.StorageV3,
-	})
-	s.NoError(err)
+	// Reject: a V3 sync without a manifest path, even when not flushing.
+	resp = saveBinlog(10, false, storage.StorageV3, nil)
 	s.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
 
-	resp, err = s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
-		Base:           &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
-		SegmentID:      10,
-		CollectionID:   0,
-		PartitionID:    1,
-		Channel:        "ch1",
-		SegLevel:       datapb.SegmentLevel_L1,
-		Flushed:        false,
-		StorageVersion: storage.StorageV3,
+	// Reject: a V2 segment whose data actually carries a TEXT column.
+	addSegment(11, commonpb.SegmentState_Sealed, storage.StorageV2)
+	resp = saveBinlog(11, true, storage.StorageV2, []*datapb.FieldBinlog{
+		{FieldID: 101, Binlogs: []*datapb.Binlog{{LogPath: "files/insert_log/0/1/11/101/1", EntriesNum: 1}}},
 	})
-	s.NoError(err)
 	s.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
+	s.ErrorContains(merr.Error(resp), "must be saved with StorageV3 manifest")
 
-	err = s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
-		ID:            11,
-		CollectionID:  0,
-		PartitionID:   1,
-		InsertChannel: "ch1",
-		State:         commonpb.SegmentState_Dropped,
-		Level:         datapb.SegmentLevel_L1,
-		NumOfRows:     1,
-	}))
-	s.Require().NoError(err)
+	// Allow: a legacy V2 segment with no binlogs at all (no TEXT column).
+	addSegment(12, commonpb.SegmentState_Sealed, storage.StorageV2)
+	resp = saveBinlog(12, true, storage.StorageV2, nil)
+	s.True(merr.Ok(resp))
 
-	resp, err = s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
-		Base:           &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
-		SegmentID:      11,
-		CollectionID:   0,
-		PartitionID:    1,
-		Channel:        "ch1",
-		SegLevel:       datapb.SegmentLevel_L1,
-		Flushed:        true,
-		StorageVersion: storage.StorageV2,
+	// Allow: a legacy V2 segment carrying only non-TEXT columns.
+	addSegment(13, commonpb.SegmentState_Sealed, storage.StorageV2)
+	resp = saveBinlog(13, true, storage.StorageV2, []*datapb.FieldBinlog{
+		{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "files/insert_log/0/1/13/100/1", EntriesNum: 1}}},
 	})
-	s.NoError(err)
+	s.True(merr.Ok(resp))
+
+	// Dropped segments are exempt from the TEXT storage validation.
+	addSegment(14, commonpb.SegmentState_Dropped, storage.StorageV2)
+	resp = saveBinlog(14, true, storage.StorageV2, nil)
 	s.True(merr.Ok(resp))
 }
 
