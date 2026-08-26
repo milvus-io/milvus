@@ -25,9 +25,10 @@ Mapping rules trim syntax whitespace on both sides of `=>`, matching
 Elasticsearch. Whitespace that is part of a source or target must use an escape
 such as `\u0020`. The parser supports `\\`, `\n`, `\t`, `\r`, `\b`, `\f`, and
 `\uXXXX`; valid UTF-16 surrogate-pair escapes are combined into one Unicode
-scalar before processing UTF-8 text. When a rule contains multiple unescaped
-`=>` sequences, the last one is the separator. Duplicate sources are rejected
-after trimming and unescaping.
+scalar before processing UTF-8 text. When a rule contains multiple raw `=>`
+sequences, the last one is the separator. A literal arrow inside either side
+must be escaped as `\=\>`, so it contains no raw separator. Duplicate sources
+are rejected after trimming and unescaping.
 
 ## Configuration
 
@@ -110,8 +111,9 @@ through source corrections monotonically.
 - UTF-16 offsets are not supported. Adding them would require a coordinate
   contract across tokenizers, Rust/Cgo bindings, Go, and API consumers rather
   than a local character-filter change.
-- A gRPC tokenizer used with character filters must return ordered UTF-8 byte
-  offsets for the filtered input. Contract validation is future work.
+- Every tokenizer, including the gRPC tokenizer, owns the contract of returning
+  ordered UTF-8 byte offsets for its input. The character-filter wrapper trusts
+  those offsets and does not validate or repair tokenizer output.
 
 ## Verification
 

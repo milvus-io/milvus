@@ -142,7 +142,7 @@ fn test_mapping_char_filter_rejects_invalid_unicode_escape() {
 }
 
 #[test]
-fn test_mapping_char_filter_uses_last_unescaped_separator() {
+fn test_mapping_char_filter_uses_last_raw_separator() {
     let params = r#"{
         "char_filter": [
             {
@@ -161,6 +161,21 @@ fn test_mapping_char_filter_uses_last_unescaped_separator() {
     assert_eq!(token.text, "c");
     assert_eq!((token.offset_from, token.offset_to), (0, 4));
     assert!(!stream.advance());
+}
+
+#[test]
+fn test_mapping_char_filter_rejects_backslash_before_raw_separator() {
+    let params = r#"{
+        "char_filter": [
+            {
+                "type": "mapping",
+                "mappings": ["a=>b\\=>c"]
+            }
+        ],
+        "tokenizer": "standard"
+    }"#;
+
+    assert!(create_analyzer(params, "").is_err());
 }
 
 #[test]
