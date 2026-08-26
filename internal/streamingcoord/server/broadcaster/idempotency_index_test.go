@@ -2,6 +2,7 @@ package broadcaster
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -186,17 +187,21 @@ func TestIdempotencyIndexRecovery(t *testing.T) {
 			message.NewCollectionScopedIdempotencyKey(testCollectionID, clientKey))
 	}
 
-	original, _, ok := bm.getOriginalBroadcast(scopeOf("import/1/pending"))
+	id, ok := bm.idempotencyIndex.Get(scopeOf("import/1/pending"))
 	require.True(t, ok)
-	require.Equal(t, uint64(100), original.BroadcastHeader().BroadcastID)
+	require.Equal(t, uint64(100), id)
+	_, ok = bm.getBroadcastTaskByID(id)
+	require.True(t, ok)
 
-	original, _, ok = bm.getOriginalBroadcast(scopeOf("import/1/tombstone"))
+	id, ok = bm.idempotencyIndex.Get(scopeOf("import/1/tombstone"))
 	require.True(t, ok)
-	require.Equal(t, uint64(200), original.BroadcastHeader().BroadcastID)
+	require.Equal(t, uint64(200), id)
+	_, ok = bm.getBroadcastTaskByID(id)
+	require.True(t, ok)
 
 	// The raw client key alone must never resolve: an unscoped lookup is exactly the
 	// bug that makes the same key collide across collections and message types.
-	_, _, ok = bm.getOriginalBroadcast("import/1/pending")
+	_, ok = bm.idempotencyIndex.Get("import/1/pending")
 	require.False(t, ok)
 
 	// The keyless task must not occupy an entry.
@@ -694,6 +699,75 @@ func newBroadcastTaskManagerWithEntrypointForTest(t *testing.T, protos ...*strea
 	bm := newBroadcastTaskManager(protos)
 	t.Cleanup(bm.Close)
 	return bm
+}
+
+// TestConcurrentSameKeyBroadcastsUnderDifferentResourceKeys pins the dedup guarantee
+// to the manager lock rather than to the caller's resource keys.
+//
+// TestConcurrentSameKeyBroadcastsCreateExactlyOneTask hands every goroutine the SAME
+// collection key, so they serialize on it and the lookup can never race. Import does
+// not have that luxury: it scopes the key by collection ID -- deliberately, so a retry
+// still dedups after a rename -- while startBroadcastWithCollectionID resolves the
+// collection NAME before any lock is held and locks on the name. RenameCollection
+// takes DB-level keys only, so it blocks an in-flight import, and by the time it
+// releases, the original request and its retry hold exclusive locks on two different
+// names. Same scope, non-conflicting locks, no serialization.
+//
+// The keys below are exactly that pairing: one scope, one lock per goroutine, all
+// distinct. Exactly one task may still be created.
+func TestConcurrentSameKeyBroadcastsUnderDifferentResourceKeys(t *testing.T) {
+	bm := newBroadcastTaskManagerWithEntrypointForTest(t)
+
+	const concurrency = 8
+	results := make([]*types.BroadcastAppendResult, concurrency)
+	errs := make([]error, concurrency)
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			// A different collection name per goroutine, standing in for the names a
+			// rename hands out. The scope below is unchanged: it is built from the
+			// collection ID.
+			collKey := message.NewExclusiveCollectionNameResourceKey("db1", fmt.Sprintf("coll_rename_%d", i))
+			api, err := bm.WithResourceKeys(context.Background(), collKey)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			defer api.Close()
+			results[i], errs[i] = api.Broadcast(context.Background(), newImportMsgWithKey("renamed"))
+		}(i)
+	}
+	close(start)
+
+	finished := make(chan struct{})
+	go func() { wg.Wait(); close(finished) }()
+	select {
+	case <-finished:
+	case <-time.After(30 * time.Second):
+		t.Fatal("concurrent same-key broadcasts did not all finish: a guard was leaked or an ack never completed")
+	}
+
+	fresh := 0
+	var originalID uint64
+	for i := 0; i < concurrency; i++ {
+		require.NoError(t, errs[i])
+		require.NotNil(t, results[i])
+		if results[i].Duplicated == nil {
+			fresh++
+			originalID = results[i].BroadcastID
+		}
+	}
+	require.Equal(t, 1, fresh,
+		"exactly one task may be created even when the callers hold different resource keys")
+	for i := 0; i < concurrency; i++ {
+		require.Equal(t, originalID, results[i].BroadcastID)
+	}
+	require.Len(t, bm.idempotencyIndex.scopeToBroadcastID, 1)
 }
 
 // TestConcurrentSameKeyBroadcastsCreateExactlyOneTask is the invariant import's dedup

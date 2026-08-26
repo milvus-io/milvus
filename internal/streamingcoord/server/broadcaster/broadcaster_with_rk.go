@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type broadcasterWithRK struct {
@@ -16,58 +17,44 @@ type broadcasterWithRK struct {
 }
 
 func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
-	// The idempotency lookup lives here rather than in an exported check method so
-	// it cannot be called before the resource keys are held: this object only
-	// exists once StartBroadcastWithResourceKeys acquired them. Two concurrent
-	// same-key requests are then serialized by the resource lock rather than both
-	// missing -- but only if the lock they hold is an exclusive lock on the object
-	// the key is scoped to. Under a shared lock both requests hold a read lock, both
-	// can miss, and each creates a task; the index keeps the first broadcastID while
-	// the second has already reached the WAL. The only keyed caller today (import)
-	// scopes to a collection and holds that collection's exclusive key.
+	// The idempotency decision lives in the manager, under the same lock that
+	// registers the task: see getOrAddBroadcastTask. It used to live here, as a
+	// lookup separate from the registration, with the resource keys this object
+	// holds expected to keep two same-key requests apart in between. They do not,
+	// whenever the lock names a different object than the scope does.
 	//
-	// The guards are deliberately NOT consumed on a hit, so the caller's deferred
-	// Close() releases the locks.
-	if scope := idempotencyScopeOfMessage(msg); scope != "" {
-		if dup, results, ok := b.broadcaster.getOriginalBroadcast(scope); ok {
-			return &types.BroadcastAppendResult{
-				BroadcastID:   dup.BroadcastHeader().BroadcastID,
-				AppendResults: results,
-				Duplicated:    dup,
-			}, nil
-		}
-		// Checked after the lookup, not before: the bound is admission control over new
-		// index entries, so it has nothing to decide about a key that is already indexed.
-		//
-		// This ordering is local to the broadcaster. It is NOT a cluster guarantee that
-		// lowering the bound leaves an open idempotency window alone: both doors a client
-		// key enters through -- the REST middleware and the propagation interceptor -- run
-		// interceptor.ValidateIdempotencyKey against the same refreshable parameter before
-		// a request can reach here, so a lowered limit does reject in-window retries at the
-		// edge. What this order still buys is that the broadcaster adds no second rejection
-		// of its own once a key has been admitted.
-		if err := validateIdempotencyKeyLength(message.IdempotencyKeyOf(msg)); err != nil {
-			return nil, err
-		}
-	}
+	// Read the refreshable bound here so the manager never reads config under its
+	// lock.
+	keyLengthLimit := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()
 
-	// Consume the guards before handing them to broadcast to avoid double unlock.
-	guards := b.guards
-	b.guards = nil
-	msg = msg.OverwriteBroadcastHeader(b.broadcastID, guards.ResourceKeys()...)
-	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALBroadcast)
-	defer span.End()
-
+	// Stamping the header, opening the span and injecting the trace context all
+	// operate on this call's own values, so they stay outside the manager lock.
 	// Keep a trace context in the broadcast message so that the DDL ack callback
 	// can still extract it after the original caller span is long gone.
+	msg = msg.OverwriteBroadcastHeader(b.broadcastID, b.guards.ResourceKeys()...)
+	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALBroadcast)
+	defer span.End()
 	message.InjectTraceContext(ctx, msg)
 
-	result, err := b.broadcaster.broadcast(ctx, msg, b.broadcastID, guards)
+	result, dup, err := b.broadcaster.broadcast(ctx, msg, b.broadcastID, b.guards, keyLengthLimit)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
+		return nil, err
 	}
-	return result, err
+	if dup != nil {
+		// Nothing was registered and nothing reached the WAL, so the guards are
+		// still ours: leave them for the caller's deferred Close().
+		dupMsg, results := dup.BroadcastResultIfAcked()
+		return &types.BroadcastAppendResult{
+			BroadcastID:   dupMsg.BroadcastHeader().BroadcastID,
+			AppendResults: results,
+			Duplicated:    dupMsg,
+		}, nil
+	}
+	// The registered task owns the guards now; drop ours to avoid a double unlock.
+	b.guards = nil
+	return result, nil
 }
 
 func (b *broadcasterWithRK) Close() {

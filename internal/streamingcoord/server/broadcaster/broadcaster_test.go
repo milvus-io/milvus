@@ -244,7 +244,9 @@ func TestBroadcastTaskNotCreatedOnStoppedBroadcaster(t *testing.T) {
 	}
 	bm.lifetime.SetState(typeutil.LifetimeStateStopped)
 
-	_, err := bm.broadcast(context.Background(), createNewBroadcastMsg([]string{"v1"}, rk), 1, guards)
+	// The manager is already stopped, so it returns before the key-length bound
+	// is ever consulted; any value does.
+	_, _, err := bm.broadcast(context.Background(), createNewBroadcastMsg([]string{"v1"}, rk), 1, guards, 256)
 
 	require.Error(t, err)
 	require.True(t, IsBroadcastTaskNotCreated(err))

@@ -69,14 +69,18 @@ func ValidateIdempotencyKey(key string) error {
 // matching how the db name is handled: the entrypoint already owns the incoming
 // metadata, so an extra interceptor would only add a hop.
 func IdempotencyKeyFromContext(ctx context.Context) string {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return ""
-	}
+	// ValueFromIncomingContext, not FromIncomingContext: the latter copies the
+	// whole incoming metadata -- one map plus one []string per entry -- and this
+	// runs on every outgoing unary RPC through
+	// IdempotencyKeyPropagationUnaryClientInterceptor, i.e. on the cluster's
+	// hottest path, almost always to learn the key is absent. The lookup below
+	// allocates only when it matches.
+	//
 	// util.HeaderIdempotencyKey is already lowercase, which is the form gRPC
-	// normalizes metadata keys to; lowering it again here would only hide a future
-	// edit to the constant that the write side would not survive either.
-	values := md[util.HeaderIdempotencyKey]
+	// normalizes metadata keys to, so the exact-key hit carries it; the
+	// EqualFold fallback inside covers metadata that was not built through the
+	// helpers, which is what the copy-and-lower above used to cover.
+	values := metadata.ValueFromIncomingContext(ctx, util.HeaderIdempotencyKey)
 	if len(values) < 1 {
 		return ""
 	}

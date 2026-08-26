@@ -5,7 +5,6 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // idempotencyScope derives the dedup identity of a broadcast: a client key only
@@ -62,8 +61,9 @@ func idempotencyScopeOfMessage(msg message.BroadcastMutableMessage) string {
 // The bound is inclusive and fails closed: a limit of 0 or less rejects every
 // non-empty key, i.e. the cluster accepts no idempotency keys at all. A broadcast that
 // carries no key is not idempotent and is never rejected here.
-func validateIdempotencyKeyLength(key message.IdempotencyKey) error {
-	limit := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()
+// The limit is passed in rather than read here: the only caller applies this
+// inside the manager lock, and a refreshable-config read does not belong there.
+func validateIdempotencyKeyLength(key message.IdempotencyKey, limit int) error {
 	if clientKey := key.ClientKey(); len(clientKey) > limit {
 		return merr.WrapErrParameterInvalidMsg("idempotency key length %d exceeds limit %d", len(clientKey), limit)
 	}

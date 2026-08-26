@@ -215,23 +215,39 @@ func (bm *broadcastTaskManager) appendSharedClusterRK(resourceKeys ...message.Re
 	return append(resourceKeys, message.NewSharedClusterResourceKey())
 }
 
-// broadcast broadcasts the message to all vchannels.
-// it will block until the message is broadcasted to all vchannels
-func (bm *broadcastTaskManager) broadcast(ctx context.Context, msg message.BroadcastMutableMessage, broadcastID uint64, guards *lockGuards) (*types.BroadcastAppendResult, error) {
+// broadcast broadcasts the message to all vchannels, unless its idempotency scope
+// is already owned by an earlier broadcast.
+//
+// dup is non-nil exactly when nothing was registered and nothing will reach the
+// WAL; the caller still holds its lock guards in that case.
+func (bm *broadcastTaskManager) broadcast(
+	ctx context.Context,
+	msg message.BroadcastMutableMessage,
+	broadcastID uint64,
+	guards *lockGuards,
+	keyLengthLimit int,
+) (result *types.BroadcastAppendResult, dup *broadcastTask, err error) {
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
 		guards.Unlock()
-		return nil, errors.Mark(status.NewOnShutdownError("broadcaster is closing"), ErrBroadcastTaskNotCreated)
+		return nil, nil, errors.Mark(status.NewOnShutdownError("broadcaster is closing"), ErrBroadcastTaskNotCreated)
 	}
 	defer bm.lifetime.Done()
 
 	// Validation is now done before calling broadcast (in DataCoord for import operations)
 	// CheckCallback mechanism has been removed as part of the import refactoring
 
-	task := bm.addBroadcastTask(msg, broadcastID, guards)
+	dup, task, err := bm.getOrAddBroadcastTask(ctx, msg, broadcastID, guards, keyLengthLimit)
+	if err != nil {
+		return nil, nil, err
+	}
+	if dup != nil {
+		return nil, dup, nil
+	}
 	pendingTask := newPendingBroadcastTask(task)
 
 	// Add it into broadcast scheduler to broadcast the message into all vchannels.
-	return bm.broadcastScheduler.AddTask(ctx, pendingTask)
+	result, err = bm.broadcastScheduler.AddTask(ctx, pendingTask)
+	return result, nil, err
 }
 
 // LegacyAck is the legacy ack function for the broadcast task.
@@ -297,19 +313,64 @@ func (bm *broadcastTaskManager) Close() {
 	bm.ackScheduler.Close()
 }
 
-// addBroadcastTask adds the broadcast task into the manager.
-func (bm *broadcastTaskManager) addBroadcastTask(msg message.BroadcastMutableMessage, broadcastID uint64, guards *lockGuards) *broadcastTask {
+// getOrAddBroadcastTask resolves the idempotency scope and registers the task in
+// ONE critical section.
+//
+// The lookup and the insert used to be two critical sections on bm.mu, and only
+// the caller's resource lock kept two same-key requests out of the gap between
+// them. That works only when the lock is exclusive on the very object the scope
+// names. It is not: import scopes by collection ID (so a retry still dedups after
+// a rename) but locks by collection name, and RenameCollection takes DB-level keys
+// only. A rename between name resolution and lock acquisition therefore leaves two
+// same-key requests holding non-conflicting collection-name locks -- both miss,
+// both register, both reach the WAL, and idempotencyIndex.Add silently keeps the
+// first. Deciding under bm.mu retires that caller obligation instead of restating
+// it in a comment.
+//
+// keyLengthLimit is read by the caller rather than here so no refreshable-config
+// read happens under bm.mu. It is applied only on the miss path: the bound is
+// admission control over NEW index entries, so it has nothing to decide about a
+// key that is already indexed, and lowering it must not turn an in-window retry
+// into an error.
+//
+// Returns the owning task on a hit, having registered nothing; the caller keeps
+// its lock guards. Returns the newly registered task on a miss, which now owns
+// the guards.
+func (bm *broadcastTaskManager) getOrAddBroadcastTask(
+	ctx context.Context,
+	msg message.BroadcastMutableMessage,
+	broadcastID uint64,
+	guards *lockGuards,
+	keyLengthLimit int,
+) (dup *broadcastTask, created *broadcastTask, err error) {
+	// The scope comes from the message alone, so the hit path and the miss path
+	// cannot drift apart. Construction touches no shared state, so it stays
+	// outside the lock.
+	scope := idempotencyScopeOfMessage(msg)
 	newIncomingTask := newBroadcastTaskFromBroadcastMessage(msg, bm.metrics, bm.ackScheduler)
 	newIncomingTask.SetLogger(bm.Logger())
 	newIncomingTask.WithResourceKeyLockGuards(guards)
 
 	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	if ownerID, ok := bm.idempotencyIndex.Get(scope); ok {
+		if t, ok := bm.tasks[ownerID]; ok {
+			return t, nil, nil
+		}
+		// tasks and idempotencyIndex are written together under this lock and
+		// removeBroadcastTask drops the index entry first, so a scope whose owner
+		// has no task is unreachable. Say so rather than trusting the entry, and
+		// fall through to registration.
+		bm.Logger().Warn(ctx, "idempotency index entry has no task, treating it as a miss",
+			mlog.Uint64("ownerBroadcastID", ownerID))
+	}
+	if err := validateIdempotencyKeyLength(message.IdempotencyKeyOf(msg), keyLengthLimit); err != nil {
+		return nil, nil, err
+	}
 	bm.tasks[broadcastID] = newIncomingTask
-	// Same derivation the lookup in broadcasterWithRK.Broadcast used: the scope comes
-	// from the message alone, so read side and write side cannot drift apart.
-	bm.idempotencyIndex.Add(idempotencyScopeOfMessage(msg), broadcastID)
-	bm.mu.Unlock()
-	return newIncomingTask
+	bm.idempotencyIndex.Add(scope, broadcastID)
+	return nil, newIncomingTask, nil
 }
 
 // getOrCreateBroadcastTask returns the task by the broadcastID
@@ -334,30 +395,6 @@ func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMe
 	bm.tasks[bh.BroadcastID] = newBroadcastTask
 	bm.idempotencyIndex.Add(newBroadcastTask.IdempotencyScope(), bh.BroadcastID)
 	return newBroadcastTask, true
-}
-
-// getOriginalBroadcast returns the original broadcast message that owns the given
-// idempotency scope, so the caller can recover its own response payload, together
-// with the per-vchannel append results of that original broadcast.
-//
-// The results are nil when the original has not been acked on every vchannel yet;
-// see broadcastTask.BroadcastResultIfAcked.
-func (bm *broadcastTaskManager) getOriginalBroadcast(scope string) (message.BroadcastMutableMessage, map[string]*types.AppendResult, bool) {
-	bm.mu.Lock()
-	defer bm.mu.Unlock()
-
-	broadcastID, ok := bm.idempotencyIndex.Get(scope)
-	if !ok {
-		return nil, nil, false
-	}
-	t, ok := bm.tasks[broadcastID]
-	if !ok {
-		// The index and tasks map are maintained under the same lock, so this is
-		// unreachable; treat it as a miss rather than trusting a dangling entry.
-		return nil, nil, false
-	}
-	msg, results := t.BroadcastResultIfAcked()
-	return msg, results, true
 }
 
 // getBroadcastTaskByID return the task by the broadcastID.
