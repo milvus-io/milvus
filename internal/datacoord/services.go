@@ -765,14 +765,26 @@ func (s *Server) validateTextSegmentStorage(req *datapb.SaveBinlogPathsRequest, 
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 || req.GetDropped() {
 		return nil
 	}
-	if !s.meta.collectionHasTextFields(req.GetCollectionID()) {
+	textFieldIDs := s.meta.collectionTextFieldIDs(req.GetCollectionID())
+	if len(textFieldIDs) == 0 {
 		return nil
 	}
 	if storageVersion < storage.StorageV3 {
-		return merr.WrapErrParameterInvalidMsg(
-			"TEXT segment %d must be saved with StorageV3 manifest, got storage version %d",
-			req.GetSegmentID(),
-			storageVersion)
+		// A legacy V2 segment whose data was written before the collection gained
+		// TEXT fields carries no TEXT column in its binlogs and can be flushed
+		// safely without a StorageV3 manifest (the query path fills the missing
+		// TEXT column with empty values). A V2 segment that DOES carry a TEXT
+		// column is still rejected: TEXT cannot be persisted without a StorageV3
+		// manifest (LOB spillover / query path requires it).
+		for _, fieldBinlog := range req.GetField2BinlogPaths() {
+			if lo.Contains(textFieldIDs, fieldBinlog.GetFieldID()) {
+				return merr.WrapErrParameterInvalidMsg(
+					"TEXT segment %d must be saved with StorageV3 manifest, got storage version %d",
+					req.GetSegmentID(),
+					storageVersion)
+			}
+		}
+		return nil
 	}
 	if req.GetManifestPath() == "" {
 		return merr.WrapErrParameterInvalidMsg(
