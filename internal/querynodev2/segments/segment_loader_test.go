@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/segcore/loadresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -2335,6 +2336,53 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_ExpansionF
 	suite.EqualValues(expected, usage.MemorySize)
 }
 
+func TestCheckLogicalSegmentSizeUsesJSONKeyStatsExpansionFactor(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.QueryNodeCfg.TieredEvictionEnabled.Key, "true")
+	defer params.Reset(params.QueryNodeCfg.TieredEvictionEnabled.Key)
+	params.Save(params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.Key, "1.0")
+	defer params.Reset(params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.Key)
+	params.Save(params.QueryNodeCfg.MmapJSONStats.Key, "false")
+	defer params.Reset(params.QueryNodeCfg.MmapJSONStats.Key)
+	params.Save(params.QueryNodeCfg.JSONKeyStatsExpansionFactor.Key, "3.0")
+	defer params.Reset(params.QueryNodeCfg.JSONKeyStatsExpansionFactor.Key)
+
+	const collectionID = int64(10)
+	collectionManager := NewMockCollectionManager(t)
+	segmentManager := NewMockSegmentManager(t)
+	loader := &segmentLoader{
+		manager: &Manager{
+			Collection: collectionManager,
+			Segment:    segmentManager,
+		},
+	}
+	collectionManager.EXPECT().
+		Get(collectionID).
+		Return(NewCollectionWithoutSegcoreForTest(collectionID, &schemapb.CollectionSchema{
+			Name: "test_json_stats_estimate",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			},
+		}))
+	segmentManager.EXPECT().GetLogicalResource().Return(ResourceUsage{}).Twice()
+
+	memoryBytes, diskBytes, err := loader.checkLogicalSegmentSize(context.Background(), []*querypb.SegmentLoadInfo{
+		{
+			CollectionID: collectionID,
+			SegmentID:    20,
+			NumOfRows:    1,
+			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+				101: {FieldID: 101, MemorySize: 100},
+			},
+		},
+	}, 1024)
+
+	assert.NoError(t, err)
+	assert.EqualValues(t, 300, memoryBytes)
+	assert.Zero(t, diskBytes)
+}
+
 func TestSeparateLoadInfoV2_ExternalFieldIndexNotSkipped(t *testing.T) {
 	// Verifies that indexes on external fields are NOT skipped in separateLoadInfoV2.
 	// Previously, external field indexes were filtered out, preventing index loading for external tables.
@@ -2795,7 +2843,7 @@ func TestResolveSegmentEstimateLogs(t *testing.T) {
 	}
 	loadInfo := newLoadInfo()
 
-	binlogs, deltalogs := resolveSegmentEstimateLogs(schema, loadInfo)
+	binlogs, deltalogs := loadresource.ResolveSegmentEstimateLogs(schema, loadInfo)
 	assert.Empty(t, loadInfo.GetBinlogPaths())
 	assert.Len(t, binlogs, 1)
 	assert.Equal(t, int64(0), binlogs[0].GetFieldID())
@@ -2835,7 +2883,7 @@ func TestResolveSegmentEstimateLogs(t *testing.T) {
 	assert.Equal(t, manualUsage, adaptedUsage)
 
 	loadInfo.GetStats().InsertBinlogSize = 99
-	binlogs, _ = resolveSegmentEstimateLogs(schema, loadInfo)
+	binlogs, _ = loadresource.ResolveSegmentEstimateLogs(schema, loadInfo)
 	assert.Len(t, binlogs, 1)
 
 	for name, mutate := range map[string]func(*querypb.SegmentLoadInfo, *schemapb.CollectionSchema){
@@ -2858,7 +2906,7 @@ func TestResolveSegmentEstimateLogs(t *testing.T) {
 			info.BinlogPaths = []*datapb.FieldBinlog{{FieldID: 99}}
 			testSchema := newSchema()
 			mutate(info, testSchema)
-			gotBinlogs, gotDeltalogs := resolveSegmentEstimateLogs(testSchema, info)
+			gotBinlogs, gotDeltalogs := loadresource.ResolveSegmentEstimateLogs(testSchema, info)
 			assert.Equal(t, info.GetBinlogPaths(), gotBinlogs)
 			assert.Equal(t, info.GetDeltalogs(), gotDeltalogs)
 		})
@@ -2869,7 +2917,7 @@ func TestResolveSegmentEstimateLogs(t *testing.T) {
 		info.Stats.InsertBinlogSize = 0
 		info.Stats.LoadResource.ColumnGroups = nil
 
-		gotBinlogs, gotDeltalogs := resolveSegmentEstimateLogs(schema, info)
+		gotBinlogs, gotDeltalogs := loadresource.ResolveSegmentEstimateLogs(schema, info)
 		assert.Empty(t, gotBinlogs)
 		assert.Len(t, gotDeltalogs, 1)
 		assert.EqualValues(t, 50, gotDeltalogs[0].GetBinlogs()[0].GetMemorySize())
