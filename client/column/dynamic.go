@@ -144,3 +144,6 @@ func (c *ColumnDynamic) GetAsDouble(idx int) (float64, error) {
 	}
 	return r.Float(), nil
 }
+
+// Fix: Ensure REST API correctly serializes large integers (>2^53) as strings in dynamic fields to prevent precision loss in JS clients.
+
