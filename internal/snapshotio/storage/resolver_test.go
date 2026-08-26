@@ -607,9 +607,11 @@ func TestResolveForeignStorageAzureCrossAccountRestoreWithSourceSAS(t *testing.T
 
 	require.Len(t, captured, 2)
 	foreignCM, copier := captured[0], captured[1]
-	// Metadata still reads from the foreign account with its own credential.
+	// Metadata still reads from the foreign account with its own credential,
+	// and the metadata client config must not carry the source-copy fields.
 	assert.Equal(t, "backup-account", foreignCM.AccessKeyID)
 	assert.Empty(t, foreignCM.AzureSourceEndpoint)
+	assert.Empty(t, foreignCM.AzureSourceSAS)
 	// The copy request writes the instance bucket, so the instance credential
 	// authorizes it and the source side is the foreign account under the SAS.
 	assert.Equal(t, "instance-account", copier.AccessKeyID)
@@ -621,6 +623,57 @@ func TestResolveForeignStorageAzureCrossAccountRestoreWithSourceSAS(t *testing.T
 	// whose transport is TLS.
 	assert.False(t, copier.UseSSL)
 	assert.True(t, copier.AzureSourceUseSSL)
+}
+
+func TestResolveForeignStorageAzureCrossAccountRestoreConstructsRealClients(t *testing.T) {
+	t.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
+
+	// Regression test: a restore/copy-source request carrying a source SAS used
+	// to fail before doing any work, because the foreign metadata client was
+	// constructed from a config that had AzureSourceSAS but no
+	// AzureSourceEndpoint, a combination the Azure client constructor rejects.
+	// Exercise the real NewRemoteChunkManager constructor (client construction
+	// is offline) instead of mocking it. The fixture keys are base64
+	// ("instance-key"/"backup-key") because the Azure SDK decodes the account
+	// key eagerly at construction; nothing is ever signed here.
+	// #nosec G101 -- offline fixture credentials, see above.
+	instanceCfg := &objectstorage.Config{
+		Address:           "core.windows.net",
+		BucketName:        "instance-container",
+		RootPath:          "by-dev",
+		AccessKeyID:       "instance-account",
+		SecretAccessKeyID: "aW5zdGFuY2Uta2V5",
+		CloudProvider:     objectstorage.CloudProviderAzure,
+	}
+	externalSpec := `{"extfs":{"cloud_provider":"azure","access_key_id":"backup-account","access_key_value":"YmFja3VwLWtleQ==","source_sas_token":"sv=2024-08-04&sig=abc"}}`
+
+	t.Run("restore", func(t *testing.T) {
+		resolved, err := ResolveForeignStorage(
+			context.Background(),
+			instanceCfg,
+			DirectionRestore,
+			"azure://backup-account.blob.core.windows.net/backup-container/root/snapshots/1/metadata/1.json",
+			externalSpec,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "backup-container", resolved.ForeignBucket)
+		assert.NotNil(t, resolved.ForeignCM)
+		assert.NotNil(t, resolved.Copier)
+	})
+
+	t.Run("copy source", func(t *testing.T) {
+		resolved, err := ResolveForeignStorage(
+			context.Background(),
+			instanceCfg,
+			DirectionCopySource,
+			"azure://backup-account.blob.core.windows.net/backup-container/root",
+			externalSpec,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "backup-container", resolved.ForeignBucket)
+		assert.NotNil(t, resolved.ForeignCM)
+		assert.NotNil(t, resolved.Copier)
+	})
 }
 
 func TestResolveForeignStorageAzureCrossAccountWithoutSASRejected(t *testing.T) {

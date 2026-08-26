@@ -65,7 +65,21 @@ func ResolveForeignStorage(
 	if err != nil {
 		return nil, err
 	}
-	foreignCM, err := milvusstorage.NewRemoteChunkManager(ctx, resolvedCfg.foreignCfg)
+	// The metadata client only reads and writes the foreign bucket with the
+	// foreign credential, so it must not carry the Azure source-copy fields.
+	// Besides being wrong in principle, they break construction for
+	// Restore/CopySource: AzureSourceEndpoint is populated only on the copier
+	// config below, and a source SAS without an endpoint fails client
+	// construction. Export keeps the fields because there foreignCM is the
+	// copier.
+	metadataCfg := resolvedCfg.foreignCfg
+	if direction == DirectionRestore || direction == DirectionCopySource {
+		metadataCfg = cloneObjectStorageConfig(resolvedCfg.foreignCfg)
+		metadataCfg.AzureSourceEndpoint = ""
+		metadataCfg.AzureSourceUseSSL = false
+		metadataCfg.AzureSourceSAS = ""
+	}
+	foreignCM, err := milvusstorage.NewRemoteChunkManager(ctx, metadataCfg)
 	if err != nil {
 		return nil, err
 	}
