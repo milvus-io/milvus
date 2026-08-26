@@ -49,7 +49,30 @@ func calBySchemaPolicy(schema *schemapb.CollectionSchema) (int, error) {
 		return -1, merr.WrapErrServiceInternalMsg("zero size record schema found")
 	}
 	threshold := Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
-	return int(threshold / float64(sizePerRecord)), nil
+	wholeRowRows := int(threshold / float64(sizePerRecord))
+	if !typeutil.IsMainIndexSizeMetric(Params.DataCoordCfg.SizeMetric.GetValue()) {
+		return wholeRowRows, nil
+	}
+	// mainIndex metric: min(main-index budget rows, whole-row ceiling rows).
+	// Schema fallback only (DataCoord has no data at allocation time).
+	mainIndexPerRecord, err := typeutil.EstimateMainIndexSizePerRecord(schema)
+	if err != nil {
+		return -1, err
+	}
+	if mainIndexPerRecord <= 0 {
+		// no fixed-dim dense vector field (sparse-only / ArrayOfVector-only):
+		// fall back to whole-row semantics for the collection.
+		return wholeRowRows, nil
+	}
+	proportion := Params.DataCoordCfg.SegmentSealProportion.GetAsFloat()
+	budgetRows := int(threshold * proportion / float64(mainIndexPerRecord))
+	if ceilingMB := Params.DataCoordCfg.MaxFullSegmentSize.GetAsInt64(); ceilingMB > 0 {
+		ceilingRows := int(float64(ceilingMB) * 1024 * 1024 / float64(sizePerRecord))
+		if ceilingRows < budgetRows {
+			budgetRows = ceilingRows
+		}
+	}
+	return budgetRows, nil
 }
 
 // AllocatePolicy helper function definition to allocate Segment space

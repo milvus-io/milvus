@@ -6,6 +6,7 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -33,6 +34,7 @@ func (m *partitionManager) asyncAllocSegment(schemaVersion int32, requiresStorag
 		wal:               m.wal.Get(),
 		schemaVersion:     schemaVersion,
 		requiresStorageV3: requiresStorageV3,
+		schema:            m.schema,
 	}
 	w.SetLogger(m.Logger())
 	// It should always done asynchronously.
@@ -55,6 +57,7 @@ type segmentAllocWorker struct {
 	limitation        segmentLimitation // segment limitation determined at first attempt
 	schemaVersion     int32
 	requiresStorageV3 bool
+	schema            *schemapb.CollectionSchema // collection schema used to size the new segment
 }
 
 // do is the main loop of the segment allocation worker.
@@ -152,6 +155,6 @@ func (w *segmentAllocWorker) initSegmentConfig() error {
 	}
 
 	// Generate growing segment limitation.
-	w.limitation = getSegmentLimitationPolicy().GenerateLimitation(datapb.SegmentLevel_L1)
+	w.limitation = getSegmentLimitationPolicy().GenerateLimitation(datapb.SegmentLevel_L1, w.schema)
 	return nil
 }

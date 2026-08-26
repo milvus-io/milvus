@@ -399,6 +399,120 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 	return res, nil
 }
 
+// EstimateMainIndexSizePerRecord returns per-row bytes of the widest dense
+// vector column (dim × element_size) — the SCHEMA FALLBACK for the main index
+// column of the better-segmentation design. It is only used where actual
+// per-field size is unavailable. 0 means "no applicable column"; callers fall
+// back to whole-row semantics. Dense fields with a missing or invalid dim are
+// skipped (degrading to whatever other dense fields can be sized), matching the
+// lenient behavior of EstimateSizePerRecord.
+func EstimateMainIndexSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
+	if schema == nil {
+		return 0, merr.WrapErrServiceInternalMsg("nil schema")
+	}
+	maxSize := 0
+	for _, fs := range GetAllFieldSchemas(schema) {
+		// SparseFloatVector and ArrayOfVector are per-row-variable and unbounded
+		// by schema; only fixed-dim dense vectors participate in the fallback.
+		if !IsFixDimVectorType(fs.DataType) {
+			continue
+		}
+		dim, err := GetDim(fs)
+		if err != nil || dim <= 0 {
+			continue
+		}
+		size := int(float64(dim) * VectorTypeSize(fs.DataType))
+		if size > maxSize {
+			maxSize = size
+		}
+	}
+	return maxSize, nil
+}
+
+// EstimateVectorColumnSize returns the ACTUAL in-memory bytes of a vector
+// FieldData column: dense = len×elem; SparseFloatVector = sum of per-row
+// contents bytes; ArrayOfVector = sum of inner vector bytes (each via
+// calcVectorSize on the element type). O(column bytes).
+func EstimateVectorColumnSize(fieldData *schemapb.FieldData) (int, error) {
+	if fieldData == nil {
+		return 0, merr.WrapErrServiceInternalMsg("nil field data")
+	}
+	if !IsVectorType(fieldData.GetType()) {
+		return 0, merr.WrapErrParameterInvalidMsg("field data type %s is not a vector type", fieldData.GetType().String())
+	}
+	vectors := fieldData.GetVectors()
+	if vectors == nil {
+		return 0, merr.WrapErrServiceInternalMsg("vector field data has no vector column")
+	}
+	switch fieldData.GetType() {
+	case schemapb.DataType_SparseFloatVector:
+		sparse := vectors.GetSparseFloatVector()
+		total := 0
+		for _, contents := range sparse.GetContents() {
+			total += len(contents)
+		}
+		return total, nil
+	case schemapb.DataType_ArrayOfVector:
+		array := vectors.GetVectorArray()
+		if array == nil {
+			return 0, merr.WrapErrServiceInternalMsg("ArrayOfVector field data has no vector array")
+		}
+		total := 0
+		for _, v := range array.GetData() {
+			total += calcVectorSize(v, array.GetElementType())
+		}
+		return total, nil
+	default:
+		if vectors.GetData() == nil {
+			return 0, merr.WrapErrServiceInternalMsg("vector field data has no data")
+		}
+		return calcVectorSize(vectors, fieldData.GetType()), nil
+	}
+}
+
+// SelectMainIndexField returns the vector field ID with the largest ACTUAL
+// column size among the given per-field sizes; false if none. Callers use this
+// when measured sizes are available, else fall back to EstimateMainIndexSizePerRecord.
+func SelectMainIndexField(schema *schemapb.CollectionSchema, fieldIDToSize map[int64]int) (int64, bool) {
+	if schema == nil {
+		return 0, false
+	}
+	maxFieldID := int64(0)
+	maxSize := 0
+	found := false
+	for _, fs := range GetAllFieldSchemas(schema) {
+		if !IsVectorType(fs.DataType) {
+			continue
+		}
+		size, ok := fieldIDToSize[fs.FieldID]
+		if !ok {
+			continue
+		}
+		if !found || size > maxSize {
+			maxSize = size
+			maxFieldID = fs.FieldID
+			found = true
+		}
+	}
+	return maxFieldID, found
+}
+
+// HasVariableSizeVectorField reports whether the schema contains a vector field
+// whose size is per-row-variable (SparseFloatVector or ArrayOfVector). For such
+// schemas the schema fallback (EstimateMainIndexSizePerRecord) cannot size the
+// main index column and a measured path is required.
+func HasVariableSizeVectorField(schema *schemapb.CollectionSchema) bool {
+	if schema == nil {
+		return false
+	}
+	for _, fs := range GetAllFieldSchemas(schema) {
+		if IsSparseFloatVectorType(fs.DataType) || IsArrayOfVectorType(fs.DataType) {
+			return true
+		}
+	}
+	return false
+}
+
 // SchemaHelper provides methods to get the schema of fields
 type SchemaHelper struct {
 	schema              *schemapb.CollectionSchema

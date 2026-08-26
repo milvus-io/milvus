@@ -6,6 +6,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
@@ -28,6 +29,7 @@ func newPartitionSegmentManager(
 	txnManager TxnManager,
 	fencedAssignTimeTick uint64,
 	metrics *metricsutil.SegmentAssignMetrics,
+	schema *schemapb.CollectionSchema,
 ) *partitionManager {
 	for _, segment := range segments {
 		if segment.CreateSegmentTimeTick() > fencedAssignTimeTick {
@@ -46,6 +48,7 @@ func newPartitionSegmentManager(
 		segments:             segments,
 		fencedAssignTimeTick: fencedAssignTimeTick,
 		metrics:              metrics,
+		schema:               schema,
 	}
 	m.SetLogger(logger.With(mlog.FieldVChannel(vchannel), mlog.FieldCollectionID(collectionID), mlog.FieldPartitionID(paritionID)))
 	return m
@@ -66,6 +69,7 @@ type partitionManager struct {
 	segments             map[int64]*segmentAllocManager // there will be very few segments in this list.
 	fencedAssignTimeTick uint64                         // the time tick that the assign operation is fenced.
 	metrics              *metricsutil.SegmentAssignMetrics
+	schema               *schemapb.CollectionSchema // the collection schema used to size new growing segments.
 }
 
 // AddSegment adds a segment to the partition segment manager.

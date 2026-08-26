@@ -56,5 +56,11 @@ type ShardManager interface {
 	// CheckIfCollectionSchemaVersionMatch validates insert header schema version against in-memory collection state.
 	CheckIfCollectionSchemaVersionMatch(header *message.InsertMessageHeader) (int32, error)
 
+	// GetMainIndexSizeInfo returns the per-row main-index-column size and
+	// whether the collection has variable-size vector fields at the given
+	// schema version, without cloning the schema. latestCollectionSchemaVersion
+	// asks for the newest snapshot.
+	GetMainIndexSizeInfo(collectionID int64, schemaVersion int32) (int, bool, error)
+
 	Close()
 }
