@@ -148,6 +148,7 @@ func TestStartOrResumeAzureCopySourceIdentityIgnoresQuery(t *testing.T) {
 func TestAzureObjectStorageCopyObjectCrossBucketSourceSAS(t *testing.T) {
 	newStorage := func(t *testing.T, sourceEndpoint, sourceSAS string, sourceUseSSL bool) *AzureObjectStorage {
 		t.Helper()
+		// #nosec G101 -- offline fixture credentials; no request is ever signed.
 		cfg := &objectstorage.Config{
 			Address:                     "core.windows.net",
 			BucketName:                  "dst-container",
@@ -227,6 +228,7 @@ func TestAzureObjectStorageCopyObjectCrossBucketSourceSAS(t *testing.T) {
 	})
 
 	t.Run("invalid source endpoint host is rejected at construction", func(t *testing.T) {
+		// #nosec G101 -- offline fixture credentials; no request is ever signed.
 		cfg := &objectstorage.Config{
 			Address:                     "core.windows.net",
 			BucketName:                  "dst-container",
