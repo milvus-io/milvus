@@ -57,7 +57,8 @@ func (opt *createSnapshotOption) WithDbName(dbName string) *createSnapshotOption
 	return opt
 }
 
-// WithSkipIndex controls whether reusable index definitions and artifacts are omitted.
+// WithSkipIndex controls whether reusable index definitions and separately
+// tracked index artifacts are omitted. StorageV3 manifest roots remain intact.
 func (opt *createSnapshotOption) WithSkipIndex(skipIndex bool) *createSnapshotOption {
 	opt.skipIndex = skipIndex
 	return opt
@@ -207,7 +208,8 @@ func (opt *restoreSnapshotOption) WithTargetDbName(targetDbName string) *restore
 	return opt
 }
 
-// WithSkipIndex controls whether the snapshot is restored without indexes.
+// WithSkipIndex controls whether index creation and copying of separately
+// tracked index artifacts are skipped. StorageV3 manifest roots remain intact.
 func (opt *restoreSnapshotOption) WithSkipIndex(skipIndex bool) *restoreSnapshotOption {
 	opt.skipIndex = skipIndex
 	return opt
@@ -264,7 +266,8 @@ func (opt *restoreExternalSnapshotOption) WithRequestTimeout(timeout time.Durati
 	return opt
 }
 
-// WithSkipIndex controls whether the external snapshot is restored without indexes.
+// WithSkipIndex controls whether index creation and copying of separately
+// tracked index artifacts are skipped. StorageV3 manifest roots remain intact.
 func (opt *restoreExternalSnapshotOption) WithSkipIndex(skipIndex bool) *restoreExternalSnapshotOption {
 	opt.skipIndex = skipIndex
 	return opt

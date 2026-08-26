@@ -87,13 +87,12 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 		ManifestPath:   segment.GetManifestPath(),
 		// Fallback parent loads use ChildManifestPaths to carry compact-to V3
 		// delete sources that are not representable as legacy Deltalogs.
-		ChildManifestPaths:       segment.GetChildManifestPaths(),
-		CommitTimestamp:          segment.GetCommitTimestamp(),
-		DataVersion:              segment.GetDataVersion(),
-		Stats:                    segment.GetStats(),
-		TextStatsLogs:            segment.GetTextStatsLogs(),
-		JsonKeyStatsLogs:         segment.GetJsonKeyStats(),
-		FilterManifestIndexStats: segment.GetFilterManifestIndexStats(),
+		ChildManifestPaths: segment.GetChildManifestPaths(),
+		CommitTimestamp:    segment.GetCommitTimestamp(),
+		DataVersion:        segment.GetDataVersion(),
+		Stats:              segment.GetStats(),
+		TextStatsLogs:      segment.GetTextStatsLogs(),
+		JsonKeyStatsLogs:   segment.GetJsonKeyStats(),
 	}
 
 	// Preserve legacy deltalog metadata when available. Manifest-backed internal

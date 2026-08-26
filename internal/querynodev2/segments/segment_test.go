@@ -204,22 +204,21 @@ func TestCompactSegmentLoadInfoForRuntime(t *testing.T) {
 			IndexID:        66,
 			IndexFilePaths: []string{"files/index/101"},
 		}},
-		InsertChannel:            "by-dev-rootcoord-dml_0_33v0",
-		StartPosition:            &msgpb.MsgPosition{ChannelName: "ch", MsgID: []byte("start")},
-		DeltaPosition:            &msgpb.MsgPosition{ChannelName: "ch", MsgID: []byte("delta")},
-		Level:                    datapb.SegmentLevel_L1,
-		StorageVersion:           2,
-		IsSorted:                 true,
-		TextStatsLogs:            map[int64]*datapb.TextIndexStats{101: {FieldID: 101}},
-		Bm25Logs:                 []*datapb.FieldBinlog{{FieldID: 102}},
-		JsonKeyStatsLogs:         map[int64]*datapb.JsonKeyStats{101: {FieldID: 101}},
-		Priority:                 commonpb.LoadPriority_HIGH,
-		ManifestPath:             "files/manifest",
-		DataVersion:              7,
-		UseTakeForOutput:         true,
-		EstimatedBytesPerRow:     64,
-		CommitTimestamp:          12345,
-		FilterManifestIndexStats: true,
+		InsertChannel:        "by-dev-rootcoord-dml_0_33v0",
+		StartPosition:        &msgpb.MsgPosition{ChannelName: "ch", MsgID: []byte("start")},
+		DeltaPosition:        &msgpb.MsgPosition{ChannelName: "ch", MsgID: []byte("delta")},
+		Level:                datapb.SegmentLevel_L1,
+		StorageVersion:       2,
+		IsSorted:             true,
+		TextStatsLogs:        map[int64]*datapb.TextIndexStats{101: {FieldID: 101}},
+		Bm25Logs:             []*datapb.FieldBinlog{{FieldID: 102}},
+		JsonKeyStatsLogs:     map[int64]*datapb.JsonKeyStats{101: {FieldID: 101}},
+		Priority:             commonpb.LoadPriority_HIGH,
+		ManifestPath:         "files/manifest",
+		DataVersion:          7,
+		UseTakeForOutput:     true,
+		EstimatedBytesPerRow: 64,
+		CommitTimestamp:      12345,
 	}
 
 	compact := compactSegmentLoadInfoForRuntime(loadInfo)
@@ -228,7 +227,6 @@ func TestCompactSegmentLoadInfoForRuntime(t *testing.T) {
 	assert.Equal(t, loadInfo.GetDataVersion(), compact.GetDataVersion())
 	assert.Equal(t, loadInfo.GetStorageVersion(), compact.GetStorageVersion())
 	assert.Equal(t, loadInfo.GetDeltalogs(), compact.GetDeltalogs())
-	assert.True(t, compact.GetFilterManifestIndexStats())
 	assert.Empty(t, compact.GetIndexInfos())
 	assert.Empty(t, compact.GetTextStatsLogs())
 	assert.Empty(t, compact.GetBm25Logs())

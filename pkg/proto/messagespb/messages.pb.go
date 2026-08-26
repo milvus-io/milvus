@@ -4810,7 +4810,9 @@ type CreateSnapshotMessageHeader struct {
 	Name                        string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Description                 string `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
 	CompactionProtectionSeconds int64  `protobuf:"varint,4,opt,name=compaction_protection_seconds,json=compactionProtectionSeconds,proto3" json:"compaction_protection_seconds,omitempty"` // duration in seconds to protect referenced segments from compaction
-	SkipIndex                   bool   `protobuf:"varint,5,opt,name=skip_index,json=skipIndex,proto3" json:"skip_index,omitempty"`                                                         // if true, omit reusable index definitions and artifacts from the snapshot
+	// If true, omit reusable index definitions and separately tracked index
+	// artifacts. StorageV3 manifest roots remain intact.
+	SkipIndex bool `protobuf:"varint,5,opt,name=skip_index,json=skipIndex,proto3" json:"skip_index,omitempty"`
 }
 
 func (x *CreateSnapshotMessageHeader) Reset() {
@@ -5122,7 +5124,9 @@ type RestoreSnapshotMessageHeader struct {
 	SnapshotS3Location  string `protobuf:"bytes,7,opt,name=snapshot_s3_location,json=snapshotS3Location,proto3" json:"snapshot_s3_location,omitempty"`  // Metadata file path for external snapshot restore
 	ExternalSpec        string `protobuf:"bytes,8,opt,name=external_spec,json=externalSpec,proto3" json:"external_spec,omitempty"`                      // Optional external storage spec for external snapshot restore
 	SnapshotFingerprint string `protobuf:"bytes,9,opt,name=snapshot_fingerprint,json=snapshotFingerprint,proto3" json:"snapshot_fingerprint,omitempty"` // SHA-256 of validated external snapshot metadata
-	SkipIndex           bool   `protobuf:"varint,10,opt,name=skip_index,json=skipIndex,proto3" json:"skip_index,omitempty"`                             // if true, restore data without creating or copying indexes
+	// If true, restore data without creating indexes or copying separately
+	// tracked index artifacts. StorageV3 manifest roots remain intact.
+	SkipIndex bool `protobuf:"varint,10,opt,name=skip_index,json=skipIndex,proto3" json:"skip_index,omitempty"`
 }
 
 func (x *RestoreSnapshotMessageHeader) Reset() {

@@ -45,12 +45,15 @@ func TestManifestSchemaByVersion(t *testing.T) {
 	assert.Contains(t, AvroSchemaV3(), "commit_timestamp")
 	assert.NotContains(t, AvroSchemaV3(), "child_fields")
 	assert.Contains(t, AvroSchemaV4(), "child_fields")
-	assert.NotContains(t, AvroSchemaV4(), "filter_manifest_index_stats")
-	assert.Contains(t, AvroSchemaV5(), "filter_manifest_index_stats")
+
+	version4Schema, err := ManifestSchemaByVersion(4)
+	require.NoError(t, err)
+	require.NotNil(t, version4Schema)
 
 	currentSchema, err := ManifestSchemaByVersion(SnapshotFormatVersion)
 	require.NoError(t, err)
 	assert.NotNil(t, currentSchema)
+	assert.Equal(t, version4Schema, currentSchema)
 
 	schema, err = ManifestSchemaByVersion(SnapshotFormatVersion + 1)
 	require.Error(t, err)
@@ -68,9 +71,17 @@ func TestParseSnapshotMetadataWithVersionCheck(t *testing.T) {
 	assert.Equal(t, int32(3), metadata.GetFormatVersion())
 	assert.Equal(t, int64(10), metadata.GetSnapshotInfo().GetId())
 
-	metadata, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{"format_version":5}`))
+	metadata, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{"format_version":4}`))
+	require.NoError(t, err)
+	assert.Equal(t, int32(4), metadata.GetFormatVersion())
+
+	metadata, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{
+		"format_version": 5,
+		"snapshot_info": {"skip_index": true}
+	}`))
 	require.NoError(t, err)
 	assert.Equal(t, int32(SnapshotFormatVersion), metadata.GetFormatVersion())
+	assert.True(t, metadata.GetSnapshotInfo().GetSkipIndex())
 
 	_, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{"format_version":99}`))
 	require.Error(t, err)
@@ -144,12 +155,11 @@ func TestSegmentManifestRoundTrip(t *testing.T) {
 				JsonKeyStatsDataFormat: 25,
 			},
 		},
-		StartPosition:            &msgpb.MsgPosition{ChannelName: "start", MsgID: []byte{1, 2}, MsgGroup: "g1", Timestamp: 100},
-		DmlPosition:              &msgpb.MsgPosition{ChannelName: "dml", MsgID: []byte{3, 4}, MsgGroup: "g2", Timestamp: 200},
-		StorageVersion:           2,
-		IsSorted:                 true,
-		CommitTimestamp:          999,
-		FilterManifestIndexStats: true,
+		StartPosition:   &msgpb.MsgPosition{ChannelName: "start", MsgID: []byte{1, 2}, MsgGroup: "g1", Timestamp: 100},
+		DmlPosition:     &msgpb.MsgPosition{ChannelName: "dml", MsgID: []byte{3, 4}, MsgGroup: "g2", Timestamp: 200},
+		StorageVersion:  2,
+		IsSorted:        true,
+		CommitTimestamp: 999,
 	}
 
 	entry := SegmentToManifestEntry(segment)
@@ -168,7 +178,6 @@ func TestSegmentManifestRoundTrip(t *testing.T) {
 	assert.Equal(t, segment.GetStorageVersion(), parsed.GetStorageVersion())
 	assert.Equal(t, segment.GetIsSorted(), parsed.GetIsSorted())
 	assert.Equal(t, segment.GetCommitTimestamp(), parsed.GetCommitTimestamp())
-	assert.Equal(t, segment.GetFilterManifestIndexStats(), parsed.GetFilterManifestIndexStats())
 	require.Len(t, parsed.GetBinlogs(), 1)
 	assert.Equal(t, segment.GetBinlogs()[0].GetBinlogs()[0].GetLogPath(), parsed.GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
 	require.Len(t, parsed.GetDeltalogs(), 1)
@@ -203,21 +212,6 @@ func TestParseSegmentManifestV2DefaultsCommitTimestamp(t *testing.T) {
 	parsed, err := ParseSegmentManifest(data, 2)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(0), parsed.GetCommitTimestamp())
-}
-
-func TestParseSegmentManifestV4DefaultsManifestIndexFilter(t *testing.T) {
-	segment := &datapb.SegmentDescription{
-		SegmentId:                1001,
-		FilterManifestIndexStats: true,
-	}
-	schema, err := ManifestSchemaV4()
-	require.NoError(t, err)
-	data, err := avro.Marshal(schema, SegmentToManifestEntry(segment))
-	require.NoError(t, err)
-
-	parsed, err := ParseSegmentManifest(data, 4)
-	require.NoError(t, err)
-	assert.False(t, parsed.GetFilterManifestIndexStats())
 }
 
 func TestMarshalSegmentManifestErrors(t *testing.T) {

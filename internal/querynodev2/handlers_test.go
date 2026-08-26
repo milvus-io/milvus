@@ -137,15 +137,14 @@ func (suite *HandlersSuite) TestLoadGrowingSegments() {
 	textStats := map[int64]*datapb.TextIndexStats{101: {MemorySize: 20}}
 	jsonStats := map[int64]*datapb.JsonKeyStats{102: {}}
 	req.SegmentInfos[suite.segmentID] = &datapb.SegmentInfo{
-		ID:                       suite.segmentID,
-		CollectionID:             suite.collectionID,
-		Binlogs:                  make([]*datapb.FieldBinlog, 0),
-		StorageVersion:           storage.StorageV3,
-		ManifestPath:             "files/binlogs/1/2/1000/manifest_0",
-		Stats:                    stats,
-		TextStatsLogs:            textStats,
-		JsonKeyStats:             jsonStats,
-		FilterManifestIndexStats: true,
+		ID:             suite.segmentID,
+		CollectionID:   suite.collectionID,
+		Binlogs:        make([]*datapb.FieldBinlog, 0),
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   "files/binlogs/1/2/1000/manifest_0",
+		Stats:          stats,
+		TextStatsLogs:  textStats,
+		JsonKeyStats:   jsonStats,
 	}
 	err = loadGrowingSegments(ctx, delegator, req)
 	suite.NoError(err)
@@ -154,7 +153,6 @@ func (suite *HandlersSuite) TestLoadGrowingSegments() {
 	suite.Same(stats, loadedInfos[0].GetStats())
 	suite.Equal(textStats, loadedInfos[0].GetTextStatsLogs())
 	suite.Equal(jsonStats, loadedInfos[0].GetJsonKeyStatsLogs())
-	suite.True(loadedInfos[0].GetFilterManifestIndexStats())
 
 	// normal load with binlogs
 	loadSegmetns = loadSegmetns[:0]

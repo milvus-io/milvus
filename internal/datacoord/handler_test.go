@@ -2071,13 +2071,12 @@ func TestGenSnapshot(t *testing.T) {
 
 	mock5 := mockey.Mock((*meta).SelectSegments).To(func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
 		seg := NewSegmentInfo(&datapb.SegmentInfo{
-			ID:                       1001,
-			CollectionID:             200,
-			PartitionID:              0,
-			InsertChannel:            "dml_0_200v0",
-			State:                    commonpb.SegmentState_Flushed,
-			StartPosition:            &msgpb.MsgPosition{Timestamp: 10000},
-			FilterManifestIndexStats: true,
+			ID:            1001,
+			CollectionID:  200,
+			PartitionID:   0,
+			InsertChannel: "dml_0_200v0",
+			State:         commonpb.SegmentState_Flushed,
+			StartPosition: &msgpb.MsgPosition{Timestamp: 10000},
 			Binlogs: []*datapb.FieldBinlog{
 				{
 					FieldID: 1,
@@ -2134,7 +2133,6 @@ func TestGenSnapshot(t *testing.T) {
 	assert.Equal(t, 1, len(snapshotData.Indexes))
 	assert.Equal(t, 1, len(snapshotData.Segments))
 	assert.Equal(t, int64(1001), snapshotData.Segments[0].SegmentId)
-	assert.True(t, snapshotData.Segments[0].GetFilterManifestIndexStats())
 	// Verify VirtualChannelNames is populated from DescribeCollectionInternal response
 	assert.Equal(t, []string{"dml_0_200v0", "dml_1_200v1"}, snapshotData.Collection.VirtualChannelNames)
 }

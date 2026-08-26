@@ -100,7 +100,8 @@ func listSnapshotDataFiles(
 }
 
 // ValidateExternalSnapshotDataFiles also enforces the root derived from metadata URI.
-// When skipIndex is true, index artifacts are excluded from validation.
+// When skipIndex is true, separately stored index artifacts are excluded from
+// validation; the complete StorageV3 manifest root is still validated.
 func ValidateExternalSnapshotDataFiles(
 	ctx context.Context,
 	cm milvusstorage.ChunkManager,
@@ -148,21 +149,6 @@ type snapshotFileRefCollector struct {
 	storageConfig *indexpb.StorageConfig
 	skipIndex     bool
 	byPath        map[string]SnapshotFileRef
-}
-
-// IsStorageV3IndexFile reports whether filePath is a manifest-owned text or
-// JSON index artifact. PK bloom filters and BM25 stats are data dependencies
-// and intentionally remain outside this classification.
-func IsStorageV3IndexFile(basePath, filePath string) bool {
-	statsPrefix := strings.TrimSuffix(NormalizeSnapshotObjectPath(basePath), "/") + "/_stats/"
-	relativePath, ok := strings.CutPrefix(NormalizeSnapshotObjectPath(filePath), statsPrefix)
-	if !ok {
-		return false
-	}
-
-	statKey, _, _ := strings.Cut(relativePath, "/")
-	prefix, _, ok := packed.ParseStatKey(statKey)
-	return ok && (prefix == "text_index" || prefix == "json_stats")
 }
 
 func (c *snapshotFileRefCollector) addSegment(ctx context.Context, segment *datapb.SegmentDescription) error {
@@ -217,16 +203,16 @@ func (c *snapshotFileRefCollector) addStorageV3Segment(ctx context.Context, segm
 
 	if normalizedBasePath != "" {
 		// Keep the manifest root as a prefix reference for path rewriting, then
-		// list concrete objects separately so export copies physical files only.
+		// list concrete objects separately so export copies physical files. The
+		// complete StorageV3 root is copied even for skip-index snapshots because
+		// the source manifest is not rewritten and data shares this directory with
+		// reusable index artifacts. Index metadata is omitted separately.
 		walkPrefix := normalizedBasePath
 		if walkPrefix[len(walkPrefix)-1] != '/' {
 			walkPrefix += "/"
 		}
 		manifestObjectCount := 0
 		if err := c.cm.WalkWithPrefix(ctx, walkPrefix, true, func(info *milvusstorage.ChunkObjectInfo) bool {
-			if c.skipIndex && IsStorageV3IndexFile(normalizedBasePath, info.FilePath) {
-				return true
-			}
 			manifestObjectCount++
 			c.add(SnapshotFileRef{
 				Path:      info.FilePath,

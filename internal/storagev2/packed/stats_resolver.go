@@ -44,11 +44,6 @@ type StatsResolver struct {
 	bm25Logs      []*datapb.FieldBinlog
 	textStatsLogs map[int64]*datapb.TextIndexStats
 	jsonKeyStats  map[int64]*datapb.JsonKeyStats
-	// filterManifestIndexStats is used by restored StorageV3 segments whose
-	// copied manifest may still contain source text/JSON index entries. Such
-	// entries are visible only after DataCoord registers the field in the
-	// corresponding metadata map.
-	filterManifestIndexStats bool
 
 	// Lazy-loaded manifest cache
 	manifestStats  map[string]ManifestStat
@@ -69,13 +64,12 @@ func NewStatsResolver(manifestPath string, storageConfig *indexpb.StorageConfig)
 // SegmentLoadInfo. This is the preferred constructor for QueryNode call sites.
 func NewStatsResolverFromLoadInfo(loadInfo *querypb.SegmentLoadInfo) *StatsResolver {
 	return &StatsResolver{
-		manifestPath:             loadInfo.GetManifestPath(),
-		storageConfig:            CreateStorageConfig(),
-		statslogs:                loadInfo.GetStatslogs(),
-		bm25Logs:                 loadInfo.GetBm25Logs(),
-		textStatsLogs:            loadInfo.GetTextStatsLogs(),
-		jsonKeyStats:             loadInfo.GetJsonKeyStatsLogs(),
-		filterManifestIndexStats: loadInfo.GetFilterManifestIndexStats(),
+		manifestPath:  loadInfo.GetManifestPath(),
+		storageConfig: CreateStorageConfig(),
+		statslogs:     loadInfo.GetStatslogs(),
+		bm25Logs:      loadInfo.GetBm25Logs(),
+		textStatsLogs: loadInfo.GetTextStatsLogs(),
+		jsonKeyStats:  loadInfo.GetJsonKeyStatsLogs(),
 	}
 }
 
@@ -83,13 +77,12 @@ func NewStatsResolverFromLoadInfo(loadInfo *querypb.SegmentLoadInfo) *StatsResol
 // datapb.SegmentInfo. This is the preferred constructor for DataNode call sites.
 func NewStatsResolverFromSegmentInfo(info *datapb.SegmentInfo) *StatsResolver {
 	return &StatsResolver{
-		manifestPath:             info.GetManifestPath(),
-		storageConfig:            CreateStorageConfig(),
-		statslogs:                info.GetStatslogs(),
-		bm25Logs:                 info.GetBm25Statslogs(),
-		textStatsLogs:            info.GetTextStatsLogs(),
-		jsonKeyStats:             info.GetJsonKeyStats(),
-		filterManifestIndexStats: info.GetFilterManifestIndexStats(),
+		manifestPath:  info.GetManifestPath(),
+		storageConfig: CreateStorageConfig(),
+		statslogs:     info.GetStatslogs(),
+		bm25Logs:      info.GetBm25Statslogs(),
+		textStatsLogs: info.GetTextStatsLogs(),
+		jsonKeyStats:  info.GetJsonKeyStats(),
 	}
 }
 
@@ -228,7 +221,8 @@ type StatsResult struct {
 }
 
 // TextAndJSONIndexStats returns text index and JSON key stats.
-// For manifest: parsed from manifest metadata (highest version wins per field).
+// For manifest: parsed only for fields registered in the corresponding segment
+// metadata map (highest version wins per field).
 // For legacy: returns the WithTextStatsLogs/WithJSONKeyStats maps directly.
 func (r *StatsResolver) TextAndJSONIndexStats() (
 	map[int64]*datapb.TextIndexStats, map[int64]*datapb.JsonKeyStats, error,
@@ -238,7 +232,7 @@ func (r *StatsResolver) TextAndJSONIndexStats() (
 }
 
 // TextAndJSONIndexStatsWithBasePaths returns stats with base path information.
-// For V3 (manifest): basePaths are extracted from the manifest stat paths.
+// For V3 (manifest): basePaths are extracted from registered manifest stat paths.
 // For V2 (legacy): basePaths are empty (backward compat).
 func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr {
 	if !r.isManifest() {
@@ -267,12 +261,15 @@ func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr
 			continue
 		}
 
+		// A StorageV3 manifest retains text/JSON entries when a skip-index
+		// snapshot or restore omits their segment metadata. The metadata is the
+		// registration allowlist: an entry is loadable only while its field is
+		// present in TextStatsLogs or JsonKeyStats. An index rebuild atomically
+		// publishes the replacement manifest and metadata to make it loadable.
 		switch prefix {
 		case "text_index":
-			if r.filterManifestIndexStats {
-				if _, ok := r.textStatsLogs[fieldID]; !ok {
-					continue
-				}
+			if _, ok := r.textStatsLogs[fieldID]; !ok {
+				continue
 			}
 			// For V3: extract basePath and convert to relative paths.
 			statBasePath := basePath + "/_stats/" + key
