@@ -442,7 +442,7 @@ func TestValidateEndpointURL(t *testing.T) {
 		{name: "missing_host", source: "s3://bucket/key", endpoint: "http:///", wantErrMsg: "non-empty host"},
 		{name: "empty_port", source: "s3://bucket/key", endpoint: "http://host:", wantErrMsg: "empty port"},
 		{name: "out_of_range_port", source: "s3://bucket/key", endpoint: "http://host:65536", wantErrMsg: "invalid port"},
-		{name: "userinfo", source: "s3://bucket/key", endpoint: "http://user:pass@host", wantErrMsg: "must not embed credentials"},
+		{name: "userinfo", source: "s3://bucket/key", endpoint: "http://user@host", wantErrMsg: "must not embed credentials"},
 		{name: "query", source: "s3://bucket/key", endpoint: "http://host?tenant=a", wantErrMsg: "must not contain a query"},
 		{name: "empty_query", source: "s3://bucket/key", endpoint: "http://host?", wantErrMsg: "must not contain a query"},
 		{name: "fragment", source: "s3://bucket/key", endpoint: "http://host#frag", wantErrMsg: "must not contain a fragment"},
