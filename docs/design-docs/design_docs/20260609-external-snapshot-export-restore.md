@@ -812,12 +812,21 @@ before; only the large-object copy request changes.
 ### Implementation notes
 
 - `objectstorage.Config` carries `AzureSourceEndpoint` (source account service
-  host) and `AzureSourceSAS`; the Azure object-storage client builds copy
-  source URLs from an anonymous-credential service client at that host and
-  appends the SAS per URL.
+  host), `AzureSourceUseSSL` (source account transport), and `AzureSourceSAS`;
+  the Azure object-storage client builds copy source URLs from an
+  anonymous-credential service client at that host and appends the SAS per
+  URL. The source URL scheme must come from the source account's own config —
+  export and restore put opposite accounts on the source side, so reusing the
+  client config's `UseSSL` would give the source URL the destination's scheme
+  and break sources that require a specific transport (e.g. a SAS minted with
+  `spr=https`).
 - Copy-source verification during Azure copy polling compares URL identities
   without the query string, because the service does not guarantee that
-  `x-ms-copy-source` echoes the SAS.
+  `x-ms-copy-source` echoes the SAS. The verification failure error reports
+  only these credential-free identities, so the SAS never reaches an error
+  string, a snapshot job failure reason, or a log line; the export-reason
+  scrubber also lists `source_sas_token` alongside `credential_json` in case a
+  provider SDK error echoes the SAS-bearing source URL.
 - `restoreProviderCopyConfig` is unchanged for same-account Layer 2 copies; a
   SAS-bearing restore resolves to a different copier config
   (instance credential + source endpoint/SAS) instead.

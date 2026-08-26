@@ -37,6 +37,12 @@ type Config struct {
 	// with AzureSourceSAS for cross-account server-side copies only.
 	AzureSourceEndpoint string
 
+	// AzureSourceUseSSL selects the scheme of AzureSourceEndpoint URLs. It must
+	// be carried from the source account's own config, not from this client's:
+	// the two accounts may differ in transport, and a SAS minted with spr=https
+	// fails on an http source URL.
+	AzureSourceUseSSL bool
+
 	// AzureSourceSAS is a read-scoped SAS token appended to copy source blob
 	// URLs when the source is in a different Azure storage account: neither a
 	// shared key nor the request's own OAuth token can authorize reading a

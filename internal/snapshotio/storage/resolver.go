@@ -173,6 +173,9 @@ func resolveForeignStorageConfig(
 			return nil, err
 		}
 		foreignCfg.AzureSourceEndpoint = instanceEndpoint
+		// The source here is the instance account, so the source URL scheme
+		// comes from the instance config, not from foreignCfg.
+		foreignCfg.AzureSourceUseSSL = instanceCfg.UseSSL
 	}
 	return &resolvedForeignStorageConfig{
 		foreignBucket: foreignBucket,
@@ -336,6 +339,9 @@ func restoreSASCopyConfig(instanceCfg, foreignCfg *objectstorage.Config) (*objec
 	copyCfg.CreateBucket = false
 	copyCfg.SkipBucketCheck = true
 	copyCfg.AzureSourceEndpoint = foreignEndpoint
+	// The copy destination is the instance account (copyCfg), but the source is
+	// the foreign account, so the source URL scheme comes from foreignCfg.
+	copyCfg.AzureSourceUseSSL = foreignCfg.UseSSL
 	copyCfg.AzureSourceSAS = foreignCfg.AzureSourceSAS
 	return copyCfg, nil
 }

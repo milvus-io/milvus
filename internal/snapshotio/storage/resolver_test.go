@@ -583,6 +583,11 @@ func TestResolveForeignStorageAzureCrossAccountExportWithSourceSAS(t *testing.T)
 	assert.Equal(t, "backup-account", captured[0].AccessKeyID)
 	assert.Equal(t, "instance-account.blob.core.windows.net", captured[0].AzureSourceEndpoint)
 	assert.Equal(t, "sv=2024-08-04&sig=abc", captured[0].AzureSourceSAS)
+	// The destination (foreign) transport is forced to TLS for canonical Azure
+	// endpoints, but the source URL scheme must follow the source — here the
+	// instance account, which has UseSSL=false.
+	assert.True(t, captured[0].UseSSL)
+	assert.False(t, captured[0].AzureSourceUseSSL)
 }
 
 func TestResolveForeignStorageAzureCrossAccountRestoreWithSourceSAS(t *testing.T) {
@@ -611,6 +616,11 @@ func TestResolveForeignStorageAzureCrossAccountRestoreWithSourceSAS(t *testing.T
 	assert.Equal(t, "instance-container", copier.BucketName)
 	assert.Equal(t, "backup-account.blob.core.windows.net", copier.AzureSourceEndpoint)
 	assert.Equal(t, "sv=2024-08-04&sig=abc", copier.AzureSourceSAS)
+	// The destination is the instance account (UseSSL=false), but the source
+	// URL scheme must follow the source — the foreign canonical Azure account,
+	// whose transport is TLS.
+	assert.False(t, copier.UseSSL)
+	assert.True(t, copier.AzureSourceUseSSL)
 }
 
 func TestResolveForeignStorageAzureCrossAccountWithoutSASRejected(t *testing.T) {

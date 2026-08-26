@@ -61,7 +61,7 @@ func newAzureObjectStorageWithConfig(ctx context.Context, c *objectstorage.Confi
 	if c.AzureSourceSAS == "" {
 		return storage, nil
 	}
-	sourceURL, err := azureServiceURL(c.AzureSourceEndpoint, c.UseSSL)
+	sourceURL, err := azureServiceURL(c.AzureSourceEndpoint, c.AzureSourceUseSSL)
 	if err != nil {
 		return nil, err
 	}
@@ -325,14 +325,18 @@ func waitAzureCopyComplete(
 			// The service echoes the copy source without a guarantee about the
 			// query string, so compare the URL identity only: a SAS-bearing
 			// source must still verify against its credential-free form.
-			if props.CopySource == nil || azureCopySourceIdentity(*props.CopySource) != azureCopySourceIdentity(expectedSource) {
-				actualSource := ""
-				if props.CopySource != nil {
-					actualSource = *props.CopySource
-				}
+			expectedIdentity := azureCopySourceIdentity(expectedSource)
+			actualIdentity := ""
+			if props.CopySource != nil {
+				actualIdentity = azureCopySourceIdentity(*props.CopySource)
+			}
+			if actualIdentity != expectedIdentity {
+				// Report credential-free identities only: the raw URLs may carry
+				// the source SAS in their query strings, and this error bubbles
+				// into snapshot job failure reasons and logs.
 				return merr.WrapErrIoFailedMsg(
 					"azure copy source mismatch for %s: expected %s, actual %s",
-					dstObjectName, expectedSource, actualSource)
+					dstObjectName, expectedIdentity, actualIdentity)
 			}
 		}
 		if copyID == "" && props.CopyID != nil {
