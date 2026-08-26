@@ -375,15 +375,27 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				mlog.Err(err),
 			)
 			// The exec error from an earlier attempt is normally the more
-			// informative one to end on. The exception is a non-retriable exec
-			// error masking a retriable selection error: a scoped request whose
-			// group's leader failed and then disappeared from the channel ends
-			// on ErrCollectionNotFullyLoaded, and reporting the earlier
-			// non-retriable error instead would tell the layer that waits for
-			// the group to stop -- undoing the code in exactly the case it
-			// exists for.
-			freshRetriableOverStaleTerminal := merr.IsRetryableErr(err) && !merr.IsRetryableErr(lastErr)
-			if lastErr != nil && !freshRetriableOverStaleTerminal {
+			// informative one to end on, and for an unscoped request it stays
+			// that way -- unchanged from before the scope existed.
+			//
+			// Under a scope there is one ordering where that is wrong: the
+			// group's leader failed with a non-retriable error and then
+			// disappeared from the channel, so the next selection is the
+			// retriable ErrCollectionNotFullyLoaded. Ending on the earlier
+			// error would tell the layer waiting for the group to stop,
+			// undoing the code in exactly the case it exists for.
+			//
+			// Scoped ONLY, and the gate is load-bearing: selectNode propagates
+			// the balancer's error, and the balancer answers a RETRIABLE
+			// ErrServiceUnavailable whenever every candidate is unreachable
+			// (look_aside_balancer.go), so an ungated rule would silently
+			// reclassify the ordinary "all nodes down after a terminal exec
+			// error" from terminal to retriable and drop the cause the caller
+			// could act on. TestExecuteWithRetryUnscopedKeepsTheExecError pins
+			// the unscoped half.
+			scopedFreshRetriable := workload.ResourceGroup != "" &&
+				merr.IsRetryableErr(err) && !merr.IsRetryableErr(lastErr)
+			if lastErr != nil && !scopedFreshRetriable {
 				return true, lastErr
 			}
 			return true, err
@@ -497,6 +509,26 @@ func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload Collecti
 	// ErrCollectionNotFullyLoaded, and rather than hand it back when a
 	// sibling channel could have served, move on to the next channel and end
 	// on the refusal only if none can.
+	//
+	// Each channel that is tried and refused burns a full retry budget first
+	// (~1.6s), so a group that can serve no shard of a wide collection would
+	// take shards x budget to fail. A pre-pass over the CACHED leaders keeps
+	// that bounded: try the channels that have a candidate in the group at
+	// all, in list order, and fall back to the full list only when the cache
+	// shows none -- there the refusal has to come from the real path, which
+	// refreshes the cache once per channel before giving up.
+	if workload.ResourceGroup != "" {
+		servable := make([]string, 0, len(channelList))
+		for _, channel := range channelList {
+			leaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, channel, true)
+			if err == nil && len(FilterByResourceGroup(leaders, workload.ResourceGroup)) > 0 {
+				servable = append(servable, channel)
+			}
+		}
+		if len(servable) > 0 {
+			channelList = servable
+		}
+	}
 	var lastErr error
 	for _, channel := range channelList {
 		err := lb.ExecuteWithRetry(ctx, workload.ForChannel(channel, preferredNodeID(workload, channel)))

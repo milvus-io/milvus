@@ -1306,7 +1306,10 @@ func (s *LBPolicySuite) TestExecuteOneChannelScopedPrefersAServableChannel() {
 	s.lbPolicy.retryOnReplica = 1
 	onlyRGA := lo.Filter(rgNodes(), func(n NodeInfo, _ int) bool { return n.ResourceGroup == "rg-a" })
 	s.mgr.EXPECT().GetShardLeaderList(mock.Anything, s.dbName, s.collectionName, s.collectionID, true).Return(s.channels, nil)
-	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(onlyRGA, nil)
+	// The unservable channel is consulted from the CACHE only, by the
+	// pre-pass: it must never be tried for real, which would show up here as
+	// an uncached GetShard(false) from selectNode's second attempt.
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(onlyRGA, nil)
 	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[1]).Return(rgNodes(), nil)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
@@ -1328,8 +1331,11 @@ func (s *LBPolicySuite) TestExecuteOneChannelScopedPrefersAServableChannel() {
 
 	s.NoError(err)
 	s.Equal([]string{s.channels[1]}, executed, "the channel rg-b cannot serve is skipped for the one it can")
+	s.mgr.AssertNotCalled(s.T(), "GetShard", mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0])
 
-	// When no channel can serve, the refusal is what comes back.
+	// When the cache shows no channel the group can serve, the full list is
+	// tried for real -- the refusal must come from a path that refreshed the
+	// cache, not from a stale pre-pass -- and it is what comes back.
 	s.mgr.ExpectedCalls = nil
 	s.mgr.EXPECT().GetShardLeaderList(mock.Anything, s.dbName, s.collectionName, s.collectionID, true).Return(s.channels, nil)
 	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, mock.Anything).Return(onlyRGA, nil)
@@ -1338,4 +1344,40 @@ func (s *LBPolicySuite) TestExecuteOneChannelScopedPrefersAServableChannel() {
 		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error { return nil },
 	})
 	s.ErrorIs(err, merr.ErrCollectionNotFullyLoaded)
+}
+
+// TestExecuteWithRetryUnscopedKeepsTheExecError pins the unscoped half of the
+// masking rule, so the scope gate on it cannot be removed without a red test.
+// The sequence is the ordinary one: an exec attempt fails with a non-retriable
+// error, and on the next attempt the balancer finds every remaining candidate
+// unreachable and answers a RETRIABLE ErrServiceUnavailable. Unscoped, the
+// request must still end on the exec error -- it names the cause, and it is
+// what the request ended on before the scope existed. Only the scoped form
+// lets a fresh retriable refusal win.
+func (s *LBPolicySuite) TestExecuteWithRetryUnscopedKeepsTheExecError() {
+	ctx := context.Background()
+	s.lbPolicy.retryOnReplica = 1
+	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Once()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(-1), merr.WrapErrServiceUnavailable("all available nodes are unreachable"))
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	execErr := merr.WrapErrSegmentNotLoaded(1, "not retriable")
+	s.Require().False(merr.IsRetryableErr(execErr))
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        s.channels[0],
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			return execErr
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrSegmentNotLoaded, "unscoped, the exec error still wins over a later retriable selection error")
+	s.False(merr.IsRetryableErr(err))
+	s.NotErrorIs(err, merr.ErrServiceUnavailable)
 }
