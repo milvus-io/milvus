@@ -221,7 +221,9 @@ TEST(ArrowFileSystemChunkManagerSwitch, SupportedProviders) {
     // gcpnative has no milvus-storage producer; must stay on legacy
     EXPECT_FALSE(
         ArrowFileSystemChunkManager::SupportsCloudProvider("gcpnative"));
-    EXPECT_FALSE(ArrowFileSystemChunkManager::SupportsCloudProvider(""));
+    // empty provider is supported: a minio/remote config with no explicit
+    // provider still routes to the ArrowFileSystem backend
+    EXPECT_TRUE(ArrowFileSystemChunkManager::SupportsCloudProvider(""));
 }
 
 // NOTE: constructing the LEGACY remote chunk managers requires a live

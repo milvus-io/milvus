@@ -129,8 +129,12 @@ class LatencyObserver {
 bool
 ArrowFileSystemChunkManager::SupportsCloudProvider(
     const std::string& cloud_provider) {
+    // Empty cloud_provider is treated as supported: a minio/remote config
+    // with no explicit provider (e.g. self-hosted MinIO) still routes to the
+    // ArrowFileSystem backend. gcpnative stays excluded (no milvus-storage
+    // producer).
     static const std::unordered_set<std::string> supported = {
-        "aws", "gcp", "aliyun", "azure", "tencent", "huawei"};
+        "", "aws", "gcp", "aliyun", "azure", "tencent", "huawei"};
     return supported.find(cloud_provider) != supported.end();
 }
 
@@ -279,16 +283,22 @@ ArrowFileSystemChunkManager::Write(const std::string& filepath,
 
     const auto path = ResolvePath(filepath);
     auto output = fs_->OpenOutputStream(path);
-    if (!output.ok() && IsArrowNotFound(output.status())) {
+    // IsArrowNotFound already implies !output.ok() (a not-found status is
+    // never ok), so no separate !ok() guard is needed.
+    if (IsArrowNotFound(output.status())) {
         // Object stores have no directories, but a local-backed filesystem
         // needs the parent directory to exist. Create it and retry once so
         // the "write object at key" contract holds on every backend.
         auto slash_pos = path.find_last_of('/');
         if (slash_pos != std::string::npos) {
             auto mkdir_status = fs_->CreateDir(path.substr(0, slash_pos), true);
-            if (mkdir_status.ok()) {
-                output = fs_->OpenOutputStream(path);
+            if (!mkdir_status.ok()) {
+                // Surface the real cause: falling through would rethrow the
+                // original not-found status and hide why the parent is missing.
+                milvus::monitor::internal_storage_op_count_put_fail.Increment();
+                ThrowArrowStorageError("Write", path, mkdir_status);
             }
+            output = fs_->OpenOutputStream(path);
         }
     }
     if (!output.ok()) {

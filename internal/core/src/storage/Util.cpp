@@ -1184,29 +1184,24 @@ TryCreateArrowFileSystemChunkManager(const StorageConfig& storage_config) {
 
 ChunkManagerPtr
 CreateChunkManager(const StorageConfig& storage_config) {
-    auto storage_type = ChunkManagerType_Map[storage_config.storage_type];
+    // The ArrowFileSystem backed chunk manager (when enabled) handles every
+    // storage type; try it once up front and fall back to the legacy managers
+    // below when it declines (switch off, or no producer for the provider).
+    if (auto cm = TryCreateArrowFileSystemChunkManager(storage_config);
+        cm != nullptr) {
+        return cm;
+    }
 
+    auto storage_type = ChunkManagerType_Map[storage_config.storage_type];
     switch (storage_type) {
         case ChunkManagerType::Local: {
-            if (auto cm = TryCreateArrowFileSystemChunkManager(storage_config);
-                cm != nullptr) {
-                return cm;
-            }
             return std::make_shared<LocalChunkManager>(
                 storage_config.root_path);
         }
         case ChunkManagerType::Minio: {
-            if (auto cm = TryCreateArrowFileSystemChunkManager(storage_config);
-                cm != nullptr) {
-                return cm;
-            }
             return std::make_shared<MinioChunkManager>(storage_config);
         }
         case ChunkManagerType::Remote: {
-            if (auto cm = TryCreateArrowFileSystemChunkManager(storage_config);
-                cm != nullptr) {
-                return cm;
-            }
             auto cloud_provider_type =
                 CloudProviderType_Map[storage_config.cloud_provider];
             switch (cloud_provider_type) {
