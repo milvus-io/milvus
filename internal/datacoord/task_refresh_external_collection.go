@@ -547,6 +547,12 @@ func normalizeExternalRefreshUpdatedSegment(
 //
 // Do not compare fake binlogs here: V3 catalog persistence intentionally strips
 // them, so their in-memory representation does not survive DataCoord restart.
+//
+// What this defends against is a replay by THIS binary: the pre-apply and the
+// job's state write are separate steps, so a pre-apply that succeeded and a
+// state write that then failed leaves the next tick to run the apply again. It
+// is NOT a defense against a downgrade - an older binary does not carry this
+// short-circuit for baseline patches at all.
 func externalRefreshManifestAlreadyApplied(existing *SegmentInfo, incoming *datapb.SegmentInfo) bool {
 	if existing == nil || incoming == nil {
 		return false

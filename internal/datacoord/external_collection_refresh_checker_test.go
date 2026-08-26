@@ -1390,8 +1390,10 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			require.Equal(t, indexpb.JobState_JobStateInProgress, held.GetState())
 			assert.NotZero(t, held.GetIndexWaitStartedTime())
 			assert.Equal(t, 1, applied, "the apply lands in the same write that enters the wait")
-			assert.Equal(t, indexWaitProgressFloor, held.GetProgress(),
-				"the same write moves progress into the reserved band, so an InProgress job never reports 100")
+			assert.Less(t, held.GetProgress(), int64(100),
+				"an InProgress job must never report 100")
+			assert.Equal(t, int64(95), held.GetProgress(),
+				"the entry pass settles the debt too, so progress already tracks the indexed fraction")
 
 			checker.aggregateJobState(refreshMeta.GetJob(1)) // a held tick
 			checker.aggregateJobState(refreshMeta.GetJob(1))
@@ -1589,11 +1591,8 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 				nil, nil, nil)
 
 			checker.aggregateJobState(refreshMeta.GetJob(1))
-			require.Equal(t, indexpb.JobState_JobStateInProgress, refreshMeta.GetJob(1).GetState())
-
-			checker.aggregateJobState(refreshMeta.GetJob(1))
 			assert.Equal(t, indexpb.JobState_JobStateFinished, refreshMeta.GetJob(1).GetState(),
-				"a collection with nothing to index owes nothing; the wait must clear at once")
+				"a collection with nothing to index owes nothing; the wait must clear in the entry pass")
 		})
 	})
 
@@ -1719,10 +1718,10 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
 				nil, nil, nil)
 
-			checker.aggregateJobState(job) // entry: applies, marks, sets 90
-			require.Equal(t, 1, saves)
-
-			checker.aggregateJobState(refreshMeta.GetJob(1)) // 1 of 2 indexed -> 95
+			// Entry is two writes: the one that applies and marks (progress
+			// lands on the floor), then the same-pass debt settle that moves
+			// it to the indexed fraction.
+			checker.aggregateJobState(job)
 			require.Equal(t, 2, saves)
 			require.Equal(t, int64(95), refreshMeta.GetJob(1).GetProgress())
 
@@ -1731,6 +1730,256 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			}
 			assert.Equal(t, 2, saves,
 				"an unchanged debt is not news; the catalog must not be written again")
+			assert.Equal(t, int64(95), refreshMeta.GetJob(1).GetProgress())
+		})
+	})
+
+	t.Run("a refresh whose segments are all already indexed finishes in the entry pass", func(t *testing.T) {
+		// The eager task path calls this synchronously when the last task
+		// finishes, so evaluating the debt only on the next periodic tick
+		// would put a whole externalCollectionCheckInterval on every refresh -
+		// including a re-scan that changed nothing, which is the case a
+		// "query on refresh completion" client hits most often.
+		mockey.PatchConvey("no wait when nothing is owed", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			var debt []int64 // everything already indexed
+			refreshMeta, mt, job := stage(t, []int64{555, 556}, &debt)
+			applied := 0
+			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { applied++; return nil },
+				nil, nil, nil)
+
+			checker.aggregateJobState(job)
+
+			done := refreshMeta.GetJob(1)
+			assert.Equal(t, indexpb.JobState_JobStateFinished, done.GetState(),
+				"a debt that is already settled must not cost a checker interval")
+			assert.Equal(t, int64(100), done.GetProgress())
+			assert.Equal(t, 1, applied, "and the apply still lands exactly once")
+			assert.NotZero(t, done.GetIndexWaitStartedTime(),
+				"it went through the wait path, it just had nothing to wait for")
+		})
+	})
+
+	t.Run("a collection with no flushed segment finishes at once", func(t *testing.T) {
+		// A refresh that empties its source leaves nothing that can carry an
+		// index. Without the short-circuit the debt oracle is asked about an
+		// empty set and the job would sit until the job timeout.
+		mockey.PatchConvey("empty collection", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			var debt []int64
+			refreshMeta, mt, job := stage(t, nil, &debt) // no segments at all
+			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
+				nil, nil, nil)
+
+			checker.aggregateJobState(job)
+
+			assert.Equal(t, indexpb.JobState_JobStateFinished, refreshMeta.GetJob(1).GetState())
+		})
+	})
+
+	t.Run("a pre-apply that fails at entry fails the job without entering the wait", func(t *testing.T) {
+		// The PR claims this path behaves exactly as on the ungated path:
+		// the failure is persisted as a terminal Failed and onJobFailed fires
+		// once. Nothing pinned that, and it is a real production path - the
+		// apply reads the result store.
+		mockey.PatchConvey("entry apply fails", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			debt := []int64{556}
+			refreshMeta, mt, job := stage(t, nil, &debt)
+			var failed []int64
+			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
+					return errors.New("result store unavailable")
+				},
+				func(jobID int64) { failed = append(failed, jobID) }, nil, nil)
+
+			checker.aggregateJobState(job)
+
+			got := refreshMeta.GetJob(1)
+			assert.Equal(t, indexpb.JobState_JobStateFailed, got.GetState())
+			assert.Contains(t, got.GetFailReason(), "result store unavailable")
+			assert.Zero(t, got.GetIndexWaitStartedTime(),
+				"nothing was applied, so the marker must not claim otherwise")
+			assert.Equal(t, []int64{1}, failed, "onJobFailed fires exactly once")
+		})
+	})
+
+	t.Run("a failed result release at entry still enters the wait", func(t *testing.T) {
+		// Releasing the task results is an optimization, not a step of the
+		// transition: the marker is what makes the apply once. A failure there
+		// must not cost the job its wait, and the finish clears again.
+		mockey.PatchConvey("release fails", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			debt := []int64{556}
+			refreshMeta, mt, job := stage(t, nil, &debt)
+
+			clears := 0
+			mockey.Mock((*externalCollectionRefreshMeta).ClearTaskResultsByJobID).To(
+				func(_ *externalCollectionRefreshMeta, _ int64) error {
+					clears++
+					return errors.New("etcd unavailable")
+				}).Build()
+
+			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
+				nil, nil, nil)
+
+			checker.aggregateJobState(job)
+			held := refreshMeta.GetJob(1)
+			require.Equal(t, indexpb.JobState_JobStateInProgress, held.GetState())
+			require.NotZero(t, held.GetIndexWaitStartedTime(), "the wait is entered regardless")
+			require.Equal(t, 1, clears)
+
+			debt = nil // the builds landed
+			checker.aggregateJobState(refreshMeta.GetJob(1))
+
+			assert.Equal(t, indexpb.JobState_JobStateFinished, refreshMeta.GetJob(1).GetState(),
+				"a release that keeps failing must not cost the job its transition either")
+			assert.Equal(t, 2, clears, "the finish clears again, so the results are not stranded")
+		})
+	})
+
+	t.Run("finishing a job that is already terminal does not clear its results again", func(t *testing.T) {
+		mockey.PatchConvey("finish guard", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			debt := []int64{556}
+			refreshMeta, mt, job := stage(t, nil, &debt)
+			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
+				nil, nil, nil)
+
+			checker.aggregateJobState(job) // enter the wait
+			held := refreshMeta.GetJob(1)
+			require.NotZero(t, held.GetIndexWaitStartedTime())
+
+			// The job goes terminal underneath - a concurrent timeout is the
+			// real case - and only then does this pass try to finish it.
+			applied, err := refreshMeta.UpdateJobState(1, indexpb.JobState_JobStateFailed, "timeout")
+			require.NoError(t, err)
+			require.True(t, applied)
+
+			clears := 0
+			mockey.Mock((*externalCollectionRefreshMeta).ClearTaskResultsByJobID).To(
+				func(_ *externalCollectionRefreshMeta, _ int64) error { clears++; return nil }).Build()
+
+			checker.finishAfterIndexWait(held)
+
+			assert.Equal(t, indexpb.JobState_JobStateFailed, refreshMeta.GetJob(1).GetState(),
+				"the terminal guard owns the state; a stale snapshot must not overwrite it")
+			assert.Zero(t, clears,
+				"a write that did not happen owns no follow-up")
+		})
+	})
+
+	t.Run("a progress write failure does not disturb the wait", func(t *testing.T) {
+		// Progress is a report, not state. A catalog hiccup writing it must
+		// leave the job waiting exactly as it was, not fail or finish it.
+		mockey.PatchConvey("progress write fails", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			debt := []int64{556}
+			refreshMeta, mt, job := stage(t, []int64{555}, &debt)
+			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
+				nil, nil, nil)
+
+			failProgress := mockey.Mock((*externalCollectionRefreshMeta).UpdateJobProgress).Return(
+				errors.New("etcd unavailable")).Build()
+			checker.aggregateJobState(job)
+
+			held := refreshMeta.GetJob(1)
+			assert.Equal(t, indexpb.JobState_JobStateInProgress, held.GetState())
+			assert.NotZero(t, held.GetIndexWaitStartedTime())
+			failProgress.UnPatch()
+
+			debt = nil
+			checker.aggregateJobState(refreshMeta.GetJob(1))
+			assert.Equal(t, indexpb.JobState_JobStateFinished, refreshMeta.GetJob(1).GetState(),
+				"and the wait still completes normally afterwards")
+		})
+	})
+
+	t.Run("a catalog error at the finish leaves the job in the wait to retry", func(t *testing.T) {
+		// The finish runs with no pre-apply, so there is nothing to roll back:
+		// a transient catalog error must leave the job exactly where it was -
+		// applied, marked, InProgress - for the next tick to retry.
+		mockey.PatchConvey("finish write fails", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			debt := []int64{556}
+			refreshMeta, mt, job := stage(t, nil, &debt)
+			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
+				nil, nil, nil)
+
+			checker.aggregateJobState(job) // enter the wait
+			require.NotZero(t, refreshMeta.GetJob(1).GetIndexWaitStartedTime())
+
+			debt = nil // the builds landed
+			failWrite := mockey.Mock((*externalCollectionRefreshMeta).UpdateJobState).Return(
+				false, errors.New("etcd unavailable")).Build()
+			checker.aggregateJobState(refreshMeta.GetJob(1))
+
+			stuck := refreshMeta.GetJob(1)
+			require.Equal(t, indexpb.JobState_JobStateInProgress, stuck.GetState(),
+				"a failed write must not move the job")
+			require.NotZero(t, stuck.GetIndexWaitStartedTime(), "and must not lose the marker")
+
+			failWrite.UnPatch()
+			checker.aggregateJobState(refreshMeta.GetJob(1))
+			assert.Equal(t, indexpb.JobState_JobStateFinished, refreshMeta.GetJob(1).GetState(),
+				"the next tick finishes it")
+		})
+	})
+
+	t.Run("the entry write stamps the marker and moves progress into the reserved band", func(t *testing.T) {
+		// Pinned at the meta layer, where the write actually is: the checker
+		// settles the debt in the same pass now, so a checker-level assertion
+		// on the floor would pass even if this write stopped setting it.
+		mockey.PatchConvey("entry write", t, func() {
+			debt := []int64{556}
+			refreshMeta, _, _ := stage(t, nil, &debt)
+			require.NoError(t, refreshMeta.UpdateJobProgress(1, 100))
+
+			applies := 0
+			preApply := func(*datapb.ExternalCollectionRefreshJob) error { applies++; return nil }
+
+			applied, err := refreshMeta.BeginIndexWait(1, preApply)
+			require.NoError(t, err)
+			require.True(t, applied)
+
+			held := refreshMeta.GetJob(1)
+			assert.Equal(t, indexpb.JobState_JobStateInProgress, held.GetState(),
+				"the entry write is not a state transition; the job stays InProgress")
+			assert.NotZero(t, held.GetIndexWaitStartedTime())
+			assert.Equal(t, indexWaitProgressFloor, held.GetProgress(),
+				"an InProgress job that still reported the ingest's 100 reads as done to a poller")
+
+			again, err := refreshMeta.BeginIndexWait(1, preApply)
+			require.NoError(t, err)
+			assert.False(t, again, "a second entry is rejected under the job lock")
+			assert.Equal(t, 1, applies, "the skip predicate aborts the write AND the pre-apply")
 		})
 	})
 }
@@ -1784,9 +2033,15 @@ func TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassPublishes(
 			ExternalSource: "s3://old",
 			ExternalSpec:   `{"format":"parquet"}`,
 		}})
-		// indexMeta only has to be non-nil: the entry pass never reaches the
-		// debt oracle, it applies and is timed out in the same pass.
+		// Real debt is required, not decoration: the entry pass settles the
+		// debt in the same pass, so a collection with nothing to index would
+		// finish there and the ordering this test exists for would never be
+		// reached.
 		mt := &meta{segments: NewSegmentsInfo(), indexMeta: &indexMeta{}, collections: collections}
+		mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+		}})
+		mockey.Mock((*indexMeta).GetUnindexedSegments).Return([]int64{556}).Build()
 
 		cm := &recordingChunkManager{}
 		var published [][2]string

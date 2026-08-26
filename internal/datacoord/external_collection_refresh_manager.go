@@ -554,6 +554,13 @@ func (m *externalCollectionRefreshManager) Stop() {
 // this for a job that is Finished, and also for one still in the index wait
 // or one that outran the job timeout while waiting - both have committed
 // their segments, so the publish is due either way.
+//
+// "Owed" is about which jobs reach here, not about delivery: the dedup key is
+// claimed before collectionGetter and schemaUpdater can fail, so the publish
+// gets ONE attempt per DataCoord lifetime and a transient RootCoord failure
+// leaves the schema stale until a restart clears the map. That is master's
+// behavior and the wait does not widen it - the attempt count is the same -
+// but do not read the guarantee as stronger than it is.
 func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) {
 	if m.schemaUpdater == nil {
 		return

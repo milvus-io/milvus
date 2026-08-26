@@ -232,7 +232,10 @@ func (c *externalCollectionRefreshChecker) indexWaitEnabled() bool {
 // one catalog write. The job stays InProgress; processJob fires the finished
 // callback right after aggregateJobState returns, which publishes the refreshed
 // source/spec exactly as the ungated path does.
-func (c *externalCollectionRefreshChecker) beginIndexWait(job *datapb.ExternalCollectionRefreshJob) {
+//
+// Reports whether THIS call is the one that entered the wait, so the caller
+// owns the follow-up exactly once.
+func (c *externalCollectionRefreshChecker) beginIndexWait(job *datapb.ExternalCollectionRefreshJob) bool {
 	applied, err := c.refreshMeta.BeginIndexWait(
 		job.GetJobId(),
 		func(latestJob *datapb.ExternalCollectionRefreshJob) error {
@@ -247,14 +250,14 @@ func (c *externalCollectionRefreshChecker) beginIndexWait(job *datapb.ExternalCo
 		if applied && c.onJobFailed != nil {
 			c.onJobFailed(job.GetJobId())
 		}
-		return
+		return false
 	}
 	if !applied {
 		// Either a concurrent path already drove the job terminal, or it
 		// already entered the wait - BeginIndexWait rejects a second entry
 		// under the job lock. Both mean another caller owns the one-time
 		// side effects.
-		return
+		return false
 	}
 	// Release the task results now, not at the end of the wait. They are dead
 	// weight the moment the apply lands - the marker guarantees it is never
@@ -276,6 +279,7 @@ func (c *externalCollectionRefreshChecker) beginIndexWait(job *datapb.ExternalCo
 	mlog.Info(c.ctx, "external collection refresh applied, waiting for its segments to be indexed",
 		mlog.FieldJobID(job.GetJobId()),
 		mlog.FieldCollectionID(job.GetCollectionId()))
+	return true
 }
 
 // indexWaitDone reports whether every segment of the collection carries an
@@ -423,7 +427,24 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 		return
 	}
 	if state == indexpb.JobState_JobStateFinished && c.indexWaitEnabled() {
-		c.beginIndexWait(job)
+		if !c.beginIndexWait(job) {
+			return
+		}
+		// Settle the debt in the SAME pass. The eager task path calls this
+		// synchronously when the last task finishes, so deferring the first
+		// debt evaluation to the periodic tick costs every refresh a full
+		// externalCollectionCheckInterval - including a re-scan that changed
+		// nothing and whose segments are all already indexed, which is the
+		// case this feature's clients hit most often. The debt is knowable the
+		// moment the apply lands, so evaluate it now.
+		//
+		// Re-read rather than reuse the snapshot: the snapshot predates the
+		// marker and still carries whatever progress the ingest last reported.
+		entered := c.refreshMeta.GetJob(job.GetJobId())
+		if entered == nil || !c.indexWaitDone(entered) {
+			return
+		}
+		c.finishAfterIndexWait(entered)
 		return
 	}
 
