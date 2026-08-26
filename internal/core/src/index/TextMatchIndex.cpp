@@ -279,14 +279,24 @@ TextMatchIndex::AddTextsGrowing(size_t n,
                                 const std::string* texts,
                                 const bool* valids,
                                 int64_t offset_begin) {
+    std::vector<size_t> local_null_offsets;
     if (valids != nullptr) {
-        for (int i = 0; i < n; i++) {
-            auto offset = i + offset_begin;
+        for (size_t i = 0; i < n; i++) {
+            auto offset = offset_begin + static_cast<int64_t>(i);
             if (!valids[i]) {
-                std::unique_lock<folly::SharedMutex> lock(mutex_);
-                null_offset_.push_back(offset);
+                local_null_offsets.push_back(offset);
             }
         }
+    }
+    // Publish null metadata before the Tantivy documents. Growing readers may
+    // observe the document count concurrently and expect every null offset
+    // below that count to be available already.
+    if (!local_null_offsets.empty()) {
+        std::unique_lock<folly::SharedMutex> lock(mutex_);
+        null_offset_.reserve(null_offset_.size() + local_null_offsets.size());
+        null_offset_.insert(null_offset_.end(),
+                            local_null_offsets.begin(),
+                            local_null_offsets.end());
     }
     wrapper_->add_data(texts, n, offset_begin);
     if (shouldTriggerCommit()) {
