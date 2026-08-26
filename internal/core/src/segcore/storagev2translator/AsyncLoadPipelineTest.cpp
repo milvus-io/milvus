@@ -302,7 +302,11 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
             if (!status_.ok()) {
                 return folly::makeSemiFuture(ChunkReadResult(status_));
             }
-            return folly::makeSemiFuture(MakeBatches(chunk_indices));
+            auto returned_indices = chunk_indices;
+            if (return_one_fewer_batch_ && !returned_indices.empty()) {
+                returned_indices.pop_back();
+            }
+            return folly::makeSemiFuture(MakeBatches(returned_indices));
         }();
         if (!observe_deferred_continuation_) {
             return future;
@@ -335,6 +339,11 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
     void
     SetStatus(arrow::Status status) {
         status_ = std::move(status);
+    }
+
+    void
+    ReturnOneFewerBatch() {
+        return_one_fewer_batch_ = true;
     }
 
     void
@@ -415,6 +424,7 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
         folly::Executor::MID_PRI};
     std::atomic<size_t> parallelism_{0};
     bool observe_deferred_continuation_{false};
+    bool return_one_fewer_batch_{false};
     std::vector<std::vector<int64_t>> requested_indices_;
     std::function<void()> on_async_call_;
     std::shared_ptr<folly::Promise<ChunkReadResult>> deferred_read_;
@@ -914,6 +924,36 @@ TEST_F(AsyncLoadPipelineTest, FailsReadBeforeRequestingFinalizationExecutor) {
     ASSERT_TRUE(next_budget.isReady());
     auto next_lease = folly::coro::blockingWait(std::move(next_budget));
     next_lease.Release();
+}
+
+TEST_F(AsyncLoadPipelineTest,
+       RejectsUnexpectedBatchCountBeforeRequestingFinalizationExecutor) {
+    folly::ManualExecutor io_executor;
+    auto reader = std::make_shared<FakeChunkReader>(&executor_);
+    reader->ReturnOneFewerBatch();
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+    int provider_calls = 0;
+    auto options = Options();
+    options.finalization_executor_provider = [&]() {
+        ++provider_calls;
+        return folly::getKeepAliveToken(&io_executor);
+    };
+
+    try {
+        Run(LoadCellsAsync(nullptr,
+                           std::move(cells),
+                           reader,
+                           Finalizer(),
+                           std::move(options)));
+        FAIL() << "expected invalid batch count";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
+    }
+    EXPECT_EQ(provider_calls, 0);
 }
 
 TEST_F(AsyncLoadPipelineTest, CapturesExecutorKeepAliveBeforeTaskStarts) {
