@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -127,6 +126,7 @@ func (suite *SyncManagerSuite) SetupTest() {
 		BaseManager: BaseManager{localPath: suite.tempDir},
 		downloader:  suite.mockStorage,
 		version:     atomic.NewUint64(0),
+		resourceMap: make(map[string]int64),
 	}
 }
 
@@ -168,68 +168,6 @@ func (suite *SyncManagerSuite) TestSync_Success() {
 	content2, err := os.ReadFile(file2Path)
 	suite.NoError(err)
 	suite.Equal("test content 2", string(content2))
-}
-
-func (suite *SyncManagerSuite) TestSync_RestoreLocalResourcesAfterRestart() {
-	activeDir := path.Join(suite.tempDir, "1")
-	orphanDir := path.Join(suite.tempDir, "2")
-	suite.Require().NoError(os.MkdirAll(activeDir, os.ModePerm))
-	suite.Require().NoError(os.MkdirAll(orphanDir, os.ModePerm))
-	suite.Require().NoError(os.WriteFile(path.Join(activeDir, "active.file"), []byte("active content"), 0o600))
-	suite.Require().NoError(os.WriteFile(path.Join(orphanDir, "orphan.file"), []byte("orphan content"), 0o600))
-
-	resources := []*internalpb.FileResourceInfo{
-		{Id: 1, Name: "active", Path: "/storage/active.file"},
-	}
-	suite.Require().NoError(suite.manager.Sync(context.Background(), 3, resources))
-
-	suite.Equal(uint64(3), suite.manager.GetVersion())
-	suite.Equal(map[int64]struct{}{1: {}}, suite.manager.localResourceIDs)
-	suite.Empty(suite.manager.restoredResourceIDs)
-	suite.FileExists(path.Join(activeDir, "active.file"))
-	suite.NoDirExists(orphanDir)
-}
-
-func (suite *SyncManagerSuite) TestSync_VerifiesRestoredResourceOnlyOnce() {
-	resourceDir := path.Join(suite.tempDir, "1")
-	localFilePath := path.Join(resourceDir, "active.file")
-	suite.Require().NoError(os.MkdirAll(resourceDir, os.ModePerm))
-	suite.Require().NoError(os.WriteFile(localFilePath, []byte("active content"), 0o600))
-
-	resources := []*internalpb.FileResourceInfo{
-		{Id: 1, Name: "active", Path: "/storage/active.file"},
-	}
-	suite.Require().NoError(suite.manager.Sync(context.Background(), 1, resources))
-	suite.Empty(suite.manager.restoredResourceIDs)
-
-	// Once a restored resource has been verified, subsequent syncs trust the
-	// in-memory state and do not stat or download the file again.
-	suite.Require().NoError(os.Remove(localFilePath))
-	suite.Require().NoError(suite.manager.Sync(context.Background(), 2, resources))
-	suite.Equal(uint64(2), suite.manager.GetVersion())
-}
-
-func (suite *SyncManagerSuite) TestSync_ClearRestoredResourcesWithEmptyList() {
-	orphanDir := path.Join(suite.tempDir, "1")
-	suite.Require().NoError(os.MkdirAll(orphanDir, os.ModePerm))
-	suite.Require().NoError(os.WriteFile(path.Join(orphanDir, "orphan.file"), []byte("orphan content"), 0o600))
-
-	suite.Require().NoError(suite.manager.Sync(context.Background(), 2, nil))
-
-	suite.Equal(uint64(2), suite.manager.GetVersion())
-	suite.Empty(suite.manager.localResourceIDs)
-	suite.Empty(suite.manager.restoredResourceIDs)
-	suite.NoDirExists(orphanDir)
-}
-
-func (suite *SyncManagerSuite) TestSync_LoadLocalResourcesFailure() {
-	filePath := path.Join(suite.tempDir, "not-a-directory")
-	suite.Require().NoError(os.WriteFile(filePath, []byte("content"), 0o600))
-	suite.manager.localPath = filePath
-
-	err := suite.manager.Sync(context.Background(), 1, nil)
-	suite.ErrorIs(err, merr.ErrIoFailed)
-	suite.Equal(uint64(0), suite.manager.GetVersion())
 }
 
 func (suite *SyncManagerSuite) TestSync_LargeFile() {
@@ -392,6 +330,7 @@ func (suite *SyncManagerSuite) TestSync_AnalyzerUpdateFailureDoesNotAdvanceVersi
 		oldResourcePath := path.Join(suite.tempDir, "1")
 		suite.Require().NoError(os.MkdirAll(oldResourcePath, os.ModePerm))
 		suite.Require().NoError(os.WriteFile(path.Join(oldResourcePath, "old.file"), []byte("old content"), 0o600))
+		suite.manager.resourceMap = map[string]int64{"test.file": 1}
 		suite.manager.version.Store(1)
 
 		listener := &mockFileResourceListener{}
@@ -409,16 +348,19 @@ func (suite *SyncManagerSuite) TestSync_AnalyzerUpdateFailureDoesNotAdvanceVersi
 		err := suite.manager.Sync(context.Background(), 2, resources)
 		suite.ErrorIs(err, expectedErr)
 		suite.Equal(uint64(1), suite.manager.GetVersion())
+		suite.Equal(map[string]int64{"test.file": 1}, suite.manager.resourceMap)
 		suite.Empty(listener.events)
 		suite.FileExists(path.Join(suite.tempDir, "1", "old.file"))
 		suite.FileExists(path.Join(suite.tempDir, "2", "new.file"))
 
-		// The same version retries the Analyzer update and reuses the complete
-		// unpublished file downloaded by the previous attempt.
+		// The same version retries the Analyzer update after replacing the unpublished new resource.
+		suite.mockStorage.EXPECT().Size(mock.Anything, "/storage/new.file").Return(int64(len("new content")), nil).Once()
+		suite.mockStorage.EXPECT().Reader(mock.Anything, "/storage/new.file").Return(newMockReader("new content"), nil).Once()
 		mocker.Return(nil)
 
 		suite.Require().NoError(suite.manager.Sync(context.Background(), 2, resources))
 		suite.Equal(uint64(2), suite.manager.GetVersion())
+		suite.Equal(map[string]int64{"test.file": 2}, suite.manager.resourceMap)
 		suite.Require().Len(listener.events, 1)
 		suite.NoDirExists(path.Join(suite.tempDir, "1"))
 		content, err := os.ReadFile(path.Join(suite.tempDir, "2", "new.file"))
