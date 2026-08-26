@@ -429,39 +429,45 @@ func appendSystemFieldsDataWithCursor(task *ImportTask, data *storage.InsertData
 	if err != nil {
 		return err
 	}
-	ids := make([]int64, rowNum)
-	var start int64
-	if cur != nil && cur.end > cur.begin {
-		// Deterministic path: derive PKs from the primary-allocated per-file range.
-		start, err = cur.take(rowNum)
-		if err != nil {
-			return err
-		}
-	} else {
-		// Legacy path: allocate PKs from the task's local allocator.
-		start, _, err = task.allocator.Alloc(uint32(rowNum))
-		if err != nil {
-			return err
-		}
-	}
-	for i := 0; i < rowNum; i++ {
-		ids[i] = start + int64(i)
-	}
 	pkData, ok := data.Data[pkField.GetFieldID()]
 	allowInsertAutoID, _ := common.IsAllowInsertAutoID(task.req.Schema.GetProperties()...)
-	if pkField.GetAutoID() && (!ok || pkData == nil || pkData.RowNum() == 0 || !allowInsertAutoID) {
-		switch pkField.GetDataType() {
-		case schemapb.DataType_Int64:
-			data.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: ids}
-		case schemapb.DataType_VarChar:
-			strIDs := lo.Map(ids, func(id int64, _ int) string {
-				return strconv.FormatInt(id, 10)
-			})
-			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: strIDs}
+	generatePK := pkField.GetAutoID() && (!ok || pkData == nil || pkData.RowNum() == 0 || !allowInsertAutoID)
+	_, hasRowID := data.Data[common.RowIDField]
+	generateRowID := !hasRowID
+	if generatePK || generateRowID {
+		ids := make([]int64, rowNum)
+		var start int64
+		if cur != nil && cur.end > cur.begin {
+			// Deterministic path: derive PKs from the primary-allocated per-file range.
+			start, err = cur.take(rowNum)
+			if err != nil {
+				return err
+			}
+		} else {
+			// Legacy path: allocate PKs or missing RowIDs from the task's local allocator.
+			start, _, err = task.allocator.Alloc(uint32(rowNum))
+			if err != nil {
+				return err
+			}
 		}
-	}
-	if _, ok := data.Data[common.RowIDField]; !ok { // for binlog import, keep original rowID and ts
-		data.Data[common.RowIDField] = &storage.Int64FieldData{Data: ids}
+		for i := 0; i < rowNum; i++ {
+			ids[i] = start + int64(i)
+		}
+
+		if generatePK {
+			switch pkField.GetDataType() {
+			case schemapb.DataType_Int64:
+				data.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: ids}
+			case schemapb.DataType_VarChar:
+				strIDs := lo.Map(ids, func(id int64, _ int) string {
+					return strconv.FormatInt(id, 10)
+				})
+				data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: strIDs}
+			}
+		}
+		if generateRowID {
+			data.Data[common.RowIDField] = &storage.Int64FieldData{Data: ids}
+		}
 	}
 	if _, ok := data.Data[common.TimeStampField]; !ok {
 		tss := make([]int64, rowNum)

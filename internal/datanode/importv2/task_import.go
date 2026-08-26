@@ -66,9 +66,9 @@ func NewImportTask(req *datapb.ImportRequest,
 	if importutilv2.IsBackup(req.GetOptions()) {
 		UnsetAutoID(req.GetSchema())
 	}
-	// Local allocator for binlog logIDs (and the legacy autoID fallback when a file
-	// carries no primary-allocated PK range). Deterministic cross-cluster autoID PKs
-	// are derived per file from ImportFile.PreAllocatedAutoIds, not from this allocator.
+	// Local allocator for binlog logIDs and for missing row IDs on legacy imports.
+	// Deterministic cross-cluster autoID PKs are derived per file from
+	// ImportFile.PreAllocatedAutoIds, not from this allocator.
 	alloc := allocator.NewLocalAllocator(req.GetIDRange().GetBegin(), req.GetIDRange().GetEnd())
 	task := &ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{

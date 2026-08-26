@@ -346,16 +346,19 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		return stat.GetTotalRows()
 	})
 
-	// Pre-allocate IDs for autoIDs and logIDs.
+	// Pre-allocate IDs for output logIDs and row IDs on legacy or missing-system-field paths.
 	fieldsNum := len(job.GetSchema().GetFields()) + 2 // userFields + tsField + rowIDField
 	binlogNum := fieldsNum + 2                        // binlogs + statslog + BM25Statslog
 	expansionFactor := paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.GetAsInt64()
-	preAllocIDNum := (totalRows + 1) * int64(binlogNum) * expansionFactor
+	preAllocIDNum, preAllocIDNumCapped, err := calculatePreAllocIDNum(totalRows, int64(binlogNum), expansionFactor)
+	if err != nil {
+		return nil, err
+	}
 
 	idBegin, idEnd, err := common.AllocAutoID(func(n uint32) (int64, int64, error) {
 		ids, ide, e := alloc.AllocN(int64(n))
 		return ids, ide, e
-	}, uint32(preAllocIDNum), Params.CommonCfg.ClusterID.GetAsUint64())
+	}, preAllocIDNum, Params.CommonCfg.ClusterID.GetAsUint64())
 	if err != nil {
 		return nil, err
 	}
@@ -363,6 +366,8 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	mlog.Info(context.TODO(), "pre-allocate ids and ts for import task", WrapTaskLog(task,
 		mlog.Int64("totalRows", totalRows),
 		mlog.Int("fieldsNum", fieldsNum),
+		mlog.Uint32("preAllocIDNum", preAllocIDNum),
+		mlog.Bool("preAllocIDNumCapped", preAllocIDNumCapped),
 		mlog.Int64("idBegin", idBegin),
 		mlog.Int64("idEnd", idEnd),
 		mlog.Uint64("ts", ts))...,
@@ -414,6 +419,36 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	}
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
 	return req, nil
+}
+
+func calculatePreAllocIDNum(totalRows, binlogNum, expansionFactor int64) (uint32, bool, error) {
+	if totalRows < 0 {
+		return 0, false, merr.WrapErrServiceInternalMsg(
+			"import total rows must not be negative: %d", totalRows,
+		)
+	}
+	if binlogNum <= 0 {
+		return 0, false, merr.WrapErrServiceInternalMsg(
+			"import binlog count must be positive: %d", binlogNum,
+		)
+	}
+	if expansionFactor <= 0 {
+		expansionFactor = 1
+	}
+
+	maxBatchSize := uint64(math.MaxUint32)
+	rows := uint64(totalRows) + 1
+	logs := uint64(binlogNum)
+	if rows > maxBatchSize/logs {
+		return math.MaxUint32, true, nil
+	}
+
+	baseIDs := rows * logs
+	if uint64(expansionFactor) > maxBatchSize/baseIDs {
+		// AllocIDRequest.Count is uint32; saturate instead of wrapping to a smaller range.
+		return math.MaxUint32, true, nil
+	}
+	return uint32(baseIDs * uint64(expansionFactor)), false, nil
 }
 
 func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats, segmentMaxSize int) [][]*datapb.ImportFileStats {

@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"path"
 	"strings"
@@ -50,6 +51,84 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
+
+func TestCalculatePreAllocIDNum(t *testing.T) {
+	tests := []struct {
+		name           string
+		totalRows      int64
+		binlogNum      int64
+		expansion      int64
+		expectedNum    uint32
+		expectedCapped bool
+		expectedError  error
+	}{
+		{
+			name:        "normal",
+			totalRows:   100,
+			binlogNum:   11,
+			expansion:   10,
+			expectedNum: 11110,
+		},
+		{
+			name:           "expansion exceeds single batch",
+			totalRows:      78201209,
+			binlogNum:      11,
+			expansion:      10,
+			expectedNum:    math.MaxUint32,
+			expectedCapped: true,
+		},
+		{
+			name:           "base estimate exceeds single batch",
+			totalRows:      math.MaxUint32 / 11,
+			binlogNum:      11,
+			expansion:      1,
+			expectedNum:    math.MaxUint32,
+			expectedCapped: true,
+		},
+		{
+			name:           "int64 rows do not overflow calculation",
+			totalRows:      math.MaxInt64,
+			binlogNum:      11,
+			expansion:      10,
+			expectedNum:    math.MaxUint32,
+			expectedCapped: true,
+		},
+		{
+			name:          "negative rows",
+			totalRows:     -1,
+			binlogNum:     11,
+			expansion:     10,
+			expectedError: merr.ErrServiceInternal,
+		},
+		{
+			name:          "non-positive binlog count",
+			totalRows:     100,
+			binlogNum:     0,
+			expansion:     10,
+			expectedError: merr.ErrServiceInternal,
+		},
+		{
+			name:        "non-positive expansion uses one",
+			totalRows:   100,
+			binlogNum:   11,
+			expansion:   0,
+			expectedNum: 1111,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			num, capped, err := calculatePreAllocIDNum(test.totalRows, test.binlogNum, test.expansion)
+			if test.expectedError != nil {
+				require.ErrorIs(t, err, test.expectedError)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, test.expectedNum, num)
+			assert.Equal(t, test.expectedCapped, capped)
+		})
+	}
+}
 
 func TestImportUtil_NewPreImportTasks(t *testing.T) {
 	fileGroups := [][]*internalpb.ImportFile{
@@ -229,7 +308,15 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 
 func TestImportUtil_AssembleRequest(t *testing.T) {
 	var job ImportJob = &importJob{
-		ImportJob: &datapb.ImportJob{JobID: 0, CollectionID: 1, PartitionIDs: []int64{2}, Vchannels: []string{"v0"}},
+		ImportJob: &datapb.ImportJob{
+			JobID:        0,
+			CollectionID: 1,
+			PartitionIDs: []int64{2},
+			Vchannels:    []string{"v0"},
+			// Seven user fields plus RowID/Timestamp produce the 11 logs per row
+			// from the restore that originally exposed the uint32 wrap.
+			Schema: &schemapb.CollectionSchema{Fields: make([]*schemapb.FieldSchema, 7)},
+		},
 	}
 	importMeta := NewMockImportMeta(t)
 	importMeta.EXPECT().GetJob(mock.Anything, mock.Anything).Return(job)
@@ -257,6 +344,7 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 		TaskID:       4,
 		CollectionID: 1,
 		SegmentIDs:   []int64{5, 6},
+		FileStats:    []*datapb.ImportFileStats{{TotalRows: 78201209}},
 	}
 	var task ImportTask = &importTask{
 		importMeta: importMeta,
@@ -278,9 +366,8 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	alloc := allocator.NewMockAllocator(t)
-	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
-		id := rand.Int63()
-		return id, id + n, nil
+	alloc.EXPECT().AllocN(int64(math.MaxUint32)).RunAndReturn(func(n int64) (int64, int64, error) {
+		return 1000, 1000 + n, nil
 	})
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(800, nil)
 
@@ -304,6 +391,7 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	assert.Equal(t, task.GetCollectionID(), importReq.GetCollectionID())
 	assert.Equal(t, job.GetPartitionIDs(), importReq.GetPartitionIDs())
 	assert.Equal(t, job.GetVchannels(), importReq.GetVchannels())
+	assert.Equal(t, int64(math.MaxUint32), importReq.GetIDRange().GetEnd()-importReq.GetIDRange().GetBegin())
 }
 
 func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -102,6 +103,51 @@ func Test_AppendSystemFieldsData(t *testing.T) {
 	assert.Equal(t, count, insertData.Data[common.TimeStampField].RowNum())
 }
 
+func Test_AppendSystemFieldsData_BackupKeepsIDsWithoutAllocation(t *testing.T) {
+	const count = 10
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "pk",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+		AutoID:       true,
+	}
+	vecField := &schemapb.FieldSchema{
+		FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pkField, vecField}}
+
+	data, err := testutil.CreateInsertData(schema, count)
+	assert.NoError(t, err)
+	originalPK := &storage.Int64FieldData{Data: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}}
+	originalRowID := &storage.Int64FieldData{Data: []int64{10, 11, 12, 13, 14, 15, 16, 17, 18, 19}}
+	originalTS := &storage.Int64FieldData{Data: []int64{20, 21, 22, 23, 24, 25, 26, 27, 28, 29}}
+	data.Data[pkField.GetFieldID()] = originalPK
+	data.Data[common.RowIDField] = originalRowID
+	data.Data[common.TimeStampField] = originalTS
+
+	// The range is deliberately smaller than rowNum. A backup batch already has
+	// PK, RowID and Timestamp, so it must not consume row IDs from the allocator.
+	task := NewImportTask(&datapb.ImportRequest{
+		Ts:      1000,
+		Schema:  schema,
+		IDRange: &datapb.IDRange{Begin: 1000, End: 1001},
+		Options: []*commonpb.KeyValuePair{{Key: importutilv2.BackupFlag, Value: "true"}},
+	}, nil, nil, nil).(*ImportTask)
+	assert.False(t, pkField.GetAutoID())
+	err = AppendSystemFieldsData(task, data, count)
+	assert.NoError(t, err)
+	assert.Same(t, originalPK, data.Data[pkField.GetFieldID()])
+	assert.Same(t, originalRowID, data.Data[common.RowIDField])
+	assert.Same(t, originalTS, data.Data[common.TimeStampField])
+
+	// The untouched range remains available for the output binlog writer's logID.
+	logID, err := task.allocator.AllocOne()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1000), logID)
+}
+
 func Test_AppendSystemFieldsData_AllowInsertAutoID_KeepUserPK(t *testing.T) {
 	const count = 10
 
@@ -148,6 +194,7 @@ func Test_AppendSystemFieldsData_AllowInsertAutoID_KeepUserPK(t *testing.T) {
 	for i := 0; i < count; i++ {
 		assert.Equal(t, userPK[i], got.Data[i])
 	}
+	assert.Equal(t, count, insertData.Data[common.RowIDField].RowNum())
 }
 
 func Test_UnsetAutoID(t *testing.T) {
