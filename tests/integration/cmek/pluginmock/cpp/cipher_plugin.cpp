@@ -206,10 +206,9 @@ class FixtureCipherPlugin final : public ICipherPlugin {
         if (it != keys_.end()) {
             return it->second;
         }
-        it = keys_.find({ez_id, 0});
-        if (it != keys_.end()) {
-            return it->second;
-        }
+        // Contexts are scoped by collection. Do not reuse an EZ-level key:
+        // doing so would let a missing load-time collection context reuse a
+        // key left behind by another storage operation.
         throw std::runtime_error(
             "fixture cipher key is not initialized for EZ " +
             std::to_string(ez_id) + " and collection " +

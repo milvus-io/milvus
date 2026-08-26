@@ -397,12 +397,20 @@ locate:
 		}
 	}
 
+	load, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		DbName: s.dbName, CollectionName: collectionName,
+	})
+	s.Require().NoError(merr.CheckRPCCall(load, err))
+	s.WaitForLoadWithDB(ctx, s.dbName, collectionName)
+	s.assertOracle(cell, collectionName)
+
 	release, err := s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
 		DbName: s.dbName, CollectionName: collectionName,
 	})
 	s.Require().NoError(merr.CheckRPCCall(release, err))
 	s.CheckCollectionCacheReleased(segments[0].GetCollectionID())
-	load, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+
+	load, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName: s.dbName, CollectionName: collectionName,
 	})
 	s.Require().NoError(merr.CheckRPCCall(load, err))
