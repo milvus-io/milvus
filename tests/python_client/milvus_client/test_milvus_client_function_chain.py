@@ -23,7 +23,7 @@ from utils.util_log import test_log as log
 
 
 class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
-    """MilvusClient coverage for XGBoost L0 FunctionChain reranking."""
+    """MilvusClient coverage for XGBoost FunctionChain reranking."""
 
     nb = ct.default_nb
     sealed_segment_count = 2
@@ -399,8 +399,13 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
         }
 
     @staticmethod
-    def _xgboost_chain(resource_name, feature_names, output):
-        return FunctionChain(FunctionChainStage.L0_RERANK, name="l0_xgboost").map(
+    def _xgboost_chain(
+        resource_name,
+        feature_names,
+        output,
+        stage=FunctionChainStage.L0_RERANK,
+    ):
+        return FunctionChain(stage, name="xgboost").map(
             "$score",
             fn.xgboost(
                 *(col(name) for name in feature_names),
@@ -1540,50 +1545,79 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_xgboost_rejects_l2_rerank_stage(self):
+    @pytest.mark.skip(reason="Proxy FileResource sync is disabled by default, so L2 cannot load the XGBoost model")
+    def test_milvus_client_xgboost_supports_l1_l2_rerank_stages(
+        self,
+        tmp_path,
+        minio_host,
+        minio_bucket,
+    ):
         """
-        target: verify XGBoost is restricted to the L0 FunctionChain stage
-        method: run an L2 XGBoost map against the standard 2 sealed + 1 growing HNSW topology
-        expected: server rejects the function/stage combination before resolving the model resource
+        target: verify XGBoost is accepted at L1 and L2 FunctionChain stages
+        method: train and register one model, then execute the same rerank at L1 and L2
+        expected: both stages return scores and ordering matching local XGBoost predictions
         """
         client = self._client()
-        columns, _, embeddings, query_vectors, _ = self._regression_dataset(
+        columns, features, embeddings, query_vectors, labels = self._regression_dataset(
             feature_seed=19542,
             embedding_seed=19543,
             query_seed=19544,
         )
-        collection_name = self._create_collection(
-            client,
-            self._build_rows(columns, embeddings),
-            index_type="HNSW",
+        _, model_path, expected_scores, _ = self._train_xgboost_model(
+            tmp_path,
+            "xgboost_l1_l2",
+            features,
+            labels,
+            "reg:squarederror",
         )
-        l2_chain = FunctionChain(FunctionChainStage.L2_RERANK, name="invalid_l2_xgboost").map(
-            "$score",
-            fn.xgboost(
-                *(col(name) for name in self.feature_names),
-                model_resource="unused_xgboost_resource",
-                output="raw",
-            ),
+        resource_name = cf.gen_unique_str("xgboost_l1_l2_resource")
+        remote_path = f"xgboost/{resource_name}.ubj"
+        minio_client = self._upload_model(
+            client,
+            minio_host,
+            minio_bucket,
+            resource_name,
+            remote_path,
+            model_path,
         )
 
-        self.search(
-            client,
-            collection_name,
-            data=query_vectors,
-            anns_field=self.vector_field,
-            search_params={
-                "metric_type": "COSINE",
-                "params": self.index_configs["HNSW"]["search_params"],
-            },
-            limit=self.limit,
-            output_fields=self.feature_names,
-            function_chains=l2_chain,
-            check_task=CheckTasks.err_res,
-            check_items={
-                ct.err_code: 1100,
-                ct.err_msg: 'function "xgboost" does not support stage "L2_rerank"',
-            },
-        )
+        try:
+            collection_name = self._create_collection(
+                client,
+                self._build_rows(columns, embeddings),
+                index_type="HNSW",
+            )
+            for stage in (
+                FunctionChainStage.L1_RERANK,
+                FunctionChainStage.L2_RERANK,
+            ):
+                result_sets, _ = self.search(
+                    client,
+                    collection_name,
+                    data=query_vectors,
+                    anns_field=self.vector_field,
+                    search_params={
+                        "metric_type": "COSINE",
+                        "params": self.index_configs["HNSW"]["search_params"],
+                    },
+                    limit=self.limit,
+                    output_fields=self.feature_names,
+                    function_chains=self._xgboost_chain(
+                        resource_name,
+                        self.feature_names,
+                        "raw",
+                        stage=stage,
+                    ),
+                )
+                self._assert_scores_match(result_sets, expected_scores)
+        finally:
+            self._cleanup_file_resource(
+                client,
+                minio_client,
+                minio_bucket,
+                resource_name,
+                remote_path,
+            )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_xgboost_rejects_corrupted_ubj_model(

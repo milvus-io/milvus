@@ -159,6 +159,16 @@ func (t *SearchTask) Execute() error {
 	}
 	defer searchReq.Delete()
 
+	// Validate before ANN so invalid chains fail even when there are no local
+	// segments. Filter-only requests only collect statistics for two-stage search.
+	var preparedChains *preparedQueryNodeFunctionChains
+	if !searchReq.FilterOnly() {
+		preparedChains, err = prepareQueryNodeFunctionChains(req.GetReq().GetSerializedExprPlan(), t.collection.Schema())
+		if err != nil {
+			return err
+		}
+	}
+
 	var (
 		results          []*segments.SearchResult
 		searchedSegments []segments.Segment
@@ -273,11 +283,6 @@ func (t *SearchTask) Execute() error {
 	)
 	if err != nil {
 		mlog.Warn(t.ctx, "failed to prepare search results for export", mlog.Err(err))
-		return err
-	}
-
-	preparedChains, err := prepareQueryNodeFunctionChains(req.GetReq().GetSerializedExprPlan(), t.collection.Schema())
-	if err != nil {
 		return err
 	}
 

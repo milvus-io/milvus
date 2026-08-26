@@ -16,6 +16,9 @@
 package proxy
 
 import (
+	"strings"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
@@ -37,14 +40,55 @@ func hasFunctionRerank(request *milvuspb.SearchRequest) bool {
 	return request.GetFunctionScore() != nil || len(request.GetFunctionChains()) > 0
 }
 
-func validateFunctionChainSearchRequest(request *milvuspb.SearchRequest, isAdvanced bool) error {
+func validateFunctionChainSearchRequest(request *milvuspb.SearchRequest, _ bool) error {
 	if request.GetFunctionScore() != nil && len(request.GetFunctionChains()) > 0 {
 		return merr.WrapErrParameterInvalidMsg("function_score and function_chains cannot be used together")
 	}
-	if isAdvanced && len(request.GetFunctionChains()) > 0 {
-		return merr.WrapErrParameterInvalidMsg("function_chains is not supported for hybrid search yet")
-	}
 	return nil
+}
+
+func selectHybridRerankMeta(request *milvuspb.SearchRequest, schema *schemaInfo) (rerankMeta, error) {
+	functionChains := request.GetFunctionChains()
+	if len(functionChains) > 0 {
+		if request.GetFunctionScore() != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("function_chains cannot be used with function_score")
+		}
+		if hasExplicitLegacyReranker(request.GetSearchParams()) {
+			return nil, merr.WrapErrParameterInvalidMsg("function_chains cannot be used with rank_params strategy or params")
+		}
+		return newHybridFunctionChainRerankMeta(functionChains, schema, len(request.GetSubReqs()))
+	}
+
+	if request.GetFunctionScore() != nil {
+		for index, subReq := range request.GetSubReqs() {
+			if len(subReq.GetFunctionChains()) > 0 {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"function_score cannot be used with function_chains in sub-search[%d]", index)
+			}
+		}
+		return newRerankMeta(schema.CollectionSchema, request.GetFunctionScore()), nil
+	}
+	return newRerankMetaFromLegacy(request.GetSearchParams()), nil
+}
+
+func hasExplicitLegacyReranker(params []*commonpb.KeyValuePair) bool {
+	for _, param := range params {
+		if param == nil {
+			continue
+		}
+		switch strings.ToLower(param.GetKey()) {
+		case RankTypeKey:
+			if strings.TrimSpace(param.GetValue()) != "" {
+				return true
+			}
+		case ParamsKey:
+			value := strings.TrimSpace(param.GetValue())
+			if value != "" && !strings.EqualFold(value, "null") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func hasFunctionChainStage(chains []*schemapb.FunctionChain, target schemapb.FunctionChainStage) bool {
@@ -76,6 +120,9 @@ func splitFunctionChainsByStage(chains []*schemapb.FunctionChain) ([]*schemapb.F
 			l2Chains = append(l2Chains, chainPB)
 		case schemapb.FunctionChainStage_FunctionChainStageL0Rerank,
 			schemapb.FunctionChainStage_FunctionChainStageL1Rerank:
+			if len(chainPB.GetOps()) == 0 {
+				return nil, nil, merr.WrapErrParameterInvalidMsg("function chain[%d] must contain at least one op", i)
+			}
 			querynodeChains = append(querynodeChains, chainPB)
 		default:
 			return nil, nil, merr.WrapErrParameterInvalidMsg("function chain[%d] stage %s is not supported in search request", i, stage.String())
@@ -86,8 +133,40 @@ func splitFunctionChainsByStage(chains []*schemapb.FunctionChain) ([]*schemapb.F
 }
 
 func newFunctionChainRerankMeta(chains []*schemapb.FunctionChain, schema *schemaInfo) (*functionChainRerankMeta, error) {
+	chainPB, repr, err := parseL2FunctionChain(chains)
+	if err != nil || repr == nil {
+		return nil, err
+	}
+
+	for i, op := range repr.Operators {
+		if op.Type == chaintypes.OpTypeMerge {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"function chain operator[%d]: merge is not supported in ordinary search", i)
+		}
+	}
+
+	return buildFunctionChainRerankMeta(chainPB, repr, schema)
+}
+
+func newHybridFunctionChainRerankMeta(chains []*schemapb.FunctionChain, schema *schemaInfo, subSearchCount int) (*functionChainRerankMeta, error) {
+	if len(chains) != 1 {
+		return nil, merr.WrapErrParameterInvalidMsg("hybrid search requires exactly one function chain, got %d", len(chains))
+	}
+
+	chainPB, repr, err := parseL2FunctionChain(chains)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateHybridL2FunctionChain(repr, subSearchCount); err != nil {
+		return nil, merr.Wrap(err, "function chain[0]")
+	}
+
+	return buildFunctionChainRerankMeta(chainPB, repr, schema)
+}
+
+func parseL2FunctionChain(chains []*schemapb.FunctionChain) (*schemapb.FunctionChain, *chain.ChainRepr, error) {
 	if len(chains) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	seenStages := make(map[schemapb.FunctionChainStage]struct{}, len(chains))
@@ -96,32 +175,57 @@ func newFunctionChainRerankMeta(chains []*schemapb.FunctionChain, schema *schema
 
 	for i, pb := range chains {
 		if pb == nil {
-			return nil, merr.WrapErrParameterInvalidMsg("function chain[%d] is nil", i)
+			return nil, nil, merr.WrapErrParameterInvalidMsg("function chain[%d] is nil", i)
 		}
 		stage := pb.GetStage()
 		if _, ok := seenStages[stage]; ok {
-			return nil, merr.WrapErrParameterInvalidMsg("function chain stage %s appears more than once", stage.String())
+			return nil, nil, merr.WrapErrParameterInvalidMsg("function chain stage %s appears more than once", stage.String())
 		}
 		seenStages[stage] = struct{}{}
 
 		if stage != schemapb.FunctionChainStage_FunctionChainStageL2Rerank {
-			return nil, merr.WrapErrParameterInvalidMsg("function chain[%d] stage %s is not supported in search request", i, stage.String())
+			return nil, nil, merr.WrapErrParameterInvalidMsg("function chain[%d] stage %s is not supported in search request", i, stage.String())
 		}
 		if len(pb.GetOps()) == 0 {
-			return nil, merr.WrapErrParameterInvalidMsg("function chain[%d] must contain at least one op", i)
+			return nil, nil, merr.WrapErrParameterInvalidMsg("function chain[%d] must contain at least one op", i)
 		}
 
 		r, err := chain.ProtoChainToRepr(pb)
 		if err != nil {
-			return nil, merr.WrapErrParameterInvalidMsg("function chain[%d]: %v", i, err)
+			return nil, nil, merr.Wrapf(err, "function chain[%d]", i)
 		}
 		if err := validateL2RerankSystemNames(r); err != nil {
-			return nil, merr.WrapErrParameterInvalidMsg("function chain[%d]: %v", i, err)
+			return nil, nil, merr.Wrapf(err, "function chain[%d]", i)
 		}
 		chainPB = pb
 		repr = r
 	}
+	return chainPB, repr, nil
+}
 
+func validateHybridL2FunctionChain(repr *chain.ChainRepr, subSearchCount int) error {
+	if repr == nil {
+		return merr.WrapErrParameterInvalidMsg("function chain repr is nil")
+	}
+
+	mergeCount := 0
+	mergeIndex := -1
+	for i, op := range repr.Operators {
+		if op.Type == chaintypes.OpTypeMerge {
+			mergeCount++
+			mergeIndex = i
+		}
+	}
+	if mergeCount != 1 {
+		return merr.WrapErrParameterInvalidMsg("hybrid function chain must contain exactly one merge operator")
+	}
+	if mergeIndex != 0 {
+		return merr.WrapErrParameterInvalidMsg("hybrid function chain merge operator must be first")
+	}
+	return chain.ValidateMergeOpRepr(&repr.Operators[0], subSearchCount)
+}
+
+func buildFunctionChainRerankMeta(chainPB *schemapb.FunctionChain, repr *chain.ChainRepr, schema *schemaInfo) (*functionChainRerankMeta, error) {
 	inputFieldNames, inputFieldIDs, err := planL2FunctionChainInputs(repr, schema)
 	if err != nil {
 		return nil, err
