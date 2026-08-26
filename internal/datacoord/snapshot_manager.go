@@ -117,7 +117,8 @@ type SnapshotManager interface {
 	//   - collectionID: ID of the collection to snapshot
 	//   - name: Unique name for the snapshot (globally unique)
 	//   - description: Optional description of the snapshot
-	//   - skipIndex: Omit index definitions, reusable index artifacts, and build IDs
+	//   - skipIndex: Omit index definitions, separately tracked index artifacts,
+	//     and build IDs. StorageV3 manifest roots remain intact.
 	//
 	// Returns:
 	//   - snapshotID: Allocated snapshot ID (0 on error)
@@ -190,7 +191,8 @@ type SnapshotManager interface {
 	//   - snapshotName: Name of the snapshot to restore (unique within collection)
 	//   - targetCollectionName: Name for the restored collection
 	//   - targetDbName: Database name for the restored collection
-	//   - skipIndex: Restore data without recreating or copying indexes
+	//   - skipIndex: Restore data without recreating indexes or copying separately
+	//     tracked index artifacts. StorageV3 manifest roots remain intact.
 	//   - startRestoreLock: Function to acquire the Phase 0 restore lock set
 	//   - startBroadcaster: Function to start a broadcaster for DDL operations
 	//   - rollback: Function to rollback on failure (drops collection)
@@ -1726,23 +1728,22 @@ func (sm *snapshotManager) createRestoreJob(
 		// populates Stats so concurrent RLock readers don't race on a
 		// lazy init.
 		newSegment := NewSegmentInfo(&datapb.SegmentInfo{
-			ID:                       targetSegmentID,
-			CollectionID:             targetCollection,
-			PartitionID:              targetPartitionID,
-			InsertChannel:            targetChannelName,
-			NumOfRows:                segDesc.GetNumOfRows(),
-			State:                    commonpb.SegmentState_Importing,
-			MaxRowNum:                Params.DataCoordCfg.SegmentMaxSize.GetAsInt64(),
-			Level:                    segDesc.GetSegmentLevel(),
-			CreatedByCompaction:      false,
-			LastExpireTime:           math.MaxUint64,
-			StartPosition:            startPos,
-			DmlPosition:              dmlPos,
-			StorageVersion:           segDesc.GetStorageVersion(),
-			IsSorted:                 segDesc.GetIsSorted(),
-			CommitTimestamp:          segDesc.GetCommitTimestamp(),
-			IsImporting:              true,
-			FilterManifestIndexStats: skipIndex || segDesc.GetFilterManifestIndexStats(),
+			ID:                  targetSegmentID,
+			CollectionID:        targetCollection,
+			PartitionID:         targetPartitionID,
+			InsertChannel:       targetChannelName,
+			NumOfRows:           segDesc.GetNumOfRows(),
+			State:               commonpb.SegmentState_Importing,
+			MaxRowNum:           Params.DataCoordCfg.SegmentMaxSize.GetAsInt64(),
+			Level:               segDesc.GetSegmentLevel(),
+			CreatedByCompaction: false,
+			LastExpireTime:      math.MaxUint64,
+			StartPosition:       startPos,
+			DmlPosition:         dmlPos,
+			StorageVersion:      segDesc.GetStorageVersion(),
+			IsSorted:            segDesc.GetIsSorted(),
+			CommitTimestamp:     segDesc.GetCommitTimestamp(),
+			IsImporting:         true,
 		})
 		targetSegments[targetSegmentID] = newSegment
 	}
@@ -1773,16 +1774,12 @@ func (sm *snapshotManager) createRestoreJob(
 	jobTimeout := Params.DataCoordCfg.CopySegmentJobTimeout.GetAsDuration(time.Second)
 	copyJob := &copySegmentJob{
 		CopySegmentJob: &datapb.CopySegmentJob{
-			JobId:        jobID,
-			CollectionId: targetCollection,
-			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
-			IdMappings:   idMappings,
-			TimeoutTs:    CopyJobTimeoutTs(jobTimeout),
-			StartTs:      uint64(time.Now().UnixNano()),
-			Options: []*commonpb.KeyValuePair{
-				{Key: "copy_index", Value: strconv.FormatBool(!skipIndex)},
-				{Key: "source_type", Value: "snapshot"},
-			},
+			JobId:               jobID,
+			CollectionId:        targetCollection,
+			State:               datapb.CopySegmentJobState_CopySegmentJobPending,
+			IdMappings:          idMappings,
+			TimeoutTs:           CopyJobTimeoutTs(jobTimeout),
+			StartTs:             uint64(time.Now().UnixNano()),
 			TotalSegments:       int64(len(idMappings)),
 			TotalRows:           totalRows,
 			SnapshotName:        snapshotData.SnapshotInfo.GetName(),
