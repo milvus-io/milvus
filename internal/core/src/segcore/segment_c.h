@@ -128,7 +128,6 @@ AsyncSegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment);
  * @param load_info_length length of load_info_blob in bytes
  * @param schema_blob serialized CollectionSchema protobuf message; must not be null
  * @param schema_length length of schema_blob in bytes; must be positive
- * @param schema_version schema version assigned to the parsed schema
  * @return CFuture* that resolves when reopen completes (result pointer is nullptr)
  */
 CFuture*
@@ -137,8 +136,7 @@ AsyncReopenSegment(CTraceContext c_trace,
                    const uint8_t* load_info_blob,
                    const int64_t load_info_length,
                    const void* schema_blob,
-                   const int64_t schema_length,
-                   const uint64_t schema_version);
+                   const int64_t schema_length);
 
 void
 DeleteSegment(CSegmentInterface c_segment);

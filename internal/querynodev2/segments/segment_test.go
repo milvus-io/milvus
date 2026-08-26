@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -814,19 +815,21 @@ func TestLocalSegmentBM25StatsAreCloned(t *testing.T) {
 	assert.NotContains(t, gotAgain, int64(103))
 }
 
-func TestLocalSegmentReopenUsesSegcoreSchemaVersion(t *testing.T) {
+func TestLocalSegmentReopenUsesCollectionSchemaState(t *testing.T) {
 	paramtable.Init()
 
 	schema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
 	schema.Version = 1
+	loadSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
 
-	collection := &Collection{}
-	collection.setSchema(schema, 1, 100, 101)
+	collection := &Collection{loadFields: typeutil.NewSet[int64](100)}
+	collection.setSchema(schema, loadSchema, 1, 100)
 
 	csegment := mock_segcore.NewMockCSegment(t)
 	csegment.EXPECT().
 		Reopen(mock.Anything, mock.MatchedBy(func(request *segcore.ReopenRequest) bool {
-			return request.Schema == schema && request.SchemaVersion == 101
+			return request.Schema == schema && request.LoadSchema == loadSchema &&
+				assert.ElementsMatch(t, []int64{100}, request.LoadFields)
 		})).
 		Return(nil)
 
@@ -860,7 +863,7 @@ func TestLocalSegmentReopenErrorDoesNotAdvanceLoadInfo(t *testing.T) {
 	schema.Version = 1
 
 	collection := &Collection{}
-	collection.setSchema(schema, 1, 100, 101)
+	collection.setSchema(schema, schema, 1, 100)
 
 	csegment := mock_segcore.NewMockCSegment(t)
 	csegment.EXPECT().
@@ -912,7 +915,7 @@ func TestLocalSegmentReopenInjectsDiskIndexLoadParams(t *testing.T) {
 	schema.Version = 1
 
 	collection := &Collection{}
-	collection.setSchema(schema, 1, 100, 101)
+	collection.setSchema(schema, schema, 1, 100)
 
 	getParam := func(kvs []*commonpb.KeyValuePair, key string) (string, bool) {
 		for _, kv := range kvs {

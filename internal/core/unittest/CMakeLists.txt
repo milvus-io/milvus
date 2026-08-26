@@ -73,6 +73,7 @@ set(MILVUS_TEST_FILES
         test_arrow_canonicalize.cpp
         TextLobSpilloverTest.cpp
         test_commit_timestamp.cpp
+        test_schema_cache.cpp
         test_schema_reopen.cpp
         test_growing_concurrent_reopen.cpp
         test_segment_read_lease.cpp

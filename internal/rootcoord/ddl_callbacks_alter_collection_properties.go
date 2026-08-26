@@ -110,6 +110,9 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 	// Apply the properties to override the existing properties.
 	oldProperties := common.CloneKeyValuePairs(coll.Properties).ToMap()
 	newProperties := common.CloneKeyValuePairs(coll.Properties).ToMap()
+	externalSource := coll.ExternalSource
+	externalSpec := coll.ExternalSpec
+	needExternalSchemaRefresh := false
 	for _, prop := range req.GetProperties() {
 		switch prop.GetKey() {
 		case common.CollectionDescription:
@@ -123,20 +126,20 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionConsistencyLevel)
 			}
 		case common.CollectionExternalSource:
-			if udpates.Schema == nil {
-				udpates.Schema = &schemapb.CollectionSchema{}
-			}
-			udpates.Schema.ExternalSource = prop.GetValue()
-			if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
-				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+			if prop.GetValue() != externalSource {
+				externalSource = prop.GetValue()
+				needExternalSchemaRefresh = true
+				if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
+					header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+				}
 			}
 		case common.CollectionExternalSpec:
-			if udpates.Schema == nil {
-				udpates.Schema = &schemapb.CollectionSchema{}
-			}
-			udpates.Schema.ExternalSpec = prop.GetValue()
-			if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
-				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+			if prop.GetValue() != externalSpec {
+				externalSpec = prop.GetValue()
+				needExternalSchemaRefresh = true
+				if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
+					header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+				}
 			}
 		default:
 			newProperties[prop.GetKey()] = prop.GetValue()
@@ -153,12 +156,12 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionProperties)
 	}
 
-	// If TTL field is changed through properties, also broadcast an updated schema snapshot and mark it as schema change,
-	// so QueryNode can refresh runtime schema properties without requiring release/load.
+	// Values parsed into the runtime schema need a new immutable schema version,
+	// so QueryNode can refresh them without requiring release/load.
 	ttlOld, okOld := oldProperties[common.CollectionTTLFieldKey]
 	ttlNew, okNew := newProperties[common.CollectionTTLFieldKey]
 	needTTLFieldSchemaRefresh := (okOld != okNew) || (okOld && okNew && ttlOld != ttlNew)
-	if needTTLFieldSchemaRefresh {
+	if needTTLFieldSchemaRefresh || needExternalSchemaRefresh {
 		// validate ttl field name exists in schema fields when setting it
 		if okNew {
 			found := false
@@ -178,17 +181,13 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 			header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionSchema)
 		}
 
-		// Build schema snapshot with updated properties (schema version should NOT be changed for properties-only alter).
+		// These values are consumed from the schema snapshot, so changing them
+		// creates a new logical schema version.
 		schema := coll.ToCollectionSchemaPB()
+		schema.Version = coll.SchemaVersion + 1
 		schema.Properties = newPropsKeyValuePairs
-		// Preserve ExternalSource/ExternalSpec from current collection state
-		// unless this alter is itself updating them (refresh-completion sync).
-		if udpates.Schema != nil && udpates.Schema.ExternalSource != "" {
-			schema.ExternalSource = udpates.Schema.ExternalSource
-		}
-		if udpates.Schema != nil && udpates.Schema.ExternalSpec != "" {
-			schema.ExternalSpec = udpates.Schema.ExternalSpec
-		}
+		schema.ExternalSource = externalSource
+		schema.ExternalSpec = externalSpec
 		udpates.Schema = schema
 	}
 

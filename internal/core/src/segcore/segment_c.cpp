@@ -66,6 +66,7 @@
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/Collection.h"
 #include "segcore/SegcoreConfig.h"
+#include "segcore/SchemaCache.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentInterface.h"
@@ -190,16 +191,17 @@ NewSegmentWithLoadInfo(CCollection collection,
 milvus::SchemaPtr
 ParseReopenSchema(const void* schema_blob,
                   const int64_t schema_length,
-                  const uint64_t schema_version) {
+                  const int64_t collection_id) {
     AssertInfo(schema_blob != nullptr, "schema is null");
     AssertInfo(schema_length > 0, "schema length must be positive");
 
     milvus::proto::schema::CollectionSchema collection_schema;
     auto suc = collection_schema.ParseFromArray(schema_blob, schema_length);
     AssertInfo(suc, "parse schema proto failed");
-    auto schema = milvus::Schema::ParseFrom(collection_schema);
-    schema->set_schema_version(schema_version);
-    return schema;
+    return collection_id > 0
+               ? milvus::segcore::GetGlobalSchemaCache().GetOrCreate(
+                     collection_id, collection_schema)
+               : milvus::Schema::ParseFrom(collection_schema);
 }
 
 milvus::SchemaPtr
@@ -219,15 +221,14 @@ AsyncReopenSegment(CTraceContext c_trace,
                    const uint8_t* load_info_blob,
                    const int64_t load_info_length,
                    const void* schema_blob,
-                   const int64_t schema_length,
-                   const uint64_t schema_version) {
+                   const int64_t schema_length) {
     try {
         AssertInfo(load_info_blob, "load info is null");
         milvus::proto::segcore::SegmentLoadInfo load_info;
         auto suc = load_info.ParseFromArray(load_info_blob, load_info_length);
         AssertInfo(suc, "unmarshal load info failed");
-        auto schema =
-            ParseReopenSchema(schema_blob, schema_length, schema_version);
+        auto schema = ParseReopenSchema(
+            schema_blob, schema_length, load_info.collectionid());
 
         auto segment =
             static_cast<milvus::segcore::SegmentInterface*>(c_segment);

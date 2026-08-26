@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/cgo"
@@ -51,6 +52,8 @@ type CreateCSegmentRequest struct {
 	SegmentType SegmentType
 	IsSorted    bool
 	LoadInfo    *querypb.SegmentLoadInfo
+	LoadSchema  *schemapb.CollectionSchema
+	LoadFields  []int64
 }
 
 func (req *CreateCSegmentRequest) getCSegmentType() C.SegmentType {
@@ -71,7 +74,7 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	var ptr C.CSegmentInterface
 	var status C.CStatus
 	if req.LoadInfo != nil {
-		segLoadInfo, err := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+		segLoadInfo, err := convertToSegcoreSegmentLoadInfo(req.LoadInfo, req.LoadSchema, req.LoadFields)
 		if err != nil {
 			return nil, merr.Wrap(err, "failed to convert segment load info")
 		}
@@ -359,7 +362,7 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(req)
 
-	segLoadInfo, err := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+	segLoadInfo, err := convertToSegcoreSegmentLoadInfo(req.LoadInfo, req.LoadSchema, req.LoadFields)
 	if err != nil {
 		return merr.Wrap(err, "failed to convert reopen load info")
 	}
@@ -389,7 +392,6 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 				C.int64_t(len(loadInfoBlob)),
 				unsafe.Pointer(&schemaBlob[0]),
 				C.int64_t(len(schemaBlob)),
-				C.uint64_t(req.SchemaVersion),
 			))
 		},
 		cgo.WithName("segment-reopen"),
@@ -416,6 +418,10 @@ func (s *cSegmentImpl) SetCommitTimestamp(ts uint64) error {
 // This function is needed because segcorepb.SegmentLoadInfo is a simplified version that doesn't
 // depend on data_coord.proto and excludes fields like start_position, delta_position, and level.
 func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) (*segcorepb.SegmentLoadInfo, error) {
+	return convertToSegcoreSegmentLoadInfo(src, nil, nil)
+}
+
+func convertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo, loadSchema *schemapb.CollectionSchema, loadFields []int64) (*segcorepb.SegmentLoadInfo, error) {
 	if src == nil {
 		return nil, nil
 	}
@@ -453,6 +459,8 @@ func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) (*segcorepb.S
 		UseTakeForOutput:     src.GetUseTakeForOutput(),
 		EstimatedBytesPerRow: src.GetEstimatedBytesPerRow(),
 		CommitTimestamp:      src.GetCommitTimestamp(),
+		LoadFields:           loadFields,
+		LoadSchema:           loadSchema,
 	}, nil
 }
 
