@@ -196,7 +196,7 @@ fn invalid_unicode_escape() -> TantivyBindingError {
 mod tests {
     use serde_json as json;
 
-    use super::MappingCharFilter;
+    use super::{unescape_mapping_side, MappingCharFilter};
     use crate::analyzer::char_filter::{CharFilter, FilteredText};
 
     #[test]
@@ -283,6 +283,16 @@ mod tests {
         let output = filter.apply(FilteredText::new("\t=>"));
 
         assert_eq!(output.text, " arrow");
+    }
+
+    #[test]
+    fn test_mapping_char_filter_supports_es_escape_rules() {
+        let escaped = r#"\\\n\r\t\b\f\u0041\"\q\=\>"#;
+
+        assert_eq!(
+            unescape_mapping_side(escaped).unwrap(),
+            "\\\n\r\t\u{0008}\u{000c}A\"q=>"
+        );
     }
 
     #[test]
