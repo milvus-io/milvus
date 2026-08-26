@@ -147,6 +147,7 @@ func packLoadSegmentRequest(
 
 	finalSchema := applyCollectionSettings(schema, collectionProperties)
 	applyIndexWarmupSetting(loadInfo, finalSchema, collectionProperties)
+	applyIndexEvictableSetting(loadInfo, finalSchema, collectionProperties)
 
 	return &querypb.LoadSegmentsRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -281,7 +282,6 @@ func applyCollectionSettings(schema *schemapb.CollectionSchema,
 
 	schemaCloned = applyCollectionMmapSetting(schemaCloned, collectionProperties)
 	schemaCloned = applyCollectionWarmupSetting(schemaCloned, collectionProperties)
-
 	// Index warmup is normally materialized into each IndexInfo by
 	// applyIndexWarmupSetting. No-index vector fields have no IndexInfo carrier,
 	// but segcore treats their raw data as the vector-index/search path until an
@@ -294,6 +294,7 @@ func applyCollectionSettings(schema *schemapb.CollectionSchema,
 			Value: common.WarmupSync,
 		})
 	}
+	schemaCloned = applyCollectionEvictableSetting(schemaCloned, collectionProperties)
 	return schemaCloned
 }
 
@@ -454,6 +455,68 @@ func applyCollectionWarmupSetting(schema *schemapb.CollectionSchema,
 	return schema
 }
 
+// applyCollectionEvictableSetting applies collection-level evictable settings to all fields
+// and propagates struct-level evictable settings to nested fields.
+// Priority: field-level > struct-level > collection-level.
+// Collection-level granular keys: evictable.scalarField and
+// evictable.vectorField.
+func applyCollectionEvictableSetting(schema *schemapb.CollectionSchema,
+	collectionProperties []*commonpb.KeyValuePair,
+) *schemapb.CollectionSchema {
+	scalarFieldEvictable, scalarFieldExist := common.GetEvictableByKey(common.EvictableScalarFieldKey, collectionProperties...)
+	vectorFieldEvictable, vectorFieldExist := common.GetEvictableByKey(common.EvictableVectorFieldKey, collectionProperties...)
+
+	for _, field := range schema.GetFields() {
+		if common.FieldHasEvictableKey(schema, field.GetFieldID()) {
+			continue
+		}
+
+		isVector := typeutil.IsVectorType(field.GetDataType())
+		if isVector && vectorFieldExist {
+			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+				Key:   common.EvictableKey,
+				Value: strconv.FormatBool(vectorFieldEvictable),
+			})
+		} else if !isVector && scalarFieldExist {
+			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+				Key:   common.EvictableKey,
+				Value: strconv.FormatBool(scalarFieldEvictable),
+			})
+		}
+	}
+
+	for _, structField := range schema.GetStructArrayFields() {
+		structEvictable, structHasExplicitEvictable := common.IsEvictableEnabled(structField.GetTypeParams()...)
+
+		for _, field := range structField.GetFields() {
+			if common.FieldHasEvictableKey(schema, field.GetFieldID()) {
+				continue
+			}
+
+			if structHasExplicitEvictable {
+				field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+					Key:   common.EvictableKey,
+					Value: strconv.FormatBool(structEvictable),
+				})
+			} else {
+				isVector := typeutil.IsVectorType(field.GetDataType())
+				if isVector && vectorFieldExist {
+					field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+						Key:   common.EvictableKey,
+						Value: strconv.FormatBool(vectorFieldEvictable),
+					})
+				} else if !isVector && scalarFieldExist {
+					field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+						Key:   common.EvictableKey,
+						Value: strconv.FormatBool(scalarFieldEvictable),
+					})
+				}
+			}
+		}
+	}
+	return schema
+}
+
 // applyIndexWarmupSetting applies collection-level index warmup setting to segment index params
 // Index params warmup setting has higher priority than collection-level
 // Priority: index-level > collection-level > autoWarmupForNonPKIsolationCollection (all indexes)
@@ -509,6 +572,54 @@ func applyIndexWarmupSetting(loadInfo *querypb.SegmentLoadInfo, schema *schemapb
 			indexInfo.IndexParams = append(indexInfo.IndexParams, &commonpb.KeyValuePair{
 				Key:   common.WarmupKey,
 				Value: common.WarmupSync,
+			})
+		}
+	}
+}
+
+// applyIndexEvictableSetting applies collection-level index evictable setting to segment index params.
+// Index params evictable setting has higher priority than collection-level.
+// Collection-level granular keys: evictable.scalarIndex and
+// evictable.vectorIndex.
+func applyIndexEvictableSetting(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema, collectionProperties []*commonpb.KeyValuePair) {
+	scalarIndexEvictable, scalarIndexExist := common.GetEvictableByKey(common.EvictableScalarIndexKey, collectionProperties...)
+	vectorIndexEvictable, vectorIndexExist := common.GetEvictableByKey(common.EvictableVectorIndexKey, collectionProperties...)
+
+	if !scalarIndexExist && !vectorIndexExist {
+		return
+	}
+
+	fieldMap := make(map[int64]*schemapb.FieldSchema)
+	for _, field := range schema.GetFields() {
+		fieldMap[field.GetFieldID()] = field
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, field := range structField.GetFields() {
+			fieldMap[field.GetFieldID()] = field
+		}
+	}
+
+	for _, indexInfo := range loadInfo.GetIndexInfos() {
+		_, exist := common.IsEvictableEnabled(indexInfo.IndexParams...)
+		if exist {
+			continue
+		}
+
+		field, ok := fieldMap[indexInfo.GetFieldID()]
+		if !ok {
+			continue
+		}
+
+		isVector := typeutil.IsVectorType(field.GetDataType())
+		if isVector && vectorIndexExist {
+			indexInfo.IndexParams = append(indexInfo.IndexParams, &commonpb.KeyValuePair{
+				Key:   common.EvictableKey,
+				Value: strconv.FormatBool(vectorIndexEvictable),
+			})
+		} else if !isVector && scalarIndexExist {
+			indexInfo.IndexParams = append(indexInfo.IndexParams, &commonpb.KeyValuePair{
+				Key:   common.EvictableKey,
+				Value: strconv.FormatBool(scalarIndexEvictable),
 			})
 		}
 	}

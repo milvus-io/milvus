@@ -26,4 +26,8 @@ TEST(CApiTest, LoadInfoTest) {
     EnableMmap(c_load_info, 100, true);
 
     EXPECT_TRUE(load_info->field_infos.at(100).enable_mmap);
+    EXPECT_TRUE(load_info->field_infos.at(100).support_eviction);
+
+    SetFieldSupportEviction(c_load_info, 100, false);
+    EXPECT_FALSE(load_info->field_infos.at(100).support_eviction);
 }

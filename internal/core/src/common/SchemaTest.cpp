@@ -427,6 +427,82 @@ TEST_F(SchemaTest, WarmupPolicyFallbackToCollectionLevel) {
     EXPECT_EQ(policy2, "disable");
 }
 
+TEST_F(SchemaTest, EvictableFieldPolicyDoesNotOverrideIndexPolicy) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+
+    auto* field = schema_proto.add_fields();
+    field->set_fieldid(100);
+    field->set_name("scalar_field");
+    field->set_data_type(milvus::proto::schema::DataType::Int64);
+    field->set_is_primary_key(true);
+    auto* field_param = field->add_type_params();
+    field_param->set_key(EVICTABLE_KEY);
+    field_param->set_value("false");
+
+    auto parsed_schema = Schema::ParseFrom(schema_proto);
+    auto field_id = FieldId(100);
+
+    auto [has_field_setting, field_enabled] = parsed_schema->EvictableEnabled(
+        field_id, /*is_vector=*/false, /*is_index=*/false);
+    EXPECT_TRUE(has_field_setting);
+    EXPECT_FALSE(field_enabled);
+
+    auto [has_index_setting, index_enabled] = parsed_schema->EvictableEnabled(
+        field_id, /*is_vector=*/false, /*is_index=*/true);
+    EXPECT_FALSE(has_index_setting);
+}
+
+TEST_F(SchemaTest, EvictableSettingsSurviveSchemaCopies) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+
+    auto* field = schema_proto.add_fields();
+    field->set_fieldid(100);
+    field->set_name("scalar_field");
+    field->set_data_type(milvus::proto::schema::DataType::Int64);
+    field->set_is_primary_key(true);
+    auto* field_param = field->add_type_params();
+    field_param->set_key(EVICTABLE_KEY);
+    field_param->set_value("false");
+
+    const std::vector<std::pair<std::string, std::string>> defaults = {
+        {EVICTABLE_VECTOR_INDEX_KEY, "true"},
+        {EVICTABLE_SCALAR_INDEX_KEY, "false"},
+        {EVICTABLE_SCALAR_FIELD_KEY, "true"},
+        {EVICTABLE_VECTOR_FIELD_KEY, "false"},
+    };
+    for (const auto& [key, value] : defaults) {
+        auto* prop = schema_proto.add_properties();
+        prop->set_key(key);
+        prop->set_value(value);
+    }
+
+    auto parsed_schema = Schema::ParseFrom(schema_proto);
+    parsed_schema->set_schema_version(42);
+    Schema copied(*parsed_schema);
+    Schema assigned;
+    assigned = *parsed_schema;
+
+    auto check = [](const Schema& schema) {
+        EXPECT_EQ(schema.get_schema_version(), 42);
+        auto field_id = FieldId(100);
+        EXPECT_EQ(schema.EvictableEnabled(
+                      field_id, /*is_vector=*/false, /*is_index=*/false),
+                  std::make_pair(true, false));
+        EXPECT_EQ(schema.EvictableEnabled(
+                      field_id, /*is_vector=*/false, /*is_index=*/true),
+                  std::make_pair(true, false));
+        EXPECT_EQ(schema.EvictableEnabled(
+                      field_id, /*is_vector=*/true, /*is_index=*/false),
+                  std::make_pair(true, false));
+        EXPECT_EQ(schema.EvictableEnabled(
+                      field_id, /*is_vector=*/true, /*is_index=*/true),
+                  std::make_pair(true, true));
+    };
+
+    check(copied);
+    check(assigned);
+}
+
 // ConvertToLoonArrowSchema tests
 
 TEST_F(SchemaTest, ConvertToLoonArrowSchemaFieldNamesAreFieldIds) {

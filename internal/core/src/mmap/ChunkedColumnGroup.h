@@ -199,6 +199,11 @@ class ChunkedColumnGroup {
     TestCacheWarmupPolicy() const {
         return slot_->meta()->cache_warmup_policy;
     }
+
+    bool
+    TestSupportEviction() const {
+        return slot_->meta()->support_eviction;
+    }
 #endif
 
  protected:
@@ -327,6 +332,11 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     CacheWarmupPolicy
     TestCacheWarmupPolicy() const {
         return group_->TestCacheWarmupPolicy();
+    }
+
+    bool
+    TestSupportEviction() const {
+        return group_->TestSupportEviction();
     }
 #endif
 

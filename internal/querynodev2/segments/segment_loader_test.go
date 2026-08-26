@@ -2032,6 +2032,37 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) baseLoadInfo(textStats map[int
 	}
 }
 
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestEstimateSkipsStatsForDroppedFields() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapJSONStats.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapJSONStats.Key)
+
+	const droppedFieldID = int64(107)
+	loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+		droppedFieldID: {FieldID: droppedFieldID, MemorySize: 100},
+	})
+	loadInfo.JsonKeyStatsLogs = map[int64]*datapb.JsonKeyStats{
+		droppedFieldID: {FieldID: droppedFieldID, MemorySize: 100},
+	}
+	factor := resourceEstimateFactor{
+		textIndexExpansionFactor:        1,
+		jsonKeyStatsExpansionFactor:     1,
+		TieredEvictableMemoryCacheRatio: 1,
+		TieredEvictableDiskCacheRatio:   1,
+	}
+
+	loadingUsage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.Zero(loadingUsage.MemorySize)
+	suite.Zero(loadingUsage.DiskSize)
+
+	logicalUsage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.Zero(logicalUsage.MemorySize)
+	suite.Zero(logicalUsage.DiskSize)
+}
+
 func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_NonMmap_NoTieredEviction() {
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
@@ -2072,6 +2103,48 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_Mmap_NoTie
 	suite.NoError(err)
 	suite.EqualValues(0, usage.MemorySize, "mmap text index must not be counted in memory")
 	suite.EqualValues(textIndexSize, usage.DiskSize, "mmap text index must be counted in disk")
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_TextIndexUsesFieldMmapOverride() {
+	const textIndexSize = int64(50 * 1024 * 1024)
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:       false,
+		textIndexExpansionFactor:    1.0,
+		deltaDataExpansionFactor:    2.0,
+		jsonKeyStatsExpansionFactor: 1.0,
+	}
+
+	suite.Run("global false field true", func() {
+		old := paramtable.Get().QueryNodeCfg.MmapScalarField.SwapTempValue("false")
+		defer paramtable.Get().QueryNodeCfg.MmapScalarField.SwapTempValue(old)
+		schema := typeutil.Clone(suite.schema)
+		schema.Fields[1].TypeParams = append(schema.Fields[1].TypeParams,
+			&commonpb.KeyValuePair{Key: common.MmapEnabledKey, Value: "true"})
+		loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+			101: {FieldID: 101, MemorySize: textIndexSize},
+		})
+
+		usage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor)
+		suite.NoError(err)
+		suite.EqualValues(0, usage.MemorySize)
+		suite.EqualValues(textIndexSize, usage.DiskSize)
+	})
+
+	suite.Run("global true field false", func() {
+		old := paramtable.Get().QueryNodeCfg.MmapScalarField.SwapTempValue("true")
+		defer paramtable.Get().QueryNodeCfg.MmapScalarField.SwapTempValue(old)
+		schema := typeutil.Clone(suite.schema)
+		schema.Fields[1].TypeParams = append(schema.Fields[1].TypeParams,
+			&commonpb.KeyValuePair{Key: common.MmapEnabledKey, Value: "false"})
+		loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+			101: {FieldID: 101, MemorySize: textIndexSize},
+		})
+
+		usage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor)
+		suite.NoError(err)
+		suite.EqualValues(textIndexSize, usage.MemorySize)
+		suite.EqualValues(0, usage.DiskSize)
+	})
 }
 
 func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_TieredEvictionEnabled_TextIndexSkipped() {
@@ -2333,6 +2406,174 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_ExpansionF
 	suite.NoError(err)
 	expected := uint64(float64(textIndexSize) * expansionFactor)
 	suite.EqualValues(expected, usage.MemorySize)
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_NonEvictableTextStatsNotCacheRatioed() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_text_estimate_nonevictable",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID:  101,
+				Name:     "text",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.EvictableKey, Value: "false"},
+				},
+			},
+		},
+	}
+
+	const textIndexSize = int64(100 * 1024 * 1024)
+	loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+		101: {FieldID: 101, MemorySize: textIndexSize},
+	})
+
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:           true,
+		textIndexExpansionFactor:        1.0,
+		deltaDataExpansionFactor:        2.0,
+		TieredEvictableMemoryCacheRatio: 0.1,
+		TieredEvictableDiskCacheRatio:   0.1,
+	}
+	usage, err := estimateLogicalResourceUsageOfSegment(schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.EqualValues(textIndexSize, usage.MemorySize, "non-evictable text stats must not be multiplied by cache ratio")
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_NonEvictableRawFieldNotCacheRatioed() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_raw_estimate_nonevictable",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID:  101,
+				Name:     "scalar",
+				DataType: schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.EvictableKey, Value: "false"},
+				},
+			},
+		},
+	}
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    1,
+		PartitionID:  2,
+		CollectionID: 3,
+		NumOfRows:    100,
+		BinlogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 101,
+				Binlogs: []*datapb.Binlog{
+					{MemorySize: 1000, LogSize: 1000},
+				},
+			},
+		},
+	}
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:           true,
+		TieredEvictableMemoryCacheRatio: 0.1,
+		TieredEvictableDiskCacheRatio:   0.1,
+	}
+	usage, err := estimateLogicalResourceUsageOfSegment(schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.EqualValues(1000, usage.MemorySize, "non-evictable raw field must not be multiplied by cache ratio")
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_StorageV2GroupAnyChildFalseIsNonEvictable() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_group_estimate_nonevictable",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID:  101,
+				Name:     "scalar_false",
+				DataType: schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.EvictableKey, Value: "false"},
+				},
+			},
+			{
+				FieldID:  102,
+				Name:     "scalar_true",
+				DataType: schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.EvictableKey, Value: "true"},
+				},
+			},
+		},
+	}
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:      1,
+		PartitionID:    2,
+		CollectionID:   3,
+		NumOfRows:      100,
+		StorageVersion: storage.StorageV2,
+		BinlogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID:     0,
+				ChildFields: []int64{101, 102},
+				Binlogs: []*datapb.Binlog{
+					{MemorySize: 1000, LogSize: 1000},
+				},
+			},
+		},
+	}
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:           true,
+		TieredEvictableMemoryCacheRatio: 0.1,
+		TieredEvictableDiskCacheRatio:   0.1,
+	}
+	usage, err := estimateLogicalResourceUsageOfSegment(schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.EqualValues(1000, usage.MemorySize, "group with any non-evictable child must not be multiplied by cache ratio")
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_TieredEvictionEnabled_NonEvictableRawFieldCounted() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_loading_raw_nonevictable",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID:  101,
+				Name:     "scalar",
+				DataType: schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.EvictableKey, Value: "false"},
+				},
+			},
+		},
+	}
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    1,
+		PartitionID:  2,
+		CollectionID: 3,
+		NumOfRows:    100,
+		BinlogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 101,
+				Binlogs: []*datapb.Binlog{
+					{MemorySize: 1000, LogSize: 1000},
+				},
+			},
+		},
+	}
+	factor := resourceEstimateFactor{TieredEvictionEnabled: true}
+	usage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.EqualValues(1000, usage.MemorySize, "non-evictable raw field must reserve loading memory under tiered eviction")
 }
 
 func TestSeparateLoadInfoV2_ExternalFieldIndexNotSkipped(t *testing.T) {
