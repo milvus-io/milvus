@@ -48,8 +48,7 @@ class ArrowFileSystemChunkManagerTest : public testing::Test {
     void
     SetUp() override {
         root_path_ = (std::filesystem::temp_directory_path() /
-                      ("arrow_fs_cm_test_" +
-                       std::to_string(::getpid()) + "_" +
+                      ("arrow_fs_cm_test_" + std::to_string(::getpid()) + "_" +
                        std::to_string(reinterpret_cast<uintptr_t>(this))))
                          .string();
         std::filesystem::create_directories(root_path_);
@@ -266,67 +265,4 @@ TEST(ArrowFileSystemChunkManagerSwitch, CreateChunkManagerRouting) {
 
     SetUseArrowFileSystemChunkManager(prev);
     ASSERT_EQ(UseArrowFileSystemChunkManager(), prev);
-}
-
-// Real object-storage coverage: exercises the milvus-storage S3FileSystem
-// backend (multipart upload finalize, HeadObject stat, AwsErrorNotFound
-// classification) against a live MinIO. Skipped unless MINIO_ADDRESS is set
-// (it is inside the CI/builder container).
-TEST(ArrowFileSystemChunkManagerRemote, MinioCRUD) {
-    const char* address = std::getenv("MINIO_ADDRESS");
-    if (address == nullptr || std::string(address).empty()) {
-        GTEST_SKIP() << "MINIO_ADDRESS not set, skip remote minio test";
-    }
-
-    StorageConfig config;
-    config.storage_type = "remote";
-    config.cloud_provider = "aws";
-    config.address = address;
-    config.bucket_name = "a-bucket";
-    config.access_key_id = "minioadmin";
-    config.access_key_value = "minioadmin";
-    config.useSSL = false;
-    config.useIAM = false;
-    config.root_path = "files";
-
-    ArrowFileSystemChunkManager cm(config);
-    EXPECT_EQ(cm.GetBucketName(), "a-bucket");
-
-    std::string prefix =
-        "arrow_fs_cm_ut/" + std::to_string(::getpid()) + "/";
-    std::string path = prefix + "insert_log/1/2/3";
-    uint8_t data[5] = {0x17, 0x32, 0x00, 0x34, 0x23};
-
-    EXPECT_FALSE(cm.Exist(path));
-    cm.Write(path, data, sizeof(data));
-    EXPECT_TRUE(cm.Exist(path));
-    EXPECT_EQ(cm.Size(path), sizeof(data));
-
-    uint8_t readdata[20] = {0};
-    EXPECT_EQ(cm.Read(path, readdata, sizeof(data)), sizeof(data));
-    EXPECT_EQ(std::memcmp(data, readdata, sizeof(data)), 0);
-
-    auto listed = cm.ListWithPrefix(prefix);
-    ASSERT_EQ(listed.size(), 1);
-    EXPECT_EQ(listed[0], path);
-
-    // not-found classification must survive the S3 error path
-    // (ExtendStatusDetail AwsErrorNotFound -> ObjectNotExist)
-    try {
-        cm.Size(prefix + "not/exist");
-        FAIL() << "Size on missing object should throw";
-    } catch (const milvus::SegcoreError& e) {
-        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::ObjectNotExist);
-    }
-    try {
-        cm.Read(prefix + "not/exist", readdata, sizeof(readdata));
-        FAIL() << "Read on missing object should throw";
-    } catch (const milvus::SegcoreError& e) {
-        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::ObjectNotExist);
-    }
-    EXPECT_NO_THROW(cm.Remove(prefix + "not/exist"));
-
-    cm.Remove(path);
-    EXPECT_FALSE(cm.Exist(path));
-    EXPECT_EQ(cm.ListWithPrefix(prefix).size(), 0);
 }

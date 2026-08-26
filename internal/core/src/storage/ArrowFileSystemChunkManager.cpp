@@ -78,12 +78,12 @@ ThrowArrowStorageError(const std::string& func,
                        const std::string& path,
                        const arrow::Status& status) {
     auto segcore_error = milvus_storage::ToSegcoreError(status);
-    std::string error_message = fmt::format(
-        "Error in {}[errcode:{}, filepath:{}, errmessage:{}]",
-        func,
-        fmt::underlying(segcore_error.get_error_code()),
-        path,
-        status.ToString());
+    std::string error_message =
+        fmt::format("Error in {}[errcode:{}, filepath:{}, errmessage:{}]",
+                    func,
+                    fmt::underlying(segcore_error.get_error_code()),
+                    path,
+                    status.ToString());
     LOG_WARN("{}", error_message);
     throw SegcoreError(segcore_error.get_error_code(), error_message);
 }
@@ -114,9 +114,10 @@ class LatencyObserver {
         : histogram_(histogram), start_(std::chrono::system_clock::now()) {
     }
     ~LatencyObserver() {
-        histogram_.Observe(std::chrono::duration_cast<std::chrono::milliseconds>(
-                               std::chrono::system_clock::now() - start_)
-                               .count());
+        histogram_.Observe(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now() - start_)
+                .count());
     }
 
  private:
@@ -253,8 +254,8 @@ ArrowFileSystemChunkManager::Read(const std::string& filepath,
     }
     uint64_t total = 0;
     while (total < size) {
-        auto read = (*file)->Read(size - total,
-                                  static_cast<uint8_t*>(buf) + total);
+        auto read =
+            (*file)->Read(size - total, static_cast<uint8_t*>(buf) + total);
         if (!read.ok()) {
             milvus::monitor::internal_storage_op_count_get_fail.Increment();
             ThrowReadError(fs_, "Read", path, read.status());
@@ -345,10 +346,9 @@ ArrowFileSystemChunkManager::ListWithPrefix(const std::string& filepath) {
     // from listed paths, so match on the stripped form of the resolved
     // prefix, then splice the caller's original prefix back on so results
     // come back in the caller's namespace (absolute or CWD-relative).
-    const std::string match_prefix = !resolved.empty() &&
-                                             resolved.front() == '/'
-                                         ? resolved.substr(1)
-                                         : resolved;
+    const std::string match_prefix =
+        !resolved.empty() && resolved.front() == '/' ? resolved.substr(1)
+                                                     : resolved;
     std::vector<std::string> result;
     for (const auto& info : *infos) {
         if (info.type() == arrow::fs::FileType::File &&
