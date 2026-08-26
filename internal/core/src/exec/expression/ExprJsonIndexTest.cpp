@@ -824,6 +824,134 @@ TEST(JsonRawScanTest, EmptyInAndLargeInt64KeepThreeValuedSemantics) {
           numeric_valid);
 }
 
+TEST(JsonRawScanTest, NumberErrorIsLimitedToTheAccessedPathOrArrayElement) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    auto seg = CreateSealedSegment(schema);
+
+    const std::vector<std::string> json_strs = {
+        R"({"bad":1e400,"ok":7,"target":[1,"x",true,[1,2]]})",
+        R"({"bad":1e400,"ok":8,"target":[1e400,[3,4],[1,2],7,"x"]})",
+        R"({"bad":1e400,"ok":9,"target":[1e400,[3,4]]})",
+    };
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    std::vector<milvus::Json> jsons;
+    jsons.reserve(json_strs.size());
+    for (const auto& json : json_strs) {
+        jsons.emplace_back(simdjson::padded_string(json));
+    }
+    json_field->add_json_data(jsons);
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, json_fid.get(), {json_field}, cm);
+    seg->LoadFieldData(load_info);
+
+    auto evaluate = [&](const expr::TypedExprPtr& filter_expr) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           filter_expr);
+        return milvus::test::gen_filter_res(
+            plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
+    };
+    auto check = [](const ColumnVectorPtr& result,
+                    const std::vector<bool>& expected_result,
+                    const std::vector<bool>& expected_valid) {
+        ASSERT_EQ(result->size(), expected_result.size());
+        ASSERT_EQ(result->size(), expected_valid.size());
+        TargetBitmapView result_view(result->GetRawData(), result->size());
+        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        for (size_t i = 0; i < result->size(); ++i) {
+            EXPECT_EQ(valid_view[i], expected_valid[i]) << "row " << i;
+            EXPECT_EQ(result_view[i], expected_result[i]) << "row " << i;
+        }
+    };
+
+    proto::plan::GenericValue seven;
+    seven.set_int64_val(7);
+    proto::plan::GenericValue zero;
+    zero.set_int64_val(0);
+    proto::plan::GenericValue ten;
+    ten.set_int64_val(10);
+
+    auto bad_column = expr::ColumnInfo(json_fid, DataType::JSON, {"bad"});
+    check(
+        evaluate(std::make_shared<expr::TermFilterExpr>(
+            bad_column, std::vector<proto::plan::GenericValue>{seven}, false)),
+        {false, false, false},
+        {false, false, false});
+    check(evaluate(std::make_shared<expr::UnaryRangeFilterExpr>(
+              bad_column,
+              proto::plan::OpType::GreaterThan,
+              seven,
+              std::vector<proto::plan::GenericValue>())),
+          {false, false, false},
+          {false, false, false});
+    check(evaluate(std::make_shared<expr::BinaryRangeFilterExpr>(
+              bad_column, zero, ten, true, true)),
+          {false, false, false},
+          {false, false, false});
+    check(evaluate(std::make_shared<expr::ExistsExpr>(bad_column)),
+          {true, true, true},
+          {true, true, true});
+
+    auto ok_column = expr::ColumnInfo(json_fid, DataType::JSON, {"ok"});
+    check(evaluate(std::make_shared<expr::TermFilterExpr>(
+              ok_column, std::vector<proto::plan::GenericValue>{seven}, false)),
+          {true, false, false},
+          {true, true, true});
+    check(evaluate(std::make_shared<expr::BinaryRangeFilterExpr>(
+              ok_column, seven, ten, true, false)),
+          {true, true, true},
+          {true, true, true});
+
+    proto::plan::GenericValue missing;
+    missing.set_string_val("missing");
+    auto target_column = expr::ColumnInfo(json_fid, DataType::JSON, {"target"});
+    check(evaluate(std::make_shared<expr::JsonContainsExpr>(
+              target_column,
+              proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+              false,
+              std::vector<proto::plan::GenericValue>{seven, missing})),
+          {false, true, false},
+          {true, true, true});
+
+    proto::plan::GenericValue x;
+    x.set_string_val("x");
+    check(evaluate(std::make_shared<expr::JsonContainsExpr>(
+              target_column,
+              proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+              false,
+              std::vector<proto::plan::GenericValue>{seven, x})),
+          {false, true, false},
+          {true, true, true});
+
+    proto::plan::GenericValue array_1_2;
+    array_1_2.mutable_array_val()->add_array()->set_int64_val(1);
+    array_1_2.mutable_array_val()->add_array()->set_int64_val(2);
+    proto::plan::GenericValue array_3_4;
+    array_3_4.mutable_array_val()->add_array()->set_int64_val(3);
+    array_3_4.mutable_array_val()->add_array()->set_int64_val(4);
+    proto::plan::GenericValue array_9_9;
+    array_9_9.mutable_array_val()->add_array()->set_int64_val(9);
+    array_9_9.mutable_array_val()->add_array()->set_int64_val(9);
+    check(evaluate(std::make_shared<expr::JsonContainsExpr>(
+              target_column,
+              proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+              false,
+              std::vector<proto::plan::GenericValue>{array_9_9, array_1_2})),
+          {true, true, false},
+          {true, true, true});
+    check(evaluate(std::make_shared<expr::JsonContainsExpr>(
+              target_column,
+              proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+              false,
+              std::vector<proto::plan::GenericValue>{array_3_4, array_1_2})),
+          {false, true, false},
+          {true, true, true});
+}
+
 TEST(JsonIndexTest, TestJsonNotEqualExpr) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(

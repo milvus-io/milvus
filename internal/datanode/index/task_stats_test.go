@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -394,6 +395,29 @@ func (s *TaskStatsSuite) TestJSONKeyStatsPropagatesPluginContext() {
 	s.Require().NoError(err)
 	s.Require().NotNil(captured)
 	s.Equal(pluginContext, captured.GetStoragePluginContext())
+}
+
+func (s *TaskStatsSuite) TestJSONStatsDataFormatMismatchIsRetryable() {
+	st := &statsTask{req: &workerpb.CreateStatsRequest{
+		ClusterID: "cluster",
+		TaskID:    1,
+	}}
+	err := st.createJSONKeyStats(
+		context.Background(),
+		nil,
+		1,
+		2,
+		3,
+		4,
+		5,
+		common.JSONStatsDataFormatVersion+1,
+		nil,
+		256,
+		0.3,
+		81920,
+	)
+	s.ErrorIs(err, merr.ErrServiceNotReady)
+	s.True(merr.IsRetryableErr(err))
 }
 
 func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {

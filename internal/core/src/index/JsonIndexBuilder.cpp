@@ -22,11 +22,64 @@
 #include "folly/FBVector.h"
 #include "index/JsonIndexBuilder.h"
 #include "pb/schema.pb.h"
-#include "simdjson/dom/array.h"
-#include "simdjson/dom/element.h"
 #include "simdjson/error.h"
 
 namespace milvus::index {
+
+namespace {
+
+enum class JsonPathPresence {
+    Missing,
+    Present,
+    PresentButInvalid,
+};
+
+struct JsonPathPresenceResult {
+    JsonPathPresence presence;
+    simdjson::error_code error;
+};
+
+// Probe path presence without materializing a DOM value. In particular,
+// ondemand::value::type() can identify an out-of-range JSON number as a number
+// without converting it to double; the conversion error is handled later as an
+// invalid indexed value while the path remains present for EXISTS.
+JsonPathPresenceResult
+GetJsonPathPresence(const Json& json, const std::string& nested_path) {
+    auto type = json.type(nested_path);
+    auto error = type.error();
+    if (error == simdjson::SUCCESS) {
+        return {json.exist(nested_path) ? JsonPathPresence::Present
+                                        : JsonPathPresence::Missing,
+                simdjson::SUCCESS};
+    }
+
+    // A path through a scalar, an absent object key, or an out-of-range array
+    // element is not present. Numeric parse/conversion failures still describe
+    // a present value; keep it out of the typed value index without marking the
+    // path as non-existent.
+    if (error == simdjson::NO_SUCH_FIELD ||
+        error == simdjson::INDEX_OUT_OF_BOUNDS ||
+        error == simdjson::INCORRECT_TYPE ||
+        error == simdjson::SCALAR_DOCUMENT_AS_VALUE ||
+        error == simdjson::INVALID_JSON_POINTER) {
+        return {JsonPathPresence::Missing, error};
+    }
+    if (error == simdjson::NUMBER_ERROR || error == simdjson::BIGINT_ERROR ||
+        error == simdjson::NUMBER_OUT_OF_RANGE) {
+        return {JsonPathPresence::PresentButInvalid, error};
+    }
+
+    // Preserve the previous all-or-nothing behavior for malformed JSON and
+    // invalid index paths. Treating an unclassifiable row as either present or
+    // absent would publish a semantically incomplete index.
+    AssertInfo(false,
+               "failed to inspect JSON path {}: {}",
+               nested_path,
+               simdjson::error_message(error));
+    return {JsonPathPresence::PresentButInvalid, error};  // unreachable
+}
+
+}  // namespace
 
 template <typename T>
 void
@@ -44,7 +97,9 @@ ProcessJsonFieldData(
     using SIMDJSON_T =
         std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
 
-    auto tokens = parse_json_pointer(nested_path);
+    // Preserve the previous up-front validation of the configured pointer, but
+    // do not materialize each row as a DOM document merely to test presence.
+    (void)parse_json_pointer(nested_path);
 
     bool is_array = cast_type.data_type() == JsonCastType::DataType::ARRAY;
 
@@ -60,18 +115,23 @@ ProcessJsonFieldData(
                 continue;
             }
 
-            auto exists = path_exists(json_column->dom_doc(), tokens);
-            if (!exists || !json_column->exist(nested_path)) {
+            auto presence = GetJsonPathPresence(*json_column, nested_path);
+            if (presence.presence == JsonPathPresence::Missing) {
                 error_recorder(
                     *json_column, nested_path, simdjson::NO_SUCH_FIELD);
                 non_exist_adder(offset);
                 data_adder(nullptr, 0, offset++);
                 continue;
             }
+            if (presence.presence == JsonPathPresence::PresentButInvalid) {
+                error_recorder(*json_column, nested_path, presence.error);
+                data_adder(nullptr, 0, offset++);
+                continue;
+            }
 
             values.clear();
             if (is_array) {
-                auto doc = json_column->dom_doc();
+                auto doc = json_column->doc();
                 auto array_res = doc.at_pointer(nested_path).get_array();
                 if (array_res.error() != simdjson::SUCCESS) {
                     error_recorder(
@@ -79,10 +139,16 @@ ProcessJsonFieldData(
                 } else {
                     auto array_values = array_res.value();
                     for (auto value : array_values) {
-                        auto val = value.template get<SIMDJSON_T>();
-
-                        if (val.error() == simdjson::SUCCESS) {
-                            values.push_back(static_cast<T>(val.value()));
+                        if constexpr (std::is_same_v<T, double>) {
+                            auto val = value.get_number();
+                            if (val.error() == simdjson::SUCCESS) {
+                                values.push_back(val.value().as_double());
+                            }
+                        } else {
+                            auto val = value.template get<SIMDJSON_T>();
+                            if (val.error() == simdjson::SUCCESS) {
+                                values.push_back(static_cast<T>(val.value()));
+                            }
                         }
                     }
                 }
@@ -92,6 +158,13 @@ ProcessJsonFieldData(
                         cast_function, *json_column, nested_path);
                     if (res.has_value()) {
                         values.push_back(res.value());
+                    }
+                } else if constexpr (std::is_same_v<T, double>) {
+                    auto res = json_column->at_numeric(nested_path);
+                    if (res.error() != simdjson::SUCCESS) {
+                        error_recorder(*json_column, nested_path, res.error());
+                    } else {
+                        values.push_back(res.value().as_double());
                     }
                 } else {
                     value_result<SIMDJSON_T> res =

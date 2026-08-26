@@ -33,6 +33,8 @@
 #include "common/protobuf_utils.h"
 #include "exec/expression/BinaryRangeExpr.h"
 #include "exec/expression/ExprBatchTestUtils.h"
+#include "exec/expression/ExistsExpr.h"
+#include "exec/expression/JsonContainsExpr.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/UnaryExpr.h"
 #include "expr/ITypeExpr.h"
@@ -121,7 +123,8 @@ BuildJsonStatsIndex(const std::vector<std::string>& json_strings,
                     int64_t field_id,
                     int64_t build_id,
                     int64_t version_id,
-                    const std::vector<uint8_t>* valid_data = nullptr) {
+                    const std::vector<uint8_t>* valid_data = nullptr,
+                    int64_t json_stats_max_shredding_columns = 1024) {
     std::vector<milvus::Json> data;
     data.reserve(json_strings.size());
     for (const auto& s : json_strings) {
@@ -177,7 +180,8 @@ BuildJsonStatsIndex(const std::vector<std::string>& json_strings,
     Config build_config;
     build_config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
 
-    auto builder = std::make_shared<JsonKeyStats>(ctx, false);
+    auto builder = std::make_shared<JsonKeyStats>(
+        ctx, false, json_stats_max_shredding_columns);
     builder->Build(build_config);
 
     auto create_index_result = builder->Upload(build_config);
@@ -220,7 +224,8 @@ BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
                          int64_t field_id,
                          int64_t build_id,
                          int64_t version_id,
-                         const std::vector<uint8_t>* valid_data = nullptr) {
+                         const std::vector<uint8_t>* valid_data = nullptr,
+                         int64_t json_stats_max_shredding_columns = 1024) {
     auto built_index = BuildJsonStatsIndex(json_strings,
                                            json_fid,
                                            root_path,
@@ -230,8 +235,186 @@ BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
                                            field_id,
                                            build_id,
                                            version_id,
-                                           valid_data);
+                                           valid_data,
+                                           json_stats_max_shredding_columns);
     return LoadBuiltJsonStatsIndex(built_index);
+}
+
+TEST(JsonStatsInvalidNumberTest,
+     MatchesRawScanWithoutDroppingSiblingOrArrayElements) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    const std::vector<std::string> json_raw_data = {
+        R"({"bad":1e400,"ok":7,"arr":[1e400,7,8]})",
+        R"({"bad":1.5,"ok":8,"arr":[1e400]})",
+        R"({"bad":18446744073709551616,"ok":9,"arr":[7,8]})",
+    };
+
+    auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
+                                          json_fid,
+                                          TestLocalPath,
+                                          1211,
+                                          2211,
+                                          3211,
+                                          json_fid.get(),
+                                          5211,
+                                          1,
+                                          nullptr);
+
+    auto shared_stats = BuildAndLoadJsonKeyStats(json_raw_data,
+                                                 json_fid,
+                                                 TestLocalPath,
+                                                 1212,
+                                                 2212,
+                                                 3212,
+                                                 json_fid.get(),
+                                                 5212,
+                                                 1,
+                                                 nullptr,
+                                                 0);
+
+    auto make_json_field = [&] {
+        auto field =
+            std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+        std::vector<milvus::Json> jsons;
+        jsons.reserve(json_raw_data.size());
+        for (const auto& json : json_raw_data) {
+            jsons.emplace_back(simdjson::padded_string(json));
+        }
+        field->add_json_data(jsons);
+        return field;
+    };
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto make_stats_segment = [&](const std::shared_ptr<JsonKeyStats>& index) {
+        auto segment = segcore::CreateSealedSegment(schema);
+        auto* sealed =
+            dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+        EXPECT_NE(sealed, nullptr);
+        sealed->SetJsonStatsForTesting(json_fid, index);
+        auto load_info = PrepareSingleFieldInsertBinlog(
+            0, 0, 0, json_fid.get(), {make_json_field()}, cm);
+        segment->LoadFieldData(load_info);
+        segment->DropFieldData(json_fid);
+        EXPECT_FALSE(segment->HasFieldData(json_fid));
+        return segment;
+    };
+    auto stats_segment = make_stats_segment(stats);
+    auto shared_stats_segment = make_stats_segment(shared_stats);
+
+    auto raw_segment = segcore::CreateSealedSegment(schema);
+    auto raw_load_info = PrepareSingleFieldInsertBinlog(
+        0, 0, 0, json_fid.get(), {make_json_field()}, cm);
+    raw_segment->LoadFieldData(raw_load_info);
+
+    auto evaluate = [&](const expr::TypedExprPtr& filter_expr,
+                        const segcore::SegmentInternalInterface* segment) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           filter_expr);
+        return milvus::test::gen_filter_res(
+            plan.get(), segment, json_raw_data.size(), MAX_TIMESTAMP);
+    };
+    auto expect_same = [](const ColumnVectorPtr& raw,
+                          const ColumnVectorPtr& shredded) {
+        ASSERT_EQ(raw->size(), shredded->size());
+        TargetBitmapView raw_result(raw->GetRawData(), raw->size());
+        TargetBitmapView raw_valid(raw->GetValidRawData(), raw->size());
+        TargetBitmapView shredded_result(shredded->GetRawData(),
+                                         shredded->size());
+        TargetBitmapView shredded_valid(shredded->GetValidRawData(),
+                                        shredded->size());
+        for (size_t i = 0; i < raw->size(); ++i) {
+            EXPECT_EQ(shredded_valid[i], raw_valid[i]) << "row " << i;
+            EXPECT_EQ(shredded_result[i], raw_result[i]) << "row " << i;
+        }
+    };
+    auto compare = [&](const expr::TypedExprPtr& filter_expr) {
+        auto raw = evaluate(filter_expr, raw_segment.get());
+        auto shredded = evaluate(filter_expr, stats_segment.get());
+        auto shared = evaluate(filter_expr, shared_stats_segment.get());
+        expect_same(raw, shredded);
+        expect_same(raw, shared);
+        return raw;
+    };
+    auto check = [](const ColumnVectorPtr& result,
+                    const std::vector<bool>& expected_result,
+                    const std::vector<bool>& expected_valid) {
+        TargetBitmapView result_view(result->GetRawData(), result->size());
+        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        for (size_t i = 0; i < result->size(); ++i) {
+            EXPECT_EQ(result_view[i], expected_result[i]) << "row " << i;
+            EXPECT_EQ(valid_view[i], expected_valid[i]) << "row " << i;
+        }
+    };
+
+    proto::plan::GenericValue one_point_five;
+    one_point_five.set_float_val(1.5);
+    proto::plan::GenericValue zero;
+    zero.set_int64_val(0);
+    proto::plan::GenericValue two;
+    two.set_int64_val(2);
+    auto bad_column = expr::ColumnInfo(json_fid, DataType::JSON, {"bad"});
+    check(compare(std::make_shared<expr::TermFilterExpr>(
+              bad_column,
+              std::vector<proto::plan::GenericValue>{one_point_five},
+              false)),
+          {false, true, false},
+          {false, true, false});
+    check(compare(std::make_shared<expr::UnaryRangeFilterExpr>(
+              bad_column,
+              proto::plan::OpType::GreaterThan,
+              zero,
+              std::vector<proto::plan::GenericValue>())),
+          {false, true, false},
+          {false, true, false});
+    check(compare(std::make_shared<expr::UnaryRangeFilterExpr>(
+              bad_column,
+              proto::plan::OpType::GreaterThan,
+              one_point_five,
+              std::vector<proto::plan::GenericValue>())),
+          {false, false, false},
+          {false, true, false});
+    check(compare(std::make_shared<expr::BinaryRangeFilterExpr>(
+              bad_column, zero, two, true, true)),
+          {false, true, false},
+          {false, true, false});
+    proto::plan::GenericValue one;
+    one.set_float_val(1.0);
+    proto::plan::GenericValue two_point_zero;
+    two_point_zero.set_float_val(2.0);
+    check(compare(std::make_shared<expr::BinaryRangeFilterExpr>(
+              bad_column, one, two_point_zero, true, true)),
+          {false, true, false},
+          {false, true, false});
+    check(compare(std::make_shared<expr::ExistsExpr>(bad_column)),
+          {true, true, true},
+          {true, true, true});
+
+    proto::plan::GenericValue seven;
+    seven.set_int64_val(7);
+    proto::plan::GenericValue eight;
+    eight.set_int64_val(8);
+    auto ok_column = expr::ColumnInfo(json_fid, DataType::JSON, {"ok"});
+    check(compare(std::make_shared<expr::TermFilterExpr>(
+              ok_column, std::vector<proto::plan::GenericValue>{seven}, false)),
+          {true, false, false},
+          {true, true, true});
+
+    auto array_column = expr::ColumnInfo(json_fid, DataType::JSON, {"arr"});
+    check(compare(std::make_shared<expr::JsonContainsExpr>(
+              array_column,
+              proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+              false,
+              std::vector<proto::plan::GenericValue>{seven})),
+          {true, false, true},
+          {true, true, true});
+    check(compare(std::make_shared<expr::JsonContainsExpr>(
+              array_column,
+              proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+              false,
+              std::vector<proto::plan::GenericValue>{seven, eight})),
+          {true, false, true},
+          {true, true, true});
 }
 
 TEST(JsonStatsSharedFallbackPruningTest,

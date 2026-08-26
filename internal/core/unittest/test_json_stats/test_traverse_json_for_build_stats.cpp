@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-#include "common/jsmn.h"
+#include "common/Json.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
 #include "index/json_stats/JsonKeyStats.h"
@@ -26,6 +26,7 @@
 
 using milvus::index::JsonKey;
 using milvus::index::JsonKeyStats;
+using milvus::index::JsonStatsValue;
 using milvus::index::JSONType;
 
 // Friend accessor declared in JsonKeyStats to invoke private method for UT
@@ -34,11 +35,14 @@ class TraverseJsonForBuildStatsAccessor {
     static void
     Call(JsonKeyStats& s,
          const char* json,
-         jsmntok_t* tokens,
-         int& index,
          std::vector<std::string>& path,
-         std::map<JsonKey, std::string>& values) {
-        s.TraverseJsonForBuildStats(json, tokens, index, path, values);
+         std::map<JsonKey, JsonStatsValue>& values) {
+        milvus::Json parsed(simdjson::padded_string(json, std::strlen(json)));
+        auto document = parsed.doc();
+        ASSERT_EQ(document.error(), simdjson::SUCCESS);
+        auto root = document.get_value();
+        ASSERT_EQ(root.error(), simdjson::SUCCESS);
+        s.TraverseJsonForBuildStats(root.value(), path, values);
     }
 };
 
@@ -49,35 +53,10 @@ class CollectSingleJsonStatsInfoAccessor {
     Call(JsonKeyStats& s,
          const char* json,
          std::map<JsonKey, milvus::index::KeyStatsInfo>& infos) {
-        s.CollectSingleJsonStatsInfo(json, infos);
+        milvus::Json parsed(simdjson::padded_string(json, std::strlen(json)));
+        s.CollectSingleJsonStatsInfo(parsed, infos);
     }
 };
-
-namespace {
-
-// Helper to tokenize JSON using jsmn
-static std::vector<jsmntok_t>
-Tokenize(const char* json) {
-    jsmn_parser parser;
-    jsmn_init(&parser);
-    int token_capacity = 32;
-    std::vector<jsmntok_t> tokens(token_capacity);
-    while (true) {
-        int r = jsmn_parse(
-            &parser, json, strlen(json), tokens.data(), token_capacity);
-        if (r == JSMN_ERROR_NOMEM) {
-            token_capacity *= 2;
-            tokens.resize(token_capacity);
-            continue;
-        }
-        EXPECT_GE(r, 0) << "Failed to parse JSON with jsmn";
-        tokens.resize(r);
-        break;
-    }
-    return tokens;
-}
-
-}  // namespace
 
 TEST(TraverseJsonForBuildStatsTest,
      HandlesPrimitivesArraysNestedAndEmptyObject) {
@@ -88,8 +67,6 @@ TEST(TraverseJsonForBuildStatsTest,
         "payload":{},"public":true,"created_at":"2024-01-01T00:01:28Z",
         "msg":"line1\nline2\t\u4e2d\u6587 \/ backslash \\"}
     )";
-
-    auto tokens = Tokenize(json);
 
     // We only need an instance to access the private method we exposed.
     milvus::storage::FieldDataMeta field_meta{1, 2, 3, 100, {}};
@@ -102,11 +79,9 @@ TEST(TraverseJsonForBuildStatsTest,
     milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
     JsonKeyStats stats(ctx, true);
 
-    int index = 0;
     std::vector<std::string> path;
-    std::map<JsonKey, std::string> values;
-    TraverseJsonForBuildStatsAccessor::Call(
-        stats, json, tokens.data(), index, path, values);
+    std::map<JsonKey, JsonStatsValue> values;
+    TraverseJsonForBuildStatsAccessor::Call(stats, json, path, values);
 
     // Expect collected key-value/type pairs
     auto expect_has = [&](const std::string& key,
@@ -115,7 +90,7 @@ TEST(TraverseJsonForBuildStatsTest,
         JsonKey k{key, type};
         auto it = values.find(k);
         ASSERT_NE(it, values.end()) << "Missing key: " << key;
-        EXPECT_EQ(it->second, value_substr);
+        EXPECT_EQ(it->second.raw_value, value_substr);
     };
 
     expect_has("/id", JSONType::INT64, "34495370646");
@@ -146,4 +121,88 @@ TEST(CollectSingleJsonStatsInfoTest, EmptyJsonStringThrows) {
     std::map<JsonKey, milvus::index::KeyStatsInfo> infos;
     EXPECT_NO_THROW(
         { CollectSingleJsonStatsInfoAccessor::Call(stats, json, infos); });
+}
+
+// Regression for https://github.com/milvus-io/milvus/issues/52806
+// Subnormal doubles (e.g. -1.48e-309) used to be misclassified as UNKNOWN by
+// the std::stof/std::stod based sniffing and aborted the whole stats build.
+TEST(TraverseJsonForBuildStatsTest, MatchesSimdjsonNumberSemantics) {
+    const char* json = R"({"sub": -1.4829972460841e-309, "underflow": 1e-400,)"
+                       R"( "uint64": 18446744073709551615, "normal": 1.5})";
+
+    milvus::storage::FieldDataMeta field_meta{1, 2, 3, 100, {}};
+    milvus::storage::IndexMeta index_meta{3, 100, 1, 1};
+    milvus::storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestLocalPath;
+    auto cm = milvus::storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
+    JsonKeyStats stats(ctx, true);
+
+    std::vector<std::string> path;
+    std::map<JsonKey, JsonStatsValue> values;
+    TraverseJsonForBuildStatsAccessor::Call(stats, json, path, values);
+
+    EXPECT_EQ(values.at(JsonKey{"/sub", JSONType::DOUBLE}).raw_value,
+              "-1.4829972460841e-309");
+    EXPECT_DOUBLE_EQ(
+        values.at(JsonKey{"/sub", JSONType::DOUBLE}).double_value.value(),
+        -1.4829972460841e-309);
+    EXPECT_DOUBLE_EQ(
+        values.at(JsonKey{"/underflow", JSONType::DOUBLE}).double_value.value(),
+        0.0);
+    EXPECT_DOUBLE_EQ(
+        values.at(JsonKey{"/uint64", JSONType::DOUBLE}).double_value.value(),
+        18446744073709551615.0);
+    EXPECT_DOUBLE_EQ(
+        values.at(JsonKey{"/normal", JSONType::DOUBLE}).double_value.value(),
+        1.5);
+}
+
+TEST(TraverseJsonForBuildStatsTest, InvalidNumberPreservesPathAndSibling) {
+    const char* json =
+        R"({"overflow":1e400,"bigint":18446744073709551616,"ok":7})";
+
+    milvus::storage::FieldDataMeta field_meta{1, 2, 3, 100, {}};
+    milvus::storage::IndexMeta index_meta{3, 100, 1, 1};
+    milvus::storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestLocalPath;
+    auto cm = milvus::storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
+    JsonKeyStats stats(ctx, true);
+
+    std::vector<std::string> path;
+    std::map<JsonKey, JsonStatsValue> values;
+    TraverseJsonForBuildStatsAccessor::Call(stats, json, path, values);
+
+    EXPECT_TRUE(
+        values.at(JsonKey{"/overflow", JSONType::DOUBLE}).IsInvalidNumber());
+    EXPECT_TRUE(
+        values.at(JsonKey{"/bigint", JSONType::DOUBLE}).IsInvalidNumber());
+    EXPECT_EQ(values.at(JsonKey{"/ok", JSONType::INT64}).raw_value, "7");
+}
+
+TEST(CollectSingleJsonStatsInfoTest, ClassifiesSubnormalNumbersAsDouble) {
+    const char* json =
+        R"({"sub": -1.4829972460841e-309, "tiny": -2.32430876e-316})";
+
+    milvus::storage::FieldDataMeta field_meta{1, 2, 3, 100, {}};
+    milvus::storage::IndexMeta index_meta{3, 100, 1, 1};
+    milvus::storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestLocalPath;
+    auto cm = milvus::storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
+    JsonKeyStats stats(ctx, true);
+
+    std::map<JsonKey, milvus::index::KeyStatsInfo> infos;
+    EXPECT_NO_THROW(
+        { CollectSingleJsonStatsInfoAccessor::Call(stats, json, infos); });
+
+    ASSERT_NE(infos.find(JsonKey{"/sub", JSONType::DOUBLE}), infos.end());
+    ASSERT_NE(infos.find(JsonKey{"/tiny", JSONType::DOUBLE}), infos.end());
 }

@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -505,6 +506,23 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskStopsAtPendingLimi
 	}
 	s.Equal(2, submitted)
 	s.Equal(2, pending)
+}
+
+func (s *statsInspectorSuite) TestNeedJSONKeyIndexRequiresExactFormat() {
+	const fieldID = int64(202)
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		State: commonpb.SegmentState_Flushed,
+		Level: datapb.SegmentLevel_L1,
+		JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+			fieldID: {JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion},
+		},
+	})
+
+	s.False(needDoJSONKeyIndex(segment, []UniqueID{fieldID}, true))
+	segment.JsonKeyStats[fieldID].JsonKeyStatsDataFormat = common.JSONStatsDataFormatVersion - 1
+	s.True(needDoJSONKeyIndex(segment, []UniqueID{fieldID}, true))
+	segment.JsonKeyStats[fieldID].JsonKeyStatsDataFormat = common.JSONStatsDataFormatVersion + 1
+	s.True(needDoJSONKeyIndex(segment, []UniqueID{fieldID}, true))
 }
 
 func (s *statsInspectorSuite) TestSubmitStatsTaskSkipExternalCollection() {

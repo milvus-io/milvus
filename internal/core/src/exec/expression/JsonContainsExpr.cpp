@@ -124,6 +124,102 @@ class ContainsAllMatcher {
     size_t num_words_{0};
 };
 
+// Match one on-demand JSON array element against mixed-type query literals.
+// Inspecting the actual JSON type first lets us consume the on-demand value
+// exactly once.  In particular, an unrepresentable number (for example
+// 1e400) only makes that element a non-match; it cannot poison a sibling JSON
+// path or abort the whole query as whole-document DOM parsing would.
+template <typename OnMatch>
+void
+VisitMatchingJsonCandidates(
+    simdjson::simdjson_result<simdjson::ondemand::value>& value,
+    const std::vector<proto::plan::GenericValue>& candidates,
+    OnMatch&& on_match) {
+    auto type = value.type();
+    if (type.error()) {
+        return;
+    }
+
+    switch (type.value()) {
+        case simdjson::ondemand::json_type::boolean: {
+            auto parsed = value.template get<bool>();
+            if (parsed.error()) {
+                return;
+            }
+            for (size_t i = 0; i < candidates.size(); ++i) {
+                if (candidates[i].val_case() ==
+                        proto::plan::GenericValue::kBoolVal &&
+                    parsed.value() == candidates[i].bool_val() && on_match(i)) {
+                    return;
+                }
+            }
+            return;
+        }
+        case simdjson::ondemand::json_type::number: {
+            auto parsed = value.get_number();
+            if (parsed.error()) {
+                return;
+            }
+            for (size_t i = 0; i < candidates.size(); ++i) {
+                if (candidates[i].val_case() !=
+                        proto::plan::GenericValue::kInt64Val &&
+                    candidates[i].val_case() !=
+                        proto::plan::GenericValue::kFloatVal) {
+                    continue;
+                }
+                auto comparison =
+                    CompareJsonNumberToBound(parsed.value(), candidates[i]);
+                if (comparison.has_value() && *comparison == 0 && on_match(i)) {
+                    return;
+                }
+            }
+            return;
+        }
+        case simdjson::ondemand::json_type::string: {
+            auto parsed = value.template get<std::string_view>();
+            if (parsed.error()) {
+                return;
+            }
+            for (size_t i = 0; i < candidates.size(); ++i) {
+                if (candidates[i].val_case() ==
+                        proto::plan::GenericValue::kStringVal &&
+                    parsed.value() == candidates[i].string_val() &&
+                    on_match(i)) {
+                    return;
+                }
+            }
+            return;
+        }
+        case simdjson::ondemand::json_type::array: {
+            // Mixed-type expressions may compare this array with more than
+            // one array literal.  An on-demand array and its elements are
+            // forward-only, so materialize only this current element into a
+            // DOM value instead of retaining ephemeral on-demand cursors.
+            auto raw = value.raw_json();
+            if (raw.error()) {
+                return;
+            }
+            simdjson::padded_string padded(raw.value());
+            thread_local simdjson::dom::parser parser;
+            auto parsed = parser.parse(padded).get_array();
+            if (parsed.error()) {
+                return;
+            }
+            for (size_t i = 0; i < candidates.size(); ++i) {
+                if (candidates[i].val_case() ==
+                        proto::plan::GenericValue::kArrayVal &&
+                    CompareTwoJsonArray(parsed, candidates[i].array_val()) &&
+                    on_match(i)) {
+                    return;
+                }
+            }
+            return;
+        }
+        default:
+            return;
+    }
+}
+
 void
 PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     WaitPrefetch();
@@ -1455,82 +1551,20 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
         }
         auto executor = [&](size_t i) {
             const auto& json = data[i];
-            auto doc = json.dom_doc();
+            auto doc = json.doc();
             auto array = doc.at_pointer(pointer).get_array();
             if (array.error()) {
                 return std::make_pair(false, false);
             }
             std::unordered_set<int> tmp_elements_index(elements_index);
             for (auto&& it : array) {
-                int i = -1;
-                for (auto& element : elements) {
-                    i++;
-                    switch (element.val_case()) {
-                        case proto::plan::GenericValue::kBoolVal: {
-                            auto val = it.template get<bool>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.bool_val()) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kInt64Val: {
-                            auto val = it.template get<int64_t>();
-                            if (val.error()) {
-                                auto double_val = it.template get<double>();
-                                if (!double_val.error() &&
-                                    double_val.value() == element.int64_val()) {
-                                    tmp_elements_index.erase(i);
-                                }
-                                continue;
-                            }
-                            if (val.value() == element.int64_val()) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kFloatVal: {
-                            auto val = it.template get<double>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.float_val()) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kStringVal: {
-                            auto val = it.template get<std::string_view>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.string_val()) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kArrayVal: {
-                            auto val = it.get_array();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (CompareTwoJsonArray(val, element.array_val())) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        default:
-                            ThrowInfo(UnexpectedError,
-                                      "unsupported data type {}",
-                                      element.val_case());
-                    }
-                    if (tmp_elements_index.size() == 0) {
-                        return std::make_pair(true, true);
-                    }
-                }
-                if (tmp_elements_index.size() == 0) {
+                VisitMatchingJsonCandidates(
+                    it, elements, [&](size_t matched_index) {
+                        tmp_elements_index.erase(
+                            static_cast<int>(matched_index));
+                        return tmp_elements_index.empty();
+                    });
+                if (tmp_elements_index.empty()) {
                     return std::make_pair(true, true);
                 }
             }
@@ -2055,75 +2089,19 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
         }
         auto executor = [&](const size_t i) {
             auto& json = data[i];
-            auto doc = json.dom_doc();
+            auto doc = json.doc();
             auto array = doc.at_pointer(pointer).get_array();
             if (array.error()) {
                 return std::make_pair(false, false);
             }
-            // Note: array can only be iterated once
             for (auto&& it : array) {
-                for (auto const& element : elements) {
-                    switch (element.val_case()) {
-                        case proto::plan::GenericValue::kBoolVal: {
-                            auto val = it.template get<bool>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.bool_val()) {
-                                return std::make_pair(true, true);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kInt64Val: {
-                            auto val = it.template get<int64_t>();
-                            if (val.error()) {
-                                auto double_val = it.template get<double>();
-                                if (!double_val.error() &&
-                                    double_val.value() == element.int64_val()) {
-                                    return std::make_pair(true, true);
-                                }
-                                continue;
-                            }
-                            if (val.value() == element.int64_val()) {
-                                return std::make_pair(true, true);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kFloatVal: {
-                            auto val = it.template get<double>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.float_val()) {
-                                return std::make_pair(true, true);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kStringVal: {
-                            auto val = it.template get<std::string_view>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.string_val()) {
-                                return std::make_pair(true, true);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kArrayVal: {
-                            auto val = it.get_array();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (CompareTwoJsonArray(val, element.array_val())) {
-                                return std::make_pair(true, true);
-                            }
-                            break;
-                        }
-                        default:
-                            ThrowInfo(UnexpectedError,
-                                      "unsupported data type {}",
-                                      element.val_case());
-                    }
+                bool matched = false;
+                VisitMatchingJsonCandidates(it, elements, [&](size_t) {
+                    matched = true;
+                    return true;
+                });
+                if (matched) {
+                    return std::make_pair(true, true);
                 }
             }
             return std::make_pair(true, false);

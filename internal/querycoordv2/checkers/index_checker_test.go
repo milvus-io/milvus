@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -164,6 +165,29 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 	utils.RecoverAllCollection(suite.meta)
 	tasks = checker.Check(context.Background())
 	suite.Require().Len(tasks, 0)
+}
+
+func (suite *IndexCheckerSuite) TestJSONStatsRequiresExactFormat() {
+	const fieldID = int64(101)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+		FieldID:  fieldID,
+		Name:     "json",
+		DataType: schemapb.DataType_JSON,
+	}}}
+	segment := &meta.Segment{
+		SegmentInfo: &datapb.SegmentInfo{ID: 1},
+		JSONStatsField: map[int64]*querypb.JsonStatsInfo{
+			fieldID: {DataFormatVersion: common.JSONStatsDataFormatVersion},
+		},
+	}
+
+	suite.Empty(suite.checker.checkSegmentStats(segment, schema, []int64{fieldID}))
+	segment.JSONStatsField[fieldID].DataFormatVersion = common.JSONStatsDataFormatVersion - 1
+	suite.Equal([]int64{fieldID},
+		suite.checker.checkSegmentStats(segment, schema, []int64{fieldID}))
+	segment.JSONStatsField[fieldID].DataFormatVersion = common.JSONStatsDataFormatVersion + 1
+	suite.Equal([]int64{fieldID},
+		suite.checker.checkSegmentStats(segment, schema, []int64{fieldID}))
 }
 
 func (suite *IndexCheckerSuite) TestIndexInfoNotMatch() {

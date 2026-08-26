@@ -42,6 +42,13 @@ JsonFlatIndex::build_index_for_json(
                 continue;
             }
             auto json = static_cast<const Json*>(data->RawValue(i));
+            // JsonFlatIndex has no per-row coverage bitmap or raw-data merge
+            // path. Keep this all-or-nothing validation until both exist:
+            // replacing an unindexable row with an empty Tantivy document
+            // would make EXISTS false and silently discard indexable sibling
+            // keys from that row.
+            // TODO: persist row coverage and merge uncovered rows from raw JSON
+            // in term/range/EXISTS executors before allowing per-row skips.
             auto exists = path_exists(json->dom_doc(), tokens);
             if (!exists || !json->exist(nested_path_)) {
                 wrapper_->add_json_array_data(nullptr, 0, offset++);
