@@ -165,6 +165,8 @@ github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0 h1:9lhK7gXsl5WfLw+XKE31HsKaSc
 github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/milvus-io/milvus-proto/go-api/v3 v3.0.1-0.20260813032215-0d1eefd075b2 h1:qBGD1jfMoRL473QBlDp1S5sMXmp14mONMfvRaoGXGKI=
 github.com/milvus-io/milvus-proto/go-api/v3 v3.0.1-0.20260813032215-0d1eefd075b2/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
+github.com/milvus-io/milvus-proto/go-api/v3 v3.0.1-0.20260827072918-5c10244615da h1:EWt7WSoPCFZsUbfljMHhetmndAjjpe1dqXL5dsh723w=
+github.com/milvus-io/milvus-proto/go-api/v3 v3.0.1-0.20260827072918-5c10244615da/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/mitchellh/go-homedir v1.1.0/go.mod h1:SfyaCUpYCn1Vlf4IUYiD9fPX4A5wJrkLzIz1N1q0pr0=
 github.com/mitchellh/mapstructure v1.1.2/go.mod h1:FVVH3fgwuzCH5S8UJGiWEs2h04kUh9fWfEaFds41c1Y=
 github.com/modern-go/concurrent v0.0.0-20180228061459-e0a39a4cb421/go.mod h1:6dJC0mAP4ikYIbvyc7fijjWJddQyLn8Ig3JB5CqoB9Q=

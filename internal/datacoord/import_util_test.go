@@ -29,6 +29,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -1354,4 +1355,138 @@ func TestImportUtil_ValidateMaxImportJobExceed(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "The number of jobs has reached the limit")
 	})
+}
+
+func TestImportUtil_AssembleRequestCarriesPKRange(t *testing.T) {
+	var job ImportJob = &importJob{
+		ImportJob: &datapb.ImportJob{JobID: 0, CollectionID: 1, PartitionIDs: []int64{2}, Vchannels: []string{"v0"}},
+	}
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetJob(mock.Anything, mock.Anything).Return(job)
+
+	// import task whose file carries a primary-allocated PK range
+	importTaskProto := &datapb.ImportTaskV2{
+		JobID:        0,
+		TaskID:       4,
+		CollectionID: 1,
+		SegmentIDs:   []int64{5},
+		FileStats: []*datapb.ImportFileStats{
+			{
+				ImportFile: &internalpb.ImportFile{Id: 1, Paths: []string{"f1"}, PreAllocatedAutoIds: &commonpb.IDRange{Begin: 5000, End: 5100}},
+				TotalRows:  50,
+			},
+		},
+	}
+	var task ImportTask = &importTask{importMeta: importMeta}
+	task.(*importTask).task.Store(importTaskProto)
+
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
+
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
+		id := rand.Int63()
+		return id, id + n, nil
+	})
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(800, nil)
+
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	assert.NoError(t, err)
+	err = meta.AddSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 5, IsImporting: true}})
+	assert.NoError(t, err)
+
+	importReq, err := AssembleImportRequest(task, job, meta, alloc)
+	assert.NoError(t, err)
+	// PK range is carried through to the datanode request, per file.
+	assert.Equal(t, int64(5000), importReq.GetFiles()[0].GetPreAllocatedAutoIds().GetBegin())
+	assert.Equal(t, int64(5100), importReq.GetFiles()[0].GetPreAllocatedAutoIds().GetEnd())
+	// logID IDRange is still allocated locally and independently.
+	assert.Greater(t, importReq.GetIDRange().GetEnd(), importReq.GetIDRange().GetBegin())
+}
+
+// The estimate path reserves a capped range rather than refusing an oversized
+// bound, so this guard is what catches a file that really does hold more rows
+// than its reservation. It must fire before any segment is written, and it must
+// carry the sentinel so CreateTaskOnWorker fails the job instead of retrying a
+// number that will never change.
+func TestImportUtil_AssembleRefusesAnUnderSizedPKRange(t *testing.T) {
+	var job ImportJob = &importJob{
+		ImportJob: &datapb.ImportJob{JobID: 0, CollectionID: 1, PartitionIDs: []int64{2}, Vchannels: []string{"v0"}},
+	}
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetJob(mock.Anything, mock.Anything).Return(job).Maybe()
+
+	// 100 ids reserved from the upper bound; pre-import then found 101 real rows.
+	importTaskProto := &datapb.ImportTaskV2{
+		JobID:        0,
+		TaskID:       4,
+		CollectionID: 1,
+		// No segments, so the guard is reached without a meta to look them up in.
+		FileStats: []*datapb.ImportFileStats{
+			{
+				ImportFile: &internalpb.ImportFile{Id: 1, Paths: []string{"f1"}, PreAllocatedAutoIds: &commonpb.IDRange{Begin: 5000, End: 5100}},
+				TotalRows:  101,
+			},
+		},
+	}
+	var task ImportTask = &importTask{importMeta: importMeta}
+	task.(*importTask).task.Store(importTaskProto)
+
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
+		return 1, 1 + n, nil
+	}).Maybe()
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(800, nil).Maybe()
+
+	// meta is only read after this guard, so the guard is reached without one.
+	_, err := AssembleImportRequest(task, job, nil, alloc)
+	require.Error(t, err)
+	// cockroachdb/errors carries the marker, which stdlib errors.Is does not walk --
+	// the same traversal CreateTaskOnWorker uses to reach its terminal branch.
+	assert.True(t, errors.Is(err, ErrPKRangeTooSmall),
+		"the sentinel must survive so the scheduler fails the job instead of retrying")
+	assert.Contains(t, err.Error(), "101 rows, 100 ids reserved")
+}
+
+// The scheduler must be able to separate the one terminal assemble failure from
+// the retriable ones. It cannot do that on merr classification: ErrImportSysFailed
+// also carries transient cases, and merr.IsNonRetryableErr is a deny-list over
+// ErrIo* sentinels AssembleImportRequest never returns -- so the branch that used
+// it was unreachable for every failure it was written for.
+func TestErrPKRangeTooSmall_IsDistinguishableAndKeepsItsCode(t *testing.T) {
+	terminal := merr.Mark(merr.WrapErrImportSysFailedMsg(
+		"reserved PK range too small for file %v: %d rows, %d ids reserved",
+		[]string{"a.npy"}, 100, 10), ErrPKRangeTooSmall)
+
+	assert.True(t, errors.Is(terminal, ErrPKRangeTooSmall))
+	assert.Equal(t, merr.Code(merr.ErrImportSysFailed), merr.Code(terminal),
+		"marking must not replace the merr code the wire projection carries")
+	assert.Contains(t, terminal.Error(), "100 rows, 10 ids reserved")
+
+	// merr.Mark carries a cockroachdb marker, which the standard library's
+	// errors.Is does not resolve. CreateTaskOnWorker must use the cockroachdb
+	// package -- which depguard already enforces repo-wide, so this cannot regress
+	// by an accidental import swap.
+
+	// The transient shape AssembleImportRequest and its callees also return: same
+	// merr code, and it must NOT be treated as terminal.
+	transient := merr.WrapErrImportSysFailedMsg("job %d not found, waiting for import job creation", 1)
+	assert.False(t, errors.Is(transient, ErrPKRangeTooSmall))
+
+	// The deny-list helper the old branch used returns false for both, which is
+	// why the branch never fired.
+	assert.False(t, merr.IsNonRetryableErr(terminal))
+	assert.False(t, merr.IsNonRetryableErr(transient))
 }
