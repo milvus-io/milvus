@@ -87,11 +87,14 @@ func initHook() error {
 	}
 	storeHook((hookVal))
 	paramtable.GetHookParams().WatchHookWithPrefix("watch_hook", "", func(event *config.Event) {
-		mlog.Info(context.TODO(), "receive the hook refresh event", mlog.Any("event", event))
+		mlog.Info(context.TODO(), "receive the hook refresh event",
+			mlog.String("eventSource", event.EventSource),
+			mlog.String("eventType", event.EventType),
+			mlog.String("key", event.Key))
 		go func() {
 			hookVal := GetHook()
 			soConfig := paramtable.GetHookParams().SoConfig.GetValue()
-			mlog.Info(context.TODO(), "refresh hook configs", mlog.Any("config", soConfig))
+			mlog.Info(context.TODO(), "refresh hook configs", mlog.Int("entries", len(soConfig)))
 			if err = hookVal.Init(soConfig); err != nil {
 				mlog.Panic(context.TODO(), "fail to init configs for the hook when refreshing", mlog.Err(err))
 			}

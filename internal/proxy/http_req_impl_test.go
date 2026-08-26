@@ -4,16 +4,19 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -21,61 +24,88 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestHideSensitive(t *testing.T) {
-	visibleConfigs := map[string]string{
-		"dummy":      "secretAccessKey",
-		"Foo":        "password",
-		"api":        "apikey",
-		"access":     "XXX",
-		"key":        "XXX",
-		"credential": "XXX",
-	}
-	invisibleConfigs := map[string]string{
-		"MyPassword":                          "123456",
-		"your_secret_access_Key":              "ABCD",
-		"SECRETACCESSKEY2":                    "XXX",
-		"minio.secretAccessKey":               "secretAccessKey",
-		"common.security.defaultRootPassword": "milvus",
-		"credentialaksk1secretaccesskey":      "XXX",
-		"credential.aksk1.secret_access_key":  "XXX",
-		"credentialapikey1apikey":             "apikey",
-		"credential.apikey1.apikey":           "apikey",
-		"credentialgcp1credentialjson":        "credential",
-		"credential.gcp1.credentialjson":      "credential",
-	}
-
-	copiedConfigs := make(map[string]string)
-	for k, v := range visibleConfigs {
-		copiedConfigs[k] = v
-	}
-	hideSensitive(copiedConfigs)
-	for k, v := range visibleConfigs {
-		assert.Contains(t, copiedConfigs, k)
-		assert.Equal(t, copiedConfigs[k], v)
-	}
-
-	copiedConfigs = make(map[string]string)
-	for k, v := range invisibleConfigs {
-		copiedConfigs[k] = v
-	}
-	hideSensitive(copiedConfigs)
-	for k := range invisibleConfigs {
-		assert.Contains(t, copiedConfigs, k)
-		assert.Equal(t, copiedConfigs[k], sensitiveMark)
-	}
-}
-
-func TestGetConfigs(t *testing.T) {
+func TestGetProjectedConfigs(t *testing.T) {
+	// getConfigs serves whatever projection the caller passed in, verbatim.
+	// Redaction belongs to the config.Manager that owns the keys: only it knows
+	// which are declared, and the hook table's keys are unknown to the main one.
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 
-	configs := map[string]string{"key": "value"}
-	handler := getConfigs(configs)
-	handler(c)
+	// The key is one the deleted hideSensitive blacklist did match, so restoring
+	// that blacklist would break this assertion rather than leave it green.
+	getProjectedConfigs(func() map[string]string {
+		return map[string]string{"my.password": "handed-to-us-in-the-clear"}
+	})(c)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "key")
-	assert.Contains(t, w.Body.String(), "value")
+	assert.Contains(t, w.Body.String(), "handed-to-us-in-the-clear",
+		"the handler must not second-guess its caller's projection")
+}
+
+func TestConfigRoutesDoNotReuseDataPlaneAuthorization(t *testing.T) {
+	params := paramtable.Get()
+	authKey := params.CommonCfg.AuthorizationEnabled.Key
+	defer params.Reset(authKey)
+	require.NoError(t, params.Save(authKey, "true"))
+
+	// Management-plane authentication is controlled independently by the
+	// companion management-auth change. Reusing the data-plane switch here would
+	// turn an existing monitoring/RBAC caller into a 401 or 403 after upgrade.
+	router := gin.New()
+	(&Proxy{}).RegisterRestRouter(router)
+	for _, path := range []string{mhttp.ClusterConfigsPath, mhttp.HookConfigsPath} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code, path)
+	}
+}
+
+func TestGetConfigsRedactsUnknownEnvironment(t *testing.T) {
+	const sentinelValue = "proxy-config-view-sentinel"
+	t.Setenv("MILVUS_CONF_SERVICE_TOKEN", sentinelValue)
+	t.Setenv("DATABASE_URL", sentinelValue)
+
+	base := paramtable.NewBaseTable(paramtable.SkipRemote(true))
+	require.NoError(t, base.Save("localStorage.path", t.TempDir()))
+	params := &paramtable.ComponentParam{}
+	params.Init(base)
+	// Set it here rather than relying on a milvus.yaml being discoverable from
+	// this package's working directory; otherwise the assertions below would
+	// pass or fail for reasons unrelated to the projection.
+	const declaredSecret = "declared-credential-sentinel"
+	require.NoError(t, params.Save(params.MinioCfg.SecretAccessKey.Key, declaredSecret))
+
+	// EnvSource imports the whole process environment, so the sentinel really
+	// is in the manager; the view is what must not carry it.
+	foundRaw := false
+	for _, value := range base.Manager().GetConfigs() {
+		if strings.Contains(value, sentinelValue) {
+			foundRaw = true
+			break
+		}
+	}
+	require.True(t, foundRaw, "sentinel was never imported, the test proves nothing")
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	getProjectedConfigs(params.GetConfigsView)(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.NotContains(t, w.Body.String(), sentinelValue)
+	// Neither the value nor the variable name survives: the list of environment
+	// variables in the pod is itself worth withholding.
+	assert.NotContains(t, w.Body.String(), "DATABASE_URL")
+	assert.NotContains(t, w.Body.String(), "MILVUS_CONF_SERVICE_TOKEN")
+	// Declared credentials are still named, and masked. Sources lowercase every
+	// key, so the projection carries the lowered spelling, not the declared one.
+	assert.NotContains(t, w.Body.String(), declaredSecret)
+	// Save writes the overlay under the separator-free identity, so that is the
+	// spelling the projection is guaranteed to carry whether or not a
+	// milvus.yaml was discoverable from this package's working directory.
+	assert.Contains(t, w.Body.String(),
+		strings.NewReplacer(".", "", "_", "", "/", "").Replace(strings.ToLower(params.MinioCfg.SecretAccessKey.Key)))
+	assert.Contains(t, w.Body.String(), sensitiveMark)
 }
 
 func TestGetClusterInfo(t *testing.T) {

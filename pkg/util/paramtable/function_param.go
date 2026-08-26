@@ -53,6 +53,12 @@ func (p *functionConfig) init(base *BaseTable) {
 		KeyPrefix: "function.textEmbedding.providers.",
 		Version:   "2.6.0",
 		Export:    true,
+		// Provider entries are open-ended, so the group defaults to sensitive.
+		// Keep only the enable switch readable. URLs and resource names are
+		// infrastructure topology and, more importantly, changing one can redirect
+		// a request that carries the separately configured provider credential.
+		Sensitive:            true,
+		NonSensitiveSuffixes: []string{"enable"},
 		DocFunc: func(key string) string {
 			switch key {
 			case "tei.enable":
@@ -133,9 +139,11 @@ func (p *functionConfig) init(base *BaseTable) {
 	p.TextEmbeddingProviders.Init(base.mgr)
 
 	p.RerankModelProviders = ParamGroup{
-		KeyPrefix: "function.rerank.model.providers.",
-		Version:   "2.6.0",
-		Export:    true,
+		KeyPrefix:            "function.rerank.model.providers.",
+		Version:              "2.6.0",
+		Export:               true,
+		Sensitive:            true,
+		NonSensitiveSuffixes: []string{"enable"},
 		DocFunc: func(key string) string {
 			switch key {
 			case "tei.credential":
@@ -188,12 +196,17 @@ func (p *functionConfig) init(base *BaseTable) {
 	p.LinderaDownloadUrls = ParamGroup{
 		KeyPrefix: "function.analyzer.lindera.download_urls.",
 		Version:   "2.5.16",
+		Sensitive: true,
 	}
 	p.LinderaDownloadUrls.Init(base.mgr)
 
 	p.ZillizProviders = ParamGroup{
 		KeyPrefix: "function.models.zilliz.",
 		Version:   "2.6.5",
+		Sensitive: true,
+		// Every member controls the remote connection or its trust policy. Keeping
+		// the whole group sensitive prevents an unauthenticated config mutation
+		// from redirecting model traffic or weakening TLS verification.
 	}
 	p.ZillizProviders.Init(base.mgr)
 

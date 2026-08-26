@@ -34,6 +34,15 @@ var (
 	ErrIgnoreChange = errors.New("ignore change")
 	ErrKeyNotFound  = errors.New("key not found")
 
+	// ErrKeyUnregistered marks a key that no ParamItem or ParamGroup declares.
+	// Config sources carry more than Milvus configuration — EnvSource imports
+	// the whole process environment — so an undeclared key is not something a
+	// caller-supplied lookup may reach.
+	ErrKeyUnregistered = errors.New("unregistered config key")
+	// ErrKeySensitive marks a declared key whose value carries a credential or
+	// protected infrastructure topology.
+	ErrKeySensitive = errors.New("sensitive config key")
+
 	// config source management
 	ErrSourceDuplicate = errors.New("duplicate config source")
 	ErrSourceInvalid   = errors.New("invalid config source or source not added")
@@ -80,12 +89,28 @@ func Init(opts ...Option) (*Manager, error) {
 
 var formattedKeys = typeutil.NewConcurrentMap[string, string]()
 
+// Four spellings of one configuration key travel through this package, and
+// picking the wrong one is how a check ends up guarding a name nothing uses:
+//
+//	lowerKey          "Kafka.SSL.tlsKey" -> "kafka.ssl.tlskey"   (case only)
+//	formatKey         "Kafka.SSL.tlsKey" -> "kafkassltlskey"     (memoised; internal keys only)
+//	formatKeyUncached same as formatKey, no memo                 (caller-supplied keys)
+//	strippedKey       same, without the NotFormatPrefix guard    (what EnvSource produces)
+//
+// lowerKey and formatKey both leave NotFormatPrefix ("knowhere.") keys exactly
+// as they are, because the index engine needs the case and the dots; strippedKey
+// is the one that does not, which is why the two disagree there and only there.
+// Values are stored under formatKey's identity, so that is what a lookup must
+// use; prefixes are declared with dots, so that is what a namespace test must
+// use.
 func lowerKey(key string) string {
 	if strings.HasPrefix(key, NotFormatPrefix) {
 		return key
 	}
 	return strings.ToLower(key)
 }
+
+var keyFormatReplacer = strings.NewReplacer("/", "", "_", "", ".", "")
 
 func formatKey(key string) string {
 	if strings.HasPrefix(key, NotFormatPrefix) {
@@ -95,9 +120,31 @@ func formatKey(key string) string {
 	if ok {
 		return cached
 	}
-	result := strings.NewReplacer("/", "", "_", "", ".", "").Replace(strings.ToLower(key))
+	result := keyFormatReplacer.Replace(strings.ToLower(key))
 	formattedKeys.Insert(key, result)
 	return result
+}
+
+// formatKeyUncached is formatKey without the memo. Use it for keys that arrive
+// from outside the process: formattedKeys is global and unbounded, so caching
+// arbitrary caller input would let a request grow it without limit.
+func formatKeyUncached(key string) string {
+	if strings.HasPrefix(key, NotFormatPrefix) {
+		return key
+	}
+	return keyFormatReplacer.Replace(strings.ToLower(key))
+}
+
+// strippedKey collapses a key with no NotFormatPrefix exemption at all.
+//
+// formatKey deliberately leaves knowhere.* alone, but the EnvSource key
+// formatter that BaseTable installs does not — it strips every separator
+// unconditionally. So the two disagree exactly on knowhere.*, and any check
+// that asks "did the environment supply this key?" has to look under this
+// spelling too, or an environment variable named KNOWHERE.SOMETHING is invisible
+// to it.
+func strippedKey(key string) string {
+	return keyFormatReplacer.Replace(strings.ToLower(key))
 }
 
 func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[string]string) {

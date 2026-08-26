@@ -65,7 +65,7 @@ Priority: `FieldXxx(val)` > typed constructor like `mlog.String(key, val)` > `ml
 | `FieldIndexID(v)` | int64 | `indexID` |
 | `FieldFieldID(v)` | int64 | `fieldID` |
 | `FieldTaskID(v)` | int64 | `taskID` |
-| `FieldBroadcastID(v)` | int64 | `broadcastID` |
+| `FieldBroadcastID(v)` | uint64 | `broadcastID` |
 | `FieldJobID(v)` | int64 | `jobID` |
 | `FieldBuildID(v)` | int64 | `buildID` |
 | `FieldVChannel(v)` | string | `vchannel` |

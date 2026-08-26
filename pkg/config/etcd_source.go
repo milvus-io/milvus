@@ -49,7 +49,13 @@ type EtcdSource struct {
 }
 
 func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
-	mlog.Debug(context.TODO(), "init etcd source", mlog.Any("etcdInfo", etcdInfo))
+	// Do not log EtcdInfo directly: it contains the etcd username/password and
+	// certificate paths. Keep only non-secret operational shape information.
+	mlog.Debug(context.TODO(), "init etcd source",
+		mlog.Bool("useEmbed", etcdInfo.UseEmbed),
+		mlog.Bool("authEnabled", etcdInfo.EnableAuth),
+		mlog.Bool("tlsEnabled", etcdInfo.UseSSL),
+		mlog.Int("endpointCount", len(etcdInfo.Endpoints)))
 	etcdCli, err := etcd.CreateEtcdClient(
 		etcdInfo.UseEmbed,
 		etcdInfo.EnableAuth,
@@ -170,7 +176,6 @@ func (es *EtcdSource) refreshConfigurationsWithOpts(extraOpts ...clientv3.OpOpti
 
 	ctx, cancel := context.WithTimeout(es.ctx, ReadConfigTimeout)
 	defer cancel()
-	mlog.RatedDebug(es.ctx, rate.Limit(10), "etcd refreshConfigurations", mlog.String("prefix", prefix), mlog.Any("endpoints", es.etcdCli.Endpoints()))
 	opts := append([]clientv3.OpOption{clientv3.WithPrefix()}, extraOpts...)
 	response, err := es.etcdCli.Get(ctx, prefix, opts...)
 	if err != nil {
@@ -178,12 +183,16 @@ func (es *EtcdSource) refreshConfigurationsWithOpts(extraOpts ...clientv3.OpOpti
 	}
 	newConfig := make(map[string]string, len(response.Kvs))
 	for _, kv := range response.Kvs {
-		key := string(kv.Key)
-		key = strings.TrimPrefix(key, prefix+"/")
-		newConfig[key] = string(kv.Value)
-		newConfig[formatKey(key)] = string(kv.Value)
-		mlog.Debug(es.ctx, "got config from etcd", mlog.String("key", string(kv.Key)), mlog.String("value", string(kv.Value)))
+		key := strings.TrimPrefix(string(kv.Key), prefix+"/")
+		value := string(kv.Value)
+		newConfig[key] = value
+		newConfig[formatKey(key)] = value
 	}
+	// Keep the polling loop cheap and bounded. Values may be credentials and key
+	// names and the etcd prefix may be operator-supplied topology, so an aggregate
+	// count is sufficient here.
+	mlog.RatedDebug(es.ctx, rate.Limit(10), "loaded configurations from etcd",
+		mlog.Int("configCount", len(response.Kvs)))
 	return es.update(newConfig)
 }
 

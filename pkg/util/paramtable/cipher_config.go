@@ -41,18 +41,21 @@ func (c *cipherConfig) init(base *BaseTable) {
 		Key:          "cipherPlugin.kms.defaultKey",
 		Version:      "2.6.1",
 		FallbackKeys: []string{"cipherPlugin.defaultKmsKeyArn"},
+		Sensitive:    true,
 	}
 	c.DefaultRootKey.Init(base.mgr)
 
 	c.KmsAwsRoleARN = ParamItem{
-		Key:     "cipherPlugin.kms.credentials.aws.roleARN",
-		Version: "2.6.1",
+		Key:       "cipherPlugin.kms.credentials.aws.roleARN",
+		Version:   "2.6.1",
+		Sensitive: true,
 	}
 	c.KmsAwsRoleARN.Init(base.mgr)
 
 	c.KmsAwsExternalID = ParamItem{
-		Key:     "cipherPlugin.kms.credentials.aws.externalID",
-		Version: "2.6.1",
+		Key:       "cipherPlugin.kms.credentials.aws.externalID",
+		Version:   "2.6.1",
+		Sensitive: true,
 	}
 	c.KmsAwsExternalID.Init(base.mgr)
 
