@@ -222,20 +222,11 @@ func GetShardLeadersWithChannelsAndReplicaFilter(
 		}
 
 		// The four arrays are parallel by construction -- every append above
-		// happens in the same branch -- and every consumer indexes them that
-		// way, so the tag's correctness rests entirely on it. State the
-		// invariant here rather than only in the tests: a later edit that
-		// moves one append out of that branch is a silent mis-tagging, and
-		// this is the one place it can still be caught at the source.
-		if len(addrs) != len(ids) || len(serviceable) != len(ids) || len(resourceGroups) != len(ids) {
-			mlog.Warn(ctx, "shard leader arrays are not parallel, this is a bug",
-				mlog.String("channel", channel.GetChannelName()),
-				mlog.Int("nodeIDs", len(ids)),
-				mlog.Int("addrs", len(addrs)),
-				mlog.Int("serviceable", len(serviceable)),
-				mlog.Int("resourceGroups", len(resourceGroups)))
-		}
-
+		// happens in the same `info != nil` branch -- and every consumer
+		// indexes them that way, so the tag's correctness rests entirely on
+		// it. TestShardLeaderResourceGroupsStayIndexAligned pins it with a
+		// leader dropped at that branch; the proxy neutralizes the tags if a
+		// response ever arrives misaligned anyway.
 		ret = append(ret, &querypb.ShardLeadersList{
 			ChannelName:    channel.GetChannelName(),
 			NodeIds:        ids,

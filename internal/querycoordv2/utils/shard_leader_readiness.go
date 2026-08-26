@@ -40,11 +40,19 @@ type ShardLeaderReadiness struct {
 // The reason strings are part of the answer: callers compare against these
 // constants rather than parsing prose, so treat their values as an API.
 const (
-	ShardLeadersReasonCoordinatorNotReady      = "coordinator query meta is not ready"
+	ShardLeadersReasonCoordinatorNotReady = "coordinator query meta is not ready"
+	// ShardLeadersReasonResourceGroupNotFound accompanies ErrResourceGroupNotFound:
+	// the named group does not exist at all, which is the request's own
+	// mistake and not a statement about the collection.
+	ShardLeadersReasonResourceGroupNotFound    = "the resource group does not exist"
 	ShardLeadersReasonNoReplicaInResourceGroup = "no replica of the collection lives in this resource group"
-	ShardLeadersReasonCollectionNotLoaded      = "the collection is not registered as loaded"
-	ShardLeadersReasonNoChannelTarget          = "the collection has no shard in the current target, it may be recovering"
-	ShardLeadersReasonShardsWithoutLeader      = "some shards have no serviceable leader in this resource group"
+	// ShardLeadersReasonNoReplica is the rgName == "" form of the reason
+	// above: with no filter the condition is about the whole collection, not
+	// about a group, and the wording is part of the contract.
+	ShardLeadersReasonNoReplica           = "the collection has no replica"
+	ShardLeadersReasonCollectionNotLoaded = "the collection is not registered as loaded"
+	ShardLeadersReasonNoChannelTarget     = "the collection has no shard in the current target, it may be recovering"
+	ShardLeadersReasonShardsWithoutLeader = "some shards have no serviceable leader in this resource group"
 )
 
 // ShardLeaderReadinessByResourceGroup answers a narrower question than
@@ -126,9 +134,22 @@ func ShardLeaderReadinessByResourceGroup(
 	// verdict like any other to a caller that only reads the struct, and
 	// "the coordinator cannot answer" is retriable and not about this
 	// resource group at all, while every other not-ready reason is about it.
-	if m == nil || targetMgr == nil || dist == nil || nodeMgr == nil {
+	if m == nil || m.ResourceManager == nil || targetMgr == nil || dist == nil || nodeMgr == nil {
 		return ShardLeaderReadiness{Reason: ShardLeadersReasonCoordinatorNotReady},
 			merr.WrapErrServiceNotReadyMsg("querycoord read stores are not wired up yet")
+	}
+
+	// A resource group that does not exist is the request's own content
+	// forcing this branch, so it is an input error -- ErrResourceGroupNotFound
+	// (300) -- rather than the NoReplicaInResourceGroup verdict the replica
+	// scan below would give, whose meaning is "waiting will never help": true
+	// for a typo as well, but for a reason the caller could not learn from
+	// it. Checked before the registration test, matching
+	// LoadPercentageByResourceGroup: the name is wrong whatever the
+	// collection's state. The empty name is the absence of a filter.
+	if rgName != "" && !m.ContainResourceGroup(ctx, rgName) {
+		return ShardLeaderReadiness{Reason: ShardLeadersReasonResourceGroupNotFound},
+			merr.WrapErrResourceGroupNotFound(rgName)
 	}
 
 	// The load-registration check comes BEFORE the replica scan, and surfaces
@@ -190,6 +211,11 @@ func ShardLeaderReadinessByResourceGroup(
 		}
 	}
 	if inRG == 0 {
+		// With no filter the condition is about the collection, not a group,
+		// and the reason strings are compared by callers, so say which.
+		if rgName == "" {
+			return ShardLeaderReadiness{Reason: ShardLeadersReasonNoReplica}, nil
+		}
 		return ShardLeaderReadiness{Reason: ShardLeadersReasonNoReplicaInResourceGroup}, nil
 	}
 
@@ -198,10 +224,12 @@ func ShardLeaderReadinessByResourceGroup(
 	// the same target the native shard-leader path reads.
 	//
 	// Note this is a different scope from the one LoadPercentageByResourceGroup
-	// measures against (NextTargetFirst). A caller pairing the two -- which
-	// the percentage's contract tells it to -- can therefore see "below 100"
-	// and "Ready" together right after a next-target re-pull adds a channel
-	// that has not been promoted. Both are correct for their own question.
+	// measures against (NextTargetFirst). A caller reading both can therefore
+	// see "below 100" and "Ready" together right after a next-target re-pull
+	// adds a channel that has not been promoted. Both are correct for their
+	// own question -- and this verdict, not the percentage, is the gate: Ready
+	// already means every current-target segment is carried, so a caller must
+	// not AND it with == 100 (see the division of labor on that function).
 	channels := targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
 	if len(channels) == 0 {
 		return ShardLeaderReadiness{Reason: ShardLeadersReasonNoChannelTarget}, nil

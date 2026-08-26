@@ -1041,3 +1041,144 @@ func (s *LBPolicySuite) TestSelectNodeWithExcludeClearing() {
 func TestLBPolicySuite(t *testing.T) {
 	suite.Run(t, new(LBPolicySuite))
 }
+
+// rgNodes is a fixture of five leaders on one channel spanning two resource
+// groups plus one whose tag is unknown, as an old coordinator would leave it.
+func rgNodes() []NodeInfo {
+	return []NodeInfo{
+		{NodeID: 1, Address: "localhost", Serviceable: true, ResourceGroup: "rg-a"},
+		{NodeID: 2, Address: "localhost", Serviceable: true, ResourceGroup: "rg-b"},
+		{NodeID: 3, Address: "localhost", Serviceable: true, ResourceGroup: "rg-b"},
+		{NodeID: 4, Address: "localhost", Serviceable: true, ResourceGroup: ""},
+		{NodeID: 5, Address: "localhost", Serviceable: true, ResourceGroup: "rg-a"},
+	}
+}
+
+// TestSelectNodeScopedToResourceGroup pins that a scoped workload builds its
+// candidate set from the leaders of that group alone: the balancer is
+// registered with, and asked to choose among, exactly those, and an unknown
+// tag is not admitted. An unscoped workload on the same leaders still sees
+// all five, which is the pre-existing behavior.
+func (s *LBPolicySuite) TestSelectNodeScopedToResourceGroup() {
+	ctx := context.Background()
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(rgNodes(), nil)
+
+	onlyRGB := func(nodes []NodeInfo) bool {
+		return len(nodes) == 2 && lo.EveryBy(nodes, func(n NodeInfo) bool { return n.ResourceGroup == "rg-b" })
+	}
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.MatchedBy(onlyRGB)).Once()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.MatchedBy(func(ids []int64) bool {
+		return len(ids) == 2 && lo.Contains(ids, int64(2)) && lo.Contains(ids, int64(3))
+	}), mock.Anything).Return(int64(3), nil).Once()
+
+	excludeNodes := typeutil.NewUniqueSet()
+	targetNode, _, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        s.channels[0],
+		Nq:             1,
+		ResourceGroup:  "rg-b",
+	}, &excludeNodes)
+	s.NoError(err)
+	s.Equal(int64(3), targetNode.NodeID)
+	s.Equal("rg-b", targetNode.ResourceGroup)
+
+	// Unscoped: the same leaders, all five are candidates.
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.MatchedBy(func(nodes []NodeInfo) bool { return len(nodes) == 5 })).Once()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.MatchedBy(func(ids []int64) bool { return len(ids) == 5 }), mock.Anything).Return(int64(4), nil).Once()
+	targetNode, _, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        s.channels[0],
+		Nq:             1,
+	}, &excludeNodes)
+	s.NoError(err)
+	s.Equal(int64(4), targetNode.NodeID)
+}
+
+// TestSelectNodeScopedWithoutLeaderIsRetriable pins the error a scoped
+// request gets when its group has no leader on the channel: the group holds a
+// replica whose delegator is not serviceable yet, a state that heals in
+// seconds to minutes, so it must be ErrCollectionNotFullyLoaded (retriable)
+// and not ErrChannelNotAvailable (503, non-retriable), which would tell every
+// upper layer to stop. The cache is refreshed once before giving up, so a
+// stale cache is not what produces the refusal. Unknown tags (an old
+// coordinator) get the same answer: they are not admitted into a named group.
+func (s *LBPolicySuite) TestSelectNodeScopedWithoutLeaderIsRetriable() {
+	ctx := context.Background()
+	onlyRGA := lo.Filter(rgNodes(), func(n NodeInfo, _ int) bool { return n.ResourceGroup == "rg-a" })
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(onlyRGA, nil).Once()
+	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(onlyRGA, nil).Once()
+
+	excludeNodes := typeutil.NewUniqueSet()
+	_, _, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        s.channels[0],
+		Nq:             1,
+		ResourceGroup:  "rg-b",
+	}, &excludeNodes)
+	s.ErrorIs(err, merr.ErrCollectionNotFullyLoaded)
+	s.True(merr.IsRetryableErr(err), "a group still coming up must be reported as retriable")
+	s.NotErrorIs(err, merr.ErrChannelNotAvailable)
+
+	// An old coordinator leaves every tag unknown; a named scope must not
+	// admit those, and the answer is the same retriable refusal.
+	untagged := lo.Map(rgNodes(), func(n NodeInfo, _ int) NodeInfo { n.ResourceGroup = ""; return n })
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(untagged, nil).Once()
+	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(untagged, nil).Once()
+	_, _, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        s.channels[0],
+		Nq:             1,
+		ResourceGroup:  "rg-b",
+	}, &excludeNodes)
+	s.ErrorIs(err, merr.ErrCollectionNotFullyLoaded)
+}
+
+// TestExecuteScopedFanOutCoversEveryShard pins the constraint the resource
+// group scope rests on: the fan-out is the UNSCOPED channel list, so a shard
+// the group cannot serve is still visited and fails its channel with a
+// retriable error. Filtering the channel map instead would make this a
+// successful query over a subset of the shards -- Execute never cross-checks
+// the channel count against the collection's shard number, so nothing would
+// report it. Here rg-b leads channel1 only; channel2 must fail, not vanish.
+func (s *LBPolicySuite) TestExecuteScopedFanOutCoversEveryShard() {
+	ctx := context.Background()
+	s.lbPolicy.retryOnReplica = 1 // keep the doomed channel's retry budget short
+
+	channel1Leaders := rgNodes()
+	channel2Leaders := lo.Filter(rgNodes(), func(n NodeInfo, _ int) bool { return n.ResourceGroup == "rg-a" })
+	s.mgr.EXPECT().GetShardLeaderList(mock.Anything, s.dbName, s.collectionName, s.collectionID, true).Return(s.channels, nil)
+	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(channel1Leaders, nil)
+	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[1]).Return(channel2Leaders, nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	executed := typeutil.NewConcurrentSet[string]()
+	err := s.lbPolicy.Execute(ctx, CollectionWorkLoad{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Nq:             1,
+		ResourceGroup:  "rg-b",
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			s.Equal(int64(2), nodeID, "only an rg-b leader may execute")
+			executed.Insert(channel)
+			return nil
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrCollectionNotFullyLoaded, "the shard rg-b cannot serve must fail the request, not be skipped")
+	s.True(merr.IsRetryableErr(err))
+	s.True(executed.Contain(s.channels[0]), "the shard rg-b can serve is executed")
+	s.False(executed.Contain(s.channels[1]), "the shard rg-b cannot serve is never executed on another group's leader")
+	s.mgr.AssertCalled(s.T(), "GetShard", mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[1])
+}

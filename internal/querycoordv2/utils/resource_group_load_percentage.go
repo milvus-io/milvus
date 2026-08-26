@@ -47,10 +47,11 @@ import (
 //
 // # Outcomes
 //
-// Four distinct outcomes are all spelled "the collection isn't ready in this
+// Five distinct outcomes are all spelled "the collection isn't ready in this
 // resource group", and callers must be able to tell them apart. The
 // percentage alone separates the first two; the error separates the rest,
-// and the two error outcomes differ in whether waiting can ever help:
+// and the error outcomes differ in whether waiting can ever help, and in
+// whose fault the state is:
 //
 //   - -1, nil error: rgName has no replica of this collection at all. There
 //     is nothing to report a percentage for. Terminal once the load has been
@@ -69,7 +70,9 @@ import (
 //     has not picked up any of the collection's current load targets yet.
 //     This is a real, distinct state from "no replica" -- it means loading is
 //     underway but has not made progress, not that the resource group is
-//     unrelated to the collection. It ALSO covers the empty-target window:
+//     unrelated to the collection. 0 is never truncation: any progress at
+//     all reads at least 1 (see replicaLoadPercentage), so 0 means exactly
+//     "none". It ALSO covers the empty-target window:
 //     the current target is persisted only on a graceful Stop
 //     (Server.SaveCurrentTarget), so after an ungraceful restart
 //     TargetManager.Recover finds nothing and NextTargetFirst reads empty
@@ -94,8 +97,17 @@ import (
 //     registered as loaded and GlobalFailedLoadCache holds a recorded reason
 //     -- the load failed and is not coming back on its own. The recorded
 //     cause is kept in the message.
+//   - -1, ErrResourceGroupNotFound (300, InputError): rgName names a resource
+//     group that does not exist. This is the request's own content forcing
+//     the branch -- a misspelled name -- and it is checked before anything
+//     about the collection, because the alternative is the replica scan,
+//     where an unknown group is indistinguishable from an existing group
+//     that holds nothing and reads as the terminal bare -1: the caller would
+//     be told to stop for the wrong reason, with no way to learn it
+//     misspelled the group. rgName == "" is the absence of a filter, never a
+//     name to validate.
 //
-// The last two MUST NOT be conflated, which is why the failed-load error is
+// The ErrServiceNotReady and ErrCollectionNotLoaded rows MUST NOT be conflated, which is why the failed-load error is
 // normalized here rather than returned verbatim. FailedLoadCache stores
 // whatever error the failing load task recorded, and a load can fail with a
 // retriable sentinel -- ErrServiceNotReady when a target query node was
@@ -134,42 +146,55 @@ import (
 //     freshly flushed segment or compaction output lands in the next target,
 //     the figure reports the not-yet-loaded remainder until the replica picks
 //     it up. That is the point -- it answers "is this resource group carrying
-//     everything currently asked of it", which is what a caller gating a
-//     switchover on == 100 actually needs -- but a caller must expect the
-//     gate to re-arm whenever new work lands, where ShowLoadCollections
-//     would keep saying 100.
+//     everything currently asked of it" -- but it is also why == 100 is a
+//     transient on a collection under ingestion, and why the figure is
+//     progress rather than a gate (see the division of labor below), where
+//     ShowLoadCollections would keep saying 100.
 //
-// # Pairing rule
+// # Division of labor with readiness
 //
-// 100 IS NOT A SERVABILITY VERDICT, and a caller gating a switchover must
-// pair it with ShardLeaderReadinessByResourceGroup rather than act on it
-// alone. This figure counts query-invisible replicas (see the note at the
+// 100 IS NOT A SERVABILITY VERDICT, AND IT IS NOT MEANT TO BE ONE:
+// ShardLeaderReadinessByResourceGroup is the servability gate; this figure is
+// progress. Ready already implies the group's delegators carry every sealed
+// segment of the current target -- a delegator is serviceable only once
+// loadedRatio >= 1.0 && syncedByCoord (querynodev2/delegator/distribution.go)
+// -- so there is nothing left for the percentage to add to that verdict.
+//
+// Do NOT gate a switchover on percentage == 100 in addition to Ready. This
+// figure is measured against NextTargetFirst and re-arms below 100 whenever a
+// flush or compaction output lands in the next target, so on a collection
+// under continuous ingestion == 100 is a transient, and an AND-gate can spin
+// indefinitely on a group that has been able to serve the whole time. Use the
+// percentage to answer "how far along is this group", and Ready to answer
+// "may I route to it".
+//
+// The two answer different questions, and here is where they deliberately
+// disagree. This figure counts query-invisible replicas (see the note at the
 // selection loop); readiness and the GetShardLeaders routing path both
 // exclude them, because a leader the proxy can never be routed to cannot
 // serve. A resource group whose replicas are all still query-invisible
 // therefore reads 100 here while readiness says Ready=false -- and while the
 // group does not appear in the GetShardLeaders answer at all, since its
 // leaders are dropped before the per-leader resource-group tag is applied.
-//
 // That is a normal product state, not a corner case: UpdateLoadConfig with
 // needWaitRGReady spawns a new group's replicas WithQueryInvisible, and
 // promotion is global and all-or-nothing, so the new group can finish
 // carrying every target of its own while promotion stays blocked on some
-// unrelated replica. A caller acting on 100 alone would cut traffic to a
-// group that cannot answer, and would keep retrying it for as long as that
-// unrelated replica stays unserviceable, instead of staying on the old one.
-// TestInvisibleOnlyResourceGroupReadsFullButNotServable pins the three-way
-// state.
+// unrelated replica. It is also exactly the window where the percentage is
+// useful -- "how much longer" for a group readiness cannot yet call Ready.
+// A caller acting on 100 alone would cut traffic to a group that cannot
+// answer. TestShardLeaderReadinessByRG_QueryInvisibleReplicaDoesNotCount and
+// TestLoadPercentageByResourceGroup_InvisibleReplicaCounts pin the two halves.
 //
-// The pair is also measured against DIFFERENT target scopes, which a caller
-// must expect rather than read as a contradiction. This figure uses
-// NextTargetFirst -- "is this group carrying everything currently asked of
-// it" -- while readiness uses CurrentTarget -- "can it serve what the
+// The two are also measured against DIFFERENT target scopes, which a caller
+// reading both must expect rather than read as a contradiction. This figure
+// uses NextTargetFirst -- "is this group carrying everything currently asked
+// of it" -- while readiness uses CurrentTarget -- "can it serve what the
 // collection is currently expected to hold". So when a next-target re-pull
 // adds a channel that has not been promoted, this figure drops below 100
 // while readiness, which cannot see that channel yet, can still say Ready.
 // Both answers are correct for their own question; they are not two views of
-// one number.
+// one number, which is one more reason not to AND them.
 //
 // # Multiple replicas
 //
@@ -191,8 +216,19 @@ func LoadPercentageByResourceGroup(
 	collectionID int64,
 	rgName string,
 ) (int32, error) {
-	if m == nil || targetMgr == nil || dist == nil {
+	if m == nil || m.ResourceManager == nil || targetMgr == nil || dist == nil {
 		return -1, merr.WrapErrServiceNotReadyMsg("querycoord read stores are not wired up yet")
+	}
+
+	// A resource group that does not exist is the request's own content
+	// forcing this branch, so it is an input error -- which
+	// ErrResourceGroupNotFound (300) already is -- rather than the terminal
+	// "-1, this group holds no replica" the replica scan below would answer,
+	// telling the caller to stop for the wrong reason. It runs before the
+	// registration check: the name is wrong whatever the collection's state.
+	// The empty name is the absence of a filter, never a name to validate.
+	if rgName != "" && !m.ContainResourceGroup(ctx, rgName) {
+		return -1, merr.WrapErrResourceGroupNotFound(rgName)
 	}
 
 	// The load-registration check comes BEFORE the replica scan: the terminal
@@ -250,8 +286,9 @@ func LoadPercentageByResourceGroup(
 	// is a progress figure, and those replicas are exactly the ones whose
 	// progress the load-config path is waiting on.
 	// ShardLeaderReadinessByResourceGroup, by contrast, excludes them to
-	// match the routing surface -- see the pairing rule on this function:
-	// this asymmetry is why 100 here does not by itself mean servable.
+	// match the routing surface -- see the division of labor on this
+	// function: this asymmetry is why 100 here does not by itself mean
+	// servable, and why readiness, not this figure, is the gate.
 	var replicas []*meta.Replica
 	for _, replica := range m.GetByCollection(ctx, collectionID) {
 		if rgName == "" || replica.GetResourceGroup() == rgName {
@@ -369,5 +406,15 @@ func replicaLoadPercentage(
 		}
 	}
 
-	return int32(loadedCount * 100 / targetNum)
+	percentage := int32(loadedCount * 100 / targetNum)
+	if percentage == 0 && loadedCount > 0 {
+		// Integer division truncates 1 of 200 to 0, and 0 is contractually
+		// "carries none of the targets yet" -- the value a caller reads as
+		// "nothing has started", distinct from -1. Round any progress up to 1
+		// so 0 keeps that exact meaning. The top end needs no symmetric
+		// guard: 4999 of 5000 already truncates to 99, and 100 is reached
+		// only when every target is carried.
+		percentage = 1
+	}
+	return percentage
 }

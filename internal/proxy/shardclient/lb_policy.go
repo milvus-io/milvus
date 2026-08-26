@@ -46,6 +46,13 @@ type ChannelWorkload struct {
 	Nq              int64
 	Exec            ExecuteFunc
 	PreferredNodeID int64
+	// ResourceGroup, when non-empty, restricts selectNode to the leaders whose
+	// replica lives in that resource group (NodeInfo.ResourceGroup). It scopes
+	// the candidates of this one channel only -- the channel itself is still
+	// executed -- and an empty scoped candidate set is reported as
+	// ErrCollectionNotFullyLoaded (retriable), see selectNode. Empty is the
+	// absence of a scope and leaves routing exactly as before.
+	ResourceGroup string
 }
 
 type CollectionWorkLoad struct {
@@ -54,6 +61,11 @@ type CollectionWorkLoad struct {
 	CollectionID   int64
 	Nq             int64
 	Exec           ExecuteFunc
+	// ResourceGroup is copied onto every ChannelWorkload the fan-out creates.
+	// The fan-out itself stays unscoped: every shard is visited, and a shard
+	// the group cannot serve fails its channel rather than vanishing from the
+	// answer. See ChannelWorkload.ResourceGroup.
+	ResourceGroup  string
 	PreferredNodes map[string]int64
 }
 
@@ -163,6 +175,30 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 		if err != nil {
 			log.Warn(ctx, "failed to get shard delegator",
 				mlog.Err(err))
+			return NodeInfo{}, false, err
+		}
+
+		// The resource-group scope is applied to THIS channel's candidates,
+		// before the exclusion logic below so that "every candidate excluded"
+		// is judged on the scoped set. The channel itself is never dropped:
+		// Execute fans out over the unscoped GetShardLeaderList, so a shard the
+		// group cannot serve fails here, visibly, instead of being silently
+		// left out of the answer.
+		shardLeaders = FilterByResourceGroup(shardLeaders, workload.ResourceGroup)
+		if len(shardLeaders) == 0 && workload.ResourceGroup != "" {
+			// A scoped request finding no candidate is a resource group that
+			// is still coming up: its replica exists, but its delegator for
+			// this channel is not serviceable yet (or the cache predates it;
+			// the second, uncached attempt covers that). That is a
+			// seconds-to-minutes transient the caller polls through, so it is
+			// reported with ErrCollectionNotFullyLoaded (103, retriable) --
+			// the same code the strict GetShardLeaders gate uses for a
+			// collection still coming up. ErrChannelNotAvailable is (503,
+			// non-retriable) and would tell the SDK and every upper layer to
+			// stop on a state that heals itself; the unscoped answer below
+			// keeps the code it has always used.
+			err = merr.WrapErrCollectionNotFullyLoaded(workload.CollectionID,
+				fmt.Sprintf("no shard leader for channel %s in resource group %s", workload.Channel, workload.ResourceGroup))
 			return NodeInfo{}, false, err
 		}
 
@@ -390,6 +426,7 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 			Nq:              workload.Nq,
 			Exec:            workload.Exec,
 			PreferredNodeID: preferredNodeID(workload, channelList[0]),
+			ResourceGroup:   workload.ResourceGroup,
 		})
 	}
 
@@ -404,6 +441,7 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 				Nq:              workload.Nq,
 				Exec:            workload.Exec,
 				PreferredNodeID: preferredNodeID(workload, channel),
+				ResourceGroup:   workload.ResourceGroup,
 			})
 		})
 	}
@@ -428,6 +466,7 @@ func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload Collecti
 			Nq:              workload.Nq,
 			Exec:            workload.Exec,
 			PreferredNodeID: preferredNodeID(workload, channel),
+			ResourceGroup:   workload.ResourceGroup,
 		})
 	}
 	// An empty leader list here is a transient routing-cache state (leaders are

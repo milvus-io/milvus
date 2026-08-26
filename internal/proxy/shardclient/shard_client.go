@@ -44,18 +44,45 @@ type NodeInfo struct {
 	// of the node itself -- a replica may borrow nodes from another group, so
 	// the two are not the same thing. Empty means unknown: the coordinator
 	// predates the field, or the entry came from somewhere that does not set
-	// it. It must not be read as "no resource group".
+	// it. It must not be read as "no resource group", and an unknown entry
+	// never matches a named group in FilterByResourceGroup.
 	//
-	// NOTHING ROUTES ON THIS YET. It is carried here so the cache holds it
-	// when a per-resource-group router needs it; that router is not in this
-	// PR, and LBPolicyImpl still builds its candidate sets purely from
-	// Serviceable. A reader finding only String() using this field has not
-	// missed a call site -- there is none.
+	// The one reader is FilterByResourceGroup, applied by LBPolicyImpl.selectNode
+	// when ChannelWorkload.ResourceGroup names a group. Nothing on the proxy's
+	// request path sets that field yet, so deployed traffic still builds its
+	// candidate sets purely from Serviceable; the filter ships with the tag so
+	// that the constraints on consuming it (see FilterByResourceGroup) live in
+	// one place rather than with each future caller.
 	ResourceGroup string
 }
 
 func (n NodeInfo) String() string {
 	return fmt.Sprintf("<NodeID: %d, serviceable: %v, address: %s, rg: %s>", n.NodeID, n.Serviceable, n.Address, n.ResourceGroup)
+}
+
+// FilterByResourceGroup returns the leaders in leaders that belong to a replica
+// in rg. rg == "" is the absence of a scope and returns leaders unchanged,
+// matching the utils-layer surfaces on the coordinator. An entry whose tag is
+// unknown (empty -- an old coordinator) never matches a named group.
+//
+// It filters the candidate list OF ONE CHANNEL. It must never be used to drop
+// channels from the shard-leader map: LBPolicyImpl.Execute derives its fan-out
+// from GetShardLeaderList() and never cross-checks the channel count against
+// the collection's shard number, so a dropped channel is not an error -- it is
+// a successful query over a subset of the shards, with no signal anywhere. A
+// channel the group cannot serve has to surface from selectNode as a retriable
+// error instead, which is what applying the scope there guarantees.
+func FilterByResourceGroup(leaders []NodeInfo, rg string) []NodeInfo {
+	if rg == "" {
+		return leaders
+	}
+	scoped := make([]NodeInfo, 0, len(leaders))
+	for _, node := range leaders {
+		if node.ResourceGroup == rg {
+			scoped = append(scoped, node)
+		}
+	}
+	return scoped
 }
 
 type shardClient struct {

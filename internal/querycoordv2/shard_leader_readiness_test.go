@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // shardLeaderReadinessFixture wires up the four read-only stores
@@ -51,16 +52,21 @@ type shardLeaderReadinessFixture struct {
 }
 
 func newShardLeaderReadinessFixture(t *testing.T) *shardLeaderReadinessFixture {
+	paramtable.Init() // AddResourceGroup reads the resource-group quota
 	catalog := mocks.NewQueryCoordCatalog(t)
 	catalog.On("SaveReplica", mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.On("SaveReplica", mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.On("SaveResourceGroup", mock.Anything, mock.Anything).Return(nil).Maybe()
 
+	nodeMgr := session.NewNodeManager()
 	m := &meta.Meta{
 		CollectionManager: meta.NewCollectionManager(catalog),
 		ReplicaManager:    meta.NewReplicaManager(params.RandomIncrementIDAllocator(), catalog),
+		// See rgLoadPercentageFixture: the surfaces validate rgName against
+		// the ResourceManager first, so every group a test names must exist.
+		ResourceManager: meta.NewResourceManager(catalog, nodeMgr),
 	}
 	broker := meta.NewMockBroker(t)
-	nodeMgr := session.NewNodeManager()
 
 	return &shardLeaderReadinessFixture{
 		meta:      m,
@@ -189,6 +195,7 @@ func (f *shardLeaderReadinessFixture) putLoadedCollectionWithoutPartitions(t *te
 // distinct nodes; ReplicaManager indexes by ID and a repeated ID would
 // silently clobber the earlier replica.
 func (f *shardLeaderReadinessFixture) putReplica(t *testing.T, collectionID int64, rgName string, nodeIDs ...int64) {
+	f.putResourceGroup(t, rgName)
 	require.NotEmpty(t, nodeIDs)
 	require.NoError(t, f.meta.Put(context.Background(), meta.NewReplica(&querypb.Replica{
 		ID:            nodeIDs[0],
@@ -203,6 +210,7 @@ func (f *shardLeaderReadinessFixture) putReplica(t *testing.T, collectionID int6
 // replicas in (job_update.go passes WithQueryInvisible; visibility is flipped
 // later, all-or-nothing, by tryPromoteReadyLoadConfigReplicas).
 func (f *shardLeaderReadinessFixture) putInvisibleReplica(t *testing.T, collectionID int64, rgName string, nodeIDs ...int64) {
+	f.putResourceGroup(t, rgName)
 	require.NotEmpty(t, nodeIDs)
 	mutable := meta.NewReplica(&querypb.Replica{
 		ID:            nodeIDs[0],
@@ -217,6 +225,14 @@ func (f *shardLeaderReadinessFixture) putInvisibleReplica(t *testing.T, collecti
 // registerNode makes nodeID one the coordinator knows about. A leader on an
 // unregistered node is not usable, which the native shard-leader builder
 // enforces by dropping any leader whose NodeManager entry is missing.
+// putResourceGroup registers rgName so the existence check passes for a
+// group that deliberately holds no replica (the NoReplicaInResourceGroup
+// state, as opposed to the ErrResourceGroupNotFound one).
+func (f *shardLeaderReadinessFixture) putResourceGroup(t *testing.T, rgName string) {
+	t.Helper()
+	putResourceGroup(t, f.meta, rgName)
+}
+
 func (f *shardLeaderReadinessFixture) registerNode(nodeID int64) {
 	f.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:  nodeID,
@@ -332,6 +348,7 @@ func TestShardLeaderReadinessByRG_NoReplicaInRG(t *testing.T) {
 	f.putLoadedCollection(t, 300, 3000, "300-dmc0")
 	f.putReplica(t, 300, "rg-a", 30)
 	f.putLeader(300, 30, "300-dmc0", true)
+	f.putResourceGroup(t, "rg-absent") // exists, holds nothing: not the ErrResourceGroupNotFound state
 
 	got := f.readiness(t, 300, "rg-absent")
 
@@ -550,6 +567,8 @@ func TestShardLeaderReadinessByRG_FailedLoadSurvivesReplicaCleanup(t *testing.T)
 	f := newShardLeaderReadinessFixture(t)
 	// No putLoadedCollection, no putReplica: collection 1400 has been fully
 	// cleaned up after its load timed out; only the failure record remains.
+	// The resource group itself outlives the load, so it is registered.
+	f.putResourceGroup(t, "rg-a")
 	loadErr := errors.New("mocked load failure")
 	seedFailedLoadCache(t, 1400, loadErr)
 
@@ -570,6 +589,7 @@ func TestShardLeaderReadinessByRG_FailedLoadSurvivesReplicaCleanup(t *testing.T)
 // without the recorded-failure detail the cache would have added.
 func TestShardLeaderReadinessByRG_NilFailedLoadCache(t *testing.T) {
 	f := newShardLeaderReadinessFixture(t)
+	f.putResourceGroup(t, "rg-a")
 	nilFailedLoadCache(t)
 
 	assert.NotPanics(t, func() {
@@ -654,6 +674,10 @@ func TestShardLeaderReadinessByRG_NilStores(t *testing.T) {
 		"nil dist": func() (utils.ShardLeaderReadiness, error) {
 			return utils.ShardLeaderReadinessByResourceGroup(ctx, f.meta, f.targetMgr, nil, f.nodeMgr, 1, "rg")
 		},
+		"nil resource manager": func() (utils.ShardLeaderReadiness, error) {
+			partial := &meta.Meta{CollectionManager: f.meta.CollectionManager, ReplicaManager: f.meta.ReplicaManager}
+			return utils.ShardLeaderReadinessByResourceGroup(ctx, partial, f.targetMgr, f.dist, f.nodeMgr, 1, "rg")
+		},
 		"nil nodeMgr": func() (utils.ShardLeaderReadiness, error) {
 			return utils.ShardLeaderReadinessByResourceGroup(ctx, f.meta, f.targetMgr, f.dist, nil, 1, "rg")
 		},
@@ -703,6 +727,10 @@ func TestShardLeaderReadinessByRG_LeavesNativeShardLeadersUnchanged(t *testing.T
 
 	for _, rg := range []string{"", "rg-a", "rg-b", "rg-does-not-exist"} {
 		_, err := f.server().GetShardLeaderReadinessByResourceGroup(ctx, 1100, rg)
+		if rg == "rg-does-not-exist" {
+			require.ErrorIs(t, err, merr.ErrResourceGroupNotFound, "an unknown group is refused, and must still leave the native answer alone")
+			continue
+		}
 		require.NoError(t, err)
 	}
 
@@ -710,4 +738,49 @@ func TestShardLeaderReadinessByRG_LeavesNativeShardLeadersUnchanged(t *testing.T
 		"the per-resource-group readiness read must not disturb the native shard-leader answer")
 	assert.EqualValues(t, 100, f.meta.CalculateLoadPercentage(ctx, 1100),
 		"the per-resource-group readiness read must not disturb the collection's load registration")
+}
+
+// TestShardLeaderReadinessByRG_UnknownResourceGroupIsInputError pins that a
+// resource group which does not exist is refused as the request's own mistake
+// -- ErrResourceGroupNotFound, an InputError, with its own Reason -- rather
+// than folded into NoReplicaInResourceGroup. Both mean "waiting will never
+// help", but only one of them tells the caller it misspelled the group.
+func TestShardLeaderReadinessByRG_UnknownResourceGroupIsInputError(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 1300, 13000, "1300-dmc0")
+	f.putReplica(t, 1300, "rg-a", 130)
+	f.putLeader(1300, 130, "1300-dmc0", true)
+
+	got, err := f.server().GetShardLeaderReadinessByResourceGroup(context.Background(), 1300, "rg-typo")
+
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNotFound)
+	assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+	assert.False(t, got.Ready)
+	assert.Equal(t, utils.ShardLeadersReasonResourceGroupNotFound, got.Reason)
+
+	// The name is checked before the collection: the same typo on a
+	// collection that is not loaded at all is still the typo's fault.
+	_, err = f.server().GetShardLeaderReadinessByResourceGroup(context.Background(), 999999, "rg-typo")
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNotFound)
+}
+
+// TestShardLeaderReadinessByRG_EmptyRGWithNoReplicaReadsNoReplica pins the
+// rgName == "" wording of the no-replica verdict. The reason strings are
+// compared by callers, so "no replica lives in this resource group" would be
+// a false statement when no group was named: the condition is that the
+// collection has no replica at all.
+func TestShardLeaderReadinessByRG_EmptyRGWithNoReplicaReadsNoReplica(t *testing.T) {
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 1400, 14000, "1400-dmc0")
+	// registered as loaded, but every replica record is gone
+
+	all := f.readiness(t, 1400, "")
+	assert.False(t, all.Ready)
+	assert.Equal(t, utils.ShardLeadersReasonNoReplica, all.Reason,
+		"with no filter the verdict is about the collection, not a group")
+
+	f.putResourceGroup(t, "rg-empty")
+	named := f.readiness(t, 1400, "rg-empty")
+	assert.Equal(t, utils.ShardLeadersReasonNoReplicaInResourceGroup, named.Reason,
+		"a named group keeps the group-scoped wording")
 }

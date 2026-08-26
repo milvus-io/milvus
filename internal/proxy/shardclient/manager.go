@@ -229,16 +229,21 @@ func parseShardLeaderList2QueryNode(ctx context.Context, shardsLeaders []*queryp
 		// Two ways the array can be short, meaning opposite things, and only
 		// one of them is expected. Empty is the documented downgrade above.
 		// Non-empty but short is a broken parallel-array invariant on the
-		// coordinator side -- which is the premise the whole tag rests on, so
-		// once anything routes on it that state either drops leaders that
-		// exist or admits leaders from another group. Say so rather than let
-		// it look like an ordinary upgrade.
+		// coordinator side -- which is the premise the whole tag rests on: a
+		// leader dropped from one array but not the others shifts every tag
+		// after it, so the tags that ARE present are of unknown alignment
+		// and FilterByResourceGroup would route on them into the wrong group.
+		// Neutralize the whole array to the documented "unknown" -- strictly
+		// safer than a misaligned one, since an unknown entry never matches a
+		// named group -- and say so loudly, rather than let it look like an
+		// ordinary upgrade.
 		if len(resourceGroups) != 0 && len(resourceGroups) != len(leaders.GetNodeIds()) {
 			mlog.RatedWarn(ctx, rate.Limit(1.0/60.0),
-				"shard leader resource groups are not parallel to node ids, tags will read as unknown",
+				"shard leader resource groups are not parallel to node ids, dropping the tags for this channel",
 				mlog.String("channel", leaders.GetChannelName()),
 				mlog.Int("nodeIDs", len(leaders.GetNodeIds())),
 				mlog.Int("resourceGroups", len(resourceGroups)))
+			resourceGroups = nil
 		}
 
 		for j := range qns {

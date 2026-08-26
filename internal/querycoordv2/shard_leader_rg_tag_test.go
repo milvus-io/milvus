@@ -166,6 +166,7 @@ func TestShardLeaderResourceGroupTagIsNotAServabilityVerdict(t *testing.T) {
 	assert.Equal(t, utils.ShardLeadersReasonShardsWithoutLeader, readiness.Reason,
 		"rg-b holds a replica and is coming up -- waiting helps, which absence from the response cannot convey")
 
+	f.putResourceGroup(t, "rg-nowhere") // exists, nobody loaded into it
 	absent := f.readiness(t, 100, "rg-nowhere")
 	assert.Equal(t, utils.ShardLeadersReasonNoReplicaInResourceGroup, absent.Reason,
 		"and the group that truly holds nothing reads differently -- the distinction the tag alone loses")

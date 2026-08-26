@@ -146,13 +146,17 @@ func TestParseShardLeaderListToleratesMissingResourceGroups(t *testing.T) {
 	})
 }
 
-// TestParseShardLeaderListToleratesShortResourceGroups covers the OTHER way
+// TestParseShardLeaderListNeutralizesShortResourceGroups covers the OTHER way
 // the array can be short: non-empty but not parallel. That is a coordinator
-// bug rather than the documented old-coordinator downgrade, so it is logged
-// loudly -- but it must still not panic and must still leave the rest of
-// each entry intact, because a proxy that crashes on a malformed response
-// takes the whole query path down with it.
-func TestParseShardLeaderListToleratesShortResourceGroups(t *testing.T) {
+// bug rather than the documented old-coordinator downgrade. A leader dropped
+// from one array but not the others shifts every tag after it, so the tags
+// that ARE present are of unknown alignment -- FilterByResourceGroup would
+// route on them into the wrong group. The whole array is therefore dropped
+// to the documented "unknown" (an unknown entry never matches a named group,
+// so a scoped request gets a retriable refusal instead of a wrong node), the
+// rest of each entry is kept, and it must not panic: a proxy that crashes on
+// a malformed response takes the whole query path down with it.
+func TestParseShardLeaderListNeutralizesShortResourceGroups(t *testing.T) {
 	assert.NotPanics(t, func() {
 		shards := parseShardLeaderList2QueryNode(context.Background(), []*querypb.ShardLeadersList{
 			{
@@ -160,14 +164,14 @@ func TestParseShardLeaderListToleratesShortResourceGroups(t *testing.T) {
 				NodeIds:        []int64{1, 2},
 				NodeAddrs:      []string{"addr1", "addr2"},
 				Serviceable:    []bool{true, true},
-				ResourceGroups: []string{"rg-a"}, // one short
+				ResourceGroups: []string{"rg-a"}, // one short: which node is rg-a is unknowable
 			},
 		})
 
 		assert.Equal(t, []NodeInfo{
-			{NodeID: 1, Address: "addr1", Serviceable: true, ResourceGroup: "rg-a"},
+			{NodeID: 1, Address: "addr1", Serviceable: true, ResourceGroup: ""},
 			{NodeID: 2, Address: "addr2", Serviceable: true, ResourceGroup: ""},
 		}, shards["dmc0"],
-			"the entries that do have a tag keep it; the one past the end reads as unknown")
+			"a misaligned array is neutralized to unknown for every entry, never trusted partially")
 	})
 }

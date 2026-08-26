@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // rgLoadPercentageFixture wires up the same trio of read-only stores
@@ -49,16 +51,23 @@ type rgLoadPercentageFixture struct {
 }
 
 func newRGLoadPercentageFixture(t *testing.T) *rgLoadPercentageFixture {
+	paramtable.Init() // AddResourceGroup reads the resource-group quota
 	catalog := mocks.NewQueryCoordCatalog(t)
 	catalog.On("SaveReplica", mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.On("SaveReplica", mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.On("SaveResourceGroup", mock.Anything, mock.Anything).Return(nil).Maybe()
 
+	nodeMgr := session.NewNodeManager()
 	m := &meta.Meta{
 		CollectionManager: meta.NewCollectionManager(catalog),
 		ReplicaManager:    meta.NewReplicaManager(params.RandomIncrementIDAllocator(), catalog),
+		// The surfaces validate rgName against the ResourceManager before
+		// anything else, so the fixture carries one; putReplica registers
+		// the group it homes a replica in, and putResourceGroup registers a
+		// group that deliberately holds nothing.
+		ResourceManager: meta.NewResourceManager(catalog, nodeMgr),
 	}
 	broker := meta.NewMockBroker(t)
-	nodeMgr := session.NewNodeManager()
 
 	return &rgLoadPercentageFixture{
 		meta:      m,
@@ -126,6 +135,7 @@ func (f *rgLoadPercentageFixture) putTarget(t *testing.T, collectionID, partitio
 // zero value across more than one replica in the same test would make the
 // second Put silently clobber the first.
 func (f *rgLoadPercentageFixture) putReplica(t *testing.T, collectionID, nodeID int64, rgName string) {
+	f.putResourceGroup(t, rgName)
 	replica := meta.NewReplica(&querypb.Replica{
 		ID:            nodeID,
 		CollectionID:  collectionID,
@@ -133,6 +143,28 @@ func (f *rgLoadPercentageFixture) putReplica(t *testing.T, collectionID, nodeID 
 		Nodes:         []int64{nodeID},
 	})
 	require.NoError(t, f.meta.Put(context.Background(), replica))
+}
+
+// putResourceGroup registers rgName with the ResourceManager, idempotently,
+// so that the surfaces' existence check passes for it. A group registered
+// here and never given a replica is the "exists but holds nothing" state
+// that must keep answering -1 rather than ErrResourceGroupNotFound.
+func (f *rgLoadPercentageFixture) putResourceGroup(t *testing.T, rgName string) {
+	t.Helper()
+	putResourceGroup(t, f.meta, rgName)
+}
+
+// putResourceGroup is the shared body of the two fixtures' helpers.
+func putResourceGroup(t *testing.T, m *meta.Meta, rgName string) {
+	t.Helper()
+	if m.ContainResourceGroup(context.Background(), rgName) {
+		return
+	}
+	_, err := m.AddResourceGroup(context.Background(), rgName, &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
+	})
+	require.NoError(t, err)
 }
 
 // putDelegator records nodeID as the delegator for channelName, holding
@@ -166,6 +198,7 @@ func TestGetLoadPercentageByResourceGroup_NoReplicaOnRG(t *testing.T) {
 	f.putTarget(t, 100, 1000, "100-dmc0", 1, 2)
 	f.putReplica(t, 100, 10, "rg-other")
 	f.putDelegator(100, 10, "100-dmc0", 1, 2)
+	f.putResourceGroup(t, "rg-target") // exists, but nothing of collection 100 lives in it
 
 	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 100, "rg-target")
 
@@ -220,6 +253,7 @@ func TestGetLoadPercentageByResourceGroup_ZeroVsAbsent(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	f.putTarget(t, 300, 3000, "300-dmc0", 1, 2)
 	f.putReplica(t, 300, 30, "rg-present")
+	f.putResourceGroup(t, "rg-absent") // exists, holds nothing: the -1 row, not the 300 one
 	// No putDelegator call: rg-present's replica has not picked up
 	// anything from the target yet.
 
@@ -335,6 +369,7 @@ func nilFailedLoadCache(t *testing.T) {
 // that window on any collection that is not registered.
 func TestGetLoadPercentageByResourceGroup_NilFailedLoadCache(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
+	f.putResourceGroup(t, "rg-target")
 	nilFailedLoadCache(t)
 
 	assert.NotPanics(t, func() {
@@ -476,6 +511,10 @@ func TestLoadPercentageByResourceGroup_NilStores(t *testing.T) {
 		"nil targetMgr": func() (int32, error) { return utils.LoadPercentageByResourceGroup(ctx, f.meta, nil, f.dist, 1, "rg") },
 		"nil dist": func() (int32, error) {
 			return utils.LoadPercentageByResourceGroup(ctx, f.meta, f.targetMgr, nil, 1, "rg")
+		},
+		"nil resource manager": func() (int32, error) {
+			partial := &meta.Meta{CollectionManager: f.meta.CollectionManager, ReplicaManager: f.meta.ReplicaManager}
+			return utils.LoadPercentageByResourceGroup(ctx, partial, f.targetMgr, f.dist, 1, "rg")
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -653,9 +692,9 @@ func TestGetLoadPercentageByResourceGroup_PoolsTargetsAcrossPartitions(t *testin
 // segment, a compaction output -- it drops back below 100 until the replica
 // picks the new segment up. The observer's persisted number never regresses
 // from 100 in the same state, so ShowLoadCollections would keep saying 100.
-// A caller gating a switchover on == 100 gets exactly what it needs ("is this
-// group carrying everything currently asked of it"), and must expect the gate
-// to re-arm whenever new work lands.
+// This is what makes the figure progress rather than a gate: on a collection
+// under ingestion == 100 is a transient, so a caller must read it as "how far
+// along" and leave "may I route" to readiness, never AND the two.
 func TestGetLoadPercentageByResourceGroup_NewSegmentReArmsTheFigure(t *testing.T) {
 	ctx := context.Background()
 	f := newRGLoadPercentageFixture(t)
@@ -753,4 +792,86 @@ func TestLoadPercentageByResourceGroup_ReadsTargetsOncePerCall(t *testing.T) {
 		"the channel targets must be read once per call, not once per replica")
 	assert.Equal(t, 1, counting.segmentReads,
 		"and so must the segment targets")
+}
+
+// TestGetLoadPercentageByResourceGroup_UnknownResourceGroupIsInputError pins
+// that a resource group which does not exist at all is refused as the
+// request's own mistake -- ErrResourceGroupNotFound, an InputError -- rather
+// than reported as the terminal bare -1 an existing-but-empty group gets.
+// The two look identical to the replica scan; only the ResourceManager can
+// tell them apart, and a caller told "-1, stop" for a typo has no way to
+// learn what it actually did wrong.
+func TestGetLoadPercentageByResourceGroup_UnknownResourceGroupIsInputError(t *testing.T) {
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 1600, 16000, "1600-dmc0", 1)
+	f.putReplica(t, 1600, 160, "rg-real")
+
+	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 1600, "rg-typo")
+
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNotFound)
+	assert.Equal(t, merr.InputError, merr.GetErrorType(err), "a misspelled group is the request's fault")
+	assert.False(t, merr.IsRetryableErr(err))
+	assert.EqualValues(t, -1, percentage)
+
+	// The check is about the name, not the collection: an unknown group is
+	// refused the same way for a collection that is not loaded at all.
+	_, err = f.server().GetLoadPercentageByResourceGroup(context.Background(), 999999, "rg-typo")
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNotFound)
+
+	// And the empty name is the absence of a filter, never a name to validate.
+	all, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 1600, "")
+	assert.NoError(t, err)
+	assert.EqualValues(t, 0, all)
+}
+
+// TestGetLoadPercentageByResourceGroup_AnyProgressReadsAtLeastOne pins that 0
+// means exactly "carries none of the targets yet". Integer division would
+// truncate 1 of 200 to 0, which the contract reserves for no progress at all;
+// the value is rounded up so a caller reading 0 can rely on that meaning.
+// The top end is asserted alongside: 199 of 200 must still read 99, since
+// 100 is reached only when every target is carried.
+func TestGetLoadPercentageByResourceGroup_AnyProgressReadsAtLeastOne(t *testing.T) {
+	ctx := context.Background()
+	f := newRGLoadPercentageFixture(t)
+	segments := make([]int64, 0, 199)
+	for i := int64(1); i <= 199; i++ {
+		segments = append(segments, i)
+	}
+	f.putTarget(t, 1700, 17000, "1700-dmc0", segments...) // 1 channel + 199 segments = 200 targets
+	f.putReplica(t, 1700, 170, "rg-target")
+
+	f.putDelegator(1700, 170, "1700-dmc0") // the channel only: 1 of 200
+	low, err := f.server().GetLoadPercentageByResourceGroup(ctx, 1700, "rg-target")
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, low, "1 of 200 is progress, and progress must not read as 0")
+
+	f.putDelegator(1700, 170, "1700-dmc0", segments[:198]...) // channel + 198 segments: 199 of 200
+	high, err := f.server().GetLoadPercentageByResourceGroup(ctx, 1700, "rg-target")
+	require.NoError(t, err)
+	assert.EqualValues(t, 99, high, "199 of 200 must not round up to 100")
+}
+
+// TestLoadPercentageByResourceGroup_InvisibleReplicaCounts pins the three-way
+// state the division-of-labor note on LoadPercentageByResourceGroup
+// describes: a group whose only replica is still query-invisible reads 100
+// here (the progress figure counts it -- it is exactly what the load-config
+// path is waiting on), while readiness says Ready=false with
+// ShardsWithoutLeader (routing can never reach it), and the group is absent
+// from the GetShardLeaders answer (TestShardLeaderResourceGroupTagIsNotAServabilityVerdict).
+// This is why the percentage is progress and readiness is the gate.
+func TestLoadPercentageByResourceGroup_InvisibleReplicaCounts(t *testing.T) {
+	ctx := context.Background()
+	f := newShardLeaderReadinessFixture(t)
+	f.putLoadedCollection(t, 1800, 18000, "1800-dmc0")
+	f.putInvisibleReplica(t, 1800, "rg-new", 180)
+	f.putLeader(1800, 180, "1800-dmc0", true)
+
+	percentage, err := utils.LoadPercentageByResourceGroup(ctx, f.meta, f.targetMgr, f.dist, 1800, "rg-new")
+	require.NoError(t, err)
+	assert.EqualValues(t, 100, percentage, "the progress figure counts the invisible replica")
+
+	readiness := f.readiness(t, 1800, "rg-new")
+	assert.False(t, readiness.Ready, "100 is not a servability verdict")
+	assert.Equal(t, utils.ShardLeadersReasonShardsWithoutLeader, readiness.Reason,
+		"the group holds a replica that is coming up, so waiting helps")
 }
