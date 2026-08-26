@@ -288,14 +288,6 @@ func (node *DataNode) isHealthy() bool {
 	return node.GetStateCode() == commonpb.StateCode_Healthy
 }
 
-// ReadyToFlush tells whether DataNode is ready for flushing
-func (node *DataNode) ReadyToFlush() error {
-	if !node.isHealthy() {
-		return merr.Wrap(merr.ErrServiceNotReady, "DataNode not in HEALTHY state")
-	}
-	return nil
-}
-
 // Stop will release DataNode resources and shutdown datanode
 func (node *DataNode) Stop() error {
 	node.stopOnce.Do(func() {

@@ -152,28 +152,6 @@ func (c *Client) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannel
 	})
 }
 
-// FlushSegments notifies DataNode to flush the segments req provids. The flush tasks are async to this
-//
-//	rpc, DataNode will flush the segments in the background.
-//
-// Return UnexpectedError code in status:
-//
-//	If DataNode isn't in HEALTHY: states not HEALTHY or dynamic checks not HEALTHY
-//	If DataNode doesn't find the correspounding segmentID in its memeory replica
-//
-// Return Success code in status and trigers background flush:
-//
-//	Log an info log if a segment is under flushing
-func (c *Client) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(c.serverID))
-	return wrapGrpcCall(ctx, c, func(client DataNodeClient) (*commonpb.Status, error) {
-		return client.FlushSegments(ctx, req)
-	})
-}
-
 // ShowConfigurations gets specified configurations para of DataNode
 func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
 	req = typeutil.Clone(req)
@@ -227,13 +205,6 @@ func (c *Client) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegme
 func (c *Client) SyncSegments(ctx context.Context, req *datapb.SyncSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return wrapGrpcCall(ctx, c, func(client DataNodeClient) (*commonpb.Status, error) {
 		return client.SyncSegments(ctx, req)
-	})
-}
-
-// FlushChannels notifies DataNode to sync all the segments belongs to the target channels.
-func (c *Client) FlushChannels(ctx context.Context, req *datapb.FlushChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return wrapGrpcCall(ctx, c, func(client DataNodeClient) (*commonpb.Status, error) {
-		return client.FlushChannels(ctx, req)
 	})
 }
 

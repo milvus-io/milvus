@@ -2551,14 +2551,12 @@ const (
 	DataNode_GetComponentStates_FullMethodName            = "/milvus.proto.data.DataNode/GetComponentStates"
 	DataNode_GetStatisticsChannel_FullMethodName          = "/milvus.proto.data.DataNode/GetStatisticsChannel"
 	DataNode_WatchDmChannels_FullMethodName               = "/milvus.proto.data.DataNode/WatchDmChannels"
-	DataNode_FlushSegments_FullMethodName                 = "/milvus.proto.data.DataNode/FlushSegments"
 	DataNode_ShowConfigurations_FullMethodName            = "/milvus.proto.data.DataNode/ShowConfigurations"
 	DataNode_GetMetrics_FullMethodName                    = "/milvus.proto.data.DataNode/GetMetrics"
 	DataNode_CompactionV2_FullMethodName                  = "/milvus.proto.data.DataNode/CompactionV2"
 	DataNode_GetCompactionState_FullMethodName            = "/milvus.proto.data.DataNode/GetCompactionState"
 	DataNode_SyncSegments_FullMethodName                  = "/milvus.proto.data.DataNode/SyncSegments"
 	DataNode_ResendSegmentStats_FullMethodName            = "/milvus.proto.data.DataNode/ResendSegmentStats"
-	DataNode_FlushChannels_FullMethodName                 = "/milvus.proto.data.DataNode/FlushChannels"
 	DataNode_NotifyChannelOperation_FullMethodName        = "/milvus.proto.data.DataNode/NotifyChannelOperation"
 	DataNode_CheckChannelOperationProgress_FullMethodName = "/milvus.proto.data.DataNode/CheckChannelOperationProgress"
 	DataNode_PreImport_FullMethodName                     = "/milvus.proto.data.DataNode/PreImport"
@@ -2578,7 +2576,6 @@ type DataNodeClient interface {
 	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
 	GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
 	WatchDmChannels(ctx context.Context, in *WatchDmChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	FlushSegments(ctx context.Context, in *FlushSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
 	GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error)
@@ -2587,7 +2584,6 @@ type DataNodeClient interface {
 	SyncSegments(ctx context.Context, in *SyncSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	// Deprecated
 	ResendSegmentStats(ctx context.Context, in *ResendSegmentStatsRequest, opts ...grpc.CallOption) (*ResendSegmentStatsResponse, error)
-	FlushChannels(ctx context.Context, in *FlushChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	NotifyChannelOperation(ctx context.Context, in *ChannelOperationsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	CheckChannelOperationProgress(ctx context.Context, in *ChannelWatchInfo, opts ...grpc.CallOption) (*ChannelOperationProgressResponse, error)
 	// import v2
@@ -2631,15 +2627,6 @@ func (c *dataNodeClient) GetStatisticsChannel(ctx context.Context, in *internalp
 func (c *dataNodeClient) WatchDmChannels(ctx context.Context, in *WatchDmChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, DataNode_WatchDmChannels_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *dataNodeClient) FlushSegments(ctx context.Context, in *FlushSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, DataNode_FlushSegments_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2694,15 +2681,6 @@ func (c *dataNodeClient) SyncSegments(ctx context.Context, in *SyncSegmentsReque
 func (c *dataNodeClient) ResendSegmentStats(ctx context.Context, in *ResendSegmentStatsRequest, opts ...grpc.CallOption) (*ResendSegmentStatsResponse, error) {
 	out := new(ResendSegmentStatsResponse)
 	err := c.cc.Invoke(ctx, DataNode_ResendSegmentStats_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *dataNodeClient) FlushChannels(ctx context.Context, in *FlushChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, DataNode_FlushChannels_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2806,7 +2784,6 @@ type DataNodeServer interface {
 	GetComponentStates(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)
 	GetStatisticsChannel(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)
 	WatchDmChannels(context.Context, *WatchDmChannelsRequest) (*commonpb.Status, error)
-	FlushSegments(context.Context, *FlushSegmentsRequest) (*commonpb.Status, error)
 	ShowConfigurations(context.Context, *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
 	GetMetrics(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
@@ -2815,7 +2792,6 @@ type DataNodeServer interface {
 	SyncSegments(context.Context, *SyncSegmentsRequest) (*commonpb.Status, error)
 	// Deprecated
 	ResendSegmentStats(context.Context, *ResendSegmentStatsRequest) (*ResendSegmentStatsResponse, error)
-	FlushChannels(context.Context, *FlushChannelsRequest) (*commonpb.Status, error)
 	NotifyChannelOperation(context.Context, *ChannelOperationsRequest) (*commonpb.Status, error)
 	CheckChannelOperationProgress(context.Context, *ChannelWatchInfo) (*ChannelOperationProgressResponse, error)
 	// import v2
@@ -2843,9 +2819,6 @@ func (UnimplementedDataNodeServer) GetStatisticsChannel(context.Context, *intern
 func (UnimplementedDataNodeServer) WatchDmChannels(context.Context, *WatchDmChannelsRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method WatchDmChannels not implemented")
 }
-func (UnimplementedDataNodeServer) FlushSegments(context.Context, *FlushSegmentsRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method FlushSegments not implemented")
-}
 func (UnimplementedDataNodeServer) ShowConfigurations(context.Context, *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ShowConfigurations not implemented")
 }
@@ -2863,9 +2836,6 @@ func (UnimplementedDataNodeServer) SyncSegments(context.Context, *SyncSegmentsRe
 }
 func (UnimplementedDataNodeServer) ResendSegmentStats(context.Context, *ResendSegmentStatsRequest) (*ResendSegmentStatsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ResendSegmentStats not implemented")
-}
-func (UnimplementedDataNodeServer) FlushChannels(context.Context, *FlushChannelsRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method FlushChannels not implemented")
 }
 func (UnimplementedDataNodeServer) NotifyChannelOperation(context.Context, *ChannelOperationsRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NotifyChannelOperation not implemented")
@@ -2959,24 +2929,6 @@ func _DataNode_WatchDmChannels_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DataNodeServer).WatchDmChannels(ctx, req.(*WatchDmChannelsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DataNode_FlushSegments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(FlushSegmentsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataNodeServer).FlushSegments(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DataNode_FlushSegments_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataNodeServer).FlushSegments(ctx, req.(*FlushSegmentsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3085,24 +3037,6 @@ func _DataNode_ResendSegmentStats_Handler(srv interface{}, ctx context.Context, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DataNodeServer).ResendSegmentStats(ctx, req.(*ResendSegmentStatsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DataNode_FlushChannels_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(FlushChannelsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataNodeServer).FlushChannels(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DataNode_FlushChannels_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataNodeServer).FlushChannels(ctx, req.(*FlushChannelsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3307,10 +3241,6 @@ var DataNode_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DataNode_WatchDmChannels_Handler,
 		},
 		{
-			MethodName: "FlushSegments",
-			Handler:    _DataNode_FlushSegments_Handler,
-		},
-		{
 			MethodName: "ShowConfigurations",
 			Handler:    _DataNode_ShowConfigurations_Handler,
 		},
@@ -3333,10 +3263,6 @@ var DataNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResendSegmentStats",
 			Handler:    _DataNode_ResendSegmentStats_Handler,
-		},
-		{
-			MethodName: "FlushChannels",
-			Handler:    _DataNode_FlushChannels_Handler,
 		},
 		{
 			MethodName: "NotifyChannelOperation",
