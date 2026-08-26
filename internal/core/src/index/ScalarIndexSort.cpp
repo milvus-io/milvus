@@ -482,7 +482,8 @@ template <typename T>
 const TargetBitmap
 ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap bitset(Count(), true);
+    // NotIn must keep null rows false, so start from the validity bitmap.
+    auto bitset = valid_bitset_.clone();
     for (size_t i = 0; i < n; ++i) {
         const auto target = IndexStructure<T>(*(values + i));
         auto lb = std::lower_bound(begin(), end(), target);
@@ -498,8 +499,6 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
             bitset[lb->idx_] = false;
         }
     }
-    // NotIn(null) and In(null) is both false, need to mask with IsNotNull operate
-    bitset &= valid_bitset_;
     return bitset;
 }
 
@@ -507,8 +506,7 @@ template <typename T>
 const TargetBitmap
 ScalarIndexSort<T>::IsNull() {
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap bitset(total_num_rows_, true);
-    bitset &= valid_bitset_;
+    auto bitset = valid_bitset_.clone();
     bitset.flip();
     return bitset;
 }
@@ -517,9 +515,7 @@ template <typename T>
 TargetBitmap
 ScalarIndexSort<T>::IsNotNull() {
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap bitset(total_num_rows_, true);
-    bitset &= valid_bitset_;
-    return bitset;
+    return valid_bitset_.clone();
 }
 
 template <typename T>

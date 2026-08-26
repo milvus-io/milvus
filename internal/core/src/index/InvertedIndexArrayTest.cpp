@@ -378,6 +378,40 @@ MakeInt64ArrayValue(const std::vector<int64_t>& values) {
 }  // namespace
 
 TEST(ArrayInvertedIndexRegression,
+     NestedSealedValidityUsesMaterializedElementDomain) {
+    const std::vector<boost::container::vector<int64_t>> arrays = {
+        {10, 20}, {}, {}, {30}, {}};
+
+    auto index = std::make_unique<NullableInt64ArrayInvertedIndex>();
+    index->SetNullOffsets({2, 4});
+
+    Config config;
+    config["is_array"] = true;
+    config["is_nested_index"] = true;
+    index->BuildWithRawDataForUT(arrays.size(), arrays.data(), config);
+
+    ASSERT_TRUE(index->IsNestedIndex());
+    ASSERT_EQ(index->Count(), 3);
+    // Nested validity is materialized in the element domain as an all-valid
+    // sentinel, not from the row-domain null offsets.
+    EXPECT_EQ(index->ValidityBitmapByteSize(), 0);
+
+    auto is_null = index->IsNull();
+    auto is_not_null = index->IsNotNull();
+    ASSERT_EQ(is_null.size(), 3);
+    ASSERT_EQ(is_not_null.size(), 3);
+    EXPECT_EQ(is_null.count(), 0);
+    EXPECT_EQ(is_not_null.count(), 3);
+
+    int64_t excluded = 10;
+    auto not_in = index->NotIn(1, &excluded);
+    ASSERT_EQ(not_in.size(), 3);
+    EXPECT_FALSE(not_in[0]);
+    EXPECT_TRUE(not_in[1]);
+    EXPECT_TRUE(not_in[2]);
+}
+
+TEST(ArrayInvertedIndexRegression,
      ArrayNotEqualUsesIndexCandidatesAsRowLevelPrefilter) {
     const std::vector<std::vector<int64_t>> arrays = {
         {1, 1, 2},     // equal
@@ -475,8 +509,8 @@ TEST(ArrayInvertedIndexRegression,
         if (nested_index) {
             config["is_nested_index"] = true;
         }
-        index->BuildWithRawDataForUT(row_count, index_arrays.data(), config);
         index->SetNullOffsets(null_offsets);
+        index->BuildWithRawDataForUT(row_count, index_arrays.data(), config);
 
         LoadIndexInfo load_info{};
         load_info.field_id = array_fid.get();
