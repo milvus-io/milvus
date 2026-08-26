@@ -200,12 +200,14 @@ FinalizeWindowAsync(int64_t segment_id,
                                  *finalize_cell,
                                  std::move(batches_result));
     } catch (...) {
+        // This frame owns the moved lease during finalization. Publish the
+        // failure before unwinding releases it.
         failure_state->RecordAndCancel(std::current_exception());
         throw;
     }
 }
 
-folly::coro::Task<WindowLoadResult>
+folly::coro::Task<void>
 LoadWindowAsync(int64_t segment_id,
                 std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
                 AsyncReadWindow window,
@@ -215,7 +217,8 @@ LoadWindowAsync(int64_t segment_id,
                     finalization_executor_provider,
                 int8_t executor_priority,
                 folly::CancellationToken cancellation_token,
-                std::shared_ptr<WindowFailureState> failure_state) {
+                std::shared_ptr<WindowFailureState> failure_state,
+                std::optional<WindowLoadResult>& result_slot) {
     try {
         CheckCancellationToken(
             cancellation_token, segment_id, "AsyncLoadPipeline::admission");
@@ -236,14 +239,15 @@ LoadWindowAsync(int64_t segment_id,
                                          : folly::Executor::KeepAlive<>{};
         if (!finalization_executor) {
             (void)lease;
-            co_return FinalizeWindow(segment_id,
-                                     cancellation_token,
-                                     std::move(window),
-                                     *finalize_cell,
-                                     std::move(batches_result));
+            result_slot = FinalizeWindow(segment_id,
+                                         cancellation_token,
+                                         std::move(window),
+                                         *finalize_cell,
+                                         std::move(batches_result));
+            co_return;
         }
 
-        co_return co_await folly::coro::co_withExecutor(
+        result_slot = co_await folly::coro::co_withExecutor(
             WithExecutorPriority(std::move(finalization_executor),
                                  executor_priority),
             FinalizeWindowAsync(segment_id,
@@ -254,36 +258,9 @@ LoadWindowAsync(int64_t segment_id,
                                 std::move(batches_result),
                                 failure_state));
     } catch (...) {
-        failure_state->RecordAndCancel(std::current_exception());
-        throw;
-    }
-}
-
-folly::coro::Task<void>
-LoadWindowAndStoreResultAsync(
-    int64_t segment_id,
-    std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
-    AsyncReadWindow window,
-    std::shared_ptr<CellFinalizeFunc> finalize_cell,
-    storage::TransientBudgetLease lease,
-    std::function<folly::Executor::KeepAlive<>()>
-        finalization_executor_provider,
-    int8_t executor_priority,
-    folly::CancellationToken cancellation_token,
-    std::shared_ptr<WindowFailureState> failure_state,
-    std::optional<WindowLoadResult>* result) {
-    try {
-        *result =
-            co_await LoadWindowAsync(segment_id,
-                                     std::move(chunk_reader),
-                                     std::move(window),
-                                     std::move(finalize_cell),
-                                     std::move(lease),
-                                     std::move(finalization_executor_provider),
-                                     executor_priority,
-                                     std::move(cancellation_token),
-                                     failure_state);
-    } catch (...) {
+        // AsyncScope tasks must consume exceptions. Record the failure first
+        // so any lease still owned by this frame is released after cancellation
+        // becomes visible.
         failure_state->RecordAndCancel(std::current_exception());
     }
     co_return;
@@ -350,6 +327,8 @@ LoadCellsAsyncImpl(
     auto window_cancellation_token = folly::cancellation_token_merge(
         cancellation_token, window_failure_state->GetCancellationToken());
     auto request_count = cells.size();
+    // Slots have stable addresses and outlive every AsyncScope task. Each task
+    // exclusively writes one slot.
     std::vector<std::optional<WindowLoadResult>> window_results(windows.size());
     folly::coro::AsyncScope scope;
     const bool debug_logging_enabled = VLOG_IS_ON(GLOG_DEBUG);
@@ -388,18 +367,18 @@ LoadCellsAsyncImpl(
                                    "AsyncLoadPipeline::admission");
             scope.add(folly::coro::co_withCancellation(
                 window_cancellation_token,
-                folly::coro::co_withExecutor(work_executor.copy(),
-                                             LoadWindowAndStoreResultAsync(
-                                                 segment_id,
-                                                 chunk_reader,
-                                                 std::move(windows[i]),
-                                                 shared_finalizer,
-                                                 std::move(lease),
-                                                 finalization_executor_provider,
-                                                 executor_priority,
-                                                 window_cancellation_token,
-                                                 window_failure_state,
-                                                 &window_results[i]))));
+                folly::coro::co_withExecutor(
+                    work_executor.copy(),
+                    LoadWindowAsync(segment_id,
+                                    chunk_reader,
+                                    std::move(windows[i]),
+                                    shared_finalizer,
+                                    std::move(lease),
+                                    finalization_executor_provider,
+                                    executor_priority,
+                                    window_cancellation_token,
+                                    window_failure_state,
+                                    window_results[i]))));
         }
     } catch (...) {
         window_failure_state->RecordAndCancel(std::current_exception());
