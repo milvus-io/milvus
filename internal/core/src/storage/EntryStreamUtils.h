@@ -22,7 +22,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
-#include <limits>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -31,6 +30,7 @@
 
 #include "common/Common.h"
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 #include "folly/CancellationToken.h"
 #include "folly/OperationCancelled.h"
 #include "folly/coro/Promise.h"
@@ -501,17 +501,6 @@ TransientBudgetLease::Release() {
     budget_ = nullptr;
     bytes_ = 0;
     budget->Release(bytes);
-}
-
-inline size_t
-SaturatingMultiply(size_t value, size_t multiplier) {
-    if (value == 0 || multiplier == 0) {
-        return 0;
-    }
-    if (value > std::numeric_limits<size_t>::max() / multiplier) {
-        return std::numeric_limits<size_t>::max();
-    }
-    return value * multiplier;
 }
 
 inline size_t

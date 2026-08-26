@@ -19,7 +19,6 @@
 #include <cstddef>
 #include <exception>
 #include <future>
-#include <limits>
 #include <memory>
 #include <numeric>
 #include <string>
@@ -30,6 +29,7 @@
 #include "common/Channel.h"
 #include "common/Common.h"
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "folly/ScopeGuard.h"
 #include "glog/logging.h"
@@ -371,14 +371,8 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
         }
         current.rg_count += spec.rg_count;
         current.batch_loaded_memory_bytes += spec.memory_size;
-        if (cell_loading_overhead_bytes >
-            std::numeric_limits<size_t>::max() -
-                current.batch_loading_overhead_bytes) {
-            current.batch_loading_overhead_bytes =
-                std::numeric_limits<size_t>::max();
-        } else {
-            current.batch_loading_overhead_bytes += cell_loading_overhead_bytes;
-        }
+        current.batch_loading_overhead_bytes = SaturatingAdd(
+            current.batch_loading_overhead_bytes, cell_loading_overhead_bytes);
         current.cells.push_back(spec);
     }
     if (!current.cells.empty()) {

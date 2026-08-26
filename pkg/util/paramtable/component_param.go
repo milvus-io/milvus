@@ -5361,7 +5361,7 @@ user-task-polling:
 
 	p.StorageV2EnableAsyncLoad = ParamItem{
 		Key:          "queryNode.segcore.storageV2.enableAsyncLoad",
-		Version:      "3.0.0",
+		Version:      "3.0.1",
 		DefaultValue: "false",
 		Doc:          "Temporary rollout switch for async storage v2 field-data loading. Existing translators keep the mode captured at construction.",
 		Export:       false,

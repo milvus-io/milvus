@@ -89,6 +89,25 @@ TEST(Util_Common, MutableFieldDataRowValidData) {
     EXPECT_TRUE(vector_field.vectors().valid_data(0));
 }
 
+TEST(Util_Common, SaturatingAddReturnsExactSum) {
+    EXPECT_EQ(milvus::SaturatingAdd(uint32_t{40}, uint32_t{2}), uint32_t{42});
+}
+
+TEST(Util_Common, SaturatingAddClampsOnOverflow) {
+    constexpr auto max = std::numeric_limits<uint64_t>::max();
+    EXPECT_EQ(milvus::SaturatingAdd(max - 1, uint64_t{2}), max);
+}
+
+TEST(Util_Common, SaturatingMultiplyReturnsExactProduct) {
+    EXPECT_EQ(milvus::SaturatingMultiply(uint32_t{6}, uint32_t{7}),
+              uint32_t{42});
+}
+
+TEST(Util_Common, SaturatingMultiplyClampsOnOverflow) {
+    constexpr auto max = std::numeric_limits<uint64_t>::max();
+    EXPECT_EQ(milvus::SaturatingMultiply(max / 2 + 1, uint64_t{2}), max);
+}
+
 TEST(SimilarityCorelation, Naive) {
     ASSERT_TRUE(milvus::PositivelyRelated(knowhere::metric::IP));
     ASSERT_TRUE(milvus::PositivelyRelated(knowhere::metric::COSINE));
