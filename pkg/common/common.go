@@ -703,7 +703,7 @@ func ValidateRLSEnabledNotAltered(properties []*commonpb.KeyValuePair, deleteKey
 // IsRLSEnabled extracts rls.enabled from collection properties.
 // Returns false if not set.
 func IsRLSEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
-	value, ok := KeyValuePairs(kvs).ToMap()[RLSEnabledKey]
+	value, ok := getProperty(kvs, RLSEnabledKey)
 	if !ok {
 		return false, nil
 	}
@@ -717,7 +717,7 @@ func IsRLSEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
 // IsRLSForce extracts rls.force from collection properties.
 // Returns false if not set.
 func IsRLSForce(kvs ...*commonpb.KeyValuePair) (bool, error) {
-	value, ok := KeyValuePairs(kvs).ToMap()[RLSForceKey]
+	value, ok := getProperty(kvs, RLSForceKey)
 	if !ok {
 		return false, nil
 	}
@@ -726,6 +726,18 @@ func IsRLSForce(kvs ...*commonpb.KeyValuePair) (bool, error) {
 		return false, merr.WrapErrParameterInvalidMsg("invalid %s value %q", RLSForceKey, value)
 	}
 	return force, nil
+}
+
+func getProperty(kvs []*commonpb.KeyValuePair, key string) (string, bool) {
+	var value string
+	found := false
+	for _, kv := range kvs {
+		if kv.GetKey() == key {
+			value = kv.GetValue()
+			found = true
+		}
+	}
+	return value, found
 }
 
 // ValidateRLSProperties validates collection-level RLS properties.

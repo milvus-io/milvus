@@ -718,6 +718,15 @@ func TestRLSEnabled(t *testing.T) {
 		assert.True(t, enabled)
 	})
 
+	t.Run("uses the last duplicate value", func(t *testing.T) {
+		enabled, err := IsRLSEnabled(
+			&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "false"},
+			&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "true"},
+		)
+		assert.NoError(t, err)
+		assert.True(t, enabled)
+	})
+
 	t.Run("defaults to false", func(t *testing.T) {
 		enabled, err := IsRLSEnabled(&commonpb.KeyValuePair{Key: "other.key", Value: "true"})
 		assert.NoError(t, err)

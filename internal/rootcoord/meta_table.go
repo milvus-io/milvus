@@ -2584,19 +2584,7 @@ func (mt *MetaTable) resolveRLSCollection(ctx context.Context, dbName string, co
 	return collection, nil
 }
 
-func (mt *MetaTable) reloadCollectionRLSMetadata(ctx context.Context, collection *model.Collection) error {
-	if collection == nil {
-		return nil
-	}
-	enabled, err := common.IsRLSEnabled(collection.Properties...)
-	if err != nil {
-		return merr.WrapErrDataIntegrity(err, "invalid RLS properties for collection %d", collection.CollectionID)
-	}
-	if !enabled {
-		collection.RLSPolicies = nil
-		collection.RLSPrincipals = nil
-		return nil
-	}
+func (mt *MetaTable) reloadEnabledCollectionRLSMetadata(ctx context.Context, collection *model.Collection) error {
 	policies, err := mt.catalog.ListRLSPolicies(ctx, collection.CollectionID)
 	if err != nil {
 		return merr.Wrapf(err, "failed to reload RLS policies for collection %d", collection.CollectionID)
@@ -2624,15 +2612,32 @@ func (mt *MetaTable) reloadCollectionRLSMetadata(ctx context.Context, collection
 }
 
 func (mt *MetaTable) reloadCollectionsRLSMetadata(ctx context.Context, collections []*model.Collection) error {
+	enabledCollections := make([]*model.Collection, 0)
+	for _, collection := range collections {
+		if collection == nil {
+			continue
+		}
+		enabled, err := common.IsRLSEnabled(collection.Properties...)
+		if err != nil {
+			return merr.WrapErrDataIntegrity(err, "invalid RLS properties for collection %d", collection.CollectionID)
+		}
+		if !enabled {
+			collection.RLSPolicies = nil
+			collection.RLSPrincipals = nil
+			continue
+		}
+		enabledCollections = append(enabledCollections, collection)
+	}
+
 	if ctx == nil {
 		ctx = context.TODO()
 	}
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.SetLimit(rlsRecoveryConcurrency)
-	for _, collection := range collections {
+	for _, collection := range enabledCollections {
 		collection := collection
 		group.Go(func() error {
-			return mt.reloadCollectionRLSMetadata(groupCtx, collection)
+			return mt.reloadEnabledCollectionRLSMetadata(groupCtx, collection)
 		})
 	}
 	return group.Wait()

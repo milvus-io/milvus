@@ -258,7 +258,7 @@ func (mt *MetaTable) DeleteRLSPrincipalTags(ctx context.Context, req *rlsutil.De
 	return principal.CollectionID, nil
 }
 
-func TestReloadCollectionRLSMetadataUsesCollectionIdentity(t *testing.T) {
+func TestReloadEnabledCollectionRLSMetadataUsesCollectionIdentity(t *testing.T) {
 	catalog := mocks.NewRootCoordCatalog(t)
 	meta := &MetaTable{catalog: catalog}
 	collection := &model.Collection{
@@ -276,14 +276,14 @@ func TestReloadCollectionRLSMetadataUsesCollectionIdentity(t *testing.T) {
 		{DBID: 10, CollectionID: 20, PrincipalName: "alice"},
 	}, nil).Once()
 
-	require.NoError(t, meta.reloadCollectionRLSMetadata(context.Background(), collection))
+	require.NoError(t, meta.reloadEnabledCollectionRLSMetadata(context.Background(), collection))
 	require.Len(t, collection.RLSPolicies, 1)
 	require.Equal(t, int64(11), collection.RLSPolicies[0].DBID)
 	require.Len(t, collection.RLSPrincipals, 1)
 	require.Equal(t, int64(11), collection.RLSPrincipals[0].DBID)
 }
 
-func TestReloadCollectionRLSMetadataSkipsDisabledCollection(t *testing.T) {
+func TestReloadCollectionsRLSMetadataSkipsDisabledCollection(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		properties []*commonpb.KeyValuePair
@@ -308,14 +308,14 @@ func TestReloadCollectionRLSMetadataSkipsDisabledCollection(t *testing.T) {
 				},
 			}
 
-			require.NoError(t, meta.reloadCollectionRLSMetadata(context.Background(), collection))
+			require.NoError(t, meta.reloadCollectionsRLSMetadata(context.Background(), []*model.Collection{collection}))
 			require.Empty(t, collection.RLSPolicies)
 			require.Empty(t, collection.RLSPrincipals)
 		})
 	}
 }
 
-func TestReloadCollectionRLSMetadataRejectsInvalidProperty(t *testing.T) {
+func TestReloadCollectionsRLSMetadataRejectsInvalidProperty(t *testing.T) {
 	catalog := mocks.NewRootCoordCatalog(t)
 	meta := &MetaTable{catalog: catalog}
 	collection := &model.Collection{
@@ -325,7 +325,7 @@ func TestReloadCollectionRLSMetadataRejectsInvalidProperty(t *testing.T) {
 		},
 	}
 
-	err := meta.reloadCollectionRLSMetadata(context.Background(), collection)
+	err := meta.reloadCollectionsRLSMetadata(context.Background(), []*model.Collection{collection})
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 }
 
