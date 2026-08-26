@@ -1,10 +1,11 @@
 use tantivy::tokenizer::{BoxTokenStream, TextAnalyzer, Token, TokenStream, Tokenizer};
 
-use crate::analyzer::char_filter::{BoxCharFilter, FilteredText};
+use crate::analyzer::char_filter::{BoxCharFilter, FilteredText, OffsetMappingMode};
 
 pub struct CharFilterTokenizer {
     char_filters: Vec<BoxCharFilter>,
     inner: TextAnalyzer,
+    offset_mode: OffsetMappingMode,
     filtered: FilteredText,
 }
 
@@ -13,24 +14,31 @@ impl Clone for CharFilterTokenizer {
         CharFilterTokenizer {
             char_filters: self.char_filters.clone(),
             inner: self.inner.clone(),
-            filtered: FilteredText::default(),
+            offset_mode: self.offset_mode,
+            filtered: FilteredText::with_offset_mode("", self.offset_mode),
         }
     }
 }
 
 impl CharFilterTokenizer {
-    pub(crate) fn new(char_filters: Vec<BoxCharFilter>, inner: TextAnalyzer) -> Self {
+    pub(crate) fn new(
+        char_filters: Vec<BoxCharFilter>,
+        inner: TextAnalyzer,
+        offset_mode: OffsetMappingMode,
+    ) -> Self {
         CharFilterTokenizer {
             char_filters,
             inner,
-            filtered: FilteredText::default(),
+            offset_mode,
+            filtered: FilteredText::with_offset_mode("", offset_mode),
         }
     }
 
     fn apply_char_filters(&self, text: &str) -> FilteredText {
-        self.char_filters
-            .iter()
-            .fold(FilteredText::new(text), |input, filter| filter.apply(input))
+        self.char_filters.iter().fold(
+            FilteredText::with_offset_mode(text, self.offset_mode),
+            |input, filter| filter.apply(input),
+        )
     }
 }
 
@@ -59,8 +67,9 @@ impl TokenStream for CharFilterTokenStream<'_> {
         }
 
         let token = self.tail.token_mut();
-        token.offset_from = self.filtered.correct_offset(token.offset_from);
-        token.offset_to = self.filtered.correct_offset(token.offset_to);
+        (token.offset_from, token.offset_to) = self
+            .filtered
+            .correct_offsets(token.offset_from, token.offset_to);
         true
     }
 
@@ -84,7 +93,7 @@ mod tests {
     use tantivy::tokenizer::{TextAnalyzer, Token, TokenStream, Tokenizer};
 
     use super::CharFilterTokenizer;
-    use crate::analyzer::char_filter::{build_char_filters, BoxCharFilter};
+    use crate::analyzer::char_filter::{build_char_filters, BoxCharFilter, OffsetMappingMode};
 
     #[derive(Clone)]
     struct CountingTokenizer {
@@ -148,6 +157,7 @@ mod tests {
             TextAnalyzer::builder(tantivy::tokenizer::SimpleTokenizer::default())
                 .dynamic()
                 .build(),
+            OffsetMappingMode::SourceSpan,
         );
         let mut stream = tokenizer.token_stream("a&b");
 
@@ -171,8 +181,11 @@ mod tests {
         let inner = CountingTokenizer {
             advance_count: advance_count.clone(),
         };
-        let mut tokenizer =
-            CharFilterTokenizer::new(filters, TextAnalyzer::builder(inner).dynamic().build());
+        let mut tokenizer = CharFilterTokenizer::new(
+            filters,
+            TextAnalyzer::builder(inner).dynamic().build(),
+            OffsetMappingMode::SourceSpan,
+        );
 
         let mut stream = tokenizer.token_stream("a&b");
         assert_eq!(advance_count.load(Ordering::SeqCst), 0);

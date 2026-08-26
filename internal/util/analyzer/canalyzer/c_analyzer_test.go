@@ -115,6 +115,30 @@ func TestAnalyzer(t *testing.T) {
 		token := tokenStream.DetailedToken()
 		assert.Equal(t, "x", token.GetToken())
 		assert.Equal(t, int64(0), token.GetStartOffset())
+		assert.Equal(t, int64(2), token.GetEndOffset())
+
+		require.True(t, tokenStream.Advance())
+		token = tokenStream.DetailedToken()
+		assert.Equal(t, "y", token.GetToken())
+		assert.Equal(t, int64(0), token.GetStartOffset())
+		assert.Equal(t, int64(2), token.GetEndOffset())
+		assert.False(t, tokenStream.Advance())
+	}
+
+	// preserve character boundaries when boundary offset mode is requested.
+	{
+		m := `{"char_filter": [{"type": "mapping", "mappings": ["ab=>x y"]}], "char_filter_offset_mode": "boundary", "tokenizer": "standard"}`
+		analyzer, err := NewAnalyzer(m, "")
+		require.NoError(t, err)
+		defer analyzer.Destroy()
+
+		tokenStream := analyzer.NewTokenStream("ab")
+		defer tokenStream.Destroy()
+
+		require.True(t, tokenStream.Advance())
+		token := tokenStream.DetailedToken()
+		assert.Equal(t, "x", token.GetToken())
+		assert.Equal(t, int64(0), token.GetStartOffset())
 		assert.Equal(t, int64(1), token.GetEndOffset())
 
 		require.True(t, tokenStream.Advance())

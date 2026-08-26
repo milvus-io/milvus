@@ -1,10 +1,16 @@
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 use serde_json as json;
 
 use super::char_filter::{BoxCharFilter, CharFilter, FilteredText};
 use crate::error::{Result, TantivyBindingError};
 
+/// Rewrites tokenizer input with greedy longest-match `source => target` rules.
+///
+/// The filter scans its input once from left to right. Replacement output is
+/// not processed again by this filter, but can be processed by a later char
+/// filter in the analyzer chain. `FilteredText` composes the replacements with
+/// existing offset corrections.
 #[derive(Clone)]
 pub(crate) struct MappingCharFilter {
     mappings: HashMap<char, Vec<(String, String)>>,
@@ -26,14 +32,25 @@ impl MappingCharFilter {
                 )
             })?;
 
-        let mut parsed = Vec::with_capacity(mappings.len());
+        let mut parsed = HashMap::with_capacity(mappings.len());
         for mapping in mappings {
             let mapping = mapping.as_str().ok_or_else(|| {
                 TantivyBindingError::InvalidArgument(
                     "mapping char_filter mapping item must be string".to_string(),
                 )
             })?;
-            parsed.push(parse_mapping(mapping)?);
+            let (source, target) = parse_mapping(mapping)?;
+            match parsed.entry(source) {
+                Entry::Vacant(entry) => {
+                    entry.insert(target);
+                }
+                Entry::Occupied(entry) => {
+                    return Err(TantivyBindingError::InvalidArgument(format!(
+                        "mapping char_filter source must be unique: {:?}",
+                        entry.key()
+                    )));
+                }
+            }
         }
 
         let mut mappings: HashMap<char, Vec<(String, String)>> = HashMap::new();
@@ -83,20 +100,15 @@ impl CharFilter for MappingCharFilter {
 }
 
 fn parse_mapping(mapping: &str) -> Result<(String, String)> {
-    let separator = find_unescaped_separator(mapping).ok_or_else(|| {
+    let separator = find_last_unescaped_separator(mapping).ok_or_else(|| {
         TantivyBindingError::InvalidArgument(format!(
             "invalid mapping char_filter mapping: {}",
             mapping
         ))
     })?;
 
-    let mut source = &mapping[..separator];
-    let mut target = &mapping[(separator + 2)..];
-    // Preserve one-sided whitespace so rules can map to or from a space.
-    if has_separator_padding(source, target) {
-        source = source.trim_end();
-        target = target.trim_start();
-    }
+    let source = trim_mapping_side(&mapping[..separator]);
+    let target = trim_mapping_side(&mapping[(separator + 2)..]);
 
     let source = unescape_mapping_side(source)?;
     let target = unescape_mapping_side(target)?;
@@ -109,8 +121,9 @@ fn parse_mapping(mapping: &str) -> Result<(String, String)> {
     Ok((source, target))
 }
 
-fn find_unescaped_separator(mapping: &str) -> Option<usize> {
+fn find_last_unescaped_separator(mapping: &str) -> Option<usize> {
     let mut escaped = false;
+    let mut separator = None;
     for (offset, ch) in mapping.char_indices() {
         if escaped {
             escaped = false;
@@ -121,10 +134,10 @@ fn find_unescaped_separator(mapping: &str) -> Option<usize> {
             continue;
         }
         if mapping[offset..].starts_with("=>") {
-            return Some(offset);
+            separator = Some(offset);
         }
     }
-    None
+    separator
 }
 
 fn unescape_mapping_side(input: &str) -> Result<String> {
@@ -142,18 +155,60 @@ fn unescape_mapping_side(input: &str) -> Result<String> {
             )
         })?;
         match escaped {
+            '\\' => output.push('\\'),
             'n' => output.push('\n'),
             'r' => output.push('\r'),
             't' => output.push('\t'),
+            'b' => output.push('\u{0008}'),
+            'f' => output.push('\u{000c}'),
+            'u' => output.push(parse_unicode_escape(&mut chars)?),
             other => output.push(other),
         }
     }
     Ok(output)
 }
 
-fn has_separator_padding(source: &str, target: &str) -> bool {
-    matches!(source.chars().next_back(), Some(ch) if ch.is_whitespace())
-        && matches!(target.chars().next(), Some(ch) if ch.is_whitespace())
+// Elasticsearch trims characters up to U+0020 before parsing escapes.
+fn trim_mapping_side(input: &str) -> &str {
+    input.trim_matches(|ch| ch <= '\u{0020}')
+}
+
+fn parse_unicode_escape(chars: &mut std::str::Chars<'_>) -> Result<char> {
+    let first = parse_unicode_code_unit(chars)?;
+    let code_point = if (0xd800..=0xdbff).contains(&first) {
+        if chars.next() != Some('\\') || chars.next() != Some('u') {
+            return Err(invalid_unicode_escape());
+        }
+        let second = parse_unicode_code_unit(chars)?;
+        if !(0xdc00..=0xdfff).contains(&second) {
+            return Err(invalid_unicode_escape());
+        }
+        0x10000 + (((first as u32 - 0xd800) << 10) | (second as u32 - 0xdc00))
+    } else if (0xdc00..=0xdfff).contains(&first) {
+        return Err(invalid_unicode_escape());
+    } else {
+        first as u32
+    };
+
+    char::from_u32(code_point).ok_or_else(invalid_unicode_escape)
+}
+
+fn parse_unicode_code_unit(chars: &mut std::str::Chars<'_>) -> Result<u16> {
+    let mut value = 0u16;
+    for _ in 0..4 {
+        let digit = chars
+            .next()
+            .and_then(|ch| ch.to_digit(16))
+            .ok_or_else(invalid_unicode_escape)?;
+        value = (value << 4) | digit as u16;
+    }
+    Ok(value)
+}
+
+fn invalid_unicode_escape() -> TantivyBindingError {
+    TantivyBindingError::InvalidArgument(
+        "mapping char_filter contains an invalid unicode escape".to_string(),
+    )
 }
 
 #[cfg(test)]
@@ -174,11 +229,10 @@ mod tests {
         let output = filter.apply(FilteredText::new("a&b--c"));
 
         assert_eq!(output.text, "aandb-c");
-        assert_eq!(output.correct_offset(0), 0);
-        assert_eq!(output.correct_offset(1), 1);
-        assert_eq!(output.correct_offset(4), 2);
-        assert_eq!(output.correct_offset(6), 5);
-        assert_eq!(output.correct_offset(7), 6);
+        assert_eq!(output.correct_offsets(1, 4), (1, 2));
+        assert_eq!(output.correct_offsets(4, 5), (2, 3));
+        assert_eq!(output.correct_offsets(5, 6), (3, 5));
+        assert_eq!(output.correct_offsets(0, 7), (0, 6));
     }
 
     #[test]
@@ -192,8 +246,7 @@ mod tests {
         let output = filter.apply(FilteredText::new("aa"));
 
         assert_eq!(output.text, "y");
-        assert_eq!(output.correct_offset(0), 0);
-        assert_eq!(output.correct_offset(1), 2);
+        assert_eq!(output.correct_offsets(0, 1), (0, 2));
     }
 
     #[test]
@@ -220,16 +273,16 @@ mod tests {
         let output = filter.apply(FilteredText::new("中-文"));
 
         assert_eq!(output.text, "中文");
-        assert_eq!(output.correct_offset(0), 0);
-        assert_eq!(output.correct_offset(3), 4);
-        assert_eq!(output.correct_offset(6), 7);
+        assert_eq!(output.correct_offsets(0, 3), (0, 3));
+        assert_eq!(output.correct_offsets(3, 6), (4, 7));
+        assert_eq!(output.correct_offsets(0, 6), (0, 7));
     }
 
     #[test]
-    fn test_mapping_char_filter_preserves_whitespace() {
+    fn test_mapping_char_filter_uses_unicode_escape_for_whitespace() {
         let params = r#"{
             "type": "mapping",
-            "mappings": ["-=> ", " =>_"]
+            "mappings": ["-=>\\u0020", "\\u0020=>_"]
         }"#;
         let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
         let filter = MappingCharFilter::from_json(&params).unwrap();
@@ -242,13 +295,75 @@ mod tests {
     fn test_mapping_char_filter_supports_escaped_whitespace_and_separator() {
         let params = r#"{
             "type": "mapping",
-            "mappings": ["\\t=>\\ ", "\\=\\>=>arrow"]
+            "mappings": ["\\t=>\\u0020", "\\=\\>=>arrow"]
         }"#;
         let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
         let filter = MappingCharFilter::from_json(&params).unwrap();
         let output = filter.apply(FilteredText::new("\t=>"));
 
         assert_eq!(output.text, " arrow");
+    }
+
+    #[test]
+    fn test_mapping_char_filter_uses_last_unescaped_separator() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["a=>b=>c"]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+        let filter = MappingCharFilter::from_json(&params).unwrap();
+        let output = filter.apply(FilteredText::new("a=>b"));
+
+        assert_eq!(output.text, "c");
+    }
+
+    #[test]
+    fn test_mapping_char_filter_rejects_duplicate_source() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["a=>x", "\\u0061=>y"]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+
+        assert!(MappingCharFilter::from_json(&params).is_err());
+    }
+
+    #[test]
+    fn test_mapping_char_filter_trims_each_mapping_side() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["a => b", "-=> "]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+        let filter = MappingCharFilter::from_json(&params).unwrap();
+        let output = filter.apply(FilteredText::new("a-"));
+
+        assert_eq!(output.text, "b");
+    }
+
+    #[test]
+    fn test_mapping_char_filter_supports_unicode_surrogate_pairs() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["\\u4e2d=>zhong", "\\ud83d\\ude00=>smile"]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+        let filter = MappingCharFilter::from_json(&params).unwrap();
+        let output = filter.apply(FilteredText::new("中😀"));
+
+        assert_eq!(output.text, "zhongsmile");
+    }
+
+    #[test]
+    fn test_mapping_char_filter_rejects_invalid_unicode_escape() {
+        for mapping in ["\\u123=>x", "\\ud83d=>x", "\\ud83d\\u0041=>x"] {
+            let params = json::json!({
+                "type": "mapping",
+                "mappings": [mapping]
+            });
+
+            assert!(MappingCharFilter::from_json(params.as_object().unwrap()).is_err());
+        }
     }
 
     #[test]

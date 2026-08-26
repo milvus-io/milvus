@@ -5,7 +5,7 @@ use tantivy::tokenizer::*;
 use super::options::{get_global_file_resource_helper, FileResourcePathHelper};
 use super::{
     build_in_analyzer::*,
-    char_filter::build_char_filters,
+    char_filter::{build_char_filters, OffsetMappingMode},
     filter::*,
     tokenizers::{get_builder_with_tokenizer, CharFilterTokenizer},
 };
@@ -79,6 +79,7 @@ impl<'a> AnalyzerBuilder<'a> {
             match key.as_str() {
                 "tokenizer" => {}
                 "char_filter" => {}
+                "char_filter_offset_mode" => {}
                 "filter" => {
                     // build with filter if filter param exist
                     builder = self.build_filter(builder, value)?;
@@ -126,9 +127,12 @@ impl<'a> AnalyzerBuilder<'a> {
         // build base build-in analyzer
         match self.params.get("type") {
             Some(type_) => {
-                if self.params.contains_key("char_filter") {
+                if self.params.contains_key("char_filter")
+                    || self.params.contains_key("char_filter_offset_mode")
+                {
                     return Err(TantivyBindingError::InvalidArgument(
-                        "char_filter cannot be used with build-in analyzer type".to_string(),
+                        "char_filter options cannot be used with build-in analyzer type"
+                            .to_string(),
                     ));
                 }
                 if !type_.is_string() {
@@ -162,12 +166,23 @@ impl<'a> AnalyzerBuilder<'a> {
             create_analyzer_by_json,
         )?;
 
+        if self.params.contains_key("char_filter_offset_mode")
+            && !self.params.contains_key("char_filter")
+        {
+            return Err(TantivyBindingError::InvalidArgument(
+                "char_filter_offset_mode requires char_filter".to_string(),
+            ));
+        }
+        let offset_mode = OffsetMappingMode::from_json(self.params.get("char_filter_offset_mode"))?;
         if let Some(char_filter_params) = self.params.get("char_filter") {
             let char_filters = build_char_filters(char_filter_params)?;
             if !char_filters.is_empty() {
-                builder =
-                    TextAnalyzer::builder(CharFilterTokenizer::new(char_filters, builder.build()))
-                        .dynamic();
+                builder = TextAnalyzer::builder(CharFilterTokenizer::new(
+                    char_filters,
+                    builder.build(),
+                    offset_mode,
+                ))
+                .dynamic();
             }
         }
 
@@ -303,6 +318,17 @@ mod tests {
 
         let analyzer = create_analyzer(params, "");
         assert!(analyzer.is_err());
+    }
+
+    #[test]
+    fn test_analyzer_rejects_unsupported_char_filter_offset_mode() {
+        let params = r#"{
+            "char_filter": [],
+            "char_filter_offset_mode": "unsupported",
+            "tokenizer": "standard"
+        }"#;
+
+        assert!(create_analyzer(params, "").is_err());
     }
 
     #[test]
