@@ -99,10 +99,6 @@ func registerDefaults() {
 		Path:    EventLogRouterPath,
 		Handler: eventlog.Handler(),
 	})
-	Register(&Handler{
-		Path:    StaticPath,
-		Handler: GetStaticHandler(),
-	})
 
 	if paramtable.Get().HTTPCfg.EnableWebUI.GetAsBool() {
 		RegisterWebUIHandler()
