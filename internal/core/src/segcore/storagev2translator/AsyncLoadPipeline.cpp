@@ -54,8 +54,7 @@ struct WindowCellResult {
 };
 
 using WindowLoadResult = std::vector<WindowCellResult>;
-using ChunkReadResult =
-    arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>;
+using RecordBatches = std::vector<std::shared_ptr<arrow::RecordBatch>>;
 
 class WindowFailureState {
  public:
@@ -136,18 +135,9 @@ FinalizeWindow(int64_t segment_id,
                const folly::CancellationToken& cancellation_token,
                AsyncReadWindow window,
                CellFinalizeFunc& finalize_cell,
-               ChunkReadResult batches_result) {
+               RecordBatches batches) {
     CheckCancellationToken(
         cancellation_token, segment_id, "AsyncLoadPipeline::read");
-    if (!batches_result.ok()) {
-        throw milvus_storage::ToSegcoreError(batches_result.status());
-    }
-
-    auto batches = std::move(batches_result).ValueOrDie();
-    if (batches.size() != window.chunk_indices.size()) {
-        throw milvus_storage::ToSegcoreError(arrow::Status::Invalid(
-            "async chunk reader returned an unexpected batch count"));
-    }
 
     WindowLoadResult results;
     results.reserve(window.cells.size());
@@ -158,8 +148,9 @@ FinalizeWindow(int64_t segment_id,
         const auto& cell = window.cells[i];
         auto rg_count = static_cast<size_t>(cell.rg_count);
         if (rg_count > batches.size() - batch_offset) {
-            throw milvus_storage::ToSegcoreError(arrow::Status::Invalid(
-                "async chunk reader returned fewer batches than requested"));
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "async chunk reader returned fewer batches than "
+                      "requested");
         }
 
         std::vector<std::shared_ptr<arrow::Table>> tables;
@@ -190,7 +181,7 @@ FinalizeWindowAsync(int64_t segment_id,
                     AsyncReadWindow window,
                     std::shared_ptr<CellFinalizeFunc> finalize_cell,
                     storage::TransientBudgetLease lease,
-                    ChunkReadResult batches_result,
+                    RecordBatches batches,
                     std::shared_ptr<WindowFailureState> failure_state) {
     try {
         (void)lease;
@@ -198,7 +189,7 @@ FinalizeWindowAsync(int64_t segment_id,
                                  cancellation_token,
                                  std::move(window),
                                  *finalize_cell,
-                                 std::move(batches_result));
+                                 std::move(batches));
     } catch (...) {
         // This frame owns the moved lease during finalization. Publish the
         // failure before unwinding releases it.
@@ -230,9 +221,11 @@ LoadWindowAsync(int64_t segment_id,
         if (!batches_result.ok()) {
             throw milvus_storage::ToSegcoreError(batches_result.status());
         }
-        if (batches_result.ValueOrDie().size() != window.chunk_indices.size()) {
-            throw milvus_storage::ToSegcoreError(arrow::Status::Invalid(
-                "async chunk reader returned an unexpected batch count"));
+        auto batches = std::move(batches_result).ValueOrDie();
+        if (batches.size() != window.chunk_indices.size()) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "async chunk reader returned an unexpected batch "
+                      "count");
         }
         auto finalization_executor = finalization_executor_provider
                                          ? finalization_executor_provider()
@@ -243,7 +236,7 @@ LoadWindowAsync(int64_t segment_id,
                                          cancellation_token,
                                          std::move(window),
                                          *finalize_cell,
-                                         std::move(batches_result));
+                                         std::move(batches));
             co_return;
         }
 
@@ -255,7 +248,7 @@ LoadWindowAsync(int64_t segment_id,
                                 std::move(window),
                                 std::move(finalize_cell),
                                 std::move(lease),
-                                std::move(batches_result),
+                                std::move(batches),
                                 failure_state));
     } catch (...) {
         // AsyncScope tasks must consume exceptions. Record the failure first
