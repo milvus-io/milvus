@@ -1619,7 +1619,7 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 	// meanwhile, generating Sha256Password depends on raw password and encrypted password will not cache.
 	credInfo, err := privilege.GetPrivilegeCache().GetCredentialInfo(ctx, username)
 	if err != nil {
-		mlog.Error(context.TODO(), "found no credential", mlog.String("username", username), mlog.Err(err))
+		mlog.Error(ctx, "found no credential", mlog.String("username", username), mlog.Err(err))
 		return false
 	}
 
@@ -1634,7 +1634,7 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 	// stored-credential format, the cost parameter and the "wrong password"
 	// versus "unusable hash" split cannot drift between the two.
 	if err := adminauth.VerifyStoredPassword(credInfo.EncryptedPassword, rawPwd); err != nil {
-		mlog.Error(context.TODO(), "Verify password failed", mlog.Err(err))
+		mlog.Error(ctx, "Verify password failed", mlog.Err(err))
 		return false
 	}
 

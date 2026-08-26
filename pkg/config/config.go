@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cast"
@@ -78,7 +79,10 @@ func Init(opts ...Option) (*Manager, error) {
 	return sourceManager, nil
 }
 
-var formattedKeys = typeutil.NewConcurrentMap[string, string]()
+var (
+	formattedKeys   = typeutil.NewConcurrentMap[string, string]()
+	formattedKeysMu sync.Mutex
+)
 
 func lowerKey(key string) string {
 	if strings.HasPrefix(key, NotFormatPrefix) {
@@ -111,8 +115,12 @@ func formatKey(key string) string {
 		return cached
 	}
 	result := normalizeKey(key)
-	// Racy against a concurrent Insert, and deliberately so: the bound is a
-	// backstop against caller-driven growth, not an exact capacity.
+	formattedKeysMu.Lock()
+	defer formattedKeysMu.Unlock()
+	// A concurrent miss may have populated this key while this goroutine waited.
+	if cached, ok := formattedKeys.Get(key); ok {
+		return cached
+	}
 	if formattedKeys.Len() < maxFormattedKeys {
 		formattedKeys.Insert(key, result)
 	}

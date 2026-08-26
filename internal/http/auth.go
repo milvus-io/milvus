@@ -17,10 +17,14 @@
 package http
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -35,9 +39,76 @@ func AdminAuthEnabled() bool {
 // cached credentials on (origin, realm), so it must stay stable across releases.
 const BasicAuthRealm = "milvus"
 
-// AdminAuthCheckedKey marks, in a gin context, that the gate already ran, so a
-// route carrying its own copy neither repeats the work nor counts it twice.
-const AdminAuthCheckedKey = "milvus-admin-auth-checked"
+type authenticatedAdminContextKey struct{}
+
+// AuthDecision is the complete result of one metrics-port authentication
+// check. Keeping the HTTP status, response code, metric result and authenticated
+// principal together prevents the net/http and Gin adapters from translating
+// the same outcome independently.
+type AuthDecision struct {
+	Status  int
+	Message string
+
+	code      int32
+	result    string
+	principal string
+}
+
+// Allowed reports whether the request may proceed.
+func (d AuthDecision) Allowed() bool {
+	return d.Status == http.StatusOK
+}
+
+// ErrorCode is the merr code emitted by the metrics-port JSON API.
+func (d AuthDecision) ErrorCode() int32 {
+	return d.code
+}
+
+// AuthenticatedRequest projects a successful root-auth decision into a typed
+// request context. Downstream in-process RPC handlers can trust this marker: it
+// cannot arrive over HTTP or gRPC, and it avoids copying the root password into
+// metadata merely to authenticate the next function call in the same process.
+func (d AuthDecision) AuthenticatedRequest(req *http.Request) *http.Request {
+	if !d.Allowed() || d.principal == "" {
+		return req
+	}
+	ctx := context.WithValue(req.Context(), authenticatedAdminContextKey{}, d.principal)
+	return req.WithContext(ctx)
+}
+
+// AuthenticatedAdminFromContext returns the management-plane principal that
+// was verified at the HTTP boundary, if one exists.
+func AuthenticatedAdminFromContext(ctx context.Context) (string, bool) {
+	username, ok := ctx.Value(authenticatedAdminContextKey{}).(string)
+	return username, ok && username != ""
+}
+
+func allowedAuthDecision(principal string) AuthDecision {
+	return AuthDecision{
+		Status:    http.StatusOK,
+		result:    metrics.AdminAuthAllowed,
+		principal: principal,
+	}
+}
+
+func rejectedAuthDecision(status int, message string) AuthDecision {
+	decision := AuthDecision{Status: status, Message: message}
+	switch status {
+	case http.StatusUnauthorized:
+		decision.code = merr.Code(merr.ErrNeedAuthenticate)
+		decision.result = metrics.AdminAuthUnauthenticated
+	case http.StatusForbidden:
+		decision.code = merr.Code(merr.ErrPrivilegeNotPermitted)
+		decision.result = metrics.AdminAuthForbidden
+	case http.StatusServiceUnavailable:
+		decision.code = merr.Code(merr.ErrServiceUnavailable)
+		decision.result = metrics.AdminAuthUnavailable
+	default:
+		decision.code = merr.Code(merr.ErrServiceUnavailable)
+		decision.result = metrics.AdminAuthError
+	}
+	return decision
+}
 
 const crossSiteRejection = "cross-site requests are not accepted on this endpoint; " +
 	"open it directly rather than following a link from another site"
@@ -105,21 +176,23 @@ func originHost(origin string) string {
 // on this port needs it once the gate is on, including the ones the data plane's
 // own rule authenticates. route is the registered route pattern, used as a
 // metric label and therefore never the raw request path.
-func CheckCrossSite(req *http.Request, route string, allowTopLevelNavigation bool) (int, string, bool) {
+func CheckCrossSite(req *http.Request, route string, allowTopLevelNavigation bool) AuthDecision {
 	if RejectCrossSite(req, allowTopLevelNavigation) {
 		metrics.AdminAuthTotal.WithLabelValues(route, metrics.AdminAuthCrossSite).Inc()
-		return http.StatusForbidden, crossSiteRejection, false
+		decision := rejectedAuthDecision(http.StatusForbidden, crossSiteRejection)
+		decision.result = metrics.AdminAuthCrossSite
+		return decision
 	}
-	return http.StatusOK, "", true
+	return allowedAuthDecision("")
 }
 
 // CheckAdminRequest is the whole root gate for one request: cross-site refusal,
 // then root authentication. Every surface carrying the gate goes through here,
 // so the net/http handlers and the proxy's gin routes cannot drift apart.
 // allowTopLevelNavigation is for document surfaces only; see Handler.AuthChallenge.
-func CheckAdminRequest(req *http.Request, route string, allowTopLevelNavigation bool) (int, string, bool) {
-	if status, msg, ok := CheckCrossSite(req, route, allowTopLevelNavigation); !ok {
-		return status, msg, ok
+func CheckAdminRequest(req *http.Request, route string, allowTopLevelNavigation bool) AuthDecision {
+	if decision := CheckCrossSite(req, route, allowTopLevelNavigation); !decision.Allowed() {
+		return decision
 	}
 	// Management endpoints act on process lifecycle and cluster-wide runtime
 	// state, so they are root-only rather than "any valid user": accepting a
@@ -127,23 +200,42 @@ func CheckAdminRequest(req *http.Request, route string, allowTopLevelNavigation 
 	// proxy's credential cache does not cache misses.
 	if err := CheckRootAuth(req.Context(), req, req.URL.Path); err != nil {
 		status := HTTPStatusFromPrivilegeError(err)
-		metrics.AdminAuthTotal.WithLabelValues(route, adminAuthResult(status)).Inc()
-		return status, err.Error(), false
+		decision := rejectedAuthDecision(status, err.Error())
+		metrics.AdminAuthTotal.WithLabelValues(route, decision.result).Inc()
+		return decision
 	}
 	metrics.AdminAuthTotal.WithLabelValues(route, metrics.AdminAuthAllowed).Inc()
-	return http.StatusOK, "", true
+	return allowedAuthDecision(util.UserRoot)
 }
 
-func adminAuthResult(status int) string {
-	switch status {
-	case http.StatusUnauthorized:
-		return metrics.AdminAuthUnauthenticated
-	case http.StatusForbidden:
-		return metrics.AdminAuthForbidden
-	case http.StatusServiceUnavailable:
-		return metrics.AdminAuthUnavailable
-	default:
-		return metrics.AdminAuthError
+// ApplyGinAuthDecision is the single Gin projection for both the management
+// gate and its cross-site-only data-plane branch.
+func ApplyGinAuthDecision(c *gin.Context, decision AuthDecision, challenge bool) bool {
+	if decision.Allowed() {
+		c.Request = decision.AuthenticatedRequest(c.Request)
+		return true
+	}
+	if challenge && decision.Status == http.StatusUnauthorized {
+		WriteBasicAuthChallenge(c.Writer)
+	}
+	c.AbortWithStatusJSON(decision.Status, gin.H{
+		HTTPReturnCode:    decision.ErrorCode(),
+		HTTPReturnMessage: decision.Message,
+	})
+	return false
+}
+
+// GinAdminAuthMiddleware applies the root gate without advancing the Gin
+// chain. That matches Gin's middleware loop and lets a route-level backstop
+// reuse a principal already verified by the parent group without a second
+// bcrypt comparison or metric increment.
+func GinAdminAuthMiddleware(challenge bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if _, ok := AuthenticatedAdminFromContext(c.Request.Context()); ok {
+			return
+		}
+		ApplyGinAuthDecision(c,
+			CheckAdminRequest(c.Request, c.FullPath(), false), challenge)
 	}
 }
 
@@ -153,31 +245,18 @@ func adminAuthResult(status int) string {
 func wrapAdminAuth(next http.Handler, route string, document bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if AdminAuthEnabled() {
-			status, msg, ok := CheckAdminRequest(req, route, document)
-			if !ok {
-				if document && status == http.StatusUnauthorized {
+			decision := CheckAdminRequest(req, route, document)
+			if !decision.Allowed() {
+				if document && decision.Status == http.StatusUnauthorized {
 					WriteBasicAuthChallenge(w)
 				}
-				writeJSONError(w, status, msg)
+				writeJSONError(w, decision.Status, decision.Message)
 				return
 			}
+			req = decision.AuthenticatedRequest(req)
 		}
 		next.ServeHTTP(w, req)
 	})
-}
-
-// AuthErrorCode maps a gate status onto the merr code clients already parse out
-// of this port's error bodies, so a route's reply keeps one shape whether the
-// gate answered it or the data plane's own rule did.
-func AuthErrorCode(status int) int32 {
-	switch status {
-	case http.StatusUnauthorized:
-		return merr.Code(merr.ErrNeedAuthenticate)
-	case http.StatusForbidden:
-		return merr.Code(merr.ErrPrivilegeNotPermitted)
-	default:
-		return merr.Code(merr.ErrServiceUnavailable)
-	}
 }
 
 // WriteBasicAuthChallenge tells a browser to prompt for credentials; without it

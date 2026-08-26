@@ -1636,7 +1636,10 @@ func runDataPlaneAuthMiddleware(t *testing.T, setAuth func(*http.Request)) *http
 // collections is the thing the cross-site check then has to defend.
 func TestChallengeOnConsoleRoutesOnly(t *testing.T) {
 	paramtable.Get().Save(proxy.Params.CommonCfg.AdminAuthEnabled.Key, "true")
-	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key) })
+	t.Cleanup(func() {
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key)
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+	})
 
 	w := requestMetricsPort(t, http.MethodGet, mhttp.ClusterConfigsPath, nil)
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
@@ -1647,6 +1650,23 @@ func TestChallengeOnConsoleRoutesOnly(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 	assert.Empty(t, w.Header().Get("WWW-Authenticate"),
 		"a browser must not be taught to hold root's credential for the data plane")
+
+	// The authorization-enabled branch uses the legacy data-plane verifier.
+	// A syntactically valid Basic header used to make ParseUsernamePassword set
+	// the challenge as a parsing side effect, even though this route must never
+	// teach the browser to retain credentials.
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	passwordMock := mockey.Mock(proxy.PasswordVerify).Return(false).Build()
+	defer passwordMock.UnPatch()
+	apiKeyMock := mockey.Mock(proxy.VerifyAPIKey).Return("", errors.New("invalid API key")).Build()
+	defer apiKeyMock.UnPatch()
+
+	w = runDataPlaneAuthMiddleware(t, func(req *http.Request) {
+		req.SetBasicAuth("alice", "wrong-password")
+	})
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Empty(t, w.Header().Get("WWW-Authenticate"),
+		"wrong Basic credentials on the data plane must not trigger a browser challenge")
 }
 
 // /api/v1/health predates /healthz and is still wired into load balancers.

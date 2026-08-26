@@ -146,8 +146,6 @@ func ParseUsernamePassword(c *gin.Context) (string, string, bool) {
 			username = token[:i]
 			password = token[i+1:]
 		}
-	} else {
-		c.Header("WWW-Authenticate", `Basic realm="restricted", charset="UTF-8"`)
 	}
 	return username, password, username != "" && password != ""
 }

@@ -126,42 +126,6 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 	return server, err
 }
 
-// adminAuthMiddleware applies the root gate to routes served by the proxy's Gin
-// tree, sharing its implementation with the net/http handlers registered
-// through mhttp.Register so the two cannot drift apart.
-//
-// challenge belongs to the console routes only: the console has no login form
-// of its own, so without WWW-Authenticate the browser takes the 401 silently
-// and every panel renders an error the operator cannot clear. The data-plane
-// routes must not send it, or the browser starts holding root's credential for
-// paths that drop collections.
-func adminAuthMiddleware(challenge bool) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		status, msg, ok := mhttp.CheckAdminRequest(c.Request, c.FullPath(), false)
-		if ok {
-			// Tell the routes that carry their own copy of this check that it
-			// has already run, so they neither repeat the work nor count the
-			// same decision twice.
-			c.Set(mhttp.AdminAuthCheckedKey, true)
-			return
-		}
-		if challenge && status == http.StatusUnauthorized {
-			mhttp.WriteBasicAuthChallenge(c.Writer)
-		}
-		abortWithAuthError(c, status, msg)
-	}
-}
-
-// abortWithAuthError keeps the gate's reply the same shape as the data plane's
-// own 401 on the same route (see authenticate). A caller parsing one of them
-// should not have to know which rule ran.
-func abortWithAuthError(c *gin.Context, status int, msg string) {
-	c.AbortWithStatusJSON(status, gin.H{
-		mhttp.HTTPReturnCode:    mhttp.AuthErrorCode(status),
-		mhttp.HTTPReturnMessage: msg,
-	})
-}
-
 // metricsPortAuthMiddleware is the authentication rule for everything the
 // proxy serves on the metrics port under /api/v1.
 //
@@ -182,8 +146,8 @@ func abortWithAuthError(c *gin.Context, status int, msg string) {
 // While the gate is off, behavior is exactly what it was before it existed:
 // the legacy rule, applied only when authorizationEnabled is set.
 func metricsPortAuthMiddleware() gin.HandlerFunc {
-	consoleAuth := adminAuthMiddleware(true)
-	dataPlaneAuth := adminAuthMiddleware(false)
+	consoleAuth := mhttp.GinAdminAuthMiddleware(true)
+	dataPlaneAuth := mhttp.GinAdminAuthMiddleware(false)
 	legacyEnabled := proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool()
 	return func(c *gin.Context) {
 		gateOn := mhttp.AdminAuthEnabled()
@@ -195,7 +159,7 @@ func metricsPortAuthMiddleware() gin.HandlerFunc {
 			// authorizationEnabled's existing coverage of this path stays,
 			// because a hardening flag must never loosen an existing check.
 			if legacyEnabled {
-				authenticateAndCount(c)
+				authenticate(c)
 			}
 			return
 		}
@@ -208,28 +172,16 @@ func metricsPortAuthMiddleware() gin.HandlerFunc {
 			// replay a credential at this origin; consoleAuth and dataPlaneAuth
 			// get that from CheckAdminRequest, this branch does not.
 			if gateOn {
-				if status, msg, ok := mhttp.CheckCrossSite(c.Request, c.FullPath(), false); !ok {
-					abortWithAuthError(c, status, msg)
+				if !mhttp.ApplyGinAuthDecision(c,
+					mhttp.CheckCrossSite(c.Request, c.FullPath(), false), false) {
 					return
 				}
 			}
-			authenticateAndCount(c)
+			authenticate(c)
 		case gateOn:
 			dataPlaneAuth(c)
 		}
 	}
-}
-
-// authenticateAndCount runs the data plane's own rule and records the outcome,
-// so milvus_admin_auth_total covers every decision made on this port rather
-// than only the ones the root gate made.
-func authenticateAndCount(c *gin.Context) {
-	authenticate(c)
-	result := metrics.AdminAuthAllowed
-	if c.IsAborted() {
-		result = metrics.AdminAuthUnauthenticated
-	}
-	metrics.AdminAuthTotal.WithLabelValues(c.FullPath(), result).Inc()
 }
 
 // openMetricsPortPaths stay reachable without credentials while the gate is on.
@@ -258,7 +210,7 @@ func authenticate(c *gin.Context) {
 	username, password, ok := httpserver.ParseUsernamePassword(c)
 	if ok {
 		if proxy.PasswordVerify(c, username, password) {
-			mlog.Debug(context.TODO(), "auth successful", mlog.String("username", username))
+			mlog.Debug(c.Request.Context(), "auth successful", mlog.String("username", username))
 			c.Set(httpserver.ContextUsername, username)
 			c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, password))
 			return
@@ -272,10 +224,10 @@ func authenticate(c *gin.Context) {
 			c.Set(httpserver.ContextToken, rawToken)
 			return
 		}
-		mlog.Warn(context.TODO(), "fail to verify apikey", mlog.Err(err))
+		mlog.Warn(c.Request.Context(), "fail to verify apikey", mlog.Err(err))
 	}
 
-	hookutil.GetExtension().ReportAction(context.Background(), nil, &milvuspb.BoolResponse{
+	hookutil.GetExtension().ReportAction(c.Request.Context(), nil, &milvuspb.BoolResponse{
 		Status: merr.Status(merr.ErrNeedAuthenticate),
 	}, nil, c.FullPath(), hookutil.ActionAuthorize)
 	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{mhttp.HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), mhttp.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
