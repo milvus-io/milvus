@@ -149,6 +149,26 @@ func TestStatsManager(t *testing.T) {
 	assert.Empty(t, m.sealOperators)
 }
 
+func TestStatsManagerCeilingRejectsOversizedMessageOnEmptySegment(t *testing.T) {
+	paramtable.Init()
+	m := NewStatsManager()
+	sealOperator := mock_utils.NewMockSealOperator(t)
+	sealOperator.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel"})
+	sealOperator.EXPECT().AsyncFlushSegment(mock.Anything).Return().Maybe()
+	m.RegisterSealOperator(sealOperator, nil, nil)
+
+	stat := createSegmentStats(0, 0, 300)
+	stat.MaxFullSegmentSize = 100
+	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 1}, stat)
+
+	// A single message whose whole-row bytes exceed the ceiling can never be
+	// inserted into any segment. On an empty segment this must surface as
+	// ErrTooLargeInsert (an unrecoverable client error), not ErrWaitForNewSegment
+	// which would redo-allocate a fresh segment forever.
+	err := m.AllocRows(1, ModifiedMetrics{Rows: 10, BinarySize: 101, SealSize: 10})
+	assert.ErrorIs(t, err, ErrTooLargeInsert)
+}
+
 func TestStatsManagerRuntimeFlushSizeForMemoryPressure(t *testing.T) {
 	paramtable.Init()
 	m := NewStatsManager()

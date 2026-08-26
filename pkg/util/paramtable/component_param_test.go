@@ -1202,6 +1202,9 @@ func TestCachedParam(t *testing.T) {
 	assert.Equal(t, int64(1024), params.DataCoordCfg.SegmentMaxSize.GetAsInt64())
 	assert.Equal(t, int64(1024), params.DataCoordCfg.SegmentMaxSize.GetAsInt64())
 
+	assert.Equal(t, "wholeRow", params.DataCoordCfg.SizeMetric.GetValue())
+	assert.Equal(t, int64(-1), params.DataCoordCfg.MaxFullSegmentSize.GetAsInt64())
+
 	assert.Equal(t, 0.85, params.QuotaConfig.DataNodeMemoryLowWaterLevel.GetAsFloat())
 	assert.Equal(t, 0.85, params.QuotaConfig.DataNodeMemoryLowWaterLevel.GetAsFloat())
 
