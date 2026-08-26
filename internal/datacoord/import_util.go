@@ -22,6 +22,8 @@ import (
 	"math"
 	"path"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -741,6 +743,48 @@ func ListBinlogsAndGroupBySegment(ctx context.Context,
 	return segmentImportFiles, nil
 }
 
+// ListStorageV3Segments lists only segment directories under a backup
+// partition prefix. StorageV3 keeps partition-level LOB files in a sibling
+// "lobs" directory, so treating every direct child as a segment would create
+// a bogus import task for that shared directory.
+func ListStorageV3Segments(ctx context.Context,
+	cm storage.ChunkManager, importFile *internalpb.ImportFile,
+) ([]*internalpb.ImportFile, error) {
+	if len(importFile.GetPaths()) == 0 {
+		return nil, merr.WrapErrImportFailed("no insert binlogs to import")
+	}
+	if len(importFile.GetPaths()) > 2 {
+		return nil, merr.WrapErrImportFailedMsg("too many input paths for binlog import. "+
+			"Valid paths length should be one or two, but got paths:%s", importFile.GetPaths())
+	}
+
+	// ChunkManager prefixes are plain string prefixes, not directory-aware
+	// prefixes. Keep the trailing slash so partition "2" cannot match the
+	// partition directory itself or a sibling such as partition "20".
+	partitionPrefix := strings.TrimSuffix(path.Clean(importFile.GetPaths()[0]), "/") + "/"
+	segmentPaths, _, err := storage.ListAllChunkWithPrefix(ctx, cm, partitionPrefix, false)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*internalpb.ImportFile, 0, len(segmentPaths))
+	for _, segmentPath := range segmentPaths {
+		// Object stores represent non-recursive common prefixes as directories
+		// ending in "/", while LocalChunkManager returns paths without it. Keep
+		// one canonical form so downstream path.Dir calls resolve partition-level
+		// LOB directories from the segment's parent on every storage backend.
+		segmentPath = strings.TrimSuffix(segmentPath, "/")
+		segmentID, err := strconv.ParseInt(path.Base(segmentPath), 10, 64)
+		if err != nil || segmentID <= 0 {
+			continue
+		}
+		result = append(result, &internalpb.ImportFile{Paths: []string{segmentPath}})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].GetPaths()[0] < result[j].GetPaths()[0]
+	})
+	return result, nil
+}
+
 func LogResultSegmentsInfo(jobID int64, meta *meta, segmentIDs []int64) {
 	type (
 		segments    = []*SegmentInfo
@@ -806,6 +850,10 @@ func ListBinlogImportRequestFiles(ctx context.Context, cm storage.ChunkManager,
 	if !isBackup {
 		return reqFiles, nil
 	}
+	storageVersion, err := importutilv2.GetStorageVersion(options)
+	if err != nil {
+		return nil, err
+	}
 	resFiles := make([]*internalpb.ImportFile, 0)
 	pool := conc.NewPool[struct{}](hardware.GetCPUNum() * 2)
 	defer pool.Release()
@@ -814,7 +862,13 @@ func ListBinlogImportRequestFiles(ctx context.Context, cm storage.ChunkManager,
 	for _, importFile := range reqFiles {
 		importFile := importFile
 		futures = append(futures, pool.Submit(func() (struct{}, error) {
-			segmentPrefixes, err := ListBinlogsAndGroupBySegment(ctx, cm, importFile)
+			var segmentPrefixes []*internalpb.ImportFile
+			var err error
+			if storageVersion == storage.StorageV3 {
+				segmentPrefixes, err = ListStorageV3Segments(ctx, cm, importFile)
+			} else {
+				segmentPrefixes, err = ListBinlogsAndGroupBySegment(ctx, cm, importFile)
+			}
 			if err != nil {
 				return struct{}{}, err
 			}
@@ -824,7 +878,7 @@ func ListBinlogImportRequestFiles(ctx context.Context, cm storage.ChunkManager,
 			return struct{}{}, nil
 		}))
 	}
-	err := conc.AwaitAll(futures...)
+	err = conc.AwaitAll(futures...)
 	if err != nil {
 		return nil, merr.WrapErrServiceUnavailableMsg("list binlogs failed, err=%s", err)
 	}

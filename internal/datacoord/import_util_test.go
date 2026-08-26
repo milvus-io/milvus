@@ -1342,6 +1342,54 @@ func TestImportUtil_ListBinlogImportRequestFiles(t *testing.T) {
 	})
 }
 
+type storageV3CommonPrefixChunkManager struct {
+	storage.ChunkManager
+	segmentPath string
+}
+
+func (cm *storageV3CommonPrefixChunkManager) WalkWithPrefix(
+	ctx context.Context,
+	prefix string,
+	recursive bool,
+	walkFunc storage.ChunkObjectWalkFunc,
+) error {
+	walkFunc(&storage.ChunkObjectInfo{FilePath: cm.segmentPath})
+	return nil
+}
+
+func TestImportUtil_ListStorageV3Segments(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	partitionPath := path.Join(root, "backup/insert_log/1/2")
+	segmentPath := path.Join(partitionPath, "10")
+	siblingPartitionPath := path.Join(root, "backup/insert_log/1/20")
+	cm := storage.NewLocalChunkManager()
+	assert.NoError(t, cm.Write(ctx, path.Join(segmentPath, "_data/0.parquet"), []byte("segment-10")))
+	assert.NoError(t, cm.Write(ctx, path.Join(partitionPath, "lobs/101/_data/0.vx"), []byte("lob")))
+	assert.NoError(t, cm.Write(ctx, path.Join(siblingPartitionPath, "30/_data/0.parquet"), []byte("partition-20")))
+
+	for _, inputPath := range []string{partitionPath, partitionPath + "/"} {
+		files, err := ListBinlogImportRequestFiles(ctx, cm, []*internalpb.ImportFile{{
+			Paths: []string{inputPath, path.Join(root, "backup/delta_log/1/2")},
+		}}, []*commonpb.KeyValuePair{
+			{Key: importutilv2.BackupFlag, Value: "true"},
+			{Key: importutilv2.StorageVersion, Value: "3"},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, []*internalpb.ImportFile{{Paths: []string{segmentPath}}}, files)
+	}
+
+	t.Run("normalize object storage common prefix", func(t *testing.T) {
+		remoteCM := &storageV3CommonPrefixChunkManager{segmentPath: segmentPath + "/"}
+		files, err := ListStorageV3Segments(ctx, remoteCM, &internalpb.ImportFile{
+			Paths: []string{partitionPath},
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, []*internalpb.ImportFile{{Paths: []string{segmentPath}}}, files)
+	})
+}
+
 // TestImportUtil_ValidateMaxImportJobExceed tests validation of maximum import jobs
 func TestImportUtil_ValidateMaxImportJobExceed(t *testing.T) {
 	ctx := context.Background()
