@@ -2390,7 +2390,7 @@ func TestCollectSegmentFiles_WithManifest(t *testing.T) {
 	assert.Contains(t, files.InsertBinlogs, "files/insert_log/111/222/333/_metadata/manifest.json")
 }
 
-func TestCollectSegmentFiles_WithManifestSkipIndex(t *testing.T) {
+func TestCollectSegmentFiles_WithManifestCopiesCompleteRoot(t *testing.T) {
 	mockNoManifestLobFiles(t)
 
 	basePath := "files/insert_log/111/222/333"
@@ -2416,7 +2416,6 @@ func TestCollectSegmentFiles_WithManifestSkipIndex(t *testing.T) {
 			SegmentId:      333,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   manifestPath,
-			SkipIndex:      true,
 		},
 	)
 
@@ -2426,6 +2425,9 @@ func TestCollectSegmentFiles_WithManifestSkipIndex(t *testing.T) {
 		basePath + "/_metadata/manifest.json",
 		basePath + "/_stats/pk.100/bloom_filter",
 		basePath + "/_stats/bm25.101/stats",
+		basePath + "/_stats/text_index.102/tokenizer.json",
+		basePath + "/_stats/text_index.102/index.data",
+		basePath + "/_stats/json_stats.103/shared_key_index/index.data",
 	}, files.InsertBinlogs)
 }
 

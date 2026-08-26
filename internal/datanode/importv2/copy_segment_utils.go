@@ -20,7 +20,6 @@ import (
 	"context"
 	"net/url"
 	"path"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -223,18 +222,13 @@ func collectSegmentFiles(
 		}
 		basePath = snapshotstorage.NormalizeSnapshotObjectPath(basePath)
 
+		// Copy the complete StorageV3 manifest root. Manifest data and reusable
+		// index artifacts share this directory, and the source manifest is not
+		// rewritten. Restore controls index availability through the metadata it
+		// publishes, so StatsResolver ignores unregistered entries on load.
 		allFiles, listErr := listAllFiles(ctx, sourceCM, basePath)
 		if listErr != nil {
 			return nil, merr.Wrapf(listErr, "failed to list files from manifest base path %q for segment %d", basePath, source.GetSegmentId())
-		}
-		if source.GetSkipIndex() {
-			listedFileCount := len(allFiles)
-			allFiles = slices.DeleteFunc(allFiles, func(file string) bool {
-				return snapshotstorage.IsStorageV3IndexFile(basePath, file)
-			})
-			mlog.Info(ctx, "excluded manifest index files from copy",
-				mlog.String("basePath", basePath),
-				mlog.Int("excludedFileCount", listedFileCount-len(allFiles)))
 		}
 
 		// Empty file list is OK for V3 — segment may have only deltas and no insert binlogs

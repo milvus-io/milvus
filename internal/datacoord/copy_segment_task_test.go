@@ -1345,14 +1345,13 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
 	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
-		ID:                       segmentID,
-		CollectionID:             collectionID,
-		PartitionID:              10,
-		InsertChannel:            "ch1",
-		State:                    commonpb.SegmentState_Importing,
-		IsImporting:              true,
-		StorageVersion:           3,
-		FilterManifestIndexStats: true,
+		ID:             segmentID,
+		CollectionID:   collectionID,
+		PartitionID:    10,
+		InsertChannel:  "ch1",
+		State:          commonpb.SegmentState_Importing,
+		IsImporting:    true,
+		StorageVersion: 3,
 	}))
 
 	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
@@ -1371,6 +1370,12 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 				FieldID: 100,
 				Binlogs: []*datapb.Binlog{{LogID: 3, LogPath: "files/binlog/3"}},
 			}},
+			TextIndexInfos: map[int64]*datapb.TextIndexStats{
+				101: {FieldID: 101, BuildID: 1001},
+			},
+			JsonKeyIndexInfos: map[int64]*datapb.JsonKeyStats{
+				102: {FieldID: 102, BuildID: 1002},
+			},
 		}},
 	}
 	task := createTestCopyTask(collectionID, segmentID)
@@ -1382,7 +1387,8 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 	s.Equal(commonpb.SegmentState_Flushed, updated.GetState())
 	s.False(updated.GetIsImporting())
 	s.Equal(manifestPath, updated.GetManifestPath())
-	s.True(updated.GetFilterManifestIndexStats())
+	s.Equal(int64(1001), updated.GetTextStatsLogs()[101].GetBuildID())
+	s.Equal(int64(1002), updated.GetJsonKeyStats()[102].GetBuildID())
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnFailure() {
@@ -2077,7 +2083,6 @@ func TestAssembleCopySegmentRequest_SkipIndex(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, req.GetSources(), 1)
 	require.Len(t, req.GetTargets(), 1)
-	assert.True(t, req.GetSources()[0].GetSkipIndex())
 	assert.Empty(t, req.GetSources()[0].GetIndexFiles())
 	assert.Empty(t, req.GetSources()[0].GetTextIndexFiles())
 	assert.Empty(t, req.GetSources()[0].GetJsonKeyIndexFiles())

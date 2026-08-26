@@ -1979,13 +1979,6 @@ func TestCreateRestoreJob_PropagatesPinID(t *testing.T) {
 	assert.Equal(t, "snap1", captured.GetSnapshotName())
 	assert.Equal(t, int64(100), captured.GetSourceCollectionId())
 	assert.True(t, captured.GetSkipIndex())
-	copyIndex := ""
-	for _, option := range captured.GetOptions() {
-		if option.GetKey() == "copy_index" {
-			copyIndex = option.GetValue()
-		}
-	}
-	assert.Equal(t, "false", copyIndex)
 }
 
 func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
@@ -2014,7 +2007,8 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 		assert.Equal(t, commonpb.SegmentState_Importing, seg.GetState())
 		assert.True(t, seg.GetIsImporting())
 		assert.Equal(t, int64(3), seg.GetStorageVersion())
-		assert.True(t, seg.GetFilterManifestIndexStats())
+		assert.Empty(t, seg.GetTextStatsLogs())
+		assert.Empty(t, seg.GetJsonKeyStats())
 		return nil
 	}).Once()
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, "dst-ch", mock.Anything).Return(nil).Once()
