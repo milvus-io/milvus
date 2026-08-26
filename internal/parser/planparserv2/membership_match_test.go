@@ -19,7 +19,7 @@ package planparserv2
 // membership_match: the unified membership-filter surface syntax. The blob's
 // magic header selects the kind — MBF1 lowers to BloomFilterExpr, MRB1 to
 // RoaringFilterExpr — so these tests pin that the unified name produces plans
-// identical to what the explicit bloom_match / roaring_match aliases produce.
+// identical with and without an explicit type pin.
 
 import (
 	"strconv"
@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/roaringfilter"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestExpr_MembershipMatch(t *testing.T) {
@@ -44,6 +45,7 @@ func TestExpr_MembershipMatch(t *testing.T) {
 
 		for _, expression := range []string{
 			"membership_match(Int64Field, {bf})",
+			"membership_match(Int64Field, {bf}, type=bloom)",
 			"not membership_match(Int64Field, {bf})",
 			"Int64Field > 0 and membership_match(Int64Field, {bf})",
 		} {
@@ -59,10 +61,10 @@ func TestExpr_MembershipMatch(t *testing.T) {
 		assert.Equal(t, schemapb.DataType_Int64, bfe.GetColumnInfo().GetDataType())
 		assert.Equal(t, blob, bfe.GetFilterBlob(), "the client-built blob must be embedded verbatim")
 
-		// The wire node must be indistinguishable from bloom_match's.
-		aliasExpr, err := ParseExpr(helper, "bloom_match(Int64Field, {bf})", mv)
+		// The wire node must be indistinguishable when the type pin is omitted.
+		pinnedExpr, err := ParseExpr(helper, "membership_match(Int64Field, {bf}, type=bloom)", mv)
 		require.NoError(t, err)
-		assert.Equal(t, aliasExpr.GetBloomFilterExpr().GetFilterBlob(), bfe.GetFilterBlob())
+		assert.Equal(t, pinnedExpr.GetBloomFilterExpr().GetFilterBlob(), bfe.GetFilterBlob())
 	})
 
 	t.Run("MRB1 blob lowers to a RoaringFilterExpr", func(t *testing.T) {
@@ -75,11 +77,13 @@ func TestExpr_MembershipMatch(t *testing.T) {
 		require.NotNil(t, rfe, "an MRB1 blob must materialize as RoaringFilterExpr")
 		assert.Equal(t, schemapb.DataType_Int64, rfe.GetColumnInfo().GetDataType())
 		assert.Equal(t, blob, rfe.GetBitmapBlob(), "the client-built blob must be embedded verbatim")
+		_, err = ParseExpr(helper, "membership_match(Int64Field, {rb}, type=bloom)", mv)
+		require.ErrorContains(t, err, "does not match filter blob format")
 
-		// The wire node must be indistinguishable from roaring_match's.
-		aliasExpr, err := ParseExpr(helper, "roaring_match(Int64Field, {rb})", mv)
+		// The wire node must be indistinguishable when the type pin is omitted.
+		pinnedExpr, err := ParseExpr(helper, "membership_match(Int64Field, {rb}, type=roaring)", mv)
 		require.NoError(t, err)
-		assert.Equal(t, aliasExpr.GetRoaringFilterExpr().GetBitmapBlob(), rfe.GetBitmapBlob())
+		assert.Equal(t, pinnedExpr.GetRoaringFilterExpr().GetBitmapBlob(), rfe.GetBitmapBlob())
 	})
 
 	t.Run("unknown magic fails closed", func(t *testing.T) {
@@ -111,7 +115,7 @@ func TestExpr_MembershipMatch(t *testing.T) {
 		assert.ErrorContains(t, err, MembershipMatchFunctionName)
 		assert.ErrorContains(t, err, "VarCharField")
 		assert.ErrorContains(t, err, "only supports INT8/INT16/INT32/INT64")
-		assert.NotContains(t, err.Error(), RoaringMatchFunctionName)
+		assert.NotContains(t, err.Error(), "roaring_match")
 		assert.NotContains(t, err.Error(), "deferred column parameter")
 
 		_, err = ParseExpr(helper, `membership_match(JSONField["a"], {rb})`,
@@ -119,7 +123,7 @@ func TestExpr_MembershipMatch(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorContains(t, err, MembershipMatchFunctionName)
 		assert.ErrorContains(t, err, `JSONField["a"]`)
-		assert.NotContains(t, err.Error(), RoaringMatchFunctionName)
+		assert.NotContains(t, err.Error(), "roaring_match")
 
 		_, err = ParseExpr(helper, "membership_match(dynamicKey, {rb})",
 			map[string]*schemapb.TemplateValue{"rb": tvRoaring})
@@ -136,16 +140,87 @@ func TestExpr_MembershipMatch(t *testing.T) {
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)
 		assert.ErrorContains(t, err, MembershipMatchFunctionName)
 		assert.ErrorContains(t, err, "FloatField")
-		assert.NotContains(t, err.Error(), BloomMatchFunctionName)
+		assert.NotContains(t, err.Error(), "bloom_match")
 		assert.NotContains(t, err.Error(), "deferred column parameter")
 
 		// And an MBF1 int-domain blob against a VARCHAR field is rejected by
-		// the domain check, exactly like explicit bloom_match.
+		// the Bloom-kind domain check.
 		tvInt, _ := bloomBytesTemplate(t, 0.001, 1, 2)
 		_, err = ParseExpr(helper, "membership_match(VarCharField, {bf})",
 			map[string]*schemapb.TemplateValue{"bf": tvInt})
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "value domain")
+	})
+}
+
+func TestExpr_MembershipMatchTypeOption(t *testing.T) {
+	schema := newTestSchema(true)
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{FieldID: 2001, Name: "type", DataType: schemapb.DataType_Int64})
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{FieldID: 2002, Name: "membership_match", DataType: schemapb.DataType_Int64})
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	t.Run("soft keywords remain regular field names", func(t *testing.T) {
+		expr, err := ParseExpr(helper, "type == 1", nil)
+		require.NoError(t, err)
+		require.Equal(t, int64(2001), expr.GetUnaryRangeExpr().GetColumnInfo().GetFieldId())
+		expr, err = ParseExpr(helper, "membership_match == 2", nil)
+		require.NoError(t, err)
+		require.Equal(t, int64(2002), expr.GetUnaryRangeExpr().GetColumnInfo().GetFieldId())
+
+		tv, _ := bloomBytesTemplate(t, 0.001, 1)
+		expr, err = ParseExpr(helper, "membership_match(type, {bf}, type=bloom)", map[string]*schemapb.TemplateValue{"bf": tv})
+		require.NoError(t, err)
+		require.NotNil(t, expr.GetBloomFilterExpr())
+		expr, err = ParseExpr(helper, "membership_match(membership_match, {bf}, type=bloom)", map[string]*schemapb.TemplateValue{"bf": tv})
+		require.NoError(t, err)
+		require.Equal(t, int64(2002), expr.GetBloomFilterExpr().GetColumnInfo().GetFieldId())
+
+		expr, err = ParseExpr(helper, "membership_match($meta, {bf}, type=bloom)", map[string]*schemapb.TemplateValue{"bf": tv})
+		require.NoError(t, err)
+		require.Equal(t, int64(dynamicFieldID), expr.GetBloomFilterExpr().GetColumnInfo().GetFieldId())
+	})
+
+	t.Run("option spelling and positional kind are rejected", func(t *testing.T) {
+		tv, _ := bloomBytesTemplate(t, 0.001, 1)
+		values := map[string]*schemapb.TemplateValue{"bf": tv}
+		for _, expression := range []string{
+			"membership_match(Int64Field, {bf}, typo=bloom)",
+			"membership_match(Int64Field, {bf}, type=bad)",
+			`membership_match(Int64Field, {bf}, "bloom")`,
+		} {
+			_, err := ParseExpr(helper, expression, values)
+			require.Error(t, err, expression)
+		}
+	})
+
+	t.Run("unreleased predecessor names are rejected", func(t *testing.T) {
+		tv, _ := bloomBytesTemplate(t, 0.001, 1)
+		values := map[string]*schemapb.TemplateValue{"bf": tv}
+		for _, expression := range []string{
+			"bloom_match(Int64Field, {bf})",
+			"roaring_match(Int64Field, {bf})",
+		} {
+			_, err := ParseExpr(helper, expression, values)
+			require.ErrorContains(t, err, "is not supported", expression)
+			require.ErrorContains(t, err, MembershipMatchFunctionName, expression)
+		}
+	})
+
+	t.Run("type must match blob magic in both directions", func(t *testing.T) {
+		bloomValue, _ := bloomBytesTemplate(t, 0.001, 1)
+		roaringValue, _ := roaringBytesTemplate(t, 1)
+		_, err := ParseExpr(helper, "membership_match(Int64Field, {bf}, type=roaring)", map[string]*schemapb.TemplateValue{"bf": bloomValue})
+		require.ErrorContains(t, err, "does not match filter blob format")
+		_, err = ParseExpr(helper, "membership_match(Int64Field, {rb}, type=bloom)", map[string]*schemapb.TemplateValue{"rb": roaringValue})
+		require.ErrorContains(t, err, "does not match filter blob format")
+	})
+
+	t.Run("struct field uses the struct resolver", func(t *testing.T) {
+		tv, _ := bloomBytesTemplate(t, 0.001, 1)
+		_, err := ParseExpr(helper, "membership_match(struct_array[sub_int], {bf}, type=bloom)", map[string]*schemapb.TemplateValue{"bf": tv})
+		require.ErrorContains(t, err, "only supports")
+		require.NotContains(t, err.Error(), "invalid struct sub-field syntax")
 	})
 }
 
@@ -228,8 +303,7 @@ func TestMembershipMatchPreflightChargesUnifiedOccurrences(t *testing.T) {
 	values := map[string]*schemapb.TemplateValue{"rb": bytesTemplate(blob)}
 	body := len(blob) - roaringfilter.HeaderSize
 
-	// One occurrence fits; two occurrences of the same body exceed it — the
-	// unified syntax shares the aggregate budget with its aliases.
+	// One occurrence fits; two occurrences of the same body exceed it.
 	pt.Save(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key, strconv.Itoa(2*body-1))
 	defer pt.Reset(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key)
 

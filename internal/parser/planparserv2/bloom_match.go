@@ -34,7 +34,7 @@ import (
 )
 
 // MBF1 envelope constants, kept in sync with the client builder
-// (client/v3/sbbf) and the C++ prober (SplitBlockBloomFilterView) via the
+// (client/v3/membership/sbbf) and the C++ prober (SplitBlockBloomFilterView) via the
 // shared golden vectors. The server (this file) validates the envelope
 // independently rather than importing the client SDK module: this package is
 // compiled into the plan-parser c-shared library, which must not depend on the
@@ -98,7 +98,7 @@ func checkBloomMatchField(columnInfo *planpb.ColumnInfo, argText, functionName s
 
 // validateBloomFilterBlob validates a client pre-built SBBF blob (raw bytes) and
 // returns it ready to embed into the plan. The client builds the bit-identical
-// MBF1/SBBF blob (client/sbbf, reproducible cross-language) and ships the
+// MBF1/SBBF blob (client/membership/sbbf, reproducible cross-language) and ships the
 // compact blob as a raw bytes template value — no proxy-side build. The
 // blob declares the value domains it was built from, which
 // checkBloomFilterValueDomain matches against the target field; this validation
@@ -121,11 +121,11 @@ func validateBloomFilterBlob(blob []byte) ([]byte, error) {
 	// gate limits repeated otherwise-valid occurrences across the request.
 	if maxSize := paramtable.Get().ProxyCfg.MaxMembershipFilterSize.GetAsInt(); len(blob) > maxSize+mbf1HeaderSize {
 		return nil, merr.WrapErrParameterInvalidMsg(
-			"bloom_match filter blob body is %d bytes, exceeding proxy.maxMembershipFilterSize (%d)%s",
+			"membership_match bloom filter blob body is %d bytes, exceeding proxy.maxMembershipFilterSize (%d)%s",
 			len(blob)-mbf1HeaderSize, maxSize, oversizedBlobHint(blob, maxSize))
 	}
 	if err := validateMBF1Envelope(blob); err != nil {
-		return nil, merr.Wrap(err, "bloom_match filter blob is invalid")
+		return nil, merr.Wrap(err, "membership_match bloom filter blob is invalid")
 	}
 	return blob, nil
 }
@@ -242,7 +242,7 @@ func checkBloomFilterValueDomain(columnInfo *planpb.ColumnInfo, blob []byte) err
 	}
 	if domains&byte(want) == 0 {
 		return merr.WrapErrParameterInvalidMsg(
-			"bloom_match filter blob was built from the %s value domain but field (%s) requires the %s domain; "+
+			"membership_match bloom filter blob was built from the %s value domain but field (%s) requires the %s domain; "+
 				"rebuild the filter from values of the field's type",
 			bloomDomainNames(domains), dataType.String(), wantName)
 	}

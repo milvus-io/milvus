@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v3/sbbf"
+	"github.com/milvus-io/milvus/client/v3/membership/sbbf"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -76,7 +76,7 @@ func TestExpr_BloomMatch(t *testing.T) {
 	t.Run("int64 pre-built blob is embedded verbatim", func(t *testing.T) {
 		tv, blob := bloomBytesTemplate(t, 0.001, 1, 5, 9, -42)
 		mv := map[string]*schemapb.TemplateValue{"bf": tv}
-		expr, err := ParseExpr(helper, "bloom_match(Int64Field, {bf})", mv)
+		expr, err := ParseExpr(helper, "membership_match(Int64Field, {bf}, type=bloom)", mv)
 		require.NoError(t, err)
 
 		filter := requireBloomFilterExpr(t, expr)
@@ -94,7 +94,7 @@ func TestExpr_BloomMatch(t *testing.T) {
 	t.Run("int32 field probes widened int64 blob", func(t *testing.T) {
 		tv, _ := bloomBytesTemplate(t, 0.001, 7, 8)
 		mv := map[string]*schemapb.TemplateValue{"bf": tv}
-		expr, err := ParseExpr(helper, "bloom_match(Int32Field, {bf})", mv)
+		expr, err := ParseExpr(helper, "membership_match(Int32Field, {bf}, type=bloom)", mv)
 		require.NoError(t, err)
 		filter := requireBloomFilterExpr(t, expr)
 		assert.True(t, filter.TestInt64(7))
@@ -104,7 +104,7 @@ func TestExpr_BloomMatch(t *testing.T) {
 	t.Run("varchar pre-built blob", func(t *testing.T) {
 		tv, _ := bloomBytesTemplateStr(t, 0.01, "alice", "bob", "小明")
 		mv := map[string]*schemapb.TemplateValue{"bf": tv}
-		expr, err := ParseExpr(helper, "bloom_match(VarCharField, {bf})", mv)
+		expr, err := ParseExpr(helper, "membership_match(VarCharField, {bf}, type=bloom)", mv)
 		require.NoError(t, err)
 		filter := requireBloomFilterExpr(t, expr)
 		assert.Equal(t, 0.01, filter.FPRDeclared())
@@ -116,7 +116,7 @@ func TestExpr_BloomMatch(t *testing.T) {
 	t.Run("not bloom_match", func(t *testing.T) {
 		tv, _ := bloomBytesTemplate(t, 0.001, 11, 12)
 		mv := map[string]*schemapb.TemplateValue{"bf": tv}
-		expr, err := ParseExpr(helper, "not bloom_match(Int64Field, {bf})", mv)
+		expr, err := ParseExpr(helper, "not membership_match(Int64Field, {bf}, type=bloom)", mv)
 		require.NoError(t, err)
 		unary := expr.GetUnaryExpr()
 		require.NotNil(t, unary)
@@ -128,7 +128,7 @@ func TestExpr_BloomMatch(t *testing.T) {
 	t.Run("combined with other predicates", func(t *testing.T) {
 		tv, _ := bloomBytesTemplate(t, 0.001, 1)
 		mv := map[string]*schemapb.TemplateValue{"bf": tv}
-		expr, err := ParseExpr(helper, "Int64Field > 0 and bloom_match(Int64Field, {bf})", mv)
+		expr, err := ParseExpr(helper, "Int64Field > 0 and membership_match(Int64Field, {bf}, type=bloom)", mv)
 		require.NoError(t, err)
 		binary := expr.GetBinaryExpr()
 		require.NotNil(t, binary)
@@ -144,7 +144,7 @@ func TestExpr_BloomMatch(t *testing.T) {
 	t.Run("search plan carries BloomFilterExpr", func(t *testing.T) {
 		tv, _ := bloomBytesTemplate(t, 0.001, 21, 22)
 		mv := map[string]*schemapb.TemplateValue{"bf": tv}
-		plan, err := CreateSearchPlan(helper, "bloom_match(Int64Field, {bf})", "FloatVectorField", &planpb.QueryInfo{
+		plan, err := CreateSearchPlan(helper, "membership_match(Int64Field, {bf}, type=bloom)", "FloatVectorField", &planpb.QueryInfo{
 			Topk:       10,
 			MetricType: "L2",
 		}, mv, nil)
@@ -157,7 +157,7 @@ func TestExpr_BloomMatch(t *testing.T) {
 	t.Run("empty-set blob is allowed and matches nothing", func(t *testing.T) {
 		tv, _ := bloomBytesTemplate(t, 0.001)
 		mv := map[string]*schemapb.TemplateValue{"bf": tv}
-		expr, err := ParseExpr(helper, "bloom_match(Int64Field, {bf})", mv)
+		expr, err := ParseExpr(helper, "membership_match(Int64Field, {bf}, type=bloom)", mv)
 		require.NoError(t, err)
 		filter := requireBloomFilterExpr(t, expr)
 		assert.False(t, filter.TestInt64(1))
@@ -166,7 +166,7 @@ func TestExpr_BloomMatch(t *testing.T) {
 	t.Run("json path", func(t *testing.T) {
 		tv, blob := bloomBytesTemplate(t, 0.001, 100, 200)
 		mv := map[string]*schemapb.TemplateValue{"bf": tv}
-		expr, err := ParseExpr(helper, `bloom_match(JSONField["user_id"], {bf})`, mv)
+		expr, err := ParseExpr(helper, `membership_match(JSONField["user_id"], {bf}, type=bloom)`, mv)
 		require.NoError(t, err)
 		bfe := expr.GetBloomFilterExpr()
 		require.NotNil(t, bfe)
@@ -178,7 +178,7 @@ func TestExpr_BloomMatch(t *testing.T) {
 	t.Run("json nested path", func(t *testing.T) {
 		tv, _ := bloomBytesTemplateStr(t, 0.01, "alice")
 		mv := map[string]*schemapb.TemplateValue{"bf": tv}
-		expr, err := ParseExpr(helper, `bloom_match(JSONField["a"]["b"], {bf})`, mv)
+		expr, err := ParseExpr(helper, `membership_match(JSONField["a"]["b"], {bf}, type=bloom)`, mv)
 		require.NoError(t, err)
 		bfe := expr.GetBloomFilterExpr()
 		require.NotNil(t, bfe)
@@ -188,7 +188,7 @@ func TestExpr_BloomMatch(t *testing.T) {
 	t.Run("whole json field (root path)", func(t *testing.T) {
 		tv, _ := bloomBytesTemplate(t, 0.001, 1)
 		mv := map[string]*schemapb.TemplateValue{"bf": tv}
-		expr, err := ParseExpr(helper, "bloom_match(JSONField, {bf})", mv)
+		expr, err := ParseExpr(helper, "membership_match(JSONField, {bf}, type=bloom)", mv)
 		require.NoError(t, err)
 		bfe := expr.GetBloomFilterExpr()
 		require.NotNil(t, bfe)
@@ -201,7 +201,7 @@ func TestExpr_BloomMatch(t *testing.T) {
 		// and the deferred bloom_match fans out unfilled (P1 regression).
 		tv, blob := bloomBytesTemplate(t, 0.001, 3, 4)
 		mv := map[string]*schemapb.TemplateValue{"bf": tv}
-		expr, err := ParseExpr(helper, "bloom_match(Int64Field, {bf}) && random_sample(0.1)", mv)
+		expr, err := ParseExpr(helper, "membership_match(Int64Field, {bf}, type=bloom) && random_sample(0.1)", mv)
 		require.NoError(t, err)
 		sample := expr.GetRandomSampleExpr()
 		require.NotNil(t, sample)
@@ -215,7 +215,7 @@ func TestExpr_BloomMatch(t *testing.T) {
 		// identifier as the nested path.
 		tv, _ := bloomBytesTemplate(t, 0.001, 7)
 		mv := map[string]*schemapb.TemplateValue{"bf": tv}
-		expr, err := ParseExpr(helper, "bloom_match(unknown_field, {bf})", mv)
+		expr, err := ParseExpr(helper, "membership_match(unknown_field, {bf}, type=bloom)", mv)
 		require.NoError(t, err)
 		bfe := expr.GetBloomFilterExpr()
 		require.NotNil(t, bfe)
@@ -238,29 +238,29 @@ func TestExpr_BloomMatch_Errors(t *testing.T) {
 	}
 
 	t.Run("wrong arg count", func(t *testing.T) {
-		expectError(t, "bloom_match(Int64Field)", bf, "requires exactly 2 arguments")
+		expectError(t, "membership_match(Int64Field, type=bloom)", bf, "query plan failed")
 		// the fpr third argument was removed; three args is now invalid.
-		expectError(t, "bloom_match(Int64Field, {bf}, 0.01)", bf, "requires exactly 2 arguments")
+		expectError(t, "membership_match(Int64Field, {bf}, 0.01, type=bloom)", bf, "query plan failed")
 	})
 
 	t.Run("wrong field type", func(t *testing.T) {
-		expectError(t, "bloom_match(BoolField, {bf})", bf, "only supports INT8/INT16/INT32/INT64/VARCHAR")
-		expectError(t, "bloom_match(FloatField, {bf})", bf, "only supports INT8/INT16/INT32/INT64/VARCHAR")
-		expectError(t, "bloom_match(DoubleField, {bf})", bf, "only supports INT8/INT16/INT32/INT64/VARCHAR")
-		expectError(t, "bloom_match(ArrayField, {bf})", bf, "only supports INT8/INT16/INT32/INT64/VARCHAR")
+		expectError(t, "membership_match(BoolField, {bf}, type=bloom)", bf, "only supports INT8/INT16/INT32/INT64/VARCHAR")
+		expectError(t, "membership_match(FloatField, {bf}, type=bloom)", bf, "only supports INT8/INT16/INT32/INT64/VARCHAR")
+		expectError(t, "membership_match(DoubleField, {bf}, type=bloom)", bf, "only supports INT8/INT16/INT32/INT64/VARCHAR")
+		expectError(t, "membership_match(ArrayField, {bf}, type=bloom)", bf, "only supports INT8/INT16/INT32/INT64/VARCHAR")
 		// first argument must be a field, not a literal.
-		expectError(t, "bloom_match(1, {bf})", bf, "must be a scalar field name")
+		expectError(t, "membership_match(1, {bf}, type=bloom)", bf, "query plan failed")
 	})
 
 	t.Run("second argument must be a template placeholder", func(t *testing.T) {
 		// No proxy-side build: a literal array/scalar is not accepted.
-		expectError(t, "bloom_match(Int64Field, [1, 2, 3])", nil, "must be a {template} placeholder")
-		expectError(t, "bloom_match(Int64Field, 5)", nil, "must be a {template} placeholder")
-		expectError(t, `bloom_match(Int64Field, "abc")`, nil, "must be a {template} placeholder")
+		expectError(t, "membership_match(Int64Field, [1, 2, 3], type=bloom)", nil, "must be a {template} placeholder")
+		expectError(t, "membership_match(Int64Field, 5, type=bloom)", nil, "must be a {template} placeholder")
+		expectError(t, `membership_match(Int64Field, "abc", type=bloom)`, nil, "must be a {template} placeholder")
 	})
 
 	t.Run("unknown template name", func(t *testing.T) {
-		expectError(t, "bloom_match(Int64Field, {missing})", bf, "{missing} is not found")
+		expectError(t, "membership_match(Int64Field, {missing}, type=bloom)", bf, "{missing} is not found")
 	})
 
 	t.Run("template value must be a bytes blob", func(t *testing.T) {
@@ -268,13 +268,13 @@ func TestExpr_BloomMatch_Errors(t *testing.T) {
 		intMV := map[string]*schemapb.TemplateValue{
 			"bf": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
 		}
-		expectError(t, "bloom_match(Int64Field, {bf})", intMV, "must be a client pre-built membership filter blob (bytes)")
+		expectError(t, "membership_match(Int64Field, {bf}, type=bloom)", intMV, "must be a client pre-built membership filter blob (bytes)")
 
 		arrMV := map[string]*schemapb.TemplateValue{
 			"bf": generateTemplateValue(schemapb.DataType_Array,
 				generateTemplateArrayValue(schemapb.DataType_Int64, []int64{1, 2, 3})),
 		}
-		expectError(t, "bloom_match(Int64Field, {bf})", arrMV, "must be a client pre-built membership filter blob (bytes)")
+		expectError(t, "membership_match(Int64Field, {bf}, type=bloom)", arrMV, "must be a client pre-built membership filter blob (bytes)")
 	})
 
 	t.Run("blob body over proxy.maxMembershipFilterSize is rejected; 32-byte header allowed on top", func(t *testing.T) {
@@ -288,7 +288,7 @@ func TestExpr_BloomMatch_Errors(t *testing.T) {
 
 		// A body budget one byte below the body rejects the blob.
 		pt.Save(pt.ProxyCfg.MaxMembershipFilterSize.Key, strconv.Itoa(body-1))
-		expectError(t, "bloom_match(Int64Field, {bf})", mv, "proxy.maxMembershipFilterSize")
+		expectError(t, "membership_match(Int64Field, {bf}, type=bloom)", mv, "proxy.maxMembershipFilterSize")
 		pt.Reset(pt.ProxyCfg.MaxMembershipFilterSize.Key)
 
 		// A body budget exactly equal to the body admits the blob even though the
@@ -296,13 +296,13 @@ func TestExpr_BloomMatch_Errors(t *testing.T) {
 		// for the off-by-header bug that would otherwise halve the usable tier.
 		pt.Save(pt.ProxyCfg.MaxMembershipFilterSize.Key, strconv.Itoa(body))
 		defer pt.Reset(pt.ProxyCfg.MaxMembershipFilterSize.Key)
-		_, err := ParseExpr(helper, "bloom_match(Int64Field, {bf})", mv)
+		_, err := ParseExpr(helper, "membership_match(Int64Field, {bf}, type=bloom)", mv)
 		require.NoError(t, err, "a body-sized budget must admit the blob; the 32-byte header is allowed on top")
 	})
 
 	t.Run("blob bytes are not a valid MBF1 filter", func(t *testing.T) {
 		mv := map[string]*schemapb.TemplateValue{"bf": bytesTemplate([]byte("not-a-real-blob"))}
-		expectError(t, "bloom_match(Int64Field, {bf})", mv, "filter blob is invalid")
+		expectError(t, "membership_match(Int64Field, {bf}, type=bloom)", mv, "unknown format magic")
 	})
 
 	t.Run("bloom_match rejected inside MATCH_* element predicates", func(t *testing.T) {
@@ -311,20 +311,20 @@ func TestExpr_BloomMatch_Errors(t *testing.T) {
 		// true row — so bloom_match is rejected inside every MATCH_*.
 		// A scalar/JSON target reaches the MatchExpr guard; an element ref
 		// ($[...]) is stopped earlier by the ARRAY field-type check.
-		expectError(t, `MATCH_ANY(struct_array, bloom_match(Int64Field, {bf}) && $[sub_int] > 0)`, bf,
+		expectError(t, `MATCH_ANY(struct_array, membership_match(Int64Field, {bf}, type=bloom) && $[sub_int] > 0)`, bf,
 			"function calls are not supported inside MATCH predicate")
-		expectError(t, `MATCH_ALL(struct_array, bloom_match(JSONField["a"], {bf}) && $[sub_int] > 0)`, bf,
+		expectError(t, `MATCH_ALL(struct_array, membership_match(JSONField["a"], {bf}, type=bloom) && $[sub_int] > 0)`, bf,
 			"function calls are not supported inside MATCH predicate")
-		expectError(t, `MATCH_ANY(struct_array, bloom_match($[sub_int], {bf}))`, bf,
-			"of type Array")
+		expectError(t, `MATCH_ANY(struct_array, membership_match($[sub_int], {bf}, type=bloom))`, bf,
+			"function calls are not supported")
 	})
 
 	t.Run("bloom_match rejected inside element_filter element expression", func(t *testing.T) {
 		// element_filter evaluates its expression per element (element IDs, not
 		// row offsets), so a row-level bloom_match there would misread rows.
-		expectError(t, `element_filter(struct_array, bloom_match(Int64Field, {bf}) && $[sub_int] > 0)`, bf,
+		expectError(t, `element_filter(struct_array, membership_match(Int64Field, {bf}, type=bloom) && $[sub_int] > 0)`, bf,
 			"not supported inside element_filter")
-		expectError(t, `element_filter(struct_array, bloom_match(JSONField["a"], {bf}))`, bf,
+		expectError(t, `element_filter(struct_array, membership_match(JSONField["a"], {bf}, type=bloom))`, bf,
 			"not supported inside element_filter")
 	})
 
@@ -332,7 +332,7 @@ func TestExpr_BloomMatch_Errors(t *testing.T) {
 		// The doc-level combination is fine: bloom_match here is a SIBLING of
 		// element_filter, evaluated on doc rows, not inside the element expr.
 		_, err := ParseExpr(helper,
-			`bloom_match(Int64Field, {bf}) and element_filter(struct_array, $[sub_int] > 0)`, bf)
+			`membership_match(Int64Field, {bf}, type=bloom) and element_filter(struct_array, $[sub_int] > 0)`, bf)
 		require.NoError(t, err)
 	})
 
@@ -341,9 +341,9 @@ func TestExpr_BloomMatch_Errors(t *testing.T) {
 		// blob). Bound to any comparison it must die at the proxy, not fan out
 		// a kBytesVal GenericValue that segcore cannot evaluate.
 		expectError(t, `JSONField["a"] == {bf}`, bf,
-			"membership filter argument of bloom_match, roaring_match, or membership_match")
+			"membership filter argument of membership_match")
 		expectError(t, "Int64Field == {bf}", bf,
-			"membership filter argument of bloom_match, roaring_match, or membership_match")
+			"membership filter argument of membership_match")
 		expectError(t, "Int64Field in {bf}", bf, "")
 	})
 }
@@ -354,7 +354,7 @@ func TestExpr_BloomMatch_Errors(t *testing.T) {
 // run where it would read the wrong rows.
 func TestHasMembershipFilterExpr_MatchExprRecursion(t *testing.T) {
 	bloomNode := &planpb.Expr{Expr: &planpb.Expr_BloomFilterExpr{BloomFilterExpr: &planpb.BloomFilterExpr{}}}
-	callNode := &planpb.Expr{Expr: &planpb.Expr_CallExpr{CallExpr: &planpb.CallExpr{FunctionName: BloomMatchFunctionName}}}
+	callNode := &planpb.Expr{Expr: &planpb.Expr_CallExpr{CallExpr: &planpb.CallExpr{FunctionName: MembershipMatchFunctionName}}}
 	plainNode := &planpb.Expr{Expr: &planpb.Expr_ColumnExpr{ColumnExpr: &planpb.ColumnExpr{}}}
 
 	wrap := func(pred *planpb.Expr) *planpb.Expr {
@@ -382,20 +382,20 @@ func TestCheckBloomMatchFieldTypeMatrix(t *testing.T) {
 		schemapb.DataType_Bool, schemapb.DataType_Float, schemapb.DataType_Double,
 	}
 	for _, dt := range accept {
-		require.NoError(t, checkBloomMatchField(&planpb.ColumnInfo{DataType: dt}, "f", BloomMatchFunctionName), dt.String())
+		require.NoError(t, checkBloomMatchField(&planpb.ColumnInfo{DataType: dt}, "f", MembershipMatchFunctionName), dt.String())
 	}
 	for _, dt := range reject {
-		err := checkBloomMatchField(&planpb.ColumnInfo{DataType: dt}, "f", BloomMatchFunctionName)
+		err := checkBloomMatchField(&planpb.ColumnInfo{DataType: dt}, "f", MembershipMatchFunctionName)
 		require.Error(t, err, dt.String())
 		assert.Contains(t, err.Error(), "only supports INT8/INT16/INT32/INT64/VARCHAR", dt.String())
 	}
 	// JSON carries a nested path; non-JSON scalars must not.
 	require.NoError(t, checkBloomMatchField(
 		&planpb.ColumnInfo{DataType: schemapb.DataType_JSON, NestedPath: []string{"a", "b"}},
-		"f", BloomMatchFunctionName))
+		"f", MembershipMatchFunctionName))
 	err := checkBloomMatchField(
 		&planpb.ColumnInfo{DataType: schemapb.DataType_Int64, NestedPath: []string{"a"}},
-		"f", BloomMatchFunctionName)
+		"f", MembershipMatchFunctionName)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nested paths on non-JSON")
 }
@@ -410,9 +410,9 @@ func TestPlanContainsBloomFilter(t *testing.T) {
 		mv       map[string]*schemapb.TemplateValue
 		contains bool
 	}{
-		{"bloom_match(Int64Field, {bf})", mv, true},
-		{"not bloom_match(Int64Field, {bf})", mv, true},
-		{"Int64Field > 0 and bloom_match(Int64Field, {bf})", mv, true},
+		{"membership_match(Int64Field, {bf}, type=bloom)", mv, true},
+		{"not membership_match(Int64Field, {bf}, type=bloom)", mv, true},
+		{"Int64Field > 0 and membership_match(Int64Field, {bf}, type=bloom)", mv, true},
 		{"Int64Field in [1, 2, 3]", nil, false},
 		{"Int64Field > 0", nil, false},
 	}
@@ -431,7 +431,7 @@ func TestPlanContainsBloomFilter(t *testing.T) {
 func TestBloomMatchLiteralArgumentIsRejected(t *testing.T) {
 	helper := newTestSchemaHelper(t)
 
-	_, err := ParseExpr(helper, "bloom_match(Int64Field, [1, 2, 3])", nil)
+	_, err := ParseExpr(helper, "membership_match(Int64Field, [1, 2, 3], type=bloom)", nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must be a {template} placeholder")
 }
@@ -445,7 +445,7 @@ func TestRedactPlanForLog(t *testing.T) {
 	t.Run("bloom blob is elided", func(t *testing.T) {
 		tv, blob := bloomBytesTemplate(t, 0.001, 1, 2, 3)
 		mv := map[string]*schemapb.TemplateValue{"bf": tv}
-		plan, err := CreateRetrievePlan(helper, "bloom_match(Int64Field, {bf})", mv)
+		plan, err := CreateRetrievePlan(helper, "membership_match(Int64Field, {bf}, type=bloom)", mv)
 		require.NoError(t, err)
 
 		out := RedactPlanForLog(plan).String()
@@ -509,7 +509,7 @@ func bfLeaf(blob []byte) *planpb.Expr {
 }
 
 func bloomCallNode() *planpb.Expr {
-	return &planpb.Expr{Expr: &planpb.Expr_CallExpr{CallExpr: &planpb.CallExpr{FunctionName: BloomMatchFunctionName}}}
+	return &planpb.Expr{Expr: &planpb.Expr_CallExpr{CallExpr: &planpb.CallExpr{FunctionName: MembershipMatchFunctionName}}}
 }
 
 func nonBloomLeaf() *planpb.Expr {
@@ -557,11 +557,11 @@ func TestFillMembershipMatchExpressionValueErrors(t *testing.T) {
 
 	// not exactly 2 parameters.
 	err := fillMembershipMatchExpressionValue(&planpb.Expr{},
-		&planpb.CallExpr{FunctionName: BloomMatchFunctionName, FunctionParameters: []*planpb.Expr{col}}, nil, ctx)
+		&planpb.CallExpr{FunctionName: MembershipMatchFunctionName, FunctionParameters: []*planpb.Expr{col}}, nil, ctx)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "expected 2 parameters")
 
-	call := &planpb.CallExpr{FunctionName: BloomMatchFunctionName, FunctionParameters: []*planpb.Expr{col, tmpl}}
+	call := &planpb.CallExpr{FunctionName: MembershipMatchFunctionName, FunctionParameters: []*planpb.Expr{col, tmpl}}
 	// template value not present.
 	err = fillMembershipMatchExpressionValue(&planpb.Expr{}, call, map[string]*planpb.GenericValue{}, ctx)
 	require.Error(t, err)
@@ -687,7 +687,7 @@ func TestPlanContainsBloomFilterAndPredicates(t *testing.T) {
 	assert.Nil(t, planPredicates(empty))
 }
 
-// TestRedactPlanForLogEdgeCases covers membershipRedactedPlan branches the
+// TestRedactPlanForLogEdgeCases covers redactedPlan branches the
 // parsed-plan test does not: a nil plan and a bloom blob in a scorer filter.
 func TestRedactPlanForLogEdgeCases(t *testing.T) {
 	assert.Equal(t, "<nil>", RedactPlanForLog(nil).String())
@@ -741,66 +741,66 @@ func TestBloomMatchRejectsWrongValueDomain(t *testing.T) {
 	}{
 		{
 			name: "utf8 blob on int64 field",
-			expr: "bloom_match(Int64Field, {bf})",
+			expr: "membership_match(Int64Field, {bf}, type=bloom)",
 			tv:   func() *schemapb.TemplateValue { tv, _ := bloomBytesTemplateStr(t, 0.001, "1", "2"); return tv },
 			// The classic misuse: IDs stringified by a JSON layer.
 			wantErr: "value domain",
 		},
 		{
 			name:    "int64 blob on varchar field",
-			expr:    "bloom_match(VarCharField, {bf})",
+			expr:    "membership_match(VarCharField, {bf}, type=bloom)",
 			tv:      func() *schemapb.TemplateValue { tv, _ := bloomBytesTemplate(t, 0.001, 1, 2); return tv },
 			wantErr: "value domain",
 		},
 		{
 			name: "int64 blob on int64 field",
-			expr: "bloom_match(Int64Field, {bf})",
+			expr: "membership_match(Int64Field, {bf}, type=bloom)",
 			tv:   func() *schemapb.TemplateValue { tv, _ := bloomBytesTemplate(t, 0.001, 1, 2); return tv },
 		},
 		{
 			name: "utf8 blob on varchar field",
-			expr: "bloom_match(VarCharField, {bf})",
+			expr: "membership_match(VarCharField, {bf}, type=bloom)",
 			tv:   func() *schemapb.TemplateValue { tv, _ := bloomBytesTemplateStr(t, 0.001, "a"); return tv },
 		},
 		{
 			name: "int64 blob on widened int32 field",
-			expr: "bloom_match(Int32Field, {bf})",
+			expr: "membership_match(Int32Field, {bf}, type=bloom)",
 			tv:   func() *schemapb.TemplateValue { tv, _ := bloomBytesTemplate(t, 0.001, 7); return tv },
 		},
 		{
 			// A mixed blob carries the field's domain, so it is accepted; the
 			// extra domain only costs false positives.
 			name: "mixed blob on int64 field",
-			expr: "bloom_match(Int64Field, {bf})",
+			expr: "membership_match(Int64Field, {bf}, type=bloom)",
 			tv:   func() *schemapb.TemplateValue { return bloomBytesTemplateMixed(t, 0.001, []int64{1}, []string{"a"}) },
 		},
 		{
 			name: "mixed blob on varchar field",
-			expr: "bloom_match(VarCharField, {bf})",
+			expr: "membership_match(VarCharField, {bf}, type=bloom)",
 			tv:   func() *schemapb.TemplateValue { return bloomBytesTemplateMixed(t, 0.001, []int64{1}, []string{"a"}) },
 		},
 		{
 			// JSON paths are typed per row, so no single domain is required:
 			// a domain the blob lacks simply never matches.
 			name: "utf8 blob on json path",
-			expr: `bloom_match(JSONField["user_id"], {bf})`,
+			expr: `membership_match(JSONField["user_id"], {bf}, type=bloom)`,
 			tv:   func() *schemapb.TemplateValue { tv, _ := bloomBytesTemplateStr(t, 0.001, "a"); return tv },
 		},
 		{
 			name: "int64 blob on json path",
-			expr: `bloom_match(JSONField["user_id"], {bf})`,
+			expr: `membership_match(JSONField["user_id"], {bf}, type=bloom)`,
 			tv:   func() *schemapb.TemplateValue { tv, _ := bloomBytesTemplate(t, 0.001, 1); return tv },
 		},
 		{
 			// An empty membership set records no domain and matches nothing;
 			// that is a legal query, not a malformed blob.
 			name: "empty blob on int64 field",
-			expr: "bloom_match(Int64Field, {bf})",
+			expr: "membership_match(Int64Field, {bf}, type=bloom)",
 			tv:   emptyBlob,
 		},
 		{
 			name: "empty blob on varchar field",
-			expr: "bloom_match(VarCharField, {bf})",
+			expr: "membership_match(VarCharField, {bf}, type=bloom)",
 			tv:   emptyBlob,
 		},
 	} {

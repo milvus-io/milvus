@@ -15,8 +15,9 @@
 // limitations under the License.
 
 // Package roaringfilter builds the exact MRB1 membership-filter envelope for
-// roaring_match(field, {bitmap}), as specified by the roaring-membership design
-// doc (docs/design-docs/design_docs/20260714-roaring-exact-membership-expression.md).
+// membership_match(field, {bitmap}, type=roaring), as specified by the
+// roaring-membership design doc
+// (docs/design-docs/design_docs/20260714-roaring-exact-membership-expression.md).
 //
 // This package only builds. Blobs are validated by the proxy
 // (pkg/v3/util/roaringfilter) and decoded by segcore
@@ -50,7 +51,7 @@
 // filter it asks the cluster to fan out. Build therefore writes the count the
 // encoder produced, never a caller-supplied one.
 //
-// Like client/v3/sbbf, the server validates independently rather than importing
+// Like client/v3/membership/sbbf, the server validates independently rather than importing
 // this package: the plan parser is compiled into a c-shared library that must
 // not depend on the standalone client module.
 package roaringfilter

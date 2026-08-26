@@ -16,16 +16,17 @@
 
 package planparserv2
 
-// Unified control flow for the membership-filter expression family. The three
-// surface names below share one visitor skeleton, one deferred-call fill path,
+// Unified control flow for the membership-filter expression family. The unified
+// surface name shares one visitor skeleton and one deferred-call fill path,
 // and one set of tree walkers; everything that genuinely differs between them
 // — envelope validation, field-type domains, delete safety — lives in the
 // per-kind validators (bloom_match.go / roaring_match.go) and is selected
-// through membershipKind, either statically by function name or dynamically by
-// sniffing the blob's magic header. See
+// through membershipKind by sniffing the blob's magic header. See
 // docs/design-docs/design_docs/20260822-membership-match-expression.md.
 
 import (
+	"strings"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -34,19 +35,9 @@ import (
 )
 
 // MembershipMatchFunctionName is the unified membership-filter surface syntax,
-// membership_match(field, {blob}). The filter kind is derived from the blob's
-// magic header at fill time: MBF1 lowers to a BloomFilterExpr, MRB1 to a
-// RoaringFilterExpr, so the wire plan is identical to what the explicit
-// bloom_match / roaring_match names produce.
+// membership_match(field, {blob}, type=bloom|roaring). The type is optional;
+// when omitted the filter kind is derived from the blob's magic header.
 const MembershipMatchFunctionName = "membership_match"
-
-// BloomMatchFunctionName and RoaringMatchFunctionName are kept as permanent
-// compatibility aliases: existing clients keep sending them, and their plans
-// stay byte-identical to what they always produced.
-const (
-	BloomMatchFunctionName   = "bloom_match"
-	RoaringMatchFunctionName = "roaring_match"
-)
 
 // membershipKind identifies which concrete membership structure a blob (and
 // therefore a materialized plan node) carries.
@@ -69,47 +60,28 @@ type membershipFilterSpec struct {
 	allowInDelete bool
 }
 
-// membershipSpecByName covers the three accepted surface names. The unified
+// membershipSpecByName covers the accepted surface name. The unified
 // entry has kind membershipUnknown: its kind comes from the blob magic at fill
 // time, and its allowInDelete default is the conservative answer for any code
 // path that must decide before the blob is inspected.
 var membershipSpecByName = map[string]membershipFilterSpec{
-	BloomMatchFunctionName: {
-		kind:          membershipBloom,
-		allowInDelete: false,
-	},
-	RoaringMatchFunctionName: {
-		kind:          membershipRoaring,
-		allowInDelete: true,
-	},
 	MembershipMatchFunctionName: {
 		kind:          membershipUnknown,
 		allowInDelete: false,
 	},
 }
 
-// isMembershipFunctionName reports whether name is one of the membership-filter
-// surface functions handled by the unified skeleton.
+// isMembershipFunctionName reports whether name is the membership-filter
+// surface function handled by the unified skeleton.
 func isMembershipFunctionName(name string) bool {
 	_, ok := membershipSpecByName[name]
 	return ok
 }
 
-// fixedMembershipKind returns the statically-known kind for an explicit
-// function name. The unified membership_match name resolves its kind from the
-// blob instead and reports false here.
-func fixedMembershipKind(name string) (membershipKind, bool) {
-	spec, ok := membershipSpecByName[name]
-	if !ok || spec.kind == membershipUnknown {
-		return membershipUnknown, false
-	}
-	return spec.kind, true
-}
-
 // sniffMembershipKind identifies the blob format from its magic header. Both
-// envelopes are self-describing (4-byte magic at offset 0), so the unified
-// membership_match syntax needs no type argument; an unrecognized header is a
-// request error, never a guess.
+// envelopes are self-describing (4-byte magic at offset 0), so the optional
+// type argument is only a consistency pin; an unrecognized header is a request
+// error, never a guess.
 func sniffMembershipKind(blob []byte) (membershipKind, error) {
 	if len(blob) < 4 {
 		return membershipUnknown, merr.WrapErrParameterInvalidMsg(
@@ -124,8 +96,8 @@ func sniffMembershipKind(blob []byte) (membershipKind, error) {
 		// The blob is supplied out of band and this error is logged by Proxy.
 		// Report the protocol expectation without echoing caller-controlled bytes.
 		return membershipUnknown, merr.WrapErrParameterInvalidMsg(
-			"membership filter blob has unknown format magic; supported formats are %q (%s) and %q (%s)",
-			mbf1Magic, BloomMatchFunctionName, roaringfilter.Magic, RoaringMatchFunctionName)
+			"membership filter blob has unknown format magic; supported formats are %q (bloom) and %q (roaring)",
+			mbf1Magic, roaringfilter.Magic)
 	}
 }
 
@@ -141,18 +113,17 @@ func checkMembershipField(kind membershipKind, columnInfo *planpb.ColumnInfo, ar
 	}
 }
 
-// visitMembershipCall is the shared visitor for all membership-filter surface
-// names. It emits a deferred CallExpr carrying the name exactly as the client
-// wrote it, so redaction and every downstream error message reflect the real
-// call site. For the explicit names the per-kind field check runs here, at
-// parse time, with the best available error context; the unified
-// membership_match defers it to fill time because the kind — and therefore the
-// accepted field domain — is unknown until the blob's magic header is read.
+// visitMembershipCall emits a deferred CallExpr for membership_match. Field
+// domain validation happens at fill time because the kind is unknown until the
+// blob's magic header is read.
 func (v *ParserVisitor) visitMembershipCall(ctx *parser.CallContext, functionName string) interface{} {
-	allArgs := ctx.AllExpr()
+	return v.visitMembershipArgs(ctx.AllExpr(), functionName)
+}
+
+func (v *ParserVisitor) visitMembershipArgs(allArgs []parser.IExprContext, functionName string) interface{} {
 	if len(allArgs) != 2 {
 		return merr.WrapErrParameterInvalidMsg(
-			"%s requires exactly 2 arguments: %s(field, {blob}), got %d", functionName, functionName, len(allArgs))
+			"%s requires exactly 2 positional arguments; use type=bloom|roaring for the optional kind", functionName)
 	}
 
 	field := allArgs[0].Accept(v)
@@ -165,11 +136,7 @@ func (v *ParserVisitor) visitMembershipCall(ctx *parser.CallContext, functionNam
 			"the first argument of %s must be a scalar field name, got: %s", functionName, allArgs[0].GetText())
 	}
 	columnInfo := toColumnInfo(fieldExpr)
-	if kind, ok := fixedMembershipKind(functionName); ok {
-		if err := checkMembershipField(kind, columnInfo, allArgs[0].GetText(), functionName); err != nil {
-			return err
-		}
-	} else if columnInfo == nil {
+	if columnInfo == nil {
 		// Kind-agnostic structural floor; the per-kind validator re-checks the
 		// full field domain once the blob kind is resolved at fill time.
 		return merr.WrapErrParameterInvalidMsg(
@@ -190,18 +157,16 @@ func (v *ParserVisitor) visitMembershipCall(ctx *parser.CallContext, functionNam
 
 	// Deferred: FillExpressionValue validates the blob and materializes the
 	// dedicated plan node once the template value is resolved.
+	params := []*planpb.Expr{fieldExpr.expr, {
+		Expr:       &planpb.Expr_ValueExpr{ValueExpr: valueExpr},
+		IsTemplate: true,
+	}}
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_CallExpr{
 				CallExpr: &planpb.CallExpr{
-					FunctionName: functionName,
-					FunctionParameters: []*planpb.Expr{
-						fieldExpr.expr,
-						{
-							Expr:       &planpb.Expr_ValueExpr{ValueExpr: valueExpr},
-							IsTemplate: true,
-						},
-					},
+					FunctionName:       functionName,
+					FunctionParameters: params,
 				},
 			},
 			IsTemplate: true,
@@ -211,14 +176,13 @@ func (v *ParserVisitor) visitMembershipCall(ctx *parser.CallContext, functionNam
 }
 
 // fillMembershipMatchExpressionValue resolves the template placeholder of a
-// deferred membership-filter call, determines the filter kind — statically for
-// the explicit names, from the blob magic for membership_match — validates the
-// client pre-built blob with the per-kind validator, and rewrites the node into
-// its dedicated plan node in place.
+// deferred membership-filter call, determines the filter kind from the blob
+// magic, checks an optional explicit type pin, validates the client pre-built
+// blob with the per-kind validator, and rewrites the node into its dedicated
+// plan node in place.
 //
-// The parameter-shape checks deliberately mirror the strict form first written
-// for roaring_match: every access is guarded, so a malformed call produces an
-// input error instead of a nil dereference.
+// Every parameter access is guarded so a malformed call produces an input
+// error instead of a nil dereference.
 func fillMembershipMatchExpressionValue(
 	expr *planpb.Expr,
 	call *planpb.CallExpr,
@@ -227,9 +191,9 @@ func fillMembershipMatchExpressionValue(
 ) error {
 	functionName := call.GetFunctionName()
 	params := call.GetFunctionParameters()
-	if len(params) != 2 {
+	if len(params) != 2 && len(params) != 3 {
 		return merr.WrapErrQueryPlanMsg(
-			"malformed %s call: expected 2 parameters, got %d", functionName, len(params))
+			"malformed %s call: expected 2 parameters plus optional type, got %d", functionName, len(params))
 	}
 	columnParam, ok := params[0].GetExpr().(*planpb.Expr_ColumnExpr)
 	if !ok || columnParam.ColumnExpr == nil || columnParam.ColumnExpr.GetInfo() == nil {
@@ -256,11 +220,27 @@ func fillMembershipMatchExpressionValue(
 			functionName, templateName)
 	}
 
-	kind, ok := fixedMembershipKind(functionName)
-	if !ok {
-		var err error
-		if kind, err = sniffMembershipKind(blobValue.BytesVal); err != nil {
-			return err
+	kind, err := sniffMembershipKind(blobValue.BytesVal)
+	if err != nil {
+		return err
+	}
+	if len(params) == 3 {
+		option, ok := params[2].GetExpr().(*planpb.Expr_ValueExpr)
+		if !ok || option.ValueExpr == nil || option.ValueExpr.GetValue() == nil {
+			return merr.WrapErrQueryPlanMsg("malformed %s call: type must be bloom or roaring", functionName)
+		}
+		typeName := strings.ToLower(option.ValueExpr.GetValue().GetStringVal())
+		var requested membershipKind
+		switch typeName {
+		case "bloom":
+			requested = membershipBloom
+		case "roaring":
+			requested = membershipRoaring
+		default:
+			return merr.WrapErrQueryPlanMsg("malformed %s call: type must be bloom or roaring", functionName)
+		}
+		if requested != kind {
+			return merr.WrapErrQueryPlanMsg("%s type %q does not match filter blob format", functionName, typeName)
 		}
 	}
 	// Re-validate the probe column against the resolved kind even when the

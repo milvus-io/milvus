@@ -53,7 +53,7 @@
 // is recorded only for reproducibility. To regenerate after an intentional
 // format change:
 //
-//	SBBF_REGEN_GOLDEN=1 go test -tags dynamic,test -run TestGoldenVectors ./util/sbbf/...
+//	SBBF_REGEN_GOLDEN=1 go test -tags dynamic,test -run TestGoldenVectors ./membership/sbbf/...
 package sbbf
 
 import (
@@ -406,7 +406,7 @@ func goldenPath(t *testing.T) string {
 // keeps its own copy under internal/core/unittest; the two must stay
 // byte-identical. Empty if the server tree is not present (standalone client).
 func cppGoldenPath() string {
-	p := filepath.Join("..", "..", "internal", "core", "unittest", "testdata", "bloom", "golden_vectors.json")
+	p := filepath.Join("..", "..", "..", "internal", "core", "unittest", "testdata", "bloom", "golden_vectors.json")
 	if _, err := os.Stat(filepath.Dir(p)); err != nil {
 		return ""
 	}
@@ -446,7 +446,7 @@ func TestGoldenVectors(t *testing.T) {
 		cppData, cppErr := os.ReadFile(cpp)
 		require.NoError(t, cppErr)
 		require.Equal(t, string(data), string(cppData),
-			"client/sbbf/testdata and internal/core/unittest/testdata/bloom golden vectors diverged; regenerate with SBBF_REGEN_GOLDEN=1")
+			"client/membership/sbbf/testdata and internal/core/unittest/testdata/bloom golden vectors diverged; regenerate with SBBF_REGEN_GOLDEN=1")
 	}
 	var gf goldenFile
 	require.NoError(t, json.Unmarshal(data, &gf))

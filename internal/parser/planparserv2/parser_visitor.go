@@ -1456,10 +1456,15 @@ func isUnsupportedNullExprVectorType(dataType schemapb.DataType) bool {
 // VisitCall parses the expr to call plan.
 func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 	functionName := strings.ToLower(ctx.Identifier().GetText())
+	if functionName == "bloom_match" || functionName == "roaring_match" {
+		return merr.WrapErrParameterInvalidMsg(
+			"%s is not supported; use %s(field, {blob}) with optional type=bloom|roaring",
+			functionName, MembershipMatchFunctionName)
+	}
 	if isMembershipFunctionName(functionName) {
-		// bloom_match / roaring_match / membership_match are compiled on the
-		// proxy into a deferred CallExpr that carries the client pre-built blob;
-		// FillExpressionValue materializes it into the matching plan node.
+		// membership_match is compiled on the proxy into a deferred CallExpr that
+		// carries the client pre-built blob; FillExpressionValue materializes it
+		// into the matching plan node.
 		return v.visitMembershipCall(ctx, functionName)
 	}
 	numParams := len(ctx.AllExpr())
@@ -1482,6 +1487,63 @@ func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 		},
 		dataType: schemapb.DataType_Bool,
 	}
+}
+
+// VisitMembershipMatchWithOption handles the soft-keyword form
+// membership_match(field, {blob}, type=bloom|roaring). Both the function and
+// option names remain ordinary identifiers outside this call shape.
+func (v *ParserVisitor) VisitMembershipMatchWithOption(ctx *parser.MembershipMatchWithOptionContext) interface{} {
+	functionName := strings.ToLower(ctx.GetFunction().GetText())
+	if functionName != MembershipMatchFunctionName {
+		return merr.WrapErrParameterInvalidMsg("named membership option is only supported by %s", MembershipMatchFunctionName)
+	}
+	optionName := ctx.GetOption().GetText()
+	if !strings.EqualFold(optionName, "type") {
+		return merr.WrapErrParameterInvalidMsg("invalid option %q for %s, expected type", optionName, MembershipMatchFunctionName)
+	}
+	typeName := strings.ToLower(ctx.GetKind().GetText())
+	if typeName != "bloom" && typeName != "roaring" {
+		return merr.WrapErrParameterInvalidMsg("%s type must be bloom or roaring, got %q", MembershipMatchFunctionName, typeName)
+	}
+
+	var fieldText string
+	var fieldInfo *planpb.ColumnInfo
+	var err error
+	fieldText = ctx.GetField().GetText()
+	switch ctx.GetField().GetTokenType() {
+	case parser.PlanParserIdentifier, parser.PlanParserMeta:
+		var fieldExpr *ExprWithType
+		fieldExpr, err = v.translateIdentifier(fieldText)
+		if err == nil {
+			fieldInfo = toColumnInfo(fieldExpr)
+		}
+	case parser.PlanParserJSONIdentifier:
+		fieldInfo, err = v.getColumnInfoFromJSONIdentifier(fieldText)
+	case parser.PlanParserStructFieldIdentifier:
+		fieldInfo, err = v.getColumnInfoFromStructField(fieldText)
+	case parser.PlanParserStructIndexFieldIdentifier:
+		fieldInfo, err = v.getColumnInfoFromStructIndexField(fieldText)
+	case parser.PlanParserStructSubFieldIdentifier:
+		fieldInfo, err = v.getColumnInfoFromStructSubField(fieldText)
+	}
+	if err != nil {
+		return err
+	}
+	if fieldInfo == nil {
+		return merr.WrapErrParameterInvalidMsg("the first argument of %s must be a scalar field name, got: %s", MembershipMatchFunctionName, fieldText)
+	}
+	fieldExpr := &ExprWithType{expr: &planpb.Expr{Expr: &planpb.Expr_ColumnExpr{ColumnExpr: &planpb.ColumnExpr{Info: fieldInfo}}}, dataType: fieldInfo.GetDataType(), nodeDependent: true}
+	blob := ctx.Expr().Accept(v)
+	if err := getError(blob); err != nil {
+		return err
+	}
+	valueExpr := getValueExpr(blob)
+	if valueExpr == nil || !isTemplateExpr(valueExpr) {
+		return merr.WrapErrParameterInvalidMsg("the second argument of %s must be a {template} placeholder carrying a client pre-built membership filter blob", MembershipMatchFunctionName)
+	}
+	args := []*planpb.Expr{fieldExpr.expr, {Expr: &planpb.Expr_ValueExpr{ValueExpr: valueExpr}, IsTemplate: true}}
+	args = append(args, &planpb.Expr{Expr: &planpb.Expr_ValueExpr{ValueExpr: &planpb.ValueExpr{Value: NewString(typeName)}}})
+	return &ExprWithType{expr: &planpb.Expr{Expr: &planpb.Expr_CallExpr{CallExpr: &planpb.CallExpr{FunctionName: MembershipMatchFunctionName, FunctionParameters: args}}, IsTemplate: true}, dataType: schemapb.DataType_Bool}
 }
 
 // VisitRange translates expr to range plan.
@@ -2219,30 +2281,34 @@ func (v *ParserVisitor) VisitJSONIdentifier(ctx *parser.JSONIdentifierContext) i
 }
 
 // VisitStructField handles struct_array[sub_field] syntax for struct sub-field access.
-func (v *ParserVisitor) VisitStructField(ctx *parser.StructFieldContext) interface{} {
-	// Get the full identifier text, e.g., "struct_array[sub_int]"
-	identifier := ctx.StructFieldIdentifier().GetText()
-
-	// Look up the field directly by its full name
+func (v *ParserVisitor) getColumnInfoFromStructField(identifier string) (*planpb.ColumnInfo, error) {
 	field, err := v.schema.GetFieldFromName(identifier)
 	if err != nil {
-		return merr.WrapErrParameterInvalidMsg("struct field not found: %s, error: %s", identifier, err)
+		return nil, merr.WrapErrParameterInvalidMsg("struct field not found: %s, error: %s", identifier, err)
+	}
+	return &planpb.ColumnInfo{
+		FieldId:     field.FieldID,
+		DataType:    field.DataType,
+		ElementType: field.GetElementType(),
+		Nullable:    field.GetNullable(),
+	}, nil
+}
+
+func (v *ParserVisitor) VisitStructField(ctx *parser.StructFieldContext) interface{} {
+	columnInfo, err := v.getColumnInfoFromStructField(ctx.StructFieldIdentifier().GetText())
+	if err != nil {
+		return err
 	}
 
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_ColumnExpr{
 				ColumnExpr: &planpb.ColumnExpr{
-					Info: &planpb.ColumnInfo{
-						FieldId:     field.FieldID,
-						DataType:    field.DataType,
-						ElementType: field.GetElementType(),
-						Nullable:    field.GetNullable(),
-					},
+					Info: columnInfo,
 				},
 			},
 		},
-		dataType:      field.DataType,
+		dataType:      columnInfo.GetDataType(),
 		nodeDependent: true,
 	}
 }
@@ -3170,7 +3236,7 @@ func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) int
 	// element expression. Mirrors the guard in parseMatchExpr.
 	if hasMembershipFilterExpr(exprWithType.expr) {
 		return merr.WrapErrParameterInvalidMsg(
-			"membership filters (bloom_match/roaring_match/membership_match) are not supported inside element_filter element expressions")
+			"membership_match filters are not supported inside element_filter element expressions")
 	}
 
 	// Build ElementFilterExpr proto
@@ -3283,7 +3349,7 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 	// per-MatchType error-semantics matrix.
 	if hasMembershipFilterExpr(predicateExpr.expr) {
 		return merr.WrapErrParameterInvalidMsg(
-			"membership filters (bloom_match/roaring_match/membership_match) are not supported inside %s element predicates", funcName)
+			"membership_match filters are not supported inside %s element predicates", funcName)
 	}
 
 	// Build MatchExpr proto

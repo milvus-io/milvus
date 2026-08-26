@@ -83,13 +83,13 @@ func validateRoaringBitmapBlob(blob []byte) (validatedRoaringBitmapBlob, error) 
 			bodySize = 0
 		}
 		return validatedRoaringBitmapBlob{}, merr.WrapErrParameterInvalidMsg(
-			"roaring_match bitmap blob body is %d bytes, exceeding proxy.maxMembershipFilterSize (%d); "+
+			"membership_match roaring bitmap blob body is %d bytes, exceeding proxy.maxMembershipFilterSize (%d); "+
 				"a Roaring bitmap's size follows the value distribution, so a sparser member set costs "+
 				"more per member than a dense one", bodySize, maxSize)
 	}
 	summary, err := roaringfilter.Validate(blob)
 	if err != nil {
-		return validatedRoaringBitmapBlob{}, merr.Wrap(err, "roaring_match bitmap blob is invalid")
+		return validatedRoaringBitmapBlob{}, merr.Wrap(err, "membership_match roaring bitmap blob is invalid")
 	}
 	return validatedRoaringBitmapBlob{blob: blob, summary: summary}, nil
 }

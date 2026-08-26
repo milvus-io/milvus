@@ -163,7 +163,7 @@ func preflightMembershipFilterValues(
 			return false
 		}
 		params := call.GetFunctionParameters()
-		if len(params) != 2 || params[1] == nil || !params[1].GetIsTemplate() {
+		if (len(params) != 2 && len(params) != 3) || params[1] == nil || !params[1].GetIsTemplate() {
 			return false
 		}
 		templateName := params[1].GetValueExpr().GetTemplateVariableName()
@@ -184,14 +184,10 @@ func preflightMembershipFilterValues(
 			budget.budgetInitialized = true
 		}
 
-		// The kind is static for the explicit names; the unified
-		// membership_match resolves it from the blob magic. A blob whose magic
+		// membership_match resolves its kind from the blob magic. A blob whose magic
 		// cannot be resolved is left to the fill path, which reports it as a
 		// canonical input error.
-		kind, kindKnown := fixedMembershipKind(call.GetFunctionName())
-		if !kindKnown {
-			kind, _ = sniffMembershipKind(blobValue.BytesVal)
-		}
+		kind, _ := sniffMembershipKind(blobValue.BytesVal)
 
 		// Charge the BODY, matching the per-blob gate this early check mirrors:
 		// both MBF1 and MRB1 allow their fixed 32-byte header on top of the
@@ -262,7 +258,7 @@ func preflightMembershipFilterValues(
 		}
 		if cost != 0 && occurrences > remaining/cost {
 			return nil, merr.WrapErrParameterTooLarge(fmt.Sprintf(
-				"aggregate roaring_match estimated decoded size exceeds maximum before plan materialization: %d + %d*%d > %d bytes",
+				"aggregate membership_match roaring estimated decoded size exceeds maximum before plan materialization: %d + %d*%d > %d bytes",
 				budget.aggregateDecodedBytes, occurrences, cost, roaringfilter.MaxEstimatedDecodedBytes))
 		}
 		budget.aggregateDecodedBytes += occurrences * cost
@@ -335,7 +331,7 @@ func fillExpressionValue(
 		// the template value is known, the client-built blob is validated and
 		// the call is materialized into its dedicated plan node here —
 		// BloomFilterExpr for the bloom kind, RoaringFilterExpr for roaring,
-		// selected by function name or blob magic (membership_match).
+		// selected by blob magic (with an optional explicit type consistency pin).
 		if isMembershipFunctionName(e.CallExpr.GetFunctionName()) {
 			return fillMembershipMatchExpressionValue(expr, e.CallExpr, templateValues, ctx)
 		}

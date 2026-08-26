@@ -2350,7 +2350,7 @@ type proxyConfig struct {
 	MaxFieldNum                    ParamItem `refreshable:"true"`
 	MaxVectorFieldNum              ParamItem `refreshable:"true"`
 	MaxShardNum                    ParamItem `refreshable:"true"`
-	// Shared by bloom_match and roaring_match. There are no Bloom-named Go
+	// Shared by the Bloom and Roaring membership_match kinds. There are no Bloom-named Go
 	// fields: the old `proxy.maxBloomFilterSize` / `proxy.maxBloomFilterPlanSize`
 	// YAML keys stay accepted through FallbackKeys in init(), which is where
 	// deployment compatibility actually matters.
@@ -2554,8 +2554,8 @@ func (p *proxyConfig) init(base *BaseTable) {
 		// and reports it in the rejection.
 		DefaultValue: "67108864",
 		Version:      "3.0.0",
-		Doc: "The maximum byte size of one client pre-built membership_match, bloom_match, or " +
-			"roaring_match filter body accepted by the proxy (the fixed 32-byte MBF1/MRB1 header is allowed " +
+		Doc: "The maximum byte size of one client pre-built membership_match filter body accepted " +
+			"by the proxy (the fixed 32-byte MBF1/MRB1 header is allowed " +
 			"on top). The blob is embedded into the query plan and fanned out to every QueryNode, " +
 			"so this bounds per-membership-filter memory/network amplification. Must not exceed the format " +
 			"cap (128 MiB). Bloom SBBF bodies are powers of two, so the default admits bodies " +

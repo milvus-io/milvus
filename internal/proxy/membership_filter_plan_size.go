@@ -58,7 +58,7 @@ func wrapPlanCreationError(err error, context string) error {
 // sub-plan so all sub-searches share one limit. Complex Delete uses the same
 // gate before its shard fan-out.
 //
-// bloom_match and roaring_match share one budget because they consume one
+// Bloom and Roaring membership_match filters share one budget because they consume one
 // resource: both embed a client-built blob into the serialized plan that is
 // then fanned out to every QueryNode. Splitting the budget would let a request
 // carrying one of each spend twice what either alone is allowed. The generic

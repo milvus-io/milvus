@@ -16,9 +16,9 @@
 
 package planparserv2
 
-// Log redaction for plans carrying membership filter blobs. A membership blob
-// is up to tens of MiB of binary; RedactPlanForLog makes sure none of it ever
-// lands verbatim in a proxy log, regardless of which surface syntax carried it.
+// Log redaction for plans carrying values supplied through expression
+// templates or large membership filter blobs. RedactPlanForLog makes sure none
+// of those caller-supplied values lands verbatim in a proxy log.
 
 import (
 	"fmt"
@@ -26,11 +26,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
-// membershipRedactedPlan wraps a plan so its String() elides every membership
-// blob — approximate bloom_match and exact roaring_match alike. As a
-// fmt.Stringer, mlog.Stringer defers the work: when the log level is disabled,
-// String() is never called and there is zero cost.
-type membershipRedactedPlan struct{ plan *planpb.PlanNode }
+// redactedPlan wraps a plan so its String() elides template-substituted values
+// and membership blobs. As a fmt.Stringer, mlog.Stringer defers the work: when
+// the log level is disabled, String() is never called and there is zero cost.
+type redactedPlan struct{ plan *planpb.PlanNode }
 
 // redactTemplateValues swaps every value that arrived through an expression
 // template for a marker, returning a restore func.
@@ -95,7 +94,7 @@ func redactTemplateValues(root *planpb.Expr) func() {
 	}
 }
 
-func (p membershipRedactedPlan) String() string {
+func (p redactedPlan) String() string {
 	if p.plan == nil {
 		return "<nil>"
 	}
@@ -136,10 +135,10 @@ func (p membershipRedactedPlan) String() string {
 }
 
 // RedactPlanForLog returns a fmt.Stringer that renders the plan with every
-// bloom_match, roaring_match, or membership_match blob replaced by a {size}
-// marker, so a client's up-to-tens-of-MiB membership payload never lands
+// template-substituted value and membership_match blob replaced by a marker, so
+// caller-supplied values and up-to-tens-of-MiB membership payloads never land
 // verbatim in a proxy debug log. Cheap when logging is disabled (lazy) and when
 // the plan has no membership blob (no clone).
 func RedactPlanForLog(plan *planpb.PlanNode) fmt.Stringer {
-	return membershipRedactedPlan{plan: plan}
+	return redactedPlan{plan: plan}
 }

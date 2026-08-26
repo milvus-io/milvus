@@ -14,8 +14,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v3/roaringfilter"
-	"github.com/milvus-io/milvus/client/v3/sbbf"
+	"github.com/milvus-io/milvus/client/v3/membership/roaringfilter"
+	"github.com/milvus-io/milvus/client/v3/membership/sbbf"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -632,7 +632,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 		dr := deleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
-				Expr:           "bloom_match(pk, {bf})",
+				Expr:           "membership_match(pk, {bf}, type=bloom)",
 				ExprTemplateValues: map[string]*schemapb.TemplateValue{
 					"bf": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: blob}},
 				},
@@ -891,7 +891,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		require.NoError(t, err)
 		plan, err := planparserv2.CreateRetrievePlan(
 			schema.SchemaHelper,
-			"roaring_match(pk, {rb})",
+			"membership_match(pk, {rb}, type=roaring)",
 			map[string]*schemapb.TemplateValue{
 				"rb": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: blob}},
 			})

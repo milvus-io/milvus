@@ -64,7 +64,7 @@ namespace exec {
 // Probe policy for the approximate bloom kind: zero-copy SBBF view over the
 // logical node's MBF1 blob, gated by the blob's declared value domains.
 struct BloomMembershipProbe {
-    static constexpr const char* kKindName = "bloom_match";
+    static constexpr const char* kKindName = "membership_match(type=bloom)";
     static constexpr bool kSupportsVarChar = true;
     // JSON probes the value at the column's nested path per row, hashing by
     // the value's runtime type (strictly typed; see ExecVisitorImplJson).
@@ -101,7 +101,7 @@ struct BloomMembershipProbe {
 // plan (milvus::expr::RoaringFilterExpr) and shared by every per-segment
 // physical expression.
 struct RoaringMembershipProbe {
-    static constexpr const char* kKindName = "roaring_match";
+    static constexpr const char* kKindName = "membership_match(type=roaring)";
     static constexpr bool kSupportsVarChar = false;
     static constexpr bool kSupportsJson = false;
 
@@ -111,7 +111,7 @@ struct RoaringMembershipProbe {
     explicit RoaringMembershipProbe(const milvus::expr::RoaringFilterExpr& expr)
         : membership(expr.membership_.get()) {
         AssertInfo(membership != nullptr,
-                   "roaring_match physical expression requires membership");
+                   "membership_match(type=roaring) physical expression requires membership");
     }
 
     template <typename T>

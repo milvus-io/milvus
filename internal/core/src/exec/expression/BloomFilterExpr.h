@@ -35,8 +35,8 @@ namespace exec {
 // Zero-copy prober over an MBF1-enveloped parquet Split-Block Bloom Filter
 // (SBBF) blob. The bit layout and probe algorithm are bit-identical to Arrow
 // C++'s parquet::BlockSplitBloomFilter (parquet-format BloomFilter.md) and to
-// the Go builder in client/sbbf. Conformance is pinned by the shared golden
-// vectors in client/sbbf/testdata/golden_vectors.json.
+// the Go builder in client/membership/sbbf. Conformance is pinned by the shared golden
+// vectors in client/membership/sbbf/testdata/golden_vectors.json.
 //
 // MBF1 envelope layout (all integers little-endian):
 //   offset  size  field
@@ -115,7 +115,7 @@ class SplitBlockBloomFilterView {
 
     // INT8/16/32/64 values are widened to int64 and hashed as their 8-byte
     // little-endian encoding with XXH64(seed=0) — identical to parquet plain
-    // encoding for INT64 and to client/sbbf hashInt64.
+    // encoding for INT64 and to client/membership/sbbf hashInt64.
     bool
     TestInt64(int64_t v) const {
         if (!HasDomain(kDomainInt64)) {
@@ -131,7 +131,7 @@ class SplitBlockBloomFilterView {
 
     // VARCHAR values hash their raw UTF-8 bytes with XXH64(seed=0) —
     // identical to parquet plain encoding for BYTE_ARRAY and to
-    // client/sbbf hashString.
+    // client/membership/sbbf hashString.
     bool
     TestBytes(const void* data, size_t len) const {
         if (!HasDomain(kDomainUtf8)) {

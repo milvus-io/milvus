@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v3/sbbf"
+	"github.com/milvus-io/milvus/client/v3/membership/sbbf"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -261,7 +261,7 @@ func TestSearchTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 			},
 			request: &milvuspb.SearchRequest{
 				CollectionName:     schema.GetName(),
-				Dsl:                "bloom_match(pk, {bf})",
+				Dsl:                "membership_match(pk, {bf}, type=bloom)",
 				ExprTemplateValues: templateValues,
 				SearchParams:       bloomPlanSizeSearchParams(),
 			},
@@ -289,7 +289,7 @@ func TestSearchTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 				},
 				SubReqs: []*milvuspb.SubSearchRequest{{
 					Nq:                 1,
-					Dsl:                "bloom_match(pk, {bf})",
+					Dsl:                "membership_match(pk, {bf}, type=bloom)",
 					ExprTemplateValues: templateValues,
 					SearchParams:       bloomPlanSizeSearchParams(),
 				}},
@@ -379,7 +379,7 @@ func TestQueryTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 		},
 		request: &milvuspb.QueryRequest{
 			CollectionName:     schema.GetName(),
-			Expr:               "bloom_match(pk, {bf})",
+			Expr:               "membership_match(pk, {bf}, type=bloom)",
 			ExprTemplateValues: templateValues,
 		},
 	}

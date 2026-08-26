@@ -32,7 +32,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v3/roaringfilter"
+	"github.com/milvus-io/milvus/client/v3/membership/roaringfilter"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -94,7 +94,7 @@ func TestExpr_RoaringMatch(t *testing.T) {
 
 	for _, field := range []string{"Int8Field", "Int16Field", "Int32Field", "Int64Field"} {
 		t.Run(field, func(t *testing.T) {
-			expr, err := ParseExpr(helper, "roaring_match("+field+", {ids})", values)
+			expr, err := ParseExpr(helper, "membership_match("+field+", {ids}, type=roaring)", values)
 			require.NoError(t, err)
 			filter := requireRoaringFilterExpr(t, expr)
 			assert.Equal(t, blob, expr.GetRoaringFilterExpr().GetBitmapBlob())
@@ -105,7 +105,7 @@ func TestExpr_RoaringMatch(t *testing.T) {
 	}
 
 	t.Run("not roaring_match", func(t *testing.T) {
-		expr, err := ParseExpr(helper, "not roaring_match(Int64Field, {ids})", values)
+		expr, err := ParseExpr(helper, "not membership_match(Int64Field, {ids}, type=roaring)", values)
 		require.NoError(t, err)
 		unary := expr.GetUnaryExpr()
 		require.NotNil(t, unary)
@@ -114,7 +114,7 @@ func TestExpr_RoaringMatch(t *testing.T) {
 	})
 
 	t.Run("roaring_match nested under and", func(t *testing.T) {
-		expr, err := ParseExpr(helper, "roaring_match(Int64Field, {ids}) and Int64Field > 0", values)
+		expr, err := ParseExpr(helper, "membership_match(Int64Field, {ids}, type=roaring) and Int64Field > 0", values)
 		require.NoError(t, err)
 		binary := expr.GetBinaryExpr()
 		require.NotNil(t, binary)
@@ -123,7 +123,7 @@ func TestExpr_RoaringMatch(t *testing.T) {
 	})
 
 	t.Run("search plan carries dedicated node", func(t *testing.T) {
-		plan, err := CreateSearchPlan(helper, "roaring_match(Int64Field, {ids})", "FloatVectorField", &planpb.QueryInfo{
+		plan, err := CreateSearchPlan(helper, "membership_match(Int64Field, {ids}, type=roaring)", "FloatVectorField", &planpb.QueryInfo{
 			Topk:       10,
 			MetricType: "L2",
 		}, values, nil)
@@ -137,7 +137,7 @@ func TestExpr_RoaringMatch(t *testing.T) {
 	})
 
 	t.Run("exact predicate is not delete-unsafe", func(t *testing.T) {
-		plan, err := CreateRetrievePlan(helper, "roaring_match(Int64Field, {ids})", values)
+		plan, err := CreateRetrievePlan(helper, "membership_match(Int64Field, {ids}, type=roaring)", values)
 		require.NoError(t, err)
 		assert.True(t, PlanContainsMembershipFilter(plan),
 			"roaring_match must be charged to the shared membership plan-size budget")
@@ -158,16 +158,16 @@ func TestExpr_RoaringMatchErrors(t *testing.T) {
 	}
 
 	t.Run("wrong argument count", func(t *testing.T) {
-		expectError(t, "roaring_match(Int64Field)", values, "requires exactly 2 arguments")
-		expectError(t, "roaring_match(Int64Field, {ids}, 1)", values, "requires exactly 2 arguments")
+		expectError(t, "membership_match(Int64Field, type=roaring)", values, "query plan failed")
+		expectError(t, "membership_match(Int64Field, {ids}, 1, type=roaring)", values, "query plan failed")
 	})
 
 	t.Run("wrong field type", func(t *testing.T) {
 		for _, field := range []string{"BoolField", "FloatField", "DoubleField", "VarCharField", "ArrayField"} {
-			expectError(t, "roaring_match("+field+", {ids})", values, "only supports INT8/INT16/INT32/INT64")
+			expectError(t, "membership_match("+field+", {ids}, type=roaring)", values, "only supports INT8/INT16/INT32/INT64")
 		}
-		expectError(t, "roaring_match(JSONField, {ids})", values, "not supported on JSON")
-		expectError(t, `roaring_match(JSONField["a"], {ids})`, values, "not supported on JSON")
+		expectError(t, "membership_match(JSONField, {ids}, type=roaring)", values, "not supported on JSON")
+		expectError(t, `membership_match(JSONField["a"], {ids}, type=roaring)`, values, "not supported on JSON")
 	})
 
 	t.Run("every non-integer data type is rejected", func(t *testing.T) {
@@ -178,25 +178,25 @@ func TestExpr_RoaringMatchErrors(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				err := checkRoaringMatchField(
-					&planpb.ColumnInfo{DataType: dataType}, "field", RoaringMatchFunctionName)
+					&planpb.ColumnInfo{DataType: dataType}, "field", MembershipMatchFunctionName)
 				require.Error(t, err)
 			})
 		}
 	})
 
 	t.Run("bitmap must be a bytes template", func(t *testing.T) {
-		expectError(t, "roaring_match(Int64Field, [1, 2, 3])", nil, "must be a {template} placeholder")
-		expectError(t, "roaring_match(Int64Field, 1)", nil, "must be a {template} placeholder")
-		expectError(t, "roaring_match(Int64Field, {missing})", values, "{missing} is not found")
+		expectError(t, "membership_match(Int64Field, [1, 2, 3], type=roaring)", nil, "must be a {template} placeholder")
+		expectError(t, "membership_match(Int64Field, 1, type=roaring)", nil, "must be a {template} placeholder")
+		expectError(t, "membership_match(Int64Field, {missing}, type=roaring)", values, "{missing} is not found")
 		nonBytes := map[string]*schemapb.TemplateValue{
 			"ids": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
 		}
-		expectError(t, "roaring_match(Int64Field, {ids})", nonBytes, "must be a client pre-built membership filter blob (bytes)")
+		expectError(t, "membership_match(Int64Field, {ids}, type=roaring)", nonBytes, "must be a client pre-built membership filter blob (bytes)")
 	})
 
 	t.Run("malformed MRB1", func(t *testing.T) {
 		malformed := map[string]*schemapb.TemplateValue{"ids": bytesTemplate([]byte("not-mrb1"))}
-		expectError(t, "roaring_match(Int64Field, {ids})", malformed, "bitmap blob is invalid")
+		expectError(t, "membership_match(Int64Field, {ids}, type=roaring)", malformed, "unknown format magic")
 		_, err := validateRoaringBitmapBlob([]byte("not-mrb1"))
 		require.ErrorIs(t, err, merr.ErrParameterInvalid,
 			"adding roaring_match context must preserve the validator's typed cause")
@@ -206,23 +206,23 @@ func TestExpr_RoaringMatchErrors(t *testing.T) {
 		// The blob itself never enters the expression text -- the second
 		// argument must be a {template} placeholder supplied out of band -- so
 		// echoing the caller's own expression cannot leak MRB1 content.
-		_, err := ParseExpr(helper, `roaring_match(Int64Field, {ids}, 3)`, values)
+		_, err := ParseExpr(helper, `membership_match(Int64Field, {ids}, 3, type=roaring)`, values)
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), "MRB1")
 	})
 
 	t.Run("roaring_match rejected inside element_filter element expression", func(t *testing.T) {
 		expectError(t,
-			`element_filter(struct_array, roaring_match(Int64Field, {ids}) && $[sub_int] > 0)`,
-			values, "membership filters (bloom_match/roaring_match/membership_match) are not supported inside element_filter")
+			`element_filter(struct_array, membership_match(Int64Field, {ids}, type=roaring) && $[sub_int] > 0)`,
+			values, "membership_match filters are not supported inside element_filter")
 		expectError(t,
-			`element_filter(struct_array, not roaring_match(Int64Field, {ids}))`,
-			values, "membership filters (bloom_match/roaring_match/membership_match) are not supported inside element_filter")
+			`element_filter(struct_array, not membership_match(Int64Field, {ids}, type=roaring))`,
+			values, "membership_match filters are not supported inside element_filter")
 	})
 
 	t.Run("roaring_match as element_filter sibling stays legal", func(t *testing.T) {
 		_, err := ParseExpr(helper,
-			`roaring_match(Int64Field, {ids}) and element_filter(struct_array, $[sub_int] > 0)`,
+			`membership_match(Int64Field, {ids}, type=roaring) and element_filter(struct_array, $[sub_int] > 0)`,
 			values)
 		require.NoError(t, err)
 	})
@@ -234,7 +234,7 @@ func TestRedactPlanForLogRedactsRoaringMembershipBlobs(t *testing.T) {
 	bloomTemplate, bloomBlob := bloomBytesTemplate(t, 0.001, 1, 2, 3)
 
 	t.Run("pure roaring", func(t *testing.T) {
-		plan, err := CreateRetrievePlan(helper, "roaring_match(Int64Field, {rb})",
+		plan, err := CreateRetrievePlan(helper, "membership_match(Int64Field, {rb}, type=roaring)",
 			map[string]*schemapb.TemplateValue{"rb": roaringTemplate})
 		require.NoError(t, err)
 
@@ -248,7 +248,7 @@ func TestRedactPlanForLogRedactsRoaringMembershipBlobs(t *testing.T) {
 
 	t.Run("mixed bloom and roaring", func(t *testing.T) {
 		plan, err := CreateRetrievePlan(helper,
-			"bloom_match(Int64Field, {bf}) and roaring_match(Int64Field, {rb})",
+			"membership_match(Int64Field, {bf}, type=bloom) and membership_match(Int64Field, {rb}, type=roaring)",
 			map[string]*schemapb.TemplateValue{
 				"bf": bloomTemplate,
 				"rb": roaringTemplate,
@@ -336,7 +336,7 @@ func TestFillMembershipMatchExpressionValueRejectsMalformedCall(t *testing.T) {
 	for name, params := range tests {
 		t.Run(name, func(t *testing.T) {
 			call := &planpb.CallExpr{
-				FunctionName:       RoaringMatchFunctionName,
+				FunctionName:       MembershipMatchFunctionName,
 				FunctionParameters: params,
 			}
 			expr := &planpb.Expr{
@@ -366,7 +366,7 @@ func TestRoaringMatchSizeGuard(t *testing.T) {
 	t.Run("body over the budget is rejected", func(t *testing.T) {
 		pt.Save(pt.ProxyCfg.MaxMembershipFilterSize.Key, strconv.Itoa(body-1))
 		defer pt.Reset(pt.ProxyCfg.MaxMembershipFilterSize.Key)
-		_, err := ParseExpr(helper, "roaring_match(Int64Field, {rb})", mv)
+		_, err := ParseExpr(helper, "membership_match(Int64Field, {rb}, type=roaring)", mv)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "proxy.maxMembershipFilterSize")
 	})
@@ -374,7 +374,7 @@ func TestRoaringMatchSizeGuard(t *testing.T) {
 	t.Run("a body-sized budget admits the blob, header on top", func(t *testing.T) {
 		pt.Save(pt.ProxyCfg.MaxMembershipFilterSize.Key, strconv.Itoa(body))
 		defer pt.Reset(pt.ProxyCfg.MaxMembershipFilterSize.Key)
-		_, err := ParseExpr(helper, "roaring_match(Int64Field, {rb})", mv)
+		_, err := ParseExpr(helper, "membership_match(Int64Field, {rb}, type=roaring)", mv)
 		require.NoError(t, err, "the 32-byte MRB1 header must be allowed on top of the body budget")
 	})
 
@@ -385,7 +385,7 @@ func TestRoaringMatchSizeGuard(t *testing.T) {
 		garbage := append(append([]byte(nil), blob[:roaringfilter.HeaderSize]...), make([]byte, 4096)...)
 		pt.Save(pt.ProxyCfg.MaxMembershipFilterSize.Key, "16")
 		defer pt.Reset(pt.ProxyCfg.MaxMembershipFilterSize.Key)
-		_, err := ParseExpr(helper, "roaring_match(Int64Field, {rb})",
+		_, err := ParseExpr(helper, "membership_match(Int64Field, {rb}, type=roaring)",
 			map[string]*schemapb.TemplateValue{"rb": bytesTemplate(garbage)})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "proxy.maxMembershipFilterSize")
@@ -397,7 +397,7 @@ func TestRoaringMatchPreflightBudgetsOccurrencesBeforeValidation(t *testing.T) {
 	pt := paramtable.Get()
 	garbage := make([]byte, 4096)
 	values := map[string]*schemapb.TemplateValue{"rb": bytesTemplate(garbage)}
-	expr := "roaring_match(Int64Field, {rb}) or roaring_match(Int64Field, {rb})"
+	expr := "membership_match(Int64Field, {rb}, type=roaring) or membership_match(Int64Field, {rb}, type=roaring)"
 
 	// The occurrence budget charges the MRB1 *body* (header rides on top), so
 	// two occurrences of one body-sized blob exceed a budget of 2*body-1.
@@ -407,7 +407,7 @@ func TestRoaringMatchPreflightBudgetsOccurrencesBeforeValidation(t *testing.T) {
 	_, err := ParseExpr(helper, expr, values)
 	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	require.ErrorContains(t, err, "before plan materialization")
-	require.NotContains(t, err.Error(), "bitmap blob is invalid",
+	require.NotContains(t, err.Error(), "unknown format magic",
 		"the occurrence budget must reject before structural validation")
 }
 
@@ -415,7 +415,7 @@ func TestRoaringMatchPreflightCachesValidationByTemplateName(t *testing.T) {
 	helper := newTestSchemaHelper(t)
 	template, blob := roaringBytesTemplate(t, 1, 2, 3)
 	ret := handleExpr(helper,
-		"roaring_match(Int64Field, {rb}) and roaring_match(Int64Field, {rb})")
+		"membership_match(Int64Field, {rb}, type=roaring) and membership_match(Int64Field, {rb}, type=roaring)")
 	require.NoError(t, getError(ret))
 	predicate := getExpr(ret)
 	require.NotNil(t, predicate)
@@ -441,11 +441,11 @@ func TestRoaringMatchPreflightBudgetsAggregateDecodedBytes(t *testing.T) {
 	require.Greater(t, summary.EstimatedDecodedBytes*2, uint64(serverroaring.MaxEstimatedDecodedBytes))
 
 	values := map[string]*schemapb.TemplateValue{"rb": bytesTemplate(blob)}
-	_, err = ParseExpr(helper, "roaring_match(Int64Field, {rb})", values)
+	_, err = ParseExpr(helper, "membership_match(Int64Field, {rb}, type=roaring)", values)
 	require.NoError(t, err, "one admitted bitmap must stay valid")
 
 	_, err = ParseExpr(helper,
-		"roaring_match(Int64Field, {rb}) and roaring_match(Int64Field, {rb})",
+		"membership_match(Int64Field, {rb}, type=roaring) and membership_match(Int64Field, {rb}, type=roaring)",
 		values)
 	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	require.ErrorContains(t, err, "estimated decoded size")
@@ -462,7 +462,7 @@ func TestRoaringMatchPreflightBudgetIsSharedAcrossParses(t *testing.T) {
 	// must not fail for any other reason.
 	template, blob := roaringBytesTemplate(t, 1, 2, 3)
 	values := map[string]*schemapb.TemplateValue{"rb": template}
-	expr := "roaring_match(Int64Field, {rb})"
+	expr := "membership_match(Int64Field, {rb}, type=roaring)"
 
 	// Room for exactly one occurrence across the whole request (body basis;
 	// the fixed MRB1 header rides on top of the budget).
@@ -498,7 +498,7 @@ func TestRoaringMatchPreflightCacheIsContentAddressed(t *testing.T) {
 
 	budget := NewMembershipPreflightBudget()
 	parse := func(template *schemapb.TemplateValue) *fillExpressionContext {
-		ret := handleExpr(helper, "roaring_match(Int64Field, {rb})")
+		ret := handleExpr(helper, "membership_match(Int64Field, {rb}, type=roaring)")
 		require.NoError(t, getError(ret))
 		predicate := getExpr(ret)
 		require.NotNil(t, predicate)
@@ -525,7 +525,7 @@ func TestRoaringMatchRepeatedFilters(t *testing.T) {
 	tv, blob := roaringBytesTemplate(t, 1, 2, 3)
 
 	expr, err := ParseExpr(helper,
-		"roaring_match(Int64Field, {rb}) and roaring_match(Int64Field, {rb})",
+		"membership_match(Int64Field, {rb}, type=roaring) and membership_match(Int64Field, {rb}, type=roaring)",
 		map[string]*schemapb.TemplateValue{"rb": tv})
 	require.NoError(t, err)
 	require.Equal(t, blob, expr.GetBinaryExpr().GetLeft().GetRoaringFilterExpr().GetBitmapBlob())
@@ -534,7 +534,7 @@ func TestRoaringMatchRepeatedFilters(t *testing.T) {
 
 // TestClientBuiltBlobsPassProxyValidation pins the client/server MRB1 codec
 // agreement across the member-set shapes an SDK can actually produce: every
-// blob built with client/v3/roaringfilter must pass pkg/v3/util/roaringfilter
+// blob built with client/v3/membership/roaringfilter must pass pkg/v3/util/roaringfilter
 // validation, and the validator's structural summary must agree with what the
 // builder encoded.
 func TestClientBuiltBlobsPassProxyValidation(t *testing.T) {

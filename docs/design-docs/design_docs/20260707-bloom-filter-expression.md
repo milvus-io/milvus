@@ -143,7 +143,7 @@ not bloom_match(...)
 - `<blob>`: an expression template placeholder resolved from `expr_template_values`, carrying
   a **client pre-built filter blob** as a **raw bytes** template value
   (`schemapb.TemplateValue.bytes_val`). There is no proxy-side build and no raw-list path: the
-  client always builds the MBF1/SBBF blob (`client/sbbf`, reproducible cross-language) and
+  client always builds the MBF1/SBBF blob (`client/membership/sbbf`, reproducible cross-language) and
   ships the compact ~32 MiB blob. proto3 `bytes` carries the blob with **zero base64 inflation**.
   The proxy validates the MBF1 envelope (`sbbf.Parse`) and embeds it verbatim.
 - **No `<fpr>` argument.** The FPR is chosen by the client at build time
@@ -403,7 +403,7 @@ Java, ...) must reproduce the vectors bit-for-bit.
 
 ### Build path (client builds, proxy validates & embeds)
 
-1. **Client** builds the SBBF with the spec-conformant Go package `client/sbbf`
+1. **Client** builds the SBBF with the spec-conformant Go package `client/membership/sbbf`
    (`NewBloomFilterBlob(members, fpr)`; XXH64 via `cespare/xxhash/v2`), sizes it from (n, fpr)
    per the SBBF formula, and wraps it in the MBF1 envelope. Any SDK reproduces the same bytes
    from the shared spec. There is **no proxy-side build** and no raw-list path.
@@ -517,7 +517,7 @@ framework, and the delete-safety guard are all encoding-agnostic and reused unch
 
 ## Testing plan
 
-1. Go unit: `client/sbbf` golden vectors; empirical FPR check (build from set A, probe
+1. Go unit: `client/membership/sbbf` golden vectors; empirical FPR check (build from set A, probe
    disjoint set B, assert measured FPR ≈ declared within tolerance); envelope validation
    fuzz (truncated/corrupt headers).
 2. Parser unit: syntax, arg validation (exactly two args; second must be a `{template}` bytes

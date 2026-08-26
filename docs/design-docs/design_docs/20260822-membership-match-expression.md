@@ -13,14 +13,16 @@ Add a unified surface syntax
 
 ```
 membership_match(<field>, {<blob-bytes-template>})
+membership_match(<field>, {<blob-bytes-template>}, type=bloom|roaring)
 not membership_match(<field>, {<blob-bytes-template>})
 ```
 
 whose filter kind is derived from the blob's self-describing magic header:
 `MBF1` lowers to the existing `BloomFilterExpr` plan node (approximate), `MRB1`
-to the existing `RoaringFilterExpr` node (exact). `bloom_match` and
-`roaring_match` remain permanent compatibility aliases. The wire protocol does
-not change: plans carrying membership filters are byte-compatible with today's.
+to the existing `RoaringFilterExpr` node (exact). The old `bloom_match` and
+`roaring_match` names are intentionally not retained because neither has shipped
+in a release. The wire protocol does not change: plans carrying membership
+filters are byte-compatible with today's.
 
 The second half of this proposal is internal: the parser, proxy guards, and
 segcore execution of both kinds are merged into one parameterized chain so a
@@ -48,29 +50,23 @@ without touching what genuinely differs.
 
 ## Surface syntax and typing
 
-| | `bloom_match` | `roaring_match` | `membership_match` |
-|---|---|---|---|
-| Kind | static (name) | static (name) | dynamic (blob magic) |
-| Blob format | MBF1 only | MRB1 only | sniffed: MBF1 → bloom, MRB1 → roaring |
-| Fields | INT8–64, VARCHAR, JSON paths | INT8–64 only | enforced per resolved kind |
-| Delete | rejected | allowed | per resolved kind |
+| | `membership_match` |
+|---|---|
+| Kind | dynamic (blob magic), optionally pinned by `type=` |
+| Blob format | sniffed: MBF1 → bloom, MRB1 → roaring |
+| Fields | enforced per resolved kind |
+| Delete | per resolved kind |
 
-Why no explicit type argument (`type=bloom`)? Two reasons:
-
-1. The Milvus expression grammar has no keyword arguments; adding them for one
-   function is a disproportionate grammar change.
-2. Both envelopes are already self-describing: 4-byte magic at offset 0
-   (`MBF1` / `MRB1`). A static argument would be redundant with the bytes and
-   could contradict them. Sniffing fails closed — unknown or too-short headers
-   are input errors listing the supported formats. The error never echoes the
-   caller-supplied header bytes because Proxy records parser failures in logs.
+The optional `type=` argument improves readability in expressions and logs. It
+must be `bloom` or `roaring` and must agree with the blob magic; a mismatch is a
+request error. When omitted, both envelopes remain self-describing and are
+sniffed at fill time. Unknown or too-short headers fail closed.
 
 ### Compatibility
 
-* Old clients keep sending `bloom_match` / `roaring_match`; nothing changes for
-  them. Their deferred calls carry the name as written, and fill dispatches by
-  name.
-* New clients may use either the old names or `membership_match`.
+* `membership_match` is the only supported surface name. Since the predecessor
+  expressions have not shipped in a release, no alias or deprecation period is
+  retained.
 * Wire format unchanged: the unified syntax lowers to the existing plan nodes
   (`BloomFilterExpr`, oneof field 22; `RoaringFilterExpr`, field 23). Rolling
   upgrade behaves exactly as documented in the two predecessor MEPs: old QNs
@@ -81,25 +77,24 @@ Why no explicit type argument (`type=bloom`)? Two reasons:
 
 All in `internal/parser/planparserv2/`:
 
-1. **One spec table** (`membership_filter.go`): function name → kind +
+1. **One spec table** (`membership_filter.go`): the unified function → kind +
    properties (`allowInDelete`). Behavior switches read the table; format
    validation stays in `bloom_match.go` (MBF1 envelope + value-domain check)
    and `roaring_match.go` (MRB1 body walk + decoded-size estimate).
-2. **One visitor skeleton** (`visitMembershipCall`): arity check, column
-   extraction, template-placeholder extraction, deferred `CallExpr` emission.
-   For the two static names the per-kind field check still runs at parse time;
-   for `membership_match` it runs at fill time once the kind is known.
+2. **Soft-keyword option parsing**: the ordinary two-argument call and the
+   `type=bloom|roaring` form both emit the same deferred `CallExpr`. `type` and
+   `membership_match` remain legal field identifiers outside that call shape.
 3. **One fill path** (`fillMembershipMatchExpressionValue`): strict
    parameter-shape validation (adopting roaring_match's guarded form — the old
    bloom fill indexed call parameters unguarded), template resolution, kind
-   resolution (static or sniffed), per-kind admission gate, materialization
+   resolution from magic plus optional type-consistency check, per-kind admission gate, materialization
    into `BloomFilterExpr`/`RoaringFilterExpr`.
 4. **Tree tools merged**: `hasMembershipFilterExpr`,
    `hasDeleteUnsafeMembershipFilterExpr`, `collectMembershipFilterExprs`,
    `PlanContainsMembershipFilter`,
    `PlanContainsMembershipFilterUnsafeForDelete`. One walker
    (`walkExpr`) serves all of them plus redaction.
-5. **Redaction moved out of `bloom_match.go`** into `membership_redact.go`,
+5. **Redaction moved out of `bloom_match.go`** into `plan_redact.go`,
    driven by kind-agnostic blob slots, so the roaring feature no longer
    depends on identifiers declared in the bloom file.
 6. **Preflight charges bodies, not whole blobs**
@@ -127,7 +122,7 @@ All in `internal/parser/planparserv2/`:
 ### Guards unified
 
 * **Delete**: rejected iff the plan contains a kind that cannot be proven exact
-  (`BloomFilterExpr`, deferred `bloom_match`, deferred `membership_match`
+  (`BloomFilterExpr`, deferred `membership_match`
   whose blob is not yet sniffed). Exact kinds pass.
 * **element_filter**: all membership kinds rejected inside element expressions
   (row-offset executors vs global element IDs).
@@ -159,8 +154,8 @@ All control flow lives once in the template: exec-path selection
 cacheability (`IsCacheable() == false`), reorder-tier behavior, JSON probing
 (bloom-only, discarded at instantiation for roaring via `if constexpr` on the
 policy). Each kind's data plane stays in its probe policy: MBF1 zero-copy view
-with domain gating vs decode-once portable Roaring64. The aliases preserve the
-historical class names, so factory construction and logs are unchanged.
+with domain gating vs decode-once portable Roaring64. The C++ type aliases
+preserve the historical class names, so factory construction is unchanged.
 
 ### Divergences resolved
 
@@ -194,8 +189,8 @@ against a verified ground truth rather than by taste:
 ## What deliberately does NOT change
 
 * The MBF1 and MRB1 formats, their golden vectors, and all four SDK builders
-  (Go, pymilvus, C++, Java) — blobs built yesterday remain valid forever, under
-  any of the three surface names.
+  (Go, pymilvus, C++, Java) — blobs built yesterday remain valid forever when
+  supplied to `membership_match`.
 * The plan proto: fields 22/23 frozen; no new message.
 * Per-kind semantics: false-positive model, NULL/three-valued logic, JSON
   strict typing, signed-int key mapping, empty-set edge cases.
@@ -204,7 +199,8 @@ against a verified ground truth rather than by taste:
 ## Testing
 
 * `internal/parser/planparserv2/membership_match_test.go` (new): MBF1→bloom /
-  MRB1→roaring lowering, byte-identity with alias-produced plans, privacy-safe
+  MRB1→roaring lowering, explicit type/magic consistency, soft-keyword field
+  compatibility, privacy-safe
   unknown-magic failure, kind-specific field-domain enforcement at fill time,
   delete-safety classification including the fail-closed deferred case,
   element_filter/MATCH_* rejections, shared preflight budget across the unified
@@ -217,7 +213,7 @@ against a verified ground truth rather than by taste:
 * `pkg/util/paramtable`: fallback-key precedence tests, including a regression
   pin that the legacy plan key cannot widen the per-blob limit.
 * segcore: existing bloom/roaring expression unit tests compile against the
-  unified physical classes via the aliases; golden-vector conformance tests
+  unified physical classes; golden-vector conformance tests
   untouched.
 
 ## Future work

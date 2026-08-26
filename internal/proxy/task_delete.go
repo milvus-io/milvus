@@ -351,14 +351,14 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 
-	// Membership filters with one-sided error (bloom_match, and membership_match
-	// carrying an MBF1 blob) must not drive deletes: a false positive would
+	// Approximate membership_match filters carrying an MBF1 blob must not drive
+	// deletes: a false positive would
 	// remove rows outside the user's set (design doc
-	// 20260707-bloom-filter-expression). Exact kinds (roaring_match, MRB1) are
+	// 20260707-bloom-filter-expression). Exact Roaring/MRB1 kinds are
 	// allowed; anything whose kind cannot be proven exact is rejected.
 	if planparserv2.PlanContainsMembershipFilterUnsafeForDelete(dr.plan) {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(
-			"approximate membership filters (bloom_match/membership_match with a bloom filter blob) cannot be used in delete expressions"))
+			"membership_match with an approximate bloom filter blob cannot be used in delete expressions"))
 	}
 
 	dr.plan.Namespace = namespaceForPlan(dr.schema.CollectionSchema, dr.req.Namespace)
