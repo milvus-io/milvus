@@ -72,7 +72,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -164,7 +163,6 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 		distDeltaTracker: newDataDistributionDeltaTracker(),
 	}
 
-	expr.Register("querynode", node)
 	return node
 }
 
