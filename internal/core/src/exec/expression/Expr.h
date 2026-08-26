@@ -504,7 +504,7 @@ class SegmentExpr : public Expr {
         auto& skip_index = segment_->GetSkipIndex();
         auto pw =
             segment_->get_views_by_offsets<T>(op_ctx_, field_id_, 0, *input);
-        auto [data_vec, valid_data] = pw.get();
+        const auto& [data_vec, valid_data] = pw.get();
         if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
             func(data_vec.data(),
                  ValidityView::FromExpanded(valid_data.data()),
@@ -645,7 +645,7 @@ class SegmentExpr : public Expr {
                             field_id_,
                             chunk_id,
                             {int32_t(chunk_offset)});
-                        auto [data_vec, valid_data] = pw.get();
+                        const auto& [data_vec, valid_data] = pw.get();
                         if (!skip_func ||
                             !skip_func(skip_index, field_id_, chunk_id)) {
                             func.template operator()<FilterType::random>(
@@ -918,7 +918,7 @@ class SegmentExpr : public Expr {
                         // use valid_data to see if raw data is null
                         auto pw = segment_->get_batch_views<T>(
                             op_ctx_, field_id_, i, data_pos, size);
-                        auto [data_vec, valid_data] = pw.get();
+                        const auto& [data_vec, valid_data] = pw.get();
 
                         if constexpr (NeedSegmentOffsets) {
                             func(data_vec.data(),
