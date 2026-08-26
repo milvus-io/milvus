@@ -19,7 +19,6 @@ import pandas as pd
 import pytest
 import requests
 from chaos import constants
-from chaos.observability import format_event
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CheckTasks
@@ -460,67 +459,41 @@ def trace(fmt=DEFAULT_FMT, prefix="test", flag=True):
             start_time = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S.%f")
             start_time_ts = time.time()
             t0 = time.perf_counter()
+            res, result = func(self, *args, **kwargs)
+            elapsed = time.perf_counter() - t0
             operation_name = func.__name__
-            previous_operation = getattr(self, "current_operation", None)
-            previous_started_at = getattr(self, "current_operation_started_at", None)
-            previous_started_wall_time = getattr(self, "current_operation_started_wall_time", None)
-            self.current_operation = operation_name
-            self.current_operation_started_at = time.monotonic()
-            self.current_operation_started_wall_time = start_time
-            try:
-                res, result = func(self, *args, **kwargs)
-                elapsed = time.perf_counter() - t0
-                self.last_operation = operation_name
-                self.last_operation_elapsed = round(elapsed, 4)
-                self.last_operation_result = "success" if result else "failure"
-                self.last_operation_completed_at = time.time()
-                if result:
-                    self.last_success_at = self.last_operation_completed_at
+            if flag:
+                collection_name = self.c_name
+                log_str = f"[{prefix}]" + fmt.format(**locals())
+                try:
+                    record_started = time.perf_counter()
+                    request_records.insert(operation_name, collection_name, start_time, elapsed, str(result))
+                    record_elapsed = time.perf_counter() - record_started
+                    log.debug(f"insert request record cost {record_elapsed}s")
+                except Exception as e:
+                    log.error(e)
+                log.debug(log_str)
+            if result:
+                self.rsp_times.append(elapsed)
+                self.average_time = (elapsed + self.average_time * self._succ) / (self._succ + 1)
+                self._succ += 1
+                if (
+                    len(self.fail_records) > 0
+                    and self.fail_records[-1][0] == "failure"
+                    and self._succ + self._fail == self.fail_records[-1][1] + 1
+                ):
+                    self.fail_records.append(("success", self._succ + self._fail, start_time, start_time_ts))
+            else:
+                self._fail += 1
+                self.fail_records.append(("failure", self._succ + self._fail, start_time, start_time_ts))
+                if hasattr(res, "message"):
+                    error_msg = res.message
+                elif res is not None:
+                    error_msg = str(res)
                 else:
-                    self.last_failure_at = self.last_operation_completed_at
-                if flag:
-                    collection_name = self.c_name
-                    log_str = f"[{prefix}]" + fmt.format(**locals())
-                    try:
-                        record_started = time.perf_counter()
-                        request_records.insert(operation_name, collection_name, start_time, elapsed, str(result))
-                        record_elapsed = time.perf_counter() - record_started
-                        log.debug(f"insert request record cost {record_elapsed}s")
-                    except Exception as e:
-                        log.error(e)
-                    log.debug(log_str)
-                if result:
-                    self.rsp_times.append(elapsed)
-                    self.average_time = (elapsed + self.average_time * self._succ) / (self._succ + 1)
-                    self._succ += 1
-                    if (
-                        len(self.fail_records) > 0
-                        and self.fail_records[-1][0] == "failure"
-                        and self._succ + self._fail == self.fail_records[-1][1] + 1
-                    ):
-                        self.fail_records.append(("success", self._succ + self._fail, start_time, start_time_ts))
-                else:
-                    self._fail += 1
-                    self.fail_records.append(("failure", self._succ + self._fail, start_time, start_time_ts))
-                    if hasattr(res, "message"):
-                        error_msg = res.message
-                    elif res is not None:
-                        error_msg = str(res)
-                    else:
-                        error_msg = "Unknown error"
-                    record_error_message(self, operation_name, error_msg, start_time)
-                return res, result
-            except Exception:
-                self.last_operation = operation_name
-                self.last_operation_elapsed = round(time.perf_counter() - t0, 4)
-                self.last_operation_result = "exception"
-                self.last_operation_completed_at = time.time()
-                self.last_failure_at = self.last_operation_completed_at
-                raise
-            finally:
-                self.current_operation = previous_operation
-                self.current_operation_started_at = previous_started_at
-                self.current_operation_started_wall_time = previous_started_wall_time
+                    error_msg = "Unknown error"
+                record_error_message(self, operation_name, error_msg, start_time)
+            return res, result
 
         return inner_wrapper
 
@@ -542,17 +515,15 @@ def exception_handler():
                 log_row_length = 300
                 e_str = str(e)
                 log_e = e_str[0:log_row_length] + "......" if len(e_str) > log_row_length else e_str
-                structured_message = format_event(
-                    "operation_exception",
-                    checker=class_name,
-                    collection=getattr(self, "c_name", None),
-                    operation=function_name,
-                    error=log_e,
+                log_message = (
+                    f"Error in {class_name}.{function_name}: {log_e}"
+                    if class_name
+                    else f"Error in {function_name}: {log_e}"
                 )
                 if enable_traceback:
-                    log.exception(structured_message)
+                    log.exception(log_message)
                 else:
-                    log.error(structured_message)
+                    log.error(log_message)
                 if hasattr(self, "error_messages"):
                     start_time = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S.%f")
                     record_error_message(self, function_name, e_str, start_time)
@@ -581,22 +552,12 @@ class Checker:
         replica_number=0,
         **kwargs,
     ):
-        self.init_started_at = time.monotonic()
         self.recovery_time = 0
         self._succ = 0
         self._fail = 0
         self.fail_records = []
         self.error_messages = set()  # Store unique error messages
         self.error_message_samples = {}
-        self.current_operation = None
-        self.current_operation_started_at = None
-        self.current_operation_started_wall_time = None
-        self.last_operation = None
-        self.last_operation_elapsed = None
-        self.last_operation_result = None
-        self.last_operation_completed_at = None
-        self.last_success_at = None
-        self.last_failure_at = None
         self._keep_running = True
         self.rsp_times = []
         self.average_time = 0
@@ -610,13 +571,6 @@ class Checker:
         p_name = partition_name if partition_name is not None else "_default"
         self.p_name = p_name
         self.p_names = [self.p_name] if partition_name is not None else None
-        log.info(
-            format_event(
-                "checker_init_start",
-                checker=type(self).__name__,
-                collection=c_name,
-            )
-        )
         self.ms = MilvusSys()
         self.bucket_name = cf.param_info.param_bucket_name
 
@@ -641,18 +595,7 @@ class Checker:
         connections.connect(alias=self.alias, uri=uri, token=token)
 
         # Get or create schema
-        stage_started = time.monotonic()
         collection_exists = self.milvus_client.has_collection(c_name)
-        log.info(
-            format_event(
-                "checker_init_stage",
-                checker=type(self).__name__,
-                collection=c_name,
-                stage="collection_resolved",
-                collection_exists=collection_exists,
-                duration_seconds=round(time.monotonic() - stage_started, 2),
-            )
-        )
         if collection_exists:
             collection_info = self.milvus_client.describe_collection(c_name)
             schema = CollectionSchema.construct_from_dict(collection_info)
@@ -701,7 +644,6 @@ class Checker:
         ]
 
         # Get existing indexes and their fields
-        stage_started = time.monotonic()
         indexed_fields = set()
         try:
             index_names = self.milvus_client.list_indexes(c_name, timeout=timeout)
@@ -715,24 +657,11 @@ class Checker:
             except Exception as e:
                 raise RuntimeError(f"Failed to describe index {idx_name} for collection {c_name}") from e
 
-        log.info(
-            format_event(
-                "checker_init_stage",
-                checker=type(self).__name__,
-                collection=c_name,
-                stage="index_discovery_complete",
-                index_count=len(index_names),
-                indexed_field_count=len(indexed_fields),
-                duration_seconds=round(time.monotonic() - stage_started, 2),
-            )
-        )
-
         log.debug(f"Already indexed fields: {indexed_fields}")
         # An existing collection owns its index lifecycle. During recovery,
         # list_indexes may temporarily omit an in-progress index; recreating it
         # here amplifies the pending queue across concurrent checker workers.
         create_missing_indexes = not collection_exists
-        stage_started = time.monotonic()
 
         # create index for scalar fields
         for f in self.scalar_field_names:
@@ -861,17 +790,6 @@ class Checker:
             except Exception as e:
                 raise RuntimeError(f"Failed to create index for field {f} in collection {c_name}") from e
 
-        log.info(
-            format_event(
-                "checker_init_stage",
-                checker=type(self).__name__,
-                collection=c_name,
-                stage="index_setup_complete",
-                create_missing_indexes=create_missing_indexes,
-                duration_seconds=round(time.monotonic() - stage_started, 2),
-            )
-        )
-
         # Load collection - only if at least one vector field has an index
         self.replica_number = replica_number
         if vector_index_created:
@@ -904,18 +822,6 @@ class Checker:
 
         self.initial_entities = self.milvus_client.get_collection_stats(c_name).get("row_count", 0)
         self.scale = 100000  # timestamp scale to make time.time() as int64
-        self.init_duration_seconds = round(time.monotonic() - self.init_started_at, 2)
-        log.info(
-            format_event(
-                "checker_base_init_complete",
-                checker=type(self).__name__,
-                collection=c_name,
-                collection_exists=collection_exists,
-                duration_seconds=self.init_duration_seconds,
-                indexed_fields=len(indexed_fields),
-                initial_entities=self.initial_entities,
-            )
-        )
 
     def configure_operation_schedule(self, interval_seconds, initial_jitter_seconds=0):
         """Configure an operation cadence without changing checker coverage."""
@@ -2544,17 +2450,6 @@ class CollectionDropChecker(Checker):
         self.gen_collection_pool(schema=self.schema)
 
     def gen_collection_pool(self, pool_size=DROP_COLLECTION_POOL_SIZE, schema=None):
-        started = time.monotonic()
-        created = 0
-        log.info(
-            format_event(
-                "drop_pool_init_start",
-                checker=type(self).__name__,
-                collection=self.c_name,
-                requested=pool_size,
-                current=len(self.collection_pool),
-            )
-        )
         for i in range(pool_size):
             collection_name = cf.gen_unique_str("DropChecker_")
             try:
@@ -2562,20 +2457,8 @@ class CollectionDropChecker(Checker):
                     collection_name=collection_name, schema=schema, consistency_level="Strong"
                 )
                 self.collection_pool.append(collection_name)
-                created += 1
             except Exception as e:
                 log.error(f"Failed to create collection {collection_name}: {e}")
-        log.info(
-            format_event(
-                "drop_pool_init_complete",
-                checker=type(self).__name__,
-                collection=self.c_name,
-                requested=pool_size,
-                created=created,
-                pool_size=len(self.collection_pool),
-                duration_seconds=round(time.monotonic() - started, 2),
-            )
-        )
 
     @trace()
     def drop_collection(self):

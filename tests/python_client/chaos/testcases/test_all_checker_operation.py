@@ -133,7 +133,8 @@ class TestOperations(TestBase):
                 # add an event so that the chaos can start to apply
                 if i == 3:
                     event_records.insert("init_chaos", "ready")
-                cc.log_monitor_heartbeat(self.health_checkers, phase=f"workload_{i + 1}_of_10")
+                for checker in self.health_checkers.values():
+                    checker.check_result()
             if is_check:
                 assert_statistic(self.health_checkers, succ_rate_threshold=0.98)
                 assert_expectations()
