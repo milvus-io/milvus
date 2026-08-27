@@ -256,7 +256,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 			s.allocator.AllocN,
 			Params.CommonCfg.ClusterID.GetAsUint64(),
 		); err != nil {
-			return merr.Wrap(err, "failed to assign per-file PK ranges")
+			return 0, false, merr.Wrap(err, "failed to assign per-file PK ranges")
 		}
 		// msgFiles is a 1:1 lo.Map of files; bound the walk by both lengths so the
 		// pairing stays provable rather than assumed.
@@ -280,7 +280,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	// in that window, an auto_commit / non-enableInReplicatingCluster import would
 	// otherwise be broadcast into a replicating topology and diverge.
 	if err := s.validateImportReplication(ctx, options); err != nil {
-		return merr.Wrap(err, "failed to re-validate import replication under broadcast lock")
+		return 0, false, merr.Wrap(err, "failed to re-validate import replication under broadcast lock")
 	}
 
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
