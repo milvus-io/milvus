@@ -233,7 +233,14 @@ func newNodeSlotHeap(workerSlots map[int64]*session.WorkerSlots) typeutil.Heap[*
 // The picked node's slots are updated in place; the caller reuses the same heap
 // across all tasks in a scheduling round so later picks observe the decremented
 // slots.
+//
+// The method is kept for its callers and tests; the placement itself lives in
+// pickNodeFromHeap so nodePicker can share it as its fallback tier.
 func (s *globalTaskScheduler) pickNode(slotHeap typeutil.Heap[*nodeSlotEntry], taskSlot int64) int64 {
+	return pickNodeFromHeap(slotHeap, taskSlot)
+}
+
+func pickNodeFromHeap(slotHeap typeutil.Heap[*nodeSlotEntry], taskSlot int64) int64 {
 	if slotHeap.Len() == 0 {
 		return NullNodeID
 	}
@@ -268,9 +275,9 @@ func (s *globalTaskScheduler) schedule() {
 	nodeSlots := s.cluster.QuerySlot()
 	mlog.Info(s.ctx, "scheduling pending tasks...", mlog.Int("num", pendingNum), mlog.Any("nodeSlots", nodeSlots))
 
-	// Build the node-slot max-heap once per round and reuse it across all picks,
-	// so each task is placed on the currently least-loaded node.
-	slotHeap := newNodeSlotHeap(nodeSlots)
+	// Build the picker once per round and reuse it across all picks, so each
+	// task is placed on the currently least-loaded node.
+	picker := newNodePicker(nodeSlots)
 	futures := make([]*conc.Future[struct{}], 0)
 	var delayed []Task
 	for {
@@ -286,7 +293,7 @@ func (s *globalTaskScheduler) schedule() {
 			continue
 		}
 		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(slotHeap, taskSlot)
+		nodeID := picker.Pick(taskSlot, task.GetTaskResource())
 		if nodeID == NullNodeID {
 			s.pendingTasks.Push(task)
 			break
@@ -294,7 +301,8 @@ func (s *globalTaskScheduler) schedule() {
 		future := s.execPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())
 			defer s.mu.RUnlock(task.GetTaskID())
-			mlog.Info(s.ctx, "processing task...", WrapTaskLog(task)...)
+			mlog.Info(s.ctx, "processing task...",
+				WrapTaskLog(task, mlog.Stringer("resource", task.GetTaskResource()))...)
 			if task.GetTaskState() == taskcommon.Init {
 				task.CreateTaskOnWorker(nodeID, s.cluster)
 				switch task.GetTaskState() {
