@@ -38,7 +38,7 @@ func TestQueryViewSegmentReadinessManager_AcquireUsesNodeScheduler(t *testing.T)
 		acquire: func(AcquirePhysicalSegments) { physicalCalled <- struct{}{} },
 		release: func(req ReleaseSegments) { req.OnDropped() },
 	}
-	mgr := NewQueryViewSegmentReadinessManagerWithScheduler(nodeScheduler, physical, &fakeTransformLogBuffer{}, collections)
+	mgr := NewQueryViewSegmentReadinessManagerWithScheduler(nodeScheduler, physical, &fakeTransformLogBuffer{}, 4, collections)
 
 	mgr.Acquire(AcquireSegments{
 		Key: key, Meta: meta, View: view,
@@ -307,7 +307,7 @@ func TestQueryViewSegmentReadinessManager_RetriesRetryableCollectionAcquireInNod
 		acquire: func(AcquirePhysicalSegments) { physicalCalled <- struct{}{} },
 		release: func(req ReleaseSegments) { req.OnDropped() },
 	}
-	mgr := NewQueryViewSegmentReadinessManagerWithScheduler(nodeScheduler, physical, &fakeTransformLogBuffer{}, collections)
+	mgr := NewQueryViewSegmentReadinessManagerWithScheduler(nodeScheduler, physical, &fakeTransformLogBuffer{}, 4, collections)
 
 	unrecoverable := make(chan struct{}, 1)
 	mgr.Acquire(AcquireSegments{

@@ -565,6 +565,8 @@ queryCoord:
   resourceExhaustionPenaltyDuration: 30
   resourceExhaustionCleanupInterval: 10 # Interval (in seconds) for cleaning up expired resource exhaustion marks on query nodes.
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
+  queryView:
+    fullReconsileInterval: 10 # Interval in seconds for periodic QueryView full reconciliation.
   ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
   port: 19531 # TCP port of queryCoord
   grpc:
@@ -721,6 +723,9 @@ queryNode:
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   workerPooling:
     size: 10 # the size for worker querynode client pool
+  queryView:
+    segmentCatchupConcurrency: 4 # Maximum number of concurrent QueryView sealed segment TransformLog catch-up tasks on each QueryNode.
+    transformLogDrainConcurrency: 4 # Maximum number of concurrent QueryView TransformLog backlog drain tasks on each QueryNode.
   idfOracle:
     preload: true # Whether to parse and merge BM25 stats into current during load before first target. When false, stats are only written to disk and loaded on first SyncDistribution.
     readBufferSize: 4194304 # Read buffer size in bytes for streaming BM25 stats from remote storage. Reduces per-read overhead through the storage SDK.
@@ -1476,6 +1481,10 @@ streamingNode:
 
 # Any configuration related to the streaming service.
 streaming:
+  queryView:
+    liveEventDispatchConcurrencyPerPChannel: 4 # Maximum number of QueryRuntimes dispatching live events concurrently on each PChannel.
+  transformLog:
+    catchupConcurrencyPerStream: 4 # Maximum number of TransformLog subscriptions catching up concurrently on each stream.
   walBalancer:
     # The interval of balance task trigger at background, 1 min by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration

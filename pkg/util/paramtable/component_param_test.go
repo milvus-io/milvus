@@ -180,6 +180,49 @@ func TestComponentParam_StorageIopsParams(t *testing.T) {
 	}
 }
 
+func TestComponentParam_QueryViewConcurrency(t *testing.T) {
+	Init()
+	params := Get()
+	for _, test := range []struct {
+		name string
+		item *ParamItem
+	}{
+		{name: "segment catch-up", item: &params.QueryNodeCfg.QueryViewSegmentCatchupConcurrency},
+		{name: "transform log drain", item: &params.QueryNodeCfg.QueryViewTransformLogDrainConcurrency},
+		{name: "transform log stream catch-up", item: &params.StreamingCfg.TransformLogCatchupConcurrencyPerStream},
+		{name: "live event dispatch", item: &params.StreamingCfg.QueryViewLiveEventDispatchConcurrencyPerPChannel},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			key := test.item.Key
+			params.Reset(key)
+			t.Cleanup(func() { params.Reset(key) })
+
+			assert.Equal(t, 4, test.item.GetAsInt())
+			params.Save(key, "32")
+			assert.Equal(t, 32, test.item.GetAsInt())
+			params.Save(key, "0")
+			assert.Equal(t, 1, test.item.GetAsInt())
+		})
+	}
+}
+
+func TestComponentParam_QueryViewFullReconsileInterval(t *testing.T) {
+	Init()
+	params := Get()
+	item := &params.QueryCoordCfg.QueryViewFullReconsileInterval
+	params.Reset(item.Key)
+	t.Cleanup(func() { params.Reset(item.Key) })
+
+	assert.Equal(t, "queryCoord.queryView.fullReconsileInterval", item.Key)
+	assert.Equal(t, "10", item.DefaultValue)
+	assert.True(t, item.Export)
+	assert.Equal(t, 10*time.Second, item.GetAsDuration(time.Second))
+	params.Save(item.Key, "300")
+	assert.Equal(t, 5*time.Minute, item.GetAsDuration(time.Second))
+	params.Save(item.Key, "0")
+	assert.Equal(t, time.Second, item.GetAsDuration(time.Second))
+}
+
 func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()

@@ -12,8 +12,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
-const defaultStreamCatchupWorkers = 4
-
 type streamLogProvider interface {
 	logForStream(vchannel string) *TransformLog
 	streamNotifyStateSince(seq uint64) (<-chan struct{}, uint64, []string)
@@ -22,8 +20,9 @@ type streamLogProvider interface {
 
 // StreamManager owns TransformLog streams for one pchannel.
 type StreamManager struct {
-	pchannel string
-	logs     map[string]*TransformLog
+	pchannel       string
+	logs           map[string]*TransformLog
+	catchupWorkers int
 
 	streamMu     sync.Mutex
 	streamNotify chan struct{}
@@ -32,17 +31,21 @@ type StreamManager struct {
 }
 
 // NewStreamManager creates a TransformLog stream manager for one pchannel.
-func NewStreamManager(pchannel string) *StreamManager {
+func NewStreamManager(pchannel string, catchupConcurrency int) *StreamManager {
+	if catchupConcurrency <= 0 {
+		panic("transform log catch-up concurrency must be positive")
+	}
 	return &StreamManager{
-		pchannel:     pchannel,
-		logs:         make(map[string]*TransformLog),
-		streamNotify: make(chan struct{}),
-		streamSeqByV: make(map[string]uint64),
+		pchannel:       pchannel,
+		logs:           make(map[string]*TransformLog),
+		catchupWorkers: catchupConcurrency,
+		streamNotify:   make(chan struct{}),
+		streamSeqByV:   make(map[string]uint64),
 	}
 }
 
 func (m *StreamManager) AcquireStream(ctx context.Context, pchannel string) (wal.TransformLogStream, error) {
-	return newTransformLogStream(ctx, m, pchannel)
+	return newTransformLogStream(ctx, m, pchannel, m.catchupWorkers)
 }
 
 func (m *StreamManager) Register(vchannel string, log *TransformLog) {
@@ -161,7 +164,7 @@ const (
 	subscriptionStateClosed
 )
 
-func newTransformLogStream(ctx context.Context, provider streamLogProvider, pchannel string) (wal.TransformLogStream, error) {
+func newTransformLogStream(ctx context.Context, provider streamLogProvider, pchannel string, catchupWorkers int) (wal.TransformLogStream, error) {
 	if err := provider.validatePChannel(pchannel); err != nil {
 		return nil, err
 	}
@@ -179,7 +182,7 @@ func newTransformLogStream(ctx context.Context, provider streamLogProvider, pcha
 		byVChannel:   make(map[string]map[int64]*streamSubscription),
 	}
 	_, stream.seenNotifySeq, _ = provider.streamNotifyStateSince(0)
-	for i := 0; i < defaultStreamCatchupWorkers; i++ {
+	for i := 0; i < catchupWorkers; i++ {
 		go stream.catchupWorker()
 	}
 	go stream.run()

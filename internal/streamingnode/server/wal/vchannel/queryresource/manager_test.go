@@ -439,8 +439,11 @@ func TestManagerResolveLoadInfoAppliesLoadInfoAndIndexInfos(t *testing.T) {
 
 func TestManagerResolveLoadInfoFailureDelaysBuild(t *testing.T) {
 	scheduler := &capturedNodeScheduler{}
+	dispatcher := NewDispatcher(1)
+	defer dispatcher.Close()
 	manager := NewManager(Config{
-		Scheduler: scheduler,
+		Scheduler:  scheduler,
+		Dispatcher: dispatcher,
 		LoadInfoProvider: fakeLoadInfoProvider{
 			err: merr.WrapErrCollectionNotLoaded(1),
 		},

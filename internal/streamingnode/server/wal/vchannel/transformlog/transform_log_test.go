@@ -19,7 +19,7 @@ import (
 
 func TestReadSyncsInitialFrontierBeforeFutureUpdates(t *testing.T) {
 	transformLog := New(Config{VChannel: "v1"})
-	manager := NewStreamManager("p1")
+	manager := NewStreamManager("p1", 4)
 	manager.Register("v1", transformLog)
 	for timeTick := uint64(1); timeTick <= 20; timeTick++ {
 		require.True(t, transformLog.syncUp(timeTick).Appended)
@@ -125,7 +125,7 @@ func (n *recordingTransformLogNotifier) notify(vchannel string) {
 
 func TestReadStopsAtEndTimeTick(t *testing.T) {
 	transformLog := New(Config{VChannel: "v1"})
-	manager := NewStreamManager("p1")
+	manager := NewStreamManager("p1", 4)
 	manager.Register("v1", transformLog)
 	require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, 10), appendOption{}).Appended)
 	require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, 20), appendOption{}).Appended)
@@ -182,7 +182,7 @@ func TestNewKeepsRecoveredChunksColdUntilRead(t *testing.T) {
 			NextChunkId:        1,
 		},
 	})
-	manager := NewStreamManager("p1")
+	manager := NewStreamManager("p1", 4)
 	manager.Register("v1", transformLog)
 
 	assert.Equal(t, 0, store.readCount("v1", 0))
@@ -259,7 +259,7 @@ func TestTruncateLoadsRecoveredColdChunkToAdvanceFirstChunk(t *testing.T) {
 
 func TestFlushWhileScannerDrainsDoesNotDuplicateEntries(t *testing.T) {
 	transformLog := New(Config{VChannel: "v1", Store: newMemoryStore()})
-	manager := NewStreamManager("p1")
+	manager := NewStreamManager("p1", 4)
 	manager.Register("v1", transformLog)
 	for timeTick := uint64(1); timeTick <= 20; timeTick++ {
 		require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, timeTick), appendOption{}).Appended)

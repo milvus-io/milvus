@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const defaultTickerInterval = 10 * time.Second
@@ -120,6 +121,11 @@ func (b *DefaultBalancer) loop(ctx context.Context) {
 	defer ticker.Stop()
 
 	for {
+		interval := paramtable.Get().QueryCoordCfg.QueryViewFullReconsileInterval.GetAsDuration(time.Second)
+		if interval != b.tickerInterval {
+			b.tickerInterval = interval
+			ticker.Reset(interval)
+		}
 		select {
 		case <-ctx.Done():
 			return

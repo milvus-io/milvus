@@ -208,7 +208,7 @@ func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder
 		m.scheduler = nodescheduler.Get()
 	}
 	if m.dispatcher == nil {
-		m.dispatcher = NewDispatcher(defaultLiveEventDispatchConcurrency)
+		panic("query resource dispatcher is nil")
 	}
 	runtime := newQueryRuntime(m.dispatcher, m.newModules()...)
 	task := newResourceBuildTask(func(ctx context.Context) (*QueryRuntime, error) {

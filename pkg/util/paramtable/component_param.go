@@ -3168,6 +3168,7 @@ type queryCoordConfig struct {
 	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
 
 	AutoWarmupForNonPKIsolationCollection ParamItem `refreshable:"false"`
+	QueryViewFullReconsileInterval        ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -3892,6 +3893,21 @@ Set to 0 to disable the penalty period.`,
 		Export:       false,
 	}
 	p.AutoWarmupForNonPKIsolationCollection.Init(base.mgr)
+
+	p.QueryViewFullReconsileInterval = ParamItem{
+		Key:          "queryCoord.queryView.fullReconsileInterval",
+		Version:      "3.0.0",
+		DefaultValue: "10",
+		Doc:          "Interval in seconds for periodic QueryView full reconciliation.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 1 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.QueryViewFullReconsileInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -4102,6 +4118,10 @@ type queryNodeConfig struct {
 	ExternalCollectionSamplePerSegment ParamItem `refreshable:"true"`
 	ExternalCollectionSampleRows       ParamItem `refreshable:"true"`
 	ExternalCollectionRawDataFactor    ParamItem `refreshable:"true"`
+
+	// query view recovery
+	QueryViewSegmentCatchupConcurrency    ParamItem `refreshable:"false"`
+	QueryViewTransformLogDrainConcurrency ParamItem `refreshable:"false"`
 }
 
 func formatDurationWithMillisecondFallback(v string) string {
@@ -5621,6 +5641,36 @@ user-task-polling:
 		Export:       false,
 	}
 	p.ExternalCollectionRawDataFactor.Init(base.mgr)
+
+	p.QueryViewSegmentCatchupConcurrency = ParamItem{
+		Key:          "queryNode.queryView.segmentCatchupConcurrency",
+		Version:      "3.0.0",
+		DefaultValue: "4",
+		Doc:          "Maximum number of concurrent QueryView sealed segment TransformLog catch-up tasks on each QueryNode.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 1 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.QueryViewSegmentCatchupConcurrency.Init(base.mgr)
+
+	p.QueryViewTransformLogDrainConcurrency = ParamItem{
+		Key:          "queryNode.queryView.transformLogDrainConcurrency",
+		Version:      "3.0.0",
+		DefaultValue: "4",
+		Doc:          "Maximum number of concurrent QueryView TransformLog backlog drain tasks on each QueryNode.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 1 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.QueryViewTransformLogDrainConcurrency.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -8284,11 +8334,13 @@ type streamingConfig struct {
 	FlushL1CommitConcurrency ParamItem `refreshable:"true"`
 
 	// recovery configuration.
-	WALRecoveryPersistInterval           ParamItem `refreshable:"true"`
-	WALRecoveryMaxDirtyMessage           ParamItem `refreshable:"true"`
-	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
-	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
-	WALRecoveryTaskConcurrency           ParamItem `refreshable:"true"`
+	WALRecoveryPersistInterval                       ParamItem `refreshable:"true"`
+	WALRecoveryMaxDirtyMessage                       ParamItem `refreshable:"true"`
+	WALRecoveryGracefulCloseTimeout                  ParamItem `refreshable:"true"`
+	WALRecoverySchemaExpirationTolerance             ParamItem `refreshable:"true"`
+	WALRecoveryTaskConcurrency                       ParamItem `refreshable:"true"`
+	TransformLogCatchupConcurrencyPerStream          ParamItem `refreshable:"false"`
+	QueryViewLiveEventDispatchConcurrencyPerPChannel ParamItem `refreshable:"false"`
 
 	// wal rate limit
 	WALRateLimitDefaultBurst                     ParamItem `refreshable:"true"`
@@ -8740,6 +8792,36 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Export:       false,
 	}
 	p.WALRecoverySchemaExpirationTolerance.Init(base.mgr)
+
+	p.QueryViewLiveEventDispatchConcurrencyPerPChannel = ParamItem{
+		Key:          "streaming.queryView.liveEventDispatchConcurrencyPerPChannel",
+		Version:      "3.0.0",
+		DefaultValue: "4",
+		Doc:          "Maximum number of QueryRuntimes dispatching live events concurrently on each PChannel.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 1 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.QueryViewLiveEventDispatchConcurrencyPerPChannel.Init(base.mgr)
+
+	p.TransformLogCatchupConcurrencyPerStream = ParamItem{
+		Key:          "streaming.transformLog.catchupConcurrencyPerStream",
+		Version:      "3.0.0",
+		DefaultValue: "4",
+		Doc:          "Maximum number of TransformLog subscriptions catching up concurrently on each stream.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 1 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.TransformLogCatchupConcurrencyPerStream.Init(base.mgr)
 
 	p.OldVersionLastConfirmedWindowSize = ParamItem{
 		Key:     "streaming.walScanner.oldVersionLastConfirmedWindowSize",

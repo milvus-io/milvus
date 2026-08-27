@@ -18,7 +18,7 @@ func TestTransformLogStreamManagerCatchupThenDispatch(t *testing.T) {
 	transformLog := New(Config{VChannel: "v1"})
 	require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, 10), appendOption{}).Appended)
 	require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, 20), appendOption{}).Appended)
-	manager := NewStreamManager("pchannel")
+	manager := NewStreamManager("pchannel", 4)
 	manager.Register("v1", transformLog)
 
 	stream, err := manager.AcquireStream(ctx, "pchannel")
@@ -65,7 +65,7 @@ func TestTransformLogStreamManagerBoundedReplayEmitsSyncUpAndCloses(t *testing.T
 	require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, 10), appendOption{}).Appended)
 	require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, 20), appendOption{}).Appended)
 	require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, 30), appendOption{}).Appended)
-	manager := NewStreamManager("pchannel")
+	manager := NewStreamManager("pchannel", 4)
 	manager.Register("v1", transformLog)
 
 	stream, err := manager.AcquireStream(ctx, "pchannel")
@@ -115,7 +115,7 @@ func TestTransformLogStreamManagerCatchupDrainsDeletesAppendedAfterSubscribe(t *
 			NextChunkId:        1,
 		},
 	})
-	manager := NewStreamManager("pchannel")
+	manager := NewStreamManager("pchannel", 4)
 	manager.Register("v1", transformLog)
 
 	stream, err := manager.AcquireStream(ctx, "pchannel")
@@ -149,7 +149,7 @@ func TestTransformLogStreamManagerCatchupDrainsDeletesAppendedAfterSubscribe(t *
 func TestTransformLogStreamManagerRemovesRegisteredLog(t *testing.T) {
 	ctx := context.Background()
 	transformLog := New(Config{VChannel: "v1"})
-	manager := NewStreamManager("pchannel")
+	manager := NewStreamManager("pchannel", 4)
 	manager.Register("v1", transformLog)
 	manager.Remove("v1")
 
