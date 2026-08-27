@@ -318,8 +318,8 @@ func (s *globalTaskScheduler) schedule() {
 		nodeID := picker.Pick(taskSlot, resource)
 		if nodeID == NullNodeID {
 			if picker.exhausted() {
-				// No worker has a slot left, so nothing behind this task can be
-				// placed either: end the round.
+				// No worker of either tier has room left, so nothing behind this
+				// task can be placed either: end the round.
 				s.pendingTasks.Push(task)
 				break
 			}

@@ -132,13 +132,14 @@ answer, not a miss: it is priced at the whole segment (conservative) and cached.
   `total_memory = hardware.GetMemoryCount()`; in standalone both are multiplied
   by `dataNode.standaloneSlotFactor` (the DataNode shares the process with a
   QueryNode). `available = max(total - sum(accepted), 0)`. `available_slots`
-  is reported exactly as before.
+  is reported exactly as before; it is consumed only by coordinators/pickers on
+  the scalar tier.
 - The memory total is the full cgroup limit (standalone: ×
   `standaloneSlotFactor`). No headroom ratio is reserved in this version: this
-  was an explicit decision (no new config); the unchanged scalar slot gate still
-  binds first, so nothing is admitted that the pre-existing path would have
-  refused. A `dataNode.taskResource.memoryRatio`-style headroom is a follow-up
-  if the memory filter turns out to refuse too little.
+  was an explicit decision (no new config). The scalar slot does not bind first
+  on a dimensioned worker — the picker never gates on it — so the memory filter
+  is that worker's only admission gate. A `dataNode.taskResource.memoryRatio`-style
+  headroom is a follow-up if the memory filter turns out to refuse too little.
 - New gauge `milvus_datanode_task_resource{node_id, type=cpu|memory, state=total|available}`
   (`metrics.DataNodeTaskResource`).
 
@@ -148,27 +149,31 @@ Same rules as PR #52561, implemented thinner:
 
 - A worker that reports `total_memory > 0` is placed on the two dimensions;
   any other worker is placed by the existing max-heap, which is unchanged.
-- Two-dimensional placement: skip a worker whose `available_slots <= 0` or
-  whose `available_memory < req.Memory` (memory is the only hard filter).
+- Two-dimensional placement: skip a worker whose
+  `available_memory < req.Memory`; memory is the only hard filter — the scalar
+  slot is a compatibility currency for workers that do not report cpu/memory and
+  never gates a dimensioned worker (otherwise a worker whose slot budget is spent
+  but whose memory is free would sit idle, which is exactly what this design
+  exists to prevent).
   Rank the rest by `0.6 x memFrac + 0.25 x cpuFrac + 0.15 x (1 - |memFrac - cpuFrac|)`
   where each fraction is what remains after the task, as a fraction of the
-  worker's total. Take the highest; charge cpu, memory and slot on the picked
-  worker so later picks in the round see it.
+  worker's total. Take the highest; charge cpu and memory on the picked worker so
+  later picks in the round see it.
 - Nothing fits: fall through to the scalar heap first ("no dimensioned home →
   scalar heap" outranks the oversized rule). Only when the scalar heap has no
   room either does the oversized rule apply: if `req.Memory` exceeds the largest
   `total_memory` of any worker, dispatch to the dimensioned worker with the most
   `available_memory` (waiting never helps such a task); otherwise return
-  `NullNodeID`.
+  `NullNodeID`. The scalar slot is not consulted here either.
 - A task with a zero requirement (family that does not estimate) is placed on
   the dimensioned tier when one exists — the memory filter passes trivially —
-  and only reaches the scalar heap when no dimensioned worker has a slot.
+  and only reaches the scalar heap when no dimensioned worker has free memory.
   Sending it "straight to the scalar heap" would starve it in an
   all-dimensioned cluster. Unreachable in practice, since every family floors
   its memory at `minTaskMemory`.
 - `NullNodeID` is per-task, not per-round. `schedule()` ends the round only when
-  `nodePicker.exhausted()` — no dimensioned worker with a free slot and no free
-  scalar slot. A task that alone does not fit gives way exactly like a task in
+  `nodePicker.exhausted()` — no dimensioned worker with any free memory and no
+  free scalar slot. A task that alone does not fit gives way exactly like a task in
   failure backoff: it is set aside and re-queued after the round, so one
   oversized task at the head of the queue (ordered by task ID, i.e. oldest, not
   biggest) cannot stall every smaller task behind it.
@@ -194,10 +199,11 @@ Same rules as PR #52561, implemented thinner:
   zero, `available == total`; the old coordinator never reads the new fields.
 - Scheduling semantics do change for an all-dimensioned cluster: the old
   "one unplaceable task ends the round" behaviour is gone (see the `NullNodeID`
-  is per-task rule above). A cluster with no free slot anywhere still ends the
-  round at the first refusal, as before.
-- During a rolling upgrade, dimensioned workers are preferred until their slots
-  are full, then the scalar heap serves the rest; aggregate throughput is
+  is per-task rule above). A cluster with no room anywhere — no free memory on
+  any dimensioned worker and no free scalar slot — still ends the round at the
+  first refusal, as before.
+- During a rolling upgrade, dimensioned workers are preferred until their memory
+  is full, then the scalar heap serves the rest; aggregate throughput is
   preserved, fill order changes.
 
 ## Testing

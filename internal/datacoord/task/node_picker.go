@@ -43,6 +43,11 @@ const (
 //     filter, cpu only ranks;
 //   - workers that do not are placed by the pre-existing slot max-heap.
 //
+// The scalar slot is a compatibility currency for the second kind of worker
+// only. It never gates a worker that reports cpu/memory: such a worker with its
+// slot budget spent but its memory free must still receive work, which is the
+// situation this placement exists to fix.
+//
 // Nothing gets worse for a task: one that finds no home in the first tier
 // falls through to the tier that existed before.
 type nodePicker struct {
@@ -52,7 +57,6 @@ type nodePicker struct {
 
 type resourceNode struct {
 	nodeID          int64
-	availableSlots  int64
 	totalCPU        int64
 	availableCPU    int64
 	totalMemory     int64
@@ -69,7 +73,6 @@ func newNodePicker(workerSlots map[int64]*session.WorkerSlots) *nodePicker {
 		}
 		p.nodes = append(p.nodes, &resourceNode{
 			nodeID:          nodeID,
-			availableSlots:  ws.AvailableSlots,
 			totalCPU:        ws.TotalCPU,
 			availableCPU:    ws.AvailableCPU,
 			totalMemory:     ws.TotalMemory,
@@ -83,7 +86,7 @@ func newNodePicker(workerSlots map[int64]*session.WorkerSlots) *nodePicker {
 // Pick returns the node for a task needing taskSlot slots and req resources,
 // or NullNodeID when it should wait for the next round.
 func (p *nodePicker) Pick(taskSlot int64, req taskcommon.Resource) int64 {
-	if nodeID, ok := p.pickByResource(taskSlot, req); ok {
+	if nodeID, ok := p.pickByResource(req); ok {
 		return nodeID
 	}
 	if nodeID := pickNodeFromHeap(p.heap, taskSlot); nodeID != NullNodeID {
@@ -92,22 +95,22 @@ func (p *nodePicker) Pick(taskSlot int64, req taskcommon.Resource) int64 {
 	// No worker of either tier can take it as it stands. Only a task that is
 	// larger than any resource-reporting worker even when empty is dispatched
 	// anyway: for it, waiting never helps.
-	return p.pickOversized(taskSlot, req)
+	return p.pickOversized(req)
 }
 
 // pickByResource returns ok=false when no resource-reporting worker can hold
 // the task now, so the caller falls through to the scalar tier.
-func (p *nodePicker) pickByResource(taskSlot int64, req taskcommon.Resource) (int64, bool) {
+//
+// Memory is the only hard filter and cpu only ranks. The worker's scalar slot is
+// not consulted at all: it is a compatibility currency for workers that predate
+// the cpu/memory report, and gating on it here would leave a worker whose slot
+// budget is spent but whose memory is free sitting idle.
+func (p *nodePicker) pickByResource(req taskcommon.Resource) (int64, bool) {
 	var (
 		best      *resourceNode
 		bestScore = math.Inf(-1)
 	)
 	for _, n := range p.nodes {
-		if n.availableSlots <= 0 {
-			// The worker's queue is full however much memory its ledger has
-			// free; the scalar still carries what is merely queued there.
-			continue
-		}
 		if n.availableMemory < req.Memory {
 			// Memory gates. It is the only dimension a task is refused a
 			// worker for, because exceeding it kills the process rather
@@ -121,7 +124,7 @@ func (p *nodePicker) pickByResource(taskSlot int64, req taskcommon.Resource) (in
 	if best == nil {
 		return NullNodeID, false
 	}
-	best.charge(taskSlot, req)
+	best.charge(req)
 	return best.nodeID, true
 }
 
@@ -129,7 +132,7 @@ func (p *nodePicker) pickByResource(taskSlot int64, req taskcommon.Resource) (in
 // when empty. Waiting for such a task never helps, so it starts where it has the
 // most room and the worker's own limits pace it. A task that merely does not fit
 // right now waits instead: NullNodeID.
-func (p *nodePicker) pickOversized(taskSlot int64, req taskcommon.Resource) int64 {
+func (p *nodePicker) pickOversized(req taskcommon.Resource) int64 {
 	var largest int64
 	for _, n := range p.nodes {
 		largest = max(largest, n.totalMemory)
@@ -139,9 +142,6 @@ func (p *nodePicker) pickOversized(taskSlot int64, req taskcommon.Resource) int6
 	}
 	var emptiest *resourceNode
 	for _, n := range p.nodes {
-		if n.availableSlots <= 0 {
-			continue
-		}
 		if emptiest == nil || n.availableMemory > emptiest.availableMemory {
 			emptiest = n
 		}
@@ -149,16 +149,13 @@ func (p *nodePicker) pickOversized(taskSlot int64, req taskcommon.Resource) int6
 	if emptiest == nil {
 		return NullNodeID
 	}
-	emptiest.charge(taskSlot, req)
+	emptiest.charge(req)
 	return emptiest.nodeID
 }
 
-func (n *resourceNode) charge(taskSlot int64, req taskcommon.Resource) {
+func (n *resourceNode) charge(req taskcommon.Resource) {
 	n.availableCPU -= req.CPU
 	n.availableMemory -= req.Memory
-	if taskSlot > 0 {
-		n.availableSlots = max(n.availableSlots-taskSlot, 0)
-	}
 }
 
 // score ranks a worker that already fits: how much memory and cpu would be
@@ -178,17 +175,23 @@ func remainingFraction(remaining, total int64) float64 {
 	return math.Min(math.Max(float64(remaining)/float64(total), 0), 1)
 }
 
-// exhausted reports that no worker of either tier has a slot left, i.e. nothing
+// exhausted reports that no worker of either tier has room left, i.e. nothing
 // behind the task that was just refused can be placed either. It is the only
 // case in which a NullNodeID should end the scheduling round: a task refused
 // because it alone does not fit must give way instead, or one oversized task at
 // the head of the queue stalls every smaller task behind it.
 //
+// A worker that reports cpu/memory has room while it has any free memory,
+// whatever its scalar slot says: the slot is a compatibility currency for
+// workers that do not report cpu/memory and never gates a dimensioned one.
+// Workers that do not report it are exhausted on slots exactly as before.
+// Per-round work stays bounded by maxDelayedPerRound in schedule().
+//
 // It does not mutate the picker: the slot heap is a max-heap on AvailableSlots,
 // so peeking its top is enough.
 func (p *nodePicker) exhausted() bool {
 	for _, n := range p.nodes {
-		if n.availableSlots > 0 {
+		if n.availableMemory > 0 {
 			return false
 		}
 	}
