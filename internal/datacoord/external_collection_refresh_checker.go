@@ -311,12 +311,7 @@ func (c *externalCollectionRefreshChecker) indexWaitDone(job *datapb.ExternalCol
 		return true
 	}
 
-	for _, segmentID := range unindexed {
-		select {
-		case getBuildIndexChSingleton() <- segmentID: // accelerate index building
-		default:
-		}
-	}
+	c.nudgeIndexBuilds(job, unindexed)
 
 	held := indexWaitProgressFloor +
 		int64(10*(len(segmentIDs)-len(unindexed))/len(segmentIDs))
@@ -345,6 +340,64 @@ func (c *externalCollectionRefreshChecker) indexWaitDone(job *datapb.ExternalCol
 			mlog.Int64s("unindexedSample", lo.Slice(unindexed, 0, 10)))
 	}
 	return false
+}
+
+// nudgeIndexBuilds pushes unindexed segments into the build-acceleration
+// channel, exactly as importChecker.checkIndexBuildingJob does - but only once
+// DataCoord's collection meta already carries THIS refresh's source/spec.
+//
+// An index build resolves the external source/spec at DISPATCH time, not at
+// enqueue time: prepareJobRequest calls handler.GetCollection and copies
+// schema.GetExternalSource()/GetExternalSpec() into the CreateJobRequest, and
+// on the worker those drive the external filesystem endpoint, bucket and
+// credentials. The publish is a round trip (AlterCollection -> WAL ack ->
+// BroadcastAlteredCollection -> meta.AddCollection) while the scheduler ticks
+// every 100ms, so a nudge issued before the publish lands dispatches builds
+// against the PRE-refresh location. Those builds fail terminally, and nothing
+// retries them: createIndexesForSegment skips an index that already has a
+// segIndex record, and GetUnindexedSegments only counts Finished - so the
+// segment never becomes indexed and the wait burns the whole job timeout.
+//
+// The gate is authoritative because it reads the same place the dispatch will:
+// ServerHandler.GetCollection is a plain meta.GetCollection. A refresh that
+// does not change source/spec passes it immediately and loses no acceleration.
+// A collection missing from meta reads as "not yet" - the dispatch would resolve
+// it from RootCoord and be safe, but skipping one nudge only costs latency and
+// the periodic index inspector still creates the tasks either way.
+//
+// This narrows the window; it does not close it. The inspector's own 60s tick
+// scans every flushed segment and needs no notification, so a build can still
+// be created inside the window without this nudge. That hazard predates this
+// feature and is out of scope here - what this guarantees is that the wait does
+// not actively dispatch into it.
+func (c *externalCollectionRefreshChecker) nudgeIndexBuilds(job *datapb.ExternalCollectionRefreshJob, unindexed []int64) {
+	if !c.refreshedSchemaVisible(job) {
+		mlog.Debug(c.ctx, "refreshed external schema not visible yet, holding the index build nudge",
+			mlog.FieldJobID(job.GetJobId()),
+			mlog.FieldCollectionID(job.GetCollectionId()))
+		return
+	}
+	for _, segmentID := range unindexed {
+		select {
+		case getBuildIndexChSingleton() <- segmentID: // accelerate index building
+		default:
+		}
+	}
+}
+
+// refreshedSchemaVisible reports whether DataCoord's collection meta already
+// carries this refresh's external source/spec - i.e. whether an index build
+// dispatched now would read the refreshed location rather than the previous one.
+func (c *externalCollectionRefreshChecker) refreshedSchemaVisible(job *datapb.ExternalCollectionRefreshJob) bool {
+	if c.mt == nil {
+		return false
+	}
+	collection := c.mt.GetCollection(job.GetCollectionId())
+	if collection == nil || collection.Schema == nil {
+		return false
+	}
+	return collection.Schema.GetExternalSource() == job.GetExternalSource() &&
+		collection.Schema.GetExternalSpec() == job.GetExternalSpec()
 }
 
 // finishAfterIndexWait completes a job whose wait is over. No pre-apply: the
@@ -578,6 +631,9 @@ func (c *externalCollectionRefreshChecker) ensureJobFinishedNotified(job *datapb
 	// applied - which with the index wait on happens before Finished. Waiting
 	// for Finished would hold the schema back for the whole wait, and index
 	// builds take the external source/spec from the collection schema.
+	// Publishing here narrows the window in which a build can read the previous
+	// source/spec; it does not close it, because the index inspector's own tick
+	// needs no notification. See nudgeIndexBuilds.
 	//
 	// The marker also holds for a job that FAILED after applying (it outran
 	// the job timeout mid-wait). Such a job still owes the publish: its

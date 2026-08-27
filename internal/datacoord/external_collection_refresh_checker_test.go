@@ -1259,7 +1259,15 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		mt := &meta{segments: NewSegmentsInfo()}
+		// The nudge is gated on the refreshed source/spec being visible in
+		// collection meta, so the fixture needs a collection. The staged job
+		// carries no source/spec, so an empty one matches and these cases keep
+		// nudging exactly as before.
+		mt := &meta{
+			segments:    NewSegmentsInfo(),
+			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		}
+		mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
 		for _, id := range append(append([]int64{}, indexedSegments...), *debt...) {
 			mt.segments.SetSegment(id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: id, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -1581,7 +1589,12 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 			require.NoError(t, err)
 
-			mt := &meta{segments: NewSegmentsInfo(), indexMeta: &indexMeta{}}
+			mt := &meta{
+				segments:    NewSegmentsInfo(),
+				indexMeta:   &indexMeta{},
+				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			}
+			mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
 			mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			}})
@@ -1621,7 +1634,12 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			require.NoError(t, err)
 
 			debt := []int64{556}
-			mt := &meta{segments: NewSegmentsInfo(), indexMeta: &indexMeta{}}
+			mt := &meta{
+				segments:    NewSegmentsInfo(),
+				indexMeta:   &indexMeta{},
+				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			}
+			mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
 			mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			}})
@@ -1671,7 +1689,12 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			require.NoError(t, err)
 
 			debt := []int64{556}
-			mt := &meta{segments: NewSegmentsInfo(), indexMeta: &indexMeta{}}
+			mt := &meta{
+				segments:    NewSegmentsInfo(),
+				indexMeta:   &indexMeta{},
+				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			}
+			mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
 			mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			}})
@@ -2072,5 +2095,95 @@ func TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassPublishes(
 
 		prefixes, _ := cm.snapshot()
 		assert.Len(t, prefixes, 1, "the explore temp dir is still reclaimed exactly once")
+	})
+}
+
+// drainBuildIndexCh empties the build-acceleration channel and returns what it
+// held, so a test can assert on exactly what one call pushed.
+func drainBuildIndexCh() []int64 {
+	ch := getBuildIndexChSingleton()
+	out := make([]int64, 0)
+	for {
+		select {
+		case id := <-ch:
+			out = append(out, id)
+		default:
+			return out
+		}
+	}
+}
+
+// TestExternalCollectionRefreshChecker_IndexWait_NudgeWaitsForPublish pins that
+// the wait never accelerates a build that would read the PREVIOUS external
+// source/spec.
+//
+// An index build resolves those at dispatch time (prepareJobRequest ->
+// handler.GetCollection -> CreateJobRequest.ExternalSource/ExternalSpec), and
+// the publish is a round trip while the scheduler ticks every 100ms - so a
+// nudge issued in the entry pass, which runs before processJob reaches
+// ensureJobFinishedNotified, dispatches against the pre-refresh endpoint and
+// credentials. Such builds fail terminally and nothing retries them, so the
+// refresh would burn its whole timeout and then fail with its segments already
+// serving.
+func TestExternalCollectionRefreshChecker_IndexWait_NudgeWaitsForPublish(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	mockey.PatchConvey("nudge waits for the publish", t, func() {
+		pt := paramtable.Get()
+		pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+		defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+		catalog := &stubCatalog{}
+		// A refresh that MOVES the external location - the only shape exposed
+		// to this, since the publish short-circuits when nothing changed.
+		mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(
+			[]*datapb.ExternalCollectionRefreshJob{{
+				JobId: 1, CollectionId: 100,
+				State:          indexpb.JobState_JobStateInProgress,
+				TaskIds:        []int64{1001},
+				ExternalSource: "s3://new",
+				ExternalSpec:   `{"format":"parquet","v":2}`,
+			}}, nil).Build()
+		mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(
+			[]*datapb.ExternalCollectionRefreshTask{
+				{TaskId: 1001, JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFinished, Progress: 100},
+			}, nil).Build()
+		refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+		require.NoError(t, err)
+
+		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{
+			Name:           "coll",
+			ExternalSource: "s3://old",
+			ExternalSpec:   `{"format":"parquet"}`,
+		}})
+		mt := &meta{segments: NewSegmentsInfo(), indexMeta: &indexMeta{}, collections: collections}
+		mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+		}})
+		mockey.Mock((*indexMeta).GetUnindexedSegments).Return([]int64{556}).Build()
+
+		checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
+			nil, nil, nil)
+
+		drainBuildIndexCh() // ignore whatever earlier tests left behind
+
+		checker.aggregateJobState(refreshMeta.GetJob(1)) // entry pass: apply + mark
+		require.NotZero(t, refreshMeta.GetJob(1).GetIndexWaitStartedTime())
+		assert.Empty(t, drainBuildIndexCh(),
+			"the entry pass runs before the publish; a build dispatched now would read the pre-refresh source/spec")
+
+		// The AlterCollection round trip lands in DataCoord's meta.
+		collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{
+			Name:           "coll",
+			ExternalSource: "s3://new",
+			ExternalSpec:   `{"format":"parquet","v":2}`,
+		}})
+
+		checker.aggregateJobState(refreshMeta.GetJob(1))
+		assert.Equal(t, []int64{556}, drainBuildIndexCh(),
+			"once the refreshed schema is visible the wait accelerates the build as before")
 	})
 }
