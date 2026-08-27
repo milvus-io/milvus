@@ -66,6 +66,92 @@ func TestGlobalOptimizerSkipsPreparedEmptyBM25Corpus(t *testing.T) {
 	require.True(t, result.Skip)
 }
 
+func TestGlobalOptimizerOptimizesAdvancedBM25SubSearch(t *testing.T) {
+	const (
+		collectionID  = int64(300)
+		inputFieldID  = int64(301)
+		outputFieldID = int64(302)
+		functionKey   = "query-optimizer-advanced-test"
+	)
+	require.NoError(t, function.GetManager().Alloc(collectionID, functionKey, testBM25Schema(inputFieldID, outputFieldID)))
+	defer function.GetManager().Release(collectionID, functionKey)
+
+	bm25Req := testBM25SearchRequest(t, collectionID, inputFieldID, outputFieldID)
+	req := &internalpb.SearchRequest{
+		CollectionID: collectionID,
+		IsAdvanced:   true,
+		SubReqs: []*internalpb.SubSearchRequest{
+			{
+				FieldId:            bm25Req.GetFieldId(),
+				MetricType:         bm25Req.GetMetricType(),
+				PlaceholderGroup:   bm25Req.GetPlaceholderGroup(),
+				SerializedExprPlan: bm25Req.GetSerializedExprPlan(),
+			},
+		},
+	}
+	idf := typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 3})
+	optimizer := NewGlobalOptimizer(NewQueryRuntime(fakeIDFModule{vectors: [][]byte{idf}, avgdl: 9}), qviews.DataVersion{StreamingVersion: 1}, functionKey)
+
+	result, err := optimizer.OptimizeSearch(context.Background(), req)
+	require.NoError(t, err)
+	require.False(t, result.Skip)
+	require.False(t, req.GetSubReqs()[0].GetSkip())
+
+	placeholder := &commonpb.PlaceholderGroup{}
+	require.NoError(t, proto.Unmarshal(req.GetSubReqs()[0].GetPlaceholderGroup(), placeholder))
+	require.Equal(t, commonpb.PlaceholderType_SparseFloatVector, placeholder.GetPlaceholders()[0].GetType())
+	plan := &planpb.PlanNode{}
+	require.NoError(t, proto.Unmarshal(req.GetSubReqs()[0].GetSerializedExprPlan(), plan))
+	require.Equal(t, float64(9), plan.GetVectorAnns().GetQueryInfo().GetBm25Avgdl())
+}
+
+func TestGlobalOptimizerUsesSubSearchSkipWithoutSkippingDenseSearch(t *testing.T) {
+	const (
+		collectionID  = int64(400)
+		inputFieldID  = int64(401)
+		outputFieldID = int64(402)
+		functionKey   = "query-optimizer-advanced-empty-test"
+	)
+	require.NoError(t, function.GetManager().Alloc(collectionID, functionKey, testBM25Schema(inputFieldID, outputFieldID)))
+	defer function.GetManager().Release(collectionID, functionKey)
+
+	bm25Req := testBM25SearchRequest(t, collectionID, inputFieldID, outputFieldID)
+	bm25SubReq := func() *internalpb.SubSearchRequest {
+		return &internalpb.SubSearchRequest{
+			FieldId:            bm25Req.GetFieldId(),
+			MetricType:         bm25Req.GetMetricType(),
+			PlaceholderGroup:   bm25Req.GetPlaceholderGroup(),
+			SerializedExprPlan: bm25Req.GetSerializedExprPlan(),
+		}
+	}
+	optimizer := NewGlobalOptimizer(NewQueryRuntime(fakeIDFModule{}), qviews.DataVersion{StreamingVersion: 1}, functionKey)
+
+	mixedReq := &internalpb.SearchRequest{
+		CollectionID: collectionID,
+		IsAdvanced:   true,
+		SubReqs: []*internalpb.SubSearchRequest{
+			{FieldId: inputFieldID, MetricType: metric.IP},
+			bm25SubReq(),
+		},
+	}
+	result, err := optimizer.OptimizeSearch(context.Background(), mixedReq)
+	require.NoError(t, err)
+	require.False(t, result.Skip)
+	require.False(t, mixedReq.GetSubReqs()[0].GetSkip())
+	require.True(t, mixedReq.GetSubReqs()[1].GetSkip())
+
+	allBM25Req := &internalpb.SearchRequest{
+		CollectionID: collectionID,
+		IsAdvanced:   true,
+		SubReqs:      []*internalpb.SubSearchRequest{bm25SubReq(), bm25SubReq()},
+	}
+	result, err = optimizer.OptimizeSearch(context.Background(), allBM25Req)
+	require.NoError(t, err)
+	require.True(t, result.Skip)
+	require.True(t, allBM25Req.GetSubReqs()[0].GetSkip())
+	require.True(t, allBM25Req.GetSubReqs()[1].GetSkip())
+}
+
 func testBM25SearchRequest(t *testing.T, collectionID int64, inputFieldID int64, outputFieldID int64) *internalpb.SearchRequest {
 	t.Helper()
 	placeholder, err := funcutil.FieldDataToPlaceholderGroupBytes(&schemapb.FieldData{

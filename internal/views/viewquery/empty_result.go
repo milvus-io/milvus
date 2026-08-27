@@ -10,9 +10,12 @@ func emptySearchResults(req *internalpb.SearchRequest) *internalpb.SearchResults
 	nq := req.GetNq()
 	topK := req.GetTopk()
 	return &internalpb.SearchResults{
-		Status:     merr.Success(),
-		NumQueries: nq,
-		TopK:       topK,
+		Status:             merr.Success(),
+		MetricType:         req.GetMetricType(),
+		NumQueries:         nq,
+		TopK:               topK,
+		IsTopkReduce:       req.GetIsTopkReduce(),
+		IsRecallEvaluation: req.GetIsRecallEvaluation(),
 		ResultData: &schemapb.SearchResultData{
 			NumQueries: nq,
 			TopK:       topK,

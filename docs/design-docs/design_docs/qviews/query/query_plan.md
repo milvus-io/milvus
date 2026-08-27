@@ -183,6 +183,14 @@ The first implementation should:
 3. Apply request partition pruning before returning the plan, so Proxy avoids
    Phase 2 calls to nodes that cannot contribute results.
 
+Regular search uses the top-level `partition_ids` and `ignore_growing` scope.
+Advanced search uses all non-skipped sub-searches as one dispatch scope:
+QueryNode partition pruning uses the union of their `partition_ids`, and an
+empty partition list in any executable sub-search means all partitions. The
+StreamingNode is omitted only when every executable sub-search sets
+`ignore_growing`, or when the growing-runtime probe proves the union scope is
+empty.
+
 `work_nodes` must be built from the optimized request, not from the original
 legacy request. Global optimizers may rewrite request scope, serialized plans,
 or other planning inputs; node pruning must reflect the request that Phase 2
@@ -239,14 +247,25 @@ acquired. It is a call-scoped capability: the optimizer implementation closes
 over the selected QueryView, the prepared query runtime, and runtime modules
 such as the BM25 IDF oracle.
 
-The service-facing interface stays simple:
+The service-facing interface returns both the optimized request and the
+request-level execution decision:
 
 ```go
 type GlobalOptimizer interface {
-    OptimizeSearch(ctx context.Context, req *internalpb.SearchRequest) error
+    OptimizeSearch(ctx context.Context, req *internalpb.SearchRequest) (SearchOptimization, error)
     OptimizeRetrieve(ctx context.Context, req *internalpb.RetrieveRequest) error
 }
+
+type SearchOptimization struct {
+    Skip bool
+}
 ```
+
+For regular search, `Skip` means the optimizer proved that no WorkNode needs to
+execute the request. For advanced search, each `SubSearchRequest` runs through
+the same optimizer pipeline and keeps its own Skip decision; request-level
+`Skip` is true only when every sub-search is skipped. The BM25 optimizer uses
+this when the QueryView DataVersion has no searchable BM25 corpus.
 
 Neither `QueryPlanService` nor callers outside `walAdaptorImpl` should assemble
 or pass `QueryViewStats`, `IDFOracleSnapshot`, `QueryRuntime`, or other resource
@@ -359,7 +378,7 @@ The first node-side Phase 1 milestone is:
 2. Implement `walAdaptorImpl` as `QueryPlanProvider`.
 3. Add `SNQueryViewHandler` query-facing lease acquisition for latest Up view.
 4. Build primary-only `QueryPlanMVCC`, optimized request, and WorkNode list inside `walAdaptorImpl.GetQueryPlan`.
-5. Return a valid `QueryPlan` with a no-op global optimizer.
+5. Run BM25 global optimization for regular and advanced searches.
 6. Add fail-open StreamingNode work-node pruning for already-visible empty
    growing runtime candidate sets.
-7. Keep secondary and advanced optimizer behavior behind explicit follow-up work.
+7. Preserve advanced sub-search Skip, partition, and `ignore_growing` scope.
