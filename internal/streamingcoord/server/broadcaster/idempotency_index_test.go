@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -506,53 +504,10 @@ func TestDuplicatedBroadcastAgainstUnackedOriginalDoesNotPanic(t *testing.T) {
 	require.Nil(t, result.AppendResults)
 }
 
-// TestBroadcastRejectsOversizedIdempotencyKey covers the length bound at the
-// broadcaster, the only place it is enforced and the one point every entry path
-// passes through.
-func TestBroadcastRejectsOversizedIdempotencyKey(t *testing.T) {
-	bm := newBroadcastTaskManagerForTest(t)
-	collKey := message.NewSharedCollectionNameResourceKey("db1", "coll1")
-
-	broadcast := func(msg message.BroadcastMutableMessage) error {
-		api := &broadcasterWithRK{broadcaster: bm, broadcastID: 1, guards: bm.resourceKeyLocker.Lock(collKey)}
-		defer api.Close()
-		_, err := api.Broadcast(context.Background(), msg)
-		return err
-	}
-
-	old := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue("8")
-	defer paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue(old)
-
-	// The bound is inclusive.
-	require.NoError(t, broadcast(newImportMsgWithKey("12345678")))
-	err := broadcast(newImportMsgWithKey("123456789"))
-	require.Error(t, err)
-	require.ErrorIs(t, err, merr.ErrParameterInvalid)
-	// The rejection happens before the task is registered, and callers roll back what
-	// they staged for the broadcast only when the error says so. Marking it must not
-	// cost the client the code it is answered with.
-	require.True(t, IsBroadcastTaskNotCreated(err))
-	require.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
-
-	// A limit of 0 fails closed: no non-empty key is accepted at all, while a broadcast
-	// that carries no key is not idempotent and is never rejected here.
-	paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue("0")
-	require.Error(t, broadcast(newImportMsgWithKey("1")))
-	require.NoError(t, broadcast(newImportMsgWithKey("")))
-
-	// The parameter is refreshable and unbounded below, so a negative value is
-	// reachable at runtime. It must still reject only keys: this check runs on every
-	// broadcast in the cluster, keyed or not, so rejecting the keyless ones would stop
-	// all WAL-based DDL on a live cluster.
-	paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue("-1")
-	require.Error(t, broadcast(newImportMsgWithKey("1")))
-	require.NoError(t, broadcast(newImportMsgWithKey("")))
-}
-
-// TestDiscardedBroadcastCountsNoPendingTask covers the two paths that build no task:
-// a dedup hit and a length rejection. Counting a task there would be invisible in
-// behavior and permanent in the metric, because the count is only ever undone by a
-// state transition and neither path has a task left to transition.
+// TestDiscardedBroadcastCountsNoPendingTask covers the one path that builds no task:
+// a dedup hit. Counting a task there would be invisible in behavior and permanent in
+// the metric, because the count is only ever undone by a state transition and this
+// path has no task left to transition.
 func TestDiscardedBroadcastCountsNoPendingTask(t *testing.T) {
 	bm := newBroadcastTaskManagerForTest(t)
 	collKey := message.NewSharedCollectionNameResourceKey("db1", "coll1")
@@ -580,48 +535,6 @@ func TestDiscardedBroadcastCountsNoPendingTask(t *testing.T) {
 	// A retry of the same scope resolves to the original: nothing is registered.
 	require.NoError(t, broadcast(2, newImportMsgWithKey("k1")))
 	require.Equal(t, settled, pending())
-
-	// A rejected key registers nothing either.
-	old := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue("1")
-	defer paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue(old)
-	require.Error(t, broadcast(3, newImportMsgWithKey("far-too-long")))
-	require.Equal(t, settled, pending())
-}
-
-// TestBroadcastAcceptsIdempotencyKeyAtTheConfiguredLimit guards the length budget at
-// its real boundary, with the real default limit. A client is told it may send a raw
-// key of up to streaming.idempotency.maxKeyLength bytes, so anything that inflates the
-// key on its way here — a scoping prefix, an encoding — makes the broadcaster reject a
-// key the user was told is legal. A short-key test cannot catch that; only a key
-// sitting exactly on the limit can.
-func TestBroadcastAcceptsIdempotencyKeyAtTheConfiguredLimit(t *testing.T) {
-	bm := newBroadcastTaskManagerForTest(t)
-	collKey := message.NewSharedCollectionNameResourceKey("db1", "coll1")
-
-	limit := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()
-	require.Equal(t, 256, limit, "this test asserts the boundary of the DEFAULT limit, the one advertised to clients")
-
-	atLimit := strings.Repeat("k", limit)
-	first := broadcastForTest(t, bm, 1, newImportMsgWithKey(atLimit), collKey)
-	require.Nil(t, first.Duplicated)
-	require.Equal(t, uint64(1), first.BroadcastID)
-
-	// The key survived at full length: a retry of it still deduplicates, which is only
-	// possible if the broadcaster indexed the whole key rather than rejecting it.
-	dup := broadcastForTest(t, bm, 2, newImportMsgWithKey(atLimit), collKey)
-	require.NotNil(t, dup.Duplicated)
-	require.Equal(t, uint64(1), dup.BroadcastID)
-	require.Equal(t, atLimit, message.IdempotencyKeyOf(dup.Duplicated).ClientKey())
-	// The scoping prefix really does push the stored value past the advertised limit;
-	// that is exactly why the bound is taken over the client portion and not over the
-	// encoded key.
-	require.Greater(t, len(message.IdempotencyKeyOf(dup.Duplicated)), limit)
-
-	// One byte past the limit is where rejection starts.
-	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 3, guards: bm.resourceKeyLocker.Lock(collKey)}
-	defer api.Close()
-	_, err := api.Broadcast(context.Background(), newImportMsgWithKey(atLimit+"k"))
-	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
 
 // createBroadcastTaskProtoFromMessage builds a recovery proto for an arbitrary
@@ -671,40 +584,6 @@ func TestNonImportBroadcastIsDeduplicated(t *testing.T) {
 	appendResult := result.AppendResults["v1"]
 	require.NotNil(t, appendResult)
 	require.Equal(t, uint64(1), appendResult.TimeTick)
-}
-
-// TestBroadcasterChecksKeyLengthAfterTheLookup pins the order of the length check
-// against the index lookup inside broadcasterWithRK: the limit is admission control
-// over NEW keys, so an already-indexed key resolves without being re-measured.
-//
-// This is a statement about the broadcaster only. It is NOT the cluster-level claim
-// that lowering streaming.idempotency.maxKeyLength leaves an open idempotency window
-// intact: the REST middleware and the propagation interceptor apply the same
-// refreshable bound at the edge, so a real client's in-window retry is rejected there
-// before it ever reaches this code. See the comment at broadcasterWithRK.Broadcast.
-func TestBroadcasterChecksKeyLengthAfterTheLookup(t *testing.T) {
-	bm := newBroadcastTaskManagerForTest(t)
-	collKey := message.NewExclusiveCollectionNameResourceKey("db1", "coll1")
-
-	old := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue("8")
-	defer paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue(old)
-
-	first := broadcastForTest(t, bm, 1, newImportMsgWithKey("12345678"), collKey)
-	require.Nil(t, first.Duplicated)
-
-	// The operator lowers the bound below a key that is already indexed. A request that
-	// got this far has already cleared the edge check, which is what makes this reachable.
-	paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue("4")
-
-	retry := broadcastForTest(t, bm, 2, newImportMsgWithKey("12345678"), collKey)
-	require.NotNil(t, retry.Duplicated, "an already-indexed key must still resolve")
-	require.Equal(t, uint64(1), retry.BroadcastID)
-
-	// A key that is not in the index is still held to the current bound.
-	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 3, guards: bm.resourceKeyLocker.Lock(collKey)}
-	defer api.Close()
-	_, err := api.Broadcast(context.Background(), newImportMsgWithKey("87654321"))
-	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
 
 // newBroadcastTaskManagerWithEntrypointForTest is newBroadcastTaskManagerForTest plus

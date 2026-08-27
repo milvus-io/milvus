@@ -244,9 +244,7 @@ func TestBroadcastTaskNotCreatedOnStoppedBroadcaster(t *testing.T) {
 	}
 	bm.lifetime.SetState(typeutil.LifetimeStateStopped)
 
-	// The manager is already stopped, so it returns before the key-length bound
-	// is ever consulted; any value does.
-	_, _, guardsTransferred, err := bm.broadcast(context.Background(), createNewBroadcastMsg([]string{"v1"}, rk), 1, guards, 256)
+	_, _, guardsTransferred, err := bm.broadcast(context.Background(), createNewBroadcastMsg([]string{"v1"}, rk), 1, guards)
 
 	require.Error(t, err)
 	// Nothing was registered, so nothing took the guards over: the shutdown path

@@ -28,7 +28,7 @@ import (
 )
 
 // ValidateIdempotencyKey rejects a client-supplied key that cannot survive the
-// transport, or that exceeds the broadcaster's admission bound.
+// transport, or that exceeds streaming.idempotency.maxKeyLength.
 //
 // gRPC refuses a metadata value holding any byte outside printable ASCII, and it
 // does so before the stream exists, as codes.Internal. ClientBase reads that code
@@ -38,10 +38,17 @@ import (
 // connection every caller on that proxy shares. Refusing the key at the door keeps
 // that out of the transport and names it as the parameter error it is.
 //
-// The length bound is the same one the broadcaster applies. Checking it here too
-// is not redundant: the broadcaster sits after the key has already been copied
-// onto every coordinator RPC of the request, so only a check at the door can stop
-// an oversized key from being carried across process boundaries first.
+// The length bound is enforced here and at the REST middleware, and nowhere else:
+// these are the only two doors a client key enters through, and both sit in front
+// of the copy that puts the key on every coordinator RPC of the request, so a check
+// any later would be measuring a key that has already crossed process boundaries
+// and been retained. The broadcaster deliberately re-checks nothing -- a second
+// bound behind these doors could only ever reject a key they had already admitted,
+// which for a retry inside its idempotency window means answering it with an error
+// instead of the original result.
+//
+// The bound is refreshable, so lowering it does reject in-window retries at these
+// doors. That is a property of the doors, not something a later check could undo.
 //
 // An absent key is valid: a request without one is simply not idempotent.
 func ValidateIdempotencyKey(key string) error {

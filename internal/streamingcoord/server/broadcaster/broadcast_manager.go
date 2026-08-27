@@ -232,7 +232,6 @@ func (bm *broadcastTaskManager) broadcast(
 	msg message.BroadcastMutableMessage,
 	broadcastID uint64,
 	guards *lockGuards,
-	keyLengthLimit int,
 ) (result *types.BroadcastAppendResult, dup *broadcastTask, guardsTransferred bool, err error) {
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
 		guards.Unlock()
@@ -243,10 +242,7 @@ func (bm *broadcastTaskManager) broadcast(
 	// Validation is now done before calling broadcast (in DataCoord for import operations)
 	// CheckCallback mechanism has been removed as part of the import refactoring
 
-	dup, task, err := bm.getOrAddBroadcastTask(ctx, msg, broadcastID, guards, keyLengthLimit)
-	if err != nil {
-		return nil, nil, false, err
-	}
+	dup, task := bm.getOrAddBroadcastTask(ctx, msg, broadcastID, guards)
 	if dup != nil {
 		return nil, dup, false, nil
 	}
@@ -334,12 +330,6 @@ func (bm *broadcastTaskManager) Close() {
 // first. Deciding under bm.mu retires that caller obligation instead of restating
 // it in a comment.
 //
-// keyLengthLimit is read by the caller rather than here so no refreshable-config
-// read happens under bm.mu. It is applied only on the miss path: the bound is
-// admission control over NEW index entries, so it has nothing to decide about a
-// key that is already indexed, and lowering it must not turn an in-window retry
-// into an error.
-//
 // Returns the owning task on a hit, having registered nothing; the caller keeps
 // its lock guards. Returns the newly registered task on a miss, which now owns
 // the guards.
@@ -348,8 +338,7 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 	msg message.BroadcastMutableMessage,
 	broadcastID uint64,
 	guards *lockGuards,
-	keyLengthLimit int,
-) (dup *broadcastTask, created *broadcastTask, err error) {
+) (dup *broadcastTask, created *broadcastTask) {
 	// The scope comes from the message alone, so the hit path and the miss path
 	// cannot drift apart. It touches no shared state, so it is derived outside the
 	// lock.
@@ -360,7 +349,7 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 
 	if ownerID, ok := bm.idempotencyIndex.Get(scope); ok {
 		if t, ok := bm.tasks[ownerID]; ok {
-			return t, nil, nil
+			return t, nil
 		}
 		// tasks and idempotencyIndex are written together under this lock and
 		// removeBroadcastTask drops the index entry first, so a scope whose owner
@@ -369,24 +358,17 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 		bm.Logger().Warn(ctx, "idempotency index entry has no task, treating it as a miss",
 			mlog.Uint64("ownerBroadcastID", ownerID))
 	}
-	if err := validateIdempotencyKeyLength(message.IdempotencyKeyOf(msg), keyLengthLimit); err != nil {
-		// Marked here rather than at the caller, because this is where "nothing was
-		// registered" is known. Callers read the mark to decide whether they still
-		// own what they staged for this broadcast -- a reserved file-resource ref, a
-		// half-created target collection -- and must roll it back themselves.
-		return nil, nil, errors.Mark(err, ErrBroadcastTaskNotCreated)
-	}
 	// Constructed only once the broadcast is certain to be registered: construction
-	// counts the task into the PENDING gauge, and neither discard path above
-	// transitions state, so an earlier construction would leak that count for the
-	// lifetime of the process. It builds no shared state, but it is cheap enough to
-	// hold bm.mu across at DDL frequency.
+	// counts the task into the PENDING gauge, and the hit path above transitions no
+	// state, so an earlier construction would leak that count for the lifetime of the
+	// process. It builds no shared state, but it is cheap enough to hold bm.mu across
+	// at DDL frequency.
 	newIncomingTask := newBroadcastTaskFromBroadcastMessage(msg, bm.metrics, bm.ackScheduler)
 	newIncomingTask.SetLogger(bm.Logger())
 	newIncomingTask.WithResourceKeyLockGuards(guards)
 	bm.tasks[broadcastID] = newIncomingTask
 	bm.idempotencyIndex.Add(scope, broadcastID)
-	return nil, newIncomingTask, nil
+	return nil, newIncomingTask
 }
 
 // getOrCreateBroadcastTask returns the task by the broadcastID

@@ -4,7 +4,6 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // idempotencyScope derives the dedup identity of a broadcast: a client key only
@@ -41,43 +40,6 @@ func idempotencyScope(msgType message.MessageType, key message.IdempotencyKey) s
 // and agree.
 func idempotencyScopeOfMessage(msg message.BroadcastMutableMessage) string {
 	return idempotencyScope(msg.MessageType(), message.IdempotencyKeyOf(msg))
-}
-
-// validateIdempotencyKeyLength rejects an oversized client key at the broadcaster.
-//
-// This is the backstop, not the first check. Both doors a client key can enter
-// through -- the REST middleware and the propagation interceptor -- bound it via
-// interceptor.ValidateIdempotencyKey, which they must, because by the time the key
-// reaches here it has already been copied onto every coordinator RPC of the
-// request. What this check still owns is the broadcaster's own admission: it is
-// where the key is retained for the whole idempotency window, and it is the one
-// point every entry path passes through, including a future caller that mints a key
-// without going through a proxy door.
-//
-// The bound is taken over the CLIENT portion, not the encoded key: the scope prefix
-// is added by this process, and measuring it would reject a key the door already
-// accepted.
-//
-// The bound is inclusive and fails closed: a limit of 0 or less rejects every
-// non-empty key, i.e. the cluster accepts no idempotency keys at all. A broadcast that
-// carries no key is not idempotent and is never rejected here.
-// The limit is passed in rather than read here: the only caller applies this
-// inside the manager lock, and a refreshable-config read does not belong there.
-func validateIdempotencyKeyLength(key message.IdempotencyKey, limit int) error {
-	clientKey := key.ClientKey()
-	if clientKey == "" {
-		// The empty key is short-circuited rather than compared, because the only
-		// caller applies this to every broadcast, keyed or not, and a negative limit
-		// would otherwise reject the whole cluster's DDL: the parameter is
-		// refreshable and unbounded below, and "-1 means unlimited" is a reasonable
-		// thing for an operator to assume. interceptor.ValidateIdempotencyKey admits
-		// the absent key the same way.
-		return nil
-	}
-	if len(clientKey) > limit {
-		return merr.WrapErrParameterInvalidMsg("idempotency key length %d exceeds limit %d", len(clientKey), limit)
-	}
-	return nil
 }
 
 // idempotencyIndex maps an idempotency scope (see idempotencyScope) to the

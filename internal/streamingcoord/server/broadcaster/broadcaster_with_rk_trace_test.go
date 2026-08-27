@@ -36,7 +36,7 @@ func TestBroadcasterWithRK_InjectsTraceContextBeforeTaskPersist(t *testing.T) {
 	var capturedMsg message.BroadcastMutableMessage
 	resourceKey := message.NewExclusiveCollectionNameResourceKey("db", "collection")
 	mockey.Mock((*broadcastTaskManager).broadcast).To(
-		func(_ *broadcastTaskManager, _ context.Context, msg message.BroadcastMutableMessage, _ uint64, _ *lockGuards, _ int) (*types.BroadcastAppendResult, *broadcastTask, bool, error) {
+		func(_ *broadcastTaskManager, _ context.Context, msg message.BroadcastMutableMessage, _ uint64, _ *lockGuards) (*types.BroadcastAppendResult, *broadcastTask, bool, error) {
 			capturedMsg = msg
 			return &types.BroadcastAppendResult{}, nil, true, nil
 		}).Build()
@@ -93,7 +93,7 @@ func TestBroadcasterWithRK_KeepsExistingTraceContext(t *testing.T) {
 
 	var capturedMsg message.BroadcastMutableMessage
 	mockey.Mock((*broadcastTaskManager).broadcast).To(
-		func(_ *broadcastTaskManager, _ context.Context, msg message.BroadcastMutableMessage, _ uint64, _ *lockGuards, _ int) (*types.BroadcastAppendResult, *broadcastTask, bool, error) {
+		func(_ *broadcastTaskManager, _ context.Context, msg message.BroadcastMutableMessage, _ uint64, _ *lockGuards) (*types.BroadcastAppendResult, *broadcastTask, bool, error) {
 			capturedMsg = msg
 			return &types.BroadcastAppendResult{}, nil, true, nil
 		}).Build()

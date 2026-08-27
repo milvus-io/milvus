@@ -7,7 +7,6 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type broadcasterWithRK struct {
@@ -23,10 +22,6 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 	// holds expected to keep two same-key requests apart in between. They do not,
 	// whenever the lock names a different object than the scope does.
 	//
-	// Read the refreshable bound here so the manager never reads config under its
-	// lock.
-	keyLengthLimit := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()
-
 	// Stamping the header, opening the span and injecting the trace context all
 	// operate on this call's own values, so they stay outside the manager lock.
 	// Keep a trace context in the broadcast message so that the DDL ack callback
@@ -36,7 +31,7 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 	defer span.End()
 	message.InjectTraceContext(ctx, msg)
 
-	result, dup, guardsTransferred, err := b.broadcaster.broadcast(ctx, msg, b.broadcastID, b.guards, keyLengthLimit)
+	result, dup, guardsTransferred, err := b.broadcaster.broadcast(ctx, msg, b.broadcastID, b.guards)
 	if guardsTransferred {
 		// The registered task owns the guards now and releases them from its ack
 		// callback, on another goroutine; drop ours to avoid a double unlock. Checked

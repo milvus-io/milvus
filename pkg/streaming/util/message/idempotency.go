@@ -84,14 +84,18 @@ func newIdempotencyKey(domain IdempotencyScopeDomain, scopeID int64, clientKey s
 }
 
 // ClientKey returns the client-supplied portion, i.e. the key without the scope
-// this package encoded onto it. Bounds and fingerprints must be taken over this
-// rather than over the whole value: the client controls only this part, and a
-// bound applied to the encoded form would reject a key the request entrypoint
-// already accepted.
+// this package encoded onto it. It is the only way back: the encoding is one-way
+// for everything else, and the scope is chosen by the caller, so a holder of an
+// encoded key cannot otherwise tell which bytes came from the client.
 //
-// A value this package did not produce has no recoverable client portion, so it
-// is returned whole. That keeps a length bound conservative on a malformed key
-// instead of letting it through unmeasured.
+// Nothing in the request path needs it. Both places that bound or fingerprint a
+// client key -- the REST middleware and the propagation interceptor -- see the raw
+// string before this package encodes anything onto it, and the broadcaster indexes
+// the encoded form whole. This exists for a holder of an encoded key that must show
+// the client its own key back, or attribute one in a log.
+//
+// A value this package did not produce has no recoverable client portion, so it is
+// returned whole rather than guessed at.
 func (k IdempotencyKey) ClientKey() string {
 	parts := strings.SplitN(string(k), ":", 3)
 	if len(parts) < 3 {
