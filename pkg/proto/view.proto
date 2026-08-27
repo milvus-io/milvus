@@ -3,6 +3,9 @@ package milvus.proto.view;
 
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/viewpb";
 
+import "common.proto";
+import "internal.proto";
+
 // ViewSyncService transports QueryView state transitions between the
 // coordinator and StreamingNode/QueryNode followers. State-machine execution
 // remains outside this transport contract.
@@ -111,4 +114,127 @@ message SyncCloseResponse {
 message ShardID {
     int64 replica_id = 1;
     string vchannel = 2;
+}
+
+// ViewCode classifies errors raised while planning or executing a QueryView.
+// ViewError is transported in gRPC status details rather than response bodies.
+enum ViewCode {
+    VIEW_CODE_OK = 0;
+    VIEW_CODE_VIEW_INVALIDATED = 1;
+    VIEW_CODE_VIEW_NOT_FOUND = 2;
+    VIEW_CODE_ON_SHUTDOWN = 3;
+    VIEW_CODE_NOT_PRIMARY = 4;
+    VIEW_CODE_UNKNOWN = 999;
+}
+
+message ViewError {
+    ViewCode code = 1;
+    string cause = 2;
+}
+
+// QueryPlanMVCC carries the WAL visibility frontiers used for one shard plan.
+message QueryPlanMVCC {
+    uint64 growing_timetick = 1;
+    uint64 transforming_timetick = 2;
+}
+
+// LegacySearchPlan carries only fields rewritten by Phase 1. Unset optional
+// fields retain the values from GetQueryPlanRequest.legacy_search_request.
+message LegacySearchPlan {
+    optional bytes serialized_expr_plan = 1;
+    optional bytes placeholder_group = 2;
+}
+
+// LegacyRetrievePlan identifies a Legacy retrieve plan. Phase 1 currently has
+// no retrieve-specific delta to return.
+message LegacyRetrievePlan {
+}
+
+message QueryWorkNode {
+    int64 node_id = 1;
+}
+
+message StreamingWorkNode {
+    string pchannel = 1;
+}
+
+message QueryPlanWorkNode {
+    oneof node {
+        QueryWorkNode query_node = 1;
+        StreamingWorkNode streaming_node = 2;
+    }
+}
+
+// QueryPlanService is the Phase 1 service implemented by StreamingNode.
+service QueryPlanService {
+    rpc GetQueryPlan(GetQueryPlanRequest) returns (GetQueryPlanResponse) {
+    }
+}
+
+message GetQueryPlanRequest {
+    int64 collection_id = 1;
+    ShardID shard_id = 2;
+    oneof mvcc {
+        common.ConsistencyLevel consistency_level = 3;
+    }
+    repeated int64 partition_ids = 4;
+    oneof request {
+        internal.SearchRequest legacy_search_request = 5;
+        internal.RetrieveRequest legacy_retrieve_request = 6;
+    }
+}
+
+message GetQueryPlanResponse {
+    QueryPlan plan = 1;
+}
+
+message QueryPlan {
+    QueryViewVersion version = 1;
+    ShardID shard_id = 2;
+    QueryPlanMVCC mvcc = 3;
+    repeated QueryPlanWorkNode work_nodes = 4;
+    // Deprecated: Phase 1 should return only plan_delta so the original Legacy
+    // payload is not echoed over the wire.
+    oneof request {
+        internal.SearchRequest legacy_search_request = 5 [deprecated = true];
+        internal.RetrieveRequest legacy_retrieve_request = 6 [deprecated = true];
+    }
+    oneof plan_delta {
+        LegacySearchPlan legacy_search_plan = 7;
+        LegacyRetrievePlan legacy_retrieve_plan = 8;
+    }
+    // skip_execution explicitly records that Phase 1 proved this shard has an
+    // empty result. An empty work_nodes list is invalid unless this is true.
+    bool skip_execution = 9;
+}
+
+// ViewQueryService is the Phase 2 service implemented by StreamingNode and
+// QueryNode. This initial protocol exposes only the Legacy execution domain.
+service ViewQueryService {
+    rpc SearchOnView(SearchOnViewRequest) returns (SearchOnViewResponse) {
+    }
+    rpc QueryOnView(QueryOnViewRequest) returns (QueryOnViewResponse) {
+    }
+}
+
+message SearchOnViewRequest {
+    internal.SearchRequest legacy_req = 1;
+    ShardID shard_id = 2;
+    QueryViewVersion version = 3;
+    QueryPlanMVCC mvcc = 4;
+}
+
+message SearchOnViewResponse {
+    internal.SearchResults legacy_results = 1;
+}
+
+message QueryOnViewRequest {
+    internal.RetrieveRequest legacy_req = 1;
+    ShardID shard_id = 2;
+    QueryViewVersion version = 3;
+    QueryPlanMVCC mvcc = 4;
+}
+
+message QueryOnViewResponse {
+    internal.RetrieveResults legacy_results = 1;
 }
