@@ -1352,7 +1352,7 @@ func (*canceledObjectStorage) RemoveObject(context.Context, string, string) erro
 	return nil
 }
 
-func (*canceledObjectStorage) CopyObject(context.Context, string, string, string) error {
+func (*canceledObjectStorage) CopyObjectCrossBucket(context.Context, string, string, string, string) error {
 	return nil
 }
 
