@@ -336,6 +336,9 @@ IndexEntryReader::ReadFooterAndDirectory() {
                        MILVUS_V3_FOOTER_SIZE + MILVUS_V3_MAGIC_SIZE <=
                    static_cast<size_t>(file_size_),
                "Directory table + meta entry + footer size exceeds file size");
+    const uint64_t data_region_size = static_cast<uint64_t>(file_size_) -
+                                      MILVUS_V3_MAGIC_SIZE - dir_size -
+                                      MILVUS_V3_FOOTER_SIZE;
 
     // Check if we need a second read
     size_t needed =
@@ -383,10 +386,8 @@ IndexEntryReader::ReadFooterAndDirectory() {
         edek_ = dir_json["__edek__"].get<std::string>();
         ez_id_ = std::stoll(dir_json["__ez_id__"].get<std::string>());
         slice_size_ = dir_json["slice_size"].get<size_t>();
-        AssertInfo(IsStreamSliceSizeAligned(slice_size_),
-                   "Encrypted entry slice_size must be {}-byte aligned, got {}",
-                   kStreamSliceAlignment,
-                   slice_size_);
+        AssertInfo(slice_size_ > 0,
+                   "Encrypted entry slice_size must be positive");
 
         for (const auto& entry : dir_json["entries"]) {
             EntryMeta meta;
@@ -397,6 +398,14 @@ IndexEntryReader::ReadFooterAndDirectory() {
             for (const auto& s : entry["slices"]) {
                 auto slice = SliceMeta{s["offset"].get<uint64_t>(),
                                        s["size"].get<uint64_t>()};
+                AssertInfo(slice.offset <= data_region_size &&
+                               slice.size <= data_region_size - slice.offset,
+                           "Encrypted slice range exceeds data region: offset "
+                           "{} size {} "
+                           "region size {}",
+                           slice.offset,
+                           slice.size,
+                           data_region_size);
                 meta.enc.slices.push_back(slice);
 
                 AssertInfo(output_offset < meta.enc.original_size,
