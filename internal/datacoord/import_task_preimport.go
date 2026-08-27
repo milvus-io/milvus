@@ -92,6 +92,16 @@ func (p *preImportTask) GetTaskSlot() int64 {
 	return int64(CalculateTaskSlot(p, p.importMeta))
 }
 
+// GetTaskResource prices a pre-import by the one base write buffer it holds.
+// Not cached, for the same reason as importTask.GetTaskResource.
+func (p *preImportTask) GetTaskResource() taskcommon.Resource {
+	job := p.importMeta.GetJob(context.TODO(), p.GetJobID())
+	if job == nil {
+		return defaultTaskResource()
+	}
+	return importTaskResource(CalculateTaskBufferSize(p, job))
+}
+
 func (p *preImportTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
 	p.times.SetTaskTime(timeType, time)
 }

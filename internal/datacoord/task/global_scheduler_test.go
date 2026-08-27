@@ -283,6 +283,7 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 		task.EXPECT().GetTaskType().Return(taskcommon.Compaction).Maybe()
 		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
 		task.EXPECT().GetTaskSlot().Return(1).Maybe()
+		task.EXPECT().GetTaskResource().Return(taskcommon.Resource{}).Maybe()
 		return task
 	}
 
@@ -368,6 +369,7 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
 		task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
 		task.EXPECT().GetTaskSlot().Return(int64(0)).Once()
+		task.EXPECT().GetTaskResource().Return(taskcommon.Resource{}).Maybe()
 
 		var dispatched atomic.Bool
 		task.EXPECT().CreateTaskOnWorker(mock.MatchedBy(func(nodeID int64) bool {
@@ -483,6 +485,7 @@ func TestGlobalScheduler_FailedTaskBacksOffBeforeRedispatch(t *testing.T) {
 	task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
 	task.EXPECT().GetTaskSlot().Return(1).Maybe()
+	task.EXPECT().GetTaskResource().Return(taskcommon.Resource{}).Maybe()
 	// CreateTaskOnWorker never flips the state away from Init: every dispatch fails
 	task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
 	var createCalls atomic.Int32
@@ -519,6 +522,7 @@ func TestGlobalScheduler_TerminalTaskClearsBackoff(t *testing.T) {
 	task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
 	task.EXPECT().GetTaskSlot().Return(1).Maybe()
+	task.EXPECT().GetTaskResource().Return(taskcommon.Resource{}).Maybe()
 
 	// CreateTaskOnWorker drives the task straight to a terminal state (e.g. its
 	// segment was compacted away), so it never reaches InProgress/runningTasks.
