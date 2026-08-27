@@ -29,6 +29,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -71,20 +72,41 @@
 #include "storage/MemFileManagerImpl.h"
 
 class CollectSingleJsonStatsInfoAccessor;
+class CollectKeyInfoAccessor;
+class BuildKeyStatsAccessor;
 // Forward declaration of test accessor in global namespace for friend declaration
 class TraverseJsonForBuildStatsAccessor;
 class JsonStatsProjectionTestAccessor;
 class JsonStatsScanTestAccessor;
 
 namespace milvus::index {
+
+struct JsonStatsFieldDataSlice {
+    FieldDataPtr data;
+    int64_t local_begin;
+    int64_t row_count;
+};
+
+struct JsonStatsRowRange {
+    int64_t global_begin;
+    int64_t row_count;
+    std::vector<JsonStatsFieldDataSlice> slices;
+};
+
+std::vector<JsonStatsRowRange>
+CreateJsonStatsRowRanges(const std::vector<FieldDataPtr>& field_datas,
+                         int64_t max_rows_per_range);
+
 class JsonKeyStats : public ScalarIndex<std::string> {
  public:
+    static constexpr int64_t kDefaultWriteBatchSize = 81920;
+
     explicit JsonKeyStats(
         const storage::FileManagerContext& ctx,
         bool is_load,
         int64_t json_stats_max_shredding_columns = 1024,
         double json_stats_shredding_ratio_threshold = 0.3,
-        int64_t json_stats_write_batch_size = 81920,
+        int64_t json_stats_write_batch_size = kDefaultWriteBatchSize,
         uint32_t tantivy_index_version = TANTIVY_INDEX_LATEST_VERSION);
 
     ~JsonKeyStats() override;
@@ -463,8 +485,13 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         return ss.str();
     }
 
+    // Keep the original serial implementation for differential tests.
     std::map<JsonKey, KeyStatsInfo>
     CollectKeyInfo(const std::vector<FieldDataPtr>& field_datas, bool nullable);
+
+    std::map<JsonKey, KeyStatsInfo>
+    CollectKeyInfo(const std::vector<JsonStatsRowRange>& row_ranges,
+                   bool nullable);
 
     void
     TraverseJsonForStats(const char* json,
@@ -496,8 +523,30 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     std::map<JsonKey, JsonKeyLayoutType>
     ClassifyJsonKeyLayoutType(const std::map<JsonKey, KeyStatsInfo>& infos);
 
+    // Keep the original serial implementation for differential tests.
     void
-    BuildKeyStats(const std::vector<FieldDataPtr>& field_datas, bool nullable);
+    BuildKeyStats(const std::vector<JsonStatsRowRange>& row_ranges,
+                  bool nullable);
+
+    void
+    BuildKeyStatsParallel(const std::vector<JsonStatsRowRange>& row_ranges,
+                          bool nullable);
+
+    static size_t
+    EstimateJsonStatsMaterializeReservationBytes(const JsonStatsRowRange& range,
+                                                 const arrow::Schema& schema);
+
+    struct MaterializedChunk {
+        std::shared_ptr<arrow::RecordBatch> record_batch;
+        std::map<std::string, std::vector<int64_t>> bson_postings;
+        size_t memory_bytes;
+    };
+
+    MaterializedChunk
+    MaterializeKeyStatsRange(
+        const JsonStatsRowRange& range,
+        bool nullable,
+        const std::shared_ptr<arrow::Schema>& schema) const;
 
     void
     BuildKeyStatsForRow(std::string_view json_str, uint32_t row_id);
@@ -524,22 +573,26 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     AddKeyStats(const std::vector<std::string>& path,
                 JSONType type,
                 const std::string& value,
-                std::map<JsonKey, std::string>& values);
+                std::map<JsonKey, std::string>& values) const;
+
+    bool
+    ParseJsonForBuildStats(std::string_view json_str,
+                           std::map<JsonKey, std::string>& values) const;
 
     void
     TraverseJsonForBuildStats(const char* json,
                               jsmntok* tokens,
                               int& index,
                               std::vector<std::string>& path,
-                              std::map<JsonKey, std::string>& values);
+                              std::map<JsonKey, std::string>& values) const;
 
     bool
-    IsBoolean(const std::string& str) {
+    IsBoolean(const std::string& str) const {
         return str == "true" || str == "false";
     }
 
     bool
-    IsInt64(const std::string& str) {
+    IsInt64(const std::string& str) const {
         std::istringstream iss(str);
         int64_t num;
         iss >> num;
@@ -548,32 +601,36 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     }
 
     bool
-    IsFloat(const std::string& str) {
+    IsFloat(const std::string& str) const {
         try {
             std::stof(str);
             return true;
-        } catch (...) {
+        } catch (const std::invalid_argument&) {
+            return false;
+        } catch (const std::out_of_range&) {
             return false;
         }
     }
 
     bool
-    IsDouble(const std::string& str) {
+    IsDouble(const std::string& str) const {
         try {
             std::stod(str);
             return true;
-        } catch (...) {
+        } catch (const std::invalid_argument&) {
+            return false;
+        } catch (const std::out_of_range&) {
             return false;
         }
     }
 
     bool
-    IsNull(const std::string& str) {
+    IsNull(const std::string& str) const {
         return str == "null";
     }
 
     JSONType
-    getType(const std::string& str) {
+    getType(const std::string& str) const {
         if (IsBoolean(str)) {
             return JSONType::BOOL;
             // TODO: add int8, int16, int32 support
@@ -684,6 +741,8 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     // Friend accessor for unit tests to call private methods safely.
     friend class ::TraverseJsonForBuildStatsAccessor;
     friend class ::CollectSingleJsonStatsInfoAccessor;
+    friend class ::CollectKeyInfoAccessor;
+    friend class ::BuildKeyStatsAccessor;
     friend class ::JsonStatsProjectionTestAccessor;
     friend class ::JsonStatsScanTestAccessor;
 };

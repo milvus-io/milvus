@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <chrono>
 #include <exception>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -27,13 +28,64 @@
 
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
+#include "futures/Executor.h"
 #include "futures/Future.h"
 #include "futures/LeakyResult.h"
 #include "futures/Ready.h"
+#include "futures/future_c.h"
 #include "futures/future_c_types.h"
 #include "gtest/gtest.h"
+#include "index/json_stats/JsonStatsBuildMemoryBudget.h"
 
 using namespace milvus::futures;
+
+TEST(Futures, JsonStatsBuildExecutor) {
+    auto* executor = getJsonStatsBuildExecutor();
+
+    ASSERT_NE(executor, nullptr);
+    EXPECT_NE(executor, getSearchCPUExecutor());
+    EXPECT_NE(executor, getLoadCPUExecutor());
+    EXPECT_EQ(executor->getNumPriorities(), 1);
+    EXPECT_GE(executor->numThreads(), 1);
+
+    std::promise<std::thread::id> promise;
+    auto future = promise.get_future();
+    executor->add(
+        [&promise]() { promise.set_value(std::this_thread::get_id()); });
+
+    EXPECT_NE(future.get(), std::this_thread::get_id());
+}
+
+TEST(Futures, ResizeJsonStatsBuildExecutor) {
+    auto* executor = getJsonStatsBuildExecutor();
+    auto original_thread_num = executor->numThreads();
+
+    auto status = executor_set_json_stats_build_thread_num(3);
+    ASSERT_EQ(status.error_code, milvus::Success);
+    EXPECT_EQ(executor->numThreads(), 3);
+
+    status = executor_set_json_stats_build_thread_num(0);
+    ASSERT_EQ(status.error_code, milvus::Success);
+    EXPECT_EQ(executor->numThreads(), 1);
+
+    status = executor_set_json_stats_build_thread_num(
+        static_cast<int>(original_thread_num));
+    ASSERT_EQ(status.error_code, milvus::Success);
+}
+
+TEST(Futures, SetJsonStatsBuildMemoryBudget) {
+    auto& budget = milvus::index::JsonStatsBuildMemoryBudget::GetInstance();
+    auto original_capacity = budget.CapacityBytes();
+
+    auto status = executor_set_json_stats_build_max_inflight_bytes(1234);
+    EXPECT_EQ(status.error_code, milvus::Success);
+    EXPECT_EQ(budget.CapacityBytes(), 1234);
+
+    status = executor_set_json_stats_build_max_inflight_bytes(
+        static_cast<int64_t>(original_capacity));
+    EXPECT_EQ(status.error_code, milvus::Success);
+    EXPECT_EQ(budget.CapacityBytes(), original_capacity);
+}
 
 TEST(Futures, LeakyResult) {
     {
