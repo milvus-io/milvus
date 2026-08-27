@@ -229,6 +229,7 @@ func TestBalancer_ReconcileFullScanDoesNotRestackPreparing(t *testing.T) {
 func TestBalancer_StartStop(t *testing.T) {
 	reg := emptyRegistry(t)
 	b := NewDefaultBalancer(nil, reg, nil)
+	assert.Equal(t, 10*time.Second, b.tickerInterval)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -237,4 +238,14 @@ func TestBalancer_StartStop(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	b.Stop()
 	b.Stop()
+}
+
+func TestBalancer_UsesConfiguredTickerInterval(t *testing.T) {
+	reg := emptyRegistry(t)
+	builder := NewSnapshotBuilder(nil, reg, nil, nil, &BalanceConfig{
+		TickerInterval: 5 * time.Minute,
+	})
+	b := NewDefaultBalancer(builder, reg, nil)
+
+	assert.Equal(t, 5*time.Minute, b.tickerInterval)
 }

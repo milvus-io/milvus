@@ -268,7 +268,7 @@ func (s *fakeSegment) appliedTicks() []uint64 {
 
 func TestBufferAcquireMultiplexesVChannelsOnOnePChannelStream(t *testing.T) {
 	streams := newFakeStreamManager()
-	buffer := New(streams)
+	buffer := New(streams, 4)
 
 	guard1, err := buffer.Acquire(context.Background(), newTestQueryView("p_1v0", 50))
 	require.NoError(t, err)
@@ -299,7 +299,7 @@ func TestBufferAcquireWaitsForSubscriptionResult(t *testing.T) {
 	stream.subscribeStarted = make(chan struct{}, 1)
 	stream.subscribeRelease = make(chan struct{})
 	streams.streams["v1"] = stream
-	buffer := New(streams)
+	buffer := New(streams, 4)
 
 	type acquireResult struct {
 		guard qnview.TransformLogGuard
@@ -344,7 +344,7 @@ func TestBufferAcquireWaitsForSameVChannelSubscriptionResult(t *testing.T) {
 	stream.subscribeStarted = make(chan struct{}, 1)
 	stream.subscribeRelease = make(chan struct{})
 	streams.streams["v1"] = stream
-	buffer := New(streams)
+	buffer := New(streams, 4)
 
 	type acquireResult struct {
 		guard qnview.TransformLogGuard
@@ -392,7 +392,7 @@ func TestBufferAcquireReturnsUnrecoverableSubscriptionError(t *testing.T) {
 	stream := newFakeStream()
 	stream.subscribeErr = wal.ErrTransformLogStartPointTruncated
 	streams.streams["v1"] = stream
-	buffer := New(streams)
+	buffer := New(streams, 4)
 
 	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
 	require.Nil(t, guard)
@@ -404,7 +404,7 @@ func TestBufferAcquireDoesNotPoisonBufferOnRecoverableSubscriptionError(t *testi
 	stream := newFakeStream()
 	stream.subscribeErrs = []error{errors.New("transient stream failure")}
 	streams.streams["v1"] = stream
-	buffer := New(streams)
+	buffer := New(streams, 4)
 
 	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
 	require.Nil(t, guard)
@@ -422,7 +422,7 @@ func TestBufferAcquireReturnsHandlerErrorBeforeSubscriptionReady(t *testing.T) {
 	stream := newFakeStream()
 	stream.subscribeEvent = &wal.TransformLogStreamEvent{Err: errors.New("catchup failed")}
 	streams.streams["v1"] = stream
-	buffer := New(streams)
+	buffer := New(streams, 4)
 
 	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
 	require.Nil(t, guard)
@@ -431,7 +431,7 @@ func TestBufferAcquireReturnsHandlerErrorBeforeSubscriptionReady(t *testing.T) {
 
 func TestBufferAcquireReusesVChannelSubscriptionAndRegistersFromLocalBuffer(t *testing.T) {
 	streams := newFakeStreamManager()
-	buffer := New(streams)
+	buffer := New(streams, 4)
 	view1 := newTestQueryView("v1", 50)
 	view2 := newTestQueryView("v1", 80)
 
@@ -472,7 +472,7 @@ func TestBufferAcquireReusesVChannelSubscriptionAndRegistersFromLocalBuffer(t *t
 
 func TestBufferRegistrationKeepsApplyingLiveEntriesAfterSyncUp(t *testing.T) {
 	streams := newFakeStreamManager()
-	buffer := New(streams)
+	buffer := New(streams, 4)
 	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
 	require.NoError(t, err)
 	defer guard.Release()
@@ -496,7 +496,7 @@ func TestBufferRegistrationKeepsApplyingLiveEntriesAfterSyncUp(t *testing.T) {
 
 func TestBufferRegisterSegmentReturnsBeforeCatchupDrainCompletes(t *testing.T) {
 	streams := newFakeStreamManager()
-	buffer := New(streams)
+	buffer := New(streams, 4)
 	guard, err := buffer.Acquire(context.Background(), newTestQueryView("p_1v0", 50))
 	require.NoError(t, err)
 	defer guard.Release()
@@ -545,7 +545,7 @@ func TestBufferRegisterSegmentReturnsBeforeCatchupDrainCompletes(t *testing.T) {
 
 func TestBufferRegisterSegmentDrainsEntriesArrivingDuringCatchupBeforeLiveAttach(t *testing.T) {
 	streams := newFakeStreamManager()
-	buffer := New(streams)
+	buffer := New(streams, 4)
 	guard, err := buffer.Acquire(context.Background(), newTestQueryView("p_1v0", 50))
 	require.NoError(t, err)
 	defer guard.Release()
@@ -598,7 +598,7 @@ func TestBufferRegisterSegmentDrainsEntriesArrivingDuringCatchupBeforeLiveAttach
 
 func TestGuardWaitTransformVisibleUsesVChannelFrontier(t *testing.T) {
 	streams := newFakeStreamManager()
-	buffer := New(streams)
+	buffer := New(streams, 4)
 	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
 	require.NoError(t, err)
 	defer guard.Release()
@@ -632,7 +632,7 @@ func TestGuardWaitTransformVisibleUsesVChannelFrontier(t *testing.T) {
 
 func TestGuardWaitTransformVisibleWaitsForLiveApply(t *testing.T) {
 	streams := newFakeStreamManager()
-	buffer := New(streams)
+	buffer := New(streams, 4)
 	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
 	require.NoError(t, err)
 	defer guard.Release()
@@ -681,7 +681,7 @@ func TestGuardWaitTransformVisibleWaitsForLiveApply(t *testing.T) {
 
 func TestGuardWaitTransformVisibleReturnsScannerError(t *testing.T) {
 	streams := newFakeStreamManager()
-	buffer := New(streams)
+	buffer := New(streams, 4)
 	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
 	require.NoError(t, err)
 	defer guard.Release()
@@ -701,7 +701,7 @@ func TestGuardWaitTransformVisibleReturnsScannerError(t *testing.T) {
 
 func TestBufferRegisterSegmentFailsWhenScannerFailsBeforeSyncUp(t *testing.T) {
 	streams := newFakeStreamManager()
-	buffer := New(streams)
+	buffer := New(streams, 4)
 	_, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
 	require.NoError(t, err)
 

@@ -440,7 +440,7 @@ func newTestQueryViewSegmentReadinessManager(t *testing.T, physical PhysicalSegm
 	t.Helper()
 	scheduler := nodescheduler.New(4)
 	t.Cleanup(scheduler.Close)
-	return NewQueryViewSegmentReadinessManagerWithScheduler(scheduler, physical, buffer, collections...)
+	return NewQueryViewSegmentReadinessManagerWithScheduler(scheduler, physical, buffer, 4, collections...)
 }
 
 func newTestViewScopedPhysicalSegmentManager(t *testing.T, scheduler nodescheduler.Scheduler, streams ...SegmentLoadInfoStream) *ViewScopedPhysicalSegmentManager {

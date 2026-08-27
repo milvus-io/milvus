@@ -8,6 +8,7 @@ import (
 	qvtransformlogbuffer "github.com/milvus-io/milvus/internal/querynodev2/transformlogbuffer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type queryViewPhysicalSegmentLoader struct {
@@ -41,7 +42,16 @@ func NewQueryViewSegmentManager(ctx context.Context, manager *segments.Manager, 
 		newQueryViewSegmentResourceEstimator(loader),
 	)
 	collectionRuntime := newQueryViewCollectionRuntimeManager(meta, manager.Collection)
-	return qnview.NewQueryViewSegmentReadinessManagerWithScheduler(nodeScheduler, physicalManager, qvtransformlogbuffer.New(streams), collectionRuntime)
+	return qnview.NewQueryViewSegmentReadinessManagerWithScheduler(
+		nodeScheduler,
+		physicalManager,
+		qvtransformlogbuffer.New(
+			streams,
+			paramtable.Get().QueryNodeCfg.QueryViewTransformLogDrainConcurrency.GetAsInt(),
+		),
+		paramtable.Get().QueryNodeCfg.QueryViewSegmentCatchupConcurrency.GetAsInt(),
+		collectionRuntime,
+	)
 }
 
 func newQueryViewPhysicalSegmentLoader(collections qvCollectionManager, segments qvSegmentManager, loader qvSegmentLoader) *queryViewPhysicalSegmentLoader {
