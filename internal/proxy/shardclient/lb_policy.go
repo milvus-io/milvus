@@ -512,22 +512,33 @@ func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload Collecti
 	//
 	// Each channel that is tried and refused burns a full retry budget first
 	// (~1.6s), so a group that can serve no shard of a wide collection would
-	// take shards x budget to fail. A pre-pass over the CACHED leaders keeps
-	// that bounded: try the channels that have a candidate in the group at
-	// all, in list order, and fall back to the full list only when the cache
-	// shows none -- there the refusal has to come from the real path, which
-	// refreshes the cache once per channel before giving up.
+	// take shards x budget to fail. A pre-pass keeps that bounded, and it is
+	// made on FRESH data so that it is allowed to refuse: one uncached
+	// GetShardLeaders is one coordinator call that refreshes every channel of
+	// the collection at once (updateShardLocationCache replaces the whole
+	// entry), so what it returns is authoritative rather than stale. The
+	// channels with a candidate in the group are tried in list order; none
+	// at all is refused right here, with the same retriable code selectNode
+	// would reach after a full sweep -- in zero budgets instead of shards x
+	// budget. The cost is one RPC on the scoped path, and one cache-metric
+	// hit (caller="GetShardLeaders") rather than one per channel.
 	if workload.ResourceGroup != "" {
+		fresh, err := lb.clientMgr.GetShardLeaders(ctx, false, workload.Db, workload.CollectionName, workload.CollectionID)
+		if err != nil {
+			mlog.Warn(ctx, "failed to refresh shard leaders for the resource group pre-pass", mlog.Err(err))
+			return err
+		}
 		servable := make([]string, 0, len(channelList))
 		for _, channel := range channelList {
-			leaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, channel, true)
-			if err == nil && len(FilterByResourceGroup(leaders, workload.ResourceGroup)) > 0 {
+			if len(FilterByResourceGroup(fresh[channel], workload.ResourceGroup)) > 0 {
 				servable = append(servable, channel)
 			}
 		}
-		if len(servable) > 0 {
-			channelList = servable
+		if len(servable) == 0 {
+			return merr.WrapErrCollectionNotFullyLoaded(workload.CollectionID,
+				fmt.Sprintf("no shard leader in resource group %s", workload.ResourceGroup))
 		}
+		channelList = servable
 	}
 	var lastErr error
 	for _, channel := range channelList {

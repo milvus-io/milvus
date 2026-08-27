@@ -42,6 +42,11 @@ import (
 type ShardClientMgr interface {
 	GetShard(ctx context.Context, withCache bool, database, collectionName string, collectionID int64, channel string) ([]NodeInfo, error)
 	GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error)
+	// GetShardLeaders returns every channel of the collection with its
+	// leaders in one read -- one cache lookup, or with withCache=false one
+	// coordinator call that refreshes every channel at once. The map is the
+	// cache's own entry and must be treated as read-only.
+	GetShardLeaders(ctx context.Context, withCache bool, database, collectionName string, collectionID int64) (map[string][]NodeInfo, error)
 	InvalidateShardLeaderCache(collections []int64)
 	ListShardLocation() map[int64]NodeInfo
 	RemoveDatabase(database string)
@@ -125,6 +130,22 @@ func (m *shardClientMgrImpl) GetShard(ctx context.Context, withCache bool, datab
 	}
 
 	return cacheShardLeaders.Get(channel), nil
+}
+
+func (m *shardClientMgrImpl) GetShardLeaders(ctx context.Context, withCache bool, database, collectionName string, collectionID int64) (map[string][]NodeInfo, error) {
+	method := "GetShardLeaders"
+	// check cache first
+	cacheShardLeaders := m.getCachedShardLeaders(collectionID, method)
+	if cacheShardLeaders == nil || !withCache {
+		// refresh shard leader cache
+		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
+		if err != nil {
+			return nil, err
+		}
+		cacheShardLeaders = newShardLeaders
+	}
+
+	return cacheShardLeaders.shardLeaders, nil
 }
 
 func (m *shardClientMgrImpl) GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error) {

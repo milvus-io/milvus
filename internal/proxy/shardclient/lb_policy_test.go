@@ -1300,16 +1300,17 @@ func (s *LBPolicySuite) TestExecuteWithRetryScopedRetriableSelectErrorIsNotMaske
 // ExecuteOneChannel does not hand back the group's refusal for the first
 // channel in map order when a sibling channel could have served: channel1 has
 // no rg-b leader, channel2 does, and the request must succeed on channel2.
-// Unscoped keeps its take-the-first behavior.
+// The pre-pass reads ONE fresh copy of the whole leader table (a single
+// uncached GetShardLeaders), so the unservable channel is never tried for
+// real -- a per-channel GetShard on it fails the mock. Unscoped keeps its
+// take-the-first behavior.
 func (s *LBPolicySuite) TestExecuteOneChannelScopedPrefersAServableChannel() {
 	ctx := context.Background()
 	s.lbPolicy.retryOnReplica = 1
 	onlyRGA := lo.Filter(rgNodes(), func(n NodeInfo, _ int) bool { return n.ResourceGroup == "rg-a" })
 	s.mgr.EXPECT().GetShardLeaderList(mock.Anything, s.dbName, s.collectionName, s.collectionID, true).Return(s.channels, nil)
-	// The unservable channel is consulted from the CACHE only, by the
-	// pre-pass: it must never be tried for real, which would show up here as
-	// an uncached GetShard(false) from selectNode's second attempt.
-	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(onlyRGA, nil)
+	s.mgr.EXPECT().GetShardLeaders(mock.Anything, false, s.dbName, s.collectionName, s.collectionID).
+		Return(map[string][]NodeInfo{s.channels[0]: onlyRGA, s.channels[1]: rgNodes()}, nil).Once()
 	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[1]).Return(rgNodes(), nil)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
@@ -1331,19 +1332,24 @@ func (s *LBPolicySuite) TestExecuteOneChannelScopedPrefersAServableChannel() {
 
 	s.NoError(err)
 	s.Equal([]string{s.channels[1]}, executed, "the channel rg-b cannot serve is skipped for the one it can")
-	s.mgr.AssertNotCalled(s.T(), "GetShard", mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0])
+	s.mgr.AssertNotCalled(s.T(), "GetShard", mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[0])
 
-	// When the cache shows no channel the group can serve, the full list is
-	// tried for real -- the refusal must come from a path that refreshed the
-	// cache, not from a stale pre-pass -- and it is what comes back.
+	// When the FRESH table shows no channel the group can serve, the refusal
+	// comes back immediately -- zero retry budgets, no per-channel attempt --
+	// and it is the same retriable code a full sweep would have ended on.
+	// The read was uncached, which is what entitles it to refuse.
 	s.mgr.ExpectedCalls = nil
+	s.mgr.Calls = nil // the AssertNotCalled below must not see the first half's legitimate GetShard
 	s.mgr.EXPECT().GetShardLeaderList(mock.Anything, s.dbName, s.collectionName, s.collectionID, true).Return(s.channels, nil)
-	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, mock.Anything).Return(onlyRGA, nil)
+	s.mgr.EXPECT().GetShardLeaders(mock.Anything, false, s.dbName, s.collectionName, s.collectionID).
+		Return(map[string][]NodeInfo{s.channels[0]: onlyRGA, s.channels[1]: onlyRGA}, nil).Once()
 	err = s.lbPolicy.ExecuteOneChannel(ctx, CollectionWorkLoad{
 		Db: s.dbName, CollectionName: s.collectionName, CollectionID: s.collectionID, Nq: 1, ResourceGroup: "rg-b",
 		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error { return nil },
 	})
 	s.ErrorIs(err, merr.ErrCollectionNotFullyLoaded)
+	s.True(merr.IsRetryableErr(err))
+	s.mgr.AssertNotCalled(s.T(), "GetShard", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
 // TestExecuteWithRetryUnscopedKeepsTheExecError pins the unscoped half of the

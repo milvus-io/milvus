@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -174,4 +175,48 @@ func TestParseShardLeaderListNeutralizesShortResourceGroups(t *testing.T) {
 		}, shards["dmc0"],
 			"a misaligned array is neutralized to unknown for every entry, never trusted partially")
 	})
+}
+
+// TestGetShardLeadersReadsWholeTableOnce pins the contract of the one-read
+// accessor the scoped ExecuteOneChannel pre-pass relies on: with the cache
+// warm and withCache=true it answers from the cache without a coordinator
+// call; withCache=false is exactly one GetShardLeaders RPC that replaces the
+// whole collection entry -- every channel refreshed at once -- which is what
+// entitles the pre-pass to refuse on an empty result.
+func TestGetShardLeadersReadsWholeTableOnce(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	const collectionID int64 = 300
+
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	calls := 0
+	mixCoord.EXPECT().GetShardLeaders(mock.Anything, mock.MatchedBy(func(req *querypb.GetShardLeadersRequest) bool {
+		return req.GetCollectionID() == collectionID
+	})).RunAndReturn(func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+		calls++
+		return &querypb.GetShardLeadersResponse{
+			Status: merr.Success(),
+			Shards: []*querypb.ShardLeadersList{
+				{ChannelName: "ch0", NodeIds: []int64{1}, NodeAddrs: []string{"a"}, Serviceable: []bool{true}, ResourceGroups: []string{"rg-a"}},
+				{ChannelName: "ch1", NodeIds: []int64{2}, NodeAddrs: []string{"b"}, Serviceable: []bool{true}, ResourceGroups: []string{"rg-b"}},
+			},
+		}, nil
+	})
+	mgr := NewShardClientMgr(mixCoord)
+
+	table, err := mgr.GetShardLeaders(ctx, true, "db", "coll", collectionID)
+	require.NoError(t, err)
+	require.Equal(t, 1, calls, "a cold cache is filled with one call")
+	assert.Equal(t, map[string][]NodeInfo{
+		"ch0": {{NodeID: 1, Address: "a", Serviceable: true, ResourceGroup: "rg-a"}},
+		"ch1": {{NodeID: 2, Address: "b", Serviceable: true, ResourceGroup: "rg-b"}},
+	}, table, "every channel of the collection, tags included, in one read")
+
+	_, err = mgr.GetShardLeaders(ctx, true, "db", "coll", collectionID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, calls, "a warm cache is served without a coordinator call")
+
+	_, err = mgr.GetShardLeaders(ctx, false, "db", "coll", collectionID)
+	require.NoError(t, err)
+	assert.Equal(t, 2, calls, "withCache=false is exactly one refreshing call")
 }
