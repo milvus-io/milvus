@@ -843,50 +843,18 @@ func deriveSnapshotSourceRootURI(snapshotS3Location string, layout datapb.Snapsh
 // Result Synchronization: Update Segment Metadata from DataNode Response
 // ===========================================================================================
 
-// SyncCopySegmentTask synchronizes task results from DataNode to DataCoord metadata.
-//
-// Process flow (on successful completion):
-//  1. For each segment result from DataNode:
-//     a. Compress binlog paths and fill logID
-//     b. Update segment binlogs (insert/stats/delta/BM25)
-//     c. Mark segment as Flushed
-//     d. Sync vector/scalar indexes to indexMeta
-//     e. Sync text indexes to segment metadata
-//     f. Sync JSON key indexes to segment metadata
-//  2. Record task execution metrics (executing duration, total duration)
-//  3. Mark task as completed with completion timestamp
-//
-// Process flow (on failure):
-//  1. Mark task as failed with reason
-//  2. Return error (job will be failed by caller)
-//
-// Parameters:
-//   - task: Copy segment task being synced
-//   - resp: QueryCopySegmentResponse from DataNode
-//   - copyMeta: Metadata manager for updating task state
-//   - meta: Segment metadata for updating binlogs and indexes
-//
-// Returns:
-//   - nil on success
-//   - error on failure (task and job will be marked as failed)
-//
-// Why sync multiple index types:
-// - Vector/scalar indexes: Traditional dense/sparse vector and scalar indexes
-// - Text indexes: Full-text search indexes for VARCHAR fields
-// - JSON key indexes: Indexes on JSON field keys
-// - All must be copied and registered for query functionality
-//
-// Error handling:
-// - Any error during sync marks both task and job as failed
-// - Ensures data integrity (no partial restore)
-// - Provides clear error messages for troubleshooting
+// SyncCopySegmentTask synchronizes DataNode copy results into DataCoord metadata.
+// For each completed segment, it atomically publishes copied binlogs, the
+// StorageV3 manifest, text/JSON index metadata, and the Flushed state. It then
+// publishes vector/scalar index metadata to indexMeta. The task is completed
+// only after every segment result has been synchronized.
 func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResponse, copyMeta CopySegmentMeta, meta *meta) error {
 	ctx := context.TODO()
 
 	// Update task state based on response
 	switch resp.GetState() {
 	case datapb.CopySegmentTaskState_CopySegmentTaskCompleted:
-		// Update binlog information for all segments
+		// Synchronize each copied segment.
 		for _, result := range resp.GetSegmentResults() {
 			// Publish the copied data, manifest, and manifest-index metadata
 			// atomically before making the segment visible as Flushed.
