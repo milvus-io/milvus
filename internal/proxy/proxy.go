@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/expr"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -136,7 +135,6 @@ func NewProxy(ctx context.Context, _ dependency.Factory) (*Proxy, error) {
 		slowQueries:     expirable.NewLRU[Timestamp, *metricsinfo.SlowQuery](20, nil, time.Minute*15),
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
-	expr.Register("proxy", node)
 	hookutil.SetHook(connection.GetManager())
 	hookutil.InitOnceHook()
 	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
