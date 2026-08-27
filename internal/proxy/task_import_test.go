@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -535,11 +536,7 @@ func TestImportTask_DeleteModeIgnoresLoadedCollectionRestriction(t *testing.T) {
 			},
 		},
 	}, nil)
-	oldCache := globalMetaCache
-	globalMetaCache = mockCache
-	defer func() { globalMetaCache = oldCache }()
-
-	chMgr := NewMockChannelsMgr(t)
+	chMgr := channelmgr.NewMockChannelsMgr(t)
 	chMgr.EXPECT().GetVChannels(collectionID).Return([]string{"ch-0"}, nil)
 
 	mixCoord := mocks.NewMockMixCoordClient(t)
@@ -558,6 +555,7 @@ func TestImportTask_DeleteModeIgnoresLoadedCollectionRestriction(t *testing.T) {
 			Files:          []*internalpb.ImportFile{{Paths: []string{"a.parquet"}}},
 		},
 	}
+	task.metaCache = mockCache
 
 	err := task.PreExecute(ctx)
 	assert.NoError(t, err)
@@ -582,9 +580,6 @@ func TestImportTask_UpsertRejectsAutoIDPrimaryKey(t *testing.T) {
 			},
 		},
 	}, nil)
-	oldCache := globalMetaCache
-	globalMetaCache = mockCache
-	defer func() { globalMetaCache = oldCache }()
 
 	task := &importTask{
 		ctx: ctx,
@@ -594,6 +589,7 @@ func TestImportTask_UpsertRejectsAutoIDPrimaryKey(t *testing.T) {
 			Files:          []*internalpb.ImportFile{{Paths: []string{"a.parquet"}}},
 		},
 	}
+	task.metaCache = mockCache
 
 	err := task.PreExecute(ctx)
 	assert.Error(t, err)
@@ -617,11 +613,8 @@ func TestImportTask_UpsertAllowsNonAutoIDPrimaryKey(t *testing.T) {
 			},
 		},
 	}, nil)
-	oldCache := globalMetaCache
-	globalMetaCache = mockCache
-	defer func() { globalMetaCache = oldCache }()
 
-	chMgr := NewMockChannelsMgr(t)
+	chMgr := channelmgr.NewMockChannelsMgr(t)
 	chMgr.EXPECT().GetVChannels(collectionID).Return([]string{"ch-0"}, nil)
 	mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
 
@@ -634,6 +627,7 @@ func TestImportTask_UpsertAllowsNonAutoIDPrimaryKey(t *testing.T) {
 			Files:          []*internalpb.ImportFile{{Paths: []string{"a.parquet"}}},
 		},
 	}
+	task.metaCache = mockCache
 
 	err := task.PreExecute(ctx)
 	assert.NoError(t, err)
