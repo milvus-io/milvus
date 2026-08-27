@@ -165,14 +165,16 @@ func (s *catchupScanner) Do(ctx context.Context) (switchableScanner, error) {
 }
 
 func (s *catchupScanner) openCatchupScannerImpls(ctx context.Context) (walimpls.ScannerImpls, error) {
-	positionWALName, hasWALSpecificPosition := getDeliverPolicyWALName(s.deliverPolicy)
-	// A WAL-specific position is also used for ordinary reconnects and WAB
-	// eviction recovery. Only a position from a different backend needs the
-	// cross-WAL adaptor; positions for the active backend should keep using the
-	// already-open current WAL and must not depend on RO topic validation.
-	if !hasWALSpecificPosition ||
-		s.roOpener == nil ||
-		positionWALName == s.innerWAL.WALName() {
+	_, hasWALSpecificPosition := getDeliverPolicyWALName(s.deliverPolicy)
+	// Every WAL-specific position goes through the cross-WAL adaptor, including
+	// one that names the current backend. A WAL name identifies the backend, not
+	// the migration generation: after an A->B->A migration an old-generation
+	// position names the backend that is current again, and reading it directly
+	// would resume inside the reused topic and silently skip everything written
+	// while B was current. The adaptor instead follows the AlterWAL markers of
+	// whatever chain the position belongs to, and a position of the current
+	// generation simply never meets a marker.
+	if !hasWALSpecificPosition || s.roOpener == nil {
 		scanner, err := s.createInnerWALScannerWithBackoff(ctx, s.deliverPolicy)
 		if err == nil && s.onReaderChanged != nil {
 			s.onReaderChanged(s.innerWAL.WALName())

@@ -6,13 +6,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
 	mock_message "github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -20,18 +18,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func TestCatchupScannerUsesCurrentWALForCurrentWALPosition(t *testing.T) {
+func TestCatchupScannerUsesAdaptorForCurrentWALPosition(t *testing.T) {
 	channel := types.PChannelInfo{Name: "test-channel"}
 	currentWAL := newTestCurrentWAL(t, channel)
-	messageCh := make(chan message.ImmutableMessage)
-	innerScanner := mock_walimpls.NewMockScannerImpls(t)
-	innerScanner.EXPECT().Chan().Return(messageCh).Maybe()
-	innerScanner.EXPECT().Close().Return(nil).Once()
-	currentWAL.(*mock_walimpls.MockWALImpls).EXPECT().Read(mock.Anything, mock.Anything).Return(innerScanner, nil).Once()
-	openerCalled := false
+	currentMessage := newTestTimeTickMessage(100, walimplstest.NewTestMessageID(2), walimplstest.NewTestMessageID(1))
+	readWAL := newTestReadWAL(t, message.WALNameTest, channel, currentMessage)
+	openedWALNames := make(chan message.WALName, 4)
+
 	scanner := newSwitchableScanner(
 		"current-reader",
 		mlog.With(),
@@ -39,9 +34,9 @@ func TestCatchupScannerUsesCurrentWALForCurrentWALPosition(t *testing.T) {
 		nil,
 		options.DeliverPolicyStartFrom(walimplstest.NewTestMessageID(1)),
 		make(chan message.ImmutableMessage),
-		func(_ context.Context, walName message.WALName, gotChannel types.PChannelInfo) (walimpls.ROWALImpls, error) {
-			openerCalled = true
-			return nil, merr.WrapErrMqTopicNotFound(channel.Name)
+		func(_ context.Context, walName message.WALName, _ types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			openedWALNames <- walName
+			return readWAL, nil
 		},
 		nil,
 	)
@@ -50,8 +45,69 @@ func TestCatchupScannerUsesCurrentWALForCurrentWALPosition(t *testing.T) {
 	require.True(t, ok)
 	openedScanner, err := catchup.openCatchupScannerImpls(context.Background())
 	require.NoError(t, err)
-	require.Same(t, innerScanner, openedScanner)
-	require.False(t, openerCalled)
+	require.Equal(t, currentMessage, <-openedScanner.Chan())
+	require.Equal(t, message.WALNameTest, <-openedWALNames)
+	require.NoError(t, openedScanner.Close())
+}
+
+// A position of an older migration generation names the backend that is current
+// again after an A->B->A migration. Reading it directly from the current WAL
+// would resume inside the reused topic and silently skip everything that was
+// written while B was current, so it must replay the whole marker chain.
+func TestCatchupScannerReplaysChainForOldGenerationPosition(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel"}
+	currentWAL := newTestCurrentWAL(t, channel)
+
+	oldGenerationMessage := newTestTimeTickMessage(50, walimplstest.NewTestMessageID(2), walimplstest.NewTestMessageID(1))
+	toRocksmq := newTestAlterWALMessage(commonpb.WALName_RocksMQ, 100, walimplstest.NewTestMessageID(3), walimplstest.NewTestMessageID(2))
+	// The generation that must not be skipped.
+	middleGenerationMessage := newTestTimeTickMessage(150, rmq.NewRmqID(2), rmq.NewRmqID(1))
+	backToTest := newTestAlterWALMessage(commonpb.WALName_Test, 200, rmq.NewRmqID(3), rmq.NewRmqID(2))
+	currentGenerationMessage := newTestTimeTickMessage(250, walimplstest.NewTestMessageID(5), walimplstest.NewTestMessageID(4))
+
+	oldGenerationWAL := newTestReadWAL(t, message.WALNameTest, channel, oldGenerationMessage, toRocksmq)
+	middleGenerationWAL := newTestReadWAL(t, message.WALNameRocksmq, channel, middleGenerationMessage, backToTest)
+	currentGenerationWAL := newTestReadWAL(t, message.WALNameTest, channel, currentGenerationMessage)
+	testWALs := []walimpls.ROWALImpls{oldGenerationWAL, currentGenerationWAL}
+
+	scanner := newSwitchableScanner(
+		"old-generation-reader",
+		mlog.With(),
+		currentWAL,
+		nil,
+		options.DeliverPolicyStartFrom(walimplstest.NewTestMessageID(1)),
+		make(chan message.ImmutableMessage),
+		func(_ context.Context, walName message.WALName, _ types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			if walName == message.WALNameRocksmq {
+				return middleGenerationWAL, nil
+			}
+			require.Equal(t, message.WALNameTest, walName)
+			require.NotEmpty(t, testWALs)
+			opened := testWALs[0]
+			testWALs = testWALs[1:]
+			return opened, nil
+		},
+		nil,
+	)
+
+	catchup, ok := scanner.(*catchupScanner)
+	require.True(t, ok)
+	openedScanner, err := catchup.openCatchupScannerImpls(context.Background())
+	require.NoError(t, err)
+	for _, expected := range []message.ImmutableMessage{
+		oldGenerationMessage,
+		toRocksmq,
+		middleGenerationMessage,
+		backToTest,
+		currentGenerationMessage,
+	} {
+		select {
+		case msg := <-openedScanner.Chan():
+			require.Equal(t, expected, msg)
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for %s at time tick %d", expected.MessageType(), expected.TimeTick())
+		}
+	}
 	require.NoError(t, openedScanner.Close())
 }
 
