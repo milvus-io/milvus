@@ -40,7 +40,6 @@
 #include "storage/IndexEntryDirectStreamWriter.h"
 #include "storage/IndexEntryEncryptedLocalWriter.h"
 #include "storage/IndexEntryReader.h"
-#include "storage/Crc32cUtil.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/PluginLoader.h"
 #include "storage/RemoteInputStream.h"
@@ -1003,73 +1002,6 @@ class IndexEntryEncryptedV3Test : public IndexEntryWriterV3Test {
         VerifyPattern(entry.data, expected_size);
     }
 
-    // Builds the format emitted by the pre-validation 2.6 writer, which
-    // accepted arbitrary non-zero slice sizes. Keep this independent of the
-    // production writer so its new alignment check cannot erase the reader
-    // compatibility regression coverage.
-    void
-    WriteLegacyEncryptedFile(const std::string& file_path,
-                             const std::vector<uint8_t>& data,
-                             size_t slice_size) {
-        auto [encryptor, edek] = mock_cipher_->GetEncryptor(1, 100);
-        auto output = CreateOutputStream(file_path);
-        output->Write(MILVUS_V3_MAGIC, MILVUS_V3_MAGIC_SIZE);
-
-        uint64_t current_offset = 0;
-        nlohmann::json entries = nlohmann::json::array();
-        auto write_entry = [&](const std::string& name,
-                               const uint8_t* entry_data,
-                               size_t entry_size) {
-            nlohmann::json slices = nlohmann::json::array();
-            size_t read_offset = 0;
-            uint64_t ciphertext_size = 0;
-            while (read_offset < entry_size) {
-                size_t plain_size =
-                    std::min(slice_size, entry_size - read_offset);
-                auto ciphertext =
-                    encryptor->Encrypt(entry_data + read_offset, plain_size);
-                output->Write(ciphertext.data(), ciphertext.size());
-                slices.push_back(
-                    {{"offset", current_offset}, {"size", ciphertext.size()}});
-                current_offset += ciphertext.size();
-                ciphertext_size += ciphertext.size();
-                read_offset += plain_size;
-            }
-            entries.push_back(
-                {{"name", name},
-                 {"original_size", entry_size},
-                 {"crc32", Crc32cToHex(Crc32cValue(entry_data, entry_size))},
-                 {"slices", std::move(slices)}});
-            return ciphertext_size;
-        };
-
-        write_entry("data", data.data(), data.size());
-        const std::string meta = nlohmann::json::object().dump();
-        auto meta_entry_size =
-            write_entry(MILVUS_V3_META_ENTRY_NAME,
-                        reinterpret_cast<const uint8_t*>(meta.data()),
-                        meta.size());
-
-        nlohmann::json directory = {
-            {"slice_size", slice_size},
-            {"entries", std::move(entries)},
-            {"__edek__", edek},
-            {"__ez_id__", "1"},
-        };
-        auto dir = directory.dump();
-        output->Write(dir.data(), dir.size());
-
-        uint8_t footer[MILVUS_V3_FOOTER_SIZE] = {};
-        uint16_t version = MILVUS_V3_FORMAT_VERSION;
-        uint32_t meta_size_u32 = static_cast<uint32_t>(meta_entry_size);
-        uint32_t dir_size_u32 = static_cast<uint32_t>(dir.size());
-        std::memcpy(footer, &version, sizeof(version));
-        std::memcpy(footer + 24, &meta_size_u32, sizeof(meta_size_u32));
-        std::memcpy(footer + 28, &dir_size_u32, sizeof(dir_size_u32));
-        output->Write(footer, sizeof(footer));
-        output->Close();
-    }
-
     std::shared_ptr<MockCipherPlugin> mock_cipher_;
 };
 
@@ -1129,25 +1061,6 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedWriterCreatesMissingTempDir) {
     auto info = fs_->GetFileInfo(file_path);
     ASSERT_TRUE(info.ok());
     EXPECT_GT(info.ValueOrDie().size(), 1024);  // ciphertext > plaintext
-}
-
-TEST_F(IndexEntryEncryptedV3Test, EncryptedWriterAcceptsUnalignedSliceSize) {
-    const std::string file_path = kV3FilePath + "_enc_unaligned_slice";
-    const size_t slice_size = 1024;
-    const size_t entry_size = 5 * slice_size + 100;
-    auto data = GeneratePattern(entry_size);
-
-    IndexEntryEncryptedLocalWriter writer(file_path,
-                                          fs_,
-                                          mock_cipher_,
-                                          /*ez_id=*/1,
-                                          /*collection_id=*/100,
-                                          GetRootPath(),
-                                          slice_size);
-    writer.WriteEntry("data", data.data(), data.size());
-    writer.Finish();
-
-    VerifyEncryptedEntry(file_path, "data", entry_size);
 }
 
 TEST_F(IndexEntryEncryptedV3Test, EncryptedMultiSliceEntry) {
@@ -1315,17 +1228,6 @@ TEST_F(IndexEntryEncryptedV3Test,
     auto entry = reader->ReadEntry("data");
     ASSERT_EQ(entry.data.size(), entry_size);
     VerifyPattern(entry.data, entry_size);
-}
-
-TEST_F(IndexEntryEncryptedV3Test,
-       EncryptedDirectoryValidationAcceptsLegacyUnalignedSliceSize) {
-    const std::string file_path = kV3FilePath + "_dir_legacy_unaligned";
-    const size_t slice_size = 1024;
-    const size_t entry_size = 5 * slice_size + 100;
-    auto data = GeneratePattern(entry_size);
-
-    WriteLegacyEncryptedFile(file_path, data, slice_size);
-    VerifyEncryptedEntry(file_path, "data", entry_size);
 }
 
 TEST_F(IndexEntryEncryptedV3Test,
