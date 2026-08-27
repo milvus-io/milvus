@@ -22,8 +22,13 @@ type BroadcastAppendResult struct {
 	// persisted per-vchannel checkpoints, so a caller that only reads append
 	// results cannot tell a deduplicated broadcast from a fresh one. The one
 	// exception is an original that has not finished being acked, which leaves
-	// AppendResults nil — reachable only if the resource lock that serializes a
-	// same-scope retry behind the original's ack callback is ever shortened.
+	// AppendResults nil. The nil check is required, not defensive: the axis a key
+	// is scoped on and the axis the caller's resource lock names are decoupled by
+	// design — import scopes by collection ID so a retry still dedups across a
+	// rename, but locks by collection name — so a same-scope retry can hold a
+	// non-conflicting lock and observe an original that has not acked. On a
+	// promoted secondary the same holds for a different reason: the dedup index
+	// also carries tasks recovered from the WAL, which never held a lock at all.
 	//
 	// Only the in-process broadcaster path fills this field. The gRPC client path
 	// (GRPCBroadcastServiceImpl.Broadcast) leaves it nil regardless of whether the

@@ -220,16 +220,23 @@ func (bm *broadcastTaskManager) appendSharedClusterRK(resourceKeys ...message.Re
 //
 // dup is non-nil exactly when nothing was registered and nothing will reach the
 // WAL; the caller still holds its lock guards in that case.
+//
+// guardsTransferred says whether the registered task took over the caller's lock
+// guards. It is reported separately from err because the two are independent: once
+// the task is registered it keeps broadcasting in the background and releases the
+// guards from its ack callback, even if the wait below fails, so the caller must
+// stop releasing them itself. Deriving that from the error at the caller would put
+// the answer at every error site rather than at the one place that knows.
 func (bm *broadcastTaskManager) broadcast(
 	ctx context.Context,
 	msg message.BroadcastMutableMessage,
 	broadcastID uint64,
 	guards *lockGuards,
 	keyLengthLimit int,
-) (result *types.BroadcastAppendResult, dup *broadcastTask, err error) {
+) (result *types.BroadcastAppendResult, dup *broadcastTask, guardsTransferred bool, err error) {
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
 		guards.Unlock()
-		return nil, nil, errors.Mark(status.NewOnShutdownError("broadcaster is closing"), ErrBroadcastTaskNotCreated)
+		return nil, nil, false, errors.Mark(status.NewOnShutdownError("broadcaster is closing"), ErrBroadcastTaskNotCreated)
 	}
 	defer bm.lifetime.Done()
 
@@ -238,16 +245,16 @@ func (bm *broadcastTaskManager) broadcast(
 
 	dup, task, err := bm.getOrAddBroadcastTask(ctx, msg, broadcastID, guards, keyLengthLimit)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	if dup != nil {
-		return nil, dup, nil
+		return nil, dup, false, nil
 	}
 	pendingTask := newPendingBroadcastTask(task)
 
 	// Add it into broadcast scheduler to broadcast the message into all vchannels.
 	result, err = bm.broadcastScheduler.AddTask(ctx, pendingTask)
-	return result, nil, err
+	return result, nil, true, err
 }
 
 // LegacyAck is the legacy ack function for the broadcast task.
@@ -344,12 +351,9 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 	keyLengthLimit int,
 ) (dup *broadcastTask, created *broadcastTask, err error) {
 	// The scope comes from the message alone, so the hit path and the miss path
-	// cannot drift apart. Construction touches no shared state, so it stays
-	// outside the lock.
+	// cannot drift apart. It touches no shared state, so it is derived outside the
+	// lock.
 	scope := idempotencyScopeOfMessage(msg)
-	newIncomingTask := newBroadcastTaskFromBroadcastMessage(msg, bm.metrics, bm.ackScheduler)
-	newIncomingTask.SetLogger(bm.Logger())
-	newIncomingTask.WithResourceKeyLockGuards(guards)
 
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
@@ -366,8 +370,20 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 			mlog.Uint64("ownerBroadcastID", ownerID))
 	}
 	if err := validateIdempotencyKeyLength(message.IdempotencyKeyOf(msg), keyLengthLimit); err != nil {
-		return nil, nil, err
+		// Marked here rather than at the caller, because this is where "nothing was
+		// registered" is known. Callers read the mark to decide whether they still
+		// own what they staged for this broadcast -- a reserved file-resource ref, a
+		// half-created target collection -- and must roll it back themselves.
+		return nil, nil, errors.Mark(err, ErrBroadcastTaskNotCreated)
 	}
+	// Constructed only once the broadcast is certain to be registered: construction
+	// counts the task into the PENDING gauge, and neither discard path above
+	// transitions state, so an earlier construction would leak that count for the
+	// lifetime of the process. It builds no shared state, but it is cheap enough to
+	// hold bm.mu across at DDL frequency.
+	newIncomingTask := newBroadcastTaskFromBroadcastMessage(msg, bm.metrics, bm.ackScheduler)
+	newIncomingTask.SetLogger(bm.Logger())
+	newIncomingTask.WithResourceKeyLockGuards(guards)
 	bm.tasks[broadcastID] = newIncomingTask
 	bm.idempotencyIndex.Add(scope, broadcastID)
 	return nil, newIncomingTask, nil

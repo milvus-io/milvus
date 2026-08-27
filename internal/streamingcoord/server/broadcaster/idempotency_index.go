@@ -64,7 +64,17 @@ func idempotencyScopeOfMessage(msg message.BroadcastMutableMessage) string {
 // The limit is passed in rather than read here: the only caller applies this
 // inside the manager lock, and a refreshable-config read does not belong there.
 func validateIdempotencyKeyLength(key message.IdempotencyKey, limit int) error {
-	if clientKey := key.ClientKey(); len(clientKey) > limit {
+	clientKey := key.ClientKey()
+	if clientKey == "" {
+		// The empty key is short-circuited rather than compared, because the only
+		// caller applies this to every broadcast, keyed or not, and a negative limit
+		// would otherwise reject the whole cluster's DDL: the parameter is
+		// refreshable and unbounded below, and "-1 means unlimited" is a reasonable
+		// thing for an operator to assume. interceptor.ValidateIdempotencyKey admits
+		// the absent key the same way.
+		return nil
+	}
+	if len(clientKey) > limit {
 		return merr.WrapErrParameterInvalidMsg("idempotency key length %d exceeds limit %d", len(clientKey), limit)
 	}
 	return nil

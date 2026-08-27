@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
@@ -527,12 +528,64 @@ func TestBroadcastRejectsOversizedIdempotencyKey(t *testing.T) {
 	err := broadcast(newImportMsgWithKey("123456789"))
 	require.Error(t, err)
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	// The rejection happens before the task is registered, and callers roll back what
+	// they staged for the broadcast only when the error says so. Marking it must not
+	// cost the client the code it is answered with.
+	require.True(t, IsBroadcastTaskNotCreated(err))
+	require.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
 
 	// A limit of 0 fails closed: no non-empty key is accepted at all, while a broadcast
 	// that carries no key is not idempotent and is never rejected here.
 	paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue("0")
 	require.Error(t, broadcast(newImportMsgWithKey("1")))
 	require.NoError(t, broadcast(newImportMsgWithKey("")))
+
+	// The parameter is refreshable and unbounded below, so a negative value is
+	// reachable at runtime. It must still reject only keys: this check runs on every
+	// broadcast in the cluster, keyed or not, so rejecting the keyless ones would stop
+	// all WAL-based DDL on a live cluster.
+	paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue("-1")
+	require.Error(t, broadcast(newImportMsgWithKey("1")))
+	require.NoError(t, broadcast(newImportMsgWithKey("")))
+}
+
+// TestDiscardedBroadcastCountsNoPendingTask covers the two paths that build no task:
+// a dedup hit and a length rejection. Counting a task there would be invisible in
+// behavior and permanent in the metric, because the count is only ever undone by a
+// state transition and neither path has a task left to transition.
+func TestDiscardedBroadcastCountsNoPendingTask(t *testing.T) {
+	bm := newBroadcastTaskManagerForTest(t)
+	collKey := message.NewSharedCollectionNameResourceKey("db1", "coll1")
+
+	pending := func() float64 {
+		return testutil.ToFloat64(bm.metrics.taskTotal.WithLabelValues(
+			message.MessageTypeImport.String(),
+			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING.String()))
+	}
+	broadcast := func(broadcastID uint64, msg message.BroadcastMutableMessage) error {
+		api := &broadcasterWithRK{broadcaster: bm, broadcastID: broadcastID, guards: bm.resourceKeyLocker.Lock(collKey)}
+		defer api.Close()
+		_, err := api.Broadcast(context.Background(), msg)
+		return err
+	}
+
+	// Settle an original first, so the gauge stops moving on its own.
+	require.NoError(t, broadcast(1, newImportMsgWithKey("k1")))
+	require.Eventually(t, func() bool {
+		task, ok := bm.getBroadcastTaskByID(1)
+		return ok && task.State() == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
+	}, 10*time.Second, 10*time.Millisecond)
+	settled := pending()
+
+	// A retry of the same scope resolves to the original: nothing is registered.
+	require.NoError(t, broadcast(2, newImportMsgWithKey("k1")))
+	require.Equal(t, settled, pending())
+
+	// A rejected key registers nothing either.
+	old := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue("1")
+	defer paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.SwapTempValue(old)
+	require.Error(t, broadcast(3, newImportMsgWithKey("far-too-long")))
+	require.Equal(t, settled, pending())
 }
 
 // TestBroadcastAcceptsIdempotencyKeyAtTheConfiguredLimit guards the length budget at

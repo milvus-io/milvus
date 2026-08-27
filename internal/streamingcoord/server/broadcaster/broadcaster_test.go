@@ -246,9 +246,12 @@ func TestBroadcastTaskNotCreatedOnStoppedBroadcaster(t *testing.T) {
 
 	// The manager is already stopped, so it returns before the key-length bound
 	// is ever consulted; any value does.
-	_, _, err := bm.broadcast(context.Background(), createNewBroadcastMsg([]string{"v1"}, rk), 1, guards, 256)
+	_, _, guardsTransferred, err := bm.broadcast(context.Background(), createNewBroadcastMsg([]string{"v1"}, rk), 1, guards, 256)
 
 	require.Error(t, err)
+	// Nothing was registered, so nothing took the guards over: the shutdown path
+	// released them itself, as the FastLock below shows.
+	require.False(t, guardsTransferred)
 	require.True(t, IsBroadcastTaskNotCreated(err))
 	require.True(t, IsBroadcastTaskNotCreated(errors.Wrap(err, "broadcast failed")))
 	require.False(t, IsBroadcastTaskNotCreated(context.Canceled))

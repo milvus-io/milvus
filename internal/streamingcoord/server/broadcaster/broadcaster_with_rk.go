@@ -36,7 +36,14 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 	defer span.End()
 	message.InjectTraceContext(ctx, msg)
 
-	result, dup, err := b.broadcaster.broadcast(ctx, msg, b.broadcastID, b.guards, keyLengthLimit)
+	result, dup, guardsTransferred, err := b.broadcaster.broadcast(ctx, msg, b.broadcastID, b.guards, keyLengthLimit)
+	if guardsTransferred {
+		// The registered task owns the guards now and releases them from its ack
+		// callback, on another goroutine; drop ours to avoid a double unlock. Checked
+		// before err, not after: a failure to wait for the acks does not hand the
+		// guards back, because the task goes on broadcasting without this request.
+		b.guards = nil
+	}
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -52,8 +59,6 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 			Duplicated:    dupMsg,
 		}, nil
 	}
-	// The registered task owns the guards now; drop ours to avoid a double unlock.
-	b.guards = nil
 	return result, nil
 }
 
