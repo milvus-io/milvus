@@ -105,19 +105,34 @@ The estimate is cached once on the task object (same pattern as
 `slotUsage.Load()` today) and the request builder ships the cached value, so
 what was placed and what was shipped are the same number.
 
+A family that cannot resolve its inputs — nil schema, missing segment, empty or
+invalid index type — returns the floor and is **not** cached, so the next
+scheduling round retries instead of freezing a placeholder for the task's
+lifetime. A field that is genuinely absent from a schema we DO have is a real
+answer, not a miss: it is priced at the whole segment (conservative) and cached.
+
 ## DataNode ledger and report
 
-- New package `internal/datanode/resource` with one ledger:
-  `Accept(taskID, cpu, memory)`, `Release(taskID)`, `Snapshot()`.
-- Compaction executor, index task queue and import scheduler call `Accept` at
-  the point where they add to `usingSlots` and `Release` where they subtract,
-  so the two lifecycles are identical.
+- No separate `internal/datanode/resource` package. Each executor keeps its own
+  `taskcommon.Resource` counter right beside the `usingSlots` it already keeps,
+  with the identical lifecycle: booked where `usingSlots` is added, released
+  where it is subtracted, and the release subtracts exactly what was booked
+  rather than a re-derived value. That is the compaction executor
+  (`usingResource`), the index task queue (`usingCPU`/`usingMemory`) and the
+  import scheduler (summed over pending + in-progress tasks). One shared ledger
+  keyed by task ID would have duplicated three lifecycles that already exist.
+- The external-collection refresh task is not booked by any ledger: it never
+  entered the scalar slot report either (`QuerySlot` sums index, compaction and
+  import only), and it runs through its own manager rather than one of the three
+  executors. DataCoord still prices it, so it is charged within a scheduling
+  round.
 - `QuerySlot`: `total_cpu = hardware.GetCPUNum()`,
   `total_memory = hardware.GetMemoryCount()`; in standalone both are multiplied
   by `dataNode.standaloneSlotFactor` (the DataNode shares the process with a
   QueryNode). `available = max(total - sum(accepted), 0)`. `available_slots`
   is reported exactly as before.
-- New gauge `DataNodeResource{nodeID, type=cpu|memory, state=total|available}`.
+- New gauge `milvus_datanode_task_resource{node_id, type=cpu|memory, state=total|available}`
+  (`metrics.DataNodeTaskResource`).
 
 ## DataCoord picker (`internal/datacoord/task/node_picker.go`)
 
@@ -131,12 +146,30 @@ Same rules as PR #52561, implemented thinner:
   where each fraction is what remains after the task, as a fraction of the
   worker's total. Take the highest; charge cpu, memory and slot on the picked
   worker so later picks in the round see it.
-- Nothing fits: if `req.Memory` exceeds the largest `total_memory` of any
-  worker (oversized), dispatch to the worker with the most `available_memory`;
-  otherwise return `NullNodeID` for this round, exactly what happens today when
-  slots are exhausted.
-- A task with a zero requirement (family that does not estimate) goes straight
-  to the scalar heap.
+- Nothing fits: fall through to the scalar heap first ("no dimensioned home →
+  scalar heap" outranks the oversized rule). Only when the scalar heap has no
+  room either does the oversized rule apply: if `req.Memory` exceeds the largest
+  `total_memory` of any worker, dispatch to the dimensioned worker with the most
+  `available_memory` (waiting never helps such a task); otherwise return
+  `NullNodeID`.
+- A task with a zero requirement (family that does not estimate) is placed on
+  the dimensioned tier when one exists — the memory filter passes trivially —
+  and only reaches the scalar heap when no dimensioned worker has a slot.
+  Sending it "straight to the scalar heap" would starve it in an
+  all-dimensioned cluster. Unreachable in practice, since every family floors
+  its memory at `minTaskMemory`.
+- `NullNodeID` is per-task, not per-round. `schedule()` ends the round only when
+  `nodePicker.exhausted()` — no dimensioned worker with a free slot and no free
+  scalar slot. A task that alone does not fit gives way exactly like a task in
+  failure backoff: it is set aside and re-queued after the round, so one
+  oversized task at the head of the queue (ordered by task ID, i.e. oldest, not
+  biggest) cannot stall every smaller task behind it.
+
+  Trade-off, stated: ending the round used to reserve the cluster for that task
+  implicitly. Without the reservation a steady stream of small tasks can keep
+  delaying it, and under memory pressure with slots still free each round
+  examines the whole queue instead of stopping at the first miss. An explicit
+  reservation or aging mechanism is a follow-up.
 
 ## Compatibility
 
@@ -144,6 +177,10 @@ Same rules as PR #52561, implemented thinner:
   heap is used; extra request fields are ignored by the old worker.
 - Old DataCoord + new DataNode: requests carry no cpu/memory, the ledger books
   zero, `available == total`; the old coordinator never reads the new fields.
+- Scheduling semantics do change for an all-dimensioned cluster: the old
+  "one unplaceable task ends the round" behaviour is gone (see the `NullNodeID`
+  is per-task rule above). A cluster with no free slot anywhere still ends the
+  round at the first refusal, as before.
 
 ## Testing
 
