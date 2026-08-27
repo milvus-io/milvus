@@ -6,15 +6,11 @@ import (
 	context "context"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	clientv3 "go.etcd.io/etcd/client/v3"
-
-	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-
-	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-
+	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	mock "github.com/stretchr/testify/mock"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	workerpb "github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 )
@@ -618,124 +614,6 @@ func (_c *MockDataNode_DropTask_Call) Return(_a0 *commonpb.Status, _a1 error) *M
 }
 
 func (_c *MockDataNode_DropTask_Call) RunAndReturn(run func(context.Context, *workerpb.DropTaskRequest) (*commonpb.Status, error)) *MockDataNode_DropTask_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// FlushChannels provides a mock function with given fields: _a0, _a1
-func (_m *MockDataNode) FlushChannels(_a0 context.Context, _a1 *datapb.FlushChannelsRequest) (*commonpb.Status, error) {
-	ret := _m.Called(_a0, _a1)
-
-	if len(ret) == 0 {
-		panic("no return value specified for FlushChannels")
-	}
-
-	var r0 *commonpb.Status
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.FlushChannelsRequest) (*commonpb.Status, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.FlushChannelsRequest) *commonpb.Status); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.FlushChannelsRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockDataNode_FlushChannels_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FlushChannels'
-type MockDataNode_FlushChannels_Call struct {
-	*mock.Call
-}
-
-// FlushChannels is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *datapb.FlushChannelsRequest
-func (_e *MockDataNode_Expecter) FlushChannels(_a0 interface{}, _a1 interface{}) *MockDataNode_FlushChannels_Call {
-	return &MockDataNode_FlushChannels_Call{Call: _e.mock.On("FlushChannels", _a0, _a1)}
-}
-
-func (_c *MockDataNode_FlushChannels_Call) Run(run func(_a0 context.Context, _a1 *datapb.FlushChannelsRequest)) *MockDataNode_FlushChannels_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.FlushChannelsRequest))
-	})
-	return _c
-}
-
-func (_c *MockDataNode_FlushChannels_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataNode_FlushChannels_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockDataNode_FlushChannels_Call) RunAndReturn(run func(context.Context, *datapb.FlushChannelsRequest) (*commonpb.Status, error)) *MockDataNode_FlushChannels_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// FlushSegments provides a mock function with given fields: _a0, _a1
-func (_m *MockDataNode) FlushSegments(_a0 context.Context, _a1 *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
-	ret := _m.Called(_a0, _a1)
-
-	if len(ret) == 0 {
-		panic("no return value specified for FlushSegments")
-	}
-
-	var r0 *commonpb.Status
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.FlushSegmentsRequest) (*commonpb.Status, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.FlushSegmentsRequest) *commonpb.Status); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.FlushSegmentsRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockDataNode_FlushSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FlushSegments'
-type MockDataNode_FlushSegments_Call struct {
-	*mock.Call
-}
-
-// FlushSegments is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *datapb.FlushSegmentsRequest
-func (_e *MockDataNode_Expecter) FlushSegments(_a0 interface{}, _a1 interface{}) *MockDataNode_FlushSegments_Call {
-	return &MockDataNode_FlushSegments_Call{Call: _e.mock.On("FlushSegments", _a0, _a1)}
-}
-
-func (_c *MockDataNode_FlushSegments_Call) Run(run func(_a0 context.Context, _a1 *datapb.FlushSegmentsRequest)) *MockDataNode_FlushSegments_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.FlushSegmentsRequest))
-	})
-	return _c
-}
-
-func (_c *MockDataNode_FlushSegments_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataNode_FlushSegments_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockDataNode_FlushSegments_Call) RunAndReturn(run func(context.Context, *datapb.FlushSegmentsRequest) (*commonpb.Status, error)) *MockDataNode_FlushSegments_Call {
 	_c.Call.Return(run)
 	return _c
 }

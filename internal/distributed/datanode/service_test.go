@@ -87,16 +87,6 @@ func Test_NewServer(t *testing.T) {
 		assert.NotNil(t, states)
 	})
 
-	t.Run("FlushSegments", func(t *testing.T) {
-		datanode := mocks.NewMockDataNode(t)
-		datanode.EXPECT().GetStateCode().Return(commonpb.StateCode_Healthy)
-		datanode.EXPECT().FlushSegments(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-		server.datanode = datanode
-		states, err := server.FlushSegments(ctx, nil)
-		assert.NoError(t, err)
-		assert.NotNil(t, states)
-	})
-
 	t.Run("ShowConfigurations", func(t *testing.T) {
 		datanode := mocks.NewMockDataNode(t)
 		datanode.EXPECT().ShowConfigurations(mock.Anything, mock.Anything).Return(&internalpb.ShowConfigurationsResponse{}, nil)

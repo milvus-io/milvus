@@ -79,7 +79,7 @@ func (s *CrossClusterRoutingSuite) TestCrossClusterRouting() {
 	s.NoError(err)
 	defer conn.Close()
 	dataClient := datapb.NewDataNodeClient(conn)
-	_, err = dataClient.FlushSegments(s.Cluster.GetContext(), &datapb.FlushSegmentsRequest{})
+	_, err = dataClient.WatchDmChannels(s.Cluster.GetContext(), &datapb.WatchDmChannelsRequest{})
 	assert.Contains(s.T(), err.Error(), merr.ErrServiceCrossClusterRouting.Error())
 
 	// test queryNode

@@ -64,9 +64,6 @@ func Test_NewClient(t *testing.T) {
 		r3, err := client.WatchDmChannels(ctx, nil)
 		retCheck(retNotNil, r3, err)
 
-		r4, err := client.FlushSegments(ctx, nil)
-		retCheck(retNotNil, r4, err)
-
 		r5, err := client.GetMetrics(ctx, nil)
 		retCheck(retNotNil, r5, err)
 

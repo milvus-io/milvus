@@ -164,12 +164,6 @@ func (node *DataNode) GetComponentStates(ctx context.Context, req *milvuspb.GetC
 	return states, nil
 }
 
-// Deprecated after v2.6.0
-func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
-	mlog.Info(ctx, "FlushSegments was deprecated after v2.6.0, return success")
-	return merr.Success(), nil
-}
-
 // ResendSegmentStats . ResendSegmentStats resend un-flushed segment stats back upstream to DataCoord by resending DataNode time tick message.
 // It returns a list of segments to be sent.
 // Deprecated in 2.3.2, reversed it just for compatibility during rolling back
@@ -420,12 +414,6 @@ func (node *DataNode) CheckChannelOperationProgress(ctx context.Context, req *da
 	return &datapb.ChannelOperationProgressResponse{
 		Status: merr.Success(),
 	}, nil
-}
-
-// Deprecated after v2.6.0
-func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChannelsRequest) (*commonpb.Status, error) {
-	mlog.Info(ctx, "DataNode deprecated FlushChannels after v2.6.0, return success")
-	return merr.Success(), nil
 }
 
 func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {

@@ -43,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/netutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -280,13 +279,6 @@ func (s *Server) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannel
 	return s.datanode.WatchDmChannels(ctx, req)
 }
 
-func (s *Server) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
-	if err := merr.CheckHealthy(s.datanode.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-	return s.datanode.FlushSegments(ctx, req)
-}
-
 // ShowConfigurations gets specified configurations para of DataNode
 func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	return s.datanode.ShowConfigurations(ctx, req)
@@ -312,10 +304,6 @@ func (s *Server) ResendSegmentStats(ctx context.Context, request *datapb.ResendS
 
 func (s *Server) SyncSegments(ctx context.Context, request *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
 	return s.datanode.SyncSegments(ctx, request)
-}
-
-func (s *Server) FlushChannels(ctx context.Context, req *datapb.FlushChannelsRequest) (*commonpb.Status, error) {
-	return s.datanode.FlushChannels(ctx, req)
 }
 
 func (s *Server) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelOperationsRequest) (*commonpb.Status, error) {

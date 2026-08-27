@@ -86,9 +86,6 @@ func (m *GrpcDataNodeClient) WatchDmChannels(ctx context.Context, in *datapb.Wat
 	return &commonpb.Status{}, m.Err
 }
 
-func (m *GrpcDataNodeClient) FlushSegments(ctx context.Context, in *datapb.FlushSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
-}
 
 func (m *GrpcDataNodeClient) ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
 	return &internalpb.ShowConfigurationsResponse{}, m.Err
@@ -114,9 +111,6 @@ func (m *GrpcDataNodeClient) SyncSegments(ctx context.Context, in *datapb.SyncSe
 	return &commonpb.Status{}, m.Err
 }
 
-func (m *GrpcDataNodeClient) FlushChannels(ctx context.Context, in *datapb.FlushChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
-}
 
 func (m *GrpcDataNodeClient) NotifyChannelOperation(ctx context.Context, in *datapb.ChannelOperationsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
