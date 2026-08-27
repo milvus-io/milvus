@@ -27,7 +27,6 @@ require (
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/samber/lo v1.52.0
 	github.com/sirupsen/logrus v1.9.3
-	github.com/spaolacci/murmur3 v1.1.0
 	github.com/spf13/cast v1.3.1
 	github.com/stretchr/testify v1.11.1
 	github.com/tecbot/gorocksdb v0.0.0-20191217155057-f0fad39f321c
@@ -69,6 +68,7 @@ require (
 require (
 	github.com/ebitengine/purego v0.9.0 // indirect
 	github.com/shirou/gopsutil/v3 v3.23.12 // indirect
+	github.com/spaolacci/murmur3 v1.1.0 // indirect
 )
 
 require (
@@ -206,7 +206,7 @@ require (
 	github.com/tklauser/go-sysconf v0.3.15 // indirect
 	github.com/tklauser/numcpus v0.10.0 // indirect
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20201229170055-e5319fda7802 // indirect
-	github.com/twmb/murmur3 v1.1.3 // indirect
+	github.com/twmb/murmur3 v1.1.6
 	github.com/uber/jaeger-client-go v2.30.0+incompatible // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
