@@ -995,6 +995,15 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) baseLoadInfo(textStats map[int
 	}
 }
 
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestTantivyValidityBitmapBytesWordAligned() {
+	suite.EqualValues(0, estimateTantivyValidityBitmapBytes(-1))
+	suite.EqualValues(0, estimateTantivyValidityBitmapBytes(0))
+	suite.EqualValues(8, estimateTantivyValidityBitmapBytes(1))
+	suite.EqualValues(8, estimateTantivyValidityBitmapBytes(64))
+	suite.EqualValues(16, estimateTantivyValidityBitmapBytes(65))
+	suite.EqualValues(24, estimateTantivyValidityBitmapBytes(129))
+}
+
 func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_NonMmap_NoTieredEviction() {
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
@@ -1012,7 +1021,8 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_NonMmap_No
 	}
 	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(textIndexSize, usage.MemorySize, "non-mmap text index must be counted in memory")
+	expectedMemorySize := uint64(textIndexSize) + estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	suite.EqualValues(expectedMemorySize, usage.MemorySize, "non-mmap text index files and validity bitmap must be counted in memory")
 	suite.EqualValues(0, usage.DiskSize, "non-mmap text index must not be counted in disk")
 }
 
@@ -1033,7 +1043,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_Mmap_NoTie
 	}
 	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(0, usage.MemorySize, "mmap text index must not be counted in memory")
+	suite.EqualValues(estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows()), usage.MemorySize, "mmap text index validity bitmap must be counted in memory")
 	suite.EqualValues(textIndexSize, usage.DiskSize, "mmap text index must be counted in disk")
 }
 
@@ -1069,6 +1079,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_MultipleTe
 		101: {FieldID: 101, MemorySize: size1},
 		102: {FieldID: 102, MemorySize: size2},
 	})
+	loadInfo.NumOfRows = 65
 
 	factor := resourceEstimateFactor{
 		TieredEvictionEnabled:    false,
@@ -1077,7 +1088,8 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_MultipleTe
 	}
 	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(size1+size2, usage.MemorySize, "all text index sizes must be summed")
+	validityBitmapBytes := estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	suite.EqualValues(uint64(size1+size2)+2*validityBitmapBytes, usage.MemorySize, "each text field must include its word-aligned validity bitmap")
 }
 
 func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_ExpansionFactor() {
@@ -1097,8 +1109,8 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_ExpansionF
 	}
 	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	expected := uint64(float64(textIndexSize) * expansionFactor)
-	suite.EqualValues(expected, usage.MemorySize, "expansion factor must be applied to text index size")
+	expected := uint64(float64(textIndexSize)*expansionFactor) + estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	suite.EqualValues(expected, usage.MemorySize, "expansion factor must apply only to text index file bytes")
 }
 
 func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_EmptyTextStats_NoContribution() {
@@ -1159,7 +1171,8 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_NonMmap_Ev
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(textIndexSize, usage.MemorySize, "non-mmap text index must be in evictable memory")
+	expectedMemorySize := uint64(textIndexSize) + estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	suite.EqualValues(expectedMemorySize, usage.MemorySize, "non-mmap text index files and validity bitmap must be in evictable memory")
 	suite.EqualValues(0, usage.DiskSize)
 }
 
@@ -1181,7 +1194,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_Mmap_Evict
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(0, usage.MemorySize, "mmap text index must not be in memory")
+	suite.EqualValues(estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows()), usage.MemorySize, "mmap text index validity bitmap must be in evictable memory")
 	suite.EqualValues(textIndexSize, usage.DiskSize, "mmap text index must be in evictable disk")
 }
 
@@ -1205,8 +1218,9 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_CacheRatio
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	expected := uint64(float64(textIndexSize) * cacheRatio)
-	suite.EqualValues(expected, usage.MemorySize, "cache ratio must be applied to evictable text index memory")
+	evictableMemorySize := uint64(textIndexSize) + estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	expected := uint64(float64(evictableMemorySize) * cacheRatio)
+	suite.EqualValues(expected, usage.MemorySize, "cache ratio must be applied to evictable text index files and validity bitmap")
 }
 
 func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_EmptyTextStats_NoContribution() {
@@ -1237,6 +1251,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_MultipleTe
 		101: {FieldID: 101, MemorySize: size1},
 		102: {FieldID: 102, MemorySize: size2},
 	})
+	loadInfo.NumOfRows = 65
 
 	factor := resourceEstimateFactor{
 		TieredEvictionEnabled:           true,
@@ -1247,7 +1262,8 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_MultipleTe
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(size1+size2, usage.MemorySize, "all text index sizes must be summed in logical estimate")
+	validityBitmapBytes := estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	suite.EqualValues(uint64(size1+size2)+2*validityBitmapBytes, usage.MemorySize, "each text field must include its word-aligned validity bitmap in logical estimate")
 }
 
 func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_DiskCacheRatioApplied() {
@@ -1270,7 +1286,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_DiskCacheR
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(0, usage.MemorySize, "mmap text index must not be in memory")
+	suite.EqualValues(estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows()), usage.MemorySize, "mmap text index validity bitmap must remain in memory")
 	expected := uint64(float64(textIndexSize) * diskCacheRatio)
 	suite.EqualValues(expected, usage.DiskSize, "disk cache ratio must be applied to mmap text index")
 }
@@ -1294,7 +1310,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_ExpansionF
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	expected := uint64(float64(textIndexSize) * expansionFactor)
+	expected := uint64(float64(textIndexSize)*expansionFactor) + estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
 	suite.EqualValues(expected, usage.MemorySize)
 }
 

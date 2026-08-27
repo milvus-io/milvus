@@ -867,6 +867,8 @@ TEST(NgramIndex, TestNgramJson) {
     ngram_index->BuildWithFieldData({json_field});
     ngram_index->finish();
     ngram_index->create_reader(milvus::index::SetBitsetSealed);
+    EXPECT_EQ(ngram_index->ValidityBitmapByteSize(), 0);
+    EXPECT_EQ(ngram_index->IsNotNull().size(), json_raw_data.size());
 
     auto segment = segcore::CreateSealedSegment(schema);
     segcore::LoadIndexInfo load_index_info;

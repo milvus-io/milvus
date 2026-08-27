@@ -119,6 +119,10 @@ func (c *Client) dialOptions() []grpc.DialOption {
 		c.MetadataUnaryInterceptor(),
 	))
 
+	options = append(options, grpc.WithChainStreamInterceptor(
+		c.MetadataStreamInterceptor(),
+	))
+
 	return options
 }
 

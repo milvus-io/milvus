@@ -54,7 +54,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/tracer"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/expr"
 	"github.com/milvus-io/milvus/pkg/v2/util/gc"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -453,8 +452,6 @@ func (mr *MilvusRoles) Run() {
 	})
 	healthz.SetComponentNum(len(enableComponents))
 
-	expr.Init()
-	expr.Register("param", paramtable.Get())
 	mr.setupLogger()
 	defer log.Cleanup()
 

@@ -297,6 +297,9 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
         disk_file_manager_->RemoveNgramIndexFiles();
     }
 
+    // This custom Load() does not go through InvertedIndexTantivy::Load().
+    FinalizeSealed(/*release_null_offsets=*/true);
+
     LOG_INFO(
         "load ngram index done for field id:{} with dir:{}", field_id_, path_);
 }

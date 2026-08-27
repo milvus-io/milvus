@@ -894,6 +894,19 @@ TEST(InvertedIndex, Naive) {
     test_string<true>();
 }
 
+TEST(InvertedIndex, SealedAllValidDoesNotRetainValidityBitmap) {
+    std::vector<std::string> data = {"alpha", "beta", "gamma"};
+    auto index = std::make_unique<index::InvertedIndexTantivy<std::string>>();
+    index->BuildWithRawDataForUT(data.size(), data.data(), Config());
+
+    EXPECT_EQ(index->ValidityBitmapByteSize(), 0);
+    auto valid = index->IsNotNull();
+    ASSERT_EQ(valid.size(), data.size());
+    EXPECT_EQ(valid.count(), data.size());
+    auto nulls = index->IsNull();
+    EXPECT_EQ(nulls.count(), 0);
+}
+
 TEST(InvertedIndex, LoadSlicedNullOffsets) {
     milvus::test::FileSliceSizeGuard slice_size_guard(64);
     test_run<int64_t, DataType::INT64, DataType::NONE, true>();

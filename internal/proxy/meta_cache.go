@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/expr"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -384,7 +383,6 @@ func InitMetaCache(ctx context.Context, mixCoord types.MixCoordClient) error {
 	if err != nil {
 		return err
 	}
-	expr.Register("cache", globalMetaCache)
 
 	err = privilege.InitPrivilegeCache(ctx, mixCoord)
 	if err != nil {

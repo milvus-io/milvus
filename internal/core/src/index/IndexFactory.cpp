@@ -16,6 +16,7 @@
 
 #include "index/IndexFactory.h"
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <string>
 #include "common/EasyAssert.h"
@@ -44,6 +45,27 @@
 #include "pb/schema.pb.h"
 
 namespace milvus::index {
+
+namespace {
+
+uint64_t
+ValidityBitmapBytes(int64_t num_rows) {
+    if (num_rows <= 0) {
+        return 0;
+    }
+    auto rows = static_cast<uint64_t>(num_rows);
+    return ((rows - 1) / 64 + 1) * sizeof(uint64_t);
+}
+
+uint64_t
+SaturatingAdd(uint64_t lhs, uint64_t rhs) {
+    if (lhs > std::numeric_limits<uint64_t>::max() - rhs) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return lhs + rhs;
+}
+
+}  // namespace
 
 bool
 IndexFactory::CanUseIndexRawDataForField(DataType field_type,
@@ -134,7 +156,8 @@ IndexFactory::IndexLoadResource(
                                        index_version,
                                        index_size_in_bytes,
                                        index_params,
-                                       mmap_enable);
+                                       mmap_enable,
+                                       num_rows);
     }
 }
 
@@ -328,7 +351,8 @@ IndexFactory::ScalarIndexLoadResource(
     IndexVersion index_version,
     uint64_t index_size_in_bytes,
     const std::map<std::string, std::string>& index_params,
-    bool mmap_enable) {
+    bool mmap_enable,
+    int64_t num_rows) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
     auto index_type_it = index_params.find("index_type");
@@ -361,13 +385,25 @@ IndexFactory::ScalarIndexLoadResource(
         }
         request.has_raw_data = true;
     } else if (index_type == milvus::index::INVERTED_INDEX_TYPE ||
-               index_type == milvus::index::NGRAM_INDEX_TYPE ||
-               index_type == milvus::index::RTREE_INDEX_TYPE) {
+               index_type == milvus::index::NGRAM_INDEX_TYPE) {
+        auto validity_bitmap_bytes = ValidityBitmapBytes(num_rows);
+        if (mmap_enable) {
+            request.final_memory_cost = validity_bitmap_bytes;
+            request.final_disk_cost = index_size_in_bytes;
+        } else {
+            request.final_memory_cost =
+                SaturatingAdd(index_size_in_bytes, validity_bitmap_bytes);
+            request.final_disk_cost = 0;
+        }
+        request.max_memory_cost =
+            SaturatingAdd(index_size_in_bytes, validity_bitmap_bytes);
+        request.max_disk_cost = index_size_in_bytes;
+        request.has_raw_data = false;
+    } else if (index_type == milvus::index::RTREE_INDEX_TYPE) {
         request.final_memory_cost = 0;
         request.final_disk_cost = index_size_in_bytes;
         request.max_memory_cost = index_size_in_bytes;
         request.max_disk_cost = index_size_in_bytes;
-
         request.has_raw_data = false;
     } else if (index_type == milvus::index::BITMAP_INDEX_TYPE) {
         if (mmap_enable) {
