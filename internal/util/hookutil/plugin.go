@@ -13,8 +13,9 @@ import (
 var pluginMutex sync.Mutex
 
 // LoadPlugin opens a Go plugin at the given path, looks up the named symbol,
-// and type-asserts it to T. All calls are serialized with a mutex because
-// Go's plugin.Open() is not safe for concurrent use (causes "empty pluginpath" panic).
+// and type-asserts it to T. The mutex serializes Milvus plugin loads, while
+// production builds also use Sonic's bytedance_tango synchronization to keep
+// concurrent JIT module registration out of plugin.Open's critical section.
 func LoadPlugin[T any](path string, symbol string) (T, error) {
 	var zero T
 	if path == "" {
