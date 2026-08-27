@@ -458,7 +458,9 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 	s.SetupTest()
 	ch := "ch1"
 
-	s.handler.scheduler.(*task.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Return()
+	scheduler := s.handler.scheduler.(*task.MockGlobalScheduler)
+	scheduler.EXPECT().Enqueue(mock.Anything).Return()
+	scheduler.EXPECT().AbortAndRemoveTask(int64(19531)).Once()
 
 	t1 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:  19530,
@@ -470,6 +472,7 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 	t2 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:  19531,
 		Type:    datapb.CompactionType_MixCompaction,
+		State:   datapb.CompactionTaskState_executing,
 		Channel: ch,
 		NodeID:  1,
 	}, nil, s.mockMeta, newMockVersionManager())
@@ -477,6 +480,8 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 	s.handler.submitTask(t1)
 	s.handler.restoreTask(t2)
 	s.handler.removeTasksByChannel(ch)
+	s.Zero(s.handler.queueTasks.Len())
+	s.Empty(s.handler.executingTasks)
 }
 
 func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {

@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -447,4 +448,72 @@ func TestMixCompactionTaskMetricsRetryDoesNotDrift(t *testing.T) {
 	require.Equal(t, initialPending, testutil.ToFloat64(pending))
 	require.Equal(t, initialNormalExecuting, testutil.ToFloat64(normalExecuting))
 	require.Equal(t, initialNormalDone+1, testutil.ToFloat64(normalDone))
+}
+
+func TestMixCompactionTaskMetricsConcurrentCompletionDoesNotDrift(t *testing.T) {
+	const (
+		nodeID         = int64(99003)
+		compactionType = datapb.CompactionType_SortCompaction
+	)
+
+	taskType := compactionType.String()
+	executing := metrics.DataCoordCompactionTaskNum.WithLabelValues("99003", taskType, metrics.Executing)
+	done := metrics.DataCoordCompactionTaskNum.WithLabelValues("99003", taskType, metrics.Done)
+	initialExecuting := testutil.ToFloat64(executing)
+	initialDone := testutil.ToFloat64(done)
+	t.Cleanup(func() {
+		executing.Set(initialExecuting)
+		done.Set(initialDone)
+	})
+
+	firstSaveStarted := make(chan struct{})
+	releaseFirstSave := make(chan struct{})
+	var saveCalls atomic.Int32
+	meta := NewMockCompactionMeta(t)
+	meta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).RunAndReturn(
+		func(context.Context, *datapb.CompactionTask) error {
+			if saveCalls.Add(1) == 1 {
+				close(firstSaveStarted)
+				<-releaseFirstSave
+			}
+			return nil
+		},
+	).Twice()
+
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:  99003,
+		Type:    compactionType,
+		State:   datapb.CompactionTaskState_meta_saved,
+		NodeID:  nodeID,
+		Channel: "concurrent-completion",
+	}, nil, meta, newMockVersionManager())
+	incCompactionTaskMetric(task.GetTaskProto())
+
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
+	}()
+	<-firstSaveStarted
+
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
+	}()
+
+	var secondErr error
+	secondFinished := false
+	select {
+	case secondErr = <-secondDone:
+		secondFinished = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseFirstSave)
+	require.NoError(t, <-firstDone)
+	if !secondFinished {
+		secondErr = <-secondDone
+	}
+	require.NoError(t, secondErr)
+
+	require.Equal(t, initialExecuting, testutil.ToFloat64(executing))
+	require.Equal(t, initialDone+1, testutil.ToFloat64(done))
 }

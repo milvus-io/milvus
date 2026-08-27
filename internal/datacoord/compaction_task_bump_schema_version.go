@@ -40,11 +40,12 @@ import (
 var _ CompactionTask = (*bumpSchemaVersionTask)(nil)
 
 type bumpSchemaVersionTask struct {
-	taskProto atomic.Value // *datapb.CompactionTask
-	allocator allocator.Allocator
-	meta      CompactionMeta
-	ievm      IndexEngineVersionManager
-	times     *taskcommon.Times
+	taskProto  atomic.Value // *datapb.CompactionTask
+	stateGuard compactionTaskStateGuard
+	allocator  allocator.Allocator
+	meta       CompactionMeta
+	ievm       IndexEngineVersionManager
+	times      *taskcommon.Times
 }
 
 func newBumpSchemaVersionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, ievm IndexEngineVersionManager) *bumpSchemaVersionTask {
@@ -403,6 +404,9 @@ func (t *bumpSchemaVersionTask) processCompleted() bool {
 }
 
 func (t *bumpSchemaVersionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
+	t.stateGuard.Lock()
+	defer t.stateGuard.Unlock()
+
 	oldTask := t.GetTaskProto()
 	// if task state is completed, cleaned, failed, timeout, then do append end time and save
 	if oldTask.State == datapb.CompactionTaskState_completed ||

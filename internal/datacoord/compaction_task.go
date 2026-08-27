@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"strconv"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -51,6 +52,10 @@ type CompactionTask interface {
 }
 
 type compactionTaskOpt func(task *datapb.CompactionTask)
+
+type compactionTaskStateGuard struct {
+	sync.Mutex
+}
 
 type compactionTaskMetric struct {
 	nodeID         int64

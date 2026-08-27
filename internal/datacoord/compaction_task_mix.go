@@ -25,7 +25,8 @@ import (
 var _ CompactionTask = (*mixCompactionTask)(nil)
 
 type mixCompactionTask struct {
-	taskProto atomic.Value // *datapb.CompactionTask
+	taskProto  atomic.Value // *datapb.CompactionTask
+	stateGuard compactionTaskStateGuard
 
 	allocator allocator.Allocator
 	meta      CompactionMeta
@@ -315,6 +316,9 @@ func (t *mixCompactionTask) doClean() error {
 }
 
 func (t *mixCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
+	t.stateGuard.Lock()
+	defer t.stateGuard.Unlock()
+
 	oldTask := t.GetTaskProto()
 	// if task state is completed, cleaned, failed, timeout, then do append end time and save
 	if oldTask.State == datapb.CompactionTaskState_completed ||

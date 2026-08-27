@@ -508,6 +508,7 @@ func (c *compactionInspector) removeTasksByChannel(channel string) {
 				mlog.Int64("planID", task.GetTaskProto().GetPlanID()),
 				mlog.Int64("node", task.GetTaskProto().GetNodeID()),
 			)
+			c.scheduler.AbortAndRemoveTask(id)
 			delete(c.executingTasks, id)
 			decCompactionTaskMetric(task.GetTaskProto())
 		}
