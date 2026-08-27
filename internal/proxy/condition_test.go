@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -119,4 +120,43 @@ func TestTaskCondition_Notify(t *testing.T) {
 		assert.NotEqual(t, nil, err)
 	}()
 	wg.Wait()
+}
+
+func TestTaskCondition_OnWaitError(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		condition := NewTaskCondition(context.Background())
+		var calls atomic.Int32
+		condition.SetOnWaitError(func() {
+			calls.Add(1)
+		})
+
+		condition.Notify(nil)
+		assert.NoError(t, condition.WaitToFinish())
+		assert.Zero(t, calls.Load())
+	})
+
+	t.Run("task error", func(t *testing.T) {
+		condition := NewTaskCondition(context.Background())
+		var calls atomic.Int32
+		condition.SetOnWaitError(func() {
+			calls.Add(1)
+		})
+
+		condition.Notify(errors.New("task failed"))
+		assert.Error(t, condition.WaitToFinish())
+		assert.Equal(t, int32(1), calls.Load())
+	})
+
+	t.Run("context canceled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		condition := NewTaskCondition(ctx)
+		var calls atomic.Int32
+		condition.SetOnWaitError(func() {
+			calls.Add(1)
+		})
+
+		cancel()
+		assert.Error(t, condition.WaitToFinish())
+		assert.Equal(t, int32(1), calls.Load())
+	})
 }

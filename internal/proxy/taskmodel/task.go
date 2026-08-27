@@ -47,6 +47,7 @@ type Task interface {
 	PostExecute(ctx context.Context) error
 	WaitToFinish() error
 	Notify(err error)
+	SetOnWaitError(handler func())
 	CanSkipAllocTimestamp() bool
 	GetMetaCache() metacache.Cache
 	SetOnEnqueueTime()
