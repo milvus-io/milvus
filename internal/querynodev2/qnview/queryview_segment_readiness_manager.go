@@ -28,13 +28,16 @@ type QueryViewSegmentReadinessManager struct {
 	segments map[int64]*transformSegmentState
 }
 
-const transformCatchupWorkerCount = 4
-
-func NewQueryViewSegmentReadinessManager(physical PhysicalSegmentManager, buffer TransformLogBuffer, collections ...QueryViewCollectionRuntimeManager) *QueryViewSegmentReadinessManager {
-	return NewQueryViewSegmentReadinessManagerWithScheduler(nodescheduler.Get(), physical, buffer, collections...)
-}
-
-func NewQueryViewSegmentReadinessManagerWithScheduler(scheduler nodescheduler.Scheduler, physical PhysicalSegmentManager, buffer TransformLogBuffer, collections ...QueryViewCollectionRuntimeManager) *QueryViewSegmentReadinessManager {
+func NewQueryViewSegmentReadinessManagerWithScheduler(
+	scheduler nodescheduler.Scheduler,
+	physical PhysicalSegmentManager,
+	buffer TransformLogBuffer,
+	catchupConcurrency int,
+	collections ...QueryViewCollectionRuntimeManager,
+) *QueryViewSegmentReadinessManager {
+	if catchupConcurrency <= 0 {
+		panic("query view segment catch-up concurrency must be positive")
+	}
 	var collectionManager QueryViewCollectionRuntimeManager
 	if len(collections) > 0 {
 		collectionManager = collections[0]
@@ -48,7 +51,7 @@ func NewQueryViewSegmentReadinessManagerWithScheduler(scheduler nodescheduler.Sc
 		views:        make(map[qviews.QueryViewKey]*transformViewRef),
 		segments:     make(map[int64]*transformSegmentState),
 	}
-	for i := 0; i < transformCatchupWorkerCount; i++ {
+	for i := 0; i < catchupConcurrency; i++ {
 		go m.catchupWorker()
 	}
 	return m
