@@ -19,7 +19,6 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
-#include <unordered_set>
 
 #include "arrow/filesystem/filesystem.h"
 #include "arrow/util/io_util.h"
@@ -127,50 +126,42 @@ class LatencyObserver {
 
 }  // namespace
 
-bool
-ArrowFileSystemChunkManager::SupportsCloudProvider(
-    const std::string& cloud_provider) {
-    // Empty cloud_provider is treated as supported: a minio/remote config
-    // with no explicit provider (e.g. self-hosted MinIO) still routes to the
-    // ArrowFileSystem backend. gcpnative stays excluded (no milvus-storage
-    // producer).
-    static const std::unordered_set<std::string> supported = {
-        "", "aws", "gcp", "aliyun", "azure", "tencent", "huawei"};
-    return supported.find(cloud_provider) != supported.end();
-}
-
-ArrowFileSystemChunkManager::ArrowFileSystemChunkManager(
-    const StorageConfig& storage_config)
-    : default_bucket_name_(storage_config.bucket_name),
-      remote_root_path_(storage_config.root_path) {
+ChunkManagerPtr
+ArrowFileSystemChunkManager::Make(const StorageConfig& storage_config) {
     auto key = ToStorageV2FSCacheKey(storage_config);
+    bool local_backend = false;
     if (storage_config.storage_type == "local") {
         // LocalChunkManager parity: callers pass OS paths (absolute,
         // root_path-prefixed), not root-relative keys. Root the filesystem
         // at "/" so those paths pass through unchanged.
         key.root_path = "/";
-        local_backend_ = true;
+        local_backend = true;
     }
+    milvus_storage::ArrowFileSystemPtr fs;
     try {
-        fs_ = StorageV2FSCache::Instance().Get(key);
+        fs = StorageV2FSCache::Instance().Get(key);
     } catch (const std::exception& e) {
-        // Producers mostly report failures via arrow::Status (-> nullptr
-        // below), but some paths throw raw exceptions (e.g. endpoint
-        // parsing). Convert them so a classified SegcoreError reaches the
-        // cgo boundary instead of an unclassified std::exception.
-        ThrowInfo(StorageError,
-                  "failed to create arrow filesystem for chunk manager: {}, "
-                  "storage config: {}",
-                  e.what(),
-                  storage_config.ToString());
+        // Producers mostly report an unsupported/failed filesystem via
+        // arrow::Status (-> nullptr below), but some paths throw raw
+        // exceptions (e.g. endpoint parsing). Either way the config cannot
+        // produce a filesystem: fall back to the legacy chunk managers
+        // rather than failing the caller.
+        LOG_WARN(
+            "arrow filesystem unavailable for chunk manager ({}), storage "
+            "config: {}",
+            e.what(),
+            storage_config.ToString());
+        return nullptr;
     }
-    if (fs_ == nullptr) {
-        // Init-time failure: the storage config cannot produce a filesystem.
-        // Permanent (retrying with the same config fails identically).
-        ThrowInfo(StorageError,
-                  "failed to create arrow filesystem for chunk manager, "
-                  "storage config: {}",
-                  storage_config.ToString());
+    if (fs == nullptr) {
+        // milvus-storage has no producer for this config (unknown / empty /
+        // gcpnative cloud provider, or a config its filesystem layer rejects).
+        // Fall back to the legacy chunk managers.
+        LOG_WARN(
+            "arrow filesystem unavailable for chunk manager, storage "
+            "config: {}",
+            storage_config.ToString());
+        return nullptr;
     }
     LOG_INFO(
         "init ArrowFileSystemChunkManager with "
@@ -179,6 +170,22 @@ ArrowFileSystemChunkManager::ArrowFileSystemChunkManager(
         storage_config.bucket_name,
         storage_config.root_path,
         storage_config.useSSL);
+    return std::shared_ptr<ArrowFileSystemChunkManager>(
+        new ArrowFileSystemChunkManager(std::move(fs),
+                                        local_backend,
+                                        storage_config.bucket_name,
+                                        storage_config.root_path));
+}
+
+ArrowFileSystemChunkManager::ArrowFileSystemChunkManager(
+    milvus_storage::ArrowFileSystemPtr fs,
+    bool local_backend,
+    std::string bucket_name,
+    std::string root_path)
+    : fs_(std::move(fs)),
+      default_bucket_name_(std::move(bucket_name)),
+      remote_root_path_(std::move(root_path)),
+      local_backend_(local_backend) {
 }
 
 std::string

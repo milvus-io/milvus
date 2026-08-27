@@ -59,7 +59,15 @@ namespace milvus::storage {
  */
 class ArrowFileSystemChunkManager : public ChunkManager {
  public:
-    explicit ArrowFileSystemChunkManager(const StorageConfig& storage_config);
+    // Build a chunk manager for this storage config, or nullptr when
+    // milvus-storage has no producer for it (unknown / empty / "gcpnative"
+    // cloud provider, or any config its filesystem layer rejects). The caller
+    // (CreateChunkManager) then falls back to the legacy chunk managers.
+    // milvus-storage owns provider-support classification; milvus does not
+    // second-guess it with an allow-list. Never throws for an unsupported
+    // config — "cannot build a filesystem" is a fall-back signal, not an error.
+    static ChunkManagerPtr
+    Make(const StorageConfig& storage_config);
 
     virtual ~ArrowFileSystemChunkManager() = default;
 
@@ -113,13 +121,15 @@ class ArrowFileSystemChunkManager : public ChunkManager {
         return default_bucket_name_;
     }
 
-    // Whether the milvus-storage ArrowFileSystem has a producer for this
-    // cloud provider. "gcpnative" (and unknown values) must stay on the
-    // legacy chunk managers.
-    static bool
-    SupportsCloudProvider(const std::string& cloud_provider);
-
  private:
+    // Private: fs is already built and non-null (see Make). This constructor
+    // does no network IO and never throws — all filesystem construction and
+    // failure handling lives in Make.
+    ArrowFileSystemChunkManager(milvus_storage::ArrowFileSystemPtr fs,
+                                bool local_backend,
+                                std::string bucket_name,
+                                std::string root_path);
+
     // LocalChunkManager parity for the "/"-rooted local backend: relative
     // filepaths are resolved against the process CWD, exactly like the OS
     // path semantics of the legacy implementation. Remote paths (object

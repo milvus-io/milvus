@@ -52,8 +52,8 @@ class ArrowFileSystemChunkManagerTest : public testing::Test {
                        std::to_string(reinterpret_cast<uintptr_t>(this))))
                          .string();
         std::filesystem::create_directories(root_path_);
-        cm_ = std::make_unique<ArrowFileSystemChunkManager>(
-            LocalStorageConfig(root_path_));
+        cm_ = ArrowFileSystemChunkManager::Make(LocalStorageConfig(root_path_));
+        ASSERT_NE(cm_, nullptr);
     }
 
     // LocalChunkManager parity: callers address the local backend with OS
@@ -71,7 +71,7 @@ class ArrowFileSystemChunkManagerTest : public testing::Test {
     }
 
     std::string root_path_;
-    std::unique_ptr<ArrowFileSystemChunkManager> cm_;
+    ChunkManagerPtr cm_;
 };
 
 }  // namespace
@@ -210,19 +210,33 @@ TEST_F(ArrowFileSystemChunkManagerTest, OffsetOpsNotImplemented) {
     EXPECT_THROW(cm_->Write("any", 0, buf, sizeof(buf)), milvus::SegcoreError);
 }
 
-TEST(ArrowFileSystemChunkManagerSwitch, SupportedProviders) {
-    EXPECT_TRUE(ArrowFileSystemChunkManager::SupportsCloudProvider("aws"));
-    EXPECT_TRUE(ArrowFileSystemChunkManager::SupportsCloudProvider("gcp"));
-    EXPECT_TRUE(ArrowFileSystemChunkManager::SupportsCloudProvider("aliyun"));
-    EXPECT_TRUE(ArrowFileSystemChunkManager::SupportsCloudProvider("azure"));
-    EXPECT_TRUE(ArrowFileSystemChunkManager::SupportsCloudProvider("tencent"));
-    EXPECT_TRUE(ArrowFileSystemChunkManager::SupportsCloudProvider("huawei"));
-    // gcpnative has no milvus-storage producer; must stay on legacy
-    EXPECT_FALSE(
-        ArrowFileSystemChunkManager::SupportsCloudProvider("gcpnative"));
-    // empty provider is supported: a minio/remote config with no explicit
-    // provider still routes to the ArrowFileSystem backend
-    EXPECT_TRUE(ArrowFileSystemChunkManager::SupportsCloudProvider(""));
+// milvus-storage owns provider-support classification. Make() returns nullptr
+// for a config it has no producer for (unknown / empty / gcpnative provider),
+// so CreateChunkManager falls back to the legacy chunk managers instead of
+// throwing. A supported provider (aws) builds without touching the network
+// (the S3 client is created lazily), so this stays a unit test.
+TEST(ArrowFileSystemChunkManagerSwitch, MakeUnsupportedProviderFallsBack) {
+    StorageConfig config;
+    config.storage_type = "remote";
+    config.address = "localhost:9000";
+    config.bucket_name = "a-bucket";
+
+    // gcpnative: milvus-storage has no arrow producer -> nullptr -> legacy.
+    config.cloud_provider = "gcpnative";
+    EXPECT_EQ(ArrowFileSystemChunkManager::Make(config), nullptr);
+
+    // empty provider (e.g. self-hosted MinIO with no explicit provider):
+    // milvus-storage rejects it (CreateArrowFileSystem -> Status::Invalid), so
+    // Make() falls back rather than throwing a hard error at the caller.
+    config.cloud_provider = "";
+    EXPECT_EQ(ArrowFileSystemChunkManager::Make(config), nullptr);
+
+    // a supported provider builds a chunk manager (client is lazy, no network).
+    config.cloud_provider = "aws";
+    auto cm = ArrowFileSystemChunkManager::Make(config);
+    ASSERT_NE(cm, nullptr);
+    EXPECT_EQ(cm->GetName(), "ArrowFileSystemChunkManager");
+    EXPECT_EQ(cm->GetBucketName(), "a-bucket");
 }
 
 // NOTE: constructing the LEGACY remote chunk managers requires a live

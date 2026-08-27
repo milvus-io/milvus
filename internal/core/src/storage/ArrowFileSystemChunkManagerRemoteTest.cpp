@@ -57,7 +57,9 @@ TEST(ArrowFileSystemChunkManagerRemote, MinioCRUD) {
     config.useIAM = false;
     config.root_path = "files";
 
-    ArrowFileSystemChunkManager cm(config);
+    auto cm_ptr = ArrowFileSystemChunkManager::Make(config);
+    ASSERT_NE(cm_ptr, nullptr);
+    auto& cm = *cm_ptr;
     EXPECT_EQ(cm.GetBucketName(), "a-bucket");
 
     std::string prefix = "arrow_fs_cm_ut/" + std::to_string(::getpid()) + "/";

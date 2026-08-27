@@ -1157,29 +1157,17 @@ UseArrowFileSystemChunkManager() {
     return use_arrow_fs_chunk_manager.load();
 }
 
-// Route a storage config to the ArrowFileSystem backed chunk manager
-// when the switch is on and milvus-storage has a producer for the backend;
-// otherwise stay on the legacy implementation.
+// Route a storage config to the ArrowFileSystem backed chunk manager when the
+// switch is on. milvus-storage owns provider-support classification: Make
+// returns nullptr for any config it has no producer for (unknown / empty /
+// gcpnative provider, or a rejected config), and CreateChunkManager then falls
+// back to the legacy chunk managers.
 static ChunkManagerPtr
 TryCreateArrowFileSystemChunkManager(const StorageConfig& storage_config) {
     if (!UseArrowFileSystemChunkManager()) {
         return nullptr;
     }
-    // The local backend always has a producer; provider gating only applies
-    // to remote configs.
-    if (storage_config.storage_type == "local") {
-        return std::make_shared<ArrowFileSystemChunkManager>(storage_config);
-    }
-    if (!ArrowFileSystemChunkManager::SupportsCloudProvider(
-            storage_config.cloud_provider)) {
-        LOG_WARN(
-            "cloud provider {} is not supported by "
-            "ArrowFileSystemChunkManager, falling back to the legacy chunk "
-            "manager",
-            storage_config.cloud_provider);
-        return nullptr;
-    }
-    return std::make_shared<ArrowFileSystemChunkManager>(storage_config);
+    return ArrowFileSystemChunkManager::Make(storage_config);
 }
 
 ChunkManagerPtr
