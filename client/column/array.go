@@ -219,4 +219,22 @@ func (c *ColumnVarCharArray) Slice(start, end int) Column {
 	return &ColumnVarCharArray{
 		columnArrayBase: c.columnArrayBase.slice(start, end),
 	}
+
+/* uuid array */
+
+type ColumnUUIDArray struct {
+	*columnArrayBase[string]
+}
+
+func NewColumnUUIDArray(fieldName string, data [][]string) *ColumnUUIDArray {
+	return &ColumnUUIDArray{
+		columnArrayBase: newArrayBase(fieldName, data, entity.FieldTypeUUID),
+	}
+}
+
+func (c *ColumnUUIDArray) Slice(start, end int) Column {
+	return &ColumnUUIDArray{
+		columnArrayBase: c.columnArrayBase.slice(start, end),
+	}
+}
 }
