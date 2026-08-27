@@ -473,10 +473,11 @@ func (o *openerAdaptorImpl) handleAlterWALAdvanceCheckpointsStage(ctx context.Co
 	// Update pchannel checkpoint: reset alterWALState and set position to new WAL initial position
 	finalCheckpoint := snapshot.Checkpoint.Clone()
 	finalCheckpoint.AlterWalState = nil
+	// Only the local checkpoint moves to the new backend. The replicate checkpoint
+	// holds the position this cluster has reached in the SOURCE cluster's WAL, so a
+	// local backend migration must leave it alone: the two message IDs belong to
+	// different clusters and therefore to different ID spaces.
 	finalCheckpoint.MessageID = msgadaptor.MustGetMessageIDFromMQWrapperID(newWALInitialMsgID)
-	if finalCheckpoint.ReplicateCheckpoint != nil {
-		finalCheckpoint.ReplicateCheckpoint.MessageID = finalCheckpoint.MessageID
-	}
 
 	// Persist final checkpoint to catalog
 	if err := catalog.SaveConsumeCheckpoint(ctx, opt.Channel.Name, finalCheckpoint.IntoProto()); err != nil {
