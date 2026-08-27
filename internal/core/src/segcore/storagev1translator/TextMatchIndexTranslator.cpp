@@ -16,11 +16,13 @@
 
 #include "segcore/storagev1translator/TextMatchIndexTranslator.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <utility>
 
 #include "cachinglayer/CacheSlot.h"
-#include "segcore/Utils.h"
+#include "common/Utils.h"
+#include "index/Utils.h"
 #include "segcore/Utils.h"
 #include "monitor/Monitor.h"
 #include "common/ScopedTimer.h"
@@ -79,16 +81,33 @@ TextMatchIndexTranslator::estimated_loading_usage(
         return {};
     }
     // ignore the cid checking, because there is only one cell
-    auto bitmap_bytes = EstimateValidityBitmapBytes(load_info_.num_rows);
+    const auto index_size = std::max<int64_t>(load_info_.index_size, 0);
+    const auto bitmap_bytes = EstimateValidityBitmapBytes(load_info_.num_rows);
+    const auto load_priority =
+        milvus::index::GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config_, LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+    const auto stream_memory_peak =
+        static_cast<int64_t>(milvus::index::ScalarIndexStreamMemoryOverhead(
+            static_cast<uint64_t>(index_size),
+            load_info_.scalar_index_version,
+            load_priority));
+    const auto stream_peak_with_bitmap =
+        SaturatingAdd(stream_memory_peak, bitmap_bytes);
     if (load_info_.enable_mmap) {
-        return {{bitmap_bytes, load_info_.index_size},
-                {load_info_.index_size + bitmap_bytes, load_info_.index_size}};
+        return {{bitmap_bytes, index_size},
+                {stream_peak_with_bitmap, index_size}};
     } else {
-        // The reason the maximum disk usage is not zero is that the text match index
-        // is first written to the disk, then loaded into memory. Only after that are
-        // the disk files deleted.
-        return {{load_info_.index_size + bitmap_bytes, 0},
-                {load_info_.index_size + bitmap_bytes, load_info_.index_size}};
+        // Tantivy first materializes the index on disk, then copies each file
+        // through a temporary buffer into RamDirectory. The largest file can
+        // approach the whole index size, and the disk files are removed only
+        // after the in-memory index has been opened.
+        const auto loaded_memory = SaturatingAdd(index_size, bitmap_bytes);
+        const auto ram_directory_peak = SaturatingAdd(
+            SaturatingMultiply(int64_t{2}, index_size), bitmap_bytes);
+        return {{loaded_memory, 0},
+                {std::max(ram_directory_peak, stream_peak_with_bitmap),
+                 index_size}};
     }
 }
 

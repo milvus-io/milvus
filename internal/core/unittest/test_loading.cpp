@@ -19,10 +19,14 @@
 #include <vector>
 #include <map>
 
+#include "common/Consts.h"
 #include "segcore/Types.h"
+#include "index/IndexFactory.h"
+#include "index/Meta.h"
 #include "knowhere/version.h"
 #include "knowhere/comp/index_param.h"
 #include "segcore/load_index_c.h"
+#include "storage/ThreadPools.h"
 
 using Param =
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>;
@@ -314,6 +318,132 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     ASSERT_EQ(request.final_disk_cost, expected.final_disk_cost);
     ASSERT_EQ(request.max_memory_cost, expected.max_memory_cost);
     ASSERT_EQ(request.max_disk_cost, expected.max_disk_cost);
+}
+
+TEST(IndexLoadTest, ScalarV3MmapTantivyUsesDownloadConcurrencyBound) {
+    constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
+    constexpr int64_t kNumRows = 64UL * 1024 * 1024;
+    constexpr uint64_t kValidityBitmapBytes = kNumRows / 8;
+    const auto worker_count = std::max<size_t>(
+        1,
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH)
+            .GetMaxThreadNum());
+    const auto expected_download_peak = std::min<uint64_t>(
+        kIndexSize, worker_count * DEFAULT_INDEX_FILE_SLICE_SIZE);
+
+    for (const auto* index_type : {milvus::index::INVERTED_INDEX_TYPE,
+                                   milvus::index::NGRAM_INDEX_TYPE}) {
+        std::map<std::string, std::string> index_params{
+            {milvus::index::INDEX_TYPE, index_type},
+            {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
+        milvus::segcore::LoadIndexInfo load_index_info{};
+        load_index_info.field_type = milvus::DataType::VARCHAR;
+        load_index_info.element_type = milvus::DataType::NONE;
+        load_index_info.enable_mmap = true;
+        load_index_info.index_params = index_params;
+        load_index_info.index_size = kIndexSize;
+        load_index_info.num_rows = kNumRows;
+        load_index_info.schema.set_nullable(false);
+
+        auto request = EstimateLoadIndexResource(&load_index_info);
+
+        EXPECT_EQ(request.max_memory_cost,
+                  expected_download_peak + kValidityBitmapBytes);
+        EXPECT_EQ(request.max_disk_cost, kIndexSize);
+        EXPECT_EQ(request.final_memory_cost, kValidityBitmapBytes);
+        EXPECT_EQ(request.final_disk_cost, kIndexSize);
+    }
+}
+
+TEST(IndexLoadTest, ScalarV3SortUsesStreamConcurrencyBound) {
+    constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
+    constexpr uint64_t kSmallIndexSize = DEFAULT_INDEX_FILE_SLICE_SIZE / 2;
+    const auto worker_count = std::max<size_t>(
+        1,
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH)
+            .GetMaxThreadNum());
+    const auto stream_overhead = std::min<uint64_t>(
+        kIndexSize, worker_count * DEFAULT_INDEX_FILE_SLICE_SIZE);
+    std::map<std::string, std::string> index_params{
+        {milvus::index::INDEX_TYPE, milvus::index::ASCENDING_SORT},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
+
+    auto& factory = milvus::index::IndexFactory::GetInstance();
+    auto memory_request = factory.IndexLoadResource(milvus::DataType::INT64,
+                                                    milvus::DataType::NONE,
+                                                    0,
+                                                    kIndexSize,
+                                                    index_params,
+                                                    false,
+                                                    0,
+                                                    0);
+    EXPECT_EQ(memory_request.final_memory_cost, kIndexSize);
+    EXPECT_EQ(memory_request.final_disk_cost, 0);
+    EXPECT_EQ(memory_request.max_memory_cost, kIndexSize + stream_overhead);
+    EXPECT_EQ(memory_request.max_disk_cost, 0);
+
+    auto mmap_request = factory.IndexLoadResource(milvus::DataType::INT64,
+                                                  milvus::DataType::NONE,
+                                                  0,
+                                                  kIndexSize,
+                                                  index_params,
+                                                  true,
+                                                  0,
+                                                  0);
+    EXPECT_EQ(mmap_request.final_memory_cost, 0);
+    EXPECT_EQ(mmap_request.final_disk_cost, kIndexSize);
+    EXPECT_EQ(mmap_request.max_memory_cost, stream_overhead);
+    EXPECT_EQ(mmap_request.max_disk_cost, kIndexSize);
+
+    auto small_mmap_request = factory.IndexLoadResource(milvus::DataType::INT64,
+                                                        milvus::DataType::NONE,
+                                                        0,
+                                                        kSmallIndexSize,
+                                                        index_params,
+                                                        true,
+                                                        0,
+                                                        0);
+    EXPECT_EQ(small_mmap_request.max_memory_cost, kSmallIndexSize);
+}
+
+TEST(IndexLoadTest, ScalarV2SortRetainsWholeEntryBound) {
+    constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
+    std::map<std::string, std::string> index_params{
+        {milvus::index::INDEX_TYPE, milvus::index::ASCENDING_SORT},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "2"}};
+
+    auto request = milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+        milvus::DataType::INT64,
+        milvus::DataType::NONE,
+        0,
+        kIndexSize,
+        index_params,
+        false,
+        0,
+        0);
+
+    EXPECT_EQ(request.final_memory_cost, kIndexSize);
+    EXPECT_EQ(request.max_memory_cost, 2 * kIndexSize);
+}
+
+TEST(IndexLoadTest, ScalarV3MmapRTreeRetainsWholeIndexLoadingEstimate) {
+    constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
+    std::map<std::string, std::string> index_params{
+        {milvus::index::INDEX_TYPE, milvus::index::RTREE_INDEX_TYPE},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
+
+    auto request = milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+        milvus::DataType::GEOMETRY,
+        milvus::DataType::NONE,
+        0,
+        kIndexSize,
+        index_params,
+        true,
+        10'000'000,
+        0);
+
+    EXPECT_EQ(request.max_memory_cost, kIndexSize);
+    EXPECT_EQ(request.final_disk_cost, kIndexSize);
 }
 
 // Test that warmup policy is kept in index_params and passed to Knowhere

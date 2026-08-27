@@ -29,6 +29,7 @@ struct TextMatchIndexLoadInfo {
     int64_t field_id;
     std::string analyzer_params;
     int64_t index_size;
+    int32_t scalar_index_version;
     int64_t num_rows;
     std::string
         warmup_policy;  // "disable" or "sync", empty means use global config

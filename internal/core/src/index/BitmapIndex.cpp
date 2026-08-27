@@ -16,6 +16,9 @@
 
 #include <algorithm>
 #include <boost/algorithm/string.hpp>
+#include <cstring>
+#include <filesystem>
+#include <folly/ScopeGuard.h>
 #include <optional>
 #include <sys/errno.h>
 #include <unistd.h>
@@ -1446,30 +1449,74 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
         rebuild_validity_from_postings = false;
     }
 
-    auto data_entry = reader.ReadEntry(BITMAP_INDEX_DATA);
-
     ChooseIndexLoadMode(index_length);
+
+    auto priority = GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                        config, milvus::LOAD_PRIORITY)
+                        .value_or(milvus::proto::common::LoadPriority::HIGH);
 
     if (config.contains(MMAP_FILE_PATH) &&
         build_mode_ == BitmapIndexBuildMode::ROARING) {
         auto mmap_filepath =
             GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
-        auto priority =
-            GetValueFromConfig<milvus::proto::common::LoadPriority>(
-                config, milvus::LOAD_PRIORITY)
-                .value_or(milvus::proto::common::LoadPriority::HIGH);
         AssertInfo(mmap_filepath.has_value(),
                    "mmap filepath is empty when load index");
+
+        auto parent =
+            std::filesystem::path(mmap_filepath.value()).parent_path();
+        if (!parent.empty()) {
+            std::filesystem::create_directories(parent);
+        }
+        auto tmp_path = mmap_filepath.value() + ".tmp_load";
+        auto tmp_path_guard =
+            folly::makeGuard([&tmp_path]() { unlink(tmp_path.c_str()); });
+        {
+            auto file_writer = storage::FileWriter(
+                tmp_path, storage::io::GetPriorityFromLoadPriority(priority));
+            reader.ReadEntryStream(BITMAP_INDEX_DATA,
+                                   [&](const uint8_t* data, size_t len) {
+                                       file_writer.Write(data, len);
+                                   });
+            file_writer.Finish();
+        }
+        auto tmp_size = std::filesystem::file_size(tmp_path);
+        auto tmp_file = File::Open(tmp_path, O_RDONLY);
+        auto* tmp_map = mmap(nullptr,
+                             tmp_size,
+                             PROT_READ,
+                             MAP_PRIVATE,
+                             tmp_file.Descriptor(),
+                             0);
+        AssertInfo(tmp_map != MAP_FAILED,
+                   "failed to mmap bitmap temp file: {}",
+                   strerror(errno));
+        tmp_file.Close();
+        auto tmp_map_guard = folly::makeGuard(
+            [tmp_map, tmp_size]() { munmap(tmp_map, tmp_size); });
+
         MMapIndexData(mmap_filepath.value(),
-                      data_entry.data.data(),
-                      data_entry.data.size(),
+                      static_cast<const uint8_t*>(tmp_map),
+                      tmp_size,
                       index_length,
                       priority,
                       rebuild_validity_from_postings);
     } else {
-        DeserializeIndexData(data_entry.data.data(),
-                             index_length,
-                             rebuild_validity_from_postings);
+        auto data_size = reader.GetEntrySize(BITMAP_INDEX_DATA);
+        std::vector<uint8_t> data(data_size);
+        size_t written = 0;
+        reader.ReadEntryStream(
+            BITMAP_INDEX_DATA, [&](const uint8_t* slice, size_t len) {
+                AssertInfo(len <= data_size - written,
+                           "bitmap index stream exceeds expected size");
+                std::memcpy(data.data() + written, slice, len);
+                written += len;
+            });
+        AssertInfo(written == data_size,
+                   "bitmap index stream size mismatch: got {}, expected {}",
+                   written,
+                   data_size);
+        DeserializeIndexData(
+            data.data(), index_length, rebuild_validity_from_postings);
     }
 
     if (enable_offset_cache.has_value() && enable_offset_cache.value()) {
