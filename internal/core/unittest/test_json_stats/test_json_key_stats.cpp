@@ -12,11 +12,15 @@
 #include <boost/filesystem/operations.hpp>
 #include <fmt/core.h>
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <simdjson.h>
 #include <stddef.h>
+#include <atomic>
+#include <barrier>
 #include <cstdint>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <random>
@@ -36,6 +40,8 @@
 #include "common/Types.h"
 #include "common/bson_view.h"
 #include "common/protobuf_utils.h"
+#include "futures/Executor.h"
+#include "futures/future_c.h"
 #include "gtest/gtest.h"
 #include "index/IndexInfo.h"
 #include "index/IndexStats.h"
@@ -44,10 +50,12 @@
 #include "index/json_stats/bson_inverted.h"
 #include "index/json_stats/utils.h"
 #include "indexbuilder/IndexCreatorBase.h"
+#include "milvus-storage/format/parquet/file_reader.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "simdjson/padded_string.h"
 #include "storage/ChunkManager.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
@@ -60,6 +68,79 @@ using namespace milvus::index;
 using namespace milvus::indexbuilder;
 using namespace milvus;
 using namespace milvus::index;
+
+class BuildKeyStatsAccessor {
+ public:
+    static void
+    Prepare(JsonKeyStats& stats,
+            const std::map<JsonKey, JsonKeyLayoutType>& key_types,
+            int64_t num_rows) {
+        stats.num_rows_ = num_rows;
+        stats.key_types_ = key_types;
+        stats.shared_keys_.clear();
+        stats.column_keys_.clear();
+        for (const auto& [key, layout] : key_types) {
+            if (layout == JsonKeyLayoutType::SHARED) {
+                stats.shared_keys_.insert(key);
+            } else {
+                stats.column_keys_.insert(key);
+            }
+        }
+
+        auto remote_prefix =
+            stats.disk_file_manager_->GetRemoteJsonStatsShreddingPrefix();
+        auto writer_context =
+            ParquetWriterFactory::CreateContext(key_types, remote_prefix);
+        stats.parquet_writer_->Init(std::move(writer_context));
+    }
+
+    static void
+    CallLegacy(JsonKeyStats& stats,
+               const std::vector<JsonStatsRowRange>& row_ranges,
+               bool nullable) {
+        stats.BuildKeyStats(row_ranges, nullable);
+    }
+
+    static void
+    CallParallel(JsonKeyStats& stats,
+                 const std::vector<JsonStatsRowRange>& row_ranges,
+                 bool nullable) {
+        stats.BuildKeyStatsParallel(row_ranges, nullable);
+    }
+
+    static size_t
+    EstimateMaterializeReservationBytes(const JsonStatsRowRange& range,
+                                        const arrow::Schema& schema) {
+        return JsonKeyStats::EstimateJsonStatsMaterializeReservationBytes(
+            range, schema);
+    }
+
+    static void
+    Finish(JsonKeyStats& stats) {
+        auto status = stats.parquet_writer_->Close();
+        AssertInfo(status.ok(),
+                   "failed to close json stats test writer: {}",
+                   status.ToString());
+        stats.bson_inverted_index_->BuildIndex();
+    }
+
+    static std::vector<std::string>
+    GetParquetFiles(const JsonKeyStats& stats) {
+        std::vector<std::string> files;
+        for (const auto& [path, size] :
+             stats.parquet_writer_->GetPathsToSize()) {
+            if (size > 0) {
+                files.push_back(path);
+            }
+        }
+        return files;
+    }
+
+    static IndexStatsPtr
+    UploadBsonIndex(JsonKeyStats& stats) {
+        return stats.bson_inverted_index_->UploadIndex();
+    }
+};
 
 int64_t
 GenerateRandomInt64(int64_t min, int64_t max) {
@@ -93,6 +174,1019 @@ GenerateJsons(int size) {
         jsons.push_back(milvus::Json(simdjson::padded_string(str)));
     }
     return jsons;
+}
+
+namespace {
+
+milvus::FieldDataPtr
+CreateMaterializeJsonFieldData(const std::vector<std::string>& json_rows) {
+    auto field_data = milvus::storage::CreateFieldData(
+        milvus::DataType::JSON, milvus::DataType::NONE, false);
+    if (json_rows.empty()) {
+        return field_data;
+    }
+
+    std::vector<milvus::Json> rows;
+    rows.reserve(json_rows.size());
+    for (const auto& json : json_rows) {
+        rows.emplace_back(simdjson::padded_string(json));
+    }
+    field_data->FillFieldData(rows.data(), rows.size());
+    return field_data;
+}
+
+milvus::FieldDataPtr
+CreateNullableMaterializeJsonFieldData(
+    const std::vector<std::string>& json_rows,
+    const std::vector<bool>& valid_rows) {
+    AssertInfo(json_rows.size() == valid_rows.size(),
+               "json rows and validity rows must have the same size");
+    auto field_data = milvus::storage::CreateFieldData(
+        milvus::DataType::JSON, milvus::DataType::NONE, true);
+    if (json_rows.empty()) {
+        return field_data;
+    }
+
+    std::vector<milvus::Json> rows;
+    rows.reserve(json_rows.size());
+    for (const auto& json : json_rows) {
+        rows.emplace_back(simdjson::padded_string(json));
+    }
+
+    std::vector<uint8_t> valid_bitmap((valid_rows.size() + 7) / 8, 0);
+    for (size_t i = 0; i < valid_rows.size(); ++i) {
+        if (valid_rows[i]) {
+            valid_bitmap[i / 8] |= static_cast<uint8_t>(1U << (i % 8));
+        }
+    }
+    field_data->FillFieldData(rows.data(), valid_bitmap.data(), rows.size(), 0);
+    return field_data;
+}
+
+struct MaterializeTestIndex {
+    std::shared_ptr<storage::ChunkManager> chunk_manager;
+    milvus_storage::ArrowFileSystemPtr fs;
+    storage::FileManagerContext context;
+    std::unique_ptr<JsonKeyStats> stats;
+};
+
+MaterializeTestIndex
+CreateMaterializeTestIndex(bool nullable, int64_t write_batch_size) {
+    static std::atomic<int64_t> next_id{900000};
+    const auto id = next_id.fetch_add(1);
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_data_type(proto::schema::DataType::JSON);
+    field_schema.set_nullable(nullable);
+    storage::FieldDataMeta field_meta{11, 12, id, 101, field_schema};
+    storage::IndexMeta index_meta{id, 101, id, 1};
+
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestLocalPath;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+    auto stats =
+        std::make_unique<JsonKeyStats>(ctx, false, 1024, 0.3, write_batch_size);
+
+    return MaterializeTestIndex{
+        chunk_manager,
+        fs,
+        ctx,
+        std::move(stats),
+    };
+}
+
+struct MaterializedTable {
+    std::shared_ptr<arrow::Table> table;
+    std::vector<int64_t> row_group_rows;
+};
+
+MaterializedTable
+ReadMaterializedTable(const milvus_storage::ArrowFileSystemPtr& fs,
+                      const std::string& file) {
+    auto reader_result = milvus_storage::FileRowGroupReader::Make(fs, file);
+    AssertInfo(reader_result.ok(),
+               "failed to create json stats parquet test reader: {}",
+               reader_result.status().ToString());
+    auto reader = reader_result.ValueOrDie();
+    auto row_groups = reader->file_metadata()->GetRowGroupMetadataVector();
+    AssertInfo(row_groups.size() > 0,
+               "json stats parquet test file has no row groups");
+
+    auto status = reader->SetRowGroupOffsetAndCount(
+        0, static_cast<int>(row_groups.size()));
+    AssertInfo(status.ok(),
+               "failed to select json stats parquet row groups: {}",
+               status.ToString());
+
+    std::vector<std::shared_ptr<arrow::Table>> tables;
+    std::vector<int64_t> row_group_rows;
+    tables.reserve(row_groups.size());
+    row_group_rows.reserve(row_groups.size());
+    for (size_t i = 0; i < row_groups.size(); ++i) {
+        std::shared_ptr<arrow::Table> table;
+        status = reader->ReadNextRowGroup(&table);
+        AssertInfo(status.ok(),
+                   "failed to read json stats parquet row group: {}",
+                   status.ToString());
+        AssertInfo(table != nullptr,
+                   "json stats parquet reader returned a null row group");
+        tables.push_back(std::move(table));
+        row_group_rows.push_back(row_groups.Get(i).row_num());
+    }
+    status = reader->Close();
+    AssertInfo(status.ok(),
+               "failed to close json stats parquet test reader: {}",
+               status.ToString());
+
+    auto concatenate_result = arrow::ConcatenateTables(tables);
+    AssertInfo(concatenate_result.ok(),
+               "failed to concatenate json stats parquet tables: {}",
+               concatenate_result.status().ToString());
+    auto combine_result = concatenate_result.ValueOrDie()->CombineChunks();
+    AssertInfo(combine_result.ok(),
+               "failed to combine json stats parquet chunks: {}",
+               combine_result.status().ToString());
+    return MaterializedTable{
+        combine_result.ValueOrDie(),
+        std::move(row_group_rows),
+    };
+}
+
+struct MaterializeSnapshot {
+    MaterializedTable parquet;
+    std::map<std::string, std::vector<std::pair<uint32_t, uint32_t>>> postings;
+};
+
+MaterializeSnapshot
+BuildMaterializeSnapshot(const std::vector<JsonStatsRowRange>& row_ranges,
+                         const std::map<JsonKey, JsonKeyLayoutType>& key_types,
+                         const std::vector<std::string>& shared_paths,
+                         bool nullable,
+                         bool parallel,
+                         int64_t write_batch_size = 5) {
+    int64_t num_rows = 0;
+    for (const auto& range : row_ranges) {
+        num_rows += range.row_count;
+    }
+
+    auto test_index = CreateMaterializeTestIndex(nullable, write_batch_size);
+    BuildKeyStatsAccessor::Prepare(*test_index.stats, key_types, num_rows);
+    if (parallel) {
+        BuildKeyStatsAccessor::CallParallel(
+            *test_index.stats, row_ranges, nullable);
+    } else {
+        BuildKeyStatsAccessor::CallLegacy(
+            *test_index.stats, row_ranges, nullable);
+    }
+    BuildKeyStatsAccessor::Finish(*test_index.stats);
+
+    auto files = BuildKeyStatsAccessor::GetParquetFiles(*test_index.stats);
+    if (num_rows == 0) {
+        AssertInfo(files.empty(),
+                   "empty json stats build unexpectedly produced {} parquet "
+                   "files",
+                   files.size());
+        return MaterializeSnapshot{
+            MaterializedTable{nullptr, {}},
+            {},
+        };
+    }
+    AssertInfo(files.size() == 1,
+               "expected one json stats parquet file, got {}",
+               files.size());
+
+    MaterializeSnapshot snapshot{
+        ReadMaterializedTable(test_index.fs, files.front()),
+        {},
+    };
+    auto bson_stats = BuildKeyStatsAccessor::UploadBsonIndex(*test_index.stats);
+    auto load_disk_file_manager =
+        std::make_shared<storage::DiskFileManagerImpl>(test_index.context);
+    BsonInvertedIndex loaded_bson_index(load_disk_file_manager);
+    loaded_bson_index.LoadIndex(bson_stats->GetIndexFiles(),
+                                milvus::proto::common::LoadPriority::HIGH,
+                                false);
+    for (const auto& path : shared_paths) {
+        loaded_bson_index.TermQuery(
+            path,
+            [&](const uint32_t* row_ids,
+                const uint32_t* offsets,
+                int64_t count) {
+                for (int64_t i = 0; i < count; ++i) {
+                    snapshot.postings[path].emplace_back(row_ids[i],
+                                                         offsets[i]);
+                }
+            });
+    }
+    return snapshot;
+}
+
+void
+ExpectMaterializeSnapshotsEqual(const MaterializeSnapshot& expected,
+                                const MaterializeSnapshot& actual,
+                                bool compare_row_groups = false) {
+    ASSERT_EQ(expected.parquet.table == nullptr,
+              actual.parquet.table == nullptr);
+    if (expected.parquet.table == nullptr) {
+        EXPECT_EQ(actual.postings, expected.postings);
+        return;
+    }
+
+    EXPECT_TRUE(expected.parquet.table->Equals(*actual.parquet.table, false))
+        << "expected:\n"
+        << expected.parquet.table->ToString() << "\nactual:\n"
+        << actual.parquet.table->ToString();
+    ASSERT_EQ(expected.parquet.table->num_columns(),
+              actual.parquet.table->num_columns());
+    for (int column = 0; column < expected.parquet.table->num_columns();
+         ++column) {
+        EXPECT_TRUE(expected.parquet.table->field(column)->Equals(
+            *actual.parquet.table->field(column), true));
+    }
+    if (compare_row_groups) {
+        EXPECT_EQ(actual.parquet.row_group_rows,
+                  expected.parquet.row_group_rows);
+    }
+    EXPECT_EQ(actual.postings, expected.postings);
+}
+
+struct MixedMaterializeDataset {
+    std::vector<FieldDataPtr> field_datas;
+    std::map<JsonKey, JsonKeyLayoutType> key_types;
+    std::vector<std::string> shared_paths;
+    int64_t row_count;
+    int64_t expected_dense_postings;
+};
+
+MixedMaterializeDataset
+CreateMixedMaterializeDataset() {
+    constexpr int64_t kRowCount = 97;
+    std::vector<std::string> rows;
+    rows.reserve(kRowCount);
+    for (int64_t i = 0; i < kRowCount; ++i) {
+        nlohmann::json row;
+        row["id"] = i % 2 == 0 ? i : -i;
+        row["flag"] = i % 3 == 0;
+        row["mixed"] = i % 2 == 0 ? nlohmann::json(i * 10)
+                                  : nlohmann::json(fmt::format("mixed-{}", i));
+        row["dense"] = fmt::format("dense-{}-雪", i);
+        row["nested"]["value"] = i * 100;
+        row["a/b"]["~key"] = fmt::format("escaped-{}", i);
+        if (i % 2 == 0) {
+            row["text"] = i % 10 == 0 ? "" : fmt::format("text-{}\nline", i);
+        }
+        if (i % 3 != 0) {
+            row["score"] = static_cast<double>(i) + 0.125;
+        }
+        if (i % 4 == 0) {
+            row["arr"] = nlohmann::json::array(
+                {i, fmt::format("item-{}", i), i % 8 == 0});
+        }
+        if (i % 10 == 0) {
+            row["empty_obj"] = nlohmann::json::object();
+        }
+        if (i % 13 == 0) {
+            row["nullv"] = nullptr;
+        }
+        rows.push_back(row.dump());
+    }
+
+    for (auto row : {5, 44, 96}) {
+        rows[row].clear();
+    }
+
+    std::vector<bool> valid_rows(kRowCount, true);
+    constexpr int64_t kNullableBegin = 19;
+    constexpr int64_t kNullableEnd = 67;
+    for (int64_t row = kNullableBegin; row < kNullableEnd; ++row) {
+        if (row % 11 == 0) {
+            valid_rows[row] = false;
+        }
+    }
+
+    int64_t expected_dense_postings = 0;
+    for (int64_t row = 0; row < kRowCount; ++row) {
+        if (valid_rows[row] && !rows[row].empty()) {
+            ++expected_dense_postings;
+        }
+    }
+
+    std::vector<std::string> first(rows.begin(), rows.begin() + kNullableBegin);
+    std::vector<std::string> nullable(rows.begin() + kNullableBegin,
+                                      rows.begin() + kNullableEnd);
+    std::vector<bool> nullable_valid(valid_rows.begin() + kNullableBegin,
+                                     valid_rows.begin() + kNullableEnd);
+    std::vector<std::string> last(rows.begin() + kNullableEnd, rows.end());
+
+    return MixedMaterializeDataset{
+        {
+            CreateMaterializeJsonFieldData(first),
+            CreateMaterializeJsonFieldData({}),
+            CreateNullableMaterializeJsonFieldData(nullable, nullable_valid),
+            CreateMaterializeJsonFieldData(last),
+        },
+        {
+            {JsonKey("/id", JSONType::INT64), JsonKeyLayoutType::TYPED},
+            {JsonKey("/flag", JSONType::BOOL),
+             JsonKeyLayoutType::TYPED_NOT_ALL},
+            {JsonKey("/text", JSONType::STRING),
+             JsonKeyLayoutType::TYPED_NOT_ALL},
+            {JsonKey("/score", JSONType::DOUBLE),
+             JsonKeyLayoutType::TYPED_NOT_ALL},
+            {JsonKey("/arr", JSONType::ARRAY),
+             JsonKeyLayoutType::TYPED_NOT_ALL},
+            {JsonKey("/mixed", JSONType::INT64), JsonKeyLayoutType::DYNAMIC},
+            {JsonKey("/mixed", JSONType::STRING), JsonKeyLayoutType::DYNAMIC},
+            {JsonKey("/dense", JSONType::STRING), JsonKeyLayoutType::SHARED},
+            {JsonKey("/nested/value", JSONType::INT64),
+             JsonKeyLayoutType::SHARED},
+            {JsonKey("/a~1b/~0key", JSONType::STRING),
+             JsonKeyLayoutType::SHARED},
+            {JsonKey("/empty_obj", JSONType::OBJECT),
+             JsonKeyLayoutType::SHARED},
+            {JsonKey("/nullv", JSONType::NONE), JsonKeyLayoutType::SHARED},
+        },
+        {
+            "/dense",
+            "/nested",
+            "/nested/value",
+            "/a~1b",
+            "/a~1b/~0key",
+            "/empty_obj",
+            "/nullv",
+        },
+        kRowCount,
+        expected_dense_postings,
+    };
+}
+
+}  // namespace
+
+TEST(JsonStatsMemoryBudgetTest, CapacityUpdateWakesBlockedBuild) {
+    auto& budget = storage::TransientMemoryBudget::GetJsonStatsBuildBudget();
+    EXPECT_NE(&budget,
+              &storage::TransientMemoryBudget::GetLoadTransientBudget());
+    ASSERT_EQ(budget.InflightBytes(), 0);
+    auto original_capacity = budget.CapacityBytes();
+    auto restore_capacity = folly::makeGuard([&]() {
+        executor_set_json_stats_build_max_inflight_bytes(
+            static_cast<int64_t>(original_capacity));
+    });
+
+    executor_set_json_stats_build_max_inflight_bytes(1);
+    EXPECT_EQ(budget.CapacityBytes(), 1);
+    budget.Acquire(1);
+    auto release_budget = folly::makeGuard([&]() { budget.Release(1); });
+
+    auto waiter = std::async(std::launch::async, [&]() {
+        budget.Acquire(1);
+        budget.Release(1);
+    });
+    EXPECT_EQ(waiter.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+
+    executor_set_json_stats_build_max_inflight_bytes(2);
+    EXPECT_EQ(budget.CapacityBytes(), 2);
+    EXPECT_EQ(waiter.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    waiter.get();
+
+    executor_set_json_stats_build_max_inflight_bytes(-1);
+    EXPECT_EQ(budget.CapacityBytes(), 0);
+}
+
+TEST(JsonStatsMemoryBudgetTest,
+     MaterializeReservationAccountsForSparseArrowColumns) {
+    constexpr int64_t kRowCount = 16 * 1024;
+    constexpr size_t kShreddingColumnCount = 1024;
+    constexpr size_t kBudgetBytes = 512UL * 1024 * 1024;
+
+    auto field_data = CreateMaterializeJsonFieldData(
+        std::vector<std::string>(kRowCount, "{}"));
+    auto ranges = CreateJsonStatsRowRanges({field_data}, kRowCount);
+    ASSERT_EQ(ranges.size(), 1);
+
+    std::vector<std::shared_ptr<arrow::Field>> fields;
+    fields.reserve(kShreddingColumnCount + 1);
+    for (size_t i = 0; i < kShreddingColumnCount; ++i) {
+        fields.push_back(
+            arrow::field(fmt::format("int64_{}", i), arrow::int64(), true));
+    }
+    fields.push_back(arrow::field("shared", arrow::binary(), true));
+    auto schema = arrow::schema(std::move(fields));
+
+    const auto reservation =
+        BuildKeyStatsAccessor::EstimateMaterializeReservationBytes(
+            ranges.front(), *schema);
+    const auto validity_bytes = static_cast<size_t>((kRowCount + 7) / 8);
+    const auto shredding_buffer_bytes =
+        kShreddingColumnCount *
+        (static_cast<size_t>(kRowCount) * sizeof(int64_t) + validity_bytes);
+    const auto shared_buffer_bytes =
+        validity_bytes + (static_cast<size_t>(kRowCount) + 1) *
+                             sizeof(arrow::BinaryType::offset_type);
+
+    EXPECT_GE(reservation, shredding_buffer_bytes + shared_buffer_bytes);
+    EXPECT_GT(reservation, kBudgetBytes / 4);
+}
+
+TEST(JsonStatsMaterializeTest,
+     ParallelMatchesLegacyAcrossRangesAndWriterBatches) {
+    std::map<JsonKey, JsonKeyLayoutType> key_types = {
+        {JsonKey("/int", JSONType::INT64), JsonKeyLayoutType::TYPED_NOT_ALL},
+        {JsonKey("/double", JSONType::DOUBLE),
+         JsonKeyLayoutType::TYPED_NOT_ALL},
+        {JsonKey("/bool", JSONType::BOOL), JsonKeyLayoutType::TYPED_NOT_ALL},
+        {JsonKey("/text", JSONType::STRING), JsonKeyLayoutType::TYPED_NOT_ALL},
+        {JsonKey("/arr", JSONType::ARRAY), JsonKeyLayoutType::TYPED_NOT_ALL},
+        {JsonKey("/mixed", JSONType::INT64), JsonKeyLayoutType::DYNAMIC},
+        {JsonKey("/mixed", JSONType::STRING), JsonKeyLayoutType::DYNAMIC},
+        {JsonKey("/rare", JSONType::STRING), JsonKeyLayoutType::SHARED},
+        {JsonKey("/obj", JSONType::OBJECT), JsonKeyLayoutType::SHARED},
+        {JsonKey("/nullv", JSONType::NONE), JsonKeyLayoutType::SHARED},
+        {JsonKey("/nested/value", JSONType::DOUBLE), JsonKeyLayoutType::SHARED},
+    };
+
+    std::vector<FieldDataPtr> field_datas = {
+        CreateMaterializeJsonFieldData({
+            R"({"int":1,"double":1.5,"bool":true,"text":"one","arr":[1,2],"mixed":1,"rare":"first"})",
+            "",
+        }),
+        CreateNullableMaterializeJsonFieldData(
+            {
+                R"({"int":2,"double":2.5,"bool":false,"text":"two","arr":[],"mixed":"two","nested":{"value":2.25}})",
+                R"({"int":300,"double":300.5,"bool":true,"text":"invalid-row","arr":[300],"mixed":300,"rare":"ignored"})",
+                R"({})",
+                R"({"int":5,"double":5.5,"bool":false,"text":"escaped\nvalue","arr":[{"x":1}],"mixed":5,"obj":{},"nullv":null})",
+                R"({"int":6,"double":6.5,"bool":true,"text":"six","arr":[6],"mixed":"six","rare":"middle"})",
+            },
+            {true, false, true, true, true}),
+        CreateMaterializeJsonFieldData({
+            R"({"int":7,"double":7.5,"bool":false,"text":"seven","arr":[7,8],"mixed":7})",
+            R"({"int":8,"double":8.5,"bool":true,"text":"eight","arr":[],"mixed":"eight","rare":"last","nested":{"value":8.25}})",
+            R"({"int":9,"double":9.5,"bool":false,"text":"nine","arr":[9],"mixed":9,"obj":{}})",
+            R"({"int":10,"double":10.5,"bool":true,"text":"ten","arr":[10],"mixed":"ten","nullv":null})",
+        }),
+    };
+    auto row_ranges = CreateJsonStatsRowRanges(field_datas, 3);
+    ASSERT_EQ(row_ranges.size(), 4);
+    ASSERT_EQ(row_ranges[0].slices.size(), 2);
+    ASSERT_EQ(row_ranges[2].slices.size(), 2);
+
+    const std::vector<std::string> shared_paths = {
+        "/rare", "/obj", "/nullv", "/nested", "/nested/value"};
+    auto original_thread_num =
+        milvus::futures::getJsonStatsBuildExecutor()->numThreads();
+    auto restore_threads = folly::makeGuard([&]() {
+        executor_set_json_stats_build_thread_num(
+            static_cast<int>(original_thread_num));
+    });
+
+    auto legacy = BuildMaterializeSnapshot(
+        row_ranges, key_types, shared_paths, true, false);
+    EXPECT_EQ(legacy.parquet.table->num_rows(), 11);
+    EXPECT_FALSE(legacy.parquet.row_group_rows.empty());
+
+    for (int worker_count : {1, 2, 4}) {
+        SCOPED_TRACE(::testing::Message() << "worker_count=" << worker_count);
+        executor_set_json_stats_build_thread_num(worker_count);
+        auto parallel = BuildMaterializeSnapshot(
+            row_ranges, key_types, shared_paths, true, true);
+        ExpectMaterializeSnapshotsEqual(legacy, parallel, true);
+    }
+}
+
+TEST(JsonStatsMaterializeTest,
+     ParallelPreservesNonNulTerminatedJsonViewLength) {
+    const std::string json = R"({"int":7,"shared":"value"})";
+    std::string buffer = json;
+    buffer.append(simdjson::SIMDJSON_PADDING, '\xAB');
+
+    auto field_data = std::dynamic_pointer_cast<milvus::FieldDataJsonImpl>(
+        milvus::storage::CreateFieldData(
+            milvus::DataType::JSON, milvus::DataType::NONE, false));
+    ASSERT_NE(field_data, nullptr);
+    field_data->add_json_data({milvus::Json(buffer.data(), json.size())});
+
+    std::map<JsonKey, JsonKeyLayoutType> key_types = {
+        {JsonKey("/int", JSONType::INT64), JsonKeyLayoutType::TYPED},
+        {JsonKey("/shared", JSONType::STRING), JsonKeyLayoutType::SHARED},
+    };
+    auto ranges = CreateJsonStatsRowRanges({field_data}, 1);
+    auto legacy = BuildMaterializeSnapshot(
+        ranges, key_types, {"/shared"}, false, false, 1);
+    auto parallel = BuildMaterializeSnapshot(
+        ranges, key_types, {"/shared"}, false, true, 1);
+
+    ASSERT_NE(parallel.parquet.table, nullptr);
+    EXPECT_EQ(parallel.parquet.table->num_rows(), 1);
+    ExpectMaterializeSnapshotsEqual(legacy, parallel, true);
+}
+
+TEST(JsonStatsMaterializeTest, ParallelMatchesLegacyForEmptyInput) {
+    std::vector<FieldDataPtr> field_datas = {
+        CreateMaterializeJsonFieldData({}),
+        CreateNullableMaterializeJsonFieldData({}, {}),
+    };
+    auto row_ranges = CreateJsonStatsRowRanges(field_datas, 3);
+    ASSERT_TRUE(row_ranges.empty());
+
+    std::map<JsonKey, JsonKeyLayoutType> key_types = {
+        {JsonKey("/int", JSONType::INT64), JsonKeyLayoutType::TYPED},
+        {JsonKey("/rare", JSONType::STRING), JsonKeyLayoutType::SHARED},
+    };
+    auto legacy =
+        BuildMaterializeSnapshot(row_ranges, key_types, {}, true, false, 3);
+    ASSERT_EQ(legacy.parquet.table, nullptr);
+
+    auto original_thread_num =
+        milvus::futures::getJsonStatsBuildExecutor()->numThreads();
+    auto restore_threads = folly::makeGuard([&]() {
+        executor_set_json_stats_build_thread_num(
+            static_cast<int>(original_thread_num));
+    });
+    for (int worker_count : {1, 4}) {
+        SCOPED_TRACE(::testing::Message() << "worker_count=" << worker_count);
+        executor_set_json_stats_build_thread_num(worker_count);
+        auto parallel =
+            BuildMaterializeSnapshot(row_ranges, key_types, {}, true, true, 1);
+        ExpectMaterializeSnapshotsEqual(legacy, parallel);
+    }
+}
+
+TEST(JsonStatsMaterializeTest,
+     ParallelMatchesLegacyForNullLikeRowsAndEmptyFieldData) {
+    std::map<JsonKey, JsonKeyLayoutType> key_types = {
+        {JsonKey("/int", JSONType::INT64), JsonKeyLayoutType::TYPED},
+        {JsonKey("/text", JSONType::STRING), JsonKeyLayoutType::TYPED_NOT_ALL},
+        {JsonKey("/rare", JSONType::STRING), JsonKeyLayoutType::SHARED},
+    };
+    std::vector<FieldDataPtr> field_datas = {
+        CreateMaterializeJsonFieldData({}),
+        CreateMaterializeJsonFieldData({"", "{}", "   "}),
+        CreateNullableMaterializeJsonFieldData(
+            {
+                R"({"int":99,"text":"ignored","rare":"ignored"})",
+                "",
+                "{}",
+                R"({"rare":"also-ignored"})",
+            },
+            {false, true, true, false}),
+        CreateMaterializeJsonFieldData({}),
+    };
+    auto legacy_ranges = CreateJsonStatsRowRanges(field_datas, 2);
+    auto legacy = BuildMaterializeSnapshot(
+        legacy_ranges, key_types, {"/rare"}, true, false, 3);
+    ASSERT_NE(legacy.parquet.table, nullptr);
+    EXPECT_EQ(legacy.parquet.table->num_rows(), 7);
+    EXPECT_TRUE(legacy.postings.empty());
+
+    struct Scenario {
+        int64_t range_rows;
+        int64_t write_batch_rows;
+        int worker_count;
+    };
+    const std::vector<Scenario> scenarios = {
+        {1, 1, 1},
+        {3, 2, 2},
+        {64, 16, 4},
+    };
+
+    auto original_thread_num =
+        milvus::futures::getJsonStatsBuildExecutor()->numThreads();
+    auto restore_threads = folly::makeGuard([&]() {
+        executor_set_json_stats_build_thread_num(
+            static_cast<int>(original_thread_num));
+    });
+    for (const auto& scenario : scenarios) {
+        SCOPED_TRACE(::testing::Message()
+                     << "range_rows=" << scenario.range_rows
+                     << ", write_batch_rows=" << scenario.write_batch_rows
+                     << ", worker_count=" << scenario.worker_count);
+        executor_set_json_stats_build_thread_num(scenario.worker_count);
+        auto row_ranges =
+            CreateJsonStatsRowRanges(field_datas, scenario.range_rows);
+        auto parallel = BuildMaterializeSnapshot(row_ranges,
+                                                 key_types,
+                                                 {"/rare"},
+                                                 true,
+                                                 true,
+                                                 scenario.write_batch_rows);
+        ExpectMaterializeSnapshotsEqual(legacy, parallel);
+    }
+}
+
+TEST(JsonStatsMaterializeTest,
+     ParallelMatchesLegacyAcrossRangeAndWriterBatchMatrix) {
+    auto dataset = CreateMixedMaterializeDataset();
+    auto legacy_ranges = CreateJsonStatsRowRanges(dataset.field_datas, 9);
+    auto legacy = BuildMaterializeSnapshot(
+        legacy_ranges, dataset.key_types, dataset.shared_paths, true, false, 5);
+    ASSERT_NE(legacy.parquet.table, nullptr);
+    EXPECT_EQ(legacy.parquet.table->num_rows(), dataset.row_count);
+    ASSERT_TRUE(legacy.postings.find("/dense") != legacy.postings.end());
+    const auto& dense_postings = legacy.postings.at("/dense");
+    ASSERT_EQ(dense_postings.size(), dataset.expected_dense_postings);
+    for (size_t i = 1; i < dense_postings.size(); ++i) {
+        EXPECT_LT(dense_postings[i - 1].first, dense_postings[i].first);
+    }
+
+    struct Scenario {
+        int64_t range_rows;
+        int64_t write_batch_rows;
+        int worker_count;
+    };
+    const std::vector<Scenario> scenarios = {
+        {1, 1, 4},
+        {2, 17, 2},
+        {7, 3, 4},
+        {16, 64, 3},
+        {128, 5, 4},
+    };
+
+    auto original_thread_num =
+        milvus::futures::getJsonStatsBuildExecutor()->numThreads();
+    auto restore_threads = folly::makeGuard([&]() {
+        executor_set_json_stats_build_thread_num(
+            static_cast<int>(original_thread_num));
+    });
+    for (const auto& scenario : scenarios) {
+        SCOPED_TRACE(::testing::Message()
+                     << "range_rows=" << scenario.range_rows
+                     << ", write_batch_rows=" << scenario.write_batch_rows
+                     << ", worker_count=" << scenario.worker_count);
+        executor_set_json_stats_build_thread_num(scenario.worker_count);
+        auto row_ranges =
+            CreateJsonStatsRowRanges(dataset.field_datas, scenario.range_rows);
+        auto parallel = BuildMaterializeSnapshot(row_ranges,
+                                                 dataset.key_types,
+                                                 dataset.shared_paths,
+                                                 true,
+                                                 true,
+                                                 scenario.write_batch_rows);
+        ExpectMaterializeSnapshotsEqual(legacy, parallel);
+    }
+}
+
+TEST(JsonStatsMaterializeTest, ParallelMatchesLegacyWithSharedOnlySchema) {
+    auto dataset = CreateMixedMaterializeDataset();
+    for (auto& entry : dataset.key_types) {
+        entry.second = JsonKeyLayoutType::SHARED;
+    }
+    dataset.shared_paths = {
+        "/id",
+        "/flag",
+        "/text",
+        "/score",
+        "/arr",
+        "/mixed",
+        "/dense",
+        "/nested",
+        "/nested/value",
+        "/a~1b",
+        "/a~1b/~0key",
+        "/empty_obj",
+        "/nullv",
+    };
+
+    auto legacy = BuildMaterializeSnapshot(
+        CreateJsonStatsRowRanges(dataset.field_datas, 6),
+        dataset.key_types,
+        dataset.shared_paths,
+        true,
+        false,
+        5);
+    ASSERT_NE(legacy.parquet.table, nullptr);
+    ASSERT_EQ(legacy.parquet.table->num_columns(), 1);
+    ASSERT_EQ(legacy.postings.at("/dense").size(),
+              dataset.expected_dense_postings);
+
+    struct Scenario {
+        int64_t range_rows;
+        int64_t write_batch_rows;
+        int worker_count;
+    };
+    const std::vector<Scenario> scenarios = {
+        {1, 1, 1},
+        {7, 3, 4},
+        {128, 64, 4},
+    };
+
+    auto original_thread_num =
+        milvus::futures::getJsonStatsBuildExecutor()->numThreads();
+    auto restore_threads = folly::makeGuard([&]() {
+        executor_set_json_stats_build_thread_num(
+            static_cast<int>(original_thread_num));
+    });
+    for (const auto& scenario : scenarios) {
+        SCOPED_TRACE(::testing::Message()
+                     << "range_rows=" << scenario.range_rows
+                     << ", write_batch_rows=" << scenario.write_batch_rows
+                     << ", worker_count=" << scenario.worker_count);
+        executor_set_json_stats_build_thread_num(scenario.worker_count);
+        auto parallel = BuildMaterializeSnapshot(
+            CreateJsonStatsRowRanges(dataset.field_datas, scenario.range_rows),
+            dataset.key_types,
+            dataset.shared_paths,
+            true,
+            true,
+            scenario.write_batch_rows);
+        ASSERT_EQ(parallel.parquet.table->num_columns(), 1);
+        ExpectMaterializeSnapshotsEqual(legacy, parallel);
+    }
+}
+
+TEST(JsonStatsMaterializeTest,
+     TinyMemoryBudgetMatchesLegacyForMultipleAndOversizedChunks) {
+    auto legacy_dataset = CreateMixedMaterializeDataset();
+    auto parallel_dataset = CreateMixedMaterializeDataset();
+    auto legacy = BuildMaterializeSnapshot(
+        CreateJsonStatsRowRanges(legacy_dataset.field_datas, 8),
+        legacy_dataset.key_types,
+        legacy_dataset.shared_paths,
+        true,
+        false,
+        5);
+
+    auto original_thread_num =
+        milvus::futures::getJsonStatsBuildExecutor()->numThreads();
+    auto& budget = storage::TransientMemoryBudget::GetJsonStatsBuildBudget();
+    ASSERT_EQ(budget.InflightBytes(), 0);
+    auto original_capacity = budget.CapacityBytes();
+    auto restore_resources = folly::makeGuard([&]() {
+        executor_set_json_stats_build_thread_num(
+            static_cast<int>(original_thread_num));
+        executor_set_json_stats_build_max_inflight_bytes(
+            static_cast<int64_t>(original_capacity));
+    });
+
+    executor_set_json_stats_build_thread_num(4);
+    executor_set_json_stats_build_max_inflight_bytes(1);
+
+    auto many_chunks = BuildMaterializeSnapshot(
+        CreateJsonStatsRowRanges(parallel_dataset.field_datas, 1),
+        parallel_dataset.key_types,
+        parallel_dataset.shared_paths,
+        true,
+        true,
+        2);
+    ExpectMaterializeSnapshotsEqual(legacy, many_chunks);
+    EXPECT_EQ(budget.InflightBytes(), 0);
+
+    auto oversized_dataset = CreateMixedMaterializeDataset();
+    auto one_oversized_chunk = BuildMaterializeSnapshot(
+        CreateJsonStatsRowRanges(oversized_dataset.field_datas,
+                                 oversized_dataset.row_count),
+        oversized_dataset.key_types,
+        oversized_dataset.shared_paths,
+        true,
+        true,
+        64);
+    ExpectMaterializeSnapshotsEqual(legacy, one_oversized_chunk);
+    EXPECT_EQ(budget.InflightBytes(), 0);
+}
+
+TEST(JsonStatsMaterializeTest, ConcurrentBuildsSharingExecutorMatchLegacy) {
+    auto legacy_dataset = CreateMixedMaterializeDataset();
+    auto first_dataset = CreateMixedMaterializeDataset();
+    auto second_dataset = CreateMixedMaterializeDataset();
+    auto legacy = BuildMaterializeSnapshot(
+        CreateJsonStatsRowRanges(legacy_dataset.field_datas, 8),
+        legacy_dataset.key_types,
+        legacy_dataset.shared_paths,
+        true,
+        false,
+        5);
+
+    auto original_thread_num =
+        milvus::futures::getJsonStatsBuildExecutor()->numThreads();
+    auto& budget = storage::TransientMemoryBudget::GetJsonStatsBuildBudget();
+    ASSERT_EQ(budget.InflightBytes(), 0);
+    auto original_capacity = budget.CapacityBytes();
+    auto restore_resources = folly::makeGuard([&]() {
+        executor_set_json_stats_build_thread_num(
+            static_cast<int>(original_thread_num));
+        executor_set_json_stats_build_max_inflight_bytes(
+            static_cast<int64_t>(original_capacity));
+    });
+    executor_set_json_stats_build_thread_num(4);
+    executor_set_json_stats_build_max_inflight_bytes(1);
+
+    auto first_future = std::async(std::launch::async, [&]() {
+        return BuildMaterializeSnapshot(
+            CreateJsonStatsRowRanges(first_dataset.field_datas, 1),
+            first_dataset.key_types,
+            first_dataset.shared_paths,
+            true,
+            true,
+            2);
+    });
+    auto second_future = std::async(std::launch::async, [&]() {
+        return BuildMaterializeSnapshot(
+            CreateJsonStatsRowRanges(second_dataset.field_datas, 13),
+            second_dataset.key_types,
+            second_dataset.shared_paths,
+            true,
+            true,
+            11);
+    });
+
+    ASSERT_EQ(first_future.wait_for(std::chrono::seconds(30)),
+              std::future_status::ready);
+    ASSERT_EQ(second_future.wait_for(std::chrono::seconds(30)),
+              std::future_status::ready);
+    auto first = first_future.get();
+    auto second = second_future.get();
+    ExpectMaterializeSnapshotsEqual(legacy, first);
+    ExpectMaterializeSnapshotsEqual(legacy, second);
+    ExpectMaterializeSnapshotsEqual(first, second);
+    EXPECT_EQ(budget.InflightBytes(), 0);
+}
+
+TEST(JsonStatsMaterializeTest,
+     EightConcurrentBuildsWithTinyBudgetAndFailuresComplete) {
+    constexpr int kWorkerCount = 8;
+    constexpr int kConcurrentBuildCount = 8;
+    constexpr int kStressRounds = 20;
+    constexpr int kRowCount = 33;
+    constexpr auto kRoundTimeout = std::chrono::seconds(30);
+
+    const std::map<JsonKey, JsonKeyLayoutType> key_types = {
+        {JsonKey("/int", JSONType::INT64), JsonKeyLayoutType::TYPED},
+    };
+
+    auto original_thread_num =
+        milvus::futures::getJsonStatsBuildExecutor()->numThreads();
+    auto& budget = storage::TransientMemoryBudget::GetJsonStatsBuildBudget();
+    ASSERT_EQ(budget.InflightBytes(), 0);
+    auto original_capacity = budget.CapacityBytes();
+    auto restore_resources = folly::makeGuard([&]() {
+        executor_set_json_stats_build_thread_num(
+            static_cast<int>(original_thread_num));
+        executor_set_json_stats_build_max_inflight_bytes(
+            static_cast<int64_t>(original_capacity));
+    });
+    executor_set_json_stats_build_thread_num(kWorkerCount);
+    executor_set_json_stats_build_max_inflight_bytes(1);
+
+    for (int round = 0; round < kStressRounds; ++round) {
+        SCOPED_TRACE(::testing::Message() << "round=" << round);
+        std::barrier<> start_barrier(kConcurrentBuildCount + 1);
+        std::vector<std::future<std::string>> build_futures;
+        std::vector<bool> expect_failure;
+        build_futures.reserve(kConcurrentBuildCount);
+        expect_failure.reserve(kConcurrentBuildCount);
+
+        for (int build = 0; build < kConcurrentBuildCount; ++build) {
+            std::vector<std::string> rows;
+            rows.reserve(kRowCount);
+            for (int row = 0; row < kRowCount; ++row) {
+                rows.push_back(fmt::format(R"({{"int":{}}})", row));
+            }
+
+            const bool inject_failure = build % 2 != 0;
+            if (inject_failure) {
+                // Rotate failures across the first, middle, and last ranges so
+                // exception cleanup is exercised after different amounts of
+                // budget handoff and completed work.
+                const int failure_slot = (round + build / 2) % 3;
+                const int failure_row = failure_slot == 0   ? 0
+                                        : failure_slot == 1 ? kRowCount / 2
+                                                            : kRowCount - 1;
+                rows[failure_row] = R"({"int":)";
+            }
+            expect_failure.push_back(inject_failure);
+
+            std::vector<FieldDataPtr> field_datas = {
+                CreateMaterializeJsonFieldData(rows),
+            };
+            auto row_ranges =
+                CreateJsonStatsRowRanges(field_datas, 1 + (round + build) % 7);
+            build_futures.emplace_back(std::async(
+                std::launch::async,
+                [&start_barrier,
+                 row_ranges = std::move(row_ranges),
+                 key_types,
+                 write_batch_size = 1 + build % 5]() mutable {
+                    start_barrier.arrive_and_wait();
+                    auto test_index =
+                        CreateMaterializeTestIndex(false, write_batch_size);
+                    BuildKeyStatsAccessor::Prepare(
+                        *test_index.stats, key_types, kRowCount);
+                    try {
+                        BuildKeyStatsAccessor::CallParallel(
+                            *test_index.stats, row_ranges, false);
+                        BuildKeyStatsAccessor::Finish(*test_index.stats);
+                        return std::string{};
+                    } catch (const std::exception& e) {
+                        return std::string(e.what());
+                    } catch (...) {
+                        return std::string("non-standard exception");
+                    }
+                }));
+        }
+
+        start_barrier.arrive_and_wait();
+        const auto deadline = std::chrono::steady_clock::now() + kRoundTimeout;
+        for (int build = 0; build < kConcurrentBuildCount; ++build) {
+            ASSERT_EQ(build_futures[build].wait_until(deadline),
+                      std::future_status::ready)
+                << "concurrent json stats build timed out: round=" << round
+                << ", build=" << build;
+        }
+
+        for (int build = 0; build < kConcurrentBuildCount; ++build) {
+            auto error = build_futures[build].get();
+            if (expect_failure[build]) {
+                EXPECT_NE(error.find("Failed to parse Json"), std::string::npos)
+                    << "expected injected parse failure: round=" << round
+                    << ", build=" << build << ", error=" << error;
+            } else {
+                EXPECT_TRUE(error.empty())
+                    << "valid concurrent build failed: round=" << round
+                    << ", build=" << build << ", error=" << error;
+            }
+        }
+        EXPECT_EQ(budget.InflightBytes(), 0)
+            << "transient budget leaked after round " << round;
+    }
+}
+
+TEST(JsonStatsMaterializeTest, ParallelRethrowsLegacyParseError) {
+    std::map<JsonKey, JsonKeyLayoutType> key_types = {
+        {JsonKey("/int", JSONType::INT64), JsonKeyLayoutType::TYPED},
+    };
+    auto original_thread_num =
+        milvus::futures::getJsonStatsBuildExecutor()->numThreads();
+    auto& budget = storage::TransientMemoryBudget::GetJsonStatsBuildBudget();
+    ASSERT_EQ(budget.InflightBytes(), 0);
+    auto original_capacity = budget.CapacityBytes();
+    auto restore_resources = folly::makeGuard([&]() {
+        executor_set_json_stats_build_thread_num(
+            static_cast<int>(original_thread_num));
+        executor_set_json_stats_build_max_inflight_bytes(
+            static_cast<int64_t>(original_capacity));
+    });
+    executor_set_json_stats_build_max_inflight_bytes(1);
+
+    for (int error_row : {0, 4, 8}) {
+        SCOPED_TRACE(::testing::Message() << "error_row=" << error_row);
+        std::vector<std::string> rows;
+        for (int row = 0; row < 9; ++row) {
+            rows.push_back(fmt::format(R"({{"int":{}}})", row));
+        }
+        rows[error_row] = R"({"int":)";
+        std::vector<FieldDataPtr> field_datas = {
+            CreateMaterializeJsonFieldData(rows),
+        };
+        auto row_ranges = CreateJsonStatsRowRanges(field_datas, 2);
+        ASSERT_EQ(row_ranges.size(), 5);
+
+        auto capture_error = [&](bool parallel) {
+            auto test_index = CreateMaterializeTestIndex(false, 3);
+            BuildKeyStatsAccessor::Prepare(*test_index.stats, key_types, 9);
+            try {
+                if (parallel) {
+                    BuildKeyStatsAccessor::CallParallel(
+                        *test_index.stats, row_ranges, false);
+                } else {
+                    BuildKeyStatsAccessor::CallLegacy(
+                        *test_index.stats, row_ranges, false);
+                }
+            } catch (const std::exception& e) {
+                return std::string(e.what());
+            }
+            return std::string{};
+        };
+
+        auto legacy_error = capture_error(false);
+        ASSERT_FALSE(legacy_error.empty());
+        EXPECT_NE(legacy_error.find("Failed to parse Json"), std::string::npos);
+        for (int worker_count : {1, 2, 4}) {
+            SCOPED_TRACE(::testing::Message()
+                         << "worker_count=" << worker_count);
+            executor_set_json_stats_build_thread_num(worker_count);
+            auto parallel_error = capture_error(true);
+            ASSERT_FALSE(parallel_error.empty());
+            EXPECT_EQ(parallel_error, legacy_error);
+            EXPECT_EQ(budget.InflightBytes(), 0);
+        }
+    }
+
+    std::vector<FieldDataPtr> valid_field_datas = {
+        CreateMaterializeJsonFieldData(
+            {R"({"int":1})", R"({"int":2})", R"({"int":3})"}),
+    };
+    auto valid_ranges = CreateJsonStatsRowRanges(valid_field_datas, 1);
+    auto valid_legacy =
+        BuildMaterializeSnapshot(valid_ranges, key_types, {}, false, false, 2);
+    auto valid_parallel =
+        BuildMaterializeSnapshot(valid_ranges, key_types, {}, false, true, 2);
+    ExpectMaterializeSnapshotsEqual(valid_legacy, valid_parallel);
+    EXPECT_EQ(budget.InflightBytes(), 0);
 }
 
 class JsonKeyStatsTest : public ::testing::TestWithParam<bool> {
