@@ -18,7 +18,7 @@ import (
 
 var _ walimpls.ScannerImpls = (*underlyingWALScannerAdaptor)(nil)
 
-type underlyingROWALImplsOpener func(
+type roWALOpener func(
 	ctx context.Context,
 	walName message.WALName,
 	channel types.PChannelInfo,
@@ -54,7 +54,7 @@ type underlyingWALScannerAdaptor struct {
 
 	logger                     *mlog.Logger
 	channel                    types.PChannelInfo
-	underlyingROWALImplsOpener underlyingROWALImplsOpener
+	roOpener                   roWALOpener
 	onUnderlyingScannerChanged func(message.WALName)
 
 	underlyingWALName    message.WALName
@@ -68,14 +68,14 @@ func newUnderlyingWALScannerAdaptor(
 	logger *mlog.Logger,
 	channel types.PChannelInfo,
 	readOption walimpls.ReadOption,
-	underlyingROWALImplsOpener underlyingROWALImplsOpener,
+	roOpener roWALOpener,
 	onUnderlyingScannerChanged func(message.WALName),
 ) (walimpls.ScannerImpls, error) {
 	walName, ok := getDeliverPolicyWALName(readOption.DeliverPolicy)
 	if !ok {
 		return nil, status.NewUnrecoverableError("underlying WAL scanner requires a WAL-specific start position")
 	}
-	if underlyingROWALImplsOpener == nil {
+	if roOpener == nil {
 		return nil, status.NewUnrecoverableError("underlying WAL opener is unavailable for %s", walName)
 	}
 
@@ -91,7 +91,7 @@ func newUnderlyingWALScannerAdaptor(
 		ScannerHelper:              helper.NewScannerHelper(readOption.Name),
 		logger:                     logger,
 		channel:                    channel,
-		underlyingROWALImplsOpener: underlyingROWALImplsOpener,
+		roOpener:                   roOpener,
 		onUnderlyingScannerChanged: onUnderlyingScannerChanged,
 		underlyingWALName:          walName,
 		underlyingReadOption:       readOption,
@@ -280,7 +280,7 @@ func (a *underlyingWALScannerAdaptor) consumeUnderlying(
 func (a *underlyingWALScannerAdaptor) openUnderlyingWAL(
 	ctx context.Context,
 ) (walimpls.ROWALImpls, error) {
-	underlyingWAL, err := a.underlyingROWALImplsOpener(ctx, a.underlyingWALName, a.channel)
+	underlyingWAL, err := a.roOpener(ctx, a.underlyingWALName, a.channel)
 	if err != nil {
 		return nil, err
 	}

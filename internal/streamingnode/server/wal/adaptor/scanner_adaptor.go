@@ -88,7 +88,7 @@ func newScannerAdaptor(
 	name string,
 	innerWAL walimpls.ROWALImpls,
 	readOption wal.ReadOption,
-	underlyingROWALImplsOpener underlyingROWALImplsOpener,
+	roOpener roWALOpener,
 	scanMetrics *metricsutil.ScannerMetrics,
 	cleanup func(),
 	recovery bool,
@@ -103,19 +103,19 @@ func newScannerAdaptor(
 		mlog.String("channel", innerWAL.Channel().Name),
 	)
 	s := &scannerAdaptorImpl{
-		logger:                     logger,
-		recovery:                   recovery,
-		innerWAL:                   innerWAL,
-		readOption:                 readOption,
-		underlyingROWALImplsOpener: underlyingROWALImplsOpener,
-		filterFunc:                 options.GetFilterFunc(readOption.MessageFilter),
-		reorderBuffer:              utility.NewReOrderBuffer(),
-		pendingQueue:               utility.NewPendingQueue(),
-		txnBuffer:                  utility.NewTxnBuffer(logger, scanMetrics),
-		cleanup:                    cleanup,
-		ScannerHelper:              helper.NewScannerHelper(name),
-		metrics:                    scanMetrics,
-		readRateCounter:            utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
+		logger:          logger,
+		recovery:        recovery,
+		innerWAL:        innerWAL,
+		readOption:      readOption,
+		roOpener:        roOpener,
+		filterFunc:      options.GetFilterFunc(readOption.MessageFilter),
+		reorderBuffer:   utility.NewReOrderBuffer(),
+		pendingQueue:    utility.NewPendingQueue(),
+		txnBuffer:       utility.NewTxnBuffer(logger, scanMetrics),
+		cleanup:         cleanup,
+		ScannerHelper:   helper.NewScannerHelper(name),
+		metrics:         scanMetrics,
+		readRateCounter: utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
 	go s.execute()
 	return s
@@ -124,15 +124,15 @@ func newScannerAdaptor(
 // scannerAdaptorImpl is a wrapper of ScannerImpls to extend it into a Scanner interface.
 type scannerAdaptorImpl struct {
 	*helper.ScannerHelper
-	recovery                   bool
-	logger                     *mlog.Logger
-	innerWAL                   walimpls.ROWALImpls
-	readOption                 wal.ReadOption
-	underlyingROWALImplsOpener underlyingROWALImplsOpener
-	filterFunc                 func(message.ImmutableMessage) bool
-	reorderBuffer              *utility.ReOrderByTimeTickBuffer // support time tick reorder.
-	pendingQueue               *utility.PendingQueue
-	txnBuffer                  *utility.TxnBuffer // txn buffer for txn message.
+	recovery      bool
+	logger        *mlog.Logger
+	innerWAL      walimpls.ROWALImpls
+	readOption    wal.ReadOption
+	roOpener      roWALOpener
+	filterFunc    func(message.ImmutableMessage) bool
+	reorderBuffer *utility.ReOrderByTimeTickBuffer // support time tick reorder.
+	pendingQueue  *utility.PendingQueue
+	txnBuffer     *utility.TxnBuffer // txn buffer for txn message.
 
 	cleanup         func()
 	clearOnce       sync.Once
@@ -233,14 +233,14 @@ func (s *scannerAdaptorImpl) produceEventLoop(ctx context.Context, msgChan chan<
 		wb = resource.Resource().TimeTickInspector().MustGetOperator(s.Channel()).WriteAheadBuffer()
 	}
 
-	underlyingROWALImplsOpener := s.underlyingROWALImplsOpener
+	roOpener := s.roOpener
 	if s.recovery {
 		// AlterWAL recovery must keep scanning the current WAL past the AlterWAL
 		// marker until a following TimeTick releases the marker from the reorder
 		// buffer. Switching to the target WAL here would wait for a WAL that is
 		// created only after the flusher checkpoint reaches the marker, causing a
 		// circular wait.
-		underlyingROWALImplsOpener = nil
+		roOpener = nil
 	}
 
 	scanner := newSwitchableScanner(
@@ -250,7 +250,7 @@ func (s *scannerAdaptorImpl) produceEventLoop(ctx context.Context, msgChan chan<
 		wb,
 		s.readOption.DeliverPolicy,
 		msgChan,
-		underlyingROWALImplsOpener,
+		roOpener,
 		func(walName message.WALName) {
 			s.metrics.SetReaderWALName(walName)
 		},

@@ -21,17 +21,17 @@ type roWALAdaptorImpl struct {
 	*rate.WALRateLimitComponent
 	mlog.Binder
 
-	lifetime                   *typeutil.Lifetime
-	availableCtx               context.Context
-	availableCancel            context.CancelFunc
-	idAllocator                *typeutil.IDAllocator
-	roWALImpls                 walimpls.ROWALImpls
-	underlyingROWALImplsOpener underlyingROWALImplsOpener
-	scannerRegistry            scannerRegistry
-	scanners                   *typeutil.ConcurrentMap[int64, wal.Scanner]
-	cleanup                    func()
-	scanMetrics                *metricsutil.ScanMetrics
-	forceRecovery              bool
+	lifetime        *typeutil.Lifetime
+	availableCtx    context.Context
+	availableCancel context.CancelFunc
+	idAllocator     *typeutil.IDAllocator
+	roWALImpls      walimpls.ROWALImpls
+	roOpener        roWALOpener
+	scannerRegistry scannerRegistry
+	scanners        *typeutil.ConcurrentMap[int64, wal.Scanner]
+	cleanup         func()
+	scanMetrics     *metricsutil.ScanMetrics
+	forceRecovery   bool
 }
 
 func (w *roWALAdaptorImpl) WALName() message.WALName {
@@ -94,7 +94,7 @@ func (w *roWALAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.S
 		name,
 		w.roWALImpls,
 		opts,
-		w.underlyingROWALImplsOpener,
+		w.roOpener,
 		w.scanMetrics.NewConsumerScannerMetrics(opts.VChannel, name),
 		func() { w.scanners.Remove(id) },
 		w.forceRecovery)

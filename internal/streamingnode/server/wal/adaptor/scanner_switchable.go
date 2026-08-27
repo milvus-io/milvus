@@ -31,17 +31,17 @@ func newSwitchableScanner(
 	writeAheadBuffer wab.ROWriteAheadBuffer,
 	deliverPolicy options.DeliverPolicy,
 	msgChan chan<- message.ImmutableMessage,
-	underlyingROWALImplsOpener underlyingROWALImplsOpener,
+	roOpener roWALOpener,
 	onReaderChanged func(message.WALName),
 ) switchableScanner {
 	impl := switchableScannerImpl{
-		scannerName:                scannerName,
-		logger:                     logger,
-		innerWAL:                   innerWAL,
-		msgChan:                    msgChan,
-		writeAheadBuffer:           writeAheadBuffer,
-		underlyingROWALImplsOpener: underlyingROWALImplsOpener,
-		onReaderChanged:            onReaderChanged,
+		scannerName:      scannerName,
+		logger:           logger,
+		innerWAL:         innerWAL,
+		msgChan:          msgChan,
+		writeAheadBuffer: writeAheadBuffer,
+		roOpener:         roOpener,
+		onReaderChanged:  onReaderChanged,
 	}
 	return newCatchupScanner(impl, deliverPolicy, 0)
 }
@@ -55,13 +55,13 @@ type switchableScanner interface {
 }
 
 type switchableScannerImpl struct {
-	scannerName                string
-	logger                     *mlog.Logger
-	innerWAL                   walimpls.ROWALImpls
-	msgChan                    chan<- message.ImmutableMessage
-	writeAheadBuffer           wab.ROWriteAheadBuffer
-	underlyingROWALImplsOpener underlyingROWALImplsOpener
-	onReaderChanged            func(message.WALName)
+	scannerName      string
+	logger           *mlog.Logger
+	innerWAL         walimpls.ROWALImpls
+	msgChan          chan<- message.ImmutableMessage
+	writeAheadBuffer wab.ROWriteAheadBuffer
+	roOpener         roWALOpener
+	onReaderChanged  func(message.WALName)
 }
 
 func (s *switchableScannerImpl) HandleMessage(ctx context.Context, msg message.ImmutableMessage) error {
@@ -171,7 +171,7 @@ func (s *catchupScanner) openCatchupScannerImpls(ctx context.Context) (walimpls.
 	// cross-WAL adaptor; positions for the active backend should keep using the
 	// already-open current WAL and must not depend on RO topic validation.
 	if !hasWALSpecificPosition ||
-		s.underlyingROWALImplsOpener == nil ||
+		s.roOpener == nil ||
 		positionWALName == s.innerWAL.WALName() {
 		scanner, err := s.createInnerWALScannerWithBackoff(ctx, s.deliverPolicy)
 		if err == nil && s.onReaderChanged != nil {
@@ -187,7 +187,7 @@ func (s *catchupScanner) openCatchupScannerImpls(ctx context.Context) (walimpls.
 			DeliverPolicy:       s.deliverPolicy,
 			ReadAheadBufferSize: getWALReadAheadBufferSize(),
 		},
-		s.underlyingROWALImplsOpener,
+		s.roOpener,
 		s.onReaderChanged,
 	)
 }
