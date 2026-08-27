@@ -5,7 +5,6 @@ package compactor
 import (
 	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	indexpb "github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -287,51 +286,6 @@ func (_c *MockCompactor_GetPlanID_Call) Return(_a0 int64) *MockCompactor_GetPlan
 }
 
 func (_c *MockCompactor_GetPlanID_Call) RunAndReturn(run func() int64) *MockCompactor_GetPlanID_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetResource provides a mock function with no fields
-func (_m *MockCompactor) GetResource() taskcommon.Resource {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetResource")
-	}
-
-	var r0 taskcommon.Resource
-	if rf, ok := ret.Get(0).(func() taskcommon.Resource); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(taskcommon.Resource)
-	}
-
-	return r0
-}
-
-// MockCompactor_GetResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetResource'
-type MockCompactor_GetResource_Call struct {
-	*mock.Call
-}
-
-// GetResource is a helper method to define mock.On call
-func (_e *MockCompactor_Expecter) GetResource() *MockCompactor_GetResource_Call {
-	return &MockCompactor_GetResource_Call{Call: _e.mock.On("GetResource")}
-}
-
-func (_c *MockCompactor_GetResource_Call) Run(run func()) *MockCompactor_GetResource_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockCompactor_GetResource_Call) Return(_a0 taskcommon.Resource) *MockCompactor_GetResource_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockCompactor_GetResource_Call) RunAndReturn(run func() taskcommon.Resource) *MockCompactor_GetResource_Call {
 	_c.Call.Return(run)
 	return _c
 }

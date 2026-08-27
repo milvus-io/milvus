@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -165,7 +166,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			StorageConfig: &indexpb.StorageConfig{
 				RootPath: "root_path",
 			},
-		}, manager, s.mockChunkManager, nil)
+		}, manager, s.mockChunkManager, nil, taskcommon.Resource{})
 		task.binlogIO = s.mockBinlogIO
 
 		err = task.PreExecute(ctx)
@@ -217,7 +218,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			StorageConfig: &indexpb.StorageConfig{
 				RootPath: "root_path",
 			},
-		}, manager, s.mockChunkManager, nil)
+		}, manager, s.mockChunkManager, nil, taskcommon.Resource{})
 		task.binlogIO = s.mockBinlogIO
 
 		err = task.PreExecute(ctx)
@@ -253,7 +254,7 @@ func (s *TaskStatsSuite) TestPreExecuteDoesNotLogStorageCredentials() {
 			SslCACert:         caCert,
 			GcpCredentialJSON: statsLogCredentialJSON(gcpCredential),
 		},
-	}, manager, s.mockChunkManager, nil)
+	}, manager, s.mockChunkManager, nil, taskcommon.Resource{})
 
 	err := task.PreExecute(ctx)
 	s.Require().NoError(err)
@@ -364,7 +365,7 @@ func (s *TaskStatsSuite) TestJSONKeyStatsPropagatesPluginContext() {
 	}
 	manager := NewTaskManager(ctx)
 	manager.LoadOrStoreStatsTask(s.clusterID, req.GetTaskID(), &StatsTaskInfo{})
-	task := NewStatsTask(ctx, cancel, req, manager, nil, pluginContext)
+	task := NewStatsTask(ctx, cancel, req, manager, nil, pluginContext, taskcommon.Resource{})
 
 	var captured *indexcgopb.BuildIndexInfo
 	buildMock := mockey.Mock(indexcgowrapper.CreateJSONKeyStats).To(
@@ -491,7 +492,7 @@ func TestCreateJSONKeyStats_NullableJSONMissingFieldBinlog(t *testing.T) {
 	}
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
-	st := NewStatsTask(ctx2, cancel, req, mgr, nil, nil)
+	st := NewStatsTask(ctx2, cancel, req, mgr, nil, nil, taskcommon.Resource{})
 
 	insertBinlogs := []*datapb.FieldBinlog{
 		{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}},
@@ -544,7 +545,7 @@ func TestCreateJSONKeyStats_NonNullableJSONMissingFieldBinlog(t *testing.T) {
 	}
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
-	st := NewStatsTask(ctx2, cancel, req, mgr, nil, nil)
+	st := NewStatsTask(ctx2, cancel, req, mgr, nil, nil, taskcommon.Resource{})
 
 	insertBinlogs := []*datapb.FieldBinlog{
 		{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}},
@@ -592,7 +593,7 @@ func TestStatsExecute_EmptyInsertLogsProceedsWhenManifestSet(t *testing.T) {
 	}
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
-	st := NewStatsTask(ctx2, cancel, req, mgr, nil, nil)
+	st := NewStatsTask(ctx2, cancel, req, mgr, nil, nil, taskcommon.Resource{})
 
 	var called bool
 	m := mockey.Mock((*statsTask).createTextIndex).To(

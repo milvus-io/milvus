@@ -211,7 +211,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		catalogMock.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 		s.mt.indexMeta.catalog = catalogMock
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
+		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
 		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
 
 		it.CreateTaskOnWorker(1, cluster)
@@ -225,7 +225,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		s.mt.indexMeta.catalog = catalogMock
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
 
 		it.CreateTaskOnWorker(1, cluster)
@@ -237,10 +237,17 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		catalogMock.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 		s.mt.indexMeta.catalog = catalogMock
 
+		var placed taskcommon.Resource
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(_ int64, _ *workerpb.CreateJobRequest, resource taskcommon.Resource) error {
+				placed = resource
+				return nil
+			})
 
 		it.CreateTaskOnWorker(1, cluster)
+		// The dispatch ships exactly what the scheduler placed the task on.
+		s.Equal(it.GetTaskResource(), placed)
 		s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
 	})
 }
@@ -378,7 +385,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMaxSimRequiresEnoughVe
 			it := newIndexBuildTask(segIndex, 1, mt, handler, cm, newIndexEngineVersionManager())
 			cluster := session.NewMockCluster(s.T())
 			if tc.expectCreateIndex {
-				cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
+				cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			}
 
 			it.CreateTaskOnWorker(1, cluster)
@@ -586,7 +593,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayManifestBackedProceeds
 	cm.EXPECT().RootPath().Return("root").Maybe()
 
 	cluster := session.NewMockCluster(s.T())
-	cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
+	cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	it := newIndexBuildTask(segIndex, 1, mt, handler, cm, newIndexEngineVersionManager())
 	it.CreateTaskOnWorker(1, cluster)
@@ -719,8 +726,6 @@ func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSu
 	)
 
 	s.NoError(err)
-	// The request ships exactly what the scheduler placed the task on.
-	s.Equal(it.GetTaskResource(), taskcommon.Resource{CPU: req.GetCpu(), Memory: req.GetMemory()})
 	s.True(req.GetField().GetNullable())
 	s.False(childField.GetNullable())
 	s.NotSame(childField, req.GetField())
@@ -939,7 +944,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerNullableVectorEffectiveRows() {
 
 			cluster := session.NewMockCluster(s.T())
 			if tc.wantBuild {
-				cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
+				cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			}
 			// No CreateIndex expectation for skip cases:
 			// mockery will fail the test if it is called unexpectedly.

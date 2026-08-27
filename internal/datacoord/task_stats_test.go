@@ -398,7 +398,7 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 		st.allocator = ac
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateStats(mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		cluster.EXPECT().CreateStats(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
 		cluster.EXPECT().DropStats(mock.Anything, mock.Anything).Return(nil)
 
 		st.CreateTaskOnWorker(1, cluster)
@@ -416,7 +416,7 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 		st.meta.statsTaskMeta.catalog = catalog
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateStats(mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateStats(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		cluster.EXPECT().DropStats(mock.Anything, mock.Anything).Return(nil)
 
 		st.CreateTaskOnWorker(1, cluster)
@@ -429,11 +429,18 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 		st.meta.statsTaskMeta.catalog = catalog
 
+		var placed taskcommon.Resource
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateStats(mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateStats(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(_ int64, _ *workerpb.CreateStatsRequest, resource taskcommon.Resource) error {
+				placed = resource
+				return nil
+			})
 
 		st.CreateTaskOnWorker(1, cluster)
 		s.Equal(indexpb.JobState_JobStateInProgress, st.GetState())
+		// The dispatch ships exactly what the scheduler placed the task on.
+		s.Equal(st.GetTaskResource(), placed)
 	})
 }
 
@@ -488,7 +495,7 @@ func (s *statsTaskSuite) TestCreateTaskOnWorkerDropsExternalJSONWithoutV3Manifes
 	created := 0
 	cluster := &mockeyStatsCluster{}
 	mockCreateStats := mockey.Mock((*mockeyStatsCluster).CreateStats).To(
-		func(*mockeyStatsCluster, int64, *workerpb.CreateStatsRequest) error {
+		func(*mockeyStatsCluster, int64, *workerpb.CreateStatsRequest, taskcommon.Resource) error {
 			created++
 			return nil
 		}).Build()
@@ -1231,7 +1238,5 @@ func (s *statsTaskSuite) TestPrepareJobRequest() {
 		s.Equal(startID, req.StartLogID)
 		s.Equal(endID, req.EndLogID)
 		s.Equal(int64(1000), req.NumRows)
-		// The request ships exactly what the scheduler placed the task on.
-		s.Equal(st.GetTaskResource(), taskcommon.Resource{CPU: req.GetCpu(), Memory: req.GetMemory()})
 	})
 }

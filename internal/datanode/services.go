@@ -249,7 +249,13 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 
 // CompactionV2 handles compaction request from DataCoord
 // returns status as long as compaction task enqueued or invalid
+// CompactionV2 is the pre-CreateTask entry point. A coordinator reaching it
+// directly carries no resource estimate, so the plan books zero.
 func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
+	return node.compactionV2(ctx, req, taskcommon.Resource{})
+}
+
+func (node *DataNode) compactionV2(ctx context.Context, req *datapb.CompactionPlan, resource taskcommon.Resource) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		mlog.Warn(context.TODO(), "DataNode.Compaction failed", mlog.Int64("nodeId", node.GetNodeID()), mlog.Err(err))
 		return merr.Status(err), nil
@@ -377,7 +383,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		return merr.Status(merr.WrapErrServiceInternalMsg("Unknown compaction type: %v", req.GetType().String())), nil
 	}
 
-	succeed, err := node.compactionExecutor.Enqueue(task)
+	succeed, err := node.compactionExecutor.Enqueue(task, resource)
 	if succeed {
 		return merr.Success(), nil
 	} else {
@@ -429,7 +435,13 @@ func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChanne
 	return merr.Success(), nil
 }
 
+// PreImport is the pre-CreateTask entry point. A coordinator reaching it
+// directly carries no resource estimate, so the task books zero.
 func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {
+	return node.preImport(ctx, req, taskcommon.Resource{})
+}
+
+func (node *DataNode) preImport(ctx context.Context, req *datapb.PreImportRequest, resource taskcommon.Resource) (*commonpb.Status, error) {
 	mlog.Info(context.TODO(), "datanode receive preimport request")
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -446,9 +458,9 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 
 	var task importv2.Task
 	if importutilv2.IsL0Import(req.GetOptions()) {
-		task = importv2.NewL0PreImportTask(req, node.importTaskMgr, cm)
+		task = importv2.NewL0PreImportTask(req, node.importTaskMgr, cm, resource)
 	} else {
-		task = importv2.NewPreImportTask(req, node.importTaskMgr, cm)
+		task = importv2.NewPreImportTask(req, node.importTaskMgr, cm, resource)
 	}
 	node.importTaskMgr.Add(task)
 
@@ -456,7 +468,13 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 	return merr.Success(), nil
 }
 
+// ImportV2 is the pre-CreateTask entry point. A coordinator reaching it
+// directly carries no resource estimate, so the task books zero.
 func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (*commonpb.Status, error) {
+	return node.importV2(ctx, req, taskcommon.Resource{})
+}
+
+func (node *DataNode) importV2(ctx context.Context, req *datapb.ImportRequest, resource taskcommon.Resource) (*commonpb.Status, error) {
 	mlog.Info(context.TODO(), "datanode receive import request")
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -472,9 +490,9 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	}
 	var task importv2.Task
 	if importutilv2.IsL0Import(req.GetOptions()) {
-		task = importv2.NewL0ImportTask(req, node.importTaskMgr, node.syncMgr, cm)
+		task = importv2.NewL0ImportTask(req, node.importTaskMgr, node.syncMgr, cm, resource)
 	} else {
-		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, cm)
+		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, cm, resource)
 	}
 	node.importTaskMgr.Add(task)
 
@@ -575,7 +593,7 @@ func (node *DataNode) DropImport(ctx context.Context, req *datapb.DropImportRequ
 	return merr.Success(), nil
 }
 
-func (node *DataNode) copySegment(ctx context.Context, req *datapb.CopySegmentRequest, external bool) (*commonpb.Status, error) {
+func (node *DataNode) copySegment(ctx context.Context, req *datapb.CopySegmentRequest, external bool, resource taskcommon.Resource) (*commonpb.Status, error) {
 	// Extract collection ID from first target (all targets should have same collection)
 	var collectionID int64
 	if len(req.GetTargets()) > 0 {
@@ -652,6 +670,7 @@ func (node *DataNode) copySegment(ctx context.Context, req *datapb.CopySegmentRe
 		copier,
 		sourceBucket,
 		targetBucket,
+		resource,
 	)
 	node.importTaskMgr.Add(task)
 
@@ -853,6 +872,12 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 	if err != nil {
 		return merr.Status(err), nil
 	}
+	// DataCoord's estimate for this task, carried beside task_slot. Absent from
+	// a coordinator that predates the keys, in which case the worker books zero.
+	resource, err := properties.GetTaskResource()
+	if err != nil {
+		return merr.Status(err), nil
+	}
 	switch taskType {
 	case taskcommon.PreImport:
 		req := &datapb.PreImportRequest{}
@@ -862,7 +887,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.PreImport(ctx, req)
+		return node.preImport(ctx, req, resource)
 	case taskcommon.Import:
 		req := &datapb.ImportRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -871,7 +896,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.ImportV2(ctx, req)
+		return node.importV2(ctx, req, resource)
 	case taskcommon.Compaction:
 		req := &datapb.CompactionPlan{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -880,7 +905,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.CompactionV2(ctx, req)
+		return node.compactionV2(ctx, req, resource)
 	case taskcommon.Index:
 		req := &workerpb.CreateJobRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -889,7 +914,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.createIndexTask(ctx, req)
+		return node.createIndexTask(ctx, req, resource)
 	case taskcommon.Stats:
 		req := &workerpb.CreateStatsRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -898,7 +923,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.createStatsTask(ctx, req)
+		return node.createStatsTask(ctx, req, resource)
 	case taskcommon.Analyze:
 		req := &workerpb.AnalyzeRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -907,7 +932,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.createAnalyzeTask(ctx, req)
+		return node.createAnalyzeTask(ctx, req, resource)
 	case taskcommon.RefreshExternalCollection:
 		req := &datapb.RefreshExternalCollectionTaskRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -931,7 +956,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		// external restores still use the legacy CopySegment task type.
 		external := taskType == taskcommon.ExternalCopySegment ||
 			req.GetExternalSpec() != "" || hasExternalSourceRoot(req.GetSources())
-		return node.copySegment(ctx, req, external)
+		return node.copySegment(ctx, req, external, resource)
 	default:
 		err := merr.Wrapf(merr.ErrServiceUnimplemented,
 			"unrecognized task type '%s', properties=%v", taskType, request.GetProperties())

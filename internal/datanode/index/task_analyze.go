@@ -46,6 +46,7 @@ type analyzeTask struct {
 	queueDur time.Duration
 	manager  *TaskManager
 	analyze  analyzecgowrapper.CodecAnalyze
+	resource taskcommon.Resource
 
 	pluginContext *indexcgopb.StoragePluginContext
 }
@@ -55,6 +56,7 @@ func NewAnalyzeTask(ctx context.Context,
 	req *workerpb.AnalyzeRequest,
 	manager *TaskManager,
 	pluginContext *indexcgopb.StoragePluginContext,
+	resource taskcommon.Resource,
 ) *analyzeTask {
 	return &analyzeTask{
 		ident:         fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
@@ -63,6 +65,7 @@ func NewAnalyzeTask(ctx context.Context,
 		req:           req,
 		manager:       manager,
 		pluginContext: pluginContext,
+		resource:      resource,
 		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
 	}
 }
@@ -80,7 +83,7 @@ func (at *analyzeTask) GetSlot() int64 {
 }
 
 func (at *analyzeTask) GetResource() taskcommon.Resource {
-	return taskcommon.Resource{CPU: at.req.GetCpu(), Memory: at.req.GetMemory()}
+	return at.resource
 }
 
 func (at *analyzeTask) IsVectorIndex() bool {

@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -552,10 +551,6 @@ func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*
 
 func (t *LevelZeroCompactionTask) GetSlotUsage() int64 {
 	return t.plan.GetSlotUsage()
-}
-
-func (t *LevelZeroCompactionTask) GetResource() taskcommon.Resource {
-	return taskcommon.Resource{CPU: t.plan.GetCpu(), Memory: t.plan.GetMemory()}
 }
 
 func (t *LevelZeroCompactionTask) GetStorageConfig() *indexpb.StorageConfig {

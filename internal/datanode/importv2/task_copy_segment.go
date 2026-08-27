@@ -70,6 +70,7 @@ func NewCopySegmentTask(
 	copier storage.CrossBucketCopier,
 	sourceBucket string,
 	targetBucket string,
+	resource taskcommon.Resource,
 ) Task {
 	ctx, cancel := context.WithCancel(parentCtx)
 
@@ -117,7 +118,7 @@ func NewCopySegmentTask(
 		state:          datapb.ImportTaskStateV2_Pending,
 		reason:         "",
 		slots:          req.GetTaskSlot(),
-		resource:       taskcommon.Resource{CPU: req.GetCpu(), Memory: req.GetMemory()},
+		resource:       resource,
 		segmentResults: segmentResults,
 		req:            req,
 		manager:        manager,

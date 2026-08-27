@@ -49,6 +49,7 @@ type PreImportTask struct {
 	schema       *schemapb.CollectionSchema
 	options      []*commonpb.KeyValuePair
 	req          *datapb.PreImportRequest
+	resource     taskcommon.Resource
 
 	manager TaskManager
 	cm      storage.ChunkManager
@@ -57,6 +58,7 @@ type PreImportTask struct {
 func NewPreImportTask(req *datapb.PreImportRequest,
 	manager TaskManager,
 	cm storage.ChunkManager,
+	resource taskcommon.Resource,
 ) Task {
 	fileStats := lo.Map(req.GetImportFiles(), func(file *internalpb.ImportFile, _ int) *datapb.ImportFileStats {
 		return &datapb.ImportFileStats{
@@ -84,6 +86,7 @@ func NewPreImportTask(req *datapb.PreImportRequest,
 		schema:       req.GetSchema(),
 		options:      req.GetOptions(),
 		req:          req,
+		resource:     resource,
 		manager:      manager,
 		cm:           cm,
 	}
@@ -110,7 +113,7 @@ func (t *PreImportTask) GetSlots() int64 {
 }
 
 func (t *PreImportTask) GetResource() taskcommon.Resource {
-	return taskcommon.Resource{CPU: t.req.GetCpu(), Memory: t.req.GetMemory()}
+	return t.resource
 }
 
 // PreImportTask buffer size is fixed
@@ -133,6 +136,7 @@ func (t *PreImportTask) Clone() Task {
 		schema:        t.GetSchema(),
 		options:       t.options,
 		req:           t.req,
+		resource:      t.resource,
 		manager:       t.manager,
 		cm:            t.cm,
 	}

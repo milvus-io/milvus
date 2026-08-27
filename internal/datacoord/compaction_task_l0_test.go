@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -111,7 +112,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_NormalL0() {
 			State:         commonpb.SegmentState_Flushed,
 			Deltalogs:     deltaLogs,
 		}}
-	}).Times(4)
+	}).Times(2)
 	task := newL0CompactionTask(&datapb.CompactionTask{
 		PlanID:        1,
 		TriggerID:     19530,
@@ -140,7 +141,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SegmentNotFoundL0() {
 	channel := "Ch-1"
 	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
 		return nil
-	}).Twice()
+	}).Once()
 	task := newL0CompactionTask(&datapb.CompactionTask{
 		InputSegments: []int64{102},
 		PlanID:        1,
@@ -169,7 +170,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 			State:         commonpb.SegmentState_Flushed,
 			Deltalogs:     deltaLogs,
 		}}
-	}).Times(4)
+	}).Times(2)
 	s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 	task := newL0CompactionTask(&datapb.CompactionTask{
@@ -228,7 +229,7 @@ func (s *L0CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
 			State:         commonpb.SegmentState_Flushed,
 			Deltalogs:     deltaLogs,
 		}}
-	}).Times(4)
+	}).Times(2)
 	task := newL0CompactionTask(&datapb.CompactionTask{
 		PlanID:        1,
 		TriggerID:     19530,
@@ -292,7 +293,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64) error {
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64, _ taskcommon.Resource) error {
 			s.Require().EqualValues(t.GetTaskProto().NodeID, nodeID)
 			s.Require().EqualValues(t.GetTaskProto().GetCollectionID(), collectionID)
 			return errors.New("mock error")
@@ -332,7 +333,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		}).Times(4)
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64) error {
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64, _ taskcommon.Resource) error {
 			s.Require().EqualValues(t.GetTaskProto().NodeID, nodeID)
 			s.Require().EqualValues(t.GetTaskProto().GetCollectionID(), collectionID)
 			return nil

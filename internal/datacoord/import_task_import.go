@@ -172,7 +172,8 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		t.retryTimes++
 		return
 	}
-	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
+	resource := t.GetTaskResource()
+	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "import failed", WrapTaskLog(t, mlog.Err(err))...)
 		t.retryTimes++

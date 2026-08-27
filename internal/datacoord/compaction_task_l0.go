@@ -139,7 +139,8 @@ func (t *l0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clus
 		return
 	}
 
-	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
+	resource := t.GetTaskResource()
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		originNodeID := t.GetTaskProto().GetNodeID()
 		log.Warn(context.TODO(), "l0CompactionTask failed to notify compaction tasks to DataNode",
@@ -361,7 +362,6 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 	if err != nil {
 		return nil, err
 	}
-	resource := t.GetTaskResource()
 	plan := &datapb.CompactionPlan{
 		PlanID:        taskProto.GetPlanID(),
 		StartTime:     taskProto.GetStartTime(),
@@ -371,8 +371,6 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		TotalRows:     taskProto.GetTotalRows(),
 		Schema:        taskProto.GetSchema(),
 		SlotUsage:     t.GetSlotUsage(),
-		Cpu:           resource.CPU,
-		Memory:        resource.Memory,
 		JsonParams:    compactionParams,
 	}
 

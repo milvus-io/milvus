@@ -128,3 +128,52 @@ func TestProperties_CostFields(t *testing.T) {
 		assert.Equal(t, int64(0), props.GetCostCPUNum())
 	})
 }
+
+func TestProperties_TaskResource(t *testing.T) {
+	t.Run("round trip", func(t *testing.T) {
+		props := NewProperties(nil)
+		props.AppendTaskID(1)
+		props.AppendTaskResource(Resource{CPU: 2, Memory: 1 << 30})
+
+		assert.Equal(t, "2", props[CPUKey])
+		assert.Equal(t, "1073741824", props[MemoryKey])
+
+		resource, err := props.GetTaskResource()
+		assert.NoError(t, err)
+		assert.Equal(t, Resource{CPU: 2, Memory: 1 << 30}, resource)
+	})
+
+	t.Run("zero round trip", func(t *testing.T) {
+		props := NewProperties(nil)
+		props.AppendTaskID(1)
+		props.AppendTaskResource(Resource{})
+
+		resource, err := props.GetTaskResource()
+		assert.NoError(t, err)
+		assert.True(t, resource.IsZero())
+	})
+
+	// A coordinator that predates the keys sends neither, and the worker must
+	// book zero rather than reject the task.
+	t.Run("absent keys book zero", func(t *testing.T) {
+		for _, props := range []Properties{
+			NewProperties(map[string]string{TaskIDKey: "1"}),
+			NewProperties(map[string]string{TaskIDKey: "1", CPUKey: "2"}),
+			NewProperties(map[string]string{TaskIDKey: "1", MemoryKey: "1024"}),
+		} {
+			resource, err := props.GetTaskResource()
+			assert.NoError(t, err)
+			assert.Equal(t, Resource{}, resource)
+		}
+	})
+
+	t.Run("unparsable values", func(t *testing.T) {
+		props := NewProperties(map[string]string{TaskIDKey: "1", CPUKey: "abc", MemoryKey: "1024"})
+		_, err := props.GetTaskResource()
+		assert.Error(t, err)
+
+		props = NewProperties(map[string]string{TaskIDKey: "1", CPUKey: "2", MemoryKey: "xyz"})
+		_, err = props.GetTaskResource()
+		assert.Error(t, err)
+	})
+}
