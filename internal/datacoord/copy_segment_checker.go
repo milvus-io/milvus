@@ -165,6 +165,8 @@ func (c *copySegmentChecker) Start() {
 					c.checkPendingJob(job)
 				case datapb.CopySegmentJobState_CopySegmentJobExecuting:
 					c.checkCopyingJob(job)
+				case datapb.CopySegmentJobState_CopySegmentJobPublishing:
+					c.retryPublishingJob(job)
 				case datapb.CopySegmentJobState_CopySegmentJobFailed:
 					c.checkFailedJob(job)
 				}
@@ -179,6 +181,28 @@ func (c *copySegmentChecker) Start() {
 			c.LogTaskStats()
 		}
 	}
+}
+
+// retryPublishingJob re-runs finishJob for a job whose publication claim was
+// persisted but whose FinalizeJobPublication did not go through.
+//
+// The retry is bounded by the job deadline (tryTimeoutJob). Until then, every
+// round that finds the job still Publishing is a publication that failed to
+// persist, which is logged at warn level with the time spent so far so the
+// condition is visible in logs and metrics (CopySegmentJobs{state=Publishing})
+// without inspecting metadata.
+func (c *copySegmentChecker) retryPublishingJob(job CopySegmentJob) {
+	mlog.Warn(c.ctx, "copy segment job publication did not persist, retrying until the job deadline",
+		mlog.FieldJobID(job.GetJobId()),
+		mlog.Duration("elapsed", job.GetTR().ElapseSpan()),
+		mlog.Time("deadline", tsoutil.PhysicalTime(job.GetTimeoutTs())))
+	var totalRows int64
+	for _, mapping := range job.GetIdMappings() {
+		if segment := c.meta.GetSegment(c.ctx, mapping.GetTargetSegmentId()); segment != nil {
+			totalRows += segment.GetNumOfRows()
+		}
+	}
+	c.finishJob(job, totalRows)
 }
 
 // Close stops the checker gracefully.
@@ -318,7 +342,7 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 	idMappings := job.GetIdMappings()
 	if len(idMappings) == 0 {
 		log.Warn(c.ctx, "no id mappings to copy, mark job as completed")
-		if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
+		if _, err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted),
 			UpdateCopyJobReason("no segments to copy")); err != nil {
 			log.Error(c.ctx, "failed to update empty job state to Completed", mlog.Err(err))
@@ -487,7 +511,7 @@ func (c *copySegmentChecker) checkCopyingJob(job CopySegmentJob) {
 		log.Warn(c.ctx, "copy segment job has failed tasks",
 			mlog.Int("failedTasks", failedTasks),
 			mlog.Int("totalTasks", totalTasks))
-		if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
+		if _, err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 			UpdateCopyJobReason(fmt.Sprintf("%d/%d tasks failed", failedTasks, totalTasks))); err != nil {
 			log.Error(c.ctx, "failed to update job state to Failed", mlog.Err(err))
@@ -515,8 +539,11 @@ func (c *copySegmentChecker) checkCopyingJob(job CopySegmentJob) {
 		}
 	}
 
+	// finishJob has several silent early returns (terminal-state guard, flush
+	// failure, catalog error, !applied), so it — not this call site — owns the
+	// success log. Logging "job finished" here would claim completion for a job
+	// that concurrently timed out or failed.
 	c.finishJob(job, totalRows)
-	log.Info(c.ctx, "all copy segment tasks completed, job finished")
 }
 
 // finishJob completes the job by updating segments to Flushed and marking job as Completed.
@@ -550,55 +577,92 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 		}
 	}
 
-	// Step 2: Update segment states to Flushed (make them visible for query)
-	var flushFailures int
-	if len(targetSegmentIDs) > 0 {
-		for _, segID := range targetSegmentIDs {
-			segment := c.meta.GetSegment(c.ctx, segID)
-			if segment != nil && segment.GetState() != commonpb.SegmentState_Flushed {
-				op := UpdateStatusOperator(segID, commonpb.SegmentState_Flushed)
-				if err := c.meta.UpdateSegmentsInfo(c.ctx, op); err != nil {
-					log.Error(c.ctx, "failed to update segment state to Flushed",
-						mlog.FieldSegmentID(segID),
-						mlog.Err(err))
-					flushFailures++
-				} else {
-					log.Info(c.ctx, "updated segment state to Flushed",
-						mlog.FieldSegmentID(segID))
-				}
-			}
-		}
-	}
-
-	// Step 3: Fail the job if any segment flush failed (prevents silent data availability issues)
-	if flushFailures > 0 {
-		reason := fmt.Sprintf("%d/%d segments failed to flush to Flushed state", flushFailures, len(targetSegmentIDs))
-		log.Error(c.ctx, "finishJob: failing job due to segment flush failures",
-			mlog.Int("flushFailures", flushFailures),
-			mlog.Int("totalSegments", len(targetSegmentIDs)))
-		if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
-			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-			UpdateCopyJobReason(reason)); err != nil {
-			log.Error(c.ctx, "failed to update job state to Failed after flush failures", mlog.Err(err))
-		}
+	// Step 2: Publish the restore — flip every target segment to Flushed and
+	// clear IsImporting, in one batch.
+	//
+	// This is the ONLY point at which a restored segment becomes queryable.
+	// Individual tasks deliberately leave their targets Importing when they
+	// complete (see SyncCopySegmentTask), because a restore is all-or-nothing:
+	// publishing per task would expose a half-restored collection while later
+	// tasks are still running, and retract it again if one of them fails.
+	//
+	// `job` is the snapshot the checker round started with. Re-read it right
+	// before publishing: a concurrent path (tryTimeoutJob, or a sibling's
+	// markTaskAndJobFailed) may have finished the job since, and the guarded
+	// transition in Step 4 would then reject the Completed transition — but only
+	// after these writes were already committed, leaving the segments of a
+	// failed restore queryable. Losing this race means the job is failed, so the
+	// inspector's job-scoped cleanup owns the segments from here.
+	//
+	// The operators are handed to FinalizeJobPublication as one group per
+	// segment; it publishes them in bounded chunks (holding meta.segMu only per
+	// chunk — one unbounded hold would stall every segment reader and writer
+	// for the whole restore) and writes the Completed record last. A reader can
+	// transiently see segment A Flushed while segment B is still Importing, but
+	// the job completes only after every chunk landed; a crash or mid-way
+	// failure leaves the job Publishing, NewCopySegmentMeta re-hides the
+	// partial publication before the server becomes healthy, and this retry
+	// path republishes only what is still needed (the per-segment operators
+	// below are built from current state, so it is idempotent).
+	current := c.copyMeta.GetJob(c.ctx, job.GetJobId())
+	if current == nil || (current.GetState() != datapb.CopySegmentJobState_CopySegmentJobExecuting &&
+		current.GetState() != datapb.CopySegmentJobState_CopySegmentJobPublishing) {
+		log.Info(c.ctx, "skip finishing copy segment job: job is no longer publishable")
 		return
 	}
+	if current.GetState() == datapb.CopySegmentJobState_CopySegmentJobExecuting {
+		claimed, err := c.copyMeta.UpdateJobInState(c.ctx, job.GetJobId(),
+			datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobPublishing))
+		if err != nil {
+			log.Error(c.ctx, "failed to persist copy segment publication claim", mlog.Err(err))
+			return
+		}
+		if !claimed {
+			log.Info(c.ctx, "skip finishing copy segment job: publication outcome was claimed concurrently")
+			return
+		}
+	}
 
-	// Step 4: Update job state to Completed
+	// One operator group per segment, so chunking can never split a segment's
+	// state flip from its importing-flag clear across two writes.
+	segmentOperators := make([][]UpdateOperator, 0, len(targetSegmentIDs))
+	for _, segID := range targetSegmentIDs {
+		segment := c.meta.GetSegment(c.ctx, segID)
+		if segment == nil {
+			continue
+		}
+		group := make([]UpdateOperator, 0, 2)
+		if segment.GetState() != commonpb.SegmentState_Flushed {
+			group = append(group, UpdateStatusOperator(segID, commonpb.SegmentState_Flushed))
+		}
+		if segment.GetIsImporting() {
+			group = append(group, UpdateIsImporting(segID, false))
+		}
+		if len(group) > 0 {
+			segmentOperators = append(segmentOperators, group)
+		}
+	}
+
+	// Step 3: Persist the target updates in bounded chunks and Completed last.
+	// Publishing is an outcome fence: write failures leave the job there for a
+	// retry and can never turn a partially published success into Failed.
 	completeTs := uint64(time.Now().UnixNano())
-	err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted),
-		UpdateCopyJobCompleteTs(completeTs),
-		UpdateCopyJobTotalRows(totalRows))
+	applied, err := c.copyMeta.FinalizeJobPublication(c.ctx, job.GetJobId(), totalRows, completeTs, segmentOperators...)
 	if err != nil {
-		log.Error(c.ctx, "failed to update job state to Completed", mlog.Err(err))
+		log.Error(c.ctx, "finishJob: target publication failed; retrying from Publishing",
+			mlog.Int("totalSegments", len(targetSegmentIDs)), mlog.Err(err))
+		return
+	}
+	if !applied {
+		log.Info(c.ctx, "skip completing copy segment job: publication state changed")
 		return
 	}
 
 	// Step 4: Record metrics
 	totalDuration := job.GetTR().ElapseSpan()
 	metrics.CopySegmentJobLatency.Observe(float64(totalDuration.Milliseconds()))
-	log.Info(c.ctx, "copy segment job completed",
+	log.Info(c.ctx, "all copy segment tasks completed, copy segment job finished",
 		mlog.Int64("totalRows", totalRows),
 		mlog.Int("targetSegments", len(targetSegmentIDs)),
 		mlog.Duration("totalDuration", totalDuration))
@@ -659,15 +723,19 @@ func (c *copySegmentChecker) checkFailedJob(job CopySegmentJob) {
 
 // tryTimeoutJob checks if job has exceeded timeout and marks it as failed.
 //
-// Only applies to non-terminal jobs (Pending/Executing).
-// Timeout prevents jobs from running indefinitely due to stuck tasks.
+// Applies to every non-terminal job (Pending/Executing/Publishing). Timeout
+// prevents jobs from running indefinitely due to stuck tasks — and it is the
+// bound on publication retry: Publishing has no other exit than a successful
+// FinalizeJobPublication, so without it a persistent catalog failure would
+// keep the job in Publishing forever (see CopySegmentMeta.TimeoutJob).
 //
 // Timeout is set when job is created based on configuration.
 func (c *copySegmentChecker) tryTimeoutJob(job CopySegmentJob) {
 	// Only apply timeout to non-terminal jobs
 	switch job.GetState() {
 	case datapb.CopySegmentJobState_CopySegmentJobPending,
-		datapb.CopySegmentJobState_CopySegmentJobExecuting:
+		datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		datapb.CopySegmentJobState_CopySegmentJobPublishing:
 		// Continue to check timeout
 	default:
 		// Skip timeout check for terminal states (Completed/Failed)
@@ -679,15 +747,25 @@ func (c *copySegmentChecker) tryTimeoutJob(job CopySegmentJob) {
 		return
 	}
 
+	reason := "timeout"
+	if job.GetState() == datapb.CopySegmentJobState_CopySegmentJobPublishing {
+		reason = "timeout while publishing restored segments"
+	}
+	applied, err := c.copyMeta.TimeoutJob(c.ctx, job.GetJobId(), reason)
+	if err != nil {
+		mlog.Error(c.ctx, "failed to update timed-out job state to Failed",
+			mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+		return
+	}
+	if !applied {
+		// The job reached a terminal state through another path in this same
+		// round (typically checkCopyingJob -> finishJob -> Completed); it did
+		// not time out, so don't warn that it did.
+		return
+	}
 	mlog.Warn(c.ctx, "copy segment job timeout",
 		mlog.FieldJobID(job.GetJobId()),
 		mlog.Time("timeoutTime", timeoutTime))
-	if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-		UpdateCopyJobReason("timeout")); err != nil {
-		mlog.Error(c.ctx, "failed to update timed-out job state to Failed",
-			mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
-	}
 }
 
 // checkGC performs garbage collection for completed/failed jobs.
@@ -730,7 +808,13 @@ func (c *copySegmentChecker) checkGC(job CopySegmentJob) {
 
 		for _, task := range tasks {
 			// If job failed and task has target segments in meta, don't remove yet
-			// (wait for segments to be cleaned up first)
+			// (wait for segments to be cleaned up first).
+			//
+			// GetSegment returns unhealthy segments too, so a Dropped segment
+			// still pins the job here: the inspector's processFailed only MARKS
+			// the targets Dropped, and it is the global segment GC that later
+			// removes them from meta. Reclaiming a failed copy job therefore
+			// trails the segment GC rather than being driven by this loop.
 			if job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed {
 				hasSegments := false
 				for _, mapping := range task.GetIdMappings() {

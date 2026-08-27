@@ -363,6 +363,7 @@ func (s *Server) initDataCoord() error {
 		s.meta,
 		s.copySegmentMeta,
 		s.globalScheduler,
+		s.cluster2,
 	)
 
 	s.copySegmentChecker = NewCopySegmentChecker(

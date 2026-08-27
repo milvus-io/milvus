@@ -18,7 +18,6 @@ package importv2
 
 import (
 	"context"
-	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -96,18 +95,17 @@ func transformManifestPath(
 	source *datapb.CopySegmentSource,
 	target *datapb.CopySegmentTarget,
 ) (string, error) {
-	basePath, version, err := packed.UnmarshalManifestPath(manifestPath)
-	if err != nil {
-		return "", merr.Wrap(err, "failed to unmarshal manifest path")
-	}
-
-	targetBasePath, err := generateTargetPath(basePath, source, target)
-	if err != nil {
-		return "", merr.Wrap(err, "failed to generate target base path")
-	}
-
-	targetManifestPath := packed.MarshalManifestPath(targetBasePath, version)
-	return targetManifestPath, nil
+	// Shared with DataCoord's pre-registration of the target segment
+	// (deriveCopySegmentTargetManifestPath): both sides must derive the same
+	// path, so the transform lives in snapshotstorage and is only called here.
+	return snapshotstorage.TransformCopySegmentManifestPath(
+		manifestPath,
+		source.GetSourceRootPath(),
+		target.GetTargetRootPath(),
+		target.GetCollectionId(),
+		target.GetPartitionId(),
+		target.GetSegmentId(),
+	)
 }
 
 // listAllFiles recursively lists all files under the given path using WalkWithPrefix.
@@ -622,111 +620,21 @@ func generateSegmentInfoFromSource(
 }
 
 func remapSourceRootPath(sourcePath string, source *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) (string, error) {
-	rawSourceRoot := strings.TrimSpace(source.GetSourceRootPath())
-	if rawSourceRoot == "" {
-		return sourcePath, nil
-	}
-
-	rootBucket, rootObject, rootEndpoint, err := snapshotstorage.ParseForeignRootURI(rawSourceRoot)
-	if err != nil {
-		return "", merr.Wrap(err, "invalid copy segment source root")
-	}
-	pathBucket, pathObject, pathEndpoint, err := snapshotstorage.ParseForeignURI(sourcePath)
-	if err != nil {
-		return "", merr.Wrap(err, "invalid snapshot file path")
-	}
-
-	rootURI, err := url.Parse(rawSourceRoot)
-	if err != nil {
-		return "", merr.WrapErrDataIntegrity(err, "invalid copy segment source root")
-	}
-	pathURI, err := url.Parse(sourcePath)
-	if err != nil {
-		return "", merr.WrapErrDataIntegrity(err, "invalid snapshot file path")
-	}
-	rootIsCompleteURI := rootURI.Scheme != "" && rootURI.Host != ""
-	pathIsCompleteURI := pathURI.Scheme != "" && pathURI.Host != ""
-	if rootIsCompleteURI && pathIsCompleteURI &&
-		(snapshotstorage.CanonicalForeignScheme(rootURI.Scheme) != snapshotstorage.CanonicalForeignScheme(pathURI.Scheme) ||
-			rootBucket != pathBucket ||
-			!strings.EqualFold(rootEndpoint, pathEndpoint)) {
-		return "", merr.WrapErrDataIntegrityMsg(
-			"snapshot file URI %q does not match source root %q",
-			snapshotstorage.RedactSnapshotObjectPath(sourcePath),
-			snapshotstorage.RedactSnapshotObjectPath(rawSourceRoot),
-		)
-	}
-
-	rootObject = strings.Trim(rootObject, "/")
-	pathObject = strings.Trim(pathObject, "/")
-	relativePath := pathObject
-	if rootObject != "" {
-		switch {
-		case pathObject == rootObject:
-			relativePath = ""
-		case strings.HasPrefix(pathObject, rootObject+"/"):
-			relativePath = strings.TrimPrefix(pathObject, rootObject+"/")
-		default:
-			return "", merr.WrapErrDataIntegrityMsg(
-				"snapshot file path %q is outside source root %q",
-				snapshotstorage.RedactSnapshotObjectPath(sourcePath),
-				snapshotstorage.RedactSnapshotObjectPath(rawSourceRoot),
-			)
-		}
-	}
-
-	targetRootPath := strings.Trim(target.GetTargetRootPath(), "/")
-	if targetRootPath == "" {
-		return relativePath, nil
-	}
-	if relativePath == "" {
-		return targetRootPath, nil
-	}
-	return path.Join(targetRootPath, relativePath), nil
+	return snapshotstorage.RemapCopySegmentRootPath(sourcePath, source.GetSourceRootPath(), target.GetTargetRootPath())
 }
 
 // generateTargetPath converts source file path to target path by replacing collection/partition/segment IDs
 // Binlog path format: {rootPath}/{log_type}/{collectionID}/{partitionID}/{segmentID}/{fieldID}/{logID}
 // Example: files/insert_log/111/222/333/444/555.log -> files/insert_log/aaa/bbb/ccc/444/555.log
 func generateTargetPath(sourcePath string, source *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) (string, error) {
-	var err error
-	sourcePath, err = remapSourceRootPath(sourcePath, source, target)
-	if err != nil {
-		return "", err
-	}
-
-	// Convert IDs to strings for replacement
-	targetCollectionIDStr := strconv.FormatInt(target.GetCollectionId(), 10)
-	targetPartitionIDStr := strconv.FormatInt(target.GetPartitionId(), 10)
-	targetSegmentIDStr := strconv.FormatInt(target.GetSegmentId(), 10)
-
-	// Split path into parts
-	parts := strings.Split(sourcePath, "/")
-
-	// Find the log type index (insert_log, delta_log, stats_log, bm25_stats)
-	// Path structure: .../log_type/collectionID/partitionID/segmentID/...
-	logTypeIndex := -1
-	for i, part := range parts {
-		if part == BinlogTypeInsert || part == BinlogTypeDelta || part == BinlogTypeStats || part == BinlogTypeBM25 {
-			logTypeIndex = i
-			break
-		}
-	}
-
-	if logTypeIndex == -1 || logTypeIndex+3 >= len(parts) {
-		return "", merr.WrapErrParameterInvalidMsg("invalid binlog path structure: %s (expected log_type at a valid position)", sourcePath)
-	}
-
-	// Replace IDs in order: collectionID, partitionID, segmentID
-	// log_type is at index logTypeIndex
-	// collectionID is at index logTypeIndex + 1
-	// partitionID is at index logTypeIndex + 2
-	// segmentID is at index logTypeIndex + 3
-	parts[logTypeIndex+1] = targetCollectionIDStr
-	parts[logTypeIndex+2] = targetPartitionIDStr
-	parts[logTypeIndex+3] = targetSegmentIDStr
-
-	return path.Join(parts...), nil
+	return snapshotstorage.TransformCopySegmentPath(
+		sourcePath,
+		source.GetSourceRootPath(),
+		target.GetTargetRootPath(),
+		target.GetCollectionId(),
+		target.GetPartitionId(),
+		target.GetSegmentId(),
+	)
 }
 
 // generateTargetLOBPath replaces collection and partition IDs in a LOB file path.
