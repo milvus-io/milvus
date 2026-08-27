@@ -838,6 +838,9 @@ message CompactionPlan {
   repeated common.KeyValuePair plugin_context = 29;
   repeated internal.FileResourceInfo file_resources = 30;
   repeated schema.FunctionSchema functions = 31;
+  // Estimated by DataCoord; the worker books these on accept and releases on completion.
+  int64 cpu = 32;
+  int64 memory = 33; // bytes
 }
 
 message CompactionSegment {
@@ -1048,6 +1051,9 @@ message PreImportRequest {
   index.StorageConfig storage_config = 10;
   int64 task_slot = 11;
   repeated common.KeyValuePair plugin_context = 12;
+  // Estimated by DataCoord; the worker books these on accept and releases on completion.
+  int64 cpu = 13;
+  int64 memory = 14; // bytes
 }
 
 message IDRange {
@@ -1079,6 +1085,9 @@ message ImportRequest {
   int64 storage_version = 15;
   repeated common.KeyValuePair plugin_context = 16;
   bool use_loon_ffi = 17;
+  // Estimated by DataCoord; the worker books these on accept and releases on completion.
+  int64 cpu = 18;
+  int64 memory = 19; // bytes
 }
 
 message QueryPreImportRequest {
@@ -1208,6 +1217,9 @@ message CopySegmentRequest {
   index.StorageConfig storage_config = 6;
   int64 task_slot = 7;
   string external_spec = 8;
+  // Estimated by DataCoord; the worker books these on accept and releases on completion.
+  int64 cpu = 9;
+  int64 memory = 10; // bytes
 }
 
 message QueryCopySegmentRequest {
@@ -1472,6 +1484,13 @@ message QuerySlotResponse {
   common.Status status = 1;
   int64 available_slots = 2;
   string version = 3; // Kept for wire compatibility; new schedulers do not use it
+  // Two-dimensional report. A worker that predates it leaves total_* at zero,
+  // and a coordinator that sees total_memory == 0 places on available_slots.
+  // available_* = total_* - sum(cpu/memory of accepted, unfinished tasks).
+  int64 total_cpu = 4;
+  int64 available_cpu = 5;
+  int64 total_memory = 6;   // bytes
+  int64 available_memory = 7; // bytes
 }
 
 enum CompactionTaskState {
