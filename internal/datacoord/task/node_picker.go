@@ -177,3 +177,20 @@ func remainingFraction(remaining, total int64) float64 {
 	}
 	return math.Min(math.Max(float64(remaining)/float64(total), 0), 1)
 }
+
+// exhausted reports that no worker of either tier has a slot left, i.e. nothing
+// behind the task that was just refused can be placed either. It is the only
+// case in which a NullNodeID should end the scheduling round: a task refused
+// because it alone does not fit must give way instead, or one oversized task at
+// the head of the queue stalls every smaller task behind it.
+//
+// It does not mutate the picker: the slot heap is a max-heap on AvailableSlots,
+// so peeking its top is enough.
+func (p *nodePicker) exhausted() bool {
+	for _, n := range p.nodes {
+		if n.availableSlots > 0 {
+			return false
+		}
+	}
+	return p.heap.Len() == 0 || p.heap.Peek().slots.AvailableSlots <= 0
+}

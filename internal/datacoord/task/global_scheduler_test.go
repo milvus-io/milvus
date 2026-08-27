@@ -549,3 +549,90 @@ func TestGlobalScheduler_TerminalTaskClearsBackoff(t *testing.T) {
 	assert.Equal(t, 0, scheduler.runningTasks.Len())
 	assert.Equal(t, 0, len(scheduler.pendingTasks.TaskIDs()))
 }
+
+// TestGlobalScheduler_scheduleUnfitTask covers the two reasons a pick can fail.
+// A task that alone does not fit must give way to the tasks behind it, while a
+// cluster without a free slot anywhere must still end the round.
+func TestGlobalScheduler_scheduleUnfitTask(t *testing.T) {
+	const giB = int64(1) << 30
+
+	// newDispatchableTask returns a task that reaches InProgress once the worker
+	// accepts it, a flag reporting whether it was dispatched, and a counter of
+	// how often the scheduler popped it and looked at its cost - zero means the
+	// round ended before reaching it.
+	newDispatchableTask := func(t *testing.T, taskID int64, req taskcommon.Resource) (*MockTask, *atomic.Bool, *atomic.Int32) {
+		task := NewMockTask(t)
+		var (
+			dispatched atomic.Bool
+			examined   atomic.Int32
+		)
+		task.EXPECT().GetTaskID().Return(taskID).Maybe()
+		task.EXPECT().GetTaskType().Return(taskcommon.Compaction).Maybe()
+		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+		task.EXPECT().GetTaskSlot().RunAndReturn(func() int64 {
+			examined.Add(1)
+			return 1
+		}).Maybe()
+		task.EXPECT().GetTaskResource().Return(req).Maybe()
+		task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+			if dispatched.Load() {
+				return taskcommon.InProgress
+			}
+			return taskcommon.Init
+		}).Maybe()
+		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything).
+			Run(func(nodeID int64, cluster session.Cluster) {
+				dispatched.Store(true)
+			}).Maybe()
+		return task, &dispatched, &examined
+	}
+
+	t.Run("task that does not fit lets the queue behind it through", func(t *testing.T) {
+		cluster := session.NewMockCluster(t)
+		cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+			1: {NodeID: 1, AvailableSlots: 10, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: 4 * giB},
+			2: {NodeID: 2, AvailableSlots: 10, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: 4 * giB},
+		}).Once()
+		scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+
+		// The head of the queue (lowest task ID) needs 12GiB: it fits an empty
+		// worker, so it is not oversized, but no worker has that much free now.
+		head, headDispatched, _ := newDispatchableTask(t, 1, taskcommon.Resource{CPU: 1, Memory: 12 * giB})
+		small, smallDispatched, _ := newDispatchableTask(t, 2, taskcommon.Resource{CPU: 1, Memory: giB})
+		scheduler.Enqueue(head)
+		scheduler.Enqueue(small)
+
+		scheduler.schedule()
+
+		assert.False(t, headDispatched.Load(), "the task that does not fit must wait")
+		assert.True(t, smallDispatched.Load(), "the task behind it must not be stalled")
+		// The head task is back in the queue for the next round; the dispatched
+		// one moved to runningTasks.
+		assert.Equal(t, []int64{1}, scheduler.pendingTasks.TaskIDs())
+		assert.True(t, scheduler.runningTasks.Contain(2))
+	})
+
+	t.Run("exhausted cluster still ends the round", func(t *testing.T) {
+		cluster := session.NewMockCluster(t)
+		cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+			1: {NodeID: 1, AvailableSlots: 0, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: 16 * giB},
+			2: {NodeID: 2, AvailableSlots: 0, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: 16 * giB},
+		}).Once()
+		scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+
+		head, headDispatched, _ := newDispatchableTask(t, 1, taskcommon.Resource{CPU: 1, Memory: 12 * giB})
+		small, smallDispatched, smallExamined := newDispatchableTask(t, 2, taskcommon.Resource{CPU: 1, Memory: giB})
+		scheduler.Enqueue(head)
+		scheduler.Enqueue(small)
+
+		scheduler.schedule()
+
+		// No worker has a slot: neither task is dispatched and both stay queued.
+		assert.False(t, headDispatched.Load())
+		assert.False(t, smallDispatched.Load())
+		assert.ElementsMatch(t, []int64{1, 2}, scheduler.pendingTasks.TaskIDs())
+		// The round ended at the head rather than draining the queue: the second
+		// task was never even popped.
+		assert.Zero(t, smallExamined.Load())
+	})
+}
