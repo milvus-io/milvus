@@ -47,6 +47,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// ErrPKRangeTooSmall marks the one AssembleImportRequest failure a retry can never
+// fix: the PK range was reserved at broadcast from an upper bound, and preimport
+// has since produced a larger exact row count. Neither number changes by
+// rescheduling, so the task must fail now and keep the precise reason.
+//
+// The scheduler cannot key this off merr classification. ErrImportSysFailed also
+// carries genuinely transient cases ("job %d not found, waiting for import job
+// creation"), and merr.IsNonRetryableErr is a deny-list over ErrIo* sentinels that
+// AssembleImportRequest never returns.
+var ErrPKRangeTooSmall = errors.New("reserved PK range too small")
+
 func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
 		mlog.FieldTaskID(task.GetTaskID()),
@@ -360,6 +371,23 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 		return fileStat.GetImportFile()
 	})
+
+	// The PK reservation was sized at broadcast from an upper bound; pre-import has
+	// since produced the exact row count. Compare them here, before any segment is
+	// written, instead of letting pkCursor.take trip mid-import on the datanode.
+	for _, fileStat := range task.GetFileStats() {
+		f := fileStat.GetImportFile()
+		r := f.GetPreAllocatedAutoIds()
+		reserved := r.GetEnd() - r.GetBegin()
+		if reserved > 0 && fileStat.GetTotalRows() > reserved {
+			// Marked so the scheduler can tell this apart from the retriable
+			// failures AssembleImportRequest also returns. The merr code stays
+			// ErrImportSysFailed; markers.Mark only adds the sentinel to the chain.
+			return nil, merr.Mark(merr.WrapErrImportSysFailedMsg(
+				"reserved PK range too small for file %v: %d rows, %d ids reserved",
+				f.GetPaths(), fileStat.GetTotalRows(), reserved), ErrPKRangeTooSmall)
+		}
+	}
 
 	isL0Import := importutilv2.IsL0Import(job.GetOptions())
 	storageVersion := importStorageVersion(isL0Import)
