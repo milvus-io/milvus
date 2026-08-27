@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -388,6 +389,94 @@ func (s *CollectionManagerSuite) TestCollectionUpdateIndexMeta() {
 
 	s.Require().NoError(coll.UpdateIndexMeta(indexMeta))
 	s.True(proto.Equal(indexMeta, coll.GetCCollection().IndexMeta()))
+}
+
+func (s *CollectionManagerSuite) TestCollectionUpdateIndexMetaUnchangedBypassesSchemaTransition() {
+	coll := s.cm.Get(1)
+	s.Require().NotNil(coll)
+	indexMeta := proto.Clone(coll.GetCCollection().IndexMeta()).(*segcorepb.CollectionIndexMeta)
+
+	releaseReader := holdInsertSchemaTransition(s.T(), coll)
+	defer releaseReader()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- coll.UpdateIndexMeta(indexMeta)
+	}()
+
+	select {
+	case err := <-done:
+		s.Require().NoError(err)
+	case <-time.After(time.Second):
+		s.T().Fatal("unchanged index meta waited for the schema transition lock")
+	}
+}
+
+func (s *CollectionManagerSuite) TestCollectionUpdateIndexMetaChangeWaitsForSchemaTransition() {
+	coll := s.cm.Get(1)
+	s.Require().NotNil(coll)
+	indexMeta := proto.Clone(coll.GetCCollection().IndexMeta()).(*segcorepb.CollectionIndexMeta)
+	indexMeta.MaxIndexRowCount++
+
+	releaseReader := holdInsertSchemaTransition(s.T(), coll)
+	defer releaseReader()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- coll.UpdateIndexMeta(indexMeta)
+	}()
+	waitForSchemaTransitionWriter(s.T(), coll)
+
+	select {
+	case err := <-done:
+		s.Require().NoError(err)
+		s.T().Fatal("changed index meta bypassed the schema transition lock")
+	default:
+	}
+
+	releaseReader()
+	s.Require().NoError(<-done)
+}
+
+func (s *CollectionManagerSuite) TestCollectionConcurrentIndexMetaChangeUpdatesNativeOnce() {
+	coll := s.cm.Get(1)
+	s.Require().NotNil(coll)
+	indexMeta := proto.Clone(coll.GetCCollection().IndexMeta()).(*segcorepb.CollectionIndexMeta)
+	indexMeta.MaxIndexRowCount++
+
+	var calls atomic.Int32
+	var origin func(*segcore.CCollection, *segcorepb.CollectionIndexMeta) error
+	patch := mockey.Mock((*segcore.CCollection).UpdateIndexMeta).
+		To(func(collection *segcore.CCollection, meta *segcorepb.CollectionIndexMeta) error {
+			calls.Add(1)
+			return origin(collection, meta)
+		}).
+		Origin(&origin).
+		Build()
+	s.T().Cleanup(func() {
+		patch.UnPatch()
+	})
+
+	const concurrency = 10
+	start := make(chan struct{})
+	errs := make(chan error, concurrency)
+	var wg sync.WaitGroup
+	wg.Add(concurrency)
+	for range concurrency {
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- coll.UpdateIndexMeta(indexMeta)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		s.Require().NoError(err)
+	}
+	s.Equal(int32(1), calls.Load())
 }
 
 func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMetaWaitsForCollectionNativeLock() {
