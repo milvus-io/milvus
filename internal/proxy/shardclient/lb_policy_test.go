@@ -1334,6 +1334,28 @@ func (s *LBPolicySuite) TestExecuteOneChannelScopedPrefersAServableChannel() {
 	s.Equal([]string{s.channels[1]}, executed, "the channel rg-b cannot serve is skipped for the one it can")
 	s.mgr.AssertNotCalled(s.T(), "GetShard", mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[0])
 
+	// The scoped channel list is derived from the FRESH table, not from the
+	// cached channel list: a channel the fresh table knows and the cache does
+	// not is still tried, and one the cache lists but the fresh table lacks
+	// is not.
+	s.mgr.ExpectedCalls = nil
+	s.mgr.Calls = nil
+	executed = nil
+	s.mgr.EXPECT().GetShardLeaderList(mock.Anything, s.dbName, s.collectionName, s.collectionID, true).Return([]string{"stale-only"}, nil)
+	s.mgr.EXPECT().GetShardLeaders(mock.Anything, false, s.dbName, s.collectionName, s.collectionID).
+		Return(map[string][]NodeInfo{"fresh-only": rgNodes()}, nil).Once()
+	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, "fresh-only").Return(rgNodes(), nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	err = s.lbPolicy.ExecuteOneChannel(ctx, CollectionWorkLoad{
+		Db: s.dbName, CollectionName: s.collectionName, CollectionID: s.collectionID, Nq: 1, ResourceGroup: "rg-b",
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			executed = append(executed, channel)
+			return nil
+		},
+	})
+	s.NoError(err)
+	s.Equal([]string{"fresh-only"}, executed, "the fresh table, not the cached key set, decides what is tried")
+
 	// When the FRESH table shows no channel the group can serve, the refusal
 	// comes back immediately -- zero retry budgets, no per-channel attempt --
 	// and it is the same retriable code a full sweep would have ended on.

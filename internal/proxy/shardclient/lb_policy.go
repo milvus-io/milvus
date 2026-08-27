@@ -19,6 +19,7 @@ package shardclient
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -517,23 +518,26 @@ func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload Collecti
 	// GetShardLeaders is one coordinator call that refreshes every channel of
 	// the collection at once (updateShardLocationCache replaces the whole
 	// entry), so what it returns is authoritative rather than stale. The
-	// channels with a candidate in the group are tried in list order; none
-	// at all is refused right here, with the same retriable code selectNode
-	// would reach after a full sweep -- in zero budgets instead of shards x
-	// budget. The cost is one RPC on the scoped path, and one cache-metric
-	// hit (caller="GetShardLeaders") rather than one per channel.
+	// scoped channel list is derived from THAT table, not from the cached
+	// channelList above, so the pre-pass never mixes a stale key set with a
+	// fresh leader table; sorted, so one state always tries one order. None
+	// servable at all is refused right here, with the same retriable code
+	// selectNode would reach after a full sweep -- in zero budgets instead of
+	// shards x budget. The cost is one RPC on the scoped path, and one
+	// cache-metric hit (caller="GetShardLeaders") rather than one per channel.
 	if workload.ResourceGroup != "" {
 		fresh, err := lb.clientMgr.GetShardLeaders(ctx, false, workload.Db, workload.CollectionName, workload.CollectionID)
 		if err != nil {
 			mlog.Warn(ctx, "failed to refresh shard leaders for the resource group pre-pass", mlog.Err(err))
 			return err
 		}
-		servable := make([]string, 0, len(channelList))
-		for _, channel := range channelList {
-			if len(FilterByResourceGroup(fresh[channel], workload.ResourceGroup)) > 0 {
+		servable := make([]string, 0, len(fresh))
+		for channel, leaders := range fresh {
+			if len(FilterByResourceGroup(leaders, workload.ResourceGroup)) > 0 {
 				servable = append(servable, channel)
 			}
 		}
+		sort.Strings(servable)
 		if len(servable) == 0 {
 			return merr.WrapErrCollectionNotFullyLoaded(workload.CollectionID,
 				fmt.Sprintf("no shard leader in resource group %s", workload.ResourceGroup))
