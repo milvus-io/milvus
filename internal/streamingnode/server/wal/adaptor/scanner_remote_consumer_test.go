@@ -44,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestRemoteConsumerTransparentlyBridgesHistoricalAndCurrentWAL(t *testing.T) {
@@ -165,7 +164,7 @@ func TestRemoteConsumerTransparentlyBridgesHistoricalAndCurrentWAL(t *testing.T)
 	require.NoError(t, consumer.Close())
 }
 
-func TestRemoteConsumerDoesNotAdvanceWhenHistoricalWALIsUnavailable(t *testing.T) {
+func TestRemoteConsumerDoesNotAdvanceWhenHistoricalWALNameMismatches(t *testing.T) {
 	resource.InitForTest(t)
 	channel := types.PChannelInfo{
 		Name:       "remote-cross-wal-unavailable",
@@ -183,7 +182,7 @@ func TestRemoteConsumerDoesNotAdvanceWhenHistoricalWALIsUnavailable(t *testing.T
 		message.WALName,
 		types.PChannelInfo,
 	) (walimpls.ROWALImpls, error) {
-		return nil, merr.WrapErrMqTopicNotFound(channel.Name)
+		return nil, streamingstatus.NewWALNameMismatchError(message.WALNameTest.String(), message.WALNameRocksmq.String())
 	})
 	defer roWAL.Close()
 

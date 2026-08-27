@@ -2,7 +2,6 @@ package adaptor
 
 import (
 	"context"
-	"time"
 
 	"github.com/cockroachdb/errors"
 
@@ -15,8 +14,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var _ walimpls.ScannerImpls = (*underlyingWALScannerAdaptor)(nil)
@@ -60,13 +57,11 @@ type underlyingWALScannerAdaptor struct {
 	underlyingROWALImplsOpener underlyingROWALImplsOpener
 	onUnderlyingScannerChanged func(message.WALName)
 
-	underlyingWALName      message.WALName
-	underlyingReadOption   walimpls.ReadOption
-	cutTs                  uint64
-	excludedMessageID      message.MessageID
-	waitingForSwitchTarget bool
-	switchTargetDeadline   time.Time
-	messageCh              chan message.ImmutableMessage
+	underlyingWALName    message.WALName
+	underlyingReadOption walimpls.ReadOption
+	cutTs                uint64
+	excludedMessageID    message.MessageID
+	messageCh            chan message.ImmutableMessage
 }
 
 func newUnderlyingWALScannerAdaptor(
@@ -135,21 +130,12 @@ func (a *underlyingWALScannerAdaptor) consume() error {
 			return a.Context().Err()
 		}
 
-		openCtx, cancel, err := a.nextUnderlyingWALOpenContext(a.Context())
+		underlyingWAL, err := a.openUnderlyingWAL(a.Context())
 		if err != nil {
-			return err
-		}
-		underlyingWAL, err := a.openUnderlyingWAL(openCtx)
-		openCtxErr := openCtx.Err()
-		cancel()
-		if err != nil {
-			if a.waitingForSwitchTarget && errors.Is(openCtxErr, context.DeadlineExceeded) && a.Context().Err() == nil {
-				return a.newSwitchTargetOpenTimeoutError()
-			}
-			if a.isUnderlyingWALUnavailable(err) {
+			if isReadWALUnavailable(err) {
 				return newUnderlyingWALUnavailableError(a.underlyingWALName, err)
 			}
-			if !a.shouldRetrySwitchTarget(err) {
+			if status.AsStreamingError(err).IsUnrecoverable() {
 				return err
 			}
 			if a.Context().Err() != nil {
@@ -163,8 +149,6 @@ func (a *underlyingWALScannerAdaptor) consume() error {
 			select {
 			case <-a.Context().Done():
 				return a.Context().Err()
-			case <-a.switchTargetTimeout():
-				return a.newSwitchTargetOpenTimeoutError()
 			case <-waker:
 			}
 			continue
@@ -176,7 +160,7 @@ func (a *underlyingWALScannerAdaptor) consume() error {
 			backoffTimer = newScannerReadBackoffTimer()
 			continue
 		}
-		if a.isUnderlyingWALUnavailable(err) {
+		if isReadWALUnavailable(err) {
 			return newUnderlyingWALUnavailableError(a.underlyingWALName, err)
 		}
 		if status.AsStreamingError(err).IsUnrecoverable() {
@@ -193,8 +177,6 @@ func (a *underlyingWALScannerAdaptor) consume() error {
 		select {
 		case <-a.Context().Done():
 			return a.Context().Err()
-		case <-a.switchTargetTimeout():
-			return a.newSwitchTargetOpenTimeoutError()
 		case <-waker:
 		}
 	}
@@ -204,21 +186,10 @@ func (a *underlyingWALScannerAdaptor) consumeUnderlying(
 	ctx context.Context,
 	underlyingWAL walimpls.ROWALImpls,
 ) error {
-	openCtx, cancel, err := a.nextUnderlyingWALOpenContext(ctx)
+	underlyingScanner, err := a.createUnderlyingScannerWithBackoff(ctx, underlyingWAL)
 	if err != nil {
 		return err
 	}
-	underlyingScanner, err := a.createUnderlyingScannerWithBackoff(openCtx, underlyingWAL)
-	openCtxErr := openCtx.Err()
-	cancel()
-	if err != nil {
-		if a.waitingForSwitchTarget && errors.Is(openCtxErr, context.DeadlineExceeded) && ctx.Err() == nil {
-			return a.newSwitchTargetOpenTimeoutError()
-		}
-		return err
-	}
-	a.waitingForSwitchTarget = false
-	a.switchTargetDeadline = time.Time{}
 	defer underlyingScanner.Close()
 	if a.onUnderlyingScannerChanged != nil {
 		a.onUnderlyingScannerChanged(a.underlyingWALName)
@@ -301,8 +272,6 @@ func (a *underlyingWALScannerAdaptor) consumeUnderlying(
 			a.underlyingReadOption.DeliverPolicy = options.DeliverPolicyAll()
 			a.cutTs = messageTimeTick
 			a.excludedMessageID = nil
-			a.waitingForSwitchTarget = true
-			a.switchTargetDeadline = time.Now().Add(getWALSwitchTargetOpenTimeout())
 			return nil
 		}
 	}
@@ -374,55 +343,12 @@ func normalizeUnderlyingWALDeliverPolicy(
 	}
 }
 
+// isReadWALUnavailable reports whether the underlying WAL can never serve this
+// read. A missing topic is not part of it: the WAL that owns a channel always
+// creates its topic before any consumer can reach this path, so a not-found
+// answer only means the target writer has not started yet and must be retried.
 func isReadWALUnavailable(err error) bool {
-	return status.AsStreamingError(err).IsWALNameMismatch() || errors.Is(err, merr.ErrMqTopicNotFound)
-}
-
-func (a *underlyingWALScannerAdaptor) isUnderlyingWALUnavailable(err error) bool {
-	if status.AsStreamingError(err).IsWALNameMismatch() {
-		return true
-	}
-	return !a.waitingForSwitchTarget && errors.Is(err, merr.ErrMqTopicNotFound)
-}
-
-func (a *underlyingWALScannerAdaptor) shouldRetrySwitchTarget(err error) bool {
-	return a.waitingForSwitchTarget && errors.Is(err, merr.ErrMqTopicNotFound)
-}
-
-func (a *underlyingWALScannerAdaptor) nextUnderlyingWALOpenContext(
-	ctx context.Context,
-) (context.Context, context.CancelFunc, error) {
-	if !a.waitingForSwitchTarget {
-		return ctx, func() {}, nil
-	}
-	if time.Until(a.switchTargetDeadline) <= 0 {
-		return nil, nil, a.newSwitchTargetOpenTimeoutError()
-	}
-	openCtx, cancel := context.WithDeadline(ctx, a.switchTargetDeadline)
-	return openCtx, cancel, nil
-}
-
-func (a *underlyingWALScannerAdaptor) switchTargetTimeout() <-chan time.Time {
-	if !a.waitingForSwitchTarget {
-		return nil
-	}
-	return time.After(time.Until(a.switchTargetDeadline))
-}
-
-func (a *underlyingWALScannerAdaptor) newSwitchTargetOpenTimeoutError() error {
-	return status.NewUnrecoverableError(
-		"timed out waiting for target WAL %s on channel %s",
-		a.underlyingWALName,
-		a.channel.Name,
-	)
-}
-
-func getWALSwitchTargetOpenTimeout() time.Duration {
-	timeout := paramtable.Get().StreamingCfg.WALSwitchTargetOpenTimeout.GetAsDurationByParse()
-	if timeout <= 0 {
-		return 10 * time.Minute
-	}
-	return timeout
+	return status.AsStreamingError(err).IsWALNameMismatch()
 }
 
 func newUnderlyingWALUnavailableError(walName message.WALName, err error) error {

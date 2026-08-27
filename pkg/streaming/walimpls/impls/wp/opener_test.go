@@ -15,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type testWoodpeckerClient struct {
@@ -99,10 +98,15 @@ func TestOpenReadOnlyWALDoesNotOpenWriter(t *testing.T) {
 	w.Close()
 }
 
-func TestOpenMissingReadOnlyWALDoesNotCreateLog(t *testing.T) {
-	client := &testWoodpeckerClient{logExists: false}
+func TestOpenMissingReadOnlyWALDoesNotOpenWriter(t *testing.T) {
+	logHandle := mocks_log_handle.NewLogHandle(t)
+	logHandle.EXPECT().Close(mock.Anything).Return(nil).Once()
+	client := &testWoodpeckerClient{logExists: false, logHandle: logHandle}
 	opener := &openerImpl{c: client}
 
+	// A missing log is only reachable before its writer opened the channel, so
+	// the read-only open creates the log but must never take the writer lock,
+	// which would fence the writer that is about to own this channel.
 	opened, err := opener.Open(context.Background(), &walimpls.OpenOption{
 		Channel: types.PChannelInfo{
 			Name:       "missing-channel",
@@ -110,10 +114,10 @@ func TestOpenMissingReadOnlyWALDoesNotCreateLog(t *testing.T) {
 			AccessMode: types.AccessModeRO,
 		},
 	})
-	require.Error(t, err)
-	assert.ErrorIs(t, err, merr.ErrMqTopicNotFound)
-	assert.Nil(t, opened)
-	assert.False(t, client.created)
+	require.NoError(t, err)
+	assert.True(t, client.created)
+	assert.Nil(t, opened.(*walImpl).p)
+	opened.Close()
 }
 
 func TestOpenReadWriteWALClosesLogWhenWriterOpenFails(t *testing.T) {

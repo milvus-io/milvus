@@ -15,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/registry"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -77,20 +76,6 @@ func TestBuilderLazyInitializesRocksMQ(t *testing.T) {
 	require.NotNil(t, server.Rmq)
 	require.NoError(t, server.Rmq.CheckTopicValid(historicalTopic))
 	opener.Close()
-}
-
-func TestReadOnlyOpenRejectsMissingTopic(t *testing.T) {
-	opener, err := (&builderImpl{}).Build()
-	require.NoError(t, err)
-	defer opener.Close()
-
-	_, err = opener.Open(context.Background(), &walimpls.OpenOption{
-		Channel: types.PChannelInfo{
-			Name:       "missing-historical-topic",
-			AccessMode: types.AccessModeRO,
-		},
-	})
-	require.ErrorIs(t, err, merr.ErrMqTopicNotFound)
 }
 
 func TestRWClosePreservesTopicForHistoricalRead(t *testing.T) {

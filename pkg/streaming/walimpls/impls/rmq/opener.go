@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/client"
-	"github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
@@ -14,19 +13,13 @@ var _ walimpls.OpenerImpls = (*openerImpl)(nil)
 
 // openerImpl is the implementation of walimpls.Opener interface.
 type openerImpl struct {
-	c   client.Client
-	rmq server.RocksMQ
+	c client.Client
 }
 
 // Open opens a new wal.
 func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimpls.WALImpls, error) {
 	if err := opt.Validate(); err != nil {
 		return nil, err
-	}
-	if opt.Channel.AccessMode == types.AccessModeRO {
-		if err := o.rmq.CheckTopicValid(opt.Channel.Name); err != nil {
-			return nil, err
-		}
 	}
 	var p client.Producer
 	if opt.Channel.AccessMode == types.AccessModeRW {

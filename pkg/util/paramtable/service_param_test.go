@@ -291,19 +291,6 @@ func TestServiceParam(t *testing.T) {
 		}
 
 		{
-			const webAddress = "https://pulsar-admin.example.com:8443"
-			assert.NoError(t, bt.Save(SParams.PulsarCfg.WebAddress.Key, webAddress))
-			assert.Equal(t, webAddress, SParams.PulsarCfg.WebAddress.GetValue())
-			assert.NoError(t, bt.Save(SParams.PulsarCfg.WebAddress.Key, ""))
-		}
-
-		{
-			assert.NoError(t, bt.Save(SParams.PulsarCfg.Address.Key, "pulsar+ssl://localhost:6651"))
-			assert.NoError(t, bt.Save(SParams.PulsarCfg.WebPort.Key, "8443"))
-			assert.Equal(t, "https://localhost:8443", SParams.PulsarCfg.WebAddress.GetValue())
-		}
-
-		{
 			bt.Save(SParams.PulsarCfg.Address.Key, "u\\invalid")
 			assert.Equal(t, SParams.PulsarCfg.WebAddress.GetValue(), "")
 		}

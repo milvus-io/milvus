@@ -23,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func newTestAlterWALMessage(
@@ -377,7 +376,7 @@ func TestUnderlyingWALScannerAdaptorStartAfterAlterWALMarker(t *testing.T) {
 	require.Equal(t, []message.ImmutableMessage{currentMessage}, messages)
 }
 
-func TestUnderlyingWALScannerAdaptorFailsWhenWALIsUnavailable(t *testing.T) {
+func TestUnderlyingWALScannerAdaptorFailsWhenWALNameMismatches(t *testing.T) {
 	channel := types.PChannelInfo{Name: "test-channel"}
 	currentWAL := newTestCurrentWAL(t, channel)
 
@@ -389,7 +388,7 @@ func TestUnderlyingWALScannerAdaptorFailsWhenWALIsUnavailable(t *testing.T) {
 		options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
 		make(chan message.ImmutableMessage),
 		func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
-			return nil, merr.WrapErrMqTopicNotFound(channel.Name)
+			return nil, status.NewWALNameMismatchError(message.WALNameTest.String(), message.WALNameRocksmq.String())
 		},
 		nil,
 	)
@@ -397,7 +396,6 @@ func TestUnderlyingWALScannerAdaptorFailsWhenWALIsUnavailable(t *testing.T) {
 	next, err := scanner.Do(context.Background())
 	require.Nil(t, next)
 	require.True(t, status.AsStreamingError(err).IsUnrecoverable())
-	require.Contains(t, err.Error(), merr.ErrMqTopicNotFound.Error())
 }
 
 func TestUnderlyingWALScannerAdaptorWaitsForAlterWALTarget(t *testing.T) {
@@ -450,7 +448,21 @@ func TestUnderlyingWALScannerAdaptorWaitsForAlterWALTargetScanner(t *testing.T) 
 	historicalWAL := newTestReadWAL(t, message.WALNameRocksmq, channel, marker)
 	targetMessage := newTestTimeTickMessage(101, walimplstest.NewTestMessageID(1), walimplstest.NewTestMessageID(1))
 	targetWAL := newTestReadWAL(t, message.WALNameTest, channel, targetMessage)
-	var targetScannerOpenAttempts atomic.Int32
+	var targetScannerReadAttempts atomic.Int32
+
+	// The target WAL exists as soon as its writer opened it, but its scanner is
+	// only creatable once the writer published the topic, so the reader retries
+	// the read on the same WAL instance instead of reopening it.
+	unreadyTargetWAL := mock_walimpls.NewMockWALImpls(t)
+	unreadyTargetWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
+	unreadyTargetWAL.EXPECT().Close().Run(func() { targetWAL.Close() }).Return().Maybe()
+	unreadyTargetWAL.EXPECT().Read(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, opt walimpls.ReadOption) (walimpls.ScannerImpls, error) {
+			if targetScannerReadAttempts.Add(1) <= 2 {
+				return nil, merr.WrapErrMqTopicNotFound(channel.Name)
+			}
+			return targetWAL.Read(ctx, opt)
+		})
 
 	scanner, err := newUnderlyingWALScannerAdaptor(
 		mlog.With(),
@@ -464,15 +476,7 @@ func TestUnderlyingWALScannerAdaptorWaitsForAlterWALTargetScanner(t *testing.T) 
 				return historicalWAL, nil
 			}
 			require.Equal(t, message.WALNameTest, walName)
-			if targetScannerOpenAttempts.Add(1) <= 2 {
-				unreadyTargetWAL := mock_walimpls.NewMockWALImpls(t)
-				unreadyTargetWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
-				unreadyTargetWAL.EXPECT().Read(mock.Anything, mock.Anything).
-					Return(nil, merr.WrapErrMqTopicNotFound(channel.Name)).Once()
-				unreadyTargetWAL.EXPECT().Close().Return().Once()
-				return unreadyTargetWAL, nil
-			}
-			return targetWAL, nil
+			return unreadyTargetWAL, nil
 		},
 		nil,
 	)
@@ -485,7 +489,7 @@ func TestUnderlyingWALScannerAdaptorWaitsForAlterWALTargetScanner(t *testing.T) 
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for switch target WAL scanner")
 	}
-	require.Equal(t, int32(3), targetScannerOpenAttempts.Load())
+	require.Equal(t, int32(3), targetScannerReadAttempts.Load())
 	require.NoError(t, scanner.Close())
 }
 
@@ -524,43 +528,6 @@ func TestUnderlyingWALScannerAdaptorCanCloseWhileWaitingForAlterWALTarget(t *tes
 		t.Fatal("target WAL open was not attempted")
 	}
 	require.NoError(t, scanner.Close())
-}
-
-func TestUnderlyingWALScannerAdaptorTimesOutWaitingForAlterWALTarget(t *testing.T) {
-	oldValue := paramtable.Get().StreamingCfg.WALSwitchTargetOpenTimeout.SwapTempValue("150ms")
-	defer paramtable.Get().StreamingCfg.WALSwitchTargetOpenTimeout.SwapTempValue(oldValue)
-
-	channel := types.PChannelInfo{Name: "test-channel"}
-	marker := newTestAlterWALMessage(commonpb.WALName_Test, 100, rmq.NewRmqID(2), rmq.NewRmqID(1))
-	historicalWAL := newTestReadWAL(t, message.WALNameRocksmq, channel, marker)
-
-	scanner, err := newUnderlyingWALScannerAdaptor(
-		mlog.With(),
-		channel,
-		walimpls.ReadOption{
-			Name:          "timeout-waiting-for-switch-target",
-			DeliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
-		},
-		func(_ context.Context, walName message.WALName, _ types.PChannelInfo) (walimpls.ROWALImpls, error) {
-			if walName == message.WALNameRocksmq {
-				return historicalWAL, nil
-			}
-			require.Equal(t, message.WALNameTest, walName)
-			return nil, merr.WrapErrMqTopicNotFound(channel.Name)
-		},
-		nil,
-	)
-	require.NoError(t, err)
-	require.Equal(t, marker, <-scanner.Chan())
-
-	select {
-	case _, ok := <-scanner.Chan():
-		require.False(t, ok)
-		require.True(t, status.AsStreamingError(scanner.Error()).IsUnrecoverable())
-		require.Contains(t, scanner.Error().Error(), "timed out waiting for target WAL")
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for target WAL timeout")
-	}
 }
 
 func TestUnderlyingWALScannerAdaptorStopsWhenScannerCreationIsUnrecoverable(t *testing.T) {

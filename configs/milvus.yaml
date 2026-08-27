@@ -279,7 +279,6 @@ pulsar:
   # Default value applies when Pulsar is running on the same network with Milvus.
   address: localhost
   port: 6650 # Port of Pulsar service.
-  webaddress:  # HTTP(S) address of the Pulsar admin service. If empty, it is derived from pulsar.address and pulsar.webport.
   webport: 80 # Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.
   # The maximum size of each message in Pulsar. Unit: Byte.
   # By default, Pulsar can transmit at most 2MB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
@@ -1528,8 +1527,6 @@ streaming:
     # Higher one will increase the throughput of wal message handling, but introduce higher memory utilization.
     # Use the underlying wal default value if 0 is given.
     length: 128
-  walSwitch:
-    targetOpenTimeout: 10m # Maximum time a historical reader waits for the target WAL to become available after an AlterWAL boundary.
   logging:
     # The threshold of slow log, 1s by default. 
     # If the wal implementation is woodpecker, the minimum threshold is 3s

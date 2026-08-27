@@ -4,8 +4,6 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/admin"
-	pulsaradminconfig "github.com/apache/pulsar-client-go/pulsaradmin/pkg/admin/config"
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -43,23 +41,9 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 		return nil, err
 	}
 	return &openerImpl{
-		tenant:        tenant,
-		c:             c,
-		newTopicAdmin: b.getPulsarTopicAdmin,
+		tenant: tenant,
+		c:      c,
 	}, nil
-}
-
-func (b *builderImpl) getPulsarTopicAdmin() (pulsarTopicAdmin, error) {
-	cfg := &paramtable.Get().PulsarCfg
-	adminClient, err := admin.New(&pulsaradminconfig.Config{
-		WebServiceURL: cfg.WebAddress.GetValue(),
-		AuthPlugin:    cfg.AuthPlugin.GetValue(),
-		AuthParams:    cfg.AuthParams.GetValue(),
-	})
-	if err != nil {
-		return nil, merr.WrapErrMqInternal(err, "build pulsar admin client")
-	}
-	return adminClient.Topics(), nil
 }
 
 // getPulsarClientOptions gets the pulsar client options from the config.

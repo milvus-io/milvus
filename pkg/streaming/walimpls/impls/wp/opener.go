@@ -10,7 +10,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var _ walimpls.OpenerImpls = (*openerImpl)(nil)
@@ -31,9 +30,6 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 		return nil, err
 	}
 	if !exists {
-		if opt.Channel.AccessMode == types.AccessModeRO {
-			return nil, merr.WrapErrMqTopicNotFound(opt.Channel.Name, "woodpecker log does not exist")
-		}
 		if err := o.c.CreateLog(ctx, opt.Channel.Name); err != nil {
 			mlog.Error(ctx, "failed to create log", mlog.String("log_name", opt.Channel.Name), mlog.Err(err))
 			return nil, err
