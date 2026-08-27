@@ -85,6 +85,7 @@ arrow	internal/core/src/common/Schema.cpp
 arrow	internal/core/src/common/Schema.h
 arrow	internal/core/src/common/Types.h
 arrow	internal/core/src/index/json_stats/JsonKeyStats.cpp
+arrow	internal/core/src/index/json_stats/JsonKeyStats.h
 arrow	internal/core/src/index/json_stats/parquet_writer.cpp
 arrow	internal/core/src/index/json_stats/parquet_writer.h
 arrow	internal/core/src/index/json_stats/utils.cpp

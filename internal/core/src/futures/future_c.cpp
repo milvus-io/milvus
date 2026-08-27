@@ -9,6 +9,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <algorithm>
+#include <exception>
+
+#include "common/EasyAssert.h"
 #include "Executor.h"
 #include "Future.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
@@ -19,6 +23,7 @@
 #include "log/Log.h"
 #include "monitor/Monitor.h"
 #include "prometheus/gauge.h"
+#include "storage/TransientMemoryBudget.h"
 
 // Ring-3 note: future_cancel / future_is_ready / future_register_ready_callback
 // / future_leak_and_get delegate to IFuture methods that are declared noexcept
@@ -81,4 +86,40 @@ executor_set_load_thread_num(int thread_num) {
                  thread_num);
     }
     CGO_CATCH_AND_LOG("executor_set_load_thread_num")
+}
+
+extern "C" CStatus
+executor_set_json_stats_build_thread_num(int thread_num) {
+    auto normalized_thread_num = std::max(1, thread_num);
+    try {
+        milvus::futures::getJsonStatsBuildExecutor()->setNumThreads(
+            normalized_thread_num);
+        LOG_INFO(
+            "future executor setup json stats build cpu executor with thread "
+            "num: {}",
+            normalized_thread_num);
+        return milvus::SuccessCStatus();
+    } catch (const std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    } catch (...) {
+        return milvus::FailureCStatus(
+            milvus::UnexpectedError,
+            "unknown exception while resizing json stats build executor");
+    }
+}
+
+extern "C" CStatus
+executor_set_json_stats_build_max_inflight_bytes(int64_t max_inflight_bytes) {
+    try {
+        auto normalized_max_inflight_bytes =
+            static_cast<size_t>(std::max<int64_t>(0, max_inflight_bytes));
+        milvus::storage::TransientMemoryBudget::SetJsonStatsBuildBudgetBytes(
+            normalized_max_inflight_bytes);
+        LOG_INFO(
+            "json stats build transient memory budget setup with max inflight "
+            "bytes: {}",
+            normalized_max_inflight_bytes);
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
