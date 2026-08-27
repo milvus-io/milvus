@@ -499,8 +499,8 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 			}
 			resultSegment.Manifest = newManifest
 			// Dual-write: V3 segments store text index stats in both manifest and segment metadata.
-			// Manifest is the source of truth at load time; metadata acts as a placeholder so that
-			// needDoTextIndex() in stats_inspector.go won't trigger a redundant TextIndexJob.
+			// Segment metadata registers the index for loading and prevents needDoTextIndex()
+			// from triggering a redundant TextIndexJob. The manifest provides its files.
 		}
 		resultSegment.TextStatsLogs = textStatsLogs
 	}
