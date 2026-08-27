@@ -636,3 +636,48 @@ func TestGlobalScheduler_scheduleUnfitTask(t *testing.T) {
 		assert.Zero(t, smallExamined.Load())
 	})
 }
+
+// TestGlobalScheduler_scheduleDelayedCap covers the bound on the does-not-fit
+// scan. Under memory pressure with slots still free every task misses, and
+// without a cap one round would pop the whole queue - work that is wasted, and
+// a window in which every popped task is invisible to GetPendingTaskCount and
+// to AbortAndRemoveTask.
+func TestGlobalScheduler_scheduleDelayedCap(t *testing.T) {
+	const giB = int64(1) << 30
+
+	cluster := session.NewMockCluster(t)
+	// Slots to spare, but not enough free memory for any of the tasks below.
+	// None of them is oversized either (4GiB fits a 16GiB worker when empty),
+	// so every one of them takes the "does not fit right now" path.
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 1000, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: giB},
+	}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+
+	total := maxDelayedPerRound + 2
+	var examined atomic.Int32
+	for i := 0; i < total; i++ {
+		task := NewMockTask(t)
+		task.EXPECT().GetTaskID().Return(int64(i + 1)).Maybe()
+		task.EXPECT().GetTaskType().Return(taskcommon.Compaction).Maybe()
+		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+		task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
+		task.EXPECT().GetTaskSlot().RunAndReturn(func() int64 {
+			examined.Add(1)
+			return 1
+		}).Maybe()
+		task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 4 * giB}).Maybe()
+		scheduler.Enqueue(task)
+	}
+	assert.Equal(t, total, scheduler.GetPendingTaskCount(taskcommon.Compaction))
+
+	scheduler.schedule()
+
+	// Every task is back in the queue: none lost, none duplicated.
+	assert.Equal(t, total, scheduler.GetPendingTaskCount(taskcommon.Compaction))
+	assert.Len(t, scheduler.pendingTasks.TaskIDs(), total)
+	// The round stopped at the cap instead of draining the queue. The task that
+	// tripped the cap was popped and priced before being pushed back, hence +1.
+	assert.LessOrEqual(t, int(examined.Load()), maxDelayedPerRound+1)
+	assert.Positive(t, examined.Load())
+}
