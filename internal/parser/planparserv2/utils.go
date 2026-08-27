@@ -262,10 +262,12 @@ func toColumnInfo(left *ExprWithType) *planpb.ColumnInfo {
 }
 
 // formatDataTypeForError renders the data type a field was declared with in
-// uppercase, keeping the element type for array fields.
+// uppercase. Array fields keep the element type and use the same
+// "Array[Element]" spelling as getDataType so error messages stay consistent
+// across the package.
 func formatDataTypeForError(dataType, elementType schemapb.DataType) string {
 	if typeutil.IsArrayType(dataType) && elementType != schemapb.DataType_None {
-		return fmt.Sprintf("ARRAY(%s)", strings.ToUpper(elementType.String()))
+		return fmt.Sprintf("%s[%s]", dataType, elementType)
 	}
 	return strings.ToUpper(dataType.String())
 }
@@ -760,14 +762,20 @@ func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType,
 		return nil
 	}
 
-	// Name the offending field and its declared type so the caller does not
+	// Name every offending field and its declared type so the caller does not
 	// have to guess which side of the expression broke the operator.
+	var offendingParts []string
+	if !leftValid && leftName != "" {
+		offendingParts = append(offendingParts,
+			fmt.Sprintf("field '%s' is %s", leftName, formatDataTypeForError(leftType, leftElementType)))
+	}
+	if !rightValid && rightName != "" {
+		offendingParts = append(offendingParts,
+			fmt.Sprintf("field '%s' is %s", rightName, formatDataTypeForError(rightType, rightElementType)))
+	}
 	var offending string
-	switch {
-	case !leftValid && leftName != "":
-		offending = fmt.Sprintf(", but field '%s' is %s", leftName, formatDataTypeForError(leftType, leftElementType))
-	case !rightValid && rightName != "":
-		offending = fmt.Sprintf(", but field '%s' is %s", rightName, formatDataTypeForError(rightType, rightElementType))
+	if len(offendingParts) > 0 {
+		offending = ", but " + strings.Join(offendingParts, " and ")
 	}
 
 	switch tokenType {

@@ -1227,6 +1227,21 @@ func Test_checkValidModArith(t *testing.T) {
 		assert.NotContains(t, err.Error(), "but field")
 	})
 
+	t.Run("mod with array operands reports element types", func(t *testing.T) {
+		// Array operands must render the element type using the same
+		// "Array[Element]" spelling as getDataType, and every invalid side
+		// must be named in one pass.
+		err := checkValidModArith(planpb.ArithOpType_Mod,
+			schemapb.DataType_Array, schemapb.DataType_Float,
+			schemapb.DataType_Array, schemapb.DataType_Double,
+			"floatArr", "doubleArr")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "modulo can only apply on integer types")
+		assert.Contains(t, err.Error(), "field 'floatArr' is Array[Float]")
+		assert.Contains(t, err.Error(), "field 'doubleArr' is Array[Double]")
+		assert.Contains(t, err.Error(), " and ")
+	})
+
 	t.Run("add operation is always valid", func(t *testing.T) {
 		// Non-mod operations should not be validated by this function
 		err := checkValidModArith(planpb.ArithOpType_Add,
