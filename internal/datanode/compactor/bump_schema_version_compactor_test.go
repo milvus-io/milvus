@@ -18,8 +18,8 @@ package compactor
 
 import (
 	"context"
-	sio "io"
 	"fmt"
+	sio "io"
 	"math"
 	"path"
 	"strings"
