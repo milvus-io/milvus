@@ -1308,7 +1308,10 @@ func (s *LBPolicySuite) TestExecuteOneChannelScopedPrefersAServableChannel() {
 	ctx := context.Background()
 	s.lbPolicy.retryOnReplica = 1
 	onlyRGA := lo.Filter(rgNodes(), func(n NodeInfo, _ int) bool { return n.ResourceGroup == "rg-a" })
-	s.mgr.EXPECT().GetShardLeaderList(mock.Anything, s.dbName, s.collectionName, s.collectionID, true).Return(s.channels, nil)
+	// No GetShardLeaderList expectation on purpose: the scoped path must not
+	// read the cached channel list at all (on a cold cache that would be a
+	// second coordinator RPC on top of the pre-pass's one), and the mock
+	// fails on an unexpected call.
 	s.mgr.EXPECT().GetShardLeaders(mock.Anything, false, s.dbName, s.collectionName, s.collectionID).
 		Return(map[string][]NodeInfo{s.channels[0]: onlyRGA, s.channels[1]: rgNodes()}, nil).Once()
 	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[1]).Return(rgNodes(), nil)
@@ -1341,7 +1344,8 @@ func (s *LBPolicySuite) TestExecuteOneChannelScopedPrefersAServableChannel() {
 	s.mgr.ExpectedCalls = nil
 	s.mgr.Calls = nil
 	executed = nil
-	s.mgr.EXPECT().GetShardLeaderList(mock.Anything, s.dbName, s.collectionName, s.collectionID, true).Return([]string{"stale-only"}, nil)
+	// A stale cached list naming "stale-only" would be read by an unscoped
+	// request; the scoped one never asks for it (unexpected call = failure).
 	s.mgr.EXPECT().GetShardLeaders(mock.Anything, false, s.dbName, s.collectionName, s.collectionID).
 		Return(map[string][]NodeInfo{"fresh-only": rgNodes()}, nil).Once()
 	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, "fresh-only").Return(rgNodes(), nil)
@@ -1355,6 +1359,7 @@ func (s *LBPolicySuite) TestExecuteOneChannelScopedPrefersAServableChannel() {
 	})
 	s.NoError(err)
 	s.Equal([]string{"fresh-only"}, executed, "the fresh table, not the cached key set, decides what is tried")
+	s.mgr.AssertNotCalled(s.T(), "GetShardLeaderList", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 
 	// When the FRESH table shows no channel the group can serve, the refusal
 	// comes back immediately -- zero retry budgets, no per-channel attempt --
@@ -1362,7 +1367,6 @@ func (s *LBPolicySuite) TestExecuteOneChannelScopedPrefersAServableChannel() {
 	// The read was uncached, which is what entitles it to refuse.
 	s.mgr.ExpectedCalls = nil
 	s.mgr.Calls = nil // the AssertNotCalled below must not see the first half's legitimate GetShard
-	s.mgr.EXPECT().GetShardLeaderList(mock.Anything, s.dbName, s.collectionName, s.collectionID, true).Return(s.channels, nil)
 	s.mgr.EXPECT().GetShardLeaders(mock.Anything, false, s.dbName, s.collectionName, s.collectionID).
 		Return(map[string][]NodeInfo{s.channels[0]: onlyRGA, s.channels[1]: onlyRGA}, nil).Once()
 	err = s.lbPolicy.ExecuteOneChannel(ctx, CollectionWorkLoad{
@@ -1408,4 +1412,42 @@ func (s *LBPolicySuite) TestExecuteWithRetryUnscopedKeepsTheExecError() {
 	s.ErrorIs(err, merr.ErrSegmentNotLoaded, "unscoped, the exec error still wins over a later retriable selection error")
 	s.False(merr.IsRetryableErr(err))
 	s.NotErrorIs(err, merr.ErrServiceUnavailable)
+}
+
+// TestExecuteOneChannelScopedPrePassRetriesTransientErrors pins that the
+// pre-pass read goes through the same retry wrapper as the other two manager
+// reads: a transient coordinator error (ErrServiceNotReady during a restart)
+// is retried until it clears, while ErrCollectionNotLoaded is not retried --
+// exactly GetShard's and GetShardLeaderList's policy. Calling the manager
+// directly would fail the whole scoped request on the first blip, which is
+// backwards for the path whose contract is "hand the caller a state it can
+// poll through".
+func (s *LBPolicySuite) TestExecuteOneChannelScopedPrePassRetriesTransientErrors() {
+	ctx := context.Background()
+	s.lbPolicy.retryOnReplica = 1
+	s.mgr.EXPECT().GetShardLeaders(mock.Anything, false, s.dbName, s.collectionName, s.collectionID).
+		Return(nil, merr.WrapErrServiceNotReadyMsg("coordinator restarting")).Once()
+	s.mgr.EXPECT().GetShardLeaders(mock.Anything, false, s.dbName, s.collectionName, s.collectionID).
+		Return(map[string][]NodeInfo{s.channels[0]: rgNodes()}, nil).Once()
+	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(rgNodes(), nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	err := s.lbPolicy.ExecuteOneChannel(ctx, CollectionWorkLoad{
+		Db: s.dbName, CollectionName: s.collectionName, CollectionID: s.collectionID, Nq: 1, ResourceGroup: "rg-b",
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error { return nil },
+	})
+	s.NoError(err, "a transient coordinator error on the pre-pass read is retried through, not surfaced")
+
+	// The one error the wrapper does not retry.
+	s.mgr.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShardLeaders(mock.Anything, false, s.dbName, s.collectionName, s.collectionID).
+		Return(nil, merr.WrapErrCollectionNotLoaded(s.collectionID)).Once()
+	err = s.lbPolicy.ExecuteOneChannel(ctx, CollectionWorkLoad{
+		Db: s.dbName, CollectionName: s.collectionName, CollectionID: s.collectionID, Nq: 1, ResourceGroup: "rg-b",
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error { return nil },
+	})
+	s.ErrorIs(err, merr.ErrCollectionNotLoaded, "collection-not-loaded is not retried, matching the sibling reads")
 }

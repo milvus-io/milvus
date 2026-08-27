@@ -174,6 +174,21 @@ func (lb *LBPolicyImpl) GetShardLeaderList(ctx context.Context, dbName string, c
 	return ret, err
 }
 
+// GetShardLeaders will retry until ctx done, except the collection is not loaded.
+// Returns every channel of the collection with its leaders in one read; with
+// withCache=false that is one coordinator call refreshing all of them. Same
+// retry policy as its two siblings above: a transient coordinator error must
+// not fail a request that the other two reads would have retried through.
+func (lb *LBPolicyImpl) GetShardLeaders(ctx context.Context, dbName string, collName string, collectionID int64, withCache bool) (map[string][]NodeInfo, error) {
+	var ret map[string][]NodeInfo
+	err := retry.Handle(ctx, func() (bool, error) {
+		var err error
+		ret, err = lb.clientMgr.GetShardLeaders(ctx, withCache, dbName, collName, collectionID)
+		return !errors.Is(err, merr.ErrCollectionNotLoaded), err
+	})
+	return ret, err
+}
+
 func recordPreferredNodeSelection(status string) {
 	metrics.ProxyShardLeaderPreferredNodeCount.WithLabelValues(
 		status,
@@ -498,12 +513,6 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 
 // ExecuteOneChannel will execute at any one channel in collection
 func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload CollectionWorkLoad) error {
-	channelList, err := lb.GetShardLeaderList(ctx, workload.Db, workload.CollectionName, workload.CollectionID, true)
-	if err != nil {
-		mlog.Warn(ctx, "failed to get shards", mlog.Err(err))
-		return err
-	}
-
 	// Unscoped: any one channel will do, so the first is taken. Scoped: the
 	// channel list is a map's key order, so the first channel may be one the
 	// group has no leader on; that refusal is the retriable
@@ -518,15 +527,18 @@ func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload Collecti
 	// GetShardLeaders is one coordinator call that refreshes every channel of
 	// the collection at once (updateShardLocationCache replaces the whole
 	// entry), so what it returns is authoritative rather than stale. The
-	// scoped channel list is derived from THAT table, not from the cached
-	// channelList above, so the pre-pass never mixes a stale key set with a
-	// fresh leader table; sorted, so one state always tries one order. None
+	// scoped channel list is derived from that table alone -- the cached
+	// channel list is read only on the unscoped branch, so the scoped path
+	// pays for exactly one read and never mixes a stale key set with a fresh
+	// leader table; sorted, so one state always tries one order. None
 	// servable at all is refused right here, with the same retriable code
 	// selectNode would reach after a full sweep -- in zero budgets instead of
-	// shards x budget. The cost is one RPC on the scoped path, and one
-	// cache-metric hit (caller="GetShardLeaders") rather than one per channel.
+	// shards x budget. The cost is one RPC on the scoped path (through the
+	// same retry wrapper the other reads use), and one cache-metric hit
+	// (caller="GetShardLeaders") rather than one per channel.
+	var channelList []string
 	if workload.ResourceGroup != "" {
-		fresh, err := lb.clientMgr.GetShardLeaders(ctx, false, workload.Db, workload.CollectionName, workload.CollectionID)
+		fresh, err := lb.GetShardLeaders(ctx, workload.Db, workload.CollectionName, workload.CollectionID, false)
 		if err != nil {
 			mlog.Warn(ctx, "failed to refresh shard leaders for the resource group pre-pass", mlog.Err(err))
 			return err
@@ -543,6 +555,13 @@ func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload Collecti
 				fmt.Sprintf("no shard leader in resource group %s", workload.ResourceGroup))
 		}
 		channelList = servable
+	} else {
+		var err error
+		channelList, err = lb.GetShardLeaderList(ctx, workload.Db, workload.CollectionName, workload.CollectionID, true)
+		if err != nil {
+			mlog.Warn(ctx, "failed to get shards", mlog.Err(err))
+			return err
+		}
 	}
 	var lastErr error
 	for _, channel := range channelList {
