@@ -38,6 +38,12 @@ import (
 type WorkerSlots struct {
 	NodeID         int64
 	AvailableSlots int64
+	// Two-dimensional report. TotalMemory == 0 means the worker predates it
+	// and must be placed on AvailableSlots alone.
+	TotalCPU        int64
+	AvailableCPU    int64
+	TotalMemory     int64
+	AvailableMemory int64
 }
 
 // Cluster defines the interface for tasks
@@ -199,8 +205,12 @@ func (c *cluster) QuerySlot() map[int64]*WorkerSlots {
 			mu.Lock()
 			defer mu.Unlock()
 			availableNodeSlots[nodeID] = &WorkerSlots{
-				NodeID:         nodeID,
-				AvailableSlots: resp.GetAvailableSlots(),
+				NodeID:          nodeID,
+				AvailableSlots:  resp.GetAvailableSlots(),
+				TotalCPU:        resp.GetTotalCpu(),
+				AvailableCPU:    resp.GetAvailableCpu(),
+				TotalMemory:     resp.GetTotalMemory(),
+				AvailableMemory: resp.GetAvailableMemory(),
 			}
 		}()
 	}
