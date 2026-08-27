@@ -300,6 +300,99 @@ func (s *SearchPipelineSuite) TestRerankOp() {
 	s.NoError(err)
 }
 
+func (s *SearchPipelineSuite) TestRerankOpValidatesAllEmptyResults() {
+	const (
+		nq   = int64(1)
+		topK = int64(10)
+	)
+
+	emptyResults := []*milvuspb.SearchResults{
+		{
+			Status: merr.Success(),
+			Results: &schemapb.SearchResultData{
+				NumQueries: nq,
+				TopK:       topK,
+				Topks:      []int64{0},
+				Ids:        &schemapb.IDs{},
+			},
+		},
+		{
+			Status: merr.Success(),
+			Results: &schemapb.SearchResultData{
+				NumQueries: nq,
+				TopK:       topK,
+				Topks:      []int64{0},
+				Ids:        &schemapb.IDs{},
+			},
+		},
+	}
+	metrics := []string{"IP", "COSINE"}
+
+	functionRRF := func(weights string) rerankMeta {
+		return &funcScoreRerankMeta{
+			funcScore: &schemapb.FunctionScore{
+				Functions: []*schemapb.FunctionSchema{
+					{
+						Type: schemapb.FunctionType_Rerank,
+						Params: []*commonpb.KeyValuePair{
+							{Key: "reranker", Value: "rrf"},
+							{Key: "weights", Value: weights},
+						},
+					},
+				},
+			},
+		}
+	}
+	legacyRRF := func(params string) rerankMeta {
+		return &legacyRerankMeta{
+			legacyParams: []*commonpb.KeyValuePair{
+				{Key: "strategy", Value: "rrf"},
+				{Key: "params", Value: params},
+			},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		meta    rerankMeta
+		wantErr string
+	}{
+		{name: "function malformed weights", meta: functionRRF("not-json"), wantErr: "failed to parse weights"},
+		{name: "function null weights", meta: functionRRF("null"), wantErr: "non-empty array"},
+		{name: "function empty weights", meta: functionRRF("[]"), wantErr: "non-empty array"},
+		{name: "function out-of-range weights", meta: functionRRF("[-0.1, 0.2]"), wantErr: "range [0, 1]"},
+		{name: "function mismatched weights", meta: functionRRF("[0.8]"), wantErr: "length of weights param mismatch"},
+		{name: "legacy mismatched weights", meta: legacyRRF(`{"weights":[0.8]}`), wantErr: "length of weights param mismatch"},
+		{name: "function valid weights", meta: functionRRF("[0.8, 0.2]")},
+		{name: "legacy omitted weights", meta: legacyRRF(`{"k":60}`)},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			op := rerankOperator{
+				nq:           nq,
+				topK:         topK,
+				roundDecimal: -1,
+				rerankMeta:   test.meta,
+			}
+
+			outputs, err := op.run(context.Background(), s.span, emptyResults, metrics)
+			if test.wantErr != "" {
+				s.ErrorIs(err, merr.ErrParameterInvalid)
+				s.ErrorContains(err, test.wantErr)
+				s.Nil(outputs)
+				return
+			}
+
+			s.Require().NoError(err)
+			s.Require().Len(outputs, 1)
+			result := outputs[0].(*milvuspb.SearchResults).GetResults()
+			s.Equal([]int64{0}, result.GetTopks())
+			s.Empty(result.GetScores())
+		})
+	}
+}
+
 func (s *SearchPipelineSuite) TestRerankOpWithFunctionChainMeta() {
 	schema := &schemapb.CollectionSchema{
 		Name: "test",
