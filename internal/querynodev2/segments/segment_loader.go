@@ -160,6 +160,17 @@ type resourceEstimateFactor struct {
 	externalRawDataFactor float64
 }
 
+func logicalResourceEstimateFactor() resourceEstimateFactor {
+	return resourceEstimateFactor{
+		deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+		jsonKeyStatsExpansionFactor:     paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.GetAsFloat(),
+		textIndexExpansionFactor:        paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.GetAsFloat(),
+		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
+		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
+		TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
+	}
+}
+
 func estimateTantivyValidityBitmapBytes(numRows int64) uint64 {
 	if numRows <= 0 {
 		return 0
@@ -1716,13 +1727,7 @@ func (loader *segmentLoader) checkLogicalSegmentSize(ctx context.Context, segmen
 
 	// logical resource usage is based on the segment final resource usage,
 	// so we need to estimate the final resource usage of the segments
-	finalFactor := resourceEstimateFactor{
-		deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
-		textIndexExpansionFactor:        paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.GetAsFloat(),
-		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
-		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
-		TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
-	}
+	finalFactor := logicalResourceEstimateFactor()
 	predictLogicalMemUsage := logicalMemUsage
 	predictLogicalDiskUsage := logicalDiskUsage
 	for _, loadInfo := range segmentLoadInfos {
@@ -2104,8 +2109,7 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		}
 
 		if isVectorType {
-			mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
-			if mmapVectorField {
+			if mmapEnabled {
 				if evictableEnabled {
 					segmentEvictableDiskSize += binlogSize
 				} else {
@@ -2161,7 +2165,30 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		segmentInevictableMemorySize += uint64(float64(memSize) * expansionFactor)
 	}
 
-	// PART 5: calculate logical resource usage of text index stats data.
+	// PART 5: calculate logical resource usage of JSON key stats data.
+	jsonStatsMmapEnable := paramtable.Get().QueryNodeCfg.MmapJSONStats.GetAsBool()
+	for fieldID, jsonKeyStats := range loadInfo.GetJsonKeyStatsLogs() {
+		fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
+		if err != nil {
+			mlog.Info(ctx, "skip json stats for dropped field", mlog.FieldFieldID(fieldID), mlog.String("name", schema.GetName()))
+			continue
+		}
+		jsonStatsSize := uint64(float64(jsonKeyStats.GetMemorySize()) * multiplyFactor.jsonKeyStatsExpansionFactor)
+		evictableEnabled := isScalarStatsEvictableEnable(fieldSchema)
+		if jsonStatsMmapEnable {
+			if evictableEnabled {
+				segmentEvictableDiskSize += jsonStatsSize
+			} else {
+				segmentInevictableDiskSize += jsonStatsSize
+			}
+		} else if evictableEnabled {
+			segmentEvictableMemorySize += jsonStatsSize
+		} else {
+			segmentInevictableMemorySize += jsonStatsSize
+		}
+	}
+
+	// PART 6: calculate logical resource usage of text index stats data.
 	// Text match index mmap and eviction follow the raw scalar field settings.
 	validityBitmapBytes := estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
 	for fieldID, textStats := range loadInfo.GetTextStatsLogs() {
@@ -2359,8 +2386,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		}
 
 		if isVectorType {
-			mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
-			if mmapVectorField {
+			if mmapEnabled {
 				if !multiplyFactor.TieredEvictionEnabled || !evictableEnabled {
 					segDiskLoadingSize += binlogSize
 				}

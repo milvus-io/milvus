@@ -197,9 +197,9 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 
 	for _, kvPair := range it.req.GetIndexParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
-		// knowhere would report error if encountered the unknown key,
-		// so skip this
-		if key == common.MmapEnabledKey {
+		// Runtime-only index properties are persisted in index metadata for
+		// loading, but Knowhere rejects them as unknown build parameters.
+		if indexparams.IsConfigableIndexParam(key) {
 			continue
 		}
 		indexParams[key] = value

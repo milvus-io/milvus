@@ -467,9 +467,21 @@ func applyCollectionEvictableSetting(schema *schemapb.CollectionSchema,
 ) *schemapb.CollectionSchema {
 	scalarFieldEvictable, scalarFieldExist := common.GetEvictableByKey(common.EvictableScalarFieldKey, collectionProperties...)
 	vectorFieldEvictable, vectorFieldExist := common.GetEvictableByKey(common.EvictableVectorFieldKey, collectionProperties...)
+	if !scalarFieldExist && !vectorFieldExist {
+		hasStructOverride := false
+		for _, structField := range schema.GetStructArrayFields() {
+			if _, exist := common.IsEvictableEnabled(structField.GetTypeParams()...); exist {
+				hasStructOverride = true
+				break
+			}
+		}
+		if !hasStructOverride {
+			return schema
+		}
+	}
 
 	for _, field := range schema.GetFields() {
-		if common.FieldHasEvictableKey(schema, field.GetFieldID()) {
+		if _, exist := common.IsEvictableEnabled(field.GetTypeParams()...); exist {
 			continue
 		}
 
@@ -491,7 +503,7 @@ func applyCollectionEvictableSetting(schema *schemapb.CollectionSchema,
 		structEvictable, structHasExplicitEvictable := common.IsEvictableEnabled(structField.GetTypeParams()...)
 
 		for _, field := range structField.GetFields() {
-			if common.FieldHasEvictableKey(schema, field.GetFieldID()) {
+			if _, exist := common.IsEvictableEnabled(field.GetTypeParams()...); exist {
 				continue
 			}
 

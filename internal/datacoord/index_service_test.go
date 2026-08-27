@@ -306,6 +306,26 @@ func TestServer_CreateIndex(t *testing.T) {
 		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 
+	t.Run("existing index still rejects invalid runtime params", func(t *testing.T) {
+		invalidRetry := &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      fieldID,
+			IndexName:    req.GetIndexName(),
+			TypeParams:   typeParams,
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+				{Key: common.EvictableKey, Value: "garbage"},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+				{Key: common.EvictableKey, Value: "garbage"},
+			},
+			Timestamp: 100,
+		}
+		resp, err := s.CreateIndex(ctx, invalidRetry)
+		assert.Error(t, merr.CheckRPCCall(resp, err))
+	})
+
 	t.Run("server not healthy", func(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Abnormal)
 		resp, err := s.CreateIndex(ctx, req)

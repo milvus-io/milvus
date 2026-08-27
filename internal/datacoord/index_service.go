@@ -274,7 +274,22 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 	}
 
-	// Allocate or use provided index ID
+	// Validate the final request before the existing-index fast path. Runtime
+	// properties do not affect build identity, but malformed values must not be
+	// accepted as an idempotent retry.
+	typeParams := DeleteParams(req.GetTypeParams(), runtimeConfigTypeParamKeys())
+	index := &model.Index{
+		CollectionID:    req.GetCollectionID(),
+		FieldID:         req.GetFieldID(),
+		IndexName:       req.GetIndexName(),
+		TypeParams:      typeParams,
+		IndexParams:     req.GetIndexParams(),
+		CreateTime:      req.GetTimestamp(),
+		IsAutoIndex:     req.GetIsAutoIndex(),
+		UserIndexParams: req.GetUserIndexParams(),
+	}
+
+	// Allocate or use provided index ID.
 	var indexID int64
 	if req.GetPreserveIndexId() {
 		// For snapshot restore: use provided index ID instead of allocating a new one
@@ -287,7 +302,13 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 		mlog.Info(ctx, "using preserved index ID for snapshot restore",
 			mlog.Int64("indexID", indexID))
-	} else {
+	}
+
+	if err := indexparamcheck.ValidateIndexParams(index); err != nil {
+		return nil, err
+	}
+
+	if !req.GetPreserveIndexId() {
 		// Normal path: allocate new index ID
 		var err error
 		_, err = s.allocator.AllocID(ctx)
@@ -320,23 +341,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 	}
 
-	// Exclude runtime configurable params because they do not affect index build identity.
-	typeParams := DeleteParams(req.GetTypeParams(), runtimeConfigTypeParamKeys())
-	index := &model.Index{
-		CollectionID:    req.GetCollectionID(),
-		FieldID:         req.GetFieldID(),
-		IndexID:         indexID,
-		IndexName:       req.GetIndexName(),
-		TypeParams:      typeParams,
-		IndexParams:     req.GetIndexParams(),
-		CreateTime:      req.GetTimestamp(),
-		IsAutoIndex:     req.GetIsAutoIndex(),
-		UserIndexParams: req.GetUserIndexParams(),
-	}
-	// Validate the index params.
-	if err := indexparamcheck.ValidateIndexParams(index); err != nil {
-		return nil, err
-	}
+	index.IndexID = indexID
 
 	if _, err = broadcaster.Broadcast(ctx, message.NewCreateIndexMessageBuilderV2().
 		WithHeader(&message.CreateIndexMessageHeader{

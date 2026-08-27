@@ -220,12 +220,7 @@ func (s *baseSegment) compactLoadInfoForRuntime() {
 		return
 	}
 	loadInfo := s.LoadInfo()
-	usage, err := estimateLogicalResourceUsageOfSegment(s.collection.Schema(), loadInfo, resourceEstimateFactor{
-		deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
-		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
-		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
-		TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
-	})
+	usage, err := estimateLogicalResourceUsageOfSegment(s.collection.Schema(), loadInfo, logicalResourceEstimateFactor())
 	if err != nil {
 		s.resourceUsageCache.Store(nil)
 		mlog.Warn(context.TODO(), "unreachable: failed to get resource usage estimate of segment", mlog.Err(err), mlog.FieldCollectionID(s.Collection()), mlog.FieldSegmentID(s.ID()))
@@ -395,12 +390,7 @@ func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
 		return *cache
 	}
 
-	usage, err := estimateLogicalResourceUsageOfSegment(s.collection.Schema(), s.LoadInfo(), resourceEstimateFactor{
-		deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
-		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
-		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
-		TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
-	})
+	usage, err := estimateLogicalResourceUsageOfSegment(s.collection.Schema(), s.LoadInfo(), logicalResourceEstimateFactor())
 	if err != nil {
 		// Should never failure, if failed, segment should never be loaded.
 		mlog.Warn(context.TODO(), "unreachable: failed to get resource usage estimate of segment", mlog.Err(err), mlog.FieldCollectionID(s.Collection()), mlog.FieldSegmentID(s.ID()))

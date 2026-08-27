@@ -114,6 +114,45 @@ func (suite *IndexBuildTaskSuite) serializeData() ([]*storage.Blob, error) {
 	})
 }
 
+func (suite *IndexBuildTaskSuite) TestPreExecuteFiltersRuntimeOnlyIndexParams() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := &workerpb.CreateJobRequest{
+		BuildID:      1,
+		CollectionID: suite.collectionID,
+		PartitionID:  suite.partitionID,
+		SegmentID:    suite.segmentID,
+		DataPaths:    []string{suite.dataPath},
+		IndexParams: []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "FLAT"},
+			{Key: common.MetricTypeKey, Value: metric.L2},
+			{Key: common.MmapEnabledKey, Value: "true"},
+			{Key: common.IndexOffsetCacheEnabledKey, Value: "true"},
+			{Key: common.WarmupKey, Value: common.WarmupDisable},
+			{Key: common.EvictableKey, Value: "false"},
+		},
+		Field: &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "vec",
+			DataType: schemapb.DataType_FloatVector,
+		},
+	}
+	task := NewIndexBuildTask(ctx, cancel, req, nil, NewTaskManager(ctx), nil)
+
+	suite.NoError(task.PreExecute(ctx))
+	suite.Equal("FLAT", task.newIndexParams[common.IndexTypeKey])
+	suite.Equal(metric.L2, task.newIndexParams[common.MetricTypeKey])
+	for _, key := range []string{
+		common.MmapEnabledKey,
+		common.IndexOffsetCacheEnabledKey,
+		common.WarmupKey,
+		common.EvictableKey,
+	} {
+		suite.NotContains(task.newIndexParams, key)
+	}
+}
+
 func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 	ctx, cancel := context.WithCancel(context.Background())
 	req := &workerpb.CreateJobRequest{
