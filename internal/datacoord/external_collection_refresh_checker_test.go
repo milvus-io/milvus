@@ -1493,10 +1493,21 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			checker.aggregateJobState(job)
 			require.Equal(t, indexpb.JobState_JobStateInProgress, refreshMeta.GetJob(1).GetState())
 
-			checker.tryTimeoutJob(job)
+			// Read the persisted job so the snapshot carries the marker the
+			// entry pass just wrote, and give it the aged StartTime.
+			timedOut := refreshMeta.GetJob(1)
+			timedOut.StartTime = time.Now().Add(-1000 * time.Hour).UnixMilli()
+			checker.tryTimeoutJob(timedOut)
 
-			assert.Equal(t, indexpb.JobState_JobStateFailed, refreshMeta.GetJob(1).GetState(),
+			failed := refreshMeta.GetJob(1)
+			assert.Equal(t, indexpb.JobState_JobStateFailed, failed.GetState(),
 				"the wait runs on the job's own clock; outrunning it is an ordinary refresh timeout")
+			// Failed must not read as "nothing happened": the segments are the
+			// collection's contents and are being served.
+			assert.NotZero(t, failed.GetIndexWaitStartedTime(),
+				"the field that tells a caller the data landed must survive the failure")
+			assert.Contains(t, failed.GetFailReason(), "applied and serving",
+				"and the human-readable reason must say so too")
 		})
 	})
 
@@ -1755,6 +1766,39 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			assert.Equal(t, 2, saves,
 				"an unchanged debt is not news; the catalog must not be written again")
 			assert.Equal(t, int64(95), refreshMeta.GetJob(1).GetProgress())
+		})
+	})
+
+	t.Run("a job that times out before applying keeps the plain timeout reason", func(t *testing.T) {
+		// The other half of the distinction: nothing was applied, the
+		// collection is untouched, and re-running starts over. Saying "applied
+		// and serving" here would be the mirror-image lie.
+		mockey.PatchConvey("ingest timeout", t, func() {
+			pt := paramtable.Get()
+			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
+			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+
+			debt := []int64{556}
+			refreshMeta, mt, _ := stage(t, nil, &debt)
+			// Still ingesting: the aggregate never reaches Finished, so no
+			// apply and no marker.
+			mockey.Mock((*externalCollectionRefreshMeta).AggregateJobStateFromTasks).Return(
+				indexpb.JobState_JobStateInProgress, int64(40), nil).Build()
+			require.NoError(t, refreshMeta.UpdateJobProgress(1, 40))
+
+			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
+				nil, nil, nil)
+
+			job := refreshMeta.GetJob(1)
+			job.StartTime = time.Now().Add(-1000 * time.Hour).UnixMilli()
+			checker.tryTimeoutJob(job)
+
+			failed := refreshMeta.GetJob(1)
+			require.Equal(t, indexpb.JobState_JobStateFailed, failed.GetState())
+			assert.Zero(t, failed.GetIndexWaitStartedTime())
+			assert.Equal(t, "timeout", failed.GetFailReason(),
+				"nothing was applied, so the reason must not claim serving data")
 		})
 	})
 

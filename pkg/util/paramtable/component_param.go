@@ -7245,7 +7245,11 @@ correspondingly less. A job that exceeds it is marked Failed; raise that paramet
 for the wait to run out. Two things to know about a Failed refresh here: it does NOT roll back - its segments are
 already the collection's contents and are being served, so re-run the refresh to try again - and a segment whose
 index build failed terminally never becomes indexed (nothing retries such a build), so a refresh that hits one
-waits out the full budget before failing.`,
+waits out the full budget before failing.
+Because of that, a Failed job does NOT mean "nothing happened", and the two cases are distinguishable: a job that
+timed out during the index wait carries a non-zero index_wait_started_time and says so in its fail reason - its data
+is applied and serving, index building continues on its own, and re-running the refresh waits again without
+re-ingesting. A job that timed out before applying carries 0 and left the collection untouched.`,
 		DefaultValue: "false",
 		PanicIfEmpty: false,
 	}

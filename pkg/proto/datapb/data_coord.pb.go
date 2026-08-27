@@ -12116,6 +12116,12 @@ type ExternalCollectionRefreshJob struct {
 	// and must not apply again. The converse does not hold - a crash between the
 	// two writes leaves committed segments with no marker, and the apply is
 	// replay-safe for exactly that reason. 0 when unset.
+	//
+	// Callers of DescribeRefresh / ListRefreshJobs can read it directly, and it
+	// is the field that resolves the one ambiguity this feature introduces: a
+	// FAILED job with a non-zero value did apply its data - the refreshed
+	// segments are the collection's contents and are being served, and only the
+	// index wait ran out of budget. A failed job with 0 applied nothing.
 	IndexWaitStartedTime int64 `protobuf:"varint,13,opt,name=index_wait_started_time,json=indexWaitStartedTime,proto3" json:"index_wait_started_time,omitempty"`
 }
 

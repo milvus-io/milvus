@@ -681,6 +681,32 @@ func (c *externalCollectionRefreshChecker) logJobStats(jobs map[int64]*datapb.Ex
 	}
 }
 
+// timeoutFailReason distinguishes the two timeouts a refresh can hit, because
+// they mean opposite things to whoever reads the job.
+//
+// Timing out during the ingest is the ordinary case: nothing was applied, the
+// collection is untouched, re-running starts over. Timing out during the index
+// wait is not - the segments were applied when the wait began and are the
+// collection's contents already, being served (brute-force scanned for whatever
+// is still unindexed). Reporting both as "timeout" makes the second read as if
+// nothing had happened, which is the opposite of the truth.
+//
+// The distinction is also machine-readable without a new API: the job returned
+// by DescribeRefresh / ListRefreshJobs carries index_wait_started_time, and a
+// non-zero value on a Failed job means exactly "the data landed". That field is
+// the contract; this string is best-effort, because the snapshot it reads can
+// be a tick behind a concurrent path that just entered the wait - in which case
+// the generic message is written while the field still says the truth.
+func timeoutFailReason(job *datapb.ExternalCollectionRefreshJob) string {
+	if job.GetIndexWaitStartedTime() == 0 {
+		return "timeout"
+	}
+	return "timeout waiting for indexes: the refreshed data is applied and serving, " +
+		"but its indexes did not finish within dataCoord.externalCollectionJobTimeout. " +
+		"Index building continues on its own; re-running the refresh waits again " +
+		"without re-ingesting (index_wait_started_time is set on this job)"
+}
+
 // tryTimeoutJob checks if job has exceeded timeout and marks it as failed.
 func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCollectionRefreshJob) {
 	// Skip if StartTime is not set
@@ -705,7 +731,7 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 		applied, err := c.refreshMeta.UpdateJobState(
 			job.GetJobId(),
 			indexpb.JobState_JobStateFailed,
-			"timeout")
+			timeoutFailReason(job))
 		if err != nil {
 			mlog.Warn(c.ctx, "failed to mark job as timed out",
 				mlog.FieldJobID(job.GetJobId()),
