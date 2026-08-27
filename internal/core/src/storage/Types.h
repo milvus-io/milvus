@@ -92,15 +92,15 @@ enum CodecType {
 
 // index meta information corresponding to index file data
 struct IndexMeta {
-    int64_t segment_id;
-    int64_t field_id;
-    int64_t build_id;
-    int64_t index_version;
+    int64_t segment_id{0};
+    int64_t field_id{0};
+    int64_t build_id{0};
+    int64_t index_version{0};
     std::string key;
     std::string field_name;
-    DataType field_type;
-    int64_t dim;
-    bool index_non_encoding;
+    DataType field_type{DataType::NONE};
+    int64_t dim{0};
+    bool index_non_encoding{false};
     // Path format version used by the worker/loader to assemble the object-storage prefix.
     // See milvus.proto.index.IndexStorePathVersion.
     milvus::proto::index::IndexStorePathVersion index_store_path_version{
@@ -169,41 +169,21 @@ struct MmapConfig {
     GetEnableGrowingMmap() const {
         return growing_enable_mmap;
     }
-    void
-    SetEnableGrowingMmap(bool flag) {
-        this->growing_enable_mmap = flag;
-    }
     bool
     GetScalarIndexEnableMmap() const {
         return scalar_index_enable_mmap;
-    }
-    void
-    SetScalarIndexEnableMmap(bool flag) {
-        this->scalar_index_enable_mmap = flag;
     }
     bool
     GetScalarFieldEnableMmap() const {
         return scalar_field_enable_mmap;
     }
-    void
-    SetScalarFieldEnableMmap(bool flag) {
-        this->scalar_field_enable_mmap = flag;
-    }
     bool
     GetVectorIndexEnableMmap() const {
         return vector_index_enable_mmap;
     }
-    void
-    SetVectorIndexEnableMmap(bool flag) {
-        this->vector_index_enable_mmap = flag;
-    }
     bool
     GetVectorFieldEnableMmap() const {
         return vector_field_enable_mmap;
-    }
-    void
-    SetVectorFieldEnableMmap(bool flag) {
-        this->vector_field_enable_mmap = flag;
     }
     [[nodiscard]] bool
     GetMmapPopulate() const {

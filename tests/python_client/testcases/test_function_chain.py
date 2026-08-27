@@ -1,4 +1,5 @@
 import io
+import time
 
 import numpy as np
 import pytest
@@ -51,6 +52,96 @@ class TestFunctionChain(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
+        return collection_name
+
+    def _create_l1_function_chain_collection(self, client):
+        collection_name = cf.gen_unique_str(prefix)
+        schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field(self.scalar_field, DataType.INT64)
+        schema.add_field("payload", DataType.INT64)
+        schema.add_field("category", DataType.INT64)
+        schema.add_field(self.vector_field, DataType.FLOAT_VECTOR, dim=self.dim)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=self.vector_field, index_type="FLAT", metric_type="COSINE")
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+        )
+        self.alter_collection_properties(
+            client,
+            collection_name,
+            properties={"collection.autocompaction.enabled": "false"},
+        )
+
+        segment_rows = [
+            [
+                {
+                    "id": 1,
+                    self.scalar_field: 10,
+                    "payload": 101,
+                    "category": 1,
+                    self.vector_field: [1.0, 0.0],
+                },
+                {
+                    "id": 2,
+                    self.scalar_field: 60,
+                    "payload": 202,
+                    "category": 2,
+                    self.vector_field: [0.8, 0.6],
+                },
+                {
+                    "id": 3,
+                    self.scalar_field: 30,
+                    "payload": 303,
+                    "category": 3,
+                    self.vector_field: [0.6, 0.8],
+                },
+            ],
+            [
+                {
+                    "id": 4,
+                    self.scalar_field: 50,
+                    "payload": 404,
+                    "category": 4,
+                    self.vector_field: [0.0, 1.0],
+                },
+                {
+                    "id": 5,
+                    self.scalar_field: 20,
+                    "payload": 505,
+                    "category": 5,
+                    self.vector_field: [-0.6, 0.8],
+                },
+                {
+                    "id": 6,
+                    self.scalar_field: 40,
+                    "payload": 606,
+                    "category": 6,
+                    self.vector_field: [-1.0, 0.0],
+                },
+            ],
+        ]
+        for rows in segment_rows:
+            self.insert(client, collection_name, rows)
+            self.flush(client, collection_name)
+
+        assert self.wait_for_index_ready(client, collection_name, index_name=self.vector_field)
+        self.load_collection(client, collection_name)
+
+        deadline = time.time() + 60
+        loaded_segments = []
+        while time.time() < deadline:
+            loaded_segments = client.list_loaded_segments(collection_name)
+            if len(loaded_segments) == len(segment_rows):
+                break
+            time.sleep(1)
+        assert len(loaded_segments) == len(segment_rows), loaded_segments
+        assert sorted(segment.num_rows for segment in loaded_segments) == [3, 3]
         return collection_name
 
     def _score_plus_ts_chain(self, stage):
@@ -663,7 +754,222 @@ class TestFunctionChain(TestMilvusClientV2Base):
             order_by_fields=[{"field": self.scalar_field, "order": "asc"}],
         )
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_with_l1_function_chain_multi_query_temp_columns_offset_and_output_alignment(self):
+        """
+        target: test complex L1 rerank independently processes query chunks across sealed segments
+        method: build a temporary score, rewrite score with two hidden fields, sort, offset, and limit two queries
+        expected: each query selects exact cross-segment rows and keeps payload aligned without exposing inputs
+        """
+        client = self._client()
+        collection_name = self._create_l1_function_chain_collection(client)
+        chain = (
+            FunctionChain(FunctionChainStage.L1_RERANK, name="l1_complex")
+            .map(
+                "boosted_score",
+                fn.num_combine(col("$score"), col(self.scalar_field), mode="sum"),
+            )
+            .map(
+                "$score",
+                fn.num_combine(col("boosted_score"), col("category"), mode="sum"),
+            )
+            .sort(col(self.scalar_field), desc=True, tie_break_col=col("$id"))
+            .limit(2, offset=1)
+        )
+        query_vectors = [[1.0, 0.0], [0.0, 1.0]]
+
+        res, _ = self.search(
+            client,
+            collection_name,
+            data=query_vectors,
+            anns_field=self.vector_field,
+            search_params={"metric_type": "COSINE"},
+            limit=6,
+            output_fields=["payload"],
+            function_chains=chain,
+        )
+
+        expected_ids = [[4, 6], [4, 6]]
+        payload_by_id = {4: 404, 6: 606}
+        ts_by_id = {4: 50, 6: 40}
+        category_by_id = {4: 4, 6: 6}
+        vector_by_id = {4: [0.0, 1.0], 6: [-1.0, 0.0]}
+        assert len(res) == len(query_vectors)
+        for query_vector, hits, ids in zip(query_vectors, res, expected_ids):
+            assert [hit["id"] for hit in hits] == ids
+            expected_scores = []
+            for entity_id in ids:
+                cosine = sum(left * right for left, right in zip(query_vector, vector_by_id[entity_id]))
+                expected_scores.append(ts_by_id[entity_id] + category_by_id[entity_id] + cosine)
+            assert expected_scores == sorted(expected_scores, reverse=True)
+
+            for hit, expected_score in zip(hits, expected_scores):
+                assert self._hit_field(hit, "payload") == payload_by_id[hit["id"]]
+                assert abs(hit["distance"]) == pytest.approx(expected_score, rel=1e-5, abs=1e-5)
+                assert self._hit_field(hit, self.scalar_field) is None
+                assert self._hit_field(hit, "category") is None
+                assert self._hit_field(hit, "boosted_score") is None
+                assert self._hit_field(hit, "$l1_source_index") is None
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_with_l0_l1_l2_function_chains_execute_in_stage_order(self):
+        """
+        target: test L0, L1, and L2 function chains compose in their distributed stage order
+        method: add ts at L0, category at L1 with sort/limit, then add payload and sort at L2
+        expected: final IDs and scores equal exact L0 to L1 to L2 arithmetic
+        """
+        client = self._client()
+        collection_name = self._create_l1_function_chain_collection(client)
+        chains = [
+            FunctionChain(FunctionChainStage.L0_RERANK, name="l0_add_ts").map(
+                "$score",
+                fn.num_combine(col("$score"), col(self.scalar_field), mode="sum"),
+            ),
+            (
+                FunctionChain(FunctionChainStage.L1_RERANK, name="l1_add_category")
+                .map(
+                    "$score",
+                    fn.num_combine(col("$score"), col("category"), mode="sum"),
+                )
+                .sort(col(self.scalar_field), desc=True, tie_break_col=col("$id"))
+                .limit(3)
+            ),
+            (
+                FunctionChain(FunctionChainStage.L2_RERANK, name="l2_add_payload")
+                .map(
+                    "$score",
+                    fn.num_combine(col("$score"), col("payload"), mode="sum"),
+                )
+                .sort(col("$score"), desc=True, tie_break_col=col("$id"))
+            ),
+        ]
+
+        res, _ = self.search(
+            client,
+            collection_name,
+            data=[[1.0, 0.0]],
+            anns_field=self.vector_field,
+            search_params={"metric_type": "COSINE"},
+            limit=6,
+            output_fields=[self.scalar_field, "category", "payload"],
+            function_chains=chains,
+        )
+
+        assert [hit["id"] for hit in res[0]] == [6, 4, 2]
+        expected_by_id = {
+            2: 202 + 60 + 2 + 0.8,
+            4: 404 + 50 + 4 + 0.0,
+            6: 606 + 40 + 6 - 1.0,
+        }
+        for hit in res[0]:
+            entity_id = hit["id"]
+            assert hit["distance"] == pytest.approx(
+                expected_by_id[entity_id],
+                rel=1e-5,
+                abs=1e-5,
+            )
+            assert self._hit_field(hit, "payload") == entity_id * 101
+            assert self._hit_field(hit, "category") == entity_id
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize(
+        "case_name, chain_factory, expected_error, search_kwargs",
+        [
+            (
+                "write_id",
+                lambda: FunctionChain(FunctionChainStage.L1_RERANK, name="bad_l1_write_id").map(
+                    "$id",
+                    fn.num_combine(col("$score"), col("ts"), mode="sum"),
+                ),
+                'system output "$id" is not writable by L1',
+                {},
+            ),
+            (
+                "read_internal_system_input",
+                lambda: FunctionChain(FunctionChainStage.L1_RERANK, name="bad_l1_seg_offset").map(
+                    "$score",
+                    fn.num_combine(col("$seg_offset"), col("$score"), mode="sum"),
+                ),
+                'system input "$seg_offset" is not readable by L1',
+                {},
+            ),
+            (
+                "write_reserved_provenance_column",
+                lambda: FunctionChain(FunctionChainStage.L1_RERANK, name="bad_l1_provenance").map(
+                    "$l1_source_index",
+                    fn.num_combine(col("$score"), col("ts"), mode="sum"),
+                ),
+                'system output "$l1_source_index" is not writable by L1',
+                {},
+            ),
+            (
+                "order_by_conflict",
+                lambda: FunctionChain(FunctionChainStage.L1_RERANK, name="bad_l1_order_by").map(
+                    "$score",
+                    fn.num_combine(col("$score"), col("ts"), mode="sum"),
+                ),
+                "order_by and function rerank cannot be used together",
+                {"order_by_fields": [{"field": "ts", "order": "asc"}]},
+            ),
+        ],
+        ids=[
+            "write-id",
+            "read-internal-system-input",
+            "write-reserved-provenance-column",
+            "order-by-conflict",
+        ],
+    )
+    def test_search_rejects_invalid_l1_function_chain(
+        self,
+        case_name,
+        chain_factory,
+        expected_error,
+        search_kwargs,
+    ):
+        """
+        target: test L1 server validation rejects invalid outputs, inputs, functions, and search modes
+        method: send malformed or incompatible L1 chains through ordinary PyMilvus search
+        expected: every request fails with parameter error before any fallback execution
+        """
+        client = self._client()
+        collection_name = self._create_function_chain_collection(client)
+
+        self._assert_search_error(
+            client,
+            collection_name,
+            chain_factory(),
+            expected_error,
+            **search_kwargs,
+        )
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_rejects_duplicate_l1_function_chain_stage(self):
+        """
+        target: test ordinary search rejects two L1 chains in one request
+        method: send two independently valid L1 score maps
+        expected: request fails because each function-chain stage may appear only once
+        """
+        client = self._client()
+        collection_name = self._create_function_chain_collection(client)
+        chains = [
+            FunctionChain(FunctionChainStage.L1_RERANK, name="l1_first").map(
+                "$score",
+                fn.num_combine(col("$score"), col("ts"), mode="sum"),
+            ),
+            FunctionChain(FunctionChainStage.L1_RERANK, name="l1_second").map(
+                "$score",
+                fn.num_combine(col("$score"), col("$id"), mode="sum"),
+            ),
+        ]
+
+        self._assert_search_error(
+            client,
+            collection_name,
+            chains,
+            "function chain stage FunctionChainStageL1Rerank appears more than once",
+        )
+
+    @pytest.mark.tags(CaseLabel.L0)
     def test_search_with_l2_function_chain_sdk_reranks_by_scalar_field(self):
         """
         target: test pymilvus FunctionChain SDK with L2 rerank
@@ -687,7 +993,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
         assert [hit["id"] for hit in res[0]] == [3, 2, 1]
         assert [self._hit_field(hit, self.scalar_field) for hit in res[0]] == [30, 20, 10]
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_search_with_l2_function_chain_sdk_uses_hidden_input_field(self):
         """
         target: test L2 FunctionChain SDK can use fields that are not returned
@@ -711,7 +1017,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
         assert [hit["id"] for hit in res[0]] == [3, 2, 1]
         assert all(self._hit_field(hit, self.scalar_field) is None for hit in res[0])
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_search_with_l2_function_chain_sdk_temp_column_not_returned(self):
         """
         target: test L2 FunctionChain SDK can use ordinary temporary columns
@@ -742,7 +1048,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
         assert [self._hit_field(hit, self.scalar_field) for hit in res[0]] == [30, 20, 10]
         assert all(self._hit_field(hit, "tmp_score") is None for hit in res[0])
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_search_with_l2_function_chain_sdk_limit_op(self):
         """
         target: test L2 FunctionChain SDK supports limit operator
@@ -765,7 +1071,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
 
         assert len(res[0]) == 2
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_search_rejects_l2_function_chain_write_readonly_system_column(self):
         """
         target: test L2 FunctionChain SDK rejects writes to read-only system columns
@@ -781,7 +1087,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
 
         self._assert_search_error(client, collection_name, chain, 'system output "$id" is not writable')
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_search_rejects_l2_function_chain_reserved_temp_output(self):
         """
         target: test L2 FunctionChain SDK rejects user temporary columns in system namespace
@@ -797,7 +1103,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
 
         self._assert_search_error(client, collection_name, chain, 'system output "$tmp_score" is not writable')
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_search_rejects_l2_function_chain_read_internal_system_input(self):
         """
         target: test L2 FunctionChain SDK rejects internal system input columns
@@ -813,7 +1119,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
 
         self._assert_search_error(client, collection_name, chain, 'system input "$seg_offset" is not supported')
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_search_rejects_l2_function_chain_read_unknown_system_input(self):
         """
         target: test L2 FunctionChain SDK rejects unknown system input columns
@@ -829,7 +1135,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
 
         self._assert_search_error(client, collection_name, chain, 'system input "$tmp_score" is not supported')
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_search_rejects_l2_function_chain_with_function_score(self):
         """
         target: test search rejects ambiguous L2 rerank APIs
@@ -855,7 +1161,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
             ranker=function_score,
         )
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_search_rejects_l2_function_chain_with_order_by(self):
         """
         target: test search rejects order_by with L2 function rerank

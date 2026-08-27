@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 )
 
 // Cache is the interface for system metadata cache.
@@ -67,7 +66,6 @@ func initMetaCache(ctx context.Context, mixCoord types.MixCoordClient) (Cache, e
 	if err != nil {
 		return nil, err
 	}
-	expr.Register("cache", metaCache)
 
 	err = privilege.InitPrivilegeCache(ctx, mixCoord)
 	if err != nil {

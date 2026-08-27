@@ -244,43 +244,8 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
     std::iota(row_groups.begin(), row_groups.end(), 0);
     std::vector<std::vector<int64_t>> row_group_lists = {row_groups};
 
-    // Test MemoryBasedSplitStrategy
-    {
-        auto strategy =
-            std::make_unique<MemoryBasedSplitStrategy>(row_group_metadata);
-        milvus::segcore::LoadWithStrategy({paths[0]},
-                                          channel,
-                                          memory_limit,
-                                          std::move(strategy),
-                                          row_group_lists,
-                                          fs_);
-
-        // Verify each batch matches row group metadata
-        std::shared_ptr<milvus::ArrowDataWrapper> wrapper;
-        int64_t total_rows = 0;
-        int64_t current_row_group = 0;
-
-        while (channel->pop(wrapper)) {
-            for (const auto& table_info : wrapper->arrow_tables) {
-                // Verify batch size matches row group metadata
-                EXPECT_EQ(table_info.table->num_rows(),
-                          row_group_metadata.Get(current_row_group).row_num());
-                total_rows += table_info.table->num_rows();
-                current_row_group++;
-            }
-        }
-
-        // Verify total rows match sum of all row groups
-        int64_t expected_total_rows = 0;
-        for (size_t i = 0; i < row_group_metadata.size(); ++i) {
-            expected_total_rows += row_group_metadata.Get(i).row_num();
-        }
-        EXPECT_EQ(total_rows, expected_total_rows);
-    }
-
     // Test ParallelDegreeSplitStrategy
     {
-        channel = std::make_shared<milvus::ArrowReaderChannel>();
         auto strategy =
             std::make_unique<ParallelDegreeSplitStrategy>(parallel_degree);
         milvus::segcore::LoadWithStrategy({paths[0]},

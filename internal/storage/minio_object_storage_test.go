@@ -21,12 +21,16 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -153,6 +157,41 @@ func TestMinioObjectStorageCopyObjectCrossBucketUsesComposeForLargeObject(t *tes
 	assert.Equal(t, "src-bucket", gotSrcs[0].Bucket)
 	assert.Equal(t, "src-object", gotSrcs[0].Object)
 	assert.Equal(t, int64(0), gotSrcs[0].Start)
+	assert.Equal(t, "dst-bucket", gotDst.Bucket)
+	assert.Equal(t, "dst-object", gotDst.Object)
+}
+
+func TestMinioObjectStorageCopyObjectCrossBucketGCPUsesSingleCopyForLargeObject(t *testing.T) {
+	var gotDst minio.CopyDestOptions
+	var gotSrc minio.CopySrcOptions
+	copyCalled := false
+	composeCalled := false
+	mockStat := mockey.Mock((*minio.Client).StatObject).Return(
+		minio.ObjectInfo{Size: minioSingleCopyObjectMaxSize + 1}, nil).Build()
+	defer mockStat.UnPatch()
+	mockCopy := mockey.Mock((*minio.Client).CopyObject).To(
+		func(_ *minio.Client, _ context.Context, dst minio.CopyDestOptions, src minio.CopySrcOptions) (minio.UploadInfo, error) {
+			copyCalled = true
+			gotDst = dst
+			gotSrc = src
+			return minio.UploadInfo{}, nil
+		}).Build()
+	defer mockCopy.UnPatch()
+	mockCompose := mockey.Mock((*minio.Client).ComposeObject).To(
+		func(_ *minio.Client, _ context.Context, _ minio.CopyDestOptions, _ ...minio.CopySrcOptions) (minio.UploadInfo, error) {
+			composeCalled = true
+			return minio.UploadInfo{}, nil
+		}).Build()
+	defer mockCompose.UnPatch()
+
+	objectStorage := &MinioObjectStorage{Client: &minio.Client{}, cloudProvider: objectstorage.CloudProviderGCP}
+	err := objectStorage.CopyObjectCrossBucket(context.Background(), "src-bucket", "src-object", "dst-bucket", "dst-object")
+	require.NoError(t, err)
+
+	assert.True(t, copyCalled)
+	assert.False(t, composeCalled)
+	assert.Equal(t, "src-bucket", gotSrc.Bucket)
+	assert.Equal(t, "src-object", gotSrc.Object)
 	assert.Equal(t, "dst-bucket", gotDst.Bucket)
 	assert.Equal(t, "dst-object", gotDst.Object)
 }
@@ -561,6 +600,56 @@ func listAllObjectsWithPrefixAtBucket(ctx context.Context, objectStorage ObjectS
 		return nil, nil, err
 	}
 	return dirs, mods, nil
+}
+
+func TestMinioObjectStorageWalkWithObjectsMapsErrors(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		statusCode int
+		code       string
+		expected   error
+	}{
+		{name: "access denied", statusCode: http.StatusForbidden, code: minioAccessDenied, expected: merr.ErrIoPermissionDenied},
+		{name: "bucket not found", statusCode: http.StatusNotFound, code: minioNoSuchBucket, expected: merr.ErrIoBucketNotFound},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/xml")
+				w.WriteHeader(test.statusCode)
+				fmt.Fprintf(w, "<Error><Code>%s</Code><Message>test error</Message></Error>", test.code)
+			}))
+			defer server.Close()
+
+			client, err := minio.New(strings.TrimPrefix(server.URL, "http://"), &minio.Options{
+				Creds:  credentials.NewStaticV4("access-key", "secret-key", ""),
+				Secure: false,
+			})
+			require.NoError(t, err)
+
+			storage := &MinioObjectStorage{Client: client}
+			err = storage.WalkWithObjects(context.Background(), "test-bucket", "test-prefix", true, func(*ChunkObjectInfo) bool {
+				return true
+			})
+			assert.ErrorIs(t, err, test.expected)
+		})
+	}
+
+	t.Run("canceled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		client, err := minio.New("127.0.0.1:1", &minio.Options{
+			Creds:  credentials.NewStaticV4("access-key", "secret-key", ""),
+			Secure: false,
+		})
+		require.NoError(t, err)
+
+		storage := &MinioObjectStorage{Client: client}
+		err = storage.WalkWithObjects(ctx, "test-bucket", "test-prefix", true, func(*ChunkObjectInfo) bool {
+			return true
+		})
+		assert.ErrorIs(t, err, context.Canceled)
+	})
 }
 
 func TestMapObjectStorageError_MinIO_NewErrors(t *testing.T) {

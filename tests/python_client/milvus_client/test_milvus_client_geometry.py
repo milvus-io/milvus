@@ -15,6 +15,41 @@ default_nb = ct.default_nb
 default_dim = ct.default_dim
 default_limit = ct.default_limit
 
+# ---- shared collections (T2 pilot: one collection, many verification points) ----
+# The insert family tests share the same schema (id INT64 pk + vector + geo) and the same
+# "insert geometry data then verify round-trip" verification, so a single module-scoped
+# collection serves them all. Ids are partitioned per WKT type so each test can still
+# verify a specific type's row count via id-range filters.
+GEOM_INSERT_SHARED_COLLECTION = "test_geom_insert_shared_" + cf.gen_unique_str("_")
+GEOM_INSERT_SHARED_COLLECTION_NOINDEX = "test_geom_insert_shared_noindex_" + cf.gen_unique_str("_")
+GEOM_INSERT_BASE_COUNT = 3000
+GEOM_INSERT_EMPTY_ID_OFFSET = 1_000_000
+GEOM_WKT_TYPES = [
+    "POINT",
+    "LINESTRING",
+    "POLYGON",
+    "MULTIPOINT",
+    "MULTILINESTRING",
+    "MULTIPOLYGON",
+    "GEOMETRYCOLLECTION",
+]
+GEOM_EMPTY_WKT_TYPES = [
+    "POINT EMPTY",
+    "LINESTRING EMPTY",
+    "POLYGON EMPTY",
+    "MULTIPOINT EMPTY",
+    "MULTILINESTRING EMPTY",
+    "MULTIPOLYGON EMPTY",
+    "GEOMETRYCOLLECTION EMPTY",
+]
+
+# The spatial-operator tests all generate a diverse base dataset (same params) and compute
+# their ground truth against it, so a module-scoped fixture generates the dataset ONCE and
+# provisions two collections (with/without RTREE geo index) that share that dataset.
+GEOM_SPATIAL_SHARED_COLLECTION_RTREE = "test_geom_spatial_shared_rtree_" + cf.gen_unique_str("_")
+GEOM_SPATIAL_SHARED_COLLECTION_NOINDEX = "test_geom_spatial_shared_noindex_" + cf.gen_unique_str("_")
+GEOM_SPATIAL_BASE_COUNT = 3000
+
 
 def generate_wkt_by_type(wkt_type: str, bounds: tuple = (0, 100, 0, 100), count: int = 10) -> list:
     """
@@ -822,140 +857,6 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         assert collection_name in collections
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize(
-        "wkt_type",
-        [
-            "POINT",
-            "LINESTRING",
-            "POLYGON",
-            "MULTIPOINT",
-            "MULTILINESTRING",
-            "MULTIPOLYGON",
-            "GEOMETRYCOLLECTION",
-        ],
-    )
-    def test_insert_wkt_data(self, wkt_type):
-        """
-        target: test insert various WKT geometry types
-        method: dynamically generate and insert different WKT geometry data
-        expected: insert successfully
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-
-        # Create collection with geometry field
-        schema, _ = self.create_schema(client, auto_id=False, description=f"test {wkt_type} data")
-        schema.add_field("id", DataType.INT64, is_primary=True)
-        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field("geo", DataType.GEOMETRY)
-
-        self.create_collection(client, collection_name, schema=schema)
-
-        # Generate WKT data based on type
-        bounds = (
-            0,
-            1000,
-            0,
-            1000,
-        )  # Expanded coordinate bounds for better distribution
-        base_count = 3000  # 3000+ records for comprehensive testing
-        wkt_data = generate_wkt_by_type(wkt_type, bounds=bounds, count=base_count)
-
-        # Prepare data with generated WKT examples
-        data = []
-        for i, wkt_string in enumerate(wkt_data):
-            data.append(
-                {
-                    "id": i,
-                    "vector": [random.random() for _ in range(default_dim)],
-                    "geo": wkt_string,
-                }
-            )
-
-        # Insert data
-        self.insert(client, collection_name, data)
-
-        # Flush to ensure data is persisted
-        self.flush(client, collection_name)
-
-        # Create index before loading
-        index_params, _ = self.prepare_index_params(client)
-        index_params.add_index(field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128)
-        self.create_index(client, collection_name, index_params=index_params)
-
-        # Verify insert
-        self.load_collection(client, collection_name)
-
-        # Use query to verify data insertion
-        results, _ = self.query(
-            client,
-            collection_name=collection_name,
-            filter="id >= 0",
-            output_fields=["id", "geo"],
-        )
-        assert len(results) == len(wkt_data)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize(
-        "empty_wkt",
-        [
-            "POINT EMPTY",
-            "LINESTRING EMPTY",
-            "POLYGON EMPTY",
-            "MULTIPOINT EMPTY",
-            "MULTILINESTRING EMPTY",
-            "MULTIPOLYGON EMPTY",
-            "GEOMETRYCOLLECTION EMPTY",
-        ],
-    )
-    def test_insert_valid_empty_geometry(self, empty_wkt):
-        """
-        target: test inserting valid empty geometry formats according to WKT standard
-        method: insert valid empty geometry WKT that should be accepted per OGC standard
-        expected: should insert successfully as these are valid WKT representations
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-
-        # Create collection
-        schema, _ = self.create_schema(client, auto_id=False, description="test valid empty geometry")
-        schema.add_field("id", DataType.INT64, is_primary=True)
-        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field("geo", DataType.GEOMETRY)
-
-        self.create_collection(client, collection_name, schema=schema)
-
-        # Test valid empty geometry WKT formats
-        data = [
-            {
-                "id": 0,
-                "vector": [random.random() for _ in range(default_dim)],
-                "geo": empty_wkt,
-            }
-        ]
-
-        self.insert(client, collection_name, data)
-        self.flush(client, collection_name)
-
-        # Build indexes and load collection before querying
-        index_params, _ = self.prepare_index_params(client)
-        index_params.add_index(field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128)
-        index_params.add_index(field_name="geo", index_type="RTREE")
-
-        self.create_index(client, collection_name, index_params=index_params)
-        self.load_collection(client, collection_name)
-
-        # Verify we can query the empty geometry
-        results, _ = self.query(
-            client,
-            collection_name=collection_name,
-            filter="id == 0",
-            output_fields=["id", "geo"],
-        )
-        assert len(results) == 1, f"Should be able to query {empty_wkt}"
-        assert results[0]["geo"] == empty_wkt, f"Retrieved geometry should match inserted {empty_wkt}"
-
-    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index_type", ["RTREE", "AUTOINDEX"])
     def test_build_geometry_index(self, index_type):
         """
@@ -1056,103 +957,6 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         # Should return all results since all geometries are within the expanded bounds
         assert len(spatial_results) == expected_count, (
             f"ST_WITHIN query should return all {expected_count} records, got {len(spatial_results)}"
-        )
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize(
-        "spatial_func",
-        [
-            "ST_INTERSECTS",
-            "ST_CONTAINS",
-            "ST_WITHIN",
-            "ST_EQUALS",
-            "ST_TOUCHES",
-            "ST_OVERLAPS",
-            "ST_CROSSES",
-        ],
-    )
-    @pytest.mark.parametrize("with_geo_index", [True, False])
-    def test_spatial_query_operators_correctness(self, spatial_func, with_geo_index):
-        """
-        target: test various spatial query operators
-        method: query geometry data using different spatial operators
-        expected: return correct results based on spatial relationships
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-
-        # Generate test data dynamically
-        base_data = generate_diverse_base_data(
-            count=3000,
-            bounds=(0, 100, 0, 100),
-            pk_field_name="id",
-            geo_field_name="geo",
-        )
-
-        query_geom = generate_spatial_query_data_for_function(spatial_func, base_data, "geo")
-        expected_ids = generate_gt(spatial_func, base_data, query_geom, "geo", "id")
-
-        assert len(expected_ids) >= 1, f"{spatial_func} query should return at least 1 result, got {len(expected_ids)}"
-
-        # Create collection
-        schema, _ = self.create_schema(client, auto_id=False, description=f"test {spatial_func} query")
-        schema.add_field("id", DataType.INT64, is_primary=True)
-        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field("geo", DataType.GEOMETRY)
-
-        self.create_collection(client, collection_name, schema=schema)
-
-        # Prepare data with vectors
-        data = []
-        for item in base_data:
-            data.append(
-                {
-                    "id": item["id"],
-                    "vector": [random.random() for _ in range(default_dim)],
-                    "geo": item["geo"],
-                }
-            )
-
-        self.insert(client, collection_name, data)
-        self.flush(client, collection_name)
-
-        # Build index based on parameter
-        index_params, _ = self.prepare_index_params(client)
-        index_params.add_index(field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128)
-        if with_geo_index:
-            index_params.add_index(field_name="geo", index_type="RTREE")
-
-        self.create_index(client, collection_name, index_params=index_params)
-        self.load_collection(client, collection_name)
-
-        # Query with spatial operator
-        filter_expr = f"{spatial_func}(geo, '{query_geom}')"
-
-        results, _ = self.query(
-            client,
-            collection_name=collection_name,
-            filter=filter_expr,
-            output_fields=["id", "geo"],
-        )
-
-        # Verify results
-        result_ids = {r["id"] for r in results}
-        expected_ids_set = set(expected_ids)
-
-        assert result_ids == expected_ids_set, (
-            f"{spatial_func} query should return IDs {expected_ids}, got {list(result_ids)}"
-        )
-
-        template_results, _ = self.query(
-            client,
-            collection_name=collection_name,
-            filter=f"{spatial_func}(geo, {{query_geom}})",
-            filter_params={"query_geom": query_geom},
-            output_fields=["id", "geo"],
-        )
-        template_result_ids = {r["id"] for r in template_results}
-        assert template_result_ids == expected_ids_set, (
-            f"{spatial_func} templated query should return IDs {expected_ids}, got {list(template_result_ids)}"
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -3258,6 +3062,264 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         )
         assert len(results_lower) == len(valid_geometries), (
             f"st_isvalid (lowercase) should return all records (index={with_geo_index})"
+        )
+
+
+@pytest.mark.xdist_group("TestMilvusClientGeometryInsertShared")
+class TestMilvusClientGeometryInsertShared(TestMilvusClientV2Base):
+    """Insert-family tests (WKT types + valid empty geometries) that share one collection.
+
+    The collection is provisioned once with all 7 WKT types (ids partitioned per type)
+    plus the 7 valid empty geometries, so each test only needs to query it. This collapses
+    14 per-case create+insert+index setups into a single one (T2: one setup, many checks).
+    """
+
+    @pytest.fixture(scope="module", autouse=True)
+    def prepare_geom_insert_collection(self, request):
+        cls = self.__class__
+        client = self._client()
+        # Reuse one client across the class instead of reconnecting per test.
+        cls.shared_client = client
+
+        # Insert all 7 WKT types, ids partitioned per type so each test can filter by range.
+        rows = []
+        for t_idx, wkt_type in enumerate(GEOM_WKT_TYPES):
+            wkt_data = generate_wkt_by_type(wkt_type, bounds=(0, 1000, 0, 1000), count=GEOM_INSERT_BASE_COUNT)
+            for i, wkt_string in enumerate(wkt_data):
+                rows.append(
+                    {
+                        "id": t_idx * GEOM_INSERT_BASE_COUNT + i,
+                        "vector": [random.random() for _ in range(default_dim)],
+                        "geo": wkt_string,
+                    }
+                )
+
+        # Valid empty geometries at a distinct id range.
+        # NOTE: these empty geometries coexist with 21k non-empty rows in the same RTREE-indexed
+        # collection. RTREE-on-empty coverage is retained here; if the server ever special-cases
+        # empty geometries at index build time, run a stability pass on this class.
+        empty_rows = [
+            {
+                "id": GEOM_INSERT_EMPTY_ID_OFFSET + e_idx,
+                "vector": [random.random() for _ in range(default_dim)],
+                "geo": empty_wkt,
+            }
+            for e_idx, empty_wkt in enumerate(GEOM_EMPTY_WKT_TYPES)
+        ]
+
+        # Two collections with identical data: one geo-indexed (RTREE) and one with NO geo index.
+        # The original test_insert_valid_empty_geometry built RTREE on geo; the original
+        # test_insert_wkt_data built only a vector index (no geo index). Keeping both paths
+        # preserves the original coverage for all 7 WKT types.
+        for collection_name, add_geo_rtree in [
+            (GEOM_INSERT_SHARED_COLLECTION, True),
+            (GEOM_INSERT_SHARED_COLLECTION_NOINDEX, False),
+        ]:
+            if self.has_collection(client, collection_name)[0]:
+                self.drop_collection(client, collection_name)
+
+            schema, _ = self.create_schema(client, auto_id=False, description="shared insert collection")
+            schema.add_field("id", DataType.INT64, is_primary=True)
+            schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+            schema.add_field("geo", DataType.GEOMETRY)
+            # force_teardown=False: module-scoped shared collection; per-test teardown_method
+            # would otherwise drop it after the first test. Cleanup via request.addfinalizer.
+            self.create_collection(client, collection_name, schema=schema, force_teardown=False)
+
+            self.insert(client, collection_name, rows)
+            self.flush(client, collection_name)
+            self.insert(client, collection_name, empty_rows)
+            self.flush(client, collection_name)
+
+            index_params, _ = self.prepare_index_params(client)
+            index_params.add_index(field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128)
+            if add_geo_rtree:
+                index_params.add_index(field_name="geo", index_type="RTREE")
+            self.create_index(client, collection_name, index_params=index_params)
+            self.load_collection(client, collection_name)
+
+        def teardown():
+            for cn in [GEOM_INSERT_SHARED_COLLECTION, GEOM_INSERT_SHARED_COLLECTION_NOINDEX]:
+                try:
+                    if self.has_collection(client, cn)[0]:
+                        self.drop_collection(client, cn)
+                except Exception:
+                    pass
+
+        request.addfinalizer(teardown)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("wkt_type", GEOM_WKT_TYPES)
+    def test_insert_wkt_data(self, wkt_type):
+        """
+        target: test insert various WKT geometry types
+        method: query the shared collection's id-range for this WKT type
+        expected: the type's rows are present and round-trip correctly
+        """
+        client = type(self).shared_client
+        t_idx = GEOM_WKT_TYPES.index(wkt_type)
+        lo = t_idx * GEOM_INSERT_BASE_COUNT
+        hi = (t_idx + 1) * GEOM_INSERT_BASE_COUNT
+
+        # The original test_insert_wkt_data built only a vector index (no geo index), so
+        # query the no-geo-index shared collection to preserve that coverage for all WKT types.
+        results, _ = self.query(
+            client,
+            collection_name=GEOM_INSERT_SHARED_COLLECTION_NOINDEX,
+            filter=f"id >= {lo} and id < {hi}",
+            output_fields=["id", "geo"],
+        )
+        assert len(results) == GEOM_INSERT_BASE_COUNT, (
+            f"{wkt_type}: expected {GEOM_INSERT_BASE_COUNT} records, got {len(results)}"
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("empty_wkt", GEOM_EMPTY_WKT_TYPES)
+    def test_insert_valid_empty_geometry(self, empty_wkt):
+        """
+        target: test inserting valid empty geometry formats according to WKT standard
+        method: query the shared collection for the inserted empty geometry row
+        expected: the empty geometry is accepted, stored and round-trips unchanged
+        """
+        client = type(self).shared_client
+        e_idx = GEOM_EMPTY_WKT_TYPES.index(empty_wkt)
+        target_id = GEOM_INSERT_EMPTY_ID_OFFSET + e_idx
+
+        results, _ = self.query(
+            client,
+            collection_name=GEOM_INSERT_SHARED_COLLECTION,
+            filter=f"id == {target_id}",
+            output_fields=["id", "geo"],
+        )
+        assert len(results) == 1, f"Should be able to query {empty_wkt}"
+        assert results[0]["geo"] == empty_wkt, f"Retrieved geometry should match inserted {empty_wkt}"
+
+
+@pytest.mark.xdist_group("TestMilvusClientGeometrySpatialShared")
+class TestMilvusClientGeometrySpatialShared(TestMilvusClientV2Base):
+    """Spatial-operator tests sharing one base dataset provisioned in two collections.
+
+    The base dataset is generated ONCE (module-scoped) and both a RTREE-indexed and an
+    unindexed collection are provisioned with the same data. Each test computes its query
+    geometry and ground-truth from the shared dataset, so the 14 operator×index cases
+    collapse from 14 create+insert+index setups into 2 (T2).
+    """
+
+    @pytest.fixture(scope="module", autouse=True)
+    def prepare_geom_spatial_collections(self, request):
+        cls = self.__class__
+        client = self._client()
+        # Reuse one client across the class instead of reconnecting per test.
+        cls.shared_client = client
+
+        base_data = generate_diverse_base_data(
+            count=GEOM_SPATIAL_BASE_COUNT,
+            bounds=(0, 100, 0, 100),
+            pk_field_name="id",
+            geo_field_name="geo",
+        )
+        # Stored on the class (not a module global) so the data stays in the same
+        # worker process that owns the shared collections under xdist.
+        cls.base_data = base_data
+
+        rows = []
+        for item in base_data:
+            rows.append(
+                {
+                    "id": item["id"],
+                    "vector": [random.random() for _ in range(default_dim)],
+                    "geo": item["geo"],
+                }
+            )
+
+        for collection_name, add_rtree in [
+            (GEOM_SPATIAL_SHARED_COLLECTION_RTREE, True),
+            (GEOM_SPATIAL_SHARED_COLLECTION_NOINDEX, False),
+        ]:
+            if self.has_collection(client, collection_name)[0]:
+                self.drop_collection(client, collection_name)
+
+            schema, _ = self.create_schema(client, auto_id=False, description="shared spatial collection")
+            schema.add_field("id", DataType.INT64, is_primary=True)
+            schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+            schema.add_field("geo", DataType.GEOMETRY)
+            self.create_collection(client, collection_name, schema=schema, force_teardown=False)
+
+            self.insert(client, collection_name, rows)
+            self.flush(client, collection_name)
+
+            index_params, _ = self.prepare_index_params(client)
+            index_params.add_index(field_name="vector", index_type="IVF_FLAT", metric_type="L2", nlist=128)
+            if add_rtree:
+                index_params.add_index(field_name="geo", index_type="RTREE")
+            self.create_index(client, collection_name, index_params=index_params)
+            self.load_collection(client, collection_name)
+
+        def teardown():
+            for cn in [GEOM_SPATIAL_SHARED_COLLECTION_RTREE, GEOM_SPATIAL_SHARED_COLLECTION_NOINDEX]:
+                try:
+                    if self.has_collection(client, cn)[0]:
+                        self.drop_collection(client, cn)
+                except Exception:
+                    pass
+
+        request.addfinalizer(teardown)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "spatial_func",
+        [
+            "ST_INTERSECTS",
+            "ST_CONTAINS",
+            "ST_WITHIN",
+            "ST_EQUALS",
+            "ST_TOUCHES",
+            "ST_OVERLAPS",
+            "ST_CROSSES",
+        ],
+    )
+    @pytest.mark.parametrize("with_geo_index", [True, False])
+    def test_spatial_query_operators_correctness(self, spatial_func, with_geo_index):
+        """
+        target: test various spatial query operators
+        method: query shared geometry data using different spatial operators (RTREE vs scan)
+        expected: return correct results based on spatial relationships
+        """
+        client = type(self).shared_client
+        base_data = type(self).base_data
+
+        query_geom = generate_spatial_query_data_for_function(spatial_func, base_data, "geo")
+        expected_ids = generate_gt(spatial_func, base_data, query_geom, "geo", "id")
+
+        assert len(expected_ids) >= 1, f"{spatial_func} query should return at least 1 result, got {len(expected_ids)}"
+
+        collection_name = (
+            GEOM_SPATIAL_SHARED_COLLECTION_RTREE if with_geo_index else GEOM_SPATIAL_SHARED_COLLECTION_NOINDEX
+        )
+
+        # Query with spatial operator
+        results, _ = self.query(
+            client,
+            collection_name=collection_name,
+            filter=f"{spatial_func}(geo, '{query_geom}')",
+            output_fields=["id", "geo"],
+        )
+        result_ids = {r["id"] for r in results}
+        expected_ids_set = set(expected_ids)
+        assert result_ids == expected_ids_set, (
+            f"{spatial_func} query should return IDs {expected_ids}, got {list(result_ids)}"
+        )
+
+        template_results, _ = self.query(
+            client,
+            collection_name=collection_name,
+            filter=f"{spatial_func}(geo, {{query_geom}})",
+            filter_params={"query_geom": query_geom},
+            output_fields=["id", "geo"],
+        )
+        template_result_ids = {r["id"] for r in template_results}
+        assert template_result_ids == expected_ids_set, (
+            f"{spatial_func} templated query should return IDs {expected_ids}, got {list(template_result_ids)}"
         )
 
 

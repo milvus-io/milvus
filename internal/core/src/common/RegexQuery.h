@@ -541,7 +541,4 @@ LikePatternMatcher::operator()(const std::string_view& operand) const {
     return MatchImpl(operand);
 }
 
-// Backward compatibility alias
-using MultiWildcardMatcher = LikePatternMatcher;
-
 }  // namespace milvus

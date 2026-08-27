@@ -202,6 +202,12 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		return err
 	}
 
+	// Publish the External Table IOPS policy once for native Segcore readers.
+	err = InitExternalIopsConfig(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
 	err = InitStorageV2FileSystem(paramtable.Get())
 	if err != nil {
 		return err

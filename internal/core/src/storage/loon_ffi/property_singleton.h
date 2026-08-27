@@ -36,6 +36,13 @@ struct ArrowReaderLimits {
     int64_t range_size_limit_bytes = 0;
 };
 
+// Process-local policy applied only when an External Table filesystem is
+// materialized. These defaults must stay aligned with milvus-storage.
+struct ExternalIopsConfig {
+    uint32_t initial_rate = 2000;
+    uint32_t max_rate = 5000;
+};
+
 class LoonFFIPropertiesSingleton {
  private:
     LoonFFIPropertiesSingleton() = default;
@@ -95,6 +102,18 @@ class LoonFFIPropertiesSingleton {
     GetProperties() const {
         std::shared_lock lck(mutex_);
         return properties_;
+    }
+
+    void
+    SetExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate) {
+        std::unique_lock cfg_lck(config_mutex_);
+        external_iops_config_ = {initial_rate, max_rate};
+    }
+
+    ExternalIopsConfig
+    GetExternalIopsConfig() const {
+        std::shared_lock cfg_lck(config_mutex_);
+        return external_iops_config_;
     }
 
     // Sets the per-round read window (loon's reader.record_batch_max_size)
@@ -160,10 +179,12 @@ class LoonFFIPropertiesSingleton {
  private:
     mutable std::shared_mutex mutex_;
     std::shared_ptr<milvus_storage::api::Properties> properties_ = nullptr;
-    // Guards arrow_reader_limits_ only. Separate from mutex_ so the limits
-    // can be read while mutex_ is held; see ApplyArrowReaderConfig.
+    // Guards configuration snapshots that do not belong to the internal
+    // filesystem properties. Separate from mutex_ so the limits can be read
+    // while mutex_ is held; see ApplyArrowReaderConfig.
     mutable std::shared_mutex config_mutex_;
     ArrowReaderLimits arrow_reader_limits_{};
+    ExternalIopsConfig external_iops_config_{};
     std::atomic<int64_t> index_build_read_window_bytes_{0};
 };
 

@@ -809,7 +809,9 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
                        "json type default_value shall be bytes data");
 
             auto data = default_value->bytes_data();
-            Json default_json = Json(data.data(), data.size());
+            auto buffer = std::make_shared<simdjson::padded_string>(data);
+            Json default_json(buffer->data(), buffer->size());
+            shared_json_buffers_.emplace_back(std::move(buffer));
             std::fill(data_.data() + length_,
                       data_.data() + length_ + element_count,
                       default_json);
@@ -872,6 +874,14 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
         }
         length_ += json.size();
     }
+
+ private:
+    // Buffers backing the non-owning Json views of rows filled from a
+    // default value. One buffer is appended per FillFieldData(default_value,
+    // ...) call and kept alive for the FieldData lifetime, so all rows
+    // filled by a call share a single copy instead of allocating one per
+    // row.
+    std::vector<std::shared_ptr<simdjson::padded_string>> shared_json_buffers_;
 };
 
 class FieldDataArrayImpl : public FieldDataImpl<Array, true> {

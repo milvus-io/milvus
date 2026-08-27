@@ -1417,6 +1417,10 @@ func (s *mixCoordImpl) DeleteClientCommand(ctx context.Context, req *milvuspb.De
 	return s.rootcoordServer.DeleteClientCommand(ctx, req)
 }
 
+func (s *mixCoordImpl) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest) (*rootcoordpb.ListClientCommandsResponse, error) {
+	return s.rootcoordServer.ListClientCommands(ctx, req)
+}
+
 func (s *mixCoordImpl) RefreshExternalCollection(ctx context.Context, req *datapb.RefreshExternalCollectionRequest) (*datapb.RefreshExternalCollectionResponse, error) {
 	return s.datacoordServer.RefreshExternalCollection(ctx, req)
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -59,8 +60,7 @@ type upsertTask struct {
 	result           *milvuspb.MutationResult
 	idAllocator      *allocator.IDAllocator
 	collectionID     UniqueID
-	chMgr            channelsMgr
-	chTicker         channelsTimeTicker
+	chMgr            channelmgr.ChannelsMgr
 	vChannels        []vChan
 	pChannels        []pChan
 	schema           *schemaInfo
@@ -152,7 +152,7 @@ func (it *upsertTask) setChannels() error {
 	if err != nil {
 		return err
 	}
-	channels, err := it.chMgr.getChannels(collID)
+	channels, err := it.chMgr.GetChannels(collID)
 	if err != nil {
 		return err
 	}

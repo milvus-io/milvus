@@ -30,11 +30,6 @@
 namespace milvus {
 namespace index {
 
-struct BitmapInfo {
-    size_t offset_;
-    size_t size_;
-};
-
 enum class BitmapIndexBuildMode {
     ROARING,
     BITSET,

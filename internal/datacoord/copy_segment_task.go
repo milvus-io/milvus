@@ -26,7 +26,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
@@ -76,8 +75,6 @@ import (
 // - Task failure immediately marks job as failed (fail-fast)
 // - Failed segments are dropped by inspector
 // - Metrics recorded for pending and executing duration
-
-var externalSnapshotMinimumDataNodeVersion = semver.MustParse("3.0.1")
 
 // ===========================================================================================
 // Task Filters and Update Actions
@@ -318,20 +315,6 @@ func (t *copySegmentTask) GetTaskVersion() int64 {
 	return t.task.Load().GetTaskVersion()
 }
 
-// MinimumWorkerVersion prevents external restore tasks from being dispatched
-// to DataNodes that do not understand foreign snapshot storage settings. Local
-// snapshot restore continues to work with older DataNodes.
-func (t *copySegmentTask) MinimumWorkerVersion() semver.Version {
-	if t.copyMeta == nil {
-		return semver.Version{}
-	}
-	job := t.copyMeta.GetJob(t.ctx, t.GetJobId())
-	if job != nil && job.GetExternal() {
-		return externalSnapshotMinimumDataNodeVersion
-	}
-	return semver.Version{}
-}
-
 // ===========================================================================================
 // Task Lifecycle: Dispatch to DataNode
 // ===========================================================================================
@@ -353,8 +336,9 @@ func (t *copySegmentTask) MinimumWorkerVersion() semver.Version {
 //
 // Error handling:
 //   - Permanent snapshot assembly errors mark the task and job failed
-//   - Transient assembly or DataNode RPC errors leave the task Pending so the
-//     scheduler can retry it on a later cycle
+//   - An external task rejected as unsupported marks the task and job failed
+//   - Other transient assembly or DataNode RPC errors leave the task Pending
+//     so the scheduler can retry it on a later cycle
 //
 // Why load the snapshot during dispatch:
 // - Snapshot data contains full binlog paths needed for copy
@@ -373,10 +357,14 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 		}
 		return
 	}
-	err = cluster.CreateCopySegment(nodeID, req, t.GetCollectionId())
+	err = cluster.CreateCopySegment(nodeID, req, t.GetCollectionId(), job.GetExternal())
 	if err != nil {
 		mlog.Warn(ctx, "failed to create copy segment task on datanode",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+		if job.GetExternal() && errors.Is(err, merr.ErrServiceUnimplemented) {
+			t.markTaskAndJobFailed(merr.Wrap(err,
+				"datanode does not support external copy segment tasks").Error())
+		}
 		return
 	}
 	mlog.Info(ctx, "create copy segment task on datanode done",

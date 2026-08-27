@@ -47,57 +47,7 @@ struct StorageCost {
     int64_t scanned_total_bytes = 0;
 
     StorageCost() = default;
-
-    StorageCost(int64_t scanned_remote_bytes, int64_t scanned_total_bytes)
-        : scanned_remote_bytes(scanned_remote_bytes),
-          scanned_total_bytes(scanned_total_bytes) {
-    }
-
-    StorageCost
-    operator+(const StorageCost& rhs) const {
-        return {scanned_remote_bytes + rhs.scanned_remote_bytes,
-                scanned_total_bytes + rhs.scanned_total_bytes};
-    }
-
-    void
-    operator+=(const StorageCost& rhs) {
-        scanned_remote_bytes += rhs.scanned_remote_bytes;
-        scanned_total_bytes += rhs.scanned_total_bytes;
-    }
-
-    StorageCost
-    operator*(const double factor) const {
-        return {static_cast<int64_t>(scanned_remote_bytes * factor),
-                static_cast<int64_t>(scanned_total_bytes * factor)};
-    }
-
-    void
-    operator*=(const double factor) {
-        scanned_remote_bytes =
-            static_cast<int64_t>(scanned_remote_bytes * factor);
-        scanned_total_bytes =
-            static_cast<int64_t>(scanned_total_bytes * factor);
-    }
-
-    void
-    operator=(const StorageCost& rhs) {
-        scanned_remote_bytes = rhs.scanned_remote_bytes;
-        scanned_total_bytes = rhs.scanned_total_bytes;
-    }
-
-    std::string
-    ToString() const {
-        return fmt::format("scanned_remote_bytes: {}, scanned_total_bytes: {}",
-                           scanned_remote_bytes,
-                           scanned_total_bytes);
-    }
 };
-
-inline std::ostream&
-operator<<(std::ostream& os, const StorageCost& cost) {
-    os << cost.ToString();
-    return os;
-}
 
 struct OffsetDisPair {
  private:
@@ -355,12 +305,6 @@ struct SearchResult {
     std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
     std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_{};
     std::vector<TargetBitmapPtr> pinned_bitsets_{};
-
-    bool
-    HasIterators() const {
-        return (element_level_ && element_iterators_.has_value()) ||
-               (!element_level_ && vector_iterators_.has_value());
-    }
 
     // For two-stage search: count of rows that pass the filter in this segment
     // Set to -1 when not applicable (normal search mode)

@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tidwall/gjson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -2790,6 +2791,13 @@ type externalCollectionRESTProxy struct {
 	getExportSnapshotStateReq  *milvuspb.GetExportSnapshotStateRequest
 	getRestoreSnapshotStateReq *milvuspb.GetRestoreSnapshotStateRequest
 	listRestoreSnapshotJobsReq *milvuspb.ListRestoreSnapshotJobsRequest
+	createSnapshotReq          *milvuspb.CreateSnapshotRequest
+	dropSnapshotReq            *milvuspb.DropSnapshotRequest
+	listSnapshotsReq           *milvuspb.ListSnapshotsRequest
+	describeSnapshotReq        *milvuspb.DescribeSnapshotRequest
+	restoreSnapshotReq         *milvuspb.RestoreSnapshotRequest
+	pinSnapshotDataReq         *milvuspb.PinSnapshotDataRequest
+	unpinSnapshotDataReq       *milvuspb.UnpinSnapshotDataRequest
 }
 
 func (m *externalCollectionRESTProxy) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
@@ -2930,6 +2938,58 @@ func (m *externalCollectionRESTProxy) ListRestoreSnapshotJobs(ctx context.Contex
 			Progress:       10,
 		}},
 	}, nil
+}
+
+func (m *externalCollectionRESTProxy) CreateSnapshot(ctx context.Context, request *milvuspb.CreateSnapshotRequest) (*commonpb.Status, error) {
+	m.createSnapshotReq = request
+	return merr.Success(), nil
+}
+
+func (m *externalCollectionRESTProxy) DropSnapshot(ctx context.Context, request *milvuspb.DropSnapshotRequest) (*commonpb.Status, error) {
+	m.dropSnapshotReq = request
+	return merr.Success(), nil
+}
+
+func (m *externalCollectionRESTProxy) ListSnapshots(ctx context.Context, request *milvuspb.ListSnapshotsRequest) (*milvuspb.ListSnapshotsResponse, error) {
+	m.listSnapshotsReq = request
+	return &milvuspb.ListSnapshotsResponse{
+		Status:    merr.Success(),
+		Snapshots: []string{"snapshot_1", "snapshot_2"},
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) DescribeSnapshot(ctx context.Context, request *milvuspb.DescribeSnapshotRequest) (*milvuspb.DescribeSnapshotResponse, error) {
+	m.describeSnapshotReq = request
+	return &milvuspb.DescribeSnapshotResponse{
+		Status:         merr.Success(),
+		Name:           request.GetName(),
+		Description:    "daily backup",
+		CollectionName: request.GetCollectionName(),
+		PartitionNames: []string{"_default"},
+		CreateTs:       100,
+		S3Location:     "s3://bucket/snapshot_1",
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) RestoreSnapshot(ctx context.Context, request *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {
+	m.restoreSnapshotReq = request
+	return &milvuspb.RestoreSnapshotResponse{
+		Status: merr.Success(),
+		JobId:  200,
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) PinSnapshotData(ctx context.Context, request *milvuspb.PinSnapshotDataRequest) (*milvuspb.PinSnapshotDataResponse, error) {
+	m.pinSnapshotDataReq = request
+	return &milvuspb.PinSnapshotDataResponse{
+		Status: merr.Success(),
+		PinId:  300,
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) UnpinSnapshotData(ctx context.Context, request *milvuspb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
+	m.unpinSnapshotDataReq = request
+	return merr.Success(), nil
 }
 
 func TestFieldSchemaGetProtoWithExternalField(t *testing.T) {
@@ -3125,6 +3185,345 @@ func TestExternalCollectionJobRoutesRESTV2(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"externalSpec":"{\"format\":\"parquet\"}"`)
 }
 
+func TestSnapshotCRUDRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, CreateAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "source_books",
+		"snapshotName": "snapshot_1",
+		"description": "daily backup",
+		"compactionProtectionSeconds": 3600
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+	assert.Equal(t, "default", proxy.createSnapshotReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.createSnapshotReq.GetCollectionName())
+	assert.Equal(t, "snapshot_1", proxy.createSnapshotReq.GetName())
+	assert.Equal(t, "daily backup", proxy.createSnapshotReq.GetDescription())
+	assert.Equal(t, int64(3600), proxy.createSnapshotReq.GetCompactionProtectionSeconds())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, ListAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "source_books"
+	}`)))
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "default", proxy.listSnapshotsReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.listSnapshotsReq.GetCollectionName())
+	assert.Equal(t, "snapshot_1", gjson.Get(w.Body.String(), "data.0").String())
+	assert.Equal(t, "snapshot_2", gjson.Get(w.Body.String(), "data.1").String())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, DescribeAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "source_books",
+		"snapshotName": "snapshot_1"
+	}`)))
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "default", proxy.describeSnapshotReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.describeSnapshotReq.GetCollectionName())
+	assert.Equal(t, "snapshot_1", proxy.describeSnapshotReq.GetName())
+	assert.Equal(t, "snapshot_1", gjson.Get(w.Body.String(), "data.snapshotName").String())
+	assert.Equal(t, "daily backup", gjson.Get(w.Body.String(), "data.description").String())
+	assert.Equal(t, "source_books", gjson.Get(w.Body.String(), "data.collectionName").String())
+	assert.Equal(t, "_default", gjson.Get(w.Body.String(), "data.partitionNames.0").String())
+	assert.Equal(t, int64(100), gjson.Get(w.Body.String(), "data.createTs").Int())
+	assert.Equal(t, "s3://bucket/snapshot_1", gjson.Get(w.Body.String(), "data.s3Location").String())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, DropAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "source_books",
+		"snapshotName": "snapshot_1"
+	}`)))
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+	assert.Equal(t, "default", proxy.dropSnapshotReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.dropSnapshotReq.GetCollectionName())
+	assert.Equal(t, "snapshot_1", proxy.dropSnapshotReq.GetName())
+}
+
+func TestSnapshotRESTV2FormatsInt64Values(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	const largeInt64 int64 = 9007199254740993
+	testCases := []struct {
+		name                   string
+		path                   string
+		body                   string
+		responsePath           string
+		preserveReleasedNumber bool
+		setup                  func(*mocks.MockProxy)
+	}{
+		{
+			name:         "describe snapshot create timestamp",
+			path:         versionalV2(SnapshotCategory, DescribeAction),
+			body:         `{"collectionName":"source_books","snapshotName":"snapshot_1"}`,
+			responsePath: "data.createTs",
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().DescribeSnapshot(mock.Anything, mock.Anything).Return(&milvuspb.DescribeSnapshotResponse{
+					Status:   merr.Success(),
+					CreateTs: largeInt64,
+				}, nil).Once()
+			},
+		},
+		{
+			name:         "restore snapshot job ID",
+			path:         versionalV2(SnapshotCategory, RestoreAction),
+			body:         `{"sourceCollectionName":"source_books","targetCollectionName":"restored_books","snapshotName":"snapshot_1"}`,
+			responsePath: "data.jobId",
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().RestoreSnapshot(mock.Anything, mock.Anything).Return(&milvuspb.RestoreSnapshotResponse{
+					Status: merr.Success(),
+					JobId:  largeInt64,
+				}, nil).Once()
+			},
+		},
+		{
+			name:         "pin snapshot ID",
+			path:         versionalV2(SnapshotCategory, PinAction),
+			body:         `{"collectionName":"source_books","snapshotName":"snapshot_1"}`,
+			responsePath: "data.pinId",
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().PinSnapshotData(mock.Anything, mock.Anything).Return(&milvuspb.PinSnapshotDataResponse{
+					Status: merr.Success(),
+					PinId:  largeInt64,
+				}, nil).Once()
+			},
+		},
+		{
+			name:                   "restore external snapshot job ID",
+			path:                   versionalV2(SnapshotJobCategory, RestoreExternalAction),
+			body:                   `{"targetCollectionName":"restored_books","snapshotMetadataURI":"s3://bucket/snapshot.json"}`,
+			responsePath:           "data.jobId",
+			preserveReleasedNumber: true,
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().RestoreExternalSnapshot(mock.Anything, mock.Anything).Return(&milvuspb.RestoreExternalSnapshotResponse{
+					Status: merr.Success(),
+					JobId:  largeInt64,
+				}, nil).Once()
+			},
+		},
+		{
+			name:                   "describe restore job ID",
+			path:                   versionalV2(SnapshotJobCategory, DescribeAction),
+			body:                   `{"jobId":"9007199254740993"}`,
+			responsePath:           "data.jobId",
+			preserveReleasedNumber: true,
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().GetRestoreSnapshotState(mock.Anything, mock.Anything).Return(&milvuspb.GetRestoreSnapshotStateResponse{
+					Status: merr.Success(),
+					Info:   &milvuspb.RestoreSnapshotInfo{JobId: largeInt64},
+				}, nil).Once()
+			},
+		},
+		{
+			name:                   "list restore job ID",
+			path:                   versionalV2(SnapshotJobCategory, ListAction),
+			body:                   `{}`,
+			responsePath:           "data.records.0.jobId",
+			preserveReleasedNumber: true,
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().ListRestoreSnapshotJobs(mock.Anything, mock.Anything).Return(&milvuspb.ListRestoreSnapshotJobsResponse{
+					Status: merr.Success(),
+					Jobs:   []*milvuspb.RestoreSnapshotInfo{{JobId: largeInt64}},
+				}, nil).Once()
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		for _, allowInt64 := range []bool{false, true} {
+			name := fmt.Sprintf("%s/allow_int64_%t", testCase.name, allowInt64)
+			t.Run(name, func(t *testing.T) {
+				proxy := mocks.NewMockProxy(t)
+				testCase.setup(proxy)
+				server := initHTTPServerV2(proxy, false)
+
+				req := httptest.NewRequest(http.MethodPost, testCase.path, bytes.NewBufferString(testCase.body))
+				req.Header.Set(HTTPHeaderAllowInt64, fmt.Sprintf("%t", allowInt64))
+				recorder := httptest.NewRecorder()
+				server.ServeHTTP(recorder, req)
+
+				require.Equal(t, http.StatusOK, recorder.Code)
+				expectedRaw := `"9007199254740993"`
+				if testCase.preserveReleasedNumber || allowInt64 {
+					expectedRaw = "9007199254740993"
+				}
+				assert.Equal(t, expectedRaw, gjson.Get(recorder.Body.String(), testCase.responsePath).Raw)
+			})
+		}
+	}
+}
+
+func TestRestoreSnapshotRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, RestoreAction), bytes.NewReader([]byte(`{
+		"sourceDbName": "source_db",
+		"sourceCollectionName": "source_books",
+		"targetDbName": "target_db",
+		"targetCollectionName": "restored_books",
+		"snapshotName": "snapshot_1"
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+	assert.Equal(t, int64(200), gjson.Get(w.Body.String(), "data.jobId").Int())
+	assert.Equal(t, "source_db", proxy.restoreSnapshotReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.restoreSnapshotReq.GetCollectionName())
+	assert.Equal(t, "target_db", proxy.restoreSnapshotReq.GetTargetDbName())
+	assert.Equal(t, "restored_books", proxy.restoreSnapshotReq.GetTargetCollectionName())
+	assert.Equal(t, "snapshot_1", proxy.restoreSnapshotReq.GetName())
+	assert.False(t, proxy.restoreSnapshotReq.GetRewriteData())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, RestoreAction), bytes.NewReader([]byte(`{
+		"sourceDbName": "source_db",
+		"sourceCollectionName": "source_books",
+		"targetCollectionName": "restored_books",
+		"snapshotName": "snapshot_1"
+	}`)))
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "source_db", proxy.restoreSnapshotReq.GetDbName())
+	assert.Equal(t, "default", proxy.restoreSnapshotReq.GetTargetDbName())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, RestoreAction), bytes.NewReader([]byte(`{
+		"sourceDbName": "archive",
+		"sourceCollectionName": "source_books",
+		"targetCollectionName": "restored_books",
+		"snapshotName": "snapshot_1"
+	}`)))
+	req.Header.Set(HTTPHeaderDBName, "tenant_a")
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "archive", proxy.restoreSnapshotReq.GetDbName())
+	assert.Equal(t, "tenant_a", proxy.restoreSnapshotReq.GetTargetDbName())
+}
+
+func TestPinSnapshotDataRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, PinAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "source_books",
+		"snapshotName": "snapshot_1",
+		"ttlSeconds": 3600
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+	assert.Equal(t, int64(300), gjson.Get(w.Body.String(), "data.pinId").Int())
+	assert.Equal(t, "default", proxy.pinSnapshotDataReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.pinSnapshotDataReq.GetCollectionName())
+	assert.Equal(t, "snapshot_1", proxy.pinSnapshotDataReq.GetName())
+	assert.Equal(t, int64(3600), proxy.pinSnapshotDataReq.GetTtlSeconds())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, UnpinAction), bytes.NewReader([]byte(`{
+		"pinId": "9007199254740993"
+	}`)))
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+	assert.Equal(t, int64(9007199254740993), proxy.unpinSnapshotDataReq.GetPinId())
+}
+
+func TestSnapshotRESTV2Validation(t *testing.T) {
+	paramtable.Init()
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+
+	tests := []struct {
+		name   string
+		action string
+		body   string
+	}{
+		{
+			name:   "missing snapshot name",
+			action: CreateAction,
+			body:   `{"collectionName":"source_books"}`,
+		},
+		{
+			name:   "missing collection name for list",
+			action: ListAction,
+			body:   `{}`,
+		},
+		{
+			name:   "negative compaction protection",
+			action: CreateAction,
+			body:   `{"collectionName":"source_books","snapshotName":"snapshot_1","compactionProtectionSeconds":-1}`,
+		},
+		{
+			name:   "negative pin TTL",
+			action: PinAction,
+			body:   `{"collectionName":"source_books","snapshotName":"snapshot_1","ttlSeconds":-1}`,
+		},
+		{
+			name:   "invalid pin ID",
+			action: UnpinAction,
+			body:   `{"pinId":"0"}`,
+		},
+		{
+			name:   "malformed pin ID",
+			action: UnpinAction,
+			body:   `{"pinId":"not-an-int64"}`,
+		},
+		{
+			name:   "numeric pin ID",
+			action: UnpinAction,
+			body:   `{"pinId":300}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, test.action), bytes.NewReader([]byte(test.body)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.NotEqual(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+		})
+	}
+}
+
 func TestRestoreExternalSnapshotRESTV2(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
@@ -3210,6 +3609,7 @@ func TestRestoreSnapshotJobRESTV2(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, int64(2001), proxy.getRestoreSnapshotStateReq.GetJobId())
+	assert.Contains(t, w.Body.String(), `"jobId":2001`)
 	assert.Contains(t, w.Body.String(), `"collectionName":"restored_collection"`)
 	assert.Contains(t, w.Body.String(), `"state":"RestoreSnapshotCompleted"`)
 
@@ -3224,6 +3624,7 @@ func TestRestoreSnapshotJobRESTV2(t *testing.T) {
 	assert.Equal(t, "default", proxy.listRestoreSnapshotJobsReq.GetDbName())
 	assert.Equal(t, "restored_collection", proxy.listRestoreSnapshotJobsReq.GetCollectionName())
 	assert.Contains(t, w.Body.String(), `"records":[`)
+	assert.Contains(t, w.Body.String(), `"jobId":2001`)
 	assert.Contains(t, w.Body.String(), `"state":"RestoreSnapshotPending"`)
 }
 

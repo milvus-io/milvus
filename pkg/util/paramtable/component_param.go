@@ -51,6 +51,8 @@ const (
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
 	DefaultLowPriorityThreadCoreCoefficient    = 1
 	DefaultThreadPoolMaxThreadsSize            = 16
+	DefaultStorageIopsInitialRate              = uint32(2000)
+	DefaultStorageIopsMaxRate                  = uint32(5000)
 
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
@@ -284,8 +286,6 @@ type commonConfig struct {
 	DefaultRootPassword   ParamItem `refreshable:"false"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
 	EnablePublicPrivilege ParamItem `refreshable:"false"`
-	ExprEnabled           ParamItem `refreshable:"false"`
-	ExprAuthMode          ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -322,6 +322,8 @@ type commonConfig struct {
 	StoragePathPrefix        ParamItem `refreshable:"false"`
 	StorageZstdConcurrency   ParamItem `refreshable:"false"`
 	StorageReadRetryAttempts ParamItem `refreshable:"true"`
+	StorageIopsInitialRate   ParamItem `refreshable:"false"`
+	StorageIopsMaxRate       ParamItem `refreshable:"false"`
 
 	TraceLogMode              ParamItem `refreshable:"true"`
 	BloomFilterEnabled        ParamItem `refreshable:"false"`
@@ -1008,26 +1010,6 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	}
 	p.EnablePublicPrivilege.Init(base.mgr)
 
-	p.ExprEnabled = ParamItem{
-		Key:          "common.security.exprEnabled",
-		Version:      "2.6.0",
-		DefaultValue: "false",
-		Doc:          "Whether to enable the /expr endpoint for debugging.",
-		Export:       true,
-	}
-	p.ExprEnabled.Init(base.mgr)
-
-	p.ExprAuthMode = ParamItem{
-		Key:          "common.security.exprAuthMode",
-		Version:      "2.6.0",
-		DefaultValue: "rootOnly",
-		Doc: "Authentication mode for the /expr endpoint. Valid values: rootOnly, rbac. " +
-			"rootOnly accepts only the root credentials via HTTP Basic Auth. " +
-			"rbac requires common.security.authorizationEnabled=true and grants access to any user holding the Expr privilege.",
-		Export: true,
-	}
-	p.ExprAuthMode.Init(base.mgr)
-
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",
 		Version:      "2.0.0",
@@ -1261,6 +1243,42 @@ The default value is 1, which is enough for most cases.`,
 		Export:       false,
 	}
 	p.StorageReadRetryAttempts.Init(base.mgr)
+
+	p.StorageIopsInitialRate = ParamItem{
+		Key:          "common.storage.iops.initialRate",
+		Version:      "3.0.1",
+		DefaultValue: strconv.FormatUint(uint64(DefaultStorageIopsInitialRate), 10),
+		Doc: `Initial ObjectStore request rate used by the Lance AIMD limiter for External Table reads.
+The value must be greater than 0. Values above a positive maxRate are reduced to maxRate.
+The default matches the milvus-storage default.`,
+		Formatter: func(value string) string {
+			rate, err := strconv.ParseUint(value, 10, 32)
+			if err != nil || rate == 0 {
+				return strconv.FormatUint(uint64(DefaultStorageIopsInitialRate), 10)
+			}
+			return strconv.FormatUint(rate, 10)
+		},
+		Export: true,
+	}
+	p.StorageIopsInitialRate.Init(base.mgr)
+
+	p.StorageIopsMaxRate = ParamItem{
+		Key:          "common.storage.iops.maxRate",
+		Version:      "3.0.1",
+		DefaultValue: strconv.FormatUint(uint64(DefaultStorageIopsMaxRate), 10),
+		Doc: `Maximum request rate allowed by the Lance AIMD limiter for External Table reads.
+Set to 0 to disable the rate ceiling. This is not a strict aggregate limit across all filesystem instances.
+The default matches the milvus-storage default.`,
+		Formatter: func(value string) string {
+			rate, err := strconv.ParseUint(value, 10, 32)
+			if err != nil {
+				return strconv.FormatUint(uint64(DefaultStorageIopsMaxRate), 10)
+			}
+			return strconv.FormatUint(rate, 10)
+		},
+		Export: true,
+	}
+	p.StorageIopsMaxRate.Init(base.mgr)
 
 	p.TraceLogMode = ParamItem{
 		Key:          "common.traceLogMode",
@@ -2094,6 +2112,17 @@ type rootCoordConfig struct {
 	GracefulStopTimeout         ParamItem `refreshable:"true"`
 	UseLockScheduler            ParamItem `refreshable:"true"`
 	DefaultDBProperties         ParamItem `refreshable:"false"`
+
+	// Client telemetry. RootCoord reads these once, when it builds the telemetry manager,
+	// so they are not refreshable: a running manager keeps the values it started with.
+	ClientTelemetryCleanupInterval            ParamItem `refreshable:"false"`
+	ClientTelemetryInactiveClientThreshold    ParamItem `refreshable:"false"`
+	ClientTelemetryClientStatusThreshold      ParamItem `refreshable:"false"`
+	ClientTelemetryCommandCleanupTimeout      ParamItem `refreshable:"false"`
+	ClientTelemetryMaxMetricsPerClient        ParamItem `refreshable:"false"`
+	ClientTelemetryMaxOperationTypesPerClient ParamItem `refreshable:"false"`
+	ClientTelemetryMaxClientsInMemory         ParamItem `refreshable:"false"`
+	ClientTelemetryRetainedWindows            ParamItem `refreshable:"false"`
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -2185,6 +2214,84 @@ Segments with smaller size than this parameter will not be indexed, and will be 
 		Export:       false,
 	}
 	p.DefaultDBProperties.Init(base.mgr)
+
+	p.ClientTelemetryCleanupInterval = ParamItem{
+		Key:          "rootCoord.clientTelemetry.cleanupInterval",
+		Version:      "3.0.0",
+		DefaultValue: "60",
+		Doc:          "seconds. How often to sweep clients that stopped heartbeating and commands that expired.",
+		Export:       true,
+	}
+	p.ClientTelemetryCleanupInterval.Init(base.mgr)
+
+	p.ClientTelemetryInactiveClientThreshold = ParamItem{
+		Key:          "rootCoord.clientTelemetry.inactiveClientThreshold",
+		Version:      "3.0.0",
+		DefaultValue: "600",
+		Doc:          "seconds. How long a client may go without a heartbeat before it is dropped from memory entirely.",
+		Export:       true,
+	}
+	p.ClientTelemetryInactiveClientThreshold.Init(base.mgr)
+
+	p.ClientTelemetryClientStatusThreshold = ParamItem{
+		Key:          "rootCoord.clientTelemetry.clientStatusThreshold",
+		Version:      "3.0.0",
+		DefaultValue: "60",
+		Doc: `seconds. How long a client may go without a heartbeat before it is reported as inactive.
+It is still kept, and still reported, until inactiveClientThreshold.`,
+		Export: true,
+	}
+	p.ClientTelemetryClientStatusThreshold.Init(base.mgr)
+
+	p.ClientTelemetryCommandCleanupTimeout = ParamItem{
+		Key:          "rootCoord.clientTelemetry.commandCleanupTimeout",
+		Version:      "3.0.0",
+		DefaultValue: "10",
+		Doc:          "seconds. Timeout for the etcd operations that remove expired client commands.",
+		Export:       true,
+	}
+	p.ClientTelemetryCommandCleanupTimeout.Init(base.mgr)
+
+	p.ClientTelemetryMaxMetricsPerClient = ParamItem{
+		Key:          "rootCoord.clientTelemetry.maxMetricsPerClient",
+		Version:      "3.0.0",
+		DefaultValue: "1048576",
+		Doc: `bytes. Largest metrics payload accepted from one client per heartbeat; anything beyond is truncated.
+Zero removes the cap entirely, unlike the other limits here, where a non-positive value falls back to the default.`,
+		Export: true,
+	}
+	p.ClientTelemetryMaxMetricsPerClient.Init(base.mgr)
+
+	p.ClientTelemetryMaxOperationTypesPerClient = ParamItem{
+		Key:          "rootCoord.clientTelemetry.maxOperationTypesPerClient",
+		Version:      "3.0.0",
+		DefaultValue: "100",
+		Doc:          "Largest number of distinct operation types kept per client; anything beyond is truncated.",
+		Export:       true,
+	}
+	p.ClientTelemetryMaxOperationTypesPerClient.Init(base.mgr)
+
+	p.ClientTelemetryMaxClientsInMemory = ParamItem{
+		Key:          "rootCoord.clientTelemetry.maxClientsInMemory",
+		Version:      "3.0.0",
+		DefaultValue: "100000",
+		Doc:          "Largest number of clients tracked at once, so a misconfigured or malicious fleet cannot grow this memory without bound.",
+		Export:       true,
+	}
+	p.ClientTelemetryMaxClientsInMemory.Init(base.mgr)
+
+	p.ClientTelemetryRetainedWindows = ParamItem{
+		Key:          "rootCoord.clientTelemetry.retainedWindows",
+		Version:      "3.0.0",
+		DefaultValue: "2",
+		Doc: `How many heartbeat windows to keep per client.
+A telemetry query is answered from the oldest window kept, so this is also how far the answer lags
+the client and how many consecutive idle intervals it survives: at 2, one interval without traffic
+cannot blank the view; at 3, two cannot. Each extra window is another copy of every operation and
+per-collection breakdown for every connected client. Values below 1 are treated as the default.`,
+		Export: true,
+	}
+	p.ClientTelemetryRetainedWindows.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -5619,6 +5726,7 @@ type dataCoordConfig struct {
 	ImportInReplicatingCluster      ParamItem `refreshable:"true"`
 	EnableL0Import                  ParamItem `refreshable:"true"`
 	ImportPreAllocIDExpansionFactor ParamItem `refreshable:"true"`
+	ImportParquetFooterMaxSize      ParamItem `refreshable:"true"`
 	ImportFileNumPerSlot            ParamItem `refreshable:"true"`
 	ImportMemoryLimitPerSlot        ParamItem `refreshable:"true"`
 	MaxSegmentsPerCopyTask          ParamItem `refreshable:"true"`
@@ -6987,6 +7095,16 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Doc:          `The expansion factor for pre-allocating IDs during import.`,
 	}
 	p.ImportPreAllocIDExpansionFactor.Init(base.mgr)
+
+	p.ImportParquetFooterMaxSize = ParamItem{
+		Key:          "dataCoord.import.parquetFooterMaxSize",
+		Version:      "3.0.0",
+		DefaultValue: "67108864",
+		Doc: `Largest parquet footer, in bytes, that import sizing will read to obtain an exact row count.
+A file declaring a longer footer is rejected at submit. Footer size tracks row_groups * columns, so
+raise this for files written with small row groups, many columns, or untruncated string statistics.`,
+	}
+	p.ImportParquetFooterMaxSize.Init(base.mgr)
 
 	p.ImportFileNumPerSlot = ParamItem{
 		Key:          "dataCoord.import.fileNumPerSlot",
