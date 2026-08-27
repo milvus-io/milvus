@@ -469,6 +469,10 @@ func (s *analyzeTaskSuite) TestQueryTaskOnWorker() {
 		cluster.EXPECT().QueryAnalyze(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
 		cluster.EXPECT().DropAnalyze(mock.Anything, mock.Anything).Return(nil)
 
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil)
+		s.mt.analyzeMeta.catalog = catalog
+
 		at.QueryTaskOnWorker(cluster)
 		s.Equal(indexpb.JobState_JobStateInit, at.GetState())
 	})
@@ -478,8 +482,35 @@ func (s *analyzeTaskSuite) TestQueryTaskOnWorker() {
 		cluster.EXPECT().QueryAnalyze(mock.Anything, mock.Anything).Return(nil, merr.ErrNodeNotFound)
 		cluster.EXPECT().DropAnalyze(mock.Anything, mock.Anything).Return(nil)
 
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil)
+		s.mt.analyzeMeta.catalog = catalog
+
 		at.QueryTaskOnWorker(cluster)
 		s.Equal(indexpb.JobState_JobStateInit, at.GetState())
+	})
+
+	s.Run("node gone resets task for reschedule", func() {
+		// The assigned node has disappeared, so both QueryAnalyze and the
+		// follow-up DropAnalyze return ErrNodeNotFound. The task must still be
+		// reset to Init so the scheduler can re-dispatch it to a healthy node,
+		// otherwise it stays stuck in InProgress forever (see index/stats tasks).
+		freshTask := newAnalyzeTask(&indexpb.AnalyzeTask{
+			TaskID: s.taskID,
+			NodeID: 1,
+			State:  indexpb.JobState_JobStateInProgress,
+		}, s.mt)
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().QueryAnalyze(mock.Anything, mock.Anything).Return(nil, merr.ErrNodeNotFound)
+		cluster.EXPECT().DropAnalyze(mock.Anything, mock.Anything).Return(merr.ErrNodeNotFound)
+
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil)
+		s.mt.analyzeMeta.catalog = catalog
+
+		freshTask.QueryTaskOnWorker(cluster)
+		s.Equal(indexpb.JobState_JobStateInit, freshTask.GetState())
 	})
 
 	s.Run("task finished", func() {

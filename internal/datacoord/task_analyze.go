@@ -22,6 +22,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/exp/slices"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -305,7 +307,7 @@ func (at *analyzeTask) tryDropTaskOnWorker(cluster session.Cluster) error {
 		mlog.FieldNodeID(at.NodeID),
 	)
 
-	if err := cluster.DropAnalyze(at.NodeID, at.GetTaskID()); err != nil {
+	if err := cluster.DropAnalyze(at.NodeID, at.GetTaskID()); err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
 		log.Warn(context.TODO(), "failed to drop analyze task on worker", mlog.Err(err))
 		return err
 	}
