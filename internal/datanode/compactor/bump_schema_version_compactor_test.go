@@ -1435,12 +1435,11 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestSelectFullRewriteRecordWithUU
 	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second))
 	entityFilter := compaction.NewEntityFilter(map[any]typeutil.Timestamp{u2: deleteTs}, int64(0), getMilvusBirthday(), 0)
 
-	selection, ttlValues, err := selectFullRewriteRecord(record, pkField, entityFilter, 102, false, nil)
+	selection, err := selectFullRewriteRecord(record, pkField, entityFilter, 102, false)
 	s.Require().NoError(err)
 	s.Require().NotNil(selection)
 	s.Equal(2, selection.Len())
 	s.Equal([]rowRange{{start: 0, end: 1}, {start: 2, end: 3}}, selection.ranges)
-	s.Nil(ttlValues)
 	s.Equal(1, entityFilter.GetDeletedCount())
 }
 
