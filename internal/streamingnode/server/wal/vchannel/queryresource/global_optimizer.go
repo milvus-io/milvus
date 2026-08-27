@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/views/optimizer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	sharedviewquery "github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -54,6 +55,38 @@ func (o globalOptimizer) OptimizeSearch(ctx context.Context, req *internalpb.Sea
 	if req == nil {
 		return optimizer.SearchOptimization{}, merr.WrapErrParameterInvalid("search request", "nil")
 	}
+	if req.GetIsAdvanced() {
+		return o.optimizeAdvancedSearch(ctx, req)
+	}
+	return o.optimizeSearch(ctx, req)
+}
+
+func (o globalOptimizer) optimizeAdvancedSearch(ctx context.Context, req *internalpb.SearchRequest) (optimizer.SearchOptimization, error) {
+	if len(req.GetSubReqs()) == 0 {
+		return optimizer.SearchOptimization{}, merr.WrapErrServiceInternalMsg("advanced search request has no sub-requests")
+	}
+
+	parent := proto.Clone(req).(*internalpb.SearchRequest)
+	parent.SubReqs = nil
+	allSkipped := true
+	for index, subReq := range req.GetSubReqs() {
+		searchReq, err := sharedviewquery.BuildSubSearchRequest(parent, subReq)
+		if err != nil {
+			return optimizer.SearchOptimization{}, err
+		}
+		optimization, err := o.optimizeSearch(ctx, searchReq)
+		if err != nil {
+			return optimizer.SearchOptimization{}, merr.Wrapf(err, "optimize hybrid sub-search %d", index)
+		}
+		if err := sharedviewquery.UpdateSubSearchRequest(subReq, searchReq, optimization.Skip); err != nil {
+			return optimizer.SearchOptimization{}, err
+		}
+		allSkipped = allSkipped && optimization.Skip
+	}
+	return optimizer.SearchOptimization{Skip: allSkipped}, nil
+}
+
+func (o globalOptimizer) optimizeSearch(ctx context.Context, req *internalpb.SearchRequest) (optimizer.SearchOptimization, error) {
 	optimized, skip, err := o.optimizeBM25(ctx, req)
 	if err != nil {
 		return optimizer.SearchOptimization{}, err

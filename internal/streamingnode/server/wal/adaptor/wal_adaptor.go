@@ -218,12 +218,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		}
 		plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: searchReq}
 		if !optimization.Skip {
-			plan.WorkNodes = buildQueryPlanWorkNodes(lease.View, queryPlanWorkNodeOptions{
-				ignoreGrowing: searchReq.GetIgnoreGrowing(),
-				partitionIDs:  searchReq.GetPartitionIDs(),
-				runtime:       runtime,
-				mvcc:          mvcc,
-			})
+			plan.WorkNodes = buildQueryPlanWorkNodes(lease.View, searchQueryPlanWorkNodeOptions(searchReq, runtime, mvcc))
 		}
 	case *viewpb.GetQueryPlanRequest_LegacyRetrieveRequest:
 		if request.LegacyRetrieveRequest == nil {
@@ -306,6 +301,50 @@ type queryPlanWorkNodeOptions struct {
 	partitionIDs  []int64
 	runtime       queryPlanGrowingRuntime
 	mvcc          *viewpb.QueryPlanMVCC
+}
+
+func searchQueryPlanWorkNodeOptions(req *internalpb.SearchRequest, runtime queryPlanGrowingRuntime, mvcc *viewpb.QueryPlanMVCC) queryPlanWorkNodeOptions {
+	if !req.GetIsAdvanced() {
+		return queryPlanWorkNodeOptions{
+			ignoreGrowing: req.GetIgnoreGrowing(),
+			partitionIDs:  req.GetPartitionIDs(),
+			runtime:       runtime,
+			mvcc:          mvcc,
+		}
+	}
+
+	ignoreGrowing := true
+	allPartitions := false
+	partitionSet := make(map[int64]struct{})
+	for _, subReq := range req.GetSubReqs() {
+		if subReq.GetSkip() {
+			continue
+		}
+		if !subReq.GetIgnoreGrowing() {
+			ignoreGrowing = false
+		}
+		if len(subReq.GetPartitionIDs()) == 0 {
+			allPartitions = true
+			continue
+		}
+		for _, partitionID := range subReq.GetPartitionIDs() {
+			partitionSet[partitionID] = struct{}{}
+		}
+	}
+
+	var partitionIDs []int64
+	if !allPartitions {
+		partitionIDs = make([]int64, 0, len(partitionSet))
+		for partitionID := range partitionSet {
+			partitionIDs = append(partitionIDs, partitionID)
+		}
+	}
+	return queryPlanWorkNodeOptions{
+		ignoreGrowing: ignoreGrowing,
+		partitionIDs:  partitionIDs,
+		runtime:       runtime,
+		mvcc:          mvcc,
+	}
 }
 
 func buildQueryPlanWorkNodes(view *viewpb.QueryViewOfShard, options queryPlanWorkNodeOptions) []*viewpb.QueryPlanWorkNode {

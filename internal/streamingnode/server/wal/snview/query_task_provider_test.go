@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -84,6 +85,21 @@ func TestSNHandler_AcquireSearchSegmentTasksWaitsRuntimeAndReleasesViewRef(t *te
 
 	tasks.Release()
 	assert.Equal(t, 1, handle.releaseCount)
+}
+
+func TestSNHandler_AcquireSearchSegmentTasksSkipsIgnoreGrowingSubSearch(t *testing.T) {
+	h := &SNQueryViewHandler{}
+	tasks, err := h.AcquireSearchSegmentTasks(
+		context.Background(),
+		qviews.ShardID{},
+		qviews.QueryViewVersion{},
+		&viewpb.QueryPlanMVCC{},
+		&internalpb.SearchRequest{IgnoreGrowing: true},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, tasks)
+	assert.Empty(t, tasks.Tasks())
 }
 
 func TestSNHandler_AcquireQuerySegmentTasksWaitsRuntimeAndReleasesViewRef(t *testing.T) {

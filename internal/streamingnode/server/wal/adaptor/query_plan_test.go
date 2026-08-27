@@ -215,6 +215,31 @@ func TestBuildQueryPlanWorkNodesPrunesByPartitionAndIgnoreGrowing(t *testing.T) 
 	assert.Equal(t, int64(2), nodes[0].GetQueryNode().GetNodeId())
 }
 
+func TestSearchQueryPlanWorkNodeOptionsUnionsAdvancedSubSearchScopes(t *testing.T) {
+	probe := &queryPlanTestRuntimeProbe{mayHaveVisibleGrowingSegments: true}
+	mvcc := &viewpb.QueryPlanMVCC{GrowingTimetick: 123, TransformingTimetick: 122}
+	req := &internalpb.SearchRequest{
+		IsAdvanced: true,
+		SubReqs: []*internalpb.SubSearchRequest{
+			{PartitionIDs: []int64{10}, IgnoreGrowing: true},
+			{PartitionIDs: []int64{20}},
+			{PartitionIDs: []int64{30}, Skip: true},
+		},
+	}
+
+	options := searchQueryPlanWorkNodeOptions(req, probe, mvcc)
+	assert.False(t, options.ignoreGrowing)
+	assert.ElementsMatch(t, []int64{10, 20}, options.partitionIDs)
+
+	req.SubReqs[1].PartitionIDs = nil
+	options = searchQueryPlanWorkNodeOptions(req, probe, mvcc)
+	assert.Nil(t, options.partitionIDs)
+
+	req.SubReqs[1].IgnoreGrowing = true
+	options = searchQueryPlanWorkNodeOptions(req, probe, mvcc)
+	assert.True(t, options.ignoreGrowing)
+}
+
 func TestBuildQueryPlanWorkNodesPrunesStreamingNodeWhenVisibleGrowingRuntimeIsEmpty(t *testing.T) {
 	view := &viewpb.QueryViewOfShard{
 		Meta:          &viewpb.QueryViewMeta{Vchannel: queryPlanTestVChannel},

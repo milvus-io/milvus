@@ -19,6 +19,9 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 	mvcc *viewpb.QueryPlanMVCC,
 	req *internalpb.SearchRequest,
 ) (viewquery.SearchSegmentTasks, error) {
+	if req.GetIgnoreGrowing() {
+		return NewSNSearchSegmentTasks(nil), nil
+	}
 	lease, err := h.AcquireUpView(ctx, shardID, version)
 	if err != nil {
 		return nil, err
