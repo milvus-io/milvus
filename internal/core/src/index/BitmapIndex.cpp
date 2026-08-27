@@ -1545,6 +1545,7 @@ template class BitmapIndex<int64_t>;
 template class BitmapIndex<float>;
 template class BitmapIndex<double>;
 template class BitmapIndex<std::string>;
+template class BitmapIndex<milvus::UUID>;
 
 }  // namespace index
 }  // namespace milvus

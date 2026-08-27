@@ -103,6 +103,12 @@ PhyValueExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 real_batch_size,
                 expr_->GetGenericValue().string_val());
             break;
+        case DataType::UUID:
+            result = std::make_shared<ConstantVector<UUID>>(
+                expr_->type(),
+                real_batch_size,
+                UUID::FromString(expr_->GetGenericValue().string_val()));
+            break;
         // TODO: json and array type
         case DataType::ARRAY:
         case DataType::JSON:

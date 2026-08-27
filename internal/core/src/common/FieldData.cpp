@@ -16,6 +16,7 @@
 
 #include "common/FieldData.h"
 #include "common/FastMem.h"
+#include "log/Log.h"
 
 #include <simdjson.h>
 #include <string.h>
@@ -337,6 +338,30 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             auto string_array =
                 std::dynamic_pointer_cast<arrow::StringArray>(array);
             return FillFieldData(string_array);
+        }
+        case DataType::UUID: {
+            AssertInfo(
+                array->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY,
+                "UUID data must be BytesData 16B, got StringData");
+            FixedVector<milvus::UUID> values(element_count);
+            auto fsb_array =
+                std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(array);
+            AssertInfo(fsb_array->byte_width() ==
+                           static_cast<int32_t>(sizeof(milvus::UUID)),
+                       "unexpected UUID byte width {}",
+                       fsb_array->byte_width());
+            for (size_t index = 0; index < element_count; ++index) {
+                milvus::fastmem::FastMemcpy(values[index].data.data(),
+                                            fsb_array->GetValue(index),
+                                            sizeof(milvus::UUID));
+            }
+            if (nullable_) {
+                return FillFieldData(values.data(),
+                                     array->null_bitmap_data(),
+                                     element_count,
+                                     array->offset());
+            }
+            return FillFieldData(values.data(), element_count);
         }
         case DataType::TEXT: {
             // V3 storage: TEXT is stored as BINARY (LOBReference in parquet)
@@ -690,6 +715,17 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(
                 values.data(), valid_data_ptr.get(), element_count, 0);
         }
+        case DataType::UUID: {
+            FixedVector<milvus::UUID> values(element_count);
+            if (default_value.has_value()) {
+                auto uuid =
+                    milvus::UUID::FromString(default_value->string_data());
+                std::fill(values.begin(), values.end(), uuid);
+                return FillFieldData(values.data(), nullptr, element_count, 0);
+            }
+            return FillFieldData(
+                values.data(), valid_data_ptr.get(), element_count, 0);
+        }
         case DataType::JSON: {
             // The code here is not referenced.
             // A subclass named FieldDataJsonImpl is implemented, which overloads this function.
@@ -733,6 +769,7 @@ template class FieldDataImpl<int64_t, true>;
 template class FieldDataImpl<float, true>;
 template class FieldDataImpl<double, true>;
 template class FieldDataImpl<std::string, true>;
+template class FieldDataImpl<milvus::UUID, true>;
 template class FieldDataImpl<Json, true>;
 template class FieldDataImpl<Geometry, true>;
 template class FieldDataImpl<Array, true>;
@@ -887,6 +924,9 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
         case DataType::TEXT:
             return std::make_shared<FieldData<std::string>>(
                 type, nullable, cap_rows);
+        case DataType::UUID:
+            return std::make_shared<FieldData<milvus::UUID>>(
+                type, nullable, cap_rows);
         case DataType::JSON:
             return std::make_shared<FieldData<Json>>(type, nullable, cap_rows);
         case DataType::GEOMETRY:
@@ -922,6 +962,9 @@ InitScalarFieldDataWithLength(const DataType& type, int64_t length) {
         case DataType::TEXT:
         case DataType::GEOMETRY:
             return InitScalarFieldDataWithLengthImpl<std::string>(type, length);
+        case DataType::UUID:
+            return InitScalarFieldDataWithLengthImpl<milvus::UUID>(type,
+                                                                   length);
         case DataType::JSON:
             return InitScalarFieldDataWithLengthImpl<Json>(type, length);
         default:
@@ -986,6 +1029,14 @@ ResizeScalarFieldData(const DataType& type,
                 std::dynamic_pointer_cast<FieldData<std::string>>(field_data);
             AssertInfo(inner_field_data != nullptr,
                        "Failed to cast field_data to FieldData<std::string>");
+            inner_field_data->resize_field_data(new_num_rows);
+            return;
+        }
+        case DataType::UUID: {
+            auto inner_field_data =
+                std::dynamic_pointer_cast<FieldData<milvus::UUID>>(field_data);
+            AssertInfo(inner_field_data != nullptr,
+                       "Failed to cast field_data to FieldData<milvus::UUID>");
             inner_field_data->resize_field_data(new_num_rows);
             return;
         }

@@ -19,6 +19,7 @@ package compactor
 import (
 	"context"
 	sio "io"
+	"fmt"
 	"math"
 	"path"
 	"strings"
@@ -1414,6 +1415,35 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestSelectFullRewriteRecordDropsD
 	s.Equal(2, entityFilter.GetExpiredCount())
 }
 
+func (s *BumpSchemaVersionCompactionTaskSuite) TestSelectFullRewriteRecordWithUUIDPK() {
+	insertTs := tsoutil.ComposeTSByTime(getMilvusBirthday())
+	pkField := &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_UUID, IsPrimaryKey: true}
+	timestampArray := newInt64Array(s.T(), []int64{int64(insertTs), int64(insertTs), int64(insertTs)})
+	defer timestampArray.Release()
+	u1, _ := typeutil.ParseUUID("550e8400-e29b-41d4-a716-446655440000")
+	u2, _ := typeutil.ParseUUID("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+	u3, _ := typeutil.ParseUUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+	pkArray := newUUIDArray(s.T(), [][16]byte{u1, u2, u3})
+	defer pkArray.Release()
+	record := &materializerTestRecord{
+		columns: map[storage.FieldID]arrow.Array{
+			common.TimeStampField: timestampArray,
+			100:                   pkArray,
+		},
+		len: 3,
+	}
+	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second))
+	entityFilter := compaction.NewEntityFilter(map[any]typeutil.Timestamp{u2: deleteTs}, int64(0), getMilvusBirthday(), 0)
+
+	selection, ttlValues, err := selectFullRewriteRecord(record, pkField, entityFilter, 102, false, nil)
+	s.Require().NoError(err)
+	s.Require().NotNil(selection)
+	s.Equal(2, selection.Len())
+	s.Equal([]rowRange{{start: 0, end: 1}, {start: 2, end: 3}}, selection.ranges)
+	s.Nil(ttlValues)
+	s.Equal(1, entityFilter.GetDeletedCount())
+}
+
 func (s *BumpSchemaVersionCompactionTaskSuite) TestSchemaVersionBumpOnlyPreservesExistingV3Segment() {
 	insertLogs := []*datapb.FieldBinlog{{FieldID: 101, Binlogs: []*datapb.Binlog{{LogID: 11}}}}
 	statsLogs := []*datapb.FieldBinlog{{FieldID: 101, Binlogs: []*datapb.Binlog{{LogID: 12}}}}
@@ -1826,6 +1856,142 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionCo
 	_, err := s.task.Compact()
 	s.Error(err)
 	s.ErrorIs(err, context.Canceled)
+}
+
+func schemaBumpUUIDFields() []*schemapb.FieldSchema {
+	fields := schemaBumpBaseFields()
+	for _, field := range fields {
+		if field.GetFieldID() == 100 {
+			field.DataType = schemapb.DataType_UUID
+		}
+	}
+	return fields
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) setupUUIDTest() {
+	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
+
+	s.meta = &etcdpb.CollectionMeta{
+		ID: 1,
+		Schema: &schemapb.CollectionSchema{
+			Name:   "schema_bump_uuid_test",
+			Fields: schemaBumpUUIDFields(),
+		},
+	}
+
+	params, err := compaction.GenerateJSONParams(s.meta.GetSchema())
+	s.Require().NoError(err)
+
+	plan := &datapb.CompactionPlan{
+		PlanID: 999,
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
+			CollectionID:   1,
+			PartitionID:    1,
+			SegmentID:      100,
+			InsertChannel:  "test_channel",
+			StorageVersion: storage.StorageV3,
+			Manifest:       "manifest",
+		}},
+		Type:                   datapb.CompactionType_BumpSchemaVersionCompaction,
+		Schema:                 s.meta.GetSchema(),
+		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
+		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 9530, End: 19530},
+		MaxSize:                64 * 1024 * 1024,
+		JsonParams:             params,
+		TotalRows:              3,
+	}
+
+	cm, err := storage.NewChunkManagerFactoryWithParam(paramtable.Get()).NewPersistentStorageChunkManager(context.Background())
+	s.Require().NoError(err)
+	compactionParams := compaction.GenParams()
+	compactionParams.StorageVersion = storage.StorageV3
+	s.task = NewBumpSchemaVersionCompactionTask(context.Background(), cm, plan, compactionParams)
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) initSegBufferForSchemaBumpWithUUID(segID int64, includeDroppedField bool) {
+	fields := schemaBumpUUIDFields()
+	if includeDroppedField {
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID:  103,
+			Name:     "dropped",
+			DataType: schemapb.DataType_Int64,
+		})
+	}
+	schema := &schemapb.CollectionSchema{Fields: fields}
+
+	segIDAlloc := allocator.NewLocalAllocator(segID, math.MaxInt64)
+	logIDAlloc := allocator.NewLocalAllocator(9530, 19530)
+	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
+
+	multiSegWriter, err := NewMultiSegmentWriter(
+		context.Background(),
+		s.mockBinlogIO,
+		compAlloc,
+		64*1024*1024,
+		schema,
+		s.task.compactionParams,
+		1000,
+		PartitionID,
+		CollectionID,
+		"test_channel",
+		compactionBatchSize,
+		storage.WithStorageConfig(s.task.compactionParams.StorageConfig),
+		storage.WithVersion(storage.StorageV3),
+	)
+	s.Require().NoError(err)
+
+	for i := 0; i < 3; i++ {
+		pk := fmt.Sprintf("550e8400-0000-0000-%04x-%012x", segID, i)
+		value := map[int64]interface{}{
+			common.RowIDField:     segID + int64(i),
+			common.TimeStampField: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
+			100:                   pk,
+			101:                   "test string " + string(rune('0'+i)),
+		}
+		if includeDroppedField {
+			value[103] = int64(i)
+		}
+		uuidPK, errPK := storage.NewUUIDPrimaryKeyFromString(pk)
+		s.Require().NoError(errPK)
+		v := storage.Value{
+			PK:        uuidPK,
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
+			Value:     value,
+		}
+		err = multiSegWriter.WriteValue(&v)
+		s.Require().NoError(err)
+	}
+
+	s.multiSegWriter = multiSegWriter
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteWithUUIDPK() {
+	// Full schema rewrite on a UUID-PK collection used to fail with "invalid
+	// primary key data type for full schema rewrite"; UUID PKs must be read
+	// through the string/VarChar branch.
+	s.setupUUIDTest()
+	segID := int64(100)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	s.initSegBufferForSchemaBumpWithUUID(segID, true)
+	s.finishBumpSchemaVersionSegment()
+
+	// A large TTL forces the delete/expiry filter path so selectFullRewriteRecord
+	// (and its UUID pk handling) is exercised; nothing is expired since the rows
+	// are timestamped at the Milvus birthday.
+	s.task.plan.CollectionTtl = time.Since(getMilvusBirthday()).Nanoseconds()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+	s.Equal(datapb.CompactionTaskState_completed, result.GetState())
+	s.Require().Len(result.GetSegments(), 1)
+
+	segment := result.GetSegments()[0]
+	s.NotEqual(segID, segment.GetSegmentID())
+	s.EqualValues(3, segment.GetNumOfRows())
+	s.NotEmpty(segment.GetInsertLogs())
+	s.NotEmpty(segment.GetManifest())
 }
 
 func TestBumpSchemaVersionCompactionTaskBasic(t *testing.T) {

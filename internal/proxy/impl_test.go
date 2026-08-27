@@ -3525,3 +3525,50 @@ func TestProxy_ListRefreshExternalCollectionJobs_ByCollection(t *testing.T) {
 	assert.NotContains(t, redactedSpec, "AKIAEXAMPLE")
 	assert.NotContains(t, redactedSpec, "SUPERSECRET")
 }
+
+func TestValidateIDsType(t *testing.T) {
+	t.Run("uuid_with_str_ids_ok", func(t *testing.T) {
+		pkField := &schemapb.FieldSchema{
+			Name:     "pk",
+			DataType: schemapb.DataType_UUID,
+		}
+		ids := &schemapb.IDs{
+			IdField: &schemapb.IDs_StrId{
+				StrId: &schemapb.StringArray{
+					Data: []string{"3f2504e0-4f89-41d3-9a0c-0305e82c3301"},
+				},
+			},
+		}
+		assert.NoError(t, validateIDsType(pkField, ids))
+	})
+
+	t.Run("uuid_with_int_ids_error", func(t *testing.T) {
+		pkField := &schemapb.FieldSchema{
+			Name:     "pk",
+			DataType: schemapb.DataType_UUID,
+		}
+		ids := &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{1, 2},
+				},
+			},
+		}
+		assert.Error(t, validateIDsType(pkField, ids))
+	})
+
+	t.Run("int64_with_int_ids_ok", func(t *testing.T) {
+		pkField := &schemapb.FieldSchema{
+			Name:     "pk",
+			DataType: schemapb.DataType_Int64,
+		}
+		ids := &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{1, 2},
+				},
+			},
+		}
+		assert.NoError(t, validateIDsType(pkField, ids))
+	})
+}

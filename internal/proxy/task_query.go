@@ -129,6 +129,7 @@ func isSupportedGroupByFieldType(dt schemapb.DataType) bool {
 		schemapb.DataType_Int32,
 		schemapb.DataType_Int64,
 		schemapb.DataType_VarChar,
+		schemapb.DataType_UUID,
 		schemapb.DataType_Timestamptz:
 		return true
 	default:
@@ -498,7 +499,7 @@ func parseQueryIteratorCursor(queryParamsPair []*commonpb.KeyValuePair, isIterat
 				"value for query iterator last primary key is invalid")
 		}
 		cursor.LastIntPk = &lastIntPK
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		cursor.LastStrPk = &lastPK
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("unsupported primary key type %s for query iterator cursor", pkDataType.String())
@@ -1157,6 +1158,16 @@ func IDs2Expr(fieldName string, ids *schemapb.IDs) string {
 	case *schemapb.IDs_StrId:
 		strs := lo.Map(ids.GetStrId().GetData(), func(str string, _ int) string {
 			return fmt.Sprintf("\"%s\"", str)
+		})
+		idsStr = strings.Trim(strings.Join(strs, ", "), "[]")
+	case *schemapb.IDs_UuidId:
+		strs := lo.Map(ids.GetUuidId().GetData(), func(b []byte, _ int) string {
+			if len(b) == 16 {
+				var u [16]byte
+				copy(u[:], b)
+				return fmt.Sprintf("\"%s\"", typeutil.UUIDToString(u))
+			}
+			return fmt.Sprintf("\"%s\"", string(b))
 		})
 		idsStr = strings.Trim(strings.Join(strs, ", "), "[]")
 	}

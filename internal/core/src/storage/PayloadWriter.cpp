@@ -17,6 +17,7 @@
 #include "arrow/api.h"
 #include "arrow/array/array_base.h"
 #include "arrow/array/builder_base.h"
+#include "arrow/array/builder_binary.h"
 #include "arrow/util/type_fwd.h"
 #include "common/EasyAssert.h"
 #include "common/Types.h"
@@ -89,6 +90,24 @@ PayloadWriter::add_one_binary_payload(const uint8_t* data, int length) {
                    milvus::IsSparseFloatVectorDataType(column_type_),
                "mismatch data type");
     AddOneBinaryToArrowBuilder(builder_, data, length);
+    rows_.fetch_add(1);
+}
+
+void
+PayloadWriter::add_one_uuid_payload(const uint8_t* bytes, int size) {
+    AssertInfo(output_ == nullptr, "payload writer has been finished");
+    AssertInfo(column_type_ == DataType::UUID, "mismatch data type");
+    auto fixed_size_builder =
+        std::dynamic_pointer_cast<arrow::FixedSizeBinaryBuilder>(builder_);
+    AssertInfo(fixed_size_builder != nullptr, "empty arrow builder");
+    arrow::Status ast;
+    if (bytes == nullptr || size < 0) {
+        ast = fixed_size_builder->AppendNull();
+    } else {
+        ast = fixed_size_builder->Append(bytes);
+    }
+    AssertInfo(
+        ast.ok(), "append value to arrow builder failed: {}", ast.ToString());
     rows_.fetch_add(1);
 }
 

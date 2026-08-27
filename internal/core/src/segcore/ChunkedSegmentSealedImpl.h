@@ -1042,9 +1042,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             return {-1, -1, false};  // Invalid starting chunk
         }
 
-        using PKViewType = std::conditional_t<std::is_same_v<PK, int64_t>,
-                                              int64_t,
-                                              std::string_view>;
+        using PKViewType =
+            std::conditional_t<std::is_same_v<PK, int64_t>,
+                               int64_t,
+                               std::conditional_t<std::is_same_v<PK, UUID>,
+                                                  UUID,
+                                                  std::string_view>>;
 
         auto get_val_view = [&](int chunk_id,
                                 int in_chunk_offset) -> PKViewType {
@@ -1052,6 +1055,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             if constexpr (std::is_same_v<PK, int64_t>) {
                 auto src =
                     reinterpret_cast<const int64_t*>(pw.get()->RawData());
+                return src[in_chunk_offset];
+            } else if constexpr (std::is_same_v<PK, UUID>) {
+                auto src = reinterpret_cast<const UUID*>(pw.get()->Data());
                 return src[in_chunk_offset];
             } else {
                 auto string_chunk = static_cast<StringChunk*>(pw.get());
@@ -1151,9 +1157,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                           int first_in_chunk_offset) const {
         const auto num_chunk = pk_column->num_chunks();
 
-        using PKViewType = std::conditional_t<std::is_same_v<PK, int64_t>,
-                                              int64_t,
-                                              std::string_view>;
+        using PKViewType =
+            std::conditional_t<std::is_same_v<PK, int64_t>,
+                               int64_t,
+                               std::conditional_t<std::is_same_v<PK, UUID>,
+                                                  UUID,
+                                                  std::string_view>>;
 
         auto get_val_view = [&](int chunk_id,
                                 int in_chunk_offset) -> PKViewType {
@@ -1161,6 +1170,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             if constexpr (std::is_same_v<PK, int64_t>) {
                 auto src =
                     reinterpret_cast<const int64_t*>(pw.get()->RawData());
+                return src[in_chunk_offset];
+            } else if constexpr (std::is_same_v<PK, UUID>) {
+                auto src = reinterpret_cast<const UUID*>(pw.get()->Data());
                 return src[in_chunk_offset];
             } else {
                 auto string_chunk = static_cast<StringChunk*>(pw.get());

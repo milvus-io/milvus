@@ -338,7 +338,10 @@ typedef struct CPrimaryKeysResult {
     uint8_t* varchar_primary_keys;  // concatenated varchar primary key bytes
     int64_t* varchar_primary_key_offsets;  // offsets into varchar_primary_keys
     size_t varchar_primary_keys_size;  // total bytes in varchar_primary_keys
-    size_t num_primary_keys;           // number of primary keys
+    uint8_t*
+        uuid_primary_keys;  // concatenated UUID primary keys (16 bytes each)
+    size_t uuid_primary_keys_size;  // total bytes in uuid_primary_keys (num*16)
+    size_t num_primary_keys;        // number of primary keys
 } CPrimaryKeysResult;
 
 /**

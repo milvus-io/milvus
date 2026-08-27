@@ -64,6 +64,7 @@ class SingleElement : public BaseElement {
                                    float,
                                    double,
                                    std::string,
+                                   milvus::UUID,
                                    proto::plan::Array>;
 
     SingleElement() = default;
@@ -84,7 +85,8 @@ class SingleElement : public BaseElement {
                       std::is_same_v<T, int32_t> ||
                       std::is_same_v<T, int64_t> || std::is_same_v<T, float> ||
                       std::is_same_v<T, double> ||
-                      std::is_same_v<T, std::string>) {
+                      std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, milvus::UUID>) {
             value_ = value;
         } else {
             static_assert(sizeof(T) == 0,
@@ -120,7 +122,8 @@ class MultiElement : public BaseElement {
                                    float,
                                    double,
                                    std::string,
-                                   std::string_view>;
+                                   std::string_view,
+                                   milvus::UUID>;
 
     MultiElement() = default;
     virtual ~MultiElement() = default;
@@ -462,7 +465,8 @@ GetElementValues(const std::shared_ptr<MultiElement>& ptr) {
         return p->GetElements();
     }
     if constexpr (!std::is_same_v<T, bool> && !std::is_same_v<T, std::string> &&
-                  !std::is_same_v<T, std::string_view>) {
+                  !std::is_same_v<T, std::string_view> &&
+                  !std::is_same_v<T, milvus::UUID>) {
         if (auto p = std::dynamic_pointer_cast<SimdBatchElement<T>>(ptr)) {
             return p->GetElements();
         }

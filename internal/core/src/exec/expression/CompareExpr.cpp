@@ -31,8 +31,8 @@ namespace exec {
 
 bool
 PhyCompareFilterExpr::IsStringExpr() {
-    return expr_->left_data_type_ == DataType::VARCHAR ||
-           expr_->right_data_type_ == DataType::VARCHAR;
+    return IsStringDataType(expr_->left_data_type_) ||
+           IsStringDataType(expr_->right_data_type_);
 }
 
 bool
@@ -345,6 +345,8 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForBothDataSegment(
             return ExecCompareLeftType<float>(context);
         case DataType::DOUBLE:
             return ExecCompareLeftType<double>(context);
+        case DataType::UUID:
+            return ExecCompareLeftType<UUID>(context);
         default:
             ThrowInfo(
                 UnexpectedError,
@@ -372,6 +374,8 @@ PhyCompareFilterExpr::ExecCompareLeftType(EvalCtx& context) {
             return ExecCompareRightType<T, float>(context);
         case DataType::DOUBLE:
             return ExecCompareRightType<T, double>(context);
+        case DataType::UUID:
+            return ExecCompareRightType<T, UUID>(context);
         default:
             ThrowInfo(
                 UnexpectedError,

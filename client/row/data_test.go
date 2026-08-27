@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
@@ -95,6 +96,33 @@ func (s *RowsSuite) TestRowsToColumns() {
 		s.Require().Equal(1, len(columns))
 		s.Equal("Vector", columns[0].Name())
 		s.Equal(entity.FieldTypeInt8Vector, columns[0].Type())
+	})
+
+	s.Run("uuid_pk", func() {
+		type UUIDStruct struct {
+			ID   string `milvus:"primary_key"`
+			Attr string
+		}
+		uuid := "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+		columns, err := AnyToColumns([]any{&UUIDStruct{ID: uuid, Attr: "value"}}, false,
+			entity.NewSchema().WithField(
+				entity.NewField().WithName("ID").WithDataType(entity.FieldTypeUUID).WithIsPrimaryKey(true),
+			).WithField(
+				entity.NewField().WithName("Attr").WithDataType(entity.FieldTypeString),
+			),
+		)
+		s.NoError(err)
+		var pk column.Column
+		for _, c := range columns {
+			if c.Name() == "ID" {
+				pk = c
+			}
+		}
+		s.Require().NotNil(pk)
+		s.Equal(entity.FieldTypeUUID, pk.Type())
+		v, err := pk.Get(0)
+		s.NoError(err)
+		s.Equal(uuid, v)
 	})
 
 	s.Run("invalid_cases", func() {

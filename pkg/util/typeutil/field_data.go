@@ -134,7 +134,7 @@ func NewFieldDataBuilder(dt schemapb.DataType, fillZero bool, capacity int) (*Fi
 	case schemapb.DataType_Bool,
 		schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64,
 		// DataType_String is deprecated; string scalar fields should arrive as VarChar.
-		schemapb.DataType_Timestamptz, schemapb.DataType_VarChar:
+		schemapb.DataType_Timestamptz, schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		return &FieldDataBuilder{
 			dt:       dt,
 			data:     make([]any, 0, capacity),
@@ -157,7 +157,7 @@ func (b *FieldDataBuilder) Add(data any) *FieldDataBuilder {
 	return b
 }
 
-func (b *FieldDataBuilder) Build() *schemapb.FieldData {
+func (b *FieldDataBuilder) Build() (*schemapb.FieldData, error) {
 	field := &schemapb.FieldData{
 		Type: b.dt,
 	}
@@ -263,11 +263,44 @@ func (b *FieldDataBuilder) Build() *schemapb.FieldData {
 				},
 			},
 		}
+	case schemapb.DataType_UUID:
+		val := make([][]byte, 0, len(b.valid))
+		validIdx := 0
+		for _, v := range b.valid {
+			if v {
+				switch d := b.data[validIdx].(type) {
+				case [16]byte:
+					val = append(val, d[:])
+				case []byte:
+					val = append(val, d)
+				case string:
+					u, err := ParseUUID(d)
+					if err != nil {
+						return nil, err
+					}
+					val = append(val, u[:])
+				default:
+					val = append(val, nil)
+				}
+				validIdx++
+			} else if b.fillZero {
+				val = append(val, make([]byte, 16))
+			}
+		}
+		field.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_BytesData{
+					BytesData: &schemapb.BytesArray{
+						Data: val,
+					},
+				},
+			},
+		}
 	default:
-		return nil
+		return nil, merr.WrapErrParameterInvalidMsg("not supported field type: %s", b.dt.String())
 	}
 	if b.hasInvalid {
 		SetFieldDataValidData(field, b.valid)
 	}
-	return field
+	return field, nil
 }

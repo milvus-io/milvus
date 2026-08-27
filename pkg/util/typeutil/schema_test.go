@@ -980,6 +980,21 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 			},
 			FieldId: fieldID,
 		}
+	case schemapb.DataType_UUID:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_UUID,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: fieldValue.([]string),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
 	case schemapb.DataType_BinaryVector:
 		fieldData = &schemapb.FieldData{
 			Type:      schemapb.DataType_BinaryVector,
@@ -1719,6 +1734,62 @@ func TestComparePk(t *testing.T) {
 	assert.False(t, less)
 }
 
+func TestIsUUIDType(t *testing.T) {
+	assert.True(t, IsUUIDType(schemapb.DataType_UUID))
+	assert.False(t, IsUUIDType(schemapb.DataType_Int64))
+	assert.False(t, IsUUIDType(schemapb.DataType_VarChar))
+	assert.False(t, IsUUIDType(schemapb.DataType_String))
+	assert.False(t, IsUUIDType(schemapb.DataType_Float))
+}
+
+func TestIsFieldDataTypeSupportMaterializedView(t *testing.T) {
+	assert.True(t, IsFieldDataTypeSupportMaterializedView(&schemapb.FieldSchema{DataType: schemapb.DataType_UUID}))
+	assert.True(t, IsFieldDataTypeSupportMaterializedView(&schemapb.FieldSchema{DataType: schemapb.DataType_Int64}))
+	assert.True(t, IsFieldDataTypeSupportMaterializedView(&schemapb.FieldSchema{DataType: schemapb.DataType_VarChar}))
+	assert.True(t, IsFieldDataTypeSupportMaterializedView(&schemapb.FieldSchema{DataType: schemapb.DataType_String}))
+	assert.False(t, IsFieldDataTypeSupportMaterializedView(&schemapb.FieldSchema{DataType: schemapb.DataType_Float}))
+	assert.False(t, IsFieldDataTypeSupportMaterializedView(&schemapb.FieldSchema{DataType: schemapb.DataType_JSON}))
+	assert.False(t, IsFieldDataTypeSupportMaterializedView(&schemapb.FieldSchema{DataType: schemapb.DataType_Array}))
+}
+
+func TestIsPrimaryFieldType_WithUUID(t *testing.T) {
+	assert.True(t, IsPrimaryFieldType(schemapb.DataType_UUID))
+	assert.True(t, IsPrimaryFieldType(schemapb.DataType_Int64))
+	assert.True(t, IsPrimaryFieldType(schemapb.DataType_VarChar))
+	assert.False(t, IsPrimaryFieldType(schemapb.DataType_Float))
+	assert.False(t, IsPrimaryFieldType(schemapb.DataType_String))
+}
+
+func TestGetPKSize_UUID(t *testing.T) {
+	fieldData := &schemapb.FieldData{
+		Type: schemapb.DataType_UUID,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: []string{
+							"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+							"550e8400-e29b-41d4-a716-446655440000",
+						},
+					},
+				},
+			},
+		},
+	}
+	assert.Equal(t, 2, GetPKSize(fieldData))
+}
+
+func TestGenEmptyFieldData_UUID(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		Name:     "uuid_field",
+		DataType: schemapb.DataType_UUID,
+	}
+	fd, err := GenEmptyFieldData(field)
+	assert.NoError(t, err)
+	assert.NotNil(t, fd)
+	assert.Equal(t, schemapb.DataType_UUID, fd.GetType())
+}
+
 func TestCalcColumnSize(t *testing.T) {
 	fieldValues := map[int64]any{
 		100: []int8{0, 1},
@@ -1880,6 +1951,7 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 	FloatArray := []float32{1.0, 2.0}
 	DoubleArray := []float64{11.0, 22.0}
 	VarCharArray := []string{"a", "b"}
+	UUIDArray := []string{"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "550e8400-e29b-41d4-a716-446655440000"}
 	BinaryVector := []byte{0x12, 0x34}
 	FloatVector := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0}
 	Float16Vector := []byte{
@@ -1910,6 +1982,7 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 	floatData := genFieldData(fieldName, fieldID, schemapb.DataType_Float, FloatArray, 1)
 	doubleData := genFieldData(fieldName, fieldID, schemapb.DataType_Double, DoubleArray, 1)
 	varCharData := genFieldData(fieldName, fieldID, schemapb.DataType_VarChar, VarCharArray, 1)
+	uuidData := genFieldData(fieldName, fieldID, schemapb.DataType_UUID, UUIDArray, 1)
 	binVecData := genFieldData(fieldName, fieldID, schemapb.DataType_BinaryVector, BinaryVector, Dim)
 	floatVecData := genFieldData(fieldName, fieldID, schemapb.DataType_FloatVector, FloatVector, Dim)
 	float16VecData := genFieldData(fieldName, fieldID, schemapb.DataType_Float16Vector, Float16Vector, Dim)
@@ -1923,9 +1996,11 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 	t.Run("test GetPKSize", func(t *testing.T) {
 		int64DataRes := GetPKSize(int64Data)
 		varCharDataRes := GetPKSize(varCharData)
+		uuidDataRes := GetPKSize(uuidData)
 
 		assert.Equal(t, 2, int64DataRes)
 		assert.Equal(t, 2, varCharDataRes)
+		assert.Equal(t, 2, uuidDataRes)
 	})
 
 	t.Run("test GetData", func(t *testing.T) {
@@ -1937,6 +2012,7 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 		floatDataRes := getData(floatData, 0)
 		doubleDataRes := getData(doubleData, 0)
 		varCharDataRes := getData(varCharData, 0)
+		uuidDataRes := getData(uuidData, 0)
 		binVecDataRes := getData(binVecData, 0)
 		floatVecDataRes := getData(floatVecData, 0)
 		float16VecDataRes := getData(float16VecData, 0)
@@ -1953,6 +2029,7 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 		assert.Equal(t, FloatArray[0], floatDataRes)
 		assert.Equal(t, DoubleArray[0], doubleDataRes)
 		assert.Equal(t, VarCharArray[0], varCharDataRes)
+		assert.Equal(t, UUIDArray[0], uuidDataRes)
 		assert.ElementsMatch(t, BinaryVector[:Dim/8], binVecDataRes)
 		assert.ElementsMatch(t, FloatVector[:Dim], floatVecDataRes)
 		assert.ElementsMatch(t, Float16Vector[:2*Dim], float16VecDataRes)
@@ -6952,6 +7029,7 @@ func TestIsClusteringKeyType(t *testing.T) {
 	assert.True(t, IsClusteringKeyType(schemapb.DataType_Double))
 	assert.True(t, IsClusteringKeyType(schemapb.DataType_VarChar))
 	assert.True(t, IsClusteringKeyType(schemapb.DataType_String))
+	assert.True(t, IsClusteringKeyType(schemapb.DataType_UUID))
 
 	// Supported vector types
 	assert.True(t, IsClusteringKeyType(schemapb.DataType_FloatVector))

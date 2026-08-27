@@ -328,6 +328,19 @@ BaseEventData::Serialize() {
                 }
                 break;
             }
+            case DataType::UUID: {
+                for (size_t offset = 0; offset < field_data->get_num_rows();
+                     ++offset) {
+                    auto uuid = static_cast<const milvus::UUID*>(
+                        field_data->RawValue(offset));
+                    auto size = field_data->is_valid(offset)
+                                    ? static_cast<int>(sizeof(milvus::UUID))
+                                    : -1;
+                    payload_writer->add_one_uuid_payload(uuid->data.data(),
+                                                         size);
+                }
+                break;
+            }
             case DataType::ARRAY: {
                 auto nested_array_field =
                     std::dynamic_pointer_cast<FieldData<ArrayValue>>(

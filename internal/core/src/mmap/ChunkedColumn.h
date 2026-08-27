@@ -521,6 +521,21 @@ class ChunkedColumn : public ChunkedColumnBase {
                     op_ctx, dst, offsets, count);
                 break;
             }
+            case DataType::UUID: {
+                // UUID is fixed-width 16B FixedSizeBinary, no offsets.
+                // IsFixedWidth true, GetDataTypeSize 16.
+                auto [cids, offsets_in_chunk] =
+                    ToChunkIdAndOffset(offsets, count);
+                auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
+                auto typed_dst = static_cast<UUID*>(dst);
+                for (int64_t i = 0; i < count; i++) {
+                    auto chunk = ca->get_cell_of(cids[i]);
+                    auto value = chunk->ValueAt(offsets_in_chunk[i]);
+                    typed_dst[i] = *static_cast<const UUID*>(
+                        static_cast<const void*>(value));
+                }
+                break;
+            }
             default: {
                 ThrowInfo(
                     ErrorCode::Unsupported,

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 
 	"go.opentelemetry.io/otel"
@@ -454,7 +455,10 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 				for i := 0; i < totalRows; i++ {
 					gpFieldBuilder.Add(iter(i))
 				}
-				gbv = gpFieldBuilder.Build()
+				gbv, err = gpFieldBuilder.Build()
+				if err != nil {
+					return nil, err
+				}
 				gbv.FieldId = fieldID
 				gbv.FieldName = fieldName
 			}
@@ -756,11 +760,16 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 }
 
 func compareKey(keyI interface{}, keyJ interface{}) bool {
-	switch keyI.(type) {
+	switch kI := keyI.(type) {
 	case int64:
-		return keyI.(int64) < keyJ.(int64)
+		return kI < keyJ.(int64)
 	case string:
-		return keyI.(string) < keyJ.(string)
+		return kI < keyJ.(string)
+	case []byte:
+		return bytes.Compare(kI, keyJ.([]byte)) < 0
+	case [16]byte:
+		kJ := keyJ.([16]byte)
+		return bytes.Compare(kI[:], kJ[:]) < 0
 	}
 	return false
 }
@@ -777,6 +786,12 @@ func setupIdListForSearchResult(searchResult *milvuspb.SearchResults, pkType sch
 		searchResult.GetResults().Ids.IdField = &schemapb.IDs_StrId{
 			StrId: &schemapb.StringArray{
 				Data: make([]string, 0, capacity),
+			},
+		}
+	case schemapb.DataType_UUID:
+		searchResult.GetResults().Ids.IdField = &schemapb.IDs_UuidId{
+			UuidId: &schemapb.UUIDArray{
+				Data: make([][]byte, 0, capacity),
 			},
 		}
 	default:

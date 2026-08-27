@@ -172,6 +172,15 @@ ScalarIndex<double>::BuildWithRawDataForUT(size_t n,
     Build(n, data);
 }
 
+template <>
+void
+ScalarIndex<milvus::UUID>::BuildWithRawDataForUT(size_t n,
+                                                 const void* values,
+                                                 const Config& config) {
+    auto data = reinterpret_cast<const milvus::UUID*>(values);
+    Build(n, data);
+}
+
 template <typename T>
 IndexStatsPtr
 ScalarIndex<T>::UploadUnified(const Config& config) {
@@ -279,4 +288,5 @@ template class ScalarIndex<uint64_t>;
 template class ScalarIndex<float>;
 template class ScalarIndex<double>;
 template class ScalarIndex<std::string>;
+template class ScalarIndex<milvus::UUID>;
 }  // namespace milvus::index

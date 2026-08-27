@@ -280,6 +280,17 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 	if typeutil.IsStringType(dataType) && IsString(value) {
 		return value, nil
 	}
+	if dataType == schemapb.DataType_UUID && IsString(value) {
+		// Normalize UUID literals to canonical lowercase so query/delete
+		// expressions match the canonical form stored at insert time.
+		// Malformed literals are rejected here instead of silently missed.
+		normalized, err := typeutil.NormalizeUUID(value.GetStringVal())
+		if err != nil {
+			return nil, merr.WrapErrQueryPlanMsg("cannot cast value to %s, value: %s", dataType.String(), value)
+		}
+		value.GetVal().(*planpb.GenericValue_StringVal).StringVal = normalized
+		return value, nil
+	}
 	if typeutil.IsTimestamptzType(dataType) {
 		return value, nil
 	}
@@ -521,8 +532,8 @@ func canBeComparedDataType(left, right schemapb.DataType) bool {
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64,
 		schemapb.DataType_Float, schemapb.DataType_Double:
 		return typeutil.IsArithmetic(right) || typeutil.IsJSONType(right)
-	case schemapb.DataType_String, schemapb.DataType_VarChar:
-		return typeutil.IsStringType(right) || typeutil.IsJSONType(right)
+	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_UUID:
+		return typeutil.IsStringType(right) || typeutil.IsJSONType(right) || right == schemapb.DataType_UUID
 	case schemapb.DataType_JSON:
 		return true
 	case schemapb.DataType_Timestamptz:
@@ -762,7 +773,7 @@ func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType,
 
 func castRangeValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
 	switch dataType {
-	case schemapb.DataType_String, schemapb.DataType_VarChar:
+	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		if !IsString(value) {
 			return nil, merr.WrapErrQueryPlanMsg("invalid range operations")
 		}

@@ -151,6 +151,10 @@ func (v *ValidateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 			if err := v.checkTextFieldData(field, fieldSchema); err != nil {
 				return err
 			}
+		case schemapb.DataType_UUID:
+			if err := v.checkUUIDFieldData(field, fieldSchema); err != nil {
+				return err
+			}
 		case schemapb.DataType_Geometry:
 			if err := v.checkGeometryFieldData(field, fieldSchema); err != nil {
 				return err
@@ -566,6 +570,11 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 			if err != nil {
 				return err
 			}
+		case *schemapb.ScalarField_BytesData:
+			sd.BytesData.Data, err = fillWithNullValueImpl(sd.BytesData.Data, validData)
+			if err != nil {
+				return err
+			}
 		default:
 			return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 		}
@@ -758,6 +767,32 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 				return err
 			}
 
+		case *schemapb.ScalarField_BytesData:
+			if len(validData) != numRows {
+				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
+				return merr.WrapErrParameterInvalid(numRows, len(validData), msg)
+			}
+			var defaultValue []byte
+			dv := fieldSchema.GetDefaultValue()
+			if b := dv.GetBytesData(); len(b) != 0 {
+				if len(b) != 16 {
+					return merr.WrapErrParameterInvalidMsg("invalid default UUID length %d, expected 16 for field %s", len(b), field.GetFieldName())
+				}
+				defaultValue = b
+			} else if s := dv.GetStringData(); s != "" {
+				u, err := typeutil.ParseUUID(s)
+				if err != nil {
+					return err
+				}
+				defaultValue = u[:]
+			} else {
+				defaultValue = make([]byte, 16)
+			}
+			sd.BytesData.Data, err = fillWithDefaultValueImpl(sd.BytesData.Data, defaultValue, validData)
+			if err != nil {
+				return err
+			}
+
 		default:
 			return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 		}
@@ -945,6 +980,57 @@ func (v *ValidateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 }
 
 func (v *ValidateUtil) checkTextFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *validateUtil) checkUUIDFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	// Primary key must never be nullable — explicit guard for UUID PK (Int64/VarChar already rejected elsewhere, but UUID path must be explicit for 16B strictness).
+	if fieldSchema.GetIsPrimaryKey() && fieldSchema.GetNullable() {
+		return merr.WrapErrParameterInvalidMsg("primary field '%s' of type UUID cannot be nullable", fieldSchema.GetName())
+	}
+	bytesArr := field.GetScalars().GetBytesData()
+	strData := field.GetScalars().GetStringData()
+	// Mutual exclusion guard: UUID field must be encoded as either BytesData or StringData, not both.
+	if bytesArr != nil && strData != nil && len(bytesArr.GetData()) > 0 && len(strData.GetData()) > 0 {
+		return merr.WrapErrParameterInvalidMsg("uuid field '%v' is illegal, both BytesData and StringData are set", field.GetFieldName())
+	}
+	if bytesArr != nil {
+		if fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() && bytesArr.GetData() == nil {
+			msg := fmt.Sprintf("uuid field '%v' is illegal, array type mismatch", field.GetFieldName())
+			return merr.WrapErrParameterInvalid("need bytes array", "got nil", msg)
+		}
+		for i, b := range bytesArr.GetData() {
+			if len(b) == 0 {
+				if fieldSchema.GetNullable() {
+					continue
+				}
+				return merr.WrapErrParameterInvalidMsg("invalid UUID length for field %s at row %d: expected 16 bytes, got %d", fieldSchema.GetName(), i, len(b))
+			}
+			if len(b) != 16 {
+				return merr.WrapErrParameterInvalidMsg("invalid UUID length for field %s at row %d: expected 16 bytes, got %d", fieldSchema.GetName(), i, len(b))
+			}
+		}
+		return nil
+	}
+	// Strict 16B enforcement: StringData path is deprecated and will be removed — accept only for backward compat with warning via NormalizeUUID.
+	// New inserts should use BytesData (16B). This branch remains to avoid breaking old SDKs sending StringData, but logs via NormalizeUUID validation.
+	strArr := field.GetScalars().GetStringData().GetData()
+	if strArr == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
+		msg := fmt.Sprintf("uuid field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need string array", "got nil", msg)
+	}
+	// strArr[i]=normalized mutates the underlying FieldData in place.
+	// This is intentional and idempotent: NormalizeUUID is deterministic and the
+	// normalized form is stable across repeated validations (copy-on-write is
+	// unnecessary here because callers treat FieldData as mutable request state).
+	for i, s := range strArr {
+		normalized, err := typeutil.NormalizeUUID(s)
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid UUID format for field %s at row %d: %s", fieldSchema.GetName(), i, s)
+		}
+		strArr[i] = normalized
+	}
+	return nil
+}
+
+func (v *validateUtil) checkTextFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	strArr := field.GetScalars().GetStringData().GetData()
 	if strArr == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("text field '%v' is illegal", field.GetFieldName())
@@ -1158,6 +1244,22 @@ func (v *ValidateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 					return merr.WrapErrParameterInvalidMsg("length of %s array field \"%s\" exceeds max length, row number: %d, array index: %d, length: %d, max length: %d",
 						field.GetDataType().String(), field.GetName(), rowCnt, i, len(row.GetStringData().GetData()[i]), maxLength,
 					)
+				}
+			}
+		}
+	case schemapb.DataType_UUID:
+		for _, row := range array.GetData() {
+			if row.GetData() == nil {
+				return merr.WrapErrParameterInvalid("uuid array", "nil array", "insert data does not match")
+			}
+			actualType := reflect.TypeOf(row.GetData())
+			if actualType != reflect.TypeOf((*schemapb.ScalarField_BytesData)(nil)) {
+				return merr.WrapErrParameterInvalid("uuid array",
+					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
+			}
+			for idx, b := range row.GetBytesData().GetData() {
+				if len(b) != 16 {
+					return merr.WrapErrParameterInvalidMsg("invalid UUID length for field %s at array index %d, expected 16 bytes, got %d", field.GetName(), idx, len(b))
 				}
 			}
 		}
@@ -1514,6 +1616,8 @@ func verifyCapacityPerRow(arrayArray []*schemapb.ScalarField, maxCapacity int64,
 			arrayLen = len(array.GetLongData().GetData())
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			arrayLen = len(array.GetStringData().GetData())
+		case schemapb.DataType_UUID:
+			arrayLen = len(array.GetBytesData().GetData())
 		case schemapb.DataType_Float:
 			arrayLen = len(array.GetFloatData().GetData())
 		case schemapb.DataType_Double:

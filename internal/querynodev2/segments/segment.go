@@ -1544,6 +1544,26 @@ func (s *LocalSegment) PrimaryKeys(ctx context.Context, startOffset, endOffset i
 			}
 			pks = append(pks, storage.NewVarCharPrimaryKey(string(data[start:end])))
 		}
+	case schemapb.DataType_UUID:
+		if cResult.uuid_primary_keys == nil {
+			return nil, merr.WrapErrDataIntegrityMsg("growing source uuid primary key data is nil")
+		}
+		if uintptr(cResult.uuid_primary_keys_size) != uintptr(cResult.num_primary_keys)*16 {
+			return nil, merr.WrapErrDataIntegrityMsg("growing source uuid primary key size mismatch, num=%d size=%d", cResult.num_primary_keys, cResult.uuid_primary_keys_size)
+		}
+		data := unsafe.Slice((*byte)(unsafe.Pointer(cResult.uuid_primary_keys)), int(cResult.uuid_primary_keys_size))
+		for i := 0; i < int(cResult.num_primary_keys); i++ {
+			start := i * 16
+			end := start + 16
+			if end > len(data) {
+				return nil, merr.WrapErrDataIntegrityMsg("growing source uuid primary key offset out of range, index=%d start=%d end=%d size=%d", i, start, end, len(data))
+			}
+			pk, err := storage.NewUUIDPrimaryKeyFromBytes(data[start:end])
+			if err != nil {
+				return nil, err
+			}
+			pks = append(pks, pk)
+		}
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported growing source primary key data type %s",
 			schemapb.DataType(cResult.pk_data_type).String())

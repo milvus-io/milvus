@@ -1147,6 +1147,12 @@ class InsertRecordSealed {
                         is_int64_pk_ = false;
                         break;
                     }
+                    case DataType::UUID: {
+                        pk2offset_ =
+                            std::make_unique<OffsetOrderedArray<UUID>>();
+                        is_int64_pk_ = false;
+                        break;
+                    }
                     default: {
                         ThrowInfo(DataTypeInvalid,
                                   fmt::format("unsupported pk type",
@@ -1275,6 +1281,21 @@ class InsertRecordSealed {
                     auto pks = pw.get().first;
                     for (auto& pk : pks) {
                         pk2offset_->insert(std::string(pk), offset++);
+                    }
+                }
+                break;
+            }
+            case DataType::UUID: {
+                auto num_chunk = data->num_chunks();
+                std::vector<int64_t> chunk_ids(num_chunk);
+                std::iota(chunk_ids.begin(), chunk_ids.end(), 0);
+                data->PrefetchChunks(nullptr, chunk_ids);
+                for (int i = 0; i < num_chunk; ++i) {
+                    auto pw = data->DataOfChunk(nullptr, i);
+                    auto pks = reinterpret_cast<const UUID*>(pw.get());
+                    auto chunk_num_rows = data->chunk_row_nums(i);
+                    for (int j = 0; j < chunk_num_rows; ++j) {
+                        pk2offset_->insert(pks[j], offset++);
                     }
                 }
                 break;
@@ -1470,6 +1491,10 @@ class InsertRecordGrowing {
                             std::make_unique<OffsetOrderedMap<std::string>>();
                         break;
                     }
+                    case DataType::UUID: {
+                        pk2offset_ = std::make_unique<OffsetOrderedMap<UUID>>();
+                        break;
+                    }
                     default: {
                         ThrowInfo(DataTypeInvalid,
                                   fmt::format("unsupported pk type: {}",
@@ -1547,6 +1572,14 @@ class InsertRecordGrowing {
                     for (int i = 0; i < row_count; ++i) {
                         pk2offset_->insert(
                             *static_cast<const std::string*>(data->RawValue(i)),
+                            offset++);
+                    }
+                    break;
+                }
+                case DataType::UUID: {
+                    for (int i = 0; i < row_count; ++i) {
+                        pk2offset_->insert(
+                            *static_cast<const UUID*>(data->RawValue(i)),
                             offset++);
                     }
                     break;
@@ -1723,6 +1756,11 @@ class InsertRecordGrowing {
             case DataType::VARCHAR:
             case DataType::TEXT: {
                 this->append_data<std::string>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
+                return;
+            }
+            case DataType::UUID: {
+                this->append_data<UUID>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
