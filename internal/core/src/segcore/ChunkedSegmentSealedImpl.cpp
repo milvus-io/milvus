@@ -7554,7 +7554,9 @@ ChunkedSegmentSealedImpl::Reopen(
                   new_schema->get_schema_version());
     }
 
-    auto target_schema = new_schema ? std::move(new_schema) : current_schema;
+    const bool has_schema_update = new_schema != nullptr;
+    auto target_schema =
+        has_schema_update ? std::move(new_schema) : current_schema;
 
     SegmentLoadInfo current_mutable(*current->load_info);
     SegmentLoadInfo new_local(new_load_info, target_schema);
@@ -7578,8 +7580,10 @@ ChunkedSegmentSealedImpl::Reopen(
     LOG_INFO("Reopen segment {} with diff {}", id_, diff.ToString());
 
     auto next_runtime = CloneMutableRuntimeResourceState();
-    InvalidateStaleStructArrayOffsets(
-        current_schema, target_schema, *next_runtime);
+    if (has_schema_update) {
+        InvalidateStaleStructArrayOffsets(
+            current_schema, target_schema, *next_runtime);
+    }
     auto staged = ClonePublishedState(current);
     staged->schema = target_schema;
     staged->load_info = std::make_shared<const SegmentLoadInfo>(new_local);
