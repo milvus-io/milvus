@@ -59,7 +59,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -151,12 +150,6 @@ func (t *RefreshExternalCollectionTask) GetState() indexpb.JobState {
 
 func (t *RefreshExternalCollectionTask) GetSlot() int64 {
 	return 1
-}
-
-// GetResource books nothing: RefreshExternalCollectionTaskRequest carries no
-// coordinator-estimated cpu/memory.
-func (t *RefreshExternalCollectionTask) GetResource() taskcommon.Resource {
-	return taskcommon.Resource{}
 }
 
 func (t *RefreshExternalCollectionTask) Reset() {
