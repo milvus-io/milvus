@@ -1078,7 +1078,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedSmallEntryRoundtrip) {
     const size_t entry_size = 1024;
     auto data = GeneratePattern(entry_size);
 
-    const size_t slice_size = kStreamSliceAlignment;
+    const size_t slice_size = 1024;
 
     {
         // Note: remote_path should be relative to fs root
@@ -1131,22 +1131,29 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedWriterCreatesMissingTempDir) {
     EXPECT_GT(info.ValueOrDie().size(), 1024);  // ciphertext > plaintext
 }
 
-TEST_F(IndexEntryEncryptedV3Test, EncryptedWriterRejectsUnalignedSliceSize) {
+TEST_F(IndexEntryEncryptedV3Test, EncryptedWriterAcceptsUnalignedSliceSize) {
     const std::string file_path = kV3FilePath + "_enc_unaligned_slice";
-    EXPECT_THROW(IndexEntryEncryptedLocalWriter writer(file_path,
-                                                       fs_,
-                                                       mock_cipher_,
-                                                       /*ez_id=*/1,
-                                                       /*collection_id=*/100,
-                                                       GetRootPath(),
-                                                       1024),
-                 milvus::SegcoreError);
+    const size_t slice_size = 1024;
+    const size_t entry_size = 5 * slice_size + 100;
+    auto data = GeneratePattern(entry_size);
+
+    IndexEntryEncryptedLocalWriter writer(file_path,
+                                          fs_,
+                                          mock_cipher_,
+                                          /*ez_id=*/1,
+                                          /*collection_id=*/100,
+                                          GetRootPath(),
+                                          slice_size);
+    writer.WriteEntry("data", data.data(), data.size());
+    writer.Finish();
+
+    VerifyEncryptedEntry(file_path, "data", entry_size);
 }
 
 TEST_F(IndexEntryEncryptedV3Test, EncryptedMultiSliceEntry) {
     // Entry larger than slice_size, requiring multiple slices
     const std::string file_path = kV3FilePath + "_enc_multislice";
-    const size_t slice_size = kStreamSliceAlignment;
+    const size_t slice_size = 1024;
     const size_t entry_size = 5 * slice_size + 100;
     auto data = GeneratePattern(entry_size);
 
@@ -1172,7 +1179,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedMultiSliceEntry) {
 TEST_F(IndexEntryEncryptedV3Test, EncryptedMultipleEntriesMultiSlice) {
     // Multiple entries, each requiring multiple slices
     const std::string file_path = kV3FilePath + "_enc_multi_multi";
-    const size_t slice_size = kStreamSliceAlignment;
+    const size_t slice_size = 1024;
 
     const size_t size_a = 3 * slice_size + 500;
     const size_t size_b = 2 * slice_size + 100;
@@ -1208,7 +1215,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedMultipleEntriesMultiSlice) {
 TEST_F(IndexEntryEncryptedV3Test, EncryptedLargeMetaMultiSlice) {
     // Large meta entry requiring multiple slices
     const std::string file_path = kV3FilePath + "_enc_largemeta";
-    const size_t slice_size = kStreamSliceAlignment;
+    const size_t slice_size = 1024;
 
     auto data = GeneratePattern(256);
 
@@ -1242,7 +1249,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedLargeMetaMultiSlice) {
 TEST_F(IndexEntryEncryptedV3Test, EncryptedFdEntryMultiSlice) {
     // Test fd-based entry with multiple slices
     const std::string file_path = kV3FilePath + "_enc_fd";
-    const size_t slice_size = kStreamSliceAlignment;
+    const size_t slice_size = 1024;
     const size_t entry_size = 4 * slice_size + 200;
     auto data = GeneratePattern(entry_size);
 
@@ -1284,7 +1291,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedFdEntryMultiSlice) {
 TEST_F(IndexEntryEncryptedV3Test,
        EncryptedDirectoryValidationAcceptsValidDirectory) {
     const std::string file_path = kV3FilePath + "_dir_valid";
-    const size_t slice_size = kStreamSliceAlignment;
+    const size_t slice_size = 1024;
     const size_t entry_size = 2 * slice_size + 100;  // 3 slices
     auto data = GeneratePattern(entry_size);
 
@@ -1324,7 +1331,8 @@ TEST_F(IndexEntryEncryptedV3Test,
 TEST_F(IndexEntryEncryptedV3Test,
        EncryptedDirectoryValidationRejectsSliceOffsetPastDataRegion) {
     const std::string file_path = kV3FilePath + "_dir_bad_slice_offset";
-    auto data = GeneratePattern(2 * kStreamSliceAlignment + 100);
+    constexpr size_t slice_size = 1024;
+    auto data = GeneratePattern(2 * slice_size + 100);
 
     {
         IndexEntryEncryptedLocalWriter writer(file_path,
@@ -1333,7 +1341,7 @@ TEST_F(IndexEntryEncryptedV3Test,
                                               /*ez_id=*/1,
                                               /*collection_id=*/100,
                                               GetRootPath(),
-                                              kStreamSliceAlignment);
+                                              slice_size);
         writer.WriteEntry("data", data.data(), data.size());
         writer.Finish();
     }
@@ -1362,7 +1370,8 @@ TEST_F(IndexEntryEncryptedV3Test,
 TEST_F(IndexEntryEncryptedV3Test,
        EncryptedDirectoryValidationRejectsSliceSizePastDataRegion) {
     const std::string file_path = kV3FilePath + "_dir_bad_slice_size";
-    auto data = GeneratePattern(2 * kStreamSliceAlignment + 100);
+    constexpr size_t slice_size = 1024;
+    auto data = GeneratePattern(2 * slice_size + 100);
 
     {
         IndexEntryEncryptedLocalWriter writer(file_path,
@@ -1371,7 +1380,7 @@ TEST_F(IndexEntryEncryptedV3Test,
                                               /*ez_id=*/1,
                                               /*collection_id=*/100,
                                               GetRootPath(),
-                                              kStreamSliceAlignment);
+                                              slice_size);
         writer.WriteEntry("data", data.data(), data.size());
         writer.Finish();
     }
@@ -1400,7 +1409,7 @@ TEST_F(IndexEntryEncryptedV3Test,
 TEST_F(IndexEntryEncryptedV3Test,
        EncryptedDirectoryValidationRejectsOutOfRangeSlice) {
     const std::string file_path = kV3FilePath + "_dir_out_of_range";
-    const size_t slice_size = kStreamSliceAlignment;
+    const size_t slice_size = 1024;
     const size_t entry_size = 2 * slice_size + 100;  // 3 slices
     auto data = GeneratePattern(entry_size);
 
@@ -1442,7 +1451,7 @@ TEST_F(IndexEntryEncryptedV3Test,
 TEST_F(IndexEntryEncryptedV3Test,
        EncryptedDirectoryValidationRejectsIncompleteCoverage) {
     const std::string file_path = kV3FilePath + "_dir_incomplete";
-    const size_t slice_size = kStreamSliceAlignment;
+    const size_t slice_size = 1024;
     const size_t entry_size = 2 * slice_size + 100;  // 3 slices
     auto data = GeneratePattern(entry_size);
 
