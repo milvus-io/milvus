@@ -19,11 +19,11 @@
 #include <cassert>
 #include <cstdint>
 #include <functional>
-#include <numeric>
 #include <utility>
 #include <vector>
 
 #include "cachinglayer/Translator.h"
+#include "common/Utils.h"
 
 namespace milvus::segcore::storagev2translator {
 
@@ -39,40 +39,36 @@ inline std::pair<milvus::cachinglayer::ResourceUsage,
 EstimateGroupChunkLoadingUsage(
     const std::vector<int64_t>& cell_sizes,
     const std::vector<milvus::cachinglayer::cid_t>& cids,
+    int64_t max_cell_size,
     bool use_mmap,
-    size_t queue_capacity) {
+    size_t worker_count,
+    int64_t batch_target_bytes) {
     if (cids.empty()) {
         return {};
     }
 
-    std::vector<int64_t> requested_sizes;
-    requested_sizes.reserve(cids.size());
+    int64_t loaded_size = 0;
     for (const auto cid : cids) {
         assert(cid < cell_sizes.size());
-        requested_sizes.push_back(cell_sizes[cid]);
+        loaded_size = SaturatingAdd(loaded_size, cell_sizes[cid]);
     }
 
-    const auto loaded_size =
-        std::accumulate(requested_sizes.begin(), requested_sizes.end(), 0LL);
-    // All requested cells remain loaded. Use the bounded result channel as the
-    // pipeline's temporary-loading concurrency limit, and choose the largest
-    // cells for a conservative peak estimate.
-    const auto concurrent_cells =
-        std::min(requested_sizes.size(), std::max<size_t>(queue_capacity, 1));
-    std::partial_sort(requested_sizes.begin(),
-                      requested_sizes.begin() + concurrent_cells,
-                      requested_sizes.end(),
-                      std::greater<int64_t>());
+    // All requested cells remain loaded. A load-pool worker owns at most one
+    // batch at a time, including both Arrow reads and finalization. A batch is
+    // bounded by the target size unless it contains one oversized cell.
+    const auto concurrent_batches =
+        std::min(cids.size(), std::max<size_t>(worker_count, 1));
+    const auto max_batch_size =
+        std::max({batch_target_bytes, max_cell_size, int64_t{1}});
     const auto temporary_size =
-        std::accumulate(requested_sizes.begin(),
-                        requested_sizes.begin() + concurrent_cells,
-                        0LL);
+        std::min(loaded_size,
+                 SaturatingMultiply(max_batch_size,
+                                    static_cast<int64_t>(concurrent_batches)));
 
     if (use_mmap) {
-        return {{0, loaded_size},
-                {2 * temporary_size, loaded_size + temporary_size}};
+        return {{0, loaded_size}, {temporary_size, loaded_size}};
     }
-    return {{loaded_size, 0}, {loaded_size + temporary_size, 0}};
+    return {{loaded_size, 0}, {SaturatingAdd(loaded_size, temporary_size), 0}};
 }
 
 struct GroupCTMeta : public milvus::cachinglayer::Meta {
@@ -81,6 +77,7 @@ struct GroupCTMeta : public milvus::cachinglayer::Meta {
     std::vector<int64_t> num_rows_until_chunk_;
     // memory size for each group chunk(cache cell)
     std::vector<int64_t> chunk_memory_size_;
+    int64_t max_chunk_memory_size_{0};
     size_t num_fields_;
     // total number of row groups
     size_t total_row_groups_;
