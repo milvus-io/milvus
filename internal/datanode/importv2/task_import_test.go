@@ -263,7 +263,7 @@ func (s *ImportTaskDeleteModeSuite) TestDeleteMode_ProcessesAllReadBatches() {
 			}), nil
 		}).Times(2)
 
-	err := task.importFile(reader)
+	err := task.importFile(reader, nil)
 	s.Require().NoError(err)
 }
 
@@ -514,7 +514,7 @@ func (s *ImportTaskUpsertModeSuite) TestUpsertMode_ProcessesAllReadBatches() {
 			}), nil
 		}).Times(4)
 
-	err = task.importFile(reader)
+	err = task.importFile(reader, nil)
 	s.Require().NoError(err)
 }
 
