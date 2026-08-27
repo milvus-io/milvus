@@ -27,6 +27,8 @@ import (
 // DefaultEnvPrefix is the default prefix for environment variables
 const DefaultEnvPrefix = "MILVUS_CONF_"
 
+const environmentSourceName = "EnvironmentSource"
+
 type EnvSource struct {
 	configs      *typeutil.ConcurrentMap[string, string]
 	KeyFormatter func(string) string
@@ -90,7 +92,7 @@ func (es EnvSource) GetPriority() int {
 
 // GetSourceName implements ConfigSource
 func (es EnvSource) GetSourceName() string {
-	return "EnvironmentSource"
+	return environmentSourceName
 }
 
 func (es EnvSource) SetManager(m ConfigManager) {

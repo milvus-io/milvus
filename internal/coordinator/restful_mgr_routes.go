@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	pkgconfig "github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -1182,9 +1183,11 @@ func (s *mixCoordImpl) HandleAlterWAL(w http.ResponseWriter, req *http.Request) 
 		}
 	}
 
+	// Both keys and values are request payload. A caller can put secret material
+	// in either, so logs retain only the number of supplied options.
 	logger.Info(req.Context(), "HandleAlterWAL start",
 		mlog.String("targetWAL", requestBody.TargetWALName),
-		mlog.Any("config", requestBody.Config))
+		mlog.Int("configCount", len(requestBody.Config)))
 
 	if err := s.broadcastAlterWALMessage(req.Context(), commonpb.WALName(targetWAL), requestBody.Config); err != nil {
 		logger.Info(req.Context(), "HandleAlterWAL failed to broadcast AlterWALMessage",
@@ -1239,7 +1242,7 @@ func (s *mixCoordImpl) broadcastAlterWALMessage(ctx context.Context, targetWALNa
 
 	logger.Info(ctx, "broadcastAlterWALMessage success",
 		mlog.Int("pChannelCount", len(result.AppendResults)),
-		mlog.Uint64("broadcastID", result.BroadcastID))
+		mlog.FieldBroadcastID(result.BroadcastID))
 
 	return nil
 }
@@ -1307,36 +1310,52 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			return
 		}
 
-		// Check for duplicate keys
-		if _, exists := seen[config.Key]; exists {
-			logger.Info(request.Context(), "HandleAlterConfig duplicate key found", mlog.String("key", config.Key))
+		operation := paramtable.ConfigMutationDelete
+		if config.Value != nil {
+			operation = paramtable.ConfigMutationSet
+		}
+		decision := paramtable.EvaluateConfigMutation(paramMgr, config.Key, operation)
+		canonicalKey := decision.CanonicalKey
+
+		// Deduplicate on the identity the write actually lands under, not the
+		// caller's spelling: AlterConfigsInEtcd strips separators, so
+		// "kafka.consumer.a.b" and "kafka.consumer.ab" address one etcd key and
+		// would otherwise reach the same transaction twice.
+		if _, exists := seen[pkgconfig.EtcdConfigKey(canonicalKey)]; exists {
+			logger.Info(request.Context(), "HandleAlterConfig duplicate key found")
 			writeJSONError(writer, fmt.Sprintf("duplicate key found: %s", config.Key), http.StatusBadRequest)
 			return
 		}
-		seen[config.Key] = struct{}{}
+		seen[pkgconfig.EtcdConfigKey(canonicalKey)] = struct{}{}
 
-		// Check if it's mqtype configuration
-		normalizedKey := strings.ToLower(strings.ReplaceAll(config.Key, "/", "."))
-		if strings.Contains(normalizedKey, "mqtype") || strings.Contains(normalizedKey, "mq.type") {
-			logger.Info(request.Context(), "HandleAlterConfig attempted to modify mqtype",
-				mlog.String("key", config.Key))
+		switch decision.Rejection {
+		case paramtable.ConfigMutationSecurityGoverning:
+			logger.Info(request.Context(), "HandleAlterConfig attempted to modify a security-governing config")
+			writeJSONError(writer, fmt.Sprintf("security-governing configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
+			return
+		case paramtable.ConfigMutationWALType:
+			logger.Info(request.Context(), "HandleAlterConfig attempted to modify mqtype")
 			writeJSONError(writer, fmt.Sprintf("mqtype configuration cannot be modified through this endpoint. Please use the alterWAL endpoint instead. Invalid key: %s", config.Key), http.StatusBadRequest)
 			return
-		}
-
-		// Check if the configuration is immutable - immutable keys cannot be modified
-		if paramMgr.IsImmutable(config.Key) {
-			logger.Info(request.Context(), "HandleAlterConfig attempted to modify immutable config",
-				mlog.String("key", config.Key))
+		case paramtable.ConfigMutationImmutable:
+			logger.Info(request.Context(), "HandleAlterConfig attempted to modify immutable config")
 			writeJSONError(writer, fmt.Sprintf("immutable configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
+			return
+		case paramtable.ConfigMutationUnregistered:
+			logger.Info(request.Context(), "HandleAlterConfig attempted to set unregistered config")
+			writeJSONError(writer, fmt.Sprintf("unregistered configuration cannot be set through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
+			return
+		case paramtable.ConfigMutationSensitive:
+			logger.Info(request.Context(), "HandleAlterConfig attempted to modify sensitive config")
+			writeJSONError(writer, fmt.Sprintf("sensitive configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
 			return
 		}
 
-		if config.Value != nil {
-			configsToUpdate[config.Key] = *config.Value
-		} else {
-			keysToDelete = append(keysToDelete, config.Key)
+		if operation == paramtable.ConfigMutationSet {
+			configsToUpdate[canonicalKey] = *config.Value
+			continue
 		}
+		keysToDelete = append(keysToDelete, canonicalKey)
 	}
 
 	// Get EtcdSource to save the configuration
@@ -1351,19 +1370,17 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 	// AlterConfigsInEtcd also proactively refreshes the local EtcdSource so that the write
 	// is immediately visible in this process before we return.
 	if err := paramMgr.AlterConfigsInEtcd(etcdSource, configsToUpdate, keysToDelete); err != nil {
-		logger.Info(request.Context(), "HandleAlterConfig failed to atomically alter configs in etcd",
-			mlog.Any("updates", configsToUpdate),
-			mlog.Strings("deletes", keysToDelete),
+		logger.Error(request.Context(), "HandleAlterConfig failed to atomically alter configs in etcd",
+			mlog.Int("updateCount", len(configsToUpdate)),
+			mlog.Int("deleteCount", len(keysToDelete)),
 			mlog.Err(err))
 		writeJSONError(writer, fmt.Sprintf("failed to atomically alter configurations in etcd: %s", err.Error()), http.StatusInternalServerError)
 		return
 	}
 
 	logger.Info(request.Context(), "HandleAlterConfig success",
-		mlog.Int("updates", len(configsToUpdate)),
-		mlog.Int("deletes", len(keysToDelete)),
-		mlog.Any("updated", configsToUpdate),
-		mlog.Strings("deleted", keysToDelete))
+		mlog.Int("updateCount", len(configsToUpdate)),
+		mlog.Int("deleteCount", len(keysToDelete)))
 
 	writeJSONResponse(writer, http.StatusOK, map[string]string{"msg": "OK"})
 }
@@ -1404,17 +1421,15 @@ func (s *mixCoordImpl) HandleGetConfig(writer http.ResponseWriter, request *http
 		if key == "" {
 			continue
 		}
-		// Redact sensitive config keys (passwords, secrets, tokens).
-		normalizedKey := strings.ToLower(key)
-		if strings.Contains(normalizedKey, "password") || strings.Contains(normalizedKey, "secret") ||
-			strings.Contains(normalizedKey, "token") || strings.Contains(normalizedKey, "credential") {
-			results = append(results, configResult{Key: key, Error: "access to sensitive config key is denied"})
-			continue
-		}
-		source, value, err := paramMgr.GetConfig(key)
-		if err != nil {
+		source, value, err := paramMgr.GetRegisteredConfig(key)
+		switch {
+		case errors.Is(err, pkgconfig.ErrKeyUnregistered):
+			results = append(results, configResult{Key: key, Error: "access to unregistered config key is denied"})
+		case errors.Is(err, pkgconfig.ErrKeySensitive):
+			results = append(results, configResult{Key: key, Value: pkgconfig.RedactedValue})
+		case err != nil:
 			results = append(results, configResult{Key: key, Error: err.Error()})
-		} else {
+		default:
 			results = append(results, configResult{Key: key, Value: value, Source: source})
 		}
 	}
