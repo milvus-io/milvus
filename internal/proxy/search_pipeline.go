@@ -2311,7 +2311,7 @@ func isSameGroupByValue(field *schemapb.FieldData, i, j int) bool {
 //
 // Note on Float/Double NaN handling: This function does not explicitly handle NaN values
 // because Milvus rejects NaN and Infinity at insert time via proxy validation
-// (see task_insert.go withNANCheck() -> validate_util.go -> typeutil.VerifyFloat).
+// (see internal/proxy/fieldvalidator WithNANCheck -> Validate -> typeutil.VerifyFloat).
 // Therefore, NaN values cannot exist in stored data and will never reach this comparison.
 func compareFieldDataAt(field *schemapb.FieldData, i, j int, nullsFirst bool) (int, error) {
 	if cmp, handled := compareNulls(typeutil.GetFieldDataValidData(field), i, j, nullsFirst); handled {
