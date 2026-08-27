@@ -52,6 +52,19 @@ const (
 	// fall back on, so an anonymous caller cannot use a sick coordinator as an
 	// amplifier.
 	failureTTL = 2 * time.Second
+
+	// maxCredentialLookupCallers bounds the number of requests attached to one
+	// shared credential lookup, including its leader. singleflight collapses the
+	// backend work, but DoChan still retains one result channel per caller until
+	// the lookup finishes; without a separate bound a slow coordinator lets an
+	// unauthenticated burst grow both handler goroutines and retained channels for
+	// the whole of fetchTimeout.
+	maxCredentialLookupCallers int32 = 32
+
+	// bcrypt accepts at most 72 password bytes. Rejecting a longer value before
+	// hashing it or fetching root's stored hash keeps attacker-sized Basic Auth
+	// headers off both the CPU-heavy and coordinator-facing paths.
+	bcryptMaxPasswordBytes = 72
 )
 
 // comparisonLimiter bounds the cost of password comparison. Three bounds, not
@@ -97,6 +110,15 @@ func errComparisonSaturated() error {
 		"credential verification is saturated on this node; retry")
 }
 
+func errCredentialLookupSaturated() error {
+	return merr.WrapErrServiceUnavailable(
+		"credential lookup is saturated on this node; retry")
+}
+
+func errInvalidPassword() error {
+	return merr.WrapErrPrivilegeNotAuthenticated("invalid root password")
+}
+
 // do runs fn while holding a comparison slot, or returns
 // errComparisonSaturated without running it.
 func (l *comparisonLimiter) do(ctx context.Context, fn func() error) error {
@@ -131,17 +153,20 @@ func compareBounded(ctx context.Context, storedHash, password string) error {
 }
 
 // VerifyStoredPassword compares a plaintext password with a stored bcrypt hash.
-// Only ErrMismatchedHashAndPassword means the password is wrong; a malformed
-// hash is a credential-store failure and must not be reported as a bad
-// password, or an operator holding the right one goes looking for the wrong
-// problem.
+// A candidate that bcrypt cannot represent is a mismatch just like one that
+// does not match. A malformed stored hash is instead a credential-store failure
+// and must not be reported as a bad password, or an operator holding the right
+// one goes looking for the wrong problem.
 func VerifyStoredPassword(storedHash, password string) error {
+	if len(password) > bcryptMaxPasswordBytes {
+		return errInvalidPassword()
+	}
 	err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(password))
 	switch {
 	case err == nil:
 		return nil
 	case errors.Is(err, bcrypt.ErrMismatchedHashAndPassword):
-		return merr.WrapErrPrivilegeNotAuthenticated("invalid root password")
+		return errInvalidPassword()
 	default:
 		return merr.WrapErrServiceInternalErr(err, "stored root credential hash is invalid")
 	}
@@ -156,10 +181,13 @@ type CachedRootVerifier struct {
 	// fetches collapses a burst of concurrent misses into one lookup.
 	//
 	// x/sync directly rather than conc.Singleflight: conc's DoChan starts a
-	// goroutine per caller, so on a node that has lost its coordinator every
-	// anonymous request would park one for the whole of fetchTimeout. This one
-	// runs a goroutine only for the leader.
+	// goroutine per caller. This one runs the lookup only on the leader; the
+	// separate caller bound below caps the handler goroutines and result channels
+	// that singleflight itself must retain while that lookup is in flight.
 	fetches singleflight.Group
+
+	refreshCallers    atomic.Int32
+	maxRefreshCallers int32
 
 	mu   sync.Mutex
 	hash string
@@ -180,7 +208,11 @@ type CachedRootVerifier struct {
 // NewCachedRootVerifier wraps fetch, which must return root's stored bcrypt
 // hash or an error meaning "could not look it up".
 func NewCachedRootVerifier(fetch func(ctx context.Context) (string, error)) *CachedRootVerifier {
-	return &CachedRootVerifier{fetch: fetch, now: time.Now}
+	return &CachedRootVerifier{
+		fetch:             fetch,
+		now:               time.Now,
+		maxRefreshCallers: maxCredentialLookupCallers,
+	}
 }
 
 // Verify checks a root credential. It returns nil on a match,
@@ -194,6 +226,9 @@ func (c *CachedRootVerifier) Verify(ctx context.Context, username, password stri
 		// invite a retry, and rejecting before any lookup keeps an anonymous
 		// caller from driving lookups with invented usernames.
 		return merr.WrapErrPrivilegeNotPermitted("only root user can access this endpoint")
+	}
+	if len(password) > bcryptMaxPasswordBytes {
+		return errInvalidPassword()
 	}
 
 	if hash := c.freshHash(); hash != "" {
@@ -255,6 +290,22 @@ func (c *CachedRootVerifier) refresh(ctx context.Context) (string, error) {
 		return "", err
 	}
 
+	// singleflight bounds backend work, not the number of callers it retains.
+	// Keep this slot until the shared result exists even if the HTTP request is
+	// canceled first: DoChan keeps that caller's result channel until then too,
+	// so releasing on request cancellation would make the bound bypassable with
+	// short-lived connections.
+	if c.refreshCallers.Add(1) > c.maxRefreshCallers {
+		c.refreshCallers.Add(-1)
+		return "", errCredentialLookupSaturated()
+	}
+	releaseRefreshSlot := true
+	defer func() {
+		if releaseRefreshSlot {
+			c.refreshCallers.Add(-1)
+		}
+	}()
+
 	// DoChan rather than Do: the shared lookup runs to completion for whoever
 	// needs it, but a caller whose own deadline expires -- or whose client hung
 	// up -- must not be pinned to it for the whole of fetchTimeout.
@@ -290,6 +341,15 @@ func (c *CachedRootVerifier) refresh(ctx context.Context) (string, error) {
 		hash, _ := r.Val.(string)
 		return hash, nil
 	case <-ctx.Done():
+		// The caller can leave immediately, but singleflight retains its buffered
+		// result channel until the lookup completes. Retain the matching slot for
+		// exactly as long, using one bounded cleanup goroutine for this canceled
+		// caller, so neither resource can grow past maxRefreshCallers.
+		releaseRefreshSlot = false
+		go func() {
+			<-result
+			c.refreshCallers.Add(-1)
+		}()
 		return "", merr.WrapErrServiceUnavailable(
 			"credential lookup did not complete before the request deadline")
 	}

@@ -18,6 +18,7 @@ package adminauth
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -454,6 +455,103 @@ func TestVerifier_CallerEscapesASlowSharedLookup(t *testing.T) {
 	}
 }
 
+// singleflight collapses backend work but keeps one result channel per caller.
+// Bound the callers as well, or an unavailable coordinator lets anonymous
+// traffic retain an unbounded number of handler goroutines and channels for the
+// whole lookup timeout.
+func TestCachedRootVerifier_ShedsSlowLookupCallers(t *testing.T) {
+	var (
+		lookups     atomic.Int32
+		startOnce   sync.Once
+		releaseOnce sync.Once
+	)
+	fetchStarted := make(chan struct{})
+	releaseFetch := make(chan struct{})
+	release := func() { releaseOnce.Do(func() { close(releaseFetch) }) }
+	t.Cleanup(release)
+
+	verifier := NewCachedRootVerifier(func(context.Context) (string, error) {
+		lookups.Add(1)
+		startOnce.Do(func() { close(fetchStarted) })
+		<-releaseFetch
+		return "", errors.New("credential store unreachable")
+	})
+	verifier.maxRefreshCallers = 2
+
+	joined := make(chan error, verifier.maxRefreshCallers)
+	go func() { joined <- verifier.Verify(context.Background(), "root", testPassword) }()
+	<-fetchStarted
+	go func() { joined <- verifier.Verify(context.Background(), "root", testPassword) }()
+	require.Eventually(t, func() bool {
+		return verifier.refreshCallers.Load() == verifier.maxRefreshCallers
+	}, time.Second, time.Millisecond, "callers never filled the credential lookup bound")
+
+	// The next caller must get a fast 503 rather than attach another result
+	// channel to the blocked flight.
+	shed := make(chan error, 1)
+	go func() { shed <- verifier.Verify(context.Background(), "root", testPassword) }()
+	select {
+	case err := <-shed:
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, merr.ErrServiceUnavailable))
+		assert.Equal(t, errCredentialLookupSaturated().Error(), err.Error())
+	case <-time.After(time.Second):
+		t.Fatal("a caller past the credential lookup bound was queued")
+	}
+
+	release()
+	for i := int32(0); i < verifier.maxRefreshCallers; i++ {
+		assert.Error(t, <-joined)
+	}
+	assert.Eventually(t, func() bool {
+		return verifier.refreshCallers.Load() == 0
+	}, time.Second, time.Millisecond, "credential lookup caller slots were not released")
+	assert.Equal(t, int32(1), lookups.Load(), "the burst must still share one backend lookup")
+}
+
+// DoChan retains a canceled caller's result channel until the shared lookup
+// completes. Its caller slot must live equally long; releasing it when the HTTP
+// request leaves would let a stream of short-lived connections bypass the
+// bound while their channels remain retained inside singleflight.
+func TestCachedRootVerifier_CanceledCallerKeepsSlotUntilLookupFinishes(t *testing.T) {
+	var releaseOnce sync.Once
+	fetchStarted := make(chan struct{})
+	releaseFetch := make(chan struct{})
+	release := func() { releaseOnce.Do(func() { close(releaseFetch) }) }
+	t.Cleanup(release)
+
+	verifier := NewCachedRootVerifier(func(context.Context) (string, error) {
+		close(fetchStarted)
+		<-releaseFetch
+		return "", errors.New("credential store unreachable")
+	})
+	verifier.maxRefreshCallers = 1
+
+	requestCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- verifier.Verify(requestCtx, "root", testPassword) }()
+	<-fetchStarted
+	cancel()
+	require.Error(t, <-done)
+	assert.Equal(t, int32(1), verifier.refreshCallers.Load(),
+		"the canceled caller's result channel is still retained by singleflight")
+
+	shed := make(chan error, 1)
+	go func() { shed <- verifier.Verify(context.Background(), "root", testPassword) }()
+	select {
+	case err := <-shed:
+		require.Error(t, err)
+		assert.Equal(t, errCredentialLookupSaturated().Error(), err.Error())
+	case <-time.After(time.Second):
+		t.Fatal("a canceled caller released its slot before the shared lookup finished")
+	}
+
+	release()
+	assert.Eventually(t, func() bool {
+		return verifier.refreshCallers.Load() == 0
+	}, time.Second, time.Millisecond, "the canceled caller's slot was not released after lookup")
+}
+
 // mix.NewClient reaches sessionutil, which panics rather than erroring when the
 // process-wide etcd client cannot be built. It runs on its own goroutine, where
 // net/http's per-connection recover cannot see it, so createClient must contain
@@ -618,6 +716,20 @@ func TestCachedRootVerifier_FailingLookupsAreRateLimited(t *testing.T) {
 	clock.advance(failureTTL + time.Second)
 	assert.Error(t, verifier.Verify(context.Background(), "root", "guess"))
 	assert.Equal(t, int32(2), atomic.LoadInt32(&lookups))
+}
+
+func TestCachedRootVerifier_RejectsOverlongPasswordBeforeLookup(t *testing.T) {
+	var lookups atomic.Int32
+	verifier := NewCachedRootVerifier(func(context.Context) (string, error) {
+		lookups.Add(1)
+		return hashed(t, testPassword), nil
+	})
+
+	err := verifier.Verify(context.Background(), "root",
+		strings.Repeat("x", bcryptMaxPasswordBytes+1))
+	assert.True(t, isMismatch(err))
+	assert.Zero(t, lookups.Load(),
+		"a password bcrypt cannot represent must not drive a credential lookup")
 }
 
 // bcrypt is ~60ms of CPU, and the web console makes a dozen gated calls per
@@ -906,9 +1018,13 @@ func TestSaturationRendersAsServiceUnavailable(t *testing.T) {
 // the right password from being sent to look for a wrong one.
 func TestVerifyStoredPassword(t *testing.T) {
 	hash := hashed(t, testPassword)
+	maxLengthPassword := strings.Repeat("x", bcryptMaxPasswordBytes)
 
 	assert.NoError(t, VerifyStoredPassword(hash, testPassword))
+	assert.NoError(t, VerifyStoredPassword(hashed(t, maxLengthPassword), maxLengthPassword))
 	assert.True(t, isMismatch(VerifyStoredPassword(hash, "wrong-password")))
+	assert.True(t, isMismatch(VerifyStoredPassword(hash,
+		strings.Repeat("x", bcryptMaxPasswordBytes+1))))
 
 	err := VerifyStoredPassword("malformed-bcrypt-hash", testPassword)
 	assert.Error(t, err)
