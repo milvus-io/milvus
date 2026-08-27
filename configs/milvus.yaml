@@ -866,6 +866,17 @@ dataCoord:
     scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
+  taskResource:
+    vectorIndexCPU: 8 # cpu cores a vector index build task is expected to use; used by DataCoord to place tasks across DataNodes
+    analyzeCPU: 8 # cpu cores an analyze task is expected to use
+    clusteringCompactionCPU: 8 # cpu cores a clustering compaction task is expected to use
+    defaultCPU: 1 # cpu cores every other task type (scalar index, stats, mix/l0/sort compaction, import, copy segment) is expected to use
+    indexMemoryFactor: 2 # memory of an index build task = indexed field size * this factor
+    statsMemoryFactor: 2 # memory of a stats task (text match, bm25, json key index) or a sort compaction = segment size * this factor
+    l0CompactionMemoryFactor: 2 # memory of an l0 compaction task = total delta log size of its input segments * this factor
+    analyzeMemoryFactor: 2 # memory of an analyze task = raw vector data size (rows * dim * element size) * this factor
+    clusteringCompactionMemory: 32g # memory a clustering compaction task is expected to use
+    minTaskMemory: 64m # lower bound of the memory estimate of any task, so that no task is ever placed as if it were free
   jsonShreddingMaxColumns: 1024 # the max number of columns to shred
   jsonShreddingRatioThreshold: 0.3 # the ratio threshold to shred
   jsonShreddingWriteBatchSize: 81920 # the batch size to write
