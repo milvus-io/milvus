@@ -73,6 +73,20 @@ type ServerSuite struct {
 	mockMixCoord *mocks2.MixCoord
 }
 
+func TestPackQueryViewCollectionIndexInfosUsesDeterministicOrder(t *testing.T) {
+	indexes := []*model.Index{
+		{CollectionID: 1, FieldID: 103, IndexID: 30, IndexName: "third"},
+		{CollectionID: 1, FieldID: 101, IndexID: 10, IndexName: "first"},
+		{CollectionID: 1, FieldID: 102, IndexID: 20, IndexName: "second"},
+	}
+
+	infos := packQueryViewCollectionIndexInfos(indexes)
+
+	require.Equal(t, []int64{10, 20, 30}, lo.Map(infos, func(info *indexpb.IndexInfo, _ int) int64 {
+		return info.GetIndexID()
+	}))
+}
+
 func (s *ServerSuite) SetupSuite() {
 	snmanager.ResetStreamingNodeManager()
 	b := mock_balancer.NewMockBalancer(s.T())

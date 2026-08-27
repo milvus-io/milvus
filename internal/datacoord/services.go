@@ -17,9 +17,11 @@
 package datacoord
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"time"
 
@@ -1311,7 +1313,7 @@ func (s *Server) queryViewCollectionIndexInfos(collectionID int64) []*indexpb.In
 }
 
 func packQueryViewCollectionIndexInfos(indexes []*model.Index) []*indexpb.IndexInfo {
-	return lo.Map(indexes, func(index *model.Index, _ int) *indexpb.IndexInfo {
+	infos := lo.Map(indexes, func(index *model.Index, _ int) *indexpb.IndexInfo {
 		return &indexpb.IndexInfo{
 			CollectionID:    index.CollectionID,
 			FieldID:         index.FieldID,
@@ -1323,6 +1325,10 @@ func packQueryViewCollectionIndexInfos(indexes []*model.Index) []*indexpb.IndexI
 			UserIndexParams: index.UserIndexParams,
 		}
 	})
+	slices.SortFunc(infos, func(left, right *indexpb.IndexInfo) int {
+		return cmp.Compare(left.GetIndexID(), right.GetIndexID())
+	})
+	return infos
 }
 
 func (s *Server) packQueryViewSegmentLoadInfo(segment *datapb.SegmentInfo, indexInfos []*indexpb.IndexInfo, segmentIndexes map[int64]*model.SegmentIndex) *querypb.SegmentLoadInfo {
