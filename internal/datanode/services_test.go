@@ -52,10 +52,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type DataNodeServicesSuite struct {
@@ -234,6 +236,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 		mockC.EXPECT().GetCollection().Return(collection)
 		mockC.EXPECT().GetChannelName().Return(channel)
 		mockC.EXPECT().GetSlotUsage().Return(8)
+		mockC.EXPECT().GetResource().Return(taskcommon.Resource{}).Maybe()
 		mockC.EXPECT().Complete().Return()
 		mockC.EXPECT().Compact().Return(&datapb.CompactionPlanResult{
 			PlanID: 1,
@@ -247,6 +250,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 		mockC2.EXPECT().GetCollection().Return(collection)
 		mockC2.EXPECT().GetChannelName().Return(channel)
 		mockC2.EXPECT().GetSlotUsage().Return(8)
+		mockC2.EXPECT().GetResource().Return(taskcommon.Resource{}).Maybe()
 		mockC2.EXPECT().Complete().Return()
 		mockC2.EXPECT().Compact().Return(&datapb.CompactionPlanResult{
 			PlanID: 2,
@@ -523,11 +527,85 @@ func (s *DataNodeServicesSuite) TestQuerySlot() {
 
 	s.Run("normal case", func() {
 		s.SetupTest()
+		cpuMock := mockey.Mock(hardware.GetCPUNum).Return(16).Build()
+		defer cpuMock.UnPatch()
+		memMock := mockey.Mock(hardware.GetMemoryCount).Return(uint64(64) << 30).Build()
+		defer memMock.UnPatch()
+		roleMock := mockey.Mock(paramtable.GetRole).Return(typeutil.DataNodeRole).Build()
+		defer roleMock.UnPatch()
+
 		ctx := context.Background()
 		resp, err := s.node.QuerySlot(ctx, nil)
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
 		s.NoError(merr.Error(resp.GetStatus()))
+		s.Equal(int64(16), resp.GetTotalCpu())
+		s.Equal(int64(64)<<30, resp.GetTotalMemory())
+		// Nothing is booked on a fresh node, so everything is available.
+		s.Equal(resp.GetTotalCpu(), resp.GetAvailableCpu())
+		s.Equal(resp.GetTotalMemory(), resp.GetAvailableMemory())
+	})
+
+	s.Run("booked resource is subtracted", func() {
+		s.SetupTest()
+		cpuMock := mockey.Mock(hardware.GetCPUNum).Return(16).Build()
+		defer cpuMock.UnPatch()
+		memMock := mockey.Mock(hardware.GetMemoryCount).Return(uint64(64) << 30).Build()
+		defer memMock.UnPatch()
+		roleMock := mockey.Mock(paramtable.GetRole).Return(typeutil.DataNodeRole).Build()
+		defer roleMock.UnPatch()
+
+		// A detached executor: nothing consumes its task channel, so the
+		// booking stays put for the duration of the assertion.
+		s.node.compactionExecutor = compactor.NewExecutor()
+		mockC := compactor.NewMockCompactor(s.T())
+		mockC.EXPECT().GetPlanID().Return(int64(9527))
+		mockC.EXPECT().GetSlotUsage().Return(int64(8))
+		mockC.EXPECT().GetResource().Return(taskcommon.Resource{CPU: 4, Memory: 8 << 30})
+		succeed, err := s.node.compactionExecutor.Enqueue(mockC)
+		s.True(succeed)
+		s.NoError(err)
+
+		resp, err := s.node.QuerySlot(context.Background(), nil)
+		s.NoError(err)
+		s.True(merr.Ok(resp.GetStatus()))
+		s.Equal(int64(16), resp.GetTotalCpu())
+		s.Equal(int64(12), resp.GetAvailableCpu())
+		s.Equal(int64(64)<<30, resp.GetTotalMemory())
+		s.Equal(int64(56)<<30, resp.GetAvailableMemory())
+	})
+
+	s.Run("standalone discounts the totals", func() {
+		s.SetupTest()
+		cpuMock := mockey.Mock(hardware.GetCPUNum).Return(16).Build()
+		defer cpuMock.UnPatch()
+		memMock := mockey.Mock(hardware.GetMemoryCount).Return(uint64(64) << 30).Build()
+		defer memMock.UnPatch()
+		roleMock := mockey.Mock(paramtable.GetRole).Return(typeutil.StandaloneRole).Build()
+		defer roleMock.UnPatch()
+
+		resp, err := s.node.QuerySlot(context.Background(), nil)
+		s.NoError(err)
+		s.True(merr.Ok(resp.GetStatus()))
+		s.Equal(int64(4), resp.GetTotalCpu())
+		s.Equal(int64(16)<<30, resp.GetTotalMemory())
+	})
+
+	s.Run("standalone floors cpu at one core", func() {
+		s.SetupTest()
+		cpuMock := mockey.Mock(hardware.GetCPUNum).Return(2).Build()
+		defer cpuMock.UnPatch()
+		memMock := mockey.Mock(hardware.GetMemoryCount).Return(uint64(8) << 30).Build()
+		defer memMock.UnPatch()
+		roleMock := mockey.Mock(paramtable.GetRole).Return(typeutil.StandaloneRole).Build()
+		defer roleMock.UnPatch()
+
+		resp, err := s.node.QuerySlot(context.Background(), nil)
+		s.NoError(err)
+		s.True(merr.Ok(resp.GetStatus()))
+		// 2 * 0.25 rounds down to 0; the floor keeps a whole core offered.
+		s.Equal(int64(1), resp.GetTotalCpu())
+		s.Equal(int64(2)<<30, resp.GetTotalMemory())
 	})
 }
 

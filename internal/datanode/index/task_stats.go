@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	_ "github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -141,6 +142,10 @@ func (st *statsTask) GetState() indexpb.JobState {
 
 func (st *statsTask) GetSlot() int64 {
 	return st.req.GetTaskSlot()
+}
+
+func (st *statsTask) GetResource() taskcommon.Resource {
+	return taskcommon.Resource{CPU: st.req.GetCpu(), Memory: st.req.GetMemory()}
 }
 
 func (st *statsTask) IsVectorIndex() bool {

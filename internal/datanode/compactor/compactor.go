@@ -19,6 +19,7 @@ package compactor
 import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -32,5 +33,9 @@ type Compactor interface {
 	GetChannelName() string
 	GetCompactionType() datapb.CompactionType
 	GetSlotUsage() int64
+	// GetResource is the cpu/memory DataCoord estimated for this plan. The
+	// worker never computes it; it books it on enqueue and releases it on
+	// completion. Zero when the coordinator predates the field.
+	GetResource() taskcommon.Resource
 	GetStorageConfig() *indexpb.StorageConfig
 }

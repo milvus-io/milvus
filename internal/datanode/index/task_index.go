@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -155,6 +156,10 @@ func (it *indexBuildTask) OnEnqueue(ctx context.Context) error {
 
 func (it *indexBuildTask) GetSlot() int64 {
 	return it.req.GetTaskSlot()
+}
+
+func (it *indexBuildTask) GetResource() taskcommon.Resource {
+	return taskcommon.Resource{CPU: it.req.GetCpu(), Memory: it.req.GetMemory()}
 }
 
 func (it *indexBuildTask) IsVectorIndex() bool {

@@ -360,6 +360,14 @@ var (
 			Name:      "slot",
 			Help:      "number of available and used slot",
 		}, []string{nodeIDLabelName, "type"})
+
+	DataNodeTaskResource = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "task_resource",
+			Help:      "total and available cpu (cores) and memory (bytes) for coordinator-dispatched tasks",
+		}, []string{nodeIDLabelName, "type", "state"})
 )
 
 // DataNode pool metric descriptors (used by dataNodePoolMetricsCollector).
@@ -470,6 +478,7 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeBuildIndexLatency)
 	registry.MustRegister(DataNodeBuildJSONStatsLatency)
 	registry.MustRegister(DataNodeSlot)
+	registry.MustRegister(DataNodeTaskResource)
 	registry.MustRegister(&dataNodePoolMetricsCollector{})
 	RegisterLoggingMetrics(registry)
 }

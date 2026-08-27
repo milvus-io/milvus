@@ -166,6 +166,9 @@ func (s *RefreshExternalCollectionTaskSuite) TestTaskLifecycle() {
 
 	// Test GetSlot
 	s.Equal(int64(1), task.GetSlot())
+
+	// The refresh request carries no coordinator estimate, so it books nothing.
+	s.True(task.GetResource().IsZero())
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestPreExecuteClonesSchemaBeforeFillingExternalMetadata() {

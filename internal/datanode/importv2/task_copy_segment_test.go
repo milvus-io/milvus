@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 )
 
@@ -1609,4 +1610,49 @@ func TestCopySegmentTask_CopySingleSegment_WithCleanup(t *testing.T) {
 		assert.Equal(t, datapb.ImportTaskStateV2_Pending, latest.GetState())
 		assert.Empty(t, latest.GetReason())
 	})
+}
+
+// The copy-segment task keeps what the request priced it at, through Clone.
+func TestCopySegmentTaskGetResource(t *testing.T) {
+	mockCM := mocks.NewChunkManager(t)
+	mockManager := NewTaskManager()
+
+	req := &datapb.CopySegmentRequest{
+		JobID:    100,
+		TaskID:   401,
+		TaskSlot: 1,
+		Cpu:      2,
+		Memory:   1 << 30,
+		Sources: []*datapb.CopySegmentSource{
+			{CollectionId: 111, PartitionId: 222, SegmentId: 333},
+		},
+		Targets: []*datapb.CopySegmentTarget{
+			{CollectionId: 444, PartitionId: 555, SegmentId: 666},
+		},
+	}
+
+	storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+	task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
+
+	want := taskcommon.Resource{CPU: 2, Memory: 1 << 30}
+	assert.Equal(t, want, task.GetResource())
+	assert.Equal(t, want, task.Clone().GetResource())
+}
+
+// Every import-family task reports exactly the cpu/memory its request carries,
+// and nothing when the coordinator predates the fields.
+func TestImportTaskGetResource(t *testing.T) {
+	want := taskcommon.Resource{CPU: 2, Memory: 1 << 30}
+	importReq := &datapb.ImportRequest{Cpu: 2, Memory: 1 << 30}
+	preimportReq := &datapb.PreImportRequest{Cpu: 2, Memory: 1 << 30}
+
+	assert.Equal(t, want, (&ImportTask{req: importReq}).GetResource())
+	assert.Equal(t, want, (&L0ImportTask{req: importReq}).GetResource())
+	assert.Equal(t, want, (&PreImportTask{req: preimportReq}).GetResource())
+	assert.Equal(t, want, (&L0PreImportTask{req: preimportReq}).GetResource())
+
+	assert.True(t, (&ImportTask{req: &datapb.ImportRequest{}}).GetResource().IsZero())
+	assert.True(t, (&L0ImportTask{req: &datapb.ImportRequest{}}).GetResource().IsZero())
+	assert.True(t, (&PreImportTask{req: &datapb.PreImportRequest{}}).GetResource().IsZero())
+	assert.True(t, (&L0PreImportTask{req: &datapb.PreImportRequest{}}).GetResource().IsZero())
 }

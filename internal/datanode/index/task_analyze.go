@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -76,6 +77,10 @@ func (at *analyzeTask) Name() string {
 
 func (at *analyzeTask) GetSlot() int64 {
 	return at.req.GetTaskSlot()
+}
+
+func (at *analyzeTask) GetResource() taskcommon.Resource {
+	return taskcommon.Resource{CPU: at.req.GetCpu(), Memory: at.req.GetMemory()}
 }
 
 func (at *analyzeTask) IsVectorIndex() bool {

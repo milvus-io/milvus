@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -141,6 +142,45 @@ func (s *SchedulerSuite) TestScheduler_Slots() {
 
 	slots := s.scheduler.Slots()
 	s.Equal(int64(10), slots)
+}
+
+func (s *SchedulerSuite) TestScheduler_Resource() {
+	// A pending task books what DataCoord priced it at.
+	preimportReq := &datapb.PreImportRequest{
+		JobID:        1,
+		TaskID:       2,
+		CollectionID: 3,
+		PartitionIDs: []int64{4},
+		Vchannels:    []string{"ch-0"},
+		Schema:       s.schema,
+		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
+		TaskSlot:     10,
+		Cpu:          1,
+		Memory:       256 << 20,
+	}
+	s.manager.Add(NewPreImportTask(preimportReq, s.manager, s.cm))
+	s.Equal(taskcommon.Resource{CPU: 1, Memory: 256 << 20}, s.scheduler.Resource())
+
+	// A second task adds to the ledger.
+	importReq := &datapb.ImportRequest{
+		JobID:        1,
+		TaskID:       3,
+		CollectionID: 3,
+		PartitionIDs: []int64{4},
+		Vchannels:    []string{"ch-0"},
+		Schema:       s.schema,
+		Files:        []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
+		TaskSlot:     10,
+		Cpu:          2,
+		Memory:       512 << 20,
+	}
+	s.manager.Add(NewImportTask(importReq, s.manager, s.syncMgr, s.cm))
+	s.Equal(taskcommon.Resource{CPU: 3, Memory: 768 << 20}, s.scheduler.Resource())
+
+	// A completed task no longer books anything.
+	s.manager.Update(2, UpdateState(datapb.ImportTaskStateV2_Completed))
+	s.manager.Update(3, UpdateState(datapb.ImportTaskStateV2_Completed))
+	s.Equal(taskcommon.Resource{}, s.scheduler.Resource())
 }
 
 func (s *SchedulerSuite) TestScheduler_Start_Preimport() {

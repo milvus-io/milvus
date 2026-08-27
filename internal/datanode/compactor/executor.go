@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -38,6 +39,7 @@ type Executor interface {
 	Start(ctx context.Context)
 	Enqueue(task Compactor) (bool, error)
 	Slots() int64
+	Resource() taskcommon.Resource
 	RemoveTask(planID int64)                                // Deprecated in 2.6
 	GetResults(planID int64) []*datapb.CompactionPlanResult // Deprecated in 2.6
 }
@@ -52,6 +54,7 @@ type taskState struct {
 	compactor Compactor
 	state     datapb.CompactionTaskState
 	result    *datapb.CompactionPlanResult
+	resource  taskcommon.Resource // booked at enqueue, released at completion
 }
 
 type executor struct {
@@ -64,6 +67,10 @@ type executor struct {
 
 	// Slot tracking for resource management
 	usingSlots int64
+
+	// Cpu/memory booked for accepted, unfinished compactions. Sits beside
+	// usingSlots with the identical lifecycle; DataCoord estimates it.
+	usingResource taskcommon.Resource
 
 	// Slots(Slots Cap for DataCoord), ExecPool(MaxCompactionConcurrency) are all trying to control concurrency and resource usage,
 	// which creates unnecessary complexity. We should use a single resource pool instead.
@@ -117,10 +124,13 @@ func (e *executor) Enqueue(task Compactor) (bool, error) {
 
 	// Update slots and add task
 	e.usingSlots += getTaskSlotUsage(task)
+	resource := task.GetResource()
+	e.usingResource = e.usingResource.Add(resource)
 	e.tasks[planID] = &taskState{
 		compactor: task,
 		state:     datapb.CompactionTaskState_executing,
 		result:    nil,
+		resource:  resource,
 	}
 	e.mu.Unlock()
 
@@ -133,6 +143,13 @@ func (e *executor) Slots() int64 {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.usingSlots
+}
+
+// Resource returns the cpu/memory booked by accepted, unfinished compactions.
+func (e *executor) Resource() taskcommon.Resource {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.usingResource
 }
 
 // completeTask updates task state to completed and adjusts slot usage
@@ -153,6 +170,8 @@ func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResul
 		if e.usingSlots < 0 {
 			e.usingSlots = 0
 		}
+		// Release exactly what enqueue booked, never a re-derived value.
+		e.usingResource = e.usingResource.Sub(task.resource)
 		e.mu.Unlock()
 
 		task.compactor.Complete()
