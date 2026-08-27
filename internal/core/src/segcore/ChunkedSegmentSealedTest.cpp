@@ -583,12 +583,12 @@ TEST(test_chunk_segment,
 
     constexpr int64_t row_count = 5;
     constexpr int64_t array_len = 3;
-    auto dataset = DataGen(old_schema,
-                           row_count,
-                           /*seed=*/42,
-                           /*ts_offset=*/0,
-                           /*repeat_count=*/1,
-                           array_len);
+    auto dataset = segcore::DataGen(old_schema,
+                                    row_count,
+                                    /*seed=*/42,
+                                    /*ts_offset=*/0,
+                                    /*repeat_count=*/1,
+                                    array_len);
     auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
 
     auto old_offsets = segment->GetArrayOffsets(old_label);
