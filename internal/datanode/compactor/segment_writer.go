@@ -261,24 +261,6 @@ func (w *MultiSegmentWriter) Write(r storage.Record) error {
 	return w.writer.Write(r)
 }
 
-// WriteBatch writes records that form one logical MergeSort output batch.
-// Rotation is checked once, matching the rebuilt path even when direct Arrow
-// forwarding represents the batch as several zero-copy record slices.
-func (w *MultiSegmentWriter) WriteBatch(records []storage.Record) error {
-	if len(records) == 0 {
-		return nil
-	}
-	if err := w.rotateWriterOrGrowCurrent(); err != nil {
-		return err
-	}
-	for _, record := range records {
-		if err := w.writer.Write(record); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (w *MultiSegmentWriter) WriteValue(v *storage.Value) error {
 	if err := w.rotateWriterOrGrowCurrent(); err != nil {
 		return err
