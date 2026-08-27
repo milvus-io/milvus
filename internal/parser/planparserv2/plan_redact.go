@@ -124,7 +124,7 @@ func (p redactedPlan) String() string {
 	saved := make([][]byte, len(slots))
 	for i, slot := range slots {
 		saved[i] = slot.get()
-		slot.set([]byte(fmt.Sprintf("<%d bytes elided>", len(saved[i]))))
+		slot.set(fmt.Appendf(nil, "<%d bytes elided>", len(saved[i])))
 	}
 	defer func() {
 		for i, slot := range slots {

@@ -57,7 +57,9 @@ without touching what genuinely differs.
 | Fields | enforced per resolved kind |
 | Delete | per resolved kind |
 
-The optional `type=` argument improves readability in expressions and logs. It
+The optional `type=` argument improves readability in expressions and logs,
+following the existing operator-argument convention in the expression grammar
+(e.g. `text_match(field, "query", minimum_should_match=2)`). It
 must be `bloom` or `roaring` and must agree with the blob magic; a mismatch is a
 request error. When omitted, both envelopes remain self-describing and are
 sniffed at fill time. Unknown or too-short headers fail closed.

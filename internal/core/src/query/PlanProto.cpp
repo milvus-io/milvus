@@ -1219,7 +1219,8 @@ ProtoParser::ParseRoaringFilterExprs(
             break;
         default:
             ThrowInfo(ExprInvalid,
-                      "membership_match(type=roaring) does not support field data type: {}",
+                      "membership_match(type=roaring) does not support field "
+                      "data type: {}",
                       data_type);
     }
     auto membership = RoaringMembership::Parse(expr_pb.bitmap_blob());
@@ -1248,7 +1249,8 @@ ProtoParser::ParseBloomFilterExprs(
             break;
         default:
             ThrowInfo(ExprInvalid,
-                      "membership_match(type=bloom) does not support field data type: {}",
+                      "membership_match(type=bloom) does not support field "
+                      "data type: {}",
                       data_type);
     }
     return std::make_shared<expr::BloomFilterExpr>(

@@ -111,7 +111,8 @@ struct RoaringMembershipProbe {
     explicit RoaringMembershipProbe(const milvus::expr::RoaringFilterExpr& expr)
         : membership(expr.membership_.get()) {
         AssertInfo(membership != nullptr,
-                   "membership_match(type=roaring) physical expression requires membership");
+                   "membership_match(type=roaring) physical expression "
+                   "requires membership");
     }
 
     template <typename T>
