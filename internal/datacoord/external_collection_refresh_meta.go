@@ -400,16 +400,24 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 }
 
 // BeginIndexWait applies the job's segment results and marks it as waiting for
-// those segments to be indexed - in ONE catalog write, the same one the
-// Finished transition would have used. The job stays InProgress.
+// those segments to be indexed, in the same transition the Finished path would
+// have used. The job stays InProgress.
 //
-// Keeping the apply welded to a state write is what makes the index wait cheap:
-// there is never a moment where the segments are committed but no persisted
-// field says so, so nothing downstream needs to reason about a half-applied
-// job. IndexWaitStartedTime is that field, and the skip predicate below turns
-// it into the apply-once guard - but only because that predicate is evaluated
-// under the job lock. Testing the marker anywhere else, including in the
-// caller, orders nothing.
+// The two are NOT one catalog write. preApply commits the segment mutations
+// through UpdateSegmentsInfo/AlterSegments, and only after it returns does
+// SaveExternalCollectionRefreshJob persist the marker. The job lock serializes
+// both against any other transition, but it does not make them atomic: a crash
+// between them leaves durable segments with no marker, and recovery rests on
+// the apply being replay-safe - which is what the manifest short-circuits in
+// applyExternalCollectionSegmentUpdateForBaseline provide. This is the same
+// window the Finished transition has always had; the wait does not add one.
+//
+// What the ordering buys is that no state is ever published claiming less than
+// what is durable: the marker appears only after the segments are committed,
+// never before. IndexWaitStartedTime is that field, and the skip predicate
+// below turns it into the apply-once guard - but only because that predicate is
+// evaluated under the job lock. Testing the marker anywhere else, including in
+// the caller, orders nothing.
 func (m *externalCollectionRefreshMeta) BeginIndexWait(
 	jobID int64,
 	preApply func(*datapb.ExternalCollectionRefreshJob) error,
@@ -430,7 +438,7 @@ func (m *externalCollectionRefreshMeta) BeginIndexWait(
 			},
 			mutate: func(job *datapb.ExternalCollectionRefreshJob) {
 				job.IndexWaitStartedTime = time.Now().UnixMilli()
-				// Enter the reserved band in the same write. Two reasons: the
+				// Enter the reserved band in the same job write. Two reasons: the
 				// value a poller sees changes phase exactly when the job does,
 				// and no later write is needed to get it out of whatever the
 				// ingest last reported - which could be 100, and an InProgress

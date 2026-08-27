@@ -229,7 +229,8 @@ func (c *externalCollectionRefreshChecker) indexWaitEnabled() bool {
 }
 
 // beginIndexWait applies the job's results and puts it into the index wait, in
-// one catalog write. The job stays InProgress; processJob fires the finished
+// one transition under the job lock - two catalog writes, ordered, not atomic;
+// see BeginIndexWait. The job stays InProgress; processJob fires the finished
 // callback right after aggregateJobState returns, which publishes the refreshed
 // source/spec exactly as the ungated path does.
 //
@@ -267,7 +268,7 @@ func (c *externalCollectionRefreshChecker) beginIndexWait(job *datapb.ExternalCo
 	// Holding them for the length of an index build, and for the retention
 	// period on top of that when a job times out mid-wait, is a cost the
 	// ungated path never pays, because there the apply and Finished are the
-	// same write and this clear follows immediately.
+	// same transition and this clear follows immediately.
 	if err := c.refreshMeta.ClearTaskResultsByJobID(job.GetJobId()); err != nil {
 		// Not fatal: finishAfterIndexWait clears again, and DropJob sweeps the
 		// job prefix at GC.

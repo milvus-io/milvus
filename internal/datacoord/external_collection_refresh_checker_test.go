@@ -1397,7 +1397,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			held := refreshMeta.GetJob(1)
 			require.Equal(t, indexpb.JobState_JobStateInProgress, held.GetState())
 			assert.NotZero(t, held.GetIndexWaitStartedTime())
-			assert.Equal(t, 1, applied, "the apply lands in the same write that enters the wait")
+			assert.Equal(t, 1, applied, "the apply lands in the same transition that enters the wait")
 			assert.Less(t, held.GetProgress(), int64(100),
 				"an InProgress job must never report 100")
 			assert.Equal(t, int64(95), held.GetProgress(),
@@ -1667,7 +1667,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 		// They are dead weight once the apply lands, and an index build can run
 		// for a long time - longer still if the job then times out and the
 		// results sit until GC. The ungated path clears them immediately
-		// because there the apply and Finished are the same write.
+		// because there the apply and Finished are the same transition.
 		mockey.PatchConvey("results released at entry", t, func() {
 			pt := paramtable.Get()
 			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
@@ -1998,6 +1998,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			assert.NotZero(t, held.GetIndexWaitStartedTime())
 			assert.Equal(t, indexWaitProgressFloor, held.GetProgress(),
 				"an InProgress job that still reported the ingest's 100 reads as done to a poller")
+			assert.Equal(t, indexpb.JobState_JobStateInProgress, refreshMeta.GetJob(1).GetState())
 
 			again, err := refreshMeta.BeginIndexWait(1, preApply)
 			require.NoError(t, err)

@@ -580,6 +580,31 @@ func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context
 			mlog.Int("size", mapSize))
 	}
 
+	// The key is an in-flight lock first and a delivered marker second. It is
+	// claimed above so a concurrent caller cannot broadcast the same schema
+	// twice, and released below unless this call actually delivered - a
+	// transient RootCoord or WAL failure must not read as "published" for the
+	// rest of this DataCoord lifetime, since the only other removal is
+	// forgetJob at GC.
+	//
+	// Releasing on failure cannot reopen the duplicate-broadcast window it
+	// guards: the release happens after this call is done, so no other caller
+	// is ever in flight at the same time. What it buys is a retry on the next
+	// checker tick - and with the index wait that retry is load-bearing, not
+	// cosmetic. nudgeIndexBuilds holds the build acceleration until the
+	// refreshed source/spec are visible in collection meta, so a publish that
+	// failed once and never retried would suppress the nudge for the whole
+	// wait and leave the refresh to run out its timeout.
+	published := false
+	defer func() {
+		if published {
+			return
+		}
+		m.notifiedMu.Lock()
+		delete(m.notifiedJobs, job.GetJobId())
+		m.notifiedMu.Unlock()
+	}()
+
 	// Reclaim the per-job explore temp dir now that all datanode tasks have
 	// finished consuming the manifest. Deduped on its own key, so a job that
 	// reached here after handleJobFailed already reclaimed it does not repeat
@@ -589,7 +614,7 @@ func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context
 	// Get current collection info
 	collection, err := m.collectionGetter(ctx, job.GetCollectionId())
 	if err != nil || collection == nil {
-		mlog.Warn(ctx, "failed to get collection for schema update after refresh",
+		mlog.Warn(ctx, "failed to get collection for schema update after refresh, will retry on the next check",
 			mlog.FieldJobID(job.GetJobId()),
 			mlog.FieldCollectionID(job.GetCollectionId()),
 			mlog.Err(err))
@@ -603,7 +628,10 @@ func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context
 	newSpec := job.GetExternalSpec()
 
 	if currentSource == newSource && currentSpec == newSpec {
-		return // No change, skip
+		// Nothing to deliver - the collection already describes this refresh.
+		// That is a delivered publish, so keep the key.
+		published = true
+		return
 	}
 
 	mlog.Info(ctx, "updating collection schema after refresh",
@@ -615,11 +643,13 @@ func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context
 		mlog.String("newSpec", externalspec.RedactExternalSpecForLog(newSpec)))
 
 	if err := m.schemaUpdater(ctx, job.GetCollectionId(), newSource, newSpec); err != nil {
-		mlog.Warn(ctx, "failed to update external schema after refresh, schema may be stale until next refresh",
+		mlog.Warn(ctx, "failed to update external schema after refresh, will retry on the next check",
 			mlog.FieldJobID(job.GetJobId()),
 			mlog.FieldCollectionID(job.GetCollectionId()),
 			mlog.Err(err))
+		return
 	}
+	published = true
 }
 
 // ============================================================================

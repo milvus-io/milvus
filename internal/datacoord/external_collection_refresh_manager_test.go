@@ -1971,6 +1971,115 @@ func TestHandleJobFinished_TriggersExploreTempCleanup(t *testing.T) {
 	assert.True(t, cleaned, "handleJobFinished should mark jobID as cleaned so forgetJob skips it")
 }
 
+// ==================== handleJobFinished retry Tests ====================
+
+// newManagerForPublish builds a manager whose collection carries `source` and
+// whose schemaUpdater is the supplied stub, so a test can drive the publish
+// path and observe the dedup key.
+func newManagerForPublish(t *testing.T, source string, updater func(context.Context, int64, string, string) error) *externalCollectionRefreshManager {
+	t.Helper()
+	ctx := context.Background()
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	if source != "" {
+		collections.Insert(200, &collectionInfo{ID: 200, Schema: &schemapb.CollectionSchema{
+			Name:           "coll",
+			ExternalSource: source,
+			ExternalSpec:   `{"format":"parquet"}`,
+		}})
+	}
+	mt := &meta{collections: collections}
+	return NewExternalCollectionRefreshManager(
+		ctx, mt, newStubScheduler(), &stubAllocator{}, createTestRefreshMeta(t), nil,
+		testCollectionGetter(mt), updater, &recordingChunkManager{},
+	).(*externalCollectionRefreshManager)
+}
+
+func publishJob() *datapb.ExternalCollectionRefreshJob {
+	return &datapb.ExternalCollectionRefreshJob{
+		JobId:          900,
+		CollectionId:   200,
+		ExternalSource: "s3://new",
+		ExternalSpec:   `{"format":"parquet","v":2}`,
+	}
+}
+
+// A transient RootCoord / WAL failure must not read as "published" for the rest
+// of this DataCoord lifetime. The dedup key is an in-flight lock first and a
+// delivered marker second: with the index wait on, nudgeIndexBuilds holds the
+// build acceleration until the refreshed source/spec are visible in meta, so a
+// publish that failed once and never retried would suppress the nudge for the
+// whole wait and leave the refresh to run out its timeout.
+func TestHandleJobFinished_RetriesAfterTransientSchemaUpdaterFailure(t *testing.T) {
+	ctx := context.Background()
+
+	calls := 0
+	mgr := newManagerForPublish(t, "s3://old", func(context.Context, int64, string, string) error {
+		calls++
+		if calls == 1 {
+			return errors.New("rootcoord unavailable")
+		}
+		return nil
+	})
+
+	mgr.handleJobFinished(ctx, publishJob())
+	require.Equal(t, 1, calls)
+	mgr.notifiedMu.Lock()
+	_, heldAfterFailure := mgr.notifiedJobs[900]
+	mgr.notifiedMu.Unlock()
+	require.False(t, heldAfterFailure,
+		"a failed publish must release the key so a later checker tick retries")
+
+	mgr.handleJobFinished(ctx, publishJob())
+	require.Equal(t, 2, calls, "the next tick retries")
+	mgr.notifiedMu.Lock()
+	_, heldAfterSuccess := mgr.notifiedJobs[900]
+	mgr.notifiedMu.Unlock()
+	assert.True(t, heldAfterSuccess, "a delivered publish keeps the key")
+
+	mgr.handleJobFinished(ctx, publishJob())
+	assert.Equal(t, 2, calls, "and is never broadcast twice")
+}
+
+func TestHandleJobFinished_RetriesAfterCollectionGetterFailure(t *testing.T) {
+	ctx := context.Background()
+
+	calls := 0
+	// No collection in meta - the getter fails before schemaUpdater is reached.
+	mgr := newManagerForPublish(t, "", func(context.Context, int64, string, string) error {
+		calls++
+		return nil
+	})
+
+	mgr.handleJobFinished(ctx, publishJob())
+	assert.Zero(t, calls)
+	mgr.notifiedMu.Lock()
+	_, held := mgr.notifiedJobs[900]
+	mgr.notifiedMu.Unlock()
+	assert.False(t, held, "a publish that never got as far as the updater must retry too")
+}
+
+func TestHandleJobFinished_KeepsKeyWhenNothingToPublish(t *testing.T) {
+	ctx := context.Background()
+
+	calls := 0
+	// The collection already describes this refresh: nothing to deliver, which
+	// is a delivered publish - not a failure to retry forever.
+	mgr := newManagerForPublish(t, "s3://new", func(context.Context, int64, string, string) error {
+		calls++
+		return nil
+	})
+	job := publishJob()
+	job.ExternalSpec = `{"format":"parquet"}`
+
+	mgr.handleJobFinished(ctx, job)
+
+	assert.Zero(t, calls)
+	mgr.notifiedMu.Lock()
+	_, held := mgr.notifiedJobs[900]
+	mgr.notifiedMu.Unlock()
+	assert.True(t, held, "an equal schema is already published; the key must stand")
+}
+
 // ==================== handleJobFailed Tests ====================
 
 func TestHandleJobFailed_TriggersCleanupAndDedups(t *testing.T) {

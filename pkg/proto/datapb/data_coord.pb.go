@@ -12106,14 +12106,16 @@ type ExternalCollectionRefreshJob struct {
 	EndTime        int64            `protobuf:"varint,9,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`               // Job end timestamp (Unix ms, 0 if not completed)
 	Progress       int64            `protobuf:"varint,10,opt,name=progress,proto3" json:"progress,omitempty"`                           // Aggregated progress percentage (0-100)
 	TaskIds        []int64          `protobuf:"varint,11,rep,packed,name=task_ids,json=taskIds,proto3" json:"task_ids,omitempty"`       // Task IDs belonging to this job
-	// Timestamp (Unix ms) at which the job entered the index wait, set in the
-	// same write that applies its segment results. Only written when
+	// Timestamp (Unix ms) at which the job entered the index wait, written in the
+	// same transition that applies its segment results - ordered after the
+	// segment write under the job lock, not atomic with it. Only written when
 	// dataCoord.externalCollection.refreshWaitForIndex is on.
 	//
 	// It is both the sub-state marker ("applied, now waiting for indexes") and
-	// the apply-once guard: the apply and this field land together, so a job
-	// carrying it has already committed its segments and must not apply again.
-	// 0 when unset.
+	// the apply-once guard: a job carrying it has already committed its segments
+	// and must not apply again. The converse does not hold - a crash between the
+	// two writes leaves committed segments with no marker, and the apply is
+	// replay-safe for exactly that reason. 0 when unset.
 	IndexWaitStartedTime int64 `protobuf:"varint,13,opt,name=index_wait_started_time,json=indexWaitStartedTime,proto3" json:"index_wait_started_time,omitempty"`
 }
 
