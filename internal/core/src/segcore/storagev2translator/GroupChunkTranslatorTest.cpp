@@ -98,6 +98,36 @@ class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
     int64_t segment_id_ = 0;
 };
 
+TEST(GroupChunkLoadingUsageTest, LimitsTemporaryUsageByQueueCapacity) {
+    const std::vector<int64_t> cell_sizes = {10, 20, 30, 40};
+    const std::vector<cachinglayer::cid_t> cids = {0, 1, 2, 3};
+
+    const auto [loaded, loading] = EstimateGroupChunkLoadingUsage(
+        cell_sizes, cids, /*use_mmap=*/false, /*queue_capacity=*/2);
+
+    EXPECT_EQ(loaded, (cachinglayer::ResourceUsage{100, 0}));
+    EXPECT_EQ(loading, (cachinglayer::ResourceUsage{170, 0}));
+}
+
+TEST(GroupChunkLoadingUsageTest, AccountsForMmapTemporaryUsage) {
+    const std::vector<int64_t> cell_sizes = {10, 20, 30, 40};
+    const std::vector<cachinglayer::cid_t> cids = {0, 1, 2, 3};
+
+    const auto [loaded, loading] = EstimateGroupChunkLoadingUsage(
+        cell_sizes, cids, /*use_mmap=*/true, /*queue_capacity=*/2);
+
+    EXPECT_EQ(loaded, (cachinglayer::ResourceUsage{0, 100}));
+    EXPECT_EQ(loading, (cachinglayer::ResourceUsage{140, 170}));
+}
+
+TEST(GroupChunkLoadingUsageTest, EmptyBatchUsesNoResources) {
+    const auto [loaded, loading] = EstimateGroupChunkLoadingUsage(
+        {10, 20}, {}, /*use_mmap=*/false, /*queue_capacity=*/2);
+
+    EXPECT_EQ(loaded, cachinglayer::ResourceUsage{});
+    EXPECT_EQ(loading, cachinglayer::ResourceUsage{});
+}
+
 TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     auto temp_dir =
         std::filesystem::path(TestLocalPath) / "gctt_test_with_mmap";
@@ -156,7 +186,7 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
             expected_size += static_cast<int64_t>(
                 row_group_metadata_vector.Get(row_group_idx).memory_size());
         }
-        auto usage = translator->estimated_byte_size_of_cell(i).first;
+        auto usage = translator->estimated_loading_usage({i}).first;
         if (use_mmap) {
             EXPECT_EQ(usage.file_bytes, expected_size);
         } else {
@@ -361,7 +391,7 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     }
 
     for (size_t cid = 0; cid < translator->num_cells(); ++cid) {
-        auto usage = translator->estimated_byte_size_of_cell(cid).first;
+        auto usage = translator->estimated_loading_usage({cid}).first;
 
         // Calculate expected size by summing all row groups in this cell
         auto [rg_start, rg_end] = static_cast<GroupCTMeta*>(translator->meta())

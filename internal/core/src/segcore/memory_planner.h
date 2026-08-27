@@ -120,6 +120,9 @@ struct CellLoadResult {
 
 using CellReaderChannel = milvus::Channel<std::shared_ptr<CellLoadResult>>;
 
+size_t
+GetCellReaderChannelCapacity(milvus::proto::common::LoadPriority load_priority);
+
 // Creates a batch reader for a range of contiguous row groups.
 // Returns all row groups as a vector of tables in one call.
 // batch_key: grouping key (file_idx for files, 0 for single reader)

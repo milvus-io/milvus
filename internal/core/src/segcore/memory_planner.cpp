@@ -392,6 +392,15 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
     return futures;
 }
 
+size_t
+GetCellReaderChannelCapacity(
+    milvus::proto::common::LoadPriority load_priority) {
+    auto& pool =
+        ThreadPools::GetThreadPool(milvus::PriorityForLoad(load_priority));
+    return std::max<size_t>(1,
+                            static_cast<size_t>(pool.GetMaxThreadNum() * 1.5));
+}
+
 BatchReaderFactory
 MakeFileReaderFactory(std::vector<std::string> remote_files,
                       milvus_storage::ArrowFileSystemPtr fs) {
