@@ -18,6 +18,7 @@ package querycoordv2
 
 import (
 	"context"
+	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type qviewsBalancer interface {
@@ -127,12 +129,14 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 	}
 
 	nodeProvider := nodeview.NewQueryNodeProvider(ctx, deps.queryNodeClient, deps.resourceGroupManager)
+	balanceConfig := balancer.DefaultBalanceConfig()
+	balanceConfig.TickerInterval = paramtable.Get().QueryCoordCfg.QueryViewFullReconsileInterval.GetAsDuration(time.Second)
 	builder := balancer.NewSnapshotBuilder(
 		loadConfigStore,
 		shardViewRegistry,
 		nodeProvider,
 		deps.dataViewProvider,
-		balancer.DefaultBalanceConfig(),
+		balanceConfig,
 	)
 	balancerController := qviewsBalancer(balancer.NewDefaultBalancer(builder, shardViewRegistry, nil))
 	if deps.balancerFactory != nil {

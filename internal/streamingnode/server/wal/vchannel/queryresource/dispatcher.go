@@ -2,8 +2,6 @@ package queryresource
 
 import "sync"
 
-const defaultLiveEventDispatchConcurrency = 4
-
 type Dispatcher struct {
 	tasks  chan *QueryRuntime
 	closed chan struct{}
@@ -13,7 +11,7 @@ type Dispatcher struct {
 
 func NewDispatcher(concurrency int) *Dispatcher {
 	if concurrency <= 0 {
-		concurrency = 1
+		panic("query resource dispatcher concurrency must be positive")
 	}
 	dispatcher := &Dispatcher{
 		tasks:  make(chan *QueryRuntime, 1024),

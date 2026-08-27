@@ -209,7 +209,7 @@ func newTestInsertDeleteTxnMessage(t *testing.T, vchannel string, segmentID int6
 
 func TestDrainDeleteReplayUsesSharedTransformLogStream(t *testing.T) {
 	ctx := context.Background()
-	manager := transformlog.NewStreamManager("p1")
+	manager := transformlog.NewStreamManager("p1", 4)
 	for _, vchannel := range []string{"v1", "v2"} {
 		log := transformlog.New(transformlog.Config{VChannel: vchannel})
 		log.SwitchIntoMetaAndData()
