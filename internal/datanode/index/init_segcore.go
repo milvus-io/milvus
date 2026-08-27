@@ -72,6 +72,12 @@ func InitSegcore(nodeID int64) error {
 
 	cCPUNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCPUNum)
+	if err := initcore.UpdateJSONStatsBuildExecutorPoolSize(
+		initcore.ResolveJSONStatsBuildExecutorPoolSize(paramtable.Get())); err != nil {
+		return err
+	}
+	initcore.UpdateJSONStatsBuildMaxInflightBytes(
+		initcore.ResolveJSONStatsBuildMaxInflightBytes(paramtable.Get()))
 
 	cKnowhereThreadPoolSize := C.uint32_t(hardware.GetCPUNum() * paramtable.DefaultKnowhereThreadPoolNumRatioInBuild)
 	if paramtable.GetRole() == typeutil.StandaloneRole {
@@ -126,6 +132,8 @@ func InitSegcore(nodeID int64) error {
 	initcore.RegisterArrowIOThreadPoolWatchers(paramtable.Get(), "datanode")
 	initcore.RegisterArrowReaderConfigWatchers(paramtable.Get(), "datanode")
 	initcore.RegisterLoonReaderConfigWatchers(paramtable.Get(), "datanode")
+	initcore.RegisterJSONStatsBuildExecutorWatcher(paramtable.Get(), "datanode")
+	initcore.RegisterJSONStatsBuildMemoryBudgetWatcher(paramtable.Get(), "datanode")
 
 	// init paramtable change callback for core related config
 	initcore.SetupCoreConfigChangelCallback()

@@ -919,7 +919,7 @@ dataCoord:
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
   jsonShreddingMaxColumns: 1024 # the max number of columns to shred
   jsonShreddingRatioThreshold: 0.3 # the ratio threshold to shred
-  jsonShreddingWriteBatchSize: 81920 # the batch size to write
+  jsonShreddingWriteBatchSize: 81920 # The batch size to write. Values must be positive; otherwise, the default is used.
   ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
   grpc:
@@ -999,6 +999,10 @@ dataNode:
   storage:
     format: parquet # storage format for insert data, options: [parquet, vortex]
     deltalog: json # deltalog format, options: [json, parquet]
+  jsonStats:
+    parallelBuild:
+      maxWorkers: 8 # Maximum number of process-wide JSON Stats Build workers. The effective value is capped by the cgroup-aware CPU count. Values less than or equal to 0 use the safe automatic limit min(CPU, 8).
+      maxInflightBytes: 536870912 # Process-wide transient memory budget in bytes for materialized JSON Stats Build chunks. The budget is shared by concurrent builds. Lower values reduce peak memory at the cost of parallelism. A chunk larger than the budget is allowed to run exclusively to guarantee progress. Set to 0 to disable the limit.
   ip:  # TCP/IP address of dataNode. If not specified, use the first unicastable address
   port: 21124 # TCP port of dataNode
   grpc:
