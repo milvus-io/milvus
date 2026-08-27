@@ -544,23 +544,23 @@ func (m *externalCollectionRefreshManager) Stop() {
 // handleJobFinished publishes the refreshed external source/spec for a job
 // whose segments are applied. It is called both eagerly (synchronously from
 // the task path via processJobByID) and from the periodic checker tick. The
-// notifiedJobs dedup map below guarantees exactly-once schemaUpdater
-// invocation per jobID: concurrent calls from the two paths race on the
-// mutex, the loser sees the jobID already present and short-circuits. The
-// source/spec equality check is a cheap secondary guard (e.g., for jobs that
-// finished with the same schema as the current collection).
+// notifiedJobs dedup map below admits at most ONE schemaUpdater call in
+// flight per jobID, and none at all once one has delivered: concurrent calls
+// from the two paths race on the mutex, the loser sees the jobID already
+// present and short-circuits. The source/spec equality check is a cheap
+// secondary guard (e.g., for jobs that finished with the same schema as the
+// current collection).
 //
 // "Applied", not "Finished", is the trigger: ensureJobFinishedNotified fires
 // this for a job that is Finished, and also for one still in the index wait
 // or one that outran the job timeout while waiting - both have committed
 // their segments, so the publish is due either way.
 //
-// "Owed" is about which jobs reach here, not about delivery: the dedup key is
-// claimed before collectionGetter and schemaUpdater can fail, so the publish
-// gets ONE attempt per DataCoord lifetime and a transient RootCoord failure
-// leaves the schema stale until a restart clears the map. That is master's
-// behavior and the wait does not widen it - the attempt count is the same -
-// but do not read the guarantee as stronger than it is.
+// "Owed" is about which jobs reach here; whether the publish actually lands
+// is the dedup key's own business, and the key is a lock before it is a
+// receipt - see the block below. A call that fails releases it, so a
+// transient RootCoord or WAL failure retries on the next checker tick instead
+// of reading as published for the rest of this DataCoord lifetime.
 func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) {
 	if m.schemaUpdater == nil {
 		return
