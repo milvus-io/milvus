@@ -234,6 +234,39 @@ func TestTaskResource_Analyze(t *testing.T) {
 	assert.Equal(t, defaultTaskResource(), missing.GetTaskResource())
 }
 
+// TestTaskResource_AnalyzeSchemaCacheMiss is the analyze counterpart of
+// TestTaskResource_IndexSchemaCacheMiss. newAnalyzeTask snapshots the schema at
+// construction, so a task built before the collection is cached would keep a nil
+// schema forever: priced at the floor on every round, and re-walking every input
+// segment each time because the floor is never cached. Resolving the schema
+// lazily lets it repair itself.
+func TestTaskResource_AnalyzeSchemaCacheMiss(t *testing.T) {
+	paramtable.Init()
+	mt := bigFamilyMeta(t)
+	// Exactly the state before the collection cache is warmed.
+	mt.collections = typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+
+	priced := analyzeTaskResource(bigFamilyRows * 128 * 4)
+	assert.NotEqual(t, defaultTaskResource(), priced, "the bug this test guards must be observable")
+
+	at := newAnalyzeTask(&indexpb.AnalyzeTask{
+		CollectionID: 1, TaskID: 13, FieldID: 101,
+		FieldType: schemapb.DataType_FloatVector, SegmentIDs: []int64{3},
+	}, mt)
+	assert.Nil(t, at.schema, "the snapshot must be empty, or the test proves nothing")
+	assert.Equal(t, defaultTaskResource(), at.GetTaskResource())
+	assert.Equal(t, defaultTaskResource(), at.GetTaskResource())
+
+	// The schema arriving repairs the price on the very next call, without the
+	// task being rebuilt.
+	mt.collections.Insert(1, &collectionInfo{ID: 1, Schema: testResourceSchema()})
+	assert.Equal(t, priced, at.GetTaskResource())
+
+	// And that answer is cached: dropping the input segment does not change it.
+	delete(mt.segments.segments, 3)
+	assert.Equal(t, priced, at.GetTaskResource())
+}
+
 // TestTaskResource_AnalyzeUnknownField covers a clustering key that is not in
 // the cached schema, and a field the vector estimator cannot size.
 func TestTaskResource_AnalyzeUnknownField(t *testing.T) {
