@@ -148,6 +148,16 @@ func (cst *createSnapshotTask) Execute(ctx context.Context) error {
 		Description:                 cst.req.GetDescription(),
 		CollectionId:                cst.collectionID,
 		CompactionProtectionSeconds: cst.req.GetCompactionProtectionSeconds(),
+		// WaitForSortedSegments is left false: creation does not wait for sort
+		// compaction, because an unsorted segment is still served (unindexed, on
+		// the growing path) so its rows are captured either way, and the wait
+		// holds the collection's DDL resource key while it runs.
+		//
+		// TODO: surface the opt-in once milvuspb.CreateSnapshotRequest has the
+		// field -- it needs a milvus-proto change, and everything below this
+		// call already carries it. A Spark column backfill is the caller that
+		// needs it: an unsorted segment's manifest predates a schema-evolution
+		// backfill and does not carry the added column.
 	})
 	if err = merr.CheckRPCCall(cst.result, err); err != nil {
 		return err

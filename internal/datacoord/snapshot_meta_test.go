@@ -189,6 +189,7 @@ func createTestSnapshotMeta(t *testing.T) *snapshotMeta {
 		segmentReferencedByGC:        typeutil.NewUniqueSet(),
 		buildIDReferencedByGC:        typeutil.NewUniqueSet(),
 		snapshotPendingCollections:   typeutil.NewUniqueSet(),
+		snapshotStagingCollections:   typeutil.NewUniqueSet(),
 		loaderCtx:                    loaderCtx,
 		loaderCancel:                 loaderCancel,
 		reader:                       snapshotstorage.NewSnapshotReader(tempChunkManager),

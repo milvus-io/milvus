@@ -330,6 +330,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerSkipsBlockedCollection() {
 	s.bumpSchemaVersionPolicy.meta.snapshotMeta = &snapshotMeta{
 		compactionBlockedCollections: typeutil.NewUniqueSet(collID),
 		snapshotPendingCollections:   typeutil.NewUniqueSet(),
+		snapshotStagingCollections:   typeutil.NewUniqueSet(),
 	}
 
 	events, err := s.bumpSchemaVersionPolicy.Trigger(ctx)
@@ -345,6 +346,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerSkipsSnapshotPendingCollection
 	s.bumpSchemaVersionPolicy.meta.snapshotMeta = &snapshotMeta{
 		compactionBlockedCollections: typeutil.NewUniqueSet(),
 		snapshotPendingCollections:   typeutil.NewUniqueSet(collID),
+		snapshotStagingCollections:   typeutil.NewUniqueSet(),
 	}
 
 	events, err := s.bumpSchemaVersionPolicy.Trigger(ctx)
@@ -361,6 +363,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerSkipsSnapshotProtectedSegment(
 	s.bumpSchemaVersionPolicy.meta.snapshotMeta = &snapshotMeta{
 		compactionBlockedCollections: typeutil.NewUniqueSet(),
 		snapshotPendingCollections:   typeutil.NewUniqueSet(),
+		snapshotStagingCollections:   typeutil.NewUniqueSet(),
 		segmentProtectionUntil:       map[int64]uint64{segmentID: uint64(time.Now().Add(time.Hour).Unix())},
 	}
 

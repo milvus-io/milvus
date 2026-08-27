@@ -121,7 +121,7 @@ type SnapshotManager interface {
 	// Returns:
 	//   - snapshotID: Allocated snapshot ID (0 on error)
 	//   - error: If name already exists, allocation fails, or save fails
-	CreateSnapshot(ctx context.Context, collectionID int64, name, description string, compactionProtectionSeconds int64) (int64, error)
+	CreateSnapshot(ctx context.Context, collectionID int64, name, description string, compactionProtectionSeconds int64, boundary *SnapshotBoundary, waitForSortedSegments bool) (int64, error)
 
 	// DropSnapshot deletes an existing snapshot by name within a collection.
 	// It removes the snapshot from memory cache, etcd, and S3 storage.
@@ -373,8 +373,35 @@ type snapshotManager struct {
 	getChannelsByCollectionID func(context.Context, int64) ([]RWChannel, error) // For channel mapping
 
 	// Concurrency control
-	// createSnapshotMu protects CreateSnapshot to prevent TOCTOU race on snapshot name uniqueness
-	createSnapshotMu sync.Mutex
+	//
+	// createSnapshotLock serializes CreateSnapshot per collection, closing the
+	// TOCTOU between the name-uniqueness check and SaveSnapshot, and keeping the
+	// staging/pending flags -- which are plain set membership, not refcounts --
+	// from interleaving with themselves.
+	//
+	// Per collection rather than process-wide: the lock is held across
+	// waitForVisibleBoundary, which can run for the whole life of a snapshot,
+	// and a global lock made one collection with stalled sort compaction starve
+	// snapshot creation on every other collection. The keyspace it actually
+	// protects is (collectionID, name), so collection scope is already wider
+	// than required. It is defense in depth either way -- the broadcaster's
+	// exclusive collection-name resource key already admits at most one
+	// in-flight CreateSnapshot callback per collection.
+	createSnapshotLockOnce sync.Once
+	createSnapshotLock     *lock.KeyLock[int64]
+
+	// captureSlots bounds how many snapshots may be in their GenSnapshot ->
+	// SaveSnapshot window at once. GenSnapshot clones every in-boundary
+	// SegmentInfo and expands per-segment binlog and index paths, all held live
+	// until the save returns -- tens of MB for a large collection. The old
+	// process-wide createSnapshotMu capped that at one by accident; making the
+	// lock per-collection removes the cap, and ack callbacks are spawned one
+	// goroutine per task with no parallelism limit, so a bulk "snapshot every
+	// collection" could otherwise multiply peak memory without bound. The wait
+	// is deliberately outside this: it is the long part, and holding a slot
+	// through it would rebuild the head-of-line blocking just removed.
+	captureSlotsOnce sync.Once
+	captureSlots     chan struct{}
 
 	// Serialize external restores by target name without holding RootCoord's DDL lock.
 	externalRestoreTargetLockOnce sync.Once
@@ -437,18 +464,84 @@ func (sm *snapshotManager) CreateSnapshot(
 	collectionID int64,
 	name, description string,
 	compactionProtectionSeconds int64,
+	boundary *SnapshotBoundary,
+	waitForSortedSegments bool,
 ) (int64, error) {
 	// Lock to prevent TOCTOU race on snapshot name uniqueness check
-	sm.createSnapshotMu.Lock()
-	defer sm.createSnapshotMu.Unlock()
+	defer sm.lockCreateSnapshot(collectionID)()
 
 	mlog.Info(context.TODO(), "create snapshot request received",
 		mlog.String("description", description),
 		mlog.Int64("compactionProtectionSeconds", compactionProtectionSeconds))
 
-	// Validate snapshot name uniqueness within collection (protected by createSnapshotMu)
-	if _, err := sm.snapshotMeta.GetSnapshot(ctx, collectionID, name); err == nil {
-		return 0, merr.WrapErrParameterInvalidMsg("snapshot name %s already exists", name)
+	// Already created: report success rather than an error (protected by
+	// createSnapshotLock).
+	//
+	// This runs as an ack callback, whose contract is at-least-once, so a second
+	// invocation for the same message is normal rather than a caller mistake. It
+	// is reachable in production: doAckCallback saves the snapshot inside
+	// callMessageAckCallbackUntilDone and only then calls MarkAckCallbackDone,
+	// and MarkAckCallbackDone panics outright if its etcd write fails -- so one
+	// etcd blip in that window deterministically replays the callback against a
+	// snapshot that already exists. Returning an error there would be retried
+	// forever, and since the collection's exclusive DDL resource key is released
+	// only by MarkAckCallbackDone on success, every later DDL on the collection
+	// would block permanently.
+	//
+	// A genuine duplicate request cannot reach here: Server.CreateSnapshot
+	// rejects an existing name twice, the second time while holding the
+	// exclusive snapshot-name resource key.
+	if existing, err := sm.snapshotMeta.GetSnapshot(ctx, collectionID, name); err == nil {
+		mlog.Info(context.TODO(), "snapshot already exists, treating this callback as a replay",
+			mlog.Int64("snapshotID", existing.GetId()))
+		return existing.GetId(), nil
+	}
+
+	// Freeze segment boundaries before anything else. The boundary was cut when
+	// the CreateSnapshot message was appended; from here until the segment list is
+	// captured, a compaction that merges across it would produce a segment that
+	// looks like it belongs to the snapshot while carrying rows written after it.
+	// Sort compaction is deliberately still allowed -- it is what the wait below
+	// is waiting for, and it rewrites one segment into one segment, so it cannot
+	// move a boundary.
+	//
+	// Staging is deliberately NOT cleared when this call fails. It is cleared
+	// only once the snapshot is saved, below. This runs inside an ack callback
+	// the scheduler retries forever, and the boundary stays cut across every
+	// retry -- so its protection has to as well. Clearing it per attempt left
+	// the collection unfrozen for the whole backoff (up to 10s out of every
+	// wait attempt), which is ample for a straddling mix compaction to be
+	// planned, validated and committed.
+	//
+	// This cannot strand a collection: the flag is in-memory only, nothing else
+	// clears it, and the retry loop can be abandoned only by canceling the ack
+	// scheduler's context -- which happens solely on process shutdown, the same
+	// shutdown that drops the flag. On restart the callback is replayed from
+	// persisted state and re-establishes staging from scratch.
+	sm.snapshotMeta.SetSnapshotStaging(collectionID)
+
+	// Wait for the boundary to be complete, and -- only if asked -- for every
+	// segment inside it to be published sorted.
+	//
+	// Capturing an unsorted segment is not a loss of rows: it is served from the
+	// growing path, so the capture gets its binlogs and manifest either way. What
+	// it costs is an index, and correctness against a schema-evolution backfill,
+	// which skips invisible segments -- so their manifests never gain an added
+	// column. That is why a backfill asks for the wait and an ordinary snapshot
+	// does not.
+	//
+	// Without the wait, a sort may commit between here and SetSnapshotPending
+	// below. That is safe only because completeSortCompactionMutation publishes
+	// the output of a stream-flushed input VISIBLE (it inherits invisibility only
+	// from a CreatedByCompaction input), so the replacement is captured normally.
+	// Were that to change, the retired input and the invisible output would both
+	// be filtered out and the rows would vanish from the capture.
+	//
+	// This runs before SetSnapshotPending, and the order is not cosmetic: pending
+	// blocks sort compaction too, so waiting under it would be waiting for tasks
+	// this call has itself forbidden.
+	if err := sm.waitForBoundary(ctx, collectionID, boundary, waitForSortedSegments); err != nil {
+		return 0, err
 	}
 
 	// Block compaction commit for this collection during snapshot creation.
@@ -457,6 +550,34 @@ func (sm *snapshotManager) CreateSnapshot(
 	// within the GenSnapshot → SaveSnapshot window, otherwise concurrent compaction
 	// could drop segments that the in-flight snapshot is about to reference, leaving
 	// the freshly-created snapshot immediately broken.
+	//
+	// Pending is layered on top of staging rather than replacing it, so there is
+	// no instant in which sort may commit while the segment list is being
+	// captured: a sorted replacement landing in that gap would swap out a
+	// segment the snapshot has already decided to reference. Holding both is
+	// equivalent to holding pending alone -- every consumer ORs the two sets --
+	// and it keeps staging continuous if this attempt fails past this point.
+	//
+	// Unlike staging, pending IS released per attempt. It also blocks sort
+	// compaction, so leaving it set across a retry would forbid exactly the
+	// tasks the next attempt's wait is waiting on.
+	// Bound how many collections hold a captured segment list in memory at once.
+	//
+	// Queue for the slot BEFORE taking pending, never after. Pending blocks every
+	// non-L0 compaction on this collection, sort included, and waiting for a slot
+	// is waiting on unrelated collections -- so setting pending first would freeze
+	// this collection's compaction for as long as someone else's capture runs, and
+	// with N collections queueing behind a fixed number of slots that stacks into
+	// exactly the head-of-line coupling the per-collection create lock removed.
+	//
+	// The wait is also outside this, deliberately: it is the long part, and
+	// holding a slot through it would serialize snapshots cluster-wide again.
+	releaseCaptureSlot, err := sm.acquireCaptureSlot(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer releaseCaptureSlot()
+
 	sm.snapshotMeta.SetSnapshotPending(collectionID)
 	defer sm.snapshotMeta.ClearSnapshotPending(collectionID)
 
@@ -467,8 +588,8 @@ func (sm *snapshotManager) CreateSnapshot(
 		return 0, err
 	}
 
-	// Generate snapshot data
-	snapshotData, err := sm.handler.GenSnapshot(ctx, collectionID)
+	// Generate snapshot data at the boundary the CreateSnapshot message cut.
+	snapshotData, err := sm.handler.GenSnapshot(ctx, collectionID, boundary)
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to generate snapshot", mlog.Err(err))
 		return 0, err
@@ -478,6 +599,10 @@ func (sm *snapshotManager) CreateSnapshot(
 	snapshotData.SnapshotInfo.Id = snapshotID
 	snapshotData.SnapshotInfo.Name = name
 	snapshotData.SnapshotInfo.Description = description
+	// Recorded so a consumer can tell a backfill-ready cut from an ordinary one:
+	// without the wait the capture may hold segments whose manifests predate a
+	// concurrent schema-evolution backfill.
+	snapshotData.SnapshotInfo.WaitedForSortedSegments = waitForSortedSegments
 
 	// Set compaction protection if requested
 	if compactionProtectionSeconds > 0 {
@@ -490,8 +615,394 @@ func (sm *snapshotManager) CreateSnapshot(
 		return 0, err
 	}
 
+	// The boundary no longer needs freezing: the snapshot references a concrete
+	// segment list now, and SaveSnapshot's registerSnapshotProtection has taken
+	// over guarding those segments. This is the only place staging comes off --
+	// see the comment where it goes on.
+	sm.snapshotMeta.ClearSnapshotStaging(collectionID)
+
 	mlog.Info(context.TODO(), "snapshot created successfully", mlog.Int64("snapshotID", snapshotID))
 	return snapshotID, nil
+}
+
+// channelsBehindBoundary returns the boundary's channels whose checkpoint has not
+// reached it yet.
+//
+// A channel checkpoint is DataCoord's own statement that everything before that
+// position is persisted and accounted for. Until it passes the boundary, the
+// segment set inside the boundary is not merely unsorted, it is incomplete:
+// DataCoord may not have been told about a segment the fence sealed -- growing
+// segments are not visible here as soon as they are on the streaming node, which
+// is the same gap GetFlushState documents. Asking "is everything sorted" against
+// a set that is still filling in answers about the wrong set.
+//
+// This is also why the check is a timestamp rather than a segment list: a list
+// cannot express "and nothing else has arrived yet".
+func (sm *snapshotManager) channelsBehindBoundary(boundary *SnapshotBoundary) []string {
+	behind := make([]string, 0, len(boundary.SeekPositions))
+	for _, position := range boundary.SeekPositions {
+		checkpoint := sm.meta.GetChannelCheckpoint(position.GetChannelName())
+		if checkpoint == nil || checkpoint.GetTimestamp() < position.GetTimestamp() {
+			behind = append(behind, position.GetChannelName())
+		}
+	}
+	return behind
+}
+
+// segmentsAwaitingVisibility returns the segments inside the boundary that the
+// snapshot is not yet allowed to capture.
+//
+// The predicate is IsInvisible, not unsortedness. Invisibility is the flag that
+// actually decides whether a segment is part of the collection a reader sees:
+// handler.go routes an invisible segment into UnflushedSegmentIds, so
+// GetRecoveryInfoV2 leaves it out of the sealed load set and a querynode picks
+// it up on the growing path with no index; schema-bump backfill refuses it
+// outright (isSchemaBumpDataSegment, and a hard reject in
+// CompleteCompactionMutation); and the DDL schema-consistency gate counts only
+// visible segments. Capturing one puts a segment in the snapshot that is
+// unindexed and un-backfilled relative to the collection it claims to copy.
+//
+// Unsortedness only tracks that while sort compaction is on, because
+// flushFlushingSegment stamps IsInvisible exactly when enableSortCompaction()
+// holds. With sort off, a flushed segment is unsorted AND visible -- indexed,
+// sealed-loaded, backfill-eligible, its manifest exactly what a reader sees --
+// and there is nothing about it to wait for. Waiting on unsortedness there
+// waits forever for a state change that is not coming and was never needed.
+// !CreatedByCompaction narrows it to segments with no other representation.
+// A compaction output that is still invisible has its inputs alive and serving
+// -- clustering does not retire them until it publishes the output -- so the
+// capture takes those inputs instead and there is nothing to wait for;
+// dropSupersededByLineage picks the generation. Waiting on them would mean
+// waiting on the clustering output's index build, which is minutes at best and
+// never, if that build fails permanently: markResultSegmentsVisible is reached
+// only once every index reports Finished, and the staging freeze this wait
+// holds is not released on failure.
+//
+// A segment still on its way to Flushed is not in this set. That is covered by
+// channelsBehindBoundary in front of this call: until every channel checkpoint
+// has passed the boundary the segment list is still filling in, so an empty
+// answer here would be about the wrong set.
+//
+// The predicate deliberately differs from canTriggerSortCompaction in one way:
+// it does not exclude segments that are already compacting. A segment with a
+// sort task in flight has not become visible yet, and the point of the wait is
+// to stay until it has. It also needs no segment-id bookkeeping -- a sort
+// replaces its input with a new id, and the replacement leaves this set on its
+// own once it is published visible, while the input leaves it as Dropped.
+func (sm *snapshotManager) segmentsAwaitingVisibility(ctx context.Context, collectionID int64, boundary *SnapshotBoundary) ([]int64, error) {
+	// External collections never get sort compaction: every compaction policy
+	// (single/clustering/forcemerge/storage-version) skips IsExternal() collections
+	// outright, so nothing would ever publish their segments visible. Waiting on a
+	// transition that structurally cannot happen would hang CreateSnapshot forever --
+	// there is nothing to wait for, so report the set as already empty.
+	if collection := sm.meta.GetCollection(collectionID); collection != nil && collection.IsExternal() {
+		return nil, nil
+	}
+
+	candidates := sm.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return info.GetState() == commonpb.SegmentState_Flushed &&
+			info.GetLevel() != datapb.SegmentLevel_L0 &&
+			info.GetIsInvisible() &&
+			!info.GetCreatedByCompaction() &&
+			!info.GetIsImporting()
+	}))
+
+	awaiting := make([]int64, 0, len(candidates))
+	for _, info := range candidates {
+		seekTs, ok := boundary.SeekTs(info.GetInsertChannel())
+		if !ok {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"missing snapshot channel seek position for segment channel %s", info.GetInsertChannel())
+		}
+		// Same comparison GenSnapshot uses to decide membership. The two must not
+		// drift: waiting on a set that is not the set being captured guarantees
+		// nothing about what ends up in the snapshot.
+		if segmentEffectiveTs(info.SegmentInfo) >= seekTs {
+			continue
+		}
+		// And the same emptiness test. A segment with nothing in it is not captured
+		// either way, so blocking on one that never gets data would hang the
+		// snapshot on a segment it does not want.
+		hasData, err := segmentHasSnapshotData(info)
+		if err != nil {
+			return nil, err
+		}
+		if hasData {
+			awaiting = append(awaiting, info.GetID())
+		}
+	}
+	return awaiting, nil
+}
+
+// segmentsWouldAwaitVisibility returns the collection's segments that the wait
+// would block on if a boundary were cut right now.
+//
+// Unlike segmentsAwaitingVisibility it takes no boundary, because it runs before
+// the CreateSnapshot message is appended and there is no boundary yet. It has to
+// predict rather than observe for segments that are not flushed: the fence seals
+// them at the boundary, and flushFlushingSegment publishes a sealed segment
+// invisible exactly when enableSortCompaction() holds. So with sort on they will
+// join the wait set, and with sort off they will flush straight to visible and
+// never enter it.
+//
+// It mirrors segmentsAwaitingVisibility's !CreatedByCompaction exactly. Without
+// that, an in-flight clustering compaction would make this refuse the snapshot
+// with "stranded invisible ... can never be published" whenever sort compaction
+// is off -- untrue, since the index build publishes them, and the wait does not
+// block on them anyway.
+func segmentsWouldAwaitVisibility(ctx context.Context, m *meta, collectionID int64) ([]int64, error) {
+	sortWillRun := enableSortCompaction()
+	candidates := m.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		if info.GetLevel() == datapb.SegmentLevel_L0 || info.GetIsImporting() {
+			return false
+		}
+		switch info.GetState() {
+		case commonpb.SegmentState_Flushed:
+			return info.GetIsInvisible() && !info.GetCreatedByCompaction()
+		case commonpb.SegmentState_Growing, commonpb.SegmentState_Sealed, commonpb.SegmentState_Flushing:
+			return sortWillRun
+		default:
+			return false
+		}
+	}))
+
+	needing := make([]int64, 0, len(candidates))
+	for _, info := range candidates {
+		if info.GetState() != commonpb.SegmentState_Flushed {
+			// Not yet flushed, so ask the cheap question only: a growing segment
+			// has no binlogs until it flushes, and its row count is the evidence
+			// it will become one worth waiting on. Deliberately NOT
+			// segmentHasSnapshotData -- that parses the StorageV3 manifest path
+			// and errors on a malformed one, which would abort this whole check
+			// (and so reject the snapshot) over a segment neither
+			// segmentsAwaitingVisibility nor GenSnapshot would ever have inspected.
+			if info.GetNumOfRows() > 0 || len(info.GetBinlogs()) > 0 {
+				needing = append(needing, info.GetID())
+			}
+			continue
+		}
+		// Flushed: the same emptiness test segmentsAwaitingVisibility applies, so
+		// the pre-check and the wait agree on which segments count.
+		hasData, err := segmentHasSnapshotData(info)
+		if err != nil {
+			return nil, err
+		}
+		if hasData {
+			needing = append(needing, info.GetID())
+		}
+	}
+	return needing, nil
+}
+
+// checkSnapshotVisibilityReachable rejects a CreateSnapshot whose wait could
+// never finish, before the message is appended to the WAL.
+//
+// The placement is the whole point. Broadcast returns once the message is
+// appended, not once the ack callback runs, so by the time the callback
+// discovers it cannot proceed the client has already been told the call
+// succeeded. The callback is then retried forever --
+// callMessageAckCallbackUntilDone sets MaxElapsedTime=0 and retries every error
+// -- and the collection's exclusive DDL resource key is released only by
+// MarkAckCallbackDone on success. A condition the callback can never satisfy
+// therefore does not fail the request: it silently wedges every later DDL on
+// that collection for the life of the process. Both conditions below are exactly
+// that, which is why they are caught here rather than in the wait.
+//
+// It refuses only what is genuinely unresolvable. A cluster running with sort
+// compaction switched off is NOT refused: its segments flush straight to visible
+// and the snapshot has nothing to wait for, so it is allowed through.
+func checkSnapshotVisibilityReachable(ctx context.Context, m *meta, collectionID int64) error {
+	// External collections never wait: no compaction policy touches them, so
+	// segmentsAwaitingVisibility reports their set as empty by construction.
+	if collection := m.GetCollection(collectionID); collection != nil && collection.IsExternal() {
+		return nil
+	}
+
+	needing, err := segmentsWouldAwaitVisibility(ctx, m, collectionID)
+	if err != nil {
+		return err
+	}
+	if len(needing) == 0 {
+		// Nothing to wait for, so neither stall below applies. This is the normal
+		// answer on a cluster with sort compaction off: everything flushes
+		// visible, and the snapshot proceeds immediately.
+		return nil
+	}
+
+	// Reaching here with sort off means the set is entirely already-invisible
+	// segments -- segmentsWouldAwaitVisibility excludes not-yet-flushed ones in
+	// that configuration. Those are stranded: nothing clears IsInvisible except a
+	// sort or clustering completion, and with the subsystem off neither will run.
+	// EnableCompaction gates startCompaction(), the only caller of
+	// compactionTriggerManager.Start() and compactionInspector.start(), so no
+	// task is created and already-queued ones stop being scheduled; it is also
+	// refreshable:"false", so the operator cannot undo it without restarting
+	// DataCoord. Refuse rather than wait for something nothing will deliver.
+	if !enableSortCompaction() {
+		return merr.WrapErrServiceUnavailableMsg(
+			"snapshot for collection %d has %d segment(s) stranded invisible by a previous sort compaction run, and sort "+
+				"compaction is now off (dataCoord.enableCompaction=%t, dataCoord.sortCompaction.enable=%t) so they can "+
+				"never be published; re-enable it to let them finish",
+			collectionID, len(needing),
+			Params.DataCoordCfg.EnableCompaction.GetAsBool(),
+			Params.DataCoordCfg.EnableSortCompaction.GetAsBool())
+	}
+
+	// A segment pinned by an older snapshot's compaction protection is skipped by
+	// both sort-triggering paths (triggerSegmentSortCompaction and
+	// triggerSortCompaction), while segmentsAwaitingVisibility still waits for it
+	// -- the two predicates are asymmetric, and the wait is the wider one.
+	// Snapshots written before this branch existed could reference invisible
+	// segments, since GenSnapshot filtered only on Dropped and IsImporting, so
+	// this is reachable on any upgraded cluster. The wait would then last until
+	// that protection lapses: up to
+	// dataCoord.snapshot.maxCompactionProtectionSeconds, 7 days by default.
+	protected := make([]int64, 0, len(needing))
+	for _, segmentID := range needing {
+		if m.isSegmentCompactionProtected(segmentID) {
+			protected = append(protected, segmentID)
+		}
+	}
+	if len(protected) > 0 {
+		return merr.WrapErrServiceUnavailableMsg(
+			"snapshot for collection %d cannot proceed: %d segment(s) are still invisible and need sort compaction, but "+
+				"are pinned by an existing snapshot's compaction protection, which blocks sort until it expires "+
+				"(e.g. segments %v); retry after it lapses, or drop the snapshot holding it",
+			collectionID, len(protected), protected[:min(len(protected), 5)])
+	}
+	return nil
+}
+
+// waitForBoundary blocks until the boundary is complete, and -- only when
+// waitForSorted is set -- until every segment inside it is one the collection's
+// readers can see.
+//
+// The two halves are not equally optional. Completeness is mandatory: until
+// every channel checkpoint has passed the boundary, DataCoord has not been told
+// about the segments the fence just sealed, so capturing then would silently
+// miss them. Visibility is the caller's choice, because an unsorted segment is
+// served anyway and so is captured either way; see CreateSnapshot for what
+// skipping it costs.
+//
+// When waitForSorted is set, the wait is on visibility itself, not on
+// sortedness. See segmentsAwaitingVisibility for why the distinction matters:
+// with sort compaction off, segments flush straight to visible and this returns
+// on the first poll rather than waiting for a sort that is not coming.
+//
+// The set is closed: the CreateSnapshot message fenced its collection's growing
+// segments at this boundary, so anything flushed afterwards starts after it and
+// can never enter. The wait therefore terminates on its own as the set drains
+// -- it is not racing ingestion.
+//
+// The per-attempt cap below does NOT give the collection's resource-key lock
+// back. This runs inside a DDL ack callback, and the broadcaster's ack-callback
+// scheduler (streamingcoord/server/broadcaster/ack_callback_scheduler.go,
+// callMessageAckCallbackUntilDone) retries any error the callback returns in an
+// inner loop that never returns to its caller -- so the lock guard is only
+// released by MarkAckCallbackDone on success, never on an intermediate error.
+// The cap's real purpose is bounding a single polling attempt's log/CPU
+// footprint and refreshing "waited so far" visibility on each retry, not
+// yielding the lock: an unbounded wait here would hold it for exactly as long
+// either way, since the outer retry has nowhere else to hand it off to. The
+// message is already in the WAL, so the snapshot is created eventually either
+// way, once the set can actually drain -- see the enableSortCompaction check
+// below for the one case where it structurally cannot.
+func (sm *snapshotManager) waitForBoundary(ctx context.Context, collectionID int64, boundary *SnapshotBoundary, waitForSorted bool) error {
+	// The budget is a deadline, so express it as one: the same select then covers
+	// both running out of budget and DataCoord shutting down, and both want the
+	// same thing -- give the lock back and let the scheduler come again.
+	waitCtx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.SnapshotSortWaitTimeout.GetAsDuration(time.Second))
+	defer cancel()
+
+	ticker := time.NewTicker(Params.DataCoordCfg.SnapshotSortWaitPollInterval.GetAsDuration(time.Second))
+	defer ticker.Stop()
+
+	start := time.Now()
+	for {
+		// Completeness before cleanliness. Until every channel checkpoint has
+		// passed the boundary, the segments inside it are still arriving, and
+		// asking whether they are all visible answers about a set that is not yet
+		// the one being captured -- typically an empty one, which reads as "done".
+		behind := sm.channelsBehindBoundary(boundary)
+		var awaiting []int64
+		if len(behind) == 0 {
+			// Completeness is mandatory; visibility is not. Skipping the
+			// checkpoint gate above would capture a set DataCoord has not
+			// finished hearing about -- silent loss, not a trade-off. Skipping
+			// the visibility wait only means the capture may include segments
+			// that are still unindexed, whose rows are served anyway.
+			if !waitForSorted {
+				mlog.Info(ctx, "snapshot boundary complete, not waiting for sorted segments",
+					mlog.FieldCollectionID(collectionID),
+					mlog.Uint64("snapshotTs", boundary.SnapshotTs),
+					mlog.Duration("waited", time.Since(start)))
+				return nil
+			}
+			var err error
+			if awaiting, err = sm.segmentsAwaitingVisibility(ctx, collectionID, boundary); err != nil {
+				return err
+			}
+			if len(awaiting) == 0 {
+				mlog.Info(ctx, "snapshot boundary complete and fully visible",
+					mlog.FieldCollectionID(collectionID),
+					mlog.Uint64("snapshotTs", boundary.SnapshotTs),
+					mlog.Duration("waited", time.Since(start)))
+				return nil
+			}
+			// Backstop for the same condition checkSnapshotVisibilityReachable
+			// refuses before the broadcast: the switches can be flipped after
+			// the message is already in the WAL, and this is the only place
+			// that would otherwise notice. Anything still invisible once sort
+			// compaction is off is stranded -- only a sort or clustering
+			// completion clears the flag, and neither will run. Checked fresh
+			// on every attempt, so re-enabling lets a later retry proceed.
+			//
+			// This still returns a retryable error rather than abandoning the
+			// snapshot: the message is in the WAL, so the snapshot has to exist
+			// eventually. It cannot release the collection's resource-key lock
+			// -- see the function doc -- which is exactly why the pre-broadcast
+			// check matters more than this one.
+			if !enableSortCompaction() {
+				mlog.Warn(ctx, "snapshot cannot proceed: segments are stranded invisible with sort compaction off",
+					mlog.FieldCollectionID(collectionID),
+					mlog.Bool("enableCompaction", Params.DataCoordCfg.EnableCompaction.GetAsBool()),
+					mlog.Bool("enableSortCompaction", Params.DataCoordCfg.EnableSortCompaction.GetAsBool()),
+					mlog.Int64s("awaitingVisibility", awaiting))
+				return merr.WrapErrServiceUnavailableMsg(
+					"snapshot for collection %d has %d segment(s) stranded invisible, and sort compaction is off "+
+						"(dataCoord.enableCompaction=%t, dataCoord.sortCompaction.enable=%t) so nothing will publish them",
+					collectionID, len(awaiting),
+					Params.DataCoordCfg.EnableCompaction.GetAsBool(),
+					Params.DataCoordCfg.EnableSortCompaction.GetAsBool())
+			}
+		}
+
+		select {
+		case <-waitCtx.Done():
+			// This attempt's budget is spent, not the snapshot's: the ack
+			// callback that runs this holds the collection's resource-key lock
+			// for as long as this call keeps returning an error, regardless of
+			// whether that error comes from here or from looping past this
+			// point -- see the function doc. Returning still matters for
+			// bounding one attempt's log/CPU footprint and refreshing the
+			// "waited" duration on the next one.
+			mlog.Info(ctx, "snapshot still waiting for its boundary, will retry",
+				mlog.FieldCollectionID(collectionID),
+				mlog.Uint64("snapshotTs", boundary.SnapshotTs),
+				mlog.Duration("waited", time.Since(start)),
+				mlog.Strings("channelsBehindBoundary", behind),
+				mlog.Int64s("awaitingVisibility", awaiting))
+			return merr.WrapErrServiceUnavailableMsg(
+				"snapshot for collection %d is waiting for %d channel(s) to reach its boundary and %d segment(s) to become visible",
+				collectionID, len(behind), len(awaiting))
+		case <-ticker.C:
+			mlog.RatedInfo(ctx, 0.1, "snapshot waiting for its boundary",
+				mlog.FieldCollectionID(collectionID),
+				mlog.Duration("waited", time.Since(start)),
+				mlog.Strings("channelsBehindBoundary", behind),
+				mlog.Int64s("awaitingVisibility", awaiting))
+		}
+	}
 }
 
 // DropSnapshot deletes an existing snapshot by name.
@@ -999,6 +1510,52 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 		mlog.Int64("jobID", jobID),
 		mlog.Bool("external", external))
 	return jobID, nil
+}
+
+// maxConcurrentSnapshotCaptures bounds concurrent GenSnapshot -> SaveSnapshot
+// windows. Sized as a safety bound against a bulk snapshot of many collections
+// exhausting memory, not as a throughput knob: it caps peak footprint at a few
+// collections' worth of cloned segment metadata.
+//
+// The window is short in the normal case -- GenSnapshot does no object I/O,
+// only path computation -- but it is not unconditionally fast: SaveSnapshot
+// writes the manifest set to object storage between two etcd writes, so a
+// degraded backend can hold a slot for as long as those take. Callers therefore
+// queue for a slot before taking any state that blocks other work on their
+// collection.
+const maxConcurrentSnapshotCaptures = 4
+
+// acquireCaptureSlot blocks until a capture slot is free and returns its
+// release. Safe to call on a snapshotManager built as a bare struct literal,
+// which the tests do in place of NewSnapshotManager.
+func (sm *snapshotManager) acquireCaptureSlot(ctx context.Context) (func(), error) {
+	sm.captureSlotsOnce.Do(func() {
+		if sm.captureSlots == nil {
+			sm.captureSlots = make(chan struct{}, maxConcurrentSnapshotCaptures)
+		}
+	})
+	select {
+	case sm.captureSlots <- struct{}{}:
+		return func() { <-sm.captureSlots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// lockCreateSnapshot serializes snapshot creation for one collection and returns
+// its unlock. Lazily initialized because most snapshotManagers in tests are
+// built as bare struct literals rather than through NewSnapshotManager, and
+// KeyLock's zero value has a nil map.
+func (sm *snapshotManager) lockCreateSnapshot(collectionID int64) func() {
+	sm.createSnapshotLockOnce.Do(func() {
+		if sm.createSnapshotLock == nil {
+			sm.createSnapshotLock = lock.NewKeyLock[int64]()
+		}
+	})
+	sm.createSnapshotLock.Lock(collectionID)
+	return func() {
+		sm.createSnapshotLock.Unlock(collectionID)
+	}
 }
 
 func (sm *snapshotManager) lockExternalRestoreTarget(dbName, collectionName string) func() {
@@ -1591,18 +2148,25 @@ func (sm *snapshotManager) createRestoreJob(
 	externalSpec string,
 	snapshotFingerprint string,
 ) error {
-	// Validate which segments exist in local meta for same-cluster restore.
-	// External restore reads source metadata from object storage; source
-	// segments do not exist in the target cluster's DataCoord meta.
+	// Validate that every segment the snapshot references still exists in local
+	// meta. External restore reads source metadata from object storage, so its
+	// source segments are legitimately absent here and are not checked.
+	//
+	// A missing segment is fatal, not skippable. The snapshot is a point-in-time
+	// copy, so restoring it minus one segment silently produces a collection
+	// with rows missing and reports success -- the caller has no way to notice.
+	// Snapshot pins are supposed to keep these alive, so reaching this means
+	// that protection failed and the restore cannot deliver what it promises.
 	validSegments := make([]*datapb.SegmentDescription, 0, len(snapshotData.Segments))
 	for _, segDesc := range snapshotData.Segments {
 		sourceSegmentID := segDesc.GetSegmentId()
 		if !external {
-			segInfo := sm.meta.GetSegment(ctx, sourceSegmentID)
-			if segInfo == nil {
-				mlog.Warn(ctx, "source segment not found in meta, skipping",
+			if segInfo := sm.meta.GetSegment(ctx, sourceSegmentID); segInfo == nil {
+				mlog.Error(ctx, "restore aborted: a segment this snapshot references is gone from meta",
 					mlog.Int64("sourceSegmentID", sourceSegmentID))
-				continue
+				return merr.WrapErrDataIntegrityMsg(
+					"snapshot references segment %d, which no longer exists; restoring would silently drop its rows",
+					sourceSegmentID)
 			}
 		}
 		validSegments = append(validSegments, segDesc)

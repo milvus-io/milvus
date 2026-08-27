@@ -41,6 +41,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeDelete:             impl.handleDeleteMessage,
 		message.MessageTypeManualFlush:        impl.handleManualFlushMessage,
 		message.MessageTypeSchemaChange:       impl.handleSchemaChange,
+		message.MessageTypeCreateSnapshot:     impl.handleCreateSnapshot,
 		message.MessageTypeAlterCollection:    impl.handleAlterCollection,
 		message.MessageTypeCreateSegment:      impl.handleCreateSegment,
 		message.MessageTypeFlush:              impl.handleFlushSegment,
@@ -289,6 +290,40 @@ func (impl *shardInterceptor) handleSchemaChange(ctx context.Context, msg messag
 	// Modify the header of schema change message, carry with the all flushed segment ids.
 	header.FlushedSegmentIds = segmentIDs
 	schemaChangeMsg.OverwriteHeader(header)
+	return appendOp(ctx, msg)
+}
+
+// handleCreateSnapshot handles the create snapshot message.
+//
+// A snapshot is defined as "everything written before this message". Sealing the
+// growing segments here is what makes that definition hold at segment
+// granularity: after the fence, no segment straddles the message, so DataCoord
+// can decide membership by comparing a segment's timestamp to the boundary
+// instead of having to reason about partially-written segments. It is the same
+// flush-and-fence that ManualFlush and SchemaChange perform, which is why the
+// snapshot does not have to trigger a separate flush of its own.
+func (impl *shardInterceptor) handleCreateSnapshot(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	header := message.MustAsMutableCreateSnapshotMessageV2(msg).Header()
+	// The sealed ids are deliberately not carried in the header. Nothing outside
+	// this fence needs them: DataCoord decides snapshot membership from the
+	// boundary, and WAL recovery re-derives the same set from the state it has
+	// rebuilt at this position, the way FlushAll does.
+	//
+	// FlushAndFenceSegmentAllocUntil only fails with "collection not found", and
+	// that cannot happen here: DataCoord's CreateSnapshot handler and rootcoord's
+	// DropCollection both broadcast under the same exclusive collection-name
+	// resource key (see startBroadcastWithCollectionLock / the lock set built in
+	// Server.CreateSnapshot), and that lock is held for the entire broadcast --
+	// from before the collection-existence check until every target vchannel has
+	// acked the message (broadcastTask.MarkAckCallbackDone releases it). So a
+	// DropCollection broadcast cannot even start until this CreateSnapshot
+	// broadcast, including this fence on every vchannel, has fully finished.
+	// An error here means that invariant was violated, so panic instead of
+	// degrading to a per-request failure.
+	if _, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick()); err != nil {
+		impl.shardManager.Logger().Panic(ctx, "unreachable: collection must exist when create snapshot message is appended",
+			mlog.FieldCollectionID(header.GetCollectionId()), mlog.Err(err))
+	}
 	return appendOp(ctx, msg)
 }
 

@@ -2,6 +2,8 @@ package datacoord
 
 import (
 	"context"
+	"math"
+	"sort"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -1544,62 +1547,6 @@ func TestGetDataVChanPositions(t *testing.T) {
 	})
 }
 
-func TestGetSnapshotSeekPositions_ReturnsSortedPositionsAndMinTs(t *testing.T) {
-	handler := &ServerHandler{s: &Server{}}
-
-	mockChannels := mockey.Mock((*Server).getChannelsByCollectionID).To(func(s *Server, ctx context.Context, collectionID int64) ([]RWChannel, error) {
-		assert.Equal(t, UniqueID(100), collectionID)
-		return []RWChannel{
-			&channelMeta{Name: "ch-b", CollectionID: 100},
-			&channelMeta{Name: "ch-a", CollectionID: 100},
-		}, nil
-	}).Build()
-	defer mockChannels.UnPatch()
-
-	chAPosition := &msgpb.MsgPosition{
-		Timestamp: 100,
-		MsgID:     []byte{1},
-	}
-	chBPosition := &msgpb.MsgPosition{
-		ChannelName: "ch-b",
-		Timestamp:   1000,
-		MsgID:       []byte{2},
-	}
-	mockSeekPosition := mockey.Mock((*ServerHandler).GetChannelSeekPosition).To(func(h *ServerHandler, channel RWChannel, partitionIDs ...UniqueID) *msgpb.MsgPosition {
-		assert.Equal(t, []UniqueID{10, 20}, partitionIDs)
-		switch channel.GetName() {
-		case "ch-a":
-			return chAPosition
-		case "ch-b":
-			return chBPosition
-		default:
-			t.Fatalf("unexpected channel: %s", channel.GetName())
-			return nil
-		}
-	}).Build()
-	defer mockSeekPosition.UnPatch()
-
-	positions, minTs, err := handler.GetSnapshotSeekPositions(context.Background(), 100, 10, 20)
-	require.NoError(t, err)
-	assert.Equal(t, uint64(100), minTs)
-	require.Len(t, positions, 2)
-	assert.Equal(t, "ch-a", positions[0].GetChannelName())
-	assert.Equal(t, uint64(100), positions[0].GetTimestamp())
-	assert.Equal(t, []byte{1}, positions[0].GetMsgID())
-	assert.Equal(t, "ch-b", positions[1].GetChannelName())
-	assert.Equal(t, uint64(1000), positions[1].GetTimestamp())
-	assert.Equal(t, []byte{2}, positions[1].GetMsgID())
-
-	positions[0].Timestamp = 9999
-
-	positions, minTs, err = handler.GetSnapshotSeekPositions(context.Background(), 100, 10, 20)
-	require.NoError(t, err)
-	assert.Equal(t, uint64(100), minTs)
-	require.Len(t, positions, 2)
-	assert.Equal(t, "ch-a", positions[0].GetChannelName())
-	assert.Equal(t, uint64(100), positions[0].GetTimestamp())
-}
-
 func TestGetDeltaLogFromCompactTo(t *testing.T) {
 	t.Run("no compaction children", func(t *testing.T) {
 		svr := newTestServer(t)
@@ -1784,6 +1731,35 @@ func TestGetDeltaLogFromCompactTo(t *testing.T) {
 	})
 }
 
+// testSnapshotBoundary reproduces the boundary these tests used to get
+// implicitly, back when GenSnapshot derived its cut from channel checkpoints.
+// Production takes the boundary from the CreateSnapshot message's own position
+// instead, so this derivation now lives here and nowhere else -- the fixtures
+// only need some boundary supplied consistently, and expressing it in terms the
+// fixtures already set up keeps their expected segment sets unchanged.
+func testSnapshotBoundary(t *testing.T, h *ServerHandler, collectionID int64, partitionIDs ...int64) *SnapshotBoundary {
+	channels, err := h.s.getChannelsByCollectionID(context.Background(), collectionID)
+	require.NoError(t, err)
+	require.NotEmpty(t, channels)
+
+	positions := make([]*msgpb.MsgPosition, 0, len(channels))
+	snapshotTs := uint64(math.MaxUint64)
+	for _, channel := range channels {
+		seekPosition := h.GetChannelSeekPosition(channel, partitionIDs...)
+		require.NotNil(t, seekPosition)
+		cloned := proto.Clone(seekPosition).(*msgpb.MsgPosition)
+		cloned.ChannelName = channel.GetName()
+		if cloned.GetTimestamp() < snapshotTs {
+			snapshotTs = cloned.GetTimestamp()
+		}
+		positions = append(positions, cloned)
+	}
+	sort.Slice(positions, func(i, j int) bool {
+		return positions[i].GetChannelName() < positions[j].GetChannelName()
+	})
+	return &SnapshotBoundary{SeekPositions: positions, SnapshotTs: snapshotTs}
+}
+
 func TestGenSnapshot(t *testing.T) {
 	schema := newTestSchema()
 
@@ -1822,12 +1798,12 @@ func TestGenSnapshot(t *testing.T) {
 	}
 
 	// Setup mocks for other methods
-	mock1 := mockey.Mock((*ServerHandler).GetSnapshotSeekPositions).To(func(h *ServerHandler, ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
-		return []*msgpb.MsgPosition{
+	snapshotBoundary := &SnapshotBoundary{
+		SeekPositions: []*msgpb.MsgPosition{
 			{ChannelName: "dml_0_200v0", Timestamp: 12345, MsgID: []byte{1}},
-		}, uint64(12345), nil
-	}).Build()
-	defer mock1.UnPatch()
+		},
+		SnapshotTs: uint64(12345),
+	}
 
 	mock4 := mockey.Mock((*indexMeta).GetIndexesForCollection).To(func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
 		return []*model.Index{
@@ -1891,12 +1867,16 @@ func TestGenSnapshot(t *testing.T) {
 	defer mock7.UnPatch()
 
 	mock8 := mockey.Mock((*meta).GetCompactionTo).To(func(m *meta, segmentID int64) ([]*SegmentInfo, bool) {
-		return nil, false // No compaction children
+		// (nil, true) is "segment present, no compaction children". The bool
+		// reports whether the segment itself is still in meta, so false would
+		// mean it vanished -- which GenSnapshot now correctly treats as an error
+		// instead of silently capturing unbounded deletes.
+		return nil, true
 	}).Build()
 	defer mock8.UnPatch()
 
 	// Test GenSnapshot
-	snapshotData, err := handler.GenSnapshot(context.Background(), 200)
+	snapshotData, err := handler.GenSnapshot(context.Background(), 200, snapshotBoundary)
 	assert.NoError(t, err)
 	assert.NotNil(t, snapshotData)
 	assert.Equal(t, int64(200), snapshotData.SnapshotInfo.CollectionId)
@@ -1908,6 +1888,126 @@ func TestGenSnapshot(t *testing.T) {
 	assert.Equal(t, int64(1001), snapshotData.Segments[0].SegmentId)
 	// Verify VirtualChannelNames is populated from DescribeCollectionInternal response
 	assert.Equal(t, []string{"dml_0_200v0", "dml_1_200v1"}, snapshotData.Collection.VirtualChannelNames)
+}
+
+// A compaction publishes its output before its inputs go away. Clustering makes
+// that gap wide -- completeClusterCompactionMutation adds only the new segments,
+// and the inputs are not dropped until completeTask has already marked the
+// results visible -- so both generations are capturable at once and the snapshot
+// would carry the same rows twice. Driven through GenSnapshot with a real meta,
+// because mocking SelectSegments away would skip the very filters under test.
+func TestGenSnapshot_CapturesOneGenerationPerLineage(t *testing.T) {
+	const channel = "dml_0_200v0"
+
+	segment := func(id int64, opts ...func(*datapb.SegmentInfo)) *SegmentInfo {
+		info := &datapb.SegmentInfo{
+			ID:            id,
+			CollectionID:  200,
+			PartitionID:   0,
+			InsertChannel: channel,
+			State:         commonpb.SegmentState_Flushed,
+			StartPosition: &msgpb.MsgPosition{Timestamp: 10000},
+			Binlogs:       []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogID: id, LogSize: 100}}}},
+		}
+		for _, opt := range opts {
+			opt(info)
+		}
+		return NewSegmentInfo(info)
+	}
+	clusteringOutput := func(id int64, invisible bool, from ...int64) *SegmentInfo {
+		return segment(id, func(s *datapb.SegmentInfo) {
+			s.CreatedByCompaction = true
+			s.CompactionFrom = from
+			s.IsInvisible = invisible
+			s.Level = datapb.SegmentLevel_L2
+		})
+	}
+
+	capturedIDs := func(t *testing.T, segments ...*SegmentInfo) []int64 {
+		t.Helper()
+
+		realMeta := &meta{ctx: context.Background(), indexMeta: &indexMeta{}, segments: NewSegmentsInfo()}
+		for _, s := range segments {
+			realMeta.segments.SetSegment(s.GetID(), s)
+		}
+
+		mixCoord := mocks2.NewMixCoord(t)
+		mixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Success(), Schema: newTestSchema(), ShardsNum: 1, NumPartitions: 1,
+			CollectionID: 200, VirtualChannelNames: []string{channel},
+		}, nil).Maybe()
+		mixCoord.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+			Status: merr.Success(), PartitionIDs: []int64{0}, PartitionNames: []string{"_default"},
+		}, nil).Maybe()
+
+		handler := &ServerHandler{s: &Server{broker: broker.NewCoordinatorBroker(mixCoord), meta: realMeta}}
+
+		noIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).To(
+			func(*indexMeta, UniqueID, string) []*model.Index { return nil }).Build()
+		defer noIndexes.UnPatch()
+		noSegIndexes := mockey.Mock((*indexMeta).getSegmentIndexes).To(
+			func(*indexMeta, int64, int64) map[int64]*model.SegmentIndex { return nil }).Build()
+		defer noSegIndexes.UnPatch()
+
+		data, err := handler.GenSnapshot(context.Background(), 200, &SnapshotBoundary{
+			SeekPositions: []*msgpb.MsgPosition{{ChannelName: channel, Timestamp: 12345, MsgID: []byte{1}}},
+			SnapshotTs:    12345,
+		})
+		require.NoError(t, err)
+
+		ids := make([]int64, 0, len(data.Segments))
+		for _, s := range data.Segments {
+			ids = append(ids, s.SegmentId)
+		}
+		return ids
+	}
+
+	t.Run("output still invisible: captures the inputs", func(t *testing.T) {
+		// The query path skips an invisible compaction output the same way; the
+		// inputs are what readers are being served from.
+		ids := capturedIDs(t, segment(1), segment(2), clusteringOutput(3, true, 1, 2))
+		assert.ElementsMatch(t, []int64{1, 2}, ids)
+	})
+
+	t.Run("output visible but inputs not yet dropped: still captures the inputs", func(t *testing.T) {
+		// markResultSegmentsVisible has run, markInputSegmentsDropped has not.
+		// Every per-segment filter passes for all three, so only the lineage
+		// walk keeps this from double-counting.
+		ids := capturedIDs(t, segment(1), segment(2), clusteringOutput(3, false, 1, 2))
+		assert.ElementsMatch(t, []int64{1, 2}, ids)
+	})
+
+	t.Run("inputs dropped: captures the output", func(t *testing.T) {
+		dropped := func(s *datapb.SegmentInfo) { s.State = commonpb.SegmentState_Dropped }
+		ids := capturedIDs(t,
+			segment(1, dropped), segment(2, dropped), clusteringOutput(3, false, 1, 2))
+		assert.Equal(t, []int64{3}, ids)
+	})
+
+	t.Run("multi-level chain collapses to the oldest captured generation", func(t *testing.T) {
+		ids := capturedIDs(t, segment(1), segment(2),
+			clusteringOutput(3, false, 1, 2), clusteringOutput(4, false, 3))
+		assert.ElementsMatch(t, []int64{1, 2}, ids)
+	})
+
+	t.Run("still one generation when the lineage dangles", func(t *testing.T) {
+		// The sort of a clustering tmp segment retires that segment atomically
+		// and inherits its invisibility, and GC removes the retired parent once
+		// THIS child is indexed -- per child, while its siblings still build. The
+		// surviving output then points at a segment meta no longer has, so the
+		// lineage walk finds no ancestor and fails open. Only the visibility
+		// filter keeps the duplicate out.
+		ids := capturedIDs(t, segment(1), segment(2),
+			clusteringOutput(9, true, 404 /* parent already GC'd */))
+		assert.ElementsMatch(t, []int64{1, 2}, ids)
+	})
+
+	t.Run("an unpublished compaction output is never captured", func(t *testing.T) {
+		// It is not in the load set any reader sees, it is un-backfilled, and its
+		// inputs are still serving in its place.
+		ids := capturedIDs(t, segment(1), segment(2), clusteringOutput(3, true, 1, 2))
+		assert.ElementsMatch(t, []int64{1, 2}, ids)
+	})
 }
 
 func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
@@ -1954,13 +2054,12 @@ func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
 		}).Build()
 	defer mockShowPartitions.UnPatch()
 
-	mockSeekPositions := mockey.Mock((*ServerHandler).GetSnapshotSeekPositions).To(
-		func(_ *ServerHandler, _ context.Context, _ UniqueID, _ ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
-			return []*msgpb.MsgPosition{
-				{ChannelName: "ch-1", Timestamp: 100, MsgID: []byte{1}},
-			}, uint64(100), nil
-		}).Build()
-	defer mockSeekPositions.UnPatch()
+	snapshotBoundary := &SnapshotBoundary{
+		SeekPositions: []*msgpb.MsgPosition{
+			{ChannelName: "ch-1", Timestamp: 100, MsgID: []byte{1}},
+		},
+		SnapshotTs: uint64(100),
+	}
 
 	mockIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).
 		Return([]*model.Index{}).
@@ -1972,7 +2071,7 @@ func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
 		Build()
 	defer mockSelectSegments.UnPatch()
 
-	snapshotData, err := handler.GenSnapshot(context.Background(), 200)
+	snapshotData, err := handler.GenSnapshot(context.Background(), 200, snapshotBoundary)
 	require.NoError(t, err)
 	require.NotNil(t, snapshotData.Collection)
 	assert.Equal(t, commonpb.ConsistencyLevel_Bounded, snapshotData.Collection.GetConsistencyLevel())
@@ -2040,14 +2139,13 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 		}).Build()
 	defer mockShowPartitions.UnPatch()
 
-	mockSeekPositions := mockey.Mock((*ServerHandler).GetSnapshotSeekPositions).To(
-		func(h *ServerHandler, ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
-			return []*msgpb.MsgPosition{
-				{ChannelName: "ch-1", Timestamp: 100, MsgID: []byte{1}},
-				{ChannelName: "ch-2", Timestamp: 1000, MsgID: []byte{2}},
-			}, uint64(100), nil
-		}).Build()
-	defer mockSeekPositions.UnPatch()
+	snapshotBoundary := &SnapshotBoundary{
+		SeekPositions: []*msgpb.MsgPosition{
+			{ChannelName: "ch-1", Timestamp: 100, MsgID: []byte{1}},
+			{ChannelName: "ch-2", Timestamp: 1000, MsgID: []byte{2}},
+		},
+		SnapshotTs: uint64(100),
+	}
 
 	mockIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).To(
 		func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
@@ -2076,7 +2174,8 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 	defer mockSelectSegments.UnPatch()
 
 	mockCompactionTo := mockey.Mock((*meta).GetCompactionTo).To(func(m *meta, segmentID int64) ([]*SegmentInfo, bool) {
-		return nil, false
+		// present, no children -- see the note in TestGenSnapshot
+		return nil, true
 	}).Build()
 	defer mockCompactionTo.UnPatch()
 
@@ -2086,7 +2185,7 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 		}).Build()
 	defer mockSegmentIndexes.UnPatch()
 
-	snapshotData, err := handler.GenSnapshot(context.Background(), 200)
+	snapshotData, err := handler.GenSnapshot(context.Background(), 200, snapshotBoundary)
 	require.NoError(t, err)
 	require.NotNil(t, snapshotData)
 	require.NotNil(t, snapshotData.SnapshotInfo)
@@ -2242,13 +2341,12 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		}).Build()
 	defer mockShowPartitions.UnPatch()
 
-	mockSeekPositions := mockey.Mock((*ServerHandler).GetSnapshotSeekPositions).To(
-		func(h *ServerHandler, ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
-			return []*msgpb.MsgPosition{
-				{ChannelName: "ch-1", Timestamp: 1000, MsgID: []byte{1}},
-			}, uint64(1000), nil
-		}).Build()
-	defer mockSeekPositions.UnPatch()
+	snapshotBoundary := &SnapshotBoundary{
+		SeekPositions: []*msgpb.MsgPosition{
+			{ChannelName: "ch-1", Timestamp: 1000, MsgID: []byte{1}},
+		},
+		SnapshotTs: uint64(1000),
+	}
 
 	mockIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).To(
 		func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
@@ -2276,7 +2374,8 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	defer mockSelectSegments.UnPatch()
 
 	mockCompactionTo := mockey.Mock((*meta).GetCompactionTo).To(func(m *meta, segmentID int64) ([]*SegmentInfo, bool) {
-		return nil, false
+		// present, no children -- see the note in TestGenSnapshot
+		return nil, true
 	}).Build()
 	defer mockCompactionTo.UnPatch()
 
@@ -2286,7 +2385,7 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		}).Build()
 	defer mockSegmentIndexes.UnPatch()
 
-	snapshotData, err := handler.GenSnapshot(context.Background(), 200)
+	snapshotData, err := handler.GenSnapshot(context.Background(), 200, snapshotBoundary)
 	require.NoError(t, err)
 	require.NotNil(t, snapshotData)
 	require.Len(t, snapshotData.Segments, 1)
@@ -2304,7 +2403,7 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		StorageVersion: storage.StorageV3,
 		ManifestPath:   "invalid",
 	})}
-	snapshotData, err = handler.GenSnapshot(context.Background(), 200)
+	snapshotData, err = handler.GenSnapshot(context.Background(), 200, snapshotBoundary)
 	assert.Nil(t, snapshotData)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 	assert.Contains(t, err.Error(), "invalid manifest path for segment 2004")
@@ -2346,13 +2445,12 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 		}).Build()
 	defer mockShowPartitions.UnPatch()
 
-	mockSeekPositions := mockey.Mock((*ServerHandler).GetSnapshotSeekPositions).To(
-		func(h *ServerHandler, ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
-			return []*msgpb.MsgPosition{
-				{ChannelName: "ch-1", Timestamp: 1000, MsgID: []byte{1}},
-			}, uint64(1000), nil
-		}).Build()
-	defer mockSeekPositions.UnPatch()
+	snapshotBoundary := &SnapshotBoundary{
+		SeekPositions: []*msgpb.MsgPosition{
+			{ChannelName: "ch-1", Timestamp: 1000, MsgID: []byte{1}},
+		},
+		SnapshotTs: uint64(1000),
+	}
 
 	mockIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).To(
 		func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
@@ -2392,7 +2490,7 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 				},
 			})
 
-			snapshotData, err := handler.GenSnapshot(context.Background(), 200)
+			snapshotData, err := handler.GenSnapshot(context.Background(), 200, snapshotBoundary)
 			require.Error(t, err)
 			assert.Nil(t, snapshotData)
 			assert.Contains(t, err.Error(), "missing snapshot channel seek position")
@@ -2520,7 +2618,7 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		},
 	})
 
-	setupHandlerMocks := func(t *testing.T, snapshotTs uint64) (*ServerHandler, []*mockey.Mocker) {
+	setupHandlerMocks := func(t *testing.T, snapshotTs uint64) (*ServerHandler, *SnapshotBoundary, []*mockey.Mocker) {
 		mockIndexMeta := &indexMeta{}
 		mockMeta := &meta{indexMeta: mockIndexMeta}
 
@@ -2548,12 +2646,12 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 
 		var mockers []*mockey.Mocker
 
-		m1 := mockey.Mock((*ServerHandler).GetSnapshotSeekPositions).To(func(h *ServerHandler, ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
-			return []*msgpb.MsgPosition{
+		snapshotBoundary := &SnapshotBoundary{
+			SeekPositions: []*msgpb.MsgPosition{
 				{ChannelName: "dml_0_200v0", Timestamp: snapshotTs, MsgID: []byte{1}},
-			}, snapshotTs, nil
-		}).Build()
-		mockers = append(mockers, m1)
+			},
+			SnapshotTs: snapshotTs,
+		}
 
 		m2 := mockey.Mock((*indexMeta).GetIndexesForCollection).To(func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
 			return []*model.Index{}
@@ -2581,7 +2679,8 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		mockers = append(mockers, m3)
 
 		m4 := mockey.Mock((*meta).GetCompactionTo).To(func(m *meta, segmentID int64) ([]*SegmentInfo, bool) {
-			return nil, false
+			// present, no children -- see the note in TestGenSnapshot
+			return nil, true
 		}).Build()
 		mockers = append(mockers, m4)
 
@@ -2595,17 +2694,17 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		}).Build()
 		mockers = append(mockers, m6)
 
-		return handler, mockers
+		return handler, snapshotBoundary, mockers
 	}
 
 	t.Run("import segment excluded when snapshotTs < commit_timestamp", func(t *testing.T) {
 		// snapshotTs=3000 < commit_ts=5000 → segment must NOT appear
-		handler, mockers := setupHandlerMocks(t, 3000)
+		handler, snapshotBoundary, mockers := setupHandlerMocks(t, 3000)
 		for _, m := range mockers {
 			defer m.UnPatch()
 		}
 
-		snapshotData, err := handler.GenSnapshot(context.Background(), 200)
+		snapshotData, err := handler.GenSnapshot(context.Background(), 200, snapshotBoundary)
 		assert.NoError(t, err)
 		assert.NotNil(t, snapshotData)
 		assert.Equal(t, 0, len(snapshotData.Segments), "segment with commit_ts=5000 must not appear at snapshotTs=3000")
@@ -2613,12 +2712,12 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 
 	t.Run("import segment included when snapshotTs >= commit_timestamp", func(t *testing.T) {
 		// snapshotTs=6000 >= commit_ts=5000 → segment must appear
-		handler, mockers := setupHandlerMocks(t, 6000)
+		handler, snapshotBoundary, mockers := setupHandlerMocks(t, 6000)
 		for _, m := range mockers {
 			defer m.UnPatch()
 		}
 
-		snapshotData, err := handler.GenSnapshot(context.Background(), 200)
+		snapshotData, err := handler.GenSnapshot(context.Background(), 200, snapshotBoundary)
 		assert.NoError(t, err)
 		assert.NotNil(t, snapshotData)
 		assert.Equal(t, 1, len(snapshotData.Segments), "segment with commit_ts=5000 must appear at snapshotTs=6000")

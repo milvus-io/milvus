@@ -135,6 +135,61 @@ func TestCompactionQueue(t *testing.T) {
 	})
 }
 
+// TestSortCompactionPrioritizer pins sort ahead of the compaction each
+// prioritizer would otherwise run next. A sort task is what takes its input off
+// the growing query path, and a snapshot cannot be captured until it lands, so
+// leaving it at the default rank of 1000 put it behind every other compaction
+// under both prioritizers.
+func TestSortCompactionPrioritizer(t *testing.T) {
+	sortTask := &mixCompactionTask{}
+	sortTask.SetTask(&datapb.CompactionTask{
+		PlanID: 4,
+		Type:   datapb.CompactionType_SortCompaction,
+	})
+
+	assert.Equal(t, sortCompactionPriority, LevelPrioritizer(sortTask))
+	assert.Equal(t, sortCompactionPriority, MixFirstPrioritizer(sortTask))
+
+	mixTask := &mixCompactionTask{}
+	mixTask.SetTask(&datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_MixCompaction})
+	l0Task := &l0CompactionTask{}
+	l0Task.SetTask(&datapb.CompactionTask{PlanID: 2, Type: datapb.CompactionType_Level0DeleteCompaction})
+	clusteringTask := &clusteringCompactionTask{}
+	clusteringTask.SetTask(&datapb.CompactionTask{PlanID: 3, Type: datapb.CompactionType_ClusteringCompaction})
+
+	// The queue is a heap, so enqueue order must not decide the outcome: sort
+	// goes in last here, after every task it is expected to overtake.
+	dequeueTypes := func(prioritizer Prioritizer) []datapb.CompactionType {
+		cq := NewCompactionQueue(4, prioritizer)
+		for _, task := range []CompactionTask{mixTask, l0Task, clusteringTask, sortTask} {
+			assert.NoError(t, cq.Enqueue(task))
+		}
+		types := make([]datapb.CompactionType, 0, 4)
+		for {
+			task, err := cq.Dequeue()
+			if err != nil {
+				break
+			}
+			types = append(types, task.GetTaskProto().GetType())
+		}
+		return types
+	}
+
+	assert.Equal(t, []datapb.CompactionType{
+		datapb.CompactionType_Level0DeleteCompaction,
+		datapb.CompactionType_SortCompaction,
+		datapb.CompactionType_MixCompaction,
+		datapb.CompactionType_ClusteringCompaction,
+	}, dequeueTypes(LevelPrioritizer))
+
+	assert.Equal(t, []datapb.CompactionType{
+		datapb.CompactionType_MixCompaction,
+		datapb.CompactionType_SortCompaction,
+		datapb.CompactionType_Level0DeleteCompaction,
+		datapb.CompactionType_ClusteringCompaction,
+	}, dequeueTypes(MixFirstPrioritizer))
+}
+
 func TestBumpSchemaVersionPrioritizer(t *testing.T) {
 	task := &bumpSchemaVersionTask{}
 	task.SetTask(&datapb.CompactionTask{Type: datapb.CompactionType_BumpSchemaVersionCompaction})
