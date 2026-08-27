@@ -93,7 +93,9 @@ func (p *preImportTask) GetTaskSlot() int64 {
 }
 
 // GetTaskResource prices a pre-import by the one base write buffer it holds.
-// Not cached, for the same reason as importTask.GetTaskResource.
+// Not cached, for the same reason as importTask.GetTaskResource: the inputs are
+// three cheap job fields re-read each round, so a cache would buy nothing and
+// would freeze a price the job may still amend before dispatch.
 func (p *preImportTask) GetTaskResource() taskcommon.Resource {
 	job := p.importMeta.GetJob(context.TODO(), p.GetJobID())
 	if job == nil {

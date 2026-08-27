@@ -607,6 +607,28 @@ func (s *DataNodeServicesSuite) TestQuerySlot() {
 		s.Equal(int64(1), resp.GetTotalCpu())
 		s.Equal(int64(2)<<30, resp.GetTotalMemory())
 	})
+
+	s.Run("a zero standalone factor reports as a scalar-only worker", func() {
+		s.SetupTest()
+		cpuMock := mockey.Mock(hardware.GetCPUNum).Return(16).Build()
+		defer cpuMock.UnPatch()
+		memMock := mockey.Mock(hardware.GetMemoryCount).Return(uint64(64) << 30).Build()
+		defer memMock.UnPatch()
+		roleMock := mockey.Mock(paramtable.GetRole).Return(typeutil.StandaloneRole).Build()
+		defer roleMock.UnPatch()
+
+		key := paramtable.Get().DataNodeCfg.StandaloneSlotRatio.Key
+		paramtable.Get().Save(key, "0")
+		defer paramtable.Get().Reset(key)
+
+		resp, err := s.node.QuerySlot(context.Background(), nil)
+		s.NoError(err)
+		s.True(merr.Ok(resp.GetStatus()))
+		// Memory rounds away entirely, which DataCoord reads as "no ledger" and
+		// routes through the scalar slot heap. CPU keeps its one-core floor.
+		s.Equal(int64(0), resp.GetTotalMemory())
+		s.Equal(int64(1), resp.GetTotalCpu())
+	})
 }
 
 func (s *DataNodeServicesSuite) TestDropCompactionPlan() {

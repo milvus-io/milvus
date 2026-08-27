@@ -794,6 +794,18 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 // machine (cgroup-aware) in cluster mode, and the same fraction of it the
 // scalar slots already use in standalone mode, where a QueryNode shares the
 // process.
+//
+// The standalone role and the dataNode.standaloneSlotFactor ratio are applied
+// exactly as index.CalculateNodeSlots applies them to the scalar slot total, so
+// the two reports discount the same machine by the same rule. The one
+// difference is the floor: the scalar total and the CPU here are floored at 1,
+// memory is not, because "one byte" is not a meaningful unit of work.
+//
+// The whole cgroup limit is offered, with no headroom reserved. That is an
+// explicit decision for this version rather than an oversight: the unchanged
+// scalar slot gate still binds first, so nothing is admitted that the
+// pre-existing path would have refused. A configurable headroom ratio is a
+// follow-up if the memory filter turns out to refuse too little.
 func nodeTaskCapacity() taskcommon.Resource {
 	total := taskcommon.Resource{
 		CPU:    int64(hardware.GetCPUNum()),
@@ -801,8 +813,20 @@ func nodeTaskCapacity() taskcommon.Resource {
 	}
 	if paramtable.GetRole() == typeutil.StandaloneRole {
 		ratio := paramtable.Get().DataNodeCfg.StandaloneSlotRatio.GetAsFloat()
+		rawMemory := total.Memory
 		total.CPU = max(int64(float64(total.CPU)*ratio), 1)
 		total.Memory = int64(float64(total.Memory) * ratio)
+		if total.Memory <= 0 {
+			// DataCoord reads total_memory <= 0 as "this worker does not report
+			// its ledger" and places the node through the scalar slot heap. A
+			// ratio of zero (or one small enough to round the machine away)
+			// therefore silently opts the node out of memory-aware placement,
+			// which is worth saying out loud.
+			mlog.Warn(context.TODO(),
+				"standalone-discounted memory total is zero; node reports as a scalar-only worker",
+				mlog.Float64("standaloneSlotFactor", ratio),
+				mlog.Int64("rawMemory", rawMemory))
+		}
 	}
 	return total
 }

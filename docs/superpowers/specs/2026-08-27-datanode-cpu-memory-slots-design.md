@@ -102,8 +102,10 @@ segments also lack `Stats`. Only when the binlog-derived size is 0 (warn log):
 | `minTaskMemory` | 64MB |
 
 The estimate is cached once on the task object (same pattern as
-`slotUsage.Load()` today) and the request builder ships the cached value, so
-what was placed and what was shipped are the same number.
+`slotUsage.Load()` today) and the request builder ships the same value the
+scheduler saw: cached on the task for the nine families that walk meta, a pure
+function of three job fields for import/preimport. Either way, what was placed
+and what was shipped are the same number.
 
 A family that cannot resolve its inputs — nil schema, missing segment, empty or
 invalid index type — returns the floor and is **not** cached, so the next
@@ -131,6 +133,12 @@ answer, not a miss: it is priced at the whole segment (conservative) and cached.
   by `dataNode.standaloneSlotFactor` (the DataNode shares the process with a
   QueryNode). `available = max(total - sum(accepted), 0)`. `available_slots`
   is reported exactly as before.
+- The memory total is the full cgroup limit (standalone: ×
+  `standaloneSlotFactor`). No headroom ratio is reserved in this version: this
+  was an explicit decision (no new config); the unchanged scalar slot gate still
+  binds first, so nothing is admitted that the pre-existing path would have
+  refused. A `dataNode.taskResource.memoryRatio`-style headroom is a follow-up
+  if the memory filter turns out to refuse too little.
 - New gauge `milvus_datanode_task_resource{node_id, type=cpu|memory, state=total|available}`
   (`metrics.DataNodeTaskResource`).
 
@@ -168,8 +176,15 @@ Same rules as PR #52561, implemented thinner:
   Trade-off, stated: ending the round used to reserve the cluster for that task
   implicitly. Without the reservation a steady stream of small tasks can keep
   delaying it, and under memory pressure with slots still free each round
-  examines the whole queue instead of stopping at the first miss. An explicit
+  examines more of the queue instead of stopping at the first miss. An explicit
   reservation or aging mechanism is a follow-up.
+
+  The set-aside scan is capped at `maxDelayedPerRound = 64` tasks per round
+  (shared with the failure-backoff branch, which uses the same slice). The cap
+  bounds both the work of a round and the window in which a set-aside task is
+  in neither queue and therefore invisible to `GetPendingTaskCount` and
+  `AbortAndRemoveTask`. It is a round-trip budget, not a fairness guarantee: a
+  task beyond the cap is simply looked at in a later round.
 
 ## Compatibility
 
@@ -181,6 +196,9 @@ Same rules as PR #52561, implemented thinner:
   "one unplaceable task ends the round" behaviour is gone (see the `NullNodeID`
   is per-task rule above). A cluster with no free slot anywhere still ends the
   round at the first refusal, as before.
+- During a rolling upgrade, dimensioned workers are preferred until their slots
+  are full, then the scalar heap serves the rest; aggregate throughput is
+  preserved, fill order changes.
 
 ## Testing
 
