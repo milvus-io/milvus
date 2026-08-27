@@ -2708,3 +2708,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImpl<int64_t>(
 
 }  //namespace exec
 }  // namespace milvus
+
+#undef BinaryArithRangeJSONCompare
+#undef BinaryArithRangeJONCompareArrayLength
+#undef BinaryArithRangeArrayCompare

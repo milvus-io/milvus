@@ -804,3 +804,7 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
 
 }  //namespace exec
 }  // namespace milvus
+
+#undef GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON
+#undef GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON_DISTANCE
+#undef GEOMETRY_EXECUTE_SUB_BATCH_UNARY
