@@ -206,6 +206,100 @@ def post_build(conanfile, **kwargs):
     _saved_env.clear()
 HOOK_EOF
 
+# ---------------------------------------------------------------------------
+# Build-host fingerprint validation
+# ---------------------------------------------------------------------------
+# Prevents cross-microarchitecture cache pollution that causes SIGILL.
+#
+# Background: the Conan local cache (and ccache) may contain binaries that
+# were compiled on a host with a newer instruction set (e.g. AMD Zen4/c8a
+# with AVX-512).  When those cached artifacts are reused on a host with an
+# older ISA (e.g. AMD Zen3/c6a, no AVX-512), any code path that executes
+# the newer instructions crashes with SIGILL at run time.
+#
+# This check writes a fingerprint of the current build host into the Conan
+# cache directory.  On every build, the stored fingerprint is compared to
+# the current host; on mismatch, the Conan package cache and ccache are
+# cleared before any dependency resolution happens, forcing a clean
+# rebuild that is safe for the current CPU.
+# ---------------------------------------------------------------------------
+function milvus_host_fingerprint() {
+    local os arch cpu_model has_avx512 has_avx2
+    os="$(uname -s)"
+    arch="$(uname -m)"
+
+    if [[ "$os" == "Darwin" ]]; then
+        cpu_model="$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo 'unknown')"
+        has_avx512="n/a"
+        has_avx2="n/a"
+    elif [[ "$os" == "Linux" && -r /proc/cpuinfo ]]; then
+        cpu_model="$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | xargs)"
+        [[ -z "$cpu_model" ]] && cpu_model="unknown"
+        if grep -qm1 'avx512f' /proc/cpuinfo; then has_avx512="yes"; else has_avx512="no"; fi
+        if grep -qm1 'avx2'    /proc/cpuinfo; then has_avx2="yes";    else has_avx2="no";    fi
+    else
+        cpu_model="unknown"
+        has_avx512="n/a"
+        has_avx2="n/a"
+    fi
+
+    echo "${os}|${arch}|${cpu_model}|avx512=${has_avx512}|avx2=${has_avx2}"
+}
+
+function milvus_host_fingerprint_check() {
+    local conan_home tag_file current_fp cached_fp
+
+    conan_home="${CONAN_HOME_DIR:-$HOME/.conan2}"
+    tag_file="${conan_home}/.milvus_build_host_tag"
+    current_fp="$(milvus_host_fingerprint)"
+
+    if [[ ! -f "$tag_file" ]]; then
+        # First run on this cache volume: we have no record of which host
+        # populated the existing cache.  The cache may contain binaries from
+        # a previous (possibly different) CPU.  Clear it to guarantee a
+        # safe rebuild, then stamp the current host.
+        echo "============================================================"
+        echo "[milvus-ci] No host tag found on this Conan cache."
+        echo "[milvus-ci] Existing cache is untrusted (may contain binaries"
+        echo "[milvus-ci] compiled on a different CPU architecture)."
+        echo "[milvus-ci] Clearing Conan package cache and ccache..."
+        echo "============================================================"
+
+        rm -rf "${conan_home}/p" 2>/dev/null || true
+        if command -v ccache &>/dev/null; then
+            ccache --clear 2>/dev/null || true
+        fi
+    else
+        cached_fp="$(cat "$tag_file" 2>/dev/null || true)"
+        if [[ -n "$cached_fp" && "$cached_fp" != "$current_fp" ]]; then
+            echo "============================================================"
+            echo "[milvus-ci] WARNING: Conan cache host mismatch detected"
+            echo "[milvus-ci]   cached host : ${cached_fp}"
+            echo "[milvus-ci]   current host: ${current_fp}"
+            echo "[milvus-ci] The local cache was populated on a different CPU."
+            echo "[milvus-ci] Reusing it risks SIGILL from newer instructions."
+            echo "[milvus-ci] Clearing Conan package cache and ccache..."
+            echo "============================================================"
+
+            # Remove Conan package binaries (keeps profiles, remotes, hooks)
+            rm -rf "${conan_home}/p" 2>/dev/null || true
+
+            # Clear ccache if present
+            if command -v ccache &>/dev/null; then
+                ccache --clear 2>/dev/null || true
+            fi
+        fi
+    fi
+
+    # Always (re)write the tag with the current host fingerprint.
+    mkdir -p "$conan_home"
+    echo "$current_fp" > "$tag_file"
+    echo "[milvus-ci] Build host fingerprint: ${current_fp}"
+}
+
+# Run validation before any dependency resolution.
+milvus_host_fingerprint_check
+
 unameOut="$(uname -s)"
 case "${unameOut}" in
   Darwin*)
