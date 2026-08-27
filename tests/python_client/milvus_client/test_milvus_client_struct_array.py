@@ -2076,6 +2076,23 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         res, check = self.load_collection(client, collection_name)
         assert check
 
+        trailing_results, check = self.query(
+            client,
+            collection_name,
+            filter=f"id in [{non_empty_rows - 1}, {total_rows - 2}, {total_rows - 1}]",
+            output_fields=["id", "clips"],
+        )
+        assert check
+        assert len(trailing_results) == 3
+        trailing_results_by_id = {row["id"]: row["clips"] for row in trailing_results}
+        assert len(trailing_results_by_id[non_empty_rows - 1]) == 1
+        np.testing.assert_allclose(
+            trailing_results_by_id[non_empty_rows - 1][0]["embedding"],
+            vectors[non_empty_rows - 1],
+        )
+        assert trailing_results_by_id[total_rows - 2] == []
+        assert trailing_results_by_id[total_rows - 1] == []
+
         search_tensor = EmbeddingList()
         search_tensor.add(vectors[0])
         results, check = self.search(
