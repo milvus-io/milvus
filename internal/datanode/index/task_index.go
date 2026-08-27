@@ -60,6 +60,7 @@ type indexBuildTask struct {
 	tr             *timerecord.TimeRecorder
 	queueDur       time.Duration
 	manager        *TaskManager
+	resource       taskcommon.Resource
 
 	pluginContext *indexcgopb.StoragePluginContext
 }
@@ -70,6 +71,7 @@ func NewIndexBuildTask(ctx context.Context,
 	cm storage.ChunkManager,
 	manager *TaskManager,
 	pluginContext *indexcgopb.StoragePluginContext,
+	resource taskcommon.Resource,
 ) *indexBuildTask {
 	t := &indexBuildTask{
 		ident:         fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetBuildID()),
@@ -80,6 +82,7 @@ func NewIndexBuildTask(ctx context.Context,
 		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.GetBuildID(), req.GetClusterID())),
 		manager:       manager,
 		pluginContext: pluginContext,
+		resource:      resource,
 	}
 
 	t.parseParams()
@@ -159,7 +162,7 @@ func (it *indexBuildTask) GetSlot() int64 {
 }
 
 func (it *indexBuildTask) GetResource() taskcommon.Resource {
-	return taskcommon.Resource{CPU: it.req.GetCpu(), Memory: it.req.GetMemory()}
+	return it.resource
 }
 
 func (it *indexBuildTask) IsVectorIndex() bool {

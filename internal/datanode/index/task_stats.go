@@ -78,6 +78,8 @@ type statsTask struct {
 
 	pluginContext *indexcgopb.StoragePluginContext
 
+	resource taskcommon.Resource
+
 	logIDOffset  int64
 	currentTime  time.Time
 	manifestPath string // current manifest version, updated after each AddStatsToManifest
@@ -96,6 +98,7 @@ func NewStatsTask(ctx context.Context,
 	manager *TaskManager,
 	cm storage.ChunkManager,
 	pluginContext *indexcgopb.StoragePluginContext,
+	resource taskcommon.Resource,
 ) *statsTask {
 	return &statsTask{
 		ident:         fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
@@ -109,6 +112,7 @@ func NewStatsTask(ctx context.Context,
 		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
 		currentTime:   tsoutil.PhysicalTime(req.GetCurrentTs()),
 		logIDOffset:   0,
+		resource:      resource,
 	}
 }
 
@@ -145,7 +149,7 @@ func (st *statsTask) GetSlot() int64 {
 }
 
 func (st *statsTask) GetResource() taskcommon.Resource {
-	return taskcommon.Resource{CPU: st.req.GetCpu(), Memory: st.req.GetMemory()}
+	return st.resource
 }
 
 func (st *statsTask) IsVectorIndex() bool {

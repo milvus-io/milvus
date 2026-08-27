@@ -230,7 +230,8 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		}
 	}()
 	// Execute task creation
-	if err = cluster.CreateStats(nodeID, req); err != nil {
+	resource := st.GetTaskResource()
+	if err = cluster.CreateStats(nodeID, req, resource); err != nil {
 		log.Warn(context.TODO(), "failed to create stats task on worker", mlog.Err(err))
 		return
 	}
@@ -493,7 +494,6 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 	}
 
 	// Create the request
-	resource := st.GetTaskResource()
 	req := &workerpb.CreateStatsRequest{
 		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
 		TaskID:          st.GetTaskID(),
@@ -514,8 +514,6 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		EnableJsonKeyStats:               Params.CommonCfg.EnabledJSONKeyStats.GetAsBool(),
 		JsonKeyStatsDataFormat:           common.JSONStatsDataFormatVersion,
 		TaskSlot:                         st.taskSlot,
-		Cpu:                              resource.CPU,
-		Memory:                           resource.Memory,
 		StorageVersion:                   segment.StorageVersion,
 		CurrentScalarIndexVersion:        st.ievm.ResolveScalarIndexVersion(),
 		JsonStatsMaxShreddingColumns:     Params.DataCoordCfg.JSONStatsMaxShreddingColumns.GetAsInt64(),

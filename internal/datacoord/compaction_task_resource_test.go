@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -124,9 +125,11 @@ func TestCompactionTaskResource_ClusteringAndBump(t *testing.T) {
 	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 1024 * testMiB}, bump.GetTaskResource())
 }
 
-// TestCompactionTaskResource_RequestCarriesEstimate proves the plan the worker
-// receives ships exactly what GetTaskResource priced, for every compaction
-// family whose plan is buildable without a full meta.
+// TestCompactionTaskResource_RequestCarriesEstimate proves the dispatch the
+// worker receives ships exactly what GetTaskResource priced, for every
+// compaction family whose plan is buildable without a full meta. The estimate
+// travels in the CreateTask properties, not in the plan, so the assertion is on
+// the argument handed to session.Cluster.CreateCompaction.
 func TestCompactionTaskResource_RequestCarriesEstimate(t *testing.T) {
 	paramtable.Init()
 
@@ -143,6 +146,20 @@ func TestCompactionTaskResource_RequestCarriesEstimate(t *testing.T) {
 		return alloc
 	}
 
+	// dispatched runs the task's real CreateTaskOnWorker against a mock cluster
+	// and returns the resource it handed to CreateCompaction.
+	dispatched := func(t *testing.T, task CompactionTask) taskcommon.Resource {
+		var placed taskcommon.Resource
+		cluster := session.NewMockCluster(t)
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(_ int64, _ *datapb.CompactionPlan, _ int64, resource taskcommon.Resource) error {
+				placed = resource
+				return nil
+			})
+		task.CreateTaskOnWorker(1, cluster)
+		return placed
+	}
+
 	t.Run("mix", func(t *testing.T) {
 		meta := NewMockCompactionMeta(t)
 		meta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(
@@ -151,9 +168,8 @@ func TestCompactionTaskResource_RequestCarriesEstimate(t *testing.T) {
 			PlanID: 1, Type: datapb.CompactionType_MixCompaction, InputSegments: []int64{10},
 			Schema: &schemapb.CollectionSchema{Version: 1},
 		}, newAlloc(t), meta, newMockVersionManager())
-		plan, err := task.BuildCompactionRequest()
-		assert.NoError(t, err)
-		assert.Equal(t, task.GetTaskResource(), taskcommon.Resource{CPU: plan.GetCpu(), Memory: plan.GetMemory()})
+		meta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+		assert.Equal(t, task.GetTaskResource(), dispatched(t, task))
 	})
 
 	t.Run("sort", func(t *testing.T) {
@@ -164,24 +180,27 @@ func TestCompactionTaskResource_RequestCarriesEstimate(t *testing.T) {
 			PlanID: 1, Type: datapb.CompactionType_SortCompaction, InputSegments: []int64{10},
 			Schema: &schemapb.CollectionSchema{Version: 1},
 		}, newAlloc(t), meta, newMockVersionManager())
-		plan, err := task.BuildCompactionRequest()
-		assert.NoError(t, err)
+		meta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 		assert.Equal(t, statsTaskResource(2048), task.GetTaskResource())
-		assert.Equal(t, task.GetTaskResource(), taskcommon.Resource{CPU: plan.GetCpu(), Memory: plan.GetMemory()})
+		assert.Equal(t, task.GetTaskResource(), dispatched(t, task))
 	})
 
 	t.Run("l0", func(t *testing.T) {
 		meta := NewMockCompactionMeta(t)
 		meta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(
 			func(_ context.Context, segID int64) *SegmentInfo { return newSegment(segID) })
-		meta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		// A target L1 segment, so the plan is a real compaction rather than the
+		// fast-finish path that never reaches the worker.
+		meta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return(
+			[]*SegmentInfo{{SegmentInfo: &datapb.SegmentInfo{
+				ID: 11, Level: datapb.SegmentLevel_L1, InsertChannel: "ch-1",
+			}}}).Maybe()
 		task := newL0CompactionTask(&datapb.CompactionTask{
 			PlanID: 1, Type: datapb.CompactionType_Level0DeleteCompaction, InputSegments: []int64{10},
 			Channel: "ch-1", Schema: &schemapb.CollectionSchema{Version: 1},
 		}, newAlloc(t), meta)
-		plan, err := task.BuildCompactionRequest()
-		assert.NoError(t, err)
-		assert.Equal(t, task.GetTaskResource(), taskcommon.Resource{CPU: plan.GetCpu(), Memory: plan.GetMemory()})
+		meta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+		assert.Equal(t, task.GetTaskResource(), dispatched(t, task))
 	})
 
 	t.Run("bumpSchemaVersion", func(t *testing.T) {
@@ -192,8 +211,7 @@ func TestCompactionTaskResource_RequestCarriesEstimate(t *testing.T) {
 			PlanID: 1, Type: datapb.CompactionType_BumpSchemaVersionCompaction, InputSegments: []int64{10},
 			Schema: &schemapb.CollectionSchema{Version: 1},
 		}, newAlloc(t), meta, newMockVersionManager())
-		plan, err := task.BuildCompactionRequest()
-		assert.NoError(t, err)
-		assert.Equal(t, task.GetTaskResource(), taskcommon.Resource{CPU: plan.GetCpu(), Memory: plan.GetMemory()})
+		meta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+		assert.Equal(t, task.GetTaskResource(), dispatched(t, task))
 	})
 }

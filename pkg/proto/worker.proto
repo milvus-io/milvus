@@ -117,9 +117,6 @@ message CreateJobRequest {
   // Path format version for index files on object storage.
   // See milvus.proto.index.IndexStorePathVersion for value semantics.
   index.IndexStorePathVersion index_store_path_version = 36;
-  // Estimated by DataCoord; the worker books these on accept and releases on completion.
-  int64 cpu = 37;
-  int64 memory = 38; // bytes
 }
 
 message QueryJobsRequest {
@@ -173,9 +170,6 @@ message AnalyzeRequest {
   int64 max_cluster_size = 17;
   int64 task_slot = 18;
   repeated common.KeyValuePair plugin_context = 19;
-  // Estimated by DataCoord; the worker books these on accept and releases on completion.
-  int64 cpu = 20;
-  int64 memory = 21; // bytes
 }
 
 message CreateStatsRequest {
@@ -216,9 +210,6 @@ message CreateStatsRequest {
   int64 json_stats_write_batch_size = 30;
   string manifest_path = 31;
   repeated internal.FileResourceInfo file_resources = 32;
-  // Estimated by DataCoord; the worker books these on accept and releases on completion.
-  int64 cpu = 33;
-  int64 memory = 34; // bytes
 }
 
 message CreateJobV2Request {

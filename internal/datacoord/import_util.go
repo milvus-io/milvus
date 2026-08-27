@@ -290,7 +290,6 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 			return fileStats.GetImportFile()
 		})
 
-	resource := task.GetTaskResource()
 	req := &datapb.PreImportRequest{
 		JobID:         task.GetJobID(),
 		TaskID:        task.GetTaskID(),
@@ -301,8 +300,6 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 		ImportFiles:   importFiles,
 		Options:       job.GetOptions(),
 		TaskSlot:      task.GetTaskSlot(),
-		Cpu:           resource.CPU,
-		Memory:        resource.Memory,
 		StorageConfig: createStorageConfig(),
 		PluginContext: GetReadPluginContext(job.GetOptions()),
 	}
@@ -368,7 +365,6 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	storageVersion := importStorageVersion(isL0Import)
 	useLoonFFI := importUseLoonFFI(isL0Import)
 
-	resource := task.GetTaskResource()
 	req := &datapb.ImportRequest{
 		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
 		JobID:           task.GetJobID(),
@@ -384,8 +380,6 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		RequestSegments: requestSegments,
 		StorageConfig:   createStorageConfig(),
 		TaskSlot:        task.GetTaskSlot(),
-		Cpu:             resource.CPU,
-		Memory:          resource.Memory,
 		StorageVersion:  storageVersion,
 		PluginContext:   GetReadPluginContext(job.GetOptions()),
 		UseLoonFfi:      useLoonFFI,

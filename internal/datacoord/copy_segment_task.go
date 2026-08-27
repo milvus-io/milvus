@@ -362,7 +362,8 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 		}
 		return
 	}
-	err = cluster.CreateCopySegment(nodeID, req, t.GetCollectionId(), job.GetExternal())
+	resource := t.GetTaskResource()
+	err = cluster.CreateCopySegment(nodeID, req, t.GetCollectionId(), job.GetExternal(), resource)
 	if err != nil {
 		mlog.Warn(ctx, "failed to create copy segment task on datanode",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
@@ -812,7 +813,6 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		targets = append(targets, target)
 	}
 
-	resource := task.GetTaskResource()
 	return &datapb.CopySegmentRequest{
 		ClusterID:     Params.CommonCfg.ClusterPrefix.GetValue(),
 		JobID:         task.GetJobId(),
@@ -821,8 +821,6 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		Targets:       targets,
 		StorageConfig: storageConfig,
 		TaskSlot:      task.GetTaskSlot(),
-		Cpu:           resource.CPU,
-		Memory:        resource.Memory,
 		ExternalSpec:  job.GetExternalSpec(),
 	}, nil
 }

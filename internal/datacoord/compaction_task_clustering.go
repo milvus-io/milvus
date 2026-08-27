@@ -352,7 +352,6 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 	if err != nil {
 		return nil, err
 	}
-	resource := t.GetTaskResource()
 	plan := &datapb.CompactionPlan{
 		PlanID:                    taskProto.GetPlanID(),
 		StartTime:                 taskProto.GetStartTime(),
@@ -370,8 +369,6 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		PreAllocatedSegmentIDs:    taskProto.GetPreAllocatedSegmentIDs(),
 		PreAllocatedLogIDs:        logIDRange,
 		SlotUsage:                 t.GetSlotUsage(),
-		Cpu:                       resource.CPU,
-		Memory:                    resource.Memory,
 		MaxSize:                   taskProto.GetMaxSize(),
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
@@ -780,7 +777,8 @@ func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 		mlog.Warn(context.TODO(), "Failed to BuildCompactionRequest", mlog.Err(err))
 		return err
 	}
-	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID())
+	resource := t.GetTaskResource()
+	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		originNodeID := t.GetTaskProto().GetNodeID()
 		mlog.Warn(context.TODO(), "Failed to notify compaction tasks to DataNode",

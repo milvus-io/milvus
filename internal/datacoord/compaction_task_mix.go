@@ -116,7 +116,8 @@ func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 		return
 	}
 
-	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
+	resource := t.GetTaskResource()
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		// Compaction tasks may be refused by DataNode because of slot limit. In this case, the node id is reset
 		//  to enable a retry in compaction.checkCompaction().
@@ -380,7 +381,6 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 	if err != nil {
 		return nil, err
 	}
-	resource := t.GetTaskResource()
 	plan := &datapb.CompactionPlan{
 		PlanID:                    taskProto.GetPlanID(),
 		StartTime:                 taskProto.GetStartTime(),
@@ -391,8 +391,6 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		Schema:                    taskSchema,
 		PreAllocatedSegmentIDs:    taskProto.GetPreAllocatedSegmentIDs(),
 		SlotUsage:                 t.GetSlotUsage(),
-		Cpu:                       resource.CPU,
-		Memory:                    resource.Memory,
 		MaxSize:                   taskProto.GetMaxSize(),
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),

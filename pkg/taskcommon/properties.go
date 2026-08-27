@@ -32,6 +32,8 @@ const (
 	TypeKey         = "task_type"
 	SubTypeKey      = "task_sub_type" // optional, only for Stats
 	SlotKey         = "task_slot"
+	CPUKey          = "task_cpu"     // optional, absent from a coordinator that predates it
+	MemoryKey       = "task_memory"  // optional, absent from a coordinator that predates it
 	NumRowsKey      = "num_row"      // optional, only for Index, Stats
 	TaskVersionKey  = "task_version" // optional, only for Index, Stats and Analyze
 	CollectionIDKey = "collection_id"
@@ -82,6 +84,13 @@ func (p Properties) AppendSubType(subType string) {
 
 func (p Properties) AppendTaskSlot(slot int64) {
 	p[SlotKey] = fmt.Sprintf("%d", slot)
+}
+
+// AppendTaskResource carries DataCoord's estimate of what the task will occupy
+// on the worker for its whole run, alongside the scalar slot.
+func (p Properties) AppendTaskResource(r Resource) {
+	p[CPUKey] = fmt.Sprintf("%d", r.CPU)
+	p[MemoryKey] = fmt.Sprintf("%d", r.Memory)
 }
 
 func (p Properties) AppendNumRows(rows int64) {
@@ -183,6 +192,28 @@ func (p Properties) GetTaskSlot() (int64, error) {
 		return 0, WrapErrTaskPropertyLack(SlotKey, p[TaskIDKey])
 	}
 	return strconv.ParseInt(p[SlotKey], 10, 64)
+}
+
+// GetTaskResource reads the estimate DataCoord attached to the task. Unlike the
+// other request properties, absence is not a protocol violation: a coordinator
+// that predates these keys sets neither, and the worker then books zero for the
+// task, which is the compatibility case this codepath exists for. A key that is
+// present but unparsable is a real error and is returned as one.
+func (p Properties) GetTaskResource() (Resource, error) {
+	cpuStr, cpuOK := p[CPUKey]
+	memoryStr, memoryOK := p[MemoryKey]
+	if !cpuOK || !memoryOK {
+		return Resource{}, nil
+	}
+	cpu, err := strconv.ParseInt(cpuStr, 10, 64)
+	if err != nil {
+		return Resource{}, err
+	}
+	memory, err := strconv.ParseInt(memoryStr, 10, 64)
+	if err != nil {
+		return Resource{}, err
+	}
+	return Resource{CPU: cpu, Memory: memory}, nil
 }
 
 func (p Properties) GetNumRows() int64 {

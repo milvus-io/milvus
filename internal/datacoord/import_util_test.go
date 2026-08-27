@@ -249,8 +249,6 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	assert.Equal(t, pt.GetCollectionID(), preimportReq.GetCollectionID())
 	assert.Equal(t, job.GetPartitionIDs(), preimportReq.GetPartitionIDs())
 	assert.Equal(t, job.GetVchannels(), preimportReq.GetVchannels())
-	// The request ships exactly what the scheduler placed the task on.
-	assert.Equal(t, pt.GetTaskResource(), taskcommon.Resource{CPU: preimportReq.GetCpu(), Memory: preimportReq.GetMemory()})
 
 	importTaskProto := &datapb.ImportTaskV2{
 		JobID:        0,
@@ -300,7 +298,6 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, task.GetJobID(), importReq.GetJobID())
 	assert.Equal(t, task.GetTaskID(), importReq.GetTaskID())
-	assert.Equal(t, task.GetTaskResource(), taskcommon.Resource{CPU: importReq.GetCpu(), Memory: importReq.GetMemory()})
 	assert.Equal(t, task.GetCollectionID(), importReq.GetCollectionID())
 	assert.Equal(t, job.GetPartitionIDs(), importReq.GetPartitionIDs())
 	assert.Equal(t, job.GetVchannels(), importReq.GetVchannels())

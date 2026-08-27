@@ -24,7 +24,7 @@ Non-goals:
 
 ```
 DataCoord                                          DataNode
-task.GetTaskResource() -> {cpu, memory}  --(each request carries cpu+memory)-->  ledger.Accept(id, cpu, mem)
+task.GetTaskResource() -> {cpu, memory}  --(CreateTask properties: task_cpu/task_memory)-->  ledger.Accept(id, cpu, mem)
         |                                                                          ...task runs under the existing pools...
         v                                                                          ledger.Release(id)
 pickNode (2-D)  <--(QuerySlot: total/available cpu+memory)--                       available = total - sum(accepted)
@@ -32,10 +32,12 @@ pickNode (2-D)  <--(QuerySlot: total/available cpu+memory)--                    
 
 - Estimation lives only in DataCoord: every task family implements
   `GetTaskResource() taskcommon.Resource` next to the existing `GetTaskSlot()`.
-- DataNode only does bookkeeping: whatever cpu/memory the request carries is
-  added on accept and subtracted on completion, at exactly the points where the
-  scalar `usingSlots` is added and subtracted today. A request without the
-  fields (old coordinator) books zero.
+- DataNode only does bookkeeping: whatever cpu/memory the CreateTask properties
+  carry is added on accept and subtracted on completion, at exactly the points
+  where the scalar `usingSlots` is added and subtracted today. The worker never
+  recomputes an estimate, and never reads one off the request payload — the
+  handler resolves it once and passes it down as a parameter. A request without
+  the properties (old coordinator) books zero.
 - The old scalar chain (`GetTaskSlot`, `slot_usage`/`task_slot`,
   `available_slots`, the max-heap `pickNode`) is untouched.
 
@@ -44,14 +46,30 @@ pickNode (2-D)  <--(QuerySlot: total/available cpu+memory)--                    
 | message | new fields |
 |---|---|
 | `datapb.QuerySlotResponse` | `int64 total_cpu`, `int64 available_cpu`, `int64 total_memory`, `int64 available_memory` (memory in bytes) |
-| `datapb.CompactionPlan` | `int64 cpu`, `int64 memory` |
-| `workerpb.CreateJobRequest` (index), `workerpb.AnalyzeRequest`, `workerpb.CreateStatsRequest` | `int64 cpu`, `int64 memory` |
-| `datapb.PreImportRequest`, `datapb.ImportRequest`, `datapb.CopySegmentRequest` | `int64 cpu`, `int64 memory` |
 
-`RefreshExternalCollectionTaskRequest` is not extended: the DataNode does not
-count that task in its slot report today (QuerySlot sums index, compaction and
-import only) and that stays as is. DataCoord still charges it 1 CPU / 64MB
-within a scheduling round.
+That is the only proto change. The worker's report needs fixed fields because
+it is a response the coordinator reads directly; a per-task estimate does not.
+
+Every task request carries its estimate as
+`workerpb.CreateTaskRequest.properties["task_cpu"]` and `["task_memory"]` —
+the same `taskcommon.Properties` map that already carries `task_slot`,
+`task_type` and `collection_id`. `session.Cluster.Create*` sets both next to
+its existing `AppendTaskSlot`, from the `taskcommon.Resource` its caller passes
+in; the worker's `CreateTask` handler reads them once with
+`Properties.GetTaskResource()` and threads the value to the executor that books
+it. The request payload protos — `CompactionPlan`, `CreateJobRequest`,
+`AnalyzeRequest`, `CreateStatsRequest`, `PreImportRequest`, `ImportRequest`,
+`CopySegmentRequest` — are unchanged.
+
+One consequence worth naming: because DataCoord reads its own estimate once per
+dispatch and hands that same value to `Create*`, "what the scheduler placed the
+task on" and "what the worker books" are the same variable by construction,
+not two independently computed numbers that have to be kept in step.
+
+`RefreshExternalCollectionTaskRequest` gets no estimate at all: the DataNode
+does not count that task in its slot report today (QuerySlot sums index,
+compaction and import only) and that stays as is. DataCoord still charges it
+1 CPU / 64MB within a scheduling round.
 
 ## DataCoord estimation
 
@@ -195,9 +213,17 @@ Same rules as PR #52561, implemented thinner:
 ## Compatibility
 
 - New DataCoord + old DataNode: no new fields in the report, so the scalar
-  heap is used; extra request fields are ignored by the old worker.
-- Old DataCoord + new DataNode: requests carry no cpu/memory, the ledger books
-  zero, `available == total`; the old coordinator never reads the new fields.
+  heap is used; the extra `task_cpu` / `task_memory` properties are unknown
+  keys the old worker simply ignores.
+- Old DataCoord + new DataNode: the properties carry neither key, so
+  `GetTaskResource` returns the zero resource with no error, the ledger books
+  zero and `available == total`. Absence is the compatibility case, not a
+  protocol violation, so it must not be reported as one — unlike `task_slot`,
+  a missing `task_cpu` never fails the task. A key that is present but
+  unparsable is a real error and does fail the `CreateTask` call.
+- The pre-`CreateTask` RPCs (`PreImport`, `ImportV2`, `CompactionV2`,
+  `CreateJob`, `CreateJobV2`) carry no properties at all; a coordinator
+  reaching them books zero for the same reason.
 - Scheduling semantics do change for an all-dimensioned cluster: the old
   "one unplaceable task ends the round" behaviour is gone (see the `NullNodeID`
   is per-task rule above). A cluster with no room anywhere — no free memory on
@@ -227,3 +253,6 @@ Same rules as PR #52561, implemented thinner:
 3. `enhance: estimate cpu/memory for every DataCoord task type`
 4. `enhance: DataNode reports cpu/memory ledger in QuerySlot`
 5. `enhance: place tasks on cpu/memory when workers report them`
+6. `enhance: carry task cpu/memory in CreateTask properties, not proto fields`
+   — supersedes the per-request proto fields added in (1); only
+   `QuerySlotResponse` keeps its new fields.

@@ -355,7 +355,8 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	}()
 
 	// Send request to worker
-	if err = cluster.CreateIndex(nodeID, req); err != nil {
+	resource := it.GetTaskResource()
+	if err = cluster.CreateIndex(nodeID, req, resource); err != nil {
 		log.Warn(ctx, "failed to send job to worker", mlog.Err(err))
 		return
 	}
@@ -593,7 +594,6 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	// IndexStorePathVersion; C++ indexbuilder assembles the remote prefix locally.
 	// external_source is passed raw (AWS-form or Milvus-form). C++ indexbuilder
 	// InjectExternalSpecProperties handles Tier-1/2 endpoint derivation + AWS-form swap.
-	resource := it.GetTaskResource()
 	req := &workerpb.CreateJobRequest{
 		ClusterID:                 Params.CommonCfg.ClusterPrefix.GetValue(),
 		IndexFilePrefix:           path.Join(it.chunkManager.RootPath(), common.SegmentIndexV0Path),
@@ -619,8 +619,6 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		PartitionKeyIsolation:     partitionKeyIsolation,
 		StorageVersion:            segment.GetStorageVersion(),
 		TaskSlot:                  it.taskSlot,
-		Cpu:                       resource.CPU,
-		Memory:                    resource.Memory,
 		LackBinlogRows:            segIndex.NumRows - totalRows,
 		InsertLogs:                segment.GetBinlogs(),
 		Manifest:                  segment.GetManifestPath(),

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -115,7 +116,7 @@ func (s *L0ImportSuite) TestL0PreImport() {
 		Schema:       s.schema,
 		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy-prefix"}}},
 	}
-	task := NewL0PreImportTask(req, s.manager, s.cm)
+	task := NewL0PreImportTask(req, s.manager, s.cm, taskcommon.Resource{})
 	s.manager.Add(task)
 	fu := task.Execute()
 	err := conc.AwaitAll(fu...)
@@ -170,7 +171,7 @@ func (s *L0ImportSuite) TestL0Import() {
 			End:   int64(s.delCnt),
 		},
 	}
-	task := NewL0ImportTask(req, s.manager, s.syncMgr, s.cm)
+	task := NewL0ImportTask(req, s.manager, s.syncMgr, s.cm, taskcommon.Resource{})
 	s.manager.Add(task)
 	fu := task.Execute()
 	err := conc.AwaitAll(fu...)
@@ -230,7 +231,7 @@ func (s *L0ImportSuite) TestL0ImportForcesStorageV2ForSyncTask() {
 			End:   int64(s.delCnt),
 		},
 	}
-	task = NewL0ImportTask(req, s.manager, s.syncMgr, s.cm).(*L0ImportTask)
+	task = NewL0ImportTask(req, s.manager, s.syncMgr, s.cm, taskcommon.Resource{}).(*L0ImportTask)
 
 	futures, syncTasks, err := task.syncDelete([]*storage.DeleteData{s.deleteData})
 	s.NoError(err)

@@ -117,7 +117,7 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 	task := s.generateBasicTask(false)
 
 	cluster := session.NewMockCluster(s.T())
-	cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	task.CreateTaskOnWorker(1, cluster)
 
 	seg11 := s.meta.GetSegment(context.TODO(), 101)
@@ -488,7 +488,7 @@ func (s *ClusteringCompactionTaskSuite) TestCreateTaskOnWorker() {
 		})
 		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining))
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		task.CreateTaskOnWorker(1, cluster)
 		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
 	})

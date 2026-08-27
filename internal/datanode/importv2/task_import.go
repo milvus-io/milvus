@@ -48,6 +48,7 @@ type ImportTask struct {
 	cancel       context.CancelFunc
 	segmentsInfo map[int64]*datapb.ImportSegmentInfo
 	req          *datapb.ImportRequest
+	resource     taskcommon.Resource
 
 	allocator  allocator.Interface
 	manager    TaskManager
@@ -60,6 +61,7 @@ func NewImportTask(req *datapb.ImportRequest,
 	manager TaskManager,
 	syncMgr syncmgr.SyncManager,
 	cm storage.ChunkManager,
+	resource taskcommon.Resource,
 ) Task {
 	ctx, cancel := context.WithCancel(context.Background())
 	// During binlog import, even if the primary key's autoID is set to true,
@@ -80,6 +82,7 @@ func NewImportTask(req *datapb.ImportRequest,
 		cancel:       cancel,
 		segmentsInfo: make(map[int64]*datapb.ImportSegmentInfo),
 		req:          req,
+		resource:     resource,
 		allocator:    alloc,
 		manager:      manager,
 		syncMgr:      syncMgr,
@@ -110,7 +113,7 @@ func (t *ImportTask) GetSlots() int64 {
 }
 
 func (t *ImportTask) GetResource() taskcommon.Resource {
-	return taskcommon.Resource{CPU: t.req.GetCpu(), Memory: t.req.GetMemory()}
+	return t.resource
 }
 
 func (t *ImportTask) GetBufferSize() int64 {
@@ -157,6 +160,7 @@ func (t *ImportTask) Clone() Task {
 		cancel:       cancel,
 		segmentsInfo: infos,
 		req:          t.req,
+		resource:     t.resource,
 		allocator:    t.allocator,
 		manager:      t.manager,
 		syncMgr:      t.syncMgr,

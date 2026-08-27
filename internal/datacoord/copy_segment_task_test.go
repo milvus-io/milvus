@@ -503,10 +503,17 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerUsesJobExternalFlag() {
 			mockAssemble := mockey.Mock(AssembleCopySegmentRequest).Return(req, nil).Build()
 			defer mockAssemble.UnPatch()
 
+			var placed taskcommon.Resource
 			cluster := session.NewMockCluster(s.T())
-			cluster.EXPECT().CreateCopySegment(int64(10), req, int64(100), test.external).Return(nil)
+			cluster.EXPECT().CreateCopySegment(int64(10), req, int64(100), test.external, mock.Anything).RunAndReturn(
+				func(_ int64, _ *datapb.CopySegmentRequest, _ int64, _ bool, resource taskcommon.Resource) error {
+					placed = resource
+					return nil
+				})
 
 			task.CreateTaskOnWorker(10, cluster)
+			// The dispatch ships exactly what the scheduler placed the task on.
+			s.Equal(task.GetTaskResource(), placed)
 
 			updated := copyMeta.GetTask(context.Background(), task.GetTaskId())
 			s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, updated.GetState())
@@ -672,8 +679,8 @@ func (s *CopySegmentTaskSuite) TestScheduler_OneOffTransientErrorDoesNotRedispat
 			}, nil
 		})
 	var creates atomic.Int32
-	cluster.EXPECT().CreateCopySegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(int64, *datapb.CopySegmentRequest, int64, bool) error {
+	cluster.EXPECT().CreateCopySegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(int64, *datapb.CopySegmentRequest, int64, bool, taskcommon.Resource) error {
 			creates.Add(1)
 			return nil
 		}).Maybe()
@@ -1527,8 +1534,6 @@ func TestAssembleCopySegmentRequest_MarksExternalCollection(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, req.GetSources(), 1)
 	assert.True(t, req.GetSources()[0].GetIsExternalCollection())
-	// The request ships exactly what the scheduler placed the task on.
-	assert.Equal(t, task.GetTaskResource(), taskcommon.Resource{CPU: req.GetCpu(), Memory: req.GetMemory()})
 }
 
 func TestAssembleCopySegmentRequest_ExternalSnapshotRootRemap(t *testing.T) {

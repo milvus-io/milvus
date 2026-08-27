@@ -297,7 +297,7 @@ func newSchedulerIndexBuildTask(t *testing.T, manager *TaskManager, buildID int6
 	manager.LoadOrStoreIndexTask(req.GetClusterID(), req.GetBuildID(), &IndexTaskInfo{
 		State: commonpb.IndexState_InProgress,
 	})
-	return NewIndexBuildTask(ctx, cancel, req, nil, manager, nil)
+	return NewIndexBuildTask(ctx, cancel, req, nil, manager, nil, taskcommon.Resource{})
 }
 
 func TestIndexTaskSchedulerRecordsIndexTaskCost(t *testing.T) {
@@ -373,22 +373,27 @@ func TestIndexTaskSchedulerRecordsIndexTaskCost(t *testing.T) {
 	})
 }
 
-// Every index-family task reports exactly the cpu/memory its request carries,
-// and nothing when the coordinator predates the fields.
+// Every index-family task reports exactly the cpu/memory its constructor was
+// handed -- the estimate DataCoord put in the CreateTask properties -- and
+// nothing when the coordinator predates them.
 func TestIndexTaskGetResource(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager := NewTaskManager(ctx)
 	want := taskcommon.Resource{CPU: 2, Memory: 1 << 30}
 
-	assert.Equal(t, want, (&indexBuildTask{
-		req: &workerpb.CreateJobRequest{Cpu: 2, Memory: 1 << 30},
-	}).GetResource())
-	assert.Equal(t, want, (&statsTask{
-		req: &workerpb.CreateStatsRequest{Cpu: 2, Memory: 1 << 30},
-	}).GetResource())
-	assert.Equal(t, want, (&analyzeTask{
-		req: &workerpb.AnalyzeRequest{Cpu: 2, Memory: 1 << 30},
-	}).GetResource())
+	assert.Equal(t, want, NewIndexBuildTask(ctx, cancel,
+		&workerpb.CreateJobRequest{}, nil, manager, nil, want).GetResource())
+	assert.Equal(t, want, NewStatsTask(ctx, cancel,
+		&workerpb.CreateStatsRequest{}, manager, nil, nil, want).GetResource())
+	assert.Equal(t, want, NewAnalyzeTask(ctx, cancel,
+		&workerpb.AnalyzeRequest{}, manager, nil, want).GetResource())
 
-	assert.True(t, (&indexBuildTask{req: &workerpb.CreateJobRequest{}}).GetResource().IsZero())
-	assert.True(t, (&statsTask{req: &workerpb.CreateStatsRequest{}}).GetResource().IsZero())
-	assert.True(t, (&analyzeTask{req: &workerpb.AnalyzeRequest{}}).GetResource().IsZero())
+	// A coordinator that predates the properties books nothing.
+	assert.True(t, NewIndexBuildTask(ctx, cancel,
+		&workerpb.CreateJobRequest{}, nil, manager, nil, taskcommon.Resource{}).GetResource().IsZero())
+	assert.True(t, NewStatsTask(ctx, cancel,
+		&workerpb.CreateStatsRequest{}, manager, nil, nil, taskcommon.Resource{}).GetResource().IsZero())
+	assert.True(t, NewAnalyzeTask(ctx, cancel,
+		&workerpb.AnalyzeRequest{}, manager, nil, taskcommon.Resource{}).GetResource().IsZero())
 }

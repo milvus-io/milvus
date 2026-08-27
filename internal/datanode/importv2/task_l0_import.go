@@ -47,6 +47,7 @@ type L0ImportTask struct {
 	cancel       context.CancelFunc
 	segmentsInfo map[int64]*datapb.ImportSegmentInfo
 	req          *datapb.ImportRequest
+	resource     taskcommon.Resource
 
 	allocator  allocator.Interface
 	manager    TaskManager
@@ -59,6 +60,7 @@ func NewL0ImportTask(req *datapb.ImportRequest,
 	manager TaskManager,
 	syncMgr syncmgr.SyncManager,
 	cm storage.ChunkManager,
+	resource taskcommon.Resource,
 ) Task {
 	ctx, cancel := context.WithCancel(context.Background())
 	// Allocator for autoIDs and logIDs.
@@ -74,6 +76,7 @@ func NewL0ImportTask(req *datapb.ImportRequest,
 		cancel:       cancel,
 		segmentsInfo: make(map[int64]*datapb.ImportSegmentInfo),
 		req:          req,
+		resource:     resource,
 		allocator:    alloc,
 		manager:      manager,
 		syncMgr:      syncMgr,
@@ -104,7 +107,7 @@ func (t *L0ImportTask) GetSlots() int64 {
 }
 
 func (t *L0ImportTask) GetResource() taskcommon.Resource {
-	return taskcommon.Resource{CPU: t.req.GetCpu(), Memory: t.req.GetMemory()}
+	return t.resource
 }
 
 // L0 import task buffer size is fixed
@@ -132,6 +135,7 @@ func (t *L0ImportTask) Clone() Task {
 		cancel:       cancel,
 		segmentsInfo: infos,
 		req:          t.req,
+		resource:     t.resource,
 		allocator:    t.allocator,
 		manager:      t.manager,
 		syncMgr:      t.syncMgr,

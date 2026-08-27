@@ -194,12 +194,11 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 
 	s.Run("sort_task_schema_older_than_input", func() {
 		meta := NewMockCompactionMeta(s.T())
-		// A sort compaction looks the segment up twice: once to price the task, once to build the plan.
 		meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            200,
 			State:         commonpb.SegmentState_Flushed,
 			SchemaVersion: 3,
-		}}).Twice()
+		}}).Once()
 		task := newMixCompactionTask(&datapb.CompactionTask{
 			PlanID:        1,
 			Type:          datapb.CompactionType_SortCompaction,
@@ -247,18 +246,14 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 	} {
 		s.Run(test.name, func() {
 			meta := NewMockCompactionMeta(s.T())
-			// A sort compaction prices itself from the same segment the plan reads,
-			// so it looks the segment up once more than a mix compaction does.
-			segmentLookups := 1
-			if test.compactionType == datapb.CompactionType_SortCompaction {
-				segmentLookups = 2
-			}
+			// Pricing moved to dispatch, so building the plan reads the segment once
+			// for every compaction family.
 			meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID:            200,
 				State:         commonpb.SegmentState_Flushed,
 				SchemaVersion: test.inputSchema,
 				Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(101, 1)},
-			}}).Times(segmentLookups)
+			}}).Once()
 			task := newMixCompactionTask(&datapb.CompactionTask{
 				PlanID:        1,
 				Type:          test.compactionType,

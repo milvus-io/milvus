@@ -37,7 +37,9 @@ const (
 
 type Executor interface {
 	Start(ctx context.Context)
-	Enqueue(task Compactor) (bool, error)
+	// Enqueue books resource — DataCoord's cpu/memory estimate for this plan,
+	// carried in the CreateTask properties — for the whole run of the task.
+	Enqueue(task Compactor, resource taskcommon.Resource) (bool, error)
 	Slots() int64
 	Resource() taskcommon.Resource
 	RemoveTask(planID int64)                                // Deprecated in 2.6
@@ -108,7 +110,7 @@ func getTaskSlotUsage(task Compactor) int64 {
 	return taskSlotUsage
 }
 
-func (e *executor) Enqueue(task Compactor) (bool, error) {
+func (e *executor) Enqueue(task Compactor, resource taskcommon.Resource) (bool, error) {
 	e.mu.Lock()
 
 	planID := task.GetPlanID()
@@ -124,7 +126,6 @@ func (e *executor) Enqueue(task Compactor) (bool, error) {
 
 	// Update slots and add task
 	e.usingSlots += getTaskSlotUsage(task)
-	resource := task.GetResource()
 	e.usingResource = e.usingResource.Add(resource)
 	e.tasks[planID] = &taskState{
 		compactor: task,

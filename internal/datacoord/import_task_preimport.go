@@ -121,7 +121,8 @@ func (p *preImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster
 	job := p.importMeta.GetJob(context.TODO(), p.GetJobID())
 	req := AssemblePreImportRequest(p, job)
 
-	err := cluster.CreatePreImport(nodeID, req, p.GetTaskSlot())
+	resource := p.GetTaskResource()
+	err := cluster.CreatePreImport(nodeID, req, p.GetTaskSlot(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "preimport failed", WrapTaskLog(p, mlog.Err(err))...)
 		p.retryTimes++

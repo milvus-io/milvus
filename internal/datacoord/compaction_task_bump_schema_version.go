@@ -104,7 +104,6 @@ func (t *bumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan
 	if err != nil {
 		return nil, err
 	}
-	resource := t.GetTaskResource()
 	plan := &datapb.CompactionPlan{
 		PlanID:                    taskProto.GetPlanID(),
 		StartTime:                 taskProto.GetStartTime(),
@@ -115,8 +114,6 @@ func (t *bumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan
 		Schema:                    taskProto.GetSchema(),
 		PreAllocatedSegmentIDs:    taskProto.GetPreAllocatedSegmentIDs(),
 		SlotUsage:                 t.GetSlotUsage(),
-		Cpu:                       resource.CPU,
-		Memory:                    resource.Memory,
 		MaxSize:                   taskProto.GetMaxSize(),
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
@@ -235,7 +232,8 @@ func (t *bumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session
 		return
 	}
 
-	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
+	resource := t.GetTaskResource()
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		log.Warn(context.TODO(), "bumpSchemaVersionTask failed to notify compaction tasks to DataNode",
 			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),

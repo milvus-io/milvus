@@ -272,8 +272,6 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 	req.MaxClusterSize = Params.DataCoordCfg.ClusteringCompactionMaxClusterSize.GetAsSize()
 	req.TaskSlot = Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64()
 	resource := at.GetTaskResource()
-	req.Cpu = resource.CPU
-	req.Memory = resource.Memory
 
 	WrapPluginContext(task.CollectionID, at.schema.GetProperties(), req)
 
@@ -285,7 +283,7 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		}
 	}()
 
-	err = cluster.CreateAnalyze(nodeID, req)
+	err = cluster.CreateAnalyze(nodeID, req, resource)
 	if err != nil {
 		log.Warn(context.TODO(), "assign analyze task to worker failed", mlog.Err(err))
 		return
