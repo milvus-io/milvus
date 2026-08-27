@@ -224,8 +224,8 @@ static const auto kIndexLoadTestValues = ::testing::Values(
          {"field_type", "string"}},
         {1UL * 1024 * 1024 * 1024,
          1UL * 1024 * 1024 * 1024,
-         0UL,
          1UL * 1024 * 1024 * 1024,
+         0UL,
          false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "INVERTED"},
@@ -240,8 +240,8 @@ static const auto kIndexLoadTestValues = ::testing::Values(
         {{"index_type", "NGRAM"}, {"mmap", "false"}, {"field_type", "string"}},
         {1UL * 1024 * 1024 * 1024,
          1UL * 1024 * 1024 * 1024,
-         0UL,
          1UL * 1024 * 1024 * 1024,
+         0UL,
          false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "NGRAM"}, {"mmap", "true"}, {"field_type", "string"}},

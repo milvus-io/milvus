@@ -372,9 +372,15 @@ BaseEventData::Serialize() {
                      ++offset) {
                     auto geo_ptr = static_cast<const std::string*>(
                         field_data->RawValue(offset));
+                    // A negative length is the only way a null reaches Arrow
+                    // (AddOneBinaryToArrowBuilder appends a null iff
+                    // length < 0), so a null row must not be handed its raw
+                    // size -- same as the STRING/ARRAY/JSON branches above.
+                    auto size =
+                        field_data->is_valid(offset) ? geo_ptr->size() : -1;
                     payload_writer->add_one_binary_payload(
                         reinterpret_cast<const uint8_t*>(geo_ptr->data()),
-                        geo_ptr->size());
+                        size);
                 }
                 break;
             }
