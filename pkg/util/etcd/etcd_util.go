@@ -167,7 +167,6 @@ func GetRemoteEtcdSSLClient(endpoints []string, certFile string, keyFile string,
 func GetRemoteEtcdSSLClientWithCfg(endpoints []string, certFile string, keyFile string, caCertFile string, minVersion string, cfg clientv3.Config, opts ...ClientOption) (*clientv3.Client, error) {
 	cfg.Endpoints = endpoints
 	cfg.DialTimeout = 5 * time.Second
-
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		return nil, merr.Wrap(err, "load etcd cert key pair error")

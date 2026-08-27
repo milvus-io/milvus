@@ -1035,16 +1035,29 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                            dim,
                                            fs_);
         } else {
-            field_datas = GetFieldDatasFromManifest(
+            // Variable-width manifest fields (sparse vectors with dim <= 0,
+            // VECTOR_ARRAY) cannot use the fixed-width row pagination the
+            // dense-vector path relies on, but they must NOT fall back to
+            // GetFieldDatasFromManifest: that helper retains every decoded
+            // FieldData until the whole column is read, so a large sparse /
+            // embedding-list segment would need full-column memory plus Arrow
+            // buffers and can OOM the very large-segment index builds this
+            // path is meant to bound. Stream each batch straight to the local
+            // file instead, exactly as the pre-pagination code did: retention
+            // drops to the reader's prefetch window plus the bounded streaming
+            // decode window, and the disk write overlaps fetch/decode. This is
+            // streaming only; it does not add partial-download support for
+            // VECTOR_ARRAY.
+            cached_already = true;
+            IterateFieldDataFromManifest(
                 manifest_path_str,
                 loon_ffi_properties_,
                 field_meta_,
                 data_type,
                 dim,
                 element_type,
-                0,
-                0,
-                GetStorageColumnMapping(GetFieldDataMeta().field_id));
+                GetStorageColumnMapping(GetFieldDataMeta().field_id),
+                consume_field_data);
         }
     } else {
         for (auto& remote_files_group : all_remote_files) {
