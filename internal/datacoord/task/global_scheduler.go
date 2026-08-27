@@ -37,9 +37,10 @@ const NullNodeID = -1
 // (because they are in failure backoff, or because they alone do not fit the
 // cluster right now) before it stops popping. Two reasons for a cap:
 //
-//   - it bounds the work of a round. Under memory pressure with slots still
-//     free every pick misses, and without the cap the round pops and prices the
-//     entire queue only to push all of it back;
+//   - it bounds the work of a round. Under memory pressure -- some memory
+//     free on the workers, but not enough for the tasks at hand -- every pick
+//     misses, and without the cap the round pops and prices the entire queue
+//     only to push all of it back;
 //   - it bounds the window in which a set-aside task is invisible. Between the
 //     pop and the re-queue at the end of the round the task is in neither
 //     pendingTasks nor runningTasks, so GetPendingTaskCount does not count it

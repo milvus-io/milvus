@@ -180,8 +180,9 @@ Same rules as PR #52561, implemented thinner:
 
   Trade-off, stated: ending the round used to reserve the cluster for that task
   implicitly. Without the reservation a steady stream of small tasks can keep
-  delaying it, and under memory pressure with slots still free each round
-  examines more of the queue instead of stopping at the first miss. An explicit
+  delaying it, and under memory pressure (some memory free on the workers, but
+  not enough for the tasks at hand) each round examines more of the queue
+  instead of stopping at the first miss. An explicit
   reservation or aging mechanism is a follow-up.
 
   The set-aside scan is capped at `maxDelayedPerRound = 64` tasks per round
