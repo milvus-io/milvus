@@ -106,22 +106,39 @@ func (it *indexBuildTask) GetTaskID() int64 {
 }
 
 // GetTaskResource prices the build by the bytes of the indexed field. It walks
-// meta once and caches; a segment or schema that is not there yet is priced at
-// the floor and retried next round.
+// meta once and caches; an input that is not in meta yet is priced at the floor
+// and retried next round rather than frozen.
+//
+// The distinction that matters is transient-vs-permanent. A collection whose
+// schema is not cached yet, or an index whose params have not been read back
+// yet, are both states that resolve on their own, and both would otherwise be
+// cached as a wrong answer for the task's lifetime: without a schema
+// estimateFieldSize cannot tell the indexed field from any other and charges
+// the whole segment (10-50x for one field of a wide collection), and without an
+// index type a vector build would be frozen at the scalar CPU request. A field
+// that is genuinely absent from a schema we DO have is a different thing: that
+// is a real answer, so the conservative whole-segment price is kept and cached.
 func (it *indexBuildTask) GetTaskResource() taskcommon.Resource {
 	return it.resource.get(func() (taskcommon.Resource, bool) {
 		segment := it.meta.GetHealthySegment(context.TODO(), it.SegmentID)
 		if segment == nil {
 			return defaultTaskResource(), false
 		}
-		var schema *schemapb.CollectionSchema
-		if coll := it.meta.GetCollection(it.CollectionID); coll != nil {
-			schema = coll.Schema
+		coll := it.meta.GetCollection(it.CollectionID)
+		if coll == nil || coll.Schema == nil {
+			return defaultTaskResource(), false
 		}
-		indexType := GetIndexType(it.meta.indexMeta.GetIndexParams(it.CollectionID, it.IndexID))
+		// GetIndexType answers the invalidIndex sentinel, not "", when the params
+		// carry no index_type -- which is exactly what an index whose params have
+		// not been read back yet looks like.
+		indexParams := it.meta.indexMeta.GetIndexParams(it.CollectionID, it.IndexID)
+		indexType := GetIndexType(indexParams)
+		if len(indexParams) == 0 || indexType == "" || indexType == invalidIndex {
+			return defaultTaskResource(), false
+		}
 		isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 		fieldID := it.meta.indexMeta.GetFieldIDByIndexID(it.CollectionID, it.IndexID)
-		fieldSize := estimateFieldSize(segment, schema, fieldID)
+		fieldSize := estimateFieldSize(segment, coll.Schema, fieldID)
 		if fieldSize <= 0 {
 			return defaultTaskResource(), false
 		}
