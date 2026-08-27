@@ -979,8 +979,7 @@ func (v *ValidateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 	return nil
 }
 
-func (v *ValidateUtil) checkTextFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
-func (v *validateUtil) checkUUIDFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkUUIDFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	// Primary key must never be nullable — explicit guard for UUID PK (Int64/VarChar already rejected elsewhere, but UUID path must be explicit for 16B strictness).
 	if fieldSchema.GetIsPrimaryKey() && fieldSchema.GetNullable() {
 		return merr.WrapErrParameterInvalidMsg("primary field '%s' of type UUID cannot be nullable", fieldSchema.GetName())
@@ -1030,7 +1029,7 @@ func (v *validateUtil) checkUUIDFieldData(field *schemapb.FieldData, fieldSchema
 	return nil
 }
 
-func (v *validateUtil) checkTextFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkTextFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	strArr := field.GetScalars().GetStringData().GetData()
 	if strArr == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("text field '%v' is illegal", field.GetFieldName())

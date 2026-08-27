@@ -564,7 +564,7 @@ func selectFullRewriteRecord(record storage.Record, pkField *schemapb.FieldSchem
 				break
 			}
 		}
-		return nil, nil, merr.WrapErrServiceInternal("uuid primary key field not found in full schema rewrite record: expected FixedSizeBinary(16), got %T", pkArray)
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("uuid primary key field not found in full schema rewrite record: expected FixedSizeBinary(16), got %T", pkArray))
 	default:
 		return nil, merr.WrapErrServiceInternal("invalid primary key data type for full schema rewrite")
 	}
