@@ -1010,6 +1010,18 @@ BuildTantivyStringIndex(const std::vector<std::string>& data) {
     return index;
 }
 
+TEST(InvertedIndexTest, SealedAllValidDoesNotRetainValidityBitmap) {
+    std::vector<std::string> data = {"alpha", "beta", "gamma"};
+    auto index = BuildTantivyStringIndex(data);
+
+    EXPECT_EQ(index->ValidityBitmapByteSize(), 0);
+    auto valid = index->IsNotNull();
+    ASSERT_EQ(valid.size(), data.size());
+    EXPECT_EQ(valid.count(), data.size());
+    auto nulls = index->IsNull();
+    EXPECT_EQ(nulls.count(), 0);
+}
+
 // Verify all three matchers agree for a pattern against test data
 void
 VerifyPatternMatchConsistency(

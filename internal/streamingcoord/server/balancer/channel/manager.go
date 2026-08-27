@@ -354,6 +354,7 @@ func (cm *ChannelManager) MarkStreamingHasEnabled(ctx context.Context) error {
 		notifier.BlockUntilFinish()
 	}
 	cm.streamingEnableNotifiers = nil
+	cm.cond.UnsafeBroadcast()
 	return nil
 }
 

@@ -774,6 +774,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 500*time.Second, Params.TaskCheckInterval.GetAsDuration(time.Second))
 		params.Save("datacoord.statsTaskTriggerCount", "3")
 		assert.Equal(t, 3, Params.SortCompactionTriggerCount.GetAsInt())
+		// The stats admission limit is independent from the sort compaction trigger count.
+		assert.Equal(t, 100, Params.StatsTaskPendingLimit.GetAsInt())
+		params.Save("datacoord.statsTaskPendingLimit", "7")
+		assert.Equal(t, 7, Params.StatsTaskPendingLimit.GetAsInt())
 
 		assert.Equal(t, 100, Params.MaxSegmentsPerCopyTask.GetAsInt())
 		params.Save("dataCoord.import.maxSegmentsPerCopyTask", "200")

@@ -1034,6 +1034,11 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     }
 
     bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
+    }
+
+    bool
     IsSource() const override {
         return true;
     }
@@ -1041,21 +1046,6 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr>
     GetLogicalExpr() {
         return expr_;
-    }
-
-    proto::plan::OpType
-    GetOpType() {
-        return expr_->op_type_;
-    }
-
-    FieldId
-    GetFieldId() {
-        return expr_->column_.field_id_;
-    }
-
-    DataType
-    GetFieldType() {
-        return expr_->column_.data_type_;
     }
 
     int64_t
@@ -1127,7 +1117,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     // Check overflow and cache result for performace
     template <typename T>
     ColumnVectorPtr
-    PreCheckOverflow(OffsetVector* input = nullptr);
+    PreCheckOverflow(int64_t batch_size, OffsetVector* input = nullptr);
 
     template <typename T>
     bool
@@ -1135,12 +1125,6 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     VectorPtr
     ExecTextMatch();
-
-    // Check if ngram index exists
-    bool
-    HasNgramIndex() const {
-        return pinned_ngram_index_.get() != nullptr;
-    }
 
     std::optional<VectorPtr>
     ExecNgramMatch(EvalCtx& context);

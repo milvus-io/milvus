@@ -96,42 +96,6 @@ TextColumnCache::GetOrCreateReader(
     return cached_reader;
 }
 
-std::string
-TextColumnCache::ReadText(const std::string& lob_base_path,
-                          std::shared_ptr<arrow::fs::FileSystem> fs,
-                          const milvus_storage::api::Properties& properties,
-                          const uint8_t* encoded_ref,
-                          size_t ref_size) {
-    if (encoded_ref == nullptr || ref_size == 0) {
-        return "";
-    }
-
-    if (IsInlineData(encoded_ref)) {
-        return DecodeInlineText(encoded_ref, ref_size);
-    }
-
-    if (ref_size != LOB_REFERENCE_SIZE) {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "Invalid LOB reference size: {}, expected: {}",
-                  ref_size,
-                  LOB_REFERENCE_SIZE);
-    }
-
-    auto cached_reader = GetOrCreateReader(lob_base_path, fs, properties);
-
-    std::lock_guard<std::mutex> reader_lock(cached_reader->mutex);
-    auto result = cached_reader->reader->ReadText(encoded_ref, ref_size);
-    if (!result.ok()) {
-        auto error = milvus_storage::ToSegcoreError(result.status());
-        ThrowInfo(error.get_error_code(),
-                  "Failed to read text from {}: {}",
-                  lob_base_path,
-                  error.what());
-    }
-
-    return std::move(result).ValueOrDie();
-}
-
 std::vector<std::string>
 TextColumnCache::ReadBatch(const std::string& lob_base_path,
                            std::shared_ptr<arrow::fs::FileSystem> fs,
@@ -248,30 +212,9 @@ TextColumnCache::ReadBatchInto(
 }
 
 void
-TextColumnCache::Invalidate(const std::string& lob_base_path) {
-    std::lock_guard<std::mutex> lock(reader_cache_mutex_);
-    reader_cache_.remove(lob_base_path);
-}
-
-void
 TextColumnCache::Clear() {
     std::lock_guard<std::mutex> lock(reader_cache_mutex_);
     reader_cache_.clean();
-}
-
-TextColumnCacheStats
-TextColumnCache::GetStats() const {
-    TextColumnCacheStats stats;
-    stats.file_cache_hits = file_cache_hits_.load(std::memory_order_relaxed);
-    stats.file_cache_misses =
-        file_cache_misses_.load(std::memory_order_relaxed);
-
-    {
-        std::lock_guard<std::mutex> lock(reader_cache_mutex_);
-        stats.current_file_cache_size = reader_cache_.size();
-    }
-
-    return stats;
 }
 
 static std::unique_ptr<TextColumnCache> g_text_column_cache;

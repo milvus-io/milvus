@@ -100,9 +100,12 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
         bitset.flip();
 
-        // TODO: optimize this
-        auto null_bitset = this->IsNotNull();
-        bitset &= null_bitset;
+        if (use_comparable_value_mask_) {
+            auto comparable_values = ComparableValueBitset();
+            bitset &= comparable_values;
+        } else {
+            this->ApplyValidityMask(bitset);
+        }
 
         return bitset;
     }
@@ -113,6 +116,11 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         bitset.flip();
         return bitset;
     }
+
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using InvertedIndexTantivy<T>::IsNotNull;
 
     TargetBitmap
     IsNotNull() override {
@@ -781,6 +789,7 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
     void
     create_reader(SetBitsetFn set_bitset) {
         this->wrapper_->create_reader(set_bitset);
+        this->FinalizeSealed();
     }
 
  private:
@@ -795,6 +804,8 @@ JsonFlatIndexQueryExecutor<T>::JsonFlatIndexQueryExecutor(
     json_path_ = json_path;
     use_comparable_value_mask_ = use_comparable_value_mask;
     this->wrapper_ = json_flat_index.wrapper_;
-    this->null_offset_ = json_flat_index.null_offset_;
+    this->valid_bitmap_ = json_flat_index.valid_bitmap_;
+    AssertInfo(json_flat_index.valid_bitmap_ != nullptr,
+               "cannot create JSON flat executor before finalization");
 }
 }  // namespace milvus::index

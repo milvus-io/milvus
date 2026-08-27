@@ -279,8 +279,6 @@ type commonConfig struct {
 	DefaultRootPassword   ParamItem `refreshable:"false"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
 	EnablePublicPrivilege ParamItem `refreshable:"false"`
-	ExprEnabled           ParamItem `refreshable:"false"`
-	ExprAuthMode          ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -1004,26 +1002,6 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.EnablePublicPrivilege.Init(base.mgr)
-
-	p.ExprEnabled = ParamItem{
-		Key:          "common.security.exprEnabled",
-		Version:      "2.6.0",
-		DefaultValue: "false",
-		Doc:          "Whether to enable the /expr endpoint for debugging.",
-		Export:       true,
-	}
-	p.ExprEnabled.Init(base.mgr)
-
-	p.ExprAuthMode = ParamItem{
-		Key:          "common.security.exprAuthMode",
-		Version:      "2.6.0",
-		DefaultValue: "rootOnly",
-		Doc: "Authentication mode for the /expr endpoint. Valid values: rootOnly, rbac. " +
-			"rootOnly accepts only the root credentials via HTTP Basic Auth. " +
-			"rbac requires common.security.authorizationEnabled=true and grants access to any user holding the Expr privilege.",
-		Export: true,
-	}
-	p.ExprAuthMode.Init(base.mgr)
 
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",
@@ -5591,10 +5569,13 @@ type dataCoordConfig struct {
 	StatsTaskSlotUsage                   ParamItem `refreshable:"true"`
 	AnalyzeTaskSlotUsage                 ParamItem `refreshable:"true"`
 
-	EnableSortCompaction             ParamItem `refreshable:"true"`
-	TaskCheckInterval                ParamItem `refreshable:"true"`
-	SortCompactionTriggerCount       ParamItem `refreshable:"true"`
-	JSONStatsTriggerCount            ParamItem `refreshable:"true"`
+	EnableSortCompaction       ParamItem `refreshable:"true"`
+	TaskCheckInterval          ParamItem `refreshable:"true"`
+	SortCompactionTriggerCount ParamItem `refreshable:"true"`
+	StatsTaskPendingLimit      ParamItem `refreshable:"true"`
+	// Deprecated: JSON stats tasks are throttled by StatsTaskPendingLimit.
+	JSONStatsTriggerCount ParamItem `refreshable:"true"`
+	// Deprecated: JSON stats tasks now run on TaskCheckInterval.
 	JSONStatsTriggerInterval         ParamItem `refreshable:"true"`
 	JSONStatsMaxShreddingColumns     ParamItem `refreshable:"true"`
 	JSONStatsShreddingRatioThreshold ParamItem `refreshable:"true"`
@@ -7173,25 +7154,35 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	}
 	p.SortCompactionTriggerCount.Init(base.mgr)
 
+	p.StatsTaskPendingLimit = ParamItem{
+		Key:          "dataCoord.statsTaskPendingLimit",
+		Version:      "3.0.0",
+		Doc:          "skip submitting new stats tasks when the global scheduler holds more pending tasks than this limit",
+		DefaultValue: "100",
+		PanicIfEmpty: false,
+		Export:       false,
+	}
+	p.StatsTaskPendingLimit.Init(base.mgr)
+
 	p.JSONStatsTriggerCount = ParamItem{
 		Key:          "dataCoord.jsonShreddingTriggerCount",
 		Version:      "2.6.5",
-		Doc:          "jsonkey stats task count per trigger",
+		Doc:          "Deprecated: JSON stats tasks are throttled by dataCoord.statsTaskPendingLimit.",
 		DefaultValue: "10",
 		FallbackKeys: []string{"dataCoord.jsonStatsTriggerCount"},
 		PanicIfEmpty: false,
-		Export:       true,
+		Export:       false,
 	}
 	p.JSONStatsTriggerCount.Init(base.mgr)
 
 	p.JSONStatsTriggerInterval = ParamItem{
 		Key:          "dataCoord.jsonShreddingTriggerInterval",
 		Version:      "2.6.5",
-		Doc:          "jsonkey task interval per trigger",
+		Doc:          "Deprecated: JSON stats tasks now run on dataCoord.taskCheckInterval.",
 		DefaultValue: "10",
 		FallbackKeys: []string{"dataCoord.jsonStatsTriggerInterval"},
 		PanicIfEmpty: false,
-		Export:       true,
+		Export:       false,
 	}
 	p.JSONStatsTriggerInterval.Init(base.mgr)
 

@@ -865,8 +865,6 @@ dataCoord:
     scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
-  jsonShreddingTriggerCount: 10 # jsonkey stats task count per trigger
-  jsonShreddingTriggerInterval: 10 # jsonkey task interval per trigger
   jsonShreddingMaxColumns: 1024 # the max number of columns to shred
   jsonShreddingRatioThreshold: 0.3 # the ratio threshold to shred
   jsonShreddingWriteBatchSize: 81920 # the batch size to write
@@ -1132,8 +1130,6 @@ common:
     defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
-    exprEnabled: false # Whether to enable the /expr endpoint for debugging.
-    exprAuthMode: rootOnly # Authentication mode for the /expr endpoint. Valid values: rootOnly, rbac. rootOnly accepts only the root credentials via HTTP Basic Auth. rbac requires common.security.authorizationEnabled=true and grants access to any user holding the Expr privilege.
     internaltlsEnabled: false
     tlsMode: 0
   session:

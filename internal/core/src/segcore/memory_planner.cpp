@@ -86,22 +86,6 @@ FieldDataReadWindowBytes() {
                          kDefaultFieldDataReadWindowBytes);
 }
 
-void
-SetFieldDataLoadBatchTargetBytes(int64_t bytes) {
-    FIELD_DATA_LOAD_BATCH_TARGET_BYTES.store(
-        PositiveBytes(bytes, kDefaultFieldDataLoadBatchTargetBytes));
-    LOG_INFO("set field data load batch target bytes: {}",
-             FIELD_DATA_LOAD_BATCH_TARGET_BYTES.load());
-}
-
-void
-SetFieldDataReadWindowBytes(int64_t bytes) {
-    FIELD_DATA_READ_WINDOW_BYTES.store(
-        PositiveBytes(bytes, kDefaultFieldDataReadWindowBytes));
-    LOG_INFO("set field data read window bytes: {}",
-             FIELD_DATA_READ_WINDOW_BYTES.load());
-}
-
 namespace {
 
 size_t
@@ -153,54 +137,9 @@ ReadFileRowGroupBlock(const milvus_storage::ArrowFileSystemPtr& fs,
 
 }  // namespace
 
-MemoryBasedSplitStrategy::MemoryBasedSplitStrategy(
-    const milvus_storage::RowGroupMetadataVector& row_group_metadatas)
-    : row_group_metadatas_(row_group_metadatas) {
-}
-
 ParallelDegreeSplitStrategy::ParallelDegreeSplitStrategy(
     uint64_t parallel_degree)
     : parallel_degree_(parallel_degree) {
-}
-
-std::vector<RowGroupBlock>
-MemoryBasedSplitStrategy::split(const std::vector<int64_t>& input_row_groups) {
-    std::vector<RowGroupBlock> blocks;
-    if (input_row_groups.empty()) {
-        return blocks;
-    }
-
-    std::vector<int64_t> sorted_row_groups = input_row_groups;
-    std::sort(sorted_row_groups.begin(), sorted_row_groups.end());
-
-    int64_t current_start = sorted_row_groups[0];
-    int64_t current_count = 1;
-    int64_t current_memory =
-        row_group_metadatas_.Get(current_start).memory_size();
-
-    for (size_t i = 1; i < sorted_row_groups.size(); ++i) {
-        int64_t next_row_group = sorted_row_groups[i];
-        int64_t next_memory =
-            row_group_metadatas_.Get(next_row_group).memory_size();
-
-        if (next_row_group == current_start + current_count &&
-            current_memory + next_memory <= MAX_ROW_GROUP_BLOCK_MEMORY) {
-            current_count++;
-            current_memory += next_memory;
-            continue;
-        }
-
-        blocks.push_back({current_start, current_count});
-        current_start = next_row_group;
-        current_count = 1;
-        current_memory = next_memory;
-    }
-
-    if (current_count > 0) {
-        blocks.push_back({current_start, current_count});
-    }
-
-    return blocks;
 }
 
 std::vector<RowGroupBlock>

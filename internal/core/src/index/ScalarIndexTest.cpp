@@ -21,6 +21,7 @@
 #include <memory>
 #include <random>
 #include <string>
+#include <type_traits>
 #include <typeindex>
 #include <typeinfo>
 #include <unordered_map>
@@ -34,11 +35,16 @@
 #include "common/type_c.h"
 #include "gtest/gtest.h"
 #include "index/BitmapIndex.h"
+#include "index/HybridScalarIndex.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
+#include "index/InvertedIndexTantivy.h"
+#include "index/JsonFlatIndex.h"
 #include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
+#include "index/StringIndexSort.h"
+#include "index/json_stats/JsonKeyStats.h"
 #include "pb/common.pb.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
@@ -655,3 +661,33 @@ TEST(ScalarTest, test_function_range) {
     TestIndexSearchRange<float>();
     TestIndexSearchRange<double>();
 }
+
+// ScalarIndex<T>::IsNotNull(int64_t) -- the row-count-aware overload that
+// projects absolute null offsets into a caller-owned row space -- is hidden in
+// every subclass that declares IsNotNull() without a using-declaration, so a
+// call through the derived static type simply stops compiling. Each subclass
+// carries `using <base>::IsNotNull;` for exactly that reason. Nothing at
+// runtime can catch its removal, so pin it here.
+template <typename Index, typename = void>
+struct HasRowCountIsNotNull : std::false_type {};
+
+template <typename Index>
+struct HasRowCountIsNotNull<
+    Index,
+    std::void_t<decltype(std::declval<Index&>().IsNotNull(int64_t{}))>>
+    : std::true_type {};
+
+static_assert(HasRowCountIsNotNull<milvus::index::ScalarIndex<int64_t>>::value,
+              "the base overload must exist");
+static_assert(HasRowCountIsNotNull<milvus::index::BitmapIndex<int64_t>>::value);
+static_assert(
+    HasRowCountIsNotNull<milvus::index::HybridScalarIndex<int64_t>>::value);
+static_assert(
+    HasRowCountIsNotNull<milvus::index::InvertedIndexTantivy<int64_t>>::value);
+static_assert(HasRowCountIsNotNull<
+              milvus::index::JsonFlatIndexQueryExecutor<std::string>>::value);
+static_assert(
+    HasRowCountIsNotNull<milvus::index::ScalarIndexSort<int64_t>>::value);
+static_assert(HasRowCountIsNotNull<milvus::index::StringIndexMarisa>::value);
+static_assert(HasRowCountIsNotNull<milvus::index::StringIndexSort>::value);
+static_assert(HasRowCountIsNotNull<milvus::index::JsonKeyStats>::value);

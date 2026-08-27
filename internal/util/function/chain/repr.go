@@ -275,6 +275,10 @@ func (repr *ChainRepr) RefreshInfo() error {
 		repr.Operators[i].Inputs = inputs
 		repr.Operators[i].Outputs = outputs
 
+		_, ok := GetOperatorFactory(opType)
+		if !ok {
+			return merr.WrapErrParameterInvalidMsg("op[%d]: unknown operator type: %s", i, opType)
+		}
 		info.Ops = append(info.Ops, OperatorReprInfo{
 			Type:       opType,
 			ReadNames:  append([]string(nil), inputs...),
@@ -337,7 +341,7 @@ func funcChainFromRepr(repr *ChainRepr, alloc memory.Allocator, buildCtx types.F
 	for i, opRepr := range repr.Operators {
 		op, err := operatorFromReprWithContext(&opRepr, buildCtx)
 		if err != nil {
-			return nil, merr.WrapErrServiceInternalMsg("operator[%d]: %v", i, err)
+			return nil, merr.Wrapf(err, "operator[%d]", i)
 		}
 		chain.Add(op)
 	}
@@ -356,18 +360,11 @@ func operatorFromRepr(repr *OperatorRepr) (Operator, error) {
 }
 
 func operatorFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBuildContext) (Operator, error) {
-	switch repr.Type {
-	case types.OpTypeMap:
-		return NewMapOpFromReprWithContext(repr, buildCtx)
-	case types.OpTypeFilter:
-		return NewFilterOpFromReprWithContext(repr, buildCtx)
-	}
-
 	factory, ok := GetOperatorFactory(repr.Type)
 	if !ok {
 		return nil, merr.WrapErrParameterInvalidMsg("unknown operator type: %s", repr.Type)
 	}
-	return factory(repr)
+	return factory(repr, buildCtx)
 }
 
 // FunctionFromRepr creates a FunctionExpr from a FunctionRepr.
