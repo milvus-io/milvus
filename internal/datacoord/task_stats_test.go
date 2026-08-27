@@ -96,6 +96,8 @@ func (s *statsTaskSuite) SetupSuite() {
 	secondaryIndex.Insert(secondaryKey, statsTask)
 
 	s.mt = &meta{
+		// A real meta always has a collection cache; task pricing reads it.
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
 				s.segID: {
@@ -1229,5 +1231,7 @@ func (s *statsTaskSuite) TestPrepareJobRequest() {
 		s.Equal(startID, req.StartLogID)
 		s.Equal(endID, req.EndLogID)
 		s.Equal(int64(1000), req.NumRows)
+		// The request ships exactly what the scheduler placed the task on.
+		s.Equal(st.GetTaskResource(), taskcommon.Resource{CPU: req.GetCpu(), Memory: req.GetMemory()})
 	})
 }

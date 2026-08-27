@@ -111,7 +111,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_NormalL0() {
 			State:         commonpb.SegmentState_Flushed,
 			Deltalogs:     deltaLogs,
 		}}
-	}).Times(2)
+	}).Times(4)
 	task := newL0CompactionTask(&datapb.CompactionTask{
 		PlanID:        1,
 		TriggerID:     19530,
@@ -140,7 +140,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SegmentNotFoundL0() {
 	channel := "Ch-1"
 	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
 		return nil
-	}).Once()
+	}).Twice()
 	task := newL0CompactionTask(&datapb.CompactionTask{
 		InputSegments: []int64{102},
 		PlanID:        1,
@@ -169,7 +169,7 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 			State:         commonpb.SegmentState_Flushed,
 			Deltalogs:     deltaLogs,
 		}}
-	}).Times(2)
+	}).Times(4)
 	s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 	task := newL0CompactionTask(&datapb.CompactionTask{
@@ -228,7 +228,7 @@ func (s *L0CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
 			State:         commonpb.SegmentState_Flushed,
 			Deltalogs:     deltaLogs,
 		}}
-	}).Times(2)
+	}).Times(4)
 	task := newL0CompactionTask(&datapb.CompactionTask{
 		PlanID:        1,
 		TriggerID:     19530,
@@ -288,7 +288,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 				State:         commonpb.SegmentState_Flushed,
 				Deltalogs:     deltaLogs,
 			}}
-		}).Twice()
+		}).Times(4)
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 
 		cluster := session.NewMockCluster(s.T())
@@ -329,7 +329,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 				State:         commonpb.SegmentState_Flushed,
 				Deltalogs:     deltaLogs,
 			}}
-		}).Twice()
+		}).Times(4)
 
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64) error {

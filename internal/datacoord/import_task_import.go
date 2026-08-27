@@ -129,6 +129,17 @@ func (t *importTask) GetTaskSlot() int64 {
 	return int64(CalculateTaskSlot(t, t.importMeta))
 }
 
+// GetTaskResource prices an import by the write buffer it holds. It is
+// deliberately not cached: the job's file stats fill in as pre-import
+// completes, so a later round can price it better.
+func (t *importTask) GetTaskResource() taskcommon.Resource {
+	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
+	if job == nil {
+		return defaultTaskResource()
+	}
+	return importTaskResource(CalculateTaskBufferSize(t, job))
+}
+
 func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	mlog.Info(context.TODO(), "processing pending import task...", WrapTaskLog(t)...)
 	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())

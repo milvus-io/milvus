@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
@@ -49,6 +50,8 @@ type statsTask struct {
 	handler   Handler
 	allocator allocator.Allocator
 	ievm      IndexEngineVersionManager
+
+	resource resourceCache
 }
 
 var _ globalTask.Task = (*statsTask)(nil)
@@ -86,6 +89,25 @@ func (st *statsTask) GetTaskType() taskcommon.Type {
 
 func (st *statsTask) GetTaskState() taskcommon.State {
 	return st.GetState()
+}
+
+// GetTaskResource prices a stats task by the whole segment it reads.
+func (st *statsTask) GetTaskResource() taskcommon.Resource {
+	return st.resource.get(func() (taskcommon.Resource, bool) {
+		segment := st.meta.GetHealthySegment(context.TODO(), st.GetSegmentID())
+		if segment == nil {
+			return defaultTaskResource(), false
+		}
+		var schema *schemapb.CollectionSchema
+		if coll := st.meta.GetCollection(segment.GetCollectionID()); coll != nil {
+			schema = coll.Schema
+		}
+		size := estimateSegmentSize(segment, schema)
+		if size <= 0 {
+			return defaultTaskResource(), false
+		}
+		return statsTaskResource(size), true
+	})
 }
 
 func (st *statsTask) GetTaskSlot() int64 {
@@ -471,6 +493,7 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 	}
 
 	// Create the request
+	resource := st.GetTaskResource()
 	req := &workerpb.CreateStatsRequest{
 		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
 		TaskID:          st.GetTaskID(),
@@ -491,6 +514,8 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		EnableJsonKeyStats:               Params.CommonCfg.EnabledJSONKeyStats.GetAsBool(),
 		JsonKeyStatsDataFormat:           common.JSONStatsDataFormatVersion,
 		TaskSlot:                         st.taskSlot,
+		Cpu:                              resource.CPU,
+		Memory:                           resource.Memory,
 		StorageVersion:                   segment.StorageVersion,
 		CurrentScalarIndexVersion:        st.ievm.ResolveScalarIndexVersion(),
 		JsonStatsMaxShreddingColumns:     Params.DataCoordCfg.JSONStatsMaxShreddingColumns.GetAsInt64(),

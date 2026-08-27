@@ -333,7 +333,9 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_NumClustersCapped() {
 
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.MatchedBy(func(req *workerpb.AnalyzeRequest) bool {
-		return req.NumClusters == 1 // capped at MaxCentroidsNum=1
+		// The request ships exactly what the scheduler placed the task on.
+		return req.NumClusters == 1 && // capped at MaxCentroidsNum=1
+			at.GetTaskResource() == taskcommon.Resource{CPU: req.GetCpu(), Memory: req.GetMemory()}
 	})).Return(nil)
 
 	at.CreateTaskOnWorker(1, cluster)

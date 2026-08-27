@@ -74,6 +74,11 @@ func (t *bumpSchemaVersionTask) GetTaskProto() *datapb.CompactionTask {
 	return t.taskProto.Load().(*datapb.CompactionTask)
 }
 
+// GetTaskResource: a schema bump rewrites one segment, so it is bounded like a mix compaction.
+func (t *bumpSchemaVersionTask) GetTaskResource() taskcommon.Resource {
+	return mixCompactionTaskResource()
+}
+
 func (t *bumpSchemaVersionTask) GetTaskSlot() int64 {
 	return paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionSlotUsage.GetAsInt64()
 }
@@ -99,6 +104,7 @@ func (t *bumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan
 	if err != nil {
 		return nil, err
 	}
+	resource := t.GetTaskResource()
 	plan := &datapb.CompactionPlan{
 		PlanID:                    taskProto.GetPlanID(),
 		StartTime:                 taskProto.GetStartTime(),
@@ -109,6 +115,8 @@ func (t *bumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan
 		Schema:                    taskProto.GetSchema(),
 		PreAllocatedSegmentIDs:    taskProto.GetPreAllocatedSegmentIDs(),
 		SlotUsage:                 t.GetSlotUsage(),
+		Cpu:                       resource.CPU,
+		Memory:                    resource.Memory,
 		MaxSize:                   taskProto.GetMaxSize(),
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),

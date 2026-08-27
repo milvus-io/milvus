@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type indexTaskSuite struct {
@@ -69,6 +70,8 @@ func (s *indexTaskSuite) SetupSuite() {
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.mt = &meta{
+		// A real meta always has a collection cache; task pricing reads it.
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
 				s.segID: {
@@ -313,6 +316,8 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMaxSimRequiresEnoughVe
 			catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 			mt := &meta{
+				// A real meta always has a collection cache; task pricing reads it.
+				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 				segments: &SegmentsInfo{
 					segments: map[int64]*SegmentInfo{
 						s.segID: {
@@ -392,6 +397,8 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayEstimateFailureMarksFa
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 
 	mt := &meta{
+		// A real meta always has a collection cache; task pricing reads it.
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
 				s.segID: {
@@ -456,6 +463,8 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMissingBinlogOnStaleSc
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 
 	mt := &meta{
+		// A real meta always has a collection cache; task pricing reads it.
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
 				s.segID: {
@@ -521,6 +530,8 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayManifestBackedProceeds
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 
 	mt := &meta{
+		// A real meta always has a collection cache; task pricing reads it.
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
 				s.segID: {
@@ -653,7 +664,10 @@ func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSu
 
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	mt := &meta{
-		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
+		// A real meta always has a segment and collection cache; task pricing reads both.
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:    NewSegmentsInfo(),
+		indexMeta:   createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
 	}
 	segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
 	s.True(ok)
@@ -705,6 +719,8 @@ func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSu
 	)
 
 	s.NoError(err)
+	// The request ships exactly what the scheduler placed the task on.
+	s.Equal(it.GetTaskResource(), taskcommon.Resource{CPU: req.GetCpu(), Memory: req.GetMemory()})
 	s.True(req.GetField().GetNullable())
 	s.False(childField.GetNullable())
 	s.NotSame(childField, req.GetField())

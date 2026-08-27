@@ -56,6 +56,8 @@ type indexBuildTask struct {
 	handler                   Handler
 	chunkManager              storage.ChunkManager
 	indexEngineVersionManager IndexEngineVersionManager
+
+	resource resourceCache
 }
 
 var _ globalTask.Task = (*indexBuildTask)(nil)
@@ -101,6 +103,30 @@ func newIndexBuildTask(segIndex *model.SegmentIndex,
 
 func (it *indexBuildTask) GetTaskID() int64 {
 	return it.BuildID
+}
+
+// GetTaskResource prices the build by the bytes of the indexed field. It walks
+// meta once and caches; a segment or schema that is not there yet is priced at
+// the floor and retried next round.
+func (it *indexBuildTask) GetTaskResource() taskcommon.Resource {
+	return it.resource.get(func() (taskcommon.Resource, bool) {
+		segment := it.meta.GetHealthySegment(context.TODO(), it.SegmentID)
+		if segment == nil {
+			return defaultTaskResource(), false
+		}
+		var schema *schemapb.CollectionSchema
+		if coll := it.meta.GetCollection(it.CollectionID); coll != nil {
+			schema = coll.Schema
+		}
+		indexType := GetIndexType(it.meta.indexMeta.GetIndexParams(it.CollectionID, it.IndexID))
+		isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
+		fieldID := it.meta.indexMeta.GetFieldIDByIndexID(it.CollectionID, it.IndexID)
+		fieldSize := estimateFieldSize(segment, schema, fieldID)
+		if fieldSize <= 0 {
+			return defaultTaskResource(), false
+		}
+		return indexTaskResource(fieldSize, isVectorIndex), true
+	})
 }
 
 func (it *indexBuildTask) GetTaskSlot() int64 {
@@ -550,6 +576,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	// IndexStorePathVersion; C++ indexbuilder assembles the remote prefix locally.
 	// external_source is passed raw (AWS-form or Milvus-form). C++ indexbuilder
 	// InjectExternalSpecProperties handles Tier-1/2 endpoint derivation + AWS-form swap.
+	resource := it.GetTaskResource()
 	req := &workerpb.CreateJobRequest{
 		ClusterID:                 Params.CommonCfg.ClusterPrefix.GetValue(),
 		IndexFilePrefix:           path.Join(it.chunkManager.RootPath(), common.SegmentIndexV0Path),
@@ -575,6 +602,8 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		PartitionKeyIsolation:     partitionKeyIsolation,
 		StorageVersion:            segment.GetStorageVersion(),
 		TaskSlot:                  it.taskSlot,
+		Cpu:                       resource.CPU,
+		Memory:                    resource.Memory,
 		LackBinlogRows:            segIndex.NumRows - totalRows,
 		InsertLogs:                segment.GetBinlogs(),
 		Manifest:                  segment.GetManifestPath(),

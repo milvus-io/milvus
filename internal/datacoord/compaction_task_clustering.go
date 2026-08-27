@@ -77,6 +77,12 @@ func (t *clusteringCompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
 }
 
+// GetTaskResource: a clustering compaction buffers many output segments at
+// once, so it is priced by a flat configured budget rather than its input.
+func (t *clusteringCompactionTask) GetTaskResource() taskcommon.Resource {
+	return clusteringCompactionTaskResource()
+}
+
 func (t *clusteringCompactionTask) GetTaskSlot() int64 {
 	return paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
 }
@@ -346,6 +352,7 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 	if err != nil {
 		return nil, err
 	}
+	resource := t.GetTaskResource()
 	plan := &datapb.CompactionPlan{
 		PlanID:                    taskProto.GetPlanID(),
 		StartTime:                 taskProto.GetStartTime(),
@@ -363,6 +370,8 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		PreAllocatedSegmentIDs:    taskProto.GetPreAllocatedSegmentIDs(),
 		PreAllocatedLogIDs:        logIDRange,
 		SlotUsage:                 t.GetSlotUsage(),
+		Cpu:                       resource.CPU,
+		Memory:                    resource.Memory,
 		MaxSize:                   taskProto.GetMaxSize(),
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),

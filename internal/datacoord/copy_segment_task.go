@@ -293,6 +293,11 @@ func (t *copySegmentTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCopySegmentState(t.GetState())
 }
 
+// GetTaskResource: copy tasks stream objects and hold little of them.
+func (t *copySegmentTask) GetTaskResource() taskcommon.Resource {
+	return lightweightTaskResource()
+}
+
 // GetTaskSlot returns the number of task slots this task consumes.
 //
 // Used for resource quota enforcement across different task types.
@@ -807,6 +812,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		targets = append(targets, target)
 	}
 
+	resource := task.GetTaskResource()
 	return &datapb.CopySegmentRequest{
 		ClusterID:     Params.CommonCfg.ClusterPrefix.GetValue(),
 		JobID:         task.GetJobId(),
@@ -815,6 +821,8 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		Targets:       targets,
 		StorageConfig: storageConfig,
 		TaskSlot:      task.GetTaskSlot(),
+		Cpu:           resource.CPU,
+		Memory:        resource.Memory,
 		ExternalSpec:  job.GetExternalSpec(),
 	}, nil
 }

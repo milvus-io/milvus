@@ -43,6 +43,8 @@ type analyzeTask struct {
 
 	schema *schemapb.CollectionSchema
 	meta   *meta
+
+	resource resourceCache
 }
 
 var _ globalTask.Task = (*analyzeTask)(nil)
@@ -79,6 +81,30 @@ func (at *analyzeTask) GetTaskType() taskcommon.Type {
 
 func (at *analyzeTask) GetTaskState() taskcommon.State {
 	return at.State
+}
+
+// GetTaskResource prices the analyze by the raw vectors it trains on:
+// rows x dim x element size across every input segment.
+func (at *analyzeTask) GetTaskResource() taskcommon.Resource {
+	return at.resource.get(func() (taskcommon.Resource, bool) {
+		field := typeutil.GetFieldByID(at.schema, at.GetFieldID())
+		if field == nil {
+			return defaultTaskResource(), false
+		}
+		var rows int64
+		for _, segID := range at.GetSegmentIDs() {
+			segment := at.meta.GetHealthySegment(context.TODO(), segID)
+			if segment == nil {
+				return defaultTaskResource(), false
+			}
+			rows += segment.GetNumOfRows()
+		}
+		raw := vectorFieldBytes(field, rows)
+		if raw <= 0 {
+			return defaultTaskResource(), false
+		}
+		return analyzeTaskResource(raw), true
+	})
 }
 
 func (at *analyzeTask) GetTaskSlot() int64 {
@@ -231,6 +257,9 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 	req.MaxClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxClusterSizeRatio.GetAsFloat()
 	req.MaxClusterSize = Params.DataCoordCfg.ClusteringCompactionMaxClusterSize.GetAsSize()
 	req.TaskSlot = Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64()
+	resource := at.GetTaskResource()
+	req.Cpu = resource.CPU
+	req.Memory = resource.Memory
 
 	WrapPluginContext(task.CollectionID, at.schema.GetProperties(), req)
 

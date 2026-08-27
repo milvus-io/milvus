@@ -1527,6 +1527,8 @@ func TestAssembleCopySegmentRequest_MarksExternalCollection(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, req.GetSources(), 1)
 	assert.True(t, req.GetSources()[0].GetIsExternalCollection())
+	// The request ships exactly what the scheduler placed the task on.
+	assert.Equal(t, task.GetTaskResource(), taskcommon.Resource{CPU: req.GetCpu(), Memory: req.GetMemory()})
 }
 
 func TestAssembleCopySegmentRequest_ExternalSnapshotRootRemap(t *testing.T) {
