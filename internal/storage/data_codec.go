@@ -406,6 +406,14 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 		if err = eventWriter.AddTimestamptzToPayload(singleData.(*TimestamptzFieldData).Data, singleData.(*TimestamptzFieldData).ValidData); err != nil {
 			return err
 		}
+	case schemapb.DataType_Date:
+		if err = eventWriter.AddDateToPayload(singleData.(*DateFieldData).Data, singleData.(*DateFieldData).ValidData); err != nil {
+			return err
+		}
+	case schemapb.DataType_Time:
+		if err = eventWriter.AddTimeToPayload(singleData.(*TimeFieldData).Data, singleData.(*TimeFieldData).ValidData); err != nil {
+			return err
+		}
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		for i, singleString := range singleData.(*StringFieldData).Data {
 			isValid := true
@@ -686,6 +694,30 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 		timestamptzFieldData.Data = append(timestamptzFieldData.Data, singleData...)
 		timestamptzFieldData.ValidData = append(timestamptzFieldData.ValidData, validData...)
 		insertData.Data[fieldID] = timestamptzFieldData
+		return len(singleData), nil
+
+	case schemapb.DataType_Date:
+		singleData := data.([]int32)
+		if fieldData == nil {
+			fieldData = &DateFieldData{Data: make([]int32, 0, rowNum)}
+		}
+		dateFieldData := fieldData.(*DateFieldData)
+
+		dateFieldData.Data = append(dateFieldData.Data, singleData...)
+		dateFieldData.ValidData = append(dateFieldData.ValidData, validData...)
+		insertData.Data[fieldID] = dateFieldData
+		return len(singleData), nil
+
+	case schemapb.DataType_Time:
+		singleData := data.([]int64)
+		if fieldData == nil {
+			fieldData = &TimeFieldData{Data: make([]int64, 0, rowNum)}
+		}
+		timeFieldData := fieldData.(*TimeFieldData)
+
+		timeFieldData.Data = append(timeFieldData.Data, singleData...)
+		timeFieldData.ValidData = append(timeFieldData.ValidData, validData...)
+		insertData.Data[fieldID] = timeFieldData
 		return len(singleData), nil
 
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:

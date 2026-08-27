@@ -288,6 +288,22 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 		for i, v := range val {
 			fmt.Printf("\t\t%d : %d\n", i, v)
 		}
+	case schemapb.DataType_Date:
+		val, _, err := reader.GetDateFromPayload()
+		if err != nil {
+			return err
+		}
+		for i, v := range val {
+			fmt.Printf("\t\t%d : %d\n", i, v)
+		}
+	case schemapb.DataType_Time:
+		val, _, err := reader.GetTimeFromPayload()
+		if err != nil {
+			return err
+		}
+		for i, v := range val {
+			fmt.Printf("\t\t%d : %d\n", i, v)
+		}
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		rows, err := reader.GetPayloadLengthFromReader()
 		if err != nil {

@@ -204,6 +204,14 @@ fillDataArrayFromColumnVector(const ColumnVectorPtr& column_vector,
                 int_data->mutable_data()->mutable_data());
             break;
         }
+        case DataType::DATE: {
+            auto date_data = data_array.mutable_scalars()->mutable_date_data();
+            fillTypedDataArray<int32_t>(
+                column_raw_data,
+                column_data_size,
+                date_data->mutable_data()->mutable_data());
+            break;
+        }
         case DataType::INT64: {
             auto longData = data_array.mutable_scalars()->mutable_long_data();
             fillTypedDataArray<int64_t>(
@@ -219,6 +227,14 @@ fillDataArrayFromColumnVector(const ColumnVectorPtr& column_vector,
                 column_raw_data,
                 column_data_size,
                 timestamptzData->mutable_data()->mutable_data());
+            break;
+        }
+        case DataType::TIME: {
+            auto timeData = data_array.mutable_scalars()->mutable_time_data();
+            fillTypedDataArray<int64_t>(
+                column_raw_data,
+                column_data_size,
+                timeData->mutable_data()->mutable_data());
             break;
         }
         case DataType::FLOAT: {

@@ -1107,6 +1107,34 @@ func TestNumRowsWithSchema(t *testing.T) {
 	suite.Run(t, new(NumRowsWithSchemaSuite))
 }
 
+func TestGetNumRowOfFieldDataDateTime(t *testing.T) {
+	n, err := GetNumRowOfFieldData(&schemapb.FieldData{
+		Type: schemapb.DataType_Date,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_DateData{
+					DateData: &schemapb.DateArray{Data: []int32{0}},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), n)
+
+	n, err = GetNumRowOfFieldData(&schemapb.FieldData{
+		Type: schemapb.DataType_Time,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_TimeData{
+					TimeData: &schemapb.TimeArray{Data: []int64{0}},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), n)
+}
+
 func TestChannelConvert(t *testing.T) {
 	t.Run("is physical channel", func(t *testing.T) {
 		{

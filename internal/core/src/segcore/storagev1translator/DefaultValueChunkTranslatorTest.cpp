@@ -535,6 +535,78 @@ TEST_P(DefaultValueChunkTranslatorTest, TestTimestamptzType) {
     }
 }
 
+TEST_P(DefaultValueChunkTranslatorTest, TestDateType) {
+    bool use_mmap = GetParam();
+    int64_t row_count = 200;
+
+    DefaultValueType value_field;
+    value_field.set_date_data(19000);
+    FieldMeta field_meta(FieldName("test_date"),
+                         FieldId(904),
+                         DataType::DATE,
+                         false,
+                         value_field);
+
+    FieldDataInfo field_data_info(904, row_count, getMmapDirPath());
+
+    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+        segment_id_, field_meta, field_data_info, use_mmap, true);
+
+    EXPECT_GT(translator->num_cells(), 0);
+    EXPECT_EQ(translator->value_size(), sizeof(int32_t));
+
+    std::vector<cachinglayer::cid_t> cids = {0};
+    auto cells = translator->get_cells(nullptr, cids);
+    EXPECT_EQ(cells.size(), 1);
+
+    auto& [cid, chunk] = cells[0];
+    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
+    auto span = fixed_chunk->Span();
+    EXPECT_GT(span.row_count(), 0);
+
+    for (size_t i = 0; i < span.row_count(); ++i) {
+        auto value = *reinterpret_cast<int32_t*>((char*)span.data() +
+                                                 i * span.element_sizeof());
+        EXPECT_EQ(value, 19000);
+    }
+}
+
+TEST_P(DefaultValueChunkTranslatorTest, TestTimeType) {
+    bool use_mmap = GetParam();
+    int64_t row_count = 200;
+
+    DefaultValueType value_field;
+    value_field.set_time_data(123456789);
+    FieldMeta field_meta(FieldName("test_time"),
+                         FieldId(905),
+                         DataType::TIME,
+                         false,
+                         value_field);
+
+    FieldDataInfo field_data_info(905, row_count, getMmapDirPath());
+
+    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+        segment_id_, field_meta, field_data_info, use_mmap, true);
+
+    EXPECT_GT(translator->num_cells(), 0);
+    EXPECT_EQ(translator->value_size(), sizeof(int64_t));
+
+    std::vector<cachinglayer::cid_t> cids = {0};
+    auto cells = translator->get_cells(nullptr, cids);
+    EXPECT_EQ(cells.size(), 1);
+
+    auto& [cid, chunk] = cells[0];
+    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
+    auto span = fixed_chunk->Span();
+    EXPECT_GT(span.row_count(), 0);
+
+    for (size_t i = 0; i < span.row_count(); ++i) {
+        auto value = *reinterpret_cast<int64_t*>((char*)span.data() +
+                                                 i * span.element_sizeof());
+        EXPECT_EQ(value, 123456789);
+    }
+}
+
 // Test with zero rows (edge case)
 TEST_P(DefaultValueChunkTranslatorTest, TestZeroRows) {
     bool use_mmap = GetParam();

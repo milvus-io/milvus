@@ -103,6 +103,14 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 		stats.Max = &Int64FieldValue{}
 		stats.Min = &Int64FieldValue{}
 		isScalarField = true
+	case schemapb.DataType_Date:
+		stats.Max = &Int32FieldValue{}
+		stats.Min = &Int32FieldValue{}
+		isScalarField = true
+	case schemapb.DataType_Time:
+		stats.Max = &Int64FieldValue{}
+		stats.Min = &Int64FieldValue{}
+		isScalarField = true
 	case schemapb.DataType_Float:
 		stats.Max = &FloatFieldValue{}
 		stats.Min = &FloatFieldValue{}
@@ -321,6 +329,30 @@ func (stats *FieldStats) UpdateByMsgs(msgs FieldData) {
 			common.Endian.PutUint64(b, uint64(int64Value))
 			stats.BF.Add(b)
 		}
+	case schemapb.DataType_Date:
+		data := msgs.(*DateFieldData).Data
+		if len(data) < 1 {
+			return
+		}
+		b := make([]byte, 8)
+		for _, int32Value := range data {
+			pk := NewInt32FieldValue(int32Value)
+			stats.UpdateMinMax(pk)
+			common.Endian.PutUint64(b, uint64(int32Value))
+			stats.BF.Add(b)
+		}
+	case schemapb.DataType_Time:
+		data := msgs.(*TimeFieldData).Data
+		if len(data) < 1 {
+			return
+		}
+		b := make([]byte, 8)
+		for _, int64Value := range data {
+			pk := NewInt64FieldValue(int64Value)
+			stats.UpdateMinMax(pk)
+			common.Endian.PutUint64(b, uint64(int64Value))
+			stats.BF.Add(b)
+		}
 	case schemapb.DataType_String:
 		data := msgs.(*StringFieldData).Data
 		// return error: msgs must has one element at least
@@ -367,6 +399,16 @@ func (stats *FieldStats) Update(pk ScalarFieldValue) {
 		common.Endian.PutUint64(b, uint64(data))
 		stats.BF.Add(b)
 	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
+		data := pk.GetValue().(int64)
+		b := make([]byte, 8)
+		common.Endian.PutUint64(b, uint64(data))
+		stats.BF.Add(b)
+	case schemapb.DataType_Date:
+		data := pk.GetValue().(int32)
+		b := make([]byte, 8)
+		common.Endian.PutUint64(b, uint64(data))
+		stats.BF.Add(b)
+	case schemapb.DataType_Time:
 		data := pk.GetValue().(int64)
 		b := make([]byte, 8)
 		common.Endian.PutUint64(b, uint64(data))

@@ -65,6 +65,10 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecVisitorImpl<int32_t>(input);
             break;
         }
+        case DataType::DATE: {
+            result = ExecVisitorImpl<int32_t>(input);
+            break;
+        }
         case DataType::INT64: {
             result = ExecVisitorImpl<int64_t>(input);
             break;
@@ -77,7 +81,8 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecVisitorImpl<double>(input);
             break;
         }
-        case DataType::TIMESTAMPTZ: {
+        case DataType::TIMESTAMPTZ:
+        case DataType::TIME: {
             result = ExecVisitorImpl<int64_t>(input);
             break;
         }

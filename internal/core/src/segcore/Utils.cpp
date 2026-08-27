@@ -437,6 +437,11 @@ SetUpScalarFieldData(milvus::proto::schema::ScalarField*& scalar_array,
             obj->mutable_data()->Resize(count, 0);
             break;
         }
+        case DataType::DATE: {
+            auto obj = scalar_array->mutable_date_data();
+            obj->mutable_data()->Resize(count, 0);
+            break;
+        }
         case DataType::INT64: {
             auto obj = scalar_array->mutable_long_data();
             obj->mutable_data()->Resize(count, 0);
@@ -454,6 +459,11 @@ SetUpScalarFieldData(milvus::proto::schema::ScalarField*& scalar_array,
         }
         case DataType::TIMESTAMPTZ: {
             auto obj = scalar_array->mutable_timestamptz_data();
+            obj->mutable_data()->Resize(count, 0);
+            break;
+        }
+        case DataType::TIME: {
+            auto obj = scalar_array->mutable_time_data();
             obj->mutable_data()->Resize(count, 0);
             break;
         }
@@ -636,6 +646,12 @@ CreateScalarDataArrayFrom(const void* data_raw,
             obj->mutable_data()->Add(data, data + count);
             break;
         }
+        case DataType::DATE: {
+            auto data = reinterpret_cast<const int32_t*>(data_raw);
+            auto obj = scalar_array->mutable_date_data();
+            obj->mutable_data()->Add(data, data + count);
+            break;
+        }
         case DataType::INT64: {
             auto data = reinterpret_cast<const int64_t*>(data_raw);
             auto obj = scalar_array->mutable_long_data();
@@ -657,6 +673,12 @@ CreateScalarDataArrayFrom(const void* data_raw,
         case DataType::TIMESTAMPTZ: {
             auto data = reinterpret_cast<const int64_t*>(data_raw);
             auto obj = scalar_array->mutable_timestamptz_data();
+            obj->mutable_data()->Add(data, data + count);
+            break;
+        }
+        case DataType::TIME: {
+            auto data = reinterpret_cast<const int64_t*>(data_raw);
+            auto obj = scalar_array->mutable_time_data();
             obj->mutable_data()->Add(data, data + count);
             break;
         }
@@ -1018,6 +1040,12 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 *(obj->mutable_data()->Add()) = data[src_offset];
                 break;
             }
+            case DataType::DATE: {
+                auto data = FIELD_DATA(src_field_data, date).data();
+                auto obj = scalar_array->mutable_date_data();
+                *(obj->mutable_data()->Add()) = data[src_offset];
+                break;
+            }
             case DataType::INT64: {
                 auto data = FIELD_DATA(src_field_data, long).data();
                 auto obj = scalar_array->mutable_long_data();
@@ -1040,6 +1068,12 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 auto data = FIELD_DATA(src_field_data, timestamptz)
                                 .data();  //Here is a marco
                 auto obj = scalar_array->mutable_timestamptz_data();
+                *(obj->mutable_data()->Add()) = data[src_offset];
+                break;
+            }
+            case DataType::TIME: {
+                auto data = FIELD_DATA(src_field_data, time).data();
+                auto obj = scalar_array->mutable_time_data();
                 *(obj->mutable_data()->Add()) = data[src_offset];
                 break;
             }
@@ -1191,6 +1225,25 @@ ReverseDataFromIndex(const index::IndexBase* index,
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
+        case DataType::DATE: {
+            using IndexType = index::ScalarIndex<int32_t>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<int32_t> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
+                if (!raw.has_value()) {
+                    valid_data[i] = false;
+                    continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
+                }
+                raw_data[i] = raw.value();
+            }
+            auto obj = scalar_array->mutable_date_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
         case DataType::INT64: {
             using IndexType = index::ScalarIndex<int64_t>;
             auto ptr = dynamic_cast<const IndexType*>(index);
@@ -1268,6 +1321,25 @@ ReverseDataFromIndex(const index::IndexBase* index,
                 raw_data[i] = raw.value();
             }
             auto obj = scalar_array->mutable_timestamptz_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::TIME: {
+            using IndexType = index::ScalarIndex<int64_t>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<int64_t> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
+                if (!raw.has_value()) {
+                    valid_data[i] = false;
+                    continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
+                }
+                raw_data[i] = raw.value();
+            }
+            auto obj = scalar_array->mutable_time_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
@@ -1614,7 +1686,8 @@ bulk_script_field_data(milvus::OpContext* op_ctx,
                 1, dataType, false, std::move(vec));
             break;
         }
-        case milvus::DataType::INT32: {
+        case milvus::DataType::INT32:
+        case milvus::DataType::DATE: {
             FixedVector<int32_t> vec(count);
             segment->bulk_subscript(op_ctx,
                                     fieldId,
@@ -1628,6 +1701,7 @@ bulk_script_field_data(milvus::OpContext* op_ctx,
             break;
         }
         case milvus::DataType::TIMESTAMPTZ:
+        case milvus::DataType::TIME:
         case milvus::DataType::INT64: {
             FixedVector<int64_t> vec(count);
             segment->bulk_subscript(op_ctx,

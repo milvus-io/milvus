@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/datetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -203,6 +204,16 @@ func getTargetType(lDataType, rDataType schemapb.DataType) (schemapb.DataType, e
 			return schemapb.DataType_Timestamptz, nil
 		}
 	}
+	if typeutil.IsDateType(lDataType) {
+		if typeutil.IsDateType(rDataType) {
+			return schemapb.DataType_Date, nil
+		}
+	}
+	if typeutil.IsTimeType(lDataType) {
+		if typeutil.IsTimeType(rDataType) {
+			return schemapb.DataType_Time, nil
+		}
+	}
 	if typeutil.IsFloatingType(lDataType) {
 		if typeutil.IsJSONType(rDataType) || typeutil.IsArithmetic(rDataType) {
 			return schemapb.DataType_Double, nil
@@ -282,6 +293,39 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 	}
 	if typeutil.IsTimestamptzType(dataType) {
 		return value, nil
+	}
+	if typeutil.IsDateType(dataType) {
+		if IsString(value) {
+			days, err := datetime.ParseDate(value.GetStringVal())
+			if err != nil {
+				return nil, err
+			}
+			return NewInt(int64(days)), nil
+		}
+		if IsInteger(value) {
+			days, err := datetime.ValidateDateDays(value.GetInt64Val())
+			if err != nil {
+				return nil, err
+			}
+			return NewInt(int64(days)), nil
+		}
+		return nil, merr.WrapErrQueryPlanMsg("cannot cast value to Date: expected YYYY-MM-DD string")
+	}
+	if typeutil.IsTimeType(dataType) {
+		if IsString(value) {
+			micros, err := datetime.ParseTime(value.GetStringVal())
+			if err != nil {
+				return nil, err
+			}
+			return NewInt(micros), nil
+		}
+		if IsInteger(value) {
+			if err := datetime.ValidateTimeMicros(value.GetInt64Val()); err != nil {
+				return nil, err
+			}
+			return value, nil
+		}
+		return nil, merr.WrapErrQueryPlanMsg("cannot cast value to Time: expected HH:MM:SS string")
 	}
 
 	if typeutil.IsBoolType(dataType) && IsBool(value) {
@@ -490,6 +534,16 @@ func handleCompare(op planpb.OpType, left *ExprWithType, right *ExprWithType) (*
 		return nil, merr.WrapErrQueryPlanMsg("two column comparison with JSON type is not supported")
 	}
 
+	leftType := leftColumnInfo.GetDataType()
+	rightType := rightColumnInfo.GetDataType()
+	if typeutil.IsDateType(leftType) || typeutil.IsDateType(rightType) ||
+		typeutil.IsTimeType(leftType) || typeutil.IsTimeType(rightType) {
+		if leftType != rightType {
+			return nil, merr.WrapErrQueryPlanMsg("comparisons between %s and %s are not supported",
+				leftType.String(), rightType.String())
+		}
+	}
+
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_CompareExpr{
 			CompareExpr: &planpb.CompareExpr{
@@ -522,7 +576,11 @@ func canBeComparedDataType(left, right schemapb.DataType) bool {
 		schemapb.DataType_Float, schemapb.DataType_Double:
 		return typeutil.IsArithmetic(right) || typeutil.IsJSONType(right)
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
-		return typeutil.IsStringType(right) || typeutil.IsJSONType(right)
+		return typeutil.IsStringType(right) || typeutil.IsJSONType(right) || typeutil.IsDateType(right) || typeutil.IsTimeType(right)
+	case schemapb.DataType_Date:
+		return typeutil.IsDateType(right) || typeutil.IsStringType(right)
+	case schemapb.DataType_Time:
+		return typeutil.IsTimeType(right) || typeutil.IsStringType(right)
 	case schemapb.DataType_JSON:
 		return true
 	case schemapb.DataType_Timestamptz:
@@ -761,6 +819,9 @@ func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType,
 }
 
 func castRangeValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
+	if typeutil.IsDateType(dataType) || typeutil.IsTimeType(dataType) {
+		return castValue(dataType, value)
+	}
 	switch dataType {
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		if !IsString(value) {

@@ -66,6 +66,16 @@ TEST(GetArrowDataTypeTest, TIMESTAMPTZ) {
     ASSERT_TRUE(result->Equals(arrow::int64()));
 }
 
+TEST(GetArrowDataTypeTest, DATE) {
+    auto result = GetArrowDataType(DataType::DATE);
+    ASSERT_TRUE(result->Equals(arrow::int32()));
+}
+
+TEST(GetArrowDataTypeTest, TIME) {
+    auto result = GetArrowDataType(DataType::TIME);
+    ASSERT_TRUE(result->Equals(arrow::int64()));
+}
+
 TEST(GetArrowDataTypeTest, STRING_TYPES) {
     auto result1 = GetArrowDataType(DataType::STRING);
     auto result2 = GetArrowDataType(DataType::VARCHAR);

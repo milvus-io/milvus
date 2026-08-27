@@ -3029,6 +3029,38 @@ func TestCheckFieldSchemaAllowsAnalyzerParamsWithoutEnableAnalyzer(t *testing.T)
 	require.NoError(t, err)
 }
 
+func TestCheckFieldSchemaRejectsDateTimeDefaultValue(t *testing.T) {
+	err := checkFieldSchema([]*schemapb.FieldSchema{
+		{
+			Name:     "d",
+			DataType: schemapb.DataType_Date,
+			DefaultValue: &schemapb.ValueField{
+				Data: &schemapb.ValueField_DateData{DateData: 0},
+			},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not support default_value")
+
+	err = checkFieldSchema([]*schemapb.FieldSchema{
+		{
+			Name:     "tm",
+			DataType: schemapb.DataType_Time,
+			DefaultValue: &schemapb.ValueField{
+				Data: &schemapb.ValueField_TimeData{TimeData: 0},
+			},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not support default_value")
+
+	err = checkFieldSchema([]*schemapb.FieldSchema{
+		{Name: "d", DataType: schemapb.DataType_Date},
+		{Name: "tm", DataType: schemapb.DataType_Time},
+	})
+	require.NoError(t, err)
+}
+
 func Test_appendConsistecyLevel(t *testing.T) {
 	task := &createCollectionTask{
 		Req: &milvuspb.CreateCollectionRequest{

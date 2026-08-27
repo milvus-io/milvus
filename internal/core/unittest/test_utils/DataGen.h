@@ -206,6 +206,15 @@ struct GeneratedData {
                             std::copy_n(src_data, raw_->num_rows(), ret.data());
                             break;
                         }
+                        case DataType::DATE: {
+                            auto src_data = reinterpret_cast<const T*>(
+                                target_field_data.scalars()
+                                    .date_data()
+                                    .data()
+                                    .data());
+                            std::copy_n(src_data, raw_->num_rows(), ret.data());
+                            break;
+                        }
                         case DataType::INT64: {
                             auto src_data = reinterpret_cast<const T*>(
                                 target_field_data.scalars()
@@ -237,6 +246,15 @@ struct GeneratedData {
                             auto src_data = reinterpret_cast<const T*>(
                                 target_field_data.scalars()
                                     .timestamptz_data()
+                                    .data()
+                                    .data());
+                            std::copy_n(src_data, raw_->num_rows(), ret.data());
+                            break;
+                        }
+                        case DataType::TIME: {
+                            auto src_data = reinterpret_cast<const T*>(
+                                target_field_data.scalars()
+                                    .time_data()
                                     .data()
                                     .data());
                             std::copy_n(src_data, raw_->num_rows(), ret.data());
@@ -861,6 +879,32 @@ DataGen(SchemaPtr schema,
                 break;
             }
             case DataType::TIMESTAMPTZ: {
+                vector<int64_t> data(N);
+                for (int i = 0; i < N; ++i) {
+                    int64_t x = 0;
+                    if (random_val)
+                        x = random() % (2 * N);
+                    else
+                        x = i / repeat_count;
+                    data[i] = x;
+                }
+                insert_cols(data, N, field_meta, random_valid);
+                break;
+            }
+            case DataType::DATE: {
+                vector<int32_t> data(N);
+                for (int i = 0; i < N; i++) {
+                    int32_t x = 0;
+                    if (random_val)
+                        x = random() % (2 * N);
+                    else
+                        x = i / repeat_count;
+                    data[i] = x;
+                }
+                insert_cols(data, N, field_meta, random_valid);
+                break;
+            }
+            case DataType::TIME: {
                 vector<int64_t> data(N);
                 for (int i = 0; i < N; ++i) {
                     int64_t x = 0;
@@ -1570,6 +1614,17 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 }
                 break;
             }
+            case DataType::DATE: {
+                auto raw_data = data->scalars().date_data().data().data();
+                if (field_meta.is_nullable()) {
+                    auto raw_valid_data = row_valid_data.data();
+                    createNullableFieldData(
+                        raw_data, raw_valid_data, DataType::DATE, dim);
+                } else {
+                    createFieldData(raw_data, DataType::DATE, dim);
+                }
+                break;
+            }
             case DataType::INT64: {
                 auto raw_data = data->scalars().long_data().data().data();
                 if (field_meta.is_nullable()) {
@@ -1612,6 +1667,17 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                         raw_data, raw_valid_data, DataType::TIMESTAMPTZ, dim);
                 } else {
                     createFieldData(raw_data, DataType::TIMESTAMPTZ, dim);
+                }
+                break;
+            }
+            case DataType::TIME: {
+                auto raw_data = data->scalars().time_data().data().data();
+                if (field_meta.is_nullable()) {
+                    auto raw_valid_data = row_valid_data.data();
+                    createNullableFieldData(
+                        raw_data, raw_valid_data, DataType::TIME, dim);
+                } else {
+                    createFieldData(raw_data, DataType::TIME, dim);
                 }
                 break;
             }

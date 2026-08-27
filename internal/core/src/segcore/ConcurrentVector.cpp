@@ -120,6 +120,10 @@ VectorBase::set_data_raw(ssize_t element_offset,
             return set_data_raw(
                 element_offset, FIELD_DATA(data, int).data(), element_count);
         }
+        case DataType::DATE: {
+            return set_data_raw(
+                element_offset, FIELD_DATA(data, date).data(), element_count);
+        }
         case DataType::INT64: {
             return set_data_raw(
                 element_offset, FIELD_DATA(data, long).data(), element_count);
@@ -136,6 +140,10 @@ VectorBase::set_data_raw(ssize_t element_offset,
             return set_data_raw(element_offset,
                                 FIELD_DATA(data, timestamptz).data(),
                                 element_count);
+        }
+        case DataType::TIME: {
+            return set_data_raw(
+                element_offset, FIELD_DATA(data, time).data(), element_count);
         }
         case DataType::STRING:
         case DataType::VARCHAR:
@@ -258,7 +266,8 @@ ConcurrentVector<ArrayValue>::set_mmap_proto_rows(
             static_cast<ssize_t>(size_per_chunk_ - chunk_offset);
         const auto remaining_rows =
             static_cast<ssize_t>(rows.size() - source_offset);
-        const auto copy_count = std::min(remaining_in_chunk, remaining_rows);
+        const auto copy_count =
+            std::min(static_cast<ssize_t>(remaining_in_chunk), remaining_rows);
         mmap_chunks->copy_array_rows_to_chunk(
             chunk_id,
             static_cast<size_t>(chunk_offset),

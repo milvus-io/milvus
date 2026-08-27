@@ -1066,6 +1066,15 @@ func NewScalarFieldValueFromGenericValue(dtype schemapb.DataType, gVal *planpb.G
 	case schemapb.DataType_Timestamptz:
 		i64VAl := gVal.Val.(*planpb.GenericValue_Int64Val)
 		return NewInt64FieldValue(i64VAl.Int64Val), nil
+	case schemapb.DataType_Date:
+		i64Val := gVal.Val.(*planpb.GenericValue_Int64Val)
+		if i64Val.Int64Val > math.MaxInt32 || i64Val.Int64Val < math.MinInt32 {
+			return nil, merr.WrapErrParameterInvalidRange(math.MinInt32, math.MaxInt32, i64Val.Int64Val, "expr value out of bound")
+		}
+		return NewInt32FieldValue(int32(i64Val.Int64Val)), nil
+	case schemapb.DataType_Time:
+		i64Val := gVal.Val.(*planpb.GenericValue_Int64Val)
+		return NewInt64FieldValue(i64Val.Int64Val), nil
 	case schemapb.DataType_String:
 		strVal := gVal.Val.(*planpb.GenericValue_StringVal)
 		return NewStringFieldValue(strVal.StringVal), nil
@@ -1093,6 +1102,10 @@ func NewScalarFieldValue(dtype schemapb.DataType, data interface{}) ScalarFieldV
 	case schemapb.DataType_Double:
 		return NewDoubleFieldValue(data.(float64))
 	case schemapb.DataType_Timestamptz:
+		return NewInt64FieldValue(data.(int64))
+	case schemapb.DataType_Date:
+		return NewInt32FieldValue(data.(int32))
+	case schemapb.DataType_Time:
 		return NewInt64FieldValue(data.(int64))
 	case schemapb.DataType_String:
 		return NewStringFieldValue(data.(string))

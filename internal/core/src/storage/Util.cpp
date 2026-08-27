@@ -228,7 +228,8 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                 builder, int16_data, payload.valid_data, nullable, length);
             break;
         }
-        case DataType::INT32: {
+        case DataType::INT32:
+        case DataType::DATE: {
             auto int32_data = reinterpret_cast<int32_t*>(raw_data);
             add_numeric_payload<int32_t, arrow::Int32Builder>(
                 builder, int32_data, payload.valid_data, nullable, length);
@@ -252,7 +253,8 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                 builder, double_data, payload.valid_data, nullable, length);
             break;
         }
-        case DataType::TIMESTAMPTZ: {
+        case DataType::TIMESTAMPTZ:
+        case DataType::TIME: {
             auto timestamptz_data = reinterpret_cast<int64_t*>(raw_data);
             add_numeric_payload<int64_t, arrow::Int64Builder>(
                 builder,
@@ -458,7 +460,8 @@ CreateArrowBuilder(DataType data_type) {
         case DataType::INT16: {
             return std::make_shared<arrow::Int16Builder>();
         }
-        case DataType::INT32: {
+        case DataType::INT32:
+        case DataType::DATE: {
             return std::make_shared<arrow::Int32Builder>();
         }
         case DataType::INT64: {
@@ -470,7 +473,8 @@ CreateArrowBuilder(DataType data_type) {
         case DataType::DOUBLE: {
             return std::make_shared<arrow::DoubleBuilder>();
         }
-        case DataType::TIMESTAMPTZ: {
+        case DataType::TIMESTAMPTZ:
+        case DataType::TIME: {
             return std::make_shared<arrow::Int64Builder>();
         }
         case DataType::VARCHAR:
@@ -621,6 +625,9 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
         case DataType::INT32:
             return std::make_shared<arrow::Int32Scalar>(
                 default_value.int_data());
+        case DataType::DATE:
+            return std::make_shared<arrow::Int32Scalar>(
+                default_value.date_data());
         case DataType::INT64:
             return std::make_shared<arrow::Int64Scalar>(
                 default_value.long_data());
@@ -633,6 +640,9 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
         case DataType::TIMESTAMPTZ:
             return std::make_shared<arrow::Int64Scalar>(
                 default_value.timestamptz_data());
+        case DataType::TIME:
+            return std::make_shared<arrow::Int64Scalar>(
+                default_value.time_data());
         case DataType::VARCHAR:
         case DataType::STRING:
         case DataType::TEXT:
@@ -663,7 +673,8 @@ CreateArrowSchema(DataType data_type, bool nullable) {
             return arrow::schema(
                 {arrow::field("val", arrow::int16(), nullable)});
         }
-        case DataType::INT32: {
+        case DataType::INT32:
+        case DataType::DATE: {
             return arrow::schema(
                 {arrow::field("val", arrow::int32(), nullable)});
         }
@@ -679,7 +690,8 @@ CreateArrowSchema(DataType data_type, bool nullable) {
             return arrow::schema(
                 {arrow::field("val", arrow::float64(), nullable)});
         }
-        case DataType::TIMESTAMPTZ: {
+        case DataType::TIMESTAMPTZ:
+        case DataType::TIME: {
             return arrow::schema(
                 {arrow::field("val", arrow::int64(), nullable)});
         }
@@ -1232,6 +1244,7 @@ CreateFieldData(const DataType& type,
             return std::make_shared<FieldData<int16_t>>(
                 type, nullable, total_num_rows);
         case DataType::INT32:
+        case DataType::DATE:
             return std::make_shared<FieldData<int32_t>>(
                 type, nullable, total_num_rows);
         case DataType::INT64:
@@ -1244,6 +1257,7 @@ CreateFieldData(const DataType& type,
             return std::make_shared<FieldData<double>>(
                 type, nullable, total_num_rows);
         case DataType::TIMESTAMPTZ:
+        case DataType::TIME:
             return std::make_shared<FieldData<int64_t>>(
                 type, nullable, total_num_rows);
         case DataType::STRING:
@@ -3064,8 +3078,10 @@ ExpectedScalarArrowType(DataType data_type) {
         case DataType::INT16:
             return arrow::int16();
         case DataType::INT32:
+        case DataType::DATE:
             return arrow::int32();
         case DataType::INT64:
+        case DataType::TIME:
             return arrow::int64();
         case DataType::FLOAT:
             return arrow::float32();

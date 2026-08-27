@@ -229,7 +229,8 @@ SortBuffer::Compare(const char* lhs, const char* rhs) const {
                     lhs_val, rhs_val, sort_key.ascending);
                 break;
             }
-            case DataType::INT32: {
+            case DataType::INT32:
+            case DataType::DATE: {
                 auto lhs_val =
                     RowContainer::valueAt<int32_t>(lhs, row_column.offset());
                 auto rhs_val =
@@ -239,7 +240,8 @@ SortBuffer::Compare(const char* lhs, const char* rhs) const {
                 break;
             }
             case DataType::INT64:
-            case DataType::TIMESTAMPTZ: {
+            case DataType::TIMESTAMPTZ:
+            case DataType::TIME: {
                 auto lhs_val =
                     RowContainer::valueAt<int64_t>(lhs, row_column.offset());
                 auto rhs_val =

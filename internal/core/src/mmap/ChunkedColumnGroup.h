@@ -622,7 +622,8 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 }
                 break;
             }
-            case DataType::INT32: {
+            case DataType::INT32:
+            case DataType::DATE: {
                 BulkPrimitiveValueAtImpl<int32_t, int32_t>(
                     op_ctx, dst, offsets, count);
                 break;
@@ -632,7 +633,8 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                     op_ctx, dst, offsets, count);
                 break;
             }
-            case DataType::TIMESTAMPTZ: {
+            case DataType::TIMESTAMPTZ:
+            case DataType::TIME: {
                 BulkPrimitiveValueAtImpl<int64_t, int64_t>(
                     op_ctx, dst, offsets, count);
                 break;

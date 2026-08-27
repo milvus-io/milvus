@@ -91,8 +91,13 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecVisitorImpl<int32_t>(context);
             break;
         }
+        case DataType::DATE: {
+            result = ExecVisitorImpl<int32_t>(context);
+            break;
+        }
         case DataType::INT64:
-        case DataType::TIMESTAMPTZ: {
+        case DataType::TIMESTAMPTZ:
+        case DataType::TIME: {
             result = ExecVisitorImpl<int64_t>(context);
             break;
         }
@@ -1338,10 +1343,14 @@ PhyTermFilterExpr::PrefetchRawData() {
         case DataType::INT32:
             PrefetchRawData<int32_t>();
             break;
+        case DataType::DATE:
+            PrefetchRawData<int32_t>();
+            break;
         case DataType::INT64:
             PrefetchRawData<int64_t>();
             break;
         case DataType::TIMESTAMPTZ:
+        case DataType::TIME:
             PrefetchRawData<int64_t>();
             break;
         case DataType::FLOAT:

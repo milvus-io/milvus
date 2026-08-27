@@ -340,6 +340,62 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return merr.WrapErrServiceInternalMsg("expected *array.Int64Builder, got %T", b)
 		},
 	}
+	m[schemapb.DataType_Date] = serdeEntry{
+		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
+			return arrow.PrimitiveTypes.Int32
+		},
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, error) {
+			if a.IsNull(i) {
+				return nil, nil
+			}
+			if arr, ok := a.(*array.Int32); ok && i < arr.Len() {
+				return arr.Value(i), nil
+			}
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.Int32, got %T", a)
+		},
+		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
+			if v == nil {
+				b.AppendNull()
+				return nil
+			}
+			if builder, ok := b.(*array.Int32Builder); ok {
+				if v, ok := v.(int32); ok {
+					builder.Append(v)
+					return nil
+				}
+				return merr.WrapErrServiceInternalMsg("expected int32 value, got %T", v)
+			}
+			return merr.WrapErrServiceInternalMsg("expected *array.Int32Builder, got %T", b)
+		},
+	}
+	m[schemapb.DataType_Time] = serdeEntry{
+		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
+			return arrow.PrimitiveTypes.Int64
+		},
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, _ int, shouldCopy bool) (any, error) {
+			if a.IsNull(i) {
+				return nil, nil
+			}
+			if arr, ok := a.(*array.Int64); ok && i < arr.Len() {
+				return arr.Value(i), nil
+			}
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.Int64, got %T", a)
+		},
+		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
+			if v == nil {
+				b.AppendNull()
+				return nil
+			}
+			if builder, ok := b.(*array.Int64Builder); ok {
+				if v, ok := v.(int64); ok {
+					builder.Append(v)
+					return nil
+				}
+				return merr.WrapErrServiceInternalMsg("expected int64 value, got %T", v)
+			}
+			return merr.WrapErrServiceInternalMsg("expected *array.Int64Builder, got %T", b)
+		},
+	}
 	stringEntry := serdeEntry{
 		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
 			return arrow.BinaryTypes.String
@@ -1160,7 +1216,9 @@ func newSingleFieldRecordWriter(field *schemapb.FieldSchema, writer io.Writer, o
 				return 2
 			case schemapb.DataType_Int32:
 				return 4
-			case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
+			case schemapb.DataType_Date:
+				return 4
+			case schemapb.DataType_Int64, schemapb.DataType_Timestamptz, schemapb.DataType_Time:
 				return 8
 			}
 		}

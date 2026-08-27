@@ -1037,10 +1037,12 @@ GetElementByteWidth(milvus::DataType data_type, int64_t dim) {
         case milvus::DataType::INT16:
             return 2;
         case milvus::DataType::INT32:
+        case milvus::DataType::DATE:
         case milvus::DataType::FLOAT:
             return 4;
         case milvus::DataType::INT64:
         case milvus::DataType::TIMESTAMPTZ:
+        case milvus::DataType::TIME:
         case milvus::DataType::DOUBLE:
             return 8;
         case milvus::DataType::VECTOR_FLOAT:
@@ -1509,6 +1511,7 @@ BuildArrayForChunk(const FieldInfo& field_info,
                 global_offset);
 
         case milvus::DataType::INT32:
+        case milvus::DataType::DATE:
             return WrapChunkAsArrowArray<arrow::Int32Array>(
                 get_data_ptr(),
                 num_rows,
@@ -1518,6 +1521,7 @@ BuildArrayForChunk(const FieldInfo& field_info,
 
         case milvus::DataType::INT64:
         case milvus::DataType::TIMESTAMPTZ:
+        case milvus::DataType::TIME:
             return WrapChunkAsArrowArray<arrow::Int64Array>(
                 get_data_ptr(),
                 num_rows,

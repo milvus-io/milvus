@@ -5878,6 +5878,8 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 			{schemapb.DataType_JSON, nil},
 			{schemapb.DataType_Array, nil},
 			{schemapb.DataType_Timestamptz, nil},
+			{schemapb.DataType_Date, nil},
+			{schemapb.DataType_Time, nil},
 			{schemapb.DataType_Geometry, nil},
 			{schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
 			{schemapb.DataType_Float16Vector, []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
@@ -6963,6 +6965,8 @@ func TestIsClusteringKeyType(t *testing.T) {
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_Geometry))
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_Text))
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_Timestamptz))
+	assert.False(t, IsClusteringKeyType(schemapb.DataType_Date))
+	assert.False(t, IsClusteringKeyType(schemapb.DataType_Time))
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_BinaryVector))
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_Float16Vector))
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_BFloat16Vector))

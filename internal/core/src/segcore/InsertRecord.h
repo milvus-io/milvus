@@ -1699,6 +1699,11 @@ class InsertRecordGrowing {
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
+            case DataType::DATE: {
+                this->append_data<int32_t>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
+                return;
+            }
             case DataType::INT64: {
                 this->append_data<int64_t>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
@@ -1714,7 +1719,8 @@ class InsertRecordGrowing {
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
-            case DataType::TIMESTAMPTZ: {
+            case DataType::TIMESTAMPTZ:
+            case DataType::TIME: {
                 this->append_data<int64_t>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;

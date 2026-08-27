@@ -999,8 +999,12 @@ IndexFactory::CreatePrimitiveScalarIndex(
         case DataType::INT32:
             return CreatePrimitiveScalarIndex<int32_t>(create_index_info,
                                                        file_manager_context);
+        case DataType::DATE:
+            return CreatePrimitiveScalarIndex<int32_t>(create_index_info,
+                                                       file_manager_context);
         case DataType::INT64:
         case DataType::TIMESTAMPTZ:
+        case DataType::TIME:
             return CreatePrimitiveScalarIndex<int64_t>(create_index_info,
                                                        file_manager_context);
         case DataType::FLOAT:
@@ -1379,6 +1383,8 @@ IndexFactory::CreateScalarIndex(
         case DataType::STRING:
         case DataType::TEXT:
         case DataType::TIMESTAMPTZ:
+        case DataType::DATE:
+        case DataType::TIME:
             return CreatePrimitiveScalarIndex(
                 data_type, create_index_info, file_manager_context);
         case DataType::ARRAY: {

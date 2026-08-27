@@ -270,7 +270,8 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             }
             return FillFieldData(array_info.first, array_info.second);
         }
-        case DataType::INT32: {
+        case DataType::INT32:
+        case DataType::DATE: {
             auto array_info =
                 GetDataInfoFromArray<arrow::Int32Array,
                                      arrow::Type::type::INT32>(array);
@@ -318,7 +319,8 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             }
             return FillFieldData(array_info.first, array_info.second);
         }
-        case DataType::TIMESTAMPTZ: {
+        case DataType::TIMESTAMPTZ:
+        case DataType::TIME: {
             auto array_info =
                 GetDataInfoFromArray<arrow::Int64Array,
                                      arrow::Type::type::INT64>(array);
@@ -668,12 +670,32 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(
                 values.data(), valid_data_ptr.get(), element_count, 0);
         }
+        case DataType::DATE: {
+            FixedVector<int32_t> values(element_count);
+            if (default_value.has_value()) {
+                std::fill(
+                    values.begin(), values.end(), default_value->date_data());
+                return FillFieldData(values.data(), nullptr, element_count, 0);
+            }
+            return FillFieldData(
+                values.data(), valid_data_ptr.get(), element_count, 0);
+        }
         case DataType::TIMESTAMPTZ: {
             FixedVector<int64_t> values(element_count);
             if (default_value.has_value()) {
                 std::fill(values.begin(),
                           values.end(),
                           default_value->timestamptz_data());
+                return FillFieldData(values.data(), nullptr, element_count, 0);
+            }
+            return FillFieldData(
+                values.data(), valid_data_ptr.get(), element_count, 0);
+        }
+        case DataType::TIME: {
+            FixedVector<int64_t> values(element_count);
+            if (default_value.has_value()) {
+                std::fill(
+                    values.begin(), values.end(), default_value->time_data());
                 return FillFieldData(values.data(), nullptr, element_count, 0);
             }
             return FillFieldData(
@@ -869,6 +891,7 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
             return std::make_shared<FieldData<int16_t>>(
                 type, nullable, cap_rows);
         case DataType::INT32:
+        case DataType::DATE:
             return std::make_shared<FieldData<int32_t>>(
                 type, nullable, cap_rows);
         case DataType::INT64:
@@ -880,6 +903,7 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
             return std::make_shared<FieldData<double>>(
                 type, nullable, cap_rows);
         case DataType::TIMESTAMPTZ:
+        case DataType::TIME:
             return std::make_shared<FieldData<int64_t>>(
                 type, nullable, cap_rows);
         case DataType::STRING:
@@ -909,9 +933,11 @@ InitScalarFieldDataWithLength(const DataType& type, int64_t length) {
         case DataType::INT16:
             return InitScalarFieldDataWithLengthImpl<int16_t>(type, length);
         case DataType::INT32:
+        case DataType::DATE:
             return InitScalarFieldDataWithLengthImpl<int32_t>(type, length);
         case DataType::INT64:
         case DataType::TIMESTAMPTZ:
+        case DataType::TIME:
             return InitScalarFieldDataWithLengthImpl<int64_t>(type, length);
         case DataType::FLOAT:
             return InitScalarFieldDataWithLengthImpl<float>(type, length);
@@ -954,13 +980,15 @@ ResizeScalarFieldData(const DataType& type,
             inner_field_data->resize_field_data(new_num_rows);
             return;
         }
-        case DataType::INT32: {
+        case DataType::INT32:
+        case DataType::DATE: {
             auto inner_field_data =
                 std::dynamic_pointer_cast<FieldData<int32_t>>(field_data);
             inner_field_data->resize_field_data(new_num_rows);
             return;
         }
         case DataType::TIMESTAMPTZ:
+        case DataType::TIME:
         case DataType::INT64: {
             auto inner_field_data =
                 std::dynamic_pointer_cast<FieldData<int64_t>>(field_data);

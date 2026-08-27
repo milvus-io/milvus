@@ -604,10 +604,12 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage(const Schema& schema) const {
                     field_bytes = num_rows * sizeof(int16_t);
                     break;
                 case DataType::INT32:
+                case DataType::DATE:
                     field_bytes = num_rows * sizeof(int32_t);
                     break;
                 case DataType::INT64:
                 case DataType::TIMESTAMPTZ:
+                case DataType::TIME:
                     field_bytes = num_rows * sizeof(int64_t);
                     break;
                 case DataType::FLOAT:
@@ -2155,6 +2157,17 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                              ->mutable_data());
             break;
         }
+        case DataType::DATE: {
+            bulk_subscript_impl<int32_t>(op_ctx,
+                                         vec_ptr,
+                                         seg_offsets,
+                                         count,
+                                         result->mutable_scalars()
+                                             ->mutable_date_data()
+                                             ->mutable_data()
+                                             ->mutable_data());
+            break;
+        }
         case DataType::INT64: {
             bulk_subscript_impl<int64_t>(op_ctx,
                                          vec_ptr,
@@ -2195,6 +2208,17 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                          count,
                                          result->mutable_scalars()
                                              ->mutable_timestamptz_data()
+                                             ->mutable_data()
+                                             ->mutable_data());
+            break;
+        }
+        case DataType::TIME: {
+            bulk_subscript_impl<int64_t>(op_ctx,
+                                         vec_ptr,
+                                         seg_offsets,
+                                         count,
+                                         result->mutable_scalars()
+                                             ->mutable_time_data()
                                              ->mutable_data()
                                              ->mutable_data());
             break;
@@ -2544,7 +2568,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             }
             break;
         }
-        case DataType::INT32: {
+        case DataType::INT32:
+        case DataType::DATE: {
             bulk_subscript_impl<int32_t>(op_ctx,
                                          vec_ptr,
                                          seg_offsets,
@@ -2553,6 +2578,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::TIMESTAMPTZ:
+        case DataType::TIME:
         case DataType::INT64: {
             bulk_subscript_impl<int64_t>(op_ctx,
                                          vec_ptr,

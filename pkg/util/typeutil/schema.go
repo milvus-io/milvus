@@ -152,9 +152,9 @@ func estimateSizeBy(schema *schemapb.CollectionSchema, policy getVariableFieldLe
 			res++
 		case schemapb.DataType_Int16:
 			res += 2
-		case schemapb.DataType_Int32, schemapb.DataType_Float:
+		case schemapb.DataType_Int32, schemapb.DataType_Float, schemapb.DataType_Date:
 			res += 4
-		case schemapb.DataType_Int64, schemapb.DataType_Double, schemapb.DataType_Timestamptz:
+		case schemapb.DataType_Int64, schemapb.DataType_Double, schemapb.DataType_Timestamptz, schemapb.DataType_Time:
 			res += 8
 		case schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_Array, schemapb.DataType_JSON, schemapb.DataType_Geometry:
 			maxLengthPerRow, err := getVarFieldLength(fs, policy)
@@ -261,6 +261,10 @@ func CalcScalarSize(column *schemapb.FieldData) int {
 		res += len(column.GetScalars().GetDoubleData().GetData()) * 8
 	case schemapb.DataType_Timestamptz:
 		res += len(column.GetScalars().GetTimestamptzData().GetData()) * 8
+	case schemapb.DataType_Date:
+		res += len(column.GetScalars().GetDateData().GetData()) * 4
+	case schemapb.DataType_Time:
+		res += len(column.GetScalars().GetTimeData().GetData()) * 8
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		for _, str := range column.GetScalars().GetStringData().GetData() {
 			res += len(str)
@@ -321,9 +325,9 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 			res++
 		case schemapb.DataType_Int16:
 			res += 2
-		case schemapb.DataType_Int32, schemapb.DataType_Float:
+		case schemapb.DataType_Int32, schemapb.DataType_Float, schemapb.DataType_Date:
 			res += 4
-		case schemapb.DataType_Int64, schemapb.DataType_Double, schemapb.DataType_Timestamptz:
+		case schemapb.DataType_Int64, schemapb.DataType_Double, schemapb.DataType_Timestamptz, schemapb.DataType_Time:
 			res += 8
 		case schemapb.DataType_VarChar, schemapb.DataType_Text:
 			if rowOffset >= len(fs.GetScalars().GetStringData().GetData()) {
@@ -741,6 +745,14 @@ func IsTimestamptzType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_Timestamptz
 }
 
+func IsDateType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_Date
+}
+
+func IsTimeType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_Time
+}
+
 func IsArrayType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_Array
 }
@@ -801,7 +813,8 @@ func IsVariableDataType(dataType schemapb.DataType) bool {
 }
 
 func IsPrimitiveType(dataType schemapb.DataType) bool {
-	return IsArithmetic(dataType) || IsStringType(dataType) || IsBoolType(dataType) || IsTimestamptzType(dataType)
+	return IsArithmetic(dataType) || IsStringType(dataType) || IsBoolType(dataType) ||
+		IsTimestamptzType(dataType) || IsDateType(dataType) || IsTimeType(dataType)
 }
 
 // PrepareResultFieldData construct this slice fo FieldData for final result reduce
@@ -843,6 +856,18 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 			case *schemapb.ScalarField_TimestamptzData:
 				scalar.Scalars.Data = &schemapb.ScalarField_TimestamptzData{
 					TimestamptzData: &schemapb.TimestamptzArray{
+						Data: make([]int64, 0, topK),
+					},
+				}
+			case *schemapb.ScalarField_DateData:
+				scalar.Scalars.Data = &schemapb.ScalarField_DateData{
+					DateData: &schemapb.DateArray{
+						Data: make([]int32, 0, topK),
+					},
+				}
+			case *schemapb.ScalarField_TimeData:
+				scalar.Scalars.Data = &schemapb.ScalarField_TimeData{
+					TimeData: &schemapb.TimeArray{
 						Data: make([]int64, 0, topK),
 					},
 				}
@@ -1200,6 +1225,30 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				}
 				/* #nosec G103 */
 				appendSize += int64(unsafe.Sizeof(srcScalar.TimestamptzData.Data[idx]))
+			case *schemapb.ScalarField_DateData:
+				if dstScalar.GetDateData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_DateData{
+						DateData: &schemapb.DateArray{
+							Data: []int32{srcScalar.DateData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetDateData().Data = append(dstScalar.GetDateData().Data, srcScalar.DateData.Data[idx])
+				}
+				/* #nosec G103 */
+				appendSize += int64(unsafe.Sizeof(srcScalar.DateData.Data[idx]))
+			case *schemapb.ScalarField_TimeData:
+				if dstScalar.GetTimeData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_TimeData{
+						TimeData: &schemapb.TimeArray{
+							Data: []int64{srcScalar.TimeData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetTimeData().Data = append(dstScalar.GetTimeData().Data, srcScalar.TimeData.Data[idx])
+				}
+				/* #nosec G103 */
+				appendSize += int64(unsafe.Sizeof(srcScalar.TimeData.Data[idx]))
 			case *schemapb.ScalarField_GeometryData:
 				if dstScalar.GetGeometryData() == nil {
 					dstScalar.Data = &schemapb.ScalarField_GeometryData{
@@ -1495,6 +1544,24 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 			for _, idx := range dataIndices {
 				dstScalar.GetTimestamptzData().Data = append(dstScalar.GetTimestamptzData().Data, srcScalar.TimestamptzData.Data[idx])
 			}
+		case *schemapb.ScalarField_DateData:
+			if dstScalar.GetDateData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_DateData{
+					DateData: &schemapb.DateArray{Data: make([]int32, 0, len(dataIndices))},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetDateData().Data = append(dstScalar.GetDateData().Data, srcScalar.DateData.Data[idx])
+			}
+		case *schemapb.ScalarField_TimeData:
+			if dstScalar.GetTimeData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_TimeData{
+					TimeData: &schemapb.TimeArray{Data: make([]int64, 0, len(dataIndices))},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetTimeData().Data = append(dstScalar.GetTimeData().Data, srcScalar.TimeData.Data[idx])
+			}
 		}
 	case *schemapb.FieldData_Vectors:
 		dim := srcField.Vectors.Dim
@@ -1650,6 +1717,10 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 				dstScalar.GetLongData().Data = dstScalar.GetLongData().Data[:len(dstScalar.GetLongData().Data)-1]
 			case *schemapb.ScalarField_TimestamptzData:
 				dstScalar.GetTimestamptzData().Data = dstScalar.GetTimestamptzData().Data[:len(dstScalar.GetTimestamptzData().Data)-1]
+			case *schemapb.ScalarField_DateData:
+				dstScalar.GetDateData().Data = dstScalar.GetDateData().Data[:len(dstScalar.GetDateData().Data)-1]
+			case *schemapb.ScalarField_TimeData:
+				dstScalar.GetTimeData().Data = dstScalar.GetTimeData().Data[:len(dstScalar.GetTimeData().Data)-1]
 			case *schemapb.ScalarField_FloatData:
 				dstScalar.GetFloatData().Data = dstScalar.GetFloatData().Data[:len(dstScalar.GetFloatData().Data)-1]
 			case *schemapb.ScalarField_DoubleData:
@@ -1790,6 +1861,20 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 			case *schemapb.ScalarField_TimestamptzData:
 				updateData := updateScalar.GetTimestamptzData()
 				baseData := baseScalar.GetTimestamptzData()
+				if updateData != nil && baseData != nil &&
+					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
+					baseData.Data[baseIdx] = updateData.Data[updateIdx]
+				}
+			case *schemapb.ScalarField_DateData:
+				updateData := updateScalar.GetDateData()
+				baseData := baseScalar.GetDateData()
+				if updateData != nil && baseData != nil &&
+					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
+					baseData.Data[baseIdx] = updateData.Data[updateIdx]
+				}
+			case *schemapb.ScalarField_TimeData:
+				updateData := updateScalar.GetTimeData()
+				baseData := baseScalar.GetTimeData()
 				if updateData != nil && baseData != nil &&
 					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
 					baseData.Data[baseIdx] = updateData.Data[updateIdx]
@@ -2062,6 +2147,18 @@ func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, upda
 		case *schemapb.ScalarField_TimestamptzData:
 			baseData := baseScalar.GetTimestamptzData().Data
 			updateData := updateScalar.GetTimestamptzData().Data
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
+			}
+		case *schemapb.ScalarField_DateData:
+			baseData := baseScalar.GetDateData().Data
+			updateData := updateScalar.GetDateData().Data
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
+			}
+		case *schemapb.ScalarField_TimeData:
+			baseData := baseScalar.GetTimeData().Data
+			updateData := updateScalar.GetTimeData().Data
 			for i, baseIdx := range baseIndices {
 				baseData[baseIdx] = updateData[updateIndices[i]]
 			}
@@ -2440,6 +2537,26 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 					}
 				} else {
 					dstScalar.GetTimestamptzData().Data = append(dstScalar.GetTimestamptzData().Data, srcScalar.TimestamptzData.Data...)
+				}
+			case *schemapb.ScalarField_DateData:
+				if dstScalar.GetDateData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_DateData{
+						DateData: &schemapb.DateArray{
+							Data: srcScalar.DateData.Data,
+						},
+					}
+				} else {
+					dstScalar.GetDateData().Data = append(dstScalar.GetDateData().Data, srcScalar.DateData.Data...)
+				}
+			case *schemapb.ScalarField_TimeData:
+				if dstScalar.GetTimeData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_TimeData{
+						TimeData: &schemapb.TimeArray{
+							Data: srcScalar.TimeData.Data,
+						},
+					}
+				} else {
+					dstScalar.GetTimeData().Data = append(dstScalar.GetTimeData().Data, srcScalar.TimeData.Data...)
 				}
 			case *schemapb.ScalarField_FloatData:
 				if dstScalar.GetFloatData() == nil {
@@ -3256,6 +3373,8 @@ func isExternalFieldTypeSupported(dt schemapb.DataType) bool {
 		schemapb.DataType_JSON,
 		schemapb.DataType_Array,
 		schemapb.DataType_Timestamptz,
+		schemapb.DataType_Date,
+		schemapb.DataType_Time,
 		schemapb.DataType_Geometry,
 		schemapb.DataType_FloatVector,
 		schemapb.DataType_Float16Vector,
@@ -3612,6 +3731,10 @@ func getScalarDataLen(field *schemapb.FieldData) int {
 		return len(field.GetScalars().GetDoubleData().GetData())
 	case schemapb.DataType_Timestamptz:
 		return len(field.GetScalars().GetTimestamptzData().GetData())
+	case schemapb.DataType_Date:
+		return len(field.GetScalars().GetDateData().GetData())
+	case schemapb.DataType_Time:
+		return len(field.GetScalars().GetTimeData().GetData())
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return len(field.GetScalars().GetStringData().GetData())
 	}
@@ -3632,6 +3755,10 @@ func getData(field *schemapb.FieldData, idx int) any {
 		return field.GetScalars().GetDoubleData().GetData()[idx]
 	case schemapb.DataType_Timestamptz:
 		return field.GetScalars().GetTimestamptzData().GetData()[idx]
+	case schemapb.DataType_Date:
+		return field.GetScalars().GetDateData().GetData()[idx]
+	case schemapb.DataType_Time:
+		return field.GetScalars().GetTimeData().GetData()[idx]
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return field.GetScalars().GetStringData().GetData()[idx]
 	case schemapb.DataType_FloatVector:

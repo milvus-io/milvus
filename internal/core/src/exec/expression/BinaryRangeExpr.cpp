@@ -82,7 +82,15 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecRangeVisitorImpl<int32_t>(context);
             break;
         }
+        case DataType::DATE: {
+            result = ExecRangeVisitorImpl<int32_t>(context);
+            break;
+        }
         case DataType::INT64: {
+            result = ExecRangeVisitorImpl<int64_t>(context);
+            break;
+        }
+        case DataType::TIME: {
             result = ExecRangeVisitorImpl<int64_t>(context);
             break;
         }
@@ -1300,10 +1308,14 @@ PhyBinaryRangeFilterExpr::PrefetchRawData() {
         case DataType::INT32:
             PrefetchRawData<int32_t>();
             break;
+        case DataType::DATE:
+            PrefetchRawData<int32_t>();
+            break;
         case DataType::INT64:
             PrefetchRawData<int64_t>();
             break;
         case DataType::TIMESTAMPTZ:
+        case DataType::TIME:
             PrefetchRawData<int64_t>();
             break;
         case DataType::FLOAT:

@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/nullutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/datetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
@@ -188,6 +189,14 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 			panic("unreachable, array of struct should have been flattened")
 		case schemapb.DataType_Timestamptz:
 			if err := v.checkTimestamptzFieldData(field, helper.GetTimezone()); err != nil {
+				return err
+			}
+		case schemapb.DataType_Date:
+			if err := v.checkDateFieldData(field); err != nil {
+				return err
+			}
+		case schemapb.DataType_Time:
+			if err := v.checkTimeFieldData(field); err != nil {
 				return err
 			}
 		default:
@@ -535,6 +544,16 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 
 		case *schemapb.ScalarField_TimestamptzData:
 			sd.TimestamptzData.Data, err = fillWithNullValueImpl(sd.TimestamptzData.Data, validData)
+			if err != nil {
+				return err
+			}
+		case *schemapb.ScalarField_DateData:
+			sd.DateData.Data, err = fillWithNullValueImpl(sd.DateData.Data, validData)
+			if err != nil {
+				return err
+			}
+		case *schemapb.ScalarField_TimeData:
+			sd.TimeData.Data, err = fillWithNullValueImpl(sd.TimeData.Data, validData)
 			if err != nil {
 				return err
 			}
@@ -1488,6 +1507,68 @@ func (v *validateUtil) checkTimestamptzFieldData(field *schemapb.FieldData, time
 		TimestamptzData: &schemapb.TimestamptzArray{
 			Data: utcTimestamps,
 		},
+	}
+	return nil
+}
+
+func (v *validateUtil) checkDateFieldData(field *schemapb.FieldData) error {
+	scalarField := field.GetScalars()
+	if scalarField == nil {
+		return merr.WrapErrParameterInvalidMsg("date field data is missing")
+	}
+	if dateData := scalarField.GetDateData(); dateData != nil {
+		for _, days := range dateData.GetData() {
+			if _, err := datetime.ValidateDateDays(int64(days)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if scalarField.GetStringData() == nil {
+		return merr.WrapErrParameterInvalidMsg("date field data must be a string array of YYYY-MM-DD literals")
+	}
+	stringData := scalarField.GetStringData().GetData()
+	days := make([]int32, len(stringData))
+	for i, isoStr := range stringData {
+		parsed, err := datetime.ParseDate(isoStr)
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg("got invalid DATE string '%s'", isoStr)
+		}
+		days[i] = parsed
+	}
+	field.GetScalars().Data = &schemapb.ScalarField_DateData{
+		DateData: &schemapb.DateArray{Data: days},
+	}
+	return nil
+}
+
+func (v *validateUtil) checkTimeFieldData(field *schemapb.FieldData) error {
+	scalarField := field.GetScalars()
+	if scalarField == nil {
+		return merr.WrapErrParameterInvalidMsg("time field data is missing")
+	}
+	if timeData := scalarField.GetTimeData(); timeData != nil {
+		for _, micros := range timeData.GetData() {
+			if err := datetime.ValidateTimeMicros(micros); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if scalarField.GetStringData() == nil {
+		return merr.WrapErrParameterInvalidMsg("time field data must be a string array of HH:MM:SS literals")
+	}
+	stringData := scalarField.GetStringData().GetData()
+	micros := make([]int64, len(stringData))
+	for i, isoStr := range stringData {
+		parsed, err := datetime.ParseTime(isoStr)
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg("got invalid TIME string '%s'", isoStr)
+		}
+		micros[i] = parsed
+	}
+	field.GetScalars().Data = &schemapb.ScalarField_TimeData{
+		TimeData: &schemapb.TimeArray{Data: micros},
 	}
 	return nil
 }

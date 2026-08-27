@@ -80,8 +80,12 @@ MultiFieldDataGetter::MultiFieldDataGetter(
             case DataType::INT32:
                 getter = CreateFieldGetter<int32_t>(op_ctx, segment, field_id);
                 break;
+            case DataType::DATE:
+                getter = CreateFieldGetter<int32_t>(op_ctx, segment, field_id);
+                break;
             case DataType::INT64:
             case DataType::TIMESTAMPTZ:
+            case DataType::TIME:
                 getter = CreateFieldGetter<int64_t>(op_ctx, segment, field_id);
                 break;
             case DataType::BOOL:

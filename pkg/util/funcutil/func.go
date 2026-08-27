@@ -631,6 +631,16 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 		if fieldNumRows == 0 {
 			fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetStringData().GetData())
 		}
+	case schemapb.DataType_Date:
+		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetDateData().GetData())
+		if fieldNumRows == 0 {
+			fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetStringData().GetData())
+		}
+	case schemapb.DataType_Time:
+		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetTimeData().GetData())
+		if fieldNumRows == 0 {
+			fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetStringData().GetData())
+		}
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetStringData().GetData())
 	case schemapb.DataType_Array:
@@ -732,6 +742,10 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetDoubleData().Data)
 		case *schemapb.ScalarField_TimestamptzData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetTimestamptzData().Data)
+		case *schemapb.ScalarField_DateData:
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetDateData().Data)
+		case *schemapb.ScalarField_TimeData:
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetTimeData().Data)
 		case *schemapb.ScalarField_StringData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetStringData().Data)
 		case *schemapb.ScalarField_ArrayData:

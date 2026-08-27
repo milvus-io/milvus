@@ -1322,7 +1322,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
 					}
 					reallyData[fieldName] = result
-				case schemapb.DataType_Timestamptz:
+				case schemapb.DataType_Timestamptz, schemapb.DataType_Date, schemapb.DataType_Time:
 					reallyData[fieldName] = dataString
 				case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text:
 					value, err := stringFieldValue(fieldName, fieldValue, compatibilityMode)
@@ -2878,7 +2878,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			data = make([]float32, 0, rowsLen)
 		case schemapb.DataType_Double:
 			data = make([]float64, 0, rowsLen)
-		case schemapb.DataType_Timestamptz:
+		case schemapb.DataType_Timestamptz, schemapb.DataType_Date, schemapb.DataType_Time:
 			data = make([]string, 0, rowsLen)
 		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 			data = make([]string, 0, rowsLen)
@@ -2977,7 +2977,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]int64), candi.v.Interface().(int64))
 			case schemapb.DataType_Float:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]float32), candi.v.Interface().(float32))
-			case schemapb.DataType_Timestamptz:
+			case schemapb.DataType_Timestamptz, schemapb.DataType_Date, schemapb.DataType_Time:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]string), candi.v.Interface().(string))
 			case schemapb.DataType_Double:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]float64), candi.v.Interface().(float64))
@@ -3156,7 +3156,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					},
 				},
 			}
-		case schemapb.DataType_Timestamptz:
+		case schemapb.DataType_Timestamptz, schemapb.DataType_Date, schemapb.DataType_Time:
 			colData.Field = &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_StringData{
@@ -3613,6 +3613,16 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 			return int64(len(fieldData.GetScalars().GetTimestamptzData().GetData())), nil
 		}
 		return int64(len(fieldData.GetScalars().GetStringData().GetData())), nil
+	case schemapb.DataType_Date:
+		if fieldData.GetScalars().GetDateData() != nil {
+			return int64(len(fieldData.GetScalars().GetDateData().GetData())), nil
+		}
+		return int64(len(fieldData.GetScalars().GetStringData().GetData())), nil
+	case schemapb.DataType_Time:
+		if fieldData.GetScalars().GetTimeData() != nil {
+			return int64(len(fieldData.GetScalars().GetTimeData().GetData())), nil
+		}
+		return int64(len(fieldData.GetScalars().GetStringData().GetData())), nil
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return int64(len(fieldData.GetScalars().GetStringData().GetData())), nil
 	case schemapb.DataType_Array:
@@ -4043,6 +4053,18 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				case schemapb.DataType_Timestamptz:
 					if fieldDataList[j].GetScalars().GetTimestamptzData() != nil {
 						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetTimestamptzData().GetData()[dataIdx]
+					} else {
+						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
+					}
+				case schemapb.DataType_Date:
+					if fieldDataList[j].GetScalars().GetDateData() != nil {
+						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetDateData().GetData()[dataIdx]
+					} else {
+						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
+					}
+				case schemapb.DataType_Time:
+					if fieldDataList[j].GetScalars().GetTimeData() != nil {
+						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetTimeData().GetData()[dataIdx]
 					} else {
 						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
 					}

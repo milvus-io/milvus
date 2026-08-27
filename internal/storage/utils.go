@@ -412,6 +412,26 @@ func readTimestamptzArray(blobReaders []io.Reader) []int64 {
 	return ret
 }
 
+func readDateArray(blobReaders []io.Reader) []int32 {
+	ret := make([]int32, 0)
+	for _, r := range blobReaders {
+		var v int32
+		ReadBinary(r, &v, schemapb.DataType_Date)
+		ret = append(ret, v)
+	}
+	return ret
+}
+
+func readTimeArray(blobReaders []io.Reader) []int64 {
+	ret := make([]int64, 0)
+	for _, r := range blobReaders {
+		var v int64
+		ReadBinary(r, &v, schemapb.DataType_Time)
+		ret = append(ret, v)
+	}
+	return ret
+}
+
 func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemapb.CollectionSchema, skipFunction bool) (idata *InsertData, err error) {
 	blobReaders := make([]io.Reader, 0)
 	for _, blob := range msg.RowData {
@@ -551,6 +571,14 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 		case schemapb.DataType_Timestamptz:
 			idata.Data[field.FieldID] = &TimestamptzFieldData{
 				Data: readTimestamptzArray(blobReaders),
+			}
+		case schemapb.DataType_Date:
+			idata.Data[field.FieldID] = &DateFieldData{
+				Data: readDateArray(blobReaders),
+			}
+		case schemapb.DataType_Time:
+			idata.Data[field.FieldID] = &TimeFieldData{
+				Data: readTimeArray(blobReaders),
 			}
 		}
 	}
@@ -874,6 +902,26 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				Nullable:  field.GetNullable(),
 			}
 
+		case schemapb.DataType_Date:
+			srcData := srcField.GetScalars().GetDateData().GetData()
+			validData := typeutil.GetFieldDataValidData(srcField)
+
+			fieldData = &DateFieldData{
+				Data:      srcData,
+				ValidData: validData,
+				Nullable:  field.GetNullable(),
+			}
+
+		case schemapb.DataType_Time:
+			srcData := srcField.GetScalars().GetTimeData().GetData()
+			validData := typeutil.GetFieldDataValidData(srcField)
+
+			fieldData = &TimeFieldData{
+				Data:      srcData,
+				ValidData: validData,
+				Nullable:  field.GetNullable(),
+			}
+
 		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 			srcData := srcField.GetScalars().GetStringData().GetData()
 			validData := typeutil.GetFieldDataValidData(srcField)
@@ -1100,6 +1148,32 @@ func mergeTimestamptzField(data *InsertData, fid FieldID, field *TimestamptzFiel
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
 
+func mergeDateField(data *InsertData, fid FieldID, field *DateFieldData) {
+	if _, ok := data.Data[fid]; !ok {
+		fieldData := &DateFieldData{
+			Data:      nil,
+			ValidData: nil,
+		}
+		data.Data[fid] = fieldData
+	}
+	fieldData := data.Data[fid].(*DateFieldData)
+	fieldData.Data = append(fieldData.Data, field.Data...)
+	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
+}
+
+func mergeTimeField(data *InsertData, fid FieldID, field *TimeFieldData) {
+	if _, ok := data.Data[fid]; !ok {
+		fieldData := &TimeFieldData{
+			Data:      nil,
+			ValidData: nil,
+		}
+		data.Data[fid] = fieldData
+	}
+	fieldData := data.Data[fid].(*TimeFieldData)
+	fieldData.Data = append(fieldData.Data, field.Data...)
+	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
+}
+
 func mergeStringField(data *InsertData, fid FieldID, field *StringFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &StringFieldData{
@@ -1278,6 +1352,10 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 		mergeDoubleField(data, fid, field)
 	case *TimestamptzFieldData:
 		mergeTimestamptzField(data, fid, field)
+	case *DateFieldData:
+		mergeDateField(data, fid, field)
+	case *TimeFieldData:
+		mergeTimeField(data, fid, field)
 	case *StringFieldData:
 		mergeStringField(data, fid, field)
 	case *ArrayFieldData:
@@ -1523,6 +1601,34 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_TimestamptzData{
 							TimestamptzData: &schemapb.TimestamptzArray{
+								Data: rawData.Data,
+							},
+						},
+					},
+				},
+			}
+		case *DateFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Date,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_DateData{
+							DateData: &schemapb.DateArray{
+								Data: rawData.Data,
+							},
+						},
+					},
+				},
+			}
+		case *TimeFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Time,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_TimeData{
+							TimeData: &schemapb.TimeArray{
 								Data: rawData.Data,
 							},
 						},
@@ -1813,6 +1919,10 @@ func GetDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
 		return fieldSchema.GetDefaultValue().GetStringData()
 	case schemapb.DataType_Timestamptz:
 		return fieldSchema.GetDefaultValue().GetTimestamptzData()
+	case schemapb.DataType_Date:
+		return fieldSchema.GetDefaultValue().GetDateData()
+	case schemapb.DataType_Time:
+		return fieldSchema.GetDefaultValue().GetTimeData()
 	case schemapb.DataType_JSON:
 		return fieldSchema.GetDefaultValue().GetBytesData()
 	case schemapb.DataType_Geometry:
