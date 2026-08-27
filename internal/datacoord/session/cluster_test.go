@@ -206,8 +206,12 @@ func TestCluster_QuerySlot(t *testing.T) {
 		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
 
 		mockClient.EXPECT().QuerySlot(mock.Anything, mock.Anything).Return(&datapb.QuerySlotResponse{
-			Status:         merr.Success(),
-			AvailableSlots: 5,
+			Status:          merr.Success(),
+			AvailableSlots:  5,
+			TotalCpu:        16,
+			AvailableCpu:    12,
+			TotalMemory:     64 << 30,
+			AvailableMemory: 40 << 30,
 		}, nil)
 
 		// Test
@@ -216,6 +220,12 @@ func TestCluster_QuerySlot(t *testing.T) {
 		assert.Len(t, result, 2)
 		for _, slots := range result {
 			assert.Equal(t, int64(5), slots.AvailableSlots)
+			// Every dimension of the report must reach the scheduler, and reach
+			// the field it was reported as.
+			assert.Equal(t, int64(16), slots.TotalCPU)
+			assert.Equal(t, int64(12), slots.AvailableCPU)
+			assert.Equal(t, int64(64)<<30, slots.TotalMemory)
+			assert.Equal(t, int64(40)<<30, slots.AvailableMemory)
 		}
 	})
 

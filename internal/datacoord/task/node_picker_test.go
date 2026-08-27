@@ -156,3 +156,29 @@ func TestNodePicker_ScoreWithoutCPUReport(t *testing.T) {
 	n := &resourceNode{totalCPU: 0, availableCPU: 0, totalMemory: 16 * pickGiB, availableMemory: 16 * pickGiB}
 	assert.InDelta(t, 0.6*1.0+0.25*0+0.15*0, n.score(taskcommon.Resource{}), 1e-9)
 }
+
+func TestNodePicker_Exhausted(t *testing.T) {
+	// A worker with slots left but no room for this task: the cluster is not
+	// exhausted, so the round must go on to the tasks behind it.
+	busy := newNodePicker(map[int64]*session.WorkerSlots{1: resourceWorker(1, 10, 8, 8*pickGiB)})
+	busy.nodes[0].availableMemory = 0
+	assert.Equal(t, int64(NullNodeID), busy.Pick(1, taskcommon.Resource{Memory: 4 * pickGiB}))
+	assert.False(t, busy.exhausted())
+
+	// The dimensioned worker's queue is full but a scalar worker still has slots.
+	mixed := newNodePicker(map[int64]*session.WorkerSlots{
+		1: resourceWorker(1, 0, 8, 8*pickGiB),
+		2: {NodeID: 2, AvailableSlots: 4},
+	})
+	assert.False(t, mixed.exhausted())
+	// Peeking must leave the heap usable.
+	assert.Equal(t, int64(2), mixed.Pick(1, taskcommon.Resource{Memory: pickGiB}))
+
+	// No slot anywhere, of either kind.
+	none := newNodePicker(map[int64]*session.WorkerSlots{
+		1: resourceWorker(1, 0, 8, 8*pickGiB),
+		2: {NodeID: 2, AvailableSlots: 0},
+	})
+	assert.True(t, none.exhausted())
+	assert.True(t, newNodePicker(nil).exhausted())
+}

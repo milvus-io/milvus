@@ -295,8 +295,23 @@ func (s *globalTaskScheduler) schedule() {
 		taskSlot := task.GetTaskSlot()
 		nodeID := picker.Pick(taskSlot, task.GetTaskResource())
 		if nodeID == NullNodeID {
-			s.pendingTasks.Push(task)
-			break
+			if picker.exhausted() {
+				// No worker has a slot left, so nothing behind this task can be
+				// placed either: end the round.
+				s.pendingTasks.Push(task)
+				break
+			}
+			// The cluster still has room; this task alone does not fit it. Give
+			// way like a backoff task does, so one oversized task at the head of
+			// the queue cannot stall every smaller task behind it (the queue is
+			// ordered by task ID, so "head" means "oldest", not "biggest").
+			//
+			// Trade-off: ending the round used to reserve the cluster for this
+			// task implicitly. Without that reservation a steady stream of small
+			// tasks can keep delaying it; an explicit reservation or aging
+			// mechanism is a follow-up.
+			delayed = append(delayed, task)
+			continue
 		}
 		future := s.execPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())
