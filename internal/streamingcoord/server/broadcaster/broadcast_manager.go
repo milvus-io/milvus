@@ -221,21 +221,31 @@ func (bm *broadcastTaskManager) appendSharedClusterRK(resourceKeys ...message.Re
 // dup is non-nil exactly when nothing was registered and nothing will reach the
 // WAL; the caller still holds its lock guards in that case.
 //
-// guardsTransferred says whether the registered task took over the caller's lock
-// guards. It is reported separately from err because the two are independent: once
-// the task is registered it keeps broadcasting in the background and releases the
-// guards from its ack callback, even if the wait below fails, so the caller must
-// stop releasing them itself. Deriving that from the error at the caller would put
-// the answer at every error site rather than at the one place that knows.
+// guardsConsumed says the caller no longer holds its lock guards, either because
+// the registered task took them over or because this function released them. It is
+// reported separately from err because the two are independent: once the task is
+// registered it keeps broadcasting in the background and releases the guards from
+// its ack callback, even if the wait below fails, so the caller must stop releasing
+// them itself. Deriving that from the error at the caller would put the answer at
+// every error site rather than at the one place that knows.
+//
+// The two ways to consume them are reported as one fact on purpose: what the caller
+// has to decide is only whether to keep releasing them, and answering that with
+// "the task owns them" alone would leave the shutdown path relying on Unlock being
+// harmless to call twice. It is, on one goroutine -- lockGuards.Unlock empties its
+// own slice -- but that is not a property to build ownership on, since nothing
+// synchronizes it against the ack callback's release on another goroutine.
 func (bm *broadcastTaskManager) broadcast(
 	ctx context.Context,
 	msg message.BroadcastMutableMessage,
 	broadcastID uint64,
 	guards *lockGuards,
-) (result *types.BroadcastAppendResult, dup *broadcastTask, guardsTransferred bool, err error) {
+) (result *types.BroadcastAppendResult, dup *broadcastTask, guardsConsumed bool, err error) {
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
+		// Released here rather than left to the caller, and reported as consumed: the
+		// caller's deferred Close() must not reach these guards again.
 		guards.Unlock()
-		return nil, nil, false, errors.Mark(status.NewOnShutdownError("broadcaster is closing"), ErrBroadcastTaskNotCreated)
+		return nil, nil, true, errors.Mark(status.NewOnShutdownError("broadcaster is closing"), ErrBroadcastTaskNotCreated)
 	}
 	defer bm.lifetime.Done()
 

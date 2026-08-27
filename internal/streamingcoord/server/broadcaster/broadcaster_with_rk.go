@@ -31,12 +31,13 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 	defer span.End()
 	message.InjectTraceContext(ctx, msg)
 
-	result, dup, guardsTransferred, err := b.broadcaster.broadcast(ctx, msg, b.broadcastID, b.guards)
-	if guardsTransferred {
-		// The registered task owns the guards now and releases them from its ack
-		// callback, on another goroutine; drop ours to avoid a double unlock. Checked
-		// before err, not after: a failure to wait for the acks does not hand the
-		// guards back, because the task goes on broadcasting without this request.
+	result, dup, guardsConsumed, err := b.broadcaster.broadcast(ctx, msg, b.broadcastID, b.guards)
+	if guardsConsumed {
+		// The guards left our hands: either the registered task owns them and releases
+		// them from its ack callback on another goroutine, or broadcast released them
+		// itself. Drop ours either way, so Close() cannot unlock them a second time.
+		// Checked before err, not after: a failure to wait for the acks does not hand
+		// the guards back, because the task goes on broadcasting without this request.
 		b.guards = nil
 	}
 	if err != nil {

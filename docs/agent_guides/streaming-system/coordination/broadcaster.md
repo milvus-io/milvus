@@ -25,7 +25,7 @@ A broadcast message carrying the `_ik` idempotency key property is additionally 
 
 Both halves of the name-vs-identity problem an earlier design had are closed by this:
 
-- **Rename.** `RenameCollection` keeps the collectionID and changes the name (and can move the collection to another DB). The scope is the ID, so a retry that arrives after a rename still resolves to its original broadcast.
+- **Rename.** `RenameCollection` keeps the collectionID and changes the name (and can move the collection to another DB). The scope is the ID, so the key stays bound to that collection and a retry naming the renamed collection still resolves to its original broadcast. This is a statement about the scope, not about stale names: an entry point that resolves a name to an id — `importTask.PreExecute` does, through the proxy meta cache — rejects a retry still carrying the old name before it reaches the broadcaster at all. That request fails; it does not import twice.
 - **Drop and recreate under the same name.** The recreated collection has a new ID, so the scope differs and the lookup MISSES: a fresh task is created, which is the correct outcome — the two requests target different collections. Import still compares the decoded `collectionID` on a hit, but as an invariant check against an encoding or scoping bug, not as a semantic guard.
 
 There is no unscoped key: `WithIdempotencyKey` takes an `IdempotencyKey`, which only the scoped constructors produce, so a caller cannot ship a key that silently deduplicates cluster-wide by omission. Choosing `NewClusterScopedIdempotencyKey` is a decision that reads as one.

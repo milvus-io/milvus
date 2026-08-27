@@ -305,9 +305,12 @@ func (s *Server) broadcastImport(ctx context.Context,
 			JobID:          jobID,
 		}).
 		// Scoped to the collection by ID, so the same client key stays a distinct
-		// operation against another collection, and a retry that arrives after the
-		// collection was renamed still resolves to its original job. The broadcaster adds
-		// the message type; everything else about the dedup identity is this scope.
+		// operation against another collection, and a rename does not move the key off
+		// the collection it was bound to: a retry naming the renamed collection still
+		// resolves to its original job. A retry still naming the OLD collection never
+		// reaches here -- the proxy resolves the name first -- so it fails rather than
+		// importing twice. The broadcaster adds the message type; everything else about
+		// the dedup identity is this scope.
 		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(collectionID, idempotencyKey)).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()

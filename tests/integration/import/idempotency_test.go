@@ -179,6 +179,62 @@ func (s *IdempotencySuite) TestImport_DifferentKeysCreateDistinctJobs() {
 	s.NoError(WaitForImportDone(ctx, c, second.GetJobID()))
 }
 
+// TestImport_SameKeyAfterRenameImportsOnce is what scoping the key by collection ID
+// rather than by collection name buys, end to end.
+//
+// The scope is the collection's identity, so a key stays bound to the same
+// collection across a RenameCollection. A name-scoped key would miss here and
+// import the same files a second time. Note what the retry has to carry: the
+// collection's CURRENT name. The proxy resolves the request's collection name
+// through its meta cache before any of this is reached, so a replay still naming
+// the old collection fails there with collection-not-found -- safely, with no
+// second import, but without recovering the original jobID.
+func (s *IdempotencySuite) TestImport_SameKeyAfterRenameImportsOnce() {
+	const rowCount = 100
+
+	c := s.Cluster
+	ctx, cancel := context.WithTimeout(c.GetContext(), 300*time.Second)
+	defer cancel()
+
+	suffix := funcutil.RandomString(8)
+	collectionName := "TestImportIdemRename_" + suffix
+	renamedName := "TestImportIdemRenamed_" + suffix
+	schema := s.createCollection(ctx, collectionName)
+
+	filePath, err := GenerateParquetFile(c, schema, rowCount)
+	s.NoError(err)
+
+	keyedCtx := withIdempotencyKey(ctx, "run-1-batch-1-"+suffix)
+	first, err := c.ProxyClient.ImportV2(keyedCtx, &internalpb.ImportRequest{
+		CollectionName: collectionName,
+		Files:          []*internalpb.ImportFile{{Paths: []string{filePath}}},
+	})
+	s.NoError(err)
+	s.Equal(int32(0), first.GetStatus().GetCode())
+	s.NotEmpty(first.GetJobID())
+
+	renameStatus, err := c.MilvusClient.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{
+		OldName: collectionName,
+		NewName: renamedName,
+	})
+	s.NoError(merr.CheckRPCCall(renameStatus, err))
+
+	// The same logical request, retried under the collection's new name.
+	second, err := c.ProxyClient.ImportV2(keyedCtx, &internalpb.ImportRequest{
+		CollectionName: renamedName,
+		Files:          []*internalpb.ImportFile{{Paths: []string{filePath}}},
+	})
+	s.NoError(err)
+	s.Equal(int32(0), second.GetStatus().GetCode())
+	s.Equal(first.GetJobID(), second.GetJobID(),
+		"the key is scoped to the collection id, so a rename must not turn a retry into a new job")
+
+	s.NoError(WaitForImportDone(ctx, c, first.GetJobID()))
+
+	s.Equal(rowCount, s.countRows(ctx, renamedName),
+		"the retry issued after the rename must not have written a second copy of the data")
+}
+
 func TestIdempotencySuite(t *testing.T) {
 	suite.Run(t, new(IdempotencySuite))
 }

@@ -31,12 +31,16 @@ const (
 // deduplicates within, encoded as `<domain>:<scopeID>:<clientKey>`.
 //
 // The scope is an IDENTITY, never a name: a collection id rather than a
-// collection name. That is what makes a rename transparent to a retry, and what
-// makes a drop-and-recreate under the same name a different operation. Callers
-// choose it explicitly through one of the New*ScopedIdempotencyKey constructors;
-// there is no constructor that takes a bare string, so a caller cannot end up
-// with an unscoped key by omission. Choosing cluster scope is a decision that
-// reads as one.
+// collection name. That is what keeps a key bound to the object it was issued
+// against when that object is renamed -- a retry that names the renamed object
+// still resolves to the original -- and what makes a drop-and-recreate under the
+// same name a different operation. It does not make a stale name work: whatever
+// resolves the caller's name to an id runs before any of this.
+//
+// Callers choose the scope explicitly through one of the New*ScopedIdempotencyKey
+// constructors; there is no constructor that takes a bare string, so a caller
+// cannot end up with an unscoped key by omission. Choosing cluster scope is a
+// decision that reads as one.
 //
 // The encoding is injective without any framing tricks: the domain and the scope
 // id are decimal digits, so the first two colons delimit them and the client key
