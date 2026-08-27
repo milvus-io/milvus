@@ -1451,3 +1451,41 @@ func (s *LBPolicySuite) TestExecuteOneChannelScopedPrePassRetriesTransientErrors
 	})
 	s.ErrorIs(err, merr.ErrCollectionNotLoaded, "collection-not-loaded is not retried, matching the sibling reads")
 }
+
+// TestExecuteWithRetryScopedKeepsTheExecErrorOnBalancerFailure is the scoped
+// counterpart of TestExecuteWithRetryUnscopedKeepsTheExecError: the masking
+// exception is for the empty-scoped-set refusal only, not for any retriable
+// selection error. The group's leader fails with a non-retriable exec error
+// and is blacklisted; the scoped candidate set is still non-empty (a second
+// rg-b leader), so the refusal does not fire, and the balancer reports every
+// remaining candidate unreachable with a RETRIABLE ErrServiceUnavailable. A
+// rule keyed on "any retriable error" would end the request on that and
+// discard the terminal cause; the request must still end on the exec error.
+func (s *LBPolicySuite) TestExecuteWithRetryScopedKeepsTheExecErrorOnBalancerFailure() {
+	ctx := context.Background()
+	s.lbPolicy.retryOnReplica = 1
+	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(rgNodes(), nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), nil).Once()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(-1), merr.WrapErrServiceUnavailable("all available nodes are unreachable"))
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	execErr := merr.WrapErrSegmentNotLoaded(1, "not retriable")
+	s.Require().False(merr.IsRetryableErr(execErr))
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        s.channels[0],
+		Nq:             1,
+		ResourceGroup:  "rg-b",
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			return execErr
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrSegmentNotLoaded, "scoped, a balancer-side retriable error must not mask the terminal exec error")
+	s.False(merr.IsRetryableErr(err))
+	s.NotErrorIs(err, merr.ErrServiceUnavailable)
+}

@@ -150,7 +150,9 @@ func (lb *LBPolicyImpl) Start(ctx context.Context) {
 	lb.blacklist.Start()
 }
 
-// GetShard will retry until ctx done, except the collection is not loaded.
+// GetShard retries a bounded number of times (retry.Handle's default: 10
+// attempts, backing off from 200ms) or until ctx is done, whichever comes first, except
+// when the collection is not loaded.
 // return all replicas of shard from cache if withCache is true, otherwise return shard leaders from coord.
 func (lb *LBPolicyImpl) GetShard(ctx context.Context, dbName string, collName string, collectionID int64, channel string, withCache bool) ([]NodeInfo, error) {
 	var shardLeaders []NodeInfo
@@ -162,7 +164,9 @@ func (lb *LBPolicyImpl) GetShard(ctx context.Context, dbName string, collName st
 	return shardLeaders, err
 }
 
-// GetShardLeaderList will retry until ctx done, except the collection is not loaded.
+// GetShardLeaderList retries a bounded number of times (retry.Handle's
+// default: 10 attempts, backing off from 200ms) or until ctx is done, whichever comes
+// first, except when the collection is not loaded.
 // return all shard(channel) from cache if withCache is true, otherwise return shard leaders from coord.
 func (lb *LBPolicyImpl) GetShardLeaderList(ctx context.Context, dbName string, collName string, collectionID int64, withCache bool) ([]string, error) {
 	var ret []string
@@ -174,11 +178,13 @@ func (lb *LBPolicyImpl) GetShardLeaderList(ctx context.Context, dbName string, c
 	return ret, err
 }
 
-// GetShardLeaders will retry until ctx done, except the collection is not loaded.
-// Returns every channel of the collection with its leaders in one read; with
-// withCache=false that is one coordinator call refreshing all of them. Same
-// retry policy as its two siblings above: a transient coordinator error must
-// not fail a request that the other two reads would have retried through.
+// GetShardLeaders retries a bounded number of times (retry.Handle's default:
+// 10 attempts, backing off from 200ms) or until ctx is done, whichever comes first,
+// except when the collection is not loaded -- the same policy as its two
+// siblings above, so a transient coordinator error does not fail a request
+// the other two reads would have retried through. Returns every channel of
+// the collection with its leaders in one read; with withCache=false that is
+// one coordinator call refreshing all of them.
 func (lb *LBPolicyImpl) GetShardLeaders(ctx context.Context, dbName string, collName string, collectionID int64, withCache bool) (map[string][]NodeInfo, error) {
 	var ret map[string][]NodeInfo
 	err := retry.Handle(ctx, func() (bool, error) {
@@ -401,17 +407,22 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			// error would tell the layer waiting for the group to stop,
 			// undoing the code in exactly the case it exists for.
 			//
-			// Scoped ONLY, and the gate is load-bearing: selectNode propagates
-			// the balancer's error, and the balancer answers a RETRIABLE
-			// ErrServiceUnavailable whenever every candidate is unreachable
-			// (look_aside_balancer.go), so an ungated rule would silently
-			// reclassify the ordinary "all nodes down after a terminal exec
-			// error" from terminal to retriable and drop the cause the caller
-			// could act on. TestExecuteWithRetryUnscopedKeepsTheExecError pins
-			// the unscoped half.
-			scopedFreshRetriable := workload.ResourceGroup != "" &&
-				merr.IsRetryableErr(err) && !merr.IsRetryableErr(lastErr)
-			if lastErr != nil && !scopedFreshRetriable {
+			// Scoped ONLY, and ONLY for that one refusal -- the
+			// ErrCollectionNotFullyLoaded selectNode raises when the scoped
+			// candidate set is empty. Both halves of the gate are load-bearing:
+			// selectNode also propagates the balancer's error, and the balancer
+			// answers a RETRIABLE ErrServiceUnavailable whenever every
+			// candidate is unreachable (look_aside_balancer.go), so a rule
+			// keyed on "any retriable error" would silently reclassify the
+			// ordinary "all nodes down after a terminal exec error" from
+			// terminal to retriable and drop the cause the caller could act on
+			// -- on the scoped path just as much as the unscoped one.
+			// TestExecuteWithRetryUnscopedKeepsTheExecError and
+			// TestExecuteWithRetryScopedKeepsTheExecErrorOnBalancerFailure pin
+			// the two halves.
+			scopedFreshRefusal := workload.ResourceGroup != "" &&
+				errors.Is(err, merr.ErrCollectionNotFullyLoaded) && !merr.IsRetryableErr(lastErr)
+			if lastErr != nil && !scopedFreshRefusal {
 				return true, lastErr
 			}
 			return true, err
