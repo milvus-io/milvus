@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -3323,11 +3324,16 @@ func TestGenFunctionSchem(t *testing.T) {
 				"test2": map[string]interface{}{
 					"test3": "test4",
 				},
-				"test3": []int{1, 2, 3},
+				"test3":   []int{1, 2, 3},
+				"test4":   nil,
+				"weights": []float64{0.7, 0.3},
 			},
 		}
-		_, err := genFunctionSchema(context.Background(), funcSchema)
+		result, err := genFunctionSchema(context.Background(), funcSchema)
 		assert.NoError(t, err)
+		params := funcutil.KeyValuePair2Map(result.GetParams())
+		assert.Equal(t, "null", params["test4"])
+		assert.Equal(t, "[0.7,0.3]", params["weights"])
 	}
 }
 

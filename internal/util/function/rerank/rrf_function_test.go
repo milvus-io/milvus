@@ -86,6 +86,73 @@ func (s *RRFFunctionSuite) TestNewRRFFuction() {
 	}
 }
 
+func (s *RRFFunctionSuite) TestRRFWeightsValidation() {
+	tests := []struct {
+		name    string
+		value   string
+		wantErr string
+	}{
+		{name: "malformed", value: "not-json", wantErr: "failed to parse weights"},
+		{name: "not numeric", value: `["0.8", 0.2]`, wantErr: "failed to parse weights"},
+		{name: "null element", value: "[null, 0.2]", wantErr: "failed to parse weights"},
+		{name: "null", value: "null", wantErr: "non-empty array"},
+		{name: "empty", value: "[]", wantErr: "non-empty array"},
+		{name: "negative", value: "[-0.1, 0.2]", wantErr: "range [0, 1]"},
+		{name: "greater than one", value: "[0.8, 1.1]", wantErr: "range [0, 1]"},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			_, err := parseRRFWeights(test.value)
+			s.ErrorContains(err, test.wantErr)
+		})
+	}
+
+	weights, err := parseRRFWeights("[0, 0.3, 1]")
+	s.NoError(err)
+	s.Equal([]float64{0, 0.3, 1}, weights)
+}
+
+func (s *RRFFunctionSuite) TestWeightedRRFProducesExpectedScoresAndOrder() {
+	cols := []*columns{
+		{size: 3, ids: []int64{1, 2, 3}},
+		{size: 3, ids: []int64{3, 2, 4}},
+	}
+	params := NewSearchParams(1, 4, 0, -1, -1, 1, false, "", []string{"COSINE", "IP"})
+	rrf := &RRFFunction[int64]{k: 1, weights: []float64{0.7, 0.2}, weightsSet: true}
+
+	result, err := rrf.processOneSearchData(context.Background(), params, cols, nil)
+	s.Require().NoError(err)
+	s.Equal([]int64{1, 2, 3, 4}, result.ids)
+	expectedScores := []float64{0.35, 0.3, 0.275, 0.05}
+	for index, expected := range expectedScores {
+		s.InDelta(expected, result.scores[index], 1e-6)
+	}
+}
+
+func (s *RRFFunctionSuite) TestRRFWeightsCompatibilityAndValidationAtExecution() {
+	cols := []*columns{
+		{size: 2, ids: []int64{3, 1}},
+		{size: 2, ids: []int64{2, 1}},
+	}
+	params := NewSearchParams(1, 4, 0, -1, -1, 1, false, "", []string{"COSINE", "IP"})
+
+	classic, err := (&RRFFunction[int64]{k: 60}).processOneSearchData(context.Background(), params, cols, nil)
+	s.Require().NoError(err)
+	allOne, err := (&RRFFunction[int64]{k: 60, weights: []float64{1, 1}, weightsSet: true}).processOneSearchData(context.Background(), params, cols, nil)
+	s.Require().NoError(err)
+	s.Equal(classic.ids, allOne.ids)
+	s.Equal(classic.scores, allOne.scores)
+
+	allZero, err := (&RRFFunction[int64]{k: 60, weights: []float64{0, 0}, weightsSet: true}).processOneSearchData(context.Background(), params, cols, nil)
+	s.Require().NoError(err)
+	s.Equal([]int64{1, 2, 3}, allZero.ids)
+	s.Equal([]float32{0, 0, 0}, allZero.scores)
+
+	_, err = (&RRFFunction[int64]{k: 60, weights: []float64{1}, weightsSet: true}).processOneSearchData(context.Background(), params, cols, nil)
+	s.ErrorContains(err, "the length of weights param mismatch with ann search requests")
+}
+
 func (s *RRFFunctionSuite) TestRRFFuctionProcess() {
 	schema := &schemapb.CollectionSchema{
 		Name: "test",
