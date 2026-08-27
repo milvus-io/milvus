@@ -17,6 +17,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(MilvusCMEKCipherPlugin LANGUAGES CXX)
 
+include(CTest)
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+
 if(NOT MILVUS_SOURCE_DIR)
     message(FATAL_ERROR "MILVUS_SOURCE_DIR is required")
 endif()
@@ -27,7 +30,16 @@ target_compile_options(CipherPlugin PRIVATE -fPIC)
 target_include_directories(CipherPlugin PRIVATE
     "${MILVUS_SOURCE_DIR}/internal/core/src"
 )
+target_link_libraries(CipherPlugin PRIVATE OpenSSL::Crypto)
 set_target_properties(CipherPlugin PROPERTIES
     PREFIX "lib"
     OUTPUT_NAME "CipherPlugin"
 )
+
+add_executable(CipherPluginTest cipher_plugin_test.cpp)
+target_compile_features(CipherPluginTest PRIVATE cxx_std_17)
+target_include_directories(CipherPluginTest PRIVATE
+    "${MILVUS_SOURCE_DIR}/internal/core/src"
+)
+target_link_libraries(CipherPluginTest PRIVATE CipherPlugin)
+add_test(NAME CipherPluginContract COMMAND CipherPluginTest)

@@ -17,13 +17,15 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 )
@@ -33,20 +35,20 @@ const (
 	unsafeEZK              = "cipher.ezk"
 	kmsKeyARN              = "cipher.kmsKeyArn"
 	expectedFixtureRootKey = "fixture-root-key"
+	fixtureMasterKey       = "milvus-cmek-fixture-master-v1"
+	ezkDomain              = "ezk-v1\x00"
+	dekDomain              = "dek-v1\x00"
+	edekDomain             = "edek-v1\x00"
+	edekVersion            = "v1"
+	nonceSize              = 16
 )
 
 // CipherPlugin is intentionally a concrete exported value. Go's plugin
 // loader returns a pointer to exported variables, so *fixtureCipher must
 // implement hook.Cipher for the host type assertion to succeed.
-var CipherPlugin = fixtureCipher{
-	keys: make(map[int64][]byte),
-}
+var CipherPlugin = fixtureCipher{}
 
-type fixtureCipher struct {
-	mu      sync.RWMutex
-	keys    map[int64][]byte
-	counter uint64
-}
+type fixtureCipher struct{}
 
 func (c *fixtureCipher) Init(params map[string]string) error {
 	ezText := params[createEZKey]
@@ -61,12 +63,19 @@ func (c *fixtureCipher) Init(params map[string]string) error {
 	key := params[unsafeEZK]
 	if key != "" {
 		if parts := strings.SplitN(key, ":", 2); len(parts) == 2 {
+			contextEZID, parseErr := strconv.ParseInt(parts[0], 10, 64)
+			if parseErr != nil || contextEZID != ezID {
+				return fmt.Errorf("fixture cipher: unexpected EZ key context %q for EZ %d", parts[0], ezID)
+			}
 			key, err = decodeKey(parts[1])
 		} else {
 			key, err = decodeKey(key)
 		}
 		if err != nil {
 			return fmt.Errorf("fixture cipher: decode EZ key: %w", err)
+		}
+		if !hmac.Equal([]byte(key), deriveEZKey(ezID)) {
+			return fmt.Errorf("fixture cipher: unexpected EZ key for EZ %d", ezID)
 		}
 	} else {
 		key = params[kmsKeyARN]
@@ -76,55 +85,46 @@ func (c *fixtureCipher) Init(params map[string]string) error {
 		if key != expectedFixtureRootKey {
 			return fmt.Errorf("fixture cipher: unexpected root key %q for EZ %d", key, ezID)
 		}
-		key = "fixture-root/" + key
 	}
-
-	c.mu.Lock()
-	c.keys[ezID] = []byte(key)
-	c.mu.Unlock()
 	return nil
 }
 
 func (c *fixtureCipher) GetEncryptor(ezID, collectionID int64) (hook.Encryptor, []byte, error) {
-	key, ok := c.key(ezID)
-	if !ok {
-		return nil, nil, fmt.Errorf("fixture cipher: EZ %d is not initialized", ezID)
+	nonce := make([]byte, nonceSize)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, nil, fmt.Errorf("fixture cipher: generate nonce: %w", err)
 	}
 
-	c.mu.Lock()
-	c.counter++
-	sequence := c.counter
-	c.mu.Unlock()
-
-	rawEdek := digest(string(key), ezID, collectionID, sequence)
-	edek := []byte(hex.EncodeToString(rawEdek))
-	return &fixtureEncryptor{key: deriveDataKey(key, edek)}, edek, nil
+	ezk := deriveEZKey(ezID)
+	tag := deriveEDEKTag(ezk, nonce, ezID, collectionID)
+	edek := []byte(fmt.Sprintf("%s:%s:%s", edekVersion, hex.EncodeToString(nonce), hex.EncodeToString(tag)))
+	return &fixtureEncryptor{key: deriveDataKey(ezk, nonce, ezID, collectionID)}, edek, nil
 }
 
 func (c *fixtureCipher) GetDecryptor(ezID, collectionID int64, safeKey []byte) (hook.Decryptor, error) {
-	key, ok := c.key(ezID)
-	if !ok {
-		return nil, fmt.Errorf("fixture cipher: EZ %d is not initialized", ezID)
+	nonce, tag, err := decodeEDEK(safeKey)
+	if err != nil {
+		return nil, fmt.Errorf("fixture cipher: decode EDEK for EZ %d: %w", ezID, err)
 	}
-	if len(safeKey) == 0 {
-		return nil, fmt.Errorf("fixture cipher: empty EDEK for EZ %d", ezID)
+
+	ezk := deriveEZKey(ezID)
+	expectedTag := deriveEDEKTag(ezk, nonce, ezID, collectionID)
+	if !hmac.Equal(tag, expectedTag) {
+		return nil, fmt.Errorf("fixture cipher: EDEK authentication failed for EZ %d and collection %d", ezID, collectionID)
 	}
-	return &fixtureDecryptor{key: deriveDataKey(key, safeKey)}, nil
+	return &fixtureDecryptor{key: deriveDataKey(ezk, nonce, ezID, collectionID)}, nil
 }
 
 func (c *fixtureCipher) GetUnsafeKey(ezID, _ int64) []byte {
-	key, ok := c.key(ezID)
-	if !ok {
-		return nil
-	}
-	return append([]byte(nil), key...)
+	return deriveEZKey(ezID)
 }
 
-func (c *fixtureCipher) key(ezID int64) ([]byte, bool) {
-	c.mu.RLock()
-	key, ok := c.keys[ezID]
-	c.mu.RUnlock()
-	return append([]byte(nil), key...), ok
+func deriveEZKey(ezID int64) []byte {
+	message := make([]byte, len(ezkDomain)+8)
+	copy(message, ezkDomain)
+	binary.BigEndian.PutUint64(message[len(ezkDomain):], uint64(ezID))
+
+	return hmacSHA256([]byte(fixtureMasterKey), message)
 }
 
 type fixtureEncryptor struct{ key []byte }
@@ -150,50 +150,50 @@ func decodeKey(encoded string) (string, error) {
 	return string(key), nil
 }
 
-func digest(key string, ezID, collectionID int64, sequence uint64) []byte {
-	return digestBytes([]byte(key), ezID, collectionID, sequence)
+func deriveDataKey(ezk, nonce []byte, ezID, collectionID int64) []byte {
+	return deriveContextKey(ezk, dekDomain, nonce, ezID, collectionID)
 }
 
-func deriveDataKey(key, edek []byte) []byte {
-	// The Go layer Base64-encodes the unsafe key before passing it to the C++
-	// plugin context. Derive from that exact representation so both fixtures
-	// can decrypt artifacts written by the other side.
-	encodedKey := base64.StdEncoding.EncodeToString(key)
-	seed := make([]byte, 0, len(encodedKey)+1+len(edek))
-	seed = append(seed, encodedKey...)
-	seed = append(seed, '/')
-	seed = append(seed, edek...)
-
-	const (
-		fnvOffset = uint64(1469598103934665603)
-		fnvPrime  = uint64(1099511628211)
-		xorScale  = uint64(2685821657736338717)
-	)
-	hash := fnvOffset
-	for _, value := range seed {
-		hash ^= uint64(value)
-		hash *= fnvPrime
-	}
-
-	result := make([]byte, sha256.Size)
-	for i := range result {
-		hash ^= hash >> 12
-		hash ^= hash << 25
-		hash ^= hash >> 27
-		result[i] = byte((hash * xorScale) >> 56)
-	}
-	return result
+func deriveEDEKTag(ezk, nonce []byte, ezID, collectionID int64) []byte {
+	return deriveContextKey(ezk, edekDomain, nonce, ezID, collectionID)
 }
 
-func digestBytes(key []byte, ezID, collectionID int64, sequence uint64) []byte {
-	h := sha256.New()
-	h.Write(key)
-	h.Write([]byte(strconv.FormatInt(ezID, 10)))
-	h.Write([]byte("/"))
-	h.Write([]byte(strconv.FormatInt(collectionID, 10)))
-	h.Write([]byte("/"))
-	h.Write([]byte(strconv.FormatUint(sequence, 10)))
-	return h.Sum(nil)
+func deriveContextKey(ezk []byte, domain string, nonce []byte, ezID, collectionID int64) []byte {
+	message := make([]byte, len(domain)+len(nonce)+16)
+	copy(message, domain)
+	copy(message[len(domain):], nonce)
+	ids := message[len(domain)+len(nonce):]
+	binary.BigEndian.PutUint64(ids, uint64(ezID))
+	binary.BigEndian.PutUint64(ids[8:], uint64(collectionID))
+	return hmacSHA256(ezk, message)
+}
+
+func hmacSHA256(key, message []byte) []byte {
+	hash := hmac.New(sha256.New, key)
+	_, _ = hash.Write(message)
+	return hash.Sum(nil)
+}
+
+func decodeEDEK(edek []byte) ([]byte, []byte, error) {
+	parts := strings.Split(string(edek), ":")
+	if len(parts) != 3 {
+		return nil, nil, fmt.Errorf("invalid field count")
+	}
+	if parts[0] != edekVersion {
+		return nil, nil, fmt.Errorf("unsupported version %q", parts[0])
+	}
+	if parts[1] != strings.ToLower(parts[1]) || parts[2] != strings.ToLower(parts[2]) {
+		return nil, nil, fmt.Errorf("fields must use lowercase hex")
+	}
+	nonce, err := hex.DecodeString(parts[1])
+	if err != nil || len(nonce) != nonceSize {
+		return nil, nil, fmt.Errorf("invalid nonce")
+	}
+	tag, err := hex.DecodeString(parts[2])
+	if err != nil || len(tag) != sha256.Size {
+		return nil, nil, fmt.Errorf("invalid authentication tag")
+	}
+	return nonce, tag, nil
 }
 
 func xor(data, key []byte) []byte {

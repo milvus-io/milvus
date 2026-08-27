@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"plugin"
 	"strconv"
@@ -49,6 +48,7 @@ const (
 	fixturePrimaryKey = "id"
 	fixtureVectorDim  = 4
 	fixtureRowCount   = 2048
+	fixturePluginEnv  = "MILVUS_CMEK_FIXTURE_DIR"
 )
 
 var (
@@ -64,14 +64,30 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	fixtureGoPluginPath, fixtureGoPluginRacePath, fixtureCppPluginPath, err = buildFixturePlugins(tmpDir)
+	cmekDir, err := filepath.Abs(".")
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		_ = os.RemoveAll(tmpDir)
+		os.Exit(1)
+	}
+	repoRoot, err := filepath.Abs(filepath.Join(cmekDir, "../../../"))
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		_ = os.RemoveAll(tmpDir)
+		os.Exit(1)
+	}
+	fixtureDir := os.Getenv(fixturePluginEnv)
+	if fixtureDir == "" {
+		fixtureDir = filepath.Join(repoRoot, "bin", "cmek-fixtures")
+	}
+	fixtureGoPluginPath, fixtureGoPluginRacePath, fixtureCppPluginPath, err = fixturePluginPaths(fixtureDir)
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		_ = os.RemoveAll(tmpDir)
 		os.Exit(1)
 	}
 
-	if err := configureFixtureConfig(tmpDir, fixtureGoPluginPath, fixtureCppPluginPath); err != nil {
+	if err := configureFixtureConfig(tmpDir, repoRoot, fixtureGoPluginPath, fixtureCppPluginPath); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		_ = os.RemoveAll(tmpDir)
 		os.Exit(1)
@@ -86,16 +102,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func configureFixtureConfig(tmpDir, goPluginPath, cppPluginPath string) error {
-	cmekDir, err := filepath.Abs(".")
-	if err != nil {
-		return err
-	}
-	repoRoot, err := filepath.Abs(filepath.Join(cmekDir, "../../../"))
-	if err != nil {
-		return err
-	}
-
+func configureFixtureConfig(tmpDir, repoRoot, goPluginPath, cppPluginPath string) error {
 	configDir := filepath.Join(tmpDir, "configs")
 	if err := os.Mkdir(configDir, 0o755); err != nil {
 		return fmt.Errorf("create fixture config directory: %w", err)
@@ -116,6 +123,22 @@ func configureFixtureConfig(tmpDir, goPluginPath, cppPluginPath string) error {
 		return fmt.Errorf("write fixture hook config: %w", err)
 	}
 	return os.Setenv("MILVUSCONF", configDir)
+}
+
+func fixturePluginPaths(directory string) (string, string, string, error) {
+	goPlugin := filepath.Join(directory, "libGoCipherPlugin.so")
+	goRacePlugin := filepath.Join(directory, "libGoCipherPluginRace.so")
+	cppPlugin := filepath.Join(directory, "libCipherPlugin.so")
+	for _, artifact := range []string{goPlugin, goRacePlugin, cppPlugin} {
+		info, err := os.Stat(artifact) //nolint:gosec // The path selects test-only artifacts built by the repository target.
+		if err != nil {
+			return "", "", "", fmt.Errorf("CMEK fixture artifact %s is unavailable; run make build-cmek-fixtures: %w", artifact, err)
+		}
+		if !info.Mode().IsRegular() {
+			return "", "", "", fmt.Errorf("CMEK fixture artifact %s is not a regular file; run make build-cmek-fixtures", artifact)
+		}
+	}
+	return goPlugin, goRacePlugin, cppPlugin, nil
 }
 
 func TestFixtureGoPluginABI(t *testing.T) {
@@ -141,47 +164,6 @@ func TestFixtureCipherConfig(t *testing.T) {
 	if got := configs["cipherpluginsopathcpp"]; got != fixtureCppPluginPath {
 		t.Fatalf("C++ cipher plugin config = %q, want %q", got, fixtureCppPluginPath)
 	}
-}
-
-func buildFixturePlugins(tmpDir string) (string, string, string, error) {
-	cmekDir, err := filepath.Abs(".")
-	if err != nil {
-		return "", "", "", err
-	}
-	repoRoot, err := filepath.Abs(filepath.Join(cmekDir, "../../../"))
-	if err != nil {
-		return "", "", "", err
-	}
-
-	goPlugin := filepath.Join(tmpDir, "libGoCipherPlugin.so")
-	goBuild := exec.Command("go", "build", "-buildmode=plugin", "-buildvcs=false", //nolint:gosec // command and arguments are fixed test build inputs.
-		"-tags", "dynamic,test", "-o", goPlugin, "./tests/integration/cmek/pluginmock/go")
-	goBuild.Dir = repoRoot
-	if output, err := goBuild.CombinedOutput(); err != nil {
-		return "", "", "", fmt.Errorf("build Go cipher fixture: %w: %s", err, output)
-	}
-
-	goPluginRace := filepath.Join(tmpDir, "libGoCipherPluginRace.so")
-	goRaceBuild := exec.Command("go", "build", "-race", "-buildmode=plugin", "-buildvcs=false", //nolint:gosec // command and arguments are fixed test build inputs.
-		"-tags", "dynamic,test", "-gcflags", "all=-N -l", "-o", goPluginRace,
-		"./tests/integration/cmek/pluginmock/go")
-	goRaceBuild.Dir = repoRoot
-	if output, err := goRaceBuild.CombinedOutput(); err != nil {
-		return "", "", "", fmt.Errorf("build race Go cipher fixture: %w: %s", err, output)
-	}
-
-	cppSource := filepath.Join(cmekDir, "pluginmock", "cpp")
-	cppBuild := filepath.Join(tmpDir, "cpp-build")
-	configure := exec.Command("cmake", "-S", cppSource, "-B", cppBuild, //nolint:gosec // paths are created inside the test-owned temporary directory.
-		"-DMILVUS_SOURCE_DIR="+repoRoot, "-DCMAKE_BUILD_TYPE=Release")
-	if output, err := configure.CombinedOutput(); err != nil {
-		return "", "", "", fmt.Errorf("configure C++ cipher fixture: %w: %s", err, output)
-	}
-	compile := exec.Command("cmake", "--build", cppBuild, "--parallel", "2") //nolint:gosec // cppBuild is created inside the test-owned temporary directory.
-	if output, err := compile.CombinedOutput(); err != nil {
-		return "", "", "", fmt.Errorf("build C++ cipher fixture: %w: %s", err, output)
-	}
-	return goPlugin, goPluginRace, filepath.Join(cppBuild, "libCipherPlugin.so"), nil
 }
 
 type campaign struct {
