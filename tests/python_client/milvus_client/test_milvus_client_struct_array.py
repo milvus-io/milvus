@@ -2021,6 +2021,78 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
                 assert hit is not None
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_search_emb_list_with_trailing_empty_arrays_and_scalar_filter(self):
+        """
+        target: test filtered emb-list search when sealed index data ends with empty arrays
+        method: insert non-empty arrays followed by empty arrays, flush, index, and search with a scalar filter
+        expected: search succeeds and returns every matching non-empty row
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_trailing_empty")
+        client = self._client()
+        dim = 32
+        non_empty_rows = 2000
+        total_rows = 3000
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=1,
+            nullable=False,
+        )
+        res, check = self.create_collection(client, collection_name, schema=schema)
+        assert check
+
+        rng = np.random.default_rng(seed=19530)
+        vectors = rng.random((non_empty_rows, dim)).tolist()
+        data = [
+            {
+                "id": i,
+                "clips": [{"embedding": vectors[i]}] if i < non_empty_rows else [],
+            }
+            for i in range(total_rows)
+        ]
+        res, check = self.insert(client, collection_name, data)
+        assert check
+        assert res["insert_count"] == total_rows
+        res, check = self.flush(client, collection_name)
+        assert check
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="clips[embedding]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+        res, check = self.load_collection(client, collection_name)
+        assert check
+
+        search_tensor = EmbeddingList()
+        search_tensor.add(vectors[0])
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[search_tensor],
+            anns_field="clips[embedding]",
+            search_params={"metric_type": "MAX_SIM_COSINE", "params": {"ef": 64}},
+            filter="id < 10",
+            limit=10,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) == 10
+        assert {hit["id"] for hit in results[0]} == set(range(10))
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_different_array_lengths(self):
         """
         target: test search with different EmbeddingList lengths
