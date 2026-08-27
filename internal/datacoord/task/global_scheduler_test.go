@@ -614,9 +614,11 @@ func TestGlobalScheduler_scheduleUnfitTask(t *testing.T) {
 
 	t.Run("exhausted cluster still ends the round", func(t *testing.T) {
 		cluster := session.NewMockCluster(t)
+		// Slots to spare on both workers, and no memory at all: the slot is not
+		// what makes a dimensioned cluster exhausted, the memory is.
 		cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
-			1: {NodeID: 1, AvailableSlots: 0, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: 16 * giB},
-			2: {NodeID: 2, AvailableSlots: 0, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: 16 * giB},
+			1: {NodeID: 1, AvailableSlots: 10, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: 0},
+			2: {NodeID: 2, AvailableSlots: 10, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: 0},
 		}).Once()
 		scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
 
@@ -627,7 +629,7 @@ func TestGlobalScheduler_scheduleUnfitTask(t *testing.T) {
 
 		scheduler.schedule()
 
-		// No worker has a slot: neither task is dispatched and both stay queued.
+		// No worker has memory: neither task is dispatched and both stay queued.
 		assert.False(t, headDispatched.Load())
 		assert.False(t, smallDispatched.Load())
 		assert.ElementsMatch(t, []int64{1, 2}, scheduler.pendingTasks.TaskIDs())
