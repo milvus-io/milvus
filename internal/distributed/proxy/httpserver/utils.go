@@ -450,9 +450,15 @@ func printFieldDetail(field *schemapb.FieldSchema, oldVersion bool) gin.H {
 func printStructArrayFieldsV2(structFields []*schemapb.StructArrayFieldSchema) []gin.H {
 	res := make([]gin.H, 0, len(structFields))
 	for _, sf := range structFields {
+		nullable := sf.GetNullable()
 		subs := make([]gin.H, 0, len(sf.GetFields()))
 		for _, sub := range sf.GetFields() {
+			// The server stores the parent nullable state on every sub-field. REST
+			// exposes nullable at the struct level, so hide the physical projection
+			// and recover the parent flag when an older client dropped it.
+			nullable = nullable || sub.GetNullable()
 			detail := printFieldDetail(sub, false)
+			detail[HTTPReturnFieldNullable] = false
 			if short, err := typeutil.ExtractStructFieldName(sub.GetName()); err == nil && short != "" {
 				detail[HTTPReturnFieldName] = short
 			}
@@ -462,7 +468,7 @@ func printStructArrayFieldsV2(structFields []*schemapb.StructArrayFieldSchema) [
 			HTTPReturnFieldName:     sf.GetName(),
 			HTTPReturnFieldID:       sf.GetFieldID(),
 			HTTPReturnDescription:   sf.GetDescription(),
-			HTTPReturnFieldNullable: sf.GetNullable(),
+			HTTPReturnFieldNullable: nullable,
 			HTTPReturnFieldType:     schemapb.DataType_ArrayOfStruct.String(),
 			"fields":                subs,
 		}
