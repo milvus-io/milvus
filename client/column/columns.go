@@ -25,7 +25,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/entity"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Column interface field type for column-based data frame
@@ -524,9 +523,9 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 			return parseScalarData(fd.GetFieldName(), data, begin, end, validData, NewColumnUUID, NewNullableColumnUUID)
 		}
 		if fd.GetScalars().GetStringData() != nil {
-			return nil, merr.WrapErrParameterInvalidMsg("UUID field '%s' must be BytesData with 16-byte values, got StringData — strict 16B enforcement (no string UUID path)", fd.GetFieldName())
+			return nil, errors.Newf("UUID field '%s' must be BytesData with 16-byte values, got StringData — strict 16B enforcement (no string UUID path)", fd.GetFieldName())
 		}
-		return nil, merr.WrapErrParameterInvalidMsg("UUID field '%s' has no BytesData", fd.GetFieldName())
+		return nil, errors.Newf("UUID field '%s' has no BytesData", fd.GetFieldName())
 
 	case schemapb.DataType_Array:
 		// handle struct array field (legacy server may use DataType_Array as top-level)
