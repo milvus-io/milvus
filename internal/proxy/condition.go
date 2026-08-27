@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 )
@@ -27,6 +28,7 @@ type Condition interface {
 	WaitToFinish() error
 	Notify(err error)
 	Ctx() context.Context
+	SetOnWaitError(handler func())
 }
 
 // make sure interface implementation
@@ -36,16 +38,29 @@ var _ Condition = (*TaskCondition)(nil)
 type TaskCondition struct {
 	done chan error
 	ctx  context.Context
+
+	onWaitErrorMu sync.RWMutex
+	onWaitError   func()
 }
 
 // WaitToFinish waits until the TaskCondition is notified or context done or canceled
 func (tc *TaskCondition) WaitToFinish() error {
+	var err error
 	select {
 	case <-tc.ctx.Done():
-		return errors.Wrap(tc.ctx.Err(), "proxy TaskCondition context Done")
-	case err := <-tc.done:
-		return err
+		err = errors.Wrap(tc.ctx.Err(), "proxy TaskCondition context Done")
+	case err = <-tc.done:
 	}
+
+	if err != nil {
+		tc.onWaitErrorMu.RLock()
+		handler := tc.onWaitError
+		tc.onWaitErrorMu.RUnlock()
+		if handler != nil {
+			handler()
+		}
+	}
+	return err
 }
 
 // Notify sends a signal into the done channel
@@ -56,6 +71,13 @@ func (tc *TaskCondition) Notify(err error) {
 // Ctx returns internal context
 func (tc *TaskCondition) Ctx() context.Context {
 	return tc.ctx
+}
+
+// SetOnWaitError registers a handler invoked before WaitToFinish returns an error.
+func (tc *TaskCondition) SetOnWaitError(handler func()) {
+	tc.onWaitErrorMu.Lock()
+	defer tc.onWaitErrorMu.Unlock()
+	tc.onWaitError = handler
 }
 
 // NewTaskCondition creates a TaskCondition with provided context

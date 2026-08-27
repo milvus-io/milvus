@@ -142,6 +142,38 @@ func TestBaseTaskQueue(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestDqTaskQueue_RemoveUnissuedTaskOnWaitError(t *testing.T) {
+	t.Run("remove queued task", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		queue := newDqTaskQueue(newMockTsoAllocator())
+		task := newMockDqlTask(ctx)
+
+		assert.NoError(t, queue.Enqueue(task))
+		assert.Equal(t, 1, queue.unissuedTasks.Len())
+
+		cancel()
+		assert.Error(t, task.WaitToFinish())
+		assert.True(t, queue.utEmpty())
+		assert.Nil(t, queue.getTaskByReqID(task.ID()))
+	})
+
+	t.Run("popped task is unchanged", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		queue := newDqTaskQueue(newMockTsoAllocator())
+		poppedTask := newMockDqlTask(ctx)
+		queuedTask := newDefaultMockDqlTask()
+
+		assert.NoError(t, queue.Enqueue(poppedTask))
+		assert.NoError(t, queue.Enqueue(queuedTask))
+		assert.Same(t, poppedTask, queue.PopUnissuedTask())
+
+		cancel()
+		assert.Error(t, poppedTask.WaitToFinish())
+		assert.Equal(t, 1, queue.unissuedTasks.Len())
+		assert.Same(t, queuedTask, queue.FrontUnissuedTask())
+	})
+}
+
 func TestDdTaskQueue(t *testing.T) {
 	var err error
 	var unissuedTask task
