@@ -106,6 +106,7 @@ const (
 	BatchReduce = "batch_reduce"
 
 	FunctionChainLevelL0 = "l0"
+	FunctionChainLevelL1 = "l1"
 
 	Pending   = "pending"
 	Executing = "executing"
@@ -170,7 +171,6 @@ const (
 	// model function/UDF labels
 	functionTypeName = "function_type_name"
 	functionProvider = "function_provider"
-	functionName     = "function_name"
 
 	// entities label
 	LoadedLabel         = "loaded"

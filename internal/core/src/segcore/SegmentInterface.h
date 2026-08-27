@@ -447,6 +447,9 @@ class SegmentInternalInterface : public SegmentInterface {
         } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
             return chunk_array_view_impl(
                 op_ctx, field_id, chunk_id, offset_len);
+        } else if constexpr (std::is_same_v<ViewType, ArrayValueView>) {
+            return chunk_array_value_view_impl(
+                op_ctx, field_id, chunk_id, offset_len);
         } else if constexpr (std::is_same_v<ViewType, VectorArrayView>) {
             return chunk_vector_array_view_impl(
                 op_ctx, field_id, chunk_id, offset_len);
@@ -483,14 +486,10 @@ class SegmentInternalInterface : public SegmentInterface {
 
     template <typename ViewType>
     PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
-    get_views_by_offsets(milvus::OpContext* op_ctx,
-                         FieldId field_id,
-                         int64_t chunk_id,
-                         const FixedVector<int32_t>& offsets) const {
-        if (this->type() == SegmentType::Growing) {
-            ThrowInfo(ErrorCode::Unsupported,
-                      "get chunk views not supported for growing segment");
-        }
+    chunk_views_by_offsets(milvus::OpContext* op_ctx,
+                           FieldId field_id,
+                           int64_t chunk_id,
+                           const FixedVector<int32_t>& offsets) const {
         if constexpr (std::is_same_v<ViewType, std::string_view>) {
             return chunk_string_views_by_offsets(
                 op_ctx, field_id, chunk_id, offsets);
@@ -511,7 +510,24 @@ class SegmentInternalInterface : public SegmentInterface {
         } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
             return chunk_array_views_by_offsets(
                 op_ctx, field_id, chunk_id, offsets);
+        } else if constexpr (std::is_same_v<ViewType, ArrayValueView>) {
+            return chunk_array_value_views_by_offsets(
+                op_ctx, field_id, chunk_id, offsets);
         }
+    }
+
+    template <typename ViewType>
+    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
+    get_views_by_offsets(milvus::OpContext* op_ctx,
+                         FieldId field_id,
+                         int64_t chunk_id,
+                         const FixedVector<int32_t>& offsets) const {
+        if (this->type() == SegmentType::Growing) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "get chunk views not supported for growing segment");
+        }
+        return chunk_views_by_offsets<ViewType>(
+            op_ctx, field_id, chunk_id, offsets);
     }
 
     // union(segment_id, field_id) as unique id
@@ -809,6 +825,13 @@ class SegmentInternalInterface : public SegmentInterface {
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
+    virtual PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
+    chunk_array_value_view_impl(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
+
     virtual PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     chunk_vector_array_view_impl(
         milvus::OpContext* op_ctx,
@@ -829,6 +852,14 @@ class SegmentInternalInterface : public SegmentInterface {
                                  FieldId field_id,
                                  int64_t chunk_id,
                                  const FixedVector<int32_t>& offsets) const = 0;
+
+    virtual PinWrapper<
+        std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    chunk_array_value_views_by_offsets(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        const FixedVector<int32_t>& offsets) const = 0;
 
     virtual void
     check_search(const query::Plan* plan) const = 0;

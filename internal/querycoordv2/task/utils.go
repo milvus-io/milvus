@@ -53,31 +53,24 @@ func WrapIDSource(id int64) Source {
 
 // Wait blocks until every task in tasks has finished (succeeded, failed, or
 // been canceled) or ctx is done, whichever comes first. It does not impose
-// any timeout of its own: each task already carries its own real deadline
-// (armed on first dispatch, see Task.ActivateDeadline) and is guaranteed to
-// finish within it, so a second, independently-guessed timeout here would
-// only race against that real deadline instead of bounding anything new.
-// Callers that need to bound how long they'll wait should set a deadline on
-// ctx themselves.
+// any timeout of its own; callers that need to bound how long they'll wait
+// should set a deadline on ctx themselves.
+//
+// The wait happens on the caller's goroutine on purpose. Handing it off to a
+// helper goroutine and racing it against ctx would return to the caller on
+// time but leave the helper parked on a task that has no lifetime guarantee
+// of its own: a task's execution deadline is only armed on first dispatch (see
+// Task.ActivateDeadline), so a task repeatedly bounced by the executor's
+// admission cap never arms a deadline, and taskScheduler.checkStale has no
+// time-based staleness check, so on a healthy cluster with a saturated
+// executor the helper would stay parked indefinitely.
 func Wait(ctx context.Context, tasks ...Task) error {
-	errCh := make(chan error, 1)
-	go func() {
-		var err error
-		for _, task := range tasks {
-			err = task.Wait()
-			if err != nil {
-				break
-			}
+	for _, task := range tasks {
+		if err := task.Wait(ctx); err != nil {
+			return err
 		}
-		errCh <- err
-	}()
-
-	select {
-	case err := <-errCh:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
 	}
+	return nil
 }
 
 func SetPriority(priority Priority, tasks ...Task) {

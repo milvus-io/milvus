@@ -25,29 +25,6 @@
 namespace milvus {
 
 void
-BaseVector::prepareForReuse(milvus::VectorPtr& vector,
-                            milvus::vector_size_t size) {
-    // Guard against null shared_ptr dereference
-    AssertInfo(vector != nullptr,
-               "BaseVector::prepareForReuse: vector cannot be null");
-
-    // Use use_count() instead of unique() (deprecated in C++17, removed in C++20)
-    if (vector.use_count() != 1) {
-        // When vector is non-unique (shared by multiple owners), create a new
-        // instance of the same dynamic type using the virtual factory method to
-        // preserve the subclass type (e.g., ColumnVector, RowVector) instead of
-        // creating a BaseVector.
-        vector = vector->cloneEmpty(size);
-    } else {
-        // When vector is unique (only one owner), reuse it by resetting state
-        // and resizing. This preserves subclass state (e.g., ColumnVector's
-        // values_, RowVector's children_values_).
-        vector->prepareForReuse();
-        vector->resize(size);
-    }
-}
-
-void
 BaseVector::prepareForReuse() {
     null_count_ = std::nullopt;
 }

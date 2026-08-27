@@ -525,6 +525,10 @@ func canBeComparedDataType(left, right schemapb.DataType) bool {
 		return typeutil.IsStringType(right) || typeutil.IsJSONType(right)
 	case schemapb.DataType_JSON:
 		return true
+	case schemapb.DataType_Timestamptz:
+		// Same type only. Mixed TIMESTAMPTZ vs INT64 stays unsupported even
+		// though both dispatch to int64_t in the C++ compare path.
+		return typeutil.IsTimestamptzType(right)
 	default:
 		return false
 	}

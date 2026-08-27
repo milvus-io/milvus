@@ -164,18 +164,6 @@ class WriteRateLimiter {
         return refill_period_us_;
     }
 
-    size_t
-    GetBytesPerPeriod() const {
-        return refill_bytes_per_period_;
-    }
-
-    void
-    Reset() {
-        std::unique_lock<std::mutex> lock(mutex_);
-        available_bytes_ = refill_bytes_per_period_;
-        last_refill_time_ = std::chrono::steady_clock::now();
-    }
-
     WriteRateLimiter(const WriteRateLimiter&) = delete;
     WriteRateLimiter&
     operator=(const WriteRateLimiter&) = delete;

@@ -2854,18 +2854,24 @@ func (m *meta) GetMinGrowingSegmentCheckpoint(channel string) *msgpb.MsgPosition
 	return minPos
 }
 
-// collectionHasTextFields returns true if the collection has any TEXT type fields.
-func (m *meta) collectionHasTextFields(collectionID int64) bool {
+// collectionTextFieldIDs returns the field IDs of all TEXT type fields in the collection schema.
+func (m *meta) collectionTextFieldIDs(collectionID int64) []int64 {
 	coll := m.GetCollection(collectionID)
 	if coll == nil || coll.Schema == nil {
-		return false
+		return nil
 	}
+	var ids []int64
 	for _, field := range coll.Schema.GetFields() {
 		if field.GetDataType() == schemapb.DataType_Text {
-			return true
+			ids = append(ids, field.GetFieldID())
 		}
 	}
-	return false
+	return ids
+}
+
+// collectionHasTextFields returns true if the collection has any TEXT type fields.
+func (m *meta) collectionHasTextFields(collectionID int64) bool {
+	return len(m.collectionTextFieldIDs(collectionID)) > 0
 }
 
 // UpdateChannelCheckpoint updates and saves channel checkpoint.

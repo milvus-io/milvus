@@ -123,7 +123,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 		if preMaterializeFilter && materializer.hasMaterialization() {
 			reader = newSelectedMaterializedRecordReader(reader, materializer, func(rec storage.Record) (*recordSelection, error) {
 				segmentTotalRows[i] += int64(rec.Len())
-				selection, _, err := selectFullRewriteRecord(rec, pkField, segmentFilters[i], ttlFieldID, sourceHasTTLField, nil)
+				selection, err := selectFullRewriteRecord(rec, pkField, segmentFilters[i], ttlFieldID, sourceHasTTLField)
 				return selection, err
 			}, true)
 		} else if preMaterializeFilter {

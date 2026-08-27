@@ -653,6 +653,56 @@ func TestApplyBoostScoresReleasesBoostedFramesOnError(t *testing.T) {
 	require.Error(t, task.applyBoostScores(segDFs, []segments.Segment{nil, nil}, nil))
 }
 
+func TestPrepareBoostScore(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		prepared, err := prepareBoostScore(nil)
+		require.NoError(t, err)
+		require.Nil(t, prepared)
+
+		prepared, err = prepareBoostScore(&planpb.PlanNode{})
+		require.NoError(t, err)
+		require.Nil(t, prepared)
+	})
+
+	t.Run("valid", func(t *testing.T) {
+		plan := &planpb.PlanNode{
+			Scorers: []*planpb.ScoreFunction{{Weight: 1}, {Weight: 2}},
+			ScoreOption: &planpb.ScoreOption{
+				FunctionMode: planpb.FunctionMode_FunctionModeSum,
+				BoostMode:    planpb.BoostMode_BoostModeMultiply,
+			},
+		}
+
+		prepared, err := prepareBoostScore(plan)
+		require.NoError(t, err)
+		require.NotNil(t, prepared)
+		require.Equal(t, plan.GetScorers(), prepared.scorers)
+		require.Equal(t, expr.ModeSum, prepared.functionMode)
+		require.Equal(t, expr.ModeMultiply, prepared.boostMode)
+	})
+
+	t.Run("invalid modes", func(t *testing.T) {
+		_, err := prepareBoostScore(&planpb.PlanNode{
+			Scorers: []*planpb.ScoreFunction{{Weight: 1}},
+			ScoreOption: &planpb.ScoreOption{
+				FunctionMode: planpb.FunctionMode(999),
+			},
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unknown function mode")
+
+		_, err = prepareBoostScore(&planpb.PlanNode{
+			Scorers: []*planpb.ScoreFunction{{Weight: 1}},
+			ScoreOption: &planpb.ScoreOption{
+				FunctionMode: planpb.FunctionMode_FunctionModeSum,
+				BoostMode:    planpb.BoostMode(999),
+			},
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unknown boost mode")
+	})
+}
+
 func TestBoostScoreModeConversions(t *testing.T) {
 	functionMode, err := functionModeToScoreCombineMode(planpb.FunctionMode_FunctionModeMultiply)
 	require.NoError(t, err)

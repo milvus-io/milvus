@@ -188,9 +188,6 @@ GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
                           int64_t segment_id,
                           int64_t field_id);
 
-std::string
-GetSegmentRawDataPathPrefix(ChunkManagerPtr cm, int64_t segment_id);
-
 std::pair<std::string, size_t>
 EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           uint8_t* buf,
@@ -388,9 +385,6 @@ PutIndexData(ChunkManager* remote_chunk_manager,
              IndexMeta& index_meta,
              std::shared_ptr<CPluginContext> plugin_context);
 
-int64_t
-GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas);
-
 size_t
 GetNumRowsForLoadInfo(const LoadFieldDataInfo& load_info);
 
@@ -578,19 +572,6 @@ NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
 arrow::ArrayVector
 NormalizeArrowForChunkWriter(const arrow::ArrayVector& arrays,
                              const FieldMeta& field_meta);
-
-// Coerce any binary-like array (LARGE_BINARY / BINARY_VIEW /
-// LARGE_STRING / STRING_VIEW / STRING) to canonical BinaryArray.
-// Required because vortex schemaless mode emits view variants for the
-// whole variable-length family; downstream paths assume canonical layout.
-arrow::ArrayVector
-CoerceToBinary(const arrow::ArrayVector& arrays);
-
-// Coerce LARGE_LIST / LIST_VIEW to canonical (32-bit offset) ListArray.
-// Vortex schemaless mode may emit list variants for the same logical
-// List<T>; downstream code expects arrow::ListArray.
-arrow::ArrayVector
-CoerceToList(const arrow::ArrayVector& arrays);
 
 // Single source of truth for view/large-variant elimination.
 // STRING_VIEW/LARGE_STRING -> STRING, BINARY_VIEW/LARGE_BINARY -> BINARY,

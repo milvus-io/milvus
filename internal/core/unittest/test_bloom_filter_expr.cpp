@@ -544,7 +544,6 @@ TEST(BloomFilterExprTest, ProbeSkipsAbsentValueDomain) {
     TestSbbfBuilder empty(4);
     const std::string empty_blob = empty.Serialize(0, 0.001);
     const auto empty_view = SplitBlockBloomFilterView::Parse(empty_blob);
-    EXPECT_EQ(empty_view.domains(), 0);
     EXPECT_FALSE(empty_view.TestInt64(kCollidingInt64));
     EXPECT_FALSE(
         empty_view.TestBytes(kCollidingString, std::strlen(kCollidingString)));

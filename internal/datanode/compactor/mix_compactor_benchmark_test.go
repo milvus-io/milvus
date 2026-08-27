@@ -1218,7 +1218,7 @@ func BenchmarkMixCompactorPhases(b *testing.B) {
 					b.Fatal(err)
 				}
 				filter := compaction.NewEntityFilter(nil, int64(time.Hour), benchmarkCurrentTime, 0)
-				selection, _, err := selectFullRewriteRecord(record, pkField, filter, -1, false, nil)
+				selection, err := selectFullRewriteRecord(record, pkField, filter, -1, false)
 				if err != nil {
 					materializer.Close()
 					b.Fatal(err)

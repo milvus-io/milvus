@@ -249,7 +249,10 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
         // the index is loaded in ram, so we can remove files in advance
         disk_file_manager_->RemoveIndexFiles();
     }
-    ComputeByteSize();
+
+    // Count() goes through wrapper_, so sealed finalization must happen after
+    // the reader has been constructed rather than in LoadIndexMetas().
+    FinalizeSealed(/*release_null_offsets=*/true);
 }
 
 template <typename T>
@@ -350,31 +353,117 @@ InvertedIndexTantivy<T>::IsNull() {
     tracer::AutoSpan span("InvertedIndexTantivy::IsNull",
                           tracer::GetRootSpan());
     int64_t count = Count();
-    TargetBitmap bitset(count);
 
-    // For nested index, null rows don't have elements in the index,
-    // so all elements in the index are valid (none are null).
-    // null_offset_ stores row offsets, not element offsets.
-    if (is_nested_index_) {
-        return bitset;  // All false - no element is null
+    // Same materialized bitmap as IsNotNull(), inverted.
+    if (!is_growing_) {
+        AssertInfo(valid_bitmap_ != nullptr,
+                   "sealed inverted index queried before finalization");
+        if (valid_bitmap_->size() == 0) {
+            return TargetBitmap(count);
+        }
+        AssertInfo(static_cast<int64_t>(valid_bitmap_->size()) == count,
+                   "validity bitmap not materialized for sealed inverted "
+                   "index: bitmap size {} vs count {}",
+                   valid_bitmap_->size(),
+                   count);
+        TargetBitmap bitset = valid_bitmap_->clone();
+        bitset.flip();
+        return bitset;
     }
 
-    auto fill_bitset = [this, count, &bitset]() {
+    // Growing nested results are in the element domain, while null_offset_
+    // contains row offsets. Null rows emit no elements, so every indexed
+    // element is valid and none is null.
+    if (is_nested_index_) {
+        return TargetBitmap(count);
+    }
+
+    TargetBitmap bitset(count);
+    {
+        std::shared_lock<folly::SharedMutex> lock(mutex_);
         auto end =
             std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
         for (auto iter = null_offset_.begin(); iter != end; ++iter) {
             bitset.set(*iter);
         }
-    };
+    }
+    return bitset;
+}
 
+template <typename T>
+void
+InvertedIndexTantivy<T>::MaterializeValidBitmap() {
     if (is_growing_) {
-        std::shared_lock<folly::SharedMutex> lock(mutex_);
-        fill_bitset();
-    } else {
-        fill_bitset();
+        // Growing indexes still take rows and read null_offset_ under mutex.
+        return;
+    }
+    if (valid_bitmap_ != nullptr) {
+        return;
+    }
+    int64_t count = Count();
+    if (is_nested_index_ || null_offset_.empty()) {
+        // A non-null empty bitmap marks finalization without retaining a
+        // rows/8 allocation for non-nullable fields or fields with no nulls.
+        // Nested results use the element domain: null rows emit no elements,
+        // so their materialized element validity is also all-valid even when
+        // null_offset_ still contains row offsets for persistence.
+        // Share one empty sentinel per scalar type instead of allocating one
+        // control block for every all-valid index.
+        static const auto all_valid_bitmap =
+            std::make_shared<const TargetBitmap>();
+        valid_bitmap_ = all_valid_bitmap;
+        return;
+    }
+    auto bitmap = std::make_shared<TargetBitmap>(count, true);
+    auto end =
+        std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
+    for (auto iter = null_offset_.begin(); iter != end; ++iter) {
+        bitmap->reset(*iter);
+    }
+    valid_bitmap_ = std::move(bitmap);
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::FinalizeSealed(bool release_null_offsets) {
+    set_is_growing(false);
+    MaterializeValidBitmap();
+    if (release_null_offsets) {
+        std::vector<size_t>().swap(null_offset_);
+    }
+    ComputeByteSize();
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::ApplyValidityMask(TargetBitmap& bitset) {
+    auto count = static_cast<int64_t>(bitset.size());
+    if (!is_growing_) {
+        AssertInfo(valid_bitmap_ != nullptr,
+                   "sealed inverted index queried before finalization");
+        if (valid_bitmap_->size() == 0) {
+            return;
+        }
+        AssertInfo(static_cast<int64_t>(valid_bitmap_->size()) == count,
+                   "validity bitmap size {} does not match result size {}",
+                   valid_bitmap_->size(),
+                   count);
+        bitset &= *valid_bitmap_;
+        return;
     }
 
-    return bitset;
+    // Growing nested results are in the element domain, while null_offset_
+    // contains row offsets. Segment-level validity handles null rows.
+    if (is_nested_index_) {
+        return;
+    }
+
+    std::shared_lock<folly::SharedMutex> lock(mutex_);
+    auto end =
+        std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
+    for (auto iter = null_offset_.begin(); iter != end; ++iter) {
+        bitset.reset(*iter);
+    }
 }
 
 template <typename T>
@@ -383,30 +472,40 @@ InvertedIndexTantivy<T>::IsNotNull() {
     tracer::AutoSpan span("InvertedIndexTantivy::IsNotNull",
                           tracer::GetRootSpan());
     int64_t count = Count();
-    TargetBitmap bitset(count, true);
 
-    // For nested index, null rows don't have elements in the index,
-    // so all elements in the index are valid.
-    // null_offset_ stores row offsets, not element offsets.
-    if (is_nested_index_) {
-        return bitset;  // All true - all elements are valid
+    // A sealed index has an immutable null set: MaterializeValidBitmap() has
+    // already built the bitmap on every path that makes the index queryable,
+    // so serving a query is just a copy.
+    if (!is_growing_) {
+        AssertInfo(valid_bitmap_ != nullptr,
+                   "sealed inverted index queried before finalization");
+        if (valid_bitmap_->size() == 0) {
+            return TargetBitmap(count, true);
+        }
+        AssertInfo(static_cast<int64_t>(valid_bitmap_->size()) == count,
+                   "validity bitmap not materialized for sealed inverted "
+                   "index: bitmap size {} vs count {}",
+                   valid_bitmap_->size(),
+                   count);
+        return valid_bitmap_->clone();
     }
 
-    auto fill_bitset = [this, count, &bitset]() {
+    // Growing nested results are in the element domain, while null_offset_
+    // contains row offsets. Null rows emit no elements, so every indexed
+    // element is valid.
+    if (is_nested_index_) {
+        return TargetBitmap(count, true);
+    }
+
+    TargetBitmap bitset(count, true);
+    {
+        std::shared_lock<folly::SharedMutex> lock(mutex_);
         auto end =
             std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
         for (auto iter = null_offset_.begin(); iter != end; ++iter) {
             bitset.reset(*iter);
         }
-    };
-
-    if (is_growing_) {
-        std::shared_lock<folly::SharedMutex> lock(mutex_);
-        fill_bitset();
-    } else {
-        fill_bitset();
     }
-
     return bitset;
 }
 
@@ -444,22 +543,7 @@ InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
     wrapper_->terms_query(values, n, &bitset);
     // The expression is "not" in, so we flip the bit.
     bitset.flip();
-
-    auto fill_bitset = [this, count, &bitset]() {
-        auto end =
-            std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
-        for (auto iter = null_offset_.begin(); iter != end; ++iter) {
-            bitset.reset(*iter);
-        }
-    };
-
-    if (is_growing_) {
-        std::shared_lock<folly::SharedMutex> lock(mutex_);
-        fill_bitset();
-    } else {
-        fill_bitset();
-    }
-
+    ApplyValidityMask(bitset);
     return bitset;
 }
 
@@ -638,7 +722,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
     wrapper_->create_reader(milvus::index::SetBitsetSealed);
     finish();
     wrapper_->reload();
-    ComputeByteSize();
+    FinalizeSealed();
 }
 
 template <typename T>
@@ -955,7 +1039,8 @@ InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
         disk_file_manager_->RemoveIndexFiles();
     }
 
-    ComputeByteSize();
+    // V3 load path; same reason as in Load().
+    FinalizeSealed(/*release_null_offsets=*/true);
 
     LOG_INFO(
         "LoadEntries InvertedIndexTantivy done, file_count: {}, has_null: "

@@ -17,10 +17,16 @@
 package metrics
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -260,50 +266,48 @@ func observeQueryNodeCollection(nodeID, collectionID string) {
 	QueryNodeGlobalRefineCount.WithLabelValues(nodeID, collectionID).Add(1)
 }
 
+// proxyCollectionCollectors mirrors the production cleanup list, so a metric
+// added there is automatically observed and asserted on here.
 func proxyCollectionCollectors() []prometheus.Collector {
-	return []prometheus.Collector{
-		ProxyReceivedNQ,
-		ProxySearchVectors,
-		ProxyInsertVectors,
-		ProxyUpsertVectors,
-		ProxyDeleteVectors,
-		ProxySQLatency,
-		ProxyCollectionSQLatency,
-		ProxyMutationLatency,
-		ProxyCollectionMutationLatency,
-		ProxyFunctionCall,
-		ProxyReceiveBytes,
-		ProxyRetrySearchCount,
-		ProxyRetrySearchResultInsufficientCount,
-		ProxyRecallSearchCount,
-		ProxySearchSparseNumNonZeros,
-		ProxyFunctionlatency,
-		ProxyScannedRemoteMB,
-		ProxyScannedTotalMB,
+	scoped := proxyCollectionScopedMetrics()
+	collectors := make([]prometheus.Collector, 0, len(scoped))
+	for _, m := range scoped {
+		collectors = append(collectors, m.(prometheus.Collector))
 	}
+	return collectors
 }
 
+// observeProxyCollection touches every (metric, label value) combination the
+// proxy emits for a collection. Observing a single combination per metric is
+// not enough: cleanup used to enumerate label values with Delete() and passed
+// such a test while leaking every value the test did not happen to pick.
 func observeProxyCollection(nodeID, db, collection string) {
-	ProxyReceivedNQ.WithLabelValues(nodeID, SearchLabel, db, collection).Add(1)
+	for _, queryType := range []string{SearchLabel, HybridSearchLabel, QueryLabel, UpsertQueryLabel} {
+		ProxyReceivedNQ.WithLabelValues(nodeID, queryType, db, collection).Add(1)
+		ProxySQLatency.WithLabelValues(nodeID, queryType, db, collection).Observe(1)
+		ProxyCollectionSQLatency.WithLabelValues(nodeID, queryType, db, collection).Observe(1)
+		ProxyRetrySearchCount.WithLabelValues(nodeID, queryType, db, collection).Add(1)
+		ProxyRetrySearchResultInsufficientCount.WithLabelValues(nodeID, queryType, db, collection).Add(1)
+		ProxyRecallSearchCount.WithLabelValues(nodeID, queryType, db, collection).Add(1)
+		ProxySearchSparseNumNonZeros.WithLabelValues(nodeID, db, collection, queryType, "1").Observe(1)
+	}
+	for _, msgType := range []string{InsertLabel, DeleteLabel, UpsertLabel, SearchLabel, HybridSearchLabel, QueryLabel} {
+		ProxyMutationLatency.WithLabelValues(nodeID, msgType, db, collection).Observe(1)
+		ProxyCollectionMutationLatency.WithLabelValues(nodeID, msgType, db, collection).Observe(1)
+		ProxyReceiveBytes.WithLabelValues(nodeID, msgType, db, collection).Add(1)
+		ProxyScannedRemoteMB.WithLabelValues(nodeID, msgType, db, collection).Add(1)
+		ProxyScannedTotalMB.WithLabelValues(nodeID, msgType, db, collection).Add(1)
+	}
 	ProxySearchVectors.WithLabelValues(nodeID, db, collection).Add(1)
 	ProxyInsertVectors.WithLabelValues(nodeID, db, collection).Add(1)
 	ProxyUpsertVectors.WithLabelValues(nodeID, db, collection).Add(1)
 	ProxyDeleteVectors.WithLabelValues(nodeID, db, collection).Add(1)
-	ProxySQLatency.WithLabelValues(nodeID, SearchLabel, db, collection).Observe(1)
-	ProxyCollectionSQLatency.WithLabelValues(nodeID, SearchLabel, db, collection).Observe(1)
-	ProxyMutationLatency.WithLabelValues(nodeID, DeleteLabel, db, collection).Observe(1)
-	ProxyCollectionMutationLatency.WithLabelValues(nodeID, DeleteLabel, db, collection).Observe(1)
 	ProxyFunctionCall.WithLabelValues(nodeID, "x", SuccessLabel, CauseNA, db, collection).Add(1)
-	ProxyReceiveBytes.WithLabelValues(nodeID, DeleteLabel, db, collection).Add(1)
-	ProxyRetrySearchCount.WithLabelValues(nodeID, SearchLabel, db, collection).Add(1)
-	ProxyRetrySearchResultInsufficientCount.WithLabelValues(nodeID, SearchLabel, db, collection).Add(1)
-	ProxyRecallSearchCount.WithLabelValues(nodeID, SearchLabel, db, collection).Add(1)
-	ProxySearchSparseNumNonZeros.WithLabelValues(nodeID, collection, SearchLabel, "1").Observe(1)
-	ProxyFunctionlatency.WithLabelValues(nodeID, collection, "x", "x", "x").Observe(1)
-	ProxyScannedRemoteMB.WithLabelValues(nodeID, DeleteLabel, db, collection).Add(1)
-	ProxyScannedTotalMB.WithLabelValues(nodeID, DeleteLabel, db, collection).Add(1)
+	ProxyFunctionlatency.WithLabelValues(nodeID, db, collection, "x", "x", "x").Observe(1)
 }
 
+// leftoverCollectionSeries returns the distinct metric names that still hold a
+// series carrying label=value.
 func leftoverCollectionSeries(t *testing.T, collectors []prometheus.Collector, label, value string) []string {
 	t.Helper()
 	r := prometheus.NewRegistry()
@@ -312,14 +316,19 @@ func leftoverCollectionSeries(t *testing.T, collectors []prometheus.Collector, l
 	}
 	mfs, err := r.Gather()
 	assert.NoError(t, err)
+	seen := make(map[string]struct{})
 	var names []string
 	for _, mf := range mfs {
 		for _, m := range mf.GetMetric() {
 			for _, lp := range m.GetLabel() {
-				if lp.GetName() == label && lp.GetValue() == value {
-					names = append(names, mf.GetName())
-					break
+				if lp.GetName() != label || lp.GetValue() != value {
+					continue
 				}
+				if _, ok := seen[mf.GetName()]; !ok {
+					seen[mf.GetName()] = struct{}{}
+					names = append(names, mf.GetName())
+				}
+				break
 			}
 		}
 	}
@@ -358,7 +367,8 @@ func TestCleanupProxyCollectionMetricsDropsEveryCollectionSeries(t *testing.T) {
 	observeProxyCollection("7", db, other)
 
 	before := leftoverCollectionSeries(t, proxyCollectionCollectors(), collectionName, coll)
-	assert.NotEmpty(t, before)
+	assert.Len(t, before, len(proxyCollectionScopedMetrics()),
+		"observeProxyCollection must observe every metric in proxyCollectionScopedMetrics")
 
 	CleanupProxyCollectionMetrics(nodeID, db, coll)
 
@@ -366,4 +376,200 @@ func TestCleanupProxyCollectionMetricsDropsEveryCollectionSeries(t *testing.T) {
 	assert.NotEmpty(t, leftoverCollectionSeries(t, proxyCollectionCollectors(), collectionName, other))
 
 	CleanupProxyCollectionMetrics(nodeID, db, other)
+}
+
+func TestCleanupProxyDBMetricsDropsEveryCollectionSeries(t *testing.T) {
+	nodeID := int64(7)
+	db := "metric_db_cleanup_db"
+	otherDB := "metric_db_cleanup_other_db"
+
+	observeProxyCollection("7", db, "coll_a")
+	observeProxyCollection("7", db, "coll_b")
+	observeProxyCollection("7", otherDB, "coll_a")
+
+	before := leftoverCollectionSeries(t, proxyCollectionCollectors(), databaseLabelName, db)
+	assert.Len(t, before, len(proxyCollectionScopedMetrics()))
+
+	CleanupProxyDBMetrics(nodeID, db)
+
+	assert.Empty(t, leftoverCollectionSeries(t, proxyCollectionCollectors(), databaseLabelName, db))
+	assert.NotEmpty(t, leftoverCollectionSeries(t, proxyCollectionCollectors(), databaseLabelName, otherDB))
+
+	CleanupProxyDBMetrics(nodeID, otherDB)
+}
+
+// TestCollectionScopedMetricsAreComplete parses the metric declarations and
+// fails when a collection labeled metric is not wired into the matching drop
+// cleanup, which is how these series leaked in the first place.
+func TestCollectionScopedMetricsAreComplete(t *testing.T) {
+	t.Run("proxy", func(t *testing.T) {
+		assertCleanupCoversLabels(t, "proxy_metrics.go", "proxyCollectionScopedMetrics",
+			map[string]string{
+				// ProxyReportValue is db-scoped only (no collection_name label), so it
+				// cannot join proxyCollectionScopedMetrics(): CleanupProxyCollectionMetrics
+				// passes collection_name too and would then match nothing for it. It is
+				// cleaned separately in CleanupProxyDBMetrics.
+				"ProxyReportValue": "db-scoped only, cleaned in CleanupProxyDBMetrics",
+			},
+			"databaseLabelName", "collectionName")
+	})
+	t.Run("querynode", func(t *testing.T) {
+		assertCleanupCoversLabels(t, "querynode_metrics.go", "CleanupQueryNodeCollectionMetrics",
+			nil, "collectionIDLabelName")
+	})
+}
+
+// assertCleanupCoversLabels asserts every prometheus vec declared in file whose
+// variable label set overlaps requiredLabels is cleaned up by the named
+// function:
+//   - a vec carrying all required labels must be referenced by funcName;
+//   - a vec carrying only some of them (e.g. collection_name without db_name)
+//     is flagged as a gap unless it is allow-listed in allowList.
+//
+// Labels are matched by the identifier used in the declaration (for example
+// "collectionName"), not by the string it expands to; string-literal label
+// elements are resolved through the label-name constants in metrics.go. Scope is
+// the single named file -- a vec declared in another file of the package is
+// invisible to this guard.
+func assertCleanupCoversLabels(t *testing.T, file, funcName string, allowList map[string]string, requiredLabels ...string) {
+	t.Helper()
+	labelIdentByValue := labelIdentifiers(t)
+
+	parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
+	require.NoError(t, err)
+
+	referenced := make(map[string]struct{})
+	var declared []string
+	var partial []string
+
+	ast.Inspect(parsed, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.FuncDecl:
+			if node.Name.Name != funcName {
+				return true
+			}
+			ast.Inspect(node.Body, func(inner ast.Node) bool {
+				if ident, ok := inner.(*ast.Ident); ok {
+					referenced[ident.Name] = struct{}{}
+				}
+				return true
+			})
+		case *ast.ValueSpec:
+			if len(node.Names) != 1 || len(node.Values) != 1 {
+				return true
+			}
+			labels, ok := vecVariableLabels(node.Values[0], labelIdentByValue)
+			if !ok {
+				return true
+			}
+			hasAny, hasAll := false, true
+			for _, required := range requiredLabels {
+				_, has := labels[required]
+				hasAny = hasAny || has
+				hasAll = hasAll && has
+			}
+			if !hasAny {
+				return true
+			}
+			name := node.Names[0].Name
+			if hasAll {
+				declared = append(declared, name)
+				return true
+			}
+			if _, allowed := allowList[name]; !allowed {
+				partial = append(partial, name)
+			}
+		}
+		return true
+	})
+
+	require.NotEmpty(t, declared, "no metric declaration matched %v in %s", requiredLabels, file)
+	for _, name := range declared {
+		_, ok := referenced[name]
+		assert.True(t, ok, "%s is labeled with %v but is never cleaned up in %s", name, requiredLabels, funcName)
+	}
+	for _, name := range partial {
+		assert.Failf(t, "metric carries only some required labels", "%s is labeled with only some of %v but is not cleaned up in %s", name, requiredLabels, funcName)
+	}
+}
+
+// labelIdentifiers parses the label-name constants declared in metrics.go and
+// returns a map from a constant's string value to its identifier (for example
+// "collection_name" -> "collectionName"), so a vec whose labels are written as
+// string literals resolves to the same identifiers the guard matches against.
+func labelIdentifiers(t *testing.T) map[string]string {
+	t.Helper()
+	parsed, err := parser.ParseFile(token.NewFileSet(), "metrics.go", nil, 0)
+	require.NoError(t, err)
+
+	result := make(map[string]string)
+	ast.Inspect(parsed, func(n ast.Node) bool {
+		decl, ok := n.(*ast.GenDecl)
+		if !ok || decl.Tok != token.CONST {
+			return true
+		}
+		for _, spec := range decl.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for i, name := range vs.Names {
+				if i >= len(vs.Values) {
+					continue
+				}
+				lit, ok := vs.Values[i].(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					continue
+				}
+				if val, err := strconv.Unquote(lit.Value); err == nil {
+					result[val] = name.Name
+				}
+			}
+		}
+		return true
+	})
+	return result
+}
+
+// vecVariableLabels returns the variable label names of a
+// `prometheus.NewXxxVec(opts, []string{...})` expression. Identifiers are kept
+// as-is; string literals are resolved to their identifier via labelIdentByValue.
+func vecVariableLabels(expr ast.Expr, labelIdentByValue map[string]string) (map[string]struct{}, bool) {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok || len(call.Args) == 0 {
+		return nil, false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || !strings.HasSuffix(sel.Sel.Name, "Vec") {
+		return nil, false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	if !ok || pkg.Name != "prometheus" {
+		return nil, false
+	}
+	lit, ok := call.Args[len(call.Args)-1].(*ast.CompositeLit)
+	if !ok {
+		return nil, false
+	}
+	if _, ok := lit.Type.(*ast.ArrayType); !ok {
+		return nil, false
+	}
+	labels := make(map[string]struct{}, len(lit.Elts))
+	for _, elt := range lit.Elts {
+		switch e := elt.(type) {
+		case *ast.Ident:
+			labels[e.Name] = struct{}{}
+		case *ast.BasicLit:
+			if e.Kind == token.STRING {
+				if val, err := strconv.Unquote(e.Value); err == nil {
+					if ident, ok := labelIdentByValue[val]; ok {
+						labels[ident] = struct{}{}
+					} else {
+						labels[val] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+	return labels, true
 }

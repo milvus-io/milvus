@@ -69,7 +69,7 @@ func (p Properties) AppendTaskID(taskID int64) {
 
 func (p Properties) AppendType(t Type) {
 	switch t {
-	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment:
+	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment, ExternalCopySegment:
 		p[TypeKey] = t
 	default:
 		p[TypeKey] = TypeNone
@@ -117,13 +117,14 @@ func (p Properties) GetTaskType() (Type, error) {
 		return "", WrapErrTaskPropertyLack(TypeKey, p[TaskIDKey])
 	}
 	switch p[TypeKey] {
-	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment:
+	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment, ExternalCopySegment:
 		return p[TypeKey], nil
 	default:
-		// Task types are assigned by the coordinator; an unrecognized one means a
-		// protocol mismatch (e.g. a newer coordinator scheduling onto an older
-		// node), which is system blame, not user input.
-		return p[TypeKey], merr.WrapErrServiceInternalMsg("unrecognized task type '%s', taskID=%s", p[TypeKey], p[TaskIDKey])
+		// Task types are assigned by the coordinator. An unrecognized type means
+		// this worker does not implement the coordinator's task protocol, which is
+		// a system capability mismatch rather than invalid user input.
+		return p[TypeKey], merr.Wrapf(merr.ErrServiceUnimplemented,
+			"unrecognized task type '%s', taskID=%s", p[TypeKey], p[TaskIDKey])
 	}
 }
 
