@@ -26,6 +26,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -513,5 +515,35 @@ func TestHandleAlterConfigRefusesTheAdminAuthGate(t *testing.T) {
 		coord.HandleAlterConfig(w,
 			httptest.NewRequest(http.MethodPost, "/management/config/alter", bytes.NewReader(body)))
 		assert.Equal(t, http.StatusBadRequest, w.Code, spelling)
+	}
+}
+
+func TestNewAlterWALBroadcastMessage(t *testing.T) {
+	clusterChannels := message.ClusterChannels{
+		Channels:       []string{"pchannel1", "pchannel2"},
+		ControlChannel: "pchannel1_vcchan",
+	}
+
+	msg, err := newAlterWALBroadcastMessage(
+		commonpb.WALName_Pulsar,
+		map[string]string{"pulsar.address": "pulsar://localhost:6650"},
+		clusterChannels,
+	)
+	require.NoError(t, err)
+
+	// A local WAL migration must not be replayed on a secondary cluster.
+	assert.True(t, msg.IsUnreplicable())
+	// The ack callback writes mq.type into etcd, so it must wait for the streaming
+	// nodes to consume the message instead of being fast-acked at append time.
+	require.NotNil(t, msg.BroadcastHeader())
+	assert.True(t, msg.BroadcastHeader().AckSyncUp)
+
+	// Both properties must survive the split into per-pchannel messages.
+	msg.WithBroadcastID(1)
+	splitMsgs := msg.SplitIntoMutableMessage()
+	require.Len(t, splitMsgs, 2)
+	for _, splitMsg := range splitMsgs {
+		assert.True(t, splitMsg.IsUnreplicable())
+		assert.True(t, splitMsg.BroadcastHeader().AckSyncUp)
 	}
 }

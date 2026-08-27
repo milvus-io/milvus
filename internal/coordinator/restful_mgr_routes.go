@@ -1219,14 +1219,7 @@ func (s *mixCoordImpl) broadcastAlterWALMessage(ctx context.Context, targetWALNa
 	defer broadcaster.Close()
 
 	// Create AlterWAL broadcast message
-	broadcastMsg, err := message.NewAlterWALMessageBuilderV2().
-		WithHeader(&message.AlterWALMessageHeader{
-			TargetWalName: targetWALName,
-			Config:        config,
-		}).
-		WithBody(&message.AlterWALMessageBody{}).
-		WithClusterLevelBroadcast(channel.GetClusterChannels()).
-		BuildBroadcast()
+	broadcastMsg, err := newAlterWALBroadcastMessage(targetWALName, config, channel.GetClusterChannels())
 	if err != nil {
 		logger.Info(ctx, "broadcastAlterWALMessage failed to build broadcast message", mlog.Err(err))
 		return errors.Wrap(err, "failed to build broadcast message")
@@ -1244,6 +1237,32 @@ func (s *mixCoordImpl) broadcastAlterWALMessage(ctx context.Context, targetWALNa
 		mlog.Uint64("broadcastID", result.BroadcastID))
 
 	return nil
+}
+
+// newAlterWALBroadcastMessage builds the AlterWAL broadcast message.
+//
+// The message is unreplicable: the WAL backend is a per-cluster deployment choice,
+// so a local migration must not make a secondary cluster migrate as well, and the
+// secondary may not even run the target MQ.
+//
+// The broadcast acks in sync with consumption: the ack callback writes the
+// cluster-wide mq.type into etcd, so it must not run while the streaming nodes
+// have not observed the AlterWAL marker yet. Without this option the broadcast is
+// fast-acked as soon as every pchannel append succeeds.
+func newAlterWALBroadcastMessage(
+	targetWALName commonpb.WALName,
+	config map[string]string,
+	clusterChannels message.ClusterChannels,
+) (message.BroadcastMutableMessage, error) {
+	return message.NewAlterWALMessageBuilderV2().
+		WithHeader(&message.AlterWALMessageHeader{
+			TargetWalName: targetWALName,
+			Config:        config,
+		}).
+		WithBody(&message.AlterWALMessageBody{}).
+		WithUnreplicable().
+		WithClusterLevelBroadcast(clusterChannels, message.OptBuildBroadcastAckSyncUp()).
+		BuildBroadcast()
 }
 
 // HandleAlterConfig handles POST requests to alter configuration items.

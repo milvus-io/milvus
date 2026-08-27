@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
@@ -1442,7 +1443,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	fieldsData := t.result.GetResults().GetFieldsData()
 	for i, fieldData := range fieldsData {
 		if fieldData.Type == schemapb.DataType_Geometry {
-			if err := validateGeometryFieldSearchResult(&fieldsData[i]); err != nil {
+			if err := fieldvalidator.ValidateGeometryFieldSearchResult(&fieldsData[i]); err != nil {
 				log.Warn(ctx, "fail to validate geometry field search result", mlog.Err(err))
 				return err
 			}
@@ -1452,7 +1453,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	// stages emit plural; runs before the legacy-wire downgrade below.
 	for i, gbv := range t.result.GetResults().GetGroupByFieldValues() {
 		if gbv != nil && gbv.GetType() == schemapb.DataType_Geometry {
-			if err := validateGeometryFieldSearchResult(&t.result.Results.GroupByFieldValues[i]); err != nil {
+			if err := fieldvalidator.ValidateGeometryFieldSearchResult(&t.result.Results.GroupByFieldValues[i]); err != nil {
 				log.Warn(ctx, "fail to validate geometry field search result", mlog.Err(err))
 				return err
 			}

@@ -1,4 +1,4 @@
-package proxy
+package fieldvalidator
 
 import (
 	"fmt"
@@ -19,6 +19,41 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func testArrayTypeSchema(element *schemapb.TypeSchema, params ...*commonpb.KeyValuePair) *schemapb.TypeSchema {
+	return &schemapb.TypeSchema{
+		Kind:       &schemapb.TypeSchema_ArrayElement{ArrayElement: element},
+		TypeParams: params,
+	}
+}
+
+func autoGenDynamicFieldData(schema *schemapb.CollectionSchema, data [][]byte) *schemapb.FieldData {
+	fd := &schemapb.FieldData{
+		FieldName: common.MetaFieldName,
+		Type:      schemapb.DataType_JSON,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_JsonData{
+					JsonData: &schemapb.JSONArray{
+						Data: data,
+					},
+				},
+			},
+		},
+		IsDynamic: true,
+	}
+	for _, f := range schema.Fields {
+		if f.GetIsDynamic() && (f.GetNullable() || f.GetDefaultValue() != nil) {
+			validData := make([]bool, len(data))
+			for i := range validData {
+				validData[i] = true
+			}
+			typeutil.SetFieldDataValidData(fd, validData)
+			break
+		}
+	}
+	return fd
+}
 
 func Test_verifyLengthPerRow(t *testing.T) {
 	maxLength := 16
@@ -42,10 +77,10 @@ func Test_verifyLengthPerRow(t *testing.T) {
 	assert.Equal(t, 1, row)
 }
 
-func Test_validateUtil_checkVarCharFieldData(t *testing.T) {
+func Test_ValidateUtil_checkVarCharFieldData(t *testing.T) {
 	t.Run("type mismatch", func(t *testing.T) {
 		f := &schemapb.FieldData{}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		assert.Error(t, v.checkVarCharFieldData(f, nil))
 	})
 
@@ -66,7 +101,7 @@ func Test_validateUtil_checkVarCharFieldData(t *testing.T) {
 			DataType: schemapb.DataType_VarChar,
 		}
 
-		v := newValidateUtil(withMaxLenCheck())
+		v := NewValidateUtil(WithMaxLenCheck())
 
 		err := v.checkVarCharFieldData(f, fs)
 		assert.Error(t, err)
@@ -95,7 +130,7 @@ func Test_validateUtil_checkVarCharFieldData(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil(withMaxLenCheck())
+		v := NewValidateUtil(WithMaxLenCheck())
 
 		err := v.checkVarCharFieldData(f, fs)
 		assert.Error(t, err)
@@ -124,7 +159,7 @@ func Test_validateUtil_checkVarCharFieldData(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil(withMaxLenCheck())
+		v := NewValidateUtil(WithMaxLenCheck())
 
 		err := v.checkVarCharFieldData(f, fs)
 		assert.NoError(t, err)
@@ -153,7 +188,7 @@ func Test_validateUtil_checkVarCharFieldData(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err := v.checkVarCharFieldData(f, fs)
 		assert.NoError(t, err)
@@ -184,17 +219,17 @@ func Test_validateUtil_checkVarCharFieldData(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil(withMaxLenCheck())
+		v := NewValidateUtil(WithMaxLenCheck())
 
 		err := v.checkVarCharFieldData(f, fs)
 		assert.NoError(t, err)
 	})
 }
 
-func Test_validateUtil_checkTextFieldData(t *testing.T) {
+func Test_ValidateUtil_checkTextFieldData(t *testing.T) {
 	t.Run("type mismatch", func(t *testing.T) {
 		f := &schemapb.FieldData{}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		assert.Error(t, v.checkTextFieldData(f, nil))
 	})
 
@@ -215,7 +250,7 @@ func Test_validateUtil_checkTextFieldData(t *testing.T) {
 			DataType: schemapb.DataType_Text,
 		}
 
-		v := newValidateUtil(withMaxLenCheck())
+		v := NewValidateUtil(WithMaxLenCheck())
 
 		err := v.checkTextFieldData(f, fs)
 		assert.NoError(t, err)
@@ -244,7 +279,7 @@ func Test_validateUtil_checkTextFieldData(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil(withMaxLenCheck())
+		v := NewValidateUtil(WithMaxLenCheck())
 
 		err := v.checkTextFieldData(f, fs)
 		assert.NoError(t, err)
@@ -273,7 +308,7 @@ func Test_validateUtil_checkTextFieldData(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil(withMaxLenCheck())
+		v := NewValidateUtil(WithMaxLenCheck())
 
 		err := v.checkTextFieldData(f, fs)
 		assert.NoError(t, err)
@@ -302,22 +337,22 @@ func Test_validateUtil_checkTextFieldData(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err := v.checkTextFieldData(f, fs)
 		assert.NoError(t, err)
 	})
 }
 
-func Test_validateUtil_checkBinaryVectorFieldData(t *testing.T) {
+func Test_ValidateUtil_checkBinaryVectorFieldData(t *testing.T) {
 	t.Run("not binary vector", func(t *testing.T) {
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkBinaryVectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{}}, nil)
 		assert.Error(t, err)
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkBinaryVectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Vectors{
 			Vectors: &schemapb.VectorField{
 				Dim: 128,
@@ -345,7 +380,7 @@ func Test_validateUtil_checkBinaryVectorFieldData(t *testing.T) {
 			DataType: schemapb.DataType_BinaryVector,
 			Nullable: false,
 		}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkBinaryVectorFieldData(data, schema)
 		assert.Error(t, err)
 	})
@@ -366,20 +401,20 @@ func Test_validateUtil_checkBinaryVectorFieldData(t *testing.T) {
 			DataType: schemapb.DataType_BinaryVector,
 			Nullable: true,
 		}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkBinaryVectorFieldData(data, schema)
 		assert.NoError(t, err)
 	})
 }
 
-func Test_validateUtil_checkFloatVectorFieldData(t *testing.T) {
+func Test_ValidateUtil_checkFloatVectorFieldData(t *testing.T) {
 	nb := 5
 	dim := int64(8)
 	data := testutils.GenerateFloatVectors(nb, int(dim))
 	invalidData := testutils.GenerateFloatVectorsWithInvalidData(nb, int(dim))
 
 	t.Run("not float vector", func(t *testing.T) {
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkFloatVectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{}}, nil)
 		assert.Error(t, err)
 	})
@@ -396,7 +431,7 @@ func Test_validateUtil_checkFloatVectorFieldData(t *testing.T) {
 				},
 			},
 		}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		v.checkNAN = false
 		err := v.checkFloatVectorFieldData(f, nil)
 		assert.NoError(t, err)
@@ -414,7 +449,7 @@ func Test_validateUtil_checkFloatVectorFieldData(t *testing.T) {
 				},
 			},
 		}
-		v := newValidateUtil(withNANCheck())
+		v := NewValidateUtil(WithNANCheck())
 		err := v.checkFloatVectorFieldData(f, nil)
 		assert.Error(t, err)
 	})
@@ -431,7 +466,7 @@ func Test_validateUtil_checkFloatVectorFieldData(t *testing.T) {
 				},
 			},
 		}
-		v := newValidateUtil(withNANCheck())
+		v := NewValidateUtil(WithNANCheck())
 		err := v.checkFloatVectorFieldData(f, nil)
 		assert.NoError(t, err)
 	})
@@ -459,7 +494,7 @@ func Test_validateUtil_checkFloatVectorFieldData(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err = v.fillWithValue(data, h, 1)
 		assert.Error(t, err)
 	})
@@ -480,7 +515,7 @@ func Test_validateUtil_checkFloatVectorFieldData(t *testing.T) {
 			DataType: schemapb.DataType_FloatVector,
 			Nullable: false,
 		}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkFloatVectorFieldData(data, schema)
 		assert.Error(t, err)
 	})
@@ -502,20 +537,20 @@ func Test_validateUtil_checkFloatVectorFieldData(t *testing.T) {
 			Nullable: true,
 		}
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkFloatVectorFieldData(data, schema)
 		assert.NoError(t, err)
 	})
 }
 
-func Test_validateUtil_checkFloat16VectorFieldData(t *testing.T) {
+func Test_ValidateUtil_checkFloat16VectorFieldData(t *testing.T) {
 	nb := 5
 	dim := int64(8)
 	data := testutils.GenerateFloat16Vectors(nb, int(dim))
 	invalidData := testutils.GenerateFloat16VectorsWithInvalidData(nb, int(dim))
 
 	t.Run("not float16 vector", func(t *testing.T) {
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkFloat16VectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{}}, nil)
 		assert.Error(t, err)
 	})
@@ -531,7 +566,7 @@ func Test_validateUtil_checkFloat16VectorFieldData(t *testing.T) {
 				},
 			},
 		}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		v.checkNAN = false
 		err := v.checkFloat16VectorFieldData(f, nil)
 		assert.NoError(t, err)
@@ -548,7 +583,7 @@ func Test_validateUtil_checkFloat16VectorFieldData(t *testing.T) {
 				},
 			},
 		}
-		v := newValidateUtil(withNANCheck())
+		v := NewValidateUtil(WithNANCheck())
 		err := v.checkFloat16VectorFieldData(f, nil)
 		assert.Error(t, err)
 	})
@@ -564,7 +599,7 @@ func Test_validateUtil_checkFloat16VectorFieldData(t *testing.T) {
 				},
 			},
 		}
-		v := newValidateUtil(withNANCheck())
+		v := NewValidateUtil(WithNANCheck())
 		err := v.checkFloat16VectorFieldData(f, nil)
 		assert.NoError(t, err)
 	})
@@ -592,7 +627,7 @@ func Test_validateUtil_checkFloat16VectorFieldData(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err = v.fillWithValue(data, h, 1)
 		assert.Error(t, err)
 	})
@@ -613,7 +648,7 @@ func Test_validateUtil_checkFloat16VectorFieldData(t *testing.T) {
 			DataType: schemapb.DataType_Float16Vector,
 			Nullable: false,
 		}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkFloat16VectorFieldData(data, schema)
 		assert.Error(t, err)
 	})
@@ -635,20 +670,20 @@ func Test_validateUtil_checkFloat16VectorFieldData(t *testing.T) {
 			Nullable: true,
 		}
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkFloat16VectorFieldData(data, schema)
 		assert.NoError(t, err)
 	})
 }
 
-func Test_validateUtil_checkBFloat16VectorFieldData(t *testing.T) {
+func Test_ValidateUtil_checkBFloat16VectorFieldData(t *testing.T) {
 	nb := 5
 	dim := int64(8)
 	data := testutils.GenerateBFloat16Vectors(nb, int(dim))
 	invalidData := testutils.GenerateBFloat16VectorsWithInvalidData(nb, int(dim))
 
 	t.Run("not bfloat16 vector", func(t *testing.T) {
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkBFloat16VectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{}}, nil)
 		assert.Error(t, err)
 	})
@@ -664,7 +699,7 @@ func Test_validateUtil_checkBFloat16VectorFieldData(t *testing.T) {
 				},
 			},
 		}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		v.checkNAN = false
 		err := v.checkBFloat16VectorFieldData(f, nil)
 		assert.NoError(t, err)
@@ -681,7 +716,7 @@ func Test_validateUtil_checkBFloat16VectorFieldData(t *testing.T) {
 				},
 			},
 		}
-		v := newValidateUtil(withNANCheck())
+		v := NewValidateUtil(WithNANCheck())
 		err := v.checkBFloat16VectorFieldData(f, nil)
 		assert.Error(t, err)
 	})
@@ -697,7 +732,7 @@ func Test_validateUtil_checkBFloat16VectorFieldData(t *testing.T) {
 				},
 			},
 		}
-		v := newValidateUtil(withNANCheck())
+		v := NewValidateUtil(WithNANCheck())
 		err := v.checkBFloat16VectorFieldData(f, nil)
 		assert.NoError(t, err)
 	})
@@ -725,7 +760,7 @@ func Test_validateUtil_checkBFloat16VectorFieldData(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err = v.fillWithValue(data, h, 1)
 		assert.Error(t, err)
 	})
@@ -746,7 +781,7 @@ func Test_validateUtil_checkBFloat16VectorFieldData(t *testing.T) {
 			DataType: schemapb.DataType_BFloat16Vector,
 			Nullable: false,
 		}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkBFloat16VectorFieldData(data, schema)
 		assert.Error(t, err)
 	})
@@ -768,18 +803,18 @@ func Test_validateUtil_checkBFloat16VectorFieldData(t *testing.T) {
 			Nullable: true,
 		}
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkBFloat16VectorFieldData(data, schema)
 		assert.NoError(t, err)
 	})
 }
 
-func Test_validateUtil_checkSparseFloatVectorFieldData(t *testing.T) {
+func Test_ValidateUtil_checkSparseFloatVectorFieldData(t *testing.T) {
 	nb := 5
 	sparseContents, dim := testutils.GenerateSparseFloatVectorsData(nb)
 
 	t.Run("not sparse float vector", func(t *testing.T) {
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkSparseFloatVectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{}}, nil)
 		assert.Error(t, err)
 	})
@@ -803,7 +838,7 @@ func Test_validateUtil_checkSparseFloatVectorFieldData(t *testing.T) {
 			Name:     "vec",
 			DataType: schemapb.DataType_SparseFloatVector,
 		}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkSparseFloatVectorFieldData(fieldData, schema)
 		assert.NoError(t, err)
 	})
@@ -824,7 +859,7 @@ func Test_validateUtil_checkSparseFloatVectorFieldData(t *testing.T) {
 			DataType: schemapb.DataType_SparseFloatVector,
 			Nullable: false,
 		}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkSparseFloatVectorFieldData(data, schema)
 		assert.Error(t, err)
 	})
@@ -846,19 +881,19 @@ func Test_validateUtil_checkSparseFloatVectorFieldData(t *testing.T) {
 			Nullable: true,
 		}
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkSparseFloatVectorFieldData(data, schema)
 		assert.NoError(t, err)
 	})
 }
 
-func Test_validateUtil_checkInt8VectorFieldData(t *testing.T) {
+func Test_ValidateUtil_checkInt8VectorFieldData(t *testing.T) {
 	nb := 5
 	dim := int64(8)
 	data := typeutil.Int8ArrayToBytes(testutils.GenerateInt8Vectors(nb, int(dim)))
 
 	t.Run("not int8 vector", func(t *testing.T) {
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkInt8VectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{}}, nil)
 		assert.Error(t, err)
 	})
@@ -879,7 +914,7 @@ func Test_validateUtil_checkInt8VectorFieldData(t *testing.T) {
 			Name:     "vec",
 			DataType: schemapb.DataType_Int8Vector,
 		}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkInt8VectorFieldData(fieldData, schema)
 		assert.NoError(t, err)
 	})
@@ -900,7 +935,7 @@ func Test_validateUtil_checkInt8VectorFieldData(t *testing.T) {
 			DataType: schemapb.DataType_Int8Vector,
 			Nullable: false,
 		}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkInt8VectorFieldData(fieldData, schema)
 		assert.Error(t, err)
 	})
@@ -922,13 +957,13 @@ func Test_validateUtil_checkInt8VectorFieldData(t *testing.T) {
 			Nullable: true,
 		}
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkInt8VectorFieldData(fieldData, schema)
 		assert.NoError(t, err)
 	})
 }
 
-func Test_validateUtil_checkAligned(t *testing.T) {
+func Test_ValidateUtil_checkAligned(t *testing.T) {
 	t.Run("float vector column not found", func(t *testing.T) {
 		data := []*schemapb.FieldData{
 			{
@@ -941,9 +976,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -967,9 +1002,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1009,9 +1044,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 1)
+		err = v.CheckAligned(data, h, 1)
 
 		assert.Error(t, err)
 	})
@@ -1051,9 +1086,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1093,9 +1128,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1114,9 +1149,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1140,9 +1175,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1180,9 +1215,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1220,9 +1255,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1260,9 +1295,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1281,9 +1316,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1307,9 +1342,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1347,9 +1382,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1387,9 +1422,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1427,9 +1462,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 1)
+		err = v.CheckAligned(data, h, 1)
 
 		assert.Error(t, err)
 	})
@@ -1448,9 +1483,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1474,9 +1509,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1514,9 +1549,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 1)
+		err = v.CheckAligned(data, h, 1)
 
 		assert.Error(t, err)
 	})
@@ -1554,9 +1589,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1594,9 +1629,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1614,9 +1649,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1640,9 +1675,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1680,9 +1715,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 1)
+		err = v.CheckAligned(data, h, 1)
 
 		assert.Error(t, err)
 	})
@@ -1720,9 +1755,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1760,9 +1795,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1790,9 +1825,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1831,9 +1866,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 100)
+		err = v.CheckAligned(data, h, 100)
 
 		assert.Error(t, err)
 	})
@@ -1876,9 +1911,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 3)
+		err = v.CheckAligned(data, h, 3)
 
 		assert.Error(t, err)
 	})
@@ -1992,9 +2027,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 10)
+		err = v.CheckAligned(data, h, 10)
 
 		assert.NoError(t, err)
 	})
@@ -2028,9 +2063,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 3)
+		err = v.CheckAligned(data, h, 3)
 
 		assert.NoError(t, err)
 	})
@@ -2072,9 +2107,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 4)
+		err = v.CheckAligned(data, h, 4)
 
 		assert.NoError(t, err)
 	})
@@ -2116,9 +2151,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 4)
+		err = v.CheckAligned(data, h, 4)
 
 		assert.Error(t, err)
 	})
@@ -2152,9 +2187,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 3)
+		err = v.CheckAligned(data, h, 3)
 
 		assert.NoError(t, err)
 	})
@@ -2188,9 +2223,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 3)
+		err = v.CheckAligned(data, h, 3)
 
 		assert.NoError(t, err)
 	})
@@ -2224,9 +2259,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 3)
+		err = v.CheckAligned(data, h, 3)
 
 		assert.NoError(t, err)
 	})
@@ -2285,7 +2320,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 				h, err := typeutil.CreateSchemaHelper(schema)
 				require.NoError(t, err)
 
-				err = newValidateUtil().checkAligned(data, h, 2)
+				err = NewValidateUtil().CheckAligned(data, h, 2)
 				require.Error(t, err)
 			})
 		}
@@ -2320,9 +2355,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 3)
+		err = v.CheckAligned(data, h, 3)
 
 		assert.NoError(t, err)
 	})
@@ -2350,15 +2385,15 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
-		err = v.checkAligned(data, h, 3)
+		err = v.CheckAligned(data, h, 3)
 
 		assert.NoError(t, err)
 	})
 }
 
-func Test_validateUtil_Validate(t *testing.T) {
+func Test_ValidateUtil_Validate(t *testing.T) {
 	paramtable.Init()
 
 	t.Run("nil schema", func(t *testing.T) {
@@ -2369,7 +2404,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err := v.Validate(data, nil, 100)
 
@@ -2404,7 +2439,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 			},
 		}
 
-		err = newValidateUtil().Validate([]*schemapb.FieldData{field}, h, 2)
+		err = NewValidateUtil().Validate([]*schemapb.FieldData{field}, h, 2)
 		require.NoError(t, err)
 		assert.Nil(t, field.GetValidData())
 		assert.Equal(t, []bool{true, false}, field.GetScalars().GetValidData())
@@ -2438,7 +2473,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 			},
 		}
 
-		err = newValidateUtil().Validate([]*schemapb.FieldData{field}, h, 2)
+		err = NewValidateUtil().Validate([]*schemapb.FieldData{field}, h, 2)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "different legacy and field-specific valid_data")
 	})
@@ -2551,7 +2586,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 				})
 				require.NoError(t, err)
 
-				err = newValidateUtil().Validate([]*schemapb.FieldData{tc.fieldData}, h, 2)
+				err = NewValidateUtil().Validate([]*schemapb.FieldData{tc.fieldData}, h, 2)
 				require.NoError(t, err)
 				assert.Equal(t, []bool{true, true}, typeutil.GetFieldDataValidData(tc.fieldData))
 			})
@@ -2590,7 +2625,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		helper, err := typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 
@@ -2744,7 +2779,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil(withNANCheck(), withMaxLenCheck())
+		v := NewValidateUtil(WithNANCheck(), WithMaxLenCheck())
 		helper, err := typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 
@@ -2898,7 +2933,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil(withNANCheck(), withMaxLenCheck())
+		v := NewValidateUtil(WithNANCheck(), WithMaxLenCheck())
 		helper, err := typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 		err = v.Validate(data, helper, 2)
@@ -2963,7 +2998,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil(withOverflowCheck())
+		v := NewValidateUtil(WithOverflowCheck())
 		helper, err := typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 		err = v.Validate(data, helper, 2)
@@ -3001,7 +3036,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		helper, err := typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 
@@ -3051,7 +3086,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil(withMaxCapCheck())
+		v := NewValidateUtil(WithMaxCapCheck())
 		helper, err := typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 
@@ -3106,7 +3141,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil(withMaxCapCheck(), withMaxLenCheck())
+		v := NewValidateUtil(WithMaxCapCheck(), WithMaxLenCheck())
 		helper, err := typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 
@@ -3151,7 +3186,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil(withMaxCapCheck())
+		v := NewValidateUtil(WithMaxCapCheck())
 		helper, err := typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 
@@ -3201,7 +3236,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil(withMaxCapCheck())
+		v := NewValidateUtil(WithMaxCapCheck())
 		helper, err := typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 
@@ -3258,7 +3293,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil(withMaxCapCheck())
+		v := NewValidateUtil(WithMaxCapCheck())
 		helper, err := typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 		err = v.Validate(data, helper, 1)
@@ -3313,7 +3348,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 		helper, err = typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck()).Validate(data, helper, 1)
+		err = NewValidateUtil(WithMaxCapCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 
 		schema = &schemapb.CollectionSchema{
@@ -3334,7 +3369,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 		helper, err = typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck()).Validate(data, helper, 1)
+		err = NewValidateUtil(WithMaxCapCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 
 		schema = &schemapb.CollectionSchema{
@@ -3356,7 +3391,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 		helper, err = typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck()).Validate(data, helper, 1)
+		err = NewValidateUtil(WithMaxCapCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 
 		data = []*schemapb.FieldData{
@@ -3407,7 +3442,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 		}
 		helper, err = typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
-		err = newValidateUtil(withMaxCapCheck()).Validate(data, helper, 1)
+		err = NewValidateUtil(WithMaxCapCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 
 		data = []*schemapb.FieldData{
@@ -3459,7 +3494,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 		helper, err = typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck()).Validate(data, helper, 1)
+		err = NewValidateUtil(WithMaxCapCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 
 		data = []*schemapb.FieldData{
@@ -3511,7 +3546,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 		helper, err = typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck()).Validate(data, helper, 1)
+		err = NewValidateUtil(WithMaxCapCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 
 		data = []*schemapb.FieldData{
@@ -3563,7 +3598,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 		helper, err = typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck()).Validate(data, helper, 1)
+		err = NewValidateUtil(WithMaxCapCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 	})
 
@@ -3609,7 +3644,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 		}
 		helper, err := typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
-		err = newValidateUtil(withMaxCapCheck(), withOverflowCheck()).Validate(data, helper, 1)
+		err = NewValidateUtil(WithMaxCapCheck(), WithOverflowCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 
 		data = []*schemapb.FieldData{
@@ -3654,7 +3689,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 		helper, err = typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck(), withOverflowCheck()).Validate(data, helper, 1)
+		err = NewValidateUtil(WithMaxCapCheck(), WithOverflowCheck()).Validate(data, helper, 1)
 		assert.Error(t, err)
 	})
 
@@ -4073,7 +4108,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 			},
 		}
 
-		v := newValidateUtil(withNANCheck(), withMaxLenCheck(), withOverflowCheck(), withMaxCapCheck())
+		v := NewValidateUtil(WithNANCheck(), WithMaxLenCheck(), WithOverflowCheck(), WithMaxCapCheck())
 		helper, err := typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 
@@ -4120,7 +4155,7 @@ func checkJsonfillWithValueData(values [][]byte, v []byte, length int) (bool, er
 	return true, nil
 }
 
-func Test_validateUtil_fillWithValue(t *testing.T) {
+func Test_ValidateUtil_fillWithValue(t *testing.T) {
 	t.Run("bool scalars schema not found", func(t *testing.T) {
 		data := []*schemapb.FieldData{
 			{
@@ -4133,7 +4168,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -4168,7 +4203,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -4207,7 +4242,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -4242,7 +4277,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -4286,7 +4321,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -4332,7 +4367,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -4378,7 +4413,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 3)
 
@@ -4413,7 +4448,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -4457,7 +4492,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -4501,7 +4536,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -4540,7 +4575,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -4564,7 +4599,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -4599,7 +4634,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -4638,7 +4673,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -4675,7 +4710,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -4719,7 +4754,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -4765,7 +4800,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -4810,7 +4845,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 3)
 
@@ -4846,7 +4881,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -4891,7 +4926,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -4936,7 +4971,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -4977,7 +5012,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -5000,7 +5035,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -5035,7 +5070,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -5074,7 +5109,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -5111,7 +5146,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -5154,7 +5189,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -5199,7 +5234,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -5243,7 +5278,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 3)
 
@@ -5279,7 +5314,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 		assert.NoError(t, err)
@@ -5323,7 +5358,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -5368,7 +5403,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -5409,7 +5444,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -5433,7 +5468,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -5468,7 +5503,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -5507,7 +5542,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -5544,7 +5579,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -5588,7 +5623,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -5634,7 +5669,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -5679,7 +5714,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 3)
 
@@ -5715,7 +5750,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 		assert.NoError(t, err)
@@ -5759,7 +5794,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -5804,7 +5839,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -5845,7 +5880,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -5868,7 +5903,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -5903,7 +5938,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -5942,7 +5977,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -5979,7 +6014,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -6023,7 +6058,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -6069,7 +6104,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -6114,7 +6149,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 3)
 
@@ -6150,7 +6185,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 		assert.NoError(t, err)
@@ -6194,7 +6229,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -6239,7 +6274,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -6279,7 +6314,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -6303,7 +6338,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -6338,7 +6373,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -6377,7 +6412,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -6414,7 +6449,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -6458,7 +6493,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -6504,7 +6539,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -6550,7 +6585,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -6595,7 +6630,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -6638,7 +6673,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 3)
 
@@ -6674,7 +6709,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 3)
 
@@ -6710,7 +6745,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -6732,7 +6767,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -6767,7 +6802,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -6806,7 +6841,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -6843,7 +6878,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -6886,7 +6921,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -6933,7 +6968,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -6979,7 +7014,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 3)
 
@@ -7014,7 +7049,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 		assert.NoError(t, err)
@@ -7058,7 +7093,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -7102,7 +7137,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -7142,7 +7177,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -7183,7 +7218,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -7221,7 +7256,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -7267,7 +7302,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 
@@ -7316,7 +7351,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -7360,7 +7395,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 2)
 
@@ -7427,7 +7462,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
+		v := NewValidateUtil()
 
 		err = v.fillWithValue(data, h, 1)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
@@ -7480,9 +7515,9 @@ func Test_verifyOverflowByRange(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
+func Test_ValidateUtil_checkIntegerFieldData(t *testing.T) {
 	t.Run("no check", func(t *testing.T) {
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		assert.Error(t, v.checkIntegerFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Vectors{}}, nil))
 		assert.NoError(t, v.checkIntegerFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
@@ -7496,7 +7531,7 @@ func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
 	})
 
 	t.Run("no int data but set nullable==true or set default_value", func(t *testing.T) {
-		v := newValidateUtil(withOverflowCheck())
+		v := NewValidateUtil(WithOverflowCheck())
 
 		f := &schemapb.FieldSchema{
 			DataType: schemapb.DataType_Int8,
@@ -7540,7 +7575,7 @@ func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
 	})
 
 	t.Run("tiny int, type mismatch", func(t *testing.T) {
-		v := newValidateUtil(withOverflowCheck())
+		v := NewValidateUtil(WithOverflowCheck())
 
 		f := &schemapb.FieldSchema{
 			DataType: schemapb.DataType_Int8,
@@ -7558,7 +7593,7 @@ func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
 	})
 
 	t.Run("tiny int, overflow", func(t *testing.T) {
-		v := newValidateUtil(withOverflowCheck())
+		v := NewValidateUtil(WithOverflowCheck())
 
 		f := &schemapb.FieldSchema{
 			DataType: schemapb.DataType_Int8,
@@ -7580,7 +7615,7 @@ func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
 	})
 
 	t.Run("tiny int, normal case", func(t *testing.T) {
-		v := newValidateUtil(withOverflowCheck())
+		v := NewValidateUtil(WithOverflowCheck())
 
 		f := &schemapb.FieldSchema{
 			DataType: schemapb.DataType_Int8,
@@ -7602,7 +7637,7 @@ func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
 	})
 
 	t.Run("small int, overflow", func(t *testing.T) {
-		v := newValidateUtil(withOverflowCheck())
+		v := NewValidateUtil(WithOverflowCheck())
 
 		f := &schemapb.FieldSchema{
 			DataType: schemapb.DataType_Int16,
@@ -7624,7 +7659,7 @@ func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
 	})
 
 	t.Run("small int, normal case", func(t *testing.T) {
-		v := newValidateUtil(withOverflowCheck())
+		v := NewValidateUtil(WithOverflowCheck())
 
 		f := &schemapb.FieldSchema{
 			DataType: schemapb.DataType_Int16,
@@ -7646,9 +7681,9 @@ func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
 	})
 }
 
-func Test_validateUtil_checkJSONData(t *testing.T) {
+func Test_ValidateUtil_checkJSONData(t *testing.T) {
 	t.Run("no json data", func(t *testing.T) {
-		v := newValidateUtil(withOverflowCheck())
+		v := NewValidateUtil(WithOverflowCheck())
 
 		f := &schemapb.FieldSchema{
 			DataType: schemapb.DataType_JSON,
@@ -7670,7 +7705,7 @@ func Test_validateUtil_checkJSONData(t *testing.T) {
 	})
 
 	t.Run("no json data but set nullable==true or set default_value", func(t *testing.T) {
-		v := newValidateUtil(withOverflowCheck())
+		v := NewValidateUtil(WithOverflowCheck())
 
 		f := &schemapb.FieldSchema{
 			DataType: schemapb.DataType_JSON,
@@ -7712,9 +7747,9 @@ func Test_validateUtil_checkJSONData(t *testing.T) {
 	})
 
 	t.Run("json string exceed max length", func(t *testing.T) {
-		v := newValidateUtil(withOverflowCheck(), withMaxLenCheck())
+		v := NewValidateUtil(WithOverflowCheck(), WithMaxLenCheck())
 		jsonString := ""
-		for i := 0; i < Params.CommonCfg.JSONMaxLength.GetAsInt(); i++ {
+		for i := 0; i < paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt(); i++ {
 			jsonString += fmt.Sprintf("key: %d, value: %d", i, i)
 		}
 		jsonString = "{" + jsonString + "}"
@@ -7739,9 +7774,9 @@ func Test_validateUtil_checkJSONData(t *testing.T) {
 	})
 
 	t.Run("dynamic field exceed max length", func(t *testing.T) {
-		v := newValidateUtil(withOverflowCheck(), withMaxLenCheck())
+		v := NewValidateUtil(WithOverflowCheck(), WithMaxLenCheck())
 		jsonString := ""
-		for i := 0; i < Params.CommonCfg.JSONMaxLength.GetAsInt(); i++ {
+		for i := 0; i < paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt(); i++ {
 			jsonString += fmt.Sprintf("key: %d, value: %d", i, i)
 		}
 		jsonString = "{" + jsonString + "}"
@@ -7767,8 +7802,8 @@ func Test_validateUtil_checkJSONData(t *testing.T) {
 	})
 }
 
-func Test_validateUtil_checkLongFieldData(t *testing.T) {
-	v := newValidateUtil()
+func Test_ValidateUtil_checkLongFieldData(t *testing.T) {
+	v := NewValidateUtil()
 	assert.Error(t, v.checkLongFieldData(&schemapb.FieldData{
 		Field: &schemapb.FieldData_Vectors{},
 	}, nil))
@@ -7785,7 +7820,7 @@ func Test_validateUtil_checkLongFieldData(t *testing.T) {
 	}, nil))
 
 	t.Run("no long data but set nullable==true or set default_value", func(t *testing.T) {
-		v := newValidateUtil(withOverflowCheck())
+		v := NewValidateUtil(WithOverflowCheck())
 
 		f := &schemapb.FieldSchema{
 			DataType: schemapb.DataType_Int64,
@@ -7828,8 +7863,8 @@ func Test_validateUtil_checkLongFieldData(t *testing.T) {
 	})
 }
 
-func Test_validateUtil_checkFloatFieldData(t *testing.T) {
-	v := newValidateUtil(withNANCheck())
+func Test_ValidateUtil_checkFloatFieldData(t *testing.T) {
+	v := NewValidateUtil(WithNANCheck())
 	assert.Error(t, v.checkFloatFieldData(&schemapb.FieldData{
 		Field: &schemapb.FieldData_Vectors{},
 	}, nil))
@@ -7857,7 +7892,7 @@ func Test_validateUtil_checkFloatFieldData(t *testing.T) {
 	}, nil))
 
 	t.Run("no float data but set nullable==true or set default_value", func(t *testing.T) {
-		v := newValidateUtil(withOverflowCheck())
+		v := NewValidateUtil(WithOverflowCheck())
 
 		f := &schemapb.FieldSchema{
 			Nullable: true,
@@ -7898,8 +7933,8 @@ func Test_validateUtil_checkFloatFieldData(t *testing.T) {
 	})
 }
 
-func Test_validateUtil_checkDoubleFieldData(t *testing.T) {
-	v := newValidateUtil(withNANCheck())
+func Test_ValidateUtil_checkDoubleFieldData(t *testing.T) {
+	v := NewValidateUtil(WithNANCheck())
 	assert.Error(t, v.checkDoubleFieldData(&schemapb.FieldData{
 		Field: &schemapb.FieldData_Vectors{},
 	}, nil))
@@ -7927,7 +7962,7 @@ func Test_validateUtil_checkDoubleFieldData(t *testing.T) {
 	}, nil))
 
 	t.Run("no float data but set nullable==true or set default_value", func(t *testing.T) {
-		v := newValidateUtil(withOverflowCheck())
+		v := NewValidateUtil(WithOverflowCheck())
 
 		f := &schemapb.FieldSchema{
 			Nullable: true,
@@ -7979,12 +8014,12 @@ func TestCheckArrayElementNilData(t *testing.T) {
 		ElementType: schemapb.DataType_Int64,
 	}
 
-	v := newValidateUtil()
+	v := NewValidateUtil()
 	err := v.checkArrayElement(data, fieldSchema)
 	assert.True(t, merr.ErrParameterInvalid.Is(err))
 }
 
-func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
+func Test_ValidateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 	t.Run("nil data", func(t *testing.T) {
 		f := &schemapb.FieldData{
 			Field: &schemapb.FieldData_Vectors{
@@ -7996,7 +8031,7 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 			ElementType: schemapb.DataType_FloatVector,
 			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
 		}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
 		assert.Error(t, err)
 	})
@@ -8018,7 +8053,7 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 			ElementType: schemapb.DataType_FloatVector,
 			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
 		}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
 		assert.Error(t, err)
 	})
@@ -8048,7 +8083,7 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 			ElementType: schemapb.DataType_FloatVector,
 			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "3"}},
 		}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		v.checkNAN = false
 		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
 		assert.NoError(t, err)
@@ -8079,7 +8114,7 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 			ElementType: schemapb.DataType_FloatVector,
 			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "1"}},
 		}
-		v := newValidateUtil(withNANCheck())
+		v := NewValidateUtil(WithNANCheck())
 		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
 		assert.Error(t, err)
 	})
@@ -8116,7 +8151,7 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 			ElementType: schemapb.DataType_FloatVector,
 			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
 		}
-		v := newValidateUtil(withNANCheck())
+		v := NewValidateUtil(WithNANCheck())
 		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
 		assert.NoError(t, err)
 	})
@@ -8150,7 +8185,7 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 				{Key: common.MaxCapacityKey, Value: "1"},
 			},
 		}
-		v := newValidateUtil(withMaxCapCheck())
+		v := NewValidateUtil(WithMaxCapCheck())
 		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "max capacity")
@@ -8182,14 +8217,14 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 			ElementType: schemapb.DataType_FloatVector,
 			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
 		}
-		v := newValidateUtil()
+		v := NewValidateUtil()
 		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "divisible")
 	})
 }
 
-func Test_validateUtil_checkAligned_ArrayOfVector(t *testing.T) {
+func Test_ValidateUtil_checkAligned_ArrayOfVector(t *testing.T) {
 	t.Run("array of vector dim mismatch", func(t *testing.T) {
 		data := []*schemapb.FieldData{
 			{
@@ -8231,8 +8266,8 @@ func Test_validateUtil_checkAligned_ArrayOfVector(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
-		err = v.checkAligned(data, h, 1)
+		v := NewValidateUtil()
+		err = v.CheckAligned(data, h, 1)
 		assert.Error(t, err)
 	})
 
@@ -8277,8 +8312,8 @@ func Test_validateUtil_checkAligned_ArrayOfVector(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(schema)
 		assert.NoError(t, err)
 
-		v := newValidateUtil()
-		err = v.checkAligned(data, h, 100)
+		v := NewValidateUtil()
+		err = v.CheckAligned(data, h, 100)
 		assert.Error(t, err)
 	})
 }
@@ -8464,7 +8499,7 @@ func Test_MetaNullableCompat_v25_vs_v26(t *testing.T) {
 		require.NoError(t, err)
 
 		data := []*schemapb.FieldData{sdkMetaFieldData()}
-		err = newValidateUtil().fillWithValue(data, h, numRows)
+		err = NewValidateUtil().fillWithValue(data, h, numRows)
 		assert.NoError(t, err, "2.6 schema + SDK-provided $meta should pass fillWithValue")
 	})
 
@@ -8474,7 +8509,7 @@ func Test_MetaNullableCompat_v25_vs_v26(t *testing.T) {
 		require.NoError(t, err)
 
 		data := []*schemapb.FieldData{sdkMetaFieldData()}
-		err = newValidateUtil().fillWithValue(data, h, numRows)
+		err = NewValidateUtil().fillWithValue(data, h, numRows)
 		assert.NoError(t, err, "2.5 schema + SDK-provided $meta (no ValidData) should pass fillWithValue")
 	})
 
@@ -8484,7 +8519,7 @@ func Test_MetaNullableCompat_v25_vs_v26(t *testing.T) {
 		require.NoError(t, err)
 
 		data := []*schemapb.FieldData{autoGenMetaFieldData(schema)}
-		err = newValidateUtil().fillWithValue(data, h, numRows)
+		err = NewValidateUtil().fillWithValue(data, h, numRows)
 		assert.NoError(t, err, "2.6 schema + auto-generated $meta should pass fillWithValue")
 	})
 
@@ -8496,7 +8531,7 @@ func Test_MetaNullableCompat_v25_vs_v26(t *testing.T) {
 		require.NoError(t, err)
 
 		data := []*schemapb.FieldData{autoGenMetaFieldData(schema)}
-		err = newValidateUtil().fillWithValue(data, h, numRows)
+		err = NewValidateUtil().fillWithValue(data, h, numRows)
 		assert.NoError(t, err, "2.5 schema + auto-generated $meta should pass fillWithValue")
 		// ValidData should remain empty for non-nullable field
 		assert.Empty(t, typeutil.GetFieldDataValidData(data[0]), "non-nullable $meta should not have ValidData")
@@ -8720,7 +8755,7 @@ func TestValidateNestedArrayFieldData(t *testing.T) {
 		helper, err := typeutil.CreateSchemaHelper(intSchema("3"))
 		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
+		err = NewValidateUtil(WithMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
 		require.NoError(t, err)
 		assert.Equal(t, schemapb.DataType_Array, data.GetScalars().GetArrayData().GetElementType())
 		assert.Equal(t, schemapb.DataType_Array, data.GetScalars().GetArrayData().GetData()[0].GetArrayData().GetElementType())
@@ -8732,7 +8767,7 @@ func TestValidateNestedArrayFieldData(t *testing.T) {
 		helper, err := typeutil.CreateSchemaHelper(quadIntSchema())
 		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
+		err = NewValidateUtil(WithMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
 		require.NoError(t, err)
 
 		root := data.GetScalars().GetArrayData()
@@ -8752,7 +8787,7 @@ func TestValidateNestedArrayFieldData(t *testing.T) {
 		helper, err := typeutil.CreateSchemaHelper(intSchema("3"))
 		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
+		err = NewValidateUtil(WithMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "expects Int32 element type, got Array")
 	})
@@ -8766,7 +8801,7 @@ func TestValidateNestedArrayFieldData(t *testing.T) {
 		helper, err := typeutil.CreateSchemaHelper(intSchema("3"))
 		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
+		err = NewValidateUtil(WithMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "undeclared null value at level 1")
 	})
@@ -8776,7 +8811,7 @@ func TestValidateNestedArrayFieldData(t *testing.T) {
 		helper, err := typeutil.CreateSchemaHelper(intSchema("2"))
 		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
+		err = NewValidateUtil(WithMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "max capacity")
 	})
@@ -8786,7 +8821,7 @@ func TestValidateNestedArrayFieldData(t *testing.T) {
 		helper, err := typeutil.CreateSchemaHelper(intSchema("3"))
 		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
+		err = NewValidateUtil(WithMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "insert data does not match")
 	})
@@ -8817,7 +8852,7 @@ func TestValidateNestedArrayFieldData(t *testing.T) {
 		helper, err := typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
 
-		err = newValidateUtil(withMaxCapCheck(), withMaxLenCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
+		err = NewValidateUtil(WithMaxCapCheck(), WithMaxLenCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "max length")
 	})

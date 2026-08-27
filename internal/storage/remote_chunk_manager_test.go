@@ -32,10 +32,12 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/googleapi"
 
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -1295,6 +1297,65 @@ func TestAzureChunkManager(t *testing.T) {
 	})
 }
 
+func TestRemoteChunkManagerCanceledMetrics(t *testing.T) {
+	mcm := &RemoteChunkManager{}
+
+	t.Run("get", func(t *testing.T) {
+		cancelCounter := metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataGetLabel, metrics.CancelLabel)
+		failCounter := metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataGetLabel, metrics.FailLabel)
+		cancelBefore := testutil.ToFloat64(cancelCounter)
+		failBefore := testutil.ToFloat64(failCounter)
+
+		mcm.client = &canceledObjectStorage{getErr: ToMilvusIoError("test/path", context.Canceled)}
+		_, err := mcm.getObject(context.Background(), "test-bucket", "test/path", 0, 0)
+		assert.ErrorIs(t, err, context.Canceled)
+		assert.Equal(t, cancelBefore+1, testutil.ToFloat64(cancelCounter))
+		assert.Equal(t, failBefore, testutil.ToFloat64(failCounter))
+	})
+
+	t.Run("put", func(t *testing.T) {
+		cancelCounter := metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataPutLabel, metrics.CancelLabel)
+		failCounter := metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataPutLabel, metrics.FailLabel)
+		cancelBefore := testutil.ToFloat64(cancelCounter)
+		failBefore := testutil.ToFloat64(failCounter)
+
+		mcm.client = &canceledObjectStorage{putErr: ToMilvusIoError("test/path", context.Canceled)}
+		err := mcm.putObject(context.Background(), "test-bucket", "test/path", nil, 0)
+		assert.ErrorIs(t, err, context.Canceled)
+		assert.Equal(t, cancelBefore+1, testutil.ToFloat64(cancelCounter))
+		assert.Equal(t, failBefore, testutil.ToFloat64(failCounter))
+	})
+}
+
+type canceledObjectStorage struct {
+	getErr error
+	putErr error
+}
+
+func (s *canceledObjectStorage) GetObject(context.Context, string, string, int64, int64) (FileReader, error) {
+	return nil, s.getErr
+}
+
+func (s *canceledObjectStorage) PutObject(context.Context, string, string, io.Reader, int64) error {
+	return s.putErr
+}
+
+func (*canceledObjectStorage) StatObject(context.Context, string, string) (int64, error) {
+	return 0, nil
+}
+
+func (*canceledObjectStorage) WalkWithObjects(context.Context, string, string, bool, ChunkObjectWalkFunc) error {
+	return nil
+}
+
+func (*canceledObjectStorage) RemoveObject(context.Context, string, string) error {
+	return nil
+}
+
+func (*canceledObjectStorage) CopyObjectCrossBucket(context.Context, string, string, string, string) error {
+	return nil
+}
+
 func TestToMilvusIoError(t *testing.T) {
 	fileName := "test_file"
 
@@ -1317,6 +1378,28 @@ func TestToMilvusIoError(t *testing.T) {
 		err := ToMilvusIoError(fileName, errors.New("some error"))
 		assert.ErrorIs(t, err, merr.ErrIoFailed)
 	})
+
+	for _, test := range []struct {
+		name string
+		err  error
+		code int32
+	}{
+		{name: "context canceled", err: context.Canceled, code: merr.CanceledCode},
+		{name: "context deadline exceeded", err: context.DeadlineExceeded, code: merr.TimeoutCode},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := ToMilvusIoError(fileName, test.err)
+			assert.ErrorIs(t, err, test.err)
+			assert.Equal(t, test.code, merr.Code(err))
+		})
+
+		t.Run("wrapped "+test.name, func(t *testing.T) {
+			cause := merr.Wrap(test.err, "object storage request failed")
+			err := ToMilvusIoError(fileName, cause)
+			assert.ErrorIs(t, err, test.err)
+			assert.Equal(t, test.code, merr.Code(err))
+		})
+	}
 
 	t.Run("minio NoSuchKey", func(t *testing.T) {
 		minioErr := minio.ErrorResponse{Code: "NoSuchKey"}

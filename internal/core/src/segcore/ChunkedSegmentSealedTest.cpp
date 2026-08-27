@@ -568,6 +568,66 @@ TEST(test_chunk_segment, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
     }
 }
 
+// #52877: lazy reopen may skip the drop-only schema and see the old and new
+// StructArrays as one same-name transition with disjoint child field IDs.
+TEST(test_chunk_segment,
+     ReopenInvalidatesOffsetsForReaddedStructArrayWithSameName) {
+    auto old_schema = std::make_shared<Schema>();
+    old_schema->set_schema_version(1);
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(pk);
+    auto old_label = old_schema->AddDebugArrayField(
+        "chunks[label]", DataType::VARCHAR, true);
+    auto old_score =
+        old_schema->AddDebugArrayField("chunks[score]", DataType::INT32, true);
+
+    constexpr int64_t row_count = 5;
+    constexpr int64_t array_len = 3;
+    auto dataset = segcore::DataGen(old_schema,
+                                    row_count,
+                                    /*seed=*/42,
+                                    /*ts_offset=*/0,
+                                    /*repeat_count=*/1,
+                                    array_len);
+    auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
+
+    auto old_offsets = segment->GetArrayOffsets(old_label);
+    ASSERT_NE(old_offsets, nullptr);
+    ASSERT_EQ(old_offsets.get(), segment->GetArrayOffsets(old_score).get());
+    ASSERT_EQ(old_offsets->GetTotalElementCount(), row_count * array_len);
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->set_schema_version(2);
+    new_schema->AddField(
+        FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    new_schema->set_primary_field_id(pk);
+    auto new_label = FieldId(old_score.get() + 1);
+    auto new_score = FieldId(new_label.get() + 1);
+    new_schema->AddField(FieldName("chunks[label]"),
+                         new_label,
+                         DataType::ARRAY,
+                         DataType::VARCHAR,
+                         true);
+    new_schema->AddField(FieldName("chunks[score]"),
+                         new_score,
+                         DataType::ARRAY,
+                         DataType::INT32,
+                         true);
+
+    // Model lazy reopen skipping the intermediate drop-only schema: the struct
+    // name is unchanged, while every child field ID belongs to a new generation.
+    segment->Reopen(new_schema);
+
+    auto new_offsets = segment->GetArrayOffsets(new_label);
+    ASSERT_NE(new_offsets, nullptr);
+    EXPECT_NE(new_offsets.get(), old_offsets.get());
+    EXPECT_EQ(new_offsets.get(), segment->GetArrayOffsets(new_score).get());
+    EXPECT_EQ(new_offsets->GetRowCount(), row_count);
+    EXPECT_EQ(new_offsets->GetTotalElementCount(), 0);
+    EXPECT_EQ(segment->GetArrayOffsets(old_label), nullptr);
+    EXPECT_EQ(segment->GetArrayOffsets(old_score), nullptr);
+}
+
 TEST(test_chunk_segment, SearchOnSealedColumnBruteForceUsesOriginalTopk) {
     int dim = 16;
     int chunk_num = 2;

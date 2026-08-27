@@ -5461,6 +5461,8 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
 
     index->Reload();
 
+    index->FinalizeSealed(/*release_null_offsets=*/true);
+
     index->RegisterAnalyzer("milvus_tokenizer",
                             field_meta.get_analyzer_params().c_str());
 
@@ -5572,6 +5574,7 @@ ChunkedSegmentSealedImpl::BuildTextIndexFromFiles(
         info_proto->fieldid(),
         field_meta.get_analyzer_params(),
         info_proto->index_size(),
+        segment_load_info.GetNumOfRows(),
         info_proto->warmup_policy(),
         segment_load_info.GetInsertChannel()};
 
@@ -7137,6 +7140,47 @@ ChunkedSegmentSealedImpl::PrepareSchemaForReopen(const SchemaPtr& sch) {
 }
 
 void
+ChunkedSegmentSealedImpl::InvalidateStaleStructArrayOffsets(
+    const SchemaPtr& current_schema,
+    const SchemaPtr& target_schema,
+    RuntimeResourceState& runtime) {
+    if (runtime.struct_to_array_offsets.empty()) {
+        return;
+    }
+
+    // A StructArray generation survives schema evolution when at least one of
+    // its child field IDs survives under the same struct name.  This preserves
+    // offsets for ordinary schema changes while distinguishing a dropped and
+    // re-added StructArray whose name is reused with entirely new field IDs.
+    // The flattened C++ Schema does not retain the StructArray parent field ID,
+    // so child-ID continuity is the available generation marker here.
+    std::unordered_set<std::string> surviving_structs;
+    for (const auto& [field_id, target_field_meta] :
+         target_schema->get_fields()) {
+        if (!current_schema->has_field(field_id)) {
+            continue;
+        }
+
+        auto current_struct_name =
+            GetStructNameForArrayField(current_schema->operator[](field_id));
+        auto target_struct_name = GetStructNameForArrayField(target_field_meta);
+        if (current_struct_name.has_value() &&
+            current_struct_name == target_struct_name) {
+            surviving_structs.emplace(*target_struct_name);
+        }
+    }
+
+    for (auto it = runtime.struct_to_array_offsets.begin();
+         it != runtime.struct_to_array_offsets.end();) {
+        if (surviving_structs.find(it->first) == surviving_structs.end()) {
+            it = runtime.struct_to_array_offsets.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void
 ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
     milvus::OpContext* op_ctx,
     SegmentLoadInfo& segment_load_info,
@@ -7461,6 +7505,7 @@ ChunkedSegmentSealedImpl::ReopenSchemaLocked(milvus::OpContext* op_ctx,
         "Schema-only reopen segment {} with diff {}", id_, diff.ToString());
 
     auto next_runtime = CloneMutableRuntimeResourceState();
+    InvalidateStaleStructArrayOffsets(current_schema, sch, *next_runtime);
     auto staged = ClonePublishedState(current);
     staged->schema = sch;
     staged->load_info = std::make_shared<const SegmentLoadInfo>(new_local);
@@ -7512,7 +7557,9 @@ ChunkedSegmentSealedImpl::Reopen(
                   new_schema->get_schema_version());
     }
 
-    auto target_schema = new_schema ? std::move(new_schema) : current_schema;
+    const bool has_schema_update = new_schema != nullptr;
+    auto target_schema =
+        has_schema_update ? std::move(new_schema) : current_schema;
 
     SegmentLoadInfo current_mutable(*current->load_info);
     SegmentLoadInfo new_local(new_load_info, target_schema);
@@ -7536,6 +7583,10 @@ ChunkedSegmentSealedImpl::Reopen(
     LOG_INFO("Reopen segment {} with diff {}", id_, diff.ToString());
 
     auto next_runtime = CloneMutableRuntimeResourceState();
+    if (has_schema_update) {
+        InvalidateStaleStructArrayOffsets(
+            current_schema, target_schema, *next_runtime);
+    }
     auto staged = ClonePublishedState(current);
     staged->schema = target_schema;
     staged->load_info = std::make_shared<const SegmentLoadInfo>(new_local);
