@@ -3957,7 +3957,7 @@ func SelectMinPKWithTimestamp[T interface {
 			}
 		case []byte:
 			ts := timestamps[cursor]
-			if firstUUID || bytes.Compare(pk, minUUIDPK) < 0 || (bytes.Compare(pk, minUUIDPK) == 0 && ts > maxTimestamp) {
+			if firstUUID || bytes.Compare(pk, minUUIDPK) < 0 || (bytes.Equal(pk, minUUIDPK) && ts > maxTimestamp) {
 				firstUUID = false
 				minUUIDPK = pk
 				sel = i
