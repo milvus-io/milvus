@@ -219,6 +219,7 @@ func (c *ColumnVarCharArray) Slice(start, end int) Column {
 	return &ColumnVarCharArray{
 		columnArrayBase: c.columnArrayBase.slice(start, end),
 	}
+}
 
 /* uuid array */
 
@@ -236,5 +237,4 @@ func (c *ColumnUUIDArray) Slice(start, end int) Column {
 	return &ColumnUUIDArray{
 		columnArrayBase: c.columnArrayBase.slice(start, end),
 	}
-}
 }
