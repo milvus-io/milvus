@@ -339,6 +339,8 @@ func BenchmarkHash32Int64(b *testing.B) {
 		assert.NoError(b, err)
 		hash32BenchmarkSink = hash
 	}
+}
+
 func TestHashPK2Channels_BatchInvariance(t *testing.T) {
 	channels := []string{"ch0", "ch1", "ch2", "ch3"}
 	u, _ := ParseUUID("550e8400-e29b-41d4-a716-446655440000")
