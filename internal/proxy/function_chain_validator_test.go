@@ -136,6 +136,37 @@ func TestNewFunctionChainRerankMeta(t *testing.T) {
 		assert.Equal(t, []int64{101}, meta.GetInputFieldIDs())
 	})
 
+	t.Run("merge generated system outputs are not user writes", func(t *testing.T) {
+		chainPB := l2FunctionChain(&schemapb.FunctionChainOp{
+			Op: types.OpTypeMerge,
+			Params: map[string]*schemapb.FunctionParamValue{
+				"strategy": chainStringParam("rrf"),
+			},
+		})
+
+		meta, err := newFunctionChainRerankMeta([]*schemapb.FunctionChain{chainPB}, schema)
+		require.NoError(t, err)
+		require.NotNil(t, meta)
+		assert.Empty(t, meta.GetInputFieldNames())
+	})
+
+	t.Run("group by system field is not planned as schema input", func(t *testing.T) {
+		chainPB := l2FunctionChain(&schemapb.FunctionChainOp{
+			Op: types.OpTypeGroupBy,
+			Params: map[string]*schemapb.FunctionParamValue{
+				"field":      chainStringParam("$group_by_101"),
+				"group_size": chainIntParam(2),
+				"limit":      chainIntParam(10),
+			},
+		})
+
+		meta, err := newFunctionChainRerankMeta([]*schemapb.FunctionChain{chainPB}, schema)
+		require.NoError(t, err)
+		require.NotNil(t, meta)
+		assert.Empty(t, meta.GetInputFieldNames())
+		assert.Empty(t, meta.GetInputFieldIDs())
+	})
+
 	t.Run("duplicate schema input is planned once", func(t *testing.T) {
 		chainPB := l2FunctionChain(
 			mapOp("score1", "expr", columnArg("ts"), columnArg(types.ScoreFieldName)),
@@ -293,6 +324,18 @@ func l2LimitFunctionChain(limit int64) *schemapb.FunctionChain {
 			"limit": {Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: limit}},
 		},
 	})
+}
+
+func chainStringParam(value string) *schemapb.FunctionParamValue {
+	return &schemapb.FunctionParamValue{
+		Value: &schemapb.FunctionParamValue_StringValue{StringValue: value},
+	}
+}
+
+func chainIntParam(value int64) *schemapb.FunctionParamValue {
+	return &schemapb.FunctionParamValue{
+		Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: value},
+	}
 }
 
 func mapOp(output string, exprName string, args ...*schemapb.FunctionChainExprArg) *schemapb.FunctionChainOp {
