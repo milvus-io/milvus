@@ -49,6 +49,10 @@ type rowParser struct {
 	dynamicField         *schemapb.FieldSchema
 	allowInsertAutoID    bool
 
+	// rowNum is the 1-based index of the data row currently being parsed,
+	// used to locate invalid values (e.g. malformed UUIDs) in error messages.
+	rowNum int64
+
 	timezone string
 }
 
@@ -225,6 +229,7 @@ func (r *rowParser) reconstructArrayForStructArray(structName string, subFieldsM
 }
 
 func (r *rowParser) Parse(strArr []string) (Row, error) {
+	r.rowNum++
 	if len(strArr) != len(r.header) {
 		return nil, merr.WrapErrImportFailed("the number of fields in the row is not equal to the header")
 	}
@@ -481,6 +486,8 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string, useElem
 			return nil, err
 		}
 		return obj, nil
+	case schemapb.DataType_UUID:
+		return common.ValidateAndNormalizeUUID(field.GetName(), r.rowNum, obj)
 	case schemapb.DataType_BinaryVector:
 		var vec []byte
 		err := json.Unmarshal([]byte(obj), &vec)

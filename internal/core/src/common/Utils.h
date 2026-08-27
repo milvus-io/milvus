@@ -604,7 +604,6 @@ GetAggResultType(std::string func_name, DataType input_type) {
         }
     }
     if (func_name == KMin || func_name == KMax) {
-        // min/max keep the original scalar type.
         switch (input_type) {
             case DataType::INT8:
             case DataType::INT16:
@@ -615,6 +614,7 @@ GetAggResultType(std::string func_name, DataType input_type) {
             case DataType::VARCHAR:
             case DataType::STRING:
             case DataType::TEXT:
+            case DataType::UUID:
             case DataType::TIMESTAMPTZ: {
                 return input_type;
             }

@@ -97,6 +97,122 @@ func TestIDColumns(t *testing.T) {
 		assert.NotNil(t, column)
 		assert.Equal(t, dataLen, column.Len())
 	})
+
+	t.Run("uuid ids", func(t *testing.T) {
+		uuidPKCol := entity.NewSchema().WithField(
+			entity.NewField().WithName("pk").WithIsPrimaryKey(true).WithDataType(entity.FieldTypeUUID),
+		)
+
+		uuids := []string{
+			"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+			"550e8400-e29b-41d4-a716-446655440000",
+			"6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+		}
+		idField := &schemapb.IDs{
+			IdField: &schemapb.IDs_StrId{
+				StrId: &schemapb.StringArray{
+					Data: uuids,
+				},
+			},
+		}
+		column, err := IDColumns(uuidPKCol, idField, 0, len(uuids))
+		assert.Nil(t, err)
+		assert.NotNil(t, column)
+		assert.Equal(t, len(uuids), column.Len())
+		uuidCol, ok := column.(*ColumnUUID)
+		assert.True(t, ok)
+		assert.Equal(t, uuids, uuidCol.Data())
+
+		// test -1 method
+		column, err = IDColumns(uuidPKCol, idField, 0, -1)
+		assert.Nil(t, err)
+		assert.NotNil(t, column)
+		assert.Equal(t, len(uuids), column.Len())
+	})
+}
+
+func TestFieldDataColumn_UUID(t *testing.T) {
+	fd := &schemapb.FieldData{
+		Type:      schemapb.DataType_UUID,
+		FieldName: "uuid_field",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: []string{
+							"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+							"550e8400-e29b-41d4-a716-446655440000",
+						},
+					},
+				},
+			},
+		},
+	}
+	column, err := FieldDataColumn(fd, 0, -1)
+	assert.NoError(t, err)
+	assert.NotNil(t, column)
+	assert.Equal(t, "uuid_field", column.Name())
+	assert.Equal(t, entity.FieldTypeUUID, column.Type())
+	assert.Equal(t, 2, column.Len())
+	uuidCol, ok := column.(*ColumnUUID)
+	if assert.True(t, ok) {
+		assert.Equal(t, []string{
+			"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+			"550e8400-e29b-41d4-a716-446655440000",
+		}, uuidCol.Data())
+	}
+}
+
+func TestFieldDataColumn_UUID_Nullable(t *testing.T) {
+	fd := &schemapb.FieldData{
+		Type:      schemapb.DataType_UUID,
+		FieldName: "uuid_field",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: []string{
+							"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+							"",
+						},
+					},
+				},
+			},
+		},
+		ValidData: []bool{true, false},
+	}
+	column, err := FieldDataColumn(fd, 0, -1)
+	assert.NoError(t, err)
+	assert.NotNil(t, column)
+	assert.Equal(t, "uuid_field", column.Name())
+	assert.Equal(t, entity.FieldTypeUUID, column.Type())
+	assert.Equal(t, 2, column.Len())
+}
+
+func TestFieldDataColumn_UUID_Slice(t *testing.T) {
+	fd := &schemapb.FieldData{
+		Type:      schemapb.DataType_UUID,
+		FieldName: "uuid_field",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: []string{
+							"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+							"550e8400-e29b-41d4-a716-446655440000",
+						},
+					},
+				},
+			},
+		},
+	}
+	column, err := FieldDataColumn(fd, 0, 1)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, column.Len())
+	uuidCol, ok := column.(*ColumnUUID)
+	if assert.True(t, ok) {
+		assert.Equal(t, []string{"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"}, uuidCol.Data())
+	}
 }
 
 func TestFieldDataColumnValidDataSources(t *testing.T) {

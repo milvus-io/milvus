@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -25,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type PrimaryKey interface {
@@ -259,6 +261,136 @@ func (vcp *VarCharPrimaryKey) Size() int64 {
 	return int64(len(vcp.Value) + 8)
 }
 
+type UUIDPrimaryKey struct {
+	Value [16]byte
+}
+
+func NewUUIDPrimaryKey(v [16]byte) *UUIDPrimaryKey {
+	return &UUIDPrimaryKey{
+		Value: v,
+	}
+}
+
+func NewUUIDPrimaryKeyFromString(s string) (*UUIDPrimaryKey, error) {
+	u, err := typeutil.ParseUUID(s)
+	if err != nil {
+		return nil, err
+	}
+	return &UUIDPrimaryKey{
+		Value: u,
+	}, nil
+}
+
+func NewUUIDPrimaryKeyFromBytes(b []byte) (*UUIDPrimaryKey, error) {
+	u, err := typeutil.BytesToUUID(b)
+	if err != nil {
+		return nil, err
+	}
+	return &UUIDPrimaryKey{
+		Value: u,
+	}, nil
+}
+
+func (up *UUIDPrimaryKey) GT(key PrimaryKey) bool {
+	pk, ok := key.(*UUIDPrimaryKey)
+	if !ok {
+		mlog.Warn(context.TODO(), "type of compared pk is not UUID")
+		return false
+	}
+	return bytes.Compare(up.Value[:], pk.Value[:]) > 0
+}
+
+func (up *UUIDPrimaryKey) GE(key PrimaryKey) bool {
+	pk, ok := key.(*UUIDPrimaryKey)
+	if !ok {
+		mlog.Warn(context.TODO(), "type of compared pk is not UUID")
+		return false
+	}
+	return bytes.Compare(up.Value[:], pk.Value[:]) >= 0
+}
+
+func (up *UUIDPrimaryKey) LT(key PrimaryKey) bool {
+	pk, ok := key.(*UUIDPrimaryKey)
+	if !ok {
+		mlog.Warn(context.TODO(), "type of compared pk is not UUID")
+		return false
+	}
+	return bytes.Compare(up.Value[:], pk.Value[:]) < 0
+}
+
+func (up *UUIDPrimaryKey) LE(key PrimaryKey) bool {
+	pk, ok := key.(*UUIDPrimaryKey)
+	if !ok {
+		mlog.Warn(context.TODO(), "type of compared pk is not UUID")
+		return false
+	}
+	return bytes.Compare(up.Value[:], pk.Value[:]) <= 0
+}
+
+func (up *UUIDPrimaryKey) EQ(key PrimaryKey) bool {
+	pk, ok := key.(*UUIDPrimaryKey)
+	if !ok {
+		mlog.Warn(context.TODO(), "type of compared pk is not UUID")
+		return false
+	}
+	return bytes.Equal(up.Value[:], pk.Value[:])
+}
+
+func (up *UUIDPrimaryKey) MarshalJSON() ([]byte, error) {
+	str := typeutil.UUIDToString(up.Value)
+	return json.Marshal(str)
+}
+
+func (up *UUIDPrimaryKey) UnmarshalJSON(data []byte) error {
+	var str string
+	err := json.Unmarshal(data, &str)
+	if err != nil {
+		return err
+	}
+	u, err := typeutil.ParseUUID(str)
+	if err != nil {
+		return err
+	}
+	up.Value = u
+	return nil
+}
+
+func (up *UUIDPrimaryKey) SetValue(data interface{}) error {
+	switch v := data.(type) {
+	case [16]byte:
+		up.Value = v
+		return nil
+	case []byte:
+		u, err := typeutil.BytesToUUID(v)
+		if err != nil {
+			return err
+		}
+		up.Value = u
+		return nil
+	case string:
+		u, err := typeutil.ParseUUID(v)
+		if err != nil {
+			return err
+		}
+		up.Value = u
+		return nil
+	default:
+		return merr.WrapErrServiceInternalMsg("wrong type value when setValue for UUIDPrimaryKey")
+	}
+}
+
+func (up *UUIDPrimaryKey) GetValue() interface{} {
+	return up.Value
+}
+
+func (up *UUIDPrimaryKey) Type() schemapb.DataType {
+	return schemapb.DataType_UUID
+}
+
+func (up *UUIDPrimaryKey) Size() int64 {
+	return 24
+}
+
 func GenPrimaryKeyByRawData(data interface{}, pkType schemapb.DataType) (PrimaryKey, error) {
 	var result PrimaryKey
 	switch pkType {
@@ -269,6 +401,25 @@ func GenPrimaryKeyByRawData(data interface{}, pkType schemapb.DataType) (Primary
 	case schemapb.DataType_VarChar:
 		result = &VarCharPrimaryKey{
 			Value: data.(string),
+		}
+	case schemapb.DataType_UUID:
+		switch v := data.(type) {
+		case [16]byte:
+			result = &UUIDPrimaryKey{Value: v}
+		case []byte:
+			u, err := typeutil.BytesToUUID(v)
+			if err != nil {
+				return nil, err
+			}
+			result = &UUIDPrimaryKey{Value: u}
+		case string:
+			u, err := typeutil.ParseUUID(v)
+			if err != nil {
+				return nil, err
+			}
+			result = &UUIDPrimaryKey{Value: u}
+		default:
+			return nil, merr.WrapErrServiceInternalMsg("unsupported raw data type for UUID primary key: %T", data)
 		}
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("not supported primary data type")
@@ -301,6 +452,18 @@ func GenVarcharPrimaryKeys(data ...string) ([]PrimaryKey, error) {
 	return pks, nil
 }
 
+func GenUUIDPrimaryKeys(data ...[16]byte) ([]PrimaryKey, error) {
+	pks := make([]PrimaryKey, len(data))
+	var err error
+	for i := range data {
+		pks[i], err = GenPrimaryKeyByRawData(data[i], schemapb.DataType_UUID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return pks, nil
+}
+
 func ParseFieldData2PrimaryKeys(data *schemapb.FieldData) ([]PrimaryKey, error) {
 	ret := make([]PrimaryKey, 0)
 	if data == nil {
@@ -322,6 +485,24 @@ func ParseFieldData2PrimaryKeys(data *schemapb.FieldData) ([]PrimaryKey, error) 
 			pk := NewVarCharPrimaryKey(value)
 			ret = append(ret, pk)
 		}
+	case schemapb.DataType_UUID:
+		if scalarData.GetBytesData() != nil {
+			for _, value := range scalarData.GetBytesData().GetData() {
+				pk, err := NewUUIDPrimaryKeyFromBytes(value)
+				if err != nil {
+					return nil, err
+				}
+				ret = append(ret, pk)
+			}
+		} else if scalarData.GetStringData() != nil {
+			for _, value := range scalarData.GetStringData().GetData() {
+				pk, err := NewUUIDPrimaryKeyFromString(value)
+				if err != nil {
+					return nil, err
+				}
+				ret = append(ret, pk)
+			}
+		}
 	default:
 		return ret, merr.WrapErrServiceInternalMsg("not supported primary data type")
 	}
@@ -329,7 +510,7 @@ func ParseFieldData2PrimaryKeys(data *schemapb.FieldData) ([]PrimaryKey, error) 
 	return ret, nil
 }
 
-func ParseIDs2PrimaryKeys(ids *schemapb.IDs) []PrimaryKey {
+func ParseIDs2PrimaryKeys(ids *schemapb.IDs) ([]PrimaryKey, error) {
 	ret := make([]PrimaryKey, 0)
 	switch ids.IdField.(type) {
 	case *schemapb.IDs_IntId:
@@ -344,11 +525,20 @@ func ParseIDs2PrimaryKeys(ids *schemapb.IDs) []PrimaryKey {
 			pk := NewVarCharPrimaryKey(v)
 			ret = append(ret, pk)
 		}
+	case *schemapb.IDs_UuidId:
+		uuidPks := ids.GetUuidId().GetData()
+		for _, v := range uuidPks {
+			pk, err := NewUUIDPrimaryKeyFromBytes(v)
+			if err != nil {
+				return nil, err
+			}
+			ret = append(ret, pk)
+		}
 	default:
-		// TODO::
+		return nil, merr.WrapErrParameterInvalidMsg("invalid IDs type %T", ids.IdField)
 	}
 
-	return ret
+	return ret, nil
 }
 
 func ParseIDs2PrimaryKeysBatch(ids *schemapb.IDs) PrimaryKeys {
@@ -363,6 +553,11 @@ func ParseIDs2PrimaryKeysBatch(ids *schemapb.IDs) PrimaryKeys {
 		stringPks := ids.GetStrId().GetData()
 		pks := NewVarcharPrimaryKeys(int64(len(stringPks)))
 		pks.AppendRaw(stringPks...)
+		result = pks
+	case *schemapb.IDs_UuidId:
+		uuidPks := ids.GetUuidId().GetData()
+		pks := NewUUIDPrimaryKeys(int64(len(uuidPks)))
+		pks.AppendBytes(uuidPks...)
 		result = pks
 	default:
 		panic(fmt.Sprintf("unexpected schema id field type %T", ids.IdField))
@@ -390,6 +585,13 @@ func ParsePrimaryKeysBatch2IDs(pks PrimaryKeys) (*schemapb.IDs, error) {
 				Data: varcharPks.values,
 			},
 		}
+	case schemapb.DataType_UUID:
+		uuidPks := pks.(*UUIDPrimaryKeys)
+		ret.IdField = &schemapb.IDs_UuidId{
+			UuidId: &schemapb.UUIDArray{
+				Data: uuidPks.Bytes(),
+			},
+		}
 	default:
 		return nil, merr.WrapErrServiceInternal("parsing unsupported pk type", pks.Type().String())
 	}
@@ -397,10 +599,10 @@ func ParsePrimaryKeysBatch2IDs(pks PrimaryKeys) (*schemapb.IDs, error) {
 	return ret, nil
 }
 
-func ParsePrimaryKeys2IDs(pks []PrimaryKey) *schemapb.IDs {
+func ParsePrimaryKeys2IDs(pks []PrimaryKey) (*schemapb.IDs, error) {
 	ret := &schemapb.IDs{}
 	if len(pks) == 0 {
-		return ret
+		return ret, nil
 	}
 	switch pks[0].Type() {
 	case schemapb.DataType_Int64:
@@ -423,11 +625,25 @@ func ParsePrimaryKeys2IDs(pks []PrimaryKey) *schemapb.IDs {
 				Data: stringPks,
 			},
 		}
+	case schemapb.DataType_UUID:
+		uuidPks := make([][]byte, 0, len(pks))
+		for _, pk := range pks {
+			upk, ok := pk.(*UUIDPrimaryKey)
+			if !ok {
+				return nil, merr.WrapErrServiceInternalMsg("expected UUIDPrimaryKey, got %T", pk)
+			}
+			uuidPks = append(uuidPks, upk.Value[:])
+		}
+		ret.IdField = &schemapb.IDs_UuidId{
+			UuidId: &schemapb.UUIDArray{
+				Data: uuidPks,
+			},
+		}
 	default:
-		// TODO::
+		return nil, merr.WrapErrParameterInvalidMsg("invalid primary key type %v", pks[0].Type())
 	}
 
-	return ret
+	return ret, nil
 }
 
 func ParseInt64s2IDs(pks ...int64) *schemapb.IDs {

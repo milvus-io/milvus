@@ -41,7 +41,7 @@ RowContainer::RowContainer(const std::vector<DataType>& keyTypes,
         }
         offsets_.push_back(offset);
         if (type == DataType::VARCHAR || type == DataType::STRING) {
-            offset += 8;  //use a pointer to store string
+            offset += 8;
         } else {
             offset += GetDataTypeSize(type, 1);
         }

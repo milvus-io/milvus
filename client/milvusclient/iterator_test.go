@@ -676,6 +676,52 @@ func (s *QueryIteratorSuite) TestQueryIteratorWithVarCharPK() {
 	s.ErrorIs(err, io.EOF)
 }
 
+func (s *QueryIteratorSuite) TestQueryIteratorWithUUIDPK() {
+	ctx := context.Background()
+	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+
+	schemaUUIDPK := entity.NewSchema().
+		WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeUUID).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("Vector").WithDataType(entity.FieldTypeFloatVector).WithDim(128))
+
+	s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionID: 1,
+		Schema:       schemaUUIDPK.ProtoMessage(),
+	}, nil).Once()
+
+	s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		return &milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				s.getVarcharFieldData("ID", []string{"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "550e8400-e29b-41d4-a716-446655440000"}),
+			},
+		}, nil
+	}).Once()
+
+	iter, err := s.client.QueryIterator(ctx, NewQueryIteratorOption(collectionName).
+		WithOutputFields("ID").
+		WithBatchSize(2))
+	s.Require().NoError(err)
+	s.Require().NotNil(iter)
+
+	rs, err := iter.Next(ctx)
+	s.NoError(err)
+	s.EqualValues(2, rs.ResultCount)
+
+	// second query - verify UUID PK filter uses canonical string comparison
+	s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		s.Contains(qr.GetExpr(), `ID > "550e8400-e29b-41d4-a716-446655440000"`)
+		return &milvuspb.QueryResults{
+			Status:     merr.Success(),
+			FieldsData: []*schemapb.FieldData{},
+		}, nil
+	}).Once()
+
+	_, err = iter.Next(ctx)
+	s.Error(err)
+	s.ErrorIs(err, io.EOF)
+}
+
 func (s *QueryIteratorSuite) TestQueryIteratorWithFilter() {
 	ctx := context.Background()
 	collectionName := fmt.Sprintf("coll_%s", s.randString(6))

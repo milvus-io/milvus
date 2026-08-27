@@ -128,6 +128,12 @@ GetLeafElementCount(const ScalarFieldProto& row, DataType data_type) {
                        static_cast<int>(row.data_case()));
             return row.string_data().data_size();
         }
+        case DataType::UUID: {
+            AssertInfo(row.data_case() == ScalarFieldProto::kBytesData,
+                       "expected UUID array row, got proto case {}",
+                       static_cast<int>(row.data_case()));
+            return row.bytes_data().data_size();
+        }
         default:
             ThrowInfo(Unsupported,
                       "unsupported columnar array leaf type {}",
@@ -197,6 +203,17 @@ CopyLeafRow(ColumnarArrayBuildNode& node,
                     static_cast<uint32_t>(node.string_data.size()));
             }
             return element_offset + row.string_data().data_size();
+        case DataType::UUID:
+            for (const auto& bytes : row.bytes_data().data()) {
+                AssertInfo(bytes.size() == 16,
+                           "UUID bytes must be 16B, got {}",
+                           bytes.size());
+                std::memcpy(node.fixed_data.data() + element_offset * 16,
+                            bytes.data(),
+                            16);
+                ++element_offset;
+            }
+            return element_offset;
         default:
             ThrowInfo(Unsupported,
                       "unsupported columnar array leaf type {}",
@@ -219,6 +236,8 @@ GetLeafFixedWidth(DataType data_type) {
             return sizeof(float);
         case DataType::DOUBLE:
             return sizeof(double);
+        case DataType::UUID:
+            return 16;
         default:
             ThrowInfo(Unsupported,
                       "columnar array leaf type {} is not fixed width",

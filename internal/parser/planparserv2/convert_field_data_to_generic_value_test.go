@@ -88,6 +88,22 @@ func Test_ConvertToGenericValue(t *testing.T) {
 		},
 		{
 			input: map[string]*schemapb.TemplateValue{
+				"uuid": {
+					Val: &schemapb.TemplateValue_StringVal{
+						StringVal: "550e8400-e29b-41d4-a716-446655440000",
+					},
+				},
+			},
+			expect: map[string]*planpb.GenericValue{
+				"uuid": {
+					Val: &planpb.GenericValue_StringVal{
+						StringVal: "550e8400-e29b-41d4-a716-446655440000",
+					},
+				},
+			},
+		},
+		{
+			input: map[string]*schemapb.TemplateValue{
 				"array": {
 					Val: &schemapb.TemplateValue_ArrayVal{
 						ArrayVal: &schemapb.TemplateArrayValue{
@@ -203,7 +219,7 @@ func generateTemplateValue(dataType schemapb.DataType, data interface{}) *schema
 				FloatVal: data.(float64),
 			},
 		}
-	case schemapb.DataType_String, schemapb.DataType_VarChar:
+	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		return &schemapb.TemplateValue{
 			Val: &schemapb.TemplateValue_StringVal{
 				StringVal: data.(string),
@@ -250,7 +266,7 @@ func generateTemplateArrayValue(dataType schemapb.DataType, data interface{}) *s
 				},
 			},
 		}
-	case schemapb.DataType_VarChar, schemapb.DataType_String:
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_UUID:
 		return &schemapb.TemplateArrayValue{
 			Data: &schemapb.TemplateArrayValue_StringData{
 				StringData: &schemapb.StringArray{

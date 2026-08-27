@@ -20,6 +20,7 @@
 #include <functional>
 
 #include "common/EasyAssert.h"
+#include "common/Types.h"
 #include "log/Log.h"
 
 namespace milvus {
@@ -278,6 +279,15 @@ SortBuffer::Compare(const char* lhs, const char* rhs) const {
                 std::string_view rhs_val =
                     rhs_str ? std::string_view(*rhs_str) : std::string_view();
                 result = CompareNonNullValues<std::string_view>(
+                    lhs_val, rhs_val, sort_key.ascending);
+                break;
+            }
+            case DataType::UUID: {
+                auto lhs_val =
+                    RowContainer::valueAt<UUID>(lhs, row_column.offset());
+                auto rhs_val =
+                    RowContainer::valueAt<UUID>(rhs, row_column.offset());
+                result = CompareNonNullValues<UUID>(
                     lhs_val, rhs_val, sort_key.ascending);
                 break;
             }

@@ -12,6 +12,7 @@
 #include "common/EasyAssert.h"
 #include "tantivy-error.h"
 #include "common/Json.h"
+#include "common/Types.h"
 #include "tantivy-binding.h"
 #include "rust-binding.h"
 #include "rust-array.h"
@@ -758,9 +759,19 @@ struct TantivyIndexWrapper {
                     reader_, views.data(), len, bitset);
             }
 
-            // fmt::format returns a std::string; throwing it means catch
-            // (std::exception&) cannot see it, only catch (...). Throw a typed
-            // SegcoreError instead.
+            if constexpr (std::is_same_v<T, milvus::UUID>) {
+                std::vector<std::string> strs;
+                std::vector<const char*> views;
+                strs.reserve(len);
+                views.reserve(len);
+                for (uintptr_t i = 0; i < len; i++) {
+                    strs.push_back(terms[i].ToString());
+                    views.push_back(strs.back().c_str());
+                }
+                return tantivy_terms_query_keyword(
+                    reader_, views.data(), len, bitset);
+            }
+
             ThrowInfo(milvus::ErrorCode::Unsupported,
                       "InvertedIndex.terms_query: unsupported data type: {}",
                       typeid(T).name());
@@ -821,9 +832,12 @@ struct TantivyIndexWrapper {
                     bitset);
             }
 
-            // fmt::format returns a std::string; throwing it means catch
-            // (std::exception&) cannot see it, only catch (...). Throw a typed
-            // SegcoreError instead.
+            if constexpr (std::is_same_v<T, milvus::UUID>) {
+                auto str = lower_bound.ToString();
+                return tantivy_lower_bound_range_query_keyword(
+                    reader_, str.c_str(), inclusive, bitset);
+            }
+
             ThrowInfo(
                 milvus::ErrorCode::Unsupported,
                 "InvertedIndex.lower_bound_range_query: unsupported data type: "
@@ -873,9 +887,12 @@ struct TantivyIndexWrapper {
                     bitset);
             }
 
-            // fmt::format returns a std::string; throwing it means catch
-            // (std::exception&) cannot see it, only catch (...). Throw a typed
-            // SegcoreError instead.
+            if constexpr (std::is_same_v<T, milvus::UUID>) {
+                auto str = upper_bound.ToString();
+                return tantivy_upper_bound_range_query_keyword(
+                    reader_, str.c_str(), inclusive, bitset);
+            }
+
             ThrowInfo(
                 milvus::ErrorCode::Unsupported,
                 "InvertedIndex.upper_bound_range_query: unsupported data type: "
@@ -938,9 +955,17 @@ struct TantivyIndexWrapper {
                     bitset);
             }
 
-            // fmt::format returns a std::string; throwing it means catch
-            // (std::exception&) cannot see it, only catch (...). Throw a typed
-            // SegcoreError instead.
+            if constexpr (std::is_same_v<T, milvus::UUID>) {
+                auto lower_str = lower_bound.ToString();
+                auto upper_str = upper_bound.ToString();
+                return tantivy_range_query_keyword(reader_,
+                                                   lower_str.c_str(),
+                                                   upper_str.c_str(),
+                                                   lb_inclusive,
+                                                   ub_inclusive,
+                                                   bitset);
+            }
+
             ThrowInfo(milvus::ErrorCode::Unsupported,
                       "InvertedIndex.range_query: unsupported data type: {}",
                       typeid(T).name());

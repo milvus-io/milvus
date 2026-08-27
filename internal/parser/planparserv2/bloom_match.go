@@ -88,9 +88,9 @@ func checkBloomMatchField(columnInfo *planpb.ColumnInfo, argText, functionName s
 	// accepted type set matches the segcore executor exactly — otherwise a
 	// STRING/TEXT field would build successfully here and only be rejected after
 	// fan-out at the QueryNode.
-	if !typeutil.IsIntegerType(dataType) && dataType != schemapb.DataType_VarChar {
+	if !typeutil.IsIntegerType(dataType) && dataType != schemapb.DataType_VarChar && !typeutil.IsUUIDType(dataType) {
 		return merr.WrapErrParameterInvalidMsg(
-			"%s only supports INT8/INT16/INT32/INT64/VARCHAR fields and JSON paths, but field (%s) is of type %s",
+			"%s only supports INT8/INT16/INT32/INT64/VARCHAR/UUID fields and JSON paths, but field (%s) is of type %s",
 			functionName, argText, dataType.String())
 	}
 	return nil
@@ -238,7 +238,7 @@ func checkBloomFilterValueDomain(columnInfo *planpb.ColumnInfo, blob []byte) err
 		return nil
 	}
 	want, wantName := mbf1DomainInt64, "int64"
-	if dataType == schemapb.DataType_VarChar {
+	if dataType == schemapb.DataType_VarChar || typeutil.IsUUIDType(dataType) {
 		want, wantName = mbf1DomainUTF8, "utf8"
 	}
 	if domains&byte(want) == 0 {

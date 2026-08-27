@@ -40,7 +40,8 @@ using data_access_type = std::optional<boost::variant<bool,
                                                       float,
                                                       double,
                                                       std::string,
-                                                      std::string_view>>;
+                                                      std::string_view,
+                                                      milvus::UUID>>;
 
 using ChunkDataAccessor = std::function<const data_access_type(int)>;
 using MultipleChunkDataAccessor = std::function<const data_access_type()>;

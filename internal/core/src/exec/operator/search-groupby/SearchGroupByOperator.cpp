@@ -91,6 +91,9 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                 getter =
                     CreateFieldGetter<std::string>(op_ctx, segment, field_id);
                 break;
+            case DataType::UUID:
+                getter = CreateFieldGetter<UUID>(op_ctx, segment, field_id);
+                break;
             case DataType::JSON:
                 if (json_type.has_value()) {
                     switch (json_type.value()) {

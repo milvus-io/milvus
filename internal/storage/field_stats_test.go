@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestFieldStatsUpdate(t *testing.T) {
@@ -86,6 +88,15 @@ func TestFieldStatsUpdate(t *testing.T) {
 	fieldStat8.Update(NewVarCharFieldValue("z"))
 	assert.Equal(t, "z", fieldStat8.Max.GetValue())
 	assert.Equal(t, "a", fieldStat8.Min.GetValue())
+
+	fieldStat9, err := NewFieldStats(2, schemapb.DataType_UUID, 2)
+	assert.NoError(t, err)
+	fieldStat9.Update(NewScalarFieldValue(schemapb.DataType_UUID, "550e8400-e29b-41d4-a716-446655440000"))
+	fieldStat9.Update(NewScalarFieldValue(schemapb.DataType_UUID, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"))
+	uMin, _ := typeutil.ParseUUID("550e8400-e29b-41d4-a716-446655440000")
+	uMax, _ := typeutil.ParseUUID("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+	assert.Equal(t, uMax, fieldStat9.Max.GetValue())
+	assert.Equal(t, uMin, fieldStat9.Min.GetValue())
 }
 
 func TestFieldStatsWriter_Int8FieldValue(t *testing.T) {
@@ -332,6 +343,55 @@ func TestFieldStatsWriter_VarCharFieldValue(t *testing.T) {
 	}
 	err = sw.GenerateByData(common.RowIDField, schemapb.DataType_Int64, msgs)
 	assert.NoError(t, err)
+}
+
+func TestFieldStatsWriter_UUIDFieldValue(t *testing.T) {
+	u1Str := "550e8400-e29b-41d4-a716-446655440000"
+	u2Str := "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+	u3Str := "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+	u1, _ := typeutil.ParseUUID(u1Str)
+	u2, _ := typeutil.ParseUUID(u2Str)
+	u3, _ := typeutil.ParseUUID(u3Str)
+	data := &UUIDFieldData{
+		Data: [][16]byte{u1, u2, u3},
+	}
+	sw := &FieldStatsWriter{}
+	err := sw.GenerateByData(common.RowIDField, schemapb.DataType_UUID, data)
+	assert.NoError(t, err)
+	b := sw.GetBuffer()
+	sr := &FieldStatsReader{}
+	sr.SetBuffer(b)
+	statsList, err := sr.GetFieldStatsList()
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(statsList))
+	stats := statsList[0]
+	all := [][16]byte{u1, u2, u3}
+	maxU, minU := all[0], all[0]
+	for _, u := range all[1:] {
+		if bytes.Compare(u[:], maxU[:]) > 0 {
+			maxU = u
+		}
+		if bytes.Compare(u[:], minU[:]) < 0 {
+			minU = u
+		}
+	}
+	maxPk := NewUUIDFieldValue(maxU)
+	minPk := NewUUIDFieldValue(minU)
+	assert.True(t, stats.Max.EQ(maxPk))
+	assert.True(t, stats.Min.EQ(minPk))
+	for _, u := range data.Data {
+		assert.True(t, stats.BF.Test(u[:]))
+	}
+	fake, _ := typeutil.ParseUUID("00000000-0000-0000-0000-000000000001")
+	assert.False(t, stats.BF.Test(fake[:]))
+	blob, err := json.Marshal(statsList)
+	assert.NoError(t, err)
+	var decoded []*FieldStats
+	err = json.Unmarshal(blob, &decoded)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(decoded))
+	assert.True(t, decoded[0].Max.EQ(stats.Max))
+	assert.True(t, decoded[0].Min.EQ(stats.Min))
 }
 
 func TestFieldStatsWriter_BF(t *testing.T) {

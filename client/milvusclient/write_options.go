@@ -351,7 +351,7 @@ func newStructSubColumn(field *entity.Field) (column.Column, error) {
 		return column.NewColumnFloatArray(field.Name, nil), nil
 	case entity.FieldTypeDouble:
 		return column.NewColumnDoubleArray(field.Name, nil), nil
-	case entity.FieldTypeVarChar, entity.FieldTypeString:
+	case entity.FieldTypeVarChar, entity.FieldTypeString, entity.FieldTypeUUID:
 		return column.NewColumnVarCharArray(field.Name, nil), nil
 	case entity.FieldTypeFloatVector:
 		dim, err := field.GetDim()

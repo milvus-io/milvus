@@ -168,7 +168,8 @@ class SkipIndex {
         static constexpr bool isAllowedType =
             std::is_integral<T>::value || std::is_floating_point<T>::value ||
             std::is_same<T, std::string>::value ||
-            std::is_same<T, std::string_view>::value;
+            std::is_same<T, std::string_view>::value ||
+            std::is_same<T, milvus::UUID>::value;
         static constexpr bool isDisabledType =
             std::is_same<T, milvus::Json>::value ||
             std::is_same<T, bool>::value;

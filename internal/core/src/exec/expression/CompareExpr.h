@@ -22,6 +22,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -60,85 +61,154 @@ struct CompareElementFunc {
                const TargetBitmap& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
-        // This is the original code, kept here for the documentation purposes
-        // also, used for iterative filter
-        if constexpr (filter_type == FilterType::random) {
-            for (int i = 0; i < size; ++i) {
-                auto offset = (offsets != nullptr) ? offsets[i] : i;
-                if constexpr (op == proto::plan::OpType::Equal) {
-                    res[i] = left[offset] == right[offset];
-                } else if constexpr (op == proto::plan::OpType::NotEqual) {
-                    res[i] = left[offset] != right[offset];
-                } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-                    res[i] = left[offset] > right[offset];
-                } else if constexpr (op == proto::plan::OpType::LessThan) {
-                    res[i] = left[offset] < right[offset];
-                } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-                    res[i] = left[offset] >= right[offset];
-                } else if constexpr (op == proto::plan::OpType::LessEqual) {
-                    res[i] = left[offset] <= right[offset];
+        // UUID heterogenous guard: UUID only comparable with UUID. When exactly
+        // one side is UUID the cross-type instantiation would try UUID==double
+        // etc which has no operator==. Handle heterogenous early so the
+        // generic Op{}(UUID, non-UUID) never instantiates.
+        if constexpr (std::is_same_v<T, milvus::UUID> !=
+                      std::is_same_v<U, milvus::UUID>) {
+            if constexpr (op == proto::plan::OpType::NotEqual) {
+                if constexpr (filter_type == FilterType::random) {
+                    for (int i = 0; i < static_cast<int>(size); ++i) {
+                        res[i] = true;
+                    }
                 } else {
-                    ThrowInfo(
-                        UnexpectedError,
-                        fmt::format(
-                            "unsupported op_type:{} for CompareElementFunc",
-                            op));
+                    if (!bitmap_input.empty()) {
+                        for (int i = 0; i < static_cast<int>(size); ++i) {
+                            if (!bitmap_input[start_cursor + i]) {
+                                continue;
+                            }
+                            res[i] = true;
+                        }
+                    } else {
+                        for (int i = 0; i < static_cast<int>(size); ++i) {
+                            res[i] = true;
+                        }
+                    }
+                }
+            } else {
+                // Equal and all ordering ops (>, >=, <, <=) are false for
+                // heterogenous UUID vs non-UUID. res was pre-initialized to
+                // false; explicitly clear to be safe and respect bitmap.
+                if constexpr (filter_type == FilterType::random) {
+                    for (int i = 0; i < static_cast<int>(size); ++i) {
+                        res[i] = false;
+                    }
+                } else {
+                    if (!bitmap_input.empty()) {
+                        for (int i = 0; i < static_cast<int>(size); ++i) {
+                            if (!bitmap_input[start_cursor + i]) {
+                                continue;
+                            }
+                            res[i] = false;
+                        }
+                    } else {
+                        for (int i = 0; i < static_cast<int>(size); ++i) {
+                            res[i] = false;
+                        }
+                    }
                 }
             }
             return;
-        }
-
-        if (!bitmap_input.empty()) {
-            for (int i = 0; i < size; ++i) {
-                if (!bitmap_input[start_cursor + i]) {
-                    continue;
-                }
-                if constexpr (op == proto::plan::OpType::Equal) {
-                    res[i] = left[i] == right[i];
-                } else if constexpr (op == proto::plan::OpType::NotEqual) {
-                    res[i] = left[i] != right[i];
-                } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-                    res[i] = left[i] > right[i];
-                } else if constexpr (op == proto::plan::OpType::LessThan) {
-                    res[i] = left[i] < right[i];
-                } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-                    res[i] = left[i] >= right[i];
-                } else if constexpr (op == proto::plan::OpType::LessEqual) {
-                    res[i] = left[i] <= right[i];
-                } else {
-                    ThrowInfo(
-                        UnexpectedError,
-                        fmt::format(
-                            "unsupported op_type:{} for CompareElementFunc",
-                            op));
-                }
-            }
-            return;
-        }
-
-        if constexpr (op == proto::plan::OpType::Equal) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::EQ>(
-                left, right, size);
-        } else if constexpr (op == proto::plan::OpType::NotEqual) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::NE>(
-                left, right, size);
-        } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::GT>(
-                left, right, size);
-        } else if constexpr (op == proto::plan::OpType::LessThan) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::LT>(
-                left, right, size);
-        } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::GE>(
-                left, right, size);
-        } else if constexpr (op == proto::plan::OpType::LessEqual) {
-            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::LE>(
-                left, right, size);
         } else {
-            ThrowInfo(UnexpectedError,
-                      fmt::format(
-                          "unsupported op_type:{} for CompareElementFunc", op));
-        }
+            // Homogeneous or both non-UUID: safe to instantiate operator== etc.
+            // This else is required so heterogeneous T vs UUID never
+            // instantiates a==b for incomparable types (would be ill-formed).
+            if constexpr (filter_type == FilterType::random) {
+                for (int i = 0; i < size; ++i) {
+                    auto offset = (offsets != nullptr) ? offsets[i] : i;
+                    if constexpr (op == proto::plan::OpType::Equal) {
+                        res[i] = left[offset] == right[offset];
+                    } else if constexpr (op == proto::plan::OpType::NotEqual) {
+                        res[i] = left[offset] != right[offset];
+                    } else if constexpr (op ==
+                                         proto::plan::OpType::GreaterThan) {
+                        res[i] = left[offset] > right[offset];
+                    } else if constexpr (op == proto::plan::OpType::LessThan) {
+                        res[i] = left[offset] < right[offset];
+                    } else if constexpr (op ==
+                                         proto::plan::OpType::GreaterEqual) {
+                        res[i] = left[offset] >= right[offset];
+                    } else if constexpr (op == proto::plan::OpType::LessEqual) {
+                        res[i] = left[offset] <= right[offset];
+                    } else {
+                        ThrowInfo(
+                            UnexpectedError,
+                            fmt::format(
+                                "unsupported op_type:{} for CompareElementFunc",
+                                op));
+                    }
+                }
+                return;
+            }
+
+            if (!bitmap_input.empty()) {
+                for (int i = 0; i < size; ++i) {
+                    if (!bitmap_input[start_cursor + i]) {
+                        continue;
+                    }
+                    if constexpr (op == proto::plan::OpType::Equal) {
+                        res[i] = left[i] == right[i];
+                    } else if constexpr (op == proto::plan::OpType::NotEqual) {
+                        res[i] = left[i] != right[i];
+                    } else if constexpr (op ==
+                                         proto::plan::OpType::GreaterThan) {
+                        res[i] = left[i] > right[i];
+                    } else if constexpr (op == proto::plan::OpType::LessThan) {
+                        res[i] = left[i] < right[i];
+                    } else if constexpr (op ==
+                                         proto::plan::OpType::GreaterEqual) {
+                        res[i] = left[i] >= right[i];
+                    } else if constexpr (op == proto::plan::OpType::LessEqual) {
+                        res[i] = left[i] <= right[i];
+                    } else {
+                        ThrowInfo(
+                            UnexpectedError,
+                            fmt::format(
+                                "unsupported op_type:{} for CompareElementFunc",
+                                op));
+                    }
+                }
+                return;
+            }
+
+            if constexpr (op == proto::plan::OpType::Equal) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::EQ>(
+                    left, right, size);
+            } else if constexpr (op == proto::plan::OpType::NotEqual) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::NE>(
+                    left, right, size);
+            } else if constexpr (op == proto::plan::OpType::GreaterThan) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::GT>(
+                    left, right, size);
+            } else if constexpr (op == proto::plan::OpType::LessThan) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::LT>(
+                    left, right, size);
+            } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::GE>(
+                    left, right, size);
+            } else if constexpr (op == proto::plan::OpType::LessEqual) {
+                res.inplace_compare_column<T,
+                                           U,
+                                           milvus::bitset::CompareOpType::LE>(
+                    left, right, size);
+            } else {
+                ThrowInfo(
+                    UnexpectedError,
+                    fmt::format("unsupported op_type:{} for CompareElementFunc",
+                                op));
+            }
+        }  // else: homogeneous branch
     }
 };
 

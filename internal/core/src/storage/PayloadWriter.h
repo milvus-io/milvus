@@ -49,6 +49,9 @@ class PayloadWriter {
     add_one_binary_payload(const uint8_t* data, int length);
 
     void
+    add_one_uuid_payload(const uint8_t* bytes, int size);
+
+    void
     finish();
 
     bool

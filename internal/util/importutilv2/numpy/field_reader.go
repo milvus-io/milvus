@@ -223,10 +223,8 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 			int64Ts = append(int64Ts, tz)
 		}
 		data = int64Ts
-		c.readPosition += int(readCount)
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		data, err = c.ReadString(readCount)
-		c.readPosition += int(readCount)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -245,7 +243,6 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 			byteArr = append(byteArr, wkbValue)
 		}
 		data = byteArr
-		c.readPosition += int(readCount)
 	case schemapb.DataType_JSON:
 		var strs []string
 		strs, err = c.ReadString(readCount)
@@ -272,7 +269,6 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 			byteArr = append(byteArr, []byte(str))
 		}
 		data = byteArr
-		c.readPosition += int(readCount)
 	case schemapb.DataType_BinaryVector:
 		data, err = ReadN[uint8](c.reader, c.order, readCount)
 		if err != nil {
@@ -390,9 +386,14 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 		return nil, merr.WrapErrImportFailed(
 			fmt.Sprintf("failed to get max length %d of varchar from numpy file header, error: %v", maxLen, err))
 	}
-	maxLength, err := parameterutil.GetMaxLength(c.field)
-	if c.field.DataType == schemapb.DataType_VarChar && err != nil {
-		return nil, err
+	// only VarChar needs the schema-level max_length for the length check,
+	// UUID is validated via uuid.Parse (canonical form is exactly 36 bytes)
+	var maxLength int64
+	if c.field.DataType == schemapb.DataType_VarChar {
+		maxLength, err = parameterutil.GetMaxLength(c.field)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// read data
 	data := make([]string, 0, count)
@@ -410,13 +411,18 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 				return nil, merr.WrapErrImportFailedMsg("failed to read utf32 bytes from numpy file, error: %v", err)
 			}
 			str, err := decodeUtf32(raw, c.order)
-			if c.field.DataType == schemapb.DataType_VarChar {
+			if err != nil {
+				return nil, merr.WrapErrImportFailedMsg("failed to decode utf32 bytes, error: %v", err)
+			}
+			switch c.field.DataType {
+			case schemapb.DataType_VarChar:
 				if err = common.CheckVarcharLength(str, maxLength, c.field); err != nil {
 					return nil, err
 				}
-			}
-			if err != nil {
-				return nil, merr.WrapErrImportFailedMsg("failed to decode utf32 bytes, error: %v", err)
+			case schemapb.DataType_UUID:
+				if str, err = common.ValidateAndNormalizeUUID(c.field.GetName(), int64(c.readPosition+len(data)), str); err != nil {
+					return nil, err
+				}
 			}
 			data = append(data, str)
 		} else {
@@ -434,8 +440,14 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 			if err = common.CheckValidUTF8(str, c.field); err != nil {
 				return nil, err
 			}
+			if c.field.DataType == schemapb.DataType_UUID {
+				if str, err = common.ValidateAndNormalizeUUID(c.field.GetName(), int64(c.readPosition+len(data)), str); err != nil {
+					return nil, err
+				}
+			}
 			data = append(data, str)
 		}
 	}
+	c.readPosition += len(data)
 	return data, nil
 }

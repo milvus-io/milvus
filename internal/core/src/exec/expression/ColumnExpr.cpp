@@ -71,6 +71,10 @@ PhyColumnExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = DoEval<std::string>(input);
             break;
         }
+        case DataType::UUID: {
+            result = DoEval<UUID>(input);
+            break;
+        }
         default:
             ThrowInfo(UnexpectedError,
                       "unsupported data type: {}",

@@ -50,6 +50,11 @@ ExpectedLiteralValCase(DataType element_type) {
         case DataType::VARCHAR:
         case DataType::GEOMETRY:
             return proto::plan::GenericValue::ValCase::kStringVal;
+        case DataType::UUID:
+            // UUID literal carried as 36-char hex string via GenericValue
+            // string_val (GetValueFromProto<UUID> asserts kStringVal). No
+            // string conversion for storage — array element is 16B FixedSizeBinary.
+            return proto::plan::GenericValue::ValCase::kStringVal;
         default:
             return proto::plan::GenericValue::ValCase::VAL_NOT_SET;
     }
@@ -155,6 +160,24 @@ class Array {
                     milvus::fastmem::FastMemcpy(data_.get() + offsets_ptr_[i],
                                                 value.data(),
                                                 value.size());
+                }
+                break;
+            }
+            case ScalarFieldProto::kBytesData: {
+                // UUID array elements via FixedSizeBinary(16). Each entry is
+                // exactly 16 bytes; element is fixed-width, no offsets_ptr_.
+                // DataType::UUID invariant: 16B fixed, not variable string.
+                element_type_ = DataType::UUID;
+                length_ = field_data.bytes_data().data().size();
+                size_ = length_ * 16;
+                data_ = std::make_unique<char[]>(size_);
+                for (int i = 0; i < length_; ++i) {
+                    const auto& bytes = field_data.bytes_data().data(i);
+                    AssertInfo(bytes.size() == 16,
+                               "UUID bytes must be 16B, got {}",
+                               bytes.size());
+                    milvus::fastmem::FastMemcpy(
+                        data_.get() + i * 16, bytes.data(), 16);
                 }
                 break;
             }
@@ -275,6 +298,14 @@ class Array {
                 }
                 return true;
             }
+            case DataType::UUID: {
+                for (int i = 0; i < length_; ++i) {
+                    if (get_data<UUID>(i) != arr.get_data<UUID>(i)) {
+                        return false;
+                    }
+                }
+                return true;
+            }
             default:
                 ThrowInfo(Unsupported, "unsupported element type for array");
         }
@@ -313,6 +344,16 @@ class Array {
                 case DataType::DOUBLE:
                     return static_cast<T>(
                         reinterpret_cast<double*>(data_.get())[index]);
+                default:
+                    ThrowInfo(Unsupported,
+                              "unsupported element type for array");
+            }
+        }
+        if constexpr (std::is_same_v<T, milvus::UUID>) {
+            switch (element_type_) {
+                case DataType::UUID:
+                    return *reinterpret_cast<const UUID*>(data_.get() +
+                                                          index * sizeof(UUID));
                 default:
                     ThrowInfo(Unsupported,
                               "unsupported element type for array");
@@ -393,6 +434,16 @@ class Array {
                     auto element = get_data<std::string_view>(j);
                     data_array.mutable_geometry_data()->add_data(
                         element.data(), element.size());
+                }
+                break;
+            }
+            case DataType::UUID: {
+                data_array.mutable_bytes_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_data<UUID>(j);
+                    data_array.mutable_bytes_data()->add_data(
+                        reinterpret_cast<const char*>(element.data.data()), 16);
                 }
                 break;
             }
@@ -519,6 +570,20 @@ class Array {
                 }
                 return true;
             }
+            case DataType::UUID: {
+                for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
+                    auto val = get_data<UUID>(i);
+                    auto proto_uuid =
+                        UUID::FromString(arr2.array(i).string_val());
+                    if (val != proto_uuid) {
+                        return false;
+                    }
+                }
+                return true;
+            }
             default:
                 return false;
         }
@@ -613,6 +678,16 @@ class ArrayView {
                               "unsupported element type for array");
             }
         }
+        if constexpr (std::is_same_v<T, milvus::UUID>) {
+            switch (element_type_) {
+                case DataType::UUID:
+                    return *reinterpret_cast<const UUID*>(data_ +
+                                                          index * sizeof(UUID));
+                default:
+                    ThrowInfo(Unsupported,
+                              "unsupported element type for array");
+            }
+        }
         return reinterpret_cast<T*>(data_)[index];
     }
 
@@ -683,6 +758,16 @@ class ArrayView {
                     auto element = get_data<std::string_view>(j);
                     data_array.mutable_geometry_data()->add_data(
                         element.data(), element.size());
+                }
+                break;
+            }
+            case DataType::UUID: {
+                data_array.mutable_bytes_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_data<UUID>(j);
+                    data_array.mutable_bytes_data()->add_data(
+                        reinterpret_cast<const char*>(element.data.data()), 16);
                 }
                 break;
             }
@@ -812,6 +897,20 @@ class ArrayView {
                     }
                     auto val = get_data<std::string>(i);
                     if (val != arr2.array(i).string_val()) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            case DataType::UUID: {
+                for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
+                    auto val = get_data<UUID>(i);
+                    auto proto_uuid =
+                        UUID::FromString(arr2.array(i).string_val());
+                    if (val != proto_uuid) {
                         return false;
                     }
                 }
