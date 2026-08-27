@@ -28,6 +28,7 @@
 #include "common/EasyAssert.h"
 #include "filemanager/InputStream.h"
 #include "nlohmann/json.hpp"
+#include "storage/FileWriter.h"
 #include "storage/IndexEntryWriter.h"
 #include "storage/ThreadPools.h"
 #include "storage/plugin/PluginInterface.h"
@@ -171,12 +172,12 @@ class IndexEntryReader {
 
     struct EntryDownloadState {
         std::string name;
-        int fd;
+        std::unique_ptr<PositionedFileWriter> writer;
         uint32_t expected_crc;
         std::vector<RangeCrc> range_crcs;
     };
 
-    // Prepare download state for an entry (open file, allocate CRC vector)
+    // Prepare download state for an entry (open writer, allocate CRC vector)
     EntryDownloadState
     PrepareEntryDownload(const std::string& name,
                          const std::string& local_path,
@@ -188,7 +189,7 @@ class IndexEntryReader {
                              EntryDownloadState& state,
                              std::vector<std::future<void>>& futures);
 
-    // Verify CRC and close file descriptor
+    // Verify CRC and finish the writer
     void
     FinalizeEntryDownload(EntryDownloadState& state);
 
