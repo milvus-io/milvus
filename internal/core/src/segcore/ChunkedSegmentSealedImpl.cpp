@@ -266,7 +266,8 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
             info.index_engine_version,
             info.index_size,
             info.index_params,
-            info.enable_mmap);
+            info.enable_mmap,
+            info.num_rows);
 
     set_bit(index_ready_bitset_, field_id, true);
     index_has_raw_data_[field_id] = request.has_raw_data;
@@ -1894,6 +1895,8 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id,
 
     index->Reload();
 
+    index->FinalizeSealed(/*release_null_offsets=*/true);
+
     index->RegisterTokenizer("milvus_tokenizer",
                              field_meta.get_analyzer_params().c_str());
 
@@ -1941,12 +1944,18 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
 
     auto field_id = milvus::FieldId(info_proto->fieldid());
     const auto& field_meta = schema_->operator[](field_id);
+    int64_t num_rows;
+    {
+        std::shared_lock lck(mutex_);
+        num_rows = segment_load_info_.GetNumOfRows();
+    }
     milvus::segcore::storagev1translator::TextMatchIndexLoadInfo load_info{
         info_proto->enable_mmap(),
         this->get_segment_id(),
         info_proto->fieldid(),
         field_meta.get_analyzer_params(),
         info_proto->index_size(),
+        num_rows,
         info_proto->warmup_policy()};
 
     std::unique_ptr<
