@@ -1268,15 +1268,15 @@ TEST_P(ManifestGroupTranslatorTest, TestAsyncLoadParity) {
         EXPECT_EQ(mmap_files_after_async, mmap_files_before_async);
     }
     ASSERT_EQ(sync_cells.size(), async_cells.size());
+    const auto field_metas = test_data_->GetFieldMetas(0);
     for (size_t i = 0; i < sync_cells.size(); ++i) {
         EXPECT_EQ(sync_cells[i].first, async_cells[i].first);
-        const auto& sync_chunks = sync_cells[i].second->GetChunks();
-        const auto& async_chunks = async_cells[i].second->GetChunks();
-        ASSERT_EQ(sync_chunks.size(), async_chunks.size());
-        for (const auto& [field_id, sync_chunk] : sync_chunks) {
-            auto it = async_chunks.find(field_id);
-            ASSERT_NE(it, async_chunks.end());
-            const auto& async_chunk = it->second;
+        for (const auto& field_meta : field_metas) {
+            const auto field_id = field_meta.first;
+            auto sync_chunk = sync_cells[i].second->GetChunk(field_id);
+            auto async_chunk = async_cells[i].second->GetChunk(field_id);
+            ASSERT_NE(sync_chunk, nullptr);
+            ASSERT_NE(async_chunk, nullptr);
             ASSERT_EQ(sync_chunk->RowNums(), async_chunk->RowNums());
             ASSERT_EQ(sync_chunk->Size(), async_chunk->Size());
             EXPECT_EQ(std::memcmp(sync_chunk->RawData(),

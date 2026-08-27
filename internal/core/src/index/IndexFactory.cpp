@@ -663,8 +663,8 @@ IndexFactory::VecIndexLoadResource(
     }
     if (knowhere::UseDiskLoad(index_type, index_version)) {
         const auto id_map_disk_cost = IdMapMmapDiskCost(config, num_rows);
-        request.final_disk_cost = milvus::SaturatingAdd(
-            request.final_disk_cost, id_map_disk_cost);
+        request.final_disk_cost =
+            milvus::SaturatingAdd(request.final_disk_cost, id_map_disk_cost);
         request.max_disk_cost =
             milvus::SaturatingAdd(request.max_disk_cost, id_map_disk_cost);
     }
@@ -785,8 +785,8 @@ IndexFactory::ScalarIndexLoadResourceImpl(
             request.max_memory_cost = milvus::SaturatingAdd(
                 stream_memory_overhead, validity_bitmap_bytes);
         } else {
-            auto resident_bytes = milvus::SaturatingAdd(
-                index_size_in_bytes, validity_bitmap_bytes);
+            auto resident_bytes = milvus::SaturatingAdd(index_size_in_bytes,
+                                                        validity_bitmap_bytes);
             request.final_memory_cost = resident_bytes;
             request.final_disk_cost = 0;
             request.max_memory_cost =
