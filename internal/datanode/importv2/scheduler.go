@@ -26,12 +26,14 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 )
 
 type Scheduler interface {
 	Start()
 	Slots() int64
+	Resource() taskcommon.Resource
 	Close()
 }
 
@@ -111,6 +113,16 @@ func (s *scheduler) Slots() int64 {
 	used := lo.SumBy(tasks, func(t Task) int64 {
 		return t.GetSlots()
 	})
+	return used
+}
+
+// Resource returns the cpu/memory booked by pending and in-progress import tasks.
+func (s *scheduler) Resource() taskcommon.Resource {
+	tasks := s.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending, datapb.ImportTaskStateV2_InProgress))
+	var used taskcommon.Resource
+	for _, t := range tasks {
+		used = used.Add(t.GetResource())
+	}
 	return used
 }
 

@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -129,6 +130,10 @@ func (t *fakeTask) GetSlot() int64 {
 	return 1
 }
 
+func (t *fakeTask) GetResource() taskcommon.Resource {
+	return taskcommon.Resource{CPU: 1, Memory: 100}
+}
+
 func (t *fakeTask) OnEnqueue(ctx context.Context) error {
 	_taskwg.Add(1)
 	t.state = fakeTaskEnqueued
@@ -200,6 +205,28 @@ func newTask(cancelStage fakeTaskState, reterror map[fakeTaskState]error, expect
 		retstate:      indexpb.JobState_JobStateNone,
 		expectedState: expectedState,
 	}
+}
+
+func TestIndexTaskQueue_Resource(t *testing.T) {
+	paramtable.Init()
+
+	queue := NewIndexBuildTaskQueue(&TaskScheduler{ctx: context.Background()})
+	task := newTask(fakeTaskSavedIndexes, nil, indexpb.JobState_JobStateFinished)
+
+	assert.NoError(t, queue.Enqueue(task))
+	// Reset() balances the _taskwg.Add(1) that OnEnqueue did, so the other
+	// tests in this package that wait on _taskwg are unaffected.
+	defer task.Reset()
+
+	assert.Equal(t, int64(1), queue.GetUsingSlot())
+	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 100}, queue.GetUsingResource())
+
+	queue.AddActiveTask(task)
+	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 100}, queue.GetUsingResource())
+
+	queue.PopActiveTask(task.Name())
+	assert.Equal(t, int64(0), queue.GetUsingSlot())
+	assert.Equal(t, taskcommon.Resource{}, queue.GetUsingResource())
 }
 
 func TestIndexTaskScheduler(t *testing.T) {
@@ -344,4 +371,24 @@ func TestIndexTaskSchedulerRecordsIndexTaskCost(t *testing.T) {
 		assert.GreaterOrEqual(t, info.CostTimeMs, int64(0))
 		assert.Equal(t, int64(hardware.GetCPUNum()), info.CostCPUNum)
 	})
+}
+
+// Every index-family task reports exactly the cpu/memory its request carries,
+// and nothing when the coordinator predates the fields.
+func TestIndexTaskGetResource(t *testing.T) {
+	want := taskcommon.Resource{CPU: 2, Memory: 1 << 30}
+
+	assert.Equal(t, want, (&indexBuildTask{
+		req: &workerpb.CreateJobRequest{Cpu: 2, Memory: 1 << 30},
+	}).GetResource())
+	assert.Equal(t, want, (&statsTask{
+		req: &workerpb.CreateStatsRequest{Cpu: 2, Memory: 1 << 30},
+	}).GetResource())
+	assert.Equal(t, want, (&analyzeTask{
+		req: &workerpb.AnalyzeRequest{Cpu: 2, Memory: 1 << 30},
+	}).GetResource())
+
+	assert.True(t, (&indexBuildTask{req: &workerpb.CreateJobRequest{}}).GetResource().IsZero())
+	assert.True(t, (&statsTask{req: &workerpb.CreateStatsRequest{}}).GetResource().IsZero())
+	assert.True(t, (&analyzeTask{req: &workerpb.AnalyzeRequest{}}).GetResource().IsZero())
 }

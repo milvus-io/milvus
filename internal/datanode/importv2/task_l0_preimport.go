@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -97,6 +98,10 @@ func (t *L0PreImportTask) GetSchema() *schemapb.CollectionSchema {
 
 func (t *L0PreImportTask) GetSlots() int64 {
 	return t.req.GetTaskSlot()
+}
+
+func (t *L0PreImportTask) GetResource() taskcommon.Resource {
+	return taskcommon.Resource{CPU: t.req.GetCpu(), Memory: t.req.GetMemory()}
 }
 
 // L0 preimport task buffer size is fixed

@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/tracer"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -751,24 +752,59 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		availableSlots = 0
 	}
 
+	total := nodeTaskCapacity()
+	used := node.taskScheduler.TaskQueue.GetUsingResource().
+		Add(node.compactionExecutor.Resource()).
+		Add(node.importScheduler.Resource())
+	available := total.Sub(used)
+
 	mlog.Info(ctx, "query slots done",
 		mlog.Int64("totalSlots", totalSlots),
 		mlog.Int64("availableSlots", availableSlots),
 		mlog.Int64("indexStatsUsed", indexStatsUsed),
 		mlog.Int64("compactionUsed", compactionUsed),
 		mlog.Int64("importUsed", importUsed),
+		mlog.Stringer("totalResource", total),
+		mlog.Stringer("usedResource", used),
+		mlog.Stringer("availableResource", available),
 	)
 
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(availableSlots))
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "total").Set(float64(totalSlots))
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "indexStatsUsed").Set(float64(indexStatsUsed))
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsed").Set(float64(compactionUsed))
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(float64(importUsed))
+	nodeID := fmt.Sprint(node.GetNodeID())
+	metrics.DataNodeSlot.WithLabelValues(nodeID, "available").Set(float64(availableSlots))
+	metrics.DataNodeSlot.WithLabelValues(nodeID, "total").Set(float64(totalSlots))
+	metrics.DataNodeSlot.WithLabelValues(nodeID, "indexStatsUsed").Set(float64(indexStatsUsed))
+	metrics.DataNodeSlot.WithLabelValues(nodeID, "compactionUsed").Set(float64(compactionUsed))
+	metrics.DataNodeSlot.WithLabelValues(nodeID, "importUsed").Set(float64(importUsed))
+	metrics.DataNodeTaskResource.WithLabelValues(nodeID, "cpu", "total").Set(float64(total.CPU))
+	metrics.DataNodeTaskResource.WithLabelValues(nodeID, "cpu", "available").Set(float64(available.CPU))
+	metrics.DataNodeTaskResource.WithLabelValues(nodeID, "memory", "total").Set(float64(total.Memory))
+	metrics.DataNodeTaskResource.WithLabelValues(nodeID, "memory", "available").Set(float64(available.Memory))
 
 	return &datapb.QuerySlotResponse{
-		Status:         merr.Success(),
-		AvailableSlots: availableSlots,
+		Status:          merr.Success(),
+		AvailableSlots:  availableSlots,
+		TotalCpu:        total.CPU,
+		AvailableCpu:    available.CPU,
+		TotalMemory:     total.Memory,
+		AvailableMemory: available.Memory,
 	}, nil
+}
+
+// nodeTaskCapacity is what this node offers coordinator-dispatched tasks: the
+// machine (cgroup-aware) in cluster mode, and the same fraction of it the
+// scalar slots already use in standalone mode, where a QueryNode shares the
+// process.
+func nodeTaskCapacity() taskcommon.Resource {
+	total := taskcommon.Resource{
+		CPU:    int64(hardware.GetCPUNum()),
+		Memory: int64(hardware.GetMemoryCount()),
+	}
+	if paramtable.GetRole() == typeutil.StandaloneRole {
+		ratio := paramtable.Get().DataNodeCfg.StandaloneSlotRatio.GetAsFloat()
+		total.CPU = max(int64(float64(total.CPU)*ratio), 1)
+		total.Memory = int64(float64(total.Memory) * ratio)
+	}
+	return total
 }
 
 // Not in used now
