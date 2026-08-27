@@ -33,6 +33,24 @@ import (
 
 const NullNodeID = -1
 
+// maxDelayedPerRound caps how many tasks one scheduling round may set aside
+// (because they are in failure backoff, or because they alone do not fit the
+// cluster right now) before it stops popping. Two reasons for a cap:
+//
+//   - it bounds the work of a round. Under memory pressure with slots still
+//     free every pick misses, and without the cap the round pops and prices the
+//     entire queue only to push all of it back;
+//   - it bounds the window in which a set-aside task is invisible. Between the
+//     pop and the re-queue at the end of the round the task is in neither
+//     pendingTasks nor runningTasks, so GetPendingTaskCount does not count it
+//     and AbortAndRemoveTask cannot find it.
+//
+// Backoff and does-not-fit share the one slice and therefore the one budget.
+// That is deliberate: both are "set aside and retried next round", and one
+// counter is simpler than two. The value is a round-trip budget, not a fairness
+// guarantee - a task beyond the cap is simply looked at in a later round.
+const maxDelayedPerRound = 64
+
 type GlobalScheduler interface {
 	Enqueue(task Task)
 	AbortAndRemoveTask(taskID int64)
@@ -293,11 +311,22 @@ func (s *globalTaskScheduler) schedule() {
 			continue
 		}
 		taskSlot := task.GetTaskSlot()
-		nodeID := picker.Pick(taskSlot, task.GetTaskResource())
+		// Price once per round and reuse: the placement decision and the log
+		// below must agree, and a family that walks meta on a cache miss would
+		// otherwise pay for the walk twice.
+		resource := task.GetTaskResource()
+		nodeID := picker.Pick(taskSlot, resource)
 		if nodeID == NullNodeID {
 			if picker.exhausted() {
 				// No worker has a slot left, so nothing behind this task can be
 				// placed either: end the round.
+				s.pendingTasks.Push(task)
+				break
+			}
+			if len(delayed) >= maxDelayedPerRound {
+				// Enough set aside for one round: stop popping rather than walk
+				// the rest of the queue only to push it back. See
+				// maxDelayedPerRound.
 				s.pendingTasks.Push(task)
 				break
 			}
@@ -317,7 +346,7 @@ func (s *globalTaskScheduler) schedule() {
 			s.mu.RLock(task.GetTaskID())
 			defer s.mu.RUnlock(task.GetTaskID())
 			mlog.Info(s.ctx, "processing task...",
-				WrapTaskLog(task, mlog.Stringer("resource", task.GetTaskResource()))...)
+				WrapTaskLog(task, mlog.Stringer("resource", resource))...)
 			if task.GetTaskState() == taskcommon.Init {
 				task.CreateTaskOnWorker(nodeID, s.cluster)
 				switch task.GetTaskState() {
