@@ -66,7 +66,7 @@ func RunQNQueryPipeline(
 	var err error
 
 	if retrievePlan.IsIgnoreNonPk() {
-		pipeline, msg, err = buildIgnoreNonPkPipeline(req, segcoreResults, segments, manager, retrievePlan)
+		pipeline, msg, err = buildIgnoreNonPkPipeline(req, schema, segcoreResults, segments, manager, retrievePlan)
 	} else {
 		pipeline, msg, err = buildStandardQNPipeline(req, schema, plan, segcoreResults)
 	}
@@ -88,6 +88,7 @@ func RunQNQueryPipeline(
 // [MergeByPKWithOffsets(topK)] → [FetchFieldsData] → output
 func buildIgnoreNonPkPipeline(
 	req *querypb.QueryRequest,
+	schema *schemapb.CollectionSchema,
 	segcoreResults []*segcorepb.RetrieveResults,
 	segments []Segment,
 	manager *Manager,
@@ -108,16 +109,32 @@ func buildIgnoreNonPkPipeline(
 		validSegments = append(validSegments, segments[i])
 	}
 
+	// Build the output field schemas, aligned with OutputFieldsId, needed by
+	// the Arrow path to convert Arrow record columns back to proto FieldData.
+	fieldSchemaMap := make(map[int64]*schemapb.FieldSchema, len(schema.GetFields()))
+	for _, f := range schema.GetFields() {
+		fieldSchemaMap[f.GetFieldID()] = f
+	}
+	outputFieldsId := req.GetReq().GetOutputFieldsId()
+	fieldSchemas := make([]*schemapb.FieldSchema, 0, len(outputFieldsId))
+	for _, fid := range outputFieldsId {
+		if fs, ok := fieldSchemaMap[fid]; ok {
+			fieldSchemas = append(fieldSchemas, fs)
+		}
+	}
+
 	builder := queryutil.NewPipelineBuilder(queryutil.PipelineNameQNIgnoreNonPk)
-	builder.Add(queryutil.OpMergeByPKOffsets,
+	builder.Add(
+		queryutil.OpMergeByPKOffsets,
 		[]string{queryutil.PipelineInput},
 		[]string{queryutil.ChannelMerged},
 		NewMergeByPKWithOffsetsOperator(topK, reduceType),
 	)
-	builder.Add(queryutil.OpFetchFields,
+	builder.Add(
+		queryutil.OpFetchFields,
 		[]string{queryutil.ChannelMerged},
 		[]string{queryutil.PipelineOutput},
-		NewFetchFieldsDataOperator(validSegments, manager, retrievePlan),
+		NewFetchFieldsDataOperator(validSegments, manager, retrievePlan, fieldSchemas),
 	)
 
 	msg := queryutil.OpMsg{queryutil.PipelineInput: validResults}
