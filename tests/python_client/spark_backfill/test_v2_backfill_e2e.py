@@ -57,13 +57,15 @@ def _validate_v2_job(case, job_result, result_uri, parquet_rows, target_field_id
     return result
 
 
-def _commit_and_wait(case, job_result, result_uri, parquet_rows, mode):
+def _commit_and_wait(case, job_result, result_uri, parquet_rows, mode, *, drop_snapshot=False):
     before = _segment_evidence(case)
     status, commit = case.commit(result_uri)
     case.write_local_evidence(job_result, "segments-before-commit.json", before)
     case.write_local_evidence(job_result, "commit-response.json", commit)
     assert status == 200, commit
     assert_commit_succeeded(commit, expected_segments=set(case.snapshot.segment_ids), expected_kind="v2")
+    if drop_snapshot:
+        case.drop_snapshots_and_refresh()
 
     expected = build_ground_truth(_source_by_pk(case), _parquet_by_pk(parquet_rows), TARGET_FIELDS, mode)
     wait_for_visible_rows(case.client, case.collection_name, expected, TARGET_FIELDS)
@@ -109,4 +111,4 @@ def test_v2_multifield_column_groups_commit_and_replacement_become_visible(backf
         assert set(first_groups) == set(second_groups)
         assert first_groups != second_groups
 
-    _commit_and_wait(case, second_job, second_result_uri, second_rows, "overwrite")
+    _commit_and_wait(case, second_job, second_result_uri, second_rows, "overwrite", drop_snapshot=True)

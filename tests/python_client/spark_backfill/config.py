@@ -128,11 +128,98 @@ class SparkBackfillSettings:
         )
 
 
+@dataclass(frozen=True)
+class SparkJobsSettings:
+    """Configuration for the managed Spark Batch Jobs API E2E suite."""
+
+    endpoint: str
+    api_key: str
+    project_id: str
+    region_id: str
+    volume_name: str
+    output_volume_name: str
+    input_path: str
+    output_path: str
+    artifact_path: str
+    volume_bucket: str
+    volume_root: str
+    minio_endpoint: str
+    storage_secure: bool
+    evidence_root: Path
+    job_timeout: int
+    poll_interval: float
+
+    @classmethod
+    def from_values(
+        cls,
+        *,
+        endpoint,
+        api_key,
+        project_id,
+        region_id,
+        volume_name,
+        output_volume_name,
+        input_path,
+        output_path,
+        artifact_path,
+        volume_bucket,
+        volume_root,
+        minio_host,
+        storage_secure,
+        evidence_root,
+        job_timeout,
+        poll_interval,
+    ) -> SparkJobsSettings:
+        endpoint = str(endpoint).strip().rstrip("/")
+        if not endpoint.startswith(("http://", "https://")):
+            raise SparkBackfillConfigurationError("Spark Batch Jobs endpoint must be an absolute HTTP(S) URL")
+        if not str(api_key).strip():
+            raise SparkBackfillConfigurationError("Spark Batch Jobs API key is required")
+        if not str(project_id).strip():
+            raise SparkBackfillConfigurationError("Spark Batch Jobs projectId is required")
+        if not str(region_id).strip():
+            raise SparkBackfillConfigurationError("Spark Batch Jobs regionId is required")
+        if not str(volume_name).strip():
+            raise SparkBackfillConfigurationError("Spark Batch Jobs volumeName is required")
+        timeout = int(job_timeout)
+        if timeout <= 0:
+            raise SparkBackfillConfigurationError("Spark Batch Jobs timeout must be positive")
+        return cls(
+            endpoint=endpoint,
+            api_key=str(api_key).strip(),
+            project_id=str(project_id).strip(),
+            region_id=str(region_id).strip(),
+            volume_name=str(volume_name).strip(),
+            output_volume_name=str(output_volume_name).strip() or str(volume_name).strip(),
+            input_path=str(input_path).strip().strip("/"),
+            output_path=str(output_path).strip().strip("/"),
+            artifact_path=str(artifact_path).strip().strip("/"),
+            volume_bucket=str(volume_bucket).strip(),
+            volume_root=str(volume_root).strip().strip("/"),
+            minio_endpoint=_minio_endpoint(str(minio_host)),
+            storage_secure=bool(storage_secure),
+            evidence_root=Path(evidence_root).expanduser().resolve(),
+            job_timeout=timeout,
+            poll_interval=float(poll_interval),
+        )
+
+
 def _minio_endpoint(value: str) -> str:
-    endpoint = value.strip().removeprefix("http://").removeprefix("https://").rstrip("/")
+    endpoint = (
+        value.strip()
+        .removeprefix("s3://")
+        .removeprefix("http://")
+        .removeprefix("https://")
+        .rstrip("/")
+    )
     if not endpoint:
-        raise SparkBackfillConfigurationError("MinIO endpoint is required")
-    if ":" not in endpoint:
+        raise SparkBackfillConfigurationError("storage endpoint is required")
+    if "/" in endpoint:
+        raise SparkBackfillConfigurationError(
+            "storage endpoint must be a bare host[:port] with no path; "
+            f"put the bucket in --spark-jobs-volume-bucket and any prefix in --spark-jobs-volume-root, got {value!r}"
+        )
+    if ":" not in endpoint and "." not in endpoint:
         endpoint = f"{endpoint}:9000"
     return endpoint
 

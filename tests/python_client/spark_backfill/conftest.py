@@ -19,7 +19,9 @@ from spark_backfill.backfill_helpers import (
     unique_name,
 )
 from spark_backfill.case import DEFAULT_COMPACTION_PROTECTION_SECONDS, BackfillCase, infer_root_path
-from spark_backfill.config import SparkBackfillSettings
+from spark_backfill.config import SparkBackfillSettings, SparkJobsSettings
+from spark_backfill.jobs_case import SparkJobsCase
+from spark_backfill.jobs_client import SparkBatchJobsClient
 from spark_backfill.k8s_resources import (
     assert_rbac_permissions,
     build_ephemeral_secret,
@@ -28,6 +30,7 @@ from spark_backfill.k8s_resources import (
 )
 from spark_backfill.k8s_runner import KubernetesSparkRunner, SparkRuntimeConfig
 from spark_backfill.toolbox_runner import ToolboxRuntimeConfig, ToolboxSparkRunner
+from spark_backfill.volume_helpers import VolumeStorage
 
 
 @pytest.fixture(scope="session")
@@ -270,7 +273,7 @@ def spark_backfill_case_factory(
             spark_milvus_client.flush(collection_name)
         spark_milvus_client.load_collection(collection_name)
         if online_minhash_field is not None:
-            add_minhash_function_field(spark_backfill_settings, collection_name, online_minhash_field)
+            add_minhash_function_field(spark_milvus_client, collection_name, online_minhash_field)
 
         snapshot_name = unique_name("spark_backfill_snapshot")
         spark_milvus_client.create_snapshot(
@@ -280,7 +283,7 @@ def spark_backfill_case_factory(
         )
         snapshot_names.append(snapshot_name)
         snapshot_info = spark_milvus_client.describe_snapshot(snapshot_name, collection_name)
-        root_path = infer_root_path(snapshot_info.s3_location)
+        root_path = infer_root_path(snapshot_info.s3_location, spark_backfill_settings.minio_bucket)
         prefix = "/".join(part for part in (root_path, "spark-backfill", uuid.uuid4().hex) if part)
         resource["prefix"] = prefix
         raw_metadata = read_json_object(
@@ -358,3 +361,101 @@ def backfill_v2_case_factory(spark_backfill_case_factory):
         return spark_backfill_case_factory(expected_storage_kind="v2", **kwargs)
 
     return factory
+
+
+# ---------------------------------------------------------------------------
+# Managed Spark Batch Jobs API fixtures
+# ---------------------------------------------------------------------------
+
+
+def _spark_jobs_s3_credentials():
+    access_key = os.getenv("SPARK_JOBS_S3_ACCESS_KEY", "") or os.getenv("SPARK_BACKFILL_S3_ACCESS_KEY", "")
+    secret_key = os.getenv("SPARK_JOBS_S3_SECRET_KEY", "") or os.getenv("SPARK_BACKFILL_S3_SECRET_KEY", "")
+    if bool(access_key) != bool(secret_key):
+        pytest.fail("SPARK_JOBS_S3_ACCESS_KEY and SPARK_JOBS_S3_SECRET_KEY must both be set or both be empty")
+    return access_key, secret_key
+
+
+@pytest.fixture(scope="session")
+def spark_jobs_settings(request):
+    settings = SparkJobsSettings.from_values(
+        endpoint=request.config.getoption("--spark-jobs-endpoint"),
+        api_key=request.config.getoption("--spark-jobs-api-key"),
+        project_id=request.config.getoption("--spark-jobs-project-id"),
+        region_id=request.config.getoption("--spark-jobs-region-id"),
+        volume_name=request.config.getoption("--spark-jobs-volume-name"),
+        output_volume_name=request.config.getoption("--spark-jobs-output-volume-name"),
+        input_path=request.config.getoption("--spark-jobs-input-path"),
+        output_path=request.config.getoption("--spark-jobs-output-path"),
+        artifact_path=request.config.getoption("--spark-jobs-artifact-path"),
+        volume_bucket=request.config.getoption("--spark-jobs-volume-bucket") or request.config.getoption("--minio_bucket"),
+        volume_root=request.config.getoption("--spark-jobs-volume-root"),
+        minio_host=request.config.getoption("--minio_host"),
+        storage_secure=request.config.getoption("--spark-jobs-storage-secure"),
+        evidence_root=request.config.getoption("--spark-jobs-evidence-root"),
+        job_timeout=request.config.getoption("--spark-jobs-job-timeout"),
+        poll_interval=request.config.getoption("--spark-jobs-poll-interval"),
+    )
+    settings.evidence_root.mkdir(parents=True, exist_ok=True)
+    return settings
+
+
+@pytest.fixture(scope="session")
+def spark_jobs_minio(spark_jobs_settings):
+    access_key, secret_key = _spark_jobs_s3_credentials()
+    if not access_key:
+        pytest.fail("Static S3 credentials are required to stage and read Spark Batch Jobs volume objects")
+    return Minio(
+        spark_jobs_settings.minio_endpoint,
+        access_key=access_key,
+        secret_key=secret_key,
+        secure=spark_jobs_settings.storage_secure,
+    )
+
+
+@pytest.fixture(scope="session")
+def spark_jobs_volume(spark_jobs_settings, spark_jobs_minio):
+    return VolumeStorage(
+        spark_jobs_minio,
+        spark_jobs_settings.volume_bucket,
+        volume_root=spark_jobs_settings.volume_root,
+    )
+
+
+@pytest.fixture(scope="session")
+def spark_jobs_client(spark_jobs_settings):
+    return SparkBatchJobsClient(
+        spark_jobs_settings.endpoint,
+        spark_jobs_settings.api_key,
+        spark_jobs_settings.project_id,
+        spark_jobs_settings.region_id,
+        timeout=120,
+    )
+
+
+@pytest.fixture(scope="session")
+def spark_jobs_test_jar(request):
+    return {
+        "path": request.config.getoption("--spark-jobs-test-jar-path"),
+        "main_class": request.config.getoption("--spark-jobs-test-jar-main-class"),
+    }
+
+
+@pytest.fixture
+def spark_jobs_case_factory(spark_jobs_settings, spark_jobs_client, spark_jobs_volume, tmp_path):
+    cases: list[SparkJobsCase] = []
+
+    def factory() -> SparkJobsCase:
+        case = SparkJobsCase(
+            client=spark_jobs_client,
+            settings=spark_jobs_settings,
+            volume=spark_jobs_volume,
+            tmp_path=tmp_path,
+        )
+        cases.append(case)
+        return case
+
+    yield factory
+
+    for case in reversed(cases):
+        case.cleanup()
