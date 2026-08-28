@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	qvobserve "github.com/milvus-io/milvus/internal/views/qviews/observe"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -261,7 +262,17 @@ func (m *ShardViewManager) AddPreparing(_ context.Context, builder *qviews.Query
 
 	// Preempt existing Preparing/Ready view.
 	if m.preparingView != nil {
+		before := m.preparingView.State()
 		m.preparingView.EnterUnrecoverable()
+		qvobserve.Observe(m.ctx, qvobserve.CoordViewPreemptedEvent{
+			ViewStateTransition: qvobserve.ViewStateTransition{
+				CollectionID: m.preparingView.View().GetMeta().GetCollectionId(),
+				View:         qviews.QueryViewKey{ShardID: m.shardID, QueryViewVersion: m.preparingView.Version()},
+				From:         before,
+				To:           m.preparingView.State(),
+			},
+			PreemptingDataVersion: newDV,
+		})
 		m.processStateMachine(m.preparingView)
 		// preparingView is cleared by processStateMachine (Unrecoverable case).
 	}
@@ -279,6 +290,11 @@ func (m *ShardViewManager) AddPreparing(_ context.Context, builder *qviews.Query
 	sm := NewCoordQueryViewStateMachine(view)
 	m.views[sm.Version()] = sm
 	m.preparingView = sm
+	qvobserve.Observe(m.ctx, qvobserve.CoordViewCreatedEvent{
+		CollectionID: sm.View().GetMeta().GetCollectionId(),
+		View:         qviews.QueryViewKey{ShardID: m.shardID, QueryViewVersion: sm.Version()},
+		State:        sm.State(),
+	})
 
 	// Process: collect persist and sync effects.
 	m.processStateMachine(sm)
@@ -305,13 +321,31 @@ func (m *ShardViewManager) RequestRelease(_ context.Context) error {
 	m.releaseRequested = true
 
 	if m.preparingView != nil {
+		before := m.preparingView.State()
 		m.preparingView.EnterUnrecoverable()
+		qvobserve.Observe(m.ctx, qvobserve.CoordViewReleaseRequestedEvent{
+			ViewStateTransition: qvobserve.ViewStateTransition{
+				CollectionID: m.preparingView.View().GetMeta().GetCollectionId(),
+				View:         qviews.QueryViewKey{ShardID: m.shardID, QueryViewVersion: m.preparingView.Version()},
+				From:         before,
+				To:           m.preparingView.State(),
+			},
+		})
 		m.processStateMachine(m.preparingView)
 		// preparingView is cleared by processStateMachine (Unrecoverable case).
 	}
 
 	if m.upView != nil {
+		before := m.upView.State()
 		m.upView.EnterDown()
+		qvobserve.Observe(m.ctx, qvobserve.CoordViewReleaseRequestedEvent{
+			ViewStateTransition: qvobserve.ViewStateTransition{
+				CollectionID: m.upView.View().GetMeta().GetCollectionId(),
+				View:         qviews.QueryViewKey{ShardID: m.shardID, QueryViewVersion: m.upView.Version()},
+				From:         before,
+				To:           m.upView.State(),
+			},
+		})
 		m.processStateMachine(m.upView)
 		// processStateMachine's Down case clears m.upView.
 	}
@@ -399,7 +433,16 @@ func (m *ShardViewManager) processStateMachine(sm *CoordQueryViewStateMachine) {
 func (m *ShardViewManager) advanceUnrecoverableToDropping() {
 	for _, sm := range m.views {
 		if sm.State() == qviews.QueryViewStateUnrecoverable {
+			before := sm.State()
 			sm.EnterDropping()
+			qvobserve.Observe(m.ctx, qvobserve.CoordViewAdvancedFromUnrecoverableEvent{
+				ViewStateTransition: qvobserve.ViewStateTransition{
+					CollectionID: sm.View().GetMeta().GetCollectionId(),
+					View:         qviews.QueryViewKey{ShardID: m.shardID, QueryViewVersion: sm.Version()},
+					From:         before,
+					To:           sm.State(),
+				},
+			})
 			m.processStateMachine(sm)
 		}
 	}
@@ -410,7 +453,17 @@ func (m *ShardViewManager) advanceUnrecoverableToDropping() {
 // Must be called under m.mu.
 func (m *ShardViewManager) downOlderUpView(newUp *CoordQueryViewStateMachine) {
 	if m.upView != nil && m.upView != newUp {
+		before := m.upView.State()
 		m.upView.EnterDown()
+		qvobserve.Observe(m.ctx, qvobserve.CoordViewHandoffToNewUpEvent{
+			ViewStateTransition: qvobserve.ViewStateTransition{
+				CollectionID: m.upView.View().GetMeta().GetCollectionId(),
+				View:         qviews.QueryViewKey{ShardID: m.shardID, QueryViewVersion: m.upView.Version()},
+				From:         before,
+				To:           m.upView.State(),
+			},
+			NewUpView: qviews.QueryViewKey{ShardID: m.shardID, QueryViewVersion: newUp.Version()},
+		})
 		m.processStateMachine(m.upView)
 		// processStateMachine's Down case clears m.upView.
 	}
@@ -464,7 +517,19 @@ func (m *ShardViewManager) makeOnSyncResponse(version qviews.QueryViewVersion, t
 			return true // view already removed, stop tracking
 		}
 
+		before := sm.State()
 		sm.OnNodeStateReported(resp)
+		qvobserve.Observe(m.ctx, qvobserve.CoordViewReportAppliedEvent{
+			ViewStateTransition: qvobserve.ViewStateTransition{
+				CollectionID: sm.View().GetMeta().GetCollectionId(),
+				View:         qviews.QueryViewKey{ShardID: m.shardID, QueryViewVersion: sm.Version()},
+				From:         before,
+				To:           sm.State(),
+			},
+			Node:                 target.WorkNode(),
+			ReportedState:        resp.State(),
+			ResourceReadyPercent: resourceReadyPercent(resp),
+		})
 		m.processStateMachine(sm)
 		event := m.consumeDirtyEventLocked()
 		m.publishStatsLocked()
@@ -474,6 +539,18 @@ func (m *ShardViewManager) makeOnSyncResponse(version qviews.QueryViewVersion, t
 		m.submitDirtyEvent(event)
 		m.mu.Unlock()
 		return completed
+	}
+}
+
+func resourceReadyPercent(report qviews.QueryViewAtWorkNode) int64 {
+	if _, ok := report.WorkNode().(qviews.StreamingNode); !ok {
+		return 0
+	}
+	switch report.State() {
+	case qviews.QueryViewStateReady, qviews.QueryViewStateUp, qviews.QueryViewStateDown, qviews.QueryViewStateDropped:
+		return 100
+	default:
+		return 0
 	}
 }
 
@@ -506,7 +583,20 @@ func (m *ShardViewManager) makeOnQueryNodeLost(version qviews.QueryViewVersion) 
 			return // view already removed
 		}
 
+		before := sm.State()
+		qvobserve.Observe(m.ctx, qvobserve.CoordQueryNodeLostDetectedEvent{
+			Node: node,
+		})
 		sm.OnQueryNodeLost(node)
+		qvobserve.Observe(m.ctx, qvobserve.CoordViewQueryNodeLostAppliedEvent{
+			ViewStateTransition: qvobserve.ViewStateTransition{
+				CollectionID: sm.View().GetMeta().GetCollectionId(),
+				View:         qviews.QueryViewKey{ShardID: m.shardID, QueryViewVersion: sm.Version()},
+				From:         before,
+				To:           sm.State(),
+			},
+			Node: node,
+		})
 		m.processStateMachine(sm)
 		event := m.consumeDirtyEventLocked()
 		m.publishStatsLocked()

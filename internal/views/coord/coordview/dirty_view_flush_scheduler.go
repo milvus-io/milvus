@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	qvobserve "github.com/milvus-io/milvus/internal/views/qviews/observe"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
@@ -356,6 +357,12 @@ func (s *DirtyViewFlushScheduler) flushBatch(
 		if err := s.persistViews(ctx, persists); err != nil {
 			return err
 		}
+		for _, view := range persists {
+			qvobserve.Observe(ctx, qvobserve.CoordPersistViewEvent{
+				View:  queryViewKeyFromProto(view),
+				State: qviews.QueryViewState(view.GetMeta().GetState()),
+			})
+		}
 	}
 	for _, callback := range afterPersist {
 		callback()
@@ -363,6 +370,15 @@ func (s *DirtyViewFlushScheduler) flushBatch(
 	if len(viewsByNode) > 0 {
 		if err := s.syncer.SyncViews(ctx, syncer.SyncGroup{ViewsByNode: viewsByNode}); err != nil {
 			return err
+		}
+	}
+	for _, views := range viewsByNode {
+		for _, view := range views {
+			qvobserve.Observe(ctx, qvobserve.CoordSyncViewAcceptedEvent{
+				View:  view.View.QueryViewKey(),
+				Node:  view.View.WorkNode(),
+				State: view.View.State(),
+			})
 		}
 	}
 	return nil
