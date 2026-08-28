@@ -58,7 +58,26 @@ func (e *StreamingError) IsUnrecoverable() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE ||
 		e.IsInvalidArgument() ||
 		e.IsReplicateViolation() ||
-		e.IsTxnUnavilable() || e.IsSchemaVersionMismatch()
+		e.IsTxnUnavilable() || e.IsSchemaVersionMismatch() ||
+		e.IsShardFenced() || e.IsRoutingStale()
+}
+
+// IsShardFenced returns true if the error is caused by the vchannel fenced by shard split.
+// Retrying on the same vchannel never succeeds; the caller should refresh
+// the routing table and redispatch the messages to the new shards.
+func (e *StreamingError) IsShardFenced() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED
+}
+
+// IsRoutingStale returns true if the error is caused by a stale client routing version.
+// The caller should refresh the routing table and retry.
+//
+// Reserved, not yet wired: the routing_version negotiation scheme it belongs to
+// was dropped; the write switch relies purely on the permanent source fence
+// (SHARD_FENCED) + cache invalidation. No producer emits ROUTING_STALE today; it
+// is kept for a possible later routing-version fast path (design #50465 §3.3).
+func (e *StreamingError) IsRoutingStale() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_ROUTING_STALE
 }
 
 // IsReplicateViolation returns true if the error is caused by replicate violation.
@@ -201,6 +220,25 @@ func NewRateLimitRejected(format string, args ...interface{}) *StreamingError {
 // NewPartialUpdateRetryable creates a retryable partial update CAS error.
 func NewPartialUpdateRetryable(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE, format, args...)
+}
+
+// NewShardFenced creates a new StreamingError with code STREAMING_CODE_SHARD_FENCED.
+// fencedTimeTick is T_switch (the time tick the vchannel was fenced at); it is 0
+// when unknown. The split coordinator reads it back from an already-fenced
+// re-fence to recover T_switch after a crash that lost the recorded value.
+func NewShardFenced(vchannel string, fencedTimeTick uint64) *StreamingError {
+	err := New(streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED, "%s is fenced by shard split", vchannel)
+	err.FencedTimeTick = fencedTimeTick
+	return err
+}
+
+// NewRoutingStale creates a new StreamingError with code STREAMING_CODE_ROUTING_STALE.
+//
+// Reserved, not yet wired: no producer emits ROUTING_STALE today (the
+// routing_version negotiation was dropped in favor of the SHARD_FENCED
+// reject-refetch loop); kept for a possible later routing-version fast path.
+func NewRoutingStale(format string, args ...interface{}) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_ROUTING_STALE, format, args...)
 }
 
 // New creates a new StreamingError with the given code and cause.

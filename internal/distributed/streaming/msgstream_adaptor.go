@@ -110,13 +110,32 @@ func (m *delegatorMsgstreamAdaptor) Seek(ctx context.Context, msgPositions []*ms
 		DeliverFilters: []options.DeliverFilter{
 			// only consume messages with timestamp >= position timestamp
 			options.DeliverFilterTimeTickGTE(position.GetTimestamp()),
-			// only consume insert, delete, schema change, and manual flush messages
-			options.DeliverFilterMessageType(message.MessageTypeInsert, message.MessageTypeDelete, message.MessageTypeSchemaChange, message.MessageTypeAlterCollection, message.MessageTypeManualFlush),
+			options.DeliverFilterMessageType(delegatorMessageTypes...),
 		},
 		MessageHandler: handler,
 	})
 	m.ch = handler.Chan()
 	return nil
+}
+
+// delegatorMessageTypes is the whole set of WAL message types a query
+// delegator's msgstream is allowed to see. It is a whitelist: anything absent
+// is dropped at the WAL scanner, before the dispatcher, before the flow graph,
+// and without a trace in any log.
+//
+// SplitShard is in it because that fence is how a delegator learns its vchannel
+// was split. Dropped, the source delegator never spawns the in-process children
+// that answer for the new shards until querycoord adopts them, so every row
+// written after the fence is served by nothing for the length of the split —
+// while the source keeps answering from its own pre-fence data with a fully
+// advanced tsafe, so the loss looks like nothing at all.
+var delegatorMessageTypes = []message.MessageType{
+	message.MessageTypeInsert,
+	message.MessageTypeDelete,
+	message.MessageTypeSchemaChange,
+	message.MessageTypeAlterCollection,
+	message.MessageTypeManualFlush,
+	message.MessageTypeSplitShard,
 }
 
 func (m *delegatorMsgstreamAdaptor) GetLatestMsgID(channel string) (msgstream.MessageID, error) {
