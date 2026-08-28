@@ -15,10 +15,17 @@ Coord is the leader of the global state machine. It generates QueryViews, drives
 
 Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahead), **Dropped** (deletion).
 
+The Coord state machine exposes pending persistence and node-sync effects as one
+atomic `ConsumeFlush` result. Persist and sync values are independently
+latest-wins until consumed, so the manager cannot drain only one half of a
+transition and leave an inconsistent externalization boundary.
+
 ### 1.1 Preparing
 
 **Entry Conditions:**
-- Balancer generates a new view (triggers: DataView version change, balance request, QN online/offline, previous view becomes Unrecoverable, load config change such as LoadPartition/ReleasePartition).
+- The lifecycle caller generates a new view (for example after a DataVersion
+  change, node membership change, previous Unrecoverable view, or load-config
+  change).
 - Recovery: loaded from ETCD in Preparing state.
 
 **Automatic Behavior:**
@@ -129,6 +136,10 @@ Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahea
   - Dropped → Coord transitions to Dropping. This fast-forwards recovery when
     Coord regresses from the unpersisted Dropping state to persisted Down while
     SN has already completed Dropped.
+  - If a recovered Down view is no longer present on SN, SN reports Dropped
+    immediately. Coord then follows the same fast-forward path and pushes
+    Dropped to all nodes, allowing QueryNode resources and the persisted Coord
+    record to be cleaned up.
   - Unrecoverable → Coord transitions to Unrecoverable.
 - **QN**: Ready / Unrecoverable
   - Ready → Coord does nothing.
@@ -196,7 +207,7 @@ Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahea
 
 **Automatic Behavior:**
 1. Delete the view from ETCD.
-2. Destroy the state machine instance.
+2. After the ETCD deletion succeeds, destroy the state machine instance.
 
 **Transitions:** None (terminal state).
 
@@ -206,22 +217,18 @@ Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahea
 
 ## 2. StreamingNode State Machine
 
-StreamingNode manages growing data and generates query plans. It persists Up
-recovery records for crash recovery. Each persisted recovery record is the
+StreamingNode persists Up recovery records for crash recovery. Each record is the
 complete `QueryViewOfShard` received from Coord, including both
-`QueryViewOfStreamingNode` and `QueryViewOfQueryNode`; the latter is required to
-rebuild Phase 1 query plans after StreamingNode restart.
+`QueryViewOfStreamingNode` and `QueryViewOfQueryNode`, so recovery retains the
+complete shard topology without depending on a separate metadata source.
 
 Persisted states: **Up** recovery info only. Every version that has reached Up
 is persisted independently until that view receives Down or Dropped, so
 multiple Up recovery records may coexist.
 
-> **TODO:** Wire StreamingNode resource-preparation and WAL-recovery failures
-> to `snQueryViewStateMachine.OnUnrecoverable`. The current production resource
-> manager reports successful readiness but does not provide an unrecoverable
-> failure callback. Until that callback is introduced, the StreamingNode
-> transitions to Unrecoverable described below are design intent rather than a
-> production-reachable chain.
+StreamingNode resource acquisition exposes both successful and unrecoverable
+callbacks. The handler wires them to `OnReady` and `OnUnrecoverable`, including
+the crash-recovery path.
 
 ### 2.1 Preparing
 
@@ -238,7 +245,7 @@ multiple Up recovery records may coexist.
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
 | Ready | Resource preparation succeeded | Report Ready to Coord |
-| Unrecoverable | **TODO:** data_version expired (growing segments already flushed and released) | Report Unrecoverable to Coord after the failure callback is wired |
+| Unrecoverable | data_version expired (growing segments already flushed and released) | Report Unrecoverable to Coord |
 | Dropped | Received Dropped push from Coord (Coord aborted this view) | Release any prepared resources |
 
 **Possible Coord States (and this node's reaction):**
@@ -310,7 +317,7 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 |---|---|---|
 | Up | WAL consumption catches up to current position | Begin serving queries |
 | Down | Received Down push from Coord | Delete recovery info; abandon WAL catch-up |
-| Unrecoverable | **TODO:** local resource failure during WAL recovery (e.g., OOM) | Mark the view locally unavailable without reporting to Coord after the failure callback is wired; retain persisted Up recovery info, and let the query path trigger replacement |
+| Unrecoverable | local resource failure during WAL recovery (e.g., OOM) | Mark the view locally unavailable without reporting to Coord; retain persisted Up recovery info, and let the query path trigger replacement |
 
 **Possible Coord States (and this node's reaction):**
 - Coord considers this view to be in Up state (Coord is unaware of UpRecovering).
@@ -340,12 +347,12 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 - Coord in Down / Dropping → SN does nothing; normal.
 - Coord pushes Dropped → SN transitions to Dropped.
 
-### 2.6 Unrecoverable (TODO: Production Failure Wiring)
+### 2.6 Unrecoverable
 
 **Entry Conditions:**
-- **TODO:** data_version check failed during Preparing (growing segments already
+- data_version check failed during Preparing (growing segments already
   flushed to sealed and released).
-- **TODO:** local resource failure during UpRecovering (e.g., OOM while
+- local resource failure during UpRecovering (e.g., OOM while
   replaying WAL to recover growing segments).
 
 **Automatic Behavior:**
@@ -383,6 +390,10 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 ## 3. QueryNode State Machine
 
 QueryNode is fully stateless with no persistence and no recovery process. It does NOT observe Up, Down, or Dropping states — it can serve queries as soon as it reaches Ready.
+
+QN stores the complete pending report proto at the moment a state/progress
+event occurs. `ConsumeReport` returns that immutable snapshot and clears it;
+later local progress does not retroactively mutate an already-pending report.
 
 ### 3.1 Preparing
 

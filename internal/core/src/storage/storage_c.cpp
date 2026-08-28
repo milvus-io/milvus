@@ -32,6 +32,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/KeyRetriever.h"
 #include "storage/Types.h"
+#include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "milvus-storage/thread_pool.h"
 
@@ -198,6 +199,16 @@ InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config) {
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
     }
+}
+
+void
+SetExternalVectorPartialNullAsRowNull(bool enabled) {
+    milvus::storage::SetExternalVectorPartialNullAsRowNull(enabled);
+}
+
+bool
+GetExternalVectorPartialNullAsRowNull() {
+    return milvus::storage::GetExternalVectorPartialNullAsRowNull();
 }
 
 CStatus

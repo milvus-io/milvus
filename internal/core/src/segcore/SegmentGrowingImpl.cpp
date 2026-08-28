@@ -95,8 +95,6 @@
 
 namespace milvus::segcore {
 
-using namespace milvus::cachinglayer;
-
 namespace {
 
 int64_t
@@ -389,14 +387,22 @@ ValidateGeometryInsertDataShape(const proto::schema::FieldData& field_data,
     }
 }
 
+// A StorageV2 column-group load only carries fields that were written to
+// binlogs. A TEXT field added to the schema after the segment was written
+// (AddField) has no binlog column, so the schema alone must not reject the
+// load: the empty column is backfilled by FillAbsentFields. Only a load info
+// that actually carries TEXT field data is invalid, because TEXT cannot be
+// persisted without a StorageV3 manifest (LOB spillover / query path).
 bool
-SchemaHasTextField(const Schema& schema) {
-    return std::any_of(schema.get_fields().begin(),
-                       schema.get_fields().end(),
-                       [](const auto& field) {
-                           return field.second.get_data_type() ==
-                                  DataType::TEXT;
-                       });
+LoadInfoHasTextField(const LoadFieldDataInfo& load_info, const Schema& schema) {
+    for (const auto& [_, info] : load_info.field_infos) {
+        auto fid = FieldId(info.field_id);
+        if (schema.has_field(fid) &&
+            schema.operator[](fid).get_data_type() == DataType::TEXT) {
+            return true;
+        }
+    }
+    return false;
 }
 
 }  // anonymous namespace
@@ -475,17 +481,17 @@ SegmentGrowingImpl::try_remove_chunks(FieldId fieldId, const Schema& schema) {
     }
 }
 
-ResourceUsage
+cachinglayer::ResourceUsage
 SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
     auto schema = get_schema_snapshot();
     return EstimateSegmentResourceUsage(*schema);
 }
 
-ResourceUsage
+cachinglayer::ResourceUsage
 SegmentGrowingImpl::EstimateSegmentResourceUsage(const Schema& schema) const {
     int64_t num_rows = get_row_count();
     if (num_rows == 0) {
-        return ResourceUsage{0, 0};
+        return cachinglayer::ResourceUsage{0, 0};
     }
 
     bool growing_mmap_enabled = storage::MmapManager::GetInstance()
@@ -672,7 +678,7 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage(const Schema& schema) const {
     memory_bytes = static_cast<int64_t>(memory_bytes * kResourceSafetyMargin);
     disk_bytes = static_cast<int64_t>(disk_bytes * kResourceSafetyMargin);
 
-    return ResourceUsage{memory_bytes, disk_bytes};
+    return cachinglayer::ResourceUsage{memory_bytes, disk_bytes};
 }
 
 void
@@ -691,12 +697,12 @@ SegmentGrowingImpl::UpdateResourceTracking(const Schema& schema) {
     auto old_resource = tracked_resource_;
 
     if (old_resource.AnyGTZero()) {
-        Manager::GetInstance().RefundLoadedResource(
+        cachinglayer::Manager::GetInstance().RefundLoadedResource(
             old_resource, fmt::format("growing_segment_{}_refund", id_));
     }
 
     if (new_resource.AnyGTZero()) {
-        Manager::GetInstance().ChargeLoadedResource(
+        cachinglayer::Manager::GetInstance().ChargeLoadedResource(
             new_resource, fmt::format("growing_segment_{}_charge", id_));
     }
 
@@ -1050,14 +1056,12 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
                 field_meta.is_nested_array()) {
                 array_type = field_meta.get_array_type_schema();
             }
-            auto field_data =
-                storage::CreateFieldData(field_meta.get_data_type(),
-                                         field_meta.get_element_type(),
-                                         true,
-                                         1,
-                                         lack_num,
-                                         std::move(array_type));
-            field_data->FillFieldData(field_meta.default_value(), lack_num);
+            auto field_data = storage::CreateFieldDataFromDefaultValue(
+                field_meta.get_data_type(),
+                true,
+                lack_num,
+                field_meta.default_value(),
+                std::move(array_type));
             channel->push(field_data);
         }
 
@@ -1228,7 +1232,7 @@ void
 SegmentGrowingImpl::load_column_group_data_internal(
     const LoadFieldDataInfo& infos) {
     auto schema = get_schema_snapshot();
-    AssertInfo(!SchemaHasTextField(*schema),
+    AssertInfo(!LoadInfoHasTextField(infos, *schema),
                "TEXT growing segment cannot be loaded from StorageV2 column "
                "groups; StorageV3 manifest is required");
 
@@ -1473,7 +1477,7 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     deleted_record_.LoadPush(pks, timestamps);
 }
 
-PinWrapper<SpanBase>
+cachinglayer::PinWrapper<SpanBase>
 SegmentGrowingImpl::chunk_data_impl(milvus::OpContext* op_ctx,
                                     FieldId field_id,
                                     int64_t chunk_id) const {
@@ -1484,7 +1488,7 @@ SegmentGrowingImpl::chunk_data_impl(milvus::OpContext* op_ctx,
                   "Span API does not support nested ARRAY field {}",
                   field_id.get());
     }
-    return PinWrapper<SpanBase>(
+    return cachinglayer::PinWrapper<SpanBase>(
         get_insert_record().get_span_base(field_id, chunk_id));
 }
 
@@ -1541,7 +1545,7 @@ SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
     }
 }
 
-PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
+cachinglayer::PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
 SegmentGrowingImpl::chunk_string_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1551,7 +1555,7 @@ SegmentGrowingImpl::chunk_string_view_impl(
               "chunk string view impl not implement for growing segment");
 }
 
-PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
+cachinglayer::PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
 SegmentGrowingImpl::chunk_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1561,7 +1565,7 @@ SegmentGrowingImpl::chunk_array_view_impl(
               "chunk array view impl not implement for growing segment");
 }
 
-PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
+cachinglayer::PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
 SegmentGrowingImpl::chunk_array_value_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1632,7 +1636,8 @@ SegmentGrowingImpl::chunk_array_value_view_impl(
         }
         std::pair<std::vector<ArrayValueView>, ValidityView> content{
             std::move(views), ValidityView::FromExpanded(row_valid)};
-        return PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>(
+        return cachinglayer::PinWrapper<
+            std::pair<std::vector<ArrayValueView>, ValidityView>>(
             std::move(valid_data), std::move(content));
     }
 
@@ -1641,11 +1646,12 @@ SegmentGrowingImpl::chunk_array_value_view_impl(
     }
     std::pair<std::vector<ArrayValueView>, ValidityView> content{
         std::move(views), ValidityView{}};
-    return PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>(
+    return cachinglayer::PinWrapper<
+        std::pair<std::vector<ArrayValueView>, ValidityView>>(
         std::move(content));
 }
 
-PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
+cachinglayer::PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
 SegmentGrowingImpl::chunk_vector_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1745,7 +1751,7 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
         }
         std::pair<std::vector<VectorArrayView>, ValidityView> content{
             std::move(views), ValidityView::FromExpanded(valid_data->data())};
-        return PinWrapper<
+        return cachinglayer::PinWrapper<
             std::pair<std::vector<VectorArrayView>, ValidityView>>(
             std::move(valid_data), std::move(content));
     }
@@ -1759,11 +1765,13 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
     }
     std::pair<std::vector<VectorArrayView>, ValidityView> content{
         std::move(views), ValidityView{}};
-    return PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>(
+    return cachinglayer::PinWrapper<
+        std::pair<std::vector<VectorArrayView>, ValidityView>>(
         std::move(content));
 }
 
-PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+cachinglayer::PinWrapper<
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>>
 SegmentGrowingImpl::chunk_string_views_by_offsets(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1773,7 +1781,7 @@ SegmentGrowingImpl::chunk_string_views_by_offsets(
               "chunk view by offsets not implemented for growing segment");
 }
 
-PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+cachinglayer::PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
 SegmentGrowingImpl::chunk_array_views_by_offsets(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1784,7 +1792,8 @@ SegmentGrowingImpl::chunk_array_views_by_offsets(
         "chunk array views by offsets not implemented for growing segment");
 }
 
-PinWrapper<std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+cachinglayer::PinWrapper<
+    std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
 SegmentGrowingImpl::chunk_array_value_views_by_offsets(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1840,7 +1849,7 @@ SegmentGrowingImpl::chunk_array_value_views_by_offsets(
 
     std::pair<std::vector<ArrayValueView>, FixedVector<bool>> content{
         std::move(views), std::move(valid_data)};
-    return PinWrapper<
+    return cachinglayer::PinWrapper<
         std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>(
         std::move(content));
 }

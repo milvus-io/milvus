@@ -160,6 +160,22 @@ type resourceEstimateFactor struct {
 	externalRawDataFactor float64
 }
 
+func estimateTantivyValidityBitmapBytes(numRows int64) uint64 {
+	if numRows <= 0 {
+		return 0
+	}
+
+	// TextIndexStats does not carry the null count, so admission reserves the
+	// full word-aligned bitmap conservatively. All-valid indexes charge zero
+	// actual bitmap bytes after loading.
+	const (
+		bitsPerWord  = uint64(64)
+		bytesPerWord = uint64(8)
+	)
+	words := (uint64(numRows)-1)/bitsPerWord + 1
+	return words * bytesPerWord
+}
+
 func NewLoader(
 	ctx context.Context,
 	manager *Manager,
@@ -2122,11 +2138,14 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 	// Text match indexes are evictable (support_eviction=true in caching layer).
 	// Text match index mmap is driven by scalar_field_enable_mmap (same as raw scalar data).
 	textIndexMmapEnable := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
+	validityBitmapBytes := estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
 	for _, textStats := range loadInfo.GetTextStatsLogs() {
+		indexFileBytes := uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+		segmentEvictableMemorySize += validityBitmapBytes
 		if textIndexMmapEnable {
-			segmentEvictableDiskSize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+			segmentEvictableDiskSize += indexFileBytes
 		} else {
-			segmentEvictableMemorySize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+			segmentEvictableMemorySize += indexFileBytes
 		}
 	}
 
@@ -2421,18 +2440,22 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 	// text index data is managed by the caching layer when tiered eviction is enabled,
 	// so it only needs to be included when tiered eviction is disabled.
 	// Text match index mmap is driven by scalar_field_enable_mmap (same as raw scalar data).
-	// memory_size = sum of Tantivy index file sizes (same value as C++ ByteSize() after load),
-	// so 1.0x is the baseline; textIndexExpansionFactor allows tuning if needed.
+	// memory_size is the sum of uploaded Tantivy index files, including sparse null sidecars.
+	// The materialized word-aligned validity bitmap is separate heap memory, and
+	// textIndexExpansionFactor applies only to the index file bytes.
 	textIndexMmapEnable := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
+	validityBitmapBytes := estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
 	for _, textStats := range loadInfo.GetTextStatsLogs() {
+		if multiplyFactor.TieredEvictionEnabled {
+			continue
+		}
+
+		indexFileBytes := uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+		segMemoryLoadingSize += validityBitmapBytes
 		if textIndexMmapEnable {
-			if !multiplyFactor.TieredEvictionEnabled {
-				segDiskLoadingSize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
-			}
+			segDiskLoadingSize += indexFileBytes
 		} else {
-			if !multiplyFactor.TieredEvictionEnabled {
-				segMemoryLoadingSize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
-			}
+			segMemoryLoadingSize += indexFileBytes
 		}
 	}
 

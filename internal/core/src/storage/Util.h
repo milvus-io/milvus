@@ -59,6 +59,15 @@
 
 namespace milvus::storage {
 
+// Controls how parent-valid external dense-vector rows with a mixture of
+// valid and null child elements are normalized. All-null child ranges are
+// always normalized to a row-level null when the field is nullable.
+void
+SetExternalVectorPartialNullAsRowNull(bool enabled);
+
+bool
+GetExternalVectorPartialNullAsRowNull();
+
 void
 ReadMediumType(BinlogReaderPtr reader);
 
@@ -404,6 +413,17 @@ CreateFieldData(
     bool nullable = false,
     int64_t dim = 1,
     int64_t total_num_rows = 0,
+    std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
+
+// Creates field data whose rows are initialized from a schema default value.
+// Initialization completes before the FieldData is published and does not
+// acquire its mutation lock.
+FieldDataPtr
+CreateFieldDataFromDefaultValue(
+    const DataType& type,
+    bool nullable,
+    int64_t element_count,
+    const std::optional<DefaultValueType>& default_value,
     std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 
 int64_t

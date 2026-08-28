@@ -876,6 +876,31 @@ class TestMilvusClientV2Base(Base):
             time.sleep(2)
         return False
 
+    def wait_for_schema_version_consistency(self, client, collection_name, timeout=None):
+        """Wait until every eligible sealed segment catches up with the latest collection
+        schema version, i.e. all pending schema-bump backfill is done. Polls the
+        schema_version_consistent_segments / schema_version_total_segments stats emitted
+        by DataCoord through get_collection_stats (present only after a schema-changing
+        DDL; growing and L0 segments are excluded server-side, so flush data that must
+        be counted). Two consecutive consistent polls absorb the DDL -> DataCoord
+        propagation window.
+        """
+        timeout = TIMEOUT if timeout is None else timeout
+        start_time = time.time()
+        streak = 0
+        while start_time + timeout > time.time():
+            stats, _ = self.get_collection_stats(client, collection_name)
+            consistent = stats.get("schema_version_consistent_segments")
+            total = stats.get("schema_version_total_segments")
+            if consistent is not None and total is not None and int(total) > 0 and int(consistent) == int(total):
+                streak += 1
+                if streak >= 2:
+                    return True
+            else:
+                streak = 0
+            time.sleep(2)
+        return False
+
     @trace()
     def create_alias(self, client, collection_name, alias, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout

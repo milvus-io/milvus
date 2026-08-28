@@ -179,6 +179,11 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int32(16), Params.StorageReaderThreadPoolSize.GetAsInt32())
 		assert.Equal(t, int64(536870912), Params.IndexBuildReadWindowBytes.GetAsInt64())
 
+		defer params.Reset(Params.ExternalVectorPartialNullPolicy.Key)
+		assert.Equal(t, "error", Params.ExternalVectorPartialNullPolicy.GetValue())
+		params.Save(Params.ExternalVectorPartialNullPolicy.Key, "null")
+		assert.Equal(t, "null", Params.ExternalVectorPartialNullPolicy.GetValue())
+
 		assert.Equal(t, Params.GracefulTime.GetAsInt64(), int64(DefaultGracefulTime))
 		t.Logf("default grafeful time = %d", Params.GracefulTime.GetAsInt64())
 
@@ -269,6 +274,12 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 60*time.Second, params.CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second))
 		params.Save("common.sync.taskPoolReleaseTimeoutSeconds", "100")
 		assert.Equal(t, 100*time.Second, params.CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second))
+
+		assert.Equal(t, 2.0, Params.NodeSchedulerMaxConcurrencyRatio.GetAsFloat())
+		params.Save(Params.NodeSchedulerMaxConcurrencyRatio.Key, "0.5")
+		assert.Equal(t, 0.5, Params.NodeSchedulerMaxConcurrencyRatio.GetAsFloat())
+		params.Reset(Params.NodeSchedulerMaxConcurrencyRatio.Key)
+		assert.Equal(t, 2.0, Params.NodeSchedulerMaxConcurrencyRatio.GetAsFloat())
 
 		assert.Equal(t, 1, params.CommonCfg.StorageZstdConcurrency.GetAsInt())
 		params.Save("common.storage.zstd.concurrency", "2")
