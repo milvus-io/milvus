@@ -78,6 +78,9 @@ _EXTERNAL_ADD_FIELD_UNSUPPORTED_PUBLIC_TYPES = {
 }
 _EXTERNAL_ADD_FIELD_PROTO_ONLY_UNSUPPORTED_TYPES = {
     "Mol": 27,
+    "Date": 28,
+    "Time": 29,
+    "Decimal": 30,
 }
 _EXTERNAL_ADD_FIELD_INTERNAL_TYPES = {
     DataType.NONE,
@@ -2965,7 +2968,7 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
 
         error = {
             ct.err_code: 1100,
-            ct.err_msg: "DropCollectionFunction RPC is no longer supported; drop a function via drop_function_field",
+            ct.err_msg: "alter collection schema operation is not supported for external collection",
         }
         self.drop_function_field(
             client,
