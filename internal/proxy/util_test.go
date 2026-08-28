@@ -964,6 +964,17 @@ func TestValidateFieldNestedArray(t *testing.T) {
 		assert.Contains(t, err.Error(), "nullable nested array elements are not supported")
 	})
 
+	t.Run("legacy element nullable on nested array is rejected", func(t *testing.T) {
+		field := nestedField(testArrayTypeSchema(
+			leafType(schemapb.DataType_Int64),
+			&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "10"},
+		))
+		field.ElementNullable = true
+
+		err := ValidateField(field, schema)
+		require.ErrorContains(t, err, "element_nullable is not supported for nested Array")
+	})
+
 	t.Run("valid array of varchar array", func(t *testing.T) {
 		field := nestedField(testArrayTypeSchema(
 			leafType(schemapb.DataType_VarChar,
