@@ -26,6 +26,9 @@ type reliableSyncer struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	nodeChanged chan struct{}
+	drainWG     sync.WaitGroup
 }
 
 // NewReliableSyncer creates a new ReliableSyncer.
@@ -36,9 +39,33 @@ func NewReliableSyncer(client ViewSyncClient) ReliableSyncer {
 		resumableSyncers: make(map[qviews.WorkNodeKey]*resumableSyncer),
 		ctx:              ctx,
 		cancel:           cancel,
+		nodeChanged:      make(chan struct{}, 1),
 	}
-	client.RegisterNodeChangedNotifier(s.drainRemovedNodes)
+	s.drainWG.Add(1)
+	go s.watchNodeChanged()
+	client.RegisterNodeChangedNotifier(s.notifyNodeChanged)
 	return s
+}
+
+// notifyNodeChanged coalesces membership-change notifications without blocking
+// the service-discovery watcher that invokes the registered callback.
+func (s *reliableSyncer) notifyNodeChanged() {
+	select {
+	case s.nodeChanged <- struct{}{}:
+	default:
+	}
+}
+
+func (s *reliableSyncer) watchNodeChanged() {
+	defer s.drainWG.Done()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-s.nodeChanged:
+			s.drainRemovedNodes()
+		}
+	}
 }
 
 func (s *reliableSyncer) SyncViews(ctx context.Context, group SyncGroup) error {
@@ -121,6 +148,7 @@ func (s *reliableSyncer) Close() error {
 	s.mu.Unlock()
 
 	s.cancel()
+	s.drainWG.Wait()
 
 	// Close all remaining ResumableSyncers (graceful shutdown, no drain).
 	s.mu.Lock()
