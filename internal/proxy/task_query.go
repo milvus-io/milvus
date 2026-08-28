@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
@@ -1065,7 +1066,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	// Only geometry WKB→WKT conversion still needs to happen here.
 	for i, fieldData := range t.result.FieldsData {
 		if fieldData.Type == schemapb.DataType_Geometry {
-			if err := validateGeometryFieldSearchResult(&t.result.FieldsData[i]); err != nil {
+			if err := fieldvalidator.ValidateGeometryFieldSearchResult(&t.result.FieldsData[i]); err != nil {
 				log.Warn(ctx, "fail to validate geometry field search result", mlog.Err(err))
 				return err
 			}
