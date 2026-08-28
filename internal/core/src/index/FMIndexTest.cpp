@@ -30,6 +30,8 @@
 #include "common/Types.h"
 #include "exec/QueryContext.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/ExprBatchTestUtils.h"
+#include "expr/ITypeExpr.h"
 #include "index/FMIndex.h"
 #include "index/IndexInfo.h"
 #include "index/Meta.h"
@@ -825,12 +827,15 @@ RunRoundTrip(bool enable_mmap) {
     if (enable_mmap) {
         EXPECT_EQ(idx->CellByteSize().memory_bytes, idx->ByteSize());
         EXPECT_EQ(idx->CellByteSize().file_bytes, kEstimatedFile);
-        EXPECT_GT(idx->ByteSize(), 0);
-        // No assertion that a query leaves ByteSize() unchanged: ByteSize()
-        // returns cached_byte_size_, which only ComputeByteSize() rewrites and
-        // which nothing reaches at query time, so such a check is vacuous. The
-        // ISA table stays lazy because this wrapper has no Extract() call site
-        // at all -- an invariant held by construction, not by a size probe.
+        const auto bytes_after_load = idx->ByteSize();
+        EXPECT_GT(bytes_after_load, 0);
+        EXPECT_LT(idx->CellByteSize().memory_bytes, kEstimatedMemory / 2);
+        // Match does not Extract. Recompute so this would fail if a future
+        // change materialized ISA and grew resident heap.
+        (void)Match(idx.get(), "%app%");
+        idx->ComputeByteSize();
+        EXPECT_EQ(idx->ByteSize(), bytes_after_load);
+        EXPECT_EQ(idx->CellByteSize().memory_bytes, bytes_after_load);
     } else {
         // This change targets LoadView: the copy path keeps its pre-load cache
         // accounting unchanged.
@@ -1341,6 +1346,356 @@ TEST(FMIndex, ExecutorPathMatchRechecksVarchar) {
         FAIL() << "expected invalid LIKE pattern to fail during compilation";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::ExprInvalid);
+    }
+}
+
+namespace {
+
+struct SealedFMMatch {
+    SchemaPtr schema;
+    FieldId varchar_id;
+    FieldId int_id;
+    std::unique_ptr<segcore::SegmentSealed> segment;
+    // Owns the insert-log write and keeps TestLocalPath alive until the
+    // loaded segment is destroyed. ChunkManagerWrapper::dtor wipes the
+    // chunk-manager root.
+    std::unique_ptr<ChunkManagerWrapper> cm_w;
+};
+
+expr::TypedExprPtr
+MakeMatchTypedExpr(const SchemaPtr& schema,
+                   FieldId field_id,
+                   const std::string& pattern,
+                   bool nullable) {
+    auto* unary = test::GenUnaryRangeExpr(proto::plan::OpType::Match, pattern);
+    unary->set_allocated_column_info(
+        test::GenColumnInfo(field_id.get(),
+                            proto::schema::DataType::VarChar,
+                            false,
+                            false,
+                            proto::schema::DataType::None,
+                            nullable));
+    auto expr = test::GenExpr();
+    expr->set_allocated_unary_range_expr(unary);
+    auto parser = milvus::query::ProtoParser(schema);
+    return parser.ParseExprs(*expr);
+}
+
+bool
+CompiledUseIndexCursor(const expr::TypedExprPtr& typed_expr,
+                       const segcore::SegmentInternalInterface* segment,
+                       int64_t active_count) {
+    auto query_context = std::make_shared<exec::QueryContext>(
+        DEAFULT_QUERY_ID, segment, active_count, MAX_TIMESTAMP);
+    exec::ExecContext exec_context(query_context.get());
+    auto compiled =
+        exec::CompileExpressions({typed_expr}, &exec_context, {}, false);
+    auto* seg_expr = dynamic_cast<exec::SegmentExpr*>(compiled[0].get());
+    if (seg_expr == nullptr) {
+        return false;
+    }
+    return seg_expr->UseIndexCursor();
+}
+
+SealedFMMatch
+LoadSealedFMMatch(int64_t collection_id,
+                  int64_t partition_id,
+                  int64_t segment_id,
+                  int64_t index_build_id,
+                  const std::vector<std::string>& rows,
+                  const std::vector<FieldDataPtr>& varchar_chunks,
+                  bool nullable,
+                  const uint8_t* valid_bitmap,
+                  const std::vector<int64_t>* ints) {
+    SealedFMMatch out;
+    out.schema = std::make_shared<Schema>();
+    out.varchar_id =
+        out.schema->AddDebugField("fm_match", DataType::VARCHAR, nullable);
+    if (ints != nullptr) {
+        out.int_id = out.schema->AddDebugField("fm_int", DataType::INT64);
+    }
+
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      out.varchar_id.get(),
+                                                      DataType::VARCHAR,
+                                                      DataType::NONE,
+                                                      nullable,
+                                                      /*max_length=*/65535);
+    auto index_meta = gen_index_meta(
+        segment_id, out.varchar_id.get(), index_build_id, index_build_id);
+    auto storage_config = gen_local_storage_config(TestLocalPath);
+    auto cm = CreateChunkManager(storage_config);
+    // Same FS handle as ExecutorPathMatchRechecksVarchar. UploadUnified writes
+    // through StorageV2FSCache; AppendIndexV2 reads through the process Arrow
+    // FS. Both are rooted at TestLocalPath, so the packed file is visible.
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    out.cm_w = std::make_unique<ChunkManagerWrapper>(cm);
+
+    std::vector<FieldDataPtr> chunks = varchar_chunks;
+    if (chunks.empty()) {
+        auto field_data = storage::CreateFieldData(
+            DataType::VARCHAR, DataType::NONE, nullable);
+        if (nullable) {
+            field_data->FillFieldData(
+                rows.data(), valid_bitmap, rows.size(), 0);
+        } else {
+            field_data->FillFieldData(rows.data(), rows.size());
+        }
+        chunks.push_back(field_data);
+    }
+
+    out.segment = milvus::segcore::CreateSealedSegment(out.schema);
+    auto varchar_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                       partition_id,
+                                                       segment_id,
+                                                       out.varchar_id.get(),
+                                                       chunks,
+                                                       cm);
+    out.segment->LoadFieldData(varchar_info);
+
+    if (ints != nullptr) {
+        auto int_data =
+            storage::CreateFieldData(DataType::INT64, DataType::NONE, false);
+        int_data->FillFieldData(ints->data(), ints->size());
+        auto int_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                       partition_id,
+                                                       segment_id,
+                                                       out.int_id.get(),
+                                                       {int_data},
+                                                       cm);
+        out.segment->LoadFieldData(int_info);
+    }
+
+    auto build_data =
+        storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, nullable);
+    if (nullable) {
+        build_data->FillFieldData(rows.data(), valid_bitmap, rows.size(), 0);
+    } else {
+        build_data->FillFieldData(rows.data(), rows.size());
+    }
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(build_data);
+    storage::InsertData insert_data(payload_reader);
+    insert_data.SetFieldDataMeta(field_meta);
+    insert_data.SetTimestamps(0, 100);
+    auto serialized_bytes = insert_data.Serialize(storage::Remote);
+    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
+                                TestLocalPath,
+                                collection_id,
+                                partition_id,
+                                segment_id,
+                                out.varchar_id.get(),
+                                1);
+    out.cm_w->Write(log_path, serialized_bytes.data(), serialized_bytes.size());
+
+    storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
+    std::vector<std::string> index_files;
+    int64_t index_size = 0;
+    {
+        Config config;
+        config[milvus::index::INDEX_TYPE] = milvus::index::FMINDEX_INDEX_TYPE;
+        config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+        index::FMIndexParams params{.sa_sample_rate = 8};
+        auto built = std::make_shared<index::FMIndex>(ctx, params);
+        built->Build(config);
+        auto stats = built->UploadUnified({});
+        index_size = stats->GetSerializedSize();
+        index_files = stats->GetIndexFiles();
+        AssertInfo(!index_files.empty(), "FMINDEX upload produced no files");
+    }
+
+    std::map<std::string, std::string> index_params{
+        {milvus::index::INDEX_TYPE, milvus::index::FMINDEX_INDEX_TYPE},
+        {milvus::index::FM_SA_SAMPLE_RATE, "8"},
+        {milvus::LOAD_PRIORITY, "HIGH"},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"},
+    };
+    milvus::segcore::LoadIndexInfo load_index_info{};
+    load_index_info.collection_id = collection_id;
+    load_index_info.partition_id = partition_id;
+    load_index_info.segment_id = segment_id;
+    load_index_info.field_id = out.varchar_id.get();
+    load_index_info.field_type = DataType::VARCHAR;
+    load_index_info.enable_mmap = true;
+    load_index_info.mmap_dir_path = TestLocalPath + "mmap";
+    load_index_info.index_id = index_build_id + 1000;
+    load_index_info.index_build_id = index_build_id;
+    load_index_info.index_version = index_build_id;
+    load_index_info.index_params = index_params;
+    load_index_info.index_files = index_files;
+    load_index_info.schema = field_meta.field_schema;
+    load_index_info.index_size = index_size;
+    uint8_t trace_id[16] = {5};
+    uint8_t span_id[8] = {6};
+    CTraceContext trace{};
+    trace.traceID = trace_id;
+    trace.spanID = span_id;
+    trace.traceFlags = 0;
+    AppendIndexV2(trace, static_cast<CLoadIndexInfo>(&load_index_info));
+    out.segment->LoadIndex(load_index_info);
+    return out;
+}
+
+std::vector<std::string>
+MakeLongTextZebraRows(size_t nb) {
+    std::string filler(500, 'y');
+    std::vector<std::string> data;
+    data.reserve(nb);
+    for (size_t i = 0; i < nb; i++) {
+        std::string row = filler;
+        if (i % 250 == 0) {
+            row += "ZEBRA";
+        }
+        if (i >= 100 && (i - 100) % 250 == 0) {
+            row = "QOP" + row;
+        }
+        if (i == 0) {
+            row = "QOP" + row;
+        }
+        data.push_back(std::move(row));
+    }
+    return data;
+}
+
+}  // namespace
+
+TEST(FMIndex, ExecutorPathMatchBatchesAndBitmap) {
+    const size_t nb = 1000;
+    auto rows = MakeLongTextZebraRows(nb);
+    std::vector<int64_t> ints(nb);
+    for (size_t i = 0; i < nb; i++) {
+        ints[i] = static_cast<int64_t>(i);
+    }
+    auto loaded =
+        LoadSealedFMMatch(21, 22, 23, 8101, rows, {}, false, nullptr, &ints);
+
+    auto match_expr = MakeMatchTypedExpr(
+        loaded.schema, loaded.varchar_id, "QOP%ZEBRA", false);
+    EXPECT_TRUE(CompiledUseIndexCursor(
+        match_expr, loaded.segment.get(), static_cast<int64_t>(nb)));
+    auto declined =
+        MakeMatchTypedExpr(loaded.schema, loaded.varchar_id, "%%", false);
+    EXPECT_FALSE(CompiledUseIndexCursor(
+        declined, loaded.segment.get(), static_cast<int64_t>(nb)));
+
+    proto::plan::GenericValue match_val;
+    match_val.set_string_val("QOP%ZEBRA");
+    auto match = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(loaded.varchar_id, DataType::VARCHAR),
+        proto::plan::OpType::Match,
+        match_val);
+    proto::plan::GenericValue int_val;
+    int_val.set_int64_val(500);
+    auto numeric = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(loaded.int_id, DataType::INT64),
+        proto::plan::OpType::GreaterEqual,
+        int_val);
+    auto conjunction = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And, match, numeric);
+
+    milvus::test::ExprBatchSizeGuard batch_size_guard(64);
+    EXPECT_FALSE(milvus::test::CanExprExecuteAllAtOnce(
+        conjunction, loaded.segment.get(), static_cast<int64_t>(nb)));
+    auto node = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       conjunction);
+    auto got = milvus::query::ExecuteQueryExpr(
+        node, loaded.segment.get(), nb, MAX_TIMESTAMP);
+    LikePatternMatcher matcher("QOP%ZEBRA");
+    for (size_t i = 0; i < nb; i++) {
+        const bool want = matcher(rows[i]) && ints[i] >= 500;
+        EXPECT_EQ(got[i], want) << "row " << i;
+    }
+}
+
+TEST(FMIndex, ExecutorPathMatchMultiChunk) {
+    const size_t nb = 300;
+    std::string filler(500, 'y');
+    std::vector<std::string> rows;
+    rows.reserve(nb);
+    for (size_t i = 0; i < nb; i++) {
+        if (i >= 100 && i < 200 && (i % 25 == 0)) {
+            rows.push_back(filler + "ZEBRA");
+        } else {
+            rows.push_back(filler);
+        }
+    }
+    auto chunk_of = [&](size_t begin, size_t end) {
+        auto field_data =
+            storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
+        field_data->FillFieldData(rows.data() + begin, end - begin);
+        return field_data;
+    };
+    std::vector<FieldDataPtr> chunks{
+        chunk_of(0, 100), chunk_of(100, 200), chunk_of(200, 300)};
+    auto loaded = LoadSealedFMMatch(
+        31, 32, 33, 8201, rows, chunks, false, nullptr, nullptr);
+
+    auto match_expr =
+        MakeMatchTypedExpr(loaded.schema, loaded.varchar_id, "%ZEBRA%", false);
+    EXPECT_TRUE(CompiledUseIndexCursor(
+        match_expr, loaded.segment.get(), static_cast<int64_t>(nb)));
+
+    milvus::test::ExprBatchSizeGuard batch_size_guard(50);
+    auto node =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, match_expr);
+    auto got = milvus::query::ExecuteQueryExpr(
+        node, loaded.segment.get(), nb, MAX_TIMESTAMP);
+    LikePatternMatcher matcher("%ZEBRA%");
+    size_t hits = 0;
+    for (size_t i = 0; i < nb; i++) {
+        const bool want = matcher(rows[i]);
+        EXPECT_EQ(got[i], want) << "row " << i;
+        hits += want;
+    }
+    EXPECT_GT(hits, 0u);
+    EXPECT_LT(hits, nb);
+}
+
+TEST(FMIndex, ExecutorPathMatchNullableAndOffsets) {
+    std::string filler(500, 'y');
+    std::vector<std::string> rows(200, filler);
+    rows[0] = filler + "ZEBRA";
+    rows[50] = filler + "ZEBRA";
+    rows[51] = "";
+    std::vector<uint8_t> valid_bitmap((rows.size() + 7) / 8, 0);
+    for (size_t i = 0; i < rows.size(); i++) {
+        if (i != 51 && i != 52) {
+            valid_bitmap[i >> 3] |= static_cast<uint8_t>(1u << (i & 0x07));
+        }
+    }
+    rows[52] = filler + "ZEBRA";
+    auto loaded = LoadSealedFMMatch(
+        41, 42, 43, 8301, rows, {}, true, valid_bitmap.data(), nullptr);
+    const size_t nb = rows.size();
+    auto match_expr =
+        MakeMatchTypedExpr(loaded.schema, loaded.varchar_id, "%ZEBRA%", true);
+    EXPECT_TRUE(CompiledUseIndexCursor(
+        match_expr, loaded.segment.get(), static_cast<int64_t>(nb)));
+
+    auto node =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, match_expr);
+    auto full = milvus::query::ExecuteQueryExpr(
+        node, loaded.segment.get(), nb, MAX_TIMESTAMP);
+    LikePatternMatcher matcher("%ZEBRA%");
+    for (size_t i = 0; i < nb; i++) {
+        const bool valid = (valid_bitmap[i >> 3] & (1u << (i & 0x07))) != 0;
+        const bool want = valid && matcher(rows[i]);
+        EXPECT_EQ(full[i], want) << "row " << i;
+    }
+
+    exec::OffsetVector offsets;
+    for (int32_t i = 0; i < static_cast<int32_t>(nb); i += 2) {
+        offsets.push_back(i);
+    }
+    auto offset_res = milvus::test::gen_filter_res(
+        node.get(), loaded.segment.get(), nb, MAX_TIMESTAMP, &offsets);
+    ASSERT_EQ(offset_res->size(), offsets.size());
+    TargetBitmapView offset_view(offset_res->GetRawData(), offsets.size());
+    for (size_t j = 0; j < offsets.size(); j++) {
+        const auto i = static_cast<size_t>(offsets[j]);
+        EXPECT_EQ(offset_view[j], full[i]) << "offset row " << i;
     }
 }
 

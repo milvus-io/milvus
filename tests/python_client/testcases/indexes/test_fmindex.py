@@ -286,3 +286,80 @@ class TestFMIndexQuery(TestMilvusClientV2Base):
         )
         assert len(ids) == len(marked_ids) > 0
         assert set(ids) == marked_ids
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_fmindex_general_like_recheck(self):
+        """
+        General LIKE with interior wildcards must match the un-indexed twin
+        field after FMINDEX is built, including an unselective pattern, empty
+        values, and two flushed sealed segments.
+        """
+        client = self._client()
+        collection_name, insert_times, _ = self._build_loaded_collection(client)
+        self._assert_same(
+            client,
+            collection_name,
+            f'{content_field_name} LIKE "%st%um%"',
+            f'{no_index_field_name} LIKE "%st%um%"',
+        )
+        self._assert_same(
+            client,
+            collection_name,
+            f'{content_field_name} LIKE "%a%"',
+            f'{no_index_field_name} LIKE "%a%"',
+        )
+        self._assert_same(
+            client,
+            collection_name,
+            f'{content_field_name} LIKE "%%"',
+            f'{no_index_field_name} LIKE "%%"',
+        )
+
+        empty_collection = cf.gen_collection_name_by_testcase_name() + "_empty"
+        schema, _ = self.create_schema(client)
+        schema.add_field(pk_field_name, datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(vector_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(no_index_field_name, datatype=DataType.VARCHAR, max_length=64, nullable=True)
+        schema.add_field(content_field_name, datatype=DataType.VARCHAR, max_length=64, nullable=True)
+        self.create_collection(client, empty_collection, schema=schema)
+        rows = cf.gen_row_data_by_schema(nb=20, schema=schema, start=0)
+        for i, row in enumerate(rows):
+            if i % 5 == 0:
+                row[no_index_field_name] = ""
+                row[content_field_name] = ""
+            elif i % 5 == 1:
+                row[no_index_field_name] = None
+                row[content_field_name] = None
+            else:
+                row[no_index_field_name] = "stadium"
+                row[content_field_name] = "stadium"
+        self.insert(client, empty_collection, rows)
+        self.flush(client, empty_collection)
+        extra = cf.gen_row_data_by_schema(nb=20, schema=schema, start=20)
+        for row in extra:
+            row[no_index_field_name] = "park"
+            row[content_field_name] = "park"
+        self.insert(client, empty_collection, extra)
+        self.flush(client, empty_collection)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name=vector_field_name, metric_type="COSINE", index_type="IVF_FLAT", params={"nlist": 128}
+        )
+        index_params.add_index(field_name=content_field_name, index_type=index_type, params={"fm_sa_sample_rate": 32})
+        self.create_index(client, empty_collection, index_params)
+        self.wait_for_index_ready(client, empty_collection, index_name=vector_field_name)
+        self.wait_for_index_ready(client, empty_collection, index_name=content_field_name)
+        self.load_collection(client, empty_collection)
+        self._assert_same(
+            client,
+            empty_collection,
+            f'{content_field_name} LIKE "%sta%um%"',
+            f'{no_index_field_name} LIKE "%sta%um%"',
+        )
+        ids = self._assert_same(
+            client,
+            empty_collection,
+            f'{content_field_name} LIKE ""',
+            f'{no_index_field_name} LIKE ""',
+        )
+        assert len(ids) > 0
