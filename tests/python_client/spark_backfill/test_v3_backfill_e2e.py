@@ -537,10 +537,7 @@ def test_add_field_after_spark_rejects_nonzero_stale_schema_result(backfill_case
 @pytest.mark.xfail(
     strict=True,
     raises=StaleSchemaFenceMissingError,
-    reason=(
-        "https://github.com/milvus-io/milvus/issues/51318: "
-        "schema fencing is not in place for schema version = 0"
-    ),
+    reason=("https://github.com/milvus-io/milvus/issues/51318: schema fencing is not in place for schema version = 0"),
 )
 def test_add_field_after_spark_rejects_zero_version_stale_schema_result(backfill_case_factory):
     case = backfill_case_factory()

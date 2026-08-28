@@ -140,7 +140,9 @@ class BackfillCase:
         extra_arguments: Sequence[str] = (),
     ) -> tuple[SparkJobResult, str]:
         result_uri = result_uri or self.result_uri(case_id)
-        snapshot_path = f"s3a://{self.settings.minio_bucket}/{object_key(self.snapshot_location, self.settings.minio_bucket)}"
+        snapshot_path = (
+            f"s3a://{self.settings.minio_bucket}/{object_key(self.snapshot_location, self.settings.minio_bucket)}"
+        )
         arguments = build_backfill_arguments(
             parquet_path=parquet_uri,
             snapshot_path=snapshot_path,
