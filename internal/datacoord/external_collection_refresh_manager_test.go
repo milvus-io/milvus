@@ -1308,6 +1308,49 @@ func TestExternalCollectionRefreshManager_GetJobProgress(t *testing.T) {
 		assert.Equal(t, indexpb.JobState_JobStateInit, job.GetState())
 	})
 
+	t.Run("index_wait_progress_reaches_the_client", func(t *testing.T) {
+		// During the wait every task is Finished, so the task aggregate is a
+		// flat 100 and says nothing about it. The job's persisted progress is
+		// the indexed fraction - the only signal there is - so a client polling
+		// DescribeRefresh must see that, not a constant 99.
+		existingJob := &datapb.ExternalCollectionRefreshJob{
+			JobId:                1,
+			CollectionId:         100,
+			State:                indexpb.JobState_JobStateInProgress,
+			Progress:             94,
+			IndexWaitStartedTime: time.Now().UnixMilli(),
+		}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
+		}
+		refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{existingJob}, tasks)
+		manager := NewExternalCollectionRefreshManager(ctx, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, nil, nil, nil)
+
+		job, err := manager.GetJobProgress(ctx, 1)
+		assert.NoError(t, err)
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, job.GetState())
+		assert.Equal(t, int64(94), job.GetProgress(),
+			"the index-wait progress must reach the client, not a flat 99")
+	})
+
+	t.Run("a_job_outside_the_index_wait_still_reads_as_good_as_done", func(t *testing.T) {
+		// Same shape, no wait marker: the persisted number is just the last
+		// ingest progress and must not be mistaken for an indexed fraction.
+		existingJob := &datapb.ExternalCollectionRefreshJob{
+			JobId: 1, CollectionId: 100,
+			State: indexpb.JobState_JobStateInProgress, Progress: 94,
+		}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
+		}
+		refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{existingJob}, tasks)
+		manager := NewExternalCollectionRefreshManager(ctx, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, nil, nil, nil)
+
+		job, err := manager.GetJobProgress(ctx, 1)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(99), job.GetProgress())
+	})
+
 	t.Run("finished_tasks_do_not_expose_finished_before_job_persisted", func(t *testing.T) {
 		existingJob := &datapb.ExternalCollectionRefreshJob{
 			JobId:        1,
@@ -1920,11 +1963,121 @@ func TestHandleJobFinished_TriggersExploreTempCleanup(t *testing.T) {
 	assert.Equal(t, []string{"__explore_temp__/coord_555/"}, prefixes, "Finished path must clean up the job-specific prefix")
 	assert.Equal(t, []string{"__explore_temp__/coord_555"}, removes)
 
-	// notifiedJobs must hold an entry so forgetJob later skips redundant cleanup.
 	mgr.notifiedMu.Lock()
-	_, present := mgr.notifiedJobs[555]
+	_, notified := mgr.notifiedJobs[555]
+	_, cleaned := mgr.cleanedJobs[555]
 	mgr.notifiedMu.Unlock()
-	assert.True(t, present, "handleJobFinished should mark jobID in notifiedJobs")
+	assert.True(t, notified, "handleJobFinished should mark jobID in notifiedJobs")
+	assert.True(t, cleaned, "handleJobFinished should mark jobID as cleaned so forgetJob skips it")
+}
+
+// ==================== handleJobFinished retry Tests ====================
+
+// newManagerForPublish builds a manager whose collection carries `source` and
+// whose schemaUpdater is the supplied stub, so a test can drive the publish
+// path and observe the dedup key.
+func newManagerForPublish(t *testing.T, source string, updater func(context.Context, int64, string, string) error) *externalCollectionRefreshManager {
+	t.Helper()
+	ctx := context.Background()
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	if source != "" {
+		collections.Insert(200, &collectionInfo{ID: 200, Schema: &schemapb.CollectionSchema{
+			Name:           "coll",
+			ExternalSource: source,
+			ExternalSpec:   `{"format":"parquet"}`,
+		}})
+	}
+	mt := &meta{collections: collections}
+	return NewExternalCollectionRefreshManager(
+		ctx, mt, newStubScheduler(), &stubAllocator{}, createTestRefreshMeta(t), nil,
+		testCollectionGetter(mt), updater, &recordingChunkManager{},
+	).(*externalCollectionRefreshManager)
+}
+
+func publishJob() *datapb.ExternalCollectionRefreshJob {
+	return &datapb.ExternalCollectionRefreshJob{
+		JobId:          900,
+		CollectionId:   200,
+		ExternalSource: "s3://new",
+		ExternalSpec:   `{"format":"parquet","v":2}`,
+	}
+}
+
+// A transient RootCoord / WAL failure must not read as "published" for the rest
+// of this DataCoord lifetime. The dedup key is an in-flight lock first and a
+// delivered marker second: with the index wait on, nudgeIndexBuilds holds the
+// build acceleration until the refreshed source/spec are visible in meta, so a
+// publish that failed once and never retried would suppress the nudge for the
+// whole wait and leave the refresh to run out its timeout.
+func TestHandleJobFinished_RetriesAfterTransientSchemaUpdaterFailure(t *testing.T) {
+	ctx := context.Background()
+
+	calls := 0
+	mgr := newManagerForPublish(t, "s3://old", func(context.Context, int64, string, string) error {
+		calls++
+		if calls == 1 {
+			return errors.New("rootcoord unavailable")
+		}
+		return nil
+	})
+
+	mgr.handleJobFinished(ctx, publishJob())
+	require.Equal(t, 1, calls)
+	mgr.notifiedMu.Lock()
+	_, heldAfterFailure := mgr.notifiedJobs[900]
+	mgr.notifiedMu.Unlock()
+	require.False(t, heldAfterFailure,
+		"a failed publish must release the key so a later checker tick retries")
+
+	mgr.handleJobFinished(ctx, publishJob())
+	require.Equal(t, 2, calls, "the next tick retries")
+	mgr.notifiedMu.Lock()
+	_, heldAfterSuccess := mgr.notifiedJobs[900]
+	mgr.notifiedMu.Unlock()
+	assert.True(t, heldAfterSuccess, "a delivered publish keeps the key")
+
+	mgr.handleJobFinished(ctx, publishJob())
+	assert.Equal(t, 2, calls, "and is never broadcast twice")
+}
+
+func TestHandleJobFinished_RetriesAfterCollectionGetterFailure(t *testing.T) {
+	ctx := context.Background()
+
+	calls := 0
+	// No collection in meta - the getter fails before schemaUpdater is reached.
+	mgr := newManagerForPublish(t, "", func(context.Context, int64, string, string) error {
+		calls++
+		return nil
+	})
+
+	mgr.handleJobFinished(ctx, publishJob())
+	assert.Zero(t, calls)
+	mgr.notifiedMu.Lock()
+	_, held := mgr.notifiedJobs[900]
+	mgr.notifiedMu.Unlock()
+	assert.False(t, held, "a publish that never got as far as the updater must retry too")
+}
+
+func TestHandleJobFinished_KeepsKeyWhenNothingToPublish(t *testing.T) {
+	ctx := context.Background()
+
+	calls := 0
+	// The collection already describes this refresh: nothing to deliver, which
+	// is a delivered publish - not a failure to retry forever.
+	mgr := newManagerForPublish(t, "s3://new", func(context.Context, int64, string, string) error {
+		calls++
+		return nil
+	})
+	job := publishJob()
+	job.ExternalSpec = `{"format":"parquet"}`
+
+	mgr.handleJobFinished(ctx, job)
+
+	assert.Zero(t, calls)
+	mgr.notifiedMu.Lock()
+	_, held := mgr.notifiedJobs[900]
+	mgr.notifiedMu.Unlock()
+	assert.True(t, held, "an equal schema is already published; the key must stand")
 }
 
 // ==================== handleJobFailed Tests ====================
@@ -1934,16 +2087,21 @@ func TestHandleJobFailed_TriggersCleanupAndDedups(t *testing.T) {
 	mgr := newManagerWithChunkManager(t, cm)
 
 	mgr.handleJobFailed(777)
-	mgr.handleJobFailed(777) // second call must no-op via notifiedJobs dedup
+	mgr.handleJobFailed(777) // second call must no-op via the cleanup dedup
 
 	prefixes, removes := cm.snapshot()
 	assert.Equal(t, []string{"__explore_temp__/coord_777/"}, prefixes)
 	assert.Equal(t, []string{"__explore_temp__/coord_777"}, removes)
 
 	mgr.notifiedMu.Lock()
-	_, present := mgr.notifiedJobs[777]
+	_, cleaned := mgr.cleanedJobs[777]
+	_, notified := mgr.notifiedJobs[777]
 	mgr.notifiedMu.Unlock()
-	assert.True(t, present, "handleJobFailed should mark jobID in notifiedJobs")
+	assert.True(t, cleaned, "handleJobFailed should mark jobID as cleaned")
+	// The load-bearing half: a job applied by the index wait and then failed
+	// still owes its schema publish, and handleJobFinished is what delivers it.
+	// Claiming the publish key here would suppress that publish permanently.
+	assert.False(t, notified, "handleJobFailed must not claim the schema-publish dedup key")
 }
 
 // ==================== forgetJob Tests ====================
@@ -1952,21 +2110,24 @@ func TestForgetJob_SkipsCleanupWhenAlreadyHandled(t *testing.T) {
 	cm := &recordingChunkManager{}
 	mgr := newManagerWithChunkManager(t, cm)
 
-	// Simulate the Finished path having already cleaned the job.
+	// Simulate a terminal path having already cleaned the job.
 	mgr.notifiedMu.Lock()
 	mgr.notifiedJobs[321] = struct{}{}
+	mgr.cleanedJobs[321] = struct{}{}
 	mgr.notifiedMu.Unlock()
 
 	mgr.forgetJob(321)
 
 	prefixes, removes := cm.snapshot()
-	assert.Empty(t, prefixes, "forgetJob must skip cleanup when notifiedJobs entry is present")
-	assert.Empty(t, removes, "forgetJob must skip root removal when notifiedJobs entry is present")
+	assert.Empty(t, prefixes, "forgetJob must skip cleanup when the job was already cleaned")
+	assert.Empty(t, removes, "forgetJob must skip root removal when the job was already cleaned")
 
 	mgr.notifiedMu.Lock()
-	_, stillPresent := mgr.notifiedJobs[321]
+	_, stillNotified := mgr.notifiedJobs[321]
+	_, stillCleaned := mgr.cleanedJobs[321]
 	mgr.notifiedMu.Unlock()
-	assert.False(t, stillPresent, "forgetJob must still delete the dedup entry")
+	assert.False(t, stillNotified, "forgetJob must still delete the publish dedup entry")
+	assert.False(t, stillCleaned, "forgetJob must still delete the cleanup dedup entry")
 }
 
 func TestForgetJob_CleansUpWhenNeverHandled(t *testing.T) {
