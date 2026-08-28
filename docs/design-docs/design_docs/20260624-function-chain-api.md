@@ -22,6 +22,8 @@ Ordinary `SearchRequest` supports three rerank stages at distinct execution boun
 
 The server implementation also accepts typed paths into JSON fields and the dynamic `$meta` field at L0, L1, and L2. Paths become nullable scalar Arrow columns before chain execution. The proposed PyMilvus `col(..., data_type=...)` convenience API and mixed-version projection negotiation remain pending; see [Implementation and verification status](#implementation-and-verification-status).
 
+The native XGBoost L0 expression and its execution constraints are described in [XGBoost FunctionChain Expression Design](20260708-xgboost-function-chain.md). The Python worker L2 expression and its gRPC runtime boundary are described in [PyUDF FunctionChain Expression](20260722-pyudf-function-chain.md).
+
 ## Motivation
 
 Milvus already has legacy rerank entry points such as `function_score` and ranker parameters. They are useful for predefined scoring formulas, but they do not provide a general ordered plan for composing multiple rerank steps.
@@ -704,6 +706,14 @@ The chain builder dispatches by rerank metadata type:
 - legacy function score -> existing function-score chain builder;
 - legacy rank params -> existing legacy rank builder;
 - public function chain -> `FuncChainFromRepr` / `FuncChainFromReprWithContext`.
+
+### QueryNode L0 execution and Arrow allocation
+
+QueryNode executes an L0 chain independently for each segment before Go heap reduction. It builds a fresh `FuncChain` for each segment so mutable operator or expression state is not shared by concurrent segment execution.
+
+QueryNode L0 chains and internally generated boost-score chains use the existing `defaultAllocator`, which defaults to Arrow Go's `memory.DefaultAllocator`. Proxy rerank chains also use `memory.DefaultAllocator`. PyUDF exchanges serialized Arrow IPC streams over gRPC and does not require C-allocated buffers.
+
+Imported segment DataFrames retain the ownership supplied by the C++ Arrow exporter. Normal Arrow array, chunked-array, and DataFrame release chains remain required. String values exported into search results are copied into Go-owned storage so they remain valid after the source DataFrame is released.
 
 ### Tail behavior
 
