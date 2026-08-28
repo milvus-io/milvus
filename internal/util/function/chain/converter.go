@@ -21,6 +21,7 @@ package chain
 import (
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -176,6 +177,23 @@ func exportChunkedValues[T any, A valueAccessor[T]](col *arrow.Chunked, colName 
 		}
 		for j := 0; j < chunk.Len(); j++ {
 			data = append(data, chunk.Value(j))
+		}
+	}
+	return data, nil
+}
+
+// exportChunkedStrings copies Arrow string values into Go-owned storage.
+// array.String.Value returns a zero-copy view into the Arrow value buffer,
+// which may be backed by C memory and freed when the DataFrame is released.
+func exportChunkedStrings(col *arrow.Chunked, colName string) ([]string, error) {
+	data := make([]string, 0, col.Len())
+	for i := 0; i < len(col.Chunks()); i++ {
+		chunk, ok := col.Chunk(i).(*array.String)
+		if !ok {
+			return nil, merr.WrapErrServiceInternalMsg("column %s chunk %d type mismatch", colName, i)
+		}
+		for j := 0; j < chunk.Len(); j++ {
+			data = append(data, strings.Clone(chunk.Value(j)))
 		}
 	}
 	return data, nil
@@ -831,7 +849,7 @@ func exportIDs(df *DataFrame) (*schemapb.IDs, error) {
 		}, nil
 
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
-		data, err := exportChunkedValues[string, *array.String](col, types.IDFieldName)
+		data, err := exportChunkedStrings(col, types.IDFieldName)
 		if err != nil {
 			return nil, merr.WrapErrServiceInternalMsg("exportIDs: %v", err)
 		}
@@ -853,11 +871,36 @@ func exportScores(df *DataFrame) ([]float32, error) {
 		return nil, merr.WrapErrServiceInternalMsg("exportScores: column %s not found", types.ScoreFieldName)
 	}
 
-	data, err := exportChunkedValues[float32, *array.Float32](col, types.ScoreFieldName)
-	if err != nil {
-		return nil, merr.WrapErrServiceInternalMsg("exportScores: %v", err)
+	if col.DataType().ID() != arrow.FLOAT32 {
+		return nil, merr.WrapErrFunctionFailedMsg("exportScores: $score type mismatch: expected Float32, got %s", col.DataType())
+	}
+	data := make([]float32, 0, col.Len())
+	for chunkIdx, chunk := range col.Chunks() {
+		if err := ValidateScoreChunk(chunk, chunkIdx); err != nil {
+			return nil, merr.Wrap(err, "exportScores")
+		}
+		data = append(data, chunk.(*array.Float32).Float32Values()...)
 	}
 	return data, nil
+}
+
+// ValidateScoreChunk requires Float32, non-null, finite scores at a stage
+// boundary. chunkIdx identifies the original query chunk for error reporting.
+// Intermediate function-chain columns may still contain invalid scores.
+func ValidateScoreChunk(chunk arrow.Array, chunkIdx int) error {
+	scores, ok := chunk.(*array.Float32)
+	if !ok {
+		return merr.WrapErrFunctionFailedMsg("$score type mismatch: expected Float32, got %s", chunk.DataType())
+	}
+	for rowIdx, score := range scores.Float32Values() {
+		if scores.IsNull(rowIdx) {
+			return merr.WrapErrFunctionFailedMsg("$score contains null in chunk %d at row %d", chunkIdx, rowIdx)
+		}
+		if math.IsNaN(float64(score)) || math.IsInf(float64(score), 0) {
+			return merr.WrapErrFunctionFailedMsg("$score contains non-finite value %v in chunk %d at row %d", score, chunkIdx, rowIdx)
+		}
+	}
+	return nil
 }
 
 func exportElementIndices(df *DataFrame) (*schemapb.LongArray, error) {
@@ -964,7 +1007,7 @@ func exportFieldData(df *DataFrame, name string) (*schemapb.FieldData, error) {
 
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		var data []string
-		data, err = exportChunkedValues[string, *array.String](col, name)
+		data, err = exportChunkedStrings(col, name)
 		if err == nil {
 			fieldData.Field = &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
