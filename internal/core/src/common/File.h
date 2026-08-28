@@ -14,19 +14,11 @@
 #include <cstdio>
 #include <string>
 #include "common/EasyAssert.h"
-#include "common/Types.h"
-#include "fmt/core.h"
 #include <fcntl.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 namespace milvus {
-
-#define THROW_FILE_WRITE_ERROR(path)                                     \
-    ThrowInfo(ErrorCode::FileWriteFailed,                                \
-              fmt::format("write data to file {} failed, error code {}", \
-                          path,                                          \
-                          strerror(errno)));
 
 class File {
  public:
@@ -70,41 +62,9 @@ class File {
         return fd_;
     }
 
-    std::string
-    Path() const {
-        return filepath_;
-    }
-
     ssize_t
     Write(const void* buf, size_t size) {
         return write(fd_, buf, size);
-    }
-
-    template <typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
-    ssize_t
-    WriteInt(T value) {
-        return write(fd_, &value, sizeof(value));
-    }
-
-    ssize_t
-    FWrite(const void* buf, size_t size) {
-        return fwrite(buf, sizeof(char), size, fs_);
-    }
-
-    template <typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
-    ssize_t
-    FWriteInt(T value) {
-        return fwrite(&value, 1, sizeof(value), fs_);
-    }
-
-    int
-    FFlush() {
-        return fflush(fs_);
-    }
-
-    offset_t
-    Seek(offset_t offset, int whence) {
-        return lseek(fd_, offset, whence);
     }
 
     void

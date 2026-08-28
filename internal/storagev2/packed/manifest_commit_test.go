@@ -252,6 +252,38 @@ func TestCommitManifestUpdates_AddNewColumnGroups(t *testing.T) {
 	require.Equal(t, int64(1), version)
 }
 
+func TestCommitManifestUpdates_AddEmptyColumnGroup(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	basePath := "files/commit_empty_cg/seg1"
+
+	schema := arrow.NewSchema([]arrow.Field{{
+		Name:     "101",
+		Type:     arrow.PrimitiveTypes.Int64,
+		Nullable: true,
+		Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"101"}),
+	}}, nil)
+	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0}, Fields: []int64{101}, GroupID: 101}}
+
+	w, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
+	require.NoError(t, err)
+	w.AsNewColumnGroups()
+	b := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer b.Release()
+	rec := b.NewRecord()
+	defer rec.Release()
+	require.NoError(t, w.WriteRecordBatch(rec))
+
+	out, err := w.Close()
+	require.NoError(t, err)
+	defer out.Destroy()
+	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: out})
+	require.NoError(t, err)
+
+	fields, err := GetManifestFieldIDs(manifest, cfg)
+	require.NoError(t, err)
+	require.Contains(t, fields, int64(101))
+}
+
 // TestColumnGroups_DestroyIdempotent verifies that calling Destroy on a
 // ColumnGroups handle multiple times (and on a nil receiver) is safe.
 func TestColumnGroups_DestroyIdempotent(t *testing.T) {

@@ -116,13 +116,6 @@ std::map<std::string, CloudProviderType> CloudProviderType_Map = {
     {"gcpnative", CloudProviderType::GCPNATIVE},
     {"huawei", CloudProviderType::HUAWEICLOUD}};
 
-std::map<std::string, int> ReadAheadPolicy_Map = {
-    {"normal", MADV_NORMAL},
-    {"random", MADV_RANDOM},
-    {"sequential", MADV_SEQUENTIAL},
-    {"willneed", MADV_WILLNEED},
-    {"dontneed", MADV_DONTNEED}};
-
 // in arrow, null_bitmap read from the least significant bit
 std::vector<uint8_t>
 genValidIter(const uint8_t* valid_data, int length) {
@@ -1099,16 +1092,6 @@ PutIndexData(ChunkManager* remote_chunk_manager,
     }
 
     return remote_paths_to_size;
-}
-
-int64_t
-GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas) {
-    int64_t count = 0;
-    for (auto& field_data : field_datas) {
-        count += field_data->get_num_rows();
-    }
-
-    return count;
 }
 
 size_t
@@ -2519,221 +2502,9 @@ ConvertStringArrayToBinary(const arrow::ArrayVector& arrays) {
     return result;
 }
 
-// Coerce any binary-like Arrow array to canonical BinaryArray.
-// Source readers (e.g. vortex) may produce LARGE_BINARY / BINARY_VIEW /
-// LARGE_STRING / STRING_VIEW for the same logical bytes; downstream
-// ChunkWriters dynamic_cast to BinaryArray and would null-deref.
-arrow::ArrayVector
-CoerceToBinary(const arrow::ArrayVector& arrays) {
-    arrow::ArrayVector result;
-    result.reserve(arrays.size());
-    for (const auto& arr : arrays) {
-        const auto tid = arr->type_id();
-        if (tid == arrow::Type::BINARY) {
-            result.push_back(arr);
-            continue;
-        }
-        if (tid == arrow::Type::STRING) {
-            // Zero-copy: identical buffer layout
-            auto d = arr->data();
-            auto bin = arrow::ArrayData::Make(arrow::binary(),
-                                              d->length,
-                                              d->buffers,
-                                              d->null_count,
-                                              d->offset);
-            result.push_back(std::make_shared<arrow::BinaryArray>(bin));
-            continue;
-        }
-        if (tid == arrow::Type::LARGE_BINARY ||
-            tid == arrow::Type::LARGE_STRING ||
-            tid == arrow::Type::BINARY_VIEW ||
-            tid == arrow::Type::STRING_VIEW) {
-            // Different offset/buffer layout -> rebuild via builder.
-            arrow::BinaryBuilder builder;
-            auto status = builder.Reserve(arr->length());
-            AssertInfo(status.ok(),
-                       "BinaryBuilder reserve failed: " + status.ToString());
-            switch (tid) {
-                case arrow::Type::LARGE_BINARY: {
-                    auto src =
-                        std::static_pointer_cast<arrow::LargeBinaryArray>(arr);
-                    for (int64_t i = 0; i < src->length(); ++i) {
-                        if (src->IsNull(i)) {
-                            status = builder.AppendNull();
-                        } else {
-                            auto v = src->GetView(i);
-                            status = builder.Append(
-                                reinterpret_cast<const uint8_t*>(v.data()),
-                                v.size());
-                        }
-                        AssertInfo(status.ok(),
-                                   "BinaryBuilder append failed: " +
-                                       status.ToString());
-                    }
-                    break;
-                }
-                case arrow::Type::LARGE_STRING: {
-                    auto src =
-                        std::static_pointer_cast<arrow::LargeStringArray>(arr);
-                    for (int64_t i = 0; i < src->length(); ++i) {
-                        if (src->IsNull(i)) {
-                            status = builder.AppendNull();
-                        } else {
-                            auto v = src->GetView(i);
-                            status = builder.Append(
-                                reinterpret_cast<const uint8_t*>(v.data()),
-                                v.size());
-                        }
-                        AssertInfo(status.ok(),
-                                   "BinaryBuilder append failed: " +
-                                       status.ToString());
-                    }
-                    break;
-                }
-                case arrow::Type::BINARY_VIEW: {
-                    auto src =
-                        std::static_pointer_cast<arrow::BinaryViewArray>(arr);
-                    for (int64_t i = 0; i < src->length(); ++i) {
-                        if (src->IsNull(i)) {
-                            status = builder.AppendNull();
-                        } else {
-                            auto v = src->GetView(i);
-                            status = builder.Append(
-                                reinterpret_cast<const uint8_t*>(v.data()),
-                                v.size());
-                        }
-                        AssertInfo(status.ok(),
-                                   "BinaryBuilder append failed: " +
-                                       status.ToString());
-                    }
-                    break;
-                }
-                case arrow::Type::STRING_VIEW: {
-                    auto src =
-                        std::static_pointer_cast<arrow::StringViewArray>(arr);
-                    for (int64_t i = 0; i < src->length(); ++i) {
-                        if (src->IsNull(i)) {
-                            status = builder.AppendNull();
-                        } else {
-                            auto v = src->GetView(i);
-                            status = builder.Append(
-                                reinterpret_cast<const uint8_t*>(v.data()),
-                                v.size());
-                        }
-                        AssertInfo(status.ok(),
-                                   "BinaryBuilder append failed: " +
-                                       status.ToString());
-                    }
-                    break;
-                }
-                default:
-                    break;
-            }
-            std::shared_ptr<arrow::Array> out;
-            status = builder.Finish(&out);
-            AssertInfo(status.ok(),
-                       "BinaryBuilder finish failed: " + status.ToString());
-            result.push_back(out);
-            continue;
-        }
-        result.push_back(arr);
-    }
-    return result;
-}
-
 // Forward decl: defined alongside CanonicalizeArrowVariants below.
 static std::shared_ptr<arrow::Buffer>
 RebuildNullBitmap(const std::shared_ptr<arrow::Array>& array);
-
-// Coerce LARGE_LIST / LIST_VIEW to canonical (32-bit offset) ListArray.
-// Vortex schemaless mode may emit list variants for the same logical
-// List<T>; downstream code (ConvertListToProtobufBinary,
-// NormalizeVectorArrayInner, ArrowListToScalarFieldProto) expects
-// arrow::ListArray and would static_cast-fail otherwise.
-arrow::ArrayVector
-CoerceToList(const arrow::ArrayVector& arrays) {
-    arrow::ArrayVector result;
-    result.reserve(arrays.size());
-    for (const auto& arr : arrays) {
-        const auto tid = arr->type_id();
-        if (tid != arrow::Type::LARGE_LIST && tid != arrow::Type::LIST_VIEW) {
-            result.push_back(arr);
-            continue;
-        }
-
-        std::shared_ptr<arrow::Array> values;
-        std::vector<std::pair<int64_t, int64_t>> ranges;
-        ranges.reserve(arr->length());
-        if (tid == arrow::Type::LARGE_LIST) {
-            auto la = std::static_pointer_cast<arrow::LargeListArray>(arr);
-            values = la->values();
-            for (int64_t i = 0; i < la->length(); ++i) {
-                int64_t s = la->value_offset(i);
-                int64_t e = s + la->value_length(i);
-                ranges.emplace_back(s, e);
-            }
-        } else {
-            auto lv = std::static_pointer_cast<arrow::ListViewArray>(arr);
-            values = lv->values();
-            for (int64_t i = 0; i < lv->length(); ++i) {
-                int64_t s = lv->value_offset(i);
-                int64_t e = s + lv->value_length(i);
-                ranges.emplace_back(s, e);
-            }
-        }
-
-        arrow::Int32Builder offset_builder;
-        auto status = offset_builder.Reserve(arr->length() + 1);
-        AssertInfo(status.ok(),
-                   "CoerceToList: offset reserve failed: " + status.ToString());
-        std::vector<std::shared_ptr<arrow::Array>> value_slices;
-        int32_t cur = 0;
-        status = offset_builder.Append(0);
-        AssertInfo(status.ok(), "CoerceToList: offset append failed");
-        for (int64_t i = 0; i < arr->length(); ++i) {
-            if (!arr->IsNull(i)) {
-                auto [s, e] = ranges[i];
-                int64_t len = e - s;
-                AssertInfo(cur + len <= INT32_MAX,
-                           "CoerceToList: offset overflows int32");
-                value_slices.push_back(values->Slice(s, len));
-                cur += static_cast<int32_t>(len);
-            }
-            status = offset_builder.Append(cur);
-            AssertInfo(status.ok(), "CoerceToList: offset append failed");
-        }
-        std::shared_ptr<arrow::Array> offsets_arr;
-        status = offset_builder.Finish(&offsets_arr);
-        AssertInfo(status.ok(),
-                   "CoerceToList: offset finish failed: " + status.ToString());
-
-        std::shared_ptr<arrow::Array> concat_values;
-        if (value_slices.empty()) {
-            auto empty = arrow::MakeArrayOfNull(values->type(), 0);
-            AssertInfo(empty.ok(), "CoerceToList: empty values failed");
-            concat_values = *empty;
-        } else {
-            auto concat = arrow::Concatenate(value_slices);
-            AssertInfo(
-                concat.ok(),
-                "CoerceToList: concat failed: " + concat.status().ToString());
-            concat_values = *concat;
-        }
-
-        auto offsets_buf =
-            std::static_pointer_cast<arrow::Int32Array>(offsets_arr)->values();
-        auto list_arr =
-            std::make_shared<arrow::ListArray>(arrow::list(values->type()),
-                                               arr->length(),
-                                               offsets_buf,
-                                               concat_values,
-                                               RebuildNullBitmap(arr),
-                                               arr->null_count(),
-                                               0);
-        result.push_back(list_arr);
-    }
-    return result;
-}
 
 // Rebuild null bitmap as a fresh buffer at offset=0.
 // Required when constructing a new arrow::Array that does not share the
@@ -2960,8 +2731,14 @@ ConvertWKTStringArrayToWKBBinary(const arrow::ArrayVector& arrays) {
     arrow::ArrayVector result;
     result.reserve(arrays.size());
 
-    GEOSContextHandle_t ctx = GEOS_init_r();
-    AssertInfo(ctx != nullptr, "Failed to initialize GEOS context");
+    // Scoped GEOS context: InitGEOSContext throws a retriable
+    // MemAllocateFailed on OOM (GEOS_init_r never returns nullptr -- see the
+    // helper's comment), and the RAII guard releases the context on every
+    // exit -- the throwing Geometry(ctx, wkt) constructor on malformed WKT
+    // and the arrow-status AssertInfo calls below would otherwise skip a
+    // trailing GEOS_finish_r and leak one context per failure.
+    ScopedGeosResources geos("WKT to WKB conversion");
+    GEOSContextHandle_t ctx = geos.ctx;
 
     for (const auto& arr : arrays) {
         const auto tid = arr->type_id();
@@ -3006,7 +2783,6 @@ ConvertWKTStringArrayToWKBBinary(const arrow::ArrayVector& arrays) {
         result.push_back(wkb_array);
     }
 
-    GEOS_finish_r(ctx);
     return result;
 }
 

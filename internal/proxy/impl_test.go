@@ -45,6 +45,7 @@ import (
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -64,26 +65,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
-	paramtable.Init()
-
-	chMgr := NewMockChannelsMgr(t)
-	chMgr.EXPECT().removeDMLStream(mock.Anything).Return()
-
-	node := &Proxy{chMgr: chMgr}
-	_ = node.initRateCollector()
-	node.UpdateStateCode(commonpb.StateCode_Healthy)
-
-	ctx := context.Background()
-	req := &proxypb.InvalidateCollMetaCacheRequest{
-		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
-	}
-
-	status, err := node.InvalidateCollectionMetaCache(ctx, req)
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
-}
 
 // TestProxy_InvalidateCollectionMetaCache_AliasScanGating locks in the
 // holder-scan fallback fingerprint: ONLY Create/AlterAlias broadcasts WITHOUT
@@ -1565,7 +1546,7 @@ func TestProxy_Delete(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		chMgr := NewMockChannelsMgr(t)
+		chMgr := channelmgr.NewMockChannelsMgr(t)
 
 		req := &milvuspb.DeleteRequest{
 			CollectionName: collectionName,
@@ -1592,8 +1573,8 @@ func TestProxy_Delete(t *testing.T) {
 			mock.AnythingOfType("string"),
 		).Return(partitionID, nil)
 		cache.On("GetCollectionInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(basicInfo, nil)
-		chMgr.On("getVChannels", mock.Anything).Return(channels, nil)
-		chMgr.On("getChannels", mock.Anything).Return(nil, errors.New("mock error"))
+		chMgr.On("GetVChannels", mock.Anything).Return(channels, nil)
+		chMgr.On("GetChannels", mock.Anything).Return(nil, errors.New("mock error"))
 		rc := mocks.NewMockRootCoordClient(t)
 		tsoAllocator := &mockTsoAllocator{}
 		idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
@@ -1635,7 +1616,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		node.sched = scheduler
 		err = node.sched.Start()
 		assert.NoError(t, err)
-		chMgr := NewMockChannelsMgr(t)
+		chMgr := channelmgr.NewMockChannelsMgr(t)
 		node.chMgr = chMgr
 
 		// no such collection
@@ -1684,14 +1665,14 @@ func TestProxy_ImportV2(t *testing.T) {
 			}},
 		}, nil)
 		node.setMetaCache(mc)
-		chMgr.EXPECT().getVChannels(mock.Anything).Return(nil, mockErr).Once()
+		chMgr.EXPECT().GetVChannels(mock.Anything).Return(nil, mockErr).Once()
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
 		assert.NoError(t, err)
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
 
 		// set partition name and with partition key
-		chMgr = NewMockChannelsMgr(t)
-		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"ch0"}, nil)
+		chMgr = channelmgr.NewMockChannelsMgr(t)
+		chMgr.EXPECT().GetVChannels(mock.Anything).Return([]string{"ch0"}, nil)
 		node.chMgr = chMgr
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa", PartitionName: "bbb"})
 		assert.NoError(t, err)

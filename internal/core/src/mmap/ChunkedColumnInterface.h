@@ -98,20 +98,18 @@ class ChunkedColumnInterface {
     virtual bool
     CellsLoaded(const int64_t* offsets, int64_t count) const = 0;
 
-    virtual PinWrapper<
-        std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
     StringViews(milvus::OpContext* op_ctx,
                 int64_t chunk_id,
                 std::optional<std::pair<int64_t, int64_t>> offset_len =
                     std::nullopt) const = 0;
 
-    virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
     ArrayViews(milvus::OpContext* op_ctx,
                int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
-    virtual PinWrapper<
-        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     VectorArrayViews(
         milvus::OpContext* op_ctx,
         int64_t chunk_id,
@@ -166,19 +164,7 @@ class ChunkedColumnInterface {
                    offset,
                    size,
                    chunk->RowNums());
-        const auto& valid_data = chunk->Valid();
-        AssertInfo(
-            offset + size <= static_cast<int64_t>(valid_data.size()),
-            "Valid-data range out of valid-data bounds, offset: {}, size: {}, "
-            "valid-data size: {}",
-            offset,
-            size,
-            valid_data.size());
-        for (int64_t i = 0; i < size; ++i) {
-            if (!valid_data[offset + i]) {
-                valid_result[i] = false;
-            }
-        }
+        chunk->ApplyValidityMask(offset, size, valid_result);
     }
 
     // Get number of rows before a specific chunk
@@ -353,15 +339,6 @@ class ChunkedColumnInterface {
         ThrowInfo(
             ErrorCode::Unsupported,
             "BulkVectorArrayAt only supported for ChunkedVectorArrayColumn");
-    }
-
-    static bool
-    IsPrimitiveDataType(DataType data_type) {
-        return data_type == DataType::INT8 || data_type == DataType::INT16 ||
-               data_type == DataType::INT32 || data_type == DataType::INT64 ||
-               data_type == DataType::FLOAT || data_type == DataType::DOUBLE ||
-               data_type == DataType::BOOL ||
-               data_type == DataType::TIMESTAMPTZ;
     }
 
     static bool

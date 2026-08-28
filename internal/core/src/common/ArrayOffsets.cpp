@@ -410,7 +410,7 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
 
             for (size_t i = 0; i < vector_array_views.size(); ++i) {
                 int32_t array_len = 0;
-                if (valid_flags.empty() || valid_flags[i]) {
+                if (!valid_flags || valid_flags[i]) {
                     array_len = vector_array_views[i].length();
                 }
 
@@ -427,7 +427,7 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
 
             for (size_t i = 0; i < array_views.size(); ++i) {
                 int32_t array_len = 0;
-                if (valid_flags.empty() || valid_flags[i]) {
+                if (!valid_flags || valid_flags[i]) {
                     array_len = array_views[i].length();
                 }
 
@@ -492,7 +492,7 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
 
             for (size_t i = 0; i < vector_array_views.size(); ++i) {
                 int32_t array_len = 0;
-                if (valid_flags.empty() || valid_flags[i]) {
+                if (!valid_flags || valid_flags[i]) {
                     array_len = vector_array_views[i].length();
                 }
 
@@ -509,7 +509,7 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
 
             for (size_t i = 0; i < array_views.size(); ++i) {
                 int32_t array_len = 0;
-                if (valid_flags.empty() || valid_flags[i]) {
+                if (!valid_flags || valid_flags[i]) {
                     array_len = array_views[i].length();
                 }
 

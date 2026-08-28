@@ -10670,7 +10670,7 @@ type QuerySlotResponse struct {
 
 	Status         *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 	AvailableSlots int64            `protobuf:"varint,2,opt,name=available_slots,json=availableSlots,proto3" json:"available_slots,omitempty"`
-	Version        string           `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"` // Milvus build version reported by the worker
+	Version        string           `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"` // Kept for wire compatibility; new schedulers do not use it
 }
 
 func (x *QuerySlotResponse) Reset() {

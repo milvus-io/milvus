@@ -20,6 +20,7 @@
 #include <map>
 #include <filesystem>
 #include <memory>
+#include <new>
 #include <mutex>
 #include <numeric>
 #include <optional>
@@ -332,6 +333,35 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
                 array_lengths[i] = 0;  // null → empty array
             }
         }
+    }
+}
+
+void
+ValidateGeometryInsertDataShape(const proto::schema::FieldData& field_data,
+                                const FieldMeta& field_meta,
+                                int64_t num_rows) {
+    AssertInfo(
+        field_data.has_scalars() && field_data.scalars().has_geometry_data(),
+        "geometry field {} is missing geometry payload",
+        field_meta.get_id().get());
+
+    const auto data_size = field_data.scalars().geometry_data().data_size();
+    AssertInfo(data_size == num_rows,
+               "geometry field {} payload size {} must match num_rows {}",
+               field_meta.get_id().get(),
+               data_size,
+               num_rows);
+
+    if (field_meta.is_nullable()) {
+        // Validity is one entry per logical row, resolved the same way the
+        // ingest path reads it (FieldData.valid_data on 3.0).
+        const auto valid_size = field_data.valid_data_size();
+        AssertInfo(valid_size == num_rows,
+                   "nullable geometry field {} valid_data size {} must match "
+                   "num_rows {}",
+                   field_meta.get_id().get(),
+                   valid_size,
+                   num_rows);
     }
 }
 
@@ -724,6 +754,30 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         field_id_to_offset.emplace(field_id, field_offset++);
     }
 
+    // Validate geometry row alignment before mutating any segment-owned
+    // storage. Geometry scalars are dense at this boundary (nullable rows keep
+    // an empty physical payload slot), and valid_data is one entry per logical
+    // row. Treating a truncated internal message as NULL later in the index or
+    // cache path would be too late: the raw column and validity vectors copy
+    // num_rows entries first.
+    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+        if (field_id.get() < START_USER_FIELDID ||
+            field_meta.get_data_type() != DataType::GEOMETRY) {
+            continue;
+        }
+        auto data_it = field_id_to_offset.find(field_id);
+        if (data_it == field_id_to_offset.end()) {
+            AssertInfo(schema_->is_function_output(field_id),
+                       "geometry field {} missing from insert",
+                       field_id.get());
+            continue;
+        }
+        ValidateGeometryInsertDataShape(
+            insert_record_proto->fields_data(data_it->second),
+            field_meta,
+            num_rows);
+    }
+
     // step 2: sort timestamp
     // query node already guarantees that the timestamp is ordered, avoid field data copy in c++
 
@@ -869,6 +923,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
             BuildGeometryCacheForInsert(
                 field_id,
                 &insert_record_proto->fields_data(data_offset),
+                reserved_offset,
                 num_rows);
         }
 
@@ -983,6 +1038,24 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
         auto field_data = storage::CollectFieldDataChannel(channel);
         load_field_data_common(
             field_id, reserved_offset, field_data, primary_field_id, num_rows);
+        // Build geometry cache for GEOMETRY fields, matching both storage-v2
+        // load paths. Without this the rows loaded here are acked below
+        // (readable) but have no cache entry, so once a later insert populates
+        // the cache at its own absolute offsets, every query against these
+        // historical rows reads an unfilled slot and silently reports no
+        // match.
+        //
+        // has_field() gates the schema lookup: this loop intentionally lets
+        // the system fields (RowID, Timestamp) through its dropped-field
+        // guard above, and they are absent from schema_->fields_, so an
+        // unguarded operator[] asserts on every load. load_field_data_common
+        // applies the same guard for the same reason.
+        if (schema_->has_field(field_id) &&
+            schema_->operator[](field_id).get_data_type() ==
+                DataType::GEOMETRY &&
+            segcore_config_.get_enable_geometry_cache()) {
+            BuildGeometryCacheForLoad(field_id, field_data, reserved_offset);
+        }
     }
 
     // step 5: update small indexes
@@ -1254,7 +1327,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
             if (schema->operator[](field_id).get_data_type() ==
                     DataType::GEOMETRY &&
                 segcore_config_.get_enable_geometry_cache()) {
-                BuildGeometryCacheForLoad(field_id, field_data);
+                BuildGeometryCacheForLoad(
+                    field_id, field_data, reserved_offset);
             }
         }
     }
@@ -1394,7 +1468,7 @@ SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
     }
 }
 
-PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
 SegmentGrowingImpl::chunk_string_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1404,7 +1478,7 @@ SegmentGrowingImpl::chunk_string_view_impl(
               "chunk string view impl not implement for growing segment");
 }
 
-PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
 SegmentGrowingImpl::chunk_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1414,7 +1488,7 @@ SegmentGrowingImpl::chunk_array_view_impl(
               "chunk array view impl not implement for growing segment");
 }
 
-PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
 SegmentGrowingImpl::chunk_vector_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1471,10 +1545,7 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
 
     std::vector<VectorArrayView> views;
     views.reserve(len);
-    FixedVector<bool> valid_data;
-    if (field_meta.is_nullable()) {
-        valid_data.reserve(len);
-    }
+    const bool nullable = field_meta.is_nullable();
 
     // One batch conversion for the whole contiguous range instead of a
     // logical->physical search (plus a validity lock) per row: the
@@ -1491,33 +1562,47 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
         logical_offsets.data(), len, row_valid.get(), physical_offsets);
 
     size_t next_physical = 0;
-    for (int64_t i = 0; i < len; ++i) {
-        if (field_meta.is_nullable()) {
-            valid_data.push_back(row_valid[i]);
-        }
-        if (!row_valid[i]) {
-            AssertInfo(field_meta.is_nullable(),
-                       "Cannot find VECTOR_ARRAY data at segment offset {}",
-                       logical_offsets[i]);
-            views.emplace_back();
-            continue;
-        }
+    auto append_valid_view = [&](int64_t logical_offset) {
         auto vector_array = vector_data->get_physical_element(
             physical_offsets[next_physical++]);
         AssertInfo(vector_array != nullptr,
                    "Cannot find VECTOR_ARRAY data at segment offset {}",
-                   logical_offsets[i]);
+                   logical_offset);
         views.emplace_back(const_cast<char*>(vector_array->data()),
                            vector_array->dim(),
                            vector_array->length(),
                            vector_array->byte_size(),
                            vector_array->get_element_type());
+    };
+
+    if (nullable) {
+        auto valid_data = std::make_shared<FixedVector<bool>>();
+        valid_data->reserve(len);
+        for (int64_t i = 0; i < len; ++i) {
+            valid_data->push_back(row_valid[i]);
+            if (!row_valid[i]) {
+                views.emplace_back();
+                continue;
+            }
+            append_valid_view(logical_offsets[i]);
+        }
+        std::pair<std::vector<VectorArrayView>, ValidityView> content{
+            std::move(views), ValidityView::FromExpanded(valid_data->data())};
+        return PinWrapper<
+            std::pair<std::vector<VectorArrayView>, ValidityView>>(
+            std::move(valid_data), std::move(content));
     }
 
-    std::pair<std::vector<VectorArrayView>, FixedVector<bool>> content{
-        std::move(views), std::move(valid_data)};
-    return PinWrapper<
-        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>(
+    AssertInfo(physical_offsets.size() == static_cast<size_t>(len),
+               "Cannot find VECTOR_ARRAY data in segment offset range [{}, {})",
+               logical_start,
+               logical_start + len);
+    for (int64_t i = 0; i < len; ++i) {
+        append_valid_view(logical_offsets[i]);
+    }
+    std::pair<std::vector<VectorArrayView>, ValidityView> content{
+        std::move(views), ValidityView{}};
+    return PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>(
         std::move(content));
 }
 
@@ -2936,7 +3021,8 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
             if (schema->operator[](field_id).get_data_type() ==
                     DataType::GEOMETRY &&
                 segcore_config_.get_enable_geometry_cache()) {
-                BuildGeometryCacheForLoad(field_id, field_data);
+                BuildGeometryCacheForLoad(
+                    field_id, field_data, reserved_offset);
             }
         }
     }
@@ -3141,6 +3227,29 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
     }
     column->set_data_raw(filled, missing, data.get(), field_meta);
 
+    // Backfilled GEOMETRY rows must reach the cache too. Once ANY cache entry
+    // exists for a field, the filter path takes the cache branch exclusively
+    // (GISFunctionFilterExpr's cache lookup), and a newly added field has no
+    // growing R-Tree because Reopen does not rebuild indexing_record_. So if
+    // these rows were left out, the first insert would create the cache and
+    // write only at its own absolute offsets, leaving [filled, total_row_num)
+    // as default-invalid gaps -- every backfilled row would then read as
+    // nullptr and be judged non-matching, silently dropping rows that the
+    // default geometry should match (or flipping to false positives under a
+    // negated predicate), while the same query is correct with the cache
+    // disabled.
+    //
+    // The write is addressed at `filled`, not 0, for the same reason the two
+    // column writes above are: `data` holds only the `missing` suffix, so the
+    // rows it carries belong at absolute offsets [filled, total_row_num).
+    // Passing (0, total_row_num) here would both re-address the suffix onto
+    // the already-filled prefix and read total_row_num rows out of a payload
+    // that only has `missing` of them.
+    if (field_meta.get_data_type() == DataType::GEOMETRY &&
+        segcore_config_.get_enable_geometry_cache() && missing > 0) {
+        BuildGeometryCacheForInsert(field_id, data.get(), filled, missing);
+    }
+
     LOG_INFO("fill empty field {} (data type {}) for growing segment {} done",
              field_meta.get_data_type(),
              field_id.get(),
@@ -3204,27 +3313,48 @@ SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
 void
 SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
                                                 const DataArray* data_array,
+                                                int64_t reserved_offset,
                                                 int64_t num_rows) {
+    // Rows are written at their reserved ABSOLUTE offsets
+    // (SimpleGeometryCache::AppendDataAt), matching how readers address the
+    // cache (GetByOffsetUnsafe) and how the R-Tree index path's AddGeometry
+    // works. This makes the write idempotent: a batch retried after a
+    // mid-batch retriable failure (e.g. a transient GEOS allocation throw)
+    // overwrites its own slots instead of re-appending after the partial
+    // prefix and shifting every later row to the wrong offset. It also
+    // removes the old tail-append ORDERING DEPENDENCY on strictly serialized,
+    // in-order Insert() batches.
     try {
         // Get geometry cache for this segment+field
-        auto& geometry_cache =
+        auto geometry_cache =
             milvus::exec::SimpleGeometryCacheManager::Instance()
-                .GetOrCreateCache(get_segment_id(), field_id);
+                .GetOrCreateCache(
+                    segment_instance_uid(), get_segment_id(), field_id);
 
         // Process geometry data from DataArray
         const auto& geometry_data = data_array->scalars().geometry_data();
         const auto& valid_data = data_array->valid_data();
 
+        AssertInfo(geometry_data.data_size() == num_rows,
+                   "geometry payload size {} must match cache append size {}",
+                   geometry_data.data_size(),
+                   num_rows);
+        AssertInfo(valid_data.empty() || valid_data.size() == num_rows,
+                   "geometry valid_data size {} must be empty or match cache "
+                   "append size {}",
+                   valid_data.size(),
+                   num_rows);
+
         for (int64_t i = 0; i < num_rows; ++i) {
-            if (valid_data.empty() ||
-                (i < valid_data.size() && valid_data[i])) {
+            bool is_valid = valid_data.empty() || valid_data[i];
+            if (is_valid) {
                 // Valid geometry data
                 const auto& wkb_data = geometry_data.data(i);
-                geometry_cache.AppendData(
-                    ctx_, wkb_data.data(), wkb_data.size());
+                geometry_cache->AppendDataAt(
+                    reserved_offset + i, wkb_data.data(), wkb_data.size());
             } else {
                 // Null/invalid geometry
-                geometry_cache.AppendData(ctx_, nullptr, 0);
+                geometry_cache->AppendDataAt(reserved_offset + i, nullptr, 0);
             }
         }
 
@@ -3236,6 +3366,21 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
             get_segment_id(),
             field_id.get());
 
+    } catch (const SegcoreError&) {
+        // Already typed (e.g. a retriable MemAllocateFailed from a transient
+        // GEOS allocation failure) -- rethrow as-is; re-wrapping would collapse
+        // the code into a non-retriable UnexpectedError.
+        throw;
+    } catch (const std::bad_alloc&) {
+        // Container/std allocation OOM (e.g. the cache's geometries_.resize)
+        // is the same transient resource failure as a GEOS allocation failure
+        // and must stay retriable -- the generic handler below would collapse
+        // it into a non-retriable UnexpectedError.
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "out of memory building geometry cache for growing segment "
+                  "{} field {} insert",
+                  get_segment_id(),
+                  field_id.get());
     } catch (const std::exception& e) {
         ThrowInfo(UnexpectedError,
                   "Failed to build geometry cache for growing segment {} field "
@@ -3248,27 +3393,33 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
 
 void
 SegmentGrowingImpl::BuildGeometryCacheForLoad(
-    FieldId field_id, const std::vector<FieldDataPtr>& field_data) {
+    FieldId field_id,
+    const std::vector<FieldDataPtr>& field_data,
+    int64_t reserved_offset) {
     try {
         // Get geometry cache for this segment+field
-        auto& geometry_cache =
+        auto geometry_cache =
             milvus::exec::SimpleGeometryCacheManager::Instance()
-                .GetOrCreateCache(get_segment_id(), field_id);
+                .GetOrCreateCache(
+                    segment_instance_uid(), get_segment_id(), field_id);
 
-        // Process each field data chunk
+        // Process each field data chunk, writing rows at their reserved
+        // absolute offsets so a retried load overwrites in place (see
+        // BuildGeometryCacheForInsert).
+        int64_t absolute_offset = reserved_offset;
         for (const auto& data : field_data) {
             auto num_rows = data->get_num_rows();
 
-            for (int64_t i = 0; i < num_rows; ++i) {
+            for (int64_t i = 0; i < num_rows; ++i, ++absolute_offset) {
                 if (data->is_valid(i)) {
                     // Valid geometry data
                     auto wkb_data =
                         static_cast<const std::string*>(data->RawValue(i));
-                    geometry_cache.AppendData(
-                        ctx_, wkb_data->data(), wkb_data->size());
+                    geometry_cache->AppendDataAt(
+                        absolute_offset, wkb_data->data(), wkb_data->size());
                 } else {
                     // Null/invalid geometry
-                    geometry_cache.AppendData(ctx_, nullptr, 0);
+                    geometry_cache->AppendDataAt(absolute_offset, nullptr, 0);
                 }
             }
         }
@@ -3286,6 +3437,18 @@ SegmentGrowingImpl::BuildGeometryCacheForLoad(
             get_segment_id(),
             field_id.get());
 
+    } catch (const SegcoreError&) {
+        // Already typed -- rethrow as-is to keep the code (see the insert-path
+        // catch above).
+        throw;
+    } catch (const std::bad_alloc&) {
+        // Container/std allocation OOM stays retriable (see the insert-path
+        // catch above).
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "out of memory building geometry cache for growing segment "
+                  "{} field {} load",
+                  get_segment_id(),
+                  field_id.get());
     } catch (const std::exception& e) {
         ThrowInfo(UnexpectedError,
                   "Failed to build geometry cache for growing segment {} field "

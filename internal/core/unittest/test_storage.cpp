@@ -902,6 +902,25 @@ TEST_F(StorageTest, CleanRemoteChunkManagerSingleton) {
     CleanRemoteChunkManagerSingleton();
 }
 
+TEST_F(StorageTest, InitExternalIopsConfig) {
+    auto& singleton = LoonFFIPropertiesSingleton::GetInstance();
+    const auto old_config = singleton.GetExternalIopsConfig();
+
+    auto status = InitExternalIopsConfig(0, old_config.max_rate);
+    EXPECT_EQ(status.error_code, ConfigInvalid);
+    FreeErrorStatus(status);
+
+    status = InitExternalIopsConfig(3000, 0);
+    EXPECT_EQ(status.error_code, Success) << status.error_msg;
+    const auto config = singleton.GetExternalIopsConfig();
+    EXPECT_EQ(config.initial_rate, 3000);
+    EXPECT_EQ(config.max_rate, 0);
+
+    status =
+        InitExternalIopsConfig(old_config.initial_rate, old_config.max_rate);
+    EXPECT_EQ(status.error_code, Success) << status.error_msg;
+}
+
 TEST_F(StorageTest, InitArrowReaderConfig) {
     auto default_cache_options =
         parquet::default_arrow_reader_properties().cache_options();

@@ -102,6 +102,12 @@ func InitSegcore(nodeID int64) error {
 		return err
 	}
 
+	// Publish the External Table IOPS policy once for native IndexBuilder
+	// readers. Reader config watchers must not rewrite this startup policy.
+	if err := initcore.InitExternalIopsConfig(paramtable.Get()); err != nil {
+		return err
+	}
+
 	// Apply milvus-storage reader concurrency config: the global reader
 	// thread pool (chunk/file-level fan-out) and the index-build read
 	// window (row groups prefetched in parallel per round).

@@ -17,6 +17,7 @@ func TestFIFOQueue_Push(t *testing.T) {
 
 	queue.Push(task1)
 	queue.Push(task2)
+	assert.Equal(t, 2, queue.TaskCount())
 
 	// Verify task ID list
 	taskIDs := queue.TaskIDs()
@@ -28,6 +29,10 @@ func TestFIFOQueue_Push(t *testing.T) {
 	queue.Push(task1)
 	taskIDs = queue.TaskIDs()
 	assert.Equal(t, 2, len(taskIDs))
+	assert.Equal(t, 2, queue.TaskCount())
+	assert.Equal(t, 1, queue.TaskCountBy(func(task Task) bool {
+		return task.GetTaskID() == 2
+	}))
 }
 
 func TestFIFOQueue_Pop(t *testing.T) {
@@ -47,10 +52,12 @@ func TestFIFOQueue_Pop(t *testing.T) {
 	poppedTask := queue.Pop()
 	assert.Equal(t, int64(1), poppedTask.GetTaskID())
 	assert.Equal(t, 1, len(queue.TaskIDs()))
+	assert.Equal(t, 1, queue.TaskCount())
 
 	poppedTask = queue.Pop()
 	assert.Equal(t, int64(2), poppedTask.GetTaskID())
 	assert.Equal(t, 0, len(queue.TaskIDs()))
+	assert.Equal(t, 0, queue.TaskCount())
 }
 
 func TestFIFOQueue_Get(t *testing.T) {
@@ -90,6 +97,7 @@ func TestFIFOQueue_Remove(t *testing.T) {
 	queue.Remove(2)
 	taskIDs := queue.TaskIDs()
 	assert.Equal(t, 2, len(taskIDs))
+	assert.Equal(t, 2, queue.TaskCount())
 	assert.Equal(t, int64(1), taskIDs[0])
 	assert.Equal(t, int64(3), taskIDs[1])
 

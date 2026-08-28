@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
@@ -44,8 +45,7 @@ type deleteTask struct {
 	req *milvuspb.DeleteRequest
 
 	// channel
-	chMgr     channelsMgr
-	chTicker  channelsTimeTicker
+	chMgr     channelmgr.ChannelsMgr
 	pChannels []pChan
 	vChannels []vChan
 
@@ -115,7 +115,7 @@ func (dt *deleteTask) setChannels() error {
 	if err != nil {
 		return err
 	}
-	channels, err := dt.chMgr.getChannels(collID)
+	channels, err := dt.chMgr.GetChannels(collID)
 	if err != nil {
 		return err
 	}
@@ -260,7 +260,7 @@ type deleteRunner struct {
 	metaCache Cache
 
 	// channel
-	chMgr     channelsMgr
+	chMgr     channelmgr.ChannelsMgr
 	vChannels []vChan
 
 	idAllocator     allocator.Interface
@@ -398,7 +398,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	}
 
 	// set vchannels
-	channelNames, err := dr.chMgr.getVChannels(dr.collectionID)
+	channelNames, err := dr.chMgr.GetVChannels(dr.collectionID)
 	if err != nil {
 		return ErrWithLog(log, "Failed to get vchannels from collection", err)
 	}

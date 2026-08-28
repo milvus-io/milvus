@@ -14,28 +14,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <map>
-#include <stdint.h>
-#include <string>
-#include <vector>
-#include "common/Types.h"
-#include "index/Index.h"
-#include "storage/Types.h"
+package channelmgr
 
-struct AnalyzeInfo {
-    int64_t collection_id;
-    int64_t partition_id;
-    int64_t field_id;
-    int64_t task_id;
-    int64_t version;
-    std::string field_name;
-    milvus::DataType field_type;
-    int64_t dim;
-    int64_t num_clusters;
-    int64_t train_size;
-    std::map<int64_t, std::vector<std::string>>
-        insert_files;  // segment_id->files
-    std::map<int64_t, int64_t> num_rows;
-    milvus::storage::StorageConfig storage_config;
-    milvus::Config config;
-};
+import (
+	"os"
+	"testing"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+)
+
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	code := m.Run()
+	os.Exit(code)
+}

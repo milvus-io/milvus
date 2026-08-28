@@ -13,6 +13,7 @@
 
 #include <unistd.h>
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -85,12 +86,6 @@ class Chunk {
           size_(size),
           nullable_(nullable),
           chunk_mmap_guard_(chunk_mmap_guard) {
-        if (nullable) {
-            valid_.reserve(row_nums);
-            for (int i = 0; i < row_nums; i++) {
-                valid_.push_back((data[i >> 3] >> (i & 0x07)) & 1);
-            }
-        }
     }
     virtual ~Chunk() {
         // The ChunkMmapGuard will handle the unmapping and unlinking of the file if it is file backed
@@ -127,18 +122,68 @@ class Chunk {
         return data_;
     }
 
-    FixedVector<bool>&
-    Valid() {
-        return valid_;
-    }
-
     virtual bool
     isValid(int offset) const {
         if (nullable_) {
-            return valid_[offset];
+            return (static_cast<uint8_t>(data_[offset >> 3]) >>
+                    (offset & 0x07)) &
+                   1;
         }
         return true;
     };
+
+    ValidityView
+    Validity(int64_t offset = 0) const {
+        if (!nullable_) {
+            return {};
+        }
+        return ValidityView::FromPacked(reinterpret_cast<const uint8_t*>(data_))
+            .Subview(offset);
+    }
+
+    void
+    ApplyValidityMask(int64_t offset,
+                      int64_t count,
+                      TargetBitmapView target) const {
+        if (!nullable_ || count == 0) {
+            return;
+        }
+        AssertInfo(offset >= 0 && count >= 0 && offset + count <= row_nums_,
+                   "Invalid validity range, offset: {}, count: {}, rows: {}",
+                   offset,
+                   count,
+                   row_nums_);
+
+        const auto validity = Validity(offset);
+        const auto* packed = validity.packed_data();
+        AssertInfo(packed != nullptr, "Packed validity data is missing");
+        const auto read_word = [packed](int64_t bit_offset, int bit_count) {
+            const auto byte_offset = bit_offset >> 3;
+            const auto shift = static_cast<int>(bit_offset & 0x07);
+            const auto bytes = (shift + bit_count + 7) >> 3;
+            uint64_t word = 0;
+            const auto low_bytes = std::min(bytes, 8);
+            for (int i = 0; i < low_bytes; ++i) {
+                word |= uint64_t(packed[byte_offset + i]) << (i * 8);
+            }
+            word >>= shift;
+            if (bytes > 8) {
+                word |= uint64_t(packed[byte_offset + 8]) << (64 - shift);
+            }
+            if (bit_count < 64) {
+                word &= (uint64_t{1} << bit_count) - 1;
+            }
+            return word;
+        };
+
+        for (int64_t i = 0; i < count; i += 64) {
+            const auto bit_count =
+                static_cast<int>(std::min<int64_t>(count - i, 64));
+            auto word = read_word(validity.bit_offset() + i, bit_count);
+            TargetBitmapView validity_word(&word, bit_count);
+            target.view(i).inplace_and(validity_word, bit_count);
+        }
+    }
 
     int64_t
     PhysicalOffsetOf(int64_t logical_offset) const {
@@ -149,20 +194,36 @@ class Chunk {
         if (!nullable_) {
             return logical_offset;
         }
-        AssertInfo(valid_[logical_offset],
+        AssertInfo(isValid(logical_offset),
                    "Logical offset {} is null",
                    logical_offset);
         BuildValidRankBlocks();
         const auto block_id = logical_offset / kValidRankBlockSize;
         int64_t physical_offset = valid_rank_blocks_[block_id];
         const auto block_start = block_id * kValidRankBlockSize;
-        for (int64_t i = block_start; i < logical_offset; ++i) {
-            physical_offset += valid_[i] ? 1 : 0;
-        }
-        return physical_offset;
+        return physical_offset + CountValidBits(block_start, logical_offset);
     }
 
  protected:
+    int64_t
+    CountValidBits(int64_t begin, int64_t end) const {
+        int64_t count = 0;
+        while (begin < end && (begin & 0x07) != 0) {
+            count += isValid(begin) ? 1 : 0;
+            ++begin;
+        }
+        while (begin + 8 <= end) {
+            count += std::popcount(static_cast<unsigned int>(
+                static_cast<uint8_t>(data_[begin >> 3])));
+            begin += 8;
+        }
+        while (begin < end) {
+            count += isValid(begin) ? 1 : 0;
+            ++begin;
+        }
+        return count;
+    }
+
     void
     BuildValidRankBlocks() const {
         std::call_once(valid_rank_blocks_once_, [&]() {
@@ -175,9 +236,7 @@ class Chunk {
                 const auto block_start = block_id * kValidRankBlockSize;
                 const auto block_end =
                     std::min(block_start + kValidRankBlockSize, row_nums_);
-                for (int64_t i = block_start; i < block_end; ++i) {
-                    valid_count += valid_[i] ? 1 : 0;
-                }
+                valid_count += CountValidBits(block_start, block_end);
             }
             valid_rank_blocks_[num_blocks] = valid_count;
         });
@@ -188,8 +247,6 @@ class Chunk {
     int64_t row_nums_;
     uint64_t size_;
     bool nullable_;
-    FixedVector<bool>
-        valid_;  // parse null bitmap to valid_ to be compatible with SpanBase
 
     std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard_{nullptr};
     mutable std::once_flag valid_rank_blocks_once_;
@@ -215,10 +272,8 @@ class FixedWidthChunk : public Chunk {
 
     milvus::SpanBase
     Span() const {
-        return milvus::SpanBase(data_start_,
-                                nullable_ ? valid_.data() : nullptr,
-                                row_nums_,
-                                element_size_ * dim_);
+        return milvus::SpanBase(
+            data_start_, Validity(), row_nums_, element_size_ * dim_);
     }
 
     const char*
@@ -283,7 +338,7 @@ class StringChunk : public Chunk {
         return {data_ + offsets_[i], offsets_[i + 1] - offsets_[i]};
     }
 
-    std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    std::pair<std::vector<std::string_view>, ValidityView>
     StringViews(std::optional<std::pair<int64_t, int64_t>> offset_len);
 
     int
@@ -444,7 +499,7 @@ class ArrayChunk : public Chunk {
         return {std::move(views), std::move(valid_res)};
     }
 
-    std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    std::pair<std::vector<ArrayView>, ValidityView>
     Views(std::optional<std::pair<int64_t, int64_t>> offset_len =
               std::nullopt) const {
         auto start_offset = 0;
@@ -474,12 +529,7 @@ class ArrayChunk : public Chunk {
         for (auto i = start_offset; i < end_offset; i++) {
             views.emplace_back(View(i));
         }
-        if (nullable_) {
-            FixedVector<bool> res_valid(valid_.begin() + start_offset,
-                                        valid_.begin() + end_offset);
-            return {std::move(views), std::move(res_valid)};
-        }
-        return {std::move(views), {}};
+        return {std::move(views), Validity(start_offset)};
     }
 
     const char*
@@ -540,19 +590,13 @@ class VectorArrayChunk : public Chunk {
                    "rows {}",
                    idx,
                    row_nums_);
-        AssertInfo(!nullable_ || valid_[idx],
+        AssertInfo(!nullable_ || isValid(idx),
                    "VectorArrayChunk::View offset {} is null",
                    idx);
-        int idx_off = 2 * idx;
-        auto offset = offsets_lens_[idx_off];
-        auto len = offsets_lens_[idx_off + 1];
-        auto next_offset = offsets_lens_[idx_off + 2];
-        auto data_ptr = data_ + offset;
-        return VectorArrayView(
-            data_ptr, dim_, len, next_offset - offset, element_type_);
+        return ViewUnchecked(idx);
     }
 
-    std::pair<std::vector<VectorArrayView>, FixedVector<bool>>
+    std::pair<std::vector<VectorArrayView>, ValidityView>
     Views(std::optional<std::pair<int64_t, int64_t>> offset_len =
               std::nullopt) const {
         auto start_offset = 0;
@@ -583,23 +627,15 @@ class VectorArrayChunk : public Chunk {
         std::vector<VectorArrayView> views;
         views.reserve(len);
         auto end_offset = start_offset + len;
+        const auto validity = Validity(start_offset);
         for (int64_t i = start_offset; i < end_offset; i++) {
-            if (nullable_) {
-                if (valid_[i]) {
-                    views.emplace_back(View(i));
-                } else {
-                    views.emplace_back();
-                }
+            if (nullable_ && !validity[i - start_offset]) {
+                views.emplace_back();
             } else {
-                views.emplace_back(View(i));
+                views.emplace_back(ViewUnchecked(i));
             }
         }
-        if (nullable_) {
-            FixedVector<bool> res_valid(valid_.begin() + start_offset,
-                                        valid_.begin() + end_offset);
-            return {std::move(views), std::move(res_valid)};
-        }
-        return {std::move(views), {}};
+        return {std::move(views), validity};
     }
 
     const char*
@@ -619,6 +655,16 @@ class VectorArrayChunk : public Chunk {
     }
 
  private:
+    VectorArrayView
+    ViewUnchecked(int64_t idx) const {
+        int idx_off = 2 * idx;
+        auto offset = offsets_lens_[idx_off];
+        auto len = offsets_lens_[idx_off + 1];
+        auto next_offset = offsets_lens_[idx_off + 2];
+        auto data_ptr = data_ + offset;
+        return VectorArrayView(
+            data_ptr, dim_, len, next_offset - offset, element_type_);
+    }
     int64_t dim_;
     uint32_t* offsets_lens_;
     milvus::DataType element_type_;

@@ -16,7 +16,6 @@ require (
 	github.com/confluentinc/confluent-kafka-go v1.9.1
 	github.com/containerd/cgroups/v3 v3.0.3
 	github.com/dave/jennifer v1.7.1
-	github.com/expr-lang/expr v1.15.7
 	github.com/huaweicloud/huaweicloud-sdk-go-v3 v0.1.174
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12
@@ -28,7 +27,6 @@ require (
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/samber/lo v1.52.0
 	github.com/sirupsen/logrus v1.9.3
-	github.com/spaolacci/murmur3 v1.1.0
 	github.com/spf13/cast v1.3.1
 	github.com/stretchr/testify v1.11.1
 	github.com/tecbot/gorocksdb v0.0.0-20191217155057-f0fad39f321c
@@ -37,7 +35,7 @@ require (
 	github.com/tikv/client-go/v2 v2.0.8-0.20260610031342-e999c1f9c7c3
 	github.com/twpayne/go-geom v1.6.1
 	github.com/x448/float16 v0.8.4
-	github.com/zilliztech/woodpecker v0.1.37
+	github.com/zilliztech/woodpecker v0.1.38
 	go.etcd.io/etcd/api/v3 v3.5.23
 	go.etcd.io/etcd/client/v3 v3.5.23
 	go.etcd.io/etcd/server/v3 v3.5.23
@@ -70,6 +68,7 @@ require (
 require (
 	github.com/ebitengine/purego v0.9.0 // indirect
 	github.com/shirou/gopsutil/v3 v3.23.12 // indirect
+	github.com/spaolacci/murmur3 v1.1.0 // indirect
 )
 
 require (
@@ -207,7 +206,7 @@ require (
 	github.com/tklauser/go-sysconf v0.3.15 // indirect
 	github.com/tklauser/numcpus v0.10.0 // indirect
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20201229170055-e5319fda7802 // indirect
-	github.com/twmb/murmur3 v1.1.3 // indirect
+	github.com/twmb/murmur3 v1.1.6
 	github.com/uber/jaeger-client-go v2.30.0+incompatible // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
@@ -246,7 +245,6 @@ require (
 
 replace (
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
-	github.com/expr-lang/expr => github.com/SimFG/expr v0.0.0-20250513112851-9b981e8400b9
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
 	github.com/ianlancetaylor/cgosymbolizer => github.com/milvus-io/cgosymbolizer v0.0.0-20260810014817-f3b338cf6824
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect

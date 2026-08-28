@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -202,6 +203,222 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	s.Equal(err, io.EOF)
 	err = r.Close()
 	s.NoError(err)
+
+	// Fill contract on the packed (StorageV2) path: schema fields absent from the
+	// written files are backfilled by the reader (#52781/#52807) — a plain nullable
+	// field comes back all-null, a field with a declared default comes back default-filled.
+	extSchema := typeutil.Clone(s.schema)
+	extSchema.Fields = append(extSchema.Fields,
+		&schemapb.FieldSchema{FieldID: 200, Name: "added_nullable", DataType: schemapb.DataType_Int64, Nullable: true},
+		&schemapb.FieldSchema{
+			FieldID: 201, Name: "added_default", DataType: schemapb.DataType_Int64, Nullable: true,
+			DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}},
+		},
+	)
+	fr, err := NewBinlogRecordReader(s.ctx, binlogs, extSchema, rOption...)
+	s.NoError(err)
+	defer fr.Close()
+	frec, err := fr.Next()
+	s.NoError(err)
+	s.Positive(frec.Len())
+	s.Equal(frec.Len(), frec.Column(200).NullN(), "absent nullable column arrives all-null")
+	s.Equal(0, frec.Column(201).NullN(), "absent default-carrying column arrives default-filled (#52781/#52807)")
+	col201 := frec.Column(201).(*array.Int64)
+	for i := 0; i < col201.Len(); i++ {
+		s.EqualValues(42, col201.Value(i))
+	}
+}
+
+// TestManifestReadFillsAbsentDefaultField is the StorageV3/manifest analog: an
+// internal manifest read must present the default of a field that has no column
+// in the manifest, not NULL (#52771).
+func (s *PackedBinlogRecordSuite) TestManifestReadFillsAbsentDefaultField() {
+	dir := s.T().TempDir()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, dir)
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+		paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+	}()
+	storageConfig := &indexpb.StorageConfig{RootPath: dir, StorageType: "local"}
+	columnGroups := []storagecommon.ColumnGroup{
+		{GroupID: 0, Columns: []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, Fields: []int64{0, 1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 101}},
+	}
+	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.maxRowNum,
+		WithVersion(StorageV3), WithColumnGroups(columnGroups), WithStorageConfig(storageConfig),
+		WithUploader(func(ctx context.Context, kvs map[string][]byte) error { return nil }))
+	s.NoError(err)
+	blobs, err := generateTestData(10)
+	s.NoError(err)
+	deser, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs), false)
+	s.NoError(err)
+	for i := 0; i < 10; i++ {
+		v, err := deser.NextValue()
+		s.NoError(err)
+		rec, err := ValueSerializer([]*Value{*v}, s.schema)
+		s.NoError(err)
+		s.NoError(w.Write(rec))
+	}
+	deser.Close()
+	s.NoError(w.Close())
+	_, _, _, manifestPath, _ := w.GetLogs()
+	s.NotEmpty(manifestPath)
+
+	const absentFieldID = int64(200)
+	readSchema := &schemapb.CollectionSchema{
+		Name: s.schema.GetName(),
+		Fields: append(append([]*schemapb.FieldSchema{}, s.schema.GetFields()...),
+			&schemapb.FieldSchema{
+				FieldID: absentFieldID, Name: "added_def", DataType: schemapb.DataType_Int64,
+				Nullable: true, DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 7}},
+			}),
+	}
+	r, err := NewManifestRecordReader(s.ctx, manifestPath, readSchema, WithVersion(StorageV3), WithStorageConfig(storageConfig))
+	s.NoError(err)
+	defer r.Close()
+	total := 0
+	for {
+		rec, err := r.Next()
+		if err == io.EOF {
+			break
+		}
+		s.NoError(err)
+		added := rec.Column(absentFieldID).(*array.Int64)
+		s.Equal(0, added.NullN(), "absent default field must not be null")
+		for j := 0; j < added.Len(); j++ {
+			s.Equal(int64(7), added.Value(j))
+		}
+		s.NotNil(rec.Column(int64(13)))
+		total += rec.Len()
+	}
+	s.Equal(10, total)
+}
+
+// writeV2Segment writes a 10-row StorageV2 packed segment and returns its
+// FieldBinlogs (which the V2 writer populates with ChildFields).
+func (s *PackedBinlogRecordSuite) writeV2Segment(storageConfig *indexpb.StorageConfig, columnGroups []storagecommon.ColumnGroup) []*datapb.FieldBinlog {
+	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.maxRowNum,
+		WithVersion(StorageV2), WithColumnGroups(columnGroups), WithStorageConfig(storageConfig),
+		WithUploader(func(ctx context.Context, kvs map[string][]byte) error { return nil }))
+	s.NoError(err)
+	blobs, err := generateTestData(10)
+	s.NoError(err)
+	deser, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs), false)
+	s.NoError(err)
+	for i := 0; i < 10; i++ {
+		v, err := deser.NextValue()
+		s.NoError(err)
+		rec, err := ValueSerializer([]*Value{*v}, s.schema)
+		s.NoError(err)
+		s.NoError(w.Write(rec))
+	}
+	deser.Close()
+	s.NoError(w.Close())
+	fieldBinlogs, _, _, _, _ := w.GetLogs()
+	return SortFieldBinlogs(fieldBinlogs)
+}
+
+func newAbsentDefaultReadSchema(base *schemapb.CollectionSchema, absentFieldID int64) *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name: base.GetName(),
+		Fields: append(append([]*schemapb.FieldSchema{}, base.GetFields()...),
+			&schemapb.FieldSchema{
+				FieldID: absentFieldID, Name: "added_def", DataType: schemapb.DataType_Int64,
+				Nullable: true, DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 7}},
+			}),
+	}
+}
+
+// TestBinlogReadFillsAbsentDefaultFieldV2 is the StorageV2/binlog analog of the
+// manifest test: a packed binlog read must present the default of an added field
+// that has no column in the segment, sourcing physical presence from the
+// FieldBinlog ChildFields written by the V2 writer.
+func (s *PackedBinlogRecordSuite) TestBinlogReadFillsAbsentDefaultFieldV2() {
+	dir := s.T().TempDir()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, dir)
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+		paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+	}()
+	storageConfig := &indexpb.StorageConfig{RootPath: dir, StorageType: "local"}
+	columnGroups := []storagecommon.ColumnGroup{
+		{GroupID: 0, Columns: []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, Fields: []int64{0, 1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 101}},
+		{GroupID: 102, Columns: []int{13}, Fields: []int64{102}},
+		{GroupID: 103, Columns: []int{14}, Fields: []int64{103}},
+		{GroupID: 104, Columns: []int{15}, Fields: []int64{104}},
+		{GroupID: 105, Columns: []int{16}, Fields: []int64{105}},
+		{GroupID: 106, Columns: []int{17}, Fields: []int64{106}},
+	}
+	binlogs := s.writeV2Segment(storageConfig, columnGroups)
+	s.NotEmpty(binlogs[0].GetChildFields(), "V2 writer must populate ChildFields for presence to be derivable")
+
+	const absentFieldID = int64(200)
+	readSchema := newAbsentDefaultReadSchema(s.schema, absentFieldID)
+	r, err := NewBinlogRecordReader(s.ctx, binlogs, readSchema, WithVersion(StorageV2), WithStorageConfig(storageConfig))
+	s.NoError(err)
+	defer r.Close()
+	total := 0
+	for {
+		rec, err := r.Next()
+		if err == io.EOF {
+			break
+		}
+		s.NoError(err)
+		added := rec.Column(absentFieldID).(*array.Int64)
+		s.Equal(0, added.NullN(), "absent default field must not be null")
+		for j := 0; j < added.Len(); j++ {
+			s.Equal(int64(7), added.Value(j))
+		}
+		total += added.Len()
+	}
+	s.Equal(10, total)
+}
+
+// TestBinlogReadNoChildFieldsFallsBackUnfiltered pins the import-restore safety net:
+// binlogs without ChildFields (FieldID keyed by column-group ID, the shape import
+// reconstructs) are not filterable, so the reader passes the full schema through
+// unchanged — no PK strip / no crash — instead of default-filling.
+func (s *PackedBinlogRecordSuite) TestBinlogReadNoChildFieldsFallsBackUnfiltered() {
+	dir := s.T().TempDir()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, dir)
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+		paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+	}()
+	storageConfig := &indexpb.StorageConfig{RootPath: dir, StorageType: "local"}
+	columnGroups := []storagecommon.ColumnGroup{
+		{GroupID: 0, Columns: []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, Fields: []int64{0, 1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 101}},
+		{GroupID: 102, Columns: []int{13}, Fields: []int64{102}},
+		{GroupID: 103, Columns: []int{14}, Fields: []int64{103}},
+		{GroupID: 104, Columns: []int{15}, Fields: []int64{104}},
+		{GroupID: 105, Columns: []int{16}, Fields: []int64{105}},
+		{GroupID: 106, Columns: []int{17}, Fields: []int64{106}},
+	}
+	binlogs := s.writeV2Segment(storageConfig, columnGroups)
+	for _, fb := range binlogs { // simulate import-reconstructed binlogs: drop ChildFields
+		fb.ChildFields = nil
+	}
+
+	const absentFieldID = int64(200)
+	readSchema := newAbsentDefaultReadSchema(s.schema, absentFieldID)
+	r, err := NewBinlogRecordReader(s.ctx, binlogs, readSchema, WithVersion(StorageV2), WithStorageConfig(storageConfig))
+	s.NoError(err) // must not strip the PK / fail — regression guard for the import break
+	defer r.Close()
+	total := 0
+	for {
+		rec, err := r.Next()
+		if err == io.EOF {
+			break
+		}
+		s.NoError(err)
+		added := rec.Column(absentFieldID).(*array.Int64)
+		s.Equal(added.Len(), added.NullN(), "no-ChildFields fallback must not default-fill")
+		s.NotNil(rec.Column(int64(13))) // present column still reads back
+		total += rec.Len()
+	}
+	s.Equal(10, total)
 }
 
 func (s *PackedBinlogRecordSuite) TestGenerateBM25Stats() {
@@ -760,4 +977,82 @@ func TestRwOptionValidate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFilterSchemaToPresentFieldsStructAllOrNothing(t *testing.T) {
+	// One ordinary field plus a struct array whose two children are the physical
+	// (first-level) columns of the struct. A struct array is added/dropped whole,
+	// so its children are physically all-or-nothing.
+	newSchema := func() *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{FieldID: 200, Name: "st", Fields: []*schemapb.FieldSchema{
+					{FieldID: 201, Name: "st[a]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+					{FieldID: 202, Name: "st[b]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar},
+				}},
+			},
+		}
+	}
+
+	t.Run("struct fully present is kept whole", func(t *testing.T) {
+		out, err := filterSchemaToPresentFields(newSchema(), map[FieldID]struct{}{100: {}, 201: {}, 202: {}})
+		require.NoError(t, err)
+		require.Len(t, out.GetStructArrayFields(), 1)
+		require.Len(t, out.GetStructArrayFields()[0].GetFields(), 2)
+	})
+
+	t.Run("struct fully absent is dropped whole", func(t *testing.T) {
+		out, err := filterSchemaToPresentFields(newSchema(), map[FieldID]struct{}{100: {}})
+		require.NoError(t, err)
+		require.Empty(t, out.GetStructArrayFields())
+		require.Len(t, out.GetFields(), 1)
+	})
+
+	t.Run("struct partially present is a data-integrity error", func(t *testing.T) {
+		_, err := filterSchemaToPresentFields(newSchema(), map[FieldID]struct{}{100: {}, 201: {}})
+		require.Error(t, err)
+	})
+}
+
+func TestFilterSchemaToPresentFieldsDropsAbsentTopLevelAndKeepsAttrs(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name:               "coll",
+		EnableDynamicField: true,
+		Functions:          []*schemapb.FunctionSchema{{Name: "fn", Id: 7}},
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "absent", DataType: schemapb.DataType_Int64, Nullable: true},
+		},
+	}
+	out, err := filterSchemaToPresentFields(schema, map[FieldID]struct{}{100: {}})
+	require.NoError(t, err)
+	require.Len(t, out.GetFields(), 1) // absent top-level 101 dropped
+	require.Equal(t, int64(100), out.GetFields()[0].GetFieldID())
+	// non-field schema attributes survive the proto.Clone-based filter
+	require.Equal(t, "coll", out.GetName())
+	require.True(t, out.GetEnableDynamicField())
+	require.Len(t, out.GetFunctions(), 1)
+}
+
+func TestBinlogFieldIDSet(t *testing.T) {
+	// flush/compaction binlogs carry ChildFields (the group's member field IDs) -> reliable.
+	withChildren := []*datapb.FieldBinlog{
+		{FieldID: 0, ChildFields: []int64{0, 1, 100}},
+		{FieldID: 101, ChildFields: []int64{101}},
+	}
+	present, reliable := binlogFieldIDSet(withChildren)
+	require.True(t, reliable)
+	require.Equal(t, map[FieldID]struct{}{0: {}, 1: {}, 100: {}, 101: {}}, present)
+
+	// import-reconstructed binlogs key FieldID by column-group ID with no ChildFields
+	// -> presence is not derivable -> unreliable (caller must read unfiltered).
+	noChildren := []*datapb.FieldBinlog{
+		{FieldID: 0, ChildFields: []int64{0, 1, 100}},
+		{FieldID: 101}, // no ChildFields
+	}
+	_, reliable = binlogFieldIDSet(noChildren)
+	require.False(t, reliable)
 }

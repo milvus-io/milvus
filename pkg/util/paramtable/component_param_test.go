@@ -74,6 +74,30 @@ func TestComponentParam_DataCoordSnapshotExportCopyConcurrency(t *testing.T) {
 	}
 }
 
+func TestComponentParam_StorageIopsParams(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
+
+	initialRate := &params.CommonCfg.StorageIopsInitialRate
+	maxRate := &params.CommonCfg.StorageIopsMaxRate
+	assert.Equal(t, "3.0.1", initialRate.Version)
+	assert.Equal(t, "3.0.1", maxRate.Version)
+	assert.Equal(t, DefaultStorageIopsInitialRate, initialRate.GetAsUint32())
+	assert.Equal(t, DefaultStorageIopsMaxRate, maxRate.GetAsUint32())
+
+	assert.NoError(t, params.Save(initialRate.Key, "3000"))
+	assert.NoError(t, params.Save(maxRate.Key, "0"))
+	assert.Equal(t, uint32(3000), initialRate.GetAsUint32())
+	assert.Equal(t, uint32(0), maxRate.GetAsUint32())
+
+	for _, invalid := range []string{"", "-1", "invalid", "4294967296"} {
+		assert.NoError(t, params.Save(initialRate.Key, invalid))
+		assert.Equal(t, DefaultStorageIopsInitialRate, initialRate.GetAsUint32())
+		assert.NoError(t, params.Save(maxRate.Key, invalid))
+		assert.Equal(t, DefaultStorageIopsMaxRate, maxRate.GetAsUint32())
+	}
+}
+
 func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()
@@ -750,6 +774,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 500*time.Second, Params.TaskCheckInterval.GetAsDuration(time.Second))
 		params.Save("datacoord.statsTaskTriggerCount", "3")
 		assert.Equal(t, 3, Params.SortCompactionTriggerCount.GetAsInt())
+		// The stats admission limit is independent from the sort compaction trigger count.
+		assert.Equal(t, 100, Params.StatsTaskPendingLimit.GetAsInt())
+		params.Save("datacoord.statsTaskPendingLimit", "7")
+		assert.Equal(t, 7, Params.StatsTaskPendingLimit.GetAsInt())
 
 		assert.Equal(t, 100, Params.MaxSegmentsPerCopyTask.GetAsInt())
 		params.Save("dataCoord.import.maxSegmentsPerCopyTask", "200")
