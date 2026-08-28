@@ -1135,6 +1135,11 @@ common:
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
     useLoonFFI: false
     enableGrowingSourceFlush: false # enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path
+    externalVector:
+      # Policy for an external nullable dense-vector row that contains both valid and NULL dimensions.
+      # error: reject the malformed row; null: treat the whole row as NULL.
+      # A row whose dimensions are all NULL is always treated as a row-level NULL.
+      partialNullPolicy: error
     iops:
       # Initial ObjectStore request rate used by the Lance AIMD limiter for External Table reads.
       # The value must be greater than 0. Values above a positive maxRate are reduced to maxRate.
