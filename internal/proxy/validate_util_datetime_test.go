@@ -157,3 +157,41 @@ func TestDateTimePacked2IsoStr(t *testing.T) {
 	assert.Equal(t, []string{"1970-01-01"}, results[0].GetScalars().GetStringData().GetData())
 	assert.Equal(t, []string{"00:00:00"}, results[1].GetScalars().GetStringData().GetData())
 }
+
+func TestDateTimePacked2IsoStrGroupByFieldValues(t *testing.T) {
+	rd := &schemapb.SearchResultData{
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type: schemapb.DataType_Date,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_DateData{DateData: &schemapb.DateArray{Data: []int32{1}}},
+					},
+				},
+			},
+		},
+		GroupByFieldValues: []*schemapb.FieldData{
+			{
+				Type: schemapb.DataType_Date,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_DateData{DateData: &schemapb.DateArray{Data: []int32{0}}},
+					},
+				},
+			},
+			{
+				Type: schemapb.DataType_Time,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_TimeData{TimeData: &schemapb.TimeArray{Data: []int64{1_000_000}}},
+					},
+				},
+			},
+		},
+	}
+	dateTimePacked2IsoStr(rd.GetFieldsData())
+	dateTimePacked2IsoStr(rd.GetGroupByFieldValues())
+	assert.Equal(t, []string{"1970-01-02"}, rd.GetFieldsData()[0].GetScalars().GetStringData().GetData())
+	assert.Equal(t, []string{"1970-01-01"}, rd.GetGroupByFieldValues()[0].GetScalars().GetStringData().GetData())
+	assert.Equal(t, []string{"00:00:01"}, rd.GetGroupByFieldValues()[1].GetScalars().GetStringData().GetData())
+}

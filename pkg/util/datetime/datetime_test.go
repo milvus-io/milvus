@@ -98,6 +98,8 @@ func TestParseTimeRejects(t *testing.T) {
 		"2024-06-22T12:00:00",
 		"12:00:00.1234567890",
 		"24:00:00.1",
+		"24:00:00.0000000",
+		"13:45:30.0000000",
 	}
 	for _, s := range invalid {
 		_, err := ParseTime(s)

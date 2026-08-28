@@ -1482,7 +1482,9 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		}
 	}
 	if t.result != nil && t.result.GetResults() != nil {
-		dateTimePacked2IsoStr(t.result.GetResults().GetFieldsData())
+		rd := t.result.GetResults()
+		dateTimePacked2IsoStr(rd.GetFieldsData())
+		dateTimePacked2IsoStr(rd.GetGroupByFieldValues())
 	}
 
 	// Legacy-wire downgrade: the old SDK only reads the singular channel

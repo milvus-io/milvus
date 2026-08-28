@@ -161,7 +161,7 @@ func parseMidnightWrap(s string) (int64, bool) {
 		return 0, false
 	}
 	frac := rest[1:]
-	if frac == "" || len(frac) > 9 {
+	if frac == "" || len(frac) > 6 {
 		return 0, false
 	}
 	for _, r := range frac {
