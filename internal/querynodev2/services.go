@@ -44,7 +44,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
+	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/internal/util/textmatch"
@@ -74,11 +76,11 @@ import (
 const legacyLoadScopeIndex = querypb.LoadScope(2)
 
 // materializeLoadSegmentsCachePolicyOverrides conditionally clones a worker-bound
-// load request and propagates collection-level warmup and eviction overrides to
-// fields and indexes. QueryNode-local defaults remain unset so each cache slot
-// can resolve the latest local configuration when it is created. Clone only
-// when an override is missing because a delegator may reuse the coordinator
-// request for multiple workers.
+// load request and resolves cache policy overrides at the worker boundary.
+// Collection defaults and index user params stay as metadata on the wire;
+// QueryNode materializes them only on its private clone. QueryNode-local
+// defaults remain unset so each cache slot can resolve the latest local
+// configuration when it is created.
 func materializeLoadSegmentsCachePolicyOverrides(req *querypb.LoadSegmentsRequest) *querypb.LoadSegmentsRequest {
 	schema := req.GetSchema()
 	if schema == nil {
@@ -100,10 +102,6 @@ func materializeLoadSegmentsCachePolicyOverrides(req *querypb.LoadSegmentsReques
 		common.WarmupScalarIndexKey, schema.GetProperties()...)
 	vectorIndexWarmup, hasVectorIndexWarmup := common.GetWarmupPolicyByKey(
 		common.WarmupVectorIndexKey, schema.GetProperties()...)
-	scalarFieldEvictable, hasScalarFieldEvictable := common.GetEvictableByKey(
-		common.EvictableScalarFieldKey, schema.GetProperties()...)
-	vectorFieldEvictable, hasVectorFieldEvictable := common.GetEvictableByKey(
-		common.EvictableVectorFieldKey, schema.GetProperties()...)
 	scalarIndexEvictable, hasScalarIndexEvictable := common.GetEvictableByKey(
 		common.EvictableScalarIndexKey, schema.GetProperties()...)
 	vectorIndexEvictable, hasVectorIndexEvictable := common.GetEvictableByKey(
@@ -112,17 +110,13 @@ func materializeLoadSegmentsCachePolicyOverrides(req *querypb.LoadSegmentsReques
 	fieldOverrides := func(field *schemapb.FieldSchema) cachePolicyOverrides {
 		if typeutil.IsVectorType(field.GetDataType()) {
 			return cachePolicyOverrides{
-				warmup:       vectorFieldWarmup,
-				hasWarmup:    hasVectorFieldWarmup,
-				evictable:    vectorFieldEvictable,
-				hasEvictable: hasVectorFieldEvictable,
+				warmup:    vectorFieldWarmup,
+				hasWarmup: hasVectorFieldWarmup,
 			}
 		}
 		return cachePolicyOverrides{
-			warmup:       scalarFieldWarmup,
-			hasWarmup:    hasScalarFieldWarmup,
-			evictable:    scalarFieldEvictable,
-			hasEvictable: hasScalarFieldEvictable,
+			warmup:    scalarFieldWarmup,
+			hasWarmup: hasScalarFieldWarmup,
 		}
 	}
 
@@ -143,15 +137,33 @@ func materializeLoadSegmentsCachePolicyOverrides(req *querypb.LoadSegmentsReques
 		}
 	}
 
+	type indexEvictableOverride struct {
+		user      bool
+		hasUser   bool
+		legacy    bool
+		hasLegacy bool
+	}
+	indexEvictableByID := make(map[int64]indexEvictableOverride, len(req.GetIndexInfoList()))
+	for _, info := range req.GetIndexInfoList() {
+		override := indexEvictableOverride{}
+		userParams, err := indexparamcheck.ExpandIndexParams(info.GetUserIndexParams())
+		if err == nil {
+			if value, ok := userParams[common.EvictableKey]; ok {
+				override.user, _ = strconv.ParseBool(value)
+				override.hasUser = true
+			}
+		} else {
+			override.user, override.hasUser = common.IsEvictableEnabled(info.GetUserIndexParams()...)
+		}
+		override.legacy, override.hasLegacy = common.IsEvictableEnabled(info.GetIndexParams()...)
+		indexEvictableByID[info.GetIndexID()] = override
+	}
+
 	effectiveFieldOverrides := func(field *schemapb.FieldSchema, inherited cachePolicyOverrides) cachePolicyOverrides {
 		overrides := fieldOverrides(field)
 		if inherited.hasWarmup {
 			overrides.warmup = inherited.warmup
 			overrides.hasWarmup = true
-		}
-		if inherited.hasEvictable {
-			overrides.evictable = inherited.evictable
-			overrides.hasEvictable = true
 		}
 		return overrides
 	}
@@ -161,12 +173,9 @@ func materializeLoadSegmentsCachePolicyOverrides(req *querypb.LoadSegmentsReques
 		}
 		for _, structField := range schema.GetStructArrayFields() {
 			structWarmup, hasStructWarmup := common.GetWarmupPolicy(structField.GetTypeParams()...)
-			structEvictable, hasStructEvictable := common.IsEvictableEnabled(structField.GetTypeParams()...)
 			inherited := cachePolicyOverrides{
-				warmup:       structWarmup,
-				hasWarmup:    hasStructWarmup,
-				evictable:    structEvictable,
-				hasEvictable: hasStructEvictable,
+				warmup:    structWarmup,
+				hasWarmup: hasStructWarmup,
 			}
 			for _, field := range structField.GetFields() {
 				visit(field, inherited)
@@ -175,83 +184,118 @@ func materializeLoadSegmentsCachePolicyOverrides(req *querypb.LoadSegmentsReques
 	}
 
 	fieldByID := make(map[int64]*schemapb.FieldSchema, len(schema.GetFields()))
-	needsMaterialization := false
+	needsSchemaMaterialization := false
 	visitFields(schema, func(field *schemapb.FieldSchema, inherited cachePolicyOverrides) {
 		fieldByID[field.GetFieldID()] = field
 		overrides := effectiveFieldOverrides(field, inherited)
 		_, hasWarmup := common.GetWarmupPolicy(field.GetTypeParams()...)
-		_, hasEvictable := common.IsEvictableEnabled(field.GetTypeParams()...)
-		needsMaterialization = needsMaterialization ||
-			(overrides.hasWarmup && !hasWarmup) ||
-			(overrides.hasEvictable && !hasEvictable)
+		needsSchemaMaterialization = needsSchemaMaterialization || (overrides.hasWarmup && !hasWarmup)
 	})
 
-	if !needsMaterialization {
-		for _, info := range req.GetInfos() {
-			for _, indexInfo := range info.GetIndexInfos() {
-				field, ok := fieldByID[indexInfo.GetFieldID()]
-				if !ok {
-					continue
-				}
-				overrides := indexOverrides(field)
-				_, hasWarmup := common.GetWarmupPolicy(indexInfo.GetIndexParams()...)
-				_, hasEvictable := common.IsEvictableEnabled(indexInfo.GetIndexParams()...)
-				if (overrides.hasWarmup && !hasWarmup) ||
-					(overrides.hasEvictable && !hasEvictable) {
-					needsMaterialization = true
-					break
-				}
-			}
-			if needsMaterialization {
-				break
-			}
+	type indexPolicyChanges struct {
+		warmup       string
+		setWarmup    bool
+		evictable    bool
+		setEvictable bool
+	}
+	changesForIndex := func(field *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo) indexPolicyChanges {
+		overrides := indexOverrides(field)
+		changes := indexPolicyChanges{}
+		if _, exists := common.GetWarmupPolicy(indexInfo.GetIndexParams()...); !exists && overrides.hasWarmup {
+			changes.warmup = overrides.warmup
+			changes.setWarmup = true
 		}
+
+		legacy, hasLegacy := common.IsEvictableEnabled(indexInfo.GetIndexParams()...)
+		metadataOverride, hasMetadata := indexEvictableByID[indexInfo.GetIndexID()]
+		effective, hasEffective := overrides.evictable, overrides.hasEvictable
+		switch {
+		case hasMetadata && metadataOverride.hasUser:
+			effective, hasEffective = metadataOverride.user, true
+		case hasLegacy:
+			effective, hasEffective = legacy, true
+		case hasMetadata && metadataOverride.hasLegacy:
+			effective, hasEffective = metadataOverride.legacy, true
+		}
+		if hasEffective && (!hasLegacy || legacy != effective) {
+			changes.evictable = effective
+			changes.setEvictable = true
+		}
+		return changes
 	}
 
-	if !needsMaterialization {
-		return req
-	}
-
-	materialized := typeutil.Clone(req)
-	schema = materialized.GetSchema()
-	fieldByID = make(map[int64]*schemapb.FieldSchema, len(schema.GetFields()))
-	visitFields(schema, func(field *schemapb.FieldSchema, inherited cachePolicyOverrides) {
-		fieldByID[field.GetFieldID()] = field
-		overrides := effectiveFieldOverrides(field, inherited)
-		if _, exist := common.GetWarmupPolicy(field.GetTypeParams()...); !exist && overrides.hasWarmup {
-			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-				Key:   common.WarmupKey,
-				Value: overrides.warmup,
-			})
-		}
-		if _, exist := common.IsEvictableEnabled(field.GetTypeParams()...); !exist && overrides.hasEvictable {
-			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-				Key:   common.EvictableKey,
-				Value: strconv.FormatBool(overrides.evictable),
-			})
-		}
-	})
-
-	for _, info := range materialized.GetInfos() {
+	needsIndexMaterialization := false
+	for _, info := range req.GetInfos() {
 		for _, indexInfo := range info.GetIndexInfos() {
 			field, ok := fieldByID[indexInfo.GetFieldID()]
 			if !ok {
 				continue
 			}
-			overrides := indexOverrides(field)
-			if _, exist := common.GetWarmupPolicy(indexInfo.GetIndexParams()...); !exist && overrides.hasWarmup {
-				indexInfo.IndexParams = append(indexInfo.IndexParams, &commonpb.KeyValuePair{
+			changes := changesForIndex(field, indexInfo)
+			if changes.setWarmup || changes.setEvictable {
+				needsIndexMaterialization = true
+				break
+			}
+		}
+		if needsIndexMaterialization {
+			break
+		}
+	}
+
+	if !needsSchemaMaterialization && !needsIndexMaterialization {
+		return req
+	}
+
+	materialized := shallowcopy.ShallowCopyLoadSegmentsRequest(req)
+	if needsSchemaMaterialization {
+		materialized.Schema = typeutil.Clone(schema)
+		visitFields(materialized.GetSchema(), func(field *schemapb.FieldSchema, inherited cachePolicyOverrides) {
+			overrides := effectiveFieldOverrides(field, inherited)
+			if _, exists := common.GetWarmupPolicy(field.GetTypeParams()...); !exists && overrides.hasWarmup {
+				field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
 					Key:   common.WarmupKey,
 					Value: overrides.warmup,
 				})
 			}
-			if _, exist := common.IsEvictableEnabled(indexInfo.GetIndexParams()...); !exist && overrides.hasEvictable {
-				indexInfo.IndexParams = append(indexInfo.IndexParams, &commonpb.KeyValuePair{
-					Key:   common.EvictableKey,
-					Value: strconv.FormatBool(overrides.evictable),
-				})
-			}
+		})
+	}
+
+	// The loader mutates every SegmentLoadInfo envelope and every FieldIndexInfo
+	// envelope in place. Clone those envelopes even when only the schema changes,
+	// while continuing to share the much larger binlog and manifest metadata.
+	materialized.Infos = make([]*querypb.SegmentLoadInfo, len(req.GetInfos()))
+	for infoIndex, info := range req.GetInfos() {
+		if info == nil {
+			continue
 		}
+		clonedInfo := shallowcopy.ShallowCopySegmentLoadInfo(info)
+		clonedInfo.IndexInfos = make([]*querypb.FieldIndexInfo, len(info.GetIndexInfos()))
+		for indexPosition, indexInfo := range info.GetIndexInfos() {
+			if indexInfo == nil {
+				continue
+			}
+			clonedIndex := typeutil.Clone(indexInfo)
+			if field, ok := fieldByID[indexInfo.GetFieldID()]; ok {
+				changes := changesForIndex(field, indexInfo)
+				if changes.setWarmup {
+					clonedIndex.IndexParams = append(clonedIndex.IndexParams, &commonpb.KeyValuePair{
+						Key:   common.WarmupKey,
+						Value: changes.warmup,
+					})
+				}
+				if changes.setEvictable {
+					clonedIndex.IndexParams = lo.Filter(clonedIndex.GetIndexParams(), func(param *commonpb.KeyValuePair, _ int) bool {
+						return param.GetKey() != common.EvictableKey
+					})
+					clonedIndex.IndexParams = append(clonedIndex.IndexParams, &commonpb.KeyValuePair{
+						Key:   common.EvictableKey,
+						Value: strconv.FormatBool(changes.evictable),
+					})
+				}
+			}
+			clonedInfo.IndexInfos[indexPosition] = clonedIndex
+		}
+		materialized.Infos[infoIndex] = clonedInfo
 	}
 
 	return materialized

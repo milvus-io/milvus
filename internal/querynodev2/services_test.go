@@ -1242,18 +1242,10 @@ func TestMaterializeLoadSegmentsCachePolicyOverridesEvictable(t *testing.T) {
 		},
 	}
 
-	oldScalarField := paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("false")
-	oldVectorField := paramtable.Get().QueryNodeCfg.TieredEvictableVectorField.SwapTempValue("false")
-	oldScalarIndex := paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue("false")
-	oldVectorIndex := paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.SwapTempValue("false")
-	defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue(oldScalarField)
-	defer paramtable.Get().QueryNodeCfg.TieredEvictableVectorField.SwapTempValue(oldVectorField)
-	defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue(oldScalarIndex)
-	defer paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.SwapTempValue(oldVectorIndex)
-
 	materialized := materializeLoadSegmentsCachePolicyOverrides(req)
 
 	require.NotSame(t, req, materialized)
+	require.Same(t, req.GetSchema(), materialized.GetSchema(), "field policy normalization belongs to the Collection schema installation boundary")
 	require.False(t, common.FieldHasEvictableKey(req.GetSchema(), 1))
 	require.False(t, common.FieldHasEvictableKey(req.GetSchema(), 2))
 	require.False(t, common.FieldHasEvictableKey(req.GetSchema(), 11))
@@ -1263,23 +1255,6 @@ func TestMaterializeLoadSegmentsCachePolicyOverridesEvictable(t *testing.T) {
 	require.Empty(t, req.GetInfos()[0].GetIndexInfos()[0].GetIndexParams())
 	require.Empty(t, req.GetInfos()[0].GetIndexInfos()[1].GetIndexParams())
 
-	assertFieldEvictable := func(fieldID int64, expected bool) {
-		field, err := typeutil.CreateSchemaHelper(materialized.GetSchema())
-		require.NoError(t, err)
-		fieldSchema, err := field.GetFieldFromID(fieldID)
-		require.NoError(t, err)
-		actual, exist := common.IsEvictableEnabled(fieldSchema.GetTypeParams()...)
-		require.True(t, exist)
-		assert.Equal(t, expected, actual)
-	}
-	assertFieldEvictable(1, true)
-	assertFieldEvictable(2, false)
-	assertFieldEvictable(3, true)
-	assertFieldEvictable(11, false)
-	assertFieldEvictable(12, true)
-	assertFieldEvictable(21, true)
-	assertFieldEvictable(22, false)
-
 	// Index policies use the collection's index keys, independently of the raw
 	// field and struct-parent policies for the same field IDs.
 	for i, expected := range []bool{false, true, false, true, true} {
@@ -1287,36 +1262,131 @@ func TestMaterializeLoadSegmentsCachePolicyOverridesEvictable(t *testing.T) {
 		require.True(t, exist)
 		assert.Equal(t, expected, actual)
 	}
+}
 
-	paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("true")
-	paramtable.Get().QueryNodeCfg.TieredEvictableVectorField.SwapTempValue("true")
-	paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue("true")
-	paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.SwapTempValue("true")
-	second := materializeLoadSegmentsCachePolicyOverrides(req)
-	secondField, err := typeutil.CreateSchemaHelper(second.GetSchema())
-	require.NoError(t, err)
-	secondScalar, err := secondField.GetFieldFromID(1)
-	require.NoError(t, err)
-	actual, exist := common.IsEvictableEnabled(secondScalar.GetTypeParams()...)
-	require.True(t, exist)
-	assert.True(t, actual)
-	actual, exist = common.IsEvictableEnabled(second.GetInfos()[0].GetIndexInfos()[0].GetIndexParams()...)
-	require.True(t, exist)
-	assert.False(t, actual)
+func TestMaterializeLoadSegmentsCachePolicyOverridesUsesIndexUserParams(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.EvictableScalarIndexKey, Value: "false"},
+			{Key: common.EvictableVectorIndexKey, Value: "true"},
+		},
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, DataType: schemapb.DataType_Int64},
+			{FieldID: 2, DataType: schemapb.DataType_FloatVector},
+		},
+	}
+	req := &querypb.LoadSegmentsRequest{
+		Schema: schema,
+		IndexInfoList: []*indexpb.IndexInfo{
+			{
+				FieldID:         1,
+				IndexID:         101,
+				TypeParams:      []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+				IndexParams:     []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+				UserIndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+			},
+			{
+				FieldID: 2,
+				IndexID: 102,
+				UserIndexParams: []*commonpb.KeyValuePair{
+					{Key: common.ParamsKey, Value: `{"evictable":"false"}`},
+				},
+			},
+			{FieldID: 1, IndexID: 103},
+			{FieldID: 2, IndexID: 104},
+		},
+		Infos: []*querypb.SegmentLoadInfo{{
+			IndexInfos: []*querypb.FieldIndexInfo{
+				{
+					FieldID:     1,
+					IndexID:     101,
+					IndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+				},
+				{FieldID: 2, IndexID: 102},
+				{
+					FieldID:     1,
+					IndexID:     103,
+					IndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+				},
+				{FieldID: 2, IndexID: 104},
+			},
+		}},
+	}
 
-	firstScalar, err := typeutil.CreateSchemaHelper(materialized.GetSchema())
-	require.NoError(t, err)
-	firstScalarField, err := firstScalar.GetFieldFromID(1)
-	require.NoError(t, err)
-	actual, exist = common.IsEvictableEnabled(firstScalarField.GetTypeParams()...)
-	require.True(t, exist)
-	assert.True(t, actual, "collection policy must keep precedence over a later local default")
+	materialized := materializeLoadSegmentsCachePolicyOverrides(req)
 
-	firstVectorField, err := firstScalar.GetFieldFromID(2)
-	require.NoError(t, err)
-	actual, exist = common.IsEvictableEnabled(firstVectorField.GetTypeParams()...)
+	require.NotSame(t, req, materialized)
+	for i, expected := range []bool{true, false, true, true} {
+		actual, exist := common.IsEvictableEnabled(materialized.GetInfos()[0].GetIndexInfos()[i].GetIndexParams()...)
+		require.True(t, exist)
+		assert.Equal(t, expected, actual)
+	}
+	_, hasTypeValue := common.IsEvictableEnabled(materialized.GetIndexInfoList()[0].GetTypeParams()...)
+	assert.True(t, hasTypeValue)
+	_, hasIndexValue := common.IsEvictableEnabled(materialized.GetIndexInfoList()[0].GetIndexParams()...)
+	assert.True(t, hasIndexValue)
+	userValue, hasUserValue := common.IsEvictableEnabled(materialized.GetIndexInfoList()[0].GetUserIndexParams()...)
+	require.True(t, hasUserValue)
+	assert.True(t, userValue)
+
+	legacyValue, hasLegacyValue := common.IsEvictableEnabled(req.GetInfos()[0].GetIndexInfos()[0].GetIndexParams()...)
+	require.True(t, hasLegacyValue)
+	assert.False(t, legacyValue)
+	_, originalTypeValue := common.IsEvictableEnabled(req.GetIndexInfoList()[0].GetTypeParams()...)
+	assert.True(t, originalTypeValue)
+	_, originalIndexValue := common.IsEvictableEnabled(req.GetIndexInfoList()[0].GetIndexParams()...)
+	assert.True(t, originalIndexValue)
+}
+
+func TestMaterializeLoadSegmentsCachePolicyOverridesUsesIndexUserParamsWithoutCollectionDefault(t *testing.T) {
+	binlog := &datapb.FieldBinlog{FieldID: 1}
+	req := &querypb.LoadSegmentsRequest{
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{{FieldID: 1, DataType: schemapb.DataType_Int64}},
+		},
+		IndexInfoList: []*indexpb.IndexInfo{{
+			FieldID:         1,
+			IndexID:         101,
+			UserIndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+		}},
+		Infos: []*querypb.SegmentLoadInfo{{
+			BinlogPaths: []*datapb.FieldBinlog{binlog},
+			IndexInfos:  []*querypb.FieldIndexInfo{{FieldID: 1, IndexID: 101}},
+		}},
+	}
+
+	materialized := materializeLoadSegmentsCachePolicyOverrides(req)
+
+	require.NotSame(t, req, materialized)
+	value, exist := common.IsEvictableEnabled(materialized.GetInfos()[0].GetIndexInfos()[0].GetIndexParams()...)
 	require.True(t, exist)
-	assert.False(t, actual, "a later materialization must not mutate an earlier clone")
+	assert.False(t, value)
+	assert.Empty(t, req.GetInfos()[0].GetIndexInfos()[0].GetIndexParams())
+	require.Same(t, binlog, materialized.GetInfos()[0].GetBinlogPaths()[0], "cache policy materialization must not deep-copy binlog metadata")
+	require.NotSame(t, req.GetInfos()[0].GetIndexInfos()[0], materialized.GetInfos()[0].GetIndexInfos()[0])
+}
+
+func TestMaterializeLoadSegmentsCachePolicyOverridesDoesNotUseFieldTypeParamsForIndexEvictable(t *testing.T) {
+	req := &querypb.LoadSegmentsRequest{
+		Schema: &schemapb.CollectionSchema{
+			Properties: []*commonpb.KeyValuePair{{Key: common.EvictableScalarIndexKey, Value: "true"}},
+			Fields:     []*schemapb.FieldSchema{{FieldID: 1, DataType: schemapb.DataType_Int64}},
+		},
+		IndexInfoList: []*indexpb.IndexInfo{{
+			FieldID:    1,
+			IndexID:    101,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+		}},
+		Infos: []*querypb.SegmentLoadInfo{{
+			IndexInfos: []*querypb.FieldIndexInfo{{FieldID: 1, IndexID: 101}},
+		}},
+	}
+
+	materialized := materializeLoadSegmentsCachePolicyOverrides(req)
+
+	value, exists := common.IsEvictableEnabled(materialized.GetInfos()[0].GetIndexInfos()[0].GetIndexParams()...)
+	require.True(t, exists)
+	assert.True(t, value, "field type params must not override the collection index policy")
 }
 
 func TestMaterializeLoadSegmentsCachePolicyOverridesWarmup(t *testing.T) {
@@ -1408,6 +1478,34 @@ func TestMaterializeLoadSegmentsCachePolicyOverridesWarmup(t *testing.T) {
 	}
 }
 
+func TestMaterializeLoadSegmentsCachePolicyOverridesClonesLoaderMutableEnvelopes(t *testing.T) {
+	indexInfo := &querypb.FieldIndexInfo{
+		FieldID:     1,
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "INVERTED"}},
+	}
+	segmentInfo := &querypb.SegmentLoadInfo{
+		IndexInfos: []*querypb.FieldIndexInfo{indexInfo},
+	}
+	req := &querypb.LoadSegmentsRequest{
+		Schema: &schemapb.CollectionSchema{
+			Properties: []*commonpb.KeyValuePair{{Key: common.WarmupScalarFieldKey, Value: common.WarmupDisable}},
+			Fields:     []*schemapb.FieldSchema{{FieldID: 1, DataType: schemapb.DataType_Int64}},
+		},
+		Infos: []*querypb.SegmentLoadInfo{segmentInfo},
+	}
+
+	materialized := materializeLoadSegmentsCachePolicyOverrides(req)
+
+	require.NotSame(t, req, materialized)
+	require.NotSame(t, segmentInfo, materialized.GetInfos()[0])
+	require.NotSame(t, indexInfo, materialized.GetInfos()[0].GetIndexInfos()[0])
+
+	materialized.GetInfos()[0].UseTakeForOutput = true
+	materialized.GetInfos()[0].GetIndexInfos()[0].IndexParams = nil
+	assert.False(t, segmentInfo.GetUseTakeForOutput())
+	assert.NotEmpty(t, indexInfo.GetIndexParams())
+}
+
 func TestMaterializeLoadSegmentsCachePolicyOverridesNoOp(t *testing.T) {
 	t.Run("no collection defaults", func(t *testing.T) {
 		req := &querypb.LoadSegmentsRequest{
@@ -1453,6 +1551,24 @@ func TestMaterializeLoadSegmentsCachePolicyOverridesNoOp(t *testing.T) {
 
 		assert.Same(t, req, materializeLoadSegmentsCachePolicyOverrides(req))
 	})
+}
+
+func TestMaterializeLoadSegmentsCachePolicyOverridesIgnoresUnmatchedEvictableMetadata(t *testing.T) {
+	req := &querypb.LoadSegmentsRequest{
+		LoadScope: querypb.LoadScope_Delta,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{{FieldID: 1, DataType: schemapb.DataType_Int64}},
+		},
+		IndexInfoList: []*indexpb.IndexInfo{{
+			IndexID:         101,
+			UserIndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+		}},
+		Infos: []*querypb.SegmentLoadInfo{{
+			BinlogPaths: []*datapb.FieldBinlog{{FieldID: 1}},
+		}},
+	}
+
+	assert.Same(t, req, materializeLoadSegmentsCachePolicyOverrides(req))
 }
 
 func (suite *ServiceSuite) TestLoadSegmentsLeavesLocalDefaultsUnmaterializedAtWorkerBoundary() {

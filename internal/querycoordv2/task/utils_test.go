@@ -31,6 +31,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -1001,97 +1003,69 @@ func (s *UtilsSuite) TestWaitRechecksDoneWhenContextDone() {
 		"Wait never reported the task outcome across 100 iterations; the recheck in the ctx.Done() branch may be missing")
 }
 
-func TestApplyCollectionEvictableSetting(t *testing.T) {
+func TestPackLoadSegmentRequestPreservesEvictableForQueryNode(t *testing.T) {
+	action := NewSegmentAction(1, ActionTypeGrow, "test-ch", 100)
+	task, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		nil,
+		1,
+		newReplicaDefaultRG(10),
+		commonpb.LoadPriority_LOW,
+		action,
+	)
+	assert.NoError(t, err)
+
 	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 1, DataType: schemapb.DataType_Int64},
-			{FieldID: 2, DataType: schemapb.DataType_FloatVector},
-			{
-				FieldID:    3,
-				DataType:   schemapb.DataType_Int64,
-				TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
-			},
-		},
-		StructArrayFields: []*schemapb.StructArrayFieldSchema{
-			{
-				FieldID:    10,
-				TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 11, DataType: schemapb.DataType_Int64},
-				},
-			},
-			{
-				FieldID: 20,
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 21, DataType: schemapb.DataType_Int64},
-					{FieldID: 22, DataType: schemapb.DataType_FloatVector},
-					{
-						FieldID:    23,
-						DataType:   schemapb.DataType_FloatVector,
-						TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
-					},
-				},
-			},
-		},
+		Fields: []*schemapb.FieldSchema{{FieldID: 1, DataType: schemapb.DataType_Int64}},
 	}
 	collectionProps := []*commonpb.KeyValuePair{
 		{Key: common.EvictableScalarFieldKey, Value: "false"},
-		{Key: common.EvictableVectorFieldKey, Value: "true"},
-	}
-
-	result := applyCollectionEvictableSetting(schema, collectionProps)
-
-	assertEvictable := func(field *schemapb.FieldSchema, expected bool) {
-		evictable, exist := common.IsEvictableEnabled(field.GetTypeParams()...)
-		assert.True(t, exist, "field %d should have evictable setting", field.GetFieldID())
-		assert.Equal(t, expected, evictable, "field %d evictable mismatch", field.GetFieldID())
-	}
-	assertEvictable(result.GetFields()[0], false)
-	assertEvictable(result.GetFields()[1], true)
-	assertEvictable(result.GetFields()[2], true)
-
-	structEvictable, exist := common.IsEvictableEnabled(result.GetStructArrayFields()[0].GetTypeParams()...)
-	assert.True(t, exist)
-	assert.True(t, structEvictable)
-	assertEvictable(result.GetStructArrayFields()[0].GetFields()[0], true)
-	_, exist = common.IsEvictableEnabled(result.GetStructArrayFields()[1].GetTypeParams()...)
-	assert.False(t, exist, "collection scalar-field default should be applied to struct sub-fields, not the struct container")
-	assertEvictable(result.GetStructArrayFields()[1].GetFields()[0], false)
-	assertEvictable(result.GetStructArrayFields()[1].GetFields()[1], true)
-	assertEvictable(result.GetStructArrayFields()[1].GetFields()[2], true)
-}
-
-func TestApplyIndexEvictableSetting(t *testing.T) {
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 1, DataType: schemapb.DataType_Int64},
-			{FieldID: 2, DataType: schemapb.DataType_FloatVector},
-			{FieldID: 3, DataType: schemapb.DataType_Int64},
-		},
+		{Key: common.EvictableScalarIndexKey, Value: "false"},
 	}
 	loadInfo := &querypb.SegmentLoadInfo{
-		IndexInfos: []*querypb.FieldIndexInfo{
-			{FieldID: 1, IndexParams: []*commonpb.KeyValuePair{}},
-			{FieldID: 2, IndexParams: []*commonpb.KeyValuePair{}},
-			{FieldID: 3, IndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}}},
-		},
+		BinlogPaths: []*datapb.FieldBinlog{{FieldID: 1}},
+		IndexInfos: []*querypb.FieldIndexInfo{{
+			FieldID:     1,
+			IndexID:     10,
+			IndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "true"}},
+		}},
 	}
-	collectionProps := []*commonpb.KeyValuePair{
-		{Key: common.EvictableScalarIndexKey, Value: "false"},
-		{Key: common.EvictableVectorIndexKey, Value: "true"},
-	}
+	indexInfos := []*indexpb.IndexInfo{{
+		FieldID:         1,
+		IndexID:         10,
+		TypeParams:      []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
+		IndexParams:     []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: "L2"}},
+		UserIndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+	}}
 
-	applyIndexEvictableSetting(loadInfo, schema, collectionProps)
+	req := packLoadSegmentRequest(
+		task,
+		action,
+		schema,
+		collectionProps,
+		&querypb.LoadMetaInfo{LoadType: querypb.LoadType_LoadCollection},
+		loadInfo,
+		indexInfos,
+	)
 
-	evictable, exist := common.IsEvictableEnabled(loadInfo.GetIndexInfos()[0].GetIndexParams()...)
-	assert.True(t, exist)
-	assert.False(t, evictable)
-	evictable, exist = common.IsEvictableEnabled(loadInfo.GetIndexInfos()[1].GetIndexParams()...)
-	assert.True(t, exist)
-	assert.True(t, evictable)
-	evictable, exist = common.IsEvictableEnabled(loadInfo.GetIndexInfos()[2].GetIndexParams()...)
-	assert.True(t, exist)
-	assert.True(t, evictable)
+	_, hasCollectionDefault := common.GetEvictableByKey(common.EvictableScalarIndexKey, req.GetSchema().GetProperties()...)
+	assert.True(t, hasCollectionDefault)
+	_, hasFieldValue := common.IsEvictableEnabled(req.GetSchema().GetFields()[0].GetTypeParams()...)
+	assert.False(t, hasFieldValue, "collection default must stay in schema properties on the wire")
+	_, hasSegmentValue := common.IsEvictableEnabled(req.GetInfos()[0].GetIndexInfos()[0].GetIndexParams()...)
+	assert.True(t, hasSegmentValue)
+	_, hasTypeValue := common.IsEvictableEnabled(req.GetIndexInfoList()[0].GetTypeParams()...)
+	assert.False(t, hasTypeValue)
+	_, hasIndexValue := common.IsEvictableEnabled(req.GetIndexInfoList()[0].GetIndexParams()...)
+	assert.False(t, hasIndexValue)
+	userValue, hasUserValue := common.IsEvictableEnabled(req.GetIndexInfoList()[0].GetUserIndexParams()...)
+	assert.True(t, hasUserValue)
+	assert.False(t, userValue)
+
+	_, originalSegmentValue := common.IsEvictableEnabled(loadInfo.GetIndexInfos()[0].GetIndexParams()...)
+	assert.True(t, originalSegmentValue)
+	assert.Same(t, loadInfo.GetBinlogPaths()[0], req.GetInfos()[0].GetBinlogPaths()[0])
 }
 
 func TestUtils(t *testing.T) {

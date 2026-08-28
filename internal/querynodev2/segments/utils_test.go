@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -12,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestFilterZeroValuesFromSlice(t *testing.T) {
@@ -25,6 +27,69 @@ func TestFilterZeroValuesFromSlice(t *testing.T) {
 	filteredInts := FilterZeroValuesFromSlice(ints)
 	assert.Equal(t, 3, len(filteredInts))
 	assert.EqualValues(t, []int64{10, 5, 13}, filteredInts)
+}
+
+func TestMaterializeFieldEvictableSettings(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.EvictableScalarFieldKey, Value: "true"},
+			{Key: common.EvictableVectorFieldKey, Value: "false"},
+		},
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "scalar", DataType: schemapb.DataType_Int64},
+			{FieldID: 2, Name: "vector", DataType: schemapb.DataType_FloatVector},
+			{
+				FieldID:    3,
+				Name:       "explicit_scalar",
+				DataType:   schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+			},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID:    10,
+				Name:       "explicit_struct",
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}},
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 11, Name: "nested_scalar", DataType: schemapb.DataType_Int64},
+				},
+			},
+			{
+				FieldID: 20,
+				Name:    "collection_struct",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 21, Name: "nested_vector", DataType: schemapb.DataType_FloatVector},
+				},
+			},
+		},
+	}
+
+	materialized := materializeFieldEvictableSettings(schema)
+	require.NotSame(t, schema, materialized)
+	require.False(t, common.FieldHasEvictableKey(schema, 1))
+	require.False(t, common.FieldHasEvictableKey(schema, 2))
+	require.False(t, common.FieldHasEvictableKey(schema, 11))
+	require.False(t, common.FieldHasEvictableKey(schema, 21))
+
+	assertEvictable := func(fieldID int64, expected bool) {
+		helper, err := typeutil.CreateSchemaHelper(materialized)
+		require.NoError(t, err)
+		field, err := helper.GetFieldFromID(fieldID)
+		require.NoError(t, err)
+		actual, exists := common.IsEvictableEnabled(field.GetTypeParams()...)
+		require.True(t, exists)
+		assert.Equal(t, expected, actual)
+	}
+	assertEvictable(1, true)
+	assertEvictable(2, false)
+	assertEvictable(3, false)
+	assertEvictable(11, false)
+	assertEvictable(21, false)
+
+	noOverrides := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 1, DataType: schemapb.DataType_Int64}},
+	}
+	assert.Same(t, noOverrides, materializeFieldEvictableSettings(noOverrides))
 }
 
 func TestGetSegmentRelatedDataSize(t *testing.T) {

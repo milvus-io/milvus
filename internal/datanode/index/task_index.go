@@ -189,19 +189,14 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	}
 
 	// type params can be removed
-	for _, kvPair := range it.req.GetTypeParams() {
+	for _, kvPair := range indexparams.FilterBuildParams(it.req.GetTypeParams()) {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
 		typeParams[key] = value
 		indexParams[key] = value
 	}
 
-	for _, kvPair := range it.req.GetIndexParams() {
+	for _, kvPair := range indexparams.FilterBuildParams(it.req.GetIndexParams()) {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
-		// Runtime-only index properties are persisted in index metadata for
-		// loading, but Knowhere rejects them as unknown build parameters.
-		if indexparams.IsConfigableIndexParam(key) {
-			continue
-		}
 		indexParams[key] = value
 	}
 	it.newTypeParams = typeParams

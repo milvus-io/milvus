@@ -628,3 +628,19 @@ func TestConfigableIndexParams(t *testing.T) {
 	assert.True(t, IsConfigableIndexParam(common.EvictableKey))
 	assert.False(t, IsConfigableIndexParam(common.EvictableScalarFieldKey))
 }
+
+func TestFilterBuildParams(t *testing.T) {
+	indexType := &commonpb.KeyValuePair{Key: common.IndexTypeKey, Value: "HNSW"}
+	dim := &commonpb.KeyValuePair{Key: common.DimKey, Value: "128"}
+	params := []*commonpb.KeyValuePair{
+		indexType,
+		{Key: common.MmapEnabledKey, Value: "true"},
+		{Key: common.IndexOffsetCacheEnabledKey, Value: "true"},
+		{Key: common.WarmupKey, Value: common.WarmupSync},
+		{Key: common.EvictableKey, Value: "true"},
+		dim,
+	}
+
+	assert.Equal(t, []*commonpb.KeyValuePair{indexType, dim}, FilterBuildParams(params))
+	assert.Len(t, params, 6)
+}

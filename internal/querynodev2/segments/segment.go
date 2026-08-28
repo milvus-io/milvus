@@ -1153,7 +1153,8 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	defer deleteLoadIndexInfo(loadIndexInfo)
 
 	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
-	// as Knowhere reports error if encounter an unknown param, we need to delete it
+	// Consume Milvus runtime-only properties through their dedicated load
+	// controls instead of forwarding them as index configuration.
 	delete(indexParams, common.MmapEnabledKey)
 	delete(indexParams, common.EvictableKey)
 

@@ -132,6 +132,13 @@ func (suite *IndexBuildTaskSuite) TestPreExecuteFiltersRuntimeOnlyIndexParams() 
 			{Key: common.WarmupKey, Value: common.WarmupDisable},
 			{Key: common.EvictableKey, Value: "false"},
 		},
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "128"},
+			{Key: common.MmapEnabledKey, Value: "true"},
+			{Key: common.IndexOffsetCacheEnabledKey, Value: "true"},
+			{Key: common.WarmupKey, Value: common.WarmupDisable},
+			{Key: common.EvictableKey, Value: "false"},
+		},
 		Field: &schemapb.FieldSchema{
 			FieldID:  102,
 			Name:     "vec",
@@ -143,12 +150,15 @@ func (suite *IndexBuildTaskSuite) TestPreExecuteFiltersRuntimeOnlyIndexParams() 
 	suite.NoError(task.PreExecute(ctx))
 	suite.Equal("FLAT", task.newIndexParams[common.IndexTypeKey])
 	suite.Equal(metric.L2, task.newIndexParams[common.MetricTypeKey])
+	suite.Equal("128", task.newTypeParams[common.DimKey])
+	suite.Equal("128", task.newIndexParams[common.DimKey])
 	for _, key := range []string{
 		common.MmapEnabledKey,
 		common.IndexOffsetCacheEnabledKey,
 		common.WarmupKey,
 		common.EvictableKey,
 	} {
+		suite.NotContains(task.newTypeParams, key)
 		suite.NotContains(task.newIndexParams, key)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"strconv"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
@@ -299,6 +300,62 @@ func isDataEvictableEnable(fieldSchema *schemapb.FieldSchema) bool {
 		return params.Params.QueryNodeCfg.TieredEvictableVectorField.GetAsBool()
 	}
 	return params.Params.QueryNodeCfg.TieredEvictableScalarField.GetAsBool()
+}
+
+// materializeFieldEvictableSettings normalizes explicit collection and struct
+// defaults into field type params before a schema is installed in QueryNode's
+// Collection. Keeping this at the schema installation boundary makes Watch,
+// Load, and UpdateSchema order-independent while leaving local defaults live.
+func materializeFieldEvictableSettings(schema *schemapb.CollectionSchema) *schemapb.CollectionSchema {
+	if schema == nil {
+		return nil
+	}
+
+	scalarDefault, hasScalarDefault := common.GetEvictableByKey(common.EvictableScalarFieldKey, schema.GetProperties()...)
+	vectorDefault, hasVectorDefault := common.GetEvictableByKey(common.EvictableVectorFieldKey, schema.GetProperties()...)
+	resolve := func(field *schemapb.FieldSchema, inherited bool, hasInherited bool) (bool, bool) {
+		if _, explicit := common.IsEvictableEnabled(field.GetTypeParams()...); explicit {
+			return false, false
+		}
+		if hasInherited {
+			return inherited, true
+		}
+		if typeutil.IsVectorType(field.GetDataType()) {
+			return vectorDefault, hasVectorDefault
+		}
+		return scalarDefault, hasScalarDefault
+	}
+	visit := func(current *schemapb.CollectionSchema, fn func(*schemapb.FieldSchema, bool, bool)) {
+		for _, field := range current.GetFields() {
+			fn(field, false, false)
+		}
+		for _, structField := range current.GetStructArrayFields() {
+			inherited, hasInherited := common.IsEvictableEnabled(structField.GetTypeParams()...)
+			for _, field := range structField.GetFields() {
+				fn(field, inherited, hasInherited)
+			}
+		}
+	}
+
+	needsMaterialization := false
+	visit(schema, func(field *schemapb.FieldSchema, inherited bool, hasInherited bool) {
+		_, shouldAppend := resolve(field, inherited, hasInherited)
+		needsMaterialization = needsMaterialization || shouldAppend
+	})
+	if !needsMaterialization {
+		return schema
+	}
+
+	materialized := typeutil.Clone(schema)
+	visit(materialized, func(field *schemapb.FieldSchema, inherited bool, hasInherited bool) {
+		if value, shouldAppend := resolve(field, inherited, hasInherited); shouldAppend {
+			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+				Key:   common.EvictableKey,
+				Value: strconv.FormatBool(value),
+			})
+		}
+	})
+	return materialized
 }
 
 func isIndexEvictableEnable(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo) bool {
