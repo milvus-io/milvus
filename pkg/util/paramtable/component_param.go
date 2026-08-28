@@ -41,8 +41,10 @@ import (
 
 const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
-	DefaultIndexSliceSize                        = 16
-	DefaultLoadTransientBudgetBytes              = 0
+	DefaultIndexSliceSize           = 16
+	DefaultLoadTransientBudgetBytes = 0
+	// DefaultStorageV2AsyncLoadReadWindowSizeBytes is the historical-key
+	// default for the Storage V3 async read-window threshold.
 	DefaultStorageV2AsyncLoadReadWindowSizeBytes = 16 * 1024 * 1024
 	DefaultGracefulTime                          = 5000 // ms
 	DefaultGracefulStopTimeout                   = 1800 // s, for node
@@ -901,7 +903,7 @@ Current valid range is [4, 65536]. If the value is not aligned to 4KB, it will b
 		Version:      "2.6.0",
 		DefaultValue: "0",
 		Doc: `This parameter controls the number of dedicated local file I/O worker threads. The valid range is [0, hardware_concurrency].
-Storage V2 async mmap load uses this pool for Arrow-to-local chunk materialization, file writes, and mmap finalization.
+Storage V3 async mmap load uses this pool for Arrow-to-local chunk materialization, file writes, and mmap finalization.
 The same value also limits concurrent synchronous FileWriter disk operations in legacy and index-loading paths.
 For example, set this parameter to 1 to serialize these local file writes.
 The default value is 0, which disables the dedicated pool and the concurrency limit; callers perform local file work directly.`,
@@ -4057,8 +4059,12 @@ type queryNodeConfig struct {
 
 	// Target average byte size per storage v2 cache cell. Parquet row groups
 	// are packed into cells so rgs_per_cell * avg_rg_size ≈ this value.
-	StorageV2CellTargetSizeBytes          ParamItem `refreshable:"true"`
-	StorageV2EnableAsyncLoad              ParamItem `refreshable:"true"`
+	StorageV2CellTargetSizeBytes ParamItem `refreshable:"true"`
+	// StorageV2EnableAsyncLoad is the historical-key rollout switch for the
+	// Storage V3 async field-data pipeline.
+	StorageV2EnableAsyncLoad ParamItem `refreshable:"true"`
+	// StorageV2AsyncLoadReadWindowSizeBytes controls the estimated bytes read
+	// by one Storage V3 async window.
 	StorageV2AsyncLoadReadWindowSizeBytes ParamItem `refreshable:"true"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
@@ -5363,7 +5369,7 @@ user-task-polling:
 		Key:          "queryNode.segcore.storageV2.enableAsyncLoad",
 		Version:      "3.0.1",
 		DefaultValue: "false",
-		Doc:          "Temporary rollout switch for async storage v2 field-data loading. Existing translators keep the mode captured at construction.",
+		Doc:          "Temporary rollout switch for Storage V3 async field-data loading. Existing translators keep the mode captured at construction.",
 		Export:       false,
 	}
 	p.StorageV2EnableAsyncLoad.Init(base.mgr)
@@ -5372,7 +5378,7 @@ user-task-polling:
 		Key:          "queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes",
 		Version:      "3.0.0",
 		DefaultValue: strconv.Itoa(DefaultStorageV2AsyncLoadReadWindowSizeBytes),
-		Doc: `Target estimated loaded-byte threshold for one storage v2 async read window. ` +
+		Doc: `Target estimated loaded-byte threshold for one Storage V3 async read window. ` +
 			`Each window contains at least one cell, so an oversized cell may exceed the threshold. ` +
 			`The value must be positive. Default 16 MiB.`,
 		Export: true,

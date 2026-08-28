@@ -219,12 +219,14 @@ class FileWriter {
 
     ~FileWriter();
 
+    // Synchronously appends bytes, subject to the global disk-write limit.
     void
     SetFdatasyncOnFinish();
 
     void
     Write(const void* data, size_t size);
 
+    // Flushes pending bytes, closes the file, and returns its logical size.
     size_t
     Finish();
 

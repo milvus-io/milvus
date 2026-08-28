@@ -1656,7 +1656,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     MutatePublishedStateLocked(Mutator&& mutator,
                                milvus::OpContext* op_ctx = nullptr) {
-        auto current = CapturePublishedState();
+        const auto current = CapturePublishedState();
         auto next = ClonePublishedState(current);
         mutator(*next);
         NormalizePublishedState(*next);
@@ -1953,7 +1953,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadColumnGroups(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
+        const std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
         const SegmentLoadInfo& segment_load_info,
         const SchemaPtr& schema_snapshot,
         bool eager_load,
@@ -2321,7 +2321,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         NormalizePublishedState(*staged);
 
         StagedStateCommitter committer(*this, runtime.get(), staged.get());
-        std::vector<std::pair<int, std::vector<FieldId>>> cg_field_ids = {
+        const std::vector<std::pair<int, std::vector<FieldId>>> cg_field_ids = {
             {static_cast<int>(index), field_ids}};
         LoadColumnGroups(column_groups,
                          properties,
@@ -2333,7 +2333,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                          false,
                          committer);
 
-        auto it = runtime->fields.find(field_ids.front());
+        const auto it = runtime->fields.find(field_ids.front());
         AssertInfo(it != runtime->fields.end(), "test field was not loaded");
         return it->second;
     }

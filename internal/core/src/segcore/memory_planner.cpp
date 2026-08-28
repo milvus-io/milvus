@@ -41,9 +41,9 @@
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/KeyRetriever.h"
-#include "storage/EntryStreamUtils.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
+#include "storage/TransientMemoryBudget.h"
 
 namespace milvus::segcore {
 
@@ -345,19 +345,18 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
     CellBatch current{};
 
     for (const auto& spec : cell_specs) {
-        auto cell_loading_overhead_bytes = CellLoadingOverheadBytes(spec);
-        bool should_split = false;
-        if (!current.cells.empty()) {
-            bool batch_full =
-                current.batch_loading_overhead_bytes > batch_limit_bytes ||
-                cell_loading_overhead_bytes >
-                    batch_limit_bytes - current.batch_loading_overhead_bytes;
-            if (spec.file_idx != current.file_idx ||
-                spec.local_rg_offset != current.rg_offset + current.rg_count ||
-                batch_full) {
-                should_split = true;
-            }
-        }
+        const auto cell_loading_overhead_bytes = CellLoadingOverheadBytes(spec);
+        const bool batch_full =
+            current.batch_loading_overhead_bytes > batch_limit_bytes ||
+            cell_loading_overhead_bytes >
+                batch_limit_bytes -
+                    std::min(current.batch_loading_overhead_bytes,
+                             batch_limit_bytes);
+        const bool should_split =
+            !current.cells.empty() &&
+            (spec.file_idx != current.file_idx ||
+             spec.local_rg_offset != current.rg_offset + current.rg_count ||
+             batch_full);
         if (should_split) {
             batches.push_back(std::move(current));
             current = {};
@@ -394,13 +393,13 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
             20,
         FieldDataReadWindowBytes() >> 20);
 
-    auto pool_priority = milvus::PriorityForLoad(priority);
+    const auto pool_priority = milvus::PriorityForLoad(priority);
     auto& pool = ThreadPools::GetThreadPool(pool_priority);
-    auto budget_priority =
+    const auto budget_priority =
         milvus::storage::TransientPriorityForThreadPool(pool_priority);
-    auto shared_factory =
+    const auto shared_factory =
         std::make_shared<BatchReaderFactory>(std::move(reader_factory));
-    auto shared_finalizer =
+    const auto shared_finalizer =
         std::make_shared<CellFinalizeFunc>(std::move(finalize_cell));
     AssertInfo(static_cast<bool>(*shared_finalizer),
                "[StorageV2] LoadCellBatchAsync requires a cell finalizer");
@@ -408,21 +407,22 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
     std::vector<CellLoadFuture> futures;
     futures.reserve(batches.size());
 
-    auto append_failed_future = [&](std::exception_ptr error) {
+    const auto append_failed_future = [&](std::exception_ptr error) {
         std::promise<LoadedCellBatch> promise;
         futures.emplace_back(promise.get_future());
         promise.set_exception(std::move(error));
     };
 
     for (auto& batch : batches) {
-        auto batch_loading_overhead_bytes = batch.batch_loading_overhead_bytes;
-        auto reader_memory_limit = BatchReaderMemoryLimit(
+        const auto batch_loading_overhead_bytes =
+            batch.batch_loading_overhead_bytes;
+        const auto reader_memory_limit = BatchReaderMemoryLimit(
             batch.batch_loaded_memory_bytes, memory_limit);
         auto& budget =
             milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
-        auto cancellation_token =
+        const auto cancellation_token =
             op_ctx ? op_ctx->cancellation_token : folly::CancellationToken();
-        auto budget_admitted = budget.AcquireUntil(
+        const bool budget_admitted = budget.AcquireUntil(
             batch_loading_overhead_bytes, budget_priority, cancellation_token);
         if (!budget_admitted) {
             // AcquireUntil waits for budget and returns false only when the

@@ -34,6 +34,7 @@ namespace milvus::storage {
 // disk-write concurrency limit across all callers.
 class LocalFileIOPool {
  public:
+    // Move-only token that releases one disk-write slot on destruction.
     class WritePermit {
      public:
         WritePermit() = default;
@@ -54,23 +55,28 @@ class LocalFileIOPool {
         explicit WritePermit(LocalFileIOPool* owner) : owner_(owner) {
         }
 
+        // Releases the owned slot early; repeated calls are no-ops.
         void
         Release() noexcept;
 
         LocalFileIOPool* owner_{nullptr};
     };
 
-    static LocalFileIOPool&
+    // Returns the process-wide local-file executor and write limiter.
+    [[nodiscard]] static LocalFileIOPool&
     GetInstance();
 
+    // Sets worker and write concurrency. Zero disables the executor and limit.
     void
     Configure(int worker_count);
 
     // Returns an empty token when the dedicated executor is disabled.
-    folly::Executor::KeepAlive<>
+    [[nodiscard]] folly::Executor::KeepAlive<>
     GetExecutor() const;
 
-    WritePermit
+    // Blocks until a configured disk-write slot is available. An empty permit
+    // represents the unlimited configuration and requires no release work.
+    [[nodiscard]] WritePermit
     AcquireWritePermit();
 
     LocalFileIOPool(const LocalFileIOPool&) = delete;
@@ -82,6 +88,7 @@ class LocalFileIOPool {
  private:
     LocalFileIOPool() = default;
 
+    // Returns one configured disk-write slot and wakes a waiter.
     void
     ReleaseWritePermit() noexcept;
 

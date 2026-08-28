@@ -68,6 +68,7 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/PluginLoader.h"
 #include "storage/Types.h"
+#include "storage/TransientMemoryBudget.h"
 
 namespace milvus::index {
 
@@ -785,8 +786,8 @@ IndexFactory::ScalarIndexLoadResourceImpl(
             request.max_memory_cost = milvus::SaturatingAdd(
                 stream_memory_overhead, validity_bitmap_bytes);
         } else {
-            auto resident_bytes = milvus::SaturatingAdd(index_size_in_bytes,
-                                                        validity_bitmap_bytes);
+            const auto resident_bytes = milvus::SaturatingAdd(
+                index_size_in_bytes, validity_bitmap_bytes);
             request.final_memory_cost = resident_bytes;
             request.final_disk_cost = 0;
             request.max_memory_cost =

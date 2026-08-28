@@ -348,8 +348,8 @@ class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
             /*fallback_bytes_per_row=*/0,
             /*shard=*/"",
             /*column_size_estimate=*/std::nullopt,
-            MmapChunkWritebackMode::Disabled,
-            enable_async_load);
+            /*writeback_mode=*/MmapChunkWritebackMode::Disabled,
+            /*enable_async_load=*/enable_async_load);
     }
 
     SchemaPtr schema_;

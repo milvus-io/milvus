@@ -293,7 +293,8 @@ FileWriter::Write(const void* data, size_t nbyte) {
         return;
     }
 
-    auto permit = LocalFileIOPool::GetInstance().AcquireWritePermit();
+    const auto write_permit =
+        LocalFileIOPool::GetInstance().AcquireWritePermit();
     WriteInternal(data, nbyte);
 }
 
@@ -333,7 +334,8 @@ FileWriter::Finish() {
         offset_ != 0 ||
         (fdatasync_on_finish_ && !use_direct_io_ && file_size_ != 0);
     if (needs_finish_io) {
-        auto permit = LocalFileIOPool::GetInstance().AcquireWritePermit();
+        const auto write_permit =
+            LocalFileIOPool::GetInstance().AcquireWritePermit();
 
         // Keep the final flush and sync under the same permit so the local
         // file I/O concurrency limit covers both operations.

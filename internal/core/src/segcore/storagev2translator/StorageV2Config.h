@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 
 namespace milvus::segcore::storagev2translator {
@@ -24,44 +23,21 @@ namespace milvus::segcore::storagev2translator {
 inline constexpr int64_t kDefaultStorageV2AsyncLoadReadWindowSizeBytes =
     16LL * 1024 * 1024;
 
-inline std::atomic<bool>&
-storage_v2_async_load_enabled_atomic() {
-    static std::atomic<bool> instance{false};
-    return instance;
-}
+// Historical StorageV2 names are retained for configuration compatibility;
+// these accessors control the Storage V3 async-load pipeline.
+[[nodiscard]] bool
+StorageV2AsyncLoadEnabled();
 
-inline bool
-StorageV2AsyncLoadEnabled() {
-    return storage_v2_async_load_enabled_atomic().load(
-        std::memory_order_acquire);
-}
+// Atomically enables or disables async loading for subsequently built readers.
+void
+SetStorageV2AsyncLoadEnabled(bool enabled);
 
-inline void
-SetStorageV2AsyncLoadEnabled(bool enabled) {
-    storage_v2_async_load_enabled_atomic().store(enabled,
-                                                 std::memory_order_release);
-}
+// Returns the process-wide Storage V3 read-window size in bytes.
+[[nodiscard]] int64_t
+StorageV2AsyncLoadReadWindowSizeBytes();
 
-inline std::atomic<int64_t>&
-storage_v2_async_load_read_window_size_bytes_atomic() {
-    static std::atomic<int64_t> instance{
-        kDefaultStorageV2AsyncLoadReadWindowSizeBytes};
-    return instance;
-}
-
-inline int64_t
-StorageV2AsyncLoadReadWindowSizeBytes() {
-    return storage_v2_async_load_read_window_size_bytes_atomic().load(
-        std::memory_order_acquire);
-}
-
-inline void
-SetStorageV2AsyncLoadReadWindowSizeBytes(int64_t bytes) {
-    if (bytes <= 0) {
-        bytes = kDefaultStorageV2AsyncLoadReadWindowSizeBytes;
-    }
-    storage_v2_async_load_read_window_size_bytes_atomic().store(
-        bytes, std::memory_order_release);
-}
+// Sets the read-window size; non-positive values restore the default.
+void
+SetStorageV2AsyncLoadReadWindowSizeBytes(int64_t bytes);
 
 }  // namespace milvus::segcore::storagev2translator

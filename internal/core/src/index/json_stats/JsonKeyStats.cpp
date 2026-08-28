@@ -1193,9 +1193,9 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             fmt::format("jks_{}", field_id_),
             /*fallback_bytes_per_row=*/0,
             shard_,
-            std::nullopt,
-            writeback_mode,
-            enable_async_load);
+            /*column_size_estimate=*/std::nullopt,
+            /*writeback_mode=*/writeback_mode,
+            /*enable_async_load=*/enable_async_load);
 
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
@@ -1277,9 +1277,9 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             fmt::format("jks_{}_{}", field_id_, inner_field_id.get()),
             /*fallback_bytes_per_row=*/0,
             shard_,
-            size_estimate,
-            writeback_mode,
-            enable_async_load);
+            /*column_size_estimate=*/size_estimate,
+            /*writeback_mode=*/writeback_mode,
+            /*enable_async_load=*/enable_async_load);
 
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
