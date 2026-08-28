@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <atomic>
 #include <chrono>
 #include <deque>
 #include <filesystem>
@@ -26,10 +27,13 @@
 #include "arrow/array/builder_nested.h"
 #include "arrow/array/builder_primitive.h"
 #include "arrow/array/concatenate.h"
+#include "arrow/buffer.h"
 #include "arrow/buffer_builder.h"
 #include <arrow/c/bridge.h>
 #include "arrow/scalar.h"
 #include "arrow/type_fwd.h"
+#include "arrow/util/bitmap_ops.h"
+#include "arrow/util/bit_util.h"
 #include "common/type_c.h"
 #include "fmt/format.h"
 #include "index/Utils.h"
@@ -80,6 +84,24 @@
 #include "nlohmann/json.hpp"
 
 namespace milvus::storage {
+
+namespace {
+
+std::atomic<bool> external_vector_partial_null_as_row_null{false};
+
+}  // namespace
+
+void
+SetExternalVectorPartialNullAsRowNull(bool enabled) {
+    external_vector_partial_null_as_row_null.store(enabled,
+                                                   std::memory_order_relaxed);
+}
+
+bool
+GetExternalVectorPartialNullAsRowNull() {
+    return external_vector_partial_null_as_row_null.load(
+        std::memory_order_relaxed);
+}
 
 constexpr const char* TEMP = "tmp";
 
@@ -2311,6 +2333,21 @@ ValidateNoNullValuesInRange(const std::shared_ptr<arrow::Array>& values,
     }
 }
 
+int64_t
+CountValidValuesInRange(const std::shared_ptr<arrow::Array>& values,
+                        int64_t begin,
+                        int64_t end) {
+    auto length = end - begin;
+    if (values->null_count() == 0) {
+        return length;
+    }
+    auto bitmap = values->null_bitmap_data();
+    AssertInfo(bitmap != nullptr,
+               "vector child array reports nulls without a validity bitmap");
+    return arrow::internal::CountSetBits(
+        bitmap, values->offset() + begin, length);
+}
+
 bool
 IsByteVectorListInput(DataType data_type) {
     return data_type == DataType::VECTOR_BINARY ||
@@ -2448,6 +2485,75 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             memset(dst, 0, num_rows * byte_width);
         }
 
+        // Allocate a replacement parent bitmap only if child nulls need to be
+        // promoted to row-level nulls. The common all-valid path keeps the
+        // existing zero-allocation behavior.
+        std::shared_ptr<arrow::Buffer> promoted_null_bitmap;
+        int64_t promoted_null_count = 0;
+        auto mark_row_null = [&](int64_t row) {
+            if (promoted_null_bitmap == nullptr) {
+                auto bitmap_result = arrow::AllocateEmptyBitmap(num_rows);
+                AssertInfo(bitmap_result.ok(),
+                           "Failed to allocate vector null bitmap");
+                promoted_null_bitmap = std::move(*bitmap_result);
+                auto promoted_bits = promoted_null_bitmap->mutable_data();
+                if (array->null_count() == 0) {
+                    arrow::bit_util::SetBitsTo(
+                        promoted_bits, 0, num_rows, true);
+                } else {
+                    arrow::internal::CopyBitmap(array->null_bitmap_data(),
+                                                array->offset(),
+                                                num_rows,
+                                                promoted_bits,
+                                                0);
+                }
+            }
+            arrow::bit_util::ClearBit(promoted_null_bitmap->mutable_data(),
+                                      row);
+            ++promoted_null_count;
+            // Null rows have no logical vector value. Keep their physical
+            // fixed-width slot deterministic and safe until the nullable
+            // Binary conversion drops it.
+            memset(dst + row * byte_width, 0, byte_width);
+        };
+
+        const bool coerce_partial_null =
+            GetExternalVectorPartialNullAsRowNull();
+        const bool can_promote_child_nulls =
+            field_meta.is_nullable() &&
+            IsVectorDataType(field_meta.get_data_type()) &&
+            !IsVectorArrayDataType(field_meta.get_data_type());
+        auto should_copy_row = [&](const std::shared_ptr<arrow::Array>& values,
+                                   int64_t begin,
+                                   int64_t end,
+                                   int64_t row) {
+            const auto length = end - begin;
+            const auto valid_count =
+                CountValidValuesInRange(values, begin, end);
+            if (valid_count == length) {
+                return true;
+            }
+
+            const auto null_count = length - valid_count;
+            const bool all_null = valid_count == 0;
+            if (can_promote_child_nulls && (all_null || coerce_partial_null)) {
+                mark_row_null(row);
+                return false;
+            }
+
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "vector list contains {} null element(s){} in child "
+                      "range [{}, {}) at row {}; field nullable={}, "
+                      "partial-null policy={}",
+                      null_count,
+                      FieldErrorSuffix(field_meta),
+                      begin,
+                      end,
+                      row,
+                      field_meta.is_nullable(),
+                      coerce_partial_null ? "null" : "error");
+        };
+
         if (type_id == arrow::Type::LIST) {
             auto list_array = std::static_pointer_cast<arrow::ListArray>(array);
             auto values = list_array->values();
@@ -2479,11 +2585,13 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                                expected_list_length,
                                actual_length,
                                i);
-                    ValidateNoNullValuesInRange(
-                        values, offset, offset + actual_length, "vector list");
-                    milvus::fastmem::FastMemcpy(dst + i * byte_width,
-                                                raw + offset * elem_byte_size,
-                                                byte_width);
+                    if (should_copy_row(
+                            values, offset, offset + actual_length, i)) {
+                        milvus::fastmem::FastMemcpy(
+                            dst + i * byte_width,
+                            raw + offset * elem_byte_size,
+                            byte_width);
+                    }
                 }
             }
         } else if (type_id == arrow::Type::FIXED_SIZE_LIST) {
@@ -2514,13 +2622,13 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             for (int64_t i = 0; i < num_rows; i++) {
                 if (array->IsValid(i)) {
                     auto offset = fsl_array->value_offset(i);
-                    ValidateNoNullValuesInRange(values,
-                                                offset,
-                                                offset + expected_list_length,
-                                                "vector list");
-                    milvus::fastmem::FastMemcpy(dst + i * byte_width,
-                                                raw + offset * elem_byte_size,
-                                                byte_width);
+                    if (should_copy_row(
+                            values, offset, offset + expected_list_length, i)) {
+                        milvus::fastmem::FastMemcpy(
+                            dst + i * byte_width,
+                            raw + offset * elem_byte_size,
+                            byte_width);
+                    }
                 }
             }
         } else {
@@ -2530,15 +2638,28 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                       array->type()->ToString());
         }
 
-        // Preserve null bitmap from the source array
+        // Preserve source nulls in an offset-zero bitmap. Reusing the source
+        // buffer directly is incorrect for sliced arrays because the new FSB
+        // array itself has offset zero.
         std::shared_ptr<arrow::Buffer> null_bitmap;
-        if (array->null_count() > 0 && array->data()->buffers[0]) {
-            null_bitmap = array->data()->buffers[0];
+        if (promoted_null_bitmap != nullptr) {
+            null_bitmap = std::move(promoted_null_bitmap);
+        } else if (array->null_count() > 0) {
+            auto bitmap_result = arrow::AllocateEmptyBitmap(num_rows);
+            AssertInfo(bitmap_result.ok(),
+                       "Failed to allocate vector null bitmap");
+            null_bitmap = std::move(*bitmap_result);
+            arrow::internal::CopyBitmap(array->null_bitmap_data(),
+                                        array->offset(),
+                                        num_rows,
+                                        null_bitmap->mutable_data(),
+                                        0);
         }
-        auto fsb_data = arrow::ArrayData::Make(fsb_type,
-                                               num_rows,
-                                               {null_bitmap, std::move(buffer)},
-                                               array->null_count());
+        auto fsb_data =
+            arrow::ArrayData::Make(fsb_type,
+                                   num_rows,
+                                   {null_bitmap, std::move(buffer)},
+                                   array->null_count() + promoted_null_count);
         result.push_back(
             std::make_shared<arrow::FixedSizeBinaryArray>(fsb_data));
     }
