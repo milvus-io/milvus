@@ -814,6 +814,27 @@ func (s *ClusteringCompactionTaskSuite) TestProcessAnalyzingState() {
 		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
 	})
 
+	s.Run("analyze task finished but data too small, gracefully complete", func() {
+		task := s.generateBasicTask(false)
+		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_analyzing), setAnalyzeTaskID(7))
+		t := &indexpb.AnalyzeTask{
+			CollectionID: task.GetTaskProto().CollectionID,
+			PartitionID:  task.GetTaskProto().PartitionID,
+			FieldID:      task.GetTaskProto().ClusteringKeyField.FieldID,
+			SegmentIDs:   task.GetTaskProto().InputSegments,
+			TaskID:       7,
+			State:        indexpb.JobState_JobStateFinished,
+			// empty centroids file + the skip reason set by the analyze task when
+			// data is too small to cluster: must NOT be treated as "vector not
+			// support", but as a no-op that completes the compaction gracefully.
+			CentroidsFile: "",
+			FailReason:    "data size too small to cluster",
+		}
+		s.meta.analyzeMeta.AddAnalyzeTask(t)
+		s.True(task.Process())
+		s.Equal(datapb.CompactionTaskState_completed, task.GetTaskProto().GetState())
+	})
+
 	s.Run("analyze task finished", func() {
 		task := s.generateBasicTask(false)
 		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_analyzing), setAnalyzeTaskID(7))

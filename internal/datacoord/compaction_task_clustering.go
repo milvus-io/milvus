@@ -621,6 +621,12 @@ func (t *clusteringCompactionTask) processAnalyzing() error {
 	switch analyzeTask.State {
 	case indexpb.JobState_JobStateFinished:
 		if analyzeTask.GetCentroidsFile() == "" {
+			if analyzeTask.GetFailReason() == "data size too small to cluster" {
+				mlog.Info(context.TODO(), "skip clustering compaction, data too small",
+					mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+					mlog.Int64("analyzeID", t.GetTaskProto().GetAnalyzeTaskID()))
+				return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
+			}
 			// not retryable, fake finished vector clustering is not supported in opensource
 			return merr.WrapErrClusteringCompactionNotSupportVector()
 		} else {
@@ -644,8 +650,15 @@ func (t *clusteringCompactionTask) doClean() error {
 		mlog.String("state", t.GetTaskProto().GetState().String()))
 
 	if t.GetTaskProto().GetState() == datapb.CompactionTaskState_completed {
-		if err := t.markInputSegmentsDropped(); err != nil {
-			return err
+		// Only drop the input segments when the compaction actually produced replacement result segments.
+		if len(t.GetTaskProto().GetResultSegments()) > 0 {
+			if err := t.markInputSegmentsDropped(); err != nil {
+				return err
+			}
+		} else {
+			mlog.Info(context.TODO(), "clustering compaction completed with no result segments, keep input segments",
+				mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+				mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()))
 		}
 	} else {
 		isInputDropped := false
