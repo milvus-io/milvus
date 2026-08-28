@@ -3,6 +3,7 @@ package syncer
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -83,48 +84,90 @@ func (rs *resumableSyncer) loop() {
 	bo.Reset()
 
 	for rs.ctx.Err() == nil {
-		// Create stream.
-		stream, err := rs.client.OpenSyncStream(rs.ctx, rs.node)
+		attemptCtx, attemptCancel := context.WithCancel(rs.ctx)
+		stream, err := rs.client.OpenSyncStream(attemptCtx, rs.node)
 		if err != nil {
+			attemptCancel()
 			if rs.ctx.Err() != nil {
 				return
 			}
 			mlog.Warn(rs.ctx, "ResumableSyncer: failed to open stream",
 				mlog.String("node", rs.node.String()), mlog.Err(err))
 
-			nextBackoff := bo.NextBackOff()
-			select {
-			case <-time.After(nextBackoff):
-			case <-rs.ctx.Done():
+			if !waitReconnectBackoff(rs.ctx, bo) {
 				return
 			}
 			continue
 		}
 
-		bo.Reset()
-
 		// Re-push all pending entries for this node.
 		if err := rs.rePush(stream); err != nil {
+			attemptCancel()
+			_ = stream.CloseSend()
+			if rs.ctx.Err() != nil {
+				return
+			}
+			if !waitReconnectBackoff(rs.ctx, bo) {
+				return
+			}
 			continue
 		}
 
-		// Run send and recv in parallel; recv drives the current goroutine.
-		streamCtx, streamCancel := context.WithCancel(rs.ctx)
+		openedAt := time.Now()
+		var loops sync.WaitGroup
+		var receivedResponse atomic.Bool
+		broken := make(chan struct{}, 1)
+		signalBroken := func() {
+			select {
+			case broken <- struct{}{}:
+			default:
+			}
+		}
 
-		var sendWg sync.WaitGroup
-		sendWg.Add(1)
+		loops.Add(2)
 		go func() {
-			defer sendWg.Done()
-			rs.sendLoop(streamCtx, stream)
+			defer loops.Done()
+			rs.sendLoop(attemptCtx, stream)
+			signalBroken()
+		}()
+		go func() {
+			defer loops.Done()
+			if rs.recvLoop(attemptCtx, stream) {
+				receivedResponse.Store(true)
+			}
+			signalBroken()
 		}()
 
-		// Recv blocks until stream breaks.
-		rs.recvLoop(stream)
+		select {
+		case <-broken:
+		case <-rs.ctx.Done():
+		}
+		attemptCancel()
+		loops.Wait()
 		_ = stream.CloseSend()
+		if rs.ctx.Err() != nil {
+			return
+		}
+		if receivedResponse.Load() || time.Since(openedAt) >= stableStreamDuration {
+			bo.Reset()
+		}
+		if !waitReconnectBackoff(rs.ctx, bo) {
+			return
+		}
+	}
+}
 
-		// Stream broke — cancel send loop and wait.
-		streamCancel()
-		sendWg.Wait()
+const stableStreamDuration = time.Second
+
+func waitReconnectBackoff(ctx context.Context, bo *backoff.ExponentialBackOff) bool {
+	nextBackoff := bo.NextBackOff()
+	timer := time.NewTimer(nextBackoff)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 
@@ -145,22 +188,26 @@ func (rs *resumableSyncer) sendLoop(ctx context.Context, stream viewpb.ViewSyncS
 
 // recvLoop receives responses and routes them to pending callbacks.
 // Returns when the stream breaks.
-func (rs *resumableSyncer) recvLoop(stream viewpb.ViewSyncService_SyncQueryViewClient) {
+func (rs *resumableSyncer) recvLoop(ctx context.Context, stream viewpb.ViewSyncService_SyncQueryViewClient) bool {
+	receivedResponse := false
 	for {
 		resp, err := stream.Recv()
 		if err != nil {
-			mlog.Warn(rs.ctx, "ResumableSyncer: stream recv failed",
-				mlog.String("node", rs.node.String()), mlog.Err(err))
-			return
+			if ctx.Err() == nil {
+				mlog.Warn(ctx, "ResumableSyncer: stream recv failed",
+					mlog.String("node", rs.node.String()), mlog.Err(err))
+			}
+			return receivedResponse
 		}
 
 		viewsResp := resp.GetViews()
 		if viewsResp == nil {
 			if resp.GetClose() != nil {
-				return
+				return receivedResponse
 			}
 			continue
 		}
+		receivedResponse = true
 
 		for _, pb := range viewsResp.QueryViews {
 			rs.pending.MatchResponse(pb)

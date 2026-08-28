@@ -152,13 +152,6 @@ The pchannel is already present in the parent path, so the compact key stores
 only the canonical vchannel index plus the QueryView/DataView version tuple.
 Recovery validates the reconstructed key identity against the persisted proto.
 
-SN-local persisted key format:
-
-- `streamingnode-meta/wal/{pchannel}/query-view/{collectionID}/{replicaID}/{vchannel}/{streamingVersion}/{compactVersion}/{queryVersion}` — `QueryViewOfShard` proto.
-
-The key keeps the full vchannel name and the QueryView/DataView version tuple so
-multiple in-flight views for the same shard do not overwrite each other.
-
 ### 4.3 SN: Crash Recovery
 
 SN persists only the Up state. On crash recovery:

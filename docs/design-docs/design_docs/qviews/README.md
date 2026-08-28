@@ -25,11 +25,12 @@ StreamingNode would become a compute-intensive and IO-intensive global bottlenec
 
 ## 3. Two-Phase Query Process
 
-For the detailed query-path flow, service boundary, client orchestration, and
-shard discovery design, see [Query Client Design](query/query_client.md).
-For node-side Phase 1 planning and Phase 2 execution, see
-[Query Plan Node-Side Design](query/query_plan.md) and
-[Query Execution Node-Side Design](query/query_execution.md).
+TODO(query/query_client.md): add the detailed query-path flow, service boundary,
+client orchestration, and shard discovery design when the query path is picked.
+TODO(query/query_plan.md): add the node-side Phase 1 planning design when that
+module is picked.
+TODO(query/query_execution.md): add the node-side Phase 2 execution design when
+that module is picked.
 
 1. **Phase One**: Proxy generates a Shard-level query plan from StreamingNode using the highest version QueryView:
    - Includes MVCC
@@ -71,8 +72,8 @@ For a single Shard of a Collection, the complete distributed query view consists
 
 ## 5. Data Side — Storage View (DataView)
 
-For the detailed DataView contract, event triggers, delayed visibility rules,
-and delete timetick handling, see [DataView Design](data_view.md).
+TODO(data_view.md): add the detailed DataView contract, event triggers, delayed
+visibility rules, and delete timetick handling when DataView is picked.
 
 ### 5.1 Overview
 
@@ -87,7 +88,6 @@ data ([B1] and [A1]). A version number DataVersion is introduced:
 Version numbers are ordered lexicographically by `(streaming_version, compact_version)`.
 
 ### 5.2 Data Structures
-
 
 `DataViewOfCollection`, `DataViewOfShard`, and `DataViewOfPartition` are
 immutable builder inputs defined in [view.proto](../../../../pkg/proto/view.proto).
@@ -268,8 +268,6 @@ keeps production resource policy behind those interfaces.
 | Coord | Node Manager | Service discovery, maintaining the global available QueryNode list |
 | Coord | Resource Group Manager | Resource Group partitioning, generating QueryNode-ResourceGroup grouping relationships |
 | Coord | Replica Manager | Replica assignment, generating Replica-to-available-Node relationships |
-
-
 | Coord | QueryView Manager | View persistence, state transitions, statistics, and reliable synchronization |
 | Streaming Node | QueryView Handler | Persistent local state machine and injected resource lifecycle interface |
 | Query Node | QueryView Handler | Stateless local state machine and injected segment lifecycle interface |
