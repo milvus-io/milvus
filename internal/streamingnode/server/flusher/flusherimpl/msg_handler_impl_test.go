@@ -64,6 +64,37 @@ func TestFlushMsgHandler_HandleFlush(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestFlushMsgHandler_HandleSplitShard(t *testing.T) {
+	vchannel := "ch-0"
+
+	m, err := message.NewSplitShardMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.SplitShardMessageHeader{
+			CollectionId:      100,
+			FlushedSegmentIds: []int64{1, 2},
+		}).
+		WithBody(&message.SplitShardMessageBody{}).
+		BuildMutable()
+	assert.NoError(t, err)
+
+	id := mock_message.NewMockMessageID(t)
+	id.EXPECT().String().Return("1").Maybe()
+	im, err := message.AsImmutableSplitShardMessageV2(m.IntoImmutableMessage(id))
+	assert.NoError(t, err)
+
+	// the fence-sealed segment ids are sealed for flush on the source vchannel.
+	wbMgr := writebuffer.NewMockBufferManager(t)
+	wbMgr.EXPECT().SealSegments(mock.Anything, vchannel, []int64{1, 2}).Return(errors.New("mock err"))
+	handler := newMsgHandler(wbMgr)
+	assert.Error(t, handler.HandleSplitShard(im))
+
+	// test normal
+	wbMgr = writebuffer.NewMockBufferManager(t)
+	wbMgr.EXPECT().SealSegments(mock.Anything, vchannel, []int64{1, 2}).Return(nil)
+	handler = newMsgHandler(wbMgr)
+	assert.NoError(t, handler.HandleSplitShard(im))
+}
+
 func TestFlushMsgHandler_HandleManualFlush(t *testing.T) {
 	vchannel := "ch-0"
 
