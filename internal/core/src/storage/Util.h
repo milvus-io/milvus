@@ -406,6 +406,17 @@ CreateFieldData(
     int64_t total_num_rows = 0,
     std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 
+// Creates field data whose rows are initialized from a schema default value.
+// Initialization completes before the FieldData is published and does not
+// acquire its mutation lock.
+FieldDataPtr
+CreateFieldDataFromDefaultValue(
+    const DataType& type,
+    bool nullable,
+    int64_t element_count,
+    const std::optional<DefaultValueType>& default_value,
+    std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
+
 int64_t
 GetByteSizeOfFieldDatas(const std::vector<FieldDataPtr>& field_datas);
 
