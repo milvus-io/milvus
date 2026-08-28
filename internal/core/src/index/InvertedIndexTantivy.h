@@ -68,7 +68,8 @@ get_tantivy_data_type(proto::schema::DataType data_type) {
         }
 
         case proto::schema::DataType::String:
-        case proto::schema::DataType::VarChar: {
+        case proto::schema::DataType::VarChar:
+        case proto::schema::DataType::UUID: {
             return TantivyDataType::Keyword;
         }
 

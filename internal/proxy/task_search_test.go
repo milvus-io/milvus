@@ -5277,6 +5277,27 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarChar() {
 	s.Equal("disable", task.queryInfos[0].Hints)
 }
 
+func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnUUID() {
+	task := s.getSearchTask()
+	task.enableMaterializedView = true
+	task.request.Dsl = testUUIDField + " == \"00000000-0000-0000-0000-000000000001\""
+	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, map[string]schemapb.DataType{
+		testInt64Field:    schemapb.DataType_Int64,
+		testUUIDField:     schemapb.DataType_UUID,
+		testFloatVecField: schemapb.DataType_FloatVector,
+	}, testInt64Field, testUUIDField, false)
+	schemaInfo := mustNewSchemaInfo(schema)
+	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+	s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
+
+	err := task.PreExecute(s.ctx)
+	s.NoError(err)
+	s.NotZero(len(task.queryInfos))
+	s.Equal(true, task.queryInfos[0].MaterializedViewInvolved)
+	s.Equal("disable", task.queryInfos[0].Hints)
+}
+
 func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolation() {
 	isAdanceds := []bool{true, false}
 	for _, isAdvanced := range isAdanceds {

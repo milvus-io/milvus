@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 
 #include "common/Types.h"
 #include "common/Utils.h"
@@ -143,6 +144,24 @@ VectorBase::set_data_raw(ssize_t element_offset,
             auto& field_data = FIELD_DATA(data, string);
             std::vector<std::string> data_raw(field_data.begin(),
                                               field_data.end());
+            return set_data_raw(element_offset, data_raw.data(), element_count);
+        }
+        case DataType::UUID: {
+            // Strict 16-byte fixed path: no Cassandra string fallback.
+            auto& bytes_data = FIELD_DATA(data, bytes);
+            AssertInfo(static_cast<ssize_t>(bytes_data.size()) == element_count,
+                       "UUID bytes_data size {} mismatch element_count {}",
+                       bytes_data.size(),
+                       element_count);
+            std::vector<UUID> data_raw;
+            data_raw.reserve(bytes_data.size());
+            for (auto& b : bytes_data) {
+                AssertInfo(
+                    b.size() == 16, "UUID expected 16 bytes, got {}", b.size());
+                UUID uuid{};
+                std::memcpy(uuid.data.data(), b.data(), 16);
+                data_raw.push_back(uuid);
+            }
             return set_data_raw(element_offset, data_raw.data(), element_count);
         }
         case DataType::JSON: {

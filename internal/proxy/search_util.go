@@ -400,7 +400,8 @@ func isSortableFieldType(dataType schemapb.DataType) bool {
 		schemapb.DataType_Float,
 		schemapb.DataType_Double,
 		schemapb.DataType_String,
-		schemapb.DataType_VarChar:
+		schemapb.DataType_VarChar,
+		schemapb.DataType_UUID:
 		return true
 	default:
 		// Vectors, Arrays, JSON (without path), etc. are not sortable

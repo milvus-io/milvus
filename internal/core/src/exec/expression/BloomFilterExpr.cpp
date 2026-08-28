@@ -164,6 +164,10 @@ PhyBloomFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             }
             break;
         }
+        case DataType::UUID: {
+            result = ExecVisitorImpl<UUID>(context);
+            break;
+        }
         case DataType::JSON: {
             result = ExecVisitorImplJson(context);
             break;

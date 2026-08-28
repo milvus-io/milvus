@@ -659,7 +659,7 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 		if fieldNumRows == 0 {
 			fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetStringData().GetData())
 		}
-	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
+	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_UUID:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetStringData().GetData())
 	case schemapb.DataType_Array:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetArrayData().GetData())

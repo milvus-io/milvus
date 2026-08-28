@@ -51,8 +51,8 @@ func (c *HYBRIDChecker) CheckValidDataType(indexType IndexType, field *schemapb.
 	}
 	if !typeutil.IsBoolType(mainType) && !typeutil.IsIntegerType(mainType) &&
 		!typeutil.IsStringType(mainType) && !typeutil.IsArrayType(mainType) &&
-		!typeutil.IsFloatingType(mainType) {
-		return merr.WrapErrParameterInvalidMsg("hybrid index are only supported on bool, int, float, string and array field")
+		!typeutil.IsFloatingType(mainType) && !typeutil.IsUUIDType(mainType) {
+		return merr.WrapErrParameterInvalidMsg("hybrid index are only supported on bool, int, float, string, uuid and array field")
 	}
 	if typeutil.IsArrayType(mainType) {
 		if !typeutil.IsBoolType(elemType) && !typeutil.IsIntegerType(elemType) &&

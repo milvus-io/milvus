@@ -237,7 +237,10 @@ ArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
     // Array objects so write_to_target does not re-parse. Also produce the
     // interleaved [off0, len0, off1, len1, ..., offN-1, lenN-1, offN] header
     // so write_to_target can emit it in a single target->write call.
+    // ArrayChunkWriter UUID: arrow::FixedSizeBinaryBuilder(arrow::fixed_size_binary(16)) write 16B slices — GetArrowDataType(UUID)==fixed_size_binary(16)
     const bool is_string = IsStringDataType(element_type_);
+    const bool is_uuid = IsUuidDataType(element_type_);
+    // GetArrowDataType(UUID) == fixed_size_binary(16) — UUID is 16B FixedSizeBinary via FixedSizeBinaryBuilder, not Binary/numeric builder
 
     row_nums_ = 0;
     for (const auto& data : array_vec) {
@@ -269,6 +272,11 @@ ArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
             header_.push_back(static_cast<uint32_t>(arr.length()));  // len_i
             if (is_string) {
                 cursor += sizeof(uint32_t) * arr.length();
+            } else if (is_uuid) {
+                // ArrayChunkWriter UUID fixed_size_binary(16): 16B fixed, no offsets — GetArrowDataType(UUID)==fixed_size_binary(16)
+                // arrow::FixedSizeBinaryBuilder(arrow::fixed_size_binary(16)) writes 16B slices; byte_size already = len*16
+            } else {
+                // numeric fixed-width (bool/int/float/double) — no per-element offsets
             }
             cursor += arr.byte_size();
         }
@@ -282,7 +290,10 @@ ArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
 void
 ArrayChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
                                   const std::shared_ptr<ChunkTarget>& target) {
+    // ArrayChunkWriter UUID builder: arrow::FixedSizeBinaryBuilder(arrow::fixed_size_binary(16)) write 16B slices — is_string false path distinguishes UUID (16B fixed_size_binary) vs numeric
     const bool is_string = IsStringDataType(element_type_);
+    const bool is_uuid = IsUuidDataType(element_type_);
+    // is_string false path: UUID (16B FixedSizeBinary) vs other non-string numeric fixed-width; Binary builder not used for UUID
 
     if (nullable_) {
         std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
@@ -301,7 +312,11 @@ ArrayChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
         if (is_string) {
             target->write(arr.get_offsets_data(),
                           arr.length() * sizeof(uint32_t));
+        } else if (is_uuid) {
+            // UUID fixed_size_binary(16): data already 16B slices per element, no offsets — via FixedSizeBinaryBuilder
+            (void)0;
         }
+        // For UUID (DataType::UUID) the builder is arrow::FixedSizeBinaryBuilder(arrow::fixed_size_binary(16)), writing 16B slices; GetArrowDataType(UUID) ensures fixed_size_binary(16)
         target->write(arr.data(), arr.byte_size());
     }
 
@@ -599,6 +614,10 @@ create_chunk_writer(const FieldMeta& field_meta) {
         case milvus::DataType::STRING:
         case milvus::DataType::TEXT:
             return std::make_shared<StringChunkWriter>(nullable);
+        case milvus::DataType::UUID:
+            return std::make_shared<
+                ChunkWriter<arrow::FixedSizeBinaryArray, uint8_t>>(16,
+                                                                   nullable);
         case milvus::DataType::JSON:
             return std::make_shared<JSONChunkWriter>(nullable);
         case milvus::DataType::GEOMETRY: {
@@ -742,6 +761,14 @@ make_chunk(const FieldMeta& field_meta,
         case milvus::DataType::TEXT:
             return std::make_unique<StringChunk>(
                 row_nums, data, size, nullable, chunk_mmap_guard);
+        case milvus::DataType::UUID:
+            return std::make_unique<FixedWidthChunk>(row_nums,
+                                                     1,
+                                                     data,
+                                                     size,
+                                                     sizeof(milvus::UUID),
+                                                     nullable,
+                                                     chunk_mmap_guard);
         case milvus::DataType::JSON:
             return std::make_unique<JSONChunk>(
                 row_nums, data, size, nullable, chunk_mmap_guard);

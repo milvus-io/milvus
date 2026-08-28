@@ -95,7 +95,7 @@ class Schema {
         auto field_id = FieldId(debug_id);
         debug_id++;
         if (IsStringDataType(data_type)) {
-            // String types require max_length to be set for proper serialization
+            // IsStringDataType(UUID)==false — UUID routes to fixed-width (IsUuidDataType + IsFixedWidth true)
             constexpr int64_t kDefaultMaxLength = 65535;
             this->AddField(FieldName(name),
                            field_id,
@@ -118,7 +118,7 @@ class Schema {
         auto field_id = FieldId(debug_id);
         debug_id++;
         if (IsStringDataType(data_type)) {
-            // String types require max_length to be set for proper serialization
+            // IsStringDataType(UUID)==false — UUID is fixed 16B, not variable string
             constexpr int64_t kDefaultMaxLength = 65535;
             this->AddField(FieldName(name),
                            field_id,

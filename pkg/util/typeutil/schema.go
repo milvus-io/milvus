@@ -156,6 +156,8 @@ func estimateSizeBy(schema *schemapb.CollectionSchema, policy getVariableFieldLe
 			res += 4
 		case schemapb.DataType_Int64, schemapb.DataType_Double, schemapb.DataType_Timestamptz:
 			res += 8
+		case schemapb.DataType_UUID:
+			res += 16
 		case schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_Array, schemapb.DataType_JSON, schemapb.DataType_Geometry:
 			maxLengthPerRow, err := getVarFieldLength(fs, policy)
 			if err != nil {
@@ -261,6 +263,10 @@ func CalcScalarSize(column *schemapb.FieldData) int {
 		res += len(column.GetScalars().GetDoubleData().GetData()) * 8
 	case schemapb.DataType_Timestamptz:
 		res += len(column.GetScalars().GetTimestamptzData().GetData()) * 8
+	case schemapb.DataType_UUID:
+		if column.GetScalars().GetBytesData() != nil {
+			res += len(column.GetScalars().GetBytesData().GetData()) * 16
+		}
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		for _, str := range column.GetScalars().GetStringData().GetData() {
 			res += len(str)
@@ -330,6 +336,18 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 				return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
 			}
 			res += len(fs.GetScalars().GetStringData().Data[rowOffset])
+		case schemapb.DataType_UUID:
+			if fs.GetScalars().GetBytesData() != nil {
+				if rowOffset >= len(fs.GetScalars().GetBytesData().GetData()) {
+					return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
+				}
+				if len(fs.GetScalars().GetBytesData().GetData()[rowOffset]) != 16 {
+					return 0, merr.WrapErrParameterInvalidMsg("invalid UUID bytes length %d, expected 16", len(fs.GetScalars().GetBytesData().GetData()[rowOffset]))
+				}
+				res += len(fs.GetScalars().GetBytesData().GetData()[rowOffset])
+			} else {
+				return 0, merr.WrapErrParameterInvalidMsg("invalid UUID field data: expected BytesData with 16-byte values")
+			}
 		case schemapb.DataType_Array:
 			if rowOffset >= len(fs.GetScalars().GetArrayData().GetData()) {
 				return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
@@ -711,7 +729,8 @@ func IsClusteringKeyType(dataType schemapb.DataType) bool {
 	case schemapb.DataType_Int8, schemapb.DataType_Int16,
 		schemapb.DataType_Int32, schemapb.DataType_Int64,
 		schemapb.DataType_Float, schemapb.DataType_Double,
-		schemapb.DataType_VarChar, schemapb.DataType_String:
+		schemapb.DataType_VarChar, schemapb.DataType_String,
+		schemapb.DataType_UUID:
 		return true
 	default:
 		return dataType == schemapb.DataType_FloatVector
@@ -739,6 +758,10 @@ func IsGeometryType(dataType schemapb.DataType) bool {
 
 func IsTimestamptzType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_Timestamptz
+}
+
+func IsUUIDType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_UUID
 }
 
 func IsArrayType(dataType schemapb.DataType) bool {
@@ -789,11 +812,15 @@ func IsTextType(dataType schemapb.DataType) bool {
 
 func IsArrayContainStringElementType(dataType schemapb.DataType, elementType schemapb.DataType) bool {
 	if IsArrayType(dataType) {
-		if elementType == schemapb.DataType_String || elementType == schemapb.DataType_VarChar {
+		if elementType == schemapb.DataType_String || elementType == schemapb.DataType_VarChar || IsUUIDType(elementType) {
 			return true
 		}
 	}
 	return false
+}
+
+func IsStringOrUUIDType(dataType schemapb.DataType) bool {
+	return IsStringType(dataType) || IsUUIDType(dataType)
 }
 
 func IsVariableDataType(dataType schemapb.DataType) bool {
@@ -801,7 +828,7 @@ func IsVariableDataType(dataType schemapb.DataType) bool {
 }
 
 func IsPrimitiveType(dataType schemapb.DataType) bool {
-	return IsArithmetic(dataType) || IsStringType(dataType) || IsBoolType(dataType) || IsTimestamptzType(dataType)
+	return IsArithmetic(dataType) || IsStringType(dataType) || IsBoolType(dataType) || IsTimestamptzType(dataType) || IsUUIDType(dataType)
 }
 
 // PrepareResultFieldData construct this slice fo FieldData for final result reduce
@@ -862,6 +889,12 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 				scalar.Scalars.Data = &schemapb.ScalarField_StringData{
 					StringData: &schemapb.StringArray{
 						Data: make([]string, 0, topK),
+					},
+				}
+			case *schemapb.ScalarField_BytesData:
+				scalar.Scalars.Data = &schemapb.ScalarField_BytesData{
+					BytesData: &schemapb.BytesArray{
+						Data: make([][]byte, 0, topK),
 					},
 				}
 			case *schemapb.ScalarField_JsonData:
@@ -1163,6 +1196,18 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				}
 				/* #nosec G103 */
 				appendSize += int64(unsafe.Sizeof(srcScalar.StringData.Data[idx]))
+			case *schemapb.ScalarField_BytesData:
+				if dstScalar.GetBytesData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_BytesData{
+						BytesData: &schemapb.BytesArray{
+							Data: [][]byte{srcScalar.BytesData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetBytesData().Data = append(dstScalar.GetBytesData().Data, srcScalar.BytesData.Data[idx])
+				}
+				/* #nosec G103 */
+				appendSize += int64(unsafe.Sizeof(srcScalar.BytesData.Data[idx]))
 			case *schemapb.ScalarField_ArrayData:
 				if dstScalar.GetArrayData() == nil {
 					dstScalar.Data = &schemapb.ScalarField_ArrayData{
@@ -1446,6 +1491,15 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 			}
 			for _, idx := range dataIndices {
 				dstScalar.GetStringData().Data = append(dstScalar.GetStringData().Data, srcScalar.StringData.Data[idx])
+			}
+		case *schemapb.ScalarField_BytesData:
+			if dstScalar.GetBytesData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_BytesData{
+					BytesData: &schemapb.BytesArray{Data: make([][]byte, 0, len(dataIndices))},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetBytesData().Data = append(dstScalar.GetBytesData().Data, srcScalar.BytesData.Data[idx])
 			}
 		case *schemapb.ScalarField_ArrayData:
 			if dstScalar.GetArrayData() == nil {
@@ -3262,7 +3316,8 @@ func isExternalFieldTypeSupported(dt schemapb.DataType) bool {
 		schemapb.DataType_BFloat16Vector,
 		schemapb.DataType_BinaryVector,
 		schemapb.DataType_Int8Vector,
-		schemapb.DataType_ArrayOfVector:
+		schemapb.DataType_ArrayOfVector,
+		schemapb.DataType_UUID:
 		return true
 	default:
 		return false
@@ -3306,7 +3361,9 @@ func HasPartitionKey(schema *schemapb.CollectionSchema) bool {
 }
 
 func IsFieldDataTypeSupportMaterializedView(fieldSchema *schemapb.FieldSchema) bool {
-	return IsIntegerType(fieldSchema.DataType) || IsStringType(fieldSchema.DataType)
+	return IsIntegerType(fieldSchema.DataType) ||
+		IsStringType(fieldSchema.DataType) ||
+		IsUUIDType(fieldSchema.DataType)
 }
 
 // HasClusterKey check if a collection schema has ClusterKey field
@@ -3443,6 +3500,8 @@ func GetId(src *schemapb.IDs, idx int) (int, any) {
 		return 8, src.GetIntId().Data[idx]
 	case *schemapb.IDs_StrId:
 		return len(src.GetStrId().Data[idx]), src.GetStrId().Data[idx]
+	case *schemapb.IDs_UuidId:
+		return 16, src.GetUuidId().Data[idx]
 	default:
 		panic("unknown pk type")
 	}
@@ -3469,6 +3528,26 @@ func AppendID(dst *schemapb.IDs, src any) {
 			}
 		} else {
 			dst.GetStrId().Data = append(dst.GetStrId().Data, value)
+		}
+	case [16]byte:
+		if dst.GetIdField() == nil {
+			dst.IdField = &schemapb.IDs_UuidId{
+				UuidId: &schemapb.UUIDArray{
+					Data: [][]byte{value[:]},
+				},
+			}
+		} else {
+			dst.GetUuidId().Data = append(dst.GetUuidId().Data, value[:])
+		}
+	case []byte:
+		if dst.GetIdField() == nil {
+			dst.IdField = &schemapb.IDs_UuidId{
+				UuidId: &schemapb.UUIDArray{
+					Data: [][]byte{value},
+				},
+			}
+		} else {
+			dst.GetUuidId().Data = append(dst.GetUuidId().Data, value)
 		}
 	default:
 		// TODO
@@ -3497,6 +3576,16 @@ func AppendIDs(dst *schemapb.IDs, src *schemapb.IDs, idx int) {
 		} else {
 			dst.GetStrId().Data = append(dst.GetStrId().Data, src.GetStrId().Data[idx])
 		}
+	case *schemapb.IDs_UuidId:
+		if dst.GetIdField() == nil {
+			dst.IdField = &schemapb.IDs_UuidId{
+				UuidId: &schemapb.UUIDArray{
+					Data: [][]byte{src.GetUuidId().Data[idx]},
+				},
+			}
+		} else {
+			dst.GetUuidId().Data = append(dst.GetUuidId().Data, src.GetUuidId().Data[idx])
+		}
 	default:
 		// TODO
 	}
@@ -3513,6 +3602,8 @@ func GetSizeOfIDs(data *schemapb.IDs) int {
 		result = len(data.GetIntId().GetData())
 	case *schemapb.IDs_StrId:
 		result = len(data.GetStrId().GetData())
+	case *schemapb.IDs_UuidId:
+		result = len(data.GetUuidId().GetData())
 	default:
 		// TODO::
 	}
@@ -3526,12 +3617,17 @@ func GetPKSize(fieldData *schemapb.FieldData) int {
 		return len(fieldData.GetScalars().GetLongData().GetData())
 	case schemapb.DataType_VarChar:
 		return len(fieldData.GetScalars().GetStringData().GetData())
+	case schemapb.DataType_UUID:
+		if fieldData.GetScalars().GetBytesData() != nil {
+			return len(fieldData.GetScalars().GetBytesData().GetData())
+		}
+		return len(fieldData.GetScalars().GetStringData().GetData())
 	}
 	return 0
 }
 
 func IsPrimaryFieldType(dataType schemapb.DataType) bool {
-	if dataType == schemapb.DataType_Int64 || dataType == schemapb.DataType_VarChar {
+	if dataType == schemapb.DataType_Int64 || dataType == schemapb.DataType_VarChar || dataType == schemapb.DataType_UUID {
 		return true
 	}
 
@@ -3547,6 +3643,8 @@ func GetPK(data *schemapb.IDs, idx int64) interface{} {
 		return data.GetIntId().GetData()[idx]
 	case *schemapb.IDs_StrId:
 		return data.GetStrId().GetData()[idx]
+	case *schemapb.IDs_UuidId:
+		return data.GetUuidId().GetData()[idx]
 	}
 	return nil
 }
@@ -3614,6 +3712,14 @@ func getScalarDataLen(field *schemapb.FieldData) int {
 		return len(field.GetScalars().GetTimestamptzData().GetData())
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return len(field.GetScalars().GetStringData().GetData())
+	case schemapb.DataType_UUID:
+		if field.GetScalars().GetBytesData() != nil {
+			return len(field.GetScalars().GetBytesData().GetData())
+		}
+		if field.GetScalars().GetStringData() != nil {
+			return len(field.GetScalars().GetStringData().GetData())
+		}
+		return 0
 	}
 	return -1
 }
@@ -3634,6 +3740,14 @@ func getData(field *schemapb.FieldData, idx int) any {
 		return field.GetScalars().GetTimestamptzData().GetData()[idx]
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return field.GetScalars().GetStringData().GetData()[idx]
+	case schemapb.DataType_UUID:
+		if field.GetScalars().GetBytesData() != nil {
+			return field.GetScalars().GetBytesData().GetData()[idx]
+		}
+		if field.GetScalars().GetStringData() != nil {
+			return field.GetScalars().GetStringData().GetData()[idx]
+		}
+		return nil
 	case schemapb.DataType_FloatVector:
 		dim := int(field.GetVectors().GetDim())
 		return field.GetVectors().GetFloatVector().GetData()[idx*dim : (idx+1)*dim]
@@ -3679,6 +3793,24 @@ func AppendPKs(pks *schemapb.IDs, pk interface{}) {
 			}
 		}
 		pks.GetStrId().Data = append(pks.GetStrId().GetData(), realPK)
+	case [16]byte:
+		if pks.GetUuidId() == nil {
+			pks.IdField = &schemapb.IDs_UuidId{
+				UuidId: &schemapb.UUIDArray{
+					Data: make([][]byte, 0),
+				},
+			}
+		}
+		pks.GetUuidId().Data = append(pks.GetUuidId().GetData(), realPK[:])
+	case []byte:
+		if pks.GetUuidId() == nil {
+			pks.IdField = &schemapb.IDs_UuidId{
+				UuidId: &schemapb.UUIDArray{
+					Data: make([][]byte, 0),
+				},
+			}
+		}
+		pks.GetUuidId().Data = append(pks.GetUuidId().GetData(), realPK)
 	}
 }
 
@@ -3689,6 +3821,8 @@ func SwapPK(data *schemapb.IDs, i, j int) {
 		f.IntId.Data[i], f.IntId.Data[j] = f.IntId.Data[j], f.IntId.Data[i]
 	case *schemapb.IDs_StrId:
 		f.StrId.Data[i], f.StrId.Data[j] = f.StrId.Data[j], f.StrId.Data[i]
+	case *schemapb.IDs_UuidId:
+		f.UuidId.Data[i], f.UuidId.Data[j] = f.UuidId.Data[j], f.UuidId.Data[i]
 	}
 }
 
@@ -3699,6 +3833,8 @@ func ComparePKInSlice(data *schemapb.IDs, i, j int) bool {
 		return f.IntId.Data[i] < f.IntId.Data[j]
 	case *schemapb.IDs_StrId:
 		return f.StrId.Data[i] < f.StrId.Data[j]
+	case *schemapb.IDs_UuidId:
+		return bytes.Compare(f.UuidId.Data[i], f.UuidId.Data[j]) < 0
 	}
 	return false
 }
@@ -3710,6 +3846,11 @@ func ComparePK(pkA, pkB interface{}) bool {
 		return v < pkB.(int64)
 	case string:
 		return v < pkB.(string)
+	case [16]byte:
+		other := pkB.([16]byte)
+		return bytes.Compare(v[:], other[:]) < 0
+	case []byte:
+		return bytes.Compare(v, pkB.([]byte)) < 0
 	}
 	return false
 }
@@ -3730,9 +3871,11 @@ func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
 		drainResult       = false
 		minIntPK    int64 = math.MaxInt64
 
-		firstStr = true
-		firstInt = true
-		minStrPK string
+		firstStr  = true
+		firstInt  = true
+		firstUUID = true
+		minStrPK  string
+		minUUIDPK []byte
 	)
 	for i, cursor := range cursors {
 		// if cursor has run out of all results from one result and this result has more matched results
@@ -3756,6 +3899,12 @@ func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
 				minIntPK = pk
 				sel = i
 			}
+		case []byte:
+			if firstUUID || bytes.Compare(pk, minUUIDPK) < 0 {
+				firstUUID = false
+				minUUIDPK = pk
+				sel = i
+			}
 		default:
 			continue
 		}
@@ -3774,8 +3923,10 @@ func SelectMinPKWithTimestamp[T interface {
 		maxTimestamp int64 = 0
 		minIntPK     int64 = math.MaxInt64
 
-		firstStr = true
-		minStrPK string
+		firstStr  = true
+		firstUUID = true
+		minStrPK  string
+		minUUIDPK []byte
 	)
 	for i, cursor := range cursors {
 		timestamps := results[i].GetTimestamps()
@@ -3801,6 +3952,14 @@ func SelectMinPKWithTimestamp[T interface {
 			ts := timestamps[cursor]
 			if pk < minIntPK || (pk == minIntPK && ts > maxTimestamp) {
 				minIntPK = pk
+				sel = i
+				maxTimestamp = ts
+			}
+		case []byte:
+			ts := timestamps[cursor]
+			if firstUUID || bytes.Compare(pk, minUUIDPK) < 0 || (bytes.Equal(pk, minUUIDPK) && ts > maxTimestamp) {
+				firstUUID = false
+				minUUIDPK = pk
 				sel = i
 				maxTimestamp = ts
 			}
@@ -4322,6 +4481,16 @@ func appendArrayRow(
 			return nil, newArrayCapacityError(len(merged), maxCapacity)
 		}
 		return &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: merged}}}, nil
+	case schemapb.DataType_UUID:
+		b := base.GetBytesData().GetData()
+		u := update.GetBytesData().GetData()
+		merged := make([][]byte, 0, len(b)+len(u))
+		merged = append(merged, b...)
+		merged = append(merged, u...)
+		if maxCapacity >= 0 && len(merged) > maxCapacity {
+			return nil, newArrayCapacityError(len(merged), maxCapacity)
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_BytesData{BytesData: &schemapb.BytesArray{Data: merged}}}, nil
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("ARRAY_APPEND does not support element type: %s", elementType.String())
 	}
@@ -4428,6 +4597,23 @@ func removeArrayRow(
 			}
 		}
 		return &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: out}}}, nil
+	case schemapb.DataType_UUID:
+		b := base.GetBytesData().GetData()
+		u := update.GetBytesData().GetData()
+		if len(b) == 0 || len(u) == 0 {
+			return base, nil
+		}
+		remove := make(map[string]struct{}, len(u))
+		for _, v := range u {
+			remove[string(v)] = struct{}{}
+		}
+		out := make([][]byte, 0, len(b))
+		for _, v := range b {
+			if _, skip := remove[string(v)]; !skip {
+				out = append(out, v)
+			}
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_BytesData{BytesData: &schemapb.BytesArray{Data: out}}}, nil
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("ARRAY_REMOVE does not support element type: %s", elementType.String())
 	}

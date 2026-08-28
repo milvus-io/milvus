@@ -244,8 +244,26 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 			}
 			return !entityFilter.Filtered(pk, uint64(ts), expireTs)
 		}
+	case schemapb.DataType_UUID:
+		predicate = func(r storage.Record, ri, i int) bool {
+			fbArr := r.Column(pkField.FieldID).(*array.FixedSizeBinary)
+			b := fbArr.Value(i)
+			var u [16]byte
+			copy(u[:], b)
+			pk := u
+			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
+			expireTs := int64(-1)
+			if hasTTLField {
+				col := r.Column(t.ttlFieldID).(*array.Int64)
+				if col.IsValid(i) {
+					expireTs = col.Value(i)
+				}
+			}
+			return !entityFilter.Filtered(pk, uint64(ts), expireTs)
+		}
 	default:
-		log.Warn(ctx, "sort task only support int64 and varchar pk field")
+		srw.Close()
+		return nil, merr.WrapErrServiceInternalMsg("sort compaction unsupported pk type %s", pkField.GetDataType().String())
 	}
 
 	phaseStart = time.Now()

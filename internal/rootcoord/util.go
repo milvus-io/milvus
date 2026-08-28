@@ -389,6 +389,10 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 			msg := fmt.Sprintf("ArrayOfVector is only supported in struct array field, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 			return merr.WrapErrParameterInvalidMsg(msg)
 		}
+		if fieldSchema.GetDataType() == schemapb.DataType_Array && fieldSchema.GetElementType() == schemapb.DataType_UUID {
+			msg := fmt.Sprintf("array element type UUID is not supported in this phase, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
+			return merr.WrapErrParameterInvalidMsg(msg)
+		}
 		if fieldSchema.GetNullable() && fieldSchema.IsPrimaryKey {
 			msg := fmt.Sprintf("primary field not support null, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 			return merr.WrapErrParameterInvalidMsg(msg)
@@ -451,11 +455,16 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Timestamptz")
 				}
 			case *schemapb.ValueField_StringData:
-				if dtype != schemapb.DataType_VarChar && dtype != schemapb.DataType_Timestamptz {
-					if dtype != schemapb.DataType_VarChar {
-						return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_VarChar")
+				if dtype != schemapb.DataType_VarChar && dtype != schemapb.DataType_Timestamptz && dtype != schemapb.DataType_UUID {
+					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_VarChar, DataType_Timestamptz or DataType_UUID")
+				}
+				if dtype == schemapb.DataType_UUID {
+					strVal := fieldSchema.GetDefaultValue().GetStringData()
+					if strVal != "" {
+						if _, err := typeutil.ParseUUID(strVal); err != nil {
+							return merr.WrapErrParameterInvalidMsg("invalid default_value for UUID field %s: %v", fieldSchema.GetName(), err)
+						}
 					}
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Timestamptz")
 				}
 				if dtype == schemapb.DataType_VarChar {
 					maxLength, err := parameterutil.GetMaxLength(fieldSchema)
@@ -469,17 +478,24 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 					}
 				}
 			case *schemapb.ValueField_BytesData:
-				if dtype != schemapb.DataType_JSON {
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_SJON")
-				}
-				defVal := fieldSchema.GetDefaultValue().GetBytesData()
-				jsonData := make(map[string]interface{})
-				if err := json.Unmarshal(defVal, &jsonData); err != nil {
-					mlog.Info(context.TODO(), "invalid default json value, milvus only support json map",
-						mlog.ByteString("data", defVal),
-						mlog.Err(err),
-					)
-					return merr.WrapErrParameterInvalidErr(err, "invalid default json value, milvus only supports json map")
+				switch dtype {
+				case schemapb.DataType_UUID:
+					defVal := fieldSchema.GetDefaultValue().GetBytesData()
+					if len(defVal) != 16 {
+						return merr.WrapErrParameterInvalidMsg("invalid default_value length %d for UUID field %s, expect 16 bytes", len(defVal), fieldSchema.GetName())
+					}
+				case schemapb.DataType_JSON:
+					defVal := fieldSchema.GetDefaultValue().GetBytesData()
+					jsonData := make(map[string]interface{})
+					if err := json.Unmarshal(defVal, &jsonData); err != nil {
+						mlog.Info(context.TODO(), "invalid default json value, milvus only support json map",
+							mlog.ByteString("data", defVal),
+							mlog.Err(err),
+						)
+						return merr.WrapErrParameterInvalidErr(err, "invalid default json value, milvus only supports json map")
+					}
+				default:
+					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_JSON or DataType_UUID")
 				}
 			default:
 				panic("default value unsupport data type")

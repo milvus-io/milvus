@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type WriteBufferSuite struct {
@@ -1165,4 +1166,117 @@ func TestPrepareInsertMaterializesLegacyBM25Output(t *testing.T) {
 	assert.Equal(t, int64(3), result[0].bm25Stats[102].NumRow())
 	assert.NotNil(t, insertMsg.GetFieldsData()[2])
 	assert.Equal(t, int64(102), insertMsg.GetFieldsData()[2].GetFieldId())
+}
+
+func TestInsertDataUUIDPKDedup(t *testing.T) {
+	// Growing-segment in-memory dedup must track UUID PKs in uuidPKTs map;
+	// previously NewInsertData/Append no-opped for DataType_UUID.
+	id := NewInsertData(1, 2, 2, schemapb.DataType_UUID)
+	assert.NotNil(t, id.uuidPKTs, "UUID PKs must be tracked in uuidPKTs")
+
+	uuid1 := "550e8400-e29b-41d4-a716-446655440001"
+	uuid2 := "550e8400-e29b-41d4-a716-446655440002"
+	uuid3 := "550e8400-e29b-41d4-a716-446655440003"
+	u1, _ := typeutil.ParseUUID(uuid1)
+	u2, _ := typeutil.ParseUUID(uuid2)
+
+	insert := &storage.InsertData{
+		Data: map[storage.FieldID]storage.FieldData{
+			100: &storage.UUIDFieldData{DataType: schemapb.DataType_UUID, Data: [][16]byte{u1, u2}},
+		},
+	}
+	pkFieldData := &storage.UUIDFieldData{DataType: schemapb.DataType_UUID, Data: [][16]byte{u1, u2}}
+	tsFieldData := &storage.Int64FieldData{Data: []int64{100, 200}}
+
+	id.Append(insert, pkFieldData, tsFieldData)
+	assert.Equal(t, int64(2), id.rowNum)
+
+	pk1, _ := storage.NewUUIDPrimaryKeyFromString(uuid1)
+	pk2, _ := storage.NewUUIDPrimaryKeyFromString(uuid2)
+	pk3, _ := storage.NewUUIDPrimaryKeyFromString(uuid3)
+
+	assert.True(t, id.pkExists(pk1, 101))
+	assert.False(t, id.pkExists(pk1, 100))
+	assert.True(t, id.pkExists(pk2, 201))
+	assert.False(t, id.pkExists(pk3, 300))
+}
+
+func TestPrepareInsertWithUUIDPK(t *testing.T) {
+	collSchema := &schemapb.CollectionSchema{
+		Name: "uuid_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: "RowID", DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_UUID, IsPrimaryKey: true},
+		},
+	}
+	pkField := &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_UUID, IsPrimaryKey: true}
+
+	uuid1 := "550e8400-e29b-41d4-a716-446655440001"
+	uuid2 := "550e8400-e29b-41d4-a716-446655440002"
+	uuid3 := "550e8400-e29b-41d4-a716-446655440003"
+
+	insertMsg := &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{
+			BeginTimestamp: 1000,
+			EndTimestamp:   1002,
+		},
+		InsertRequest: &msgpb.InsertRequest{
+			SegmentID:    1,
+			PartitionID:  1,
+			CollectionID: 1,
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   common.RowIDField,
+					FieldName: "RowID",
+					Type:      schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}},
+							},
+						},
+					},
+				},
+				{
+					FieldId:   common.TimeStampField,
+					FieldName: "Timestamp",
+					Type:      schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{1000, 1001, 1002}},
+							},
+						},
+					},
+				},
+				{
+					FieldId:   100,
+					FieldName: "pk",
+					Type:      schemapb.DataType_UUID,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{Data: []string{uuid1, uuid2, uuid3}},
+							},
+						},
+					},
+				},
+			},
+			NumRows:    3,
+			Version:    msgpb.InsertDataVersion_ColumnBased,
+			Timestamps: []uint64{1, 1, 1},
+		},
+	}
+
+	result, err := PrepareInsert(collSchema, pkField, []*msgstream.InsertMsg{insertMsg})
+	assert.NoError(t, err)
+	assert.Len(t, result, 1)
+	assert.Equal(t, int64(3), result[0].rowNum)
+	assert.NotNil(t, result[0].uuidPKTs, "UUID PKs must be tracked in uuidPKTs")
+	// The insert message carries per-row timestamps {1,1,1}, so uuid2 was
+	// last seen at ts=1. A later timestamp is a duplicate, an earlier one is not.
+	pk2, _ := storage.NewUUIDPrimaryKeyFromString(uuid2)
+	assert.True(t, result[0].pkExists(pk2, 2))
+	assert.False(t, result[0].pkExists(pk2, 0))
 }

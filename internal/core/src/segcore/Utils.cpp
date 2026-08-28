@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <memory>
 #include <numeric>
@@ -140,6 +141,7 @@ GetArrayLeafRawDataSize(
         case DataType::VARCHAR:
         case DataType::STRING:
         case DataType::TEXT:
+        case DataType::UUID:
             for (const auto& row : rows) {
                 for (const auto& value : row.string_data().data()) {
                     result += value.size();
@@ -199,6 +201,22 @@ ParsePksFromFieldData(std::vector<PkType>& pks, DataArray& data) {
             }
             break;
         }
+        case DataType::UUID: {
+            auto& bytes_data = data.scalars().bytes_data().data();
+            AssertInfo(static_cast<size_t>(bytes_data.size()) == pks.size(),
+                       "UUID bytes_data size {} mismatch pks size {}",
+                       bytes_data.size(),
+                       pks.size());
+            for (size_t i = 0; i < pks.size(); i++) {
+                auto& b = bytes_data.Get(static_cast<int>(i));
+                AssertInfo(
+                    b.size() == 16, "UUID expected 16 bytes, got {}", b.size());
+                UUID uuid{};
+                std::memcpy(uuid.data.data(), b.data(), 16);
+                pks[i] = uuid;
+            }
+            break;
+        }
         default: {
             ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported PK {}", data_type));
@@ -229,6 +247,12 @@ ParsePksFromFieldData(DataType data_type,
                             pks.data() + offset);
                 break;
             }
+            case DataType::UUID: {
+                std::copy_n(static_cast<const UUID*>(field_data->Data()),
+                            row_count,
+                            pks.data() + offset);
+                break;
+            }
             default: {
                 ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported PK {}", data_type));
@@ -254,6 +278,22 @@ ParsePksFromIDs(std::vector<PkType>& pks,
             std::copy(source_data.begin(), source_data.end(), pks.begin());
             break;
         }
+        case DataType::UUID: {
+            auto& uuid_data = data.uuid_id().data();
+            AssertInfo(static_cast<size_t>(uuid_data.size()) == pks.size(),
+                       "UUID IdArray size {} mismatch pks size {}",
+                       uuid_data.size(),
+                       pks.size());
+            for (size_t i = 0; i < pks.size(); ++i) {
+                auto& b = uuid_data.Get(static_cast<int>(i));
+                AssertInfo(
+                    b.size() == 16, "UUID expected 16 bytes, got {}", b.size());
+                UUID uuid{};
+                std::memcpy(uuid.data.data(), b.data(), 16);
+                pks[i] = uuid;
+            }
+            break;
+        }
         default: {
             ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported PK {}", data_type));
@@ -269,6 +309,10 @@ GetSizeOfIdArray(const IdArray& data) {
 
     if (data.has_str_id()) {
         return data.str_id().data_size();
+    }
+
+    if (data.has_uuid_id()) {
+        return data.uuid_id().data_size();
     }
 
     ThrowInfo(DataTypeInvalid,
@@ -464,6 +508,14 @@ SetUpScalarFieldData(milvus::proto::schema::ScalarField*& scalar_array,
             obj->mutable_data()->Reserve(count);
             for (auto i = 0; i < count; i++) {
                 *(obj->mutable_data()->Add()) = std::string();
+            }
+            break;
+        }
+        case DataType::UUID: {
+            auto obj = scalar_array->mutable_bytes_data();
+            obj->mutable_data()->Reserve(count);
+            for (auto i = 0; i < count; i++) {
+                obj->mutable_data()->Add()->assign(16, '\0');
             }
             break;
         }
@@ -667,6 +719,15 @@ CreateScalarDataArrayFrom(const void* data_raw,
             auto obj = scalar_array->mutable_string_data();
             for (auto i = 0; i < count; i++) {
                 *(obj->mutable_data()->Add()) = data[i];
+            }
+            break;
+        }
+        case DataType::UUID: {
+            auto data = reinterpret_cast<const UUID*>(data_raw);
+            auto obj = scalar_array->mutable_bytes_data();
+            for (auto i = 0; i < count; i++) {
+                obj->mutable_data()->Add()->assign(
+                    reinterpret_cast<const char*>(data[i].data.data()), 16);
             }
             break;
         }
@@ -1054,6 +1115,15 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                     std::move(*mutable_src->Mutable(src_offset));
                 break;
             }
+            case DataType::UUID: {
+                auto* mutable_src = src_field_data->mutable_scalars()
+                                        ->mutable_bytes_data()
+                                        ->mutable_data();
+                auto obj = scalar_array->mutable_bytes_data();
+                *(obj->mutable_data()->Add()) =
+                    std::move(*mutable_src->Mutable(src_offset));
+                break;
+            }
             case DataType::JSON: {
                 auto* mutable_src = src_field_data->mutable_scalars()
                                         ->mutable_json_data()
@@ -1277,7 +1347,6 @@ ReverseDataFromIndex(const index::IndexBase* index,
             std::vector<std::string> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
                 auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
                 if (!raw.has_value()) {
                     valid_data[i] = false;
                     continue;
@@ -1289,6 +1358,26 @@ ReverseDataFromIndex(const index::IndexBase* index,
             }
             auto obj = scalar_array->mutable_string_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::UUID: {
+            using IndexType = index::ScalarIndex<UUID>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<std::string> raw_bytes(count);
+            for (int64_t i = 0; i < count; ++i) {
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
+                if (!raw.has_value()) {
+                    valid_data[i] = false;
+                    continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
+                }
+                raw_bytes[i].assign(
+                    reinterpret_cast<const char*>(raw.value().data.data()), 16);
+            }
+            auto obj = scalar_array->mutable_bytes_data();
+            *(obj->mutable_data()) = {raw_bytes.begin(), raw_bytes.end()};
             break;
         }
         case DataType::GEOMETRY: {
@@ -1669,7 +1758,8 @@ bulk_script_field_data(milvus::OpContext* op_ctx,
         }
         case milvus::DataType::STRING:
         case milvus::DataType::VARCHAR:
-        case milvus::DataType::TEXT: {
+        case milvus::DataType::TEXT:
+        case milvus::DataType::UUID: {
             FixedVector<std::string> vec(count);
             segment->bulk_subscript(op_ctx,
                                     fieldId,

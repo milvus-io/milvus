@@ -63,6 +63,9 @@ func NewReader(ctx context.Context,
 		if err != nil {
 			return nil, err
 		}
+		if err := ValidateImportStorageVersion(schema, storageVersion); err != nil {
+			return nil, err
+		}
 		importEz, _ := GetEZK(options)
 		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize, importEz)
 	}

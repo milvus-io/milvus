@@ -138,7 +138,11 @@ func arrayContainsDedupKey(column *planpb.ColumnInfo, value *planpb.GenericValue
 	}
 
 	key := arrayContainsElementKey{dataType: valueType}
-	switch valueType {
+	// Normalize string literal type to UUID when column expects UUID
+	if column != nil && column.GetElementType() == schemapb.DataType_UUID && valueType == schemapb.DataType_VarChar {
+		key.dataType = schemapb.DataType_UUID
+	}
+	switch key.dataType {
 	case schemapb.DataType_Bool:
 		key.boolVal = value.GetBoolVal()
 	case schemapb.DataType_Int64:
@@ -158,7 +162,7 @@ func arrayContainsDedupKey(column *planpb.ColumnInfo, value *planpb.GenericValue
 		} else {
 			key.floatVal = value.GetFloatVal()
 		}
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		key.stringVal = value.GetStringVal()
 	default:
 		return arrayContainsElementKey{}, false

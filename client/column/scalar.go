@@ -19,6 +19,8 @@ package column
 import (
 	"time"
 
+	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/client/v3/entity"
@@ -328,6 +330,39 @@ func NewColumnString(name string, values []string) *ColumnString {
 
 func (c *ColumnString) Slice(start, end int) Column {
 	return &ColumnString{
+		genericColumnBase: c.genericColumnBase.slice(start, end),
+	}
+}
+
+/* UUID */
+
+var _ (Column) = (*ColumnUUID)(nil)
+
+type ColumnUUID struct {
+	*genericColumnBase[string]
+}
+
+func NewColumnUUID(name string, values []string) *ColumnUUID {
+	return &ColumnUUID{
+		genericColumnBase: &genericColumnBase[string]{
+			name:      name,
+			fieldType: entity.FieldTypeUUID,
+			values:    values,
+		},
+	}
+}
+
+func (c *ColumnUUID) Validate() error {
+	for i, v := range c.values {
+		if _, err := uuid.Parse(v); err != nil {
+			return errors.Errorf("invalid UUID at index %d: %s: %w", i, v, err)
+		}
+	}
+	return nil
+}
+
+func (c *ColumnUUID) Slice(start, end int) Column {
+	return &ColumnUUID{
 		genericColumnBase: c.genericColumnBase.slice(start, end),
 	}
 }

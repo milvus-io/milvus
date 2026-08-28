@@ -26,6 +26,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -160,6 +161,22 @@ func GetStorageVersion(options Options) (int64, error) {
 	default:
 		return storage.StorageV1, nil
 	}
+}
+
+// ValidateImportStorageVersion rejects storage versions that cannot encode the
+// given schema. StorageV1 binlog codecs do not support the UUID field type, so
+// importing a UUID schema with V1 must fail early instead of writing corrupt data.
+func ValidateImportStorageVersion(schema *schemapb.CollectionSchema, storageVersion int64) error {
+	if storageVersion != storage.StorageV1 {
+		return nil
+	}
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_UUID {
+			return merr.WrapErrImportFailedMsg("UUID field type is not supported with StorageV1, please use the default storage format, fieldName=%s",
+				field.GetName())
+		}
+	}
+	return nil
 }
 
 // SkipDiskQuotaCheck indicates whether the import skips the disk quota check.

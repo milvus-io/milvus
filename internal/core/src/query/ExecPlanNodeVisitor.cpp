@@ -247,6 +247,16 @@ fillDataArrayFromColumnVector(const ColumnVectorPtr& column_vector,
                 column_raw_data, column_data_size, string_data->mutable_data());
             break;
         }
+        case DataType::UUID: {
+            auto bytes_data =
+                data_array.mutable_scalars()->mutable_bytes_data();
+            const UUID* src = static_cast<const UUID*>(column_raw_data);
+            for (int64_t i = 0; i < column_data_size; ++i) {
+                bytes_data->mutable_data()->at(i).assign(
+                    reinterpret_cast<const char*>(src[i].data.data()), 16);
+            }
+            break;
+        }
         default: {
             ThrowInfo(
                 DataTypeInvalid,

@@ -652,6 +652,20 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                     op_ctx, dst, offsets, count);
                 break;
             }
+            case DataType::UUID: {
+                // UUID fixed-width 16B, IsFixedWidth true, no offsets.
+                ForEachResolvedRow(
+                    op_ctx,
+                    offsets,
+                    count,
+                    [dst](Chunk* chunk, int64_t offset_in_chunk, int64_t i) {
+                        auto typed_dst = static_cast<UUID*>(dst);
+                        auto value = chunk->ValueAt(offset_in_chunk);
+                        typed_dst[i] = *static_cast<const UUID*>(
+                            static_cast<const void*>(value));
+                    });
+                break;
+            }
             default: {
                 ThrowInfo(ErrorCode::Unsupported,
                           "[StorageV2] BulkScalarValueAt is not supported for "

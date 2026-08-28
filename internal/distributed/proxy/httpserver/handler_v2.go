@@ -2674,11 +2674,14 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				Value: fmt.Sprintf("%v", httpReq.Params["max_length"]),
 			})
 			httpReq.IDType = "VarChar"
+		case "UUID", "Uuid", "uuid":
+			idDataType = schemapb.DataType_UUID
+			httpReq.IDType = "UUID"
 		case "", "Int64", "int64":
 			httpReq.IDType = "Int64"
 		default:
-			err := merr.WrapErrParameterInvalid("Int64, Varchar", httpReq.IDType,
-				"idType can only be [Int64, VarChar], default: Int64")
+			err := merr.WrapErrParameterInvalid("Int64, Varchar, UUID", httpReq.IDType,
+				"idType can only be [Int64, VarChar, UUID], default: Int64")
 			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),

@@ -273,6 +273,10 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
             return GetMultipleChunkDataAccessor<std::string>(
                 field_id, current_chunk_id, current_chunk_pos, pinned_index);
         }
+        case DataType::UUID: {
+            return GetMultipleChunkDataAccessor<UUID>(
+                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+        }
         default:
             ThrowInfo(DataTypeInvalid, "unsupported data type: {}", data_type);
     }
@@ -401,6 +405,9 @@ SegmentChunkReader::GetChunkDataAccessor(DataType data_type,
         case DataType::TEXT: {
             return GetChunkDataAccessor<std::string>(
                 field_id, chunk_id, pinned_index);
+        }
+        case DataType::UUID: {
+            return GetChunkDataAccessor<UUID>(field_id, chunk_id, pinned_index);
         }
         default:
             ThrowInfo(DataTypeInvalid, "unsupported data type: {}", data_type);

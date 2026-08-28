@@ -70,6 +70,25 @@ class FieldData<std::string> : public FieldDataStringImpl {
 };
 
 template <>
+class FieldData<milvus::UUID> : public FieldDataImpl<milvus::UUID, true> {
+ public:
+    static_assert(std::is_trivially_copyable_v<milvus::UUID>);
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       int64_t buffered_num_rows = 0)
+        : FieldDataImpl<milvus::UUID, true>::FieldDataImpl(
+              1, data_type, nullable, buffered_num_rows) {
+    }
+
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       FixedVector<milvus::UUID>&& inner_data)
+        : FieldDataImpl<milvus::UUID, true>::FieldDataImpl(
+              1, data_type, nullable, std::move(inner_data)) {
+    }
+};
+
+template <>
 class FieldData<Json> : public FieldDataJsonImpl {
  public:
     static_assert(IsScalar<std::string> || std::is_same_v<std::string, PkType>);

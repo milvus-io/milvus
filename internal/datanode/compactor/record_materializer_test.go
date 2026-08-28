@@ -957,3 +957,13 @@ func newInt64Array(t *testing.T, values []int64) *array.Int64 {
 	builder.AppendValues(values, nil)
 	return builder.NewInt64Array()
 }
+
+func newUUIDArray(t *testing.T, values [][16]byte) *array.FixedSizeBinary {
+	dt := &arrow.FixedSizeBinaryType{ByteWidth: 16}
+	builder := array.NewFixedSizeBinaryBuilder(memory.DefaultAllocator, dt)
+	t.Cleanup(builder.Release)
+	for _, v := range values {
+		builder.Append(v[:])
+	}
+	return builder.NewFixedSizeBinaryArray()
+}

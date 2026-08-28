@@ -21,6 +21,7 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
@@ -498,6 +499,21 @@ func (s *SearchOptionSuite) TestSearchByIDs() {
 		s.Equal([]string{"a", "b", "c"}, req.GetIds().GetStrId().GetData())
 	})
 
+	s.Run("uuid_ids", func() {
+		ids := column.NewColumnUUID("id", []string{"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "550e8400-e29b-41d4-a716-446655440000"})
+		opt := NewSearchByIDsOption(collName, limit, ids)
+
+		req, err := opt.Request()
+		s.Require().NoError(err)
+
+		s.Equal(int64(2), req.GetNq()) // 2 IDs
+		s.NotNil(req.GetIds())
+		s.NotNil(req.GetIds().GetUuidId())
+		u1, _ := uuid.Parse("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+		u2, _ := uuid.Parse("550e8400-e29b-41d4-a716-446655440000")
+		s.Equal([][]byte{u1[:], u2[:]}, req.GetIds().GetUuidId().GetData())
+	})
+
 	s.Run("empty_ids_error", func() {
 		ids := column.NewColumnInt64("id", []int64{})
 		opt := NewSearchByIDsOption(collName, limit, ids)
@@ -579,6 +595,18 @@ func TestColumn2IDs(t *testing.T) {
 		assert.Equal(t, []string{"str1", "str2"}, ids.GetStrId().GetData())
 	})
 
+	t.Run("uuid_column", func(t *testing.T) {
+		col := column.NewColumnUUID("pk", []string{"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "550e8400-e29b-41d4-a716-446655440000"})
+		ids, err := column2IDs(col)
+		assert.NoError(t, err)
+		assert.NotNil(t, ids.GetUuidId())
+		assert.Nil(t, ids.GetIntId())
+		assert.Nil(t, ids.GetStrId())
+		u1, _ := uuid.Parse("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+		u2, _ := uuid.Parse("550e8400-e29b-41d4-a716-446655440000")
+		assert.Equal(t, [][]byte{u1[:], u2[:]}, ids.GetUuidId().GetData())
+	})
+
 	t.Run("nil_column_error", func(t *testing.T) {
 		_, err := column2IDs(nil)
 		assert.Error(t, err)
@@ -590,6 +618,18 @@ func TestColumn2IDs(t *testing.T) {
 		_, err := column2IDs(col)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unsupported primary key type")
+	})
+}
+
+func TestPks2Expr(t *testing.T) {
+	t.Run("varchar_column", func(t *testing.T) {
+		col := column.NewColumnVarChar("pk", []string{"id1", "id2"})
+		assert.Equal(t, `pk in ["id1","id2"]`, pks2Expr(col))
+	})
+
+	t.Run("uuid_column", func(t *testing.T) {
+		col := column.NewColumnUUID("pk", []string{"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "550e8400-e29b-41d4-a716-446655440000"})
+		assert.Equal(t, `pk in ["a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11","550e8400-e29b-41d4-a716-446655440000"]`, pks2Expr(col))
 	})
 }
 

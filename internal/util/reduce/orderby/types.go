@@ -221,7 +221,8 @@ func IsSortableType(dt schemapb.DataType) bool {
 		schemapb.DataType_Float,
 		schemapb.DataType_Double,
 		schemapb.DataType_String,
-		schemapb.DataType_VarChar:
+		schemapb.DataType_VarChar,
+		schemapb.DataType_UUID:
 		return true
 	default:
 		return false

@@ -375,6 +375,57 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 
 	m[schemapb.DataType_VarChar] = stringEntry
 	m[schemapb.DataType_String] = stringEntry
+
+	uuidEntry := serdeEntry{
+		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
+			return &arrow.FixedSizeBinaryType{ByteWidth: 16}
+		},
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, error) {
+			if a.IsNull(i) {
+				return nil, nil
+			}
+			if arr, ok := a.(*array.FixedSizeBinary); ok && i < arr.Len() {
+				value := arr.Value(i)
+				if len(value) != 16 {
+					return nil, merr.WrapErrServiceInternalMsg("expected 16 bytes for UUID, got %d", len(value))
+				}
+				var u [16]byte
+				copy(u[:], value)
+				return u, nil
+			}
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinary, got %T", a)
+		},
+		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
+			if v == nil {
+				b.AppendNull()
+				return nil
+			}
+			if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
+				switch val := v.(type) {
+				case [16]byte:
+					builder.Append(val[:])
+					return nil
+				case []byte:
+					if len(val) != 16 {
+						return merr.WrapErrServiceInternalMsg("expected 16 bytes for UUID, got %d", len(val))
+					}
+					builder.Append(val)
+					return nil
+				case string:
+					u, err := typeutil.ParseUUID(val)
+					if err != nil {
+						return merr.WrapErrServiceInternalMsg("invalid UUID string: %s", val)
+					}
+					builder.Append(u[:])
+					return nil
+				default:
+					return merr.WrapErrServiceInternalMsg("expected [16]byte or string UUID value, got %T", v)
+				}
+			}
+			return merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinaryBuilder, got %T", b)
+		},
+	}
+	m[schemapb.DataType_UUID] = uuidEntry
 	m[schemapb.DataType_Text] = serdeEntry{
 		arrowType: stringEntry.arrowType,
 		deserialize: func(a arrow.Array, i int, elementType schemapb.DataType, dim int, shouldCopy bool) (any, error) {

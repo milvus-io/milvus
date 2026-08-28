@@ -725,6 +725,16 @@ func getPrimaryKeysFromUnaryRangeExpr(schema *schemapb.CollectionSchema, unaryRa
 				Data: []string{unaryRangeExpr.UnaryRangeExpr.GetValue().GetStringVal()},
 			},
 		}
+	case schemapb.DataType_UUID:
+		u, err := typeutil.ParseUUID(unaryRangeExpr.UnaryRangeExpr.GetValue().GetStringVal())
+		if err != nil {
+			return pks, err
+		}
+		pks.IdField = &schemapb.IDs_UuidId{
+			UuidId: &schemapb.UUIDArray{
+				Data: [][]byte{u[:]},
+			},
+		}
 	default:
 		return pks, merr.WrapErrParameterInvalidMsg("invalid field data type specifyed in simple delete expr")
 	}
@@ -753,6 +763,20 @@ func getPrimaryKeysFromTermExpr(schema *schemapb.CollectionSchema, termExpr *pla
 		}
 		pks.IdField = &schemapb.IDs_StrId{
 			StrId: &schemapb.StringArray{
+				Data: ids,
+			},
+		}
+	case schemapb.DataType_UUID:
+		ids := make([][]byte, 0, len(termExpr.TermExpr.Values))
+		for _, v := range termExpr.TermExpr.Values {
+			u, err := typeutil.ParseUUID(v.GetStringVal())
+			if err != nil {
+				return pks, 0, err
+			}
+			ids = append(ids, u[:])
+		}
+		pks.IdField = &schemapb.IDs_UuidId{
+			UuidId: &schemapb.UUIDArray{
 				Data: ids,
 			},
 		}

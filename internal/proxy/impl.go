@@ -3422,8 +3422,13 @@ func validateIDsType(pkField *schemapb.FieldSchema, ids *schemapb.IDs) error {
 			return merr.WrapErrParameterInvalid("string IDs", "got other type",
 				"primary key is varchar, but IDs type mismatch")
 		}
+	case schemapb.DataType_UUID:
+		if ids.GetUuidId() == nil && ids.GetStrId() == nil {
+			return merr.WrapErrParameterInvalid("uuid IDs", "got other type",
+				"primary key is uuid, but IDs type mismatch")
+		}
 	default:
-		return merr.WrapErrParameterInvalid("int64 or varchar", pkType.String(),
+		return merr.WrapErrParameterInvalid("int64, varchar or uuid", pkType.String(),
 			fmt.Sprintf("unsupported primary key type: %s", pkType.String()))
 	}
 
@@ -3592,6 +3597,16 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 			for _, pk := range pkFieldData.GetScalars().GetStringData().GetData() {
 				returnedPKSet[pk] = struct{}{}
 			}
+		case schemapb.DataType_UUID:
+			if pkFieldData.GetScalars().GetBytesData() != nil {
+				for _, pk := range pkFieldData.GetScalars().GetBytesData().GetData() {
+					returnedPKSet[string(pk)] = struct{}{}
+				}
+			} else if pkFieldData.GetScalars().GetStringData() != nil {
+				for _, pk := range pkFieldData.GetScalars().GetStringData().GetData() {
+					returnedPKSet[pk] = struct{}{}
+				}
+			}
 		}
 
 		var missingIDs []interface{}
@@ -3606,6 +3621,18 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 			for _, id := range ids.GetStrId().GetData() {
 				if _, exists := returnedPKSet[id]; !exists {
 					missingIDs = append(missingIDs, id)
+				}
+			}
+		case *schemapb.IDs_UuidId:
+			for _, id := range ids.GetUuidId().GetData() {
+				if _, exists := returnedPKSet[string(id)]; !exists {
+					if len(id) == 16 {
+						var u [16]byte
+						copy(u[:], id)
+						missingIDs = append(missingIDs, typeutil.UUIDToString(u))
+					} else {
+						missingIDs = append(missingIDs, string(id))
+					}
 				}
 			}
 		}

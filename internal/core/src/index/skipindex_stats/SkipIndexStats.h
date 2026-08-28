@@ -55,7 +55,8 @@ using Metrics = std::variant<bool,
                              float,
                              double,
                              std::string,
-                             std::string_view>;
+                             std::string_view,
+                             milvus::UUID>;
 
 template <typename T>
 using MetricsDataType =
@@ -440,16 +441,35 @@ class IntFieldChunkMetrics : public FieldChunkMetrics {
         if (!this->has_value_) {
             return false;
         }
-        if (!std::holds_alternative<T>(val)) {
-            return false;
+        if constexpr (std::is_same_v<T, milvus::UUID>) {
+            milvus::UUID typed_val;
+            if (std::holds_alternative<milvus::UUID>(val)) {
+                typed_val = std::get<milvus::UUID>(val);
+            } else {
+                auto opt = ExtractUUID(val);
+                if (!opt.has_value()) {
+                    return false;
+                }
+                typed_val = *opt;
+            }
+            if (op_type == OpType::Equal && bloom_filter_) {
+                return !bloom_filter_->Test(
+                    reinterpret_cast<const uint8_t*>(&typed_val),
+                    sizeof(typed_val));
+            }
+            return RangeShouldSkip(typed_val, min_, max_, op_type);
+        } else {
+            if (!std::holds_alternative<T>(val)) {
+                return false;
+            }
+            const T& typed_val = std::get<T>(val);
+            if (op_type == OpType::Equal && bloom_filter_) {
+                return !bloom_filter_->Test(
+                    reinterpret_cast<const uint8_t*>(&typed_val),
+                    sizeof(typed_val));
+            }
+            return RangeShouldSkip(typed_val, min_, max_, op_type);
         }
-        const T& typed_val = std::get<T>(val);
-        if (op_type == OpType::Equal && bloom_filter_) {
-            return !bloom_filter_->Test(
-                reinterpret_cast<const uint8_t*>(&typed_val),
-                sizeof(typed_val));
-        }
-        return RangeShouldSkip(typed_val, min_, max_, op_type);
     }
 
     bool
@@ -457,35 +477,73 @@ class IntFieldChunkMetrics : public FieldChunkMetrics {
         if (!this->has_value_ || values.empty()) {
             return false;
         }
-        for (const auto& v : values) {
-            if (!std::holds_alternative<T>(v)) {
-                return false;
+        if constexpr (std::is_same_v<T, milvus::UUID>) {
+            std::vector<T> typed_values;
+            typed_values.reserve(values.size());
+            for (const auto& v : values) {
+                if (std::holds_alternative<milvus::UUID>(v)) {
+                    typed_values.push_back(std::get<milvus::UUID>(v));
+                } else {
+                    auto opt = ExtractUUID(v);
+                    if (!opt.has_value()) {
+                        return false;
+                    }
+                    typed_values.push_back(*opt);
+                }
             }
-        }
-        if (!bloom_filter_) {
-            T typed_min = std::get<T>(values[0]);
-            T typed_max = std::get<T>(values[0]);
+            if (!bloom_filter_) {
+                T typed_min = typed_values[0];
+                T typed_max = typed_values[0];
+                for (const auto& current_val : typed_values) {
+                    if (current_val < typed_min) {
+                        typed_min = current_val;
+                    }
+                    if (current_val > typed_max) {
+                        typed_max = current_val;
+                    }
+                }
+                return RangeShouldSkip(
+                    typed_min, typed_max, min_, max_, true, true);
+            }
+            for (const auto& current_val : typed_values) {
+                if (bloom_filter_->Test(
+                        reinterpret_cast<const uint8_t*>(&current_val),
+                        sizeof(current_val))) {
+                    return false;
+                }
+            }
+            return true;
+        } else {
+            for (const auto& v : values) {
+                if (!std::holds_alternative<T>(v)) {
+                    return false;
+                }
+            }
+            if (!bloom_filter_) {
+                T typed_min = std::get<T>(values[0]);
+                T typed_max = std::get<T>(values[0]);
+                for (const auto& v : values) {
+                    const T& current_val = std::get<T>(v);
+                    if (current_val < typed_min) {
+                        typed_min = current_val;
+                    }
+                    if (current_val > typed_max) {
+                        typed_max = current_val;
+                    }
+                }
+                return RangeShouldSkip(
+                    typed_min, typed_max, min_, max_, true, true);
+            }
             for (const auto& v : values) {
                 const T& current_val = std::get<T>(v);
-                if (current_val < typed_min) {
-                    typed_min = current_val;
-                }
-                if (current_val > typed_max) {
-                    typed_max = current_val;
+                if (bloom_filter_->Test(
+                        reinterpret_cast<const uint8_t*>(&current_val),
+                        sizeof(current_val))) {
+                    return false;
                 }
             }
-            return RangeShouldSkip(
-                typed_min, typed_max, min_, max_, true, true);
+            return true;
         }
-        for (const auto& v : values) {
-            const T& current_val = std::get<T>(v);
-            if (bloom_filter_->Test(
-                    reinterpret_cast<const uint8_t*>(&current_val),
-                    sizeof(current_val))) {
-                return false;
-            }
-        }
-        return true;
     }
 
     bool
@@ -493,21 +551,44 @@ class IntFieldChunkMetrics : public FieldChunkMetrics {
                        const Metrics& upper_val,
                        bool lower_inclusive,
                        bool upper_inclusive) const override {
-        if (!std::holds_alternative<T>(lower_val) ||
-            !std::holds_alternative<T>(upper_val)) {
-            return false;
-        }
         if (!this->has_value_) {
             return false;
         }
-        const T& typed_lower = std::get<T>(lower_val);
-        const T& typed_upper = std::get<T>(upper_val);
-        return RangeShouldSkip(typed_lower,
-                               typed_upper,
-                               min_,
-                               max_,
-                               lower_inclusive,
-                               upper_inclusive);
+        if constexpr (std::is_same_v<T, milvus::UUID>) {
+            milvus::UUID typed_lower, typed_upper;
+            if (std::holds_alternative<milvus::UUID>(lower_val) &&
+                std::holds_alternative<milvus::UUID>(upper_val)) {
+                typed_lower = std::get<milvus::UUID>(lower_val);
+                typed_upper = std::get<milvus::UUID>(upper_val);
+            } else {
+                auto opt_low = ExtractUUID(lower_val);
+                auto opt_high = ExtractUUID(upper_val);
+                if (!opt_low.has_value() || !opt_high.has_value()) {
+                    return false;
+                }
+                typed_lower = *opt_low;
+                typed_upper = *opt_high;
+            }
+            return RangeShouldSkip(typed_lower,
+                                   typed_upper,
+                                   min_,
+                                   max_,
+                                   lower_inclusive,
+                                   upper_inclusive);
+        } else {
+            if (!std::holds_alternative<T>(lower_val) ||
+                !std::holds_alternative<T>(upper_val)) {
+                return false;
+            }
+            const T& typed_lower = std::get<T>(lower_val);
+            const T& typed_upper = std::get<T>(upper_val);
+            return RangeShouldSkip(typed_lower,
+                                   typed_upper,
+                                   min_,
+                                   max_,
+                                   lower_inclusive,
+                                   upper_inclusive);
+        }
     }
 
     nlohmann::json
@@ -516,8 +597,13 @@ class IntFieldChunkMetrics : public FieldChunkMetrics {
         j["type"] = FieldChunkMetricsTypeToString(GetMetricsType());
 
         if (this->has_value_) {
-            j["min"] = min_;
-            j["max"] = max_;
+            if constexpr (std::is_same_v<T, milvus::UUID>) {
+                j["min"] = min_.ToString();
+                j["max"] = max_.ToString();
+            } else {
+                j["min"] = min_;
+                j["max"] = max_;
+            }
             if (bloom_filter_) {
                 auto bf_data = bloom_filter_->ToJson();
                 j["bloom_filter"] = nlohmann::json::binary(bf_data);
@@ -525,6 +611,31 @@ class IntFieldChunkMetrics : public FieldChunkMetrics {
         }
 
         return j;
+    }
+
+    template <typename U = T>
+    static std::optional<U>
+    ExtractUUID(const Metrics& val) {
+        if constexpr (std::is_same_v<U, milvus::UUID>) {
+            if (std::holds_alternative<milvus::UUID>(val)) {
+                return std::get<milvus::UUID>(val);
+            }
+            std::string_view sv;
+            if (std::holds_alternative<std::string>(val)) {
+                sv = std::get<std::string>(val);
+            } else if (std::holds_alternative<std::string_view>(val)) {
+                sv = std::get<std::string_view>(val);
+            } else {
+                return std::nullopt;
+            }
+            try {
+                return milvus::UUID::FromString(sv);
+            } catch (...) {
+                return std::nullopt;
+            }
+        } else {
+            return std::nullopt;
+        }
     }
 
  private:

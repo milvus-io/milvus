@@ -57,6 +57,8 @@ create_offset_map(DataType data_type) {
             return std::make_unique<OffsetOrderedArray<int64_t>>();
         case DataType::VARCHAR:
             return std::make_unique<OffsetOrderedArray<std::string>>();
+        case DataType::UUID:
+            return std::make_unique<OffsetOrderedArray<UUID>>();
         default:
             ThrowInfo(DataTypeInvalid,
                       "unsupported primary key data type {}",
@@ -86,6 +88,14 @@ estimate_pk_index_bytes(DataType data_type,
             } else {
                 base =
                     num_rows * static_cast<int64_t>(sizeof(std::string) + 16);
+            }
+            break;
+        case DataType::UUID:
+            if (is_sorted_by_pk) {
+                base = 0;  // sorted uuid: no index built (fixed 16B)
+            } else {
+                base = num_rows * static_cast<int64_t>(sizeof(UUID) +
+                                                       16);  // 16B + overhead
             }
             break;
         default:
@@ -315,6 +325,24 @@ PkIndexTranslator::get_cells(milvus::OpContext* ctx,
                 for (auto pk : pks) {
                     if (pk2offset) {
                         pk2offset->insert(std::string(pk), offset);
+                    }
+                    ++offset;
+                }
+            }
+            break;
+        }
+        case DataType::UUID: {
+            if (!is_sorted_by_pk_) {
+                pk2offset = create_offset_map(data_type_);
+            }
+            for (int64_t i = 0; i < num_chunks; ++i) {
+                auto pw = column_->DataOfChunk(ctx, i);
+                auto pks = reinterpret_cast<const UUID*>(pw.get());
+                auto chunk_num_rows = column_->chunk_row_nums(i);
+                for (int64_t j = 0; j < chunk_num_rows; ++j) {
+                    auto pk = pks[j];
+                    if (pk2offset) {
+                        pk2offset->insert(pk, offset);
                     }
                     ++offset;
                 }
