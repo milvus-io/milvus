@@ -524,7 +524,7 @@ func TestHandleGetConfig(t *testing.T) {
 		"pulsar.authParams":     "token:broker-secret",
 		"AWS_SECRET_ACCESS_KEY": "environment-secret",
 	}
-	groupMembers := map[string]string{
+	groupMembers := map[string]string{ // #nosec G101 -- synthetic credentials exercise management-response redaction
 		"credential.aksk1.secret_access_key":             "param-group-secret",
 		"kafka.consumer.ssl.key.pem":                     "inline-private-key",
 		"function.analyzer.lindera.download_urls.ipadic": "https://example.invalid/dict",
