@@ -350,6 +350,52 @@ func (_c *MockMsgHandler_HandleSchemaChange_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// HandleSplitShard provides a mock function with given fields: splitShardMsg
+func (_m *MockMsgHandler) HandleSplitShard(splitShardMsg message.ImmutableSplitShardMessageV2) error {
+	ret := _m.Called(splitShardMsg)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HandleSplitShard")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(message.ImmutableSplitShardMessageV2) error); ok {
+		r0 = rf(splitShardMsg)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockMsgHandler_HandleSplitShard_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HandleSplitShard'
+type MockMsgHandler_HandleSplitShard_Call struct {
+	*mock.Call
+}
+
+// HandleSplitShard is a helper method to define mock.On call
+//   - splitShardMsg message.ImmutableSplitShardMessageV2
+func (_e *MockMsgHandler_Expecter) HandleSplitShard(splitShardMsg interface{}) *MockMsgHandler_HandleSplitShard_Call {
+	return &MockMsgHandler_HandleSplitShard_Call{Call: _e.mock.On("HandleSplitShard", splitShardMsg)}
+}
+
+func (_c *MockMsgHandler_HandleSplitShard_Call) Run(run func(splitShardMsg message.ImmutableSplitShardMessageV2)) *MockMsgHandler_HandleSplitShard_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(message.ImmutableSplitShardMessageV2))
+	})
+	return _c
+}
+
+func (_c *MockMsgHandler_HandleSplitShard_Call) Return(_a0 error) *MockMsgHandler_HandleSplitShard_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMsgHandler_HandleSplitShard_Call) RunAndReturn(run func(message.ImmutableSplitShardMessageV2) error) *MockMsgHandler_HandleSplitShard_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // HandleTruncateCollection provides a mock function with given fields: truncateCollectionMsg
 func (_m *MockMsgHandler) HandleTruncateCollection(truncateCollectionMsg message.ImmutableTruncateCollectionMessageV2) error {
 	ret := _m.Called(truncateCollectionMsg)
