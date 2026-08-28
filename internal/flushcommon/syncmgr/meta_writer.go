@@ -241,10 +241,10 @@ func (b *brokerMetaWriter) UpdateGrowingSourceSync(ctx context.Context, task *Gr
 		SegmentID:           task.segmentID,
 		CollectionID:        task.collectionID,
 		PartitionID:         task.partitionID,
-		Field2BinlogPaths:   insertFieldBinlogs,
-		Field2StatslogPaths: statsFieldBinlogs,
-		Field2Bm25LogPaths:  bm25FieldBinlogs,
-		Deltalogs:           deltaFieldBinlogs,
+		Field2BinlogPaths:   nil,
+		Field2StatslogPaths: nil,
+		Field2Bm25LogPaths:  nil,
+		Deltalogs:           nil,
 		CheckPoints:         checkPoints,
 		StartPositions:      startPos,
 		Flushed:             task.IsFlush(),
@@ -254,7 +254,13 @@ func (b *brokerMetaWriter) UpdateGrowingSourceSync(ctx context.Context, task *Gr
 		StorageVersion:      segment.GetStorageVersion(),
 		WithFullBinlogs:     true,
 		ManifestPath:        task.manifestPath,
-		Stats:               stats,
+		// V3 growing-source flush ships no per-FieldBinlog arrays: the LOON
+		// manifest is the authoritative source of paths, and the cumulative
+		// Statistics below carries the aggregates. The in-memory binlog arrays
+		// are empty after a V3 recovery, so shipping them would replace
+		// DataCoord's segment arrays with a delta-only list and break its
+		// cumulative row-count accounting (see UpdateCheckPointOperator).
+		Stats: stats,
 	}
 
 	err := retry.Handle(ctx, func() (bool, error) {

@@ -990,13 +990,19 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			segment2Binlogs[id] = append(segment2Binlogs[id], fieldBinlogs)
 		}
 
-		if newCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo); newCount != segment.NumOfRows && newCount > 0 {
-			mlog.Warn(context.TODO(), "segment row number meta inconsistent with bin log row count and will be corrected",
-				mlog.Int64("segmentID", segment.GetID()),
-				mlog.Int64("segment meta row count (wrong)", segment.GetNumOfRows()),
-				mlog.Int64("segment bin log row count (correct)", newCount))
-			segmentsNumOfRows[id] = newCount
+		if segment.GetStorageVersion() != storage.StorageV3 {
+			if newCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo); newCount != segment.NumOfRows && newCount > 0 {
+				mlog.Warn(context.TODO(), "segment row number meta inconsistent with bin log row count and will be corrected",
+					mlog.Int64("segmentID", segment.GetID()),
+					mlog.Int64("segment meta row count (wrong)", segment.GetNumOfRows()),
+					mlog.Int64("segment bin log row count (correct)", newCount))
+				segmentsNumOfRows[id] = newCount
+			} else {
+				segmentsNumOfRows[id] = segment.NumOfRows
+			}
 		} else {
+			// V3 segments: NumOfRows is authoritative (advanced from the writer
+			// checkpoint); binlog arrays may be empty or delta-only.
 			segmentsNumOfRows[id] = segment.NumOfRows
 		}
 
@@ -1100,14 +1106,15 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 		if len(binlogs) == 0 && segment.GetLevel() != datapb.SegmentLevel_L0 && segment.GetManifestPath() == "" {
 			continue
 		}
-		rowCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
-		if rowCount != segment.NumOfRows && rowCount > 0 {
-			mlog.Warn(context.TODO(), "segment row number meta inconsistent with bin log row count and will be corrected",
-				mlog.Int64("segmentID", segment.GetID()),
-				mlog.Int64("segment meta row count (wrong)", segment.GetNumOfRows()),
-				mlog.Int64("segment bin log row count (correct)", rowCount))
-		} else {
-			rowCount = segment.NumOfRows
+		rowCount := segment.NumOfRows
+		if segment.GetStorageVersion() != storage.StorageV3 {
+			if binlogCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo); binlogCount != segment.NumOfRows && binlogCount > 0 {
+				mlog.Warn(context.TODO(), "segment row number meta inconsistent with bin log row count and will be corrected",
+					mlog.Int64("segmentID", segment.GetID()),
+					mlog.Int64("segment meta row count (wrong)", segment.GetNumOfRows()),
+					mlog.Int64("segment bin log row count (correct)", binlogCount))
+				rowCount = binlogCount
+			}
 		}
 
 		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
