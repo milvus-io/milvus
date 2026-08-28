@@ -543,9 +543,12 @@ func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.C
 		return
 	}
 
-	totalRows := lo.SumBy(view.GetSegmentsView(), func(v *SegmentView) int64 { return v.NumOfRows })
+	segmentViews := view.GetSegmentsView()
+	totalRows := lo.SumBy(segmentViews, func(v *SegmentView) int64 { return v.NumOfRows })
 
-	targetCount := view.(*ForceMergeSegmentView).targetSegmentCount
+	forceMergeView := view.(*ForceMergeSegmentView)
+	totalSize := sumSegmentSize(segmentViews)
+	targetCount := estimatedForceMergeOutputCount(totalSize, forceMergeView.GetTargetSegmentSize())
 	n := targetCount * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
 	startID, endID, err := m.allocator.AllocN(n)
 	if err != nil {
@@ -553,22 +556,23 @@ func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.C
 		return
 	}
 
+	now := time.Now().Unix()
 	task := &datapb.CompactionTask{
 		PlanID:             taskID,
 		TriggerID:          view.GetTriggerID(),
 		State:              datapb.CompactionTaskState_pipelining,
-		StartTime:          time.Now().Unix(),
-		CollectionTtl:      view.(*ForceMergeSegmentView).collectionTTL.Nanoseconds(),
+		StartTime:          now,
+		CollectionTtl:      forceMergeView.GetCollectionTTL().Nanoseconds(),
 		Type:               datapb.CompactionType_MixCompaction,
 		CollectionID:       view.GetGroupLabel().CollectionID,
 		PartitionID:        view.GetGroupLabel().PartitionID,
 		Channel:            view.GetGroupLabel().Channel,
 		Schema:             collection.Schema,
-		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
+		InputSegments:      lo.Map(segmentViews, func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
 		ResultSegments:     []int64{},
 		TotalRows:          totalRows,
-		LastStateStartTime: time.Now().Unix(),
-		MaxSize:            int64(view.(*ForceMergeSegmentView).targetSegmentSize),
+		LastStateStartTime: now,
+		MaxSize:            forceMergeView.GetTargetSegmentSize(),
 		PreAllocatedSegmentIDs: &datapb.IDRange{
 			Begin: startID + 1,
 			End:   endID,
