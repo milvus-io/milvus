@@ -2523,12 +2523,22 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                       array->type()->ToString());
         }
 
-        // Preserve null bitmap from the source array
+        // Preserve source nulls in an offset-zero bitmap. Reusing the source
+        // buffer directly is incorrect for sliced arrays because the new FSB
+        // array itself has offset zero.
         std::shared_ptr<arrow::Buffer> null_bitmap;
         if (promoted_null_bitmap != nullptr) {
             null_bitmap = std::move(promoted_null_bitmap);
-        } else if (array->null_count() > 0 && array->data()->buffers[0]) {
-            null_bitmap = array->data()->buffers[0];
+        } else if (array->null_count() > 0) {
+            auto bitmap_result = arrow::AllocateEmptyBitmap(num_rows);
+            AssertInfo(bitmap_result.ok(),
+                       "Failed to allocate vector null bitmap");
+            null_bitmap = std::move(*bitmap_result);
+            arrow::internal::CopyBitmap(array->null_bitmap_data(),
+                                        array->offset(),
+                                        num_rows,
+                                        null_bitmap->mutable_data(),
+                                        0);
         }
         auto fsb_data =
             arrow::ArrayData::Make(fsb_type,

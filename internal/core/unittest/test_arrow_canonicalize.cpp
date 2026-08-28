@@ -634,6 +634,39 @@ TEST(NormalizeVectorArraysToFixedSizeBinary,
 }
 
 TEST(NormalizeVectorArraysToFixedSizeBinary,
+     NullableSlicedListPreservesParentNullAtLogicalOffset) {
+    ScopedExternalVectorPartialNullPolicy policy(false);
+    auto values_builder = std::make_shared<arrow::FloatBuilder>();
+    arrow::ListBuilder list_builder(arrow::default_memory_pool(),
+                                    values_builder);
+
+    ASSERT_TRUE(list_builder.Append().ok());
+    ASSERT_TRUE(values_builder->AppendValues({1.0f, 2.0f}).ok());
+    ASSERT_TRUE(list_builder.AppendNull().ok());
+    ASSERT_TRUE(list_builder.Append().ok());
+    ASSERT_TRUE(values_builder->AppendValues({3.0f, 4.0f}).ok());
+
+    std::shared_ptr<arrow::Array> input;
+    ASSERT_TRUE(list_builder.Finish(&input).ok());
+    auto sliced = input->Slice(1, 2);
+    ASSERT_EQ(sliced->offset(), 1);
+
+    auto output = NormalizeVectorArraysToFixedSizeBinaryForTest(
+        {sliced}, milvus::DataType::VECTOR_FLOAT, 2, true);
+    ASSERT_EQ(output->type_id(), arrow::Type::BINARY);
+    auto binary = std::static_pointer_cast<arrow::BinaryArray>(output);
+    ASSERT_EQ(binary->length(), 2);
+    EXPECT_TRUE(binary->IsNull(0));
+    ASSERT_TRUE(binary->IsValid(1));
+    ASSERT_EQ(binary->value_length(1), 2 * sizeof(float));
+    auto view = binary->GetView(1);
+    float actual[2];
+    std::memcpy(actual, view.data(), view.size());
+    EXPECT_FLOAT_EQ(actual[0], 3.0f);
+    EXPECT_FLOAT_EQ(actual[1], 4.0f);
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
      NullableListPartialNullPolicyErrorReturnsDataFormatBroken) {
     ScopedExternalVectorPartialNullPolicy policy(false);
     arrow::FloatBuilder values_builder;
@@ -679,6 +712,43 @@ TEST(NormalizeVectorArraysToFixedSizeBinary,
 }
 
 TEST(NormalizeVectorArraysToFixedSizeBinary,
+     NullableFixedSizeListPartialNullPolicyErrorReturnsDataFormatBroken) {
+    ScopedExternalVectorPartialNullPolicy policy(false);
+    arrow::FloatBuilder values_builder;
+    ASSERT_TRUE(values_builder.Append(1.0f).ok());
+    ASSERT_TRUE(values_builder.AppendNull().ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    auto input = std::make_shared<arrow::FixedSizeListArray>(
+        arrow::fixed_size_list(arrow::float32(), 2), 1, values);
+    try {
+        static_cast<void>(NormalizeVectorArraysToFixedSizeBinaryForTest(
+            {input}, milvus::DataType::VECTOR_FLOAT, 2, true));
+        FAIL() << "expected partial-null vector to be rejected";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::DataFormatBroken);
+    }
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     NullableFixedSizeListPartialNullPolicyNullBecomesRowNull) {
+    ScopedExternalVectorPartialNullPolicy policy(true);
+    arrow::FloatBuilder values_builder;
+    ASSERT_TRUE(values_builder.Append(1.0f).ok());
+    ASSERT_TRUE(values_builder.AppendNull().ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    auto input = std::make_shared<arrow::FixedSizeListArray>(
+        arrow::fixed_size_list(arrow::float32(), 2), 1, values);
+    auto output = NormalizeVectorArraysToFixedSizeBinaryForTest(
+        {input}, milvus::DataType::VECTOR_FLOAT, 2, true);
+    ASSERT_EQ(output->type_id(), arrow::Type::BINARY);
+    EXPECT_TRUE(output->IsNull(0));
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
      NonNullableListPartialNullPolicyNullStillRejects) {
     ScopedExternalVectorPartialNullPolicy policy(true);
     arrow::FloatBuilder values_builder;
@@ -693,9 +763,13 @@ TEST(NormalizeVectorArraysToFixedSizeBinary,
     ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
 
     auto input = *arrow::ListArray::FromArrays(*offsets, *values);
-    EXPECT_THROW(NormalizeVectorArraysToFixedSizeBinaryForTest(
-                     {input}, milvus::DataType::VECTOR_FLOAT, 2, false),
-                 milvus::SegcoreError);
+    try {
+        static_cast<void>(NormalizeVectorArraysToFixedSizeBinaryForTest(
+            {input}, milvus::DataType::VECTOR_FLOAT, 2, false));
+        FAIL() << "expected non-nullable partial-null vector to be rejected";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::DataFormatBroken);
+    }
 }
 
 TEST(NormalizeVectorArraysToFixedSizeBinary, FixedSizeListDimMismatchAsserts) {
