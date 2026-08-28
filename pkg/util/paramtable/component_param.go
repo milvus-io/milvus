@@ -1253,7 +1253,7 @@ The default value is 1, which is enough for most cases.`,
 		Doc: `Policy for parent-valid external dense-vector rows containing a mix of valid and null child elements.
 Options: error, null. error rejects the row as malformed input; null promotes the whole row to a row-level null when the field is nullable.
 Rows whose child elements are all null are always promoted to row-level null for nullable fields, regardless of this setting.`,
-		Export: false,
+		Export: true,
 	}
 	p.ExternalVectorPartialNullPolicy.Init(base.mgr)
 

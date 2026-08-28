@@ -1138,7 +1138,7 @@ common:
     externalVector:
       # Policy for an external nullable dense-vector row that contains both valid and NULL dimensions.
       # error: reject the malformed row; null: treat the whole row as NULL.
-      # A row whose dimensions are all NULL is always treated as a row-level NULL.
+      # For a nullable field, a row whose dimensions are all NULL is always treated as a row-level NULL, regardless of this setting.
       partialNullPolicy: error
     iops:
       # Initial ObjectStore request rate used by the Lance AIMD limiter for External Table reads.
