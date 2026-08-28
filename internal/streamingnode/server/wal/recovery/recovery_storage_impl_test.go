@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
@@ -104,6 +105,63 @@ func TestRecoveryStorageCloseDrainsPendingCleanup(t *testing.T) {
 	defer consumeMock.UnPatch()
 	require.NoError(t, storage.persistDritySnapshotWhenClosing())
 	assert.Equal(t, 1, consumed)
+}
+
+func TestRecoveryStorageCloseLeavesCleanupBlockedByPhysicalCheckpoint(t *testing.T) {
+	storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{
+		MessageID: walimplstest.NewTestMessageID(10),
+		TimeTick:  100,
+		DataCheckpoint: &utility.WALConsumeCheckpoint{
+			MessageID: walimplstest.NewTestMessageID(10),
+			TimeTick:  100,
+		},
+	})
+	vchannelMeta := newRecoveryTestVChannelMeta("v1", 100)
+	vchannelMeta.SegmentDataVersionSummary = &viewpb.DataVersion{StreamingVersion: 2}
+	manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
+		PChannel:      "test-pchannel",
+		VChannelMetas: map[string]*streamingpb.VChannelMeta{"v1": vchannelMeta},
+		Segments: map[int64]*streamingpb.SegmentAssignmentMeta{
+			101: {
+				SegmentId:              101,
+				CollectionId:           100,
+				Vchannel:               "v1",
+				State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED,
+				CheckpointTimeTick:     100,
+				DataCheckpointTimeTick: 100,
+				TombstoneTimeTick:      100,
+				SealedAtDataVersion:    &viewpb.DataVersion{StreamingVersion: 2},
+				Stat:                   &streamingpb.SegmentAssignmentStat{},
+			},
+		},
+		NodeScheduler: storage.nodeScheduler,
+		Runtime: moduleapi.Runtime{
+			Scheduler: storage.taskScheduler,
+			Notifier:  storage,
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(manager.Close)
+	storage.vchannelManager = manager
+
+	require.True(t, manager.HasPendingCleanup())
+	require.Empty(t, manager.ConsumeCleanupSnapshots(moduleapi.CleanupContext{
+		MetaPhysicalTimeTick: 100,
+		DataPhysicalTimeTick: 100,
+	}))
+
+	done := make(chan error, 1)
+	go func() {
+		done <- storage.persistDritySnapshotWhenClosing()
+	}()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("recovery storage close did not stop after cleanup made no progress")
+	}
+	assert.True(t, storage.gracefulClosed)
+	assert.True(t, manager.HasPendingCleanup())
 }
 
 func (b *recordingRecoveryStreamBuilder) WALName() message.WALName {

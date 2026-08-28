@@ -76,23 +76,58 @@ func (rs *recoveryStorageImpl) persistDritySnapshotWhenClosing() error {
 	ctx, cancel := context.WithTimeout(context.Background(), rs.cfg.gracefulTimeout)
 	defer cancel()
 
+	persistIfAny := func() (bool, error) {
+		if rs.pendingPersistSnapshot == nil {
+			rs.pendingPersistSnapshot = rs.consumeDirtySnapshot()
+		}
+		// Cleanup candidates may remain pending until a future physical
+		// checkpoint passes their tombstone. They are safe to leave for the
+		// next WAL owner when no persistable snapshot can be produced.
+		if rs.pendingPersistSnapshot == nil {
+			return false, nil
+		}
+		if err := rs.persistDirtySnapshot(ctx, mlog.InfoLevel); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
 	for {
-		if rs.taskScheduler != nil {
-			if err := rs.taskScheduler.WaitIdle(ctx); err != nil {
-				return err
-			}
-		}
-		for rs.isDirty() {
-			if err := rs.persistDirtySnapshot(ctx, mlog.InfoLevel); err != nil {
-				return err
-			}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		if rs.taskScheduler != nil {
 			if err := rs.taskScheduler.WaitIdle(ctx); err != nil {
 				return err
 			}
+		}
+		persisted, err := persistIfAny()
+		if err != nil {
+			return err
+		}
+		if persisted {
+			continue
+		}
+
+		// Wait once more before declaring no progress, so a task submitted
+		// concurrently with the first idle observation can still publish its
+		// final dirty state.
+		if rs.taskScheduler != nil {
+			if err := rs.taskScheduler.WaitIdle(ctx); err != nil {
+				return err
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		if !rs.isDirty() {
+			break
+		}
+		persisted, err = persistIfAny()
+		if err != nil {
+			return err
+		}
+		if !persisted {
 			break
 		}
 	}
