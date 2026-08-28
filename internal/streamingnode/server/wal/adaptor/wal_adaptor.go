@@ -205,14 +205,36 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	ctx = utility.WithExtraAppendResult(ctx, &extraAppendResult)
 	messageID, err := w.interceptorBuildResult.Interceptor.DoAppend(ctx, msg,
 		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			// The lock interceptor still holds its lock while this callback runs, so
+			// recheck the fence here: an append that passed the check at the entry of
+			// Append and then waited for that lock must not be persisted behind an
+			// AlterWAL message that was persisted in the meantime.
+			if w.isFenced.Load() {
+				return nil, walimpls.ErrFenced
+			}
+
 			if notPersistHint := utility.GetNotPersisted(ctx); notPersistHint != nil {
 				// do not persist the message if the hint is set.
 				return notPersistHint.MessageID, nil
 			}
+
 			metricsGuard.StartWALImplAppend()
 			msgID, err := w.retryAppendWhenRecoverableError(ctx, msg)
 			metricsGuard.FinishWALImplAppend()
-			return msgID, err
+			if err != nil {
+				return msgID, err
+			}
+
+			if msg.MessageType() == message.MessageTypeAlterWAL {
+				// AlterWAL is exclusive and pchannel-level, so the lock interceptor holds
+				// the global exclusive lock here while every other append holds the shared
+				// one. Raising the fence inside the callback therefore makes it atomic with
+				// respect to persistence: no other append can be persisting right now, and
+				// every later one sees the fence in the recheck above.
+				w.Logger().Info(ctx, "alter WAL message appended, marking WAL as fenced")
+				w.isFenced.Store(true)
+			}
+			return msgID, nil
 		})
 	metricsGuard.FinishAppend()
 	if err != nil {
@@ -227,13 +249,10 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		}
 		return nil, err
 	}
-	// Mark WAL as fenced if alter WAL message is appended successfully
-	// This prevents further append operations during WAL switch
+	// The fence itself was already raised inside the append callback.
 	if msg.MessageType() == message.MessageTypeAlterWAL {
-		w.Logger().Info(ctx, "alter WAL message appended, marking WAL as fenced")
-		w.isFenced.CompareAndSwap(false, true)
 		w.forceCancelAfterGracefulTimeout()
-		w.Logger().Info(ctx, "WAL marked as fenced for WAL switch, all append operations will be rejected")
+		w.Logger().Info(ctx, "alter WAL message appended, WAL marked as fenced, all append operations will be rejected")
 	}
 	w.appendRateCounter.Add(int64(msg.EstimateSize()))
 

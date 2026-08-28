@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // StreamingNodeCataLog is the interface for streamingnode catalog
@@ -17,6 +18,12 @@ type StreamingNodeCataLog interface {
 
 	// ListSegmentAssignment list all segment assignments for the wal.
 	ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error)
+
+	// ListQueryViews lists persisted StreamingNode query views for the WAL.
+	ListQueryViews(ctx context.Context, pChannelName string) ([]*viewpb.QueryViewOfShard, error)
+
+	// SaveQueryViews persists Up views and removes non-Up recovery records.
+	SaveQueryViews(ctx context.Context, pChannelName string, views []*viewpb.QueryViewOfShard) error
 
 	// GetConsumeCheckpoint gets the consuming checkpoint of the wal.
 	// Return nil, nil if the checkpoint is not exist.
