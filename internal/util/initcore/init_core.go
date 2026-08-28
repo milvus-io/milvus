@@ -33,6 +33,7 @@ import (
 	"context"
 	"encoding/base64"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -584,6 +585,29 @@ func InitArrowReaderConfig(params *paramtable.ComponentParam) error {
 	}
 	status := C.InitArrowReaderConfig(arrowReaderConfig)
 	return HandleCStatus(&status, "InitArrowReaderConfig failed")
+}
+
+// InitExternalVectorNullPolicy publishes the process-wide normalization policy
+// used by both QueryNode external reads and DataNode index builds. The setting
+// is intentionally startup-only so one task cannot observe different semantics
+// across record batches.
+func InitExternalVectorNullPolicy(params *paramtable.ComponentParam) error {
+	policy := strings.ToLower(strings.TrimSpace(params.CommonCfg.ExternalVectorPartialNullPolicy.GetValue()))
+	switch policy {
+	case "error":
+		C.SetExternalVectorPartialNullAsRowNull(C.bool(false))
+	case "null":
+		C.SetExternalVectorPartialNullAsRowNull(C.bool(true))
+	default:
+		return merr.WrapErrParameterInvalidMsg(
+			"common.storage.externalVector.partialNullPolicy must be one of [error, null], got %q",
+			params.CommonCfg.ExternalVectorPartialNullPolicy.GetValue())
+	}
+	return nil
+}
+
+func externalVectorPartialNullAsRowNullEnabled() bool {
+	return bool(C.GetExternalVectorPartialNullAsRowNull())
 }
 
 var coreParamCallbackInitOnce sync.Once

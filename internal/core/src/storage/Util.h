@@ -59,6 +59,15 @@
 
 namespace milvus::storage {
 
+// Controls how parent-valid external dense-vector rows with a mixture of
+// valid and null child elements are normalized. All-null child ranges are
+// always normalized to a row-level null when the field is nullable.
+void
+SetExternalVectorPartialNullAsRowNull(bool enabled);
+
+bool
+GetExternalVectorPartialNullAsRowNull();
+
 void
 ReadMediumType(BinlogReaderPtr reader);
 
