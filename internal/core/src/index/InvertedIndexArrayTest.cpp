@@ -520,8 +520,8 @@ TEST(ArrayInvertedIndexRegression,
         std::make_unique<NullableInt64ArrayInvertedIndex>(index_query_count);
     Config config;
     config["is_array"] = true;
-    index->BuildWithRawDataForUT(row_count, index_arrays.data(), config);
     index->SetNullOffsets(null_offsets);
+    index->BuildWithRawDataForUT(row_count, index_arrays.data(), config);
 
     LoadIndexInfo load_info{};
     load_info.field_id = array_fid.get();

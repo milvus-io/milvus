@@ -31,7 +31,6 @@ import (
 	validator "github.com/go-playground/validator/v10"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -372,14 +371,9 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 				collectionName = getter.GetCollectionName()
 			}
 		}
-		innerCtx := gCtx.Request.Context()
-		ctx, span := otel.Tracer(typeutil.ProxyRole).Start(innerCtx, gCtx.Request.URL.Path)
-		defer span.End()
+		ctx := gCtx.Request.Context()
 		username, _ := gCtx.Get(ContextUsername)
 		ctx = proxy.NewContextWithMetadata(ctx, username.(string), dbName)
-		traceID := span.SpanContext().TraceID().String()
-		ctx = log.WithTraceID(ctx, traceID)
-		gCtx.Set("traceID", traceID)
 		log.Ctx(ctx).Debug("high level restful api, read parameters from request body, then start to handle.",
 			zap.Any("url", gCtx.Request.URL.Path))
 
@@ -448,6 +442,23 @@ func restfulSizeMiddleware(handler gin.HandlerFunc, observeOutbound bool) gin.Ha
 	}
 }
 
+func getTraceLogRequestFieldWithoutSensitiveInfo(req any) zap.Field {
+	switch request := req.(type) {
+	case *PasswordReq:
+		if request == nil {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		return zap.Any("request", &UserReq{UserName: request.UserName})
+	case *NewPasswordReq:
+		if request == nil {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		return zap.Any("request", &UserReq{UserName: request.UserName})
+	default:
+		return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+	}
+}
+
 func wrapperTraceLog(v2 handlerFuncV2) handlerFuncV2 {
 	return func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
 		switch proxy.Params.CommonCfg.TraceLogMode.GetAsInt() {
@@ -460,13 +471,13 @@ func wrapperTraceLog(v2 handlerFuncV2) handlerFuncV2 {
 			fields := proxy.GetRequestBaseInfo(ctx, req, &grpc.UnaryServerInfo{
 				FullMethod: c.Request.URL.Path,
 			}, true)
-			fields = append(fields, proxy.GetRequestFieldWithoutSensitiveInfo(req))
+			fields = append(fields, getTraceLogRequestFieldWithoutSensitiveInfo(req))
 			log.Ctx(ctx).Info("trace info: detail", fields...)
 		case 3: // detail info with request and response
 			fields := proxy.GetRequestBaseInfo(ctx, req, &grpc.UnaryServerInfo{
 				FullMethod: c.Request.URL.Path,
 			}, true)
-			fields = append(fields, proxy.GetRequestFieldWithoutSensitiveInfo(req))
+			fields = append(fields, getTraceLogRequestFieldWithoutSensitiveInfo(req))
 			log.Ctx(ctx).Info("trace info: all request", fields...)
 		}
 		resp, err := v2(ctx, c, req, dbName)

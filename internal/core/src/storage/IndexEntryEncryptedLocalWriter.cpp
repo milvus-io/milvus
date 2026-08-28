@@ -21,6 +21,8 @@
 #include <cerrno>
 #include <cstring>
 #include <algorithm>
+#include <filesystem>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -52,10 +54,18 @@ IndexEntryEncryptedLocalWriter::IndexEntryEncryptedLocalWriter(
       pool_(ThreadPools::GetThreadPool(ThreadPoolPriority::MIDDLE)) {
     auto [encryptor, edek] =
         cipher_plugin_->GetEncryptor(ez_id_, collection_id_);
+    AssertInfo(encryptor != nullptr, "cipher plugin returned a null encryptor");
+    encryptor_ = std::move(encryptor);
     edek_ = std::move(edek);
 
     auto uuid = boost::uuids::random_generator()();
     std::string dir = temp_dir.empty() ? "/tmp" : temp_dir;
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    AssertInfo(!ec,
+               "Failed to create encrypted index temp directory {}: {}",
+               dir,
+               ec.message());
     local_path_ = dir + "/milvus_enc_" + boost::uuids::to_string(uuid);
 
     local_fd_ = ::open(local_path_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
@@ -129,9 +139,7 @@ IndexEntryEncryptedLocalWriter::WriteEntry(const std::string& name,
             crc = Crc32cUpdate(
                 crc, reinterpret_cast<const uint8_t*>(slice_data.data()), len);
             pending.push_back(pool_.Submit([this, s = std::move(slice_data)]() {
-                auto [enc, unused_edek] =
-                    cipher_plugin_->GetEncryptor(ez_id_, collection_id_);
-                return enc->Encrypt(s);
+                return encryptor_->Encrypt(s);
             }));
             remaining -= len;
         }
@@ -171,9 +179,7 @@ IndexEntryEncryptedLocalWriter::EncryptAndWriteSlices(const std::string& name,
             auto slice_data = std::string(
                 reinterpret_cast<const char*>(data + read_offset), len);
             pending.push_back(pool_.Submit([this, s = std::move(slice_data)]() {
-                auto [enc, unused_edek] =
-                    cipher_plugin_->GetEncryptor(ez_id_, collection_id_);
-                return enc->Encrypt(s);
+                return encryptor_->Encrypt(s);
             }));
             read_offset += len;
             remaining -= len;

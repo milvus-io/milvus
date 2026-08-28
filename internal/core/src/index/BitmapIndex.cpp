@@ -714,9 +714,10 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
     tracer::AutoSpan span("BitmapIndex::NotIn", tracer::GetRootSpan());
 
     AssertInfo(is_built_, "index has not been built");
+    // NotIn must keep null rows false, so start from the validity bitmap.
+    auto res = valid_bitset_.clone();
 
     if (is_mmap_) {
-        TargetBitmap res(total_num_rows_, true);
         for (int i = 0; i < n; ++i) {
             auto val = values[i];
             auto it = bitmap_info_map_.find(val);
@@ -726,12 +727,9 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
                 }
             }
         }
-        // NotIn(null) and In(null) is both false, need to mask with IsNotNull operate
-        res &= valid_bitset_;
         return res;
     }
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
-        TargetBitmap res(total_num_rows_, true);
         for (int i = 0; i < n; ++i) {
             auto val = values[i];
             auto it = data_.find(val);
@@ -741,23 +739,16 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
                 }
             }
         }
-        // NotIn(null) and In(null) is both false, need to mask with IsNotNull operate
-        res &= valid_bitset_;
-        return res;
-    } else {
-        TargetBitmap res(total_num_rows_, false);
-        for (size_t i = 0; i < n; ++i) {
-            const auto& val = values[i];
-            auto it = bitsets_.find(val);
-            if (it != bitsets_.end()) {
-                res |= it->second;
-            }
-        }
-        res.flip();
-        // NotIn(null) and In(null) is both false, need to mask with IsNotNull operate
-        res &= valid_bitset_;
         return res;
     }
+    for (size_t i = 0; i < n; ++i) {
+        const auto& val = values[i];
+        auto it = bitsets_.find(val);
+        if (it != bitsets_.end()) {
+            res -= it->second;
+        }
+    }
+    return res;
 }
 
 template <typename T>
@@ -766,8 +757,7 @@ BitmapIndex<T>::IsNull() {
     tracer::AutoSpan span("BitmapIndex::IsNull", tracer::GetRootSpan());
 
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap res(total_num_rows_, true);
-    res &= valid_bitset_;
+    auto res = valid_bitset_.clone();
     res.flip();
     return res;
 }
@@ -778,9 +768,7 @@ BitmapIndex<T>::IsNotNull() {
     tracer::AutoSpan span("BitmapIndex::IsNotNull", tracer::GetRootSpan());
 
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap res(total_num_rows_, true);
-    res &= valid_bitset_;
-    return res;
+    return valid_bitset_.clone();
 }
 
 template <typename T>

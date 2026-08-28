@@ -348,15 +348,15 @@ class PhyCompareFilterExpr : public Expr {
                     1,
                     res + processed_size,
                     values...);
-                const bool* left_valid_data = left_chunk.valid_data();
-                const bool* right_valid_data = right_chunk.valid_data();
+                const auto left_validity = left_chunk.validity();
+                const auto right_validity = right_chunk.validity();
                 // mask with valid_data
-                if (left_valid_data && !left_valid_data[left_chunk_offset]) {
+                if (left_validity && !left_validity[left_chunk_offset]) {
                     res[processed_size] = false;
                     valid_res[processed_size] = false;
                     continue;
                 }
-                if (right_valid_data && !right_valid_data[right_chunk_offset]) {
+                if (right_validity && !right_validity[right_chunk_offset]) {
                     res[processed_size] = false;
                     valid_res[processed_size] = false;
                 }
@@ -374,16 +374,16 @@ class PhyCompareFilterExpr : public Expr {
             const U* right_data = right_chunk.data();
             func.template operator()<FilterType::random>(
                 left_data, right_data, input->data(), size, res, values...);
-            const bool* left_valid_data = left_chunk.valid_data();
-            const bool* right_valid_data = right_chunk.valid_data();
+            const auto left_validity = left_chunk.validity();
+            const auto right_validity = right_chunk.validity();
             // mask with valid_data
             for (int i = 0; i < size; ++i) {
-                if (left_valid_data && !left_valid_data[(*input)[i]]) {
+                if (left_validity && !left_validity[(*input)[i]]) {
                     res[i] = false;
                     valid_res[i] = false;
                     continue;
                 }
-                if (right_valid_data && !right_valid_data[(*input)[i]]) {
+                if (right_validity && !right_validity[(*input)[i]]) {
                     res[i] = false;
                     valid_res[i] = false;
                 }
@@ -437,20 +437,14 @@ class PhyCompareFilterExpr : public Expr {
                  size,
                  res + processed_size,
                  values...);
-            const bool* left_valid_data = left_chunk.valid_data();
-            const bool* right_valid_data = right_chunk.valid_data();
-            // mask with valid_data
-            for (int i = 0; i < size; ++i) {
-                if (left_valid_data && !left_valid_data[i + data_pos]) {
-                    res[processed_size + i] = false;
-                    valid_res[processed_size + i] = false;
-                    continue;
-                }
-                if (right_valid_data && !right_valid_data[i + data_pos]) {
-                    res[processed_size + i] = false;
-                    valid_res[processed_size + i] = false;
-                }
-            }
+            ApplyValidMask(left_chunk.validity().Subview(data_pos),
+                           res + processed_size,
+                           valid_res + processed_size,
+                           size);
+            ApplyValidMask(right_chunk.validity().Subview(data_pos),
+                           res + processed_size,
+                           valid_res + processed_size,
+                           size);
             processed_size += size;
 
             if (processed_size >= batch_size_) {
@@ -512,20 +506,14 @@ class PhyCompareFilterExpr : public Expr {
                  size,
                  res + processed_size,
                  values...);
-            const bool* left_valid_data = left_chunk.valid_data();
-            const bool* right_valid_data = right_chunk.valid_data();
-            // mask with valid_data
-            for (int i = 0; i < size; ++i) {
-                if (left_valid_data && !left_valid_data[i + data_pos]) {
-                    res[processed_size + i] = false;
-                    valid_res[processed_size + i] = false;
-                    continue;
-                }
-                if (right_valid_data && !right_valid_data[i + data_pos]) {
-                    res[processed_size + i] = false;
-                    valid_res[processed_size + i] = false;
-                }
-            }
+            ApplyValidMask(left_chunk.validity().Subview(data_pos),
+                           res + processed_size,
+                           valid_res + processed_size,
+                           size);
+            ApplyValidMask(right_chunk.validity().Subview(data_pos),
+                           res + processed_size,
+                           valid_res + processed_size,
+                           size);
             processed_size += size;
 
             if (processed_size >= batch_size_) {

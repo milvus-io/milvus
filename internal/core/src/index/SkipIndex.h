@@ -166,7 +166,7 @@ class FieldChunkMetricsTranslator
 
     template <typename T>
     metricInfo<T>
-    ProcessFieldMetrics(const T* data, const bool* valid_data, int64_t count) {
+    ProcessFieldMetrics(const T* data, ValidityView validity, int64_t count) {
         //double check to avoid crash
         if (data == nullptr || count == 0) {
             return {T(), T()};
@@ -174,7 +174,7 @@ class FieldChunkMetricsTranslator
         // find first not null value
         int64_t start = 0;
         for (int64_t i = start; i < count; i++) {
-            if (valid_data != nullptr && !valid_data[i]) {
+            if (validity && !validity[i]) {
                 start++;
                 continue;
             }
@@ -188,7 +188,7 @@ class FieldChunkMetricsTranslator
         int64_t null_count = start;
         for (int64_t i = start; i < count; i++) {
             T value = data[i];
-            if (valid_data != nullptr && !valid_data[i]) {
+            if (validity && !validity[i]) {
                 null_count++;
                 continue;
             }

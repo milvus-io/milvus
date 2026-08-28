@@ -70,6 +70,12 @@ if (CMAKE_COMPILER_IS_GNUCC)
 endif ()
 
 set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
+if (LINUX)
+    # Knowhere v2.6.18 still uses CMake's FindBLAS/FindLAPACK modules.  Add
+    # the Conan OpenBLAS compatibility modules before the system modules.
+    list(PREPEND CMAKE_MODULE_PATH
+         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/openblas_compat")
+endif()
 include( Utils )
 
 # **************************** Build time, type and code version ****************************

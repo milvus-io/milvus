@@ -15,6 +15,7 @@
 
 #include "Utils.h"
 #include "common/EasyAssert.h"
+#include "common/GeometryCache.h"
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
@@ -23,6 +24,12 @@
 #include "futures/Future.h"
 
 namespace milvus::segcore {
+
+std::shared_ptr<milvus::exec::SimpleGeometryCache>
+SegmentInternalInterface::GetGeometryCache(FieldId field_id) const {
+    return milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
+        segment_instance_uid(), get_segment_id(), field_id);
+}
 
 void
 SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,

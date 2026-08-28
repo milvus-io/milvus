@@ -83,6 +83,22 @@ func TestTraceLogInterceptor(t *testing.T) {
 			NewPassword: "FOO123456",
 		})
 		assert.NotContains(t, strings.ToLower(fmt.Sprint(f2.Interface)), "password")
+
+		hashSentinel := "$2a$10$RESTORE_RBAC_HASH_SENTINEL"
+		restoreReq := &milvuspb.RestoreRBACMetaRequest{
+			RBACMeta: &milvuspb.RBACMeta{
+				Users: []*milvuspb.UserInfo{{
+					User:     "restore-user",
+					Password: hashSentinel,
+				}},
+			},
+		}
+		f3 := GetRequestFieldWithoutSensitiveInfo(restoreReq)
+		request := fmt.Sprint(f3.Interface)
+		assert.NotContains(t, request, hashSentinel)
+		assert.Contains(t, request, "restore-user")
+		assert.Contains(t, request, sensitiveMark)
+		assert.Equal(t, hashSentinel, restoreReq.GetRBACMeta().GetUsers()[0].GetPassword())
 	}
 
 	_ = paramtable.Get().Save(paramtable.Get().CommonCfg.TraceLogMode.Key, "3")

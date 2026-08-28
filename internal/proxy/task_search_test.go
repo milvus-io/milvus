@@ -61,6 +61,72 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+func TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter(t *testing.T) {
+	mockey.PatchConvey("TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter", t, func() {
+		globalMetaCache = &MetaCache{}
+
+		const (
+			dbName         = "db"
+			collectionName = "timestamptz_collection"
+			collectionID   = int64(100)
+		)
+		schema := newSchemaInfo(&schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: testInt64Field, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{
+					FieldID:  101,
+					Name:     testFloatVecField,
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: strconv.Itoa(testVecDim)},
+					},
+				},
+				{FieldID: 102, Name: "ts", DataType: schemapb.DataType_Timestamptz},
+			},
+		})
+
+		mockey.Mock((*MetaCache).GetCollectionID).Return(collectionID, nil).Build()
+		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+			updateTimestamp:  100,
+			consistencyLevel: commonpb.ConsistencyLevel_Strong,
+		}, nil).Build()
+		mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
+		mockey.Mock(isIgnoreGrowing).Return(false, nil).Build()
+		mockey.Mock((*searchTask).checkNq).Return(int64(1), nil).Build()
+
+		searchParams := append([]*commonpb.KeyValuePair{}, getValidSearchParams()...)
+		searchParams = append(searchParams, &commonpb.KeyValuePair{
+			Key:   common.TimezoneKey,
+			Value: "Asia/Shanghai",
+		})
+		task := &searchTask{
+			Condition:     NewTaskCondition(context.Background()),
+			SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Search}},
+			ctx:           context.Background(),
+			request: &milvuspb.SearchRequest{
+				DbName:         dbName,
+				CollectionName: collectionName,
+				Nq:             1,
+				Dsl:            "ts > ISO '2025-01-01T00:00:00'",
+				SearchParams:   searchParams,
+			},
+			result: &milvuspb.SearchResults{Status: merr.Success()},
+		}
+
+		err := task.PreExecute(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, "Asia/Shanghai", task.resolvedTimezoneStr)
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+		rangeExpr := plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
+		require.NotNil(t, rangeExpr)
+		shanghai, err := time.LoadLocation("Asia/Shanghai")
+		require.NoError(t, err)
+		assert.Equal(t, time.Date(2025, 1, 1, 0, 0, 0, 0, shanghai).UnixMicro(), rangeExpr.GetValue().GetInt64Val())
+	})
+}
+
 func TestSearchTask_PostExecute(t *testing.T) {
 	var err error
 

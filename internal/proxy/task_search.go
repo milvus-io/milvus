@@ -231,6 +231,19 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	// Currently, we get vectors by requery. Once we support getting vectors from search,
 	// searches with small result size could no longer need requery.
+	timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.request.SearchParams)
+	if exist {
+		if !timestamptz.IsTimezoneValid(timezone) {
+			log.Info("get invalid timezone from request", zap.String("timezone", timezone))
+			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", timezone)
+		}
+		log.Debug("determine timezone from request", zap.String("user defined timezone", timezone))
+	} else {
+		timezone = getColTimezone(collectionInfo)
+		log.Debug("determine timezone from collection", zap.Any("collection timezone", timezone))
+	}
+	t.resolvedTimezoneStr = timezone
+
 	if t.GetIsAdvanced() {
 		err = t.initAdvancedSearchRequest(ctx)
 	} else {
@@ -294,19 +307,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL)
 		}
 	}
-
-	timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.request.SearchParams)
-	if exist {
-		if !timestamptz.IsTimezoneValid(timezone) {
-			log.Info("get invalid timezone from request", zap.String("timezone", timezone))
-			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", timezone)
-		}
-		log.Debug("determine timezone from request", zap.String("user defined timezone", timezone))
-	} else {
-		timezone = getColTimezone(collectionInfo)
-		log.Debug("determine timezone from collection", zap.Any("collection timezone", timezone))
-	}
-	t.resolvedTimezoneStr = timezone
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
 

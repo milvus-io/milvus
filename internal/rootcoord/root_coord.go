@@ -63,7 +63,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/expr"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -150,7 +149,6 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 	core.UpdateStateCode(commonpb.StateCode_Abnormal)
 	core.SetProxyCreator(proxyutil.DefaultProxyCreator)
 
-	expr.Register("rootcoord", core)
 	return core, nil
 }
 

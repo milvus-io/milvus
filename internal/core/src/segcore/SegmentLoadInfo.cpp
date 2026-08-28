@@ -52,6 +52,7 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     // Extract field ID
     auto field_id = FieldId(field_index_info->fieldid());
     load_index_info.field_id = field_id.get();
+    load_index_info.collection_id = GetCollectionID();
     load_index_info.partition_id = GetPartitionID();
 
     // Get field type from schema
@@ -125,21 +126,6 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     load_index_info.enable_mmap = use_mmap;
 
     return load_index_info;
-}
-
-bool
-SegmentLoadInfo::CheckIndexHasRawData(const LoadIndexInfo& load_index_info) {
-    auto request = milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-        load_index_info.field_type,
-        load_index_info.element_type,
-        load_index_info.index_engine_version,
-        load_index_info.index_size,
-        load_index_info.index_params,
-        load_index_info.enable_mmap,
-        load_index_info.num_rows,
-        load_index_info.dim);
-
-    return request.has_raw_data;
 }
 
 void

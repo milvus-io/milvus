@@ -393,6 +393,9 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := validateFieldType(t.schema); err != nil {
+		return err
+	}
 	if err := validateFunction(t.schema, "", disableCheck); err != nil {
 		return err
 	}
@@ -435,11 +438,6 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	// validate auto id definition
 	if err := ValidateFieldAutoID(t.schema); err != nil {
-		return err
-	}
-
-	// validate field type definition
-	if err := validateFieldType(t.schema); err != nil {
 		return err
 	}
 

@@ -582,6 +582,10 @@ func TestValidateFieldType(t *testing.T) {
 			validate: false,
 		},
 		{
+			dt:       schemapb.DataType_Text,
+			validate: false,
+		},
+		{
 			dt:       schemapb.DataType_Array,
 			et:       schemapb.DataType_Bool,
 			validate: true,
@@ -671,6 +675,18 @@ func TestValidateFieldType(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateFieldRejectsText(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		Name:     "text_field",
+		DataType: schemapb.DataType_Text,
+	}
+	schema := &schemapb.CollectionSchema{Name: "collection"}
+
+	err := ValidateField(field, schema)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "text data type is not supported in Milvus 2.6")
 }
 
 func TestValidateMultipleVectorFields(t *testing.T) {

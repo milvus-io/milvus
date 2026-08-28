@@ -83,20 +83,18 @@ class ChunkedColumnInterface {
     PrefetchChunks(milvus::OpContext* op_ctx,
                    const std::vector<int64_t>& chunk_ids) const = 0;
 
-    virtual PinWrapper<
-        std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
     StringViews(milvus::OpContext* op_ctx,
                 int64_t chunk_id,
                 std::optional<std::pair<int64_t, int64_t>> offset_len =
                     std::nullopt) const = 0;
 
-    virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
     ArrayViews(milvus::OpContext* op_ctx,
                int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
-    virtual PinWrapper<
-        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     VectorArrayViews(
         milvus::OpContext* op_ctx,
         int64_t chunk_id,
@@ -151,20 +149,7 @@ class ChunkedColumnInterface {
                    offset,
                    size,
                    chunk->RowNums());
-        auto& valid_data = chunk->Valid();
-        AssertInfo(
-            offset + size <= static_cast<int64_t>(valid_data.size()),
-            "Valid-data range out of valid-data bounds, offset: {}, size: {}, "
-            "valid-data size: {}",
-            offset,
-            size,
-            valid_data.size());
-        auto valid_data_ptr = valid_data.data() + offset;
-        for (int64_t i = 0; i < size; ++i) {
-            if (!valid_data_ptr[i]) {
-                valid_result[i] = false;
-            }
-        }
+        chunk->ApplyValidityMask(offset, size, valid_result);
     }
 
     // Get number of rows before a specific chunk

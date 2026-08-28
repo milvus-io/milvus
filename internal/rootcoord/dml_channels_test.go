@@ -21,8 +21,11 @@ import (
 	"context"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -53,6 +57,100 @@ func TestDmlMsgStream(t *testing.T) {
 		assert.Equal(t, int64(0), dms.RefCnt())
 		assert.Equal(t, int64(1), dms.Used())
 	})
+}
+
+func TestDmlMsgStreamCloseWaitsForBroadcast(t *testing.T) {
+	broadcastStarted := make(chan struct{})
+	releaseBroadcast := make(chan struct{})
+	closeStarted := make(chan struct{})
+	releaseClose := make(chan struct{})
+	var broadcastCalls atomic.Int32
+	var closeCalls atomic.Int32
+	var releaseBroadcastOnce sync.Once
+	var releaseCloseOnce sync.Once
+	releaseBlockedBroadcast := func() {
+		releaseBroadcastOnce.Do(func() { close(releaseBroadcast) })
+	}
+	releaseBlockedClose := func() {
+		releaseCloseOnce.Do(func() { close(releaseClose) })
+	}
+	defer releaseBlockedBroadcast()
+	defer releaseBlockedClose()
+	ms := &FailMsgStream{
+		closeHook: func() {
+			closeCalls.Add(1)
+			close(closeStarted)
+			<-releaseClose
+		},
+	}
+
+	mockBroadcast := mockey.Mock((*FailMsgStream).Broadcast).To(
+		func(_ *FailMsgStream, _ context.Context, _ *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
+			broadcastCalls.Add(1)
+			close(broadcastStarted)
+			<-releaseBroadcast
+			return nil, nil
+		}).Build()
+	defer mockBroadcast.UnPatch()
+
+	dms := &dmlMsgStream{
+		ms:     ms,
+		refcnt: 1,
+	}
+
+	broadcastDone := make(chan error, 1)
+	go func() {
+		_, err := dms.broadcast(context.Background(), nil)
+		broadcastDone <- err
+	}()
+	<-broadcastStarted
+
+	closeDone := make(chan struct{})
+	go func() {
+		dms.close()
+		close(closeDone)
+	}()
+
+	select {
+	case <-closeDone:
+		t.Fatal("dml msgstream close finished while a broadcast was still running")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	releaseBlockedBroadcast()
+	require.NoError(t, <-broadcastDone)
+	select {
+	case <-closeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("dml msgstream close did not start")
+	}
+
+	_, err := dms.broadcast(context.Background(), nil)
+	assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+	_, err = dms.broadcastMark(context.Background(), nil)
+	assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+
+	stateReadDone := make(chan [2]int64, 1)
+	go func() {
+		stateReadDone <- [2]int64{dms.RefCnt(), dms.Used()}
+	}()
+	select {
+	case state := <-stateReadDone:
+		assert.Equal(t, [2]int64{1, 0}, state)
+	case <-time.After(time.Second):
+		t.Fatal("dml msgstream state reads blocked on the underlying close")
+	}
+
+	releaseBlockedClose()
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("dml msgstream close did not finish")
+	}
+
+	dms.close()
+	assert.Equal(t, int32(1), broadcastCalls.Load())
+	assert.Equal(t, int32(1), closeCalls.Load())
 }
 
 func TestChannelsHeap(t *testing.T) {
@@ -275,9 +373,14 @@ func (f *FailMessageStreamFactory) NewTtMsgStream(ctx context.Context) (msgstrea
 type FailMsgStream struct {
 	msgstream.MsgStream
 	errBroadcast bool
+	closeHook    func()
 }
 
-func (ms *FailMsgStream) Close()                                                {}
+func (ms *FailMsgStream) Close() {
+	if ms.closeHook != nil {
+		ms.closeHook()
+	}
+}
 func (ms *FailMsgStream) Chan() <-chan *msgstream.ConsumeMsgPack                { return nil }
 func (ms *FailMsgStream) GetUnmarshalDispatcher() msgstream.UnmarshalDispatcher { return nil }
 func (ms *FailMsgStream) AsProducer(ctx context.Context, channels []string)     {}

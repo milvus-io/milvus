@@ -134,6 +134,13 @@ func TestCiper(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, body.ShardName, "123123")
 	assert.Equal(t, msg2.EstimateSize(), 36)
+
+	msg2.OverwriteBody(&msgpb.InsertRequest{
+		ShardName: "overwritten",
+	})
+	body, err = msg2.Body()
+	assert.NoError(t, err)
+	assert.Equal(t, body.ShardName, "overwritten")
 }
 
 // TestCheckIfMessageFromStreaming tests CheckIfMessageFromStreaming function.

@@ -10,6 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <map>
+#include <new>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -156,12 +158,13 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
 void
 VectorFieldIndexing::recreate_index(DataType data_type,
                                     const VectorBase* field_raw_data) {
+    const auto index_version = segcore_config_.get_interim_index_version();
     if (IsSparseFloatVectorDataType(data_type)) {
         index_ = std::make_unique<index::VectorMemIndex<sparse_u32_f32>>(
             DataType::NONE,
             config_->GetIndexType(),
             config_->GetMetricType(),
-            knowhere::Version::GetCurrentVersion().VersionNumber());
+            index_version);
     } else if (data_type == DataType::VECTOR_FLOAT) {
         auto concurrent_fp32_vec =
             reinterpret_cast<const ConcurrentVector<FloatVector>*>(
@@ -177,7 +180,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             DataType::NONE,
             config_->GetIndexType(),
             config_->GetMetricType(),
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            index_version,
             view_data);
     } else if (data_type == DataType::VECTOR_FLOAT16) {
         auto concurrent_fp16_vec =
@@ -194,7 +197,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             DataType::NONE,
             config_->GetIndexType(),
             config_->GetMetricType(),
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            index_version,
             view_data);
     } else if (data_type == DataType::VECTOR_BFLOAT16) {
         auto concurrent_bf16_vec =
@@ -211,7 +214,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             DataType::NONE,
             config_->GetIndexType(),
             config_->GetMetricType(),
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            index_version,
             view_data);
     }
 }
@@ -635,11 +638,21 @@ ScalarFieldIndexing<T>::AppendSegmentIndex(int64_t reserved_offset,
                     stream_data->scalars().geometry_data();
                 const auto& valid_data = stream_data->valid_data();
 
+                AssertInfo(geometry_array.data_size() == size,
+                           "geometry payload size {} must match append size {}",
+                           geometry_array.data_size(),
+                           size);
+                AssertInfo(valid_data.empty() || valid_data.size() == size,
+                           "geometry valid_data size {} must be empty or match "
+                           "append size {}",
+                           valid_data.size(),
+                           size);
+
                 // Create accessor for DataArray
                 auto accessor = [&geometry_array, &valid_data](
                                     int64_t i) -> std::pair<std::string, bool> {
                     bool is_valid = valid_data.empty() || valid_data[i];
-                    if (is_valid && i < geometry_array.data_size()) {
+                    if (is_valid) {
                         return {geometry_array.data(i), true};
                     }
                     return {"", false};
@@ -728,6 +741,19 @@ ScalarFieldIndexing<T>::process_geometry_data(int64_t reserved_offset,
                         "Initialized R-Tree index for immediate incremental "
                         "building from {}",
                         log_source);
+                } catch (const SegcoreError&) {
+                    // Already typed -- rethrow as-is; re-wrapping would
+                    // collapse the code (same ordered handlers as the
+                    // AddGeometry loop below).
+                    throw;
+                } catch (const std::bad_alloc&) {
+                    // Wrapper allocation OOM on the first batch is the same
+                    // transient resource failure as on the AddGeometry path
+                    // -- keep it retriable.
+                    ThrowInfo(ErrorCode::MemAllocateFailed,
+                              "out of memory initializing R-Tree index from "
+                              "{}",
+                              log_source);
                 } catch (std::exception& error) {
                     ThrowInfo(UnexpectedError,
                               "R-Tree index initialization error: {}",
@@ -740,12 +766,30 @@ ScalarFieldIndexing<T>::process_geometry_data(int64_t reserved_offset,
             for (int64_t i = 0; i < size; ++i) {
                 int64_t global_offset = reserved_offset + i;
 
-                // Use the accessor to get geometry data and validity
+                // Use the accessor to get geometry data and validity.
+                // is_valid MUST reach AddGeometry: it is the only signal that
+                // distinguishes a genuinely null row from a valid row with an
+                // empty payload (see RTreeIndex::AddGeometry).
                 auto [wkb_data, is_valid] = accessor(i);
 
                 try {
-                    rtree_index->AddGeometry(wkb_data, global_offset);
+                    rtree_index->AddGeometry(wkb_data, global_offset, is_valid);
                     added_count++;
+                } catch (const SegcoreError&) {
+                    // Already typed (e.g. a retriable MemAllocateFailed from a
+                    // transient GEOS allocation failure) -- rethrow as-is;
+                    // re-wrapping would collapse the code into a non-retriable
+                    // UnexpectedError.
+                    throw;
+                } catch (const std::bad_alloc&) {
+                    // Container/std allocation OOM (e.g. the R-Tree wrapper's
+                    // values_.push_back / rtree_.insert) is the same transient
+                    // resource failure as a GEOS allocation failure and must
+                    // stay retriable -- the generic handler below would
+                    // collapse it into a non-retriable UnexpectedError.
+                    ThrowInfo(ErrorCode::MemAllocateFailed,
+                              "out of memory adding geometry at offset {}",
+                              global_offset);
                 } catch (std::exception& error) {
                     ThrowInfo(UnexpectedError,
                               "Failed to add geometry at offset {}: {}",

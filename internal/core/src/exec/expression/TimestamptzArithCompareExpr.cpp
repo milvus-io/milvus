@@ -287,7 +287,7 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
         [ arith_op,
           compare_op ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
-            const bool* valid_data,
+            ValidityView valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
@@ -300,7 +300,7 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
         const int64_t compare_us = compare_value;
         for (int i = 0; i < size; ++i) {
             const auto offset = offsets == nullptr ? i : offsets[i];
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 // NULL never matches, under either polarity (three-valued
                 // logic); do not evaluate the storage placeholder value.
                 res[i] = valid_res[i] = false;

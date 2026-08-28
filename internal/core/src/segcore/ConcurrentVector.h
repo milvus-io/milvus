@@ -71,6 +71,7 @@ class ThreadSafeValidData {
                  const FieldMeta& field_meta) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
         if (field_meta.is_nullable()) {
+            check_source_span(num_rows, data, field_meta);
             if (length_ + num_rows > data_.size()) {
                 data_.resize(length_ + num_rows);
             }
@@ -78,6 +79,25 @@ class ThreadSafeValidData {
             std::copy_n(src, num_rows, data_.data() + length_);
             length_ += num_rows;
         }
+    }
+
+    // copy_n above reads exactly num_rows entries from the source, so a
+    // producer payload shorter than the row count is an out-of-bounds read on
+    // the protobuf RepeatedField. Reject it at the boundary rather than
+    // silently treating the missing tail as NULL further down the ingest path.
+    // (2.6 carries a single, appending set_data_raw overload; on master the
+    // same check guards the offset-addressed ingest overload as well.)
+    static void
+    check_source_span(size_t num_rows,
+                      const DataArray* data,
+                      const FieldMeta& field_meta) {
+        const auto valid_size = static_cast<size_t>(data->valid_data_size());
+        AssertInfo(valid_size == num_rows,
+                   "nullable field {} valid_data size {} must match "
+                   "num_rows {}",
+                   field_meta.get_id().get(),
+                   valid_size,
+                   num_rows);
     }
 
     bool

@@ -20,6 +20,7 @@ package rerank
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 
@@ -36,7 +37,9 @@ const (
 type RRFFunction[T PKType] struct {
 	RerankBase
 
-	k float32
+	k          float32
+	weights    []float64
+	weightsSet bool
 }
 
 func newRRFFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, pkTypeOverride ...schemapb.DataType) (Reranker, error) {
@@ -50,24 +53,63 @@ func newRRFFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 	}
 
 	k := float64(defaultRRFParamsValue)
+	var weights []float64
+	weightsSet := false
 	for _, param := range funcSchema.Params {
-		if strings.ToLower(param.Key) == RRFParamsKey {
+		switch strings.ToLower(param.Key) {
+		case RRFParamsKey:
 			if k, err = strconv.ParseFloat(param.Value, 64); err != nil {
 				return nil, merr.WrapErrParameterInvalidMsg("param k:%s is not a number", param.Value)
 			}
+		case WeightsParamsKey:
+			weights, err = parseRRFWeights(param.Value)
+			if err != nil {
+				return nil, err
+			}
+			weightsSet = true
 		}
 	}
 	if k <= 0 || k >= 16384 {
 		return nil, merr.WrapErrParameterInvalidMsg("the rank params k should be in range (0, %d)", 16384)
 	}
 	if base.pkType == schemapb.DataType_Int64 {
-		return &RRFFunction[int64]{RerankBase: *base, k: float32(k)}, nil
+		return &RRFFunction[int64]{RerankBase: *base, k: float32(k), weights: weights, weightsSet: weightsSet}, nil
 	} else {
-		return &RRFFunction[string]{RerankBase: *base, k: float32(k)}, nil
+		return &RRFFunction[string]{RerankBase: *base, k: float32(k), weights: weights, weightsSet: weightsSet}, nil
 	}
 }
 
+func parseRRFWeights(value string) ([]float64, error) {
+	var rawWeights []json.RawMessage
+	if err := json.Unmarshal([]byte(value), &rawWeights); err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("failed to parse weights: %v", err)
+	}
+	if len(rawWeights) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("rrf weights parameter must be a non-empty array")
+	}
+
+	weights := make([]float64, len(rawWeights))
+	for index, rawWeight := range rawWeights {
+		if string(rawWeight) == "null" {
+			return nil, merr.WrapErrParameterInvalidMsg("failed to parse weights: weight at index %d must be a number", index)
+		}
+		if err := json.Unmarshal(rawWeight, &weights[index]); err != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("failed to parse weights: weight at index %d must be a number", index)
+		}
+		if weights[index] < 0 || weights[index] > 1 {
+			return nil, merr.WrapErrParameterInvalidMsg("rank param weight should be in range [0, 1]")
+		}
+	}
+	return weights, nil
+}
+
 func (rrf *RRFFunction[T]) processOneSearchData(ctx context.Context, searchParams *SearchParams, cols []*columns, idGroup map[any]any) (*IDScores[T], error) {
+	if rrf.weightsSet && len(rrf.weights) != len(cols) {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"the length of weights param mismatch with ann search requests: got %d, want %d",
+			len(rrf.weights), len(cols))
+	}
+
 	rrfScores := map[T]float32{}
 	idLocations := make(map[T]IDLoc)
 	for i, col := range cols {
@@ -75,12 +117,20 @@ func (rrf *RRFFunction[T]) processOneSearchData(ctx context.Context, searchParam
 			continue
 		}
 		ids := col.ids.([]T)
+		pathWeight := 1.0
+		if rrf.weightsSet {
+			pathWeight = rrf.weights[i]
+		}
 		for idx, id := range ids {
+			rrfScore := 1 / (rrf.k + float32(idx+1))
+			if rrf.weightsSet {
+				rrfScore = float32(pathWeight / float64(rrf.k+float32(idx+1)))
+			}
 			if score, ok := rrfScores[id]; !ok {
 				idLocations[id] = IDLoc{batchIdx: i, offset: idx + int(col.nqOffset)}
-				rrfScores[id] = 1 / (rrf.k + float32(idx+1))
+				rrfScores[id] = rrfScore
 			} else {
-				rrfScores[id] = score + 1/(rrf.k+float32(idx+1))
+				rrfScores[id] = score + rrfScore
 			}
 		}
 	}

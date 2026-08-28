@@ -582,6 +582,9 @@ func TestCreateCollectionInvalidAutoPkField(t *testing.T) {
 		// pk field type: non-int64 and non-varchar
 		for _, fieldType := range hp.GetInvalidPkFieldType() {
 			invalidPkField := entity.NewField().WithName("pk").WithDataType(fieldType).WithIsPrimaryKey(true)
+			if fieldType == entity.FieldTypeArray {
+				invalidPkField.WithElementType(entity.FieldTypeInt64)
+			}
 			schema := entity.NewSchema().WithName(collName).WithField(vecField).WithField(invalidPkField).WithAutoID(autoId)
 			errNonInt64Field := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 			common.CheckErr(t, errNonInt64Field, false, "the data type of primary key should be Int64 or VarChar")
@@ -995,8 +998,8 @@ func TestCreateCollectionInvalid(t *testing.T) {
 	mSchemaErrs := []mSchemaErr{
 		{schema: nil, errMsg: "schema does not contain vector field"},
 		{schema: entity.NewSchema().WithField(vecField), errMsg: "primary key is not specified"}, // no pk field
-		{schema: entity.NewSchema().WithField(vecField).WithField(entity.NewField()), errMsg: "primary key is not specified"},
-		{schema: entity.NewSchema().WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true)), errMsg: "the data type of primary key should be Int64 or VarChar"},
+		{schema: entity.NewSchema().WithField(vecField).WithField(entity.NewField().WithName("f").WithDataType(entity.FieldTypeBool)), errMsg: "primary key is not specified"},
+		{schema: entity.NewSchema().WithField(vecField).WithField(entity.NewField().WithName("pk").WithIsPrimaryKey(true).WithDataType(entity.FieldTypeBool)), errMsg: "the data type of primary key should be Int64 or VarChar"},
 		{schema: entity.NewSchema().WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true).WithDataType(entity.FieldTypeVarChar)), errMsg: "field name should not be empty"},
 	}
 	for _, mSchema := range mSchemaErrs {

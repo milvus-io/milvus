@@ -236,6 +236,13 @@ func newFunctionScoreWithlegacy(collSchema *schemapb.CollectionSchema, rankParam
 				return nil, merr.WrapErrParameterInvalidMsg("the type of rank param k should be float")
 			}
 		}
+		if value, ok := params[WeightsParamsKey]; ok {
+			data, err := json.Marshal(value)
+			if err != nil {
+				return nil, merr.WrapErrParameterInvalidMsg("the weights param should be an array")
+			}
+			fSchema.Params = append(fSchema.Params, &commonpb.KeyValuePair{Key: WeightsParamsKey, Value: string(data)})
+		}
 	case weightedRankType:
 		fSchema.Params = append(fSchema.Params, &commonpb.KeyValuePair{Key: reranker, Value: WeightedName})
 		if v, ok := params[WeightsParamsKey]; ok {

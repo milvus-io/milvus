@@ -376,6 +376,19 @@ func (s *FunctionScoreSuite) TestlegacyFunction() {
 	}
 	{
 		rankParams := []*commonpb.KeyValuePair{
+			{Key: legacyRankTypeKey, Value: "rrf"},
+			{Key: legacyRankParamsKey, Value: `{"k": 30, "weights": [0.8, 0.2]}`},
+		}
+		f, err := NewFunctionScoreWithlegacy(schema, rankParams)
+		s.Require().NoError(err)
+		rrf, ok := f.reranker.(*RRFFunction[int64])
+		s.Require().True(ok)
+		s.Equal(float32(30), rrf.k)
+		s.Equal([]float64{0.8, 0.2}, rrf.weights)
+		s.True(rrf.weightsSet)
+	}
+	{
+		rankParams := []*commonpb.KeyValuePair{
 			{Key: legacyRankTypeKey, Value: "weighted"},
 			{Key: legacyRankParamsKey, Value: `{"weights": [1.0]}`},
 		}

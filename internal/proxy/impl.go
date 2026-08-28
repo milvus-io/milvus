@@ -5899,7 +5899,7 @@ func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMet
 
 	log := log.Ctx(ctx)
 
-	log.Debug("RestoreRBAC", zap.Any("req", req))
+	log.Debug("RestoreRBAC", zap.Any("req", redactRestoreRBACRequestForLog(req)))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}

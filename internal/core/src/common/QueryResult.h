@@ -187,12 +187,15 @@ struct VectorIterator {
     void
     seal() {
         sealed = true;
-        int idx = 0;
-        for (auto& iter : iterators_) {
+        // idx must track the iterator's physical position. A bitset can make
+        // one chunk empty, but Next() still uses this index to refill from
+        // iterators_.
+        for (int idx = 0; idx < static_cast<int>(iterators_.size()); ++idx) {
+            auto& iter = iterators_[idx];
             if (iter->HasNext()) {
                 auto origin_pair = iter->Next();
                 auto off_dis_pair =
-                    std::make_shared<OffsetDisPair>(origin_pair, idx++);
+                    std::make_shared<OffsetDisPair>(origin_pair, idx);
                 heap_.push(off_dis_pair);
             }
         }

@@ -599,51 +599,42 @@ TEST(Sealed, LoadFieldData) {
     auto valid7 = dataset.get_col_valid(int64_nullable_id);
     auto valid8 = dataset.get_col_valid(double_nullable_id);
     auto valid9 = dataset.get_col_valid(str_nullable_id);
-    ASSERT_EQ(chunk_span1.get().valid_data(), nullptr);
-    ASSERT_EQ(chunk_span2.get().valid_data(), nullptr);
-    ASSERT_EQ(chunk_span3.get().second.size(), 0);
+    ASSERT_FALSE(chunk_span1.get().validity());
+    ASSERT_FALSE(chunk_span2.get().validity());
+    ASSERT_FALSE(chunk_span3.get().second);
     for (int i = 0; i < N; ++i) {
-        if (chunk_span1.get().valid_data() == nullptr ||
-            chunk_span1.get().valid_data()[i]) {
+        if (chunk_span1.get().is_valid(i)) {
             ASSERT_EQ(chunk_span1.get().data()[i], ref1[i]);
         }
-        if (chunk_span2.get().valid_data() == nullptr ||
-            chunk_span2.get().valid_data()[i]) {
+        if (chunk_span2.get().is_valid(i)) {
             ASSERT_EQ(chunk_span2.get().data()[i], ref2[i]);
         }
-        if (chunk_span3.get().second.size() == 0 ||
-            chunk_span3.get().second[i]) {
+        if (!chunk_span3.get().second || chunk_span3.get().second[i]) {
             ASSERT_EQ(chunk_span3.get().first[i], ref3[i]);
         }
-        if (chunk_span4.get().valid_data() == nullptr ||
-            chunk_span4.get().valid_data()[i]) {
+        if (chunk_span4.get().is_valid(i)) {
             ASSERT_EQ(chunk_span4.get().data()[i], ref4[i]);
         }
-        if (chunk_span5.get().valid_data() == nullptr ||
-            chunk_span5.get().valid_data()[i]) {
+        if (chunk_span5.get().is_valid(i)) {
             ASSERT_EQ(chunk_span5.get().data()[i], ref5[i]);
         }
-        if (chunk_span6.get().valid_data() == nullptr ||
-            chunk_span6.get().valid_data()[i]) {
+        if (chunk_span6.get().is_valid(i)) {
             ASSERT_EQ(chunk_span6.get().data()[i], ref6[i]);
         }
-        if (chunk_span7.get().valid_data() == nullptr ||
-            chunk_span7.get().valid_data()[i]) {
+        if (chunk_span7.get().is_valid(i)) {
             ASSERT_EQ(chunk_span7.get().data()[i], ref7[i]);
         }
-        if (chunk_span8.get().valid_data() == nullptr ||
-            chunk_span8.get().valid_data()[i]) {
+        if (chunk_span8.get().is_valid(i)) {
             ASSERT_EQ(chunk_span8.get().data()[i], ref8[i]);
         }
-        if (chunk_span9.get().second.size() == 0 ||
-            chunk_span9.get().second[i]) {
+        if (!chunk_span9.get().second || chunk_span9.get().second[i]) {
             ASSERT_EQ(chunk_span9.get().first[i], ref9[i]);
         }
-        ASSERT_EQ(chunk_span4.get().valid_data()[i], valid4[i]);
-        ASSERT_EQ(chunk_span5.get().valid_data()[i], valid5[i]);
-        ASSERT_EQ(chunk_span6.get().valid_data()[i], valid6[i]);
-        ASSERT_EQ(chunk_span7.get().valid_data()[i], valid7[i]);
-        ASSERT_EQ(chunk_span8.get().valid_data()[i], valid8[i]);
+        ASSERT_EQ(chunk_span4.get().is_valid(i), valid4[i]);
+        ASSERT_EQ(chunk_span5.get().is_valid(i), valid5[i]);
+        ASSERT_EQ(chunk_span6.get().is_valid(i), valid6[i]);
+        ASSERT_EQ(chunk_span7.get().is_valid(i), valid7[i]);
+        ASSERT_EQ(chunk_span8.get().is_valid(i), valid8[i]);
         ASSERT_EQ(chunk_span9.get().second[i], valid9[i]);
     }
 
@@ -721,7 +712,7 @@ TEST(Sealed, ClearData) {
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
-    ASSERT_EQ(chunk_span3.get().second.size(), 0);
+    ASSERT_FALSE(chunk_span3.get().second);
     for (int i = 0; i < N; ++i) {
         ASSERT_EQ(chunk_span1.get()[i], ref1[i]);
         ASSERT_EQ(chunk_span2.get()[i], ref2[i]);
@@ -808,7 +799,7 @@ TEST(Sealed, LoadFieldDataMmap) {
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
-    ASSERT_EQ(chunk_span3.get().second.size(), 0);
+    ASSERT_FALSE(chunk_span3.get().second);
     for (int i = 0; i < N; ++i) {
         ASSERT_EQ(chunk_span1.get()[i], ref1[i]);
         ASSERT_EQ(chunk_span2.get()[i], ref2[i]);

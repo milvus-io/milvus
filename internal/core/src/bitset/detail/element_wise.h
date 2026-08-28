@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 
 #include "proxy.h"
@@ -451,10 +452,12 @@ struct ElementWiseBitsetPolicy {
 
         if ((start_src % data_bits) == 0) {
             if ((start_dst % data_bits) == 0) {
-                // plain memcpy
-                for (size_t i = 0; i < size_b; i += data_bits) {
-                    const data_type src_v = src[(start_src + i) / data_bits];
-                    dst[(start_dst + i) / data_bits] = src_v;
+                // op_copy callers provide non-overlapping ranges.
+                const size_t element_count = size_b / data_bits;
+                if (element_count != 0) {
+                    std::memcpy(dst + get_element(start_dst),
+                                src + get_element(start_src),
+                                element_count * sizeof(data_type));
                 }
             } else {
                 // easier read

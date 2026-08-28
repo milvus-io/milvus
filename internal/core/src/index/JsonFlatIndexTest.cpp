@@ -82,7 +82,8 @@ struct ChunkManagerWrapper {
 };
 
 std::unique_ptr<index::JsonFlatIndex>
-BuildInMemoryJsonFlatIndex(const std::vector<std::string>& json_data) {
+BuildInMemoryJsonFlatIndex(const std::vector<std::string>& json_data,
+                           const std::vector<bool>& valid_rows = {}) {
     auto file_manager_ctx = storage::FileManagerContext();
     file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
         milvus::proto::schema::JSON);
@@ -109,9 +110,20 @@ BuildInMemoryJsonFlatIndex(const std::vector<std::string>& json_data) {
     json_field->add_json_data(jsons);
 
     auto* valid_data = json_field->ValidData();
-    std::fill(valid_data,
-              valid_data + json_field->ValidDataSize(),
-              static_cast<uint8_t>(0xFF));
+    if (valid_rows.empty()) {
+        std::fill(valid_data,
+                  valid_data + json_field->ValidDataSize(),
+                  static_cast<uint8_t>(0xFF));
+    } else {
+        std::fill(valid_data,
+                  valid_data + json_field->ValidDataSize(),
+                  static_cast<uint8_t>(0));
+        for (size_t i = 0; i < valid_rows.size(); ++i) {
+            if (valid_rows[i]) {
+                valid_data[i >> 3] |= static_cast<uint8_t>(1U << (i & 7));
+            }
+        }
+    }
 
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
@@ -267,6 +279,7 @@ TEST_F(JsonFlatIndexTest, TestComparableAndFieldValidityMasks) {
     auto json_flat_index =
         dynamic_cast<index::JsonFlatIndex*>(json_index_.get());
     ASSERT_NE(json_flat_index, nullptr);
+    EXPECT_EQ(json_flat_index->ValidityBitmapByteSize(), 0);
 
     std::string json_path = "/profile/name/preferred_name";
     auto comparable_executor =
@@ -290,6 +303,36 @@ TEST_F(JsonFlatIndexTest, TestComparableAndFieldValidityMasks) {
     ASSERT_FALSE(field_null_mask[0]);
     ASSERT_FALSE(field_null_mask[1]);
     ASSERT_FALSE(field_null_mask[2]);
+}
+
+TEST(JsonFlatIndexDirectReader, ExecutorReusesMaterializedFieldValidity) {
+    auto json_index = BuildInMemoryJsonFlatIndex(
+        {R"({"a": "alpha"})", R"({"a": "ignored"})", R"({"a": "beta"})"},
+        {true, false, true});
+    EXPECT_EQ(json_index->ValidityBitmapByteSize(), sizeof(uint64_t));
+    auto byte_size_with_offsets = json_index->ByteSize();
+    json_index->FinalizeSealed(/*release_null_offsets=*/true);
+    EXPECT_LT(json_index->ByteSize(), byte_size_with_offsets);
+
+    std::string path = "/a";
+    auto executor = json_index->create_executor<std::string>(path, false);
+
+    auto valid = executor->IsNotNull();
+    ASSERT_EQ(valid.size(), 3);
+    EXPECT_TRUE(valid[0]);
+    EXPECT_FALSE(valid[1]);
+    EXPECT_TRUE(valid[2]);
+    auto nulls = executor->IsNull();
+    EXPECT_FALSE(nulls[0]);
+    EXPECT_TRUE(nulls[1]);
+    EXPECT_FALSE(nulls[2]);
+
+    std::string excluded = "alpha";
+    auto not_in = executor->NotIn(1, &excluded);
+    ASSERT_EQ(not_in.size(), 3);
+    EXPECT_FALSE(not_in[0]);
+    EXPECT_FALSE(not_in[1]);
+    EXPECT_TRUE(not_in[2]);
 }
 
 TEST_F(JsonFlatIndexTest, TestNotInQuery) {

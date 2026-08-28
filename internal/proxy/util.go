@@ -567,6 +567,8 @@ func validateFieldType(schema *schemapb.CollectionSchema) error {
 		switch field.GetDataType() {
 		case schemapb.DataType_String:
 			return merr.WrapErrParameterInvalidMsg("string data type not supported yet, please use VarChar type instead")
+		case schemapb.DataType_Text:
+			return merr.WrapErrParameterInvalidMsg("text data type is not supported in Milvus 2.6")
 		case schemapb.DataType_None:
 			return merr.WrapErrParameterInvalidMsg("data type None is not valid")
 		case schemapb.DataType_Array:
@@ -611,6 +613,10 @@ func ValidateFieldAutoID(coll *schemapb.CollectionSchema) error {
 }
 
 func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchema) error {
+	if field.GetDataType() == schemapb.DataType_Text {
+		return merr.WrapErrParameterInvalidMsg("text data type is not supported in Milvus 2.6")
+	}
+
 	// validate field name
 	var err error
 	if err := validateFieldName(field.Name); err != nil {
@@ -1515,11 +1521,10 @@ func PasswordVerify(ctx context.Context, username, rawPwd string) bool {
 }
 
 func VerifyAPIKey(rawToken string) (string, error) {
-	hoo := hookutil.GetHook()
-	user, err := hoo.VerifyAPIKey(rawToken)
+	user, err := hookutil.GetHook().VerifyAPIKey(rawToken)
 	if err != nil {
-		log.Warn("fail to verify apikey", zap.String("api_key", rawToken), zap.Error(err))
-		return "", merr.WrapErrParameterInvalidMsg("invalid apikey: [%s]", rawToken)
+		log.Warn("fail to verify apikey with hook", zap.Error(err))
+		return "", merr.WrapErrParameterInvalidMsg("invalid API key")
 	}
 	return user, nil
 }
@@ -1548,7 +1553,7 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 
 	// update cache after miss cache
 	credInfo.Sha256Password = sha256Pwd
-	log.Ctx(ctx).Debug("get credential miss cache, update cache with", zap.Any("credential", credInfo))
+	log.Ctx(ctx).Debug("credential cache populated")
 	privilegeCache.UpdateCredential(credInfo)
 	return true
 }
@@ -1566,18 +1571,22 @@ func translatePkOutputFields(schema *schemapb.CollectionSchema) ([]string, []int
 }
 
 func recallCal[T string | int64](results []T, gts []T) float32 {
+	if len(results) == 0 {
+		return 0
+	}
+
+	gtSet := make(map[T]struct{}, len(gts))
+	for _, gt := range gts {
+		gtSet[gt] = struct{}{}
+	}
+
 	hit := 0
-	total := 0
 	for _, r := range results {
-		total++
-		for _, gt := range gts {
-			if r == gt {
-				hit++
-				break
-			}
+		if _, ok := gtSet[r]; ok {
+			hit++
 		}
 	}
-	return float32(hit) / float32(total)
+	return float32(hit) / float32(len(results))
 }
 
 func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResultData) error {
