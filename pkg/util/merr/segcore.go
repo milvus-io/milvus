@@ -56,6 +56,21 @@ type segcoreClass struct {
 	retriable bool
 }
 
+// segcoreErrorCode preserves the exact C++ ErrorCode without changing the
+// client-visible merr code projected by the wrapped sentinel.
+type segcoreErrorCode struct {
+	code int32
+	err  error
+}
+
+func (e *segcoreErrorCode) Error() string {
+	return e.err.Error()
+}
+
+func (e *segcoreErrorCode) Unwrap() error {
+	return e.err
+}
+
 // segcoreCodeTable is the registry of known C++ segcore error codes. Codes
 // absent here fall back to ErrSegcore (see classifySegcoreError).
 //
@@ -179,7 +194,15 @@ func classifySegcoreError(code int32, msg string) error {
 	if msg != "" {
 		err = errors.Wrap(err, msg)
 	}
-	return err
+	return &segcoreErrorCode{code: code, err: err}
+}
+
+// IsSegcoreDataFormatBroken reports whether err originated from the C++
+// DataFormatBroken (2024) error. The exact identity is intentionally separate
+// from the client-visible merr code, which remains ErrSegcore for compatibility.
+func IsSegcoreDataFormatBroken(err error) bool {
+	var segcoreErr *segcoreErrorCode
+	return errors.As(err, &segcoreErr) && segcoreErr.code == 2024
 }
 
 // IsSegcoreSignal reports whether a segcore error code is a control-flow signal
