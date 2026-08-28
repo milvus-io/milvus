@@ -164,6 +164,11 @@ set_target_properties(all_tests PROPERTIES
 
 install(TARGETS all_tests DESTINATION unittest)
 
+if (BUILD_UNIT_TEST STREQUAL "ON" AND MILVUS_ENABLE_PY_UDF)
+    target_sources(all_tests PRIVATE pyudf_runtime_cpython_test.cpp)
+    target_link_libraries(all_tests Python3::Python)
+endif()
+
 add_subdirectory(test_json_stats)
 
 # bitset unit test

@@ -273,7 +273,7 @@ func TestProtoOpToReprDerivesInputsFromExprArgs(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotNil(t, repr)
-	assert.Equal(t, []string{"$score", "tag"}, repr.Inputs)
+	assert.Equal(t, []string{"$score", "tag", "$score"}, repr.Inputs)
 	assert.Equal(t, []string{"new_score"}, repr.Outputs)
 	require.NotNil(t, repr.Function)
 	assert.Equal(t, "expr", repr.Function.Name)
@@ -359,6 +359,32 @@ func TestRefreshInfoUsesExplicitDependencies(t *testing.T) {
 			assert.Equal(t, test.wantAllWritten, repr.Info.WrittenNames)
 		})
 	}
+}
+
+func TestProtoChainToReprPreservesDuplicateOpInputsAndDeduplicatesRequiredInputs(t *testing.T) {
+	repr, err := ProtoChainToRepr(&schemapb.FunctionChain{
+		Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+		Ops: []*schemapb.FunctionChainOp{
+			{
+				Op: types.OpTypeMap,
+				Expr: &schemapb.FunctionChainExpr{
+					Name: "expr",
+					Args: []*schemapb.FunctionChainExprArg{
+						columnArg("a"),
+						columnArg("a"),
+						columnArg("b"),
+					},
+				},
+				Outputs: []string{"result"},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, repr)
+	require.Len(t, repr.Operators, 1)
+	assert.Equal(t, []string{"a", "a", "b"}, repr.Operators[0].Inputs)
+	assert.Equal(t, []string{"a", "a", "b"}, repr.Info.Ops[0].ReadNames)
+	assert.Equal(t, []string{"a", "b"}, repr.Info.RequiredInputs)
 }
 
 func TestProtoStageToReprStage(t *testing.T) {
@@ -514,7 +540,9 @@ func TestFuncChainFromReprWithContextPassesBuildContext(t *testing.T) {
 		},
 	}
 
-	chain, err := FuncChainFromReprWithContext(repr, memory.NewGoAllocator(), types.FunctionBuildContext{ModelExtraInfo: extraInfo})
+	chain, err := FuncChainFromReprWithContext(repr, memory.NewGoAllocator(), types.FunctionBuildContext{
+		ModelExtraInfo: extraInfo,
+	})
 	require.NoError(t, err)
 	require.NotNil(t, chain)
 	assert.True(t, called)

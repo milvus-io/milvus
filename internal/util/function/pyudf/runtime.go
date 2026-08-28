@@ -1,0 +1,55 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package pyudf
+
+import (
+	"context"
+	"strings"
+
+	"github.com/apache/arrow/go/v17/arrow"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+)
+
+// Runtime acquires a loaded PyUDF resource for one expression execution.
+type Runtime interface {
+	Acquire(ctx context.Context, resourceName, stage string) (Lease, error)
+}
+
+// Lease owns one acquired PyUDF resource reference.
+type Lease interface {
+	Run(ctx context.Context, params *schemapb.FunctionParamObject, inputs []*arrow.Chunked) ([]*arrow.Chunked, error)
+	Release()
+}
+
+type unavailableRuntime struct {
+	reason string
+}
+
+// NewUnavailableRuntime creates a runtime that returns a clear unavailable error on acquisition.
+func NewUnavailableRuntime(reason string) Runtime {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "embedded PyUDF runtime is unavailable"
+	}
+	return &unavailableRuntime{reason: reason}
+}
+
+func (r *unavailableRuntime) Acquire(context.Context, string, string) (Lease, error) {
+	return nil, merr.WrapErrServiceInternalMsg("py_udf: runtime is unavailable: %s", r.reason)
+}

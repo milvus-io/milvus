@@ -10,6 +10,8 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 GO		  ?= go
+PYTHON	  ?= python3
+RUFF	  ?= ruff
 PWD 	  := $(shell pwd)
 GOPATH	:= $(shell $(GO) env GOPATH)
 SHELL 	:= /bin/bash
@@ -112,7 +114,12 @@ ifeq (${ENABLE_AZURE}, false)
 	AZURE_OPTION := -Z
 endif
 
-milvus: build-cpp print-build-info build-go
+PYUDF_RUNTIME_BUILD_TARGET := build-pyudf-runtime-wheel
+ifeq ($(ENABLE_PY_UDF),OFF)
+	PYUDF_RUNTIME_BUILD_TARGET :=
+endif
+
+milvus: build-cpp print-build-info build-go $(PYUDF_RUNTIME_BUILD_TARGET)
 
 build-go:
 	@echo "Building Milvus ..."
@@ -328,6 +335,80 @@ generate-message-codegen:
 # Run the tests.
 unittest: test-cpp test-go
 
+PYUDF_RUNTIME_PYTHON_DIR := $(PWD)/internal/core/src/pyudf/python
+PYUDF_RUNTIME_WHEEL_DIR := $(PWD)/cmake_build/runtime/pyudf/wheels
+
+check-pyudf-python:
+	@command -v $(RUFF) >/dev/null 2>&1 || { echo "ERROR: ruff is required; install ruff or set RUFF=/path/to/ruff" >&2; exit 1; }
+	@echo "Checking trusted PyUDF runtime Python code ..."
+	@$(RUFF) check --config $(PYUDF_RUNTIME_PYTHON_DIR)/pyproject.toml $(PYUDF_RUNTIME_PYTHON_DIR)
+	@$(RUFF) format --check --config $(PYUDF_RUNTIME_PYTHON_DIR)/pyproject.toml $(PYUDF_RUNTIME_PYTHON_DIR)
+
+format-pyudf-python:
+	@command -v $(RUFF) >/dev/null 2>&1 || { echo "ERROR: ruff is required; install ruff or set RUFF=/path/to/ruff" >&2; exit 1; }
+	@echo "Formatting trusted PyUDF runtime Python code ..."
+	@$(RUFF) check --fix --config $(PYUDF_RUNTIME_PYTHON_DIR)/pyproject.toml $(PYUDF_RUNTIME_PYTHON_DIR)
+	@$(RUFF) format --config $(PYUDF_RUNTIME_PYTHON_DIR)/pyproject.toml $(PYUDF_RUNTIME_PYTHON_DIR)
+
+build-pyudf-runtime-wheel:
+	@echo "Building trusted PyUDF runtime wheel ..."
+	@rm -rf $(PYUDF_RUNTIME_WHEEL_DIR) \
+		$(PYUDF_RUNTIME_PYTHON_DIR)/build \
+		$(PYUDF_RUNTIME_PYTHON_DIR)/*.egg-info
+	@mkdir -p $(PYUDF_RUNTIME_WHEEL_DIR)
+	@$(PYTHON) -c 'import setuptools, wheel; major = int(setuptools.__version__.split(".", 1)[0]); assert major >= 61, "setuptools>=61 is required, found " + setuptools.__version__'
+	@$(PYTHON) -m pip wheel \
+		--disable-pip-version-check \
+		--no-index \
+		--no-build-isolation \
+		--no-deps \
+		--wheel-dir $(PYUDF_RUNTIME_WHEEL_DIR) \
+		$(PYUDF_RUNTIME_PYTHON_DIR)
+	@rm -rf $(PYUDF_RUNTIME_PYTHON_DIR)/build \
+		$(PYUDF_RUNTIME_PYTHON_DIR)/*.egg-info
+
+# This explicitly modifies the selected Python environment. Set PYTHON to the
+# exact Python3_EXECUTABLE used by CMake before running this target.
+install-pyudf-runtime-wheel: build-pyudf-runtime-wheel
+	@echo "Installing trusted PyUDF runtime wheel into $(PYTHON) ..."
+	@set -e; \
+		set -- $(PYUDF_RUNTIME_WHEEL_DIR)/milvus_pyudf_runtime-*.whl; \
+		count=$$#; \
+		[ -f "$$1" ] || count=0; \
+		if [ "$$count" -ne 1 ]; then \
+			echo "ERROR: expected exactly one PyUDF runtime wheel, found $$count" >&2; \
+			exit 1; \
+		fi; \
+		PIP_USER=0 PYTHONNOUSERSITE=1 \
+			$(PYTHON) -m pip install --disable-pip-version-check "$$1"; \
+		PIP_USER=0 PYTHONNOUSERSITE=1 \
+			$(PYTHON) -m pip install --disable-pip-version-check \
+				--no-deps --force-reinstall "$$1"; \
+		$(PYTHON) -I -c 'import milvus_pyudf_runtime, pyarrow; print("Verified trusted PyUDF runtime:", milvus_pyudf_runtime.__file__); print("Verified pyarrow:", pyarrow.__file__)'
+
+# This installs only into a temporary directory and does not modify the selected
+# Python environment. Native embedded-runtime tests still require installing the
+# wheel into the exact Python distribution selected by CMake.
+test-pyudf-runtime-wheel: build-pyudf-runtime-wheel
+	@echo "Testing trusted PyUDF runtime source and wheel ..."
+	@$(PYTHON) -m unittest discover -s $(PYUDF_RUNTIME_PYTHON_DIR)/tests -p 'test_*.py'
+	@rm -rf $(PYUDF_RUNTIME_WHEEL_DIR)/site-packages
+	@set -- $(PYUDF_RUNTIME_WHEEL_DIR)/milvus_pyudf_runtime-*.whl; \
+		count=$$#; \
+		[ -f "$$1" ] || count=0; \
+		if [ "$$count" -ne 1 ]; then \
+			echo "ERROR: expected exactly one PyUDF runtime wheel, found $$count" >&2; \
+			exit 1; \
+		fi; \
+		$(PYTHON) -m pip install \
+			--disable-pip-version-check \
+			--no-index \
+			--no-deps \
+			--target $(PYUDF_RUNTIME_WHEEL_DIR)/site-packages \
+			"$$1"; \
+		$(PYTHON) -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import milvus_pyudf_runtime; assert callable(milvus_pyudf_runtime.load_instance); assert callable(milvus_pyudf_runtime.close_instance); assert callable(milvus_pyudf_runtime.import_array); assert callable(milvus_pyudf_runtime.make_chunked_array); assert callable(milvus_pyudf_runtime.export_array); assert callable(milvus_pyudf_runtime.freeze_params); assert callable(milvus_pyudf_runtime.run_transform_query)' \
+			$(PYUDF_RUNTIME_WHEEL_DIR)/site-packages
+
 test-util:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t util)
@@ -439,12 +520,12 @@ codecov-cpp: build-cpp-with-coverage
 	@(env bash $(PWD)/scripts/run_cpp_codecov.sh)
 
 # Build each component and install binary to $GOPATH/bin.
-install: milvus
+install: milvus $(PYUDF_RUNTIME_BUILD_TARGET)
 	@echo "Installing binary to './bin'"
 	@(env GOPATH=$(GOPATH) LIBRARY_PATH=$(LIBRARY_PATH) bash $(PWD)/scripts/install_milvus.sh)
 	@echo "Installation successful."
 
-gpu-install: milvus-gpu
+gpu-install: milvus-gpu $(PYUDF_RUNTIME_BUILD_TARGET)
 	@echo "Installing binary to './bin'"
 	@(env GOPATH=$(GOPATH) LIBRARY_PATH=$(LIBRARY_PATH) bash $(PWD)/scripts/install_milvus.sh)
 	@echo "Installation successful."

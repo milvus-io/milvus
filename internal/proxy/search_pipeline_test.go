@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/arrow/memory/mallocator"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -117,6 +118,17 @@ func (s *SearchPipelineSuite) TestBuildMergeChainFromFunctionChainRerankMeta() {
 	)
 	s.Require().NoError(err)
 	s.NotNil(fc)
+}
+
+func (s *SearchPipelineSuite) TestNewRerankAllocator() {
+	alloc := newRerankAllocator()
+	cBackedAlloc, ok := alloc.(*mallocator.Mallocator)
+	s.Require().True(ok)
+	s.NotSame(memory.DefaultAllocator, alloc)
+
+	buf := alloc.Allocate(8)
+	alloc.Free(buf)
+	s.Zero(cBackedAlloc.AllocatedBytes())
 }
 
 func (s *SearchPipelineSuite) TestSerializeBucketKeyPreservesRequestedOrder() {
