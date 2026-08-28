@@ -25,25 +25,28 @@ def assert_profile_equal(actual, expected):
 class TestRestfulStructArrayNullable(TestBase):
     dim = REST_VECTOR_DIM
 
-    def _create_struct_array_collection(self, name: str, struct_nullable: bool | None = None):
-        struct_field = {
-            "fieldName": "profile",
-            "typeParams": {"max_capacity": "4"},
-            "fields": [
-                {
-                    "fieldName": "p_int",
-                    "dataType": "Array",
-                    "elementDataType": "Int64",
-                    "elementTypeParams": {"max_capacity": "4"},
-                },
-                {
-                    "fieldName": "p_tag",
-                    "dataType": "Array",
-                    "elementDataType": "VarChar",
-                    "elementTypeParams": {"max_capacity": "4", "max_length": "128"},
-                },
-            ],
-        }
+    def _create_struct_array_collection(
+        self, name: str, struct_nullable: bool | None = None, struct_field: dict | None = None
+    ):
+        if struct_field is None:
+            struct_field = {
+                "fieldName": "profile",
+                "typeParams": {"max_capacity": "4"},
+                "fields": [
+                    {
+                        "fieldName": "p_int",
+                        "dataType": "Array",
+                        "elementDataType": "Int64",
+                        "elementTypeParams": {"max_capacity": "4"},
+                    },
+                    {
+                        "fieldName": "p_tag",
+                        "dataType": "Array",
+                        "elementDataType": "VarChar",
+                        "elementTypeParams": {"max_capacity": "4", "max_length": "128"},
+                    },
+                ],
+            }
         if struct_nullable is not None:
             struct_field["nullable"] = struct_nullable
 
@@ -322,7 +325,7 @@ class TestRestfulStructArrayNullable(TestBase):
         """
         target: test REST v2 nullable propagation for Struct Array
         method: create schema.structFields with nullable=true and inspect REST describe output
-        expected: REST either preserves nullable=true on Struct Array in describe output, or rejects unsupported nullable explicitly
+        expected: REST preserves nullable=true on the parent and hides the stored nullable flags on sub-fields
         """
         name = gen_collection_name()
         self.name = name
@@ -332,3 +335,48 @@ class TestRestfulStructArrayNullable(TestBase):
         assert rsp["code"] == 0
         profile = next(field for field in rsp["data"].get("structFields", []) if field["name"] == "profile")
         assert profile["nullable"] is True
+        assert all(sub_field["nullable"] is False for sub_field in profile["fields"])
+
+    def test_rest_v2_nullable_struct_array_schema_describe_create_round_trip(self):
+        """
+        target: test REST v2 nullable Struct Array schema round trip
+        method: create a nullable Struct Array, describe it, map the response back to create format,
+            and create another collection
+        expected: nullable remains on the parent and the described schema can be reused successfully
+        """
+        source_name = gen_collection_name()
+        self.name = source_name
+        self._create_struct_array_collection(source_name, struct_nullable=True)
+
+        rsp = self.collection_client.collection_describe(source_name)
+        assert rsp["code"] == 0
+        profile = next(field for field in rsp["data"].get("structFields", []) if field["name"] == "profile")
+        assert profile["nullable"] is True
+        assert all(sub_field["nullable"] is False for sub_field in profile["fields"])
+
+        replayed_struct_field = {
+            "fieldName": profile["name"],
+            "description": profile.get("description", ""),
+            "nullable": profile["nullable"],
+            "typeParams": {param["key"]: param["value"] for param in profile.get("params", [])},
+            "fields": [
+                {
+                    "fieldName": sub_field["name"],
+                    "description": sub_field.get("description", ""),
+                    "dataType": sub_field["type"],
+                    "elementDataType": sub_field["elementType"],
+                    "elementTypeParams": {param["key"]: param["value"] for param in sub_field.get("params", [])},
+                    "nullable": sub_field["nullable"],
+                }
+                for sub_field in profile["fields"]
+            ],
+        }
+
+        replayed_name = gen_collection_name()
+        self._create_struct_array_collection(replayed_name, struct_field=replayed_struct_field)
+
+        rsp = self.collection_client.collection_describe(replayed_name)
+        assert rsp["code"] == 0
+        replayed_profile = next(field for field in rsp["data"].get("structFields", []) if field["name"] == "profile")
+        assert replayed_profile["nullable"] is True
+        assert all(sub_field["nullable"] is False for sub_field in replayed_profile["fields"])
