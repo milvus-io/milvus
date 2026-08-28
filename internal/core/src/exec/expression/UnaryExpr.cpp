@@ -2508,3 +2508,5 @@ PhyUnaryRangeFilterExpr::PrefetchRawData() {
 
 }  // namespace exec
 }  // namespace milvus
+
+#undef UnaryRangeJSONCompare
