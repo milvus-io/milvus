@@ -115,6 +115,20 @@ const maxDecayValue = 0.999
 // Note: Column mapping (which columns to use as input/output) is handled by MapOp,
 // not by the function itself.
 func NewDecayExpr(function string, origin, scale, offset, decay float64) (*DecayExpr, error) {
+	for _, param := range []struct {
+		name  string
+		value float64
+	}{
+		{"origin", origin},
+		{"scale", scale},
+		{"offset", offset},
+		{"decay", decay},
+	} {
+		if math.IsNaN(param.value) || math.IsInf(param.value, 0) {
+			return nil, merr.WrapErrParameterInvalidMsg("decay: %s must be finite, got %v", param.name, param.value)
+		}
+	}
+
 	if scale <= 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("decay: scale must be > 0, got %f", scale)
 	}

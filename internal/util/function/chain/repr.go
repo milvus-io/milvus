@@ -159,7 +159,7 @@ func ProtoOpToRepr(pb *schemapb.FunctionChainOp) (*OperatorRepr, error) {
 }
 
 // ProtoExprToRepr converts a public FunctionChainExpr proto to the internal function representation.
-// It also returns the column references in expr args, preserving occurrence order.
+// It also returns the column references in expr args, preserving their order and duplicates.
 func ProtoExprToRepr(pb *schemapb.FunctionChainExpr) (*FunctionRepr, []string, error) {
 	if pb == nil {
 		return nil, nil, nil
@@ -182,7 +182,9 @@ func ProtoExprToRepr(pb *schemapb.FunctionChainExpr) (*FunctionRepr, []string, e
 	}, inputs, nil
 }
 
-// ProtoExprArgsToInputs extracts column references from public FunctionChainExpr args.
+// ProtoExprArgsToInputs extracts column references from public FunctionChainExpr args,
+// preserving their positional order and duplicates. Dependency planning deduplicates
+// required inputs separately in ChainRepr.RefreshInfo.
 func ProtoExprArgsToInputs(args []*schemapb.FunctionChainExprArg) ([]string, error) {
 	inputs := make([]string, 0, len(args))
 

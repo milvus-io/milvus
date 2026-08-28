@@ -24,6 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	dcsession "github.com/milvus-io/milvus/internal/datacoord/session"
@@ -180,6 +181,47 @@ func (s *FileResourceObserverSuite) TestStartStop() {
 		}
 
 		observer.Start()
+		observer.Stop()
+	})
+
+	s.Run("start_with_proxy_sync_mode", func() {
+		resources := []*internalpb.FileResourceInfo{{Name: "test"}}
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().HasFileResource(mock.Anything).Return(true).Once()
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(resources, uint64(2)).Once()
+
+		proxyManager := proxyutil.NewProxyClientManager(nil)
+		proxyClient := mocks.NewMockProxyClient(s.T())
+		proxyClient.EXPECT().SyncFileResource(mock.Anything, mock.Anything).
+			Run(func(_ context.Context, req *internalpb.SyncFileResourceRequest, _ ...grpc.CallOption) {
+				s.Equal(uint64(2), req.GetVersion())
+				s.Equal(resources, req.GetResources())
+			}).
+			Return(merr.Success(), nil).Once()
+		proxyManager.GetProxyClients().Insert(200, proxyClient)
+
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			notifyCh:     make(chan struct{}, 1),
+			closeCh:      make(chan struct{}),
+			qnMode:       fileresource.CloseMode,
+			dnMode:       fileresource.CloseMode,
+			proxyMode:    fileresource.SyncMode,
+			proxyManager: proxyManager,
+			meta:         mockMeta,
+		}
+		s.T().Cleanup(observer.Stop)
+
+		observer.Start()
+		observer.Start()
+		// The distribution is updated after the sync RPC returns.
+		s.Require().Eventually(func() bool {
+			info, ok := observer.distribution.Get(200)
+			return ok && info.NodeType == Proxy && info.Version == 2
+		}, time.Second, 10*time.Millisecond)
+
+		observer.Stop()
 		observer.Stop()
 	})
 }
@@ -663,6 +705,59 @@ func (s *FileResourceObserverSuite) TestSync() {
 		s.ErrorIs(observer.Sync(), merr.ErrServiceUnavailable)
 		_, ok := observer.distribution.Get(200)
 		s.False(ok)
+	})
+
+	s.Run("sync_proxy_rpc_error", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{Name: "test"}}, uint64(2))
+
+		expectedErr := errors.New("proxy rpc error")
+		proxyManager := proxyutil.NewProxyClientManager(nil)
+		proxyClient := mocks.NewMockProxyClient(s.T())
+		proxyClient.EXPECT().SyncFileResource(mock.Anything, mock.Anything).Return(nil, expectedErr)
+		proxyManager.GetProxyClients().Insert(200, proxyClient)
+
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			qnMode:       fileresource.CloseMode,
+			dnMode:       fileresource.CloseMode,
+			proxyMode:    fileresource.SyncMode,
+			proxyManager: proxyManager,
+		}
+
+		s.ErrorIs(observer.Sync(), expectedErr)
+		_, ok := observer.distribution.Get(200)
+		s.False(ok)
+	})
+
+	s.Run("sync_proxy_unimplemented_is_compatible", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{Name: "test"}}, uint64(2))
+
+		proxyManager := proxyutil.NewProxyClientManager(nil)
+		proxyClient := mocks.NewMockProxyClient(s.T())
+		proxyClient.EXPECT().SyncFileResource(mock.Anything, mock.Anything).
+			Return(nil, merr.WrapErrServiceUnimplemented(errors.New("SyncFileResource is not implemented")))
+		proxyManager.GetProxyClients().Insert(200, proxyClient)
+
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			qnMode:       fileresource.CloseMode,
+			dnMode:       fileresource.CloseMode,
+			proxyMode:    fileresource.SyncMode,
+			proxyManager: proxyManager,
+		}
+
+		s.NoError(observer.Sync())
+		info, ok := observer.distribution.Get(200)
+		s.True(ok)
+		s.Equal(int64(200), info.NodeID)
+		s.Equal(Proxy, info.NodeType)
+		s.Equal(uint64(2), info.Version)
 	})
 
 	s.Run("skip_synced_proxy", func() {

@@ -29,9 +29,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func init() {
-	MustRegisterOperator(types.OpTypeFilter, NewFilterOpFromReprWithContext)
-}
+// FilterOp is temporarily unavailable in user-submitted function chains:
+// Execute currently masks function error codes, including PyUDF errors.
+// Keep registration disabled until error propagation is fixed and verified.
+// func init() {
+// 	MustRegisterOperator(types.OpTypeFilter, NewFilterOpFromReprWithContext)
+// }
 
 // FilterOp filters the DataFrame based on the boolean result of a FunctionExpr.
 // The FunctionExpr must return exactly one boolean column.
