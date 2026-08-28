@@ -181,6 +181,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := InitExternalVectorNullPolicy(paramtable.Get()); err != nil {
+		return err
+	}
 
 	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, nodeID)
 

@@ -312,11 +312,12 @@ type commonConfig struct {
 	UseLoonFFI                           ParamItem `refreshable:"true"`
 	EnableGrowingSourceFlush             ParamItem `refreshable:"false"`
 
-	StoragePathPrefix        ParamItem `refreshable:"false"`
-	StorageZstdConcurrency   ParamItem `refreshable:"false"`
-	StorageReadRetryAttempts ParamItem `refreshable:"true"`
-	StorageIopsInitialRate   ParamItem `refreshable:"false"`
-	StorageIopsMaxRate       ParamItem `refreshable:"false"`
+	StoragePathPrefix               ParamItem `refreshable:"false"`
+	StorageZstdConcurrency          ParamItem `refreshable:"false"`
+	StorageReadRetryAttempts        ParamItem `refreshable:"true"`
+	StorageIopsInitialRate          ParamItem `refreshable:"false"`
+	StorageIopsMaxRate              ParamItem `refreshable:"false"`
+	ExternalVectorPartialNullPolicy ParamItem `refreshable:"false"`
 
 	TraceLogMode              ParamItem `refreshable:"true"`
 	BloomFilterEnabled        ParamItem `refreshable:"false"`
@@ -1236,6 +1237,17 @@ The default value is 1, which is enough for most cases.`,
 		Export:       false,
 	}
 	p.StorageReadRetryAttempts.Init(base.mgr)
+
+	p.ExternalVectorPartialNullPolicy = ParamItem{
+		Key:          "common.storage.externalVector.partialNullPolicy",
+		Version:      "3.0.1",
+		DefaultValue: "error",
+		Doc: `Policy for parent-valid external dense-vector rows containing a mix of valid and null child elements.
+Options: error, null. error rejects the row as malformed input; null promotes the whole row to a row-level null when the field is nullable.
+Rows whose child elements are all null are always promoted to row-level null for nullable fields, regardless of this setting.`,
+		Export: false,
+	}
+	p.ExternalVectorPartialNullPolicy.Init(base.mgr)
 
 	p.StorageIopsInitialRate = ParamItem{
 		Key:          "common.storage.iops.initialRate",
