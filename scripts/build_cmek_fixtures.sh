@@ -25,7 +25,9 @@ cpp_build_dir="$repo_root/cmake_build/cmek-fixtures"
 go_command=${GO:-go}
 build_jobs=${jobs:-2}
 
-mkdir -p "$output_dir" "$cpp_build_dir"
+mkdir -p "$output_dir"
+output_dir=$(cd -- "$output_dir" && pwd)
+mkdir -p "$cpp_build_dir"
 cd "$repo_root"
 
 "$go_command" build \
