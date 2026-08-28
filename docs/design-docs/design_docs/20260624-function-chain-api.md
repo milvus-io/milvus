@@ -20,6 +20,8 @@ Ordinary `SearchRequest` supports three rerank stages at distinct execution boun
 - Final `$score` is serialized through the existing search score/distance field.
 - Intermediate variables, internally fetched fields, and internal provenance columns are not returned unless requested through normal search output projection.
 
+The native XGBoost L0 expression and its execution constraints are described in [XGBoost FunctionChain Expression Design](20260708-xgboost-function-chain.md). The embedded Python L2 expression and its Production Runtime boundary are described in [PyUDF FunctionChain Expression](20260722-pyudf-function-chain.md).
+
 ## Motivation
 
 Milvus already has legacy rerank entry points such as `function_score` and ranker parameters. They are useful for predefined scoring formulas, but they do not provide a general ordered plan for composing multiple rerank steps.
@@ -581,6 +583,14 @@ The chain builder dispatches by rerank metadata type:
 - legacy function score -> existing function-score chain builder;
 - legacy rank params -> existing legacy rank builder;
 - public function chain -> `FuncChainFromRepr` / `FuncChainFromReprWithContext`.
+
+### QueryNode L0 execution and Arrow allocation
+
+QueryNode executes an L0 chain independently for each segment before Go heap reduction. It builds a fresh `FuncChain` for each segment so mutable operator or expression state is not shared by concurrent segment execution.
+
+Arrow buffers allocated by QueryNode L0 chain operators through `FuncContext.Pool()` use Arrow Go's libc-backed `mallocator`. This includes intermediate buffers produced by Go expressions before a later native expression exports them through the Arrow C Data Interface. The allocator itself has no `Close` operation; normal Arrow array, chunked-array, and DataFrame release chains return the underlying buffers to libc.
+
+This allocator policy applies to public L0 chains and the operators in the internally generated boost-score chain. It does not replace allocators owned by native helpers or imported arrays; for example, a boost-score runner may return an array with its own allocator. Go-only heap reduction also retains its existing allocator, and imported segment DataFrames retain the ownership supplied by the C++ Arrow exporter.
 
 ### Tail behavior
 

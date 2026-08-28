@@ -55,6 +55,8 @@ type functionConfig struct {
 	//     takes effect after a MixCoord restart. Operators can still intervene
 	//     at any time by setting "true" or "false" explicitly.
 	EnableWriteBeforeMaterialization ParamItem `refreshable:"true"`
+
+	PyUDFEnabled ParamItem `refreshable:"false"`
 }
 
 func (p *functionConfig) init(base *BaseTable) {
@@ -255,6 +257,15 @@ func (p *functionConfig) init(base *BaseTable) {
 		},
 	}
 	p.EnableWriteBeforeMaterialization.Init(base.mgr)
+
+	p.PyUDFEnabled = ParamItem{
+		Key:          "function.pyUDF.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Export:       true,
+		Doc:          "Whether to enable the embedded PyUDF runtime in processes that use PyUDF. Enabling it on Proxy also requires common.fileResource.mode.proxy: sync. Restart is required after changing this value.",
+	}
+	p.PyUDFEnabled.Init(base.mgr)
 }
 
 func (p *functionConfig) GetTextEmbeddingProviderConfig(providerName string) map[string]string {

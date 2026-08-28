@@ -21,6 +21,7 @@ set -e
 
 BASEDIR=$(dirname "$0")
 source $BASEDIR/setenv.sh
+$BASEDIR/prepare_pyudf_test_runtime.sh
 
 if [[ $(uname -s) == "Darwin" ]]; then
     export MallocNanoZone=0

@@ -25,6 +25,33 @@ cp $PWD"/internal/core/output/lib/"*.so* "$LIBRARY_PATH" || true
 cp $PWD"/internal/core/output/lib64/"*.so* "$LIBRARY_PATH" 2>/dev/null || true
 cp -r $PWD"/internal/core/output/lib/ossl-modules" "$LIBRARY_PATH" 2>/dev/null || true
 
+CMAKE_CACHE="$PWD/cmake_build/CMakeCache.txt"
+if [[ ! -f "$CMAKE_CACHE" ]]; then
+    echo "ERROR: CMake cache not found: $CMAKE_CACHE" >&2
+    exit 1
+fi
+
+PYUDF_ENABLED="$(grep -m1 '^MILVUS_ENABLE_PY_UDF:BOOL=' "$CMAKE_CACHE" | cut -d= -f2- || true)"
+if [[ "$PYUDF_ENABLED" == "ON" ]]; then
+    PYUDF_WHEEL_DIR="$PWD/cmake_build/runtime/pyudf/wheels"
+    PYUDF_RUNTIME_DIR="$LIBRARY_PATH/pyudf"
+    shopt -s nullglob
+    PYUDF_WHEELS=("$PYUDF_WHEEL_DIR"/milvus_pyudf_runtime-*.whl)
+    shopt -u nullglob
+    if [[ ${#PYUDF_WHEELS[@]} -ne 1 ]]; then
+        echo "ERROR: expected exactly one PyUDF runtime wheel, found ${#PYUDF_WHEELS[@]}" >&2
+        exit 1
+    fi
+    rm -rf "$PYUDF_RUNTIME_DIR"
+    mkdir -p "$PYUDF_RUNTIME_DIR"
+    cp "${PYUDF_WHEELS[0]}" "$PYUDF_RUNTIME_DIR/"
+elif [[ "$PYUDF_ENABLED" == "OFF" ]]; then
+    echo "PyUDF native backend is disabled; skipping runtime wheel packaging"
+else
+    echo "ERROR: invalid MILVUS_ENABLE_PY_UDF value in $CMAKE_CACHE: $PYUDF_ENABLED" >&2
+    exit 1
+fi
+
 for LIB_PATH in $(ldd ./bin/milvus | grep -E '(asan|atomic)' | awk '{print $3}'); do
     cp "$LIB_PATH" "$LIBRARY_PATH" 2>/dev/null
 done

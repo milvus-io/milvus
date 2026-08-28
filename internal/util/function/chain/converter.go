@@ -21,6 +21,7 @@ package chain
 import (
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -176,6 +177,23 @@ func exportChunkedValues[T any, A valueAccessor[T]](col *arrow.Chunked, colName 
 		}
 		for j := 0; j < chunk.Len(); j++ {
 			data = append(data, chunk.Value(j))
+		}
+	}
+	return data, nil
+}
+
+// exportChunkedStrings copies Arrow string values into Go-owned storage.
+// array.String.Value returns a zero-copy view into the Arrow value buffer,
+// which may be backed by C memory and freed when the DataFrame is released.
+func exportChunkedStrings(col *arrow.Chunked, colName string) ([]string, error) {
+	data := make([]string, 0, col.Len())
+	for i := 0; i < len(col.Chunks()); i++ {
+		chunk, ok := col.Chunk(i).(*array.String)
+		if !ok {
+			return nil, merr.WrapErrServiceInternalMsg("column %s chunk %d type mismatch", colName, i)
+		}
+		for j := 0; j < chunk.Len(); j++ {
+			data = append(data, strings.Clone(chunk.Value(j)))
 		}
 	}
 	return data, nil
@@ -833,7 +851,7 @@ func exportIDs(df *DataFrame) (*schemapb.IDs, error) {
 		}, nil
 
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
-		data, err := exportChunkedValues[string, *array.String](col, types.IDFieldName)
+		data, err := exportChunkedStrings(col, types.IDFieldName)
 		if err != nil {
 			return nil, merr.WrapErrServiceInternalMsg("exportIDs: %v", err)
 		}
@@ -966,7 +984,7 @@ func exportFieldData(df *DataFrame, name string) (*schemapb.FieldData, error) {
 
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		var data []string
-		data, err = exportChunkedValues[string, *array.String](col, name)
+		data, err = exportChunkedStrings(col, name)
 		if err == nil {
 			fieldData.Field = &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{

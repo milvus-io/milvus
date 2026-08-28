@@ -9,13 +9,15 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
+FROM ghcr.io/astral-sh/uv:0.11.23 AS uv
+
 FROM ubuntu:jammy-20240530
 
 ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 \
     g++ gcc gfortran gdb gdbserver ninja-build git make ccache libssl-dev zlib1g-dev zip unzip \
-    clang-format-15 clang-tidy-15 lcov libtool m4 autoconf automake python3 python3-pip \
+    clang-format-15 clang-tidy-15 lcov libtool m4 autoconf automake \
     pkg-config uuid-dev libaio-dev && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
@@ -23,13 +25,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
+COPY --from=uv /uv /usr/local/bin/uv
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python
+ENV UV_PYTHON_BIN_DIR=/usr/local/bin
+ENV UV_TOOL_BIN_DIR=/usr/local/bin
+ENV PYTHON=python3.12
+ENV PY_UDF_PYTHON_VERSION=3.12
+RUN uv python install 3.12.13 && \
+    ln -s /usr/local/bin/python3.12 /usr/local/bin/python3 && \
+    uv pip install --python python3.12 --system --break-system-packages \
+        setuptools==80.9.0 wheel==0.45.1 && \
+    uv tool install --python python3.12 conan==2.25.1
+
+
 # upgrade gcc to 12
 RUN apt-get update && apt-get install -y gcc-12 g++-12 && cd /usr/bin \
     && unlink gcc && ln -s gcc-12 gcc \
     && unlink g++ && ln -s g++-12 g++ \
     && unlink gcov && ln -s gcov-12 gcov
 
-RUN pip3 install conan==2.25.1
 
 RUN echo "target arch $TARGETARCH"
 RUN wget -qO- "https://cmake.org/files/v3.31/cmake-3.31.8-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local

@@ -25,6 +25,7 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
   [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
 done
 SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+${SCRIPTS_DIR}/prepare_pyudf_test_runtime.sh
 
 MILVUS_CORE_DIR="${SCRIPTS_DIR}/../internal/core"
 CORE_INSTALL_PREFIX="${MILVUS_CORE_DIR}/output"
