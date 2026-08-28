@@ -307,12 +307,45 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		if err := impl.flusherComponents.WhenCreateCollection(ctx, createCollectionMsg); err != nil {
 			return err
 		}
+	case message.MessageTypeCreateVChannel:
+		createVChannelMsg, err := message.AsImmutableCreateVChannelMessageV2(msg)
+		if err != nil {
+			impl.logger.DPanic(ctx, "the message type is not CreateVChannelMessage", mlog.Err(err))
+			return nil
+		}
+		if err := impl.flusherComponents.WhenCreateVChannel(ctx, createVChannelMsg); err != nil {
+			return err
+		}
+		// Don't forward to the data sync service. WhenCreateVChannel already
+		// spawned the target vchannel's genesis DSS (with its seek position),
+		// and the flow graph has no use for the genesis message itself (the
+		// dd_node has no CreateCollection/CreateVChannel case). Forwarding it
+		// would route a V2 message into fromMessageToTsMsgV2, which has no
+		// CreateVChannel case and panics ("unsupported message type"). The
+		// CreateCollection branch above only survives its fall-through because
+		// it is a V1 message handled by the unmarshaler path.
+		return nil
 	case message.MessageTypeDropCollection:
 		// defer to remove the data sync service from the components.
 		// TODO: Current drop collection message will be handled by the underlying data sync service.
 		defer func() {
 			impl.flusherComponents.WhenDropCollection(ctx, msg.VChannel())
 		}()
+	case message.MessageTypeDropVChannel:
+		// The inverse of CreateVChannel: close the data sync service the genesis
+		// spawned, so a reclaimed vchannel stops holding a flusher. Reuses the
+		// drop-collection teardown because that one is already scoped to a single
+		// vchannel, which is exactly the scope here.
+		//
+		// Then return, WITHOUT forwarding to the data sync service — the same
+		// trap the CreateVChannel branch above documents. DropCollection can fall
+		// through only because it is a V1 message handled by the unmarshaler
+		// path; DropVChannel is V2, and forwarding it routes a V2 message into
+		// fromMessageToTsMsgV2, which has no DropVChannel case and panics the
+		// process with "unsupported message type". There is nothing to drain
+		// either: a vchannel is reclaimed long after it was fenced.
+		impl.flusherComponents.WhenDropCollection(ctx, msg.VChannel())
+		return nil
 	case message.MessageTypeRollbackImport:
 		// No-op: DataCoord DDL ack callback handles all state changes.
 		impl.logger.Info(ctx, "RollbackImportMessage consumed (no-op in flusher)",
