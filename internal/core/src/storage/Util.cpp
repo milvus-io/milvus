@@ -1171,15 +1171,7 @@ TryCreateArrowFileSystemChunkManager(const StorageConfig& storage_config) {
 }
 
 ChunkManagerPtr
-CreateChunkManager(const StorageConfig& storage_config) {
-    // The ArrowFileSystem backed chunk manager (when enabled) handles every
-    // storage type; try it once up front and fall back to the legacy managers
-    // below when it declines (switch off, or no producer for the provider).
-    if (auto cm = TryCreateArrowFileSystemChunkManager(storage_config);
-        cm != nullptr) {
-        return cm;
-    }
-
+CreateLegacyChunkManager(const StorageConfig& storage_config) {
     auto storage_type = ChunkManagerType_Map[storage_config.storage_type];
     switch (storage_type) {
         case ChunkManagerType::Local: {
@@ -1232,6 +1224,18 @@ CreateChunkManager(const StorageConfig& storage_config) {
                       fmt::underlying(storage_type));
         }
     }
+}
+
+ChunkManagerPtr
+CreateChunkManager(const StorageConfig& storage_config) {
+    // The ArrowFileSystem backed chunk manager (when enabled) handles every
+    // storage type; try it once up front and fall back to the legacy managers
+    // when it declines (switch off, or no producer for the provider).
+    if (auto cm = TryCreateArrowFileSystemChunkManager(storage_config);
+        cm != nullptr) {
+        return cm;
+    }
+    return CreateLegacyChunkManager(storage_config);
 }
 
 StorageV2FSCache::Key

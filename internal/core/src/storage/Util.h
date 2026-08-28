@@ -401,6 +401,13 @@ ReleaseArrowUnused();
 ChunkManagerPtr
 CreateChunkManager(const StorageConfig& storage_config);
 
+// Build a legacy chunk manager (LocalChunkManager / the AWS-SDK based
+// MinioChunkManager family) for this storage config, bypassing the
+// ArrowFileSystem switch. Used both as the fallback inside CreateChunkManager
+// and as the remote control-plane delegate of ArrowFileSystemChunkManager.
+ChunkManagerPtr
+CreateLegacyChunkManager(const StorageConfig& storage_config);
+
 // Process-wide switch selecting the remote ChunkManager backend built by
 // CreateChunkManager: legacy AWS-SDK based managers (default) vs the
 // milvus-storage ArrowFileSystem backed ArrowFileSystemChunkManager.
