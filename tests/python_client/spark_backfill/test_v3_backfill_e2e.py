@@ -8,10 +8,12 @@ from common.common_type import CaseLabel
 from pymilvus import DataType
 
 from spark_backfill.backfill_helpers import (
+    BackfillContractError,
     FunctionOutputIndexNotReadyError,
     StaleSchemaFenceMissingError,
     assert_commit_succeeded,
     assert_stale_schema_commit_rejected,
+    compute_minhash_signatures,
     inspect_result_artifacts,
     make_backfill_rows,
     validate_v3_result,
@@ -106,6 +108,7 @@ def _validate_commit_and_visibility(
     case.write_local_evidence(job_result, "commit-response.json", commit)
     assert status == 200, commit
     assert_commit_succeeded(commit, expected_segments=set(case.snapshot.segment_ids), expected_kind="v3")
+    case.drop_snapshots_and_refresh()
     expected_rows = parquet_rows if expected_parquet_rows is None else expected_parquet_rows
     expected = _visible_ground_truth(case, expected_rows, mode, target_fields)
     visible_fields = (*SOURCE_FIELDS, *target_fields)
@@ -202,15 +205,6 @@ def test_v3_explicit_null_semantics(backfill_case_factory, mode):
     _validate_commit_and_visibility(case, job_result, result_uri, parquet_rows, mode, matched_rows=18)
 
 
-@pytest.mark.spark_backfill_known_gap
-@pytest.mark.xfail(
-    strict=True,
-    raises=FunctionOutputIndexNotReadyError,
-    reason=(
-        "https://github.com/milvus-io/milvus/issues/51318: "
-        "V3 Spark backfill does not advance function-output index readiness"
-    ),
-)
 def test_v3_online_minhash_function_output_builds_index_and_searches(backfill_case_factory):
     row_count = 3000
     num_hashes = 128
@@ -222,16 +216,17 @@ def test_v3_online_minhash_function_output_builds_index_and_searches(backfill_ca
     )
     assert case.snapshot.schema_version > 0
 
-    def signature(primary_key):
-        return b"".join(
-            (((primary_key + 1) * 0x9E3779B1 + offset * 0x85EBCA77) & 0xFFFFFFFF).to_bytes(4, "little")
-            for offset in range(num_hashes)
-        )
+    signatures = compute_minhash_signatures(
+        case.client,
+        case.source_rows,
+        field_name,
+        num_hashes=num_hashes,
+    )
 
     parquet_rows = [
         {
             "pk": primary_key,
-            field_name: signature(primary_key),
+            field_name: signatures[primary_key],
         }
         for primary_key in range(row_count)
     ]
@@ -259,6 +254,7 @@ def test_v3_online_minhash_function_output_builds_index_and_searches(backfill_ca
     case.write_local_evidence(job_result, "commit-response.json", commit)
     assert status == 200, commit
     assert_commit_succeeded(commit, expected_segments=set(case.snapshot.segment_ids), expected_kind="v3")
+    case.drop_snapshots_and_refresh()
 
     index_info = wait_for_index_ready(
         case.client,
@@ -270,10 +266,12 @@ def test_v3_online_minhash_function_output_builds_index_and_searches(backfill_ca
 
     case.client.release_collection(case.collection_name)
     case.client.load_collection(case.collection_name)
+
+    text_by_id = {int(row["id"]): row["text"] for row in case.source_rows}
     for expected_id in (0, row_count // 2, row_count - 1):
         hits = case.client.search(
             case.collection_name,
-            ids=[expected_id],
+            data=[text_by_id[expected_id]],
             anns_field=field_name,
             limit=1,
             output_fields=["id"],
@@ -281,6 +279,50 @@ def test_v3_online_minhash_function_output_builds_index_and_searches(backfill_ca
         )[0]
         assert [hit["id"] for hit in hits] == [expected_id]
         assert hits[0]["distance"] == pytest.approx(1.0)
+
+
+@pytest.mark.spark_backfill_known_gap
+@pytest.mark.xfail(
+    strict=True,
+    raises=BackfillContractError,
+    reason=(
+        "spark-milvus MilvusScan read path does not support the 'minio://' scheme "
+        "returned in the client snapshot s3_location; only s3:// / s3a:// are handled"
+    ),
+)
+def test_v3_read_probe_reports_live_rows_and_search(backfill_case_factory):
+    case = backfill_case_factory()
+
+    parquet_rows = make_backfill_rows()
+    parquet_uri = case.upload_parquet("read", parquet_rows)
+    backfill_job, result_uri = case.run_backfill(case_id="read", parquet_uri=parquet_uri, mode="coalesce")
+    assert backfill_job.succeeded, backfill_job.logs
+
+    status, commit = case.commit(result_uri)
+    case.write_local_evidence(backfill_job, "commit-response.json", commit)
+    assert status == 200, commit
+    assert_commit_succeeded(commit, expected_segments=set(case.snapshot.segment_ids), expected_kind="v3")
+
+    case.drop_snapshots_and_refresh()
+
+    job_result, probe = case.run_read_probe()
+    assert job_result.succeeded, job_result.logs
+    case.write_local_evidence(job_result, "read-probe.json", probe)
+
+    expected_ids = sorted(row["id"] for row in case.source_rows)
+    assert probe["count"] == len(expected_ids)
+    assert probe["primaryKeys"] == expected_ids
+    assert {"id", "base_int", "base_float", "text", "vector"} <= set(probe["schemaFields"])
+
+    assert probe["projection"]["count"] == len(expected_ids)
+    assert set(probe["projection"]["fields"]) == {"id", "base_float"}
+
+    assert len(probe["sqlRows"]) == 1
+    assert probe["sqlRows"][0]["total"] == len(expected_ids)
+    assert probe["sqlRows"][0]["avg_float"] == pytest.approx(14.5)
+
+    assert len(probe["topK"]) == 5
+    assert [int(row["id"]) for row in probe["topK"]] == [0, 1, 2, 3, 4]
 
 
 def test_parquet_extra_primary_key_does_not_expand_snapshot(backfill_case_factory):
@@ -355,6 +397,7 @@ def test_rows_inserted_after_snapshot_are_not_backfilled(backfill_case_factory):
     case.write_local_evidence(job_result, "commit-response.json", commit)
     assert status == 200, commit
     assert_commit_succeeded(commit, expected_segments=set(case.snapshot.segment_ids), expected_kind="v3")
+    case.drop_snapshots_and_refresh()
     expected = _visible_ground_truth(case, parquet_rows, "overwrite")
     for new_row in new_rows:
         expected[new_row["id"]] = {field: new_row[field] for field in VISIBLE_FIELDS}
@@ -391,6 +434,7 @@ def test_rows_deleted_after_snapshot_remain_deleted_after_backfill(backfill_case
     case.write_local_evidence(job_result, "commit-response.json", commit)
     assert status == 200, commit
     assert_commit_succeeded(commit, expected_segments=set(case.snapshot.segment_ids), expected_kind="v3")
+    case.drop_snapshots_and_refresh()
     expected = _visible_ground_truth(case, parquet_rows, "overwrite")
     for primary_key in deleted_primary_keys:
         expected.pop(primary_key)
@@ -472,15 +516,6 @@ def test_snapshot_after_add_field_rejects_new_target_field(backfill_case_factory
     assert result_key not in objects
 
 
-@pytest.mark.spark_backfill_known_gap
-@pytest.mark.xfail(
-    strict=True,
-    raises=StaleSchemaFenceMissingError,
-    reason=(
-        "https://github.com/milvus-io/milvus/issues/51318: "
-        "CommitBackfillResult does not enforce a stamped non-zero schemaVersion"
-    ),
-)
 def test_add_field_after_spark_rejects_nonzero_stale_schema_result(backfill_case_factory):
     case = backfill_case_factory()
     initial_version = int(case.client.describe_collection(case.collection_name)["schema_version"])
@@ -505,7 +540,7 @@ def test_add_field_after_spark_rejects_nonzero_stale_schema_result(backfill_case
     raises=StaleSchemaFenceMissingError,
     reason=(
         "https://github.com/milvus-io/milvus/issues/51318: "
-        "schemaVersion=0 is valid but CommitBackfillResult treats it as unstamped"
+        "schema fencing is not in place for schema version = 0"
     ),
 )
 def test_add_field_after_spark_rejects_zero_version_stale_schema_result(backfill_case_factory):
@@ -518,15 +553,6 @@ def test_add_field_after_spark_rejects_zero_version_stale_schema_result(backfill
 
 
 @pytest.mark.parametrize("schema_mutation", ["add", "drop"])
-@pytest.mark.spark_backfill_known_gap
-@pytest.mark.xfail(
-    strict=True,
-    raises=StaleSchemaFenceMissingError,
-    reason=(
-        "https://github.com/milvus-io/milvus/issues/51318: "
-        "CommitBackfillResult does not fence a non-zero SchemaVersion changed after Snapshot creation"
-    ),
-)
 def test_schema_change_after_snapshot_before_spark_rejects_stale_result(
     backfill_case_factory,
     schema_mutation,
@@ -695,7 +721,7 @@ def test_expired_protection_with_compaction_rejects_old_result_and_new_snapshot_
 
     old_status, old_commit = case.commit(old_result_uri)
     case.write_local_evidence(old_job, "old-result-commit-response.json", old_commit)
-    assert old_status in {200, 500}
+    assert old_status == (200 if unchanged_old_ids else 500)
     statuses_by_segment = {int(item["segment_id"]): item for item in old_commit["segment_statuses"]}
     assert set(statuses_by_segment) == old_segment_ids
     assert old_commit["failed_segments"] == len(changed_old_ids)

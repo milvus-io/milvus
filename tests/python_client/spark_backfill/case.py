@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .backfill_helpers import (
+    BackfillContractError,
     SnapshotMetadataView,
     build_backfill_arguments,
     collection_field_ids,
@@ -30,14 +31,16 @@ from .k8s_runner import SparkJobRequest, SparkJobResult
 DEFAULT_COMPACTION_PROTECTION_SECONDS = 600
 
 
-def infer_root_path(snapshot_location: str) -> str:
-    key = object_key(snapshot_location, snapshot_location.split("://", 1)[-1].split("/", 1)[0])
+def infer_root_path(snapshot_location: str, bucket: str = "") -> str:
+    key = object_key(snapshot_location, bucket or snapshot_location.split("://", 1)[-1].split("/", 1)[0])
     marker = "/snapshots/"
     if marker in f"/{key}":
         prefix = f"/{key}".split(marker, 1)[0].lstrip("/")
         return prefix
-    parts = key.split("/")
-    return parts[0] if len(parts) > 1 else ""
+    raise BackfillContractError(
+        f"cannot derive storage root path from snapshot location {snapshot_location!r}: "
+        f"expected a {marker} path segment"
+    )
 
 
 @dataclass
@@ -56,7 +59,7 @@ class BackfillCase:
 
     @property
     def root_path(self) -> str:
-        return infer_root_path(self.snapshot_location)
+        return infer_root_path(self.snapshot_location, self.settings.minio_bucket)
 
     def create_snapshot(
         self,
@@ -137,9 +140,7 @@ class BackfillCase:
         extra_arguments: Sequence[str] = (),
     ) -> tuple[SparkJobResult, str]:
         result_uri = result_uri or self.result_uri(case_id)
-        snapshot_path = self.snapshot_location
-        if "://" not in snapshot_path:
-            snapshot_path = f"s3a://{self.settings.minio_bucket}/{snapshot_path.lstrip('/')}"
+        snapshot_path = f"s3a://{self.settings.minio_bucket}/{object_key(self.snapshot_location, self.settings.minio_bucket)}"
         arguments = build_backfill_arguments(
             parquet_path=parquet_uri,
             snapshot_path=snapshot_path,
@@ -176,6 +177,11 @@ class BackfillCase:
 
     def commit(self, result_uri: str) -> tuple[int, dict]:
         return commit_backfill_result(self.settings.management_endpoint, result_uri)
+
+    def drop_snapshots_and_refresh(self) -> None:
+        for snapshot_name in self.snapshot_names:
+            self.client.drop_snapshot(snapshot_name, self.collection_name)
+        self.client.refresh_load(self.collection_name)
 
     def list_case_objects(self, case_id: str) -> list[str]:
         return list_object_keys(self.minio_client, self.settings.minio_bucket, f"{self.prefix}/{case_id}/")
@@ -214,6 +220,11 @@ class BackfillCase:
             },
         }
         result = self.runner.run(SparkJobRequest(case_id=case_id, operation="read", payload=spec))
+        if not result.succeeded:
+            raise BackfillContractError(
+                f"Spark Read probe failed (exit code {result.exit_code}); "
+                f"see {result.evidence_dir}/pod.log:\n{result.logs}"
+            )
         return result, extract_read_probe_result(result.logs)
 
     def write_local_evidence(self, job_result: SparkJobResult, filename: str, payload: Any) -> None:

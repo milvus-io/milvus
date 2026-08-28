@@ -251,6 +251,10 @@ The V2 case runs two Backfills against the same field IDs. The second run uses d
 
 Connector Read for a specific Snapshot needs more than the Snapshot URL. It also needs `milvus.snapshot.manifests`, `milvus.snapshot.v2.segments`, and the snapshot schema bytes. The current bundle contract does not expose argument construction for `ReadSourceOnlyApp` or `ListV2SegmentsApp`, so the initial V2 suite uses pymilvus for online readback rather than misclassifying the known live client-mode V2 planner limitation as a Backfill write failure.
 
+### V2 coverage parity (known gap)
+
+The V2 suite currently has a single positive case (`test_v2_multifield_column_groups_commit_and_replacement_become_visible`). It has no V2 negative, compaction-protection, or schema-fence coverage, and does not exercise the Connector Read path for a V2 Snapshot. V3 is the primary target; V2 parity is tracked as a known gap.
+
 ## Evidence and cleanup
 
 Each Spark invocation writes an independent directory under `--spark-evidence-root`, which defaults to:

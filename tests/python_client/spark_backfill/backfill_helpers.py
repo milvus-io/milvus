@@ -15,7 +15,8 @@ from urllib.parse import urlparse
 import pyarrow as pa
 import pyarrow.parquet as pq
 import requests
-from pymilvus import DataType
+from pymilvus import DataType, FunctionType
+from pymilvus.orm.schema import FieldSchema, Function
 
 from .contracts import storage_kind
 
@@ -36,9 +37,7 @@ class FunctionOutputIndexNotReadyError(BackfillContractError):
 
 def log_contains_message(logs: str, expected: str) -> bool:
     def normalize(value: str) -> str:
-        tokens = re.findall(r"\w+", value.casefold())
-        expanded = ("primary key" if token == "pk" else token for token in tokens)
-        return " ".join(expanded)
+        return " ".join(re.findall(r"\w+", value.casefold()))
 
     return normalize(expected) in normalize(logs)
 
@@ -479,8 +478,11 @@ def assert_stale_schema_commit_rejected(
         raise StaleSchemaFenceMissingError(f"stale-schema rejection committed {committed} segments")
 
     message = str(response.get("msg", response.get("message", ""))).casefold()
-    expected = f"computed against schema version {result_version} but collection is now at version {current_version}"
-    if "stale backfill result" not in message or expected not in message:
+    expected = (
+        f"backfill result schema version {result_version} does not match "
+        f"collection's current schema version {current_version}"
+    )
+    if expected not in message:
         raise BackfillContractError(f"Commit did not report the expected stale-schema rejection: {response!r}")
 
 
@@ -516,47 +518,89 @@ def create_backfill_collection(
     )
 
 
-def add_minhash_function_field(settings, collection_name: str, field_name: str, *, num_hashes: int = 128) -> None:
-    endpoint = settings.local_milvus_uri.rstrip("/")
-    if not endpoint.startswith(("http://", "https://")):
-        endpoint = f"http://{endpoint}"
-    response = requests.post(
-        f"{endpoint}/v2/vectordb/collections/add_function_field",
-        headers={"Authorization": f"Bearer {settings.milvus_token}"},
-        json={
-            "collectionName": collection_name,
-            "function": {
-                "name": f"{field_name}_minhash_fn",
-                "type": "MinHash",
-                "inputFieldNames": ["text"],
-                "outputFieldNames": [field_name],
-                "params": {
-                    "num_hashes": num_hashes,
-                    "shingle_size": 3,
-                    "seed": 42,
-                },
-            },
-            "outputField": {
-                "fieldName": field_name,
-                "dataType": "BinaryVector",
-                "elementTypeParams": {"dim": str(num_hashes * 32)},
-            },
-            "indexParams": {
-                "fieldName": field_name,
-                "indexName": field_name,
-                "indexType": "MINHASH_LSH",
-                "metricType": "MHJACCARD",
-                "params": {"mh_lsh_band": 8},
-            },
-        },
-        timeout=120,
+def add_minhash_function_field(client, collection_name: str, field_name: str, *, num_hashes: int = 128) -> None:
+    field_schema = FieldSchema(
+        name=field_name,
+        dtype=DataType.BINARY_VECTOR,
+        dim=num_hashes * 32,
     )
+    func = Function(
+        name=f"{field_name}_minhash_fn",
+        function_type=FunctionType.MINHASH,
+        input_field_names=["text"],
+        output_field_names=[field_name],
+        params={"num_hashes": num_hashes, "shingle_size": 3, "seed": 42},
+    )
+    index_params = client.prepare_index_params()
+    index_params.add_index(
+        field_name=field_name,
+        index_type="MINHASH_LSH",
+        index_name=field_name,
+        metric_type="MHJACCARD",
+        params={"mh_lsh_band": 8},
+    )
+    client.add_function_field(collection_name, field_schema, func, index_params)
+
+
+def compute_minhash_signatures(
+    client,
+    source_rows: Sequence[Mapping[str, Any]],
+    field_name: str,
+    *,
+    num_hashes: int = 128,
+) -> dict[int, bytes]:
+    """Compute the ground-truth MinHash signature for each source text.
+
+    Milvus is the oracle: the texts are round-tripped through a scratch collection
+    carrying the MinHash function, so the returned bytes match what the query node
+    recomputes during search. Reimplementing the server's C++ MinHash pipeline
+    (std::mt19937_64 permutations, XXH3 base hashes, tantivy word shingling) in
+    Python would be brittle and must not be allowed to drift from the server.
+    """
+    scratch = unique_name("spark_backfill_minhash_oracle")
     try:
-        payload = response.json()
-    except requests.JSONDecodeError as exc:
-        raise BackfillContractError(f"add_function_field returned non-JSON HTTP {response.status_code}") from exc
-    if response.status_code != 200 or payload.get("code") != 0:
-        raise BackfillContractError(f"add_function_field failed with HTTP {response.status_code}: {payload!r}")
+        create_backfill_collection(client, scratch, include_backfill_fields=False)
+        add_minhash_function_field(client, scratch, field_name, num_hashes=num_hashes)
+
+        source_fields = ("id", "base_int", "base_float", "text", "vector")
+        rows = [{field: row[field] for field in source_fields} for row in source_rows]
+        for start in range(0, len(rows), 4096):
+            client.insert(scratch, rows[start : start + 4096])
+        client.flush(scratch)
+        client.load_collection(scratch)
+
+        queried = client.query(
+            scratch,
+            filter="id >= 0",
+            output_fields=["id", field_name],
+            limit=len(rows),
+            consistency_level="Strong",
+        )
+        signatures: dict[int, bytes] = {}
+        for row in queried:
+            value = row.get(field_name)
+            if isinstance(value, list):
+                if len(value) != 1 or not isinstance(value[0], (bytes, bytearray)):
+                    raise BackfillContractError(
+                        f"MinHash oracle returned unexpected list for field {field_name!r}: {value!r}"
+                    )
+                value = value[0]
+            if not isinstance(value, (bytes, bytearray)):
+                raise BackfillContractError(
+                    f"MinHash oracle returned non-bytes for field {field_name!r}: {type(value)!r}"
+                )
+            signatures[int(row["id"])] = bytes(value)
+
+        expected_ids = {int(row["id"]) for row in rows}
+        if set(signatures) != expected_ids:
+            missing = sorted(expected_ids - set(signatures))
+            raise BackfillContractError(f"MinHash oracle is missing signatures for ids: {missing}")
+        return signatures
+    finally:
+        try:
+            client.drop_collection(scratch)
+        except Exception:
+            pass
 
 
 def wait_for_index_ready(
@@ -586,11 +630,17 @@ def object_key(uri_or_key: str, expected_bucket: str) -> str:
     if "://" not in uri_or_key:
         return uri_or_key.lstrip("/")
     parsed = urlparse(uri_or_key)
-    if parsed.netloc and parsed.netloc != expected_bucket:
-        raise BackfillContractError(
-            f"object URI bucket {parsed.netloc!r} does not match configured bucket {expected_bucket!r}"
-        )
-    return parsed.path.lstrip("/")
+    path = parsed.path.lstrip("/")
+    # Path-style URI: s3://<bucket>/<key> — the netloc is the bucket name.
+    if not parsed.netloc or parsed.netloc == expected_bucket:
+        return path
+    # Endpoint-prefixed URI: s3://<endpoint>/<bucket>/<key> — the bucket name is
+    # the first path segment and the endpoint is the netloc.
+    if path == expected_bucket or path.startswith(expected_bucket + "/"):
+        return path[len(expected_bucket) :].lstrip("/")
+    raise BackfillContractError(
+        f"object URI bucket {parsed.netloc!r} does not match configured bucket {expected_bucket!r}"
+    )
 
 
 def read_json_object(minio_client, bucket: str, uri_or_key: str) -> dict[str, Any]:

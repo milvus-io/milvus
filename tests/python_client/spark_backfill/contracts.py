@@ -144,7 +144,7 @@ def extract_read_probe_result(logs: str) -> dict[str, Any]:
 
     payloads = [line[len(READ_RESULT_PREFIX) :] for line in logs.splitlines() if line.startswith(READ_RESULT_PREFIX)]
     if not payloads:
-        raise ValueError("Spark Read probe result sentinel not found")
+        raise ValueError(f"Spark Read probe result sentinel not found in logs:\n{logs}")
     try:
         result = json.loads(payloads[-1])
     except json.JSONDecodeError as exc:
