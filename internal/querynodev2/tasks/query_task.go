@@ -92,7 +92,8 @@ func (t *QueryTask) PreExecute() error {
 	metrics.QueryNodeSQPerUserLatencyInQueue.WithLabelValues(
 		nodeID,
 		queryLabel,
-		username).
+		username,
+	).
 		Observe(inQueueDurationMS)
 
 	// Unmarshal the origin plan
@@ -143,7 +144,8 @@ func (t *QueryTask) Execute() error {
 		paramtable.GetStringNodeID(),
 		contextutil.GetQueryLabel(t.ctx),
 		metrics.ReduceSegments,
-		metrics.BatchReduce).Observe(float64(time.Since(beforeReduce).Microseconds()) / 1000.0)
+		metrics.BatchReduce,
+	).Observe(float64(time.Since(beforeReduce).Microseconds()) / 1000.0)
 	if err != nil {
 		return err
 	}
