@@ -17,6 +17,7 @@
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -54,13 +55,10 @@
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/AsyncLoadPipeline.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
-#include "storage/EntryStreamUtils.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
-
-#include <atomic>
 
 namespace milvus::segcore::storagev2translator {
 
@@ -541,7 +539,7 @@ ManifestGroupTranslator::get_cells(
         return {};
     }
 
-    auto max_cid = *std::max_element(cids.begin(), cids.end());
+    const auto max_cid = *std::max_element(cids.begin(), cids.end());
     if (max_cid >= meta_.chunk_memory_size_.size()) {
         ThrowInfo(
             ErrorCode::UnexpectedError,
@@ -554,8 +552,8 @@ ManifestGroupTranslator::get_cells(
     // Build CellSpec for each requested cid
     std::vector<milvus::segcore::CellSpec> cell_specs;
     cell_specs.reserve(cids.size());
-    for (auto cid : cids) {
-        auto [start, end] = meta_.get_row_group_range(cid);
+    for (const auto cid : cids) {
+        const auto [start, end] = meta_.get_row_group_range(cid);
         cell_specs.push_back(
             {cid,
              /*file_idx=*/0,
@@ -575,7 +573,7 @@ std::vector<ManifestGroupTranslator::CellResult>
 ManifestGroupTranslator::get_cells_legacy(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids,
-    std::vector<milvus::segcore::CellSpec> cell_specs) {
+    std::vector<milvus::segcore::CellSpec> cell_specs) const {
     std::vector<CellResult> cells;
     cells.reserve(cids.size());
 
@@ -607,7 +605,7 @@ ManifestGroupTranslator::get_cells_legacy(
         completed_cells;
     completed_cells.reserve(cids.size());
 
-    std::exception_ptr first_error = nullptr;
+    std::exception_ptr first_error;
     for (auto& future : load_futures) {
         try {
             auto loaded_cells = future.get();
@@ -641,8 +639,8 @@ ManifestGroupTranslator::get_cells_legacy(
         std::rethrow_exception(first_error);
     }
 
-    for (auto cid : cids) {
-        auto it = completed_cells.find(cid);
+    for (const auto cid : cids) {
+        const auto it = completed_cells.find(cid);
         AssertInfo(
             it != completed_cells.end(),
             fmt::format(
@@ -655,7 +653,8 @@ ManifestGroupTranslator::get_cells_legacy(
 
 std::vector<ManifestGroupTranslator::CellResult>
 ManifestGroupTranslator::get_cells_via_async_pipeline(
-    milvus::OpContext* ctx, std::vector<milvus::segcore::CellSpec> cell_specs) {
+    milvus::OpContext* ctx,
+    std::vector<milvus::segcore::CellSpec> cell_specs) const {
     LOG_INFO(
         "[StorageV3] translator {} uses async load pipeline for {} cells in "
         "manifest column group {} of segment {}",
@@ -663,10 +662,7 @@ ManifestGroupTranslator::get_cells_via_async_pipeline(
         cell_specs.size(),
         column_group_index_,
         segment_id_);
-    AsyncLoadPipelineOptions options{
-        .segment_id = segment_id_,
-        .load_priority = load_priority_,
-    };
+    AsyncLoadPipelineOptions options{.load_priority = load_priority_};
     if (use_mmap_) {
         options.finalization_executor_provider = []() {
             return storage::LocalFileIOPool::GetInstance().GetExecutor();
@@ -674,6 +670,7 @@ ManifestGroupTranslator::get_cells_via_async_pipeline(
     }
     return folly::coro::blockingWait(LoadCellsAsync(
         ctx,
+        segment_id_,
         std::move(cell_specs),
         chunk_reader_,
         [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
@@ -687,7 +684,7 @@ ManifestGroupTranslator::get_cells_via_async_pipeline(
 std::unique_ptr<milvus::GroupChunk>
 ManifestGroupTranslator::load_group_chunk(
     const std::vector<std::shared_ptr<arrow::Table>>& tables,
-    const milvus::cachinglayer::cid_t cid) {
+    const milvus::cachinglayer::cid_t cid) const {
     assert(!tables.empty());
     // Use the first table's schema as reference for field iteration
     const auto& schema = tables[0]->schema();
@@ -703,7 +700,7 @@ ManifestGroupTranslator::load_group_chunk(
     // Normal collections and Milvus-generated columns store field IDs as
     // column names. Other external columns use external_field names.
     for (int i = 0; i < schema->num_fields(); ++i) {
-        auto column_name = schema->field(i)->name();
+        const auto column_name = schema->field(i)->name();
         int64_t field_id = -1;
         if (auto parsed_fid = ParseFieldIdColumnName(column_name);
             parsed_fid.has_value()) {
@@ -730,12 +727,12 @@ ManifestGroupTranslator::load_group_chunk(
                 column_name);
         }
 
-        auto fid = milvus::FieldId(field_id);
+        const auto fid = milvus::FieldId(field_id);
         if (fid == RowFieldID) {
             // ignore row id field
             continue;
         }
-        auto it = field_metas_.find(fid);
+        const auto it = field_metas_.find(fid);
         AssertInfo(
             it != field_metas_.end(),
             "[StorageV2] translator {} field id {} not found in field_metas",
@@ -747,7 +744,7 @@ ManifestGroupTranslator::load_group_chunk(
         // All tables in a cell come from the same column group with consistent schema
         arrow::ArrayVector merged_array_vec;
         for (const auto& table : tables) {
-            auto chunks = table->column(i)->chunks();
+            const auto& chunks = table->column(i)->chunks();
             merged_array_vec.insert(
                 merged_array_vec.end(), chunks.begin(), chunks.end());
         }
@@ -773,7 +770,7 @@ ManifestGroupTranslator::load_group_chunk(
     } else {
         // Mmap mode — use unique generation suffix to avoid truncating files
         // that old MAP_SHARED mmaps still reference (see #48658).
-        auto gen =
+        const auto gen =
             g_mmap_path_generation.fetch_add(1, std::memory_order_relaxed);
         std::filesystem::path filepath;
         switch (group_chunk_type_) {

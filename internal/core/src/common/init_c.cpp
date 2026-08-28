@@ -14,8 +14,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <cstddef>
+#include "common/init_c.h"
+
 #include <algorithm>
+#include <cstddef>
 #include <mutex>
 #include <string>
 
@@ -23,19 +25,15 @@
 #include <arrow/io/type_fwd.h>
 #include <arrow/util/thread_pool.h>
 #include <openssl/evp.h>
-#include "common/init_c.h"
+
 #include "common/Common.h"
 #include "common/Tracer.h"
-#include "common/init_c.h"
-#include "monitor/Monitor.h"
-#include "log/Log.h"
-#include "storage/ThreadPool.h"
 #include "exec/expression/ExprCache.h"
 #include "log/Log.h"
+#include "monitor/Monitor.h"
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
-#include "storage/EntryStreamUtils.h"
 #include "storage/ThreadPool.h"
 
 std::once_flag traceFlag;

@@ -254,10 +254,13 @@ func UpdateStorageV2CellTargetSizeBytes(bytes int64) {
 	C.SetStorageV2CellTargetSizeBytes(C.int64_t(bytes))
 }
 
-func UpdateStorageV2AsyncLoadEnabled(enabled bool) {
+// updateStorageV2AsyncLoadEnabled publishes the rollout value to C++.
+func updateStorageV2AsyncLoadEnabled(enabled bool) {
 	C.SetStorageV2AsyncLoadEnabled(C.bool(enabled))
 }
 
+// registerConfigWatcherWithCatchUp serializes config application and performs
+// one post-registration sync so startup cannot miss a concurrent update.
 func registerConfigWatcherWithCatchUp(register func(syncConfig func()), syncConfig func()) {
 	var syncMu sync.Mutex
 	serializedSync := func() {
@@ -273,9 +276,11 @@ func registerConfigWatcherWithCatchUp(register func(syncConfig func()), syncConf
 // RegisterStorageV2AsyncLoadEnabledWatcher keeps the C++ async-load switch in
 // sync with paramtable and catches up any update that arrived during startup.
 func RegisterStorageV2AsyncLoadEnabledWatcher(ctx context.Context, pt *paramtable.ComponentParam, source string) {
-	registerStorageV2AsyncLoadEnabledWatcher(ctx, pt, source, UpdateStorageV2AsyncLoadEnabled)
+	registerStorageV2AsyncLoadEnabledWatcher(ctx, pt, source, updateStorageV2AsyncLoadEnabled)
 }
 
+// registerStorageV2AsyncLoadEnabledWatcher installs the watcher with an
+// injectable apply function for deterministic testing.
 func registerStorageV2AsyncLoadEnabledWatcher(ctx context.Context, pt *paramtable.ComponentParam, source string, apply func(bool)) {
 	if ctx == nil {
 		ctx = context.TODO()
@@ -291,12 +296,14 @@ func registerStorageV2AsyncLoadEnabledWatcher(ctx context.Context, pt *paramtabl
 	}, func() {
 		enabled := item.GetAsBool()
 		apply(enabled)
-		mlog.Info(ctx, "queryNode.segcore.storageV2.enableAsyncLoad updated",
+		mlog.Info(ctx, "Storage V3 async-load rollout updated",
 			mlog.String("source", source),
 			mlog.Bool("enabled", enabled))
 	})
 }
 
+// registerStorageV2AsyncLoadReadWindowConfig keeps the native read-window
+// threshold synchronized with the historical storageV2 config key.
 func registerStorageV2AsyncLoadReadWindowConfig(pt *paramtable.ComponentParam) {
 	item := &pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes
 	registerConfigWatcherWithCatchUp(func(syncConfig func()) {
@@ -307,15 +314,17 @@ func registerStorageV2AsyncLoadReadWindowConfig(pt *paramtable.ComponentParam) {
 			syncConfig()
 		}))
 	}, func() {
-		UpdateStorageV2AsyncLoadReadWindowSizeBytes(item.GetAsInt64())
+		updateStorageV2AsyncLoadReadWindowSizeBytes(item.GetAsInt64())
 	})
 }
 
-func UpdateStorageV2AsyncLoadReadWindowSizeBytes(bytes int64) {
+// updateStorageV2AsyncLoadReadWindowSizeBytes publishes the threshold to C++.
+func updateStorageV2AsyncLoadReadWindowSizeBytes(bytes int64) {
 	C.SetStorageV2AsyncLoadReadWindowSizeBytes(C.int64_t(bytes))
 }
 
-func GetStorageV2AsyncLoadReadWindowSizeBytes() int64 {
+// getStorageV2AsyncLoadReadWindowSizeBytes returns the effective native value.
+func getStorageV2AsyncLoadReadWindowSizeBytes() int64 {
 	return int64(C.GetStorageV2AsyncLoadReadWindowSizeBytes())
 }
 

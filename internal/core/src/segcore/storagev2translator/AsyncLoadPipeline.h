@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -33,29 +34,18 @@
 
 namespace milvus::segcore::storagev2translator {
 
-struct AsyncReadWindow {
-    std::vector<CellSpec> cells;
-    std::vector<size_t> request_indices;
-    std::vector<int64_t> chunk_indices;
-    size_t budget_bytes{0};
-};
-
-std::vector<AsyncReadWindow>
-BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
-                      int64_t read_window_bytes);
-
 struct AsyncLoadPipelineOptions {
-    int64_t segment_id{-1};
-    // Negative uses the process default. Explicit values must be positive.
-    int64_t read_window_bytes{-1};
+    // Empty uses the process default. Explicit values must be positive bytes.
+    std::optional<size_t> read_window_bytes;
     milvus::proto::common::LoadPriority load_priority{
         milvus::proto::common::LoadPriority::HIGH};
-    // A single-priority custom executor is scheduled through add(). Executors
-    // reporting multiple priorities must implement addWithPriority(). Every
-    // custom executor must defer submitted work because Folly Task does not
-    // support inline-like executors. It must support Folly KeepAlive, or
-    // otherwise outlive the returned task and all work started by it.
-    folly::Executor* executor{nullptr};
+    // Empty uses the process default. A single-priority custom executor is
+    // scheduled through add(); executors reporting multiple priorities must
+    // implement addWithPriority(). Every custom executor must defer submitted
+    // work because Folly Task does not support inline-like executors. A dummy
+    // keep-alive token does not extend lifetime, so its executor must otherwise
+    // outlive the returned task and all work started by it.
+    folly::Executor::KeepAlive<> executor{};
     // Empty means finalization runs on executor. Mmap callers may provide a
     // dedicated non-inline local-file executor so Arrow-to-local
     // materialization and the blocking file operations run as one scheduled
@@ -69,10 +59,11 @@ using AsyncCellResult =
     std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>;
 
 // Lazy coroutine: admission, storage read, and finalization start when the task
-// is awaited. The executor keep-alive and ctx cancellation token are captured
-// when this function is called.
-folly::coro::Task<std::vector<AsyncCellResult>>
-LoadCellsAsync(milvus::OpContext* ctx,
+// is awaited. segment_id is required for diagnostics. The executor keep-alive
+// and ctx cancellation token are captured when this function is called.
+[[nodiscard]] folly::coro::Task<std::vector<AsyncCellResult>>
+LoadCellsAsync(const milvus::OpContext* ctx,
+               int64_t segment_id,
                std::vector<CellSpec> cells,
                std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
                CellFinalizeFunc finalize_cell,

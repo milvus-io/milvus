@@ -39,6 +39,7 @@
 #include "storage/EntryStreamUtils.h"
 #include "storage/Crc32cUtil.h"
 #include "storage/PluginLoader.h"
+#include "storage/TransientMemoryBudget.h"
 
 namespace milvus::storage {
 namespace {
@@ -52,6 +53,7 @@ struct ActiveSliceTask {
     std::future<void> future;
 };
 
+// Holds one transient-memory reservation for the lifetime of a slice task.
 class TransientBudgetGuard {
  public:
     TransientBudgetGuard(size_t slice_transient_bytes,
@@ -60,7 +62,7 @@ class TransientBudgetGuard {
                          const std::string& operation)
         : slice_transient_bytes_(slice_transient_bytes) {
         ThrowIfCancelled(cancellation_token, operation);
-        auto acquired =
+        const bool acquired =
             TransientMemoryBudget::GetLoadTransientBudget().AcquireUntil(
                 slice_transient_bytes_, priority, cancellation_token);
         if (!acquired) {
@@ -79,7 +81,7 @@ class TransientBudgetGuard {
     operator=(const TransientBudgetGuard&) = delete;
 
  private:
-    size_t slice_transient_bytes_;
+    const size_t slice_transient_bytes_;
 };
 
 bool
@@ -164,8 +166,8 @@ ReadOrderedEntryStream(
 
     auto& pool = ThreadPools::GetThreadPool(priority);
     auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
-    auto budget_priority = TransientPriorityForThreadPool(priority);
-    size_t max_active_tasks =
+    const auto budget_priority = TransientPriorityForThreadPool(priority);
+    const size_t max_active_tasks =
         std::min(num_slices, std::max<size_t>(1, pool.GetMaxThreadNum()));
 
     size_t next_submit = 0;
@@ -220,9 +222,10 @@ ReadOrderedEntryStream(
         }
 
         if (block_for_budget) {
-            auto acquired = budget.AcquireUntil(slice_transient_byte_count,
-                                                budget_priority,
-                                                cancellation_token);
+            const bool acquired =
+                budget.AcquireUntil(slice_transient_byte_count,
+                                    budget_priority,
+                                    cancellation_token);
             if (!acquired) {
                 rememberCancellation();
                 return false;
@@ -949,7 +952,8 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
     auto& pool = ThreadPools::GetThreadPool(priority_);
     auto input = input_;
     auto* writer = state.writer.get();
-    auto cancellation_token = cancellation_token_;
+    const auto cancellation_token = cancellation_token_;
+    const auto budget_priority = TransientPriorityForThreadPool(priority_);
     futures.reserve(futures.size() + StreamDownloadTaskCount(meta));
 
     if (meta.encrypted) {
@@ -970,7 +974,7 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
             size_t plain_len = std::min(remaining, slice_size_);
             auto budget_guard = std::make_shared<TransientBudgetGuard>(
                 EncryptedStreamBudgetBytes(slice.size, plain_len),
-                TransientPriorityForThreadPool(priority_),
+                budget_priority,
                 cancellation_token,
                 "IndexEntryReader::ReadEntriesStreamToFiles");
 
@@ -1029,7 +1033,7 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
             size_t src_offset = pm.offset + output_offset;
             auto budget_guard = std::make_shared<TransientBudgetGuard>(
                 SaturatingMultiply(len, kFileStreamBufferMultiplier),
-                TransientPriorityForThreadPool(priority_),
+                budget_priority,
                 cancellation_token,
                 "IndexEntryReader::ReadEntriesStreamToFiles");
 

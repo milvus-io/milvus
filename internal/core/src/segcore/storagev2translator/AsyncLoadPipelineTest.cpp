@@ -60,8 +60,11 @@ using ChunkReadResult =
     arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>;
 using ChunkReadFuture = folly::SemiFuture<ChunkReadResult>;
 
+constexpr int64_t kTestSegmentId = 100;
+
 using LoadCellsAsyncReturn = decltype(LoadCellsAsync(
     std::declval<milvus::OpContext*>(),
+    std::declval<int64_t>(),
     std::declval<std::vector<CellSpec>>(),
     std::declval<std::shared_ptr<milvus_storage::api::ChunkReader>>(),
     std::declval<CellFinalizeFunc>(),
@@ -399,6 +402,11 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
         return parallelism_.load();
     }
 
+    std::vector<std::vector<int64_t>>
+    RequestedIndices() const {
+        return requested_indices_;
+    }
+
  private:
     static arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>
     MakeBatches(const std::vector<int64_t>& chunk_indices) {
@@ -446,10 +454,9 @@ class AsyncLoadPipelineTest : public ::testing::Test {
     AsyncLoadPipelineOptions
     Options(milvus::proto::common::LoadPriority priority =
                 milvus::proto::common::LoadPriority::HIGH) {
-        return {.segment_id = 100,
-                .read_window_bytes = 8,
+        return {.read_window_bytes = 8,
                 .load_priority = priority,
-                .executor = &executor_};
+                .executor = folly::getKeepAliveToken(executor_)};
     }
 
     CellFinalizeFunc
@@ -522,13 +529,16 @@ TEST_F(AsyncLoadPipelineTest, BuildsContiguousReadWindows) {
          .loading_overhead_size = 1},
     };
 
-    auto windows = BuildAsyncReadWindows(cells, 8);
+    auto reader = std::make_shared<FakeChunkReader>(&executor_);
+    const auto results = Run(LoadCellsAsync(
+        nullptr, kTestSegmentId, cells, reader, Finalizer(), Options()));
 
-    ASSERT_EQ(windows.size(), 3);
-    EXPECT_EQ(windows[0].chunk_indices, (std::vector<int64_t>{0, 1, 2, 3}));
-    EXPECT_EQ(windows[0].budget_bytes, 12);
-    EXPECT_EQ(windows[1].chunk_indices, (std::vector<int64_t>{4, 5}));
-    EXPECT_EQ(windows[2].chunk_indices, (std::vector<int64_t>{8}));
+    ASSERT_EQ(results.size(), cells.size());
+    const auto requested_indices = reader->RequestedIndices();
+    ASSERT_EQ(requested_indices.size(), 3);
+    EXPECT_EQ(requested_indices[0], (std::vector<int64_t>{0, 1, 2, 3}));
+    EXPECT_EQ(requested_indices[1], (std::vector<int64_t>{4, 5}));
+    EXPECT_EQ(requested_indices[2], (std::vector<int64_t>{8}));
 }
 
 TEST_F(AsyncLoadPipelineTest, RejectsZeroReadWindow) {
@@ -538,29 +548,18 @@ TEST_F(AsyncLoadPipelineTest, RejectsZeroReadWindow) {
          .local_rg_offset = 0,
          .rg_count = 1,
          .memory_size = 8},
-        {.cid = 1,
-         .file_idx = 0,
-         .local_rg_offset = 1,
-         .rg_count = 1,
-         .memory_size = 8},
-        {.cid = 2,
-         .file_idx = 0,
-         .local_rg_offset = 2,
-         .rg_count = 1,
-         .memory_size = 8},
-        {.cid = 3,
-         .file_idx = 0,
-         .local_rg_offset = 4,
-         .rg_count = 1,
-         .memory_size = 8},
-        {.cid = 4,
-         .file_idx = 1,
-         .local_rg_offset = 0,
-         .rg_count = 1,
-         .memory_size = 8},
     };
 
-    EXPECT_THROW(BuildAsyncReadWindows(cells, 0), SegcoreError);
+    auto reader = std::make_shared<FakeChunkReader>(&executor_);
+    auto options = Options();
+    options.read_window_bytes = 0;
+    EXPECT_THROW(Run(LoadCellsAsync(nullptr,
+                                    kTestSegmentId,
+                                    std::move(cells),
+                                    std::move(reader),
+                                    Finalizer(),
+                                    std::move(options))),
+                 SegcoreError);
 }
 
 TEST_F(AsyncLoadPipelineTest, AsyncReadWindowConfigRejectsNonPositiveValues) {
@@ -605,10 +604,10 @@ TEST_F(AsyncLoadPipelineTest, DefaultOptionsUseConfiguredReadWindow) {
         SetStorageV2AsyncLoadReadWindowSizeBytes(window_size);
         auto reader = std::make_shared<FakeChunkReader>(&executor_);
         auto options = AsyncLoadPipelineOptions{};
-        options.segment_id = 100;
-        options.executor = &executor_;
+        options.executor = folly::getKeepAliveToken(executor_);
         auto results = Run(LoadCellsAsync(
             nullptr,
+            kTestSegmentId,
             cells,
             reader,
             [](const auto&, int64_t) { return std::make_unique<GroupChunk>(); },
@@ -642,8 +641,12 @@ TEST_F(AsyncLoadPipelineTest, RestoresRequestedCellOrder) {
     };
     std::vector<int64_t> finalized;
 
-    auto results = Run(LoadCellsAsync(
-        nullptr, std::move(cells), reader, Finalizer(&finalized), Options()));
+    auto results = Run(LoadCellsAsync(nullptr,
+                                      kTestSegmentId,
+                                      std::move(cells),
+                                      reader,
+                                      Finalizer(&finalized),
+                                      Options()));
 
     ASSERT_EQ(results.size(), 3);
     EXPECT_EQ(results[0].first, 2);
@@ -665,10 +668,11 @@ TEST_F(AsyncLoadPipelineTest, DefaultExecutorRunsOffTheCallingThread) {
                                  .rg_count = 1,
                                  .memory_size = 1}};
     auto options = Options();
-    options.executor = nullptr;
+    options.executor.reset();
 
     auto results = Run(LoadCellsAsync(
         nullptr,
+        kTestSegmentId,
         std::move(cells),
         reader,
         [](const auto&, int64_t) { return std::make_unique<GroupChunk>(); },
@@ -691,12 +695,15 @@ TEST_F(AsyncLoadPipelineTest,
                                  .memory_size = 1}};
     auto options = Options(milvus::proto::common::LoadPriority::LOW);
 
-    auto future =
-        std::move(LoadCellsAsync(
-                      nullptr, std::move(cells), reader, Finalizer(), options))
-            .semi()
-            .via(folly::getKeepAliveToken(&caller_executor),
-                 folly::Executor::HI_PRI);
+    auto future = std::move(LoadCellsAsync(nullptr,
+                                           kTestSegmentId,
+                                           std::move(cells),
+                                           reader,
+                                           Finalizer(),
+                                           options))
+                      .semi()
+                      .via(folly::getKeepAliveToken(&caller_executor),
+                           folly::Executor::HI_PRI);
 
     executor_.drain();
     ASSERT_FALSE(future.isReady());
@@ -720,12 +727,15 @@ TEST_F(AsyncLoadPipelineTest, ReleasesBudgetWhenStorageFutureFails) {
                                  .rg_count = 1,
                                  .memory_size = 1}};
     auto options = Options(milvus::proto::common::LoadPriority::LOW);
-    auto load =
-        std::move(LoadCellsAsync(
-                      nullptr, std::move(cells), reader, Finalizer(), options))
-            .semi()
-            .via(folly::getKeepAliveToken(&caller_executor),
-                 folly::Executor::HI_PRI);
+    auto load = std::move(LoadCellsAsync(nullptr,
+                                         kTestSegmentId,
+                                         std::move(cells),
+                                         reader,
+                                         Finalizer(),
+                                         options))
+                    .semi()
+                    .via(folly::getKeepAliveToken(&caller_executor),
+                         folly::Executor::HI_PRI);
 
     executor_.drain();
     ASSERT_FALSE(load.isReady());
@@ -769,6 +779,7 @@ TEST_F(AsyncLoadPipelineTest, CancelsPendingWindowsAfterFirstReadFailure) {
 
     try {
         Run(LoadCellsAsync(nullptr,
+                           kTestSegmentId,
                            std::move(cells),
                            reader,
                            Finalizer(),
@@ -802,9 +813,10 @@ TEST_F(AsyncLoadPipelineTest, PublishesReadFailureBeforeReleasingWindowBudget) {
     options.read_window_bytes = 1;
     // Force the admitted window to run before Release() returns so the test
     // observes whether cancellation was published before the next admission.
-    options.executor = &load_executor;
+    options.executor = folly::getKeepAliveToken(load_executor);
     auto load = std::move(LoadCellsAsync(
                               nullptr,
+                              kTestSegmentId,
                               std::move(cells),
                               reader,
                               [](const auto&, int64_t) {
@@ -852,13 +864,14 @@ TEST_F(AsyncLoadPipelineTest,
     options.read_window_bytes = 1;
     // Keep load admission reentrant while finalization runs on a separate
     // executor, matching the lease handoff in the production path.
-    options.executor = &load_executor;
+    options.executor = folly::getKeepAliveToken(load_executor);
     options.finalization_executor_provider = [&finalization_executor]() {
         return folly::getKeepAliveToken(&finalization_executor);
     };
     auto load =
         std::move(LoadCellsAsync(
                       nullptr,
+                      kTestSegmentId,
                       std::move(cells),
                       reader,
                       [](const auto&, int64_t) -> std::unique_ptr<GroupChunk> {
@@ -901,8 +914,12 @@ TEST_F(AsyncLoadPipelineTest, FailsReadBeforeRequestingFinalizationExecutor) {
         return folly::getKeepAliveToken(&io_executor);
     };
 
-    auto load = Start(LoadCellsAsync(
-        nullptr, std::move(cells), reader, Finalizer(), std::move(options)));
+    auto load = Start(LoadCellsAsync(nullptr,
+                                     kTestSegmentId,
+                                     std::move(cells),
+                                     reader,
+                                     Finalizer(),
+                                     std::move(options)));
     auto completed_before_io = load.isReady();
     auto next_budget =
         budget_.AcquireAsync(1, storage::TransientBudgetPriority::High);
@@ -945,6 +962,7 @@ TEST_F(AsyncLoadPipelineTest,
 
     try {
         Run(LoadCellsAsync(nullptr,
+                           kTestSegmentId,
                            std::move(cells),
                            reader,
                            Finalizer(),
@@ -956,7 +974,7 @@ TEST_F(AsyncLoadPipelineTest,
     EXPECT_EQ(provider_calls, 0);
 }
 
-TEST_F(AsyncLoadPipelineTest, CapturesExecutorKeepAliveBeforeTaskStarts) {
+TEST_F(AsyncLoadPipelineTest, MovesExecutorKeepAliveIntoLazyTask) {
     KeepAliveRecordingExecutor executor;
     auto reader = std::make_shared<FakeChunkReader>(nullptr);
     std::vector<CellSpec> cells{{.cid = 0,
@@ -965,11 +983,16 @@ TEST_F(AsyncLoadPipelineTest, CapturesExecutorKeepAliveBeforeTaskStarts) {
                                  .rg_count = 1,
                                  .memory_size = 1}};
     auto options = Options();
-    options.executor = &executor;
+    options.executor = folly::getKeepAliveToken(executor);
+    EXPECT_EQ(executor.OutstandingKeepAlives(), 1);
 
     {
-        auto task = LoadCellsAsync(
-            nullptr, std::move(cells), reader, Finalizer(), options);
+        auto task = LoadCellsAsync(nullptr,
+                                   kTestSegmentId,
+                                   std::move(cells),
+                                   reader,
+                                   Finalizer(),
+                                   std::move(options));
         EXPECT_EQ(executor.OutstandingKeepAlives(), 1);
         EXPECT_EQ(reader->AsyncCalls(), 0);
     }
@@ -986,8 +1009,8 @@ TEST_F(AsyncLoadPipelineTest, CapturesContextCancellationBeforeTaskStarts) {
                                  .local_rg_offset = 0,
                                  .rg_count = 1,
                                  .memory_size = 1}};
-    auto task =
-        LoadCellsAsync(&ctx, std::move(cells), reader, Finalizer(), Options());
+    auto task = LoadCellsAsync(
+        &ctx, kTestSegmentId, std::move(cells), reader, Finalizer(), Options());
 
     ctx.cancellation_token = {};
     source.requestCancellation();
@@ -1016,8 +1039,12 @@ TEST_F(AsyncLoadPipelineTest,
 
     auto caller = [this, reader, cells = std::move(cells)]() mutable
         -> folly::coro::Task<std::vector<AsyncCellResult>> {
-        co_return co_await LoadCellsAsync(
-            nullptr, std::move(cells), reader, Finalizer(), Options());
+        co_return co_await LoadCellsAsync(nullptr,
+                                          kTestSegmentId,
+                                          std::move(cells),
+                                          reader,
+                                          Finalizer(),
+                                          Options());
     };
     auto with_cancellation = [&source, caller = std::move(caller)]() mutable
         -> folly::coro::Task<std::vector<AsyncCellResult>> {
@@ -1052,8 +1079,12 @@ TEST_F(AsyncLoadPipelineTest, ComposesWithCallerCoroutine) {
 
     auto caller = [this, reader, cells = std::move(cells)]() mutable
         -> folly::coro::Task<size_t> {
-        auto results = co_await LoadCellsAsync(
-            nullptr, std::move(cells), reader, Finalizer(), Options());
+        auto results = co_await LoadCellsAsync(nullptr,
+                                               kTestSegmentId,
+                                               std::move(cells),
+                                               reader,
+                                               Finalizer(),
+                                               Options());
         co_return results.size();
     };
 
@@ -1083,10 +1114,11 @@ TEST_F(AsyncLoadPipelineTest, SubmitsOnlyBudgetAdmittedWindowsToLoadExecutor) {
          .memory_size = 1},
     };
     auto options = Options();
-    options.executor = &work_executor;
+    options.executor = folly::getKeepAliveToken(work_executor);
     options.read_window_bytes = 1;
     auto load = std::move(LoadCellsAsync(
                               nullptr,
+                              kTestSegmentId,
                               std::move(cells),
                               reader,
                               [](const auto&, int64_t) {
@@ -1119,9 +1151,10 @@ TEST_F(AsyncLoadPipelineTest, RegistersBudgetAdmissionBeforeWindowWorkStarts) {
                                  .rg_count = 1,
                                  .memory_size = 1}};
     auto options = Options();
-    options.executor = &work_executor;
+    options.executor = folly::getKeepAliveToken(work_executor);
     auto load = std::move(LoadCellsAsync(
                               nullptr,
+                              kTestSegmentId,
                               std::move(cells),
                               reader,
                               [](const auto&, int64_t) {
@@ -1162,11 +1195,12 @@ TEST_F(AsyncLoadPipelineTest, ReleasesBudgetWhenWindowTaskConstructionFails) {
                                  .rg_count = 1,
                                  .memory_size = 5}};
     auto options = Options();
-    options.executor = &work_executor;
+    options.executor = folly::getKeepAliveToken(work_executor);
     options.finalization_executor_provider =
         ThrowOnCopyExecutorProvider(should_throw);
     auto task = LoadCellsAsync(
         nullptr,
+        kTestSegmentId,
         std::move(cells),
         reader,
         [](const auto&, int64_t) { return std::make_unique<GroupChunk>(); },
@@ -1198,8 +1232,12 @@ TEST_F(AsyncLoadPipelineTest, WaitsForAsyncBudgetBeforeReading) {
                                  .rg_count = 1,
                                  .memory_size = 1}};
 
-    auto future = Start(LoadCellsAsync(
-        nullptr, std::move(cells), reader, Finalizer(), Options()));
+    auto future = Start(LoadCellsAsync(nullptr,
+                                       kTestSegmentId,
+                                       std::move(cells),
+                                       reader,
+                                       Finalizer(),
+                                       Options()));
 
     EXPECT_FALSE(future.isReady());
     EXPECT_EQ(reader->AsyncCalls(), 0);
@@ -1225,8 +1263,12 @@ TEST_F(AsyncLoadPipelineTest, WaitsForStorageFutureBeforeFinalizing) {
         return std::make_unique<GroupChunk>();
     };
 
-    auto future = Start(LoadCellsAsync(
-        nullptr, std::move(cells), reader, std::move(finalizer), Options()));
+    auto future = Start(LoadCellsAsync(nullptr,
+                                       kTestSegmentId,
+                                       std::move(cells),
+                                       reader,
+                                       std::move(finalizer),
+                                       Options()));
 
     EXPECT_FALSE(future.isReady());
     EXPECT_EQ(finalized, 0);
@@ -1244,8 +1286,12 @@ TEST_F(AsyncLoadPipelineTest, MapsLoadPriorityToFollyExecutorPriorities) {
                                      .rg_count = 1,
                                      .memory_size = 1}};
 
-        auto results = Run(LoadCellsAsync(
-            nullptr, std::move(cells), reader, Finalizer(), Options(priority)));
+        auto results = Run(LoadCellsAsync(nullptr,
+                                          kTestSegmentId,
+                                          std::move(cells),
+                                          reader,
+                                          Finalizer(),
+                                          Options(priority)));
         EXPECT_EQ(results.size(), 1);
     };
 
@@ -1279,9 +1325,10 @@ TEST_F(AsyncLoadPipelineTest, FollyPoolRunsQueuedHighLoadBeforeLowLoad) {
                                      .rg_count = 1,
                                      .memory_size = 1}};
         auto options = Options(priority);
-        options.executor = &executor;
+        options.executor = folly::getKeepAliveToken(executor);
         return Start(LoadCellsAsync(
             nullptr,
+            kTestSegmentId,
             std::move(cells),
             std::move(reader),
             [](const auto&, int64_t) { return std::make_unique<GroupChunk>(); },
@@ -1314,6 +1361,7 @@ TEST_F(AsyncLoadPipelineTest,
 
     auto results = Run(LoadCellsAsync(
         nullptr,
+        kTestSegmentId,
         std::move(cells),
         reader,
         [this, &finalized_on_load_executor](const auto& tables, int64_t) {
@@ -1339,10 +1387,11 @@ TEST_F(AsyncLoadPipelineTest,
                                  .memory_size = 1}};
     bool finalized = false;
     auto options = Options();
-    options.executor = &executor;
+    options.executor = folly::getKeepAliveToken(executor);
 
     auto load = std::move(LoadCellsAsync(
                               nullptr,
+                              kTestSegmentId,
                               std::move(cells),
                               reader,
                               [&finalized](const auto&, int64_t) {
@@ -1386,6 +1435,7 @@ TEST_F(AsyncLoadPipelineTest,
 
     auto results = Run(LoadCellsAsync(
         nullptr,
+        kTestSegmentId,
         std::move(cells),
         reader,
         [this, &finalized_on_load_executor](const auto&, int64_t) {
@@ -1420,6 +1470,7 @@ TEST_F(AsyncLoadPipelineTest,
     };
     auto load = Start(LoadCellsAsync(
         nullptr,
+        kTestSegmentId,
         std::move(cells),
         reader,
         [this, &finalized_on_load_executor](const auto&, int64_t) {
@@ -1498,6 +1549,7 @@ TEST_F(AsyncLoadPipelineTest,
     };
     auto load = Start(LoadCellsAsync(
         nullptr,
+        kTestSegmentId,
         std::move(cells),
         reader,
         [&finalized](const auto&, int64_t) {
@@ -1581,6 +1633,7 @@ TEST_F(AsyncLoadPipelineTest,
         };
         return Start(LoadCellsAsync(
             nullptr,
+            kTestSegmentId,
             std::move(cells),
             std::move(reader),
             [&finalize_order](const auto&, int64_t cid) {
@@ -1620,6 +1673,7 @@ TEST_F(AsyncLoadPipelineTest, FinalizesOnLocalFileIOPoolWhenRequested) {
 
     auto results = Run(LoadCellsAsync(
         nullptr,
+        kTestSegmentId,
         std::move(cells),
         reader,
         [this, &finalized_on_io_pool](const auto& tables, int64_t) {
@@ -1648,12 +1702,13 @@ TEST_F(AsyncLoadPipelineTest,
                                  .memory_size = 1}};
     bool finalized = false;
     auto options = Options();
-    options.executor = &load_executor;
+    options.executor = folly::getKeepAliveToken(load_executor);
     options.finalization_executor_provider = [&io_executor]() {
         return folly::getKeepAliveToken(&io_executor);
     };
     auto load = std::move(LoadCellsAsync(
                               nullptr,
+                              kTestSegmentId,
                               std::move(cells),
                               reader,
                               [&finalized](const auto&, int64_t) {
@@ -1731,12 +1786,13 @@ TEST_F(AsyncLoadPipelineTest,
                                  .rg_count = 1,
                                  .memory_size = 1}};
     auto options = Options();
-    options.executor = &load_executor;
+    options.executor = folly::getKeepAliveToken(load_executor);
     options.finalization_executor_provider = [&pool]() {
         return pool.GetExecutor();
     };
     auto load = std::move(LoadCellsAsync(
                               nullptr,
+                              kTestSegmentId,
                               std::move(cells),
                               reader,
                               [finalized](const auto&, int64_t) {
@@ -1811,12 +1867,13 @@ TEST_F(AsyncLoadPipelineTest, SkipsQueuedFinalizationAfterCancellation) {
                                  .rg_count = 1,
                                  .memory_size = 1}};
     auto options = Options();
-    options.executor = &load_executor;
+    options.executor = folly::getKeepAliveToken(load_executor);
     options.finalization_executor_provider = [&pool]() {
         return pool.GetExecutor();
     };
     auto load = std::move(LoadCellsAsync(
                               &ctx,
+                              kTestSegmentId,
                               std::move(cells),
                               reader,
                               [finalized](const auto&, int64_t) {
@@ -1866,6 +1923,7 @@ TEST_F(AsyncLoadPipelineTest, PreservesFinalizerErrorAcrossLocalFileIOPool) {
     try {
         Run(LoadCellsAsync(
             nullptr,
+            kTestSegmentId,
             std::move(cells),
             reader,
             [](const auto&, int64_t) -> std::unique_ptr<GroupChunk> {
@@ -1907,6 +1965,7 @@ TEST_F(AsyncLoadPipelineTest, PreservesFileWriteErrorAcrossLocalFileIOPool) {
     try {
         Run(LoadCellsAsync(
             nullptr,
+            kTestSegmentId,
             std::move(cells),
             reader,
             [](const auto&, int64_t) -> std::unique_ptr<GroupChunk> {
@@ -1933,12 +1992,13 @@ TEST_F(AsyncLoadPipelineTest, SupportsSinglePriorityCustomExecutor) {
                                  .rg_count = 1,
                                  .memory_size = 1}};
     auto options = Options();
-    options.executor = &executor;
+    options.executor = folly::getKeepAliveToken(executor);
 
     auto load =
         std::move(
             LoadCellsAsync(
                 nullptr,
+                kTestSegmentId,
                 std::move(cells),
                 reader,
                 [](const std::vector<std::shared_ptr<arrow::Table>>& tables,
@@ -1977,12 +2037,14 @@ TEST_F(AsyncLoadPipelineTest, HighPriorityAdmissionPassesQueuedLowLoad) {
 
     auto low = Start(
         LoadCellsAsync(nullptr,
+                       kTestSegmentId,
                        cell(),
                        low_reader,
                        Finalizer(),
                        Options(milvus::proto::common::LoadPriority::LOW)));
     auto high = Start(
         LoadCellsAsync(nullptr,
+                       kTestSegmentId,
                        cell(),
                        high_reader,
                        Finalizer(),
@@ -2006,8 +2068,12 @@ TEST_F(AsyncLoadPipelineTest, CancelsWhileWaitingForBudget) {
                                  .local_rg_offset = 0,
                                  .rg_count = 1,
                                  .memory_size = 1}};
-    auto future = Start(
-        LoadCellsAsync(&ctx, std::move(cells), reader, Finalizer(), Options()));
+    auto future = Start(LoadCellsAsync(&ctx,
+                                       kTestSegmentId,
+                                       std::move(cells),
+                                       reader,
+                                       Finalizer(),
+                                       Options()));
 
     source.requestCancellation();
 
@@ -2040,8 +2106,12 @@ TEST_F(AsyncLoadPipelineTest, CancelsAfterStorageRead) {
     };
 
     try {
-        Run(LoadCellsAsync(
-            &ctx, std::move(cells), reader, std::move(finalizer), Options()));
+        Run(LoadCellsAsync(&ctx,
+                           kTestSegmentId,
+                           std::move(cells),
+                           reader,
+                           std::move(finalizer),
+                           Options()));
         FAIL() << "expected cancellation";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
@@ -2077,8 +2147,12 @@ TEST_F(AsyncLoadPipelineTest, CancelsBetweenCellFinalization) {
     };
 
     try {
-        Run(LoadCellsAsync(
-            &ctx, std::move(cells), reader, std::move(finalizer), Options()));
+        Run(LoadCellsAsync(&ctx,
+                           kTestSegmentId,
+                           std::move(cells),
+                           reader,
+                           std::move(finalizer),
+                           Options()));
         FAIL() << "expected cancellation";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
@@ -2096,8 +2170,12 @@ TEST_F(AsyncLoadPipelineTest, PreservesTypedStorageErrors) {
                                      .rg_count = 1,
                                      .memory_size = 1}};
         try {
-            Run(LoadCellsAsync(
-                nullptr, std::move(cells), reader, Finalizer(), Options()));
+            Run(LoadCellsAsync(nullptr,
+                               kTestSegmentId,
+                               std::move(cells),
+                               reader,
+                               Finalizer(),
+                               Options()));
             FAIL() << "expected storage error";
         } catch (const SegcoreError& error) {
             EXPECT_EQ(error.get_error_code(), expected);

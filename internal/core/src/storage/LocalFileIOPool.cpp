@@ -27,7 +27,8 @@
 namespace milvus::storage {
 namespace {
 
-int
+// Clamps configured workers to the executor's supported local range.
+[[nodiscard]] int
 ClampWorkerCount(int worker_count) {
     if (worker_count < 0) {
         LOG_WARN("Invalid local file I/O worker count {}, using 0",
@@ -35,7 +36,7 @@ ClampWorkerCount(int worker_count) {
         return 0;
     }
 
-    auto max_workers = std::max(1u, std::thread::hardware_concurrency());
+    const auto max_workers = std::max(1u, std::thread::hardware_concurrency());
     if (static_cast<unsigned int>(worker_count) > max_workers) {
         LOG_WARN("Local file I/O worker count {} exceeds {}, using {}",
                  worker_count,
@@ -81,18 +82,18 @@ LocalFileIOPool::GetInstance() {
 
 void
 LocalFileIOPool::Configure(int worker_count) {
-    worker_count = ClampWorkerCount(worker_count);
+    const int effective_worker_count = ClampWorkerCount(worker_count);
     std::lock_guard configure_lock(configure_mutex_);
 
     std::shared_ptr<Executor> executor_to_resize;
     std::shared_ptr<Executor> retired_executor;
     {
         std::lock_guard executor_lock(executor_mutex_);
-        if (worker_count == 0) {
+        if (effective_worker_count == 0) {
             retired_executor = std::move(executor_);
         } else if (executor_ == nullptr) {
             auto new_executor = std::make_shared<Executor>(
-                worker_count,
+                effective_worker_count,
                 Executor::makeDefaultPriorityQueue(2),
                 std::make_shared<folly::NamedThreadFactory>("MILVUS_LF_IO_"));
             executor_ = std::move(new_executor);
@@ -102,12 +103,13 @@ LocalFileIOPool::Configure(int worker_count) {
     }
 
     if (executor_to_resize != nullptr &&
-        executor_to_resize->numThreads() != static_cast<size_t>(worker_count)) {
-        auto old_worker_count = executor_to_resize->numThreads();
+        executor_to_resize->numThreads() !=
+            static_cast<size_t>(effective_worker_count)) {
+        const auto old_worker_count = executor_to_resize->numThreads();
         try {
-            executor_to_resize->setNumThreads(worker_count);
+            executor_to_resize->setNumThreads(effective_worker_count);
         } catch (...) {
-            auto resize_error = std::current_exception();
+            const auto resize_error = std::current_exception();
             try {
                 executor_to_resize->setNumThreads(old_worker_count);
             } catch (const std::exception& rollback_error) {
@@ -125,12 +127,13 @@ LocalFileIOPool::Configure(int worker_count) {
 
     {
         std::lock_guard permit_lock(permit_mutex_);
-        write_concurrency_limit_.store(static_cast<size_t>(worker_count),
-                                       std::memory_order_release);
+        write_concurrency_limit_.store(
+            static_cast<size_t>(effective_worker_count),
+            std::memory_order_release);
     }
     permit_cv_.notify_all();
 
-    LOG_INFO("Set local file I/O worker count to {}", worker_count);
+    LOG_INFO("Set local file I/O worker count to {}", effective_worker_count);
 }
 
 folly::Executor::KeepAlive<>
@@ -151,7 +154,8 @@ LocalFileIOPool::AcquireWritePermit() {
 
     std::unique_lock lock(permit_mutex_);
     permit_cv_.wait(lock, [this]() {
-        auto limit = write_concurrency_limit_.load(std::memory_order_acquire);
+        const auto limit =
+            write_concurrency_limit_.load(std::memory_order_acquire);
         return limit == 0 || active_write_permits_ < limit;
     });
     if (write_concurrency_limit_.load(std::memory_order_acquire) == 0) {

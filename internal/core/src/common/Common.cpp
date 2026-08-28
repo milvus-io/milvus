@@ -22,7 +22,7 @@
 #include "gflags/gflags.h"
 #include "glog/logging.h"
 #include "log/Log.h"
-#include "storage/EntryStreamUtils.h"
+#include "storage/TransientMemoryBudget.h"
 #include "tantivy-binding.h"
 
 namespace milvus {
