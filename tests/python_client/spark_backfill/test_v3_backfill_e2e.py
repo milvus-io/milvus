@@ -9,7 +9,6 @@ from pymilvus import DataType
 
 from spark_backfill.backfill_helpers import (
     BackfillContractError,
-    FunctionOutputIndexNotReadyError,
     StaleSchemaFenceMissingError,
     assert_commit_succeeded,
     assert_stale_schema_commit_rejected,
