@@ -258,8 +258,9 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_SuccessWithValidInput()
 // A request that fails validateImportRequest is rejected before any broadcast wiring is
 // touched -- server.broker is nil here, so reaching it would panic or block. The trigger
 // is an unparsable timeout, i.e. a pure function of the request. The job-count limit is
-// no longer one of these: it is admission over mutable cluster state and now runs inside
-// the broadcast, covered by TestImportV2_JobLimitStillRejectsANewJob.
+// admission over mutable cluster state rather than a pure function of the request, but
+// it runs in the same place -- validateImportRequest, before any resource key is taken;
+// see TestImportV2_JobLimitStillRejectsANewJob.
 func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError() {
 	ctx := context.Background()
 

@@ -244,13 +244,9 @@ func TestBroadcastTaskNotCreatedOnStoppedBroadcaster(t *testing.T) {
 	}
 	bm.lifetime.SetState(typeutil.LifetimeStateStopped)
 
-	_, _, guardsConsumed, err := bm.broadcast(context.Background(), createNewBroadcastMsg([]string{"v1"}, rk), 1, guards)
+	_, err := bm.broadcast(context.Background(), createNewBroadcastMsg([]string{"v1"}, rk), 1, guards)
 
 	require.Error(t, err)
-	// Nothing was registered, but the guards are still gone from the caller's hands:
-	// the shutdown path released them itself, as the FastLock below shows, so the
-	// caller must not release them again.
-	require.True(t, guardsConsumed)
 	require.True(t, IsBroadcastTaskNotCreated(err))
 	require.True(t, IsBroadcastTaskNotCreated(errors.Wrap(err, "broadcast failed")))
 	require.False(t, IsBroadcastTaskNotCreated(context.Canceled))

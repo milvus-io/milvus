@@ -140,22 +140,6 @@ func (b *broadcastTask) BroadcastResult() (message.BroadcastMutableMessage, map[
 	return msg, result
 }
 
-// BroadcastResultIfAcked is the non-panicking variant of BroadcastResult, returning
-// nil results when the task has not been acked on every vchannel yet.
-//
-// It exists for callers that reach a task whose ack state they do not control: the
-// duplicate branch of an idempotent broadcast resolves to a task created by another
-// request, which may still be in flight. Whether it can be observed unacked depends
-// on a resource-key lock lifetime two layers away, and a panic in a coordinator is
-// severe, so the duplicate is answered with whatever is available instead.
-func (b *broadcastTask) BroadcastResultIfAcked() (message.BroadcastMutableMessage, map[string]*types.AppendResult) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	msg, result, _ := b.broadcastResult()
-	return msg, result
-}
-
 // broadcastResult zips the vchannels of the task with their acked checkpoints.
 // Returns acked=false and a nil result when any vchannel has no checkpoint yet.
 // Caller must hold b.mu.

@@ -215,52 +215,59 @@ func (bm *broadcastTaskManager) appendSharedClusterRK(resourceKeys ...message.Re
 	return append(resourceKeys, message.NewSharedClusterResourceKey())
 }
 
-// broadcast broadcasts the message to all vchannels, unless its idempotency scope
-// is already owned by an earlier broadcast.
+// broadcast broadcasts the message to all vchannels, or resolves it to the
+// broadcast that already owns its idempotency scope, waiting for that owner to
+// complete before answering.
 //
-// dup is non-nil exactly when nothing was registered and nothing will reach the
-// WAL; the caller still holds its lock guards in that case.
-//
-// guardsConsumed says the caller no longer holds its lock guards, either because
-// the registered task took them over or because this function released them. It is
-// reported separately from err because the two are independent: once the task is
-// registered it keeps broadcasting in the background and releases the guards from
-// its ack callback, even if the wait below fails, so the caller must stop releasing
-// them itself. Deriving that from the error at the caller would put the answer at
-// every error site rather than at the one place that knows.
-//
-// The two ways to consume them are reported as one fact on purpose: what the caller
-// has to decide is only whether to keep releasing them, and answering that with
-// "the task owns them" alone would leave the shutdown path relying on Unlock being
-// harmless to call twice. It is, on one goroutine -- lockGuards.Unlock empties its
-// own slice -- but that is not a property to build ownership on, since nothing
-// synchronizes it against the ack callback's release on another goroutine.
+// Either way it consumes the caller's lock guards: a registered task takes them
+// over and releases them from its ack callback, and every other path -- shutdown,
+// duplicate -- releases them here before returning. An early return added to this
+// function MUST keep that contract; the caller cannot tell the paths apart and
+// stops releasing on all of them.
 func (bm *broadcastTaskManager) broadcast(
 	ctx context.Context,
 	msg message.BroadcastMutableMessage,
 	broadcastID uint64,
 	guards *lockGuards,
-) (result *types.BroadcastAppendResult, dup *broadcastTask, guardsConsumed bool, err error) {
+) (*types.BroadcastAppendResult, error) {
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
-		// Released here rather than left to the caller, and reported as consumed: the
-		// caller's deferred Close() must not reach these guards again.
 		guards.Unlock()
-		return nil, nil, true, errors.Mark(status.NewOnShutdownError("broadcaster is closing"), ErrBroadcastTaskNotCreated)
+		return nil, errors.Mark(status.NewOnShutdownError("broadcaster is closing"), ErrBroadcastTaskNotCreated)
 	}
 	defer bm.lifetime.Done()
 
 	// Validation is now done before calling broadcast (in DataCoord for import operations)
 	// CheckCallback mechanism has been removed as part of the import refactoring
 
-	dup, task := bm.getOrAddBroadcastTask(ctx, msg, broadcastID, guards)
-	if dup != nil {
-		return nil, dup, false, nil
+	task, created := bm.getOrAddBroadcastTask(ctx, msg, broadcastID, guards)
+	if !created {
+		// Nothing was registered and nothing reached the WAL for THIS request; the
+		// answer is the owner's. This call is about to wait on that owner, so its own
+		// guards are released first rather than held across someone else's broadcast
+		// -- they may even name a different collection than the owner's, when the
+		// two requests raced a rename.
+		guards.Unlock()
+
+		// Wait for the owner to reach the state a non-duplicate caller returns from:
+		// ack callback done. The owner is not serialized behind this caller's
+		// resource lock on the two paths that can observe it mid-flight -- a retry
+		// that raced a rename holds the stale name's lock, and a task recovered from
+		// a replicated WAL holds no lock at all -- and answering before the owner
+		// finishes hands the client a broadcastID whose effects (for import, the job
+		// itself: it is created in the ack callback) do not exist yet. The wait is
+		// bounded by the request context, which answers with the caller's own timeout
+		// instead of an ID that nothing backs. An owner already tombstoned returns
+		// immediately.
+		result, err := task.BlockUntilDone(ctx)
+		if err != nil {
+			return nil, err
+		}
+		result.Duplicated = task.BroadcastMessage()
+		return result, nil
 	}
-	pendingTask := newPendingBroadcastTask(task)
 
 	// Add it into broadcast scheduler to broadcast the message into all vchannels.
-	result, err = bm.broadcastScheduler.AddTask(ctx, pendingTask)
-	return result, nil, true, err
+	return bm.broadcastScheduler.AddTask(ctx, newPendingBroadcastTask(task))
 }
 
 // LegacyAck is the legacy ack function for the broadcast task.
@@ -340,15 +347,15 @@ func (bm *broadcastTaskManager) Close() {
 // first. Deciding under bm.mu retires that caller obligation instead of restating
 // it in a comment.
 //
-// Returns the owning task on a hit, having registered nothing; the caller keeps
-// its lock guards. Returns the newly registered task on a miss, which now owns
-// the guards.
+// Returns the owning task and created=false on a hit, having registered nothing;
+// the caller still holds its lock guards. Returns the newly registered task and
+// created=true on a miss, and that task now owns the guards.
 func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 	ctx context.Context,
 	msg message.BroadcastMutableMessage,
 	broadcastID uint64,
 	guards *lockGuards,
-) (dup *broadcastTask, created *broadcastTask) {
+) (task *broadcastTask, created bool) {
 	// The scope comes from the message alone, so the hit path and the miss path
 	// cannot drift apart. It touches no shared state, so it is derived outside the
 	// lock.
@@ -359,7 +366,7 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 
 	if ownerID, ok := bm.idempotencyIndex.Get(scope); ok {
 		if t, ok := bm.tasks[ownerID]; ok {
-			return t, nil
+			return t, false
 		}
 		// tasks and idempotencyIndex are written together under this lock and
 		// removeBroadcastTask drops the index entry first, so a scope whose owner
@@ -378,7 +385,7 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 	newIncomingTask.WithResourceKeyLockGuards(guards)
 	bm.tasks[broadcastID] = newIncomingTask
 	bm.idempotencyIndex.Add(scope, broadcastID)
-	return nil, newIncomingTask
+	return newIncomingTask, true
 }
 
 // getOrCreateBroadcastTask returns the task by the broadcastID

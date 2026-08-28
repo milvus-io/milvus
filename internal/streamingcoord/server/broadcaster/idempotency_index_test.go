@@ -281,11 +281,11 @@ func TestBroadcastReturnsDuplicatedOnKeyHit(t *testing.T) {
 	require.Equal(t, message.NewCollectionScopedIdempotencyKey(testCollectionID, "import/1/k"),
 		message.IdempotencyKeyOf(result.Duplicated))
 
-	// On a hit the guards were never consumed, so Close() must actually release
-	// them — a leaked guard would block every later import on that collection
-	// forever. Contend on the SAME exclusive key to prove both halves: still held
-	// before Close, actually released after.
-	require.NotNil(t, api.guards)
+	// The dup branch releases the guards itself before waiting on the original --
+	// a leaked guard would block every later import on that collection forever.
+	// Contend on the SAME exclusive key to prove it: acquirable already, before
+	// Close() is ever called, and Close() stays a harmless no-op after.
+	require.Nil(t, api.guards)
 
 	released := make(chan struct{})
 	go func() {
@@ -294,16 +294,10 @@ func TestBroadcastReturnsDuplicatedOnKeyHit(t *testing.T) {
 	}()
 	select {
 	case <-released:
-		t.Fatal("exclusive resource key was acquirable while the broadcast still held it")
-	case <-time.After(200 * time.Millisecond):
-	}
-
-	api.Close()
-	select {
-	case <-released:
 	case <-time.After(3 * time.Second):
 		t.Fatal("resource key lock was not released after a deduplicated broadcast")
 	}
+	api.Close()
 }
 
 func TestBroadcastWithoutKeyIsUnaffected(t *testing.T) {
@@ -481,27 +475,115 @@ func TestDuplicatedBroadcastReturnsOriginalAppendResults(t *testing.T) {
 	require.True(t, appendResult.LastConfirmedMessageID.EQ(walimplstest.NewTestMessageID(0)))
 }
 
-// TestDuplicatedBroadcastAgainstUnackedOriginalDoesNotPanic covers the case the
-// reconstruction cannot assume away: the original task exists but has not been acked on
-// every vchannel yet, so it has no checkpoints to zip. Reconstructing them there would
-// hit the "BroadcastResult is called before the broadcast task is acked" panic — inside
-// a coordinator, on a path no success-path test reaches.
-func TestDuplicatedBroadcastAgainstUnackedOriginalDoesNotPanic(t *testing.T) {
+// TestDuplicateWaitsForAnInFlightOriginal pins the duplicate branch's contract: a
+// same-key retry is answered only once the original's ack callback has run, i.e. from
+// the same state the original's own caller returns from. The retry here holds a
+// DIFFERENT collection-name key than the original -- the shape a rename race produces
+// -- so nothing but the wait itself separates it from the original's completion.
+// Without the wait this returns immediately, with a broadcastID whose import job (for
+// import, created in the ack callback) does not exist yet.
+func TestDuplicateWaitsForAnInFlightOriginal(t *testing.T) {
+	bm := newBroadcastTaskManagerForTest(t)
+
+	// Hold the WAL append open so the original stays in flight until released.
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseAppends := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseAppends)
+
+	operator := mock_streaming.NewMockWALAccesser(t)
+	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
+			<-release
+			resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
+			for idx := range msgs {
+				resps.Responses[idx] = types.AppendResponse{
+					AppendResult: &types.AppendResult{
+						MessageID: walimplstest.NewTestMessageID(int64(idx + 1)),
+						TimeTick:  uint64(time.Now().UnixMilli()),
+					},
+				}
+			}
+			return resps
+		}).Maybe()
+	streaming.SetWALForTest(operator)
+
+	// The original, holding the pre-rename name's key.
+	originalDone := make(chan struct{})
+	go func() {
+		defer close(originalDone)
+		api := &broadcasterWithRK{
+			broadcaster: bm, broadcastID: 1,
+			guards: bm.resourceKeyLocker.Lock(message.NewExclusiveCollectionNameResourceKey("db1", "coll1")),
+		}
+		defer api.Close()
+		_, err := api.Broadcast(context.Background(), newImportMsgWithKey("k"))
+		require.NoError(t, err)
+	}()
+	// The retry may only start once the original is registered, or it would race the
+	// index miss instead of hitting it.
+	require.Eventually(t, func() bool {
+		_, ok := bm.getBroadcastTaskByID(1)
+		return ok
+	}, 10*time.Second, time.Millisecond)
+
+	// The retry, holding the post-rename name's key: no lock orders it behind the
+	// original.
+	var dupResult *types.BroadcastAppendResult
+	dupDone := make(chan struct{})
+	go func() {
+		defer close(dupDone)
+		api := &broadcasterWithRK{
+			broadcaster: bm, broadcastID: 2,
+			guards: bm.resourceKeyLocker.Lock(message.NewExclusiveCollectionNameResourceKey("db1", "coll1-renamed")),
+		}
+		defer api.Close()
+		var err error
+		dupResult, err = api.Broadcast(context.Background(), newImportMsgWithKey("k"))
+		require.NoError(t, err)
+	}()
+
+	// While the original is in flight, the duplicate must not have answered.
+	select {
+	case <-dupDone:
+		t.Fatal("the duplicate answered before the original completed")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	releaseAppends()
+	<-originalDone
+	<-dupDone
+
+	require.NotNil(t, dupResult.Duplicated)
+	require.Equal(t, uint64(1), dupResult.BroadcastID)
+	// Answered from a completed original, the results are whole -- the property the
+	// wait exists to provide.
+	require.Len(t, dupResult.AppendResults, 1)
+	require.NotNil(t, dupResult.AppendResults["v1"])
+}
+
+// TestDuplicateAgainstUnackedReplicatedOriginalTimesOut covers the other path that can
+// observe an incomplete original without racing anything: a task recovered from a
+// replicated WAL holds no resource lock at all, yet is indexed. When such an original
+// never completes, the duplicate must surface the caller's own timeout -- an error the
+// client retries -- never a success carrying a broadcastID that nothing backs, which is
+// what the pre-wait implementation answered here.
+func TestDuplicateAgainstUnackedReplicatedOriginalTimesOut(t *testing.T) {
 	collKey := message.NewSharedCollectionNameResourceKey("db1", "coll1")
 	// A replicated task with an empty ack bitmap: recovery neither re-appends nor acks
-	// it, so it stays unacked for the whole test.
+	// it, so it stays incomplete for the whole test.
 	bm := newBroadcastTaskManagerForTest(t,
 		createImportBroadcastTaskProto(100, "k",
 			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED, []byte{0x00}, collKey))
 
-	var result *types.BroadcastAppendResult
-	require.NotPanics(t, func() {
-		result = broadcastForTest(t, bm, 999, newImportMsgWithKey("k"), collKey)
-	})
-	// The duplicate is still reported, just without results to hand back.
-	require.NotNil(t, result.Duplicated)
-	require.Equal(t, uint64(100), result.BroadcastID)
-	require.Nil(t, result.AppendResults)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 999, guards: bm.resourceKeyLocker.Lock(collKey)}
+	defer api.Close()
+
+	result, err := api.Broadcast(ctx, newImportMsgWithKey("k"))
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Nil(t, result)
 }
 
 // TestDiscardedBroadcastCountsNoPendingTask covers the one path that builds no task:

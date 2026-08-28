@@ -18,17 +18,15 @@ type BroadcastAppendResult struct {
 	// ORIGINAL broadcast. It carries the original broadcast message so the caller
 	// can recover its own response payload (the import jobID, for imports).
 	//
-	// AppendResults is still filled in, rebuilt from the original broadcast's
-	// persisted per-vchannel checkpoints, so a caller that only reads append
-	// results cannot tell a deduplicated broadcast from a fresh one. The one
-	// exception is an original that has not finished being acked, which leaves
-	// AppendResults nil. The nil check is required, not defensive: the axis a key
-	// is scoped on and the axis the caller's resource lock names are decoupled by
-	// design — import scopes by collection ID so a retry still dedups across a
-	// rename, but locks by collection name — so a same-scope retry can hold a
-	// non-conflicting lock and observe an original that has not acked. On a
-	// promoted secondary the same holds for a different reason: the dedup index
-	// also carries tasks recovered from the WAL, which never held a lock at all.
+	// AppendResults is filled in from the original broadcast's per-vchannel
+	// checkpoints and is never nil here: the duplicate path waits for the original's
+	// ack callback before answering, the same state a non-duplicate caller returns
+	// from, so a caller cannot tell a deduplicated broadcast from a fresh one. That
+	// wait is load-bearing, not politeness -- the original is not always serialized
+	// in front of this caller by a resource lock (a retry that raced a rename holds
+	// the stale name's lock; a task recovered from a replicated WAL holds none), and
+	// without it a duplicate could be answered from an original whose effects do not
+	// exist yet.
 	//
 	// Only the in-process broadcaster path fills this field. The gRPC client path
 	// (GRPCBroadcastServiceImpl.Broadcast) leaves it nil regardless of whether the

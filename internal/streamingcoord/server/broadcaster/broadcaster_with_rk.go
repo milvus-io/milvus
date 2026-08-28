@@ -22,38 +22,26 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 	// holds expected to keep two same-key requests apart in between. They do not,
 	// whenever the lock names a different object than the scope does.
 	//
+	// Consume the guards up front: broadcast takes ownership on every path -- the
+	// registered task owns them, or broadcast releases them itself -- so Close()
+	// must stay a no-op from here on, panic paths included.
+	guards := b.guards
+	b.guards = nil
+
 	// Stamping the header, opening the span and injecting the trace context all
 	// operate on this call's own values, so they stay outside the manager lock.
 	// Keep a trace context in the broadcast message so that the DDL ack callback
 	// can still extract it after the original caller span is long gone.
-	msg = msg.OverwriteBroadcastHeader(b.broadcastID, b.guards.ResourceKeys()...)
+	msg = msg.OverwriteBroadcastHeader(b.broadcastID, guards.ResourceKeys()...)
 	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALBroadcast)
 	defer span.End()
 	message.InjectTraceContext(ctx, msg)
 
-	result, dup, guardsConsumed, err := b.broadcaster.broadcast(ctx, msg, b.broadcastID, b.guards)
-	if guardsConsumed {
-		// The guards left our hands: either the registered task owns them and releases
-		// them from its ack callback on another goroutine, or broadcast released them
-		// itself. Drop ours either way, so Close() cannot unlock them a second time.
-		// Checked before err, not after: a failure to wait for the acks does not hand
-		// the guards back, because the task goes on broadcasting without this request.
-		b.guards = nil
-	}
+	result, err := b.broadcaster.broadcast(ctx, msg, b.broadcastID, guards)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
-	}
-	if dup != nil {
-		// Nothing was registered and nothing reached the WAL, so the guards are
-		// still ours: leave them for the caller's deferred Close().
-		dupMsg, results := dup.BroadcastResultIfAcked()
-		return &types.BroadcastAppendResult{
-			BroadcastID:   dupMsg.BroadcastHeader().BroadcastID,
-			AppendResults: results,
-			Duplicated:    dupMsg,
-		}, nil
 	}
 	return result, nil
 }
