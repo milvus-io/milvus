@@ -388,7 +388,8 @@ def spark_jobs_settings(request):
         input_path=request.config.getoption("--spark-jobs-input-path"),
         output_path=request.config.getoption("--spark-jobs-output-path"),
         artifact_path=request.config.getoption("--spark-jobs-artifact-path"),
-        volume_bucket=request.config.getoption("--spark-jobs-volume-bucket") or request.config.getoption("--minio_bucket"),
+        volume_bucket=request.config.getoption("--spark-jobs-volume-bucket")
+        or request.config.getoption("--minio_bucket"),
         volume_root=request.config.getoption("--spark-jobs-volume-root"),
         minio_host=request.config.getoption("--minio_host"),
         storage_secure=request.config.getoption("--spark-jobs-storage-secure"),

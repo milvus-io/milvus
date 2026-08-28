@@ -205,13 +205,7 @@ class SparkJobsSettings:
 
 
 def _minio_endpoint(value: str) -> str:
-    endpoint = (
-        value.strip()
-        .removeprefix("s3://")
-        .removeprefix("http://")
-        .removeprefix("https://")
-        .rstrip("/")
-    )
+    endpoint = value.strip().removeprefix("s3://").removeprefix("http://").removeprefix("https://").rstrip("/")
     if not endpoint:
         raise SparkBackfillConfigurationError("storage endpoint is required")
     if "/" in endpoint:
