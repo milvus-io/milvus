@@ -17,12 +17,15 @@
 package datacoord
 
 import (
-	"fmt"
+	"math"
 	"testing"
 	"time"
 
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestForceMergeSegmentView_GetGroupLabel(t *testing.T) {
@@ -40,37 +43,31 @@ func TestForceMergeSegmentView_GetGroupLabel(t *testing.T) {
 }
 
 func TestForceMergeSegmentView_GetSegmentsView(t *testing.T) {
-	segments := []*SegmentView{
-		{ID: 1, Size: 1024},
-		{ID: 2, Size: 2048},
+	segments := []*SegmentInfo{
+		newForceMergePlanningSegment(1, 1024),
+		newForceMergePlanningSegment(2, 2048),
 	}
 
 	view := &ForceMergeSegmentView{
 		segments: segments,
 	}
 
-	assert.Equal(t, segments, view.GetSegmentsView())
-	assert.Len(t, view.GetSegmentsView(), 2)
+	views := view.GetSegmentsView()
+	require.Len(t, views, 2)
+	assert.Equal(t, int64(1), views[0].ID)
+	assert.Equal(t, float64(1024), views[0].Size)
+	assert.Equal(t, int64(2), views[1].ID)
+	assert.Equal(t, float64(2048), views[1].Size)
 }
 
 func TestForceMergeSegmentView_Append(t *testing.T) {
 	view := &ForceMergeSegmentView{
-		segments: []*SegmentView{
-			{ID: 1, Size: 1024},
-		},
+		segments: []*SegmentInfo{newForceMergePlanningSegment(1, 1024)},
 	}
 
-	newSegments := []*SegmentView{
-		{ID: 2, Size: 2048},
-		{ID: 3, Size: 3072},
-	}
-
-	view.Append(newSegments...)
-
-	assert.Len(t, view.segments, 3)
-	assert.Equal(t, int64(1), view.segments[0].ID)
-	assert.Equal(t, int64(2), view.segments[1].ID)
-	assert.Equal(t, int64(3), view.segments[2].ID)
+	assert.Panics(t, func() {
+		view.Append(&SegmentView{ID: 2, Size: 2048})
+	})
 }
 
 func TestForceMergeSegmentView_String(t *testing.T) {
@@ -82,9 +79,9 @@ func TestForceMergeSegmentView_String(t *testing.T) {
 
 	view := &ForceMergeSegmentView{
 		label: label,
-		segments: []*SegmentView{
-			{ID: 1},
-			{ID: 2},
+		segments: []*SegmentInfo{
+			newForceMergePlanningSegment(1, 1),
+			newForceMergePlanningSegment(2, 1),
 		},
 		triggerID: 12345,
 	}
@@ -130,9 +127,9 @@ func TestForceMergeSegmentView_Complete(t *testing.T) {
 		Channel:      "test-channel",
 	}
 
-	segments := []*SegmentView{
-		{ID: 1, Size: 1024 * 1024 * 1024},
-		{ID: 2, Size: 512 * 1024 * 1024},
+	segmentInfos := []*SegmentInfo{
+		newForceMergePlanningSegment(1, 1024*1024*1024),
+		newForceMergePlanningSegment(2, 512*1024*1024),
 	}
 
 	topology := &CollectionTopology{
@@ -145,13 +142,12 @@ func TestForceMergeSegmentView_Complete(t *testing.T) {
 
 	view := &ForceMergeSegmentView{
 		label:             label,
-		segments:          segments,
+		segments:          segmentInfos,
 		triggerID:         99999,
 		collectionTTL:     24 * time.Hour,
 		targetSegmentSize: 2048 * 1024 * 1024,
 		topology:          topology,
 	}
-
 	// Test String output
 	str := view.String()
 	assert.Contains(t, str, "ForceMerge")
@@ -161,296 +157,420 @@ func TestForceMergeSegmentView_Complete(t *testing.T) {
 	assert.NotEmpty(t, r3)
 }
 
-func TestGroupingAlgorithmsComparison(t *testing.T) {
-	type testCase struct {
-		name       string
-		segments   []float64
-		targetSize float64
+func TestForceMergeSegmentView_ForceTriggerAllUsesMultiRoundKnapsack(t *testing.T) {
+	t.Run("commits a qualifying 1T singleton", func(t *testing.T) {
+		view := newForceMergePlanningView([]int64{1}, []float64{100}, 100)
+		targetSize, _ := view.calculateTargetSizeCount()
+		groups := groupForceMergeSegments(view.segments, targetSize)
+
+		require.Len(t, groups, 1)
+		requireForceMergeGroupContract(t, groups[0], targetSize)
+		residualSize := forceMergeResidualSize(groups[0])
+		assert.LessOrEqual(t, targetSize-residualSize, targetSize/forceMergeKnapsackLossDivisor)
+	})
+
+	t.Run("commits three near 0.7T inputs in the 2T round", func(t *testing.T) {
+		view := newForceMergePlanningView([]int64{1, 2, 3}, []float64{70, 70, 70}, 100)
+		targetSize, _ := view.calculateTargetSizeCount()
+		groups := groupForceMergeSegments(view.segments, targetSize)
+
+		require.Len(t, groups, 1)
+		requireForceMergeGroupContract(t, groups[0], targetSize)
+		residualSize := forceMergeResidualSize(groups[0])
+		twoTargetCapacity := forceMergeRoundCapacity(targetSize, 2)
+		assert.LessOrEqual(t, twoTargetCapacity-residualSize, targetSize/forceMergeKnapsackLossDivisor)
+		assert.Equal(t, int64(2), plannedForceMergeOutputCount(residualSize, targetSize))
+	})
+
+	t.Run("uses an absolute 0.05T loss allowance in the 2T round", func(t *testing.T) {
+		view := newForceMergePlanningView([]int64{1, 2, 3, 4}, []float64{80, 60, 60, 50}, 100)
+		targetSize, _ := view.calculateTargetSizeCount()
+		groups := groupForceMergeSegments(view.segments, targetSize)
+
+		require.Len(t, groups, 1)
+		requireForceMergeGroupContract(t, groups[0], targetSize)
+		residualSize := forceMergeResidualSize(groups[0])
+		assert.Greater(t, residualSize, forceMergeRoundCapacity(targetSize, 2))
+		assert.Equal(t, int64(250), residualSize)
+	})
+
+	t.Run("drains a non-full remainder in the 3T round", func(t *testing.T) {
+		view := newForceMergePlanningView([]int64{1}, []float64{40}, 100)
+		targetSize, _ := view.calculateTargetSizeCount()
+		groups := groupForceMergeSegments(view.segments, targetSize)
+
+		require.Len(t, groups, 1)
+		requireForceMergeGroupContract(t, groups[0], targetSize)
+		assert.Equal(t, int64(40), forceMergeResidualSize(groups[0]))
+	})
+}
+
+func TestForceMergeSegmentView_ForceTriggerAllUsesResidualSize(t *testing.T) {
+	view := newForceMergePlanningView([]int64{1, 2}, []float64{160, 10}, 100)
+	view.segments[0].NumOfRows = 100
+	view.segments[0].Deltalogs = []*datapb.FieldBinlog{{
+		Binlogs: []*datapb.Binlog{{MemorySize: 20, EntriesNum: 50}},
+	}}
+	view.segments[1].NumOfRows = 100
+	targetSize, _ := view.calculateTargetSizeCount()
+
+	groups := groupForceMergeSegments(view.segments, targetSize)
+	require.Len(t, groups, 1)
+	requireForceMergeGroupContract(t, groups[0], targetSize)
+	assert.Equal(t, int64(100), forceMergeResidualSize(groups[0]))
+
+	children := forceMergePlanningChildren(t, view)
+	require.Len(t, children, 1)
+	assert.Equal(t, int64(1), children[0].GetTargetSegmentCount())
+	assertForceMergeChildContract(t, view, children, targetSize)
+}
+
+func TestForceMergeSegmentView_ForceTriggerAllExtractsOversizedFirst(t *testing.T) {
+	view := newForceMergePlanningView([]int64{1, 2}, []float64{400, 100}, 100)
+	targetSize, _ := view.calculateTargetSizeCount()
+	groups := groupForceMergeSegments(view.segments, targetSize)
+
+	require.Len(t, groups, 2)
+	for _, group := range groups {
+		requireForceMergeGroupContract(t, group, targetSize)
+	}
+	assert.Greater(t, forceMergeResidualSize(groups[0]), forceMergeRoundCapacity(targetSize, 3))
+	assert.Equal(t, []int64{1}, forceMergeSegmentIDs(groups[0]))
+	assert.Equal(t, []int64{2}, forceMergeSegmentIDs(groups[1]))
+}
+
+func TestForceMergeSegmentView_ForceTriggerAllAssignsEveryInputExactlyOnce(t *testing.T) {
+	view := newForceMergePlanningView(
+		[]int64{1, 2, 3, 4, 5, 6, 7, 8, 9},
+		[]float64{400, 100, 80, 70, 70, 70, 60, 60, 50},
+		100,
+	)
+	targetSize, _ := view.calculateTargetSizeCount()
+	groups := groupForceMergeSegments(view.segments, targetSize)
+
+	var oversized, oneTarget, twoTargets, threeTargets bool
+	seen := make(map[*SegmentInfo]int, len(view.segments))
+	for _, group := range groups {
+		requireForceMergeGroupContract(t, group, targetSize)
+		residualSize := forceMergeResidualSize(group)
+		switch {
+		case residualSize > forceMergeRoundCapacity(targetSize, 3):
+			require.Len(t, group, 1)
+			oversized = true
+		case residualSize <= targetSize && targetSize-residualSize <= targetSize/forceMergeKnapsackLossDivisor:
+			oneTarget = true
+		case residualSize <= forceMergeRoundCapacity(targetSize, 2) &&
+			forceMergeRoundCapacity(targetSize, 2)-residualSize <= targetSize/forceMergeKnapsackLossDivisor:
+			twoTargets = true
+		default:
+			threeTargets = true
+		}
+		for _, segment := range group {
+			seen[segment]++
+		}
+	}
+	assert.True(t, oversized)
+	assert.True(t, oneTarget)
+	assert.True(t, twoTargets)
+	assert.True(t, threeTargets)
+	for _, segment := range view.segments {
+		assert.Equal(t, 1, seen[segment], "segment %d assignment count", segment.ID)
+	}
+}
+
+func TestForceMergeSegmentView_ForceTriggerAllMayReorderInputs(t *testing.T) {
+	view := newForceMergePlanningView(
+		[]int64{4, 3, 2, 1},
+		[]float64{30, 30, 30, 30},
+		100,
+	)
+	targetSize, _ := view.calculateTargetSizeCount()
+	children := forceMergePlanningChildren(t, view)
+	flattened := flattenForceMergeChildIDs(children)
+
+	assert.NotEqual(t, []int64{4, 3, 2, 1}, flattened)
+	assert.ElementsMatch(t, []int64{4, 3, 2, 1}, flattened)
+	assertForceMergeChildContract(t, view, children, targetSize)
+}
+
+func TestGroupForceMergeSegmentsDoesNotCapPackInputs(t *testing.T) {
+	segments := make([]*SegmentInfo, 4097)
+	for i := range segments {
+		segments[i] = newForceMergePlanningSegment(int64(i+1), 1)
 	}
 
-	testCases := []testCase{
-		{
-			name:       "perfect fit - 5x2GB to 5GB",
-			segments:   []float64{2, 2, 2, 2, 2},
-			targetSize: 5,
-		},
-		{
-			name:       "varying sizes - example from discussion",
-			segments:   []float64{1.2, 1.3, 1.4, 1.8, 1.8, 1.8, 1.8, 1.8},
-			targetSize: 3,
-		},
-		{
-			name:       "small segments",
-			segments:   []float64{0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5},
-			targetSize: 2,
-		},
-		{
-			name:       "large segments",
-			segments:   []float64{3, 3, 3, 3},
-			targetSize: 5,
-		},
-		{
-			name:       "mixed sizes",
-			segments:   []float64{0.5, 1, 1.5, 2, 2.5, 3},
-			targetSize: 4,
-		},
-		{
-			name:       "many small segments",
-			segments:   []float64{1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
-			targetSize: 3,
-		},
-		{
-			name:       "uneven distribution",
-			segments:   []float64{0.3, 0.4, 2.5, 0.3, 2.8, 0.5, 2.2},
-			targetSize: 3,
-		},
-		{
-			name:       "single segment",
-			segments:   []float64{5},
-			targetSize: 3,
-		},
-		{
-			name:       "two segments perfect",
-			segments:   []float64{2.5, 2.5},
-			targetSize: 5,
-		},
-		{
-			name:       "fibonacci-like sizes",
-			segments:   []float64{1, 1, 2, 3, 5, 8},
-			targetSize: 10,
-		},
-		{
-			name:       "near-perfect split - tests greedy vs optimal",
-			segments:   []float64{1.5, 1.5, 1.5, 1.5, 1.5, 1.5},
-			targetSize: 3,
-		},
-		{
-			name:       "strategic grouping - [2.8,0.3] vs [2.8,0.2,0.1]",
-			segments:   []float64{2.8, 0.2, 0.1, 2.8, 0.3},
-			targetSize: 3,
-		},
-		{
-			name:       "tail optimization - many small + one large",
-			segments:   []float64{0.5, 0.5, 0.5, 0.5, 0.5, 2.5},
-			targetSize: 3,
-		},
-		{
-			name:       "alternating sizes for different strategies",
-			segments:   []float64{1.0, 2.5, 1.0, 2.5, 1.0, 2.5},
-			targetSize: 4,
-		},
-		{
-			name:       "edge case - slightly over target creates decision point",
-			segments:   []float64{2.1, 2.1, 2.1, 2.1, 2.1},
-			targetSize: 4,
-		},
-		{
-			name:       "optimal vs greedy - can fit 3 full or 2 full + small tail",
-			segments:   []float64{1.8, 1.8, 1.8, 1.8, 1.8, 1.5},
-			targetSize: 3,
-		},
-		{
-			name:       "many segments with complex optimal solution",
-			segments:   []float64{0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8},
-			targetSize: 2,
-		},
-		{
-			name:       "greedy stops early, optimal continues",
-			segments:   []float64{2.8, 0.2, 0.1, 2.8, 0.3},
-			targetSize: 3.0,
-		},
-		{
-			name:       "Balanced vs Larger - distribution vs grouping",
-			segments:   []float64{1.0, 1.0, 1.0, 1.0, 1.0, 1.0},
-			targetSize: 2.5,
-		},
-		{
-			name: "MaxFull achieves theoretical maximum when possible",
-			// Perfect case: 6x1.5GB segments, target=3GB
-			// Total=9GB, theoretical max = 3 full segments
-			segments:   []float64{1.5, 1.5, 1.5, 1.5, 1.5, 1.5},
-			targetSize: 3.0,
-		},
-		{
-			name:       "Larger creates fewer compaction tasks",
-			segments:   lo.Times(20, func(i int) float64 { return 0.5 }),
-			targetSize: 2.0,
-		},
+	groups := groupForceMergeSegments(segments, 5000)
+
+	require.Len(t, groups, 1)
+	assert.Len(t, groups[0], len(segments))
+}
+
+func TestForceMergePlanningArithmetic(t *testing.T) {
+	assert.Equal(t, int64(math.MaxInt64), forceMergeEffectiveSize(float64(math.MaxInt64)))
+	assert.Equal(t, int64(math.MaxInt64), forceMergeRoundCapacity(math.MaxInt64, 2))
+}
+
+func TestForceMergeSegmentView_ForceTriggerAllPreservesLargeIntegerCount(t *testing.T) {
+	const targetSize = int64(1 << 53)
+	largeResidualSize := targetSize + 1
+	view := newForceMergePlanningView([]int64{1, 2}, []float64{1, 1}, 1)
+	view.segments[0].Binlogs[0].Binlogs[0].MemorySize = 1 << 52
+	view.segments[1].Binlogs[0].Binlogs[0].MemorySize = 1<<52 + 1
+	view.configMaxSize = float64(targetSize)
+	view.expectedTargetSize = 0
+	view.topology = &CollectionTopology{}
+
+	children := forceMergePlanningChildren(t, view)
+
+	require.Len(t, children, 1)
+	assert.Equal(t, targetSize, children[0].GetTargetSegmentSize())
+	assert.Equal(t, largeResidualSize, forceMergeResidualSize(children[0].segments))
+	assert.Equal(t, int64(2), children[0].GetTargetSegmentCount())
+}
+
+func TestForceMergeSegmentView_ForceTriggerAllRecoveredScenarios(t *testing.T) {
+	const gib = float64(1 << 30)
+	productionSizes := roundedForceMergeGiBSizes(
+		2.40, 2.51, 2.62, 2.73, 2.84, 2.95, 2.36,
+		2.47, 2.58, 2.69, 2.80, 2.91, 2.22, 2.33,
+		2.44, 2.55, 2.66, 2.77, 2.88, 2.99, 2.91,
+	)
+	tinyTailSizes := append(repeatForceMergeSizes(40, 10), 5, 12, 18, 20)
+
+	tests := []struct {
+		name            string
+		sizes           []float64
+		ids             []int64
+		requestedTarget float64
+		threshold       string
+		queryNodeCount  int
+		expectedTarget  int64
+		expectedFinals  int64
+	}{
+		{name: "01_production_at_threshold", sizes: productionSizes, requestedTarget: 4 * gib, threshold: "100", expectedTarget: 4509715660, expectedFinals: 14},
+		{name: "02_production_above_threshold", sizes: productionSizes, requestedTarget: 4 * gib, threshold: "20", expectedTarget: 4509715660, expectedFinals: 14},
+		{name: "03_six_equal_at_threshold", sizes: repeatForceMergeSizes(6, 70), requestedTarget: 100, threshold: "6", expectedTarget: 105, expectedFinals: 4},
+		{name: "04_six_equal_above_threshold", sizes: repeatForceMergeSizes(6, 70), requestedTarget: 100, threshold: "5", expectedTarget: 105, expectedFinals: 4},
+		{name: "05_uniform_1gib_at_threshold", sizes: repeatForceMergeSizes(12, gib), requestedTarget: 3 * gib, threshold: "12", expectedTarget: 3382286745, expectedFinals: 4},
+		{name: "06_uniform_1_02gib_at_threshold", sizes: repeatForceMergeSizes(12, 1095216660), requestedTarget: 3 * gib, threshold: "12", expectedTarget: 3382286745, expectedFinals: 4},
+		{name: "07_oversized_pair_at_threshold", sizes: []float64{315, 315}, requestedTarget: 100, threshold: "2", expectedTarget: 105, expectedFinals: 6},
+		{name: "08_uniform_130_at_threshold", sizes: repeatForceMergeSizes(10, 130), requestedTarget: 100, threshold: "10", expectedTarget: 105, expectedFinals: 15},
+		{name: "09_mixed_at_threshold", sizes: []float64{37, 162, 23, 276, 31, 249, 162}, requestedTarget: 100, threshold: "7", expectedTarget: 105, expectedFinals: 10},
+		{name: "10_mixed_above_threshold", sizes: []float64{37, 162, 23, 276, 31, 249, 162}, requestedTarget: 100, threshold: "6", expectedTarget: 105, expectedFinals: 10},
+		{name: "11_three_target_pair_at_threshold", sizes: []float64{150, 150}, requestedTarget: 100, threshold: "2", expectedTarget: 105, expectedFinals: 3},
+		{name: "12_three_target_pair_plus_one_at_threshold", sizes: []float64{150, 151}, requestedTarget: 100, threshold: "2", expectedTarget: 105, expectedFinals: 3},
+		{name: "13_equal_total_boundary_at_threshold", sizes: []float64{210, 190}, requestedTarget: 100, threshold: "2", expectedTarget: 105, expectedFinals: 4},
+		{name: "14_unequal_total_boundary_at_threshold", sizes: []float64{211, 189}, requestedTarget: 100, threshold: "2", expectedTarget: 105, expectedFinals: 5},
+		{name: "15_near_full_below_5_percent_above_threshold", sizes: []float64{95, 9, 10}, requestedTarget: 100, threshold: "2", expectedTarget: 105, expectedFinals: 2},
+		{name: "16_near_full_at_5_percent_above_threshold", sizes: []float64{95, 10, 10}, requestedTarget: 100, threshold: "2", expectedTarget: 105, expectedFinals: 2},
+		{name: "17_topology_floor_at_threshold", sizes: repeatForceMergeSizes(10, 100), requestedTarget: 1000, threshold: "10", queryNodeCount: 10, expectedTarget: 100, expectedFinals: 10},
+		{name: "18_topology_floor_above_threshold", sizes: repeatForceMergeSizes(10, 100), requestedTarget: 1000, threshold: "9", queryNodeCount: 10, expectedTarget: 100, expectedFinals: 10},
+		{name: "19_one_hundred_at_threshold", sizes: repeatForceMergeSizes(100, 51), requestedTarget: 100, threshold: "100", expectedTarget: 105, expectedFinals: 50},
+		{name: "20_one_hundred_one_above_threshold", sizes: repeatForceMergeSizes(101, 51), requestedTarget: 100, threshold: "100", expectedTarget: 105, expectedFinals: 51},
+		{name: "21_tiny_tail_at_threshold", sizes: tinyTailSizes, requestedTarget: 100, threshold: "100", expectedTarget: 105, expectedFinals: 5},
+		{name: "22_received_order_at_threshold", sizes: repeatForceMergeSizes(4, 30), ids: []int64{4, 3, 2, 1}, requestedTarget: 100, threshold: "4", expectedTarget: 105, expectedFinals: 2},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Convert to SegmentView
-			segments := make([]*SegmentView, len(tc.segments))
-			for i, size := range tc.segments {
-				segments[i] = &SegmentView{
-					ID:   int64(i + 1),
-					Size: size * 1024 * 1024 * 1024,
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setForceMergePlanningThreshold(t, test.threshold)
+			ids := append([]int64(nil), test.ids...)
+			if len(ids) == 0 {
+				ids = make([]int64, len(test.sizes))
+				for i := range ids {
+					ids[i] = int64(i + 1)
 				}
 			}
-			targetSize := tc.targetSize * 1024 * 1024 * 1024
-			totalSize := sumSegmentSize(segments)
-			theoreticalMaxFull := int(totalSize / targetSize)
-
-			// Test all three algorithms
-			groupsBalanced := adaptiveGroupSegments(segments, targetSize)
-			groupsLarger := largerGroupingSegments(segments, targetSize)
-			groupsMax := maxFullSegmentsGrouping(segments, targetSize)
-
-			// Helper to count full segments and tails
-			countMetrics := func(groups [][]*SegmentView) (numGroups, numFull, numTails int) {
-				numGroups = len(groups)
-				for _, group := range groups {
-					groupSize := sumSegmentSize(group)
-					full := int(groupSize / targetSize)
-					remainder := groupSize - float64(full)*targetSize
-					numFull += full
-					if remainder > 0.01 {
-						numTails++
-					}
-				}
-				return
+			segmentInfos := make([]*SegmentInfo, len(test.sizes))
+			for i, size := range test.sizes {
+				segmentInfos[i] = newForceMergePlanningSegment(ids[i], size)
 			}
 
-			// Helper to verify all segments used exactly once
-			verifyAllSegmentsUsed := func(groups [][]*SegmentView) bool {
-				seen := make(map[int64]int)
-				for _, group := range groups {
-					for _, seg := range group {
-						seen[seg.ID]++
-					}
-				}
-				if len(seen) != len(segments) {
-					return false
-				}
-				for _, count := range seen {
-					if count != 1 {
-						return false
-					}
-				}
-				return true
+			queryNodeCount := max(test.queryNodeCount, 1)
+			queryNodeMemory := make(map[int64]uint64, queryNodeCount)
+			for i := 0; i < queryNodeCount; i++ {
+				queryNodeMemory[int64(i+1)] = math.MaxUint64
 			}
-
-			// Verify all algorithms use each segment exactly once
-			assert.True(t, verifyAllSegmentsUsed(groupsBalanced), "adaptiveGroupSegments: all segments must be used exactly once")
-			assert.True(t, verifyAllSegmentsUsed(groupsLarger), "largerGroupingSegments: all segments must be used exactly once")
-			assert.True(t, verifyAllSegmentsUsed(groupsMax), "maxFullSegmentsGrouping: all segments must be used exactly once")
-
-			// Get metrics
-			adaptiveGroups, adaptiveFull, adaptiveTails := countMetrics(groupsBalanced)
-			largerGroups, largerFull, largerTails := countMetrics(groupsLarger)
-			maxGroups, maxFull, maxTails := countMetrics(groupsMax)
-
-			t.Logf("Total size: %.1f GB, Target: %.1f GB, Theoretical max full: %d",
-				totalSize/(1024*1024*1024), targetSize/(1024*1024*1024), theoreticalMaxFull)
-			t.Logf("Adaptive: %d groups, %d full, %d tails", adaptiveGroups, adaptiveFull, adaptiveTails)
-			t.Logf("Larger:   %d groups, %d full, %d tails", largerGroups, largerFull, largerTails)
-			t.Logf("MaxFull:  %d groups, %d full, %d tails", maxGroups, maxFull, maxTails)
-
-			// Assertions
-			// 1. maxFullSegmentsGrouping should produce most full segments
-			assert.GreaterOrEqual(t, maxFull, largerFull, "maxFullSegmentsGrouping should produce >= full segments than largerGroupingSegments")
-
-			// 2. maxFullSegmentsGrouping should not exceed theoretical maximum
-			assert.LessOrEqual(t, maxFull, theoreticalMaxFull, "cannot exceed theoretical maximum")
-
-			// 3. All algorithms should process all segments
-			for _, groups := range [][][]*SegmentView{groupsBalanced, groupsLarger, groupsMax} {
-				totalProcessed := 0
-				for _, group := range groups {
-					totalProcessed += len(group)
-				}
-				assert.Equal(t, len(segments), totalProcessed)
+			view := &ForceMergeSegmentView{
+				label: &CompactionGroupLabel{
+					CollectionID: 1,
+					PartitionID:  10,
+					Channel:      "force-merge-recovered-scenarios",
+				},
+				segments:           segmentInfos,
+				triggerID:          50916,
+				configMaxSize:      1,
+				expectedTargetSize: test.requestedTarget,
+				topology: &CollectionTopology{
+					QueryNodeMemory: queryNodeMemory,
+					DataNodeMemory:  map[int64]uint64{1: math.MaxUint64},
+					NumReplicas:     1,
+					NumShards:       1,
+				},
 			}
+			children := forceMergePlanningChildren(t, view)
+			assertForceMergeChildContract(t, view, children, test.expectedTarget)
+			assert.Equal(t, test.expectedFinals, totalForceMergeChildOutputs(children))
 		})
 	}
 }
 
-func TestAdaptiveGroupSegments(t *testing.T) {
-	t.Run("empty segments", func(t *testing.T) {
-		groups := adaptiveGroupSegments(nil, 5*1024*1024*1024)
-		assert.Nil(t, groups)
-	})
+func repeatForceMergeSizes(count int, size float64) []float64 {
+	result := make([]float64, count)
+	for i := range result {
+		result[i] = size
+	}
+	return result
+}
 
-	t.Run("uses maxFull for small segment count", func(t *testing.T) {
-		segments := []*SegmentView{
-			{ID: 1, Size: 1.5 * 1024 * 1024 * 1024},
-			{ID: 2, Size: 1.5 * 1024 * 1024 * 1024},
-			{ID: 3, Size: 1.5 * 1024 * 1024 * 1024},
-			{ID: 4, Size: 1.5 * 1024 * 1024 * 1024},
-		}
-		groups := adaptiveGroupSegments(segments, 3*1024*1024*1024)
-		// Should produce 2 groups with 2 full segments
-		assert.Equal(t, 2, len(groups))
-	})
+func roundedForceMergeGiBSizes(values ...float64) []float64 {
+	const gib = float64(1 << 30)
+	result := make([]float64, len(values))
+	for i, value := range values {
+		result[i] = math.Round(value * gib)
+	}
+	return result
+}
 
-	t.Run("uses larger for large segment count", func(t *testing.T) {
-		// Create 200 segments (> defaultMaxFullSegmentThreshold)
-		segments := make([]*SegmentView, 200)
-		for i := 0; i < 200; i++ {
-			segments[i] = &SegmentView{
-				ID:   int64(i),
-				Size: 1 * 1024 * 1024 * 1024,
-			}
-		}
-		groups := adaptiveGroupSegments(segments, 3*1024*1024*1024)
-		// Should use larger algorithm
-		assert.NotNil(t, groups)
-		assert.Greater(t, len(groups), 0)
+func setForceMergePlanningThreshold(t *testing.T, threshold string) {
+	t.Helper()
+	pt := paramtable.Get()
+	require.NoError(t, pt.Save(pt.DataCoordCfg.CompactionMaxFullSegmentThreshold.Key, threshold))
+	t.Cleanup(func() {
+		pt.Reset(pt.DataCoordCfg.CompactionMaxFullSegmentThreshold.Key)
 	})
 }
 
-func TestLargerGroupingSegments(t *testing.T) {
-	t.Run("empty segments", func(t *testing.T) {
-		groups := largerGroupingSegments(nil, 5*1024*1024*1024)
-		assert.Nil(t, groups)
-	})
-
-	t.Run("single segment", func(t *testing.T) {
-		segments := []*SegmentView{
-			{ID: 1, Size: 3 * 1024 * 1024 * 1024},
-		}
-		groups := largerGroupingSegments(segments, 5*1024*1024*1024)
-		assert.Equal(t, 1, len(groups))
-		assert.Equal(t, 1, len(groups[0]))
-	})
+func newForceMergePlanningView(ids []int64, sizes []float64, targetSize int64) *ForceMergeSegmentView {
+	segmentInfos := make([]*SegmentInfo, 0, len(sizes))
+	for i, size := range sizes {
+		segmentInfos = append(segmentInfos, newForceMergePlanningSegment(ids[i], size))
+	}
+	return &ForceMergeSegmentView{
+		label: &CompactionGroupLabel{
+			CollectionID: 1,
+			PartitionID:  10,
+			Channel:      "force-merge-planning-test",
+		},
+		segments:           segmentInfos,
+		triggerID:          100,
+		configMaxSize:      1,
+		expectedTargetSize: float64(targetSize),
+		topology: &CollectionTopology{
+			QueryNodeMemory: map[int64]uint64{1: math.MaxUint64},
+			DataNodeMemory:  map[int64]uint64{1: math.MaxUint64},
+			NumReplicas:     1,
+			NumShards:       1,
+		},
+	}
 }
 
-func TestMaxFullSegmentsGrouping(t *testing.T) {
-	t.Run("empty segments", func(t *testing.T) {
-		groups := maxFullSegmentsGrouping(nil, 5*1024*1024*1024)
-		assert.Nil(t, groups)
-	})
+func newForceMergePlanningSegment(id int64, size float64) *SegmentInfo {
+	return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:        id,
+		NumOfRows: 1,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID: 1,
+			Binlogs: []*datapb.Binlog{{MemorySize: int64(size)}},
+		}},
+	}}
+}
 
-	t.Run("single segment", func(t *testing.T) {
-		segments := []*SegmentView{
-			{ID: 1, Size: 3 * 1024 * 1024 * 1024},
+func newForceMergePlanningSegments(sizes ...float64) []*SegmentInfo {
+	segments := make([]*SegmentInfo, 0, len(sizes))
+	for i, size := range sizes {
+		segments = append(segments, newForceMergePlanningSegment(int64(i+1), size))
+	}
+	return segments
+}
+
+func forceMergePlanningChildren(t *testing.T, view *ForceMergeSegmentView) []*ForceMergeSegmentView {
+	t.Helper()
+	children, reason := view.ForceTriggerAll()
+	require.Equal(t, "force merge trigger", reason)
+	result := make([]*ForceMergeSegmentView, 0, len(children))
+	for _, child := range children {
+		forceMergeChild, ok := child.(*ForceMergeSegmentView)
+		require.True(t, ok)
+		result = append(result, forceMergeChild)
+	}
+	return result
+}
+
+func assertForceMergeChildContract(
+	t *testing.T,
+	view *ForceMergeSegmentView,
+	children []*ForceMergeSegmentView,
+	targetSize int64,
+) {
+	t.Helper()
+	seen := make(map[*SegmentInfo]int, len(view.segments))
+	inputCeiling := forceMergeRoundCapacity(targetSize, 3)
+	for _, child := range children {
+		require.NotEmpty(t, child.GetSegmentsView())
+		assert.Equal(t, targetSize, child.GetTargetSegmentSize())
+		residualSize := forceMergeResidualSize(child.segments)
+		if residualSize > inputCeiling {
+			assert.Len(t, child.GetSegmentsView(), 1)
+		} else {
+			assert.LessOrEqual(t, residualSize, inputCeiling)
 		}
-		groups := maxFullSegmentsGrouping(segments, 5*1024*1024*1024)
-		assert.Equal(t, 1, len(groups))
-		assert.Equal(t, 1, len(groups[0]))
-	})
-
-	t.Run("perfect fit achieves theoretical maximum", func(t *testing.T) {
-		segments := []*SegmentView{
-			{ID: 1, Size: 2.5 * 1024 * 1024 * 1024},
-			{ID: 2, Size: 2.5 * 1024 * 1024 * 1024},
-			{ID: 3, Size: 2.5 * 1024 * 1024 * 1024},
-			{ID: 4, Size: 2.5 * 1024 * 1024 * 1024},
+		plannedOutputCount := expectedForceMergeOutputCount(residualSize, targetSize)
+		assert.Equal(t, plannedOutputCount, child.GetTargetSegmentCount())
+		for _, segment := range child.segments {
+			seen[segment]++
 		}
-		targetSize := 5.0 * 1024 * 1024 * 1024
+	}
+	require.Len(t, seen, len(view.segments))
+	for _, segment := range view.segments {
+		assert.Equal(t, 1, seen[segment], "segment %d assignment count", segment.ID)
+	}
+}
 
-		groups := maxFullSegmentsGrouping(segments, targetSize)
+func requireForceMergeGroupContract(t *testing.T, group []*SegmentInfo, targetSize int64) {
+	t.Helper()
+	require.NotEmpty(t, group)
+	residualSize := forceMergeResidualSize(group)
+	if residualSize > forceMergeRoundCapacity(targetSize, 3) {
+		require.Len(t, group, 1)
+	} else {
+		require.LessOrEqual(t, residualSize, forceMergeRoundCapacity(targetSize, 3))
+	}
+}
 
-		totalFull := 0
-		for _, group := range groups {
-			groupSize := sumSegmentSize(group)
-			totalFull += int(groupSize / targetSize)
-		}
+func forceMergeSegmentIDs(segments []*SegmentInfo) []int64 {
+	ids := make([]int64, 0, len(segments))
+	for _, segment := range segments {
+		ids = append(ids, segment.ID)
+	}
+	return ids
+}
 
-		// Total is 10GB, should produce exactly 2 full 5GB segments
-		assert.Equal(t, 2, totalFull)
-	})
+func flattenForceMergeChildIDs(children []*ForceMergeSegmentView) []int64 {
+	ids := make([]int64, 0)
+	for _, child := range children {
+		ids = append(ids, forceMergeSegmentIDs(child.segments)...)
+	}
+	return ids
+}
+
+func totalForceMergeChildOutputs(children []*ForceMergeSegmentView) int64 {
+	total := int64(0)
+	for _, child := range children {
+		total += child.GetTargetSegmentCount()
+	}
+	return total
+}
+
+func expectedForceMergeOutputCount(residualSize, targetSize int64) int64 {
+	if residualSize <= 0 || targetSize <= 0 {
+		return 1
+	}
+	count := residualSize / targetSize
+	if residualSize%targetSize != 0 {
+		count++
+	}
+	return max(count, 1)
 }
 
 func TestSumSegmentSize(t *testing.T) {
@@ -476,10 +596,10 @@ func TestGroupByPartitionChannel(t *testing.T) {
 		Channel:      "ch1",
 	}
 
-	segments := []*SegmentView{
-		{ID: 1, label: label1},
-		{ID: 2, label: label1},
-		{ID: 3, label: label2},
+	segments := []*SegmentInfo{
+		newForceMergeSegmentForLabel(1, label1),
+		newForceMergeSegmentForLabel(2, label1),
+		newForceMergeSegmentForLabel(3, label2),
 	}
 
 	groups := groupByPartitionChannel(segments)
@@ -498,7 +618,7 @@ func TestGroupByPartitionChannel(t *testing.T) {
 }
 
 func TestGroupByPartitionChannel_EmptySegments(t *testing.T) {
-	groups := groupByPartitionChannel([]*SegmentView{})
+	groups := groupByPartitionChannel([]*SegmentInfo{})
 	assert.Empty(t, groups)
 }
 
@@ -509,10 +629,10 @@ func TestGroupByPartitionChannel_SameLabel(t *testing.T) {
 		Channel:      "ch1",
 	}
 
-	segments := []*SegmentView{
-		{ID: 1, label: label},
-		{ID: 2, label: label},
-		{ID: 3, label: label},
+	segments := []*SegmentInfo{
+		newForceMergeSegmentForLabel(1, label),
+		newForceMergeSegmentForLabel(2, label),
+		newForceMergeSegmentForLabel(3, label),
 	}
 
 	groups := groupByPartitionChannel(segments)
@@ -522,111 +642,80 @@ func TestGroupByPartitionChannel_SameLabel(t *testing.T) {
 	}
 }
 
-// Benchmark tests
-func BenchmarkLargerGroupingSegments(b *testing.B) {
-	sizes := []int{10, 50, 100, 500}
-
-	for _, n := range sizes {
-		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
-			segments := make([]*SegmentView, n)
-			for i := 0; i < n; i++ {
-				segments[i] = &SegmentView{
-					ID:   int64(i),
-					Size: float64((i%10+1)*100*1024*1024 + i*1024*1024),
-				}
-			}
-			targetSize := float64(3 * 1024 * 1024 * 1024)
-
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				largerGroupingSegments(segments, targetSize)
-			}
-		})
-	}
+func newForceMergeSegmentForLabel(id int64, label *CompactionGroupLabel) *SegmentInfo {
+	return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:            id,
+		CollectionID:  label.CollectionID,
+		PartitionID:   label.PartitionID,
+		InsertChannel: label.Channel,
+	}}
 }
 
-func BenchmarkMaxFullSegmentsGrouping(b *testing.B) {
-	sizes := []int{10, 50, 100}
-
-	for _, n := range sizes {
-		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
-			segments := make([]*SegmentView, n)
-			for i := 0; i < n; i++ {
-				segments[i] = &SegmentView{
-					ID:   int64(i),
-					Size: float64((i%10+1)*100*1024*1024 + i*1024*1024),
-				}
-			}
-			targetSize := float64(3 * 1024 * 1024 * 1024)
-
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				maxFullSegmentsGrouping(segments, targetSize)
-			}
-		})
-	}
-}
-
-func BenchmarkGroupingAlgorithmsComparison(b *testing.B) {
-	sizes := []int{10, 50, 100, 200, 500}
-	targetSize := float64(3 * 1024 * 1024 * 1024)
-
-	for _, n := range sizes {
-		segments := make([]*SegmentView, n)
-		for i := 0; i < n; i++ {
-			segments[i] = &SegmentView{
-				ID:   int64(i),
-				Size: float64((i%10+1)*100*1024*1024 + i*1024*1024),
-			}
+func TestCalculateTargetSizeCount_AppliesToleranceBeforeTopology(t *testing.T) {
+	t.Run("applies tolerance within machine-safe cap", func(t *testing.T) {
+		view := &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments:           newForceMergePlanningSegments(100),
+			triggerID:          1,
+			configMaxSize:      1000,
+			expectedTargetSize: 100,
+			topology:           &CollectionTopology{},
 		}
 
-		b.Run(fmt.Sprintf("adaptive/n=%d", n), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				adaptiveGroupSegments(segments, targetSize)
-			}
-		})
+		targetSize, targetCount := view.calculateTargetSizeCount()
 
-		b.Run(fmt.Sprintf("larger/n=%d", n), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				largerGroupingSegments(segments, targetSize)
-			}
-		})
+		assert.Equal(t, int64(105), targetSize)
+		assert.Equal(t, int64(1), targetCount)
+	})
 
-		// Only test maxFull with smaller sizes due to O(n³) complexity
-		if n <= 200 {
-			b.Run(fmt.Sprintf("maxFull/n=%d", n), func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					maxFullSegmentsGrouping(segments, targetSize)
-				}
-			})
+	t.Run("caps tolerance at machine-safe maximum", func(t *testing.T) {
+		view := &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments:           newForceMergePlanningSegments(100),
+			triggerID:          1,
+			configMaxSize:      102,
+			expectedTargetSize: 100,
+			topology:           &CollectionTopology{},
 		}
-	}
-}
 
-func BenchmarkGroupByPartitionChannel(b *testing.B) {
-	sizes := []int{10, 100, 1000}
+		targetSize, targetCount := view.calculateTargetSizeCount()
 
-	for _, n := range sizes {
-		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
-			segments := make([]*SegmentView, n)
-			for i := 0; i < n; i++ {
-				label := &CompactionGroupLabel{
-					CollectionID: 1,
-					PartitionID:  int64(i % 5),
-					Channel:      fmt.Sprintf("ch%d", i%3),
-				}
-				segments[i] = &SegmentView{
-					ID:    int64(i),
-					label: label,
-				}
-			}
+		assert.Equal(t, int64(102), targetSize)
+		assert.Equal(t, int64(1), targetCount)
+	})
 
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				_ = groupByPartitionChannel(segments)
-			}
-		})
-	}
+	t.Run("applies topology adjustment last with floor division", func(t *testing.T) {
+		view := &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments:           newForceMergePlanningSegments(1000),
+			triggerID:          1,
+			configMaxSize:      100,
+			expectedTargetSize: 1000,
+			topology: &CollectionTopology{
+				QueryNodeMemory: map[int64]uint64{1: 1 << 40, 2: 1 << 40, 3: 1 << 40},
+				DataNodeMemory:  map[int64]uint64{1: 1 << 40},
+				NumReplicas:     1,
+				NumShards:       1,
+			},
+		}
+
+		targetSize, targetCount := view.calculateTargetSizeCount()
+
+		assert.Equal(t, int64(333), targetSize)
+		assert.Equal(t, int64(4), targetCount)
+	})
 }
 
 func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
@@ -637,18 +726,16 @@ func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
 				PartitionID:  1,
 				Channel:      "ch1",
 			},
-			segments: []*SegmentView{
-				{ID: 1, Size: 150 * 1024 * 1024},
-			},
+			segments:      newForceMergePlanningSegments(150 * 1024 * 1024),
 			triggerID:     1,
 			configMaxSize: 100 * 1024 * 1024,
 			topology:      &CollectionTopology{},
 		}
 
-		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+		targetSize, targetCount := view.calculateTargetSizeCount()
 
 		assert.Equal(t, int64(2), targetCount)
-		assert.Equal(t, float64(100*1024*1024), maxSafeSize)
+		assert.Equal(t, int64(100*1024*1024), targetSize)
 	})
 
 	t.Run("single QueryNode - no adjustment", func(t *testing.T) {
@@ -662,17 +749,14 @@ func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
 				PartitionID:  1,
 				Channel:      "ch1",
 			},
-			segments: []*SegmentView{
-				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
-				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
-			},
+			segments:      newForceMergePlanningSegments(1*1024*1024*1024, 1*1024*1024*1024),
 			triggerID:     1,
 			configMaxSize: 100 * 1024 * 1024,
 			topology:      topology,
 		}
-		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+		targetSize, targetCount := view.calculateTargetSizeCount()
 		assert.Equal(t, int64(1), targetCount)
-		assert.Greater(t, maxSafeSize, 0.0)
+		assert.Greater(t, targetSize, int64(0))
 	})
 
 	t.Run("two QueryNodes - adjust to 2 segments", func(t *testing.T) {
@@ -689,17 +773,14 @@ func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
 				PartitionID:  1,
 				Channel:      "ch1",
 			},
-			segments: []*SegmentView{
-				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
-				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
-			},
+			segments:      newForceMergePlanningSegments(1*1024*1024*1024, 1*1024*1024*1024),
 			triggerID:     1,
 			configMaxSize: 100 * 1024 * 1024,
 			topology:      topology,
 		}
-		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+		targetSize, targetCount := view.calculateTargetSizeCount()
 		assert.Equal(t, int64(2), targetCount, "Should produce 2 segments for 2 QueryNodes")
-		assert.InDelta(t, 1*1024*1024*1024, maxSafeSize, 1024*1024)
+		assert.InDelta(t, 1*1024*1024*1024, targetSize, 1024*1024)
 	})
 
 	t.Run("three QueryNodes - adjust to 3 segments", func(t *testing.T) {
@@ -717,18 +798,18 @@ func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
 				PartitionID:  1,
 				Channel:      "ch1",
 			},
-			segments: []*SegmentView{
-				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
-				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
-				{ID: 3, Size: 1 * 1024 * 1024 * 1024},
-			},
+			segments: newForceMergePlanningSegments(
+				1*1024*1024*1024,
+				1*1024*1024*1024,
+				1*1024*1024*1024,
+			),
 			triggerID:     1,
 			configMaxSize: 100 * 1024 * 1024,
 			topology:      topology,
 		}
-		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+		targetSize, targetCount := view.calculateTargetSizeCount()
 		assert.Equal(t, int64(3), targetCount, "Should produce 3 segments for 3 QueryNodes")
-		assert.InDelta(t, 1*1024*1024*1024, maxSafeSize, 1024*1024)
+		assert.InDelta(t, 1*1024*1024*1024, targetSize, 1024*1024)
 	})
 
 	t.Run("two QueryNodes but segments too small - no adjustment", func(t *testing.T) {
@@ -745,10 +826,7 @@ func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
 				PartitionID:  1,
 				Channel:      "ch1",
 			},
-			segments: []*SegmentView{
-				{ID: 1, Size: 50 * 1024 * 1024},
-				{ID: 2, Size: 50 * 1024 * 1024},
-			},
+			segments:      newForceMergePlanningSegments(50*1024*1024, 50*1024*1024),
 			triggerID:     1,
 			configMaxSize: 100 * 1024 * 1024,
 			topology:      topology,
@@ -771,12 +849,12 @@ func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
 				PartitionID:  1,
 				Channel:      "ch1",
 			},
-			segments: []*SegmentView{
-				{ID: 1, Size: 500 * 1024 * 1024},
-				{ID: 2, Size: 500 * 1024 * 1024},
-				{ID: 3, Size: 500 * 1024 * 1024},
-				{ID: 4, Size: 500 * 1024 * 1024},
-			},
+			segments: newForceMergePlanningSegments(
+				500*1024*1024,
+				500*1024*1024,
+				500*1024*1024,
+				500*1024*1024,
+			),
 			triggerID:     1,
 			configMaxSize: 100 * 1024 * 1024,
 			topology:      topology,
@@ -802,17 +880,14 @@ func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
 				PartitionID:  1,
 				Channel:      "ch1",
 			},
-			segments: []*SegmentView{
-				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
-				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
-			},
+			segments:      newForceMergePlanningSegments(1*1024*1024*1024, 1*1024*1024*1024),
 			triggerID:     1,
 			configMaxSize: 100 * 1024 * 1024,
 			topology:      topology,
 		}
-		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+		targetSize, targetCount := view.calculateTargetSizeCount()
 		assert.Equal(t, int64(2), targetCount, "4 QNs / 2 replicas = 2 segments for parallelism")
-		assert.InDelta(t, 1*1024*1024*1024, maxSafeSize, 1024*1024)
+		assert.InDelta(t, 1*1024*1024*1024, targetSize, 1024*1024)
 	})
 
 	t.Run("6 QueryNodes with 3 replicas - adjust to 2 segments", func(t *testing.T) {
@@ -834,17 +909,14 @@ func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
 				PartitionID:  1,
 				Channel:      "ch1",
 			},
-			segments: []*SegmentView{
-				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
-				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
-			},
+			segments:      newForceMergePlanningSegments(1*1024*1024*1024, 1*1024*1024*1024),
 			triggerID:     1,
 			configMaxSize: 100 * 1024 * 1024,
 			topology:      topology,
 		}
-		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+		targetSize, targetCount := view.calculateTargetSizeCount()
 		assert.Equal(t, int64(2), targetCount, "6 QNs / 3 replicas = 2 segments for parallelism")
-		assert.InDelta(t, 1*1024*1024*1024, maxSafeSize, 1024*1024)
+		assert.InDelta(t, 1*1024*1024*1024, targetSize, 1024*1024)
 	})
 
 	t.Run("3 QueryNodes with 2 replicas - perShardParallelism rounds to 1", func(t *testing.T) {
@@ -863,10 +935,7 @@ func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
 				PartitionID:  1,
 				Channel:      "ch1",
 			},
-			segments: []*SegmentView{
-				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
-				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
-			},
+			segments:      newForceMergePlanningSegments(1*1024*1024*1024, 1*1024*1024*1024),
 			triggerID:     1,
 			configMaxSize: 100 * 1024 * 1024,
 			topology:      topology,
@@ -897,17 +966,14 @@ func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
 				PartitionID:  1,
 				Channel:      "ch1",
 			},
-			segments: []*SegmentView{
-				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
-				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
-			},
+			segments:      newForceMergePlanningSegments(1*1024*1024*1024, 1*1024*1024*1024),
 			triggerID:     1,
 			configMaxSize: 100 * 1024 * 1024,
 			topology:      topology,
 		}
-		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+		targetSize, targetCount := view.calculateTargetSizeCount()
 		assert.Equal(t, int64(2), targetCount, "8 QNs / (2 replicas * 2 shards) = 2 segments per shard")
-		assert.InDelta(t, 1*1024*1024*1024, maxSafeSize, 1024*1024)
+		assert.InDelta(t, 1*1024*1024*1024, targetSize, 1024*1024)
 	})
 
 	t.Run("4 QueryNodes, 1 replica, 4 shards - 1 segment per shard", func(t *testing.T) {
@@ -928,10 +994,7 @@ func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
 				PartitionID:  1,
 				Channel:      "ch1",
 			},
-			segments: []*SegmentView{
-				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
-				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
-			},
+			segments:      newForceMergePlanningSegments(1*1024*1024*1024, 1*1024*1024*1024),
 			triggerID:     1,
 			configMaxSize: 100 * 1024 * 1024,
 			topology:      topology,
@@ -966,17 +1029,14 @@ func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
 				PartitionID:  1,
 				Channel:      "ch1",
 			},
-			segments: []*SegmentView{
-				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
-				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
-			},
+			segments:      newForceMergePlanningSegments(1*1024*1024*1024, 1*1024*1024*1024),
 			triggerID:     1,
 			configMaxSize: 100 * 1024 * 1024,
 			topology:      topology,
 		}
-		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+		targetSize, targetCount := view.calculateTargetSizeCount()
 		assert.Equal(t, int64(2), targetCount, "12 QNs / (2 replicas * 3 shards) = 2 segments per shard")
-		assert.InDelta(t, 1*1024*1024*1024, maxSafeSize, 1024*1024)
+		assert.InDelta(t, 1*1024*1024*1024, targetSize, 1024*1024)
 	})
 
 	t.Run("adjusts target count and max safe size when perShardParallelism conditions met", func(t *testing.T) {
@@ -996,20 +1056,17 @@ func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
 				PartitionID:  1,
 				Channel:      "ch1",
 			},
-			segments: []*SegmentView{
-				{ID: 1, Size: 400 * 1024 * 1024},
-				{ID: 2, Size: 500 * 1024 * 1024},
-			},
+			segments:      newForceMergePlanningSegments(400*1024*1024, 500*1024*1024),
 			triggerID:     1,
 			configMaxSize: 100 * 1024 * 1024,
 			topology:      topology,
 		}
 
-		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+		targetSize, targetCount := view.calculateTargetSizeCount()
 
 		assert.Equal(t, int64(3), targetCount, "targetCount should be adjusted to perShardParallelism (3)")
-		expectedMaxSafeSize := (400.0 + 500.0) * 1024 * 1024 / 3.0
-		assert.InDelta(t, expectedMaxSafeSize, maxSafeSize, 1024*1024, "maxSafeSize should be totalSize / targetCount")
+		expectedTargetSize := (400.0 + 500.0) * 1024 * 1024 / 3.0
+		assert.InDelta(t, expectedTargetSize, targetSize, 1024*1024, "targetSize should be totalSize / targetCount")
 	})
 
 	t.Run("does not adjust when totalSize/desiredCount < configMaxSize", func(t *testing.T) {
@@ -1029,10 +1086,7 @@ func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
 				PartitionID:  1,
 				Channel:      "ch1",
 			},
-			segments: []*SegmentView{
-				{ID: 1, Size: 100 * 1024 * 1024},
-				{ID: 2, Size: 150 * 1024 * 1024},
-			},
+			segments:      newForceMergePlanningSegments(100*1024*1024, 150*1024*1024),
 			triggerID:     1,
 			configMaxSize: 100 * 1024 * 1024,
 			topology:      topology,
@@ -1041,5 +1095,74 @@ func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
 		_, targetCount := view.calculateTargetSizeCount()
 
 		assert.Equal(t, int64(1), targetCount, "targetCount should not be adjusted when totalSize/desiredCount < configMaxSize")
+	})
+}
+
+func TestCalculateTargetSizeCount_UserTargetAndMemoryClamp(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.CompactionForceMergeQueryNodeMemoryFactor.Key, "4")
+	Params.Save(Params.DataCoordCfg.CompactionForceMergeDataNodeMemoryFactor.Key, "4")
+	t.Cleanup(func() {
+		Params.Reset(Params.DataCoordCfg.CompactionForceMergeQueryNodeMemoryFactor.Key)
+		Params.Reset(Params.DataCoordCfg.CompactionForceMergeDataNodeMemoryFactor.Key)
+	})
+
+	const (
+		mb = float64(1024 * 1024)
+		gb = float64(1024 * 1024 * 1024)
+	)
+	newView := func(expectedTargetSize float64) *ForceMergeSegmentView {
+		return &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments:           newForceMergePlanningSegments(2.5*gb, 2.5*gb),
+			triggerID:          1,
+			configMaxSize:      64 * mb,
+			expectedTargetSize: expectedTargetSize,
+			topology: &CollectionTopology{
+				NumReplicas: 1,
+				NumShards:   1,
+				QueryNodeMemory: map[int64]uint64{
+					1: 8 * 1024 * 1024 * 1024,
+					2: 16 * 1024 * 1024 * 1024,
+				},
+				DataNodeMemory: map[int64]uint64{
+					1: 12 * 1024 * 1024 * 1024,
+					2: 20 * 1024 * 1024 * 1024,
+				},
+			},
+		}
+	}
+
+	t.Run("user target below safe size gets operating allowance", func(t *testing.T) {
+		view := newView(1 * gb)
+
+		targetSize, targetCount := view.calculateTargetSizeCount()
+
+		assert.Equal(t, int64(1127428915), targetSize)
+		assert.Equal(t, int64(5), targetCount)
+	})
+
+	t.Run("user target above smallest node limit is clamped", func(t *testing.T) {
+		view := newView(4 * gb)
+
+		targetSize, targetCount := view.calculateTargetSizeCount()
+
+		// The smallest QueryNode is the limiting resource: 8 GiB / factor 4 = 2 GiB.
+		assert.Equal(t, int64(2*gb), targetSize)
+		assert.Equal(t, int64(3), targetCount)
+	})
+
+	t.Run("standalone co-location halves the shared memory limit", func(t *testing.T) {
+		view := newView(4 * gb)
+		view.topology.IsStandaloneMode = true
+		view.topology.QueryNodeMemory = map[int64]uint64{1: 8 * 1024 * 1024 * 1024}
+
+		targetSize, targetCount := view.calculateTargetSizeCount()
+
+		assert.Equal(t, int64(1*gb), targetSize)
+		assert.Equal(t, int64(5), targetCount)
 	})
 }

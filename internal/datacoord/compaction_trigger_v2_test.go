@@ -133,22 +133,24 @@ func TestCreateCompactionIDBlockUsesIDExpansionFactor(t *testing.T) {
 func TestCompactionViewsExposeTotalSizeAndCollectionTTL(t *testing.T) {
 	ttl := 3 * time.Hour
 	segments := []*SegmentView{{ID: 1, Size: 10}, {ID: 2, Size: 2.5}}
+	forceMergeSegments := newForceMergePlanningSegments(10, 2)
 	tests := []struct {
-		name    string
-		view    CompactionView
-		wantTTL time.Duration
+		name     string
+		view     CompactionView
+		wantSize float64
+		wantTTL  time.Duration
 	}{
-		{name: "single", view: &MixSegmentView{segments: segments, collectionTTL: ttl}, wantTTL: ttl},
-		{name: "clustering", view: &ClusteringSegmentsView{segments: segments, collectionTTL: ttl}, wantTTL: ttl},
-		{name: "force merge", view: &ForceMergeSegmentView{segments: segments, collectionTTL: ttl}, wantTTL: ttl},
-		{name: "level zero", view: &LevelZeroCompactionView{l0Segments: segments}},
-		{name: "bump schema version", view: &BumpSchemaVersionView{segments: segments}},
+		{name: "single", view: &MixSegmentView{segments: segments, collectionTTL: ttl}, wantSize: 12.5, wantTTL: ttl},
+		{name: "clustering", view: &ClusteringSegmentsView{segments: segments, collectionTTL: ttl}, wantSize: 12.5, wantTTL: ttl},
+		{name: "force merge", view: &ForceMergeSegmentView{segments: forceMergeSegments, collectionTTL: ttl}, wantSize: 12, wantTTL: ttl},
+		{name: "level zero", view: &LevelZeroCompactionView{l0Segments: segments}, wantSize: 12.5},
+		{name: "bump schema version", view: &BumpSchemaVersionView{segments: segments}, wantSize: 12.5},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := test.view.GetTotalSize(); got != 12.5 {
-				t.Fatalf("GetTotalSize() = %v, want 12.5", got)
+			if got := test.view.GetTotalSize(); got != test.wantSize {
+				t.Fatalf("GetTotalSize() = %v, want %v", got, test.wantSize)
 			}
 			if got := test.view.GetCollectionTTL(); got != test.wantTTL {
 				t.Fatalf("GetCollectionTTL() = %v, want %v", got, test.wantTTL)
@@ -782,9 +784,11 @@ func (s *CompactionTriggerManagerSuite) TestSubmitForceMergeViewToScheduler() {
 			return nil
 		}).Return(nil).Once()
 
+	segment := newForceMergePlanningSegment(200, 150*1024*1024)
+	segment.NumOfRows = 100
 	view := &ForceMergeSegmentView{
 		label:              s.testLabel,
-		segments:           []*SegmentView{{ID: 200, label: s.testLabel, NumOfRows: 100, Size: 150 * 1024 * 1024}},
+		segments:           []*SegmentInfo{segment},
 		triggerID:          1001,
 		targetSegmentSize:  100 * 1024 * 1024,
 		targetSegmentCount: 999,
@@ -824,9 +828,11 @@ func (s *CompactionTriggerManagerSuite) TestSubmitViewToSchedulerDefensiveReturn
 	}
 
 	makeForceMergeView := func() *ForceMergeSegmentView {
+		segment := newForceMergePlanningSegment(200, 150*1024*1024)
+		segment.NumOfRows = 100
 		return &ForceMergeSegmentView{
 			label:              s.testLabel,
-			segments:           []*SegmentView{{ID: 200, label: s.testLabel, NumOfRows: 100, Size: 150 * 1024 * 1024}},
+			segments:           []*SegmentInfo{segment},
 			triggerID:          1001,
 			targetSegmentSize:  100 * 1024 * 1024,
 			targetSegmentCount: 999,
