@@ -18,6 +18,7 @@ package paramtable
 
 import (
 	"strings"
+	"time"
 )
 
 type functionConfig struct {
@@ -30,6 +31,15 @@ type functionConfig struct {
 	ZillizProviders               ParamGroup `refreshable:"true"`
 	AnalyzerConcurrencyPerCPUCore ParamItem  `refreshable:"true"`
 	AnalyzerRunnerConcurrency     ParamItem  `refreshable:"true"`
+	// EnableWriteBeforeMaterialization gates the write-before function
+	// materialization (streamingnode materializes BM25/embedding function
+	// output fields before WAL append). Default "auto": it is switched on
+	// automatically once the whole cluster has confirmed version >= 2.6.23
+	// (plus the SwitchDelay stability window); before that the write path keeps
+	// the legacy format. Explicit "false" keeps legacy format forever (escape
+	// hatch); explicit "true" force-enables and bypasses the version gate (use
+	// with caution).
+	EnableWriteBeforeMaterialization ParamItem `refreshable:"false"`
 }
 
 func (p *functionConfig) init(base *BaseTable) {
@@ -214,6 +224,22 @@ func (p *functionConfig) init(base *BaseTable) {
 		DefaultValue: "8",
 	}
 	p.AnalyzerRunnerConcurrency.Init(base.mgr)
+
+	p.EnableWriteBeforeMaterialization = ParamItem{
+		Key:          "function.enableWriteBeforeMaterialization",
+		Version:      "2.6.23",
+		Export:       false,
+		Doc:          "Whether to materialize function output fields (e.g. BM25 sparse vectors) before WAL append. auto: switch on automatically once the whole cluster reaches 2.6.23 and the stability window elapses; false: always keep the legacy format (escape hatch); true: force enable and bypass the version gate (use with caution).",
+		DefaultValue: "auto",
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false", // before the gate is activated the write path keeps the legacy format
+			GateVersion:           "2.6.23",
+			TargetValue:           "true",
+			SwitchDelay:           1 * time.Minute,
+		},
+	}
+	p.EnableWriteBeforeMaterialization.Init(base.mgr)
 }
 
 func (p *functionConfig) GetTextEmbeddingProviderConfig(providerName string) map[string]string {
