@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func allocWALSchemaForTest(t *testing.T, collectionID int64, vchannel string, schemaVersion int32) {
@@ -439,6 +440,13 @@ func TestShardInterceptorPassesExplicitZeroSchemaVersion(t *testing.T) {
 }
 
 func TestShardInterceptorRejectsMissingWALFunctionSnapshot(t *testing.T) {
+	// This test exercises the write-before materialization failure path, so the
+	// version gate must be activated (otherwise materialization is skipped and
+	// the append falls through to segment assignment).
+	item := &paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization
+	old := item.SwapTempValue("true")
+	defer item.SwapTempValue(old)
+
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()

@@ -100,6 +100,14 @@ func formatKey(key string) string {
 	return result
 }
 
+// FormatKey formats a config key for storage/retrieval in the config sources
+// (lowercased, with '/', '_' and '.' stripped). It is the exported form of
+// formatKey for callers that must address config keys directly, e.g. writing
+// to the config center from outside pkg/config.
+func FormatKey(key string) string {
+	return formatKey(key)
+}
+
 func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[string]string) {
 	for k, v := range m {
 		fullKey := k

@@ -29,9 +29,11 @@ import (
 
 	"github.com/shirou/gopsutil/v4/disk"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/fips"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -80,6 +82,11 @@ type ComponentParam struct {
 	ServiceParam
 	once      sync.Once
 	baseTable *BaseTable
+
+	// versionGates drives the version-gated config items (e.g. write-before
+	// function materialization). It is created and started right after
+	// paramtable initialization; see initVersionGates.
+	versionGates *Confirmator
 
 	CommonCfg       commonConfig
 	QuotaConfig     quotaConfig
@@ -186,6 +193,61 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.StreamingNodeGrpcClientCfg.Init("streamingNode", bt)
 
 	p.IntegrationTestCfg.init(bt)
+
+	p.initVersionGates()
+}
+
+// versionGateItems returns every version-gated config item of the param table.
+// Gate registration follows paramtable initialization: a single confirmator
+// (a paramtable-level capability) drives all of them together.
+func (p *ComponentParam) versionGateItems() []*ParamItem {
+	return []*ParamItem{
+		&p.FunctionCfg.EnableWriteBeforeMaterialization,
+	}
+}
+
+// initVersionGates creates and starts the cluster version confirmator for
+// every version-gated config item, right after paramtable initialization. It
+// is a no-op when remote config is skipped (e.g. tests) or there is no usable
+// etcd, and it never blocks paramtable initialization: the initial resolution
+// reads etcd, so it runs in the background. Once every gate is resolved the
+// confirmator stops itself.
+func (p *ComponentParam) initVersionGates() {
+	if p.baseTable == nil || p.baseTable.config.skipRemote {
+		return
+	}
+	if p.EtcdCfg.Endpoints.GetValue() == "" {
+		return
+	}
+	if p.EtcdCfg.UseEmbedEtcd.GetAsBool() && !etcd.HasServer() {
+		return
+	}
+	vg, err := NewConfirmator(&p.EtcdCfg, p.EtcdCfg.MetaRootPath.GetValue(), p.EtcdCfg.RootPath.GetValue())
+	if err != nil {
+		mlog.Warn(context.TODO(), "create version gate confirmator failed", mlog.Err(err))
+		return
+	}
+	for _, item := range p.versionGateItems() {
+		if item == nil || item.VersionGateSwitcher == nil {
+			continue
+		}
+		if err := vg.RegisterGate(item.Key, item.VersionGateSwitcher); err != nil {
+			mlog.Warn(context.TODO(), "register version gate failed, skip", zap.String("key", item.Key), mlog.Err(err))
+			continue
+		}
+	}
+	if len(vg.gates) == 0 {
+		vg.Stop()
+		return
+	}
+	// Start asynchronously: the initial gate resolution reads etcd and must
+	// not block paramtable initialization.
+	go func() {
+		if err := vg.Start(context.TODO()); err != nil {
+			mlog.Warn(context.TODO(), "start version gate confirmator failed", mlog.Err(err))
+		}
+	}()
+	p.versionGates = vg
 }
 
 func (p *ComponentParam) GetComponentConfigurations(componentName string, sub string) map[string]string {
