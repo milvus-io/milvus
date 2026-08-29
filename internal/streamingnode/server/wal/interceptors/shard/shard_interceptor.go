@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const interceptorName = "shard"
@@ -187,12 +188,17 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	if header.SchemaVersion == nil {
 		schemaVersion = function.LatestFunctionRunnerVersion
 	}
-	if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
-		impl.shardManager.Logger().Warn(ctx, "failed to materialize function fields before WAL append",
-			mlog.Int64("collectionID", header.GetCollectionId()),
-			mlog.Int32("schemaVersion", schemaVersion),
-			mlog.Err(err))
-		return nil, status.NewUnrecoverableError("failed to materialize function fields before WAL append: %s", err.Error())
+	// Write-before function materialization is version-gated: it only runs once
+	// the whole cluster has confirmed version >= GateVersion (config default
+	// "auto"); before that the write path keeps the legacy format.
+	if paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization.GetAsBoolEffective() {
+		if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
+			impl.shardManager.Logger().Warn(ctx, "failed to materialize function fields before WAL append",
+				mlog.Int64("collectionID", header.GetCollectionId()),
+				mlog.Int32("schemaVersion", schemaVersion),
+				mlog.Err(err))
+			return nil, status.NewUnrecoverableError("failed to materialize function fields before WAL append: %s", err.Error())
+		}
 	}
 	for _, partition := range header.GetPartitions() {
 		if partition.BinarySize == 0 {
