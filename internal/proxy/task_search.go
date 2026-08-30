@@ -501,6 +501,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 
 	var err error
 	var membershipFilterPlanSize int64
+	// Every hybrid sub-request is part of one client request. Share the parser's
+	// pre-materialization occurrence/decoded-memory budget across all of them;
+	// the serialized-plan gate below already shares membershipFilterPlanSize.
+	membershipPreflightBudget := planparserv2.NewMembershipPreflightBudget()
 	if err := validateFunctionChainSearchRequest(t.request, true); err != nil {
 		return err
 	}
@@ -559,7 +563,8 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
 		// For hybrid search, order_by_fields comes from main search params, not sub-search params
-		plan, queryInfo, offset, subIsIterator, _, searchType, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
+		plan, queryInfo, offset, subIsIterator, _, searchType, err := t.tryGeneratePlan(
+			subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues(), membershipPreflightBudget)
 		if err != nil {
 			return err
 		}
@@ -884,7 +889,8 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	_, errGroupByFields := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldsKey, t.request.GetSearchParams())
 	t.legacyGroupByWire = errGroupByField == nil && errGroupByFields != nil && t.request.GetSearchAggregation() == nil
 
-	plan, queryInfo, offset, isIterator, orderByFields, searchType, err := t.tryGeneratePlan(t.request.GetSearchParams(), t.request.GetDsl(), t.request.GetExprTemplateValues())
+	plan, queryInfo, offset, isIterator, orderByFields, searchType, err := t.tryGeneratePlan(
+		t.request.GetSearchParams(), t.request.GetDsl(), t.request.GetExprTemplateValues(), nil)
 	if err != nil {
 		return err
 	}
@@ -1150,7 +1156,12 @@ func (t *searchTask) convertPlaceholderIfNeeded(phgBytes []byte, fieldID int64) 
 	return ConvertPlaceholderGroup(phgBytes, field)
 }
 
-func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, internalpb.SearchType, error) {
+func (t *searchTask) tryGeneratePlan(
+	params []*commonpb.KeyValuePair,
+	dsl string,
+	exprTemplateValues map[string]*schemapb.TemplateValue,
+	membershipBudget *planparserv2.MembershipPreflightBudget,
+) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, internalpb.SearchType, error) {
 	annsFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, params)
 	if err != nil || len(annsFieldName) == 0 {
 		vecFields := typeutil.GetVectorFieldSchemas(t.schema.CollectionSchema)
@@ -1187,7 +1198,17 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	}
 
 	start := time.Now()
-	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.SchemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
+	plan, planErr := planparserv2.CreateSearchPlanArgs(
+		t.schema.SchemaHelper,
+		dsl,
+		annsFieldName,
+		searchInfo.planInfo,
+		exprTemplateValues,
+		t.request.GetFunctionScore(),
+		&planparserv2.ParserVisitorArgs{
+			Timezone:         t.resolvedTimezoneStr,
+			MembershipBudget: membershipBudget,
+		})
 	if planErr != nil {
 		mlog.Warn(t.ctx, "failed to create query plan", mlog.Err(planErr),
 			mlog.Int("dsl_bytes", len(dsl)),

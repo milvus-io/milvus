@@ -14,7 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	clientroaring "github.com/milvus-io/milvus/client/v3/roaringfilter"
+	clientroaring "github.com/milvus-io/milvus/client/v3/membership/roaringfilter"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -3024,14 +3024,14 @@ func Test_SegmentScorers(t *testing.T) {
 			kind   string
 		}{
 			{
-				name:   "bloom_match",
-				filter: "bloom_match(Int64Field, {bf})",
+				name:   "bloom",
+				filter: "membership_match(Int64Field, {bf}, type=bloom)",
 				values: map[string]*schemapb.TemplateValue{"bf": bloomTemplate},
 				kind:   "bloom",
 			},
 			{
-				name:   "roaring_match",
-				filter: "roaring_match(Int64Field, {rb})",
+				name:   "roaring",
+				filter: "membership_match(Int64Field, {rb}, type=roaring)",
 				values: map[string]*schemapb.TemplateValue{
 					"rb": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: roaringBlob}},
 				},

@@ -385,7 +385,7 @@ func (s *DeleteOptionSuite) TestWithTemplateParam() {
 	s.Require().NoError(err)
 
 	req, err := NewDeleteOption("collection").
-		WithExpr("roaring_match(id, {ids})").
+		WithExpr("membership_match(id, {ids}, type=roaring)").
 		WithTemplateParam("ids", blob).
 		Request()
 	s.Require().NoError(err)
@@ -402,7 +402,7 @@ func (s *DeleteOptionSuite) TestTemplateParamConversionError() {
 	// error return this was dropped, and a caller building the protobuf
 	// directly would send an expression whose placeholder was never bound.
 	_, err := NewDeleteOption("collection").
-		WithExpr("roaring_match(id, {ids})").
+		WithExpr("membership_match(id, {ids}, type=roaring)").
 		WithTemplateParam("ids", struct{ Unsupported bool }{}).
 		Request()
 	s.Require().Error(err)

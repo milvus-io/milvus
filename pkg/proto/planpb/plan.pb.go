@@ -908,7 +908,7 @@ type GenericValue_ArrayVal struct {
 type GenericValue_BytesVal struct {
 	// Raw binary payload, carried from a schemapb.TemplateValue.bytes_val. Used
 	// to pass a client pre-built membership-filter blob into an expression
-	// (e.g. bloom_match) without base64-inflating a string field.
+	// (e.g. membership_match with type=bloom) without base64-inflating a string field.
 	BytesVal []byte `protobuf:"bytes,6,opt,name=bytes_val,json=bytesVal,proto3,oneof"`
 }
 
