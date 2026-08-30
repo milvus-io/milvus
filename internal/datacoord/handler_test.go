@@ -1859,7 +1859,27 @@ func TestGenSnapshot(t *testing.T) {
 				},
 			},
 		})
-		return []*SegmentInfo{seg}
+		growing := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:            1002,
+			CollectionID:  200,
+			PartitionID:   0,
+			InsertChannel: "dml_0_200v0",
+			State:         commonpb.SegmentState_Growing,
+			StartPosition: &msgpb.MsgPosition{Timestamp: 10000},
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{{LogID: 2, LogSize: 100}},
+			}},
+		})
+		segments := []*SegmentInfo{seg, growing}
+		for _, filter := range filters {
+			if filterFunc, ok := filter.(SegmentFilterFunc); ok {
+				segments = lo.Filter(segments, func(segment *SegmentInfo, _ int) bool {
+					return filterFunc.Match(segment)
+				})
+			}
+		}
+		return segments
 	}).Build()
 	defer mock5.UnPatch()
 
