@@ -19,6 +19,7 @@ package proxy
 import (
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
@@ -42,6 +43,11 @@ import (
 // own PR: REST, Go SDK and Delete expectations updated together, plus a
 // release note.
 func wrapPlanCreationError(err error, context string) error {
+	// Membership-filter size checks are a new, more specific public error. Do
+	// not collapse them into the legacy ParameterInvalid projection below.
+	if errors.Is(err, merr.ErrParameterTooLarge) {
+		return merr.Wrap(err, context)
+	}
 	return merr.Combine(merr.Wrap(err, context), merr.ErrParameterInvalid)
 }
 
@@ -52,7 +58,7 @@ func wrapPlanCreationError(err error, context string) error {
 // sub-plan so all sub-searches share one limit. Complex Delete uses the same
 // gate before its shard fan-out.
 //
-// bloom_match and roaring_match share one budget because they consume one
+// Bloom and Roaring membership_match filters share one budget because they consume one
 // resource: both embed a client-built blob into the serialized plan that is
 // then fanned out to every QueryNode. Splitting the budget would let a request
 // carrying one of each spend twice what either alone is allowed. The generic
