@@ -601,7 +601,8 @@ ChunkedSegmentSealedImpl::BuildPkIndexSlot(
         pk_index_size,
         id_,
         stats_.mem_size.load());
-    auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(std::move(translator));
+    auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
+        std::move(translator));
     if (eager) {
         auto cell_holder =
             cachinglayer::SemiInlineGet(slot->PinCells(op_ctx, {0}));
