@@ -666,6 +666,19 @@ func TestClientBuiltBlobsPassProxyValidation(t *testing.T) {
 			require.Equalf(t, distinct.GetCardinality(), summary.Cardinality,
 				"declared cardinality diverged for %s n=%d", name, n)
 
+			// Structural summaries cannot prove that the encoded keys are the
+			// caller's keys: a different set can have the same cardinality,
+			// container counts, and body size. Decode with the standard portable
+			// Roaring64 reader and pin the complete member set across the client
+			// builder -> MRB1 wire body -> server validator boundary.
+			decoded := roaring64.New()
+			consumed, err := decoded.ReadFrom(bytes.NewReader(blob[serverroaring.HeaderSize:]))
+			require.NoErrorf(t, err, "%s n=%d", name, n)
+			require.Equalf(t, int64(summary.BodyBytes), consumed,
+				"portable decoder did not consume the complete MRB1 body for %s n=%d", name, n)
+			require.Truef(t, decoded.Equals(distinct),
+				"decoded membership diverged for %s n=%d", name, n)
+
 			// The container counts are the admission inputs: the SDK derives
 			// them from the member slice to pre-reject against
 			// MaxHighContainerCount and MaxEstimatedDecodedBytes, and the
