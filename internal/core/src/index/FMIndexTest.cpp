@@ -12,6 +12,7 @@
 #include <fmt/core.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstring>
 #include <filesystem>
 #include <functional>
@@ -1564,6 +1565,9 @@ MakeLongTextZebraRows(size_t nb) {
 TEST(FMIndex, ExecutorPathMatchBatchesAndBitmap) {
     const size_t nb = 1000;
     auto rows = MakeLongTextZebraRows(nb);
+    constexpr size_t kLateFalsePositive = 500;
+    constexpr size_t kLateTrueMatch = 750;
+    rows[kLateTrueMatch] = "QOP" + rows[kLateTrueMatch];
     std::vector<int64_t> ints(nb);
     for (size_t i = 0; i < nb; i++) {
         ints[i] = static_cast<int64_t>(i);
@@ -1603,10 +1607,16 @@ TEST(FMIndex, ExecutorPathMatchBatchesAndBitmap) {
     auto got = milvus::query::ExecuteQueryExpr(
         node, loaded.segment.get(), nb, MAX_TIMESTAMP);
     LikePatternMatcher matcher("QOP%ZEBRA");
+    ASSERT_NE(rows[kLateFalsePositive].find("ZEBRA"), std::string::npos);
+    ASSERT_EQ(rows[kLateFalsePositive].find("QOP"), std::string::npos);
+    ASSERT_FALSE(matcher(rows[kLateFalsePositive]));
+    ASSERT_TRUE(matcher(rows[kLateTrueMatch]));
     for (size_t i = 0; i < nb; i++) {
         const bool want = matcher(rows[i]) && ints[i] >= 500;
         EXPECT_EQ(got[i], want) << "row " << i;
     }
+    EXPECT_FALSE(got[kLateFalsePositive]);
+    EXPECT_TRUE(got[kLateTrueMatch]);
 }
 
 TEST(FMIndex, ExecutorPathMatchMultiChunk) {
@@ -1615,7 +1625,7 @@ TEST(FMIndex, ExecutorPathMatchMultiChunk) {
     std::vector<std::string> rows;
     rows.reserve(nb);
     for (size_t i = 0; i < nb; i++) {
-        if (i >= 100 && i < 200 && (i % 25 == 0)) {
+        if (i % 100 == 25) {
             rows.push_back(filler + "ZEBRA");
         } else {
             rows.push_back(filler);
@@ -1636,20 +1646,27 @@ TEST(FMIndex, ExecutorPathMatchMultiChunk) {
         MakeMatchTypedExpr(loaded.schema, loaded.varchar_id, "%ZEBRA%", false);
     EXPECT_TRUE(CompiledUseIndexCursor(
         match_expr, loaded.segment.get(), static_cast<int64_t>(nb)));
+    EXPECT_TRUE(milvus::test::CanExprExecuteAllAtOnce(
+        match_expr, loaded.segment.get(), static_cast<int64_t>(nb)));
 
-    milvus::test::ExprBatchSizeGuard batch_size_guard(50);
+    // FilterBits executes this scalar-index expression all at once. Hits at 25,
+    // 125, and 225 therefore force one ProcessDataByOffsets call to read
+    // candidates from all three raw chunks.
     auto node =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, match_expr);
     auto got = milvus::query::ExecuteQueryExpr(
         node, loaded.segment.get(), nb, MAX_TIMESTAMP);
     LikePatternMatcher matcher("%ZEBRA%");
     size_t hits = 0;
+    std::array<size_t, 3> chunk_hits{};
     for (size_t i = 0; i < nb; i++) {
         const bool want = matcher(rows[i]);
         EXPECT_EQ(got[i], want) << "row " << i;
         hits += want;
+        chunk_hits[i / 100] += want;
     }
-    EXPECT_GT(hits, 0u);
+    EXPECT_EQ(hits, 3u);
+    EXPECT_EQ(chunk_hits, (std::array<size_t, 3>{1, 1, 1}));
     EXPECT_LT(hits, nb);
 }
 

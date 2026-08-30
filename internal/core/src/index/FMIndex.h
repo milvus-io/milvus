@@ -281,9 +281,9 @@ class FMIndex : public ScalarIndex<std::string> {
     }
 
  private:
-    // Count-first guard for general LIKE (Match). Empty pattern (caller has no
-    // literal yet) stays on the allowlist. A pattern with no literal fragment
-    // (`%`, `%_%`) declines. Otherwise the rarest fragment is scored as
+    // Count-first guard for general LIKE (Match). Match declines an empty
+    // pattern and every pattern with no literal fragment (`%`, `%_%`), because
+    // phase 1 has no seed. Otherwise the rarest fragment is scored as
     // occ x sa_sample_rate < ratio x tokens, the same locate-only bound as
     // the anchored ops. Phase 2 reads those candidates back from sealed
     // VARCHAR via ProcessDataByOffsets; its byte cost is not priced here
