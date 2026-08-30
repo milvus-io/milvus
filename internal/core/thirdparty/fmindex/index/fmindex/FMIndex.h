@@ -348,11 +348,10 @@ class FMIndex {
     // Data-sized heap storage retained by the index. For LoadView this excludes
     // every array viewed from the mmap blob and includes only rebuilt rank
     // directories and small derived metadata. Deserialize additionally owns
-    // owned_blob_. Lazy Extract ISA storage is included once materialized.
+    // owned_blob_. Extract ISA storage is included once materialized.
     size_t
     resident_heap_bytes() const {
-        return wm_.resident_heap_bytes() +
-               c_.capacity() * sizeof(uint64_t) +
+        return wm_.resident_heap_bytes() + c_.capacity() * sizeof(uint64_t) +
                first_.capacity() * sizeof(size_t) +
                sampled_bv_.resident_heap_bytes() +
                sample_vals_narrow_owned_.capacity() * sizeof(uint32_t) +
@@ -528,9 +527,9 @@ class FMIndex {
     std::vector<uint8_t>
         id_to_byte_;  // dense id -> byte (inverse of byte_to_id_)
     // isa_sample_[k] = row whose SA value = k*rate. Only Extract needs it, and
-    // building it walks ALL m rows (an O(m) pass + m/rate x 8 B of heap) — so it
-    // is built LAZILY on the first Extract call (thread-safe via isa_once_),
-    // never at load time. Locate/Count/prefix/suffix never touch it.
+    // building it walks ALL m rows (an O(m) pass + m/rate x 8 B of heap). The
+    // library builds it lazily on first Extract. The scalar wrapper does not
+    // materialize ISA at load; Match rechecks sealed VARCHAR instead.
     mutable std::vector<uint64_t> isa_sample_;
     mutable std::unique_ptr<std::once_flag> isa_once_ =
         std::make_unique<std::once_flag>();
