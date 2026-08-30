@@ -1604,6 +1604,12 @@ func (sm *snapshotManager) createRestoreJob(
 					mlog.Int64("sourceSegmentID", sourceSegmentID))
 				continue
 			}
+			if segInfo.GetState() != commonpb.SegmentState_Sealed && segInfo.GetState() != commonpb.SegmentState_Flushed {
+				mlog.Warn(ctx, "source segment is not stable, skipping",
+					mlog.Int64("sourceSegmentID", sourceSegmentID),
+					mlog.String("state", segInfo.GetState().String()))
+				continue
+			}
 		}
 		validSegments = append(validSegments, segDesc)
 	}

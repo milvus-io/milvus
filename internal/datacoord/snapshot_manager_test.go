@@ -1881,7 +1881,7 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, "dst-ch", mock.Anything).Return(nil).Once()
 
 	mt := &meta{ctx: ctx, catalog: catalog, segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
-	mt.segments.SetSegment(11, NewSegmentInfo(&datapb.SegmentInfo{ID: 11}))
+	mt.segments.SetSegment(11, NewSegmentInfo(&datapb.SegmentInfo{ID: 11, State: commonpb.SegmentState_Flushed}))
 
 	var err error
 
@@ -1909,6 +1909,30 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 	err = sm.createRestoreJob(ctx, int64(200), map[string]string{"src-ch": "dst-ch"}, map[int64]int64{10: 20}, snapshotData, int64(42), int64(7), false, "", "", "")
 	require.NoError(t, err)
 	assert.True(t, addJobCalled)
+}
+
+func TestCreateRestoreJob_SkipsUnstableSourceSegments(t *testing.T) {
+	ctx := context.Background()
+	snapshotData := &snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
+		Collection:   &datapb.CollectionDescription{},
+		Segments: []*datapb.SegmentDescription{{
+			SegmentId: 11, PartitionId: 10, SegmentLevel: datapb.SegmentLevel_L1,
+			ChannelName: "src-ch", NumOfRows: 123,
+		}},
+	}
+	mt := &meta{ctx: ctx, segments: NewSegmentsInfo()}
+	mt.segments.SetSegment(11, NewSegmentInfo(&datapb.SegmentInfo{ID: 11, State: commonpb.SegmentState_Growing}))
+	mockAlloc := allocator.NewMockAllocator(t)
+	mockAlloc.EXPECT().AllocN(int64(0)).Return(int64(0), int64(0), nil)
+	mockHandler := NewNMockHandler(t)
+	mockHandler.EXPECT().GetCollection(mock.Anything, int64(200)).Return(&collectionInfo{}, nil)
+	mAddJob := mockey.Mock((*copySegmentMeta).AddJob).Return(nil).Build()
+	defer mAddJob.UnPatch()
+	sm := &snapshotManager{meta: mt, allocator: mockAlloc, handler: mockHandler, copySegmentMeta: &copySegmentMeta{}}
+
+	err := sm.createRestoreJob(ctx, 200, map[string]string{"src-ch": "dst-ch"}, map[int64]int64{10: 20}, snapshotData, 42, 7, false, "", "", "")
+	assert.NoError(t, err)
 }
 
 func TestCreateRestoreJob_ExternalPersistsSourceLocationAndSkipsLocalSegmentLookup(t *testing.T) {
