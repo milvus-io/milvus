@@ -1869,8 +1869,8 @@ TEST(BitmapIndexArrayNestedTest,
     auto high_card_field_data =
         MakeStringArrayFieldData(MakeStringScalarArrays(240, 120));
 
-    for (int32_t version : {0, kHybridIndexConfigVersion,
-                            kNestedHybridStlSortMinVersion - 1}) {
+    for (int32_t version :
+         {0, kHybridIndexConfigVersion, kNestedHybridStlSortMinVersion - 1}) {
         TestHybridScalarIndexString nested(7, ctx, true);
         nested.scalar_index_version_ = version;
         EXPECT_EQ(nested.SelectIndexBuildTypePublic(
