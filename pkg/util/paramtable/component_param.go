@@ -29,11 +29,9 @@ import (
 
 	"github.com/shirou/gopsutil/v4/disk"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/fips"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -216,37 +214,18 @@ func (p *ComponentParam) initVersionGates() {
 	if p.baseTable == nil || p.baseTable.config.skipRemote {
 		return
 	}
-	if p.EtcdCfg.Endpoints.GetValue() == "" {
+	// The confirmator shares the etcd client created for the config etcd
+	// source: when remote config is disabled or there is no usable etcd, no
+	// client exists and there is nothing to confirm against.
+	if p.baseTable.etcdClient == nil {
 		return
 	}
-	if p.EtcdCfg.UseEmbedEtcd.GetAsBool() && !etcd.HasServer() {
-		return
-	}
-	vg, err := NewConfirmator(&p.EtcdCfg, p.EtcdCfg.MetaRootPath.GetValue(), p.EtcdCfg.RootPath.GetValue())
+	vg, err := RecoverConfirmator(p.baseTable.etcdClient,
+		p.EtcdCfg.MetaRootPath.GetValue(), p.EtcdCfg.RootPath.GetValue(), p.versionGateItems())
 	if err != nil {
-		mlog.Warn(context.TODO(), "create version gate confirmator failed", mlog.Err(err))
+		mlog.Warn(context.TODO(), "recover version gate confirmator failed", mlog.Err(err))
 		return
 	}
-	for _, item := range p.versionGateItems() {
-		if item == nil || item.VersionGateSwitcher == nil {
-			continue
-		}
-		if err := vg.RegisterGate(item.Key, item.VersionGateSwitcher); err != nil {
-			mlog.Warn(context.TODO(), "register version gate failed, skip", zap.String("key", item.Key), mlog.Err(err))
-			continue
-		}
-	}
-	if len(vg.gates) == 0 {
-		vg.Stop()
-		return
-	}
-	// Start asynchronously: the initial gate resolution reads etcd and must
-	// not block paramtable initialization.
-	go func() {
-		if err := vg.Start(context.TODO()); err != nil {
-			mlog.Warn(context.TODO(), "start version gate confirmator failed", mlog.Err(err))
-		}
-	}()
 	p.versionGates = vg
 }
 
