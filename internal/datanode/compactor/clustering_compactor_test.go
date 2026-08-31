@@ -550,6 +550,32 @@ func (s *ClusteringCompactionTaskSuite) TestScalarAnalyzeSegmentFiltersDroppedOr
 	s.Equal(map[interface{}]int64{"varchar": 2}, analyzeResult)
 }
 
+// An import segment committed at birthday+2s carries a deltalog entry deleting
+// PK=100 at birthday+1s. That delete predates the commit, so it must not remove
+// the row, and every output row timestamp must be normalized to commit_ts.
+func (s *ClusteringCompactionTaskSuite) TestScalarCompactionPreservesImportCommitTimestamp() {
+	s.preparScalarCompactionNormalTask()
+	commitTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(2 * time.Second))
+	s.plan.SegmentBinlogs[0].CommitTimestamp = commitTs
+	s.task.compactionParams = compaction.GenParams()
+
+	compactionResult, err := s.task.Compact()
+	s.Require().NoError(err)
+
+	s.EqualValues(10240, lo.SumBy(compactionResult.GetSegments(), func(seg *datapb.CompactionSegment) int64 {
+		return seg.GetNumOfRows()
+	}))
+
+	for _, seg := range compactionResult.GetSegments() {
+		for _, fieldBinlog := range seg.GetInsertLogs() {
+			for _, b := range fieldBinlog.GetBinlogs() {
+				s.EqualValues(commitTs, b.GetTimestampFrom())
+				s.EqualValues(commitTs, b.GetTimestampTo())
+			}
+		}
+	}
+}
+
 func genRow(magic int64) map[int64]interface{} {
 	ts := tsoutil.ComposeTSByTime(getMilvusBirthday())
 	return map[int64]interface{}{
