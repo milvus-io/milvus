@@ -526,6 +526,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 			storageConfig *indexpb.StorageConfig,
 			storagePluginContext *indexcgopb.StoragePluginContext,
 			extfs packed.ExternalSpecContext,
+			_ ...storage.RwOption,
 		) (*storage.ManifestReader, error) {
 			gotExtfs = extfs
 			return nil, readerErr
