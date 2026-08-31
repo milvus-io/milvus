@@ -345,7 +345,7 @@ func TestCreateAliasTask_ResolvesCollectionAlias(t *testing.T) {
 
 	task := &CreateAliasTask{
 		baseTask: baseTask{
-			metaCache: cache,
+			MetaCache: cache,
 		},
 		Condition: NewTaskCondition(ctx),
 		CreateAliasRequest: &milvuspb.CreateAliasRequest{
@@ -379,7 +379,7 @@ func TestAlterAliasTask_ResolvesCollectionAlias(t *testing.T) {
 
 	task := &AlterAliasTask{
 		baseTask: baseTask{
-			metaCache: cache,
+			MetaCache: cache,
 		},
 		Condition: NewTaskCondition(ctx),
 		AlterAliasRequest: &milvuspb.AlterAliasRequest{
@@ -416,7 +416,7 @@ func TestCreateAliasTask_ResolvesEvenWhenRBACFlagDisabled(t *testing.T) {
 
 	task := &CreateAliasTask{
 		baseTask: baseTask{
-			metaCache: cache,
+			MetaCache: cache,
 		},
 		Condition: NewTaskCondition(ctx),
 		CreateAliasRequest: &milvuspb.CreateAliasRequest{
@@ -450,7 +450,7 @@ func TestListAliasesTask_ResolvesCollectionAlias(t *testing.T) {
 
 	task := &ListAliasesTask{
 		baseTask: baseTask{
-			metaCache: cache,
+			MetaCache: cache,
 		},
 		Condition: NewTaskCondition(ctx),
 		ListAliasesRequest: &milvuspb.ListAliasesRequest{
@@ -478,7 +478,7 @@ func TestListAliasesTask_NoResolveWhenCollectionNameEmpty(t *testing.T) {
 
 	task := &ListAliasesTask{
 		baseTask: baseTask{
-			metaCache: cache,
+			MetaCache: cache,
 		},
 		Condition: NewTaskCondition(ctx),
 		ListAliasesRequest: &milvuspb.ListAliasesRequest{

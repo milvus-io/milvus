@@ -1336,7 +1336,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 	}
 	qt := &queryTask{
 		baseTask: baseTask{
-			metaCache: op.node.(*Proxy).getMetaCache(),
+			MetaCache: op.node.(*Proxy).GetMetaCache(),
 		},
 		ctx:       op.traceCtx,
 		Condition: NewTaskCondition(op.traceCtx),

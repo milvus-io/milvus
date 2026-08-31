@@ -64,7 +64,7 @@ func (s *ImportTaskSuite) TestExecute_GetDatabaseInfoFailsReturnsError() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	err := task.Execute(ctx)
 
@@ -104,7 +104,7 @@ func (s *ImportTaskSuite) TestExecute_ImportV2RPCFailsReturnsError() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	err := task.Execute(ctx)
 
@@ -146,7 +146,7 @@ func (s *ImportTaskSuite) TestExecute_ImportV2ReturnsErrorStatusReturnsError() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	err := task.Execute(ctx)
 
@@ -190,7 +190,7 @@ func (s *ImportTaskSuite) TestExecute_SuccessSetsJobID() {
 		},
 		resp: resp,
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	err := task.Execute(ctx)
 
@@ -241,7 +241,7 @@ func (s *ImportTaskSuite) TestExecute_PassesCorrectRequestParameters() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	err := task.Execute(ctx)
 
@@ -320,12 +320,12 @@ func (s *ImportTaskSuite) TestTaskBasicMethods() {
 
 func (s *ImportTaskSuite) TestSetChannels_ReturnsNil() {
 	task := &importTask{}
-	s.NoError(task.setChannels())
+	s.NoError(task.SetChannels())
 }
 
 func (s *ImportTaskSuite) TestGetChannels_ReturnsNil() {
 	task := &importTask{}
-	s.Nil(task.getChannels())
+	s.Nil(task.GetChannels())
 }
 
 // --------------------------------
@@ -373,7 +373,7 @@ func (s *ImportTaskSuite) TestExecute_DataTimestampIsAlwaysZero() {
 		},
 		resp: &internalpb.ImportResponse{},
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	task.Execute(ctx)
 
@@ -401,7 +401,7 @@ func (s *ImportTaskSuite) TestPreExecute_GetCollectionIDFailsReturnsError() {
 			CollectionName: "test_collection",
 		},
 	}
-	task.metaCache = mockCache
+	task.MetaCache = mockCache
 
 	err := task.PreExecute(ctx)
 
