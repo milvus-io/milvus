@@ -239,7 +239,6 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			PlanID: 1,
 			State:  datapb.CompactionTaskState_completed,
 		}, nil)
-		mockC.EXPECT().GetStorageConfig().Return(s.storageConfig)
 		s.node.compactionExecutor.Enqueue(mockC)
 
 		mockC2 := compactor.NewMockCompactor(s.T())
@@ -253,7 +252,6 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			PlanID: 2,
 			State:  datapb.CompactionTaskState_failed,
 		}, nil)
-		mockC2.EXPECT().GetStorageConfig().Return(s.storageConfig)
 		s.node.compactionExecutor.Enqueue(mockC2)
 
 		s.Eventually(func() bool {
