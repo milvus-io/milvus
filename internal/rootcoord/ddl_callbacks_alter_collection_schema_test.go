@@ -900,7 +900,8 @@ func TestDDLCallbacksAlterCollectionDropField(t *testing.T) {
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrDatabaseNotFound)
 
 	// create collection with field1
-	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	createCollectionForTest(t, ctx, core, dbName, collectionName,
+		&commonpb.KeyValuePair{Key: common.RLSEnabledKey, Value: "true"})
 
 	// add field2 and field3
 	addResp, err := core.AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{

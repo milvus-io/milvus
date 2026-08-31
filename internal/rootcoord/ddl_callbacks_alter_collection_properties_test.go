@@ -941,7 +941,7 @@ func TestDDLCallbacksAlterCollectionProperties_MixedExternalAndRegular(t *testin
 	assertReplicaNumber(t, ctx, core, dbName, collectionName, 2)
 }
 
-func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string) {
+func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, properties ...*commonpb.KeyValuePair) {
 	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
 		DbName: dbName,
 	})
@@ -960,9 +960,11 @@ func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbNa
 	schemaBytes, err := proto.Marshal(testSchema)
 	require.NoError(t, err)
 	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
-		DbName:           dbName,
-		CollectionName:   collectionName,
-		Properties:       []*commonpb.KeyValuePair{{Key: common.CollectionReplicaNumber, Value: "1"}},
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: append([]*commonpb.KeyValuePair{
+			{Key: common.CollectionReplicaNumber, Value: "1"},
+		}, properties...),
 		Schema:           schemaBytes,
 		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 	})
