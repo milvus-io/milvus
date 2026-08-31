@@ -14,35 +14,112 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package routing maps a write to the vchannel that owns it.
+//
+// A row is placed by one number, its routing value: the hash of whatever the
+// collection's shard_by expression names — its primary key, or its namespace id.
+// The value is then taken modulo the collection's routing modulus, and the shard
+// owning that residue owns the row.
+//
+// A collection that has never been split carries no residues and a modulus of
+// zero. It is not a second code path: the table built for it is the residue
+// table with one residue per shard in vchannel order, which is the legacy
+// hash % shardNum placement bit for bit.
 package routing
 
 import (
-	"github.com/cockroachdb/errors"
+	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// NamespaceIDField is the system field a namespace-sharded collection routes by.
+// It is the one system field shard_by can name today.
+const NamespaceIDField = "$namespace_id"
 
 // Table is the single routing entry point: it maps one write to the vchannel
 // that owns it.
 //
-// Every collection routes the same way — the hash of its routing key, modulo the
-// collection's routing modulus. What differs is only which value gets hashed,
-// which the collection's shard_by expression names; by the time a write reaches
-// this package that value is already a hash, so the table has one rule.
-//
-// A collection that has never been split carries no routing in its meta, and the
-// table falls back to hash % len(channels) — the legacy placement, bit for bit.
-// After the first split each shard carries the residues it owns, and those
-// decide.
+// Every collection routes the same way — the routing value of a row, modulo the
+// collection's routing modulus. What differs is only which value that is, which
+// the collection's shard_by expression names. Callers that already hold the
+// value use RouteInsertHashes and RouteDeleteHashes; RouteInsert and RouteDelete
+// are the primary-key form, and refuse a collection that routes by anything
+// else rather than placing every row wrong.
 type Table struct {
-	// hashTable is nil for a collection with no routing meta, i.e. one that has
-	// never been split.
-	hashTable *HashRoutingTable
+	// residues resolves a routing value to its owning vchannel. Never nil in a
+	// table Derive returned; for a never-split collection it is the compat table,
+	// which reproduces the legacy modulo exactly.
+	residues *ResidueTable
 
-	// channels is the collection's vchannel list, used by the legacy path and by
-	// NumShards.
+	// channels is the collection's vchannel list, in meta order.
 	channels []string
+
+	// explicit records whether the residues came from the collection meta or were
+	// synthesized from the channel order for a never-split collection. It changes
+	// no placement; it is what lets a caller report which rule applied.
+	explicit bool
+
+	// routingField is the field named by shard_by, empty when shard_by was not
+	// declared. pkField is the collection's primary key. RouteInsert hashes the
+	// primary key, so it is valid exactly when the two agree.
+	routingField string
+	pkField      string
+}
+
+// Option configures a Table at Derive time.
+type Option func(*Table) error
+
+// WithShardBy declares the collection's shard_by expression and the name of its
+// primary key field, so the table knows whether hashing the primary key places a
+// row correctly.
+//
+// Without it a table assumes the primary key, which is what shard_by means when
+// it is empty — every collection until its first split.
+func WithShardBy(shardBy, primaryKeyField string) Option {
+	return func(t *Table) error {
+		field, err := ParseShardBy(shardBy)
+		if err != nil {
+			return err
+		}
+		t.routingField, t.pkField = field, primaryKeyField
+		return nil
+	}
+}
+
+// ParseShardBy parses a collection's shard_by expression and returns the field
+// whose hash places a row. An empty expression returns an empty field: the
+// routing was never declared, which is every collection until its first split,
+// and the primary key applies.
+//
+// The grammar is hash(<field>), where <field> is taken whole rather than lexed
+// as a user field name — one system field, $namespace_id, does not fit the rules
+// a user field name follows. The spelling is canonical and compared bytewise: no
+// space, no quoting, no case folding. A non-empty expression that does not match
+// is rejected whole rather than parsed in part, since a partial read would route
+// by a guess.
+func ParseShardBy(expr string) (string, error) {
+	if expr == "" {
+		return "", nil
+	}
+	const prefix = "hash("
+	if !strings.HasPrefix(expr, prefix) {
+		return "", merr.WrapErrServiceInternalMsg("shard_by %q is not a hash(<field>) expression", expr)
+	}
+	rest := expr[len(prefix):]
+	closing := strings.Index(rest, ")")
+	if closing != len(rest)-1 {
+		// Either no closing parenthesis, or bytes after it. Both mean the server
+		// emitted something this reader does not understand.
+		return "", merr.WrapErrServiceInternalMsg("shard_by %q is not a hash(<field>) expression", expr)
+	}
+	field := rest[:closing]
+	if field == "" {
+		return "", merr.WrapErrServiceInternalMsg("shard_by %q names no field", expr)
+	}
+	return field, nil
 }
 
 // Shard is one shard's routing meta as Derive consumes it: the vchannel plus the
@@ -55,74 +132,90 @@ type Shard struct {
 // Derive builds the routing table of a collection from its routing modulus and
 // per-shard residues.
 //
-// Shards must already be filtered to the ones that currently accept writes: the
-// caller drops a fenced split source and a released one, whose key space the
-// split targets have taken over. Derive then validates that what remains covers
-// the key space exactly — a gap or an overlap is an error, never a silent
-// mis-route.
+// Shards must already be filtered to the ones that currently accept writes, which
+// is what ShardsFromMeta does: a fenced split source and a released one own no
+// keys, and their key space belongs to the targets. Derive then validates that
+// what remains covers the key space exactly — a gap or an overlap is an error,
+// never a silent mis-route.
 //
-// A collection with no residues in its meta has never been split; Derive returns
-// a table that routes by the legacy modulo over channels.
-func Derive(modulus uint64, channels []string, shards []Shard) (*Table, error) {
+// The modulus is what says whether the collection has been split, not the
+// presence of residues. Zero means never split, and the table is built from the
+// channel order; non-zero means the meta must say which residues each shard owns,
+// and a topology that does not is rejected rather than quietly downgraded to the
+// legacy modulo — which, over a vchannel list that a split has already grown,
+// would re-place every row in the collection.
+func Derive(modulus uint64, channels []string, shards []Shard, opts ...Option) (*Table, error) {
+	if len(channels) == 0 {
+		// The legacy rule divides by the channel count and the explicit rule
+		// indexes into it; neither has an answer here, and a table that routes
+		// nowhere is not a table.
+		return nil, merr.WrapErrServiceInternal("routing table needs at least one vchannel")
+	}
 	t := &Table{channels: append([]string(nil), channels...)}
-	if !hasRouting(shards) {
+	for _, opt := range opts {
+		if err := opt(t); err != nil {
+			return nil, err
+		}
+	}
+
+	explicit := false
+	for _, s := range shards {
+		if len(s.Buckets) > 0 {
+			explicit = true
+			break
+		}
+	}
+
+	switch {
+	case modulus == 0 && explicit:
+		return nil, merr.WrapErrServiceInternal("shards carry residues but the collection reports no routing modulus")
+	case modulus != 0 && !explicit:
+		return nil, merr.WrapErrServiceInternalMsg(
+			"collection reports routing modulus %d but no shard carries a residue", modulus)
+	case modulus == 0:
+		residues, err := deriveCompat(channels)
+		if err != nil {
+			return nil, err
+		}
+		t.residues = residues
 		return t, nil
 	}
 
 	hashShards := make([]HashShard, 0, len(shards))
 	for _, s := range shards {
-		hashShards = append(hashShards, HashShard{Vchannel: s.Vchannel, Buckets: s.Buckets})
+		hashShards = append(hashShards, HashShard(s))
 	}
-	ht, err := DeriveHash(modulus, hashShards)
+	residues, err := DeriveHash(modulus, hashShards)
 	if err != nil {
 		return nil, err
 	}
-	t.hashTable = ht
+	t.residues, t.explicit = residues, true
 	return t, nil
 }
 
-// hasRouting reports whether any shard carries residues, i.e. whether the
-// collection has been split at least once.
-func hasRouting(shards []Shard) bool {
-	for _, s := range shards {
-		if len(s.Buckets) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-// Route returns the vchannel owning the given routing-key hash, or an error when
-// the hash resolves to no shard — which means the routing meta is inconsistent,
-// since a valid table tiles the key space.
-func (t *Table) Route(hash uint64) (string, error) {
-	if t == nil {
-		// A nil table is how a caller carries "the routing meta was malformed and
-		// I refused to derive it". Answering with an error rather than panicking
-		// keeps that a rejected write instead of a crashed proxy.
-		return "", errors.New("no routing table")
-	}
-	if t.hashTable != nil {
-		vchannel, ok := t.hashTable.LookupOK(hash)
-		if !ok {
-			return "", errors.Newf("hash %d resolved to no shard", hash)
-		}
-		return vchannel, nil
-	}
-	if len(t.channels) == 0 {
-		return "", errors.New("routing table has no channels")
-	}
-	return t.channels[hash%uint64(len(t.channels))], nil
-}
-
 // IsExplicit reports whether the table routes by the per-shard residues in the
-// meta rather than by the legacy modulo, i.e. whether the collection has been
-// split at least once. Nil-safe, so a caller holding a collection with no
-// routing meta need not branch.
-func (t *Table) IsExplicit() bool { return t != nil && t.hashTable != nil }
+// meta rather than by the channel order, i.e. whether the collection has been
+// split at least once. Nil-safe.
+func (t *Table) IsExplicit() bool { return t != nil && t.explicit }
 
-// NumShards returns the number of shards the collection routes over.
-func (t *Table) NumShards() int { return len(t.channels) }
+// NumShards returns the number of shards the collection routes over. Nil-safe,
+// like the other predicates on this type.
+func (t *Table) NumShards() int {
+	if t == nil {
+		return 0
+	}
+	return len(t.channels)
+}
+
+// RoutesByPrimaryKey reports whether hashing a row's primary key yields its
+// routing value — true when shard_by was not declared, and when it names the
+// primary key itself. Nil-safe.
+func (t *Table) RoutesByPrimaryKey() bool {
+	if t == nil {
+		return true
+	}
+	return t.routingField == "" || t.routingField == t.pkField
+}
 
 // ShardsFromMeta converts the per-shard routing meta of a DescribeCollection
 // response into Derive's input, keeping only the shards that currently accept
@@ -132,99 +225,156 @@ func (t *Table) NumShards() int { return len(t.channels) }
 // writable) participate; the fenced split source (ShardSplitting) and the
 // released one (ShardDropped) are excluded, because their key space now belongs
 // to the targets. Excluding them is what keeps the remainder an exact cover.
+//
+// A state this build does not know may own keys, so it fails rather than being
+// dropped: dropping it silently re-routes whatever it owned, and mapping it onto
+// the zero value would make a shard that takes no writes look like one that does.
 func ShardsFromMeta(vchannels []string, infos []*schemapb.CollectionShardInfo) ([]Shard, error) {
 	if len(infos) != len(vchannels) {
-		return nil, errors.Newf("routing shard info count %d mismatches vchannel count %d",
+		return nil, merr.WrapErrServiceInternalMsg("routing shard info count %d mismatches vchannel count %d",
 			len(infos), len(vchannels))
 	}
 	shards := make([]Shard, 0, len(vchannels))
 	for i, vchannel := range vchannels {
-		switch infos[i].GetState() {
+		switch state := infos[i].GetState(); state {
 		case schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardCreating:
+			shards = append(shards, Shard{
+				Vchannel: vchannel,
+				Buckets:  infos[i].GetHashRouting().GetBuckets(),
+			})
+		case schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardDropped:
+			// Owns no keys; the targets carved from it own them now.
 		default:
-			continue
+			return nil, merr.WrapErrServiceInternalMsg("shard %q reports shard state %d, which this build does not know",
+				vchannel, int32(state))
 		}
-		shards = append(shards, Shard{
-			Vchannel: vchannel,
-			Buckets:  infos[i].GetHashRouting().GetBuckets(),
-		})
 	}
 	return shards, nil
 }
 
-// rawHashes returns each primary key's raw hash — the same value the split's
-// rewrite partitioner hashes with, so a key the write path sends to a shard is
-// the key the rewrite would put there. Nil for an unsupported id type, matching
-// typeutil.HashPK2Channels.
+// HashPrimaryKeys returns each primary key's routing value — the same value the
+// split's rewrite partitioner computes, so a row the write path sends to a shard
+// is the row the rewrite would put there. Nil for an unsupported id type,
+// matching typeutil.HashPK2Channels.
 //
 // The width matters: the hash is a uint32 widened to uint64, NOT reduced modulo
-// anything. Reducing first (as the legacy path does, by the shard count) would
+// anything. Reducing first (as the legacy path did, by the shard count) would
 // destroy the bits the residues are cut on.
-func rawHashes(pks *schemapb.IDs) []uint64 {
+func HashPrimaryKeys(pks *schemapb.IDs) ([]uint64, error) {
 	var out []uint64
 	switch pks.GetIdField().(type) {
 	case *schemapb.IDs_IntId:
-		for _, pk := range pks.GetIntId().GetData() {
+		data := pks.GetIntId().GetData()
+		out = make([]uint64, 0, len(data))
+		for _, pk := range data {
 			h, err := typeutil.Hash32Int64(pk)
 			if err != nil {
-				return nil
+				// Never swallowed and never turned into "no rows": a batch that
+				// silently placed nothing would be reported to the client as a
+				// successful write of rows no shard ever received.
+				return nil, merr.WrapErrServiceInternalErr(err, "cannot hash primary key %d", pk)
 			}
 			out = append(out, uint64(h))
 		}
 	case *schemapb.IDs_StrId:
-		for _, pk := range pks.GetStrId().GetData() {
+		data := pks.GetStrId().GetData()
+		out = make([]uint64, 0, len(data))
+		for _, pk := range data {
 			out = append(out, uint64(typeutil.HashString2Uint32(pk)))
 		}
 	}
-	return out
+	return out, nil
+}
+
+// HashNamespace returns a namespace id's routing value, so a namespace-sharded
+// collection reaches RouteInsertHashes through the same hash the rewrite uses.
+func HashNamespace(namespace string) uint64 {
+	return uint64(typeutil.HashString2Uint32(namespace))
+}
+
+// Route returns the vchannel owning the given routing value, or an error when
+// the value resolves to no shard — which means the routing meta is inconsistent,
+// since a valid table tiles the key space.
+func (t *Table) Route(value uint64) (string, error) {
+	if t == nil {
+		return "", errNoTable()
+	}
+	vchannel, ok := t.residues.LookupOK(value)
+	if !ok {
+		return "", merr.WrapErrServiceInternalMsg("routing value %d resolved to no shard", value)
+	}
+	return vchannel, nil
+}
+
+// errNoTable is what every routing entry point answers on a nil table. A nil
+// table is how a caller carries "the routing meta was malformed and I refused to
+// derive it", so it must reject the write rather than fall back to a placement
+// rule nobody chose — and rather than panic in the proxy.
+func errNoTable() error {
+	return merr.WrapErrServiceInternal("no routing table")
 }
 
 // RouteInsert maps a batch of primary keys to the vchannels owning them,
 // returning vchannel -> row offsets and the per-row shard index that
 // InsertMsg.HashValues carries.
 //
-// A collection that carries no routing meta routes by the legacy
-// hash(pk) % len(channels), bit for bit. One that does — a collection that has
-// been split — routes by its residues, and MUST: after a doubling the surviving
-// shard owns {1} at modulus 2 while the two new ones own {0} and {2} at modulus
-// 4, and no modulo over a channel list reproduces that. Routing such a
-// collection by position sends keys to a shard that does not own them, and sends
-// some of them to a fenced split source, which rejects the write.
-//
-// An unowned hash is an error rather than a guess: a table derived by Derive
-// tiles the key space, so a miss means the routing meta is inconsistent and
-// placing the row anywhere would corrupt the collection quietly.
-//
-// channels is the channel set the caller resolved for this write; it is what the
-// legacy modulo is taken over, so a caller that narrowed it keeps that behaviour
-// exactly.
+// Valid only where the primary key is what the collection routes by. A
+// namespace-sharded collection routes by its namespace id, and hashing primary
+// keys for it would send every row to a shard that does not own it, so this
+// refuses instead; hash the routing value and call RouteInsertHashes.
 func (t *Table) RouteInsert(pks *schemapb.IDs, channels []string) (map[string][]int, []uint32, error) {
-	if !t.IsExplicit() {
-		offsets, hashValues := DeriveCompat(channels).RouteInsert(pks)
-		return offsets, hashValues, nil
+	if t == nil {
+		return nil, nil, errNoTable()
+	}
+	if !t.RoutesByPrimaryKey() {
+		return nil, nil, errNotPrimaryKeyRouted(t)
+	}
+	hashes, err := HashPrimaryKeys(pks)
+	if err != nil {
+		return nil, nil, err
+	}
+	return t.RouteInsertHashes(hashes, channels)
+}
+
+// RouteInsertHashes maps a batch of routing values to the vchannels owning them,
+// returning vchannel -> row offsets and the per-row shard index.
+//
+// The shard index is the position, within channels, of the vchannel that owns
+// the row — the same meaning it has everywhere else in the write path, where
+// InsertMsg.HashValues is read as an index into the channel list. It is derived
+// from the placement rather than recomputed, so the two can never disagree.
+//
+// An unowned value is an error rather than a guess: a table derived by Derive
+// tiles the key space, so a miss means the routing meta is inconsistent and
+// placing the row anywhere would corrupt the collection quietly. So is a row
+// whose owner is not in channels — the caller's view of the topology and the
+// table's disagree, which is a real state mid-split, and writing to a vchannel
+// the caller never resolved is not a recovery from it.
+func (t *Table) RouteInsertHashes(hashes []uint64, channels []string) (map[string][]int, []uint32, error) {
+	if t == nil {
+		return nil, nil, errNoTable()
+	}
+	index, err := channelIndex(channels)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	hashes := rawHashes(pks)
-	if len(hashes) == 0 {
-		return nil, nil, nil
+	offsets := make(map[string][]int, len(channels))
+	var hashValues []uint32
+	if len(hashes) > 0 {
+		hashValues = make([]uint32, 0, len(hashes))
 	}
-	// The shard index is still reported modulo the channel count so the field
-	// keeps its shape for consumers that only use it as an opaque tag; the
-	// placement below does not depend on it.
-	numChannels := len(channels)
-	offsets := make(map[string][]int, numChannels)
-	hashValues := make([]uint32, 0, len(hashes))
+	avgCapacity := (len(hashes) / len(channels)) + 1
 	for i, hash := range hashes {
-		vchannel, ok := t.hashTable.LookupOK(hash)
-		if !ok {
-			return nil, nil, errors.Newf("hash %d resolved to no shard", hash)
+		vchannel, position, err := t.owner(hash, index)
+		if err != nil {
+			return nil, nil, err
+		}
+		if _, ok := offsets[vchannel]; !ok {
+			offsets[vchannel] = make([]int, 0, avgCapacity)
 		}
 		offsets[vchannel] = append(offsets[vchannel], i)
-		if numChannels > 0 {
-			hashValues = append(hashValues, uint32(hash%uint64(numChannels)))
-		} else {
-			hashValues = append(hashValues, 0)
-		}
+		hashValues = append(hashValues, position)
 	}
 	return offsets, hashValues, nil
 }
@@ -232,33 +382,80 @@ func (t *Table) RouteInsert(pks *schemapb.IDs, channels []string) (map[string][]
 // RouteDelete maps a batch of primary keys to the index, within channels, of the
 // vchannel owning each one — the form the delete repacker consumes.
 //
-// Same rule as RouteInsert: routing meta decides, and a collection without it
-// keeps the legacy modulo bit for bit. A delete that went to the wrong shard
-// would not delete anything, and one that went to a fenced split source would be
-// rejected outright.
+// Same rule and same restriction as RouteInsert: a delete that went to the wrong
+// shard would not delete anything, and one that went to a fenced split source
+// would be rejected outright.
 func (t *Table) RouteDelete(pks *schemapb.IDs, channels []string) ([]uint32, error) {
-	if !t.IsExplicit() {
-		return DeriveCompat(channels).HashPKs(pks), nil
+	if t == nil {
+		return nil, errNoTable()
 	}
-	index := make(map[string]uint32, len(channels))
-	for i, channel := range channels {
-		index[channel] = uint32(i)
+	if !t.RoutesByPrimaryKey() {
+		return nil, errNotPrimaryKeyRouted(t)
 	}
-	hashes := rawHashes(pks)
-	out := make([]uint32, 0, len(hashes))
+	hashes, err := HashPrimaryKeys(pks)
+	if err != nil {
+		return nil, err
+	}
+	return t.RouteDeleteHashes(hashes, channels)
+}
+
+// RouteDeleteHashes maps a batch of routing values to the index, within channels,
+// of the vchannel owning each one.
+func (t *Table) RouteDeleteHashes(hashes []uint64, channels []string) ([]uint32, error) {
+	if t == nil {
+		return nil, errNoTable()
+	}
+	index, err := channelIndex(channels)
+	if err != nil {
+		return nil, err
+	}
+	var out []uint32
+	if len(hashes) > 0 {
+		out = make([]uint32, 0, len(hashes))
+	}
 	for _, hash := range hashes {
-		vchannel, ok := t.hashTable.LookupOK(hash)
-		if !ok {
-			return nil, errors.Newf("hash %d resolved to no shard", hash)
-		}
-		position, ok := index[vchannel]
-		if !ok {
-			// The routing table names a shard the caller did not resolve — the two
-			// views of the topology disagree, and guessing an index would send the
-			// tombstone to an unrelated shard.
-			return nil, errors.Newf("shard %q owns the key but is not in the request's channel set", vchannel)
+		_, position, err := t.owner(hash, index)
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, position)
 	}
 	return out, nil
+}
+
+// owner resolves one routing value to its vchannel and that vchannel's position
+// in the caller's channel set.
+func (t *Table) owner(hash uint64, index map[string]uint32) (string, uint32, error) {
+	vchannel, ok := t.residues.LookupOK(hash)
+	if !ok {
+		return "", 0, merr.WrapErrServiceInternalMsg("routing value %d resolved to no shard", hash)
+	}
+	position, ok := index[vchannel]
+	if !ok {
+		return "", 0, merr.WrapErrServiceInternalMsg(
+			"shard %q owns the key but is not in the request's channel set", vchannel)
+	}
+	return vchannel, position, nil
+}
+
+// channelIndex maps each channel to its position, rejecting an empty set: the
+// shard index the write path carries is a position in it, and there is none.
+func channelIndex(channels []string) (map[string]uint32, error) {
+	if len(channels) == 0 {
+		return nil, merr.WrapErrServiceInternal("routing request carries no channels")
+	}
+	index := make(map[string]uint32, len(channels))
+	for i, channel := range channels {
+		if _, ok := index[channel]; ok {
+			return nil, merr.WrapErrServiceInternalMsg("channel %q is listed twice in the request's channel set", channel)
+		}
+		index[channel] = uint32(i)
+	}
+	return index, nil
+}
+
+func errNotPrimaryKeyRouted(t *Table) error {
+	return merr.WrapErrServiceInternalMsg(
+		"collection routes by %q, not by its primary key %q; hash that value and use RouteInsertHashes or RouteDeleteHashes",
+		t.routingField, t.pkField)
 }

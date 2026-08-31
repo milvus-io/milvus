@@ -25,7 +25,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
-func TestDeriveWithoutRoutingMetaKeepsModuloBehaviour(t *testing.T) {
+func hashRouting(buckets ...uint64) *schemapb.CollectionShardInfo_HashRouting {
+	return &schemapb.CollectionShardInfo_HashRouting{
+		HashRouting: &schemapb.HashRouting{Buckets: buckets},
+	}
+}
+
+func TestDeriveWithoutRoutingMetaKeepsModuloBehavior(t *testing.T) {
 	// A collection that has never been split carries no residues in its meta;
 	// it must route exactly like hash(pk) % shardNum.
 	channels := []string{"c0", "c1", "c2"}
@@ -72,13 +78,46 @@ func TestDeriveRejectsMalformedMeta(t *testing.T) {
 	// Residues present but no modulus to read them against.
 	_, err = Derive(0, []string{"c0"}, []Shard{{Vchannel: "c0", Buckets: []uint64{0}}})
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no routing modulus")
 }
 
-func TestRouteErrorsWithoutChannels(t *testing.T) {
-	tbl, err := Derive(0, nil, nil)
-	require.NoError(t, err)
-	_, err = tbl.Route(1)
+// The modulus is what says a collection has been split, so a modulus with no
+// residues behind it is malformed meta and must be refused.
+//
+// Falling back to the legacy modulo here is the worst available answer: by the
+// time a collection has a modulus its vchannel list has grown by the split's
+// targets, so hash % len(vchannels) re-places every row in the collection —
+// some onto a fenced source that rejects them, the rest onto targets that never
+// received their data. This is also the check the split's own commit gate leans
+// on, and it used to pass the largest possible gap.
+func TestDeriveRejectsAModulusNoShardBacks(t *testing.T) {
+	_, err := Derive(4, []string{"a", "b", "c"}, []Shard{
+		{Vchannel: "a"}, {Vchannel: "b"}, {Vchannel: "c"},
+	})
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "routing modulus 4")
+	assert.Contains(t, err.Error(), "no shard carries a residue")
+
+	// And with the shards filtered away entirely, which is the same shape.
+	_, err = Derive(4, []string{"a"}, nil)
+	require.Error(t, err)
+}
+
+// Partial residues are already rejected by the tiling check, but the message
+// should name the shard that is missing one rather than blame the modulus.
+func TestDeriveRejectsResiduesOnOnlySomeShards(t *testing.T) {
+	_, err := Derive(2, []string{"a", "b"}, []Shard{
+		{Vchannel: "a", Buckets: []uint64{0, 1}},
+		{Vchannel: "b"},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `shard "b" owns no residue`)
+}
+
+func TestDeriveRejectsNoChannels(t *testing.T) {
+	_, err := Derive(0, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least one vchannel")
 }
 
 func TestRouteOnANilTableErrors(t *testing.T) {
@@ -86,15 +125,19 @@ func TestRouteOnANilTableErrors(t *testing.T) {
 	_, err := tbl.Route(1)
 	require.Error(t, err)
 	assert.False(t, tbl.IsExplicit())
+	// The predicates stay nil-safe rather than panicking half way through a
+	// caller that is already handling a derivation failure.
+	assert.Equal(t, 0, tbl.NumShards())
+	assert.True(t, tbl.RoutesByPrimaryKey())
 }
 
 // A partial table can be reached only through a plan that does not tile the key
 // space, which Derive rejects. Route still has to answer rather than guess, so
 // the unowned residue surfaces as an error.
 func TestRouteErrorsOnAnUnownedResidue(t *testing.T) {
-	ht, err := DeriveHashPartial(4, []HashShard{{Vchannel: "left", Buckets: []uint64{0}}})
+	rt, err := DeriveHashPartial(4, []HashShard{{Vchannel: "left", Buckets: []uint64{0}}})
 	require.NoError(t, err)
-	tbl := &Table{hashTable: ht, channels: []string{"left"}}
+	tbl := &Table{residues: rt, channels: []string{"left"}, explicit: true}
 
 	ch, err := tbl.Route(0)
 	require.NoError(t, err)
@@ -109,15 +152,9 @@ func TestShardsFromMetaFiltersNonWritableShards(t *testing.T) {
 	// leaving the targets as an exact cover.
 	vchannels := []string{"src", "tgtA", "tgtB", "old"}
 	infos := []*schemapb.CollectionShardInfo{
-		{State: schemapb.ShardState_ShardSplitting, Routing: &schemapb.CollectionShardInfo_HashRouting{
-			HashRouting: &schemapb.HashRouting{Buckets: []uint64{0, 1}},
-		}},
-		{State: schemapb.ShardState_ShardCreating, Routing: &schemapb.CollectionShardInfo_HashRouting{
-			HashRouting: &schemapb.HashRouting{Buckets: []uint64{0}},
-		}},
-		{State: schemapb.ShardState_ShardNormal, Routing: &schemapb.CollectionShardInfo_HashRouting{
-			HashRouting: &schemapb.HashRouting{Buckets: []uint64{1}},
-		}},
+		{State: schemapb.ShardState_ShardSplitting, Routing: hashRouting(0, 1)},
+		{State: schemapb.ShardState_ShardCreating, Routing: hashRouting(0)},
+		{State: schemapb.ShardState_ShardNormal, Routing: hashRouting(1)},
 		{State: schemapb.ShardState_ShardDropped},
 	}
 	shards, err := ShardsFromMeta(vchannels, infos)
@@ -161,4 +198,74 @@ func TestShardsFromMetaRejectsLengthMismatch(t *testing.T) {
 	_, err := ShardsFromMeta([]string{"a", "b"}, []*schemapb.CollectionShardInfo{{}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mismatches")
+}
+
+// A shard state a newer server knows and this build does not may own keys.
+// Dropping the entry would re-route whatever it owned without saying so, so the
+// whole table is refused instead.
+func TestShardsFromMetaRejectsAnUnknownShardState(t *testing.T) {
+	infos := []*schemapb.CollectionShardInfo{
+		{State: schemapb.ShardState(999), Routing: hashRouting(0)},
+		{State: schemapb.ShardState_ShardNormal, Routing: hashRouting(1)},
+	}
+	_, err := ShardsFromMeta([]string{"a", "b"}, infos)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `shard "a" reports shard state 999`)
+}
+
+func TestParseShardBy(t *testing.T) {
+	cases := []struct {
+		expr  string
+		field string
+		ok    bool
+	}{
+		{"", "", true}, // never declared: the primary key applies
+		{"hash(pk)", "pk", true},
+		{"hash($namespace_id)", NamespaceIDField, true},
+		{"hash(a)b)", "", false},     // bytes after the closing parenthesis
+		{"hash(pk", "", false},       // unterminated
+		{"HASH(pk)", "", false},      // no case folding
+		{"hash (pk)", "", false},     // no space
+		{"hash('pk')", "'pk'", true}, // taken whole, not unquoted
+		{"hash()", "", false},        // names no field
+		{"pk", "", false},
+		{"murmur(pk)", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.expr, func(t *testing.T) {
+			field, err := ParseShardBy(tc.expr)
+			if !tc.ok {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.field, field)
+		})
+	}
+}
+
+func TestWithShardByRejectsAMalformedExpression(t *testing.T) {
+	_, err := Derive(0, []string{"a"}, nil, WithShardBy("hash(pk", "pk"))
+	require.Error(t, err)
+}
+
+func TestRoutesByPrimaryKey(t *testing.T) {
+	cases := []struct {
+		name    string
+		shardBy string
+		pkField string
+		want    bool
+	}{
+		{"undeclared", "", "pk", true},
+		{"names the primary key", "hash(pk)", "pk", true},
+		{"names the namespace", "hash($namespace_id)", "pk", false},
+		{"names another field", "hash(tenant)", "pk", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tbl, err := Derive(0, []string{"a", "b"}, nil, WithShardBy(tc.shardBy, tc.pkField))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, tbl.RoutesByPrimaryKey())
+		})
+	}
 }
