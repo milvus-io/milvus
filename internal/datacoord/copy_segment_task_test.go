@@ -2357,6 +2357,10 @@ func TestAssembleCopySegmentRequest_AllocatesTextAndJsonBuildIDs(t *testing.T) {
 }
 
 func TestAssembleCopySegmentRequest_SkipIndex(t *testing.T) {
+	defer mockey.Mock((*meta).readManifestIndexes).To(func(*meta, context.Context, string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+		t.Fatal("skip-index restore must not fetch manifest indexes")
+		return nil, nil
+	}).Build().UnPatch()
 	snapshotData := &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{
 			Id:           1,
@@ -2364,8 +2368,11 @@ func TestAssembleCopySegmentRequest_SkipIndex(t *testing.T) {
 			Name:         "test_snapshot",
 		},
 		Segments: []*datapb.SegmentDescription{{
-			SegmentId:   1,
-			PartitionId: 10,
+			SegmentId:        1,
+			PartitionId:      10,
+			StorageVersion:   storage.StorageV3,
+			ManifestPath:     "files/insert_log/100/10/1/manifest/1",
+			ManifestHasIndex: proto.Bool(true),
 			IndexFiles: []*indexpb.IndexFilePathInfo{
 				{BuildID: 3001, FieldID: 100, IndexID: 1001},
 			},
@@ -2414,6 +2421,7 @@ func TestAssembleCopySegmentRequest_SkipIndex(t *testing.T) {
 	assert.Empty(t, req.GetSources()[0].GetTextIndexFiles())
 	assert.Empty(t, req.GetSources()[0].GetJsonKeyIndexFiles())
 	assert.Empty(t, req.GetTargets()[0].GetNewBuildIds())
+	assert.True(t, req.GetSources()[0].GetManifestHasIndex(), "the worker must still retract inherited entries")
 }
 
 func TestAssembleCopySegmentRequest_RedispatchAllocatesFreshBuildIDs(t *testing.T) {

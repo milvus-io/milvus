@@ -206,7 +206,9 @@ func (c *snapshotFileRefCollector) addStorageV3Segment(ctx context.Context, segm
 		// list concrete objects separately so export copies physical files. The
 		// complete StorageV3 root is copied even for skip-index snapshots because
 		// the source manifest is not rewritten and data shares this directory with
-		// reusable index artifacts. Index metadata is omitted separately.
+		// reusable stats artifacts. Restore retracts inherited vector/scalar
+		// index entries in the target manifest; text/JSON stats are gated by
+		// restored segment metadata.
 		walkPrefix := normalizedBasePath
 		if walkPrefix[len(walkPrefix)-1] != '/' {
 			walkPrefix += "/"

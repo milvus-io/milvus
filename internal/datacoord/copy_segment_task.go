@@ -1243,6 +1243,36 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 	return nil
 }
 
+func updateCopiedSegmentIndexMetadata(result *datapb.CopySegmentResult) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(result.GetSegmentId())
+		if segment == nil {
+			return false
+		}
+
+		updated := false
+		if len(result.GetTextIndexInfos()) > 0 {
+			if segment.TextStatsLogs == nil {
+				segment.TextStatsLogs = make(map[int64]*datapb.TextIndexStats)
+			}
+			for fieldID, stats := range result.GetTextIndexInfos() {
+				segment.TextStatsLogs[fieldID] = stats
+			}
+			updated = true
+		}
+		if len(result.GetJsonKeyIndexInfos()) > 0 {
+			if segment.JsonKeyStats == nil {
+				segment.JsonKeyStats = make(map[int64]*datapb.JsonKeyStats)
+			}
+			for fieldID, stats := range result.GetJsonKeyIndexInfos() {
+				segment.JsonKeyStats[fieldID] = stats
+			}
+			updated = true
+		}
+		return updated
+	}
+}
+
 func failCopySegmentSync(ctx context.Context, task CopySegmentTask, copyMeta CopySegmentMeta, err error) error {
 	// On error, mark task and job as failed
 	updateErr := copyMeta.UpdateTask(ctx, task.GetTaskId(),
@@ -1252,6 +1282,7 @@ func failCopySegmentSync(ctx context.Context, task CopySegmentTask, copyMeta Cop
 		mlog.Warn(ctx, "failed to update task state to Failed",
 			mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
 	}
+
 	updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 		UpdateCopyJobReason(err.Error()))
@@ -1259,6 +1290,7 @@ func failCopySegmentSync(ctx context.Context, task CopySegmentTask, copyMeta Cop
 		mlog.Warn(ctx, "failed to update job state to Failed",
 			mlog.FieldJobID(task.GetJobId()), mlog.Err(updateErr))
 	}
+
 	mlog.Warn(ctx, "update copy segment binlogs failed",
 		WrapCopySegmentTaskLog(task, mlog.String("err", err.Error()))...)
 	return err
@@ -1462,6 +1494,7 @@ func taskIndexWriteToManifest(task CopySegmentTask) (bool, bool) {
 	}
 	return writeSegmentIndexToManifest(), false
 }
+
 func cloneOptionalBool(value *bool) *bool {
 	if value == nil {
 		return nil

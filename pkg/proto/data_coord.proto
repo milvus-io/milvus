@@ -479,6 +479,7 @@ message SegmentInfo {
   // create_ts records the planning/create timestamp for replacement segment metadata.
   // Legacy segments keep the zero value, which means unknown.
   uint64 create_ts = 39;
+
   // Conservative presence marker for the current manifest's index section.
   // Additions set it atomically with the pointer; removals clear it only after
   // verifying the final revision is empty. Recovery normalizes old sticky true
@@ -1245,6 +1246,7 @@ message CopySegmentSource {
   // copied manifest has no index entries, while absence means an older
   // snapshot whose manifest must still be inspected conservatively.
   optional bool manifest_has_index = 15;
+
   // Snapshot-declared row count, used when StorageV3 omits legacy PB binlogs.
   int64 num_of_rows = 16;
 }
@@ -1465,7 +1467,7 @@ message CopySegmentJob {
   string external_spec = 21;
   string snapshot_fingerprint = 22;
   // Whether index definitions and separately tracked reusable index artifacts
-  // must not be restored. StorageV3 manifest roots remain intact.
+  // must not be restored. Shared StorageV3 data/stats objects are still copied.
   bool skip_index = 23;
 }
 
@@ -1962,7 +1964,7 @@ message RestoreSnapshotRequest {
   string snapshot_s3_location = 7; // metadata file path for external snapshot restore
   string external_spec = 8; // optional external storage spec for cross-bucket restore source
   // If true, restore data without creating indexes or copying separately
-  // tracked index artifacts. StorageV3 manifest roots remain intact.
+  // tracked index artifacts. Shared StorageV3 data/stats objects are still copied.
   bool skip_index = 9;
 }
 
