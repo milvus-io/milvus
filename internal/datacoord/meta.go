@@ -108,11 +108,7 @@ type meta struct {
 	compactionTargetMeta          *compactionTargetMeta
 	statsTaskMeta                 *statsTaskMeta
 	externalCollectionRefreshMeta *externalCollectionRefreshMeta
-
-	// File Resource Meta
-	resourceIDMap   map[int64]*internalpb.FileResourceInfo // id -> info
-	resourceVersion uint64
-	resourceLock    lock.RWMutex
+	broker                        broker.Broker
 	// Snapshot Meta
 	snapshotMeta *snapshotMeta
 }
@@ -276,15 +272,13 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// Construct meta struct first so reloadFromKV can run in parallel with sub-meta loading.
 	// reloadFromKV uses m.catalog/m.segments/m.channelCPs which are independent of sub-metas.
 	mt := &meta{
-		ctx:             ctx,
-		catalog:         catalog,
-		collections:     typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:        NewSegmentsInfo(),
-		channelCPs:      newChannelCps(),
-		chunkManager:    chunkManager,
-		resourceIDMap:   make(map[int64]*internalpb.FileResourceInfo),
-		resourceVersion: 0,
-		resourceLock:    lock.RWMutex{},
+		ctx:          ctx,
+		catalog:      catalog,
+		collections:  typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:     NewSegmentsInfo(),
+		channelCPs:   newChannelCps(),
+		chunkManager: chunkManager,
+		broker:       broker,
 	}
 
 	g, _ := errgroup.WithContext(ctx)
@@ -3773,37 +3767,11 @@ func contains(arr []int64, target int64) bool {
 	return false
 }
 
-func (m *meta) UpdateFileResources(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
-	m.resourceLock.Lock()
-	defer m.resourceLock.Unlock()
-	m.resourceIDMap = make(map[int64]*internalpb.FileResourceInfo)
-	for _, resource := range resources {
-		m.resourceIDMap[resource.Id] = resource
-	}
-	m.resourceVersion = version
-
-	return nil
-}
-
-func (m *meta) ListFileResources(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64) {
-	m.resourceLock.RLock()
-	defer m.resourceLock.RUnlock()
-	return lo.Values(m.resourceIDMap), m.resourceVersion
-}
-
 func (m *meta) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
-	m.resourceLock.RLock()
-	defer m.resourceLock.RUnlock()
-
-	resources := make([]*internalpb.FileResourceInfo, 0)
-	for _, id := range resourceIDs {
-		if resource, ok := m.resourceIDMap[id]; ok {
-			resources = append(resources, resource)
-		} else {
-			return nil, merr.WrapErrServiceInternalMsg("file resource %d not found", id)
-		}
+	if m.broker == nil {
+		return nil, merr.WrapErrServiceInternalMsg("file resource broker is not initialized")
 	}
-	return resources, nil
+	return m.broker.GetFileResources(ctx, resourceIDs...)
 }
 
 // TruncateChannelByTime drops segments of a channel that were updated before the flush timestamp

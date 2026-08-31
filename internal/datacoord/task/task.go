@@ -19,8 +19,6 @@ package task
 import (
 	"time"
 
-	"github.com/blang/semver/v4"
-
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -38,12 +36,6 @@ type Task interface {
 	CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 	QueryTaskOnWorker(cluster session.Cluster)
 	DropTaskOnWorker(cluster session.Cluster)
-}
-
-// WorkerVersionConstraint is implemented by tasks that require worker-side
-// behavior introduced in a specific Milvus version.
-type WorkerVersionConstraint interface {
-	MinimumWorkerVersion() semver.Version
 }
 
 func WrapTaskLog(task Task, fields ...mlog.Field) []mlog.Field {

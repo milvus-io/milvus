@@ -1468,6 +1468,9 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		preferredNodes[k] = v
 	}
 	qt := &queryTask{
+		baseTask: baseTask{
+			metaCache: op.node.(*Proxy).getMetaCache(),
+		},
 		ctx:       op.traceCtx,
 		Condition: NewTaskCondition(op.traceCtx),
 		RetrieveRequest: &internalpb.RetrieveRequest{

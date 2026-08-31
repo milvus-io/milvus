@@ -18,20 +18,18 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <string>
 #include <vector>
-
-#include "common/BitsetView.h"
-#include "common/Types.h"
 
 namespace milvus {
 
-struct OffsetMappingBuildOptions {
-    // i2o: index/internal id -> original/logical offset.
-    bool enable_mmap_i2o_map{false};
-    // o2i: original/logical offset -> index/internal id.
-    bool enable_mmap_o2i_map{false};
-    std::string mmap_dir_path;
+struct OffsetMappingIdView {
+    const int32_t* data = nullptr;
+    int64_t count = 0;
+
+    bool
+    empty() const {
+        return data == nullptr || count == 0;
+    }
 };
 
 // Bidirectional offset mapping for nullable vector storage.
@@ -54,12 +52,6 @@ struct OffsetMappingBuildOptions {
 // error.
 class OffsetMapping {
  public:
-    enum class BitsetTransformStatus {
-        NoFilter,
-        AllFiltered,
-        Transformed,
-    };
-
     OffsetMapping() = default;
     virtual ~OffsetMapping() = default;
 
@@ -96,23 +88,12 @@ class OffsetMapping {
     virtual bool
     IsEnabled() const = 0;
 
-    // Whether either direction is backed by mmap storage. Non-sealed
-    // implementations use the default false capability.
-    virtual bool
-    IsMmap() const;
-
     // Get total logical count (including nulls).
     virtual int64_t
     GetTotalCount() const = 0;
 
-    virtual BitsetTransformStatus
-    TransformBitset(const BitsetView& bitset, TargetBitmap& result) const = 0;
-
-    virtual void
-    TransformOffsets(std::vector<int64_t>& offsets) const = 0;
-
-    virtual void
-    TransformLogicalOffsets(std::vector<int64_t>& offsets) const = 0;
+    virtual OffsetMappingIdView
+    GetPhysicalToLogicalIds(int64_t physical_offset, int64_t count) const = 0;
 
     virtual void
     FilterValidLogicalOffsets(const int64_t* logical_offsets,
@@ -125,60 +106,6 @@ class OffsetMapping {
     // two answers disagree.
     virtual bool
     IsValid(int64_t logical_offset) const;
-
- protected:
-    // Shared TransformBitset fast paths: an empty / all-set / all-clear input
-    // bitset needs no per-row conversion. Returns true when `status` has been
-    // filled in and the caller should return it as-is.
-    static bool
-    ShouldSkipBitsetTransform(const BitsetView& bitset,
-                              int64_t total_count,
-                              TargetBitmap& result,
-                              BitsetTransformStatus& status);
-};
-
-// Storage used by sealed mappings. Each direction can independently use a
-// heap vector or a file-backed mmap region.
-class OffsetMappingArray {
- public:
-    OffsetMappingArray() = default;
-    ~OffsetMappingArray();
-    OffsetMappingArray(const OffsetMappingArray&) = delete;
-    OffsetMappingArray&
-    operator=(const OffsetMappingArray&) = delete;
-
-    void
-    Resize(size_t size, int32_t value, bool enable_mmap, std::string filepath);
-
-    void
-    Clear();
-
-    size_t
-    size() const {
-        return size_;
-    }
-
-    bool
-    IsMmap() const {
-        return mmap_data_ != nullptr;
-    }
-
-    int32_t&
-    operator[](size_t index) {
-        return IsMmap() ? mmap_data_[index] : vec_[index];
-    }
-
-    const int32_t&
-    operator[](size_t index) const {
-        return IsMmap() ? mmap_data_[index] : vec_[index];
-    }
-
- private:
-    size_t size_{0};
-    std::vector<int32_t> vec_;
-    int32_t* mmap_data_{nullptr};
-    size_t mmap_size_{0};
-    std::string mmap_filepath_;
 };
 
 // The "no mapping" implementation, for fields that are not nullable.
@@ -212,15 +139,9 @@ class NoOpOffsetMapping final : public OffsetMapping {
     int64_t
     GetTotalCount() const override;
 
-    BitsetTransformStatus
-    TransformBitset(const BitsetView& bitset,
-                    TargetBitmap& result) const override;
-
-    void
-    TransformOffsets(std::vector<int64_t>& offsets) const override;
-
-    void
-    TransformLogicalOffsets(std::vector<int64_t>& offsets) const override;
+    OffsetMappingIdView
+    GetPhysicalToLogicalIds(int64_t physical_offset,
+                            int64_t count) const override;
 
     void
     FilterValidLogicalOffsets(

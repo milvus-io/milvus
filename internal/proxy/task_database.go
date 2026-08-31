@@ -152,7 +152,7 @@ func (ddt *dropDatabaseTask) Execute(ctx context.Context) error {
 		// Local best-effort cleanup on the issuing proxy; the authoritative
 		// eviction is the DropDatabase broadcast handled in
 		// InvalidateCollectionMetaCache.
-		globalMetaCache.RemoveDatabase(ctx, ddt.DbName)
+		ddt.getMetaCache().RemoveDatabase(ctx, ddt.DbName)
 	}
 	return err
 }

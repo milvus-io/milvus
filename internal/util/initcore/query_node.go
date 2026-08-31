@@ -92,6 +92,7 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 
 	SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
 	SyncEnableGrowingSourceFlush(ctx, paramtable.Get())
+	SyncTakeForOutputResultCountLimit(paramtable.Get())
 
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
@@ -201,6 +202,12 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		return err
 	}
 
+	// Publish the External Table IOPS policy once for native Segcore readers.
+	err = InitExternalIopsConfig(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
 	err = InitStorageV2FileSystem(paramtable.Get())
 	if err != nil {
 		return err
@@ -263,4 +270,16 @@ func SyncEnableGrowingSourceFlush(ctx context.Context, params *paramtable.Compon
 	if v {
 		mlog.Info(ctx, "enableGrowingSourceFlush=true: growing segments retain raw field chunks for StorageV3 growing-source flush")
 	}
+}
+
+// SyncTakeForOutputResultCountLimit pushes the maximum search topK or retrieve
+// result row count allowed to use take() for output fields into segcore. A
+// value of 0 disables the limit.
+func SyncTakeForOutputResultCountLimit(params *paramtable.ComponentParam) {
+	limit := params.QueryNodeCfg.TakeForOutputResultCountLimit.GetAsInt64()
+	C.SegcoreSetTakeForOutputResultCountLimit(C.int64_t(limit))
+}
+
+func getTakeForOutputResultCountLimit() int64 {
+	return int64(C.SegcoreGetTakeForOutputResultCountLimit())
 }

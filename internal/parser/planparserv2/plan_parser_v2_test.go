@@ -14,11 +14,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	clientroaring "github.com/milvus-io/milvus/client/v3/roaringfilter"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/roaringfilter"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -3051,6 +3051,50 @@ func Test_ArrayLength(t *testing.T) {
 	}
 }
 
+func Test_ArrayLengthRejectsNestedArray(t *testing.T) {
+	schema := newTestSchema(true)
+	nestedType := &schemapb.TypeSchema{
+		Kind: &schemapb.TypeSchema_ArrayElement{
+			ArrayElement: &schemapb.TypeSchema{
+				Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+			},
+		},
+	}
+	nestedFieldType := &schemapb.TypeSchema{
+		Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: nestedType},
+	}
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:     10000,
+		Name:        "NestedArrayField",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Array,
+		TypeSchema:  nestedFieldType,
+	})
+	schema.StructArrayFields[0].Fields = append(
+		[]*schemapb.FieldSchema{{
+			FieldID:     10001,
+			Name:        "struct_array[nested]",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeSchema:  nestedFieldType,
+		}},
+		schema.StructArrayFields[0].Fields...,
+	)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	for _, expr := range []string{
+		`array_length(NestedArrayField) == 1`,
+		`array_length(struct_array[nested]) == 1`,
+	} {
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		require.ErrorContains(t, err, "array_length operation is not supported on nested array field", expr)
+	}
+
+	_, err = CreateSearchPlan(helper, `array_length(struct_array) == 1`, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+	require.NoError(t, err)
+}
+
 // Test randome sample with all other predicate expressions.
 func TestRandomSampleWithFilter(t *testing.T) {
 	schema := newTestSchema(true)
@@ -3149,7 +3193,7 @@ func Test_SegmentScorers(t *testing.T) {
 	})
 
 	t.Run("ok - membership scorer filters", func(t *testing.T) {
-		roaringBlob, err := roaringfilter.Build([]int64{1, 2, 3})
+		roaringBlob, err := clientroaring.Build([]int64{1, 2, 3})
 		require.NoError(t, err)
 		bloomTemplate, _ := bloomBytesTemplate(t, 0.01, 1, 2, 3)
 

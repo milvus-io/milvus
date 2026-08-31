@@ -49,6 +49,7 @@ func (node *Proxy) CreateSnapshot(ctx context.Context, req *milvuspb.CreateSnaps
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 	t := &createSnapshotTask{
+		baseTask:  baseTask{metaCache: node.getMetaCache()},
 		req:       req,
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -90,6 +91,7 @@ func (node *Proxy) DropSnapshot(ctx context.Context, req *milvuspb.DropSnapshotR
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 	t := &dropSnapshotTask{
+		baseTask:  baseTask{metaCache: node.getMetaCache()},
 		req:       req,
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -131,6 +133,7 @@ func (node *Proxy) DescribeSnapshot(ctx context.Context, req *milvuspb.DescribeS
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 	t := &describeSnapshotTask{
+		baseTask:  baseTask{metaCache: node.getMetaCache()},
 		req:       req,
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -175,6 +178,7 @@ func (node *Proxy) ListSnapshots(ctx context.Context, req *milvuspb.ListSnapshot
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 	t := &listSnapshotsTask{
+		baseTask:  baseTask{metaCache: node.getMetaCache()},
 		req:       req,
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -296,7 +300,7 @@ func (node *Proxy) ExportSnapshot(ctx context.Context, req *milvuspb.ExportSnaps
 		return &milvuspb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
 	}
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	collectionID, err := node.getMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		failStatus, failCause := failMetricLabel(err)
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, failStatus, failCause, req.GetDbName(), req.GetCollectionName()).Inc()
@@ -450,6 +454,7 @@ func (node *Proxy) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSna
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 	t := &restoreSnapshotTask{
+		baseTask:  baseTask{metaCache: node.getMetaCache()},
 		req:       req,
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -491,6 +496,7 @@ func (node *Proxy) GetRestoreSnapshotState(ctx context.Context, req *milvuspb.Ge
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, metrics.CauseNA, "", "").Inc()
 	t := &getRestoreSnapshotStateTask{
+		baseTask:  baseTask{metaCache: node.getMetaCache()},
 		req:       req,
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -536,6 +542,7 @@ func (node *Proxy) ListRestoreSnapshotJobs(ctx context.Context, req *milvuspb.Li
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 	t := &listRestoreSnapshotJobsTask{
+		baseTask:  baseTask{metaCache: node.getMetaCache()},
 		req:       req,
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -583,6 +590,7 @@ func (node *Proxy) PinSnapshotData(ctx context.Context, req *milvuspb.PinSnapsho
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, metrics.CauseNA, req.GetDbName(), req.GetCollectionName()).Inc()
 	t := &pinSnapshotDataTask{
+		baseTask:  baseTask{metaCache: node.getMetaCache()},
 		req:       req,
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),

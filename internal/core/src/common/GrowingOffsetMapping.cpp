@@ -190,55 +190,6 @@ GrowingOffsetMapping::GetTotalCount() const {
     return LoadCounts().total;
 }
 
-OffsetMapping::BitsetTransformStatus
-GrowingOffsetMapping::TransformBitset(const BitsetView& bitset,
-                                      TargetBitmap& result) const {
-    const auto counts = LoadCounts();
-    result.clear();
-    if (counts.total == 0) {
-        return BitsetTransformStatus::NoFilter;
-    }
-
-    // An empty BitsetView means "no filter", NOT "zero rows", and both all()
-    // and none() are vacuously true on it -- so it has to be classified before
-    // either of them is consulted. SealedOffsetMapping gets this from
-    // ShouldSkipBitsetTransform; #51953 open-coded the growing path and dropped
-    // the check, which turned an unfiltered growing search into AllFiltered,
-    // i.e. an empty result. Both call sites also guard on !bitset.empty(), but
-    // the classification belongs here so a third caller cannot reintroduce it.
-    if (bitset.empty()) {
-        return BitsetTransformStatus::NoFilter;
-    }
-    if (bitset.all()) {
-        return BitsetTransformStatus::AllFiltered;
-    }
-
-    // #51953: materialize the no-filter case instead of returning NoFilter.
-    // The bitmap is sized to valid_count from the SAME counts snapshot that
-    // total_count came from, so callers get one consistent view instead of
-    // pairing a NoFilter status with a separately (racily) read GetValidCount().
-    if (static_cast<int64_t>(bitset.size()) >= counts.total && bitset.none()) {
-        result.resize(counts.valid, false);
-        return BitsetTransformStatus::Transformed;
-    }
-
-    result.resize(counts.valid, true);
-    const auto bitset_size = static_cast<int64_t>(bitset.size());
-    for (int64_t physical_idx = 0; physical_idx < counts.valid;
-         ++physical_idx) {
-        const int64_t logical_offset = p2l_.Get(physical_idx);
-        // p2l is strictly increasing, so once a row sits past the end of the
-        // bitset every later row does too. Those stay set (= filtered out),
-        // which is exactly how rows appended after the bitset was built are
-        // excluded.
-        if (logical_offset >= bitset_size) {
-            break;
-        }
-        result[physical_idx] = bitset.test(logical_offset);
-    }
-    return BitsetTransformStatus::Transformed;
-}
-
 int64_t
 GrowingOffsetMapping::ValidCountBelow(int64_t logical_bound) const {
     const auto counts = LoadCounts();
@@ -306,31 +257,22 @@ GrowingOffsetMapping::GallopLowerBound(int64_t logical_target,
     return lo;
 }
 
-void
-GrowingOffsetMapping::TransformOffsets(std::vector<int64_t>& offsets) const {
+OffsetMappingIdView
+GrowingOffsetMapping::GetPhysicalToLogicalIds(int64_t physical_offset,
+                                              int64_t count) const {
     const auto counts = LoadCounts();
-    if (counts.total == 0) {
-        return;
+    if (counts.total == 0 || count <= 0) {
+        return {};
     }
-    for (auto& offset : offsets) {
-        if (offset >= 0) {
-            offset = GetLogicalOffsetInternal(offset, counts.valid);
-        }
-    }
-}
-
-void
-GrowingOffsetMapping::TransformLogicalOffsets(
-    std::vector<int64_t>& offsets) const {
-    const auto counts = LoadCounts();
-    if (counts.total == 0) {
-        return;
-    }
-    for (auto& offset : offsets) {
-        if (offset >= 0) {
-            offset = GetPhysicalOffsetInternal(offset, counts);
-        }
-    }
+    AssertInfo(physical_offset >= 0,
+               "physical offset {} is negative",
+               physical_offset);
+    AssertInfo(physical_offset < counts.valid,
+               "physical offset {} exceeds valid count {}",
+               physical_offset,
+               counts.valid);
+    const auto available = counts.valid - physical_offset;
+    return p2l_.View(physical_offset, std::min(count, available));
 }
 
 void

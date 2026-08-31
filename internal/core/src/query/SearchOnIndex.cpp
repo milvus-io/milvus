@@ -20,7 +20,6 @@
 #include "CachedSearchIterator.h"
 #include "Utils.h"
 #include "common/Consts.h"
-#include "common/OffsetMapping.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Types.h"
@@ -45,10 +44,7 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
         knowhere::GenDataSet(num_queries, dim, search_dataset.query_data);
     dataset->SetIsSparse(is_sparse);
 
-    const auto& offset_mapping = indexing.GetOffsetMapping();
-    TargetBitmap transformed_bitset;
     BitsetView search_bitset = bitset;
-    const auto has_offset_mapping = offset_mapping.IsEnabled();
     const auto active_count = search_conf.active_count_;
 
     // A growing interim index can advance after the plan freezes its visible
@@ -57,15 +53,9 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     // rows appended after active_count can occupy the ANN top-k before Reduce
     // gets a chance to validate their offsets.
     //
-    // Keep the bound in the index's physical space for nullable vectors.  The
-    // pinned bitmap is shared by Query, iterator and iterator-v2 paths below;
-    // Knowhere filters every id >= bitmap.size(), which also covers rows added
-    // after this bitmap is constructed.
-    int64_t physical_active_count = active_count;
-    if (active_count >= 0 && has_offset_mapping) {
-        physical_active_count = offset_mapping.ValidCountBelow(active_count);
-    }
-    if (active_count >= 0 && physical_active_count == 0) {
+    // Indexed nullable mapping lives inside Knowhere IdMap, so the visible
+    // prefix stays in logical row space.
+    if (active_count >= 0 && active_count == 0) {
         FillEmptySearchResult(search_result, num_queries, search_conf.topk_);
         return;
     }
@@ -75,39 +65,8 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
         search_bitset = search_result.PinBitset(std::move(visible_prefix));
     };
 
-    if (has_offset_mapping) {
-        if (active_count < 0 && offset_mapping.GetValidCount() == 0) {
-            // All vectors are null, return empty result
-            FillEmptySearchResult(
-                search_result, num_queries, search_conf.topk_);
-            return;
-        }
-        if (!bitset.empty()) {
-            auto status =
-                offset_mapping.TransformBitset(bitset, transformed_bitset);
-            if (status == OffsetMapping::BitsetTransformStatus::AllFiltered) {
-                FillEmptySearchResult(
-                    search_result, num_queries, search_conf.topk_);
-                return;
-            }
-            if (status == OffsetMapping::BitsetTransformStatus::NoFilter) {
-                if (active_count >= 0) {
-                    pin_visible_prefix(physical_active_count);
-                } else {
-                    search_bitset = BitsetView{};
-                }
-            } else {
-                if (active_count >= 0) {
-                    transformed_bitset.resize(physical_active_count);
-                }
-                search_bitset =
-                    search_result.PinBitset(std::move(transformed_bitset));
-            }
-        } else if (active_count >= 0) {
-            pin_visible_prefix(physical_active_count);
-        }
-    } else if (active_count >= 0 && bitset.empty()) {
-        pin_visible_prefix(physical_active_count);
+    if (active_count >= 0 && bitset.empty()) {
+        pin_visible_prefix(active_count);
     } else if (active_count >= 0) {
         // The plan layer sizes the filter bitmap to the same frozen
         // active_count it stamps into SearchInfo (both come from one
@@ -140,17 +99,11 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
         auto iter = CachedSearchIterator(
             indexing, dataset, search_conf, search_bitset, op_context);
         iter.NextBatch(search_conf, search_result);
-        if (has_offset_mapping) {
-            offset_mapping.TransformOffsets(search_result.seg_offsets_);
-        }
         return;
     }
 
     indexing.Query(
         dataset, search_conf, search_bitset, op_context, search_result);
-    if (has_offset_mapping) {
-        offset_mapping.TransformOffsets(search_result.seg_offsets_);
-    }
 }
 
 }  // namespace milvus::query

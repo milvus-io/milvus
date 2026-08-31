@@ -1366,7 +1366,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		if len(paths) == 0 {
 			return nil
 		}
-		reader, err := storage.NewDeltalogReader(pkField.DataType, paths, opts...)
+		reader, err := storage.NewDeltalogReader(ctx, pkField.DataType, paths, opts...)
 		if err != nil {
 			return err
 		}
@@ -1409,6 +1409,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				}
 				if len(storageV3Paths) > 0 {
 					reader, err := storage.NewDeltalogReader(
+						ctx,
 						pkField.DataType,
 						storageV3Paths,
 						storage.WithVersion(storage.StorageV3),
@@ -1424,6 +1425,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				}
 				if len(legacyPaths) > 0 {
 					reader, err := storage.NewDeltalogReader(
+						ctx,
 						pkField.DataType,
 						legacyPaths,
 						storage.WithVersion(storage.StorageV1),

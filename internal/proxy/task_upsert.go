@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -59,8 +60,7 @@ type upsertTask struct {
 	result           *milvuspb.MutationResult
 	idAllocator      *allocator.IDAllocator
 	collectionID     UniqueID
-	chMgr            channelsMgr
-	chTicker         channelsTimeTicker
+	chMgr            channelmgr.ChannelsMgr
 	vChannels        []vChan
 	pChannels        []pChan
 	schema           *schemaInfo
@@ -148,11 +148,11 @@ func (it *upsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
 }
 
 func (it *upsertTask) setChannels() error {
-	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.req.GetDbName(), it.req.CollectionName)
+	collID, err := it.getMetaCache().GetCollectionID(it.ctx, it.req.GetDbName(), it.req.CollectionName)
 	if err != nil {
 		return err
 	}
-	channels, err := it.chMgr.getChannels(collID)
+	channels, err := it.chMgr.GetChannels(collID)
 	if err != nil {
 		return err
 	}
@@ -216,7 +216,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 			log.Warn(ctx, "Invalid partition name", mlog.String("partitionName", partName), mlog.Err(err))
 			return nil, segcore.StorageCost{}, err
 		}
-		partID, err := globalMetaCache.GetPartitionID(ctx, t.req.GetDbName(), t.req.GetCollectionName(), partName)
+		partID, err := t.getMetaCache().GetPartitionID(ctx, t.req.GetDbName(), t.req.GetCollectionName(), partName)
 		if err != nil {
 			log.Warn(ctx, "Failed to get partition id", mlog.String("partitionName", partName), mlog.Err(err))
 			return nil, segcore.StorageCost{}, err
@@ -228,6 +228,9 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	plan := planparserv2.CreateRequeryPlan(pkField, ids)
 	plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.req.Namespace)
 	qt := &queryTask{
+		baseTask: baseTask{
+			metaCache: t.getMetaCache(),
+		},
 		ctx:       t.ctx,
 		Condition: NewTaskCondition(t.ctx),
 		RetrieveRequest: &internalpb.RetrieveRequest{
@@ -1547,7 +1550,7 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 			log.Warn(ctx, "Invalid partition name", mlog.String("partitionName", partName), mlog.Err(err))
 			return err
 		}
-		partID, err := globalMetaCache.GetPartitionID(ctx, it.req.GetDbName(), collName, partName)
+		partID, err := it.getMetaCache().GetPartitionID(ctx, it.req.GetDbName(), collName, partName)
 		if err != nil {
 			log.Warn(ctx, "Failed to get partition id", mlog.String("collectionName", collName), mlog.String("partitionName", partName), mlog.Err(err))
 			return err
@@ -1582,14 +1585,14 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	}
 
 	// check collection exists
-	collID, err := globalMetaCache.GetCollectionID(context.Background(), it.req.GetDbName(), collectionName)
+	collID, err := it.getMetaCache().GetCollectionID(context.Background(), it.req.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "fail to get collection id", mlog.Err(err))
 		return err
 	}
 	it.collectionID = collID
 
-	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, it.req.GetDbName(), collectionName, collID)
+	colInfo, err := it.getMetaCache().GetCollectionInfo(ctx, it.req.GetDbName(), collectionName, collID)
 	if err != nil {
 		log.Warn(ctx, "fail to get collection info", mlog.Err(err))
 		return err
@@ -1606,7 +1609,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.req.GetDbName(), collectionName)
+	schema, err := it.getMetaCache().GetCollectionSchema(ctx, it.req.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "Failed to get collection schema",
 			mlog.String("collectionName", collectionName),
@@ -1639,7 +1642,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		it.req.PartitionName = partitionName
 	}
 
-	it.partitionKeyMode, err = isPartitionKeyMode(ctx, it.req.GetDbName(), collectionName)
+	it.partitionKeyMode, err = isPartitionKeyMode(ctx, it.getMetaCache(), it.req.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "check partition key mode failed",
 			mlog.String("collectionName", collectionName),
@@ -1655,7 +1658,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		// insert to _default partition
 		partitionTag := it.req.GetPartitionName()
 		if len(partitionTag) <= 0 {
-			pinfo, err := globalMetaCache.GetPartitionInfo(ctx, it.req.GetDbName(), collectionName, "")
+			pinfo, err := it.getMetaCache().GetPartitionInfo(ctx, it.req.GetDbName(), collectionName, "")
 			if err != nil {
 				log.Warn(ctx, "get partition info failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 				return err

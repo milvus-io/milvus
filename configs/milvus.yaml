@@ -351,6 +351,24 @@ rootCoord:
   maxDatabaseNum: 64 # Maximum number of database
   maxGeneralCapacity: 65536 # upper limit for the sum of of product of partitionNumber and shardNumber
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
+  clientTelemetry:
+    cleanupInterval: 60 # seconds. How often to sweep clients that stopped heartbeating and commands that expired.
+    inactiveClientThreshold: 600 # seconds. How long a client may go without a heartbeat before it is dropped from memory entirely.
+    # seconds. How long a client may go without a heartbeat before it is reported as inactive.
+    # It is still kept, and still reported, until inactiveClientThreshold.
+    clientStatusThreshold: 60
+    commandCleanupTimeout: 10 # seconds. Timeout for the etcd operations that remove expired client commands.
+    # bytes. Largest metrics payload accepted from one client per heartbeat; anything beyond is truncated.
+    # Zero removes the cap entirely, unlike the other limits here, where a non-positive value falls back to the default.
+    maxMetricsPerClient: 1048576
+    maxOperationTypesPerClient: 100 # Largest number of distinct operation types kept per client; anything beyond is truncated.
+    maxClientsInMemory: 100000 # Largest number of clients tracked at once, so a misconfigured or malicious fleet cannot grow this memory without bound.
+    # How many heartbeat windows to keep per client.
+    # A telemetry query is answered from the oldest window kept, so this is also how far the answer lags
+    # the client and how many consecutive idle intervals it survives: at 2, one interval without traffic
+    # cannot blank the view; at 3, two cannot. Each extra window is another copy of every operation and
+    # per-collection breakdown for every connected client. Values below 1 are treated as the default.
+    retainedWindows: 2
   ip:  # TCP/IP address of rootCoord. If not specified, use the first unicastable address
   port: 22125 # TCP port of rootCoord
   grpc:
@@ -515,8 +533,8 @@ queryCoord:
   checkBalanceInterval: 300
   autoBalanceInterval: 3000 # the interval for triggerauto balance
   checkIndexInterval: 10000
-  channelTaskTimeout: 60000 # 1 minute
-  segmentTaskTimeout: 120000 # 2 minute
+  channelTaskTimeout: 120000 # 2 minutes
+  segmentTaskTimeout: 300000 # 5 minutes
   distPullInterval: 500
   dispatchInterval: 500
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
@@ -898,8 +916,6 @@ dataCoord:
     scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
-  jsonShreddingTriggerCount: 10 # jsonkey stats task count per trigger
-  jsonShreddingTriggerInterval: 10 # jsonkey task interval per trigger
   jsonShreddingMaxColumns: 1024 # the max number of columns to shred
   jsonShreddingRatioThreshold: 0.3 # the ratio threshold to shred
   jsonShreddingWriteBatchSize: 81920 # the batch size to write
@@ -1119,6 +1135,15 @@ common:
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
     useLoonFFI: false
     enableGrowingSourceFlush: false # enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path
+    iops:
+      # Initial ObjectStore request rate used by the Lance AIMD limiter for External Table reads.
+      # The value must be greater than 0. Values above a positive maxRate are reduced to maxRate.
+      # The default matches the milvus-storage default.
+      initialRate: 2000
+      # Maximum request rate allowed by the Lance AIMD limiter for External Table reads.
+      # Set to 0 to disable the rate ceiling. This is not a strict aggregate limit across all filesystem instances.
+      # The default matches the milvus-storage default.
+      maxRate: 5000
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.

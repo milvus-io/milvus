@@ -160,10 +160,10 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     }
 
     // Build an all-zeros offsets (every row is an empty array) and charge its
-    // heap cost to the caching layer, mirroring BuildFromSegment so the
-    // destructor's RefundLoadedResource is balanced. Used when a scalar or
-    // struct ARRAY field is materialized for old sealed rows (schema evolution)
-    // without going through the normal offsets-build path.
+    // heap cost to the caching layer so the destructor's RefundLoadedResource
+    // is balanced. Used when a scalar or struct ARRAY field is materialized for
+    // old sealed rows (schema evolution) without going through the normal
+    // offsets-build path.
     static std::shared_ptr<ArrayOffsetsSealed>
     BuildAllZeros(int64_t row_count) {
         auto result = std::make_shared<ArrayOffsetsSealed>(
@@ -231,9 +231,6 @@ class ArrayOffsetsSealed : public IArrayOffsets {
                                 int64_t elem_offset,
                                 int64_t row_start,
                                 TargetBitmapView row_result) const override;
-
-    static std::shared_ptr<ArrayOffsetsSealed>
-    BuildFromSegment(const void* segment, const FieldMeta& field_meta);
 
     static std::shared_ptr<ArrayOffsetsSealed>
     BuildFromColumn(const ChunkedColumnInterface& column,

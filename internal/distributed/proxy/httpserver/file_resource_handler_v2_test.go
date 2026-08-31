@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -287,7 +288,10 @@ func TestFileResourceHandlerV2ChecksQuota(t *testing.T) {
 	mockProxy.EXPECT().ListFileResources(mock.Anything, mock.Anything).Return(&milvuspb.ListFileResourcesResponse{
 		Status: merr.Success(),
 	}, nil).Once()
-	server := initHTTPServerV2(mockProxy, false)
+	server := initHTTPServerV2(proxyComponentWithMetaCache{
+		ProxyComponent: mockProxy,
+		metaCache:      proxy.InitEmptyMetaCacheForTest(),
+	}, false)
 
 	writeCases := []struct {
 		path string

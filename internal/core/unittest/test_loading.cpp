@@ -358,10 +358,10 @@ TEST(IndexLoadTest, LoadResourceRequestCacheIsOptional) {
 }
 
 #ifdef BUILD_DISK_ANN
-TEST(IndexLoadTest, DiskAnnOffsetMappingMmapEstimateChargesDiskCost) {
+TEST(IndexLoadTest, DiskAnnIdMapMmapEstimateChargesDiskCost) {
     constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
     constexpr int64_t kNumRows = 1025;
-    constexpr uint64_t kOffsetMappingMmapBytes =
+    constexpr uint64_t kIdMapMmapBytes =
         static_cast<uint64_t>(kNumRows) * sizeof(int32_t);
 
     auto make_load_info = [] {
@@ -398,20 +398,16 @@ TEST(IndexLoadTest, DiskAnnOffsetMappingMmapEstimateChargesDiskCost) {
     auto i2o_info = make_load_info();
     i2o_info.index_params[milvus::index::ENABLE_MMAP_I2O_MAP] = "true";
     auto i2o = EstimateLoadIndexResource(&i2o_info);
-    ASSERT_EQ(i2o.final_disk_cost,
-              baseline.final_disk_cost + kOffsetMappingMmapBytes);
-    ASSERT_EQ(i2o.max_disk_cost,
-              baseline.max_disk_cost + kOffsetMappingMmapBytes);
+    ASSERT_EQ(i2o.final_disk_cost, baseline.final_disk_cost + kIdMapMmapBytes);
+    ASSERT_EQ(i2o.max_disk_cost, baseline.max_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(i2o.final_memory_cost, baseline.final_memory_cost);
     ASSERT_EQ(i2o.max_memory_cost, baseline.max_memory_cost);
 
     auto o2i_info = make_load_info();
     o2i_info.index_params[milvus::index::ENABLE_MMAP_O2I_MAP] = "true";
     auto o2i = EstimateLoadIndexResource(&o2i_info);
-    ASSERT_EQ(o2i.final_disk_cost,
-              baseline.final_disk_cost + kOffsetMappingMmapBytes);
-    ASSERT_EQ(o2i.max_disk_cost,
-              baseline.max_disk_cost + kOffsetMappingMmapBytes);
+    ASSERT_EQ(o2i.final_disk_cost, baseline.final_disk_cost + kIdMapMmapBytes);
+    ASSERT_EQ(o2i.max_disk_cost, baseline.max_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(o2i.final_memory_cost, baseline.final_memory_cost);
     ASSERT_EQ(o2i.max_memory_cost, baseline.max_memory_cost);
 
@@ -419,10 +415,8 @@ TEST(IndexLoadTest, DiskAnnOffsetMappingMmapEstimateChargesDiskCost) {
     both_info.index_params[milvus::index::ENABLE_MMAP_I2O_MAP] = "true";
     both_info.index_params[milvus::index::ENABLE_MMAP_O2I_MAP] = "true";
     auto both = EstimateLoadIndexResource(&both_info);
-    ASSERT_EQ(both.final_disk_cost,
-              baseline.final_disk_cost + kOffsetMappingMmapBytes);
-    ASSERT_EQ(both.max_disk_cost,
-              baseline.max_disk_cost + kOffsetMappingMmapBytes);
+    ASSERT_EQ(both.final_disk_cost, baseline.final_disk_cost + kIdMapMmapBytes);
+    ASSERT_EQ(both.max_disk_cost, baseline.max_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(both.final_memory_cost, baseline.final_memory_cost);
     ASSERT_EQ(both.max_memory_cost, baseline.max_memory_cost);
 }

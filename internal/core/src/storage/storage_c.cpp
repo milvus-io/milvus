@@ -256,6 +256,22 @@ InitIndexBuildReadWindow(int64_t window_bytes) {
     }
 }
 
+CStatus
+InitExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate) {
+    try {
+        if (initial_rate == 0) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "external IOPS initial rate must be greater than zero");
+        }
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .SetExternalIopsConfig(initial_rate, max_rate);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
 void
 CleanRemoteChunkManagerSingleton() {
     milvus::storage::RemoteChunkManagerSingleton::GetInstance().Release();

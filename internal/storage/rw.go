@@ -519,6 +519,7 @@ func NewDeltalogWriter(
 }
 
 func NewDeltalogReader(
+	ctx context.Context,
 	pkType schemapb.DataType,
 	paths []string,
 	option ...RwOption,
@@ -539,7 +540,7 @@ func NewDeltalogReader(
 
 	switch rwOptions.version {
 	case StorageV1:
-		return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
+		return NewLegacyDeltalogReader(ctx, pkField, rwOptions.downloader, paths)
 	case StorageV2, StorageV3:
 		pathPos := 0
 		schema := &schemapb.CollectionSchema{
@@ -554,6 +555,11 @@ func NewDeltalogReader(
 		}
 		return &IterativeRecordReader{
 			iterate: func() (RecordReader, error) {
+				// The per-file FFI read below cannot be interrupted; honor
+				// cancellation at the file boundary at least.
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				if pathPos >= len(paths) {
 					return nil, io.EOF
 				}
@@ -571,6 +577,7 @@ func NewDeltalogReader(
 // each binlog's EntriesNum. StorageV3 FFI readers need those row counts to
 // build column groups with stable start/end row offsets.
 func NewDeltalogReaderFromBinlogs(
+	ctx context.Context,
 	pkType schemapb.DataType,
 	binlogs []*datapb.Binlog,
 	option ...RwOption,
@@ -598,8 +605,12 @@ func NewDeltalogReaderFromBinlogs(
 			}
 			paths = append(paths, binlog.GetLogPath())
 		}
-		return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
+		return NewLegacyDeltalogReader(ctx, pkField, rwOptions.downloader, paths)
 	case StorageV2, StorageV3:
+		// Unlike NewDeltalogReader, this path builds the FFI reader from all
+		// fragments up front rather than iterating file-by-file, so there is
+		// no per-file boundary to check ctx at; ctx is accepted for signature
+		// symmetry with the V1 branch above but does not bound this call.
 		fragments, err := buildDeltalogFragmentsFromBinlogs(binlogs)
 		if err != nil {
 			return nil, err

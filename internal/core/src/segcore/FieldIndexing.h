@@ -349,6 +349,10 @@ class VectorFieldIndexing : public FieldIndexing {
  private:
     void
     recreate_index(DataType data_type, const VectorBase* field_raw_data);
+
+    void
+    DisableIndexAfterBuildFailure();
+
     // current number of rows in index.
     std::atomic<idx_t> index_cur_ = 0;
     // whether the growing index has been built.
@@ -356,6 +360,9 @@ class VectorFieldIndexing : public FieldIndexing {
     // whether all insertd data has been added to growing index and can be
     // searched.
     std::atomic<bool> sync_with_index_;
+    // whether growing index build has failed and future appends should keep
+    // using brute force over raw chunks.
+    std::atomic<bool> index_unavailable_;
     std::unique_ptr<VecIndexConfig> config_;
     std::unique_ptr<index::VectorIndex> index_;
     tbb::concurrent_vector<std::unique_ptr<index::VectorIndex>> data_;

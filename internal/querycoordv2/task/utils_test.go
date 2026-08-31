@@ -18,9 +18,12 @@ package task
 
 import (
 	"context"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
@@ -864,6 +867,138 @@ func TestApplyIndexWarmupSettingAutoWarmup(t *testing.T) {
 		assert.True(t, exist)
 		assert.Equal(t, common.WarmupDisable, warmup, "collection-level setting should override autoWarmupForNonPKIsolationCollection")
 	})
+}
+
+// TestWaitDoesNotOutliveContext guards against Wait leaving a helper goroutine
+// parked on a task that may never finish. A task that keeps getting bounced by
+// the executor's admission cap never arms a deadline (see
+// Task.ActivateDeadline), and checkStale has no time-based staleness check, so
+// on a healthy cluster with a saturated executor such a task has no upper bound
+// on its lifetime -- anything parked on it would be parked forever.
+func (s *UtilsSuite) TestWaitDoesNotOutliveContext() {
+	action := NewSegmentAction(1, ActionTypeGrow, "test-ch", 100)
+
+	const waiters = 64
+	baseline := runtime.NumGoroutine()
+
+	var wg sync.WaitGroup
+	for i := 0; i < waiters; i++ {
+		// Each task is deliberately never finished: no Cancel, no Fail, so
+		// doneCh stays open for the whole test.
+		task, err := NewSegmentTask(
+			context.Background(),
+			time.Second,
+			nil,
+			1,
+			newReplicaDefaultRG(10),
+			commonpb.LoadPriority_LOW,
+			action,
+		)
+		s.NoError(err)
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+			defer cancel()
+			s.ErrorIs(Wait(ctx, task), context.DeadlineExceeded)
+		}()
+	}
+	wg.Wait()
+
+	// Give any straggler goroutine a generous window to exit before failing.
+	var current int
+	for i := 0; i < 100; i++ {
+		current = runtime.NumGoroutine()
+		if current < baseline+waiters/2 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	s.Failf("goroutine leak",
+		"Wait left goroutines parked on unfinished tasks: baseline=%d current=%d waiters=%d",
+		baseline, current, waiters)
+}
+
+// TestWaitPrefersFinishedTaskOverExpiredContext pins the tie-break: once a
+// task has finished, callers get its real outcome even if ctx expired too,
+// rather than a 50/50 coin flip between the task error and DeadlineExceeded.
+func (s *UtilsSuite) TestWaitPrefersFinishedTaskOverExpiredContext() {
+	action := NewSegmentAction(1, ActionTypeGrow, "test-ch", 100)
+	task, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		nil,
+		1,
+		newReplicaDefaultRG(10),
+		commonpb.LoadPriority_LOW,
+		action,
+	)
+	s.NoError(err)
+
+	taskErr := errors.New("load segment failed")
+	task.Fail(taskErr)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	for i := 0; i < 100; i++ {
+		s.ErrorIs(Wait(ctx, task), taskErr)
+	}
+}
+
+// TestWaitRechecksDoneWhenContextDone drives the race the fast-path test above
+// cannot reach: the task finishes and ctx expires while Wait is already parked
+// in its select, so both doneCh and ctx.Done() can become ready together and
+// the runtime may pick the ctx.Done() case. The recheck in that branch must
+// still surface the task's real outcome instead of a spurious context error.
+//
+// The interleaving is not fully deterministic: GOMAXPROCS(1) makes the task
+// finish and ctx expire land back-to-back, but a preemption point can still let
+// the waiter resume after cancel() and before task.Fail(), in which case the
+// task has not finished yet and ctx.Err() is the correct answer. So the test
+// only requires that at least one iteration reports the task outcome, failing
+// only if every iteration returned the context error.
+func (s *UtilsSuite) TestWaitRechecksDoneWhenContextDone() {
+	prev := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(prev)
+
+	action := NewSegmentAction(1, ActionTypeGrow, "test-ch", 100)
+	taskErr := errors.New("load segment failed")
+
+	sawTaskErr := false
+	for i := 0; i < 100; i++ {
+		task, err := NewSegmentTask(
+			context.Background(),
+			time.Second,
+			nil,
+			1,
+			newReplicaDefaultRG(10),
+			commonpb.LoadPriority_LOW,
+			action,
+		)
+		s.NoError(err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- task.Wait(ctx) }()
+
+		// Let the waiter park in the select (both cases open), then expire ctx
+		// and finish the task back to back. With GOMAXPROCS(1) the main
+		// goroutine normally runs both before the waiter resumes, so the select
+		// sees both cases ready and the recheck reports the task outcome; a
+		// preempted iteration may legitimately return ctx.Err() instead.
+		time.Sleep(time.Millisecond)
+		cancel()
+		task.Fail(taskErr)
+
+		if errors.Is(<-done, taskErr) {
+			sawTaskErr = true
+		}
+	}
+
+	s.True(sawTaskErr,
+		"Wait never reported the task outcome across 100 iterations; the recheck in the ctx.Done() branch may be missing")
 }
 
 func TestUtils(t *testing.T) {

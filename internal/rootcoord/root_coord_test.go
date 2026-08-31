@@ -2337,6 +2337,26 @@ func TestRootCoord_ListFileResources(t *testing.T) {
 	})
 }
 
+func TestRootCoord_GetFileResources(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		c := newTestCore(withAbnormalCode())
+		resources, err := c.GetFileResources(context.Background(), 1)
+		assert.Nil(t, resources)
+		assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		expected := []*internalpb.FileResourceInfo{{Id: 1, Name: "test", Path: "test_path"}}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetFileResources(mock.Anything, int64(1)).Return(expected, nil)
+
+		c := newTestCore(withHealthyCode(), withMeta(meta))
+		resources, err := c.GetFileResources(context.Background(), 1)
+		assert.NoError(t, err)
+		assert.Equal(t, expected, resources)
+	})
+}
+
 func TestRootCoordSuite(t *testing.T) {
 	suite.Run(t, new(RootCoordSuite))
 }

@@ -239,21 +239,5 @@ func collectRoaringFilterExprs(expr *planpb.Expr, out *[]*planpb.RoaringFilterEx
 // PlanContainsRoaringFilter reports whether the plan's main predicate or a
 // scorer filter contains a roaring_match expression.
 func PlanContainsRoaringFilter(plan *planpb.PlanNode) bool {
-	if plan == nil {
-		return false
-	}
-	for _, scorer := range plan.GetScorers() {
-		if hasRoaringFilterExpr(scorer.GetFilter()) {
-			return true
-		}
-	}
-	switch realPlan := plan.GetNode().(type) {
-	case *planpb.PlanNode_VectorAnns:
-		return hasRoaringFilterExpr(realPlan.VectorAnns.GetPredicates())
-	case *planpb.PlanNode_Predicates:
-		return hasRoaringFilterExpr(realPlan.Predicates)
-	case *planpb.PlanNode_Query:
-		return hasRoaringFilterExpr(realPlan.Query.GetPredicates())
-	}
-	return false
+	return planContainsFilter(plan, hasRoaringFilterExpr)
 }

@@ -23,7 +23,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 
 	"golang.org/x/time/rate"
@@ -114,17 +113,26 @@ func objectstorageConfigFromIndexConfig(config *indexpb.StorageConfig) *objectst
 
 func firstExternalSourceURI(sources []*datapb.CopySegmentSource) (string, error) {
 	if len(sources) == 0 {
-		return "", merr.WrapErrParameterInvalidMsg("external snapshot source URI is required")
+		return "", merr.WrapErrServiceInternalMsg("external copy segment task requires a source root URI")
 	}
 	sourceRootPath := strings.TrimSpace(sources[0].GetSourceRootPath())
 	parsed, err := url.Parse(sourceRootPath)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return "", merr.WrapErrParameterInvalidMsg("external snapshot source URI is required")
+		return "", merr.WrapErrServiceInternalMsg("external copy segment task has an invalid source root URI")
 	}
 	if _, _, _, err := snapshotstorage.ParseForeignRootURI(sourceRootPath); err != nil {
-		return "", err
+		return "", merr.WrapErrServiceInternalMsg("external copy segment task has an invalid source root URI")
 	}
 	return sourceRootPath, nil
+}
+
+func hasExternalSourceRoot(sources []*datapb.CopySegmentSource) bool {
+	for _, source := range sources {
+		if strings.TrimSpace(source.GetSourceRootPath()) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // WatchDmChannels is not in use
@@ -566,7 +574,7 @@ func (node *DataNode) DropImport(ctx context.Context, req *datapb.DropImportRequ
 	return merr.Success(), nil
 }
 
-func (node *DataNode) CopySegment(ctx context.Context, req *datapb.CopySegmentRequest) (*commonpb.Status, error) {
+func (node *DataNode) copySegment(ctx context.Context, req *datapb.CopySegmentRequest, external bool) (*commonpb.Status, error) {
 	// Extract collection ID from first target (all targets should have same collection)
 	var collectionID int64
 	if len(req.GetTargets()) > 0 {
@@ -604,16 +612,14 @@ func (node *DataNode) CopySegment(ctx context.Context, req *datapb.CopySegmentRe
 		copier = chunkManagerCopier{cm: targetCM}
 	}
 
-	sourceURI, sourceURIErr := firstExternalSourceURI(req.GetSources())
-	// External copy tasks always carry a complete source root URI. Resolve it
-	// even when the bucket matches the target because StorageV3 manifest and LOB
-	// reads must use the source root rather than the target cluster root.
-	needForeignSource := req.GetExternalSpec() != "" || sourceURIErr == nil
-
-	if needForeignSource {
-		if sourceURIErr != nil {
-			mlog.Warn(ctx, "external snapshot restore source URI is missing", mlog.Err(sourceURIErr))
-			return merr.Status(sourceURIErr), nil
+	if external {
+		// External copy tasks always carry a complete source root URI. Resolve it
+		// even when the bucket matches the target because StorageV3 manifest and LOB
+		// reads must use the source root rather than the target cluster root.
+		sourceURI, err := firstExternalSourceURI(req.GetSources())
+		if err != nil {
+			mlog.Warn(ctx, "external snapshot restore source URI is invalid", mlog.Err(err))
+			return merr.Status(err), nil
 		}
 
 		resolved, err := snapshotstorage.ResolveForeignStorage(
@@ -762,15 +768,7 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	return &datapb.QuerySlotResponse{
 		Status:         merr.Success(),
 		AvailableSlots: availableSlots,
-		Version:        currentMilvusVersion(),
 	}, nil
-}
-
-func currentMilvusVersion() string {
-	if version := strings.TrimSpace(os.Getenv(metricsinfo.GitBuildTagsEnvKey)); version != "" && version != "unknown" {
-		return version
-	}
-	return common.Version.String()
 }
 
 // Not in used now
@@ -863,14 +861,20 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 			req.ClusterID = clusterID
 		}
 		return node.createRefreshExternalCollectionTask(ctx, req)
-	case taskcommon.CopySegment:
+	case taskcommon.CopySegment, taskcommon.ExternalCopySegment:
 		req := &datapb.CopySegmentRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.CopySegment(ctx, req)
+		// ExternalCopySegment is authoritative for new coordinators. The payload
+		// fallback preserves old DataCoord -> new DataNode rolling upgrades, where
+		// external restores still use the legacy CopySegment task type.
+		external := taskType == taskcommon.ExternalCopySegment ||
+			req.GetExternalSpec() != "" || hasExternalSourceRoot(req.GetSources())
+		return node.copySegment(ctx, req, external)
 	default:
-		err := merr.WrapErrServiceInternalMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
+		err := merr.Wrapf(merr.ErrServiceUnimplemented,
+			"unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		mlog.Warn(ctx, "CreateTask failed", mlog.Err(err))
 		return merr.Status(err), nil
 	}
@@ -1020,7 +1024,7 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties.AppendTaskState(info.State)
 		resProperties.AppendReason(info.FailReason)
 		return wrapQueryTaskResult(resp, resProperties)
-	case taskcommon.CopySegment:
+	case taskcommon.CopySegment, taskcommon.ExternalCopySegment:
 		resp, err := node.QueryCopySegment(ctx, &datapb.QueryCopySegmentRequest{
 			ClusterID: clusterID,
 			TaskID:    taskID,
@@ -1033,7 +1037,8 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties.AppendReason(resp.GetReason())
 		return wrapQueryTaskResult(resp, resProperties)
 	default:
-		err := merr.WrapErrServiceInternalMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
+		err := merr.Wrapf(merr.ErrServiceUnimplemented,
+			"unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		mlog.Warn(ctx, "QueryTask failed", mlog.Err(err))
 		return &workerpb.QueryTaskResponse{
 			Status: merr.Status(err),
@@ -1059,7 +1064,7 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 	switch taskType {
 	case taskcommon.PreImport, taskcommon.Import:
 		return node.DropImport(ctx, &datapb.DropImportRequest{TaskID: taskID})
-	case taskcommon.CopySegment:
+	case taskcommon.CopySegment, taskcommon.ExternalCopySegment:
 		return node.DropCopySegment(ctx, &datapb.DropCopySegmentRequest{TaskID: taskID})
 	case taskcommon.Compaction:
 		return node.DropCompactionPlan(ctx, &datapb.DropCompactionPlanRequest{PlanID: taskID})
@@ -1093,7 +1098,8 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 			mlog.String("clusterID", clusterID))
 		return merr.Success(), nil
 	default:
-		err := merr.WrapErrServiceInternalMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
+		err := merr.Wrapf(merr.ErrServiceUnimplemented,
+			"unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		mlog.Warn(ctx, "DropTask failed", mlog.Err(err))
 		return merr.Status(err), nil
 	}

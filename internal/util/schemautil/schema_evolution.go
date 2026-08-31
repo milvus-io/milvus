@@ -201,7 +201,64 @@ func validateKeptEvolutionField(oldField, newField *schemapb.FieldSchema) error 
 		oldField.GetIsDynamic() != newField.GetIsDynamic():
 		return merr.WrapErrParameterInvalidMsg("cannot change the structural role of field %q in place", name)
 	}
+	if err := validateTypeSchemaEvolution(name, oldField.GetTypeSchema(), newField.GetTypeSchema()); err != nil {
+		return err
+	}
+	if err := typeutil.ValidateFieldTypeSchema(newField); err != nil {
+		return err
+	}
+	if typeutil.IsNestedArrayTypeSchema(newField.GetTypeSchema()) {
+		rootCapacity, _, err := evolutionNumericValue(
+			newField.GetTypeSchema().GetTypeParams(), common.MaxCapacityKey)
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg(
+				"field %q has an invalid type_schema root max_capacity", name)
+		}
+		mirrorCapacity, hasMirror, err := evolutionNumericValue(
+			newField.GetTypeParams(), common.MaxCapacityKey)
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg(
+				"field %q has an invalid max_capacity mirror", name)
+		}
+		if hasMirror && mirrorCapacity != rootCapacity {
+			return merr.WrapErrParameterInvalidMsg(
+				"type param %s of nested array field %s must match type_schema root capacity %d",
+				common.MaxCapacityKey, name, rootCapacity)
+		}
+	}
 	return validateNumericBoundsEvolution(name, oldField.GetTypeParams(), newField.GetTypeParams())
+}
+
+func validateTypeSchemaEvolution(fieldName string, oldTypeSchema, newTypeSchema *schemapb.TypeSchema) error {
+	if oldTypeSchema == nil || newTypeSchema == nil {
+		if oldTypeSchema == nil && newTypeSchema == nil {
+			return nil
+		}
+		return merr.WrapErrParameterInvalidMsg("cannot change the type schema of field %q in place", fieldName)
+	}
+	if oldTypeSchema.GetNullable() != newTypeSchema.GetNullable() {
+		return merr.WrapErrParameterInvalidMsg("cannot change the type schema of field %q in place", fieldName)
+	}
+
+	switch oldKind := oldTypeSchema.GetKind().(type) {
+	case *schemapb.TypeSchema_ArrayElement:
+		newKind, ok := newTypeSchema.GetKind().(*schemapb.TypeSchema_ArrayElement)
+		if !ok || oldKind.ArrayElement == nil || newKind.ArrayElement == nil {
+			return merr.WrapErrParameterInvalidMsg("cannot change the type schema of field %q in place", fieldName)
+		}
+		if err := validateNumericBoundsEvolution(fieldName, oldTypeSchema.GetTypeParams(), newTypeSchema.GetTypeParams()); err != nil {
+			return err
+		}
+		return validateTypeSchemaEvolution(fieldName, oldKind.ArrayElement, newKind.ArrayElement)
+	case *schemapb.TypeSchema_LeafType:
+		newKind, ok := newTypeSchema.GetKind().(*schemapb.TypeSchema_LeafType)
+		if !ok || oldKind.LeafType != newKind.LeafType {
+			return merr.WrapErrParameterInvalidMsg("cannot change the type schema of field %q in place", fieldName)
+		}
+		return validateNumericBoundsEvolution(fieldName, oldTypeSchema.GetTypeParams(), newTypeSchema.GetTypeParams())
+	default:
+		return merr.WrapErrParameterInvalidMsg("cannot change the type schema of field %q in place", fieldName)
+	}
 }
 
 func validateAddedEvolutionFields(oldFields, newFields *evolutionFieldMaps, newSchema *schemapb.CollectionSchema) error {

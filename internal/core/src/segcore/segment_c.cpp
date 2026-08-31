@@ -878,6 +878,7 @@ struct FieldInfo {
     std::string field_name;
     milvus::DataType data_type;
     milvus::DataType element_type;
+    bool is_nested_array;
     bool nullable;
     int64_t dim;  // for vector types
     const milvus::segcore::VectorBase* vec_base;
@@ -1599,6 +1600,31 @@ BuildArrayForChunk(const FieldInfo& field_info,
         }
 
         case milvus::DataType::ARRAY: {
+            if (field_info.is_nested_array) {
+                auto array_vec =
+                    dynamic_cast<const milvus::segcore::ConcurrentVector<
+                        milvus::ArrayValue>*>(field_info.vec_base);
+                if (!array_vec) {
+                    return arrow::Status::Invalid(
+                        "Expected ConcurrentVector<ArrayValue>");
+                }
+                arrow::BinaryBuilder builder;
+                ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
+                for (int64_t i = 0; i < num_rows; i++) {
+                    const int64_t offset = global_offset + i;
+                    if (field_info.valid_data &&
+                        !field_info.valid_data->is_valid(offset)) {
+                        ARROW_RETURN_NOT_OK(builder.AppendNull());
+                    } else {
+                        auto serialized = array_vec->view_element(offset)
+                                              .output_data()
+                                              .SerializeAsString();
+                        ARROW_RETURN_NOT_OK(builder.Append(serialized.data(),
+                                                           serialized.size()));
+                    }
+                }
+                return builder.Finish();
+            }
             auto array_vec = dynamic_cast<
                 const milvus::segcore::ConcurrentVector<milvus::Array>*>(
                 field_info.vec_base);
@@ -2117,6 +2143,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
             info.field_name = field_meta.get_name().get();
             info.data_type = data_type;
             info.element_type = field_meta.get_element_type();
+            info.is_nested_array = field_meta.is_nested_array();
             info.nullable = field_meta.is_nullable();
             info.dim = dim;
             info.vec_base = vec_base;

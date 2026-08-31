@@ -201,7 +201,7 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 	defer tr.Elapse("insert execute done when insertExecute")
 
 	collectionName := ut.upsertMsg.InsertMsg.CollectionName
-	collID, err := globalMetaCache.GetCollectionID(ctx, ut.req.GetDbName(), collectionName)
+	collID, err := ut.getMetaCache().GetCollectionID(ctx, ut.req.GetDbName(), collectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +211,7 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 	getCacheDur := tr.RecordSpan()
 
 	getMsgStreamDur := tr.RecordSpan()
-	channelNames, err := ut.chMgr.getVChannels(collID)
+	channelNames, err := ut.chMgr.GetVChannels(collID)
 	if err != nil {
 		log.Warn(ctx, "get vChannels failed when insertExecute",
 			mlog.Err(err))
@@ -231,9 +231,9 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 	// start to repack insert data
 	var msgs []message.MutableMessage
 	if ut.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups)
+		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), ut.getMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion, ut.partialUpdateCASGroups)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), ut.getMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion, ut.partialUpdateCASGroups)
 	}
 	if err != nil {
 		log.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
@@ -253,7 +253,7 @@ func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherC
 	log := mlog.With(
 		mlog.FieldCollectionID(collID))
 	// hash primary keys to channels
-	vChannels, err := ut.chMgr.getVChannels(collID)
+	vChannels, err := ut.chMgr.GetVChannels(collID)
 	if err != nil {
 		log.Warn(ctx, "get vChannels failed when deleteExecute", mlog.Err(err))
 		ut.result.Status = merr.Status(err)
@@ -400,7 +400,7 @@ func (ut *upsertTask) buildPartialUpdateCASGroups() (map[string]*messagespb.Part
 	if ut.chMgr == nil {
 		return nil, merr.WrapErrServiceInternalMsg("partial update channel manager is unavailable")
 	}
-	vchannels, err := ut.chMgr.getVChannels(ut.collectionID)
+	vchannels, err := ut.chMgr.GetVChannels(ut.collectionID)
 	if err != nil {
 		return nil, err
 	}

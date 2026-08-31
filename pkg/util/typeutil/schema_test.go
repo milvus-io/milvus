@@ -1454,6 +1454,46 @@ func TestEstimateEntitySize(t *testing.T) {
 	size, error := EstimateEntitySize(samples, int(0))
 	assert.NoError(t, error)
 	assert.True(t, size == 384)
+
+	t.Run("nested array", func(t *testing.T) {
+		intArray := func(values ...int32) *schemapb.ScalarField {
+			return &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{Data: values},
+				},
+			}
+		}
+		array := func(values ...*schemapb.ScalarField) *schemapb.ScalarField {
+			return &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						Data:        values,
+						ElementType: schemapb.DataType_Array,
+					},
+				},
+			}
+		}
+		field := &schemapb.FieldData{
+			Type: schemapb.DataType_Array,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							ElementType: schemapb.DataType_Array,
+							Data: []*schemapb.ScalarField{
+								array(array(intArray(1), intArray(2, 3))),
+							},
+						},
+					},
+				},
+			},
+		}
+
+		row := field.GetScalars().GetArrayData().GetData()[0]
+		size, err := EstimateEntitySize([]*schemapb.FieldData{field}, 0)
+		require.NoError(t, err)
+		assert.Equal(t, proto.Size(row), size)
+	})
 }
 
 func TestGetPrimaryFieldSchema(t *testing.T) {
@@ -5365,6 +5405,27 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 			},
 		}
 	}
+	recursiveArrayField := func() *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name:          "nested_array",
+			DataType:      schemapb.DataType_Array,
+			ElementType:   schemapb.DataType_Array,
+			ExternalField: "nested_array_col",
+			TypeSchema: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}},
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+						Kind: &schemapb.TypeSchema_ArrayElement{
+							ArrayElement: &schemapb.TypeSchema{
+								Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
 
 	t.Run("non external schema skipped", func(t *testing.T) {
 		// A non-external schema has no ExternalField set on any field
@@ -5761,6 +5822,25 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 		err := ValidateExternalCollectionResolvedSchema(schema)
 		if assert.Error(t, err) {
 			assert.Contains(t, err.Error(), "does not support field type")
+		}
+	})
+
+	t.Run("recursive array rejected", func(t *testing.T) {
+		validators := []struct {
+			name     string
+			validate func(*schemapb.CollectionSchema) error
+		}{
+			{name: "create", validate: NormalizeAndValidateExternalCollectionSchema},
+			{name: "resolved", validate: ValidateExternalCollectionResolvedSchema},
+		}
+		for _, validator := range validators {
+			t.Run(validator.name, func(t *testing.T) {
+				schema := buildSchema()
+				schema.Fields = append(schema.Fields, recursiveArrayField())
+				err := validator.validate(schema)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "does not support recursive ARRAY field nested_array")
+			})
 		}
 	})
 

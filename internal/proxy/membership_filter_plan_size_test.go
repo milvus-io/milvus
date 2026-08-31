@@ -313,11 +313,10 @@ func TestQueryTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(map[string]int64{}, nil)
 
-	oldCache := globalMetaCache
-	globalMetaCache = cache
-	t.Cleanup(func() { globalMetaCache = oldCache })
-
 	task := &queryTask{
+		baseTask: baseTask{
+			metaCache: cache,
+		},
 		ctx: ctx,
 		RetrieveRequest: &internalpb.RetrieveRequest{
 			Base:       &commonpb.MsgBase{},

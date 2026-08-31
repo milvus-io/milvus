@@ -99,8 +99,8 @@ GetLoonManifest(
  * Emits two property families from a single external_spec JSON:
  *   - extfs.{collectionID}.* — storage-layer: credentials, endpoint, bucket,
  *     region, SSL, IAM. Three-layer model:
- *       Layer 0: zero-init bool fields (no fs.* inheritance — Milvus-internal
- *                credentials must never leak into external-table scope).
+ *       Layer 0: zero-init bool fields and apply the process-local External
+ *                Table IOPS policy (no fs.* IOPS inheritance).
  *       Layer 1: derive storage_type / use_ssl / bucket_name / address from
  *                the external_source URI (Milvus form by default).
  *       Layer 2: apply external_spec.extfs JSON with allowlist gating.

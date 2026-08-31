@@ -103,6 +103,85 @@ InitEmptyVectorArrayRow(proto::schema::VectorField* row,
     }
 }
 
+// Keep the existing ARRAY resource-estimation contract: count leaf payload,
+// but not protobuf wire bytes or container metadata.
+int64_t
+GetArrayLeafRawDataSize(
+    const google::protobuf::RepeatedPtrField<ScalarFieldProto>& rows,
+    DataType element_type) {
+    int64_t result = 0;
+    switch (element_type) {
+        case DataType::BOOL:
+            for (const auto& row : rows) {
+                result += row.bool_data().data_size() * sizeof(bool);
+            }
+            break;
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+            for (const auto& row : rows) {
+                result += row.int_data().data_size() * sizeof(int);
+            }
+            break;
+        case DataType::INT64:
+            for (const auto& row : rows) {
+                result += row.long_data().data_size() * sizeof(int64_t);
+            }
+            break;
+        case DataType::FLOAT:
+            for (const auto& row : rows) {
+                result += row.float_data().data_size() * sizeof(float);
+            }
+            break;
+        case DataType::DOUBLE:
+            for (const auto& row : rows) {
+                result += row.double_data().data_size() * sizeof(double);
+            }
+            break;
+        case DataType::TIMESTAMPTZ:
+            for (const auto& row : rows) {
+                result += row.timestamptz_data().data_size() * sizeof(int64_t);
+            }
+            break;
+        case DataType::VARCHAR:
+        case DataType::STRING:
+        case DataType::TEXT:
+            for (const auto& row : rows) {
+                for (const auto& value : row.string_data().data()) {
+                    result += value.size();
+                }
+            }
+            break;
+        default:
+            ThrowInfo(DataTypeInvalid,
+                      "unsupported element type {} for array",
+                      element_type);
+    }
+    return result;
+}
+
+int64_t
+GetNestedArrayRawDataSize(
+    const google::protobuf::RepeatedPtrField<ScalarFieldProto>& rows,
+    const proto::schema::TypeSchema& type_schema) {
+    const auto offsets_size = (rows.size() + 1) * sizeof(ArrayOffset);
+    int64_t result = static_cast<int64_t>(offsets_size);
+    const auto& element_schema = type_schema.array_element();
+    if (element_schema.has_leaf_type()) {
+        return result +
+               GetArrayLeafRawDataSize(
+                   rows, static_cast<DataType>(element_schema.leaf_type()));
+    }
+
+    for (const auto& row : rows) {
+        if (row.data_case() != ScalarFieldProto::DATA_NOT_SET) {
+            result += GetNestedArrayRawDataSize(row.array_data().data(),
+                                                element_schema);
+        }
+    }
+    return result;
+}
+
 }  // namespace
 
 void
@@ -237,72 +316,13 @@ GetRawDataSizeOfDataArray(const DataArray* data,
             }
             case DataType::ARRAY: {
                 auto& array_data = FIELD_DATA(data, array);
-                switch (field_meta.get_element_type()) {
-                    case DataType::BOOL: {
-                        for (auto& array_bytes : array_data) {
-                            result += array_bytes.bool_data().data_size() *
-                                      sizeof(bool);
-                        }
-                        break;
-                    }
-                    case DataType::INT8:
-                    case DataType::INT16:
-                    case DataType::INT32: {
-                        for (auto& array_bytes : array_data) {
-                            result += array_bytes.int_data().data_size() *
-                                      sizeof(int);
-                        }
-                        break;
-                    }
-                    case DataType::INT64: {
-                        for (auto& array_bytes : array_data) {
-                            result += array_bytes.long_data().data_size() *
-                                      sizeof(int64_t);
-                        }
-                        break;
-                    }
-                    case DataType::FLOAT: {
-                        for (auto& array_bytes : array_data) {
-                            result += array_bytes.float_data().data_size() *
-                                      sizeof(float);
-                        }
-                        break;
-                    }
-                    case DataType::DOUBLE: {
-                        for (auto& array_bytes : array_data) {
-                            result += array_bytes.double_data().data_size() *
-                                      sizeof(double);
-                        }
-                        break;
-                    }
-                    case DataType::TIMESTAMPTZ: {
-                        for (auto& array_bytes : array_data) {
-                            result +=
-                                array_bytes.timestamptz_data().data_size() *
-                                sizeof(int64_t);
-                        }
-                        break;
-                    }
-                    case DataType::VARCHAR:
-                    case DataType::STRING:
-                    case DataType::TEXT: {
-                        for (auto& array_bytes : array_data) {
-                            auto element_num =
-                                array_bytes.string_data().data_size();
-                            for (int i = 0; i < element_num; ++i) {
-                                result +=
-                                    array_bytes.string_data().data(i).size();
-                            }
-                        }
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            DataTypeInvalid,
-                            fmt::format("unsupported element type for array",
-                                        field_meta.get_element_type()));
+                if (field_meta.is_nested_array()) {
+                    result += GetNestedArrayRawDataSize(
+                        array_data, field_meta.get_array_type_schema());
+                } else {
+                    result += GetArrayLeafRawDataSize(
+                        array_data, field_meta.get_element_type());
                 }
-
                 break;
             }
             case DataType::VECTOR_SPARSE_U32_F32: {
@@ -1391,12 +1411,17 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
 void
 LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                          FieldDataChannelPtr channel,
-                         milvus::proto::common::LoadPriority priority) {
+                         milvus::proto::common::LoadPriority priority,
+                         std::optional<proto::schema::TypeSchema> array_type) {
     try {
         auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
                        .GetRemoteChunkManager();
-        auto codec_futures = storage::GetObjectData(
-            rcm.get(), remote_files, milvus::PriorityForLoad(priority));
+        auto codec_futures =
+            storage::GetObjectData(rcm.get(),
+                                   remote_files,
+                                   milvus::PriorityForLoad(priority),
+                                   true,
+                                   std::move(array_type));
         storage::ProcessFuturesInOrder(
             codec_futures, [&](std::unique_ptr<storage::DataCodec> codec) {
                 channel->push(codec->GetFieldData());

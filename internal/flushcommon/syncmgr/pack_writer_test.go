@@ -245,6 +245,25 @@ func TestValidateStorageV1InsertWritableSchema(t *testing.T) {
 			Nullable:    nullable,
 		}
 	}
+	nestedArrayField := func() *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			FieldID:     103,
+			Name:        "nested_array",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeSchema: &schemapb.TypeSchema{
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_ArrayElement{
+							ArrayElement: &schemapb.TypeSchema{
+								Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
 
 	tests := []struct {
 		name      string
@@ -326,6 +345,27 @@ func TestValidateStorageV1InsertWritableSchema(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+
+	t.Run("top level nested array", func(t *testing.T) {
+		err := storage.ValidateStorageV1InsertWritableSchema(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{nestedArrayField()},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "nested Array is not supported in V1 storage format, fieldName=nested_array")
+	})
+
+	t.Run("struct nested array sub-field", func(t *testing.T) {
+		err := storage.ValidateStorageV1InsertWritableSchema(&schemapb.CollectionSchema{
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					Name:   "struct_array",
+					Fields: []*schemapb.FieldSchema{nestedArrayField()},
+				},
+			},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "nested Array is not supported in V1 storage format, structName=struct_array, fieldName=nested_array")
+	})
 }
 
 func TestBulkPackWriter_WriteLog_NonRetryableError(t *testing.T) {

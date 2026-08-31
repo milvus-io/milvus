@@ -139,7 +139,7 @@ func TestLoadDeltalogsExternalRealPKManifestReadsSourceDeltas(t *testing.T) {
 	readerCalled := atomic.NewInt32(0)
 	var gotPathSets [][]string
 	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			readerCalled.Inc()
 			gotPathSets = append(gotPathSets, append([]string(nil), paths...))
 			return eofRecordReader{}, nil
@@ -196,7 +196,7 @@ func TestLoadDeltalogsExternalRealPKManifestRejectsTargetDeltas(t *testing.T) {
 
 	readerCalled := atomic.NewInt32(0)
 	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			readerCalled.Inc()
 			return eofRecordReader{}, nil
 		},
@@ -889,7 +889,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV3PlaceholderSkipsPathRead() {
 	defer patchManifest.UnPatch()
 
 	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			readerCalled.Inc()
 			return nil, errors.New("should not be called when manifest has no delta paths")
 		},
@@ -978,7 +978,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestStorageV
 
 	readerCalled := atomic.NewInt32(0)
 	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			readerCalled.Inc()
 			suite.Equal(schemapb.DataType_Int64, pkType)
 			suite.Equal([]string{sourceDeltaPath}, paths)
@@ -1049,7 +1049,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestLegacyL0
 
 	legacyReaderCalled := atomic.NewInt32(0)
 	patchReader := mockey.Mock(storage.NewDeltalogReader).
-		To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		To(func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			legacyReaderCalled.Inc()
 			suite.Equal(schemapb.DataType_Int64, pkType)
 			suite.Equal([]string{sourceDeltaPath}, paths)
@@ -1281,7 +1281,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV1StillUsesPathRead() {
 	defer patchManifest.UnPatch()
 
 	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			readerCalled.Inc()
 			return nil, io.EOF
 		},
@@ -1351,9 +1351,9 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsLegacyParentLoadsChildManifest
 	defer patchManifest.UnPatch()
 
 	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			legacyReaderCalls.Inc()
-			return storage.NewLegacyDeltalogReader(&schemapb.FieldSchema{
+			return storage.NewLegacyDeltalogReader(context.Background(), &schemapb.FieldSchema{
 				FieldID:      0,
 				DataType:     pkType,
 				IsPrimaryKey: true,

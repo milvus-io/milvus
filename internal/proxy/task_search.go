@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
@@ -125,7 +126,7 @@ type searchTask struct {
 	hybridSubSearchInfos []hybridSubSearchInfo
 	hybridElementLevel   bool
 
-	chMgr channelsMgr
+	chMgr channelmgr.ChannelsMgr
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -138,14 +139,14 @@ func (t *searchTask) CanSkipAllocTimestamp() bool {
 		}
 		consistencyLevel = t.request.GetConsistencyLevel()
 	} else {
-		collID, err := globalMetaCache.GetCollectionID(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
+		collID, err := t.getMetaCache().GetCollectionID(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
 		if err != nil { // err is not nil if collection not exists
 			mlog.Warn(t.ctx, "search task get collectionID failed, can't skip alloc timestamp",
 				mlog.String("collectionName", t.request.GetCollectionName()), mlog.Err(err))
 			return false
 		}
 
-		collectionInfo, err2 := globalMetaCache.GetCollectionInfo(context.Background(), t.request.GetDbName(), t.request.GetCollectionName(), collID)
+		collectionInfo, err2 := t.getMetaCache().GetCollectionInfo(context.Background(), t.request.GetDbName(), t.request.GetCollectionName(), collID)
 		if err2 != nil {
 			mlog.Warn(t.ctx, "search task get collection info failed, can't skip alloc timestamp",
 				mlog.String("collectionName", t.request.GetCollectionName()), mlog.Err(err))
@@ -166,7 +167,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	collectionName := t.request.CollectionName
 	t.collectionName = collectionName
-	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
+	collID, err := t.getMetaCache().GetCollectionID(ctx, t.request.GetDbName(), collectionName)
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
@@ -174,7 +175,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.DbID = 0 // todo
 	t.CollectionID = collID
 	log := mlog.With(mlog.Int64("collID", collID), mlog.String("collName", collectionName))
-	t.schema, err = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
+	t.schema, err = t.getMetaCache().GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "get collection schema failed", mlog.Err(err))
 		return err
@@ -183,7 +184,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
+	collectionInfo, err2 := t.getMetaCache().GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err2 != nil {
 		log.Warn(ctx, "Proxy::searchTask::PreExecute failed to GetCollectionInfo from cache",
 			mlog.String("collectionName", collectionName), mlog.Int64("collectionID", t.CollectionID), mlog.Err(err2))
@@ -192,7 +193,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.largeTopKEnabled = collectionInfo.QueryMode == common.QueryModeLargeTopK
 	t.partitionKeyIsolation = collectionInfo.PartitionKeyIsolation
 
-	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
+	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.getMetaCache(), t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "is partition key mode failed", mlog.Err(err))
 		return err
@@ -214,7 +215,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	if !t.partitionKeyMode && len(t.request.GetPartitionNames()) > 0 {
 		// translate partition name to partition ids. Use regex-pattern to match partition name.
-		t.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), collectionName, t.request.GetPartitionNames())
+		t.PartitionIDs, err = getPartitionIDs(ctx, t.getMetaCache(), t.request.GetDbName(), collectionName, t.request.GetPartitionNames())
 		if err != nil {
 			log.Warn(ctx, "failed to get partition ids", mlog.Err(err))
 			return err
@@ -899,15 +900,19 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 			t.rerankMeta = meta
 		}
 		querynodeFunctionChains = qnChains
+
+		if hasFunctionChainStage(qnChains, schemapb.FunctionChainStage_FunctionChainStageL1Rerank) && t.aggCtx != nil {
+			return merr.WrapErrParameterInvalidMsg("L1 function chain is not supported with search_aggregation")
+		}
 	} else if t.request.FunctionScore != nil {
 		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
 	}
 
-	// Search iterator v2 uses the final result score as the ANN continuation
+	// Search iterators use the final result score to derive the ANN continuation
 	// bound. Function rerank rewrites that score, so the next iterator request
 	// would interpret a rerank score in the ANN metric domain.
-	if queryInfo.GetSearchIteratorV2Info() != nil && (t.rerankMeta != nil || len(querynodeFunctionChains) > 0) {
-		return merr.WrapErrParameterInvalidMsg("function rerank is not supported with search iterator v2")
+	if isIterator && (t.rerankMeta != nil || len(querynodeFunctionChains) > 0) {
+		return merr.WrapErrParameterInvalidMsg("function rerank is not supported with search iterator")
 	}
 
 	// order_by and function rerank cannot be used together
@@ -1190,13 +1195,13 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 
 func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int64, error) {
 	if namespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
-		hashedPartitionNames, err := assignNamespacePartitionKey(t.ctx, t.request.GetDbName(), t.collectionName, t.request.Namespace)
+		hashedPartitionNames, err := assignNamespacePartitionKey(t.ctx, t.getMetaCache(), t.request.GetDbName(), t.collectionName, t.request.Namespace)
 		if err != nil {
 			mlog.Warn(t.ctx, "failed to assign namespace partition key", mlog.Err(err))
 			return nil, err
 		}
 		if len(hashedPartitionNames) > 0 {
-			PartitionIDs, err2 := getPartitionIDs(t.ctx, t.request.GetDbName(), t.collectionName, hashedPartitionNames)
+			PartitionIDs, err2 := getPartitionIDs(t.ctx, t.getMetaCache(), t.request.GetDbName(), t.collectionName, hashedPartitionNames)
 			if err2 != nil {
 				mlog.Warn(t.ctx, "failed to get namespace partition ids", mlog.Err(err2))
 				return nil, err2
@@ -1212,7 +1217,7 @@ func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int6
 		return nil, err
 	}
 	partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-	hashedPartitionNames, err := assignPartitionKeys(t.ctx, t.request.GetDbName(), t.collectionName, partitionKeys)
+	hashedPartitionNames, err := assignPartitionKeys(t.ctx, t.getMetaCache(), t.request.GetDbName(), t.collectionName, partitionKeys)
 	if err != nil {
 		mlog.Warn(t.ctx, "failed to assign partition keys", mlog.Err(err))
 		return nil, err
@@ -1220,7 +1225,7 @@ func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int6
 
 	if len(hashedPartitionNames) > 0 {
 		// translate partition name to partition ids. Use regex-pattern to match partition name.
-		PartitionIDs, err2 := getPartitionIDs(t.ctx, t.request.GetDbName(), t.collectionName, hashedPartitionNames)
+		PartitionIDs, err2 := getPartitionIDs(t.ctx, t.getMetaCache(), t.request.GetDbName(), t.collectionName, hashedPartitionNames)
 		if err2 != nil {
 			mlog.Warn(t.ctx, "failed to get partition ids", mlog.Err(err2))
 			return nil, err2
@@ -1240,7 +1245,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 
 	t.queryChannelsNode = typeutil.NewConcurrentMap[string, int64]()
 	if namespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
-		channelNames, err := t.chMgr.getVChannels(t.CollectionID)
+		channelNames, err := t.chMgr.GetVChannels(t.CollectionID)
 		if err != nil {
 			log.Warn(ctx, "get vChannels failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
 			return err
@@ -1516,7 +1521,6 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	result, err = qn.Search(ctx, req)
 	if err != nil {
 		log.Warn(ctx, "QueryNode search return error", mlog.Err(err))
-		// globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
 		t.shardClientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
 		return err
 	}

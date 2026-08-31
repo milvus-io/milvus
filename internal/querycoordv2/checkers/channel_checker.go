@@ -288,6 +288,10 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 		plans[i].Replica = replica
 	}
 
+	// TODO: same known limitation as SegmentChecker.createSegmentLoadTasks --
+	// a channel whose real watch time (L0/growing backlog, seek distance)
+	// consistently exceeds ChannelTaskTimeout never converges: killed and
+	// rebuilt with the same budget every check tick, no backoff or retry cap.
 	return balance.CreateChannelTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), plans)
 }
 

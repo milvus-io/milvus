@@ -51,56 +51,62 @@ func GrpcAuthInterceptor(authFunc grpc_auth.AuthFunc) grpc.UnaryServerIntercepto
 	}
 }
 
-// AuthenticationInterceptor verify based on kv pair <"authorization": "token"> in header
-func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
-	// The keys within metadata.MD are normalized to lowercase.
-	// See: https://godoc.org/google.golang.org/grpc/metadata#New
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, merr.WrapErrIoKeyNotFound("metadata", "auth check failure, due to occurs inner error: missing metadata")
-	}
-	if globalMetaCache == nil {
-		return nil, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
-	}
-	// check rpc call from sdk
-	if Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
-		authStrArr := md[strings.ToLower(util.HeaderAuthorize)]
-
-		if len(authStrArr) < 1 {
-			mlog.Warn(ctx, "key not found in header")
-			return nil, status.Error(codes.Unauthenticated, "missing authorization in header")
+// AuthenticationInterceptorWithMetaCache returns an authentication interceptor
+// that verifies request identity against the injected meta cache. It also acts
+// as a readiness gate: until the proxy has published its meta cache (in
+// Proxy.Init), all requests are rejected with ServiceUnavailable, mirroring the
+// previous globalMetaCache == nil check that this PR's per-proxy cache removed.
+func AuthenticationInterceptorWithMetaCache(getMetaCache func() Cache) grpc_auth.AuthFunc {
+	return func(ctx context.Context) (context.Context, error) {
+		// The keys within metadata.MD are normalized to lowercase.
+		// See: https://godoc.org/google.golang.org/grpc/metadata#New
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			return nil, merr.WrapErrIoKeyNotFound("metadata", "auth check failure, due to occurs inner error: missing metadata")
 		}
-
-		// token format: base64<username:password>
-		// token := strings.TrimPrefix(authorization[0], "Bearer ")
-		token := authStrArr[0]
-		rawToken, err := crypto.Base64Decode(token)
-		if err != nil {
-			mlog.Warn(ctx, "fail to decode the token", mlog.Err(err))
-			return nil, status.Error(codes.Unauthenticated, "invalid token format")
+		if getMetaCache() == nil {
+			return nil, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
 		}
+		// check rpc call from sdk
+		if Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+			authStrArr := md[strings.ToLower(util.HeaderAuthorize)]
 
-		if !strings.Contains(rawToken, util.CredentialSeparator) {
-			user, err := VerifyAPIKey(rawToken)
+			if len(authStrArr) < 1 {
+				mlog.Warn(ctx, "key not found in header")
+				return nil, status.Error(codes.Unauthenticated, "missing authorization in header")
+			}
+
+			// token format: base64<username:password>
+			// token := strings.TrimPrefix(authorization[0], "Bearer ")
+			token := authStrArr[0]
+			rawToken, err := crypto.Base64Decode(token)
 			if err != nil {
-				mlog.Warn(ctx, "fail to verify apikey", mlog.Err(err))
-				return nil, status.Error(codes.Unauthenticated, "auth check failure, please check api key is correct")
+				mlog.Warn(ctx, "fail to decode the token", mlog.Err(err))
+				return nil, status.Error(codes.Unauthenticated, "invalid token format")
 			}
-			metrics.UserRPCCounter.WithLabelValues(user).Inc()
-			userToken := fmt.Sprintf("%s%s%s", user, util.CredentialSeparator, util.PasswordHolder)
-			md[strings.ToLower(util.HeaderAuthorize)] = []string{crypto.Base64Encode(userToken)}
-			md[util.HeaderToken] = []string{rawToken}
-			ctx = metadata.NewIncomingContext(ctx, md)
-		} else {
-			// username+password authentication
-			username, password := parseMD(rawToken)
-			if !passwordVerify(ctx, username, password, privilege.GetPrivilegeCache()) {
-				mlog.Warn(ctx, "fail to verify password", mlog.String("username", username))
-				// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
-				return nil, status.Error(codes.Unauthenticated, "auth check failure, please check username and password are correct")
+
+			if !strings.Contains(rawToken, util.CredentialSeparator) {
+				user, err := VerifyAPIKey(rawToken)
+				if err != nil {
+					mlog.Warn(ctx, "fail to verify apikey", mlog.Err(err))
+					return nil, status.Error(codes.Unauthenticated, "auth check failure, please check api key is correct")
+				}
+				metrics.UserRPCCounter.WithLabelValues(user).Inc()
+				userToken := fmt.Sprintf("%s%s%s", user, util.CredentialSeparator, util.PasswordHolder)
+				md[strings.ToLower(util.HeaderAuthorize)] = []string{crypto.Base64Encode(userToken)}
+				md[util.HeaderToken] = []string{rawToken}
+				ctx = metadata.NewIncomingContext(ctx, md)
+			} else {
+				// username+password authentication
+				username, password := parseMD(rawToken)
+				if !passwordVerify(ctx, username, password, privilege.GetPrivilegeCache()) {
+					mlog.Warn(ctx, "fail to verify password", mlog.String("username", username))
+					// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
+					return nil, status.Error(codes.Unauthenticated, "auth check failure, please check username and password are correct")
+				}
+				metrics.UserRPCCounter.WithLabelValues(username).Inc()
 			}
-			metrics.UserRPCCounter.WithLabelValues(username).Inc()
 		}
+		return ctx, nil
 	}
-	return ctx, nil
 }

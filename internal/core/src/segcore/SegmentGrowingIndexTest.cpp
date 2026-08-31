@@ -12,6 +12,7 @@
 #include <folly/FBVector.h>
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -188,6 +189,76 @@ INSTANTIATE_TEST_SUITE_P(
                         knowhere::metric::COSINE,
                         knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR,
                         "FLOAT16")));
+
+TEST(GrowingIndexVersionTest, SupportsSindiWithConfiguredMaximumVersion) {
+    constexpr int64_t dim = kTestSparseDim;
+    constexpr int64_t row_count = 100;
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField("embeddings",
+                                     DataType::VECTOR_SPARSE_U32_F32,
+                                     dim,
+                                     knowhere::metric::IP);
+    schema->set_primary_field_id(pk);
+
+    std::map<std::string, std::string> index_params = {
+        {"index_type", knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX},
+        {"metric_type", knowhere::metric::IP},
+        {knowhere::indexparam::INVERTED_INDEX_ALGO, "SINDI"}};
+    std::map<std::string, std::string> type_params = {
+        {"dim", std::to_string(dim)}};
+    FieldIndexMeta field_index_meta(
+        vec, std::move(index_params), std::move(type_params));
+    std::map<FieldId, FieldIndexMeta> field_map = {{vec, field_index_meta}};
+    auto index_meta =
+        std::make_shared<CollectionIndexMeta>(row_count, std::move(field_map));
+
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    InterimIndexConfigForTest interim_config;
+    interim_config.target_index_version =
+        knowhere::Version::GetMaximumVersion().VersionNumber();
+    interim_config.chunk_rows = 16;
+    interim_config.nlist = 1;
+    ApplyInterimIndexConfigForTest(interim_config, config);
+
+    auto segment = CreateGrowingSegment(schema, index_meta, 1, config);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto dataset = DataGen(schema, row_count);
+    auto offset = segment->PreInsert(row_count);
+    segment->Insert(offset,
+                    row_count,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    ASSERT_TRUE(segment_impl->get_indexing_record().SyncDataWithIndex(vec));
+
+    milvus::proto::plan::PlanNode plan_node;
+    auto* vector_anns = plan_node.mutable_vector_anns();
+    vector_anns->set_vector_type(
+        milvus::proto::plan::VectorType::SparseFloatVector);
+    vector_anns->set_placeholder_tag("$0");
+    vector_anns->set_field_id(vec.get());
+    auto* query_info = vector_anns->mutable_query_info();
+    query_info->set_topk(5);
+    query_info->set_metric_type(knowhere::metric::IP);
+    query_info->set_search_params(R"({"drop_ratio_search": 0})");
+
+    auto plan_str = plan_node.SerializeAsString();
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_str.data(), plan_str.size());
+    auto ph_group_raw = CreateSparseFloatPlaceholderGroup(1);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto result = segment->Search(plan.get(), ph_group.get(), 1000000);
+    EXPECT_EQ(result->total_nq_, 1);
+    EXPECT_EQ(result->unity_topK_, 5);
+    EXPECT_EQ(result->distances_.size(), 5);
+    EXPECT_EQ(result->seg_offsets_.size(), 5);
+}
 
 TEST_P(GrowingIndexTest, Correctness) {
     auto dim = 4;
@@ -639,6 +710,68 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
     } else {
         throw std::invalid_argument("Unsupported data type");
     }
+}
+
+TEST(GrowingIndexNullableVectorTest, AddAllNullTailAdvancesIdMapLogicalCount) {
+    constexpr int64_t dim = 2;
+
+    auto build_config =
+        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                       {knowhere::meta::DIM, std::to_string(dim)},
+                       {knowhere::indexparam::NLIST, "1"}};
+
+    milvus::index::VectorMemIndex<float> index(
+        DataType::NONE,
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        false,
+        milvus::storage::FileManagerContext());
+    index.SetIdMapType(knowhere::IdMap::Type::GROWING);
+
+    std::array<float, 4> initial_data = {0.0F, 0.0F, 2.0F, 0.0F};
+    std::array<bool, 3> initial_valid = {true, false, true};
+    auto initial_dataset = knowhere::GenDataSet(2, dim, initial_data.data());
+    initial_dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+        initial_valid.data(), initial_valid.size()));
+    index.BuildWithDataset(initial_dataset, build_config);
+
+    const auto* id_map = &index.GetIdMap();
+    ASSERT_EQ(id_map->OutCount(), 3);
+    ASSERT_EQ(id_map->InToOutIds().size(), 2);
+    EXPECT_EQ(id_map->MapInToOut(0), 0);
+    EXPECT_EQ(id_map->MapInToOut(1), 2);
+
+    std::array<bool, 2> all_null_tail = {false, false};
+    auto all_null_dataset = knowhere::GenDataSet(0, dim, nullptr);
+    all_null_dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+        all_null_tail.data(), all_null_tail.size()));
+    index.AddWithDataset(all_null_dataset, build_config);
+
+    id_map = &index.GetIdMap();
+    ASSERT_EQ(id_map->OutCount(), 5);
+    ASSERT_EQ(id_map->InToOutIds().size(), 2);
+    EXPECT_FALSE(index.IsRowValid(3));
+    EXPECT_FALSE(index.IsRowValid(4));
+
+    std::array<float, 4> appended_data = {5.0F, 0.0F, 7.0F, 0.0F};
+    std::array<bool, 3> appended_valid = {true, false, true};
+    auto appended_dataset = knowhere::GenDataSet(2, dim, appended_data.data());
+    appended_dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+        appended_valid.data(), appended_valid.size()));
+    index.AddWithDataset(appended_dataset, build_config);
+
+    id_map = &index.GetIdMap();
+    ASSERT_EQ(id_map->OutCount(), 8);
+    ASSERT_EQ(id_map->InToOutIds().size(), 4);
+    EXPECT_EQ(id_map->MapInToOut(0), 0);
+    EXPECT_EQ(id_map->MapInToOut(1), 2);
+    EXPECT_EQ(id_map->MapInToOut(2), 5);
+    EXPECT_EQ(id_map->MapInToOut(3), 7);
+    EXPECT_TRUE(index.IsRowValid(5));
+    EXPECT_FALSE(index.IsRowValid(6));
+    EXPECT_TRUE(index.IsRowValid(7));
+    EXPECT_EQ(index.Count(), 4);
 }
 
 TEST(GrowingIndexNullableVectorTest,

@@ -132,6 +132,70 @@ func TestDDLCallbacksAlterCollectionField(t *testing.T) {
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 3)
 }
 
+func TestDDLCallbacksAlterNestedArrayRootCapacity(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+	fieldName := "nested_array"
+
+	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: dbName})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	schemaBytes, err := proto.Marshal(&schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:        fieldName,
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Array,
+				TypeSchema: &schemapb.TypeSchema{
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}},
+					Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+						Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+							Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+						}},
+					}},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         schemaBytes,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.MaxCapacityKey, Value: "64"},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	var field *schemapb.FieldSchema
+	for _, candidate := range coll.ToCollectionSchemaPB().GetFields() {
+		if candidate.GetName() == fieldName {
+			field = candidate
+			break
+		}
+	}
+	require.NotNil(t, field)
+	fieldCapacity, err := typeutil.NewKvPairs(field.GetTypeParams()).Get(common.MaxCapacityKey)
+	require.NoError(t, err)
+	rootCapacity, err := typeutil.NewKvPairs(field.GetTypeSchema().GetTypeParams()).Get(common.MaxCapacityKey)
+	require.NoError(t, err)
+	require.Equal(t, "64", fieldCapacity)
+	require.Equal(t, fieldCapacity, rootCapacity)
+}
+
 func TestDDLCallbacksAlterCollectionFieldAnalyzerValidation(t *testing.T) {
 	core := initStreamingSystemAndCore(t)
 

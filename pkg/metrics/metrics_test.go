@@ -209,3 +209,161 @@ func TestDeletePartialMatch(t *testing.T) {
 	}
 	assert.Equal(t, 0, getMetricsCount())
 }
+
+func queryNodeCollectionCollectors() []prometheus.Collector {
+	return []prometheus.Collector{
+		QueryNodeConsumeTimeTickLag,
+		QueryNodeConsumerMsgCount,
+		QueryNodeSkippedInsertFieldCount,
+		QueryNodeNumSegments,
+		QueryNodeSQCount,
+		QueryNodeSearchFTSNumTokens,
+		QueryNodeSearchHitSegmentNum,
+		QueryNodeSegmentFilterHitSegmentNum,
+		QueryNodeSegmentFilterSkippedSegmentNum,
+		QueryNodeSegmentFilterTotalSegmentNum,
+		QueryNodeSegmentPruneRatio,
+		QueryNodeSegmentPruneBias,
+		QueryNodeSegmentPruneLatency,
+		QueryNodeNumEntities,
+		QueryNodeEntitiesSize,
+		QueryNodeLevelZeroSize,
+		QueryNodePartialResultCount,
+		QueryNodeTwoStageFilterLatency,
+		QueryNodeTwoStageSearchLatency,
+		QueryNodeTwoStageSearchFallbackCount,
+		QueryNodeGlobalRefineCount,
+	}
+}
+
+func observeQueryNodeCollection(nodeID, collectionID string) {
+	QueryNodeConsumeTimeTickLag.WithLabelValues(nodeID, InsertLabel, collectionID).Set(1)
+	QueryNodeConsumerMsgCount.WithLabelValues(nodeID, InsertLabel, collectionID).Add(1)
+	QueryNodeSkippedInsertFieldCount.WithLabelValues(nodeID, collectionID).Add(1)
+	QueryNodeNumSegments.WithLabelValues(nodeID, collectionID, SealedSegmentLabel, "L1").Set(1)
+	QueryNodeSQCount.WithLabelValues(nodeID, SearchLabel, SuccessLabel, Leader, collectionID).Add(1)
+	QueryNodeSearchFTSNumTokens.WithLabelValues(nodeID, collectionID, "1").Observe(1)
+	QueryNodeSearchHitSegmentNum.WithLabelValues(nodeID, collectionID, SearchLabel).Observe(1)
+	QueryNodeSegmentFilterHitSegmentNum.WithLabelValues(nodeID, collectionID, SearchLabel).Observe(1)
+	QueryNodeSegmentFilterSkippedSegmentNum.WithLabelValues(nodeID, collectionID, SearchLabel).Observe(1)
+	QueryNodeSegmentFilterTotalSegmentNum.WithLabelValues(nodeID, collectionID, SearchLabel).Observe(1)
+	QueryNodeSegmentPruneRatio.WithLabelValues(nodeID, collectionID, "x").Set(1)
+	QueryNodeSegmentPruneBias.WithLabelValues(nodeID, collectionID, "x").Set(1)
+	QueryNodeSegmentPruneLatency.WithLabelValues(nodeID, collectionID, "x").Observe(1)
+	QueryNodeNumEntities.WithLabelValues("db", "coll", nodeID, collectionID, GrowingSegmentLabel).Set(1)
+	QueryNodeEntitiesSize.WithLabelValues(nodeID, collectionID, GrowingSegmentLabel).Set(1)
+	QueryNodeLevelZeroSize.WithLabelValues(nodeID, collectionID, "ch").Set(1)
+	QueryNodePartialResultCount.WithLabelValues(nodeID, SearchLabel, collectionID).Add(1)
+	QueryNodeTwoStageFilterLatency.WithLabelValues(nodeID, collectionID).Observe(1)
+	QueryNodeTwoStageSearchLatency.WithLabelValues(nodeID, collectionID).Observe(1)
+	QueryNodeTwoStageSearchFallbackCount.WithLabelValues(nodeID, collectionID, "x").Add(1)
+	QueryNodeGlobalRefineCount.WithLabelValues(nodeID, collectionID).Add(1)
+}
+
+func proxyCollectionCollectors() []prometheus.Collector {
+	return []prometheus.Collector{
+		ProxyReceivedNQ,
+		ProxySearchVectors,
+		ProxyInsertVectors,
+		ProxyUpsertVectors,
+		ProxyDeleteVectors,
+		ProxySQLatency,
+		ProxyCollectionSQLatency,
+		ProxyMutationLatency,
+		ProxyCollectionMutationLatency,
+		ProxyFunctionCall,
+		ProxyReceiveBytes,
+		ProxyRetrySearchCount,
+		ProxyRetrySearchResultInsufficientCount,
+		ProxyRecallSearchCount,
+		ProxySearchSparseNumNonZeros,
+		ProxyFunctionlatency,
+		ProxyScannedRemoteMB,
+		ProxyScannedTotalMB,
+	}
+}
+
+func observeProxyCollection(nodeID, db, collection string) {
+	ProxyReceivedNQ.WithLabelValues(nodeID, SearchLabel, db, collection).Add(1)
+	ProxySearchVectors.WithLabelValues(nodeID, db, collection).Add(1)
+	ProxyInsertVectors.WithLabelValues(nodeID, db, collection).Add(1)
+	ProxyUpsertVectors.WithLabelValues(nodeID, db, collection).Add(1)
+	ProxyDeleteVectors.WithLabelValues(nodeID, db, collection).Add(1)
+	ProxySQLatency.WithLabelValues(nodeID, SearchLabel, db, collection).Observe(1)
+	ProxyCollectionSQLatency.WithLabelValues(nodeID, SearchLabel, db, collection).Observe(1)
+	ProxyMutationLatency.WithLabelValues(nodeID, DeleteLabel, db, collection).Observe(1)
+	ProxyCollectionMutationLatency.WithLabelValues(nodeID, DeleteLabel, db, collection).Observe(1)
+	ProxyFunctionCall.WithLabelValues(nodeID, "x", SuccessLabel, CauseNA, db, collection).Add(1)
+	ProxyReceiveBytes.WithLabelValues(nodeID, DeleteLabel, db, collection).Add(1)
+	ProxyRetrySearchCount.WithLabelValues(nodeID, SearchLabel, db, collection).Add(1)
+	ProxyRetrySearchResultInsufficientCount.WithLabelValues(nodeID, SearchLabel, db, collection).Add(1)
+	ProxyRecallSearchCount.WithLabelValues(nodeID, SearchLabel, db, collection).Add(1)
+	ProxySearchSparseNumNonZeros.WithLabelValues(nodeID, collection, SearchLabel, "1").Observe(1)
+	ProxyFunctionlatency.WithLabelValues(nodeID, collection, "x", "x", "x").Observe(1)
+	ProxyScannedRemoteMB.WithLabelValues(nodeID, DeleteLabel, db, collection).Add(1)
+	ProxyScannedTotalMB.WithLabelValues(nodeID, DeleteLabel, db, collection).Add(1)
+}
+
+func leftoverCollectionSeries(t *testing.T, collectors []prometheus.Collector, label, value string) []string {
+	t.Helper()
+	r := prometheus.NewRegistry()
+	for _, c := range collectors {
+		r.MustRegister(c)
+	}
+	mfs, err := r.Gather()
+	assert.NoError(t, err)
+	var names []string
+	for _, mf := range mfs {
+		for _, m := range mf.GetMetric() {
+			for _, lp := range m.GetLabel() {
+				if lp.GetName() == label && lp.GetValue() == value {
+					names = append(names, mf.GetName())
+					break
+				}
+			}
+		}
+	}
+	return names
+}
+
+func TestCleanupQueryNodeCollectionMetricsDropsEveryCollectionSeries(t *testing.T) {
+	nodeID := int64(7)
+	collectionID := int64(424242)
+	otherID := int64(424243)
+	node := "7"
+	coll := "424242"
+	other := "424243"
+
+	observeQueryNodeCollection(node, coll)
+	observeQueryNodeCollection(node, other)
+
+	before := leftoverCollectionSeries(t, queryNodeCollectionCollectors(), collectionIDLabelName, coll)
+	assert.NotEmpty(t, before)
+
+	CleanupQueryNodeCollectionMetrics(nodeID, collectionID)
+
+	assert.Empty(t, leftoverCollectionSeries(t, queryNodeCollectionCollectors(), collectionIDLabelName, coll))
+	assert.NotEmpty(t, leftoverCollectionSeries(t, queryNodeCollectionCollectors(), collectionIDLabelName, other))
+
+	CleanupQueryNodeCollectionMetrics(nodeID, otherID)
+}
+
+func TestCleanupProxyCollectionMetricsDropsEveryCollectionSeries(t *testing.T) {
+	nodeID := int64(7)
+	db := "metric_cleanup_db"
+	coll := "metric_cleanup_coll"
+	other := "metric_cleanup_other"
+
+	observeProxyCollection("7", db, coll)
+	observeProxyCollection("7", db, other)
+
+	before := leftoverCollectionSeries(t, proxyCollectionCollectors(), collectionName, coll)
+	assert.NotEmpty(t, before)
+
+	CleanupProxyCollectionMetrics(nodeID, db, coll)
+
+	assert.Empty(t, leftoverCollectionSeries(t, proxyCollectionCollectors(), collectionName, coll))
+	assert.NotEmpty(t, leftoverCollectionSeries(t, proxyCollectionCollectors(), collectionName, other))
+
+	CleanupProxyCollectionMetrics(nodeID, db, other)
+}

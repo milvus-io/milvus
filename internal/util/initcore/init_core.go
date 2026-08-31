@@ -150,6 +150,16 @@ func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
 	return InitRemoteArrowFileSystem(params)
 }
 
+// InitExternalIopsConfig publishes the process-local policy used only when
+// External Table filesystem properties are injected.
+func InitExternalIopsConfig(params *paramtable.ComponentParam) error {
+	status := C.InitExternalIopsConfig(
+		C.uint32_t(params.CommonCfg.StorageIopsInitialRate.GetAsUint32()),
+		C.uint32_t(params.CommonCfg.StorageIopsMaxRate.GetAsUint32()),
+	)
+	return HandleCStatus(&status, "InitExternalIopsConfig failed")
+}
+
 func InitLocalArrowFileSystem(path string) error {
 	cRootPath := C.CString(path)
 	cStorageType := C.CString("local")
@@ -738,6 +748,11 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		paramtable.Get().QueryNodeCfg.TakeForOutputResultCountLimit.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			SyncTakeForOutputResultCountLimit(paramtable.Get())
+			return nil
+		})
+
 		paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {
@@ -779,6 +794,12 @@ func SetupCoreConfigChangelCallback() {
 }
 
 func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
+	targetVersion := C.int64_t(params.QueryNodeCfg.InterimIndexTargetIndexVersion.GetAsInt64())
+	status := C.SegcoreSetInterimIndexTargetVersion(targetVersion)
+	if err := HandleCStatus(&status, "SegcoreSetInterimIndexTargetVersion failed"); err != nil {
+		return err
+	}
+
 	enableInterminIndex := C.bool(params.QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool())
 	C.SegcoreSetEnableInterminSegmentIndex(enableInterminIndex)
 
@@ -802,7 +823,7 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 
 	denseVecIndexType := C.CString(params.QueryNodeCfg.DenseVectorInterminIndexType.GetValue())
 	defer C.free(unsafe.Pointer(denseVecIndexType))
-	status := C.SegcoreSetDenseVectorInterminIndexType(denseVecIndexType)
+	status = C.SegcoreSetDenseVectorInterminIndexType(denseVecIndexType)
 	statErr := HandleCStatus(&status, "InitInterminIndexConfig failed")
 	if statErr != nil {
 		return statErr

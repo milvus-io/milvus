@@ -4393,19 +4393,13 @@ func TestSnapshotExportManager_Observability(t *testing.T) {
 	})
 
 	t.Run("failure log uses context and redacts reason", func(t *testing.T) {
-		var logs syncBuffer
-		oldLogger := mlog.L()
-		oldLevel := mlog.GetAtomicLevel()
-		logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+		logs := mlog.CaptureGlobalLogs(t, &mlog.Config{
 			Level:             "warn",
 			Format:            "text",
 			DisableCaller:     true,
 			DisableTimestamp:  true,
 			DisableStacktrace: true,
-		}, &logs)
-		require.NoError(t, err)
-		mlog.ReplaceGlobals(logger, props)
-		defer mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
+		})
 
 		const secret = "SNAPSHOT_EXPORT_SECRET"
 		externalSpec := `{"extfs":{"access_key_value":"` + secret + `"}}`

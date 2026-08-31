@@ -335,6 +335,15 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 				return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
 			}
 			array := fs.GetScalars().GetArrayData().GetData()[rowOffset]
+			if fs.GetScalars().GetArrayData().GetElementType() == schemapb.DataType_Array || array.GetArrayData() != nil {
+				// A recursive array row no longer carries enough leaf-type
+				// information in ArrayArray.element_type to derive its logical
+				// byte width (Int8/Int16/Int32 all share IntArray, for example).
+				// The insert splitter needs a safe wire-size estimate, so use the
+				// actual protobuf size for recursive rows.
+				res += proto.Size(array)
+				break
+			}
 			res += CalcScalarSize(&schemapb.FieldData{
 				Field: &schemapb.FieldData_Scalars{Scalars: array},
 				Type:  fs.GetScalars().GetArrayData().GetElementType(),
@@ -2750,9 +2759,8 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		ext := field.GetExternalField()
 		externalFieldOwners[ext] = append(externalFieldOwners[ext], field)
 
-		if !isExternalFieldTypeSupported(field.GetDataType()) {
-			return merr.WrapErrParameterInvalidMsg("external collection %s does not support field type %s on field %s",
-				schema.GetName(), field.GetDataType().String(), field.GetName())
+		if err := validateExternalFieldType(schema.GetName(), field); err != nil {
+			return err
 		}
 
 		if outputField, ok := generatedColumns[ext]; ok {
@@ -2847,9 +2855,8 @@ func ValidateExternalCollectionResolvedSchema(schema *schemapb.CollectionSchema)
 			}
 			continue
 		}
-		if !isExternalFieldTypeSupported(field.GetDataType()) {
-			return merr.WrapErrParameterInvalidMsg("external collection %s does not support field type %s on field %s",
-				schema.GetName(), field.GetDataType().String(), field.GetName())
+		if err := validateExternalFieldType(schema.GetName(), field); err != nil {
+			return err
 		}
 		ext := field.GetExternalField()
 		if ext == "" {
@@ -3214,6 +3221,20 @@ func normalizeMilvusTableKVPairs(kvs []*commonpb.KeyValuePair) []*commonpb.KeyVa
 		return out[i].GetKey() < out[j].GetKey()
 	})
 	return out
+}
+
+// validateExternalFieldType applies external-collection restrictions that
+// depend on the complete field schema, not only its top-level data type.
+func validateExternalFieldType(collectionName string, field *schemapb.FieldSchema) error {
+	if IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		return merr.WrapErrParameterInvalidMsg("external collection %s does not support recursive ARRAY field %s",
+			collectionName, field.GetName())
+	}
+	if !isExternalFieldTypeSupported(field.GetDataType()) {
+		return merr.WrapErrParameterInvalidMsg("external collection %s does not support field type %s on field %s",
+			collectionName, field.GetDataType().String(), field.GetName())
+	}
+	return nil
 }
 
 // isExternalFieldTypeSupported returns true if the given data type can be

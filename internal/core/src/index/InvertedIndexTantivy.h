@@ -173,6 +173,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     const TargetBitmap
     IsNull() override;
 
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<T>::IsNotNull;
+
     TargetBitmap
     IsNotNull() override;
 

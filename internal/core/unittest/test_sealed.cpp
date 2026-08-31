@@ -42,6 +42,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
+#include "common/GeometryCache.h"
 #include "common/IndexMeta.h"
 #include "common/LoadInfo.h"
 #include "common/PrometheusClient.h"
@@ -5767,6 +5768,37 @@ TEST(SealedSegmentCowState, ExternalSynthesizeRequiresRuntime) {
     SegmentLoadInfo staged_load_info(published_proto, schema);
     EXPECT_ANY_THROW(sealed->TestSynthesizeExternalSystemFields(
         staged_load_info, schema, nullptr));
+}
+
+// FreezeRuntimeResourceState copies the runtime state field by field, so every
+// member added to the struct has to be added to that copy by hand. Nothing in
+// the type system catches an omission, and the consequence is silent: every
+// geometry predicate on a segment published through the freeze path would fall
+// back to bulk_subscript + WKB re-parse forever, because the caches are built
+// once at column load and never rebuilt. Pin the copy for the one member whose
+// loss is invisible.
+TEST(SealedSegmentCowState, FreezePreservesGeometryCaches) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    auto cache = std::make_shared<milvus::exec::SimpleGeometryCache>();
+    const auto geo_field = FieldId(101);
+    runtime->geometry_caches[geo_field] = cache;
+
+    auto frozen =
+        ChunkedSegmentSealedImpl::TestFreezeRuntimeResourceStateCopy(*runtime);
+    ASSERT_NE(frozen, nullptr);
+    auto it = frozen->geometry_caches.find(geo_field);
+    ASSERT_TRUE(it != frozen->geometry_caches.end());
+    // Same cache, not a fresh empty one: the frozen state must keep the
+    // populated instance the caller already filled.
+    EXPECT_EQ(it->second, cache);
 }
 
 TEST(SealedSegmentCowState, ExternalWrapperSynthesizeRequiresRuntime) {
