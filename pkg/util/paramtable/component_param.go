@@ -4630,8 +4630,10 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Version:      "3.0.1",
 		DefaultValue: "0",
 		Doc: `The fraction of the interim index build thread pool that a single growing segment index build may use.
-The pool size is buildParallelRate * cpu num, so the thread number of one growing index build is
-buildParallelRate * cpu num * growingBuildThreadRate, at least 1.
+The thread number of one growing index build is round(growingBuildThreadRate * build thread pool size),
+clamped to [1, pool size]. The pool size is buildParallelRate * cpu num on a QueryNode; in standalone the
+DataNode initializes the same process-global pool from common.buildIndexThreadPoolRatio instead, so the
+effective pool size there depends on which component initializes it last.
 0 by default, which keeps every growing index build single threaded.
 Note this only bounds a single build: multiple growing segments may still build concurrently, so the
 worst case thread number is the pool size multiplied by this resolved thread number.`,

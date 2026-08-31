@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -766,6 +767,22 @@ TEST(GrowingIndexBuildThreadRateTest, ResolvedAgainstBuildThreadPoolSize) {
     // A rate too small to reach a whole thread still resolves to one thread.
     config.set_growing_index_build_thread_rate(
         1.0F / static_cast<float>(pool_size * 8));
+    EXPECT_EQ(build_thread_num(), 1);
+
+    // knowhere declares num_build_thread without a range and passes it straight
+    // to omp_set_num_threads, and this config is refreshable, so an out of range
+    // rate must be clamped to the pool size rather than reach that call.
+    config.set_growing_index_build_thread_rate(8.0F);
+    EXPECT_EQ(build_thread_num(), pool_size);
+
+    // Non-finite values must not reach llround or knowhere either.
+    config.set_growing_index_build_thread_rate(
+        std::numeric_limits<float>::infinity());
+    EXPECT_EQ(build_thread_num(), 1);
+    config.set_growing_index_build_thread_rate(
+        std::numeric_limits<float>::quiet_NaN());
+    EXPECT_EQ(build_thread_num(), 1);
+    config.set_growing_index_build_thread_rate(-1.0F);
     EXPECT_EQ(build_thread_num(), 1);
 }
 
