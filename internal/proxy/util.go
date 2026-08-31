@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
@@ -663,6 +664,11 @@ func validateFieldType(schema *schemapb.CollectionSchema) error {
 		case schemapb.DataType_None:
 			return merr.WrapErrParameterInvalidMsg("data type None is not valid")
 		case schemapb.DataType_Array:
+			if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+				return merr.WrapErrParameterInvalidMsg(
+					"nested array can only be in a struct array field, field name: %s",
+					field.GetName())
+			}
 			if field.GetTypeSchema() == nil {
 				if err := typeutil.ValidateArrayElementType(field.GetElementType()); err != nil {
 					return err
@@ -719,6 +725,11 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
 		return err
 	}
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		return merr.WrapErrParameterInvalidMsg(
+			"nested array can only be in a struct array field, field name: %s",
+			field.GetName())
+	}
 	// validate dense vector field type parameters
 	isVectorType := typeutil.IsVectorType(field.DataType)
 	if isVectorType {
@@ -749,7 +760,7 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 
 	// TODO should remove the index params in the field schema
 	indexParams := funcutil.KeyValuePair2Map(field.GetIndexParams())
-	if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
+	if err = fieldvalidator.ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
 		return err
 	}
 
@@ -772,14 +783,18 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
 		return err
 	}
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		leafSchema := field.GetTypeSchema().GetArrayElement().GetArrayElement()
+		if _, ok := leafSchema.GetKind().(*schemapb.TypeSchema_LeafType); !ok {
+			return merr.WrapErrParameterInvalidMsg(
+				"nested array field %s supports exactly one nested array level",
+				field.GetName())
+		}
+	}
 
 	if field.DataType != schemapb.DataType_Array && field.DataType != schemapb.DataType_ArrayOfVector {
 		return merr.WrapErrParameterInvalidMsg("fields in StructArrayField can only be array or array of struct, but field %s is %s", field.Name, field.DataType.String())
 	}
-	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
-		return merr.WrapErrParameterInvalidMsg("nested array is not supported for field %s", field.GetName())
-	}
-
 	switch field.GetElementType() {
 	case schemapb.DataType_ArrayOfVector:
 		return merr.WrapErrParameterInvalidMsg("nested ArrayOfVector is not supported for field %s", field.GetName())
@@ -1641,18 +1656,22 @@ func translatePkOutputFields(schema *schemapb.CollectionSchema) ([]string, []int
 }
 
 func recallCal[T string | int64](results []T, gts []T) float32 {
+	if len(results) == 0 {
+		return 0
+	}
+
+	gtSet := make(map[T]struct{}, len(gts))
+	for _, gt := range gts {
+		gtSet[gt] = struct{}{}
+	}
+
 	hit := 0
-	total := 0
 	for _, r := range results {
-		total++
-		for _, gt := range gts {
-			if r == gt {
-				hit++
-				break
-			}
+		if _, ok := gtSet[r]; ok {
+			hit++
 		}
 	}
-	return float32(hit) / float32(total)
+	return float32(hit) / float32(len(results))
 }
 
 func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResultData) error {

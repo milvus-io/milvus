@@ -539,16 +539,6 @@ class IndexingRecord {
         return field_indexings_.count(field_id);
     }
 
-    template <typename T>
-    auto
-    get_scalar_field_indexing(FieldId field_id) const
-        -> const ScalarFieldIndexing<T>& {
-        auto& entry = get_field_indexing(field_id);
-        auto ptr = dynamic_cast<const ScalarFieldIndexing<T>*>(&entry);
-        AssertInfo(ptr, "invalid indexing");
-        return *ptr;
-    }
-
  private:
     IndexMetaPtr index_meta_;
     const SegcoreConfig& segcore_config_;

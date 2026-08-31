@@ -35,6 +35,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
@@ -4495,30 +4496,8 @@ func (node *Proxy) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milv
 	}
 
 	if drt.RequestType == "query" {
-		drr, err := parseDummyQueryRequest(req.RequestType)
-		if err != nil {
-			mlog.Warn(context.TODO(), "Failed to parse dummy query request",
-				mlog.Err(err))
-			return failedResponse, nil
-		}
-
-		request := &milvuspb.QueryRequest{
-			DbName:         drr.DbName,
-			CollectionName: drr.CollectionName,
-			PartitionNames: drr.PartitionNames,
-			OutputFields:   drr.OutputFields,
-		}
-
-		_, err = node.Query(ctx, request)
-		if err != nil {
-			mlog.Warn(context.TODO(), "Failed to execute dummy query",
-				mlog.Err(err))
-			return failedResponse, err
-		}
-
-		return &milvuspb.DummyResponse{
-			Response: `{"status": "success"}`,
-		}, nil
+		mlog.Warn(ctx, "Dummy query request is disabled")
+		return failedResponse, nil
 	}
 
 	mlog.Debug(context.TODO(), "cannot find specify dummy request type")
@@ -6738,6 +6717,14 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 		}, nil
 	}
 
+	var err error
+	ctx, err = authorizeRunAnalyzerCollection(ctx, req)
+	if err != nil {
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
 	// build and run analyzer at any streaming node/query node
 	// if collection and field not set
 	if req.GetCollectionName() == "" {
@@ -6788,6 +6775,28 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 		}, nil
 	}
 	return task.result, nil
+}
+
+func authorizeRunAnalyzerCollection(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (context.Context, error) {
+	if req.GetCollectionName() == "" {
+		return ctx, nil
+	}
+
+	nextCtx, err := PrivilegeInterceptor(ctx, &milvuspb.SearchRequest{
+		DbName:         req.GetDbName(),
+		CollectionName: req.GetCollectionName(),
+	})
+	if err == nil {
+		return nextCtx, nil
+	}
+	if grpcstatus.Code(err) == codes.PermissionDenied {
+		return ctx, merr.WrapErrPrivilegeNotPermitted(
+			"RunAnalyzer requires %s on collection %s",
+			commonpb.ObjectPrivilege_PrivilegeSearch.String(),
+			req.GetCollectionName(),
+		)
+	}
+	return ctx, err
 }
 
 func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
@@ -7313,6 +7322,20 @@ func (node *Proxy) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.Com
 // Client Telemetry RPC Handlers
 // =============================================================================
 
+func checkTelemetryAdmin(ctx context.Context, method string) error {
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return nil
+	}
+	username, err := GetCurUserFromContext(ctx)
+	if err != nil {
+		return merr.WrapErrPrivilegeNotAuthenticated("telemetry %s requires authenticated root user", method)
+	}
+	if username != util.UserRoot {
+		return merr.WrapErrPrivilegeNotPermitted("telemetry %s requires root user", method)
+	}
+	return nil
+}
+
 // ClientHeartbeat handles client telemetry heartbeat requests.
 // Forwards the heartbeat to rootcoord for storage and command management.
 func (node *Proxy) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
@@ -7329,6 +7352,9 @@ func (node *Proxy) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClie
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.GetClientTelemetryResponse{Status: merr.Status(err)}, nil
 	}
+	if err := checkTelemetryAdmin(ctx, "GetClientTelemetry"); err != nil {
+		return &milvuspb.GetClientTelemetryResponse{Status: merr.Status(err)}, nil
+	}
 
 	// Forward to rootcoord
 	resp, err := node.mixCoord.GetClientTelemetry(ctx, req)
@@ -7342,6 +7368,9 @@ func (node *Proxy) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClie
 // PushClientCommand pushes a command to rootcoord for distribution to clients.
 func (node *Proxy) PushClientCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.PushClientCommandResponse{Status: merr.Status(err)}, nil
+	}
+	if err := checkTelemetryAdmin(ctx, "PushClientCommand"); err != nil {
 		return &milvuspb.PushClientCommandResponse{Status: merr.Status(err)}, nil
 	}
 
@@ -7361,6 +7390,9 @@ func (node *Proxy) ListClientCommands(ctx context.Context, req *rootcoordpb.List
 // DeleteClientCommand deletes a client command at rootcoord.
 func (node *Proxy) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.DeleteClientCommandResponse{Status: merr.Status(err)}, nil
+	}
+	if err := checkTelemetryAdmin(ctx, "DeleteClientCommand"); err != nil {
 		return &milvuspb.DeleteClientCommandResponse{Status: merr.Status(err)}, nil
 	}
 	// Forward to rootcoord

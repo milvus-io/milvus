@@ -491,6 +491,11 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         return expr_->column_;
     }
 
+    bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
+    }
+
     void
     DetermineExecPath() override {
         if (CanUseJsonStatsAtInit()) {
@@ -509,7 +514,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
             return;
         }
         if (expr_->column_.data_type_ == DataType::ARRAY &&
-            expr_->vals_.empty()) {
+            (expr_->column_.element_level_ || expr_->vals_.empty())) {
             exec_path_ = ExprExecPath::RawData;
             return;
         }
@@ -546,6 +551,10 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     VectorPtr
     ExecArrayContains(EvalCtx& context);
 
+    template <typename ArrayType, typename ExprValueType, bool ElementLevel>
+    VectorPtr
+    ExecArrayContainsImpl(EvalCtx& context);
+
     template <typename ExprValueType>
     VectorPtr
     ExecJsonContainsAll(EvalCtx& context);
@@ -557,6 +566,10 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     template <typename ExprValueType>
     VectorPtr
     ExecArrayContainsAll(EvalCtx& context);
+
+    template <typename ArrayType, typename ExprValueType, bool ElementLevel>
+    VectorPtr
+    ExecArrayContainsAllImpl(EvalCtx& context);
 
     VectorPtr
     ExecJsonContainsArray(EvalCtx& context);

@@ -1028,9 +1028,9 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplForArray(OffsetVector* input = nullptr);
 
-    template <typename ValueType>
+    template <typename ArrayType, typename ValueType, bool ElementLevel>
     VectorPtr
-    ExecRangeVisitorImplForVectorArray(OffsetVector* input = nullptr);
+    ExecArrayLength(OffsetVector* input = nullptr);
 
  private:
     std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr> expr_;

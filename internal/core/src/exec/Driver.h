@@ -115,13 +115,6 @@ class BlockingState {
         return std::move(future_);
     }
 
-    // Returns total number of drivers process wide that are currently in blocked
-    // state.
-    static uint64_t
-    get_num_blocked_drivers() {
-        return num_blocked_drivers_;
-    }
-
  private:
     std::shared_ptr<Driver> driver_;
     ContinueFuture future_;
@@ -217,10 +210,6 @@ class Driver : public std::enable_shared_from_this<Driver> {
 
  private:
     Driver() = default;
-
-    void
-    EnqueueInternal() {
-    }
 
     /// Invoked to initialize the operators from this driver once on its first
     /// execution.

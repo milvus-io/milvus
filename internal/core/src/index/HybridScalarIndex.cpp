@@ -194,11 +194,14 @@ HybridScalarIndex<T>::SelectBuildTypeForArrayType(
             }
         }
     }
-    // For array types, always use BITMAP for low cardinality and INVERTED for high cardinality.
-    // These are hardcoded because STL_SORT doesn't support arrays, and BITMAP is the only
-    // suitable choice for low cardinality arrays. Config parameters don't apply to arrays.
+    // For array types, always use BITMAP for low cardinality. For high
+    // cardinality, nested indexes index the flattened scalar elements, so the
+    // sort index can serve them and STL_SORT replaces INVERTED; regular array
+    // fields keep INVERTED because the sort index cannot handle array values.
+    // These are hardcoded and config parameters don't apply to arrays.
     if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
-        internal_index_type_ = ScalarIndexType::INVERTED;
+        internal_index_type_ = is_nested_index_ ? ScalarIndexType::STLSORT
+                                                : ScalarIndexType::INVERTED;
     } else {
         internal_index_type_ = ScalarIndexType::BITMAP;
     }

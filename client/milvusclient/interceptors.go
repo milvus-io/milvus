@@ -127,13 +127,29 @@ func newClientRequestID() string {
 	return id
 }
 
+// withClientMetadata applies the client's metadata enrichment (static headers,
+// connection state, and per-request extras) to an outgoing context. It is shared
+// by the unary and stream interceptors so new headers stay in sync across both.
+func (c *Client) withClientMetadata(ctx context.Context) context.Context {
+	ctx = c.metadata(ctx)
+	ctx = c.state(ctx)
+	ctx = c.extraInfo(ctx)
+	return ctx
+}
+
 func (c *Client) MetadataUnaryInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		ctx = c.metadata(ctx)
-		ctx = c.state(ctx)
-		ctx = c.extraInfo(ctx)
+		ctx = c.withClientMetadata(ctx)
 
 		return invoker(ctx, method, req, reply, cc, opts...)
+	}
+}
+
+func (c *Client) MetadataStreamInterceptor() grpc.StreamClientInterceptor {
+	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		ctx = c.withClientMetadata(ctx)
+
+		return streamer(ctx, desc, cc, method, opts...)
 	}
 }
 

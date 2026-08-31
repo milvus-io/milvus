@@ -2241,6 +2241,142 @@ TEST(ElementFilter, QueryIteratorCursorRequiresElementFilter) {
     ASSERT_ANY_THROW(parser.CreateRetrievePlan(plan_node));
 }
 
+TEST(ElementFilter, RecursiveArrayJsonContainsPlanValidation) {
+    auto make_schema = [](proto::schema::TypeSchema logical_child) {
+        auto schema = std::make_shared<Schema>();
+        auto field_id = FieldId(100);
+        proto::schema::TypeSchema physical_type;
+        *physical_type.mutable_array_element() = std::move(logical_child);
+        schema->AddField(
+            FieldMeta(FieldName("structA[nested]"),
+                      field_id,
+                      DataType::ARRAY,
+                      DataType::ARRAY,
+                      false,
+                      std::nullopt,
+                      std::string{},
+                      LOCAL_FORMAT_RAW,
+                      std::make_optional(std::move(physical_type))));
+        return std::pair{std::move(schema), field_id};
+    };
+
+    auto make_contains_expr = [](FieldId field_id, DataType element_type) {
+        proto::plan::Expr expr;
+        auto* contains = expr.mutable_json_contains_expr();
+        auto* column = contains->mutable_column_info();
+        column->set_field_id(field_id.get());
+        column->set_data_type(proto::schema::DataType::Array);
+        column->set_element_type(ToProtoDataType(element_type));
+        column->set_is_element_level(true);
+        contains->set_op(proto::plan::JSONContainsExpr_JSONOp_ContainsAny);
+        contains->set_elements_same_type(true);
+        contains->add_elements()->set_string_val("abc");
+        return expr;
+    };
+
+    proto::schema::TypeSchema array_of_varchar;
+    array_of_varchar.mutable_array_element()->set_leaf_type(
+        proto::schema::DataType::VarChar);
+    auto [schema, field_id] = make_schema(std::move(array_of_varchar));
+
+    auto contains = make_contains_expr(field_id, DataType::VARCHAR);
+    ASSERT_NO_THROW(ProtoParser(schema).ParseExprs(contains));
+
+    auto wrong_leaf = make_contains_expr(field_id, DataType::INT64);
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(wrong_leaf));
+
+    auto wrong_logical_type = make_contains_expr(field_id, DataType::VARCHAR);
+    wrong_logical_type.mutable_json_contains_expr()
+        ->mutable_column_info()
+        ->set_data_type(proto::schema::DataType::VarChar);
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(wrong_logical_type));
+
+    auto row_level = make_contains_expr(field_id, DataType::VARCHAR);
+    row_level.mutable_json_contains_expr()
+        ->mutable_column_info()
+        ->set_is_element_level(false);
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(row_level));
+
+    auto flat_schema = std::make_shared<Schema>();
+    auto flat_field_id = flat_schema->AddDebugArrayField(
+        "structA[scalar]", DataType::VARCHAR, false);
+    auto flat_contains = make_contains_expr(flat_field_id, DataType::VARCHAR);
+    ASSERT_ANY_THROW(ProtoParser(flat_schema).ParseExprs(flat_contains));
+
+    proto::schema::TypeSchema array_of_array_of_varchar;
+    array_of_array_of_varchar.mutable_array_element()
+        ->mutable_array_element()
+        ->set_leaf_type(proto::schema::DataType::VarChar);
+    auto [deeper_schema, deeper_field_id] =
+        make_schema(std::move(array_of_array_of_varchar));
+    auto deeper_contains =
+        make_contains_expr(deeper_field_id, DataType::VARCHAR);
+    ASSERT_ANY_THROW(ProtoParser(deeper_schema).ParseExprs(deeper_contains));
+
+    proto::plan::Expr range_expr;
+    auto* range = range_expr.mutable_unary_range_expr();
+    auto* range_column = range->mutable_column_info();
+    range_column->set_field_id(field_id.get());
+    range_column->set_data_type(proto::schema::DataType::Array);
+    range_column->set_element_type(proto::schema::DataType::VarChar);
+    range_column->set_is_element_level(true);
+    range->set_op(proto::plan::OpType::Equal);
+    range->mutable_value()->set_string_val("abc");
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(range_expr));
+}
+
+TEST(ElementFilter, RecursiveArrayLengthPlanValidation) {
+    auto schema = std::make_shared<Schema>();
+    const auto field_id = FieldId(100);
+    proto::schema::TypeSchema physical_type;
+    physical_type.mutable_array_element()
+        ->mutable_array_element()
+        ->set_leaf_type(proto::schema::DataType::Int32);
+    schema->AddField(FieldMeta(FieldName("structA[nested]"),
+                               field_id,
+                               DataType::ARRAY,
+                               DataType::ARRAY,
+                               false,
+                               std::nullopt,
+                               std::string{},
+                               LOCAL_FORMAT_RAW,
+                               std::make_optional(std::move(physical_type))));
+
+    auto make_length_expr = [field_id]() {
+        proto::plan::Expr expr;
+        auto* length = expr.mutable_binary_arith_op_eval_range_expr();
+        auto* column = length->mutable_column_info();
+        column->set_field_id(field_id.get());
+        column->set_data_type(proto::schema::DataType::Array);
+        column->set_element_type(proto::schema::DataType::Array);
+        column->set_is_element_level(true);
+        length->set_arith_op(proto::plan::ArithOpType::ArrayLength);
+        length->set_op(proto::plan::OpType::Equal);
+        length->mutable_value()->set_int64_val(1);
+        return expr;
+    };
+
+    auto length = make_length_expr();
+    ASSERT_NO_THROW(ProtoParser(schema).ParseExprs(length));
+
+    auto wrong_element_type = make_length_expr();
+    wrong_element_type.mutable_binary_arith_op_eval_range_expr()
+        ->mutable_column_info()
+        ->set_element_type(proto::schema::DataType::Int32);
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(wrong_element_type));
+
+    auto nested_path = make_length_expr();
+    nested_path.mutable_binary_arith_op_eval_range_expr()
+        ->mutable_column_info()
+        ->add_nested_path("0");
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(nested_path));
+
+    auto wrong_arith = make_length_expr();
+    wrong_arith.mutable_binary_arith_op_eval_range_expr()->set_arith_op(
+        proto::plan::ArithOpType::Add);
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(wrong_arith));
+}
+
 // Regression test for https://github.com/milvus-io/milvus/issues/49260
 // ElementFilterBitsNode: when element_filter is AND-composed with a predicate
 // that matches 0 docs on a segment, doc_hit_ratio = 0 triggers offset_mode

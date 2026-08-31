@@ -102,7 +102,7 @@ func NewRemoteChunkManager(ctx context.Context, c *objectstorage.Config) (*Remot
 // NewRemoteChunkManagerForTesting is used for testing.
 func NewRemoteChunkManagerForTesting(c *minio.Client, bucket string, rootPath string) *RemoteChunkManager {
 	mcm := &RemoteChunkManager{
-		client:            &MinioObjectStorage{c},
+		client:            &MinioObjectStorage{Client: c},
 		bucketName:        bucket,
 		rootPath:          rootPath,
 		readRetryAttempts: 10,
@@ -528,6 +528,12 @@ func mapObjectStorageError(fileName string, err error) error {
 
 	// If error is already a Milvus error, return it as-is to avoid double-wrapping
 	if merr.IsMilvusError(err) {
+		return err
+	}
+
+	// Preserve context termination so callers can stop retries and classify
+	// canceled operations correctly.
+	if merr.IsCanceledOrTimeout(err) {
 		return err
 	}
 

@@ -892,6 +892,10 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			op2 := UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
 			op3 := UpdateIsImporting(result.GetSegmentId(), false)
 			operators := []UpdateOperator{op1, op2, op3}
+			// A copy target is a freshly created, exclusively owned segment and
+			// the worker returns a complete manifest pointer, so first-time
+			// publication is set inline via UpdateManifest (no CommitSegmentManifest
+			// serialization is needed for a segment no other writer touches).
 			if manifestPath := result.GetManifestPath(); manifestPath != "" {
 				operators = append(operators, UpdateManifest(result.GetSegmentId(), manifestPath))
 			}

@@ -185,16 +185,6 @@ class ScalarIndexSort : public ScalarIndex<T> {
     ShouldSkip(const T lower_value, const T upper_value, const OpType op);
 
  public:
-    const IndexStructure<T>*
-    GetData() {
-        return data_ptr_;
-    }
-
-    bool
-    IsBuilt() const {
-        return is_built_;
-    }
-
     void
     LoadWithoutAssemble(const BinarySet& binary_set,
                         const Config& config) override;

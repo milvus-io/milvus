@@ -49,7 +49,10 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     auto data_type = expr_->column_.data_type_;
-    if (expr_->column_.element_level_) {
+    const bool is_nested_array =
+        data_type == DataType::ARRAY &&
+        expr_->column_.element_type_ == DataType::ARRAY;
+    if (expr_->column_.element_level_ && !is_nested_array) {
         data_type = expr_->column_.element_type_;
     }
     switch (data_type) {
@@ -106,14 +109,55 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::ARRAY: {
+            const auto is_array_length =
+                expr_->arith_op_type_ == proto::plan::ArithOpType::ArrayLength;
+            if (is_nested_array && !is_array_length) {
+                ThrowInfo(UnexpectedError,
+                          "unsupported arith type for recursive ARRAY: {}",
+                          expr_->arith_op_type_);
+            }
             auto value_type = expr_->value_.val_case();
             switch (value_type) {
                 case proto::plan::GenericValue::ValCase::kInt64Val: {
-                    result = ExecRangeVisitorImplForArray<int64_t>(input);
+                    if (is_array_length) {
+                        if (is_nested_array) {
+                            if (expr_->column_.element_level_) {
+                                result = ExecArrayLength<ArrayValueView,
+                                                         int64_t,
+                                                         true>(input);
+                            } else {
+                                result = ExecArrayLength<ArrayValueView,
+                                                         int64_t,
+                                                         false>(input);
+                            }
+                        } else {
+                            result = ExecArrayLength<ArrayView, int64_t, false>(
+                                input);
+                        }
+                    } else {
+                        result = ExecRangeVisitorImplForArray<int64_t>(input);
+                    }
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
-                    result = ExecRangeVisitorImplForArray<double>(input);
+                    if (is_array_length) {
+                        if (is_nested_array) {
+                            if (expr_->column_.element_level_) {
+                                result = ExecArrayLength<ArrayValueView,
+                                                         double,
+                                                         true>(input);
+                            } else {
+                                result = ExecArrayLength<ArrayValueView,
+                                                         double,
+                                                         false>(input);
+                            }
+                        } else {
+                            result = ExecArrayLength<ArrayView, double, false>(
+                                input);
+                        }
+                    } else {
+                        result = ExecRangeVisitorImplForArray<double>(input);
+                    }
                     break;
                 }
                 default: {
@@ -126,14 +170,22 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::VECTOR_ARRAY: {
+            if (expr_->arith_op_type_ !=
+                proto::plan::ArithOpType::ArrayLength) {
+                ThrowInfo(UnexpectedError,
+                          "unsupported arith type for VECTOR_ARRAY: {}",
+                          expr_->arith_op_type_);
+            }
             auto value_type = expr_->value_.val_case();
             switch (value_type) {
                 case proto::plan::GenericValue::ValCase::kInt64Val: {
-                    result = ExecRangeVisitorImplForVectorArray<int64_t>(input);
+                    result =
+                        ExecArrayLength<VectorArrayView, int64_t, false>(input);
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
-                    result = ExecRangeVisitorImplForVectorArray<double>(input);
+                    result =
+                        ExecArrayLength<VectorArrayView, double, false>(input);
                     break;
                 }
                 default: {
@@ -803,6 +855,8 @@ template <typename ValueType>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     OffsetVector* input) {
+    AssertInfo(expr_->arith_op_type_ != proto::plan::ArithOpType::ArrayLength,
+               "ARRAY length must use ExecArrayLength");
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
@@ -887,21 +941,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
         }                                                                     \
     } while (false)
 
-#define BinaryArithRangeArrayLengthCompate(cmp)                \
-    do {                                                       \
-        for (size_t i = 0; i < size; ++i) {                    \
-            auto offset = i;                                   \
-            if constexpr (filter_type == FilterType::random) { \
-                offset = (offsets) ? offsets[i] : i;           \
-            }                                                  \
-            if (valid_data && !valid_data[offset]) {           \
-                res[i] = valid_res[i] = false;                 \
-                continue;                                      \
-            }                                                  \
-            res[i] = (cmp);                                    \
-        }                                                      \
-    } while (false)
-
     auto execute_sub_batch =
         [ op_type, arith_type1 = arith_type, arith_type2,
           has_second_op ]<FilterType filter_type = FilterType::sequential>(
@@ -955,11 +994,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
                             safe_mod(value, right_operand) == val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() == val);
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
@@ -1023,11 +1057,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             safe_mod(value, right_operand) != val);
                         break;
                     }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() != val);
-                        break;
-                    }
                     case proto::plan::ArithOpType::BitAnd: {
                         BinaryArithRangeArrayCompare(
                             (int64_t(value) & int64_t(right_operand)) != val);
@@ -1087,11 +1116,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
                             safe_mod(value, right_operand) > val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() > val);
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
@@ -1155,11 +1179,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             safe_mod(value, right_operand) >= val);
                         break;
                     }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() >= val);
-                        break;
-                    }
                     case proto::plan::ArithOpType::BitAnd: {
                         BinaryArithRangeArrayCompare(
                             (int64_t(value) & int64_t(right_operand)) >= val);
@@ -1221,11 +1240,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             safe_mod(value, right_operand) < val);
                         break;
                     }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() < val);
-                        break;
-                    }
                     case proto::plan::ArithOpType::BitAnd: {
                         BinaryArithRangeArrayCompare(
                             (int64_t(value) & int64_t(right_operand)) < val);
@@ -1285,11 +1299,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
                             safe_mod(value, right_operand) <= val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() <= val);
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
@@ -1364,20 +1373,31 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     return res_vec;
 }
 
-template <typename ValueType>
+template <typename ArrayType, typename ValueType, bool ElementLevel>
 VectorPtr
-PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
-    OffsetVector* input) {
+PhyBinaryArithOpEvalRangeExpr::ExecArrayLength(OffsetVector* input) {
     if (expr_->arith_op_type_ != proto::plan::ArithOpType::ArrayLength) {
         ThrowInfo(UnexpectedError,
-                  "unsupported arith type for vector array field: {}",
+                  "unsupported arith type for ARRAY length expression: {}",
                   expr_->arith_op_type_);
     }
+    AssertInfo(expr_->column_.element_level_ == ElementLevel,
+               "ARRAY length element-level mismatch: plan={}, executor={}",
+               expr_->column_.element_level_,
+               ElementLevel);
+    if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+        AssertInfo(expr_->column_.nested_path_.empty(),
+                   "recursive ARRAY length does not support nested path now");
+    }
 
-    auto real_batch_size =
-        has_offset_input_ ? input->size() : GetNextBatchSize();
-    if (real_batch_size == 0) {
+    auto next_batch_size = GetNextRealBatchSize(input, ElementLevel);
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res =
+            AdvanceEmptyElementBatch(input, ElementLevel, real_batch_size)) {
+        return res;
     }
 
     if (!arg_inited_) {
@@ -1394,7 +1414,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
     auto op_type = expr_->op_type_;
     auto value = value_arg_.GetValue<ValueType>();
 
-    auto compare_length = [op_type, value](int length) {
+    auto compare_length = [op_type, value](int64_t length) {
         switch (op_type) {
             case proto::plan::OpType::Equal:
                 return length == value;
@@ -1410,8 +1430,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
                 return length <= value;
             default:
                 ThrowInfo(UnexpectedError,
-                          "unsupported operator type for vector array "
-                          "length eval expr: {}",
+                          "unsupported operator type for ARRAY length "
+                          "expression: {}",
                           op_type);
         }
         return false;
@@ -1419,7 +1439,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
 
     auto execute_sub_batch = [compare_length]<FilterType filter_type =
                                                   FilterType::sequential>(
-        const VectorArrayView* data,
+        const ArrayType* data,
         ValidityView valid_data,
         const int32_t* offsets,
         const int size,
@@ -1437,17 +1457,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            res[i] = compare_length(data[offset].length());
+            res[i] = compare_length(
+                static_cast<int64_t>(GetArrayRowSize(data[offset])));
         }
     };
 
     int64_t processed_size = 0;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<VectorArrayView>(
-            execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+        if constexpr (ElementLevel) {
+            processed_size = ProcessElementLevelByOffsets<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+        } else {
+            processed_size = ProcessDataByOffsets<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+        }
     } else {
-        processed_size = ProcessDataChunks<VectorArrayView>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res);
+        if constexpr (ElementLevel) {
+            processed_size = ProcessDataChunksForElementLevel<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, res, valid_res);
+        } else {
+            processed_size = ProcessDataChunks<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, res, valid_res);
+        }
     }
 
     AssertInfo(processed_size == real_batch_size,
@@ -3471,3 +3502,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImpl<int64_t>(
 
 }  //namespace exec
 }  // namespace milvus
+
+#undef BinaryArithRangeJSONCompare
+#undef BinaryArithRangeJONCompareArrayLength
+#undef BinaryArithRangeArrayCompare
