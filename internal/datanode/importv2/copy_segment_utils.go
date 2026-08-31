@@ -255,10 +255,9 @@ func collectSegmentFiles(
 			return nil, merr.WrapErrDataIntegrityMsg("storage v3 segment %d has an empty manifest base path", source.GetSegmentId())
 		}
 
-		// Copy the complete StorageV3 manifest root. Manifest data and reusable
-		// index artifacts share this directory, and the source manifest is not
-		// rewritten. Restore controls index availability through the metadata it
-		// publishes, so StatsResolver ignores unregistered entries on load.
+		// Copy the StorageV3 root without filtering shared data/stats objects.
+		// Step 7 retracts inherited vector/scalar index entries in the target
+		// manifest. Text/JSON stats remain gated by restored segment metadata.
 		allFiles, listErr := listAllFiles(ctx, sourceCM, walkBasePath)
 		if listErr != nil {
 			return nil, merr.Wrapf(listErr, "failed to list files from manifest base path %q for segment %d", basePath, source.GetSegmentId())

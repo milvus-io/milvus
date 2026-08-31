@@ -3931,6 +3931,29 @@ func TestRepublishCopiedManifestIndexes_NoWork(t *testing.T) {
 	assert.Zero(t, manifestReads)
 }
 
+func TestRepublishCopiedManifestIndexes_SkipIndexRetractsInheritedIndexes(t *testing.T) {
+	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 3)
+	mockCopiedManifestIndexEntries(t, []packed.ManifestIndexInfo{{IndexID: 5001, BuildID: 6001}})
+	republished := packed.MarshalManifestPath("files/insert_log/100/200/300", 4)
+	commitCalls := 0
+	defer mockey.Mock(packed.CommitManifestUpdates).To(
+		func(_ string, _ int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			commitCalls++
+			assert.Equal(t, []packed.DropIndexEntry{{IndexID: 5001}}, updates.DropIndexes)
+			assert.Empty(t, updates.Indexes)
+			return republished, nil
+		}).Build().UnPatch()
+
+	// Skip-index leaves no copied artifacts, but the source marker must not
+	// claim that the inherited manifest's index section is empty.
+	got, builds, err := republishCopiedManifestIndexes(context.Background(), manifestPath,
+		&datapb.CopySegmentTarget{SegmentId: 300}, 4096, &indexpb.StorageConfig{}, nil, false)
+	require.NoError(t, err)
+	assert.Equal(t, republished, got)
+	assert.Empty(t, builds)
+	assert.Equal(t, 1, commitCalls)
+}
+
 func TestRepublishCopiedManifestIndexes_NoTargetDefinitionsOnlyRetractsInheritedIndexes(t *testing.T) {
 	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 3)
 	target := &datapb.CopySegmentTarget{

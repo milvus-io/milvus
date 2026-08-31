@@ -282,6 +282,7 @@ func TestSnapshotMetadata_ChannelSeekPositionsRoundTrip(t *testing.T) {
 	err = protojson.UnmarshalOptions{DiscardUnknown: true}.Unmarshal(metadataJSON, restored)
 	require.NoError(t, err)
 	require.NotNil(t, restored.GetSnapshotInfo())
+	assert.Equal(t, int32(snapshotio.SnapshotFormatVersion), restored.GetFormatVersion())
 	assert.True(t, restored.GetSnapshotInfo().GetSkipIndex())
 
 	positions := restored.GetSnapshotInfo().GetChannelSeekPositions()

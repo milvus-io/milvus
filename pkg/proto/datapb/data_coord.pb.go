@@ -10369,7 +10369,7 @@ type CopySegmentJob struct {
 	ExternalSpec        string `protobuf:"bytes,21,opt,name=external_spec,json=externalSpec,proto3" json:"external_spec,omitempty"`
 	SnapshotFingerprint string `protobuf:"bytes,22,opt,name=snapshot_fingerprint,json=snapshotFingerprint,proto3" json:"snapshot_fingerprint,omitempty"`
 	// Whether index definitions and separately tracked reusable index artifacts
-	// must not be restored. StorageV3 manifest roots remain intact.
+	// must not be restored. Shared StorageV3 data/stats objects are still copied.
 	SkipIndex bool `protobuf:"varint,23,opt,name=skip_index,json=skipIndex,proto3" json:"skip_index,omitempty"`
 }
 
@@ -14116,7 +14116,7 @@ type RestoreSnapshotRequest struct {
 	SnapshotS3Location   string            `protobuf:"bytes,7,opt,name=snapshot_s3_location,json=snapshotS3Location,proto3" json:"snapshot_s3_location,omitempty"`       // metadata file path for external snapshot restore
 	ExternalSpec         string            `protobuf:"bytes,8,opt,name=external_spec,json=externalSpec,proto3" json:"external_spec,omitempty"`                           // optional external storage spec for cross-bucket restore source
 	// If true, restore data without creating indexes or copying separately
-	// tracked index artifacts. StorageV3 manifest roots remain intact.
+	// tracked index artifacts. Shared StorageV3 data/stats objects are still copied.
 	SkipIndex bool `protobuf:"varint,9,opt,name=skip_index,json=skipIndex,proto3" json:"skip_index,omitempty"`
 }
 
