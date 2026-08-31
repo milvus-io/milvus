@@ -14,11 +14,11 @@ require (
 	github.com/cockroachdb/errors v1.9.1
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-playground/validator/v10 v10.27.0
-	github.com/gofrs/flock v0.8.1
+	github.com/gofrs/flock v0.13.0
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/btree v1.1.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
-	github.com/klauspost/compress v1.18.0
+	github.com/klauspost/compress v1.18.2
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/panjf2000/ants/v2 v2.11.3 // indirect
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3 // indirect
@@ -29,7 +29,7 @@ require (
 	github.com/samber/lo v1.52.0
 	github.com/sbinet/npyio v0.6.0
 	github.com/soheilhy/cmux v0.1.5
-	github.com/spf13/cast v1.3.1
+	github.com/spf13/cast v1.5.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865 // indirect
 	github.com/tikv/client-go/v2 v2.0.8-0.20260610031342-e999c1f9c7c3
@@ -67,8 +67,8 @@ require (
 	github.com/cockroachdb/redact v1.1.3
 	github.com/google/uuid v1.6.0
 	github.com/greatroar/blobloom v0.0.0-00010101000000-000000000000
-	github.com/hamba/avro/v2 v2.29.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
+	github.com/iskorotkov/avro/v2 v2.33.1
 	github.com/magiconair/properties v1.8.7
 	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260806081414-16b288837fbd
 	github.com/milvus-io/milvus/client/v3 v3.0.0
@@ -90,6 +90,7 @@ require (
 	github.com/cloudfoundry/gosigar v1.3.6 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/gopherjs/gopherjs v1.12.80 // indirect
+	github.com/hamba/avro/v2 v2.29.0 // indirect
 	github.com/jtolds/gls v4.20.0+incompatible // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/smartystreets/assertions v1.2.0 // indirect
@@ -209,7 +210,7 @@ require (
 	github.com/labstack/gommon v0.4.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
-	github.com/mattn/go-colorable v0.1.13 // indirect
+	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/miekg/dns v1.1.26 // indirect
 	github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8 // indirect
@@ -243,7 +244,7 @@ require (
 	github.com/shirou/gopsutil/v3 v3.23.12 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
-	github.com/spf13/pflag v1.0.9 // indirect
+	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/tecbot/gorocksdb v0.0.0-20191217155057-f0fad39f321c // indirect
 	github.com/tiancaiamao/gp v0.0.0-20221230034425-4025bc8a4d4a // indirect
@@ -282,7 +283,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.43.0
 	go.opentelemetry.io/otel/sdk/metric v1.43.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
-	go.uber.org/automaxprocs v1.5.3 // indirect
+	go.uber.org/automaxprocs v1.6.0 // indirect
 	go.uber.org/mock v0.5.0 // indirect
 	golang.org/x/arch v0.20.0 // indirect
 	golang.org/x/mod v0.37.0 // indirect
@@ -315,6 +316,7 @@ replace (
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
 	github.com/greatroar/blobloom => github.com/milvus-io/blobloom v0.0.0-20240603110411-471ae49f3b93
+	github.com/hamba/avro/v2 => github.com/iskorotkov/avro/v2 v2.33.0
 	github.com/ianlancetaylor/cgosymbolizer => github.com/milvus-io/cgosymbolizer v0.0.0-20260810014817-f3b338cf6824
 	github.com/milvus-io/milvus/pkg/v3 => ./pkg
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
