@@ -25,6 +25,9 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | CreateSegment *(SelfControlled)* | Single VChannel | No | — |
 | Flush *(SelfControlled)* | Single VChannel | No | — |
 | ManualFlush | Single VChannel | Yes (VChannel) | — |
+| SplitShard | Single VChannel | Yes (VChannel) | — |
+| CreateVChannel | Single VChannel | Yes (VChannel) | — |
+| DropVChannel | Single VChannel | Yes (VChannel) | — |
 | AlterLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName (or ExclusiveCluster) |
 | BatchUpdateManifest | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
@@ -43,6 +46,9 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **Insert** / **Delete**: DML on a single VChannel. CipherEnabled.
 - **CreateSegment** / **Flush**: WAL-generated (SelfControlled). Allocates or seals a growing segment.
 - **ManualFlush**: Seals all growing segments for a collection on a VChannel.
+- **SplitShard**: The write fence of a shard split's source VChannel. Its TimeTick is `T_switch`; after it the VChannel never accepts DML again (`STREAMING_CODE_SHARD_FENCED`). The shard interceptor seals every growing segment as of `T_switch` and embeds their ids in the header — this message is the only seal record, there is no separate ManualFlush — and the flusher's `HandleSplitShard` hands those ids to the write buffer. A re-fence is rejected with `SHARD_FENCED` carrying the recorded `T_switch`, so a coordinator that crashed after fencing recovers it.
+- **CreateVChannel**: The genesis of a shard split target VChannel. Shares the CreateCollection body shape (schema), and additionally carries the target's routing residues and the split correlation. Appended with `BarrierTimeTick >= T_switch`, so the new WAL is born strictly after the fence and creation doubles as activation.
+- **DropVChannel**: Retires ONE VChannel a split left behind — the inverse of CreateVChannel — rather than the whole collection.
 - **AlterLoadConfig**: Modifies load configuration — partition set, replica count, load fields, etc. CChannel-only, consumed by QueryCoord.
 - **DropLoadConfig**: Removes load configuration, unloading/releasing from query nodes. Uses ExclusiveCluster when part of DropCollection flow.
 - **BatchUpdateManifest**: Updates segment manifest versions in batch. Used after compaction or index building. CChannel-only.
@@ -78,9 +84,21 @@ CreateSegment → Insert* → (Flush | ManualFlush | DropPartition | DropCollect
 - **CreateSegment** must precede any Insert referencing that segment.
 - Any message with flush semantics (Flush, ManualFlush, DropPartition, DropCollection, TruncateCollection, FlushAll) seals the segment. No Insert may reference it afterward.
 
+### Shard Split VChannel Lifecycle
+
+```
+CreateVChannel → [Insert | Delete | CreateSegment | Flush]* → SplitShard → DropVChannel
+```
+
+- A VChannel enters the WAL either through **CreateCollection** or through **CreateVChannel**; both are exempt from the recovery storage's "vchannel not found" check because they create the VChannel they name.
+- **SplitShard** moves the VChannel to `VCHANNEL_STATE_SPLITTED` and records `T_switch` in `VChannelMeta.split_time_tick`. The state is persisted: the fence must still hold after a restart.
+- **DropVChannel** moves it to `VCHANNEL_STATE_DROPPED`. It is only legal on a VChannel a split has fenced, and it must be appended BEFORE the coordinator removes the VChannel from `collection.VirtualChannelNames` — DropCollection is broadcast to exactly that list, so a VChannel removed from it first would never receive another teardown message of any kind.
+- **One VChannel per collection per PChannel.** The shard manager's registration map is keyed by collection id, so a split target must never be allocated onto a PChannel that still holds another VChannel of the same collection; the source has to be retired first. The append path enforces this (`CheckIfVChannelCanBeCreated` → `ErrVChannelConflict`) rather than trusting the coordinator, because the failure it prevents is silent and permanent: the newcomer would skip its own registration and inherit the incumbent's state, fence included.
+- **CreateVChannel and DropVChannel must not be forwarded to the data sync service.** Both are V2 messages and `fromMessageToTsMsgV2` has no case for either, so forwarding panics the process. DropCollection survives the same fall-through only because it is V1 and takes the unmarshaler path.
+
 ### Exclusive Lock Rule
 
-DDL messages (CreateCollection, DropCollection, CreatePartition, DropPartition, TruncateCollection, ManualFlush, FlushAll) acquire exclusive locks. While held:
+DDL messages (CreateCollection, DropCollection, CreatePartition, DropPartition, TruncateCollection, ManualFlush, FlushAll, SplitShard, CreateVChannel, DropVChannel) acquire exclusive locks. While held:
 - No DML (Insert/Delete) can append to locked VChannels.
 - In-flight transactions on locked VChannels are failed.
 
