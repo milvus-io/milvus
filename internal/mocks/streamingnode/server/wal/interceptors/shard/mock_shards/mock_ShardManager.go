@@ -598,17 +598,111 @@ func (_c *MockShardManager_CheckIfSegmentCanBeFlushed_Call) RunAndReturn(run fun
 	return _c
 }
 
-// CheckIfVChannelCanBeWritten provides a mock function with given fields: collectionID
-func (_m *MockShardManager) CheckIfVChannelCanBeWritten(collectionID int64) error {
-	ret := _m.Called(collectionID)
+// CheckIfVChannelCanBeCreated provides a mock function with given fields: collectionID, vchannel
+func (_m *MockShardManager) CheckIfVChannelCanBeCreated(collectionID int64, vchannel string) error {
+	ret := _m.Called(collectionID, vchannel)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckIfVChannelCanBeCreated")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, string) error); ok {
+		r0 = rf(collectionID, vchannel)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockShardManager_CheckIfVChannelCanBeCreated_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfVChannelCanBeCreated'
+type MockShardManager_CheckIfVChannelCanBeCreated_Call struct {
+	*mock.Call
+}
+
+// CheckIfVChannelCanBeCreated is a helper method to define mock.On call
+//   - collectionID int64
+//   - vchannel string
+func (_e *MockShardManager_Expecter) CheckIfVChannelCanBeCreated(collectionID interface{}, vchannel interface{}) *MockShardManager_CheckIfVChannelCanBeCreated_Call {
+	return &MockShardManager_CheckIfVChannelCanBeCreated_Call{Call: _e.mock.On("CheckIfVChannelCanBeCreated", collectionID, vchannel)}
+}
+
+func (_c *MockShardManager_CheckIfVChannelCanBeCreated_Call) Run(run func(collectionID int64, vchannel string)) *MockShardManager_CheckIfVChannelCanBeCreated_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockShardManager_CheckIfVChannelCanBeCreated_Call) Return(_a0 error) *MockShardManager_CheckIfVChannelCanBeCreated_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardManager_CheckIfVChannelCanBeCreated_Call) RunAndReturn(run func(int64, string) error) *MockShardManager_CheckIfVChannelCanBeCreated_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CheckIfVChannelCanBeDropped provides a mock function with given fields: collectionID, vchannel
+func (_m *MockShardManager) CheckIfVChannelCanBeDropped(collectionID int64, vchannel string) error {
+	ret := _m.Called(collectionID, vchannel)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckIfVChannelCanBeDropped")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, string) error); ok {
+		r0 = rf(collectionID, vchannel)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockShardManager_CheckIfVChannelCanBeDropped_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfVChannelCanBeDropped'
+type MockShardManager_CheckIfVChannelCanBeDropped_Call struct {
+	*mock.Call
+}
+
+// CheckIfVChannelCanBeDropped is a helper method to define mock.On call
+//   - collectionID int64
+//   - vchannel string
+func (_e *MockShardManager_Expecter) CheckIfVChannelCanBeDropped(collectionID interface{}, vchannel interface{}) *MockShardManager_CheckIfVChannelCanBeDropped_Call {
+	return &MockShardManager_CheckIfVChannelCanBeDropped_Call{Call: _e.mock.On("CheckIfVChannelCanBeDropped", collectionID, vchannel)}
+}
+
+func (_c *MockShardManager_CheckIfVChannelCanBeDropped_Call) Run(run func(collectionID int64, vchannel string)) *MockShardManager_CheckIfVChannelCanBeDropped_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockShardManager_CheckIfVChannelCanBeDropped_Call) Return(_a0 error) *MockShardManager_CheckIfVChannelCanBeDropped_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardManager_CheckIfVChannelCanBeDropped_Call) RunAndReturn(run func(int64, string) error) *MockShardManager_CheckIfVChannelCanBeDropped_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CheckIfVChannelCanBeWritten provides a mock function with given fields: collectionID, vchannel
+func (_m *MockShardManager) CheckIfVChannelCanBeWritten(collectionID int64, vchannel string) error {
+	ret := _m.Called(collectionID, vchannel)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CheckIfVChannelCanBeWritten")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64) error); ok {
-		r0 = rf(collectionID)
+	if rf, ok := ret.Get(0).(func(int64, string) error); ok {
+		r0 = rf(collectionID, vchannel)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -623,13 +717,14 @@ type MockShardManager_CheckIfVChannelCanBeWritten_Call struct {
 
 // CheckIfVChannelCanBeWritten is a helper method to define mock.On call
 //   - collectionID int64
-func (_e *MockShardManager_Expecter) CheckIfVChannelCanBeWritten(collectionID interface{}) *MockShardManager_CheckIfVChannelCanBeWritten_Call {
-	return &MockShardManager_CheckIfVChannelCanBeWritten_Call{Call: _e.mock.On("CheckIfVChannelCanBeWritten", collectionID)}
+//   - vchannel string
+func (_e *MockShardManager_Expecter) CheckIfVChannelCanBeWritten(collectionID interface{}, vchannel interface{}) *MockShardManager_CheckIfVChannelCanBeWritten_Call {
+	return &MockShardManager_CheckIfVChannelCanBeWritten_Call{Call: _e.mock.On("CheckIfVChannelCanBeWritten", collectionID, vchannel)}
 }
 
-func (_c *MockShardManager_CheckIfVChannelCanBeWritten_Call) Run(run func(collectionID int64)) *MockShardManager_CheckIfVChannelCanBeWritten_Call {
+func (_c *MockShardManager_CheckIfVChannelCanBeWritten_Call) Run(run func(collectionID int64, vchannel string)) *MockShardManager_CheckIfVChannelCanBeWritten_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(int64), args[1].(string))
 	})
 	return _c
 }
@@ -639,7 +734,7 @@ func (_c *MockShardManager_CheckIfVChannelCanBeWritten_Call) Return(_a0 error) *
 	return _c
 }
 
-func (_c *MockShardManager_CheckIfVChannelCanBeWritten_Call) RunAndReturn(run func(int64) error) *MockShardManager_CheckIfVChannelCanBeWritten_Call {
+func (_c *MockShardManager_CheckIfVChannelCanBeWritten_Call) RunAndReturn(run func(int64, string) error) *MockShardManager_CheckIfVChannelCanBeWritten_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1057,17 +1152,17 @@ func (_c *MockShardManager_FlushSegment_Call) RunAndReturn(run func(message.Immu
 	return _c
 }
 
-// GetSplitTimeTick provides a mock function with given fields: collectionID
-func (_m *MockShardManager) GetSplitTimeTick(collectionID int64) uint64 {
-	ret := _m.Called(collectionID)
+// GetSplitTimeTick provides a mock function with given fields: collectionID, vchannel
+func (_m *MockShardManager) GetSplitTimeTick(collectionID int64, vchannel string) uint64 {
+	ret := _m.Called(collectionID, vchannel)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetSplitTimeTick")
 	}
 
 	var r0 uint64
-	if rf, ok := ret.Get(0).(func(int64) uint64); ok {
-		r0 = rf(collectionID)
+	if rf, ok := ret.Get(0).(func(int64, string) uint64); ok {
+		r0 = rf(collectionID, vchannel)
 	} else {
 		r0 = ret.Get(0).(uint64)
 	}
@@ -1082,13 +1177,14 @@ type MockShardManager_GetSplitTimeTick_Call struct {
 
 // GetSplitTimeTick is a helper method to define mock.On call
 //   - collectionID int64
-func (_e *MockShardManager_Expecter) GetSplitTimeTick(collectionID interface{}) *MockShardManager_GetSplitTimeTick_Call {
-	return &MockShardManager_GetSplitTimeTick_Call{Call: _e.mock.On("GetSplitTimeTick", collectionID)}
+//   - vchannel string
+func (_e *MockShardManager_Expecter) GetSplitTimeTick(collectionID interface{}, vchannel interface{}) *MockShardManager_GetSplitTimeTick_Call {
+	return &MockShardManager_GetSplitTimeTick_Call{Call: _e.mock.On("GetSplitTimeTick", collectionID, vchannel)}
 }
 
-func (_c *MockShardManager_GetSplitTimeTick_Call) Run(run func(collectionID int64)) *MockShardManager_GetSplitTimeTick_Call {
+func (_c *MockShardManager_GetSplitTimeTick_Call) Run(run func(collectionID int64, vchannel string)) *MockShardManager_GetSplitTimeTick_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(int64), args[1].(string))
 	})
 	return _c
 }
@@ -1098,7 +1194,7 @@ func (_c *MockShardManager_GetSplitTimeTick_Call) Return(_a0 uint64) *MockShardM
 	return _c
 }
 
-func (_c *MockShardManager_GetSplitTimeTick_Call) RunAndReturn(run func(int64) uint64) *MockShardManager_GetSplitTimeTick_Call {
+func (_c *MockShardManager_GetSplitTimeTick_Call) RunAndReturn(run func(int64, string) uint64) *MockShardManager_GetSplitTimeTick_Call {
 	_c.Call.Return(run)
 	return _c
 }

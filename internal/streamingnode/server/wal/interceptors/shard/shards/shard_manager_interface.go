@@ -16,15 +16,27 @@ type ShardManager interface {
 
 	CheckIfCollectionExists(collectionID int64) error
 
-	// CheckIfVChannelCanBeWritten checks if the vchannel of the collection
-	// still accepts new DML. It returns ErrVChannelFenced if the vchannel
-	// has been fenced by shard split.
-	CheckIfVChannelCanBeWritten(collectionID int64) error
+	// CheckIfVChannelCanBeWritten checks if the named vchannel of the collection
+	// still accepts new DML. It returns ErrVChannelFenced if the vchannel has
+	// been fenced by shard split, and ErrCollectionNotFound if this pchannel
+	// does not hold that vchannel.
+	CheckIfVChannelCanBeWritten(collectionID int64, vchannel string) error
 
-	// GetSplitTimeTick returns T_switch (the time tick the collection's vchannel
-	// was fenced at by shard split), or 0 if the collection is unknown or not
-	// fenced. It is read on an already-fenced re-fence to recover T_switch.
-	GetSplitTimeTick(collectionID int64) uint64
+	// CheckIfVChannelCanBeCreated checks if the named vchannel can be
+	// registered on this pchannel. It returns ErrCollectionExists for an
+	// idempotent replay of the same vchannel, and ErrVChannelConflict when
+	// another vchannel of the same collection already holds the entry.
+	CheckIfVChannelCanBeCreated(collectionID int64, vchannel string) error
+
+	// CheckIfVChannelCanBeDropped checks if the named vchannel may be retired.
+	// It returns ErrVChannelNotFenced when this pchannel holds the vchannel and
+	// no shard split has fenced it, so a live shard is never torn down.
+	CheckIfVChannelCanBeDropped(collectionID int64, vchannel string) error
+
+	// GetSplitTimeTick returns T_switch (the time tick the named vchannel was
+	// fenced at by shard split), or 0 if the vchannel is unknown or not fenced.
+	// It is read on an already-fenced re-fence to recover T_switch.
+	GetSplitTimeTick(collectionID int64, vchannel string) uint64
 
 	// SplitShard marks the vchannel of the collection as splitted (fenced)
 	// when a SplitShard message is written into the wal. After it is called,
