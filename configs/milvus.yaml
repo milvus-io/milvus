@@ -351,6 +351,24 @@ rootCoord:
   maxDatabaseNum: 64 # Maximum number of database
   maxGeneralCapacity: 65536 # upper limit for the sum of of product of partitionNumber and shardNumber
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
+  clientTelemetry:
+    cleanupInterval: 60 # seconds. How often to sweep clients that stopped heartbeating and commands that expired.
+    inactiveClientThreshold: 600 # seconds. How long a client may go without a heartbeat before it is dropped from memory entirely.
+    # seconds. How long a client may go without a heartbeat before it is reported as inactive.
+    # It is still kept, and still reported, until inactiveClientThreshold.
+    clientStatusThreshold: 60
+    commandCleanupTimeout: 10 # seconds. Timeout for the etcd operations that remove expired client commands.
+    # bytes. Largest metrics payload accepted from one client per heartbeat; anything beyond is truncated.
+    # Zero removes the cap entirely, unlike the other limits here, where a non-positive value falls back to the default.
+    maxMetricsPerClient: 1048576
+    maxOperationTypesPerClient: 100 # Largest number of distinct operation types kept per client; anything beyond is truncated.
+    maxClientsInMemory: 100000 # Largest number of clients tracked at once, so a misconfigured or malicious fleet cannot grow this memory without bound.
+    # How many heartbeat windows to keep per client.
+    # A telemetry query is answered from the oldest window kept, so this is also how far the answer lags
+    # the client and how many consecutive idle intervals it survives: at 2, one interval without traffic
+    # cannot blank the view; at 3, two cannot. Each extra window is another copy of every operation and
+    # per-collection breakdown for every connected client. Values below 1 are treated as the default.
+    retainedWindows: 2
   ip:  # TCP/IP address of rootCoord. If not specified, use the first unicastable address
   port: 22125 # TCP port of rootCoord
   grpc:
@@ -371,7 +389,7 @@ proxy:
   maxFieldNum: 256 # The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 256.
   maxVectorFieldNum: 10 # The maximum number of vector fields that can be specified in a collection
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
-  maxMembershipFilterSize: 67108864 # The maximum byte size of one client pre-built bloom_match or roaring_match filter body accepted by the proxy (the fixed 32-byte MBF1/MRB1 header is allowed on top). The blob is embedded into the query plan and fanned out to every QueryNode, so this bounds per-membership-filter memory/network amplification. Must not exceed the format cap (128 MiB). Bloom SBBF bodies are powers of two, so the default admits bodies up to 64 MiB: ~48.6M int64 members at the default fpr=0.005, ~55.4M at fpr=0.01. Raising the member count past a tier boundary requires raising the fpr too, not only this limit. Roaring filters remain independently limited to 262144 high containers and a 64 MiB decoded-memory estimate per filter. Keep proxy.grpc.serverMaxRecvSize above this plus the rest of the request.
+  maxMembershipFilterSize: 67108864 # The maximum byte size of one client pre-built membership_match filter body accepted by the proxy (the fixed 32-byte MBF1/MRB1 header is allowed on top). The blob is embedded into the query plan and fanned out to every QueryNode, so this bounds per-membership-filter memory/network amplification. Must not exceed the format cap (128 MiB). Bloom SBBF bodies are powers of two, so the default admits bodies up to 64 MiB: ~48.6M int64 members at the default fpr=0.005, ~55.4M at fpr=0.01. Raising the member count past a tier boundary requires raising the fpr too, not only this limit. Roaring filters remain independently limited to 262144 high containers and a 64 MiB decoded-memory estimate per filter. Keep proxy.grpc.serverMaxRecvSize above this plus the rest of the request.
   maxMembershipFilterPlanSize: 134217728 # The maximum aggregate serialized byte size of membership-filter-bearing expression plans in one Search, HybridSearch, Query, or complex Delete request. The proxy checks the assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches share the configured budget. Must be positive; invalid values fall back to 128 MiB.
   maxDimension: 32768 # The maximum number of dimensions of a vector can have when creating in a collection.
   # Whether to produce gin logs.\n
@@ -623,7 +641,7 @@ queryNode:
     storageV2:
       cellTargetSizeBytes: 4194304 # Target average byte size per storage v2 cache cell. Parquet row groups are greedily packed so that rgs_per_cell * avg_row_group_size ≈ this target. Each cell always contains at least one row group and cells never cross file boundaries. Tune larger for bigger batch IO (fewer cells) or smaller to get finer cache granularity. Default 4 MiB.
     deleteDumpBatchSize: 10000 # Batch size for delete snapshot dump in segcore.
-  fmindexCostRatio: 0.001 # FM-index count-first guard threshold. An FMINDEX-accelerated LIKE prefix/infix/suffix runs through the index only when occ * sa_sample_rate < fmindexCostRatio * total_tokens; otherwise it falls back to the raw-data scan (both paths are exact, this only picks the cheaper one). Normalized by tokens (bytes), not rows, so it is row-length invariant. Must be in (0, 1]; larger favors the index. Default 0.001 is the conservative crossover measured in benchmarks.
+  fmindexCostRatio: 0.001 # FM-index count-first guard threshold. An FMINDEX-accelerated LIKE (prefix/infix/suffix and general LIKE with interior wildcards) runs through the index only when occ * sa_sample_rate < fmindexCostRatio * total_tokens; otherwise it falls back to the raw-data scan (all paths are exact, this only picks the cheaper one). For the anchored forms the index answer is exact; for general LIKE it is candidate generation followed by an exact recheck of the candidate rows on the original VARCHAR data. The bound prices only FM locate, not the recheck bytes, so it stays row-length invariant only for the anchored forms; very long rows with unselective fragments may be routed to a path slower than the scan. Must be in (0, 1]; larger favors the index. Default 0.001 is the conservative crossover measured in benchmarks.
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
@@ -1108,6 +1126,7 @@ common:
   storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote], value minio is deprecated, use remote instead
   storage:
     manifestTransactionRetryLimit: 10 # Maximum number of retry attempts for V3 storage manifest transaction commits on optimistic concurrency conflicts
+    useArrowFileSystemChunkManager: false # Whether segcore routes chunk manager IO (segment load, index build/load) through the milvus-storage Arrow FileSystem, unified with storage v2. Applies to both remote and local storage types; when false, the legacy chunk managers are used. Not effective for cloudProvider=gcpnative, which always uses the legacy implementation.
     stv2:
       splitSystemColumn:
         enabled: true # enable split system column policy in storage v2
@@ -1117,6 +1136,20 @@ common:
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
     useLoonFFI: false
     enableGrowingSourceFlush: false # enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path
+    iops:
+      # Initial ObjectStore request rate used by the Lance AIMD limiter for External Table reads.
+      # The value must be greater than 0. Values above a positive maxRate are reduced to maxRate.
+      # The default matches the milvus-storage default.
+      initialRate: 2000
+      # Maximum request rate allowed by the Lance AIMD limiter for External Table reads.
+      # Set to 0 to disable the rate ceiling. This is not a strict aggregate limit across all filesystem instances.
+      # The default matches the milvus-storage default.
+      maxRate: 5000
+    externalVector:
+      # Policy for parent-valid external dense-vector rows containing a mix of valid and null child elements.
+      # Options: error, null. error rejects the row as malformed input; null promotes the whole row to a row-level null when the field is nullable.
+      # Rows whose child elements are all null are always promoted to row-level null for nullable fields, regardless of this setting.
+      partialNullPolicy: error
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
@@ -1154,8 +1187,6 @@ common:
     defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
-    exprEnabled: false # Whether to enable the /expr endpoint for debugging.
-    exprAuthMode: rootOnly # Authentication mode for the /expr endpoint. Valid values: rootOnly, rbac. rootOnly accepts only the root credentials via HTTP Basic Auth. rbac requires common.security.authorizationEnabled=true and grants access to any user holding the Expr privilege.
     internaltlsEnabled: false
     tlsMode: 0
   session:
@@ -1187,6 +1218,8 @@ common:
   preferIPv6: false
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
+  nodeScheduler:
+    maxConcurrencyRatio: 2 # Maximum number of tasks executed concurrently by the process-level node scheduler, expressed as a ratio of CPU cores. Must be greater than zero; 2 by default.
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
   enableDriverPrefetch: false # Indicates whether to enable query driver prefetch in segcore.
   enabledJSONShredding: true # Indicates sealedsegment whether to enable JSON key stats

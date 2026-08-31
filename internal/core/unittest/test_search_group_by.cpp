@@ -48,7 +48,6 @@
 #include "query/Plan.h"
 #include "query/Utils.h"
 #include "segcore/Collection.h"
-#include "segcore/ReduceStructure.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"

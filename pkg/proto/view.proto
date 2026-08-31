@@ -18,6 +18,26 @@ message DataVersion {
     int64 compact_version = 2;
 }
 
+// DataViewOfCollection is the immutable storage snapshot used to build QueryViews.
+message DataViewOfCollection {
+    int64 collection_id = 1;
+    repeated DataViewOfShard shards = 2;
+    DataVersion data_version = 3;
+}
+
+// DataViewOfShard is the immutable storage snapshot for one vchannel.
+message DataViewOfShard {
+    string vchannel = 1;
+    repeated DataViewOfPartition partitions = 2;
+    uint64 transform_start_after_timetick = 3;
+}
+
+// DataViewOfPartition lists the sealed segments in one partition.
+message DataViewOfPartition {
+    int64 partition_id = 1;
+    repeated int64 segment_ids = 2;
+}
+
 // QueryViewState represents the distributed lifecycle of a QueryView.
 enum QueryViewState {
     QueryViewStateUnknown = 0;

@@ -1572,13 +1572,6 @@ class InsertRecordGrowing {
         return pk2offset_->empty();
     }
 
-    void
-    seal_pks() {
-        std::lock_guard lck(shared_mutex_);
-        pk2offset_
-            ->seal();  // will throw for growing map, consistent with previous behavior
-    }
-
     const ConcurrentVector<Timestamp>&
     timestamps() const {
         return timestamps_;

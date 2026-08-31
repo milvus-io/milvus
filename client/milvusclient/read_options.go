@@ -207,7 +207,7 @@ func any2TmplValue(val any) (*schemapb.TemplateValue, error) {
 		// Same raw-bytes carriage as BloomFilterBlob. The two are distinct Go
 		// types rather than one []byte alias so the builders cannot be mixed up
 		// where a concrete type is expected. Note this does NOT catch pairing a
-		// bloom blob with a roaring_match expression: WithTemplateParam takes
+		// bloom blob with membership_match(..., type=roaring): WithTemplateParam takes
 		// any and the expression is a string, so nothing ties the two together
 		// at the call site. That mismatch is rejected by the Proxy on the
 		// envelope magic.

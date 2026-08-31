@@ -1455,7 +1455,7 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
                     check_task=CheckTasks.err_res,
                     check_items={
                         ct.err_code: 1100,
-                        ct.err_msg: "function rerank is not supported with search iterator v2",
+                        ct.err_msg: "function rerank is not supported with search iterator",
                     },
                 )
                 return

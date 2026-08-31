@@ -47,6 +47,15 @@ func validateFunctionChainSearchRequest(request *milvuspb.SearchRequest, isAdvan
 	return nil
 }
 
+func hasFunctionChainStage(chains []*schemapb.FunctionChain, target schemapb.FunctionChainStage) bool {
+	for _, chainPB := range chains {
+		if chainPB != nil && chainPB.GetStage() == target {
+			return true
+		}
+	}
+	return false
+}
+
 func splitFunctionChainsByStage(chains []*schemapb.FunctionChain) ([]*schemapb.FunctionChain, []*schemapb.FunctionChain, error) {
 	l2Chains := make([]*schemapb.FunctionChain, 0)
 	querynodeChains := make([]*schemapb.FunctionChain, 0)
@@ -65,10 +74,9 @@ func splitFunctionChainsByStage(chains []*schemapb.FunctionChain) ([]*schemapb.F
 		switch stage {
 		case schemapb.FunctionChainStage_FunctionChainStageL2Rerank:
 			l2Chains = append(l2Chains, chainPB)
-		case schemapb.FunctionChainStage_FunctionChainStageL0Rerank:
+		case schemapb.FunctionChainStage_FunctionChainStageL0Rerank,
+			schemapb.FunctionChainStage_FunctionChainStageL1Rerank:
 			querynodeChains = append(querynodeChains, chainPB)
-		case schemapb.FunctionChainStage_FunctionChainStageL1Rerank:
-			return nil, nil, merr.WrapErrParameterInvalidMsg("function chain[%d] stage %s is not supported yet", i, stage.String())
 		default:
 			return nil, nil, merr.WrapErrParameterInvalidMsg("function chain[%d] stage %s is not supported in search request", i, stage.String())
 		}
@@ -173,7 +181,7 @@ func validateL2RerankSystemNames(repr *chain.ChainRepr) error {
 				return merr.WrapErrParameterInvalidMsg("op[%d] input %q: %v", opIdx, input, err)
 			}
 		}
-		for _, output := range op.WriteNames {
+		for _, output := range repr.Operators[opIdx].Outputs {
 			if !chain.IsFunctionChainSystemName(output) {
 				continue
 			}

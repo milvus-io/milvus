@@ -490,3 +490,107 @@ func (crr *CompositeBinlogRecordReader) releaseCurrent() {
 		crr.current = nil
 	}
 }
+
+// NewAbsentFieldFillRecordReader completes a partial record to full read-schema
+// width the way V1's CompositeBinlogRecordReader does: every read-schema field NOT
+// physically present (FieldID not in presentFields) is filled via
+// GenerateEmptyArrayFromSchema -- its declared default when it has one, else null,
+// erroring on a non-nullable absent field. Present columns pass through from inner.
+// This gives the packed StorageV3 manifest reader the same default-for-absent
+// semantic the V1 binlog reader already applies, so it stops presenting declared
+// defaults as NULL (issue #52771). presentFields is the physically-present field
+// set -- self-sourced from the manifest, or supplied by a caller that already
+// computed it (compaction via WithPresentFields). Returns inner unchanged when
+// nothing is absent.
+func NewAbsentFieldFillRecordReader(inner RecordReader, neededSchema *schemapb.CollectionSchema, presentFields map[FieldID]struct{}) RecordReader {
+	fill := make([]*schemapb.FieldSchema, 0)
+	for _, f := range typeutil.GetAllFieldSchemas(neededSchema) {
+		if _, present := presentFields[f.GetFieldID()]; present {
+			continue
+		}
+		fill = append(fill, f)
+	}
+	if len(fill) == 0 {
+		return inner
+	}
+	return &absentFieldFillRecordReader{inner: inner, fill: fill}
+}
+
+type absentFieldFillRecordReader struct {
+	inner RecordReader
+	fill  []*schemapb.FieldSchema
+	cur   *absentFilledRecord
+}
+
+var _ RecordReader = (*absentFieldFillRecordReader)(nil)
+
+func (r *absentFieldFillRecordReader) Next() (Record, error) {
+	r.releaseCur()
+	base, err := r.inner.Next()
+	if err != nil {
+		return nil, err
+	}
+	computed := make(map[FieldID]arrow.Array, len(r.fill))
+	for _, f := range r.fill {
+		arr, genErr := GenerateEmptyArrayFromSchema(f, base.Len())
+		if genErr != nil {
+			for _, a := range computed {
+				a.Release()
+			}
+			return nil, genErr
+		}
+		computed[f.GetFieldID()] = arr
+	}
+	base.Retain()
+	r.cur = &absentFilledRecord{base: base, computed: computed}
+	return r.cur, nil
+}
+
+func (r *absentFieldFillRecordReader) releaseCur() {
+	if r.cur == nil {
+		return
+	}
+	r.cur.Release()
+	r.cur = nil
+}
+
+func (r *absentFieldFillRecordReader) Close() error {
+	r.releaseCur()
+	if r.inner == nil {
+		return nil
+	}
+	return r.inner.Close()
+}
+
+// absentFilledRecord overlays filled columns onto base (the present columns). It
+// owns a retained ref on base plus the filled arrays; Release drops both, so the
+// wrapping reader frees them by releasing this record on its next Next/Close.
+type absentFilledRecord struct {
+	base     Record
+	computed map[FieldID]arrow.Array
+}
+
+var _ Record = (*absentFilledRecord)(nil)
+
+func (r *absentFilledRecord) Column(i FieldID) arrow.Array {
+	if col, ok := r.computed[i]; ok {
+		return col
+	}
+	return r.base.Column(i)
+}
+
+func (r *absentFilledRecord) Len() int { return r.base.Len() }
+
+func (r *absentFilledRecord) Retain() {
+	r.base.Retain()
+	for _, col := range r.computed {
+		col.Retain()
+	}
+}
+
+func (r *absentFilledRecord) Release() {
+	r.base.Release()
+	for _, col := range r.computed {
+		col.Release()
+	}
+}

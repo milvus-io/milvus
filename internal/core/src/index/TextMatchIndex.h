@@ -130,8 +130,9 @@ class TextMatchIndexHolder {
                   return milvus::cachinglayer::ResourceUsage(0, 0);
               }
               if (mmap_enabled) {
+                  auto bitmap_bytes = index_->ValidityBitmapByteSize();
                   return milvus::cachinglayer::ResourceUsage(
-                      0, index_->ByteSize());
+                      bitmap_bytes, index_->ByteSize() - bitmap_bytes);
               } else {
                   return milvus::cachinglayer::ResourceUsage(index_->ByteSize(),
                                                              0);

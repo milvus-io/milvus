@@ -43,6 +43,7 @@
 #include "google/protobuf/util/message_differencer.h"
 #include "gtest/gtest.h"
 #include "milvus-storage/common/config.h"
+#include "mmap/ChunkedColumn.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "plan/PlanNode.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
@@ -431,6 +432,8 @@ TEST(ArrayValue, ScalarLeavesRoundTrip) {
         ASSERT_EQ(array.byte_size(), 2 * sizeof(int32_t) + MMAP_ARRAY_PADDING);
         ASSERT_EQ(array.View().get_data<int16_t>(0), -3);
         ASSERT_EQ(array.View().get_data<int16_t>(1), 7);
+        ASSERT_EQ(array.View().get_data<int64_t>(0), -3);
+        ASSERT_EQ(array.View().get_data<int64_t>(1), 7);
         AssertProtoEqual(row, array.output_data());
     }
     {
@@ -725,10 +728,8 @@ TEST(ArrayValue, RecursiveSchemaSelectsStorageFieldData) {
 TEST(ArrayValue, NullableBackfillSharesNullStorage) {
     auto type =
         NestedArrayType(LeafArrayType(proto::schema::DataType::Int32), true);
-    auto field_data = storage::CreateFieldData(
-        DataType::ARRAY, DataType::NONE, true, 1, 0, type);
-
-    field_data->FillFieldData(std::nullopt, 3);
+    auto field_data = storage::CreateFieldDataFromDefaultValue(
+        DataType::ARRAY, true, 3, std::nullopt, type);
 
     ASSERT_EQ(field_data->get_num_rows(), 3);
     ASSERT_EQ(field_data->get_null_count(), 3);
@@ -879,9 +880,14 @@ TEST(ArrayValue, GrowingSegmentInsertAndRetrieveNestedArray) {
     const auto array_field = FieldId(pk.get() + 1);
     schema->AddField(NestedArrayFieldMeta(array_field, type));
 
-    auto segment = segcore::CreateGrowingSegment(schema, empty_index_meta);
+    auto config = segcore::SegcoreConfig::default_config();
+    config.set_chunk_rows(2);
+    auto segment =
+        segcore::CreateGrowingSegment(schema, empty_index_meta, 1, config);
     auto row0 = NestedArrayRow(proto::schema::DataType::Int32,
                                {IntArrayRow({1}), IntArrayRow({2, 3})});
+    auto null_row_payload =
+        NestedArrayRow(proto::schema::DataType::Int32, {IntArrayRow({99})});
     auto row2 = NestedArrayRow(proto::schema::DataType::Int32, {});
 
     InsertRecordProto insert;
@@ -896,13 +902,13 @@ TEST(ArrayValue, GrowingSegmentInsertAndRetrieveNestedArray) {
     auto* nested_data = insert.add_fields_data();
     nested_data->set_field_id(array_field.get());
     nested_data->set_type(proto::schema::DataType::Array);
-    nested_data->add_valid_data(true);
-    nested_data->add_valid_data(false);
-    nested_data->add_valid_data(true);
+    nested_data->mutable_scalars()->add_valid_data(true);
+    nested_data->mutable_scalars()->add_valid_data(false);
+    nested_data->mutable_scalars()->add_valid_data(true);
     auto* array_data = nested_data->mutable_scalars()->mutable_array_data();
     array_data->set_element_type(proto::schema::DataType::Array);
     *array_data->add_data() = row0;
-    array_data->add_data();
+    *array_data->add_data() = null_row_payload;
     *array_data->add_data() = row2;
 
     std::vector<int64_t> row_ids{100, 101, 102};
@@ -923,9 +929,39 @@ TEST(ArrayValue, GrowingSegmentInsertAndRetrieveNestedArray) {
     ASSERT_EQ(result_arrays.element_type(), proto::schema::DataType::Array);
     ASSERT_EQ(result_arrays.data_size(), 3);
     AssertProtoEqual(row0, result_arrays.data(0));
-    ASSERT_EQ(result_arrays.data(1).data_case(),
-              ScalarFieldProto::DATA_NOT_SET);
+    AssertProtoEqual(null_row_payload, result_arrays.data(1));
     AssertProtoEqual(row2, result_arrays.data(2));
+
+    auto first_batch = segment->chunk_view<ArrayValueView>(
+        nullptr, array_field, 0, std::make_pair(0, 2));
+    const auto& [first_batch_views, first_batch_valid_data] = first_batch.get();
+    ASSERT_EQ(first_batch_views.size(), 2);
+    ASSERT_TRUE(first_batch_valid_data);
+    ASSERT_TRUE(first_batch_valid_data[0]);
+    ASSERT_FALSE(first_batch_valid_data[1]);
+    AssertProtoEqual(row0, first_batch_views[0].output_data());
+    ASSERT_FALSE(first_batch_views[1].is_null());
+    AssertProtoEqual(null_row_payload, first_batch_views[1].output_data());
+
+    auto selected = segment->chunk_views_by_offsets<ArrayValueView>(
+        nullptr, array_field, 0, {1, 0});
+    const auto& [selected_views, selected_valid_data] = selected.get();
+    ASSERT_EQ(selected_views.size(), 2);
+    ASSERT_EQ(selected_valid_data.size(), 2);
+    ASSERT_FALSE(selected_views[0].is_null());
+    AssertProtoEqual(null_row_payload, selected_views[0].output_data());
+    ASSERT_FALSE(selected_valid_data[0]);
+    AssertProtoEqual(row0, selected_views[1].output_data());
+    ASSERT_TRUE(selected_valid_data[1]);
+
+    auto second_batch = segment->chunk_view<ArrayValueView>(
+        nullptr, array_field, 1, std::make_pair(0, 1));
+    const auto& [second_batch_views, second_batch_valid_data] =
+        second_batch.get();
+    ASSERT_EQ(second_batch_views.size(), 1);
+    ASSERT_TRUE(second_batch_valid_data);
+    AssertProtoEqual(row2, second_batch_views[0].output_data());
+    ASSERT_TRUE(second_batch_valid_data[0]);
 }
 
 TEST(ColumnarArrayChunk, WriterAndChunkShareOneContiguousBuffer) {
@@ -1025,6 +1061,43 @@ TEST(ColumnarArrayChunk, SealedFactoriesUseRecursiveChunk) {
     ASSERT_TRUE(array_chunk->View(1).is_null());
     AssertProtoEqual(row2, array_chunk->output_data(2));
 
+    auto verify_views = [&](ChunkedColumnInterface& column) {
+        auto batch = column.ArrayValueViews(nullptr, 0, std::make_pair(0, 3));
+        auto selected = column.ArrayValueViewsByOffsets(nullptr, 0, {2, 0, 1});
+        column.ManualEvictCache();
+
+        const auto& [batch_views, batch_valid_data] = batch.get();
+        ASSERT_EQ(batch_views.size(), 3);
+        ASSERT_TRUE(batch_valid_data);
+        AssertProtoEqual(row0, batch_views[0].output_data());
+        ASSERT_TRUE(batch_valid_data[0]);
+        ASSERT_TRUE(batch_views[1].is_null());
+        ASSERT_FALSE(batch_valid_data[1]);
+        AssertProtoEqual(row2, batch_views[2].output_data());
+        ASSERT_TRUE(batch_valid_data[2]);
+
+        const auto& [selected_views, selected_valid_data] = selected.get();
+        ASSERT_EQ(selected_views.size(), 3);
+        ASSERT_EQ(selected_valid_data.size(), 3);
+        AssertProtoEqual(row2, selected_views[0].output_data());
+        ASSERT_TRUE(selected_valid_data[0]);
+        AssertProtoEqual(row0, selected_views[1].output_data());
+        ASSERT_TRUE(selected_valid_data[1]);
+        ASSERT_TRUE(selected_views[2].is_null());
+        ASSERT_FALSE(selected_valid_data[2]);
+    };
+
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    chunks.push_back(std::move(chunk));
+    auto translator =
+        std::make_unique<TestChunkTranslator>(std::vector<int64_t>{3},
+                                              "recursive_array_value_views_v1",
+                                              std::move(chunks));
+    auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+        std::move(translator), nullptr);
+    ChunkedArrayColumn column(std::move(slot), field_meta);
+    verify_views(column);
+
     std::vector<FieldId> field_ids{field_id};
     std::vector<FieldMeta> field_metas{field_meta};
     std::vector<arrow::ArrayVector> column_arrays{arrays};
@@ -1036,6 +1109,21 @@ TEST(ColumnarArrayChunk, SealedFactoriesUseRecursiveChunk) {
     AssertProtoEqual(row0, group_chunk->output_data(0));
     ASSERT_TRUE(group_chunk->View(1).is_null());
     AssertProtoEqual(row2, group_chunk->output_data(2));
+
+    std::vector<std::unique_ptr<GroupChunk>> storage_v2_chunks;
+    storage_v2_chunks.push_back(
+        std::make_unique<GroupChunk>(std::move(group_chunks)));
+    group_chunks.clear();
+    group_chunk.reset();
+    auto group_translator = std::make_unique<TestGroupChunkTranslator>(
+        1,
+        std::vector<int64_t>{3},
+        "recursive_array_value_views_v2",
+        std::move(storage_v2_chunks));
+    auto group =
+        std::make_shared<ChunkedColumnGroup>(std::move(group_translator));
+    ProxyChunkColumn proxy_column(group, field_id, field_meta);
+    verify_views(proxy_column);
 }
 
 TEST(ColumnarArrayChunk, SealedArrayOffsetsUseRecursiveRootOffsets) {

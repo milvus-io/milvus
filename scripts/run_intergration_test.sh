@@ -45,7 +45,6 @@ TEST_CMD_WITH_ARGS=(
     -coverpkg=./...
     -coverprofile=profile.out
     -covermode=atomic
-    -caseTimeout=20m
     -timeout=60m
     -ldflags="-r ${RPATH}"
 )
@@ -54,7 +53,10 @@ function test_cmd() {
     mapfile -t PKGS < <(go list -tags dynamic,test ./...)
     for pkg in "${PKGS[@]}"; do
         echo -e "-----------------------------------\nRunning test cases at $pkg ..." 
-        "${TEST_CMD_WITH_ARGS[@]}" "$pkg"
+        # Custom test-binary flags must follow the package operand. Otherwise
+        # go test forwards "$pkg" to the test binary and silently runs the
+        # current root package for every entry returned by go list.
+        "${TEST_CMD_WITH_ARGS[@]}" "$pkg" -caseTimeout=20m
         if [ -f profile.out ]; then
             # Skip the per-profile header to keep a single global "mode:" line
             # Skip the packages that are not covered by the test

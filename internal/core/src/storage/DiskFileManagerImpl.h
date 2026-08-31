@@ -128,9 +128,6 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     GetLocalJsonStatsSharedIndexPrefix();
 
-    std::string
-    GetLocalJsonStatsShreddingPath(const std::string& file_name);
-
     // Used for upload index to remote storage, using this index prefix dir as remote storage directory
     std::string
     GetLocalNgramIndexPrefix();
@@ -240,11 +237,6 @@ class DiskFileManagerImpl : public FileManagerImpl {
     GetFileName(const std::string& localfile);
 
  private:
-    int64_t
-    GetIndexBuildId() {
-        return index_meta_.build_id;
-    }
-
     std::string
     GetRemoteIndexPath(const std::string& file_name, int64_t slice_num) const;
 

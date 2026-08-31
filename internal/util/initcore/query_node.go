@@ -185,6 +185,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := InitExternalVectorNullPolicy(paramtable.Get()); err != nil {
+		return err
+	}
 
 	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, nodeID)
 
@@ -192,12 +195,19 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		return err
 	}
 
+	SetArrowFSChunkManagerEnabled(paramtable.Get())
 	err = InitRemoteChunkManager(paramtable.Get())
 	if err != nil {
 		return err
 	}
 
 	err = InitDiskFileWriterConfig(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
+	// Publish the External Table IOPS policy once for native Segcore readers.
+	err = InitExternalIopsConfig(paramtable.Get())
 	if err != nil {
 		return err
 	}

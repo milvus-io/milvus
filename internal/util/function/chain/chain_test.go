@@ -137,44 +137,6 @@ func (s *ChainTestSuite) TestFuncChainString() {
 }
 
 // =============================================================================
-// SelectOp Tests
-// =============================================================================
-
-func (s *ChainTestSuite) TestSelectOp() {
-	df := s.createTestDataFrame()
-	defer df.Release()
-
-	result, err := NewFuncChainWithAllocator(s.pool).
-		SetStage(types.StageL2Rerank).
-		Select(types.IDFieldName, "age").
-		Execute(df)
-	s.Require().NoError(err)
-	defer result.Release()
-
-	// Verify selected non-system columns exist and unselected non-system columns are removed.
-	// System columns are preserved by SelectOp because downstream reduce paths may need them.
-	s.True(result.HasColumn(types.IDFieldName))
-	s.True(result.HasColumn(types.ScoreFieldName))
-	s.True(result.HasColumn("age"))
-	s.False(result.HasColumn("name"))
-
-	// Verify data integrity
-	s.Equal(df.NumRows(), result.NumRows())
-	s.Equal(df.NumChunks(), result.NumChunks())
-}
-
-func (s *ChainTestSuite) TestSelectOp_NonExistentColumn() {
-	df := s.createTestDataFrame()
-	defer df.Release()
-
-	_, err := NewFuncChainWithAllocator(s.pool).
-		SetStage(types.StageL2Rerank).
-		Select("nonexistent").
-		Execute(df)
-	s.Error(err)
-}
-
-// =============================================================================
 // FilterOp Tests
 // =============================================================================
 
@@ -474,11 +436,10 @@ func (s *ChainTestSuite) TestChainedOperations() {
 	df := s.createTestDataFrame()
 	defer df.Release()
 
-	// Filter -> Select -> Sort -> Limit
+	// Filter -> Sort -> Limit
 	result, err := NewFuncChainWithAllocator(s.pool).
 		SetStage(types.StageL2Rerank).
 		Filter(&MockFilterFunction{threshold: 0.3}, []string{types.ScoreFieldName}).
-		Select(types.IDFieldName, types.ScoreFieldName, "age").
 		Sort(types.ScoreFieldName, true, types.IDFieldName). // descending
 		Limit(3).
 		Execute(df)
@@ -489,7 +450,7 @@ func (s *ChainTestSuite) TestChainedOperations() {
 	s.True(result.HasColumn(types.IDFieldName))
 	s.True(result.HasColumn(types.ScoreFieldName))
 	s.True(result.HasColumn("age"))
-	s.False(result.HasColumn("name"))
+	s.True(result.HasColumn("name"))
 }
 
 // =============================================================================
@@ -503,7 +464,6 @@ func (s *ChainTestSuite) TestMemoryLeak_ChainedOperations() {
 		result, err := NewFuncChainWithAllocator(s.pool).
 			SetStage(types.StageL2Rerank).
 			Map(&MockAddColumnFunction{value: 1}, []string{types.IDFieldName}, []string{"temp"}).
-			Select(types.IDFieldName, "age", "temp").
 			Limit(3).
 			Execute(df)
 		s.Require().NoError(err)
@@ -684,22 +644,6 @@ func (s *ChainTestSuite) TestMemoryLeak_FilterOpError_NonExistentColumn() {
 	// Memory leak check happens in TearDownTest
 }
 
-func (s *ChainTestSuite) TestMemoryLeak_SelectOpError_NonExistentColumn() {
-	// Test: Select fails because column doesn't exist
-	for range 10 {
-		df := s.createTestDataFrame()
-
-		_, err := NewFuncChainWithAllocator(s.pool).
-			SetStage(types.StageL2Rerank).
-			Select(types.IDFieldName, "non_existent_column").
-			Execute(df)
-		s.Require().Error(err)
-
-		df.Release()
-	}
-	// Memory leak check happens in TearDownTest
-}
-
 func (s *ChainTestSuite) TestMemoryLeak_SortOpError_NonExistentColumn() {
 	// Test: Sort fails because column doesn't exist
 	for range 10 {
@@ -724,7 +668,7 @@ func (s *ChainTestSuite) TestMemoryLeak_ChainedError_MiddleOperatorFails() {
 		_, err := NewFuncChainWithAllocator(s.pool).
 			SetStage(types.StageL2Rerank).
 			Map(&MockAddColumnFunction{value: 1}, []string{types.IDFieldName}, []string{"temp"}).
-			Select("non_existent"). // This will fail
+			Sort("non_existent", true, types.IDFieldName). // This will fail
 			Limit(5).
 			Execute(df)
 		s.Require().Error(err)
@@ -839,10 +783,6 @@ func (s *ChainTestSuite) TestOperatorStrings() {
 	filterOp, _ := NewFilterOp(&MockFilterFunction{threshold: 0.5}, []string{"score"})
 	s.Equal("Filter(MockFilter)", filterOp.String())
 
-	// SelectOp
-	selectOp := NewSelectOp([]string{"a", "b"})
-	s.Contains(selectOp.String(), "Select")
-
 	// SortOp
 	sortOpAsc := newSortOp("col", false, types.IDFieldName)
 	s.Equal("Sort(col ASC, $id ASC)", sortOpAsc.String())
@@ -892,22 +832,6 @@ func (s *ChainTestSuite) TestEmptyChain() {
 	s.Equal(df, result)
 }
 
-func (s *ChainTestSuite) TestSelectOp_AllColumns() {
-	df := s.createTestDataFrame()
-	defer df.Release()
-
-	// Select all columns
-	result, err := NewFuncChainWithAllocator(s.pool).
-		SetStage(types.StageL2Rerank).
-		Select(types.IDFieldName, types.ScoreFieldName, "age", "name").
-		Execute(df)
-	s.Require().NoError(err)
-	defer result.Release()
-
-	s.Equal(df.NumColumns(), result.NumColumns())
-	s.Equal(df.NumRows(), result.NumRows())
-}
-
 func (s *ChainTestSuite) TestLimitOp_ZeroLimit() {
 	df := s.createTestDataFrame()
 	defer df.Release()
@@ -927,7 +851,6 @@ func (s *ChainTestSuite) TestLimitOp_ZeroLimit() {
 func (s *ChainTestSuite) TestValidate_ValidChain() {
 	fc := NewFuncChainWithAllocator(s.pool).
 		SetStage(types.StageL2Rerank).
-		Select(types.IDFieldName, "age").
 		Sort("age", false, types.IDFieldName).
 		Limit(10)
 
@@ -958,7 +881,6 @@ func (s *ChainTestSuite) TestValidate_BuildError() {
 func (s *ChainTestSuite) TestValidate_MissingStage() {
 	// Chain without stage should fail validation
 	fc := NewFuncChainWithAllocator(s.pool).
-		Select(types.IDFieldName, "age").
 		Limit(10)
 
 	err := fc.Validate()
@@ -1194,7 +1116,6 @@ func (s *ChainTestSuite) TestExecuteWithContext_Cancellation() {
 	// Execute with canceled context
 	_, err := NewFuncChainWithAllocator(s.pool).
 		SetStage(types.StageL2Rerank).
-		Select(types.IDFieldName, "age").
 		Sort("age", false, types.IDFieldName).
 		Limit(10).
 		ExecuteWithContext(goCtx, df)
@@ -1211,7 +1132,6 @@ func (s *ChainTestSuite) TestExecuteWithContext_Success() {
 
 	result, err := NewFuncChainWithAllocator(s.pool).
 		SetStage(types.StageL2Rerank).
-		Select(types.IDFieldName, "age").
 		Sort("age", false, types.IDFieldName).
 		Limit(2).
 		ExecuteWithContext(goCtx, df)
@@ -1348,11 +1268,6 @@ func (s *ChainTestSuite) TestOperatorInputsOutputs() {
 	filterOp, _ := NewFilterOp(&MockFilterFunction{threshold: 0.5}, []string{"filter_col"})
 	s.Equal([]string{"filter_col"}, filterOp.Inputs())
 	s.Empty(filterOp.Outputs())
-
-	// SelectOp
-	selectOp := NewSelectOp([]string{"a", "b", "c"})
-	s.Equal([]string{"a", "b", "c"}, selectOp.Inputs())
-	s.Equal([]string{"a", "b", "c"}, selectOp.Outputs())
 
 	// SortOp
 	sortOp := newSortOp("sort_col", true, types.IDFieldName)
@@ -1793,14 +1708,12 @@ func (s *ChainTestSuite) TestMapOp_Name() {
 func (s *ChainTestSuite) TestFuncChain_StringWithOperators() {
 	fc := NewFuncChainWithAllocator(nil).
 		SetName("test-chain").
-		Select("a", "b").
 		Filter(&MockFilterFunction{threshold: 0.5}, []string{"score"}).
 		Sort("s", true, types.IDFieldName).
 		Limit(10)
 
 	str := fc.String()
 	s.Contains(str, "test-chain")
-	s.Contains(str, "Select")
 	s.Contains(str, "Filter")
 	s.Contains(str, "Sort")
 	s.Contains(str, "Limit")

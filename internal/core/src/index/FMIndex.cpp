@@ -29,6 +29,7 @@
 
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
+#include "common/RegexQuery.h"
 #include "common/Slice.h"
 #include "common/Tracer.h"
 #include "index/Meta.h"
@@ -248,7 +249,7 @@ FMIndex::BuildWithFieldData(const std::vector<FieldDataPtr>& datas) {
     // this single-threaded build path, so the concurrent const query path never
     // races on a lazy write.
     ComputeTotalTokens();
-    ComputeByteSize();
+    RefreshResidentSize();
 
     LOG_INFO("FM index build done, field id: {}, total rows: {}",
              field_id_,
@@ -277,20 +278,30 @@ FMIndex::BuildWithRawDataForUT(size_t n,
 
     // total_tokens is derived from the built blob, so compute after Build.
     ComputeTotalTokens();
-    ComputeByteSize();
+    RefreshResidentSize();
 }
 
 void
 FMIndex::ComputeByteSize() {
     // Mmap-backed serialized arrays are accounted as file bytes by the cache,
     // not heap memory. fm_ reports only allocations it owns; the wrapper adds
-    // its row-sized null bitmap.
+    // its row-sized null bitmap. Match does not Extract, so ISA is not
+    // materialized here.
     const size_t bytes =
         fm_.resident_heap_bytes() + null_bitmap_.size_in_bytes();
     cached_byte_size_ =
         bytes > static_cast<size_t>(std::numeric_limits<int64_t>::max())
             ? std::numeric_limits<int64_t>::max()
             : static_cast<int64_t>(bytes);
+}
+
+void
+FMIndex::RefreshResidentSize() {
+    ComputeByteSize();
+    if (mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
+        const auto estimated_cell = CellByteSize();
+        SetCellSize({ByteSize(), estimated_cell.file_bytes});
+    }
 }
 
 TargetBitmap
@@ -312,6 +323,47 @@ FMIndex::DocsToBitmap(const std::vector<uint64_t>& docs) const {
     return bitset;
 }
 
+bool
+FMIndex::MatchGuardAccepts(const std::string& pattern) const {
+    auto parts = split_by_wildcard(pattern);
+    // No literal fragment to seed phase 1 with. Covers the wildcard-only
+    // patterns ("%", "%_%") and, because split_by_wildcard("") is also empty,
+    // the empty pattern: PatternMatch(Match, "") can only answer by handing
+    // every non-null row to the phase-2 recheck, which is the raw scan wearing
+    // an index costume. Decline so the executor runs the scan directly. The
+    // planner never produces Match with an empty pattern (a wildcard-free LIKE
+    // lowers to Equal, see optimizeLikePattern) -- this keeps the direct-API
+    // contract honest, and PatternMatch keeps its all-rows fallback because a
+    // candidate superset is the only safe answer there.
+    if (parts.empty()) {
+        return false;
+    }
+    int64_t occ =
+        static_cast<int64_t>(fm_.Count(bytes(parts[0]), parts[0].size()));
+    for (size_t i = 1; i < parts.size(); ++i) {
+        int64_t c =
+            static_cast<int64_t>(fm_.Count(bytes(parts[i]), parts[i].size()));
+        if (c < occ) {
+            occ = c;
+        }
+    }
+    if (occ == 0) {
+        return true;
+    }
+    const double ratio = static_cast<double>(
+        segcore::SegcoreConfig::default_config().get_fmindex_cost_ratio());
+    const double tokens = static_cast<double>(TotalTokens());
+    const double sr = static_cast<double>(fm_.sa_sample_rate());
+    // Locate is occ x sr LF steps. Phase 2 reads those candidates back from
+    // sealed VARCHAR via ProcessDataByOffsets (ascending offsets, views
+    // fetched per same-chunk run). Its candidate-byte cost is NOT priced by
+    // this locate-only bound -- a known approximation whose worst case is
+    // long average rows x unselective fragments, where phase 2 approaches a
+    // full column read on top of the locate. Revisit with end-to-end
+    // measurements across row length and selectivity before recalibrating.
+    return static_cast<double>(occ) * sr < ratio * tokens;
+}
+
 const TargetBitmap
 FMIndex::PatternMatch(const std::string& pattern, proto::plan::OpType op) {
     tracer::AutoSpan span("FMIndex::PatternMatch", tracer::GetRootSpan());
@@ -330,7 +382,7 @@ FMIndex::PatternMatch(const std::string& pattern, proto::plan::OpType op) {
             case proto::plan::OpType::InnerMatch:
                 return IsNotNull();
             default:
-                break;  // fall through so the op switch throws OpTypeInvalid.
+                break;  // Match falls through to candidate plus recheck.
         }
     }
     // The executor passes the RAW literal (PrefixMatch gets "abc" not "abc%"),
@@ -354,6 +406,37 @@ FMIndex::PatternMatch(const std::string& pattern, proto::plan::OpType op) {
                                   pattern.size(),
                                   [&](uint64_t d) { bitset.set(d); });
             return bitset;
+        }
+        case proto::plan::OpType::Match: {
+            // Phase 1 only: rarest literal fragment to candidate rows.
+            // ExecFMMatch rechecks those offsets on sealed VARCHAR.
+            TargetBitmap candidates(total_rows_);
+            auto parts = split_by_wildcard(pattern);
+            if (parts.empty()) {
+                for (int64_t i = 0; i < total_rows_; ++i) {
+                    if (!null_bitmap_[i]) {
+                        candidates.set(i);
+                    }
+                }
+                return candidates;
+            }
+            const std::string* rarest = &parts[0];
+            size_t rarest_occ = fm_.Count(bytes(*rarest), rarest->size());
+            for (size_t i = 1; i < parts.size(); ++i) {
+                size_t occ = fm_.Count(bytes(parts[i]), parts[i].size());
+                if (occ < rarest_occ) {
+                    rarest_occ = occ;
+                    rarest = &parts[i];
+                }
+            }
+            fm_.VisitMatchingDocs(
+                bytes(*rarest), rarest->size(), [&](uint64_t d) {
+                    if (d < static_cast<uint64_t>(total_rows_) &&
+                        !null_bitmap_[d]) {
+                        candidates.set(d);
+                    }
+                });
+            return candidates;
         }
         default:
             // `op` is selected by the executor's index-routing logic, not read
@@ -700,19 +783,10 @@ FMIndex::LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
         }
     }
 
-    // Guard token total, derived from the loaded blob (bwt_size); needs fm_ valid
-    // (asserted above), so compute it here at the end of the load path.
+    // Guard token total, derived from the loaded blob (bwt_size); needs fm_
+    // valid (asserted above), so compute it here at the end of the load path.
     ComputeTotalTokens();
-
-    ComputeByteSize();
-    if (mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
-        // Admission used the conservative pre-load estimate. Once LoadView has
-        // rebuilt its directories, replace only the memory component with the
-        // measured resident heap. Preserve file_bytes: it accounts for the
-        // staged mmap file and is independent of heap residency.
-        const auto estimated_cell = CellByteSize();
-        SetCellSize({ByteSize(), estimated_cell.file_bytes});
-    }
+    RefreshResidentSize();
 
     LOG_INFO("LoadEntries FM index done, field id: {}, total rows: {}",
              field_id_,

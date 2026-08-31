@@ -40,7 +40,7 @@ class RoaringMembership {
     };
 
     // The MRB1 envelope and admission limits are one contract with the Go SDK
-    // builder (client/v3/roaringfilter) and the Go proxy validator
+    // builder (client/v3/membership/roaringfilter) and the Go proxy validator
     // (pkg/v3/util/roaringfilter): the SDK pre-rejects what the proxy would
     // reject, and the proxy pre-rejects what segcore would reject. Nothing in
     // the build linked the three, so a value edited on one side alone compiled

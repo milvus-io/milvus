@@ -65,6 +65,23 @@ FillOutputFieldsOrdered(CSearchResult* search_results,
                         CProto* out_result,
                         void* cancellation_source);
 
+// Read explicit schema fields from multiple segments and export one Arrow
+// RecordBatch in the caller-provided row order. The caller owns
+// out_schema/out_array and must release them through the Arrow C Data Interface
+// when imported/consumed.
+CStatus
+FillFieldsOrderedAsArrowRecordBatch(CSearchResult* search_results,
+                                    int64_t num_search_results,
+                                    CSearchPlan c_plan,
+                                    const int64_t* field_ids,
+                                    int64_t num_fields,
+                                    const int32_t* result_seg_indices,
+                                    const int64_t* result_seg_offsets,
+                                    int64_t total_rows,
+                                    struct ArrowSchema* out_schema,
+                                    struct ArrowArray* out_array,
+                                    void* cancellation_source);
+
 // Run the pre-export phase of reduce across all per-segment SearchResults:
 // filter invalid rows, optionally apply Global Refine (truncate + refine),
 // and fill primary keys. Mutates the passed SearchResults in place; the

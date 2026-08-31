@@ -33,6 +33,7 @@ import (
 	"context"
 	"encoding/base64"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -150,6 +151,16 @@ func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
 	return InitRemoteArrowFileSystem(params)
 }
 
+// InitExternalIopsConfig publishes the process-local policy used only when
+// External Table filesystem properties are injected.
+func InitExternalIopsConfig(params *paramtable.ComponentParam) error {
+	status := C.InitExternalIopsConfig(
+		C.uint32_t(params.CommonCfg.StorageIopsInitialRate.GetAsUint32()),
+		C.uint32_t(params.CommonCfg.StorageIopsMaxRate.GetAsUint32()),
+	)
+	return HandleCStatus(&status, "InitExternalIopsConfig failed")
+}
+
 func InitLocalArrowFileSystem(path string) error {
 	cRootPath := C.CString(path)
 	cStorageType := C.CString("local")
@@ -215,6 +226,14 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 
 	status := C.InitArrowFileSystem(storageConfig)
 	return HandleCStatus(&status, "InitArrowFileSystem failed")
+}
+
+// SetArrowFSChunkManagerEnabled selects the segcore remote chunk manager
+// backend for this process: milvus-storage Arrow FileSystem vs the legacy
+// AWS-SDK based implementations. Must run during component init, before any
+// remote chunk manager is created (segment load, index build/load).
+func SetArrowFSChunkManagerEnabled(params *paramtable.ComponentParam) {
+	C.SetArrowFileSystemChunkManagerEnabled(C.bool(params.CommonCfg.UseArrowFSChunkManager.GetAsBool()))
 }
 
 func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
@@ -574,6 +593,29 @@ func InitArrowReaderConfig(params *paramtable.ComponentParam) error {
 	}
 	status := C.InitArrowReaderConfig(arrowReaderConfig)
 	return HandleCStatus(&status, "InitArrowReaderConfig failed")
+}
+
+// InitExternalVectorNullPolicy publishes the process-wide normalization policy
+// used by both QueryNode external reads and DataNode index builds. The setting
+// is intentionally startup-only so one task cannot observe different semantics
+// across record batches.
+func InitExternalVectorNullPolicy(params *paramtable.ComponentParam) error {
+	policy := strings.ToLower(strings.TrimSpace(params.CommonCfg.ExternalVectorPartialNullPolicy.GetValue()))
+	switch policy {
+	case "error":
+		C.SetExternalVectorPartialNullAsRowNull(C.bool(false))
+	case "null":
+		C.SetExternalVectorPartialNullAsRowNull(C.bool(true))
+	default:
+		return merr.WrapErrParameterInvalidMsg(
+			"common.storage.externalVector.partialNullPolicy must be one of [error, null], got %q",
+			params.CommonCfg.ExternalVectorPartialNullPolicy.GetValue())
+	}
+	return nil
+}
+
+func externalVectorPartialNullAsRowNullEnabled() bool {
+	return bool(C.GetExternalVectorPartialNullAsRowNull())
 }
 
 var coreParamCallbackInitOnce sync.Once

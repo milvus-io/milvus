@@ -720,7 +720,7 @@ func TestCheckStructArrayFieldSchema_MaxCapacityValidation(t *testing.T) {
 		assert.Contains(t, err.Error(), "sub_b")
 	})
 
-	t.Run("nested array is rejected", func(t *testing.T) {
+	t.Run("nested array is supported", func(t *testing.T) {
 		schemas := []*schemapb.StructArrayFieldSchema{
 			{
 				Name: "my_struct",
@@ -749,8 +749,7 @@ func TestCheckStructArrayFieldSchema_MaxCapacityValidation(t *testing.T) {
 			},
 		}
 
-		err := checkStructArrayFieldSchema(schemas)
-		require.ErrorContains(t, err, "nested array is not supported")
+		require.NoError(t, checkStructArrayFieldSchema(schemas))
 	})
 }
 
