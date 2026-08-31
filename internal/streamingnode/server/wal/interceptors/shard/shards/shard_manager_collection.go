@@ -3,6 +3,7 @@ package shards
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -52,30 +53,93 @@ func (m *shardManagerImpl) checkIfCollectionExists(collectionID int64) error {
 	return nil
 }
 
-// CheckIfVChannelCanBeWritten checks if the vchannel of the collection still accepts new DML.
-func (m *shardManagerImpl) CheckIfVChannelCanBeWritten(collectionID int64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+// CheckIfVChannelCanBeWritten checks if the given vchannel of the collection
+// still accepts new DML.
+//
+// The vchannel is named, not just the collection: m.collections is keyed by
+// collection id -- one entry per collection per pchannel -- so an entry may
+// describe a DIFFERENT vchannel of the same collection than the one the message
+// targets. Answering from that entry would report the wrong shard's fence state
+// in both directions: letting writes through onto a fenced shard, or rejecting
+// writes to a live one.
+func (m *shardManagerImpl) CheckIfVChannelCanBeWritten(collectionID int64, vchannel string) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-	return m.checkIfVChannelCanBeWritten(collectionID)
+	return m.checkIfVChannelCanBeWritten(collectionID, vchannel)
 }
 
-// GetSplitTimeTick returns T_switch (the time tick the collection's vchannel was
-// fenced at by shard split), or 0 if the collection is unknown or not fenced.
-func (m *shardManagerImpl) GetSplitTimeTick(collectionID int64) uint64 {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+// GetSplitTimeTick returns T_switch (the time tick the named vchannel was fenced
+// at by shard split), or 0 if the vchannel is unknown or not fenced.
+func (m *shardManagerImpl) GetSplitTimeTick(collectionID int64, vchannel string) uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-	if info, ok := m.collections[collectionID]; ok {
+	if info, ok := m.collections[collectionID]; ok && info.VChannel == vchannel {
 		return info.SplitTimeTick
 	}
 	return 0
 }
 
-// checkIfVChannelCanBeWritten checks if the vchannel of the collection still accepts new DML.
-func (m *shardManagerImpl) checkIfVChannelCanBeWritten(collectionID int64) error {
+// CheckIfVChannelCanBeCreated checks if the named vchannel can be registered on
+// this pchannel.
+//
+// Re-registering the SAME vchannel is a no-op replay and reported as such. A
+// DIFFERENT vchannel of the same collection is the dangerous case and is
+// reported as an error rather than silently skipped: the entry is keyed by
+// collection id, so the newcomer would find the slot taken, skip its own
+// registration, and inherit the incumbent's state -- including a SPLITTED
+// source's fence, which leaves the new shard permanently unwritable with
+// nothing but a warning in the log. The split coordinator must retire a source
+// (DropVChannel) before a successor lands on its pchannel, and this is where
+// that contract is enforced.
+func (m *shardManagerImpl) CheckIfVChannelCanBeCreated(collectionID int64, vchannel string) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return m.checkIfVChannelCanBeCreated(collectionID, vchannel)
+}
+
+func (m *shardManagerImpl) checkIfVChannelCanBeCreated(collectionID int64, vchannel string) error {
 	collectionInfo, ok := m.collections[collectionID]
 	if !ok {
+		return nil
+	}
+	if collectionInfo.VChannel == vchannel {
+		return ErrCollectionExists
+	}
+	return errors.Wrapf(ErrVChannelConflict,
+		"collection %d is registered on this pchannel as vchannel %s, cannot register %s",
+		collectionID, collectionInfo.VChannel, vchannel)
+}
+
+// CheckIfVChannelCanBeDropped checks if the named vchannel can be retired.
+//
+// A retired vchannel must have been fenced by a shard split first. Tearing down
+// a NORMAL vchannel would remove a live shard's segment assignment with no way
+// back, so a teardown that names one is refused instead of applied. A teardown
+// naming a vchannel this pchannel no longer holds is a replay: nothing to do,
+// and it must still be appended so the recovery storage and the flusher -- which
+// are keyed by vchannel, not by collection -- can finish their own teardown.
+func (m *shardManagerImpl) CheckIfVChannelCanBeDropped(collectionID int64, vchannel string) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	collectionInfo, ok := m.collections[collectionID]
+	if !ok || collectionInfo.VChannel != vchannel {
+		return nil
+	}
+	if collectionInfo.State != streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED {
+		return errors.Wrapf(ErrVChannelNotFenced,
+			"vchannel %s of collection %d is in state %s", vchannel, collectionID, collectionInfo.State)
+	}
+	return nil
+}
+
+// checkIfVChannelCanBeWritten checks if the given vchannel of the collection still accepts new DML.
+func (m *shardManagerImpl) checkIfVChannelCanBeWritten(collectionID int64, vchannel string) error {
+	collectionInfo, ok := m.collections[collectionID]
+	if !ok || collectionInfo.VChannel != vchannel {
 		return ErrCollectionNotFound
 	}
 	if collectionInfo.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED {
@@ -84,10 +148,15 @@ func (m *shardManagerImpl) checkIfVChannelCanBeWritten(collectionID int64) error
 	return nil
 }
 
-// SplitShard marks the vchannel of the collection as splitted (fenced) when
-// a SplitShard message is written into the wal.
-// The growing segments have been sealed by the ManualFlush message written
-// right before the SplitShard message; here only the fence state flips.
+// SplitShard marks the vchannel as splitted (fenced) when a SplitShard message
+// is written into the wal. Here only the fence state flips: the growing
+// segments were sealed by FlushAndFenceSegmentAllocUntil while the fence message
+// was being built, and their ids travel in the message header (there is no
+// separate ManualFlush -- this message IS the seal record).
+//
+// Guarded by the vchannel name for the reason DropVChannel is: the entry is
+// keyed by collection id, so a replayed or late fence must not fence a
+// successor vchannel that has since taken over this pchannel's slot.
 func (m *shardManagerImpl) SplitShard(msg message.ImmutableSplitShardMessageV2) {
 	collectionID := msg.Header().CollectionId
 	logger := m.Logger().With(mlog.FieldMessage(msg))
@@ -98,6 +167,11 @@ func (m *shardManagerImpl) SplitShard(msg message.ImmutableSplitShardMessageV2) 
 	collectionInfo, ok := m.collections[collectionID]
 	if !ok {
 		logger.Warn(context.TODO(), "collection not exists when splitting shard", mlog.Int64("collectionID", collectionID))
+		return
+	}
+	if collectionInfo.VChannel != msg.VChannel() {
+		logger.Warn(context.TODO(), "split shard skipped: this pchannel now hosts another vchannel of the collection",
+			mlog.String("registered", collectionInfo.VChannel))
 		return
 	}
 	if collectionInfo.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED {
@@ -135,9 +209,26 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 // on this pchannel exactly as CreateCollection does.
 func (m *shardManagerImpl) CreateVChannel(msg message.ImmutableCreateVChannelMessageV2) {
 	logger := m.Logger().With(mlog.FieldMessage(msg))
+	collectionID := msg.Header().CollectionId
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.createCollectionLocked(msg.Header().CollectionId, msg.Header().PartitionIds, msg.VChannel(),
+
+	if err := m.checkIfVChannelCanBeCreated(collectionID, msg.VChannel()); err != nil {
+		if errors.Is(err, ErrVChannelConflict) {
+			// The append path refuses this (CheckIfVChannelCanBeCreated), so
+			// reaching here means a replay of a genesis whose source has since
+			// been retired and replaced. Log loudly rather than skip quietly:
+			// the newcomer is left without a registration and the shard is
+			// unwritable until the WAL is next recovered.
+			logger.Error(context.TODO(), "cannot register vchannel, another vchannel of the collection holds this pchannel", mlog.Err(err))
+			return
+		}
+		// ErrCollectionExists: the same vchannel is already registered, an
+		// ordinary idempotent replay.
+		logger.Info(context.TODO(), "vchannel already registered, skip the genesis")
+		return
+	}
+	m.createCollectionLocked(collectionID, msg.Header().PartitionIds, msg.VChannel(),
 		msg.TimeTick(), msg.MustBody().GetCollectionSchema(), logger)
 }
 

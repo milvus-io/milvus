@@ -42,6 +42,13 @@ var (
 	ErrSegmentOnGrowing                = errors.New("segment on growing")
 	ErrFencedAssign                    = errors.New("fenced assign")
 	ErrVChannelFenced                  = errors.New("vchannel is fenced by shard split")
+	// ErrVChannelConflict is returned when a vchannel cannot be registered
+	// because another vchannel of the same collection already holds this
+	// pchannel's entry. See CheckIfVChannelCanBeCreated.
+	ErrVChannelConflict = errors.New("another vchannel of the collection is registered on this pchannel")
+	// ErrVChannelNotFenced is returned when a teardown names a vchannel that a
+	// shard split has not fenced. See CheckIfVChannelCanBeDropped.
+	ErrVChannelNotFenced = errors.New("vchannel is not fenced by shard split")
 
 	ErrTimeTickTooOld    = errors.New("time tick is too old")
 	ErrWaitForNewSegment = errors.New("wait for new segment")
@@ -195,9 +202,49 @@ func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*Coll
 			SplitTimeTick: vchannelInfo.GetSplitTimeTick(),
 		}
 		collectionInfo.setSchema(latestSchema)
-		collectionInfoMap[vchannelInfo.CollectionInfo.CollectionId] = collectionInfo
+		collectionID := vchannelInfo.CollectionInfo.CollectionId
+		if incumbent, ok := collectionInfoMap[collectionID]; ok {
+			// Two vchannels of one collection on one pchannel: the map holds a
+			// single entry per collection, so one of them is about to lose its
+			// registration. Which one used to depend on map iteration order,
+			// i.e. a restart could leave a live shard unwritable at random and
+			// leave it that way. Resolve it deterministically instead, and keep
+			// the shard that can still take writes -- a fenced source accepts no
+			// DML anyway and only waits to be retired.
+			winner, loser := resolveVChannelCollision(incumbent, collectionInfo)
+			mlog.Error(context.TODO(), "two vchannels of one collection recovered on one pchannel",
+				mlog.FieldCollectionID(collectionID),
+				mlog.String("kept", winner.VChannel),
+				mlog.String("dropped", loser.VChannel),
+				mlog.Stringer("keptState", winner.State),
+				mlog.Stringer("droppedState", loser.State))
+			collectionInfoMap[collectionID] = winner
+			continue
+		}
+		collectionInfoMap[collectionID] = collectionInfo
 	}
 	return collectionInfoMap
+}
+
+// resolveVChannelCollision picks, deterministically, which of two vchannels of
+// the same collection keeps this pchannel's single registration.
+//
+// A vchannel that still accepts DML wins over a fenced one; if that does not
+// separate them, the vchannel name does, so every replica of this recovery
+// reaches the same answer.
+func resolveVChannelCollision(a *CollectionInfo, b *CollectionInfo) (winner *CollectionInfo, loser *CollectionInfo) {
+	aFenced := a.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED
+	bFenced := b.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED
+	switch {
+	case aFenced && !bFenced:
+		return b, a
+	case bFenced && !aFenced:
+		return a, b
+	case a.VChannel <= b.VChannel:
+		return a, b
+	default:
+		return b, a
+	}
 }
 
 // shardManagerImpl manages the all shard info of collection on current pchannel.
