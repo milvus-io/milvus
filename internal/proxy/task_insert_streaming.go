@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -41,7 +42,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	it.insertMsg.CollectionID = collID
 
 	getCacheDur := tr.RecordSpan()
-	channelNames, err := it.chMgr.getVChannels(collID)
+	channelNames, err := it.chMgr.GetVChannels(collID)
 	if err != nil {
 		mlog.Warn(ctx, "get vChannels failed", mlog.FieldCollectionID(collID), mlog.Err(err))
 		it.result.Status = merr.Status(err)
@@ -98,7 +99,7 @@ func repackInsertDataForStreamingService(
 	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
-	walName := getActiveWALName()
+	walName := channelmgr.GetActiveWALName()
 
 	channel2RowOffsets, err := assignChannelsByPK(result.IDs, channelNames, insertMsg)
 	if err != nil {
@@ -150,7 +151,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
-	walName := getActiveWALName()
+	walName := channelmgr.GetActiveWALName()
 
 	var channel2RowOffsets map[string][]int
 	var err error
@@ -269,7 +270,7 @@ func repackInsertDataByPartitionForStreamingService(
 		pack := pending[0]
 		pending = pending[1:]
 		if pack.insertMsg == nil {
-			packedMsgs, err := genInsertMsgsByPartition(
+			packedMsgs, err := channelmgr.GenInsertMsgsByPartition(
 				ctx,
 				0,
 				partitionID,

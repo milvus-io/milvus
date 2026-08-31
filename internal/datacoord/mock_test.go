@@ -1087,6 +1087,10 @@ func (s *mockMixCoord) DeleteClientCommand(ctx context.Context, req *milvuspb.De
 	panic("implement me")
 }
 
+func (s *mockMixCoord) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest) (*rootcoordpb.ListClientCommandsResponse, error) {
+	panic("implement me")
+}
+
 func (s *mockMixCoord) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error) {
 	panic("implement me")
 }

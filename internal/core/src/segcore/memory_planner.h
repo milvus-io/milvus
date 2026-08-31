@@ -45,26 +45,12 @@ struct RowGroupBlock {
     }
 };
 
-const std::size_t MAX_ROW_GROUP_BLOCK_MEMORY = 16 << 20;
-
 // Strategy interface for row group splitting
 class RowGroupSplitStrategy {
  public:
     virtual ~RowGroupSplitStrategy() = default;
     virtual std::vector<RowGroupBlock>
     split(const std::vector<int64_t>& input_row_groups) = 0;
-};
-
-// Memory-based splitting strategy
-class MemoryBasedSplitStrategy : public RowGroupSplitStrategy {
- public:
-    explicit MemoryBasedSplitStrategy(
-        const milvus_storage::RowGroupMetadataVector& row_group_metadatas);
-    std::vector<RowGroupBlock>
-    split(const std::vector<int64_t>& input_row_groups) override;
-
- private:
-    const milvus_storage::RowGroupMetadataVector& row_group_metadatas_;
 };
 
 // Parallel degree based splitting strategy
@@ -115,12 +101,6 @@ FieldDataLoadBatchSplitTargetBytes();
 
 int64_t
 FieldDataReadWindowBytes();
-
-void
-SetFieldDataLoadBatchTargetBytes(int64_t bytes);
-
-void
-SetFieldDataReadWindowBytes(int64_t bytes);
 
 // A cell specification: identifies a cell's location within a specific file.
 struct CellSpec {

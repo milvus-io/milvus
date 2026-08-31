@@ -43,7 +43,6 @@ type (
 )
 
 const (
-	TaskStatusCreated   = "created"
 	TaskStatusStarted   = "started"
 	TaskStatusSucceeded = "succeeded"
 	TaskStatusCanceled  = "canceled"
@@ -101,7 +100,13 @@ type Task interface {
 	// fail the task as we encounter some error so be unable to continue,
 	// this error will be recorded for response to user requests
 	Fail(err error)
-	Wait() error
+	// Wait blocks until the task has finished (succeeded, failed or been
+	// canceled) and returns its error, or until ctx is done, whichever comes
+	// first. ctx is what bounds the caller: a task that keeps getting bounced
+	// by the executor's admission cap never arms a deadline (see
+	// ActivateDeadline), so it carries no lifetime guarantee of its own while
+	// it is still queued.
+	Wait(ctx context.Context) error
 	Actions() []Action
 	Step() int
 	StepUp() int
@@ -354,9 +359,30 @@ func (task *baseTask) Fail(err error) {
 	}
 }
 
-func (task *baseTask) Wait() error {
-	<-task.doneCh
-	return task.err
+func (task *baseTask) Wait(ctx context.Context) error {
+	// Task completion is signaled solely by closing doneCh, never by the err
+	// value: a succeeded task is finished with a nil err, so err is not a
+	// reliable "finished" predicate. Reading task.err is only safe after a
+	// receive from doneCh because Fail/Cancel write task.err before closing
+	// doneCh, and that receive synchronizes-with the close.
+	select {
+	case <-task.doneCh:
+		// Task finished (succeeded, failed or canceled); report its real
+		// outcome.
+		return task.err
+	case <-ctx.Done():
+		// ctx expired first, but the task may have finished in the same
+		// instant. When both doneCh and ctx.Done() are ready at once the
+		// runtime picks a case at random, so recheck doneCh here: once the
+		// task has finished it reports its real outcome instead of a
+		// spurious context error, keeping the tie-break deterministic.
+		select {
+		case <-task.doneCh:
+			return task.err
+		default:
+			return ctx.Err()
+		}
+	}
 }
 
 func (task *baseTask) Actions() []Action {
@@ -523,7 +549,7 @@ func NewChannelTask(ctx context.Context,
 		if channel == "" {
 			channel = channelAction.ChannelName()
 		} else if channel != channelAction.ChannelName() {
-			return nil, errors.WithStack(merr.WrapErrParameterInvalid(channel, channelAction.ChannelName(), "all actions must operate the same segment"))
+			return nil, errors.WithStack(merr.WrapErrParameterInvalid(channel, channelAction.ChannelName(), "all actions must operate the same channel"))
 		}
 	}
 

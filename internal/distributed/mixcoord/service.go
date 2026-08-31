@@ -1083,3 +1083,8 @@ func (s *Server) PushClientCommand(ctx context.Context, req *milvuspb.PushClient
 func (s *Server) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
 	return s.mixCoord.DeleteClientCommand(ctx, req)
 }
+
+// ListClientCommands lists the commands currently held for clients
+func (s *Server) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest) (*rootcoordpb.ListClientCommandsResponse, error) {
+	return s.mixCoord.ListClientCommands(ctx, req)
+}

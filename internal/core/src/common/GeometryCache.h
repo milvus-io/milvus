@@ -182,13 +182,6 @@ class SimpleGeometryCache {
         return geometry.IsValid() ? &geometry : nullptr;
     }
 
-    // Get Geometry by offset (thread-safe read for filtering)
-    const Geometry*
-    GetByOffset(size_t offset) const {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        return GetByOffsetUnsafe(offset);
-    }
-
     // Get total number of loaded geometries
     size_t
     Size() const {
@@ -207,13 +200,6 @@ class SimpleGeometryCache {
     size_t
     SizeUnsafe() const {
         return geometries_.size();
-    }
-
-    // Check if cache is loaded
-    bool
-    IsLoaded() const {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        return !geometries_.empty();
     }
 
  private:
@@ -236,7 +222,7 @@ class SimpleGeometryCacheManager {
     SimpleGeometryCacheManager() = default;
 
     // Returns a shared_ptr so callers keep the cache alive for the duration of
-    // their use even if RemoveCache/RemoveSegmentCaches drops it concurrently.
+    // their use even if RemoveSegmentCaches drops it concurrently.
     std::shared_ptr<SimpleGeometryCache>
     GetOrCreateCache(uint64_t segment_instance_uid,
                      int64_t segment_id,
@@ -266,14 +252,6 @@ class SimpleGeometryCacheManager {
         return nullptr;
     }
 
-    void
-    RemoveCache(uint64_t segment_instance_uid,
-                int64_t segment_id,
-                FieldId field_id) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        caches_.erase(MakeCacheKey(segment_instance_uid, segment_id, field_id));
-    }
-
     // Remove all caches owned by one segment OBJECT -- called from that
     // object's destructor, and deliberately NOT matching any other live
     // instance that shares the same logical segment id (growing/sealed twin,
@@ -292,27 +270,6 @@ class SimpleGeometryCacheManager {
                 ++it;
             }
         }
-    }
-
-    // Get cache statistics for monitoring
-    struct CacheStats {
-        size_t total_caches = 0;
-        size_t loaded_caches = 0;
-        size_t total_geometries = 0;
-    };
-
-    CacheStats
-    GetStats() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        CacheStats stats;
-        stats.total_caches = caches_.size();
-        for (const auto& [key, cache] : caches_) {
-            if (cache->IsLoaded()) {
-                stats.loaded_caches++;
-                stats.total_geometries += cache->Size();
-            }
-        }
-        return stats;
     }
 
  private:

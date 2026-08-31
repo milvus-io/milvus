@@ -25,13 +25,6 @@
 
 namespace milvus::segcore {
 
-enum class IndexConfigLevel {
-    UNKNOWN = 0,
-    SUPPORT = 1,
-    COMPATIBLE = 2,
-    SYSTEM_ASSIGN = 3
-};
-
 // this is the config used for generating growing index or the temp sealed index
 // when the segment is sealed before the index is built.
 class VecIndexConfig {

@@ -94,40 +94,6 @@ GetLoonReader(
 }
 
 CStatus
-NewPackedFFIReader(const char* manifest_path,
-                   struct ArrowSchema* schema,
-                   char** needed_columns,
-                   int64_t needed_columns_size,
-                   CFFIPackedReader* c_packed_reader,
-                   CStorageConfig c_storage_config,
-                   CPluginContext* c_plugin_context) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto properties =
-            MakeInternalPropertiesFromStorageConfig(c_storage_config);
-        AssertInfo(properties != nullptr, "properties is nullptr");
-
-        auto loon_manifest = GetLoonManifest(manifest_path, properties);
-        AssertInfo(loon_manifest != nullptr, "manifest is nullptr");
-
-        auto reader =
-            GetLoonReader(std::make_shared<milvus_storage::api::ColumnGroups>(
-                              loon_manifest->columnGroups()),
-                          schema,
-                          needed_columns,
-                          needed_columns_size,
-                          properties,
-                          c_plugin_context);
-
-        *c_packed_reader = static_cast<CFFIPackedReader>(reader.release());
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
-}
-
-CStatus
 NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
                                struct ArrowSchema* schema,
                                char** needed_columns,

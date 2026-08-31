@@ -19,6 +19,7 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "common/common_type_c.h"
@@ -55,6 +56,12 @@ InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config);
 CStatus
 InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config);
 
+void
+SetExternalVectorPartialNullAsRowNull(bool enabled);
+
+bool
+GetExternalVectorPartialNullAsRowNull();
+
 CStatus
 InitLoonReaderThreadPool(int32_t num_threads);
 
@@ -67,6 +74,9 @@ GetLoonReaderThreadPoolSize();
 
 CStatus
 InitIndexBuildReadWindow(int64_t window_bytes);
+
+CStatus
+InitExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate);
 
 // Plugin related APIs
 CStatus

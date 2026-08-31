@@ -60,6 +60,15 @@
 
 namespace milvus::storage {
 
+// Controls how parent-valid external dense-vector rows with a mixture of
+// valid and null child elements are normalized. All-null child ranges are
+// always normalized to a row-level null when the field is nullable.
+void
+SetExternalVectorPartialNullAsRowNull(bool enabled);
+
+bool
+GetExternalVectorPartialNullAsRowNull();
+
 void
 ReadMediumType(BinlogReaderPtr reader);
 
@@ -188,9 +197,6 @@ std::string
 GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
                           int64_t segment_id,
                           int64_t field_id);
-
-std::string
-GetSegmentRawDataPathPrefix(ChunkManagerPtr cm, int64_t segment_id);
 
 std::pair<std::string, size_t>
 EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
@@ -389,9 +395,6 @@ PutIndexData(ChunkManager* remote_chunk_manager,
              IndexMeta& index_meta,
              std::shared_ptr<CPluginContext> plugin_context);
 
-int64_t
-GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas);
-
 size_t
 GetNumRowsForLoadInfo(const LoadFieldDataInfo& load_info);
 
@@ -434,6 +437,17 @@ CreateFieldData(
     bool nullable = false,
     int64_t dim = 1,
     int64_t total_num_rows = 0,
+    std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
+
+// Creates field data whose rows are initialized from a schema default value.
+// Initialization completes before the FieldData is published and does not
+// acquire its mutation lock.
+FieldDataPtr
+CreateFieldDataFromDefaultValue(
+    const DataType& type,
+    bool nullable,
+    int64_t element_count,
+    const std::optional<DefaultValueType>& default_value,
     std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 
 int64_t
@@ -602,19 +616,6 @@ NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
 arrow::ArrayVector
 NormalizeArrowForChunkWriter(const arrow::ArrayVector& arrays,
                              const FieldMeta& field_meta);
-
-// Coerce any binary-like array (LARGE_BINARY / BINARY_VIEW /
-// LARGE_STRING / STRING_VIEW / STRING) to canonical BinaryArray.
-// Required because vortex schemaless mode emits view variants for the
-// whole variable-length family; downstream paths assume canonical layout.
-arrow::ArrayVector
-CoerceToBinary(const arrow::ArrayVector& arrays);
-
-// Coerce LARGE_LIST / LIST_VIEW to canonical (32-bit offset) ListArray.
-// Vortex schemaless mode may emit list variants for the same logical
-// List<T>; downstream code expects arrow::ListArray.
-arrow::ArrayVector
-CoerceToList(const arrow::ArrayVector& arrays);
 
 // Single source of truth for view/large-variant elimination.
 // STRING_VIEW/LARGE_STRING -> STRING, BINARY_VIEW/LARGE_BINARY -> BINARY,

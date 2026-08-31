@@ -232,6 +232,10 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         // null_offset_: vector<size_t>
         total += null_offset_.capacity() * sizeof(size_t);
 
+        // materialized validity bitmap, if any. CustomBitset stores uint64_t
+        // words, so account for its word-rounded allocation.
+        total += valid_bitmap_ ? valid_bitmap_->size_in_bytes() : 0;
+
         this->cached_byte_size_ = total;
     }
 
@@ -320,6 +324,21 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         is_growing_ = is_growing;
     }
 
+    // Idempotently complete the transition to an immutable, queryable index.
+    // Every custom sealed lifecycle must call this after its reader is ready.
+    // Loaded query indexes can release the persisted offset representation
+    // after the validity bitmap has been materialized. Build paths retain it
+    // until Serialize()/WriteEntries() has persisted the compatible format.
+    void
+    FinalizeSealed(bool release_null_offsets = false);
+
+    int64_t
+    ValidityBitmapByteSize() const {
+        return valid_bitmap_
+                   ? static_cast<int64_t>(valid_bitmap_->size_in_bytes())
+                   : 0;
+    }
+
     void
     WriteEntries(storage::IndexEntryWriter* writer) override;
 
@@ -382,9 +401,32 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     DiskFileManagerPtr disk_file_manager_;
 
     folly::SharedMutexWritePriority mutex_{};
-    // all data need to be built to align the offset
-    // so need to store null_offset_ in inverted index additionally
+    // Build and growing paths keep row offsets for persistence and updates.
+    // Loaded sealed indexes release this vector after materializing
+    // valid_bitmap_.
     std::vector<size_t> null_offset_{};
+
+    // A sealed index has an immutable null set, but IsNull()/IsNotNull() are
+    // called once per query per segment and each call used to walk
+    // null_offset_ clearing one bit at a time. Materialize the validity
+    // bitmap once, when the index becomes queryable, and hand out copies.
+    // Executors share immutable ownership with their parent index, avoiding
+    // an extra segment-sized copy when an executor is created. Set bit means
+    // the result-domain offset is not null. Null means not finalized (or
+    // growing); a non-null zero-sized bitmap is the sealed all-valid sentinel,
+    // including nested indexes whose result domain contains only elements
+    // from valid rows.
+    std::shared_ptr<const TargetBitmap> valid_bitmap_{};
+
+    // Build valid_bitmap_ from null_offset_. FinalizeSealed() calls this after
+    // the tantivy reader exists (Count() reads through wrapper_).
+    void
+    MaterializeValidBitmap();
+
+    // Mask a query result without cloning the immutable sealed bitmap.
+    // Growing indexes continue to consult their mutable null offsets.
+    void
+    ApplyValidityMask(TargetBitmap& bitset);
 
     // `inverted_index_single_segment_` is used to control whether to build tantivy index with single segment.
     //
@@ -414,4 +456,28 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     // every element in the array is treated as a separate document in the index.
     bool is_nested_index_{false};
 };
+
+template <>
+const TargetBitmap
+InvertedIndexTantivy<std::string>::Query(const DatasetPtr& dataset);
+
+template <>
+void
+InvertedIndexTantivy<std::string>::build_index_for_array(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas);
+
+template <>
+void
+InvertedIndexTantivy<std::string>::build_index_for_array_nested(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas);
+
+extern template class InvertedIndexTantivy<bool>;
+extern template class InvertedIndexTantivy<int8_t>;
+extern template class InvertedIndexTantivy<int16_t>;
+extern template class InvertedIndexTantivy<int32_t>;
+extern template class InvertedIndexTantivy<int64_t>;
+extern template class InvertedIndexTantivy<uint64_t>;
+extern template class InvertedIndexTantivy<float>;
+extern template class InvertedIndexTantivy<double>;
+extern template class InvertedIndexTantivy<std::string>;
 }  // namespace milvus::index

@@ -27,8 +27,6 @@
 #include "storage/Util.h"
 
 using milvus::storage::CanonicalizeArrowVariants;
-using milvus::storage::CoerceToBinary;
-using milvus::storage::CoerceToList;
 
 namespace {
 
@@ -239,39 +237,6 @@ TEST(CanonicalizeArrowVariants, EmptyArray) {
     EXPECT_EQ(out->length(), 0);
 }
 
-// ===== CoerceToBinary =====
-
-TEST(CoerceToBinary, StringToBinaryZeroCopy) {
-    arrow::StringBuilder b;
-    ASSERT_TRUE(b.Append("hello").ok());
-    std::shared_ptr<arrow::Array> in;
-    ASSERT_TRUE(b.Finish(&in).ok());
-    auto out = CoerceToBinary({in})[0];
-    ASSERT_EQ(out->type_id(), arrow::Type::BINARY);
-    auto ba = std::static_pointer_cast<arrow::BinaryArray>(out);
-    EXPECT_EQ(ba->GetString(0), "hello");
-}
-
-TEST(CoerceToBinary, BinaryPassthrough) {
-    arrow::BinaryBuilder b;
-    ASSERT_TRUE(b.Append(reinterpret_cast<const uint8_t*>("xy"), 2).ok());
-    std::shared_ptr<arrow::Array> in;
-    ASSERT_TRUE(b.Finish(&in).ok());
-    auto out = CoerceToBinary({in})[0];
-    EXPECT_EQ(out.get(), in.get());
-}
-
-TEST(CoerceToBinary, AllVariantsToBinary) {
-    auto sv = MakeStringViewArray({"a"}, {true});
-    auto ls = MakeLargeStringArray({"bb"}, {true});
-    auto bv = MakeBinaryViewArray({"ccc"}, {true});
-    auto lb = MakeLargeBinaryArray({"dddd"}, {true});
-    for (const auto& in : {sv, ls, bv, lb}) {
-        auto out = CoerceToBinary({in})[0];
-        ASSERT_EQ(out->type_id(), arrow::Type::BINARY);
-    }
-}
-
 namespace {
 milvus::FieldMeta
 MakeExternalFieldMetaForTest(milvus::DataType data_type,
@@ -328,12 +293,28 @@ std::shared_ptr<arrow::Array>
 NormalizeVectorArraysToFixedSizeBinaryForTest(
     const std::vector<std::shared_ptr<arrow::Array>>& arrays,
     milvus::DataType data_type,
-    int64_t dim) {
+    int64_t dim,
+    bool nullable = false) {
     AssertInfo(arrays.size() == 1, "test helper expects one array");
     auto field_meta = MakeExternalFieldMetaForTest(
-        data_type, dim, false, milvus::DataType::NONE);
+        data_type, dim, nullable, milvus::DataType::NONE);
     return milvus::storage::NormalizeExternalArrow(arrays.front(), field_meta);
 }
+
+class ScopedExternalVectorPartialNullPolicy {
+ public:
+    explicit ScopedExternalVectorPartialNullPolicy(bool enabled)
+        : previous_(milvus::storage::GetExternalVectorPartialNullAsRowNull()) {
+        milvus::storage::SetExternalVectorPartialNullAsRowNull(enabled);
+    }
+
+    ~ScopedExternalVectorPartialNullPolicy() {
+        milvus::storage::SetExternalVectorPartialNullAsRowNull(previous_);
+    }
+
+ private:
+    bool previous_;
+};
 
 std::shared_ptr<arrow::Array>
 MakeInt32Array(const std::vector<int32_t>& vals,
@@ -570,6 +551,225 @@ TEST(NormalizeVectorArraysToFixedSizeBinary, ListNullElementAsserts) {
     EXPECT_THROW(NormalizeVectorArraysToFixedSizeBinaryForTest(
                      {input}, milvus::DataType::VECTOR_FLOAT, 2),
                  std::exception);
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     NullableListAllNullChildrenBecomeRowNull) {
+    ScopedExternalVectorPartialNullPolicy policy(false);
+    arrow::FloatBuilder values_builder;
+    ASSERT_TRUE(values_builder.AppendValues({1.0f, 2.0f}).ok());
+    ASSERT_TRUE(values_builder.AppendNull().ok());
+    ASSERT_TRUE(values_builder.AppendNull().ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    arrow::Int32Builder offsets_builder;
+    ASSERT_TRUE(offsets_builder.AppendValues({0, 2, 4}).ok());
+    std::shared_ptr<arrow::Array> offsets;
+    ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
+
+    auto input = *arrow::ListArray::FromArrays(*offsets, *values);
+    auto output = NormalizeVectorArraysToFixedSizeBinaryForTest(
+        {input}, milvus::DataType::VECTOR_FLOAT, 2, true);
+    ASSERT_EQ(output->type_id(), arrow::Type::BINARY);
+    auto binary = std::static_pointer_cast<arrow::BinaryArray>(output);
+    ASSERT_EQ(binary->length(), 2);
+    EXPECT_TRUE(binary->IsValid(0));
+    EXPECT_TRUE(binary->IsNull(1));
+    EXPECT_EQ(binary->value_length(0), 2 * sizeof(float));
+    EXPECT_EQ(binary->value_length(1), 0);
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     NullableFixedSizeListAllNullChildrenBecomeRowNull) {
+    ScopedExternalVectorPartialNullPolicy policy(false);
+    arrow::FloatBuilder values_builder;
+    ASSERT_TRUE(values_builder.AppendNull().ok());
+    ASSERT_TRUE(values_builder.AppendNull().ok());
+    ASSERT_TRUE(values_builder.AppendValues({3.0f, 4.0f}).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    auto input = std::make_shared<arrow::FixedSizeListArray>(
+        arrow::fixed_size_list(arrow::float32(), 2), 2, values);
+    auto output = NormalizeVectorArraysToFixedSizeBinaryForTest(
+        {input}, milvus::DataType::VECTOR_FLOAT, 2, true);
+    ASSERT_EQ(output->type_id(), arrow::Type::BINARY);
+    auto binary = std::static_pointer_cast<arrow::BinaryArray>(output);
+    ASSERT_EQ(binary->length(), 2);
+    EXPECT_TRUE(binary->IsNull(0));
+    EXPECT_TRUE(binary->IsValid(1));
+    EXPECT_EQ(binary->value_length(0), 0);
+    EXPECT_EQ(binary->value_length(1), 2 * sizeof(float));
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     NullableListPreservesParentNullWhenPromotingAllNullChildren) {
+    ScopedExternalVectorPartialNullPolicy policy(false);
+    auto values_builder = std::make_shared<arrow::FloatBuilder>();
+    arrow::ListBuilder list_builder(arrow::default_memory_pool(),
+                                    values_builder);
+
+    ASSERT_TRUE(list_builder.Append().ok());
+    ASSERT_TRUE(values_builder->AppendValues({1.0f, 2.0f}).ok());
+    ASSERT_TRUE(list_builder.AppendNull().ok());
+    ASSERT_TRUE(list_builder.Append().ok());
+    ASSERT_TRUE(values_builder->AppendNull().ok());
+    ASSERT_TRUE(values_builder->AppendNull().ok());
+
+    std::shared_ptr<arrow::Array> input;
+    ASSERT_TRUE(list_builder.Finish(&input).ok());
+    auto output = NormalizeVectorArraysToFixedSizeBinaryForTest(
+        {input}, milvus::DataType::VECTOR_FLOAT, 2, true);
+    ASSERT_EQ(output->type_id(), arrow::Type::BINARY);
+    auto binary = std::static_pointer_cast<arrow::BinaryArray>(output);
+    ASSERT_EQ(binary->length(), 3);
+    EXPECT_EQ(binary->null_count(), 2);
+    EXPECT_TRUE(binary->IsValid(0));
+    EXPECT_TRUE(binary->IsNull(1));
+    EXPECT_TRUE(binary->IsNull(2));
+    EXPECT_EQ(binary->value_length(0), 2 * sizeof(float));
+    EXPECT_EQ(binary->value_length(1), 0);
+    EXPECT_EQ(binary->value_length(2), 0);
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     NullableSlicedListPreservesParentNullAtLogicalOffset) {
+    ScopedExternalVectorPartialNullPolicy policy(false);
+    auto values_builder = std::make_shared<arrow::FloatBuilder>();
+    arrow::ListBuilder list_builder(arrow::default_memory_pool(),
+                                    values_builder);
+
+    ASSERT_TRUE(list_builder.Append().ok());
+    ASSERT_TRUE(values_builder->AppendValues({1.0f, 2.0f}).ok());
+    ASSERT_TRUE(list_builder.AppendNull().ok());
+    ASSERT_TRUE(list_builder.Append().ok());
+    ASSERT_TRUE(values_builder->AppendValues({3.0f, 4.0f}).ok());
+
+    std::shared_ptr<arrow::Array> input;
+    ASSERT_TRUE(list_builder.Finish(&input).ok());
+    auto sliced = input->Slice(1, 2);
+    ASSERT_EQ(sliced->offset(), 1);
+
+    auto output = NormalizeVectorArraysToFixedSizeBinaryForTest(
+        {sliced}, milvus::DataType::VECTOR_FLOAT, 2, true);
+    ASSERT_EQ(output->type_id(), arrow::Type::BINARY);
+    auto binary = std::static_pointer_cast<arrow::BinaryArray>(output);
+    ASSERT_EQ(binary->length(), 2);
+    EXPECT_TRUE(binary->IsNull(0));
+    ASSERT_TRUE(binary->IsValid(1));
+    ASSERT_EQ(binary->value_length(1), 2 * sizeof(float));
+    auto view = binary->GetView(1);
+    float actual[2];
+    std::memcpy(actual, view.data(), view.size());
+    EXPECT_FLOAT_EQ(actual[0], 3.0f);
+    EXPECT_FLOAT_EQ(actual[1], 4.0f);
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     NullableListPartialNullPolicyErrorReturnsDataFormatBroken) {
+    ScopedExternalVectorPartialNullPolicy policy(false);
+    arrow::FloatBuilder values_builder;
+    ASSERT_TRUE(values_builder.Append(1.0f).ok());
+    ASSERT_TRUE(values_builder.AppendNull().ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    arrow::Int32Builder offsets_builder;
+    ASSERT_TRUE(offsets_builder.AppendValues({0, 2}).ok());
+    std::shared_ptr<arrow::Array> offsets;
+    ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
+
+    auto input = *arrow::ListArray::FromArrays(*offsets, *values);
+    try {
+        static_cast<void>(NormalizeVectorArraysToFixedSizeBinaryForTest(
+            {input}, milvus::DataType::VECTOR_FLOAT, 2, true));
+        FAIL() << "expected partial-null vector to be rejected";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::DataFormatBroken);
+    }
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     NullableListPartialNullPolicyNullBecomesRowNull) {
+    ScopedExternalVectorPartialNullPolicy policy(true);
+    arrow::FloatBuilder values_builder;
+    ASSERT_TRUE(values_builder.Append(1.0f).ok());
+    ASSERT_TRUE(values_builder.AppendNull().ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    arrow::Int32Builder offsets_builder;
+    ASSERT_TRUE(offsets_builder.AppendValues({0, 2}).ok());
+    std::shared_ptr<arrow::Array> offsets;
+    ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
+
+    auto input = *arrow::ListArray::FromArrays(*offsets, *values);
+    auto output = NormalizeVectorArraysToFixedSizeBinaryForTest(
+        {input}, milvus::DataType::VECTOR_FLOAT, 2, true);
+    ASSERT_EQ(output->type_id(), arrow::Type::BINARY);
+    EXPECT_TRUE(output->IsNull(0));
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     NullableFixedSizeListPartialNullPolicyErrorReturnsDataFormatBroken) {
+    ScopedExternalVectorPartialNullPolicy policy(false);
+    arrow::FloatBuilder values_builder;
+    ASSERT_TRUE(values_builder.Append(1.0f).ok());
+    ASSERT_TRUE(values_builder.AppendNull().ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    auto input = std::make_shared<arrow::FixedSizeListArray>(
+        arrow::fixed_size_list(arrow::float32(), 2), 1, values);
+    try {
+        static_cast<void>(NormalizeVectorArraysToFixedSizeBinaryForTest(
+            {input}, milvus::DataType::VECTOR_FLOAT, 2, true));
+        FAIL() << "expected partial-null vector to be rejected";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::DataFormatBroken);
+    }
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     NullableFixedSizeListPartialNullPolicyNullBecomesRowNull) {
+    ScopedExternalVectorPartialNullPolicy policy(true);
+    arrow::FloatBuilder values_builder;
+    ASSERT_TRUE(values_builder.Append(1.0f).ok());
+    ASSERT_TRUE(values_builder.AppendNull().ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    auto input = std::make_shared<arrow::FixedSizeListArray>(
+        arrow::fixed_size_list(arrow::float32(), 2), 1, values);
+    auto output = NormalizeVectorArraysToFixedSizeBinaryForTest(
+        {input}, milvus::DataType::VECTOR_FLOAT, 2, true);
+    ASSERT_EQ(output->type_id(), arrow::Type::BINARY);
+    EXPECT_TRUE(output->IsNull(0));
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     NonNullableListPartialNullPolicyNullStillRejects) {
+    ScopedExternalVectorPartialNullPolicy policy(true);
+    arrow::FloatBuilder values_builder;
+    ASSERT_TRUE(values_builder.Append(1.0f).ok());
+    ASSERT_TRUE(values_builder.AppendNull().ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    arrow::Int32Builder offsets_builder;
+    ASSERT_TRUE(offsets_builder.AppendValues({0, 2}).ok());
+    std::shared_ptr<arrow::Array> offsets;
+    ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
+
+    auto input = *arrow::ListArray::FromArrays(*offsets, *values);
+    try {
+        static_cast<void>(NormalizeVectorArraysToFixedSizeBinaryForTest(
+            {input}, milvus::DataType::VECTOR_FLOAT, 2, false));
+        FAIL() << "expected non-nullable partial-null vector to be rejected";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::DataFormatBroken);
+    }
 }
 
 TEST(NormalizeVectorArraysToFixedSizeBinary, FixedSizeListDimMismatchAsserts) {
@@ -979,28 +1179,6 @@ TEST(NormalizeExternalArrow, ArrayVarcharAcceptsStringList) {
     EXPECT_FALSE(out->IsNull(0));
 }
 
-// ===== CoerceToList =====
-
-TEST(CoerceToList, LargeListToList) {
-    arrow::Int32Builder vb;
-    ASSERT_TRUE(vb.AppendValues({1, 2, 3, 4}).ok());
-    std::shared_ptr<arrow::Array> values;
-    ASSERT_TRUE(vb.Finish(&values).ok());
-
-    arrow::Int64Builder ob;
-    ASSERT_TRUE(ob.AppendValues({0, 2, 4}).ok());
-    std::shared_ptr<arrow::Array> offsets;
-    ASSERT_TRUE(ob.Finish(&offsets).ok());
-    auto large_list = *arrow::LargeListArray::FromArrays(*offsets, *values);
-
-    auto out = CoerceToList({large_list})[0];
-    ASSERT_EQ(out->type_id(), arrow::Type::LIST);
-    auto la = std::static_pointer_cast<arrow::ListArray>(out);
-    EXPECT_EQ(la->length(), 2);
-    EXPECT_EQ(la->value_length(0), 2);
-    EXPECT_EQ(la->value_length(1), 2);
-}
-
 // ===== Sliced-input nullability =====
 
 TEST(CanonicalizeArrowVariants, SlicedLargeListNullsPreserved) {
@@ -1075,40 +1253,6 @@ TEST(CanonicalizeArrowVariants, SlicedFixedSizeListNullsPreserved) {
     EXPECT_EQ(fsla->values()->type_id(), arrow::Type::STRING);
 }
 
-TEST(CoerceToList, SlicedLargeListNullsPreserved) {
-    arrow::Int32Builder vb;
-    ASSERT_TRUE(vb.AppendValues({1, 2, 3, 4, 5, 6}).ok());
-    std::shared_ptr<arrow::Array> values;
-    ASSERT_TRUE(vb.Finish(&values).ok());
-    arrow::Int64Builder ob;
-    ASSERT_TRUE(ob.AppendValues({0, 2, 2, 4, 6}).ok());
-    std::shared_ptr<arrow::Array> offsets;
-    ASSERT_TRUE(ob.Finish(&offsets).ok());
-    arrow::TypedBufferBuilder<bool> nb;
-    ASSERT_TRUE(nb.Reserve(4).ok());
-    nb.UnsafeAppend(true);
-    nb.UnsafeAppend(false);
-    nb.UnsafeAppend(true);
-    nb.UnsafeAppend(true);
-    std::shared_ptr<arrow::Buffer> null_buf;
-    ASSERT_TRUE(nb.Finish(&null_buf).ok());
-    auto ll = std::make_shared<arrow::LargeListArray>(
-        arrow::large_list(values->type()),
-        4,
-        std::static_pointer_cast<arrow::Int64Array>(offsets)->values(),
-        values,
-        null_buf,
-        1,
-        0);
-    auto sliced = ll->Slice(1, 3);
-
-    auto out = CoerceToList({sliced})[0];
-    ASSERT_EQ(out->type_id(), arrow::Type::LIST);
-    EXPECT_EQ(out->length(), 3);
-    EXPECT_EQ(out->null_count(), 1);
-    EXPECT_TRUE(out->IsNull(0));
-}
-
 TEST(CanonicalizeArrowVariants, AllNullStringView) {
     auto in = MakeStringViewArray({"x", "y", "z"}, {false, false, false});
     auto out = CanonicalizeArrowVariants(in);
@@ -1117,18 +1261,4 @@ TEST(CanonicalizeArrowVariants, AllNullStringView) {
     EXPECT_TRUE(out->IsNull(0));
     EXPECT_TRUE(out->IsNull(1));
     EXPECT_TRUE(out->IsNull(2));
-}
-
-TEST(CoerceToList, ListPassthrough) {
-    arrow::Int32Builder vb;
-    ASSERT_TRUE(vb.AppendValues({1, 2}).ok());
-    std::shared_ptr<arrow::Array> values;
-    ASSERT_TRUE(vb.Finish(&values).ok());
-    arrow::Int32Builder ob;
-    ASSERT_TRUE(ob.AppendValues({0, 2}).ok());
-    std::shared_ptr<arrow::Array> offsets;
-    ASSERT_TRUE(ob.Finish(&offsets).ok());
-    auto in = *arrow::ListArray::FromArrays(*offsets, *values);
-    auto out = CoerceToList({in})[0];
-    EXPECT_EQ(out.get(), in.get());
 }

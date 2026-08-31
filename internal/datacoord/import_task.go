@@ -46,12 +46,6 @@ func WithType(taskType TaskType) ImportTaskFilter {
 	}
 }
 
-func WithJob(jobID int64) ImportTaskFilter {
-	return func(task ImportTask) bool {
-		return task.GetJobID() == jobID
-	}
-}
-
 func WithStates(states ...datapb.ImportTaskStateV2) ImportTaskFilter {
 	return func(task ImportTask) bool {
 		for _, state := range states {

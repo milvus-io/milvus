@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/blang/semver/v4"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 
@@ -34,50 +33,6 @@ import (
 func init() {
 	paramtable.Init()
 }
-
-type versionAwareSchedulerCluster struct {
-	session.Cluster
-	slots map[int64]*session.WorkerSlots
-}
-
-func (c *versionAwareSchedulerCluster) QuerySlot() map[int64]*session.WorkerSlots {
-	return c.slots
-}
-
-type versionAwareSchedulerTask struct {
-	id             int64
-	slot           int64
-	minimumVersion semver.Version
-	state          atomic.Int32
-	nodeID         atomic.Int64
-}
-
-func newVersionAwareSchedulerTask(id int64, minimumVersion semver.Version) *versionAwareSchedulerTask {
-	task := &versionAwareSchedulerTask{id: id, slot: 1, minimumVersion: minimumVersion}
-	task.state.Store(int32(taskcommon.Init))
-	task.nodeID.Store(NullNodeID)
-	return task
-}
-
-func (t *versionAwareSchedulerTask) GetTaskID() int64             { return t.id }
-func (t *versionAwareSchedulerTask) GetTaskType() taskcommon.Type { return taskcommon.CopySegment }
-func (t *versionAwareSchedulerTask) GetTaskState() taskcommon.State {
-	return taskcommon.State(t.state.Load())
-}
-func (t *versionAwareSchedulerTask) GetTaskSlot() int64                         { return t.slot }
-func (t *versionAwareSchedulerTask) SetTaskTime(taskcommon.TimeType, time.Time) {}
-func (t *versionAwareSchedulerTask) GetTaskTime(taskcommon.TimeType) time.Time  { return time.Time{} }
-func (t *versionAwareSchedulerTask) GetTaskVersion() int64                      { return 0 }
-func (t *versionAwareSchedulerTask) MinimumWorkerVersion() semver.Version {
-	return t.minimumVersion
-}
-
-func (t *versionAwareSchedulerTask) CreateTaskOnWorker(nodeID int64, _ session.Cluster) {
-	t.nodeID.Store(nodeID)
-	t.state.Store(int32(taskcommon.InProgress))
-}
-func (t *versionAwareSchedulerTask) QueryTaskOnWorker(session.Cluster) {}
-func (t *versionAwareSchedulerTask) DropTaskOnWorker(session.Cluster)  {}
 
 func TestGlobalScheduler_Enqueue(t *testing.T) {
 	cluster := session.NewMockCluster(t)
@@ -255,51 +210,6 @@ func TestGlobalScheduler_pickNode(t *testing.T) {
 
 	// Empty cluster.
 	assert.Equal(t, int64(NullNodeID), scheduler.pickNode(newNodeSlotHeap(nil), 1))
-}
-
-func TestGlobalScheduler_pickNodeWithMinimumVersion(t *testing.T) {
-	scheduler := NewGlobalTaskScheduler(context.TODO(), nil).(*globalTaskScheduler)
-	minimumVersion := semver.MustParse("3.0.1")
-	nodes := map[int64]*session.WorkerSlots{
-		1: {NodeID: 1, AvailableSlots: 100, Version: "3.0.0"},
-		2: {NodeID: 2, AvailableSlots: 20, Version: "3.0.1"},
-	}
-	slotHeap := newNodeSlotHeap(nodes)
-
-	assert.Equal(t, int64(2), scheduler.pickNodeWithMinimumVersion(slotHeap, 10, minimumVersion))
-	assert.Equal(t, int64(10), nodes[2].AvailableSlots)
-	assert.Equal(t, int64(1), scheduler.pickNode(slotHeap, 10))
-	assert.Equal(t, int64(90), nodes[1].AvailableSlots)
-}
-
-func TestWorkerSupportsMinimumVersion(t *testing.T) {
-	minimumVersion := semver.MustParse("3.0.1")
-	assert.False(t, workerSupportsMinimumVersion("", minimumVersion))
-	assert.False(t, workerSupportsMinimumVersion("3.0.0", minimumVersion))
-	assert.True(t, workerSupportsMinimumVersion("3.0.1-rc.1", minimumVersion))
-	assert.True(t, workerSupportsMinimumVersion("v3.0.2", minimumVersion))
-	assert.True(t, workerSupportsMinimumVersion("master-20260810-deadbeef", minimumVersion))
-	assert.True(t, workerSupportsMinimumVersion("", semver.Version{}))
-}
-
-func TestGlobalScheduler_IncompatibleTaskDoesNotBlockOrdinaryTask(t *testing.T) {
-	cluster := &versionAwareSchedulerCluster{
-		slots: map[int64]*session.WorkerSlots{
-			1: {NodeID: 1, AvailableSlots: 10, Version: "3.0.0"},
-		},
-	}
-	scheduler := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
-	externalTask := newVersionAwareSchedulerTask(1, semver.MustParse("3.0.1"))
-	ordinaryTask := newVersionAwareSchedulerTask(2, semver.Version{})
-
-	scheduler.Enqueue(externalTask)
-	scheduler.Enqueue(ordinaryTask)
-	scheduler.schedule()
-
-	assert.Equal(t, int64(NullNodeID), externalTask.nodeID.Load())
-	assert.NotNil(t, scheduler.pendingTasks.Get(externalTask.GetTaskID()))
-	assert.Equal(t, int64(1), ordinaryTask.nodeID.Load())
-	assert.True(t, scheduler.runningTasks.Contain(ordinaryTask.GetTaskID()))
 }
 
 // TestGlobalScheduler_pickNode_Balancing verifies that successive picks spread

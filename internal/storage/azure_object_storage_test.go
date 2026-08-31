@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,6 +93,19 @@ func TestWaitAzureCopyComplete(t *testing.T) {
 		assert.Contains(t, err.Error(), "copy source mismatch")
 	})
 
+	t.Run("mismatch error never carries the source SAS", func(t *testing.T) {
+		statuses := []blob.CopyStatusType{blob.CopyStatusTypePending}
+		actual := "https://other-account.blob.core.windows.net/src-container/srcobj?sv=2024-08-04&sig=other"
+		client, _ := mockAzureCopyStatuses(t, statuses, actual, "copy-id", "")
+
+		err := waitAzureCopyComplete(context.Background(), client, "dst",
+			"https://src-account.blob.core.windows.net/src-container/srcobj?sv=2024-08-04&sig=abc", "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "https://src-account.blob.core.windows.net/src-container/srcobj")
+		assert.NotContains(t, err.Error(), "sig=abc")
+		assert.NotContains(t, err.Error(), "sig=other")
+	})
+
 	t.Run("rejects replaced copy ID", func(t *testing.T) {
 		statuses := []blob.CopyStatusType{blob.CopyStatusTypePending}
 		client, _ := mockAzureCopyStatuses(t, statuses, "source", "other-copy-id", "")
@@ -113,6 +127,125 @@ func TestWaitAzureCopyComplete(t *testing.T) {
 		err := waitAzureCopyComplete(context.Background(), new(blockblob.Client), "dst", "source", "copy-id")
 		require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
 		assert.Equal(t, 1, calls)
+	})
+}
+
+func TestStartOrResumeAzureCopySourceIdentityIgnoresQuery(t *testing.T) {
+	// The service echoes the copy source without a guarantee about the query
+	// string or percent-encoding; a SAS-bearing, escaped expected source must
+	// verify against its bare, unescaped form.
+	status := blob.CopyStatusTypeSuccess
+	copyID := "copy-id"
+	bareSource := "https://src-account.blob.core.windows.net/src-container/src/obj"
+	client, calls := mockAzureCopyStatuses(t, []blob.CopyStatusType{status}, bareSource, copyID, "")
+
+	err := waitAzureCopyComplete(context.Background(), client, "dst",
+		"https://src-account.blob.core.windows.net/src-container/src%2Fobj?sv=2024-08-04&sig=abc", copyID)
+	require.NoError(t, err)
+	require.Equal(t, 1, *calls)
+}
+
+func TestAzureObjectStorageCopyObjectCrossBucketSourceSAS(t *testing.T) {
+	newStorage := func(t *testing.T, sourceEndpoint, sourceSAS string, sourceUseSSL bool) *AzureObjectStorage {
+		t.Helper()
+		// #nosec G101 -- "ZmFrZS1rZXk=" is base64 for "fake-key", an offline
+		// fixture credential; all requests are mocked, nothing is ever signed.
+		cfg := &objectstorage.Config{
+			Address:                     "core.windows.net",
+			BucketName:                  "dst-container",
+			AccessKeyID:                 "dst-account",
+			SecretAccessKeyID:           "ZmFrZS1rZXk=",
+			CloudProvider:               objectstorage.CloudProviderAzure,
+			UseSSL:                      true,
+			SkipBucketCheck:             true,
+			IgnoreAzureConnectionString: true,
+			AzureSourceEndpoint:         sourceEndpoint,
+			AzureSourceUseSSL:           sourceUseSSL,
+			AzureSourceSAS:              sourceSAS,
+		}
+		storage, err := newAzureObjectStorageWithConfig(context.Background(), cfg)
+		require.NoError(t, err)
+		return storage
+	}
+
+	mockCopy := func(t *testing.T, source *string, echoSourceWithQuery bool) {
+		t.Helper()
+		copyID := "copy-id"
+		status := blob.CopyStatusTypeSuccess
+		startPatch := mockey.Mock((*blockblob.Client).StartCopyFromURL).To(
+			func(_ *blockblob.Client, _ context.Context, url string, _ *blob.StartCopyFromURLOptions) (blob.StartCopyFromURLResponse, error) {
+				*source = url
+				return blob.StartCopyFromURLResponse{CopyID: &copyID}, nil
+			}).Build()
+		t.Cleanup(func() { startPatch.UnPatch() })
+		echoedSource := ""
+		pollPatch := mockey.Mock((*blockblob.Client).GetProperties).To(
+			func(_ *blockblob.Client, _ context.Context, _ *blob.GetPropertiesOptions) (blob.GetPropertiesResponse, error) {
+				echoedSource = *source
+				if !echoSourceWithQuery {
+					if i := strings.IndexByte(echoedSource, '?'); i >= 0 {
+						echoedSource = echoedSource[:i]
+					}
+				}
+				return blob.GetPropertiesResponse{
+					CopyID:     &copyID,
+					CopySource: &echoedSource,
+					CopyStatus: &status,
+				}, nil
+			}).Build()
+		t.Cleanup(func() { pollPatch.UnPatch() })
+	}
+
+	t.Run("cross-account source URL addresses the source account and carries the SAS", func(t *testing.T) {
+		storage := newStorage(t, "src-account.blob.core.windows.net", "sv=2024-08-04&sig=abc", true)
+		var captured string
+		mockCopy(t, &captured, false)
+
+		err := storage.CopyObjectCrossBucket(context.Background(), "src-container", "srcobj", "dst-container", "dstobj")
+		require.NoError(t, err)
+		assert.Equal(t, "https://src-account.blob.core.windows.net/src-container/srcobj?sv=2024-08-04&sig=abc", captured)
+	})
+
+	t.Run("source URL scheme follows the source config, not the destination", func(t *testing.T) {
+		// The destination config uses SSL; the source account does not, so the
+		// source URL must be http even though the client config has UseSSL=true.
+		storage := newStorage(t, "src-account.blob.core.windows.net", "sv=2024-08-04&sig=abc", false)
+		var captured string
+		mockCopy(t, &captured, false)
+
+		err := storage.CopyObjectCrossBucket(context.Background(), "src-container", "srcobj", "dst-container", "dstobj")
+		require.NoError(t, err)
+		assert.Equal(t, "http://src-account.blob.core.windows.net/src-container/srcobj?sv=2024-08-04&sig=abc", captured)
+	})
+
+	t.Run("same-account source URL stays on the client service", func(t *testing.T) {
+		storage := newStorage(t, "", "", true)
+		var captured string
+		mockCopy(t, &captured, true)
+
+		err := storage.CopyObjectCrossBucket(context.Background(), "dst-container", "srcobj", "dst-container", "dstobj")
+		require.NoError(t, err)
+		assert.Equal(t, "https://dst-account.blob.core.windows.net/dst-container/srcobj", captured)
+	})
+
+	t.Run("invalid source endpoint host is rejected at construction", func(t *testing.T) {
+		// #nosec G101 -- "ZmFrZS1rZXk=" is base64 for "fake-key", an offline
+		// fixture credential; all requests are mocked, nothing is ever signed.
+		cfg := &objectstorage.Config{
+			Address:                     "core.windows.net",
+			BucketName:                  "dst-container",
+			AccessKeyID:                 "dst-account",
+			SecretAccessKeyID:           "ZmFrZS1rZXk=",
+			CloudProvider:               objectstorage.CloudProviderAzure,
+			UseSSL:                      true,
+			SkipBucketCheck:             true,
+			IgnoreAzureConnectionString: true,
+			AzureSourceEndpoint:         "not a host",
+			AzureSourceSAS:              "sv=2024-08-04&sig=abc",
+		}
+		_, err := newAzureObjectStorageWithConfig(context.Background(), cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must be a bare service host")
 	})
 }
 

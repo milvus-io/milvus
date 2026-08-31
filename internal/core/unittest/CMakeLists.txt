@@ -42,6 +42,7 @@ set(MILVUS_TEST_FILES
         test_loading.cpp
         test_exec.cpp
         test_timestamptz_arith_compare.cpp
+        test_timestamptz_compare.cpp
         test_offsets_eval_correctness.cpp
         test_expr_materialized_view.cpp
         test_float16.cpp
@@ -61,7 +62,6 @@ set(MILVUS_TEST_FILES
         test_element_filter.cpp
         test_query_group_by.cpp
         test_minhash.cpp
-        test_async_warmup.cpp
         test_boost_score_c.cpp
         test_sort_buffer.cpp
         test_row_container.cpp

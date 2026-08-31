@@ -219,8 +219,9 @@ func NewTaskScheduler(ctx context.Context) *TaskScheduler {
 func getStateFromError(err error) indexpb.JobState {
 	if errors.Is(err, errCancel) {
 		return indexpb.JobState_JobStateRetry
-	} else if errors.Is(err, merr.ErrIoKeyNotFound) || errors.Is(err, merr.ErrSegcoreUnsupported) {
-		// NoSuchKey or unsupported error
+	} else if errors.Is(err, merr.ErrIoKeyNotFound) || errors.Is(err, merr.ErrSegcoreUnsupported) ||
+		merr.IsSegcoreDataFormatBroken(err) {
+		// NoSuchKey, unsupported, or malformed persisted data cannot be fixed by retrying.
 		return indexpb.JobState_JobStateFailed
 	} else if errors.Is(err, merr.ErrSegcorePretendFinished) {
 		return indexpb.JobState_JobStateFinished

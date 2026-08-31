@@ -190,7 +190,7 @@ func (s *BloomMatchTestSuite) bloomBlobStr(vals []string) []byte {
 }
 
 // bfParam wraps a pre-built blob as a raw bytes template value under key "bf",
-// matching bloom_match(field, {bf}).
+// matching membership_match(field, {bf}, type=bloom).
 func bfParam(blob []byte) map[string]*schemapb.TemplateValue {
 	return map[string]*schemapb.TemplateValue{
 		"bf": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: blob}},
@@ -394,12 +394,12 @@ func scalarIndexParams(indexType string) []*commonpb.KeyValuePair {
 }
 
 // assertBloomSupersetInt runs a scalar QUERY on an integer field and asserts
-// bloom_match(field, {bf}) returns a superset of exact `in` — zero row-level false
+// membership_match(field, {bf}, type=bloom) returns a superset of exact `in` — zero row-level false
 // negatives — regardless of whether the field's raw column is present or was
 // dropped in favor of an index reverse-lookup. desc labels the failure.
 func (s *BloomMatchTestSuite) assertBloomSupersetInt(collectionName, field string, memberSet []int64, blob []byte, desc string) {
 	exactRes := s.query(collectionName, fmt.Sprintf("%s in %s", field, int64LiteralList(memberSet)), []string{integration.Int64Field}, nil)
-	bloomRes := s.query(collectionName, fmt.Sprintf("bloom_match(%s, {bf})", field), []string{integration.Int64Field}, bfParam(blob))
+	bloomRes := s.query(collectionName, fmt.Sprintf("membership_match(%s, {bf}, type=bloom)", field), []string{integration.Int64Field}, bfParam(blob))
 
 	exactPKs := queryInt64Field(exactRes, integration.Int64Field)
 	bloomPKs := queryInt64Field(bloomRes, integration.Int64Field)
@@ -419,7 +419,7 @@ func (s *BloomMatchTestSuite) assertBloomSupersetInt(collectionName, field strin
 // assertBloomSupersetStr is assertBloomSupersetInt for a varchar field.
 func (s *BloomMatchTestSuite) assertBloomSupersetStr(collectionName, field string, memberSet []string, blob []byte, desc string) {
 	exactRes := s.query(collectionName, fmt.Sprintf("%s in %s", field, stringLiteralList(memberSet)), []string{integration.Int64Field}, nil)
-	bloomRes := s.query(collectionName, fmt.Sprintf("bloom_match(%s, {bf})", field), []string{integration.Int64Field}, bfParam(blob))
+	bloomRes := s.query(collectionName, fmt.Sprintf("membership_match(%s, {bf}, type=bloom)", field), []string{integration.Int64Field}, bfParam(blob))
 
 	exactPKs := queryInt64Field(exactRes, integration.Int64Field)
 	bloomPKs := queryInt64Field(bloomRes, integration.Int64Field)
@@ -433,7 +433,7 @@ func (s *BloomMatchTestSuite) assertBloomSupersetStr(collectionName, field strin
 			missing++
 		}
 	}
-	s.Equalf(0, missing, "%s: bloom_match(varchar) dropped %d/%d true member rows (false negatives)", desc, missing, len(exactPKs))
+	s.Equalf(0, missing, "%s: membership_match(varchar, type=bloom) dropped %d/%d true member rows (false negatives)", desc, missing, len(exactPKs))
 }
 
 func (s *BloomMatchTestSuite) search(collectionName, expr string, topK int, outputFields []string, tmpl map[string]*schemapb.TemplateValue) *milvuspb.SearchResults {
@@ -508,7 +508,7 @@ func (s *BloomMatchTestSuite) TestQueryIncludeZeroFalseNegatives() {
 	blob := s.bloomBlobInt64(memberSet)
 
 	exactRes := s.query(collectionName, fmt.Sprintf("%s in %s", creatorIDField, lit), []string{integration.Int64Field}, nil)
-	bloomRes := s.query(collectionName, fmt.Sprintf("bloom_match(%s, {bf})", creatorIDField), []string{integration.Int64Field, creatorIDField}, bfParam(blob))
+	bloomRes := s.query(collectionName, fmt.Sprintf("membership_match(%s, {bf}, type=bloom)", creatorIDField), []string{integration.Int64Field, creatorIDField}, bfParam(blob))
 
 	exactPKs := queryInt64Field(exactRes, integration.Int64Field)
 	bloomPKs := queryInt64Field(bloomRes, integration.Int64Field)
@@ -580,7 +580,7 @@ func (s *BloomMatchTestSuite) TestQueryJsonPathStrictTypedMembership() {
 	s.Require().Positive(expectedFloatEncodedMemberRows)
 
 	bloomRes := s.query(collectionName,
-		fmt.Sprintf(`bloom_match(%s["creator"], {bf})`, metaJSONField),
+		fmt.Sprintf(`membership_match(%s["creator"], {bf}, type=bloom)`, metaJSONField),
 		[]string{integration.Int64Field, creatorIDField}, bfParam(blob))
 	bloomPKs := queryInt64Field(bloomRes, integration.Int64Field)
 	bloomCreators := queryInt64Field(bloomRes, creatorIDField)
@@ -600,7 +600,7 @@ func (s *BloomMatchTestSuite) TestQueryJsonPathStrictTypedMembership() {
 		}
 	}
 	s.Equalf(expectedMemberRows, memberRows,
-		"bloom_match(json path) returned %d member rows, want %d int-encoded (float-encoded rows must not match: %d)",
+		"membership_match(json path, type=bloom) returned %d member rows, want %d int-encoded (float-encoded rows must not match: %d)",
 		memberRows, expectedMemberRows, expectedFloatEncodedMemberRows)
 
 	// Gate 2: pin the deliberate divergence from exact `in`. Exact `in`
@@ -631,7 +631,7 @@ func (s *BloomMatchTestSuite) TestQueryJsonPathStrictTypedMembership() {
 	}
 	if len(bloomCreators) > 0 {
 		s.Lessf(float64(fp)/float64(len(bloomCreators)), 0.05,
-			"bloom_match(json path) false-positive fraction too high: %d/%d", fp, len(bloomCreators))
+			"membership_match(json path, type=bloom) false-positive fraction too high: %d/%d", fp, len(bloomCreators))
 	}
 }
 
@@ -659,10 +659,10 @@ func (s *BloomMatchTestSuite) assertJSONPathStrictMembership(collectionName stri
 	s.Require().Positivef(expectedMemberRows, "%s: no int-encoded member rows in fixture", desc)
 
 	bloomRes := s.query(collectionName,
-		fmt.Sprintf(`bloom_match(%s["creator"], {bf})`, metaJSONField),
+		fmt.Sprintf(`membership_match(%s["creator"], {bf}, type=bloom)`, metaJSONField),
 		[]string{integration.Int64Field, creatorIDField}, bfParam(blob))
 	bloomCreators := queryInt64Field(bloomRes, creatorIDField)
-	s.Require().NotEmptyf(bloomCreators, "%s: bloom_match(json path) returned no rows", desc)
+	s.Require().NotEmptyf(bloomCreators, "%s: membership_match(json path, type=bloom) returned no rows", desc)
 
 	memberRows := 0
 	for _, cv := range bloomCreators {
@@ -671,7 +671,7 @@ func (s *BloomMatchTestSuite) assertJSONPathStrictMembership(collectionName stri
 		}
 	}
 	s.Equalf(expectedMemberRows, memberRows,
-		"%s: bloom_match(json path) returned %d member rows, want %d int-encoded — raw JSON must stay loaded and strict typing preserved",
+		"%s: membership_match(json path, type=bloom) returned %d member rows, want %d int-encoded — raw JSON must stay loaded and strict typing preserved",
 		desc, memberRows, expectedMemberRows)
 }
 
@@ -771,7 +771,7 @@ func (s *BloomMatchTestSuite) TestSearchRecallWithinThreshold() {
 
 	exactRes := s.search(collectionName, fmt.Sprintf("%s in %s", creatorIDField, lit), topK, []string{creatorIDField}, nil)
 	s.Require().NoError(merr.Error(exactRes.GetStatus()))
-	bloomRes := s.search(collectionName, fmt.Sprintf("bloom_match(%s, {bf})", creatorIDField), topK, []string{creatorIDField}, bfParam(blob))
+	bloomRes := s.search(collectionName, fmt.Sprintf("membership_match(%s, {bf}, type=bloom)", creatorIDField), topK, []string{creatorIDField}, bfParam(blob))
 	s.Require().NoError(merr.Error(bloomRes.GetStatus()))
 
 	exactPKs := resultPKs(exactRes)
@@ -797,7 +797,7 @@ func (s *BloomMatchTestSuite) TestQueryExcludeNoTrueMemberLeaks() {
 	memberSet := []int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19}
 	blob := s.bloomBlobInt64(memberSet)
 
-	res := s.query(collectionName, fmt.Sprintf("not bloom_match(%s, {bf})", creatorIDField), []string{creatorIDField}, bfParam(blob))
+	res := s.query(collectionName, fmt.Sprintf("not membership_match(%s, {bf}, type=bloom)", creatorIDField), []string{creatorIDField}, bfParam(blob))
 	creators := queryInt64Field(res, creatorIDField)
 	s.Require().NotEmpty(creators)
 	for _, cv := range creators {
@@ -816,7 +816,7 @@ func (s *BloomMatchTestSuite) TestQueryVarcharZeroFalseNegatives() {
 	blob := s.bloomBlobStr(memberSet)
 
 	exactRes := s.query(collectionName, fmt.Sprintf("%s in %s", creatorIDStrField, lit), []string{integration.Int64Field}, nil)
-	bloomRes := s.query(collectionName, fmt.Sprintf("bloom_match(%s, {bf})", creatorIDStrField), []string{integration.Int64Field}, bfParam(blob))
+	bloomRes := s.query(collectionName, fmt.Sprintf("membership_match(%s, {bf}, type=bloom)", creatorIDStrField), []string{integration.Int64Field}, bfParam(blob))
 
 	exactPKs := queryInt64Field(exactRes, integration.Int64Field)
 	bloomPKs := queryInt64Field(bloomRes, integration.Int64Field)
@@ -830,7 +830,7 @@ func (s *BloomMatchTestSuite) TestQueryVarcharZeroFalseNegatives() {
 			missing++
 		}
 	}
-	s.Equalf(0, missing, "bloom_match(varchar) dropped %d/%d true member rows (false negatives)", missing, len(exactPKs))
+	s.Equalf(0, missing, "membership_match(varchar, type=bloom) dropped %d/%d true member rows (false negatives)", missing, len(exactPKs))
 }
 
 // TestQueryGrowingAndSealedBothMatched proves bloom_match evaluates BOTH sealed and
@@ -862,7 +862,7 @@ func (s *BloomMatchTestSuite) TestQueryGrowingAndSealedBothMatched() {
 	memberSet := []int64{0, 1, 2, 3, 4, 500, 501, 502, 503, 504}
 	blob := s.bloomBlobInt64(memberSet)
 
-	res := s.query(collectionName, fmt.Sprintf("bloom_match(%s, {bf})", creatorIDField),
+	res := s.query(collectionName, fmt.Sprintf("membership_match(%s, {bf}, type=bloom)", creatorIDField),
 		[]string{creatorIDField}, bfParam(blob))
 	creators := queryInt64Field(res, creatorIDField)
 	s.Require().NotEmpty(creators)
@@ -885,7 +885,7 @@ func (s *BloomMatchTestSuite) TestQueryGrowingAndSealedBothMatched() {
 	// growing-only "g0".."g4". A returned value with a "g" prefix can only come
 	// from a growing segment.
 	strBlob := s.bloomBlobStr([]string{"c0", "c1", "c2", "c3", "c4", "g0", "g1", "g2", "g3", "g4"})
-	strRes := s.query(collectionName, fmt.Sprintf("bloom_match(%s, {bf})", creatorIDStrField),
+	strRes := s.query(collectionName, fmt.Sprintf("membership_match(%s, {bf}, type=bloom)", creatorIDStrField),
 		[]string{creatorIDStrField}, bfParam(strBlob))
 	strVals := queryStringField(strRes, creatorIDStrField)
 	s.Require().NotEmpty(strVals)
@@ -899,8 +899,8 @@ func (s *BloomMatchTestSuite) TestQueryGrowingAndSealedBothMatched() {
 			sawGrowingStr = true
 		}
 	}
-	s.True(sawSealedStr, "bloom_match(varchar) missed sealed-segment members")
-	s.True(sawGrowingStr, "bloom_match(varchar) missed growing-segment members (growing segment not probed)")
+	s.True(sawSealedStr, "membership_match(varchar, type=bloom) missed sealed-segment members")
+	s.True(sawGrowingStr, "membership_match(varchar, type=bloom) missed growing-segment members (growing segment not probed)")
 }
 
 // TestBlobArgAndErrors verifies the reshaped API: the second argument must be a client
@@ -914,20 +914,20 @@ func (s *BloomMatchTestSuite) TestBlobArgAndErrors() {
 	blob := s.bloomBlobInt64([]int64{0, 1, 2})
 
 	// a valid client-built blob passed as a template param succeeds
-	okRes := s.search(collectionName, fmt.Sprintf("bloom_match(%s, {bf})", creatorIDField), 10, []string{creatorIDField}, bfParam(blob))
+	okRes := s.search(collectionName, fmt.Sprintf("membership_match(%s, {bf}, type=bloom)", creatorIDField), 10, []string{creatorIDField}, bfParam(blob))
 	s.NoError(merr.Error(okRes.GetStatus()))
 
 	// bloom_match on a float vector field must be rejected
-	badField := s.search(collectionName, fmt.Sprintf("bloom_match(%s, {bf})", integration.FloatVecField), 10, nil, bfParam(blob))
+	badField := s.search(collectionName, fmt.Sprintf("membership_match(%s, {bf}, type=bloom)", integration.FloatVecField), 10, nil, bfParam(blob))
 	s.False(merr.Ok(badField.GetStatus()), "bloom_match on vector field should be rejected")
 
 	// a malformed blob (not a valid MBF1 envelope) must be rejected, never silently unfiltered
-	badBlob := s.search(collectionName, fmt.Sprintf("bloom_match(%s, {bf})", creatorIDField), 10, nil, bfParam([]byte("not-a-real-blob")))
+	badBlob := s.search(collectionName, fmt.Sprintf("membership_match(%s, {bf}, type=bloom)", creatorIDField), 10, nil, bfParam([]byte("not-a-real-blob")))
 	s.False(merr.Ok(badBlob.GetStatus()), "malformed blob should be rejected")
 
 	// a literal-array argument (no client build / not a template) is rejected — the blob
 	// must arrive as a {template} bytes param, not be constructed proxy-side.
-	badLiteral := s.search(collectionName, fmt.Sprintf("bloom_match(%s, [1, 2, 3])", creatorIDField), 10, nil, nil)
+	badLiteral := s.search(collectionName, fmt.Sprintf("membership_match(%s, [1, 2, 3], type=bloom)", creatorIDField), 10, nil, nil)
 	s.False(merr.Ok(badLiteral.GetStatus()), "literal-array argument should be rejected")
 
 	// A blob built from the wrong value domain is rejected at the proxy rather than
@@ -936,11 +936,11 @@ func (s *BloomMatchTestSuite) TestBlobArgAndErrors() {
 	// silent recall loss this check exists to prevent. The realistic trigger is IDs
 	// stringified by a JSON/JS layer and shipped against an INT64 field.
 	strBlobOnInt := s.bloomBlobStr([]string{"0", "1", "2"})
-	badDomain := s.search(collectionName, fmt.Sprintf("bloom_match(%s, {bf})", creatorIDField), 10, nil, bfParam(strBlobOnInt))
+	badDomain := s.search(collectionName, fmt.Sprintf("membership_match(%s, {bf}, type=bloom)", creatorIDField), 10, nil, bfParam(strBlobOnInt))
 	s.False(merr.Ok(badDomain.GetStatus()), "utf8 blob on an int64 field should be rejected")
 
 	intBlobOnStr := s.bloomBlobInt64([]int64{0, 1, 2})
-	badDomainStr := s.search(collectionName, fmt.Sprintf("bloom_match(%s, {bf})", creatorIDStrField), 10, nil, bfParam(intBlobOnStr))
+	badDomainStr := s.search(collectionName, fmt.Sprintf("membership_match(%s, {bf}, type=bloom)", creatorIDStrField), 10, nil, bfParam(intBlobOnStr))
 	s.False(merr.Ok(badDomainStr.GetStatus()), "int64 blob on a varchar field should be rejected")
 }
 

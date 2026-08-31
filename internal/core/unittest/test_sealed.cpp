@@ -1330,6 +1330,56 @@ TEST(Sealed, LoadScalarIndex) {
     std::cout << json.dump(1);
 }
 
+TEST(Sealed, BulkSubscriptSkipsPinIndexWhenIndexHasNoRawData) {
+    size_t N = ROW_COUNT;
+    auto schema = std::make_shared<Schema>();
+    auto counter_id = schema->AddDebugField("counter", DataType::INT64);
+    auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
+    schema->set_primary_field_id(counter_id);
+
+    auto dataset = DataGen(schema, N);
+    auto double_col = dataset.get_col<double>(double_id);
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // Load a scalar index whose metadata reports no raw data (as INVERTED
+    // does). TestIndexTranslator records the OpContext when the index is
+    // actually materialized, so we can assert bulk_subscript never pins it.
+    auto index = GenScalarIndexing<double>(N, double_col.data());
+    milvus::OpContext* observed_ctx = nullptr;
+    LoadIndexInfo load_info;
+    load_info.field_id = double_id.get();
+    load_info.field_type = DataType::DOUBLE;
+    load_info.index_params = GenIndexParams(index.get());
+    load_info.load_resource_request.emplace();
+    load_info.load_resource_request->has_raw_data = false;
+    load_info.cache_index =
+        CreateTestCacheIndex("test", std::move(index), &observed_ctx);
+    segment->LoadIndex(load_info);
+    ASSERT_TRUE(segment->HasIndex(double_id));
+
+    std::vector<int64_t> seg_offsets(N);
+    for (int64_t i = 0; i < static_cast<int64_t>(N); i++) {
+        seg_offsets[i] = i;
+    }
+
+    milvus::OpContext op_ctx;
+    auto field_data =
+        segment->bulk_subscript(&op_ctx, double_id, seg_offsets.data(), N);
+
+    // Values must be read from the raw column, unchanged.
+    ASSERT_TRUE(field_data->has_scalars());
+    ASSERT_TRUE(field_data->scalars().has_double_data());
+    ASSERT_EQ(field_data->scalars().double_data().data_size(),
+              static_cast<int>(N));
+    for (size_t i = 0; i < N; i++) {
+        ASSERT_EQ(field_data->scalars().double_data().data(i), double_col[i]);
+    }
+    // The index carries no raw data: bulk_subscript must fall back to the raw
+    // column without pinning (and thus materializing) the index.
+    ASSERT_EQ(observed_ctx, nullptr);
+}
+
 TEST(Sealed, Delete) {
     auto dim = 4;
     auto N = 10;

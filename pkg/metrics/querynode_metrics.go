@@ -1093,6 +1093,9 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	RegisterLoggingMetrics(registry)
 }
 
+// CleanupQueryNodeCollectionMetrics drops every query node series belonging to
+// collectionID. Every metric labeled with collection_id has to be listed here --
+// TestCollectionScopedMetricsAreComplete guards it.
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 	// Reuse a single labels map to avoid allocations; DeletePartialMatch does not mutate it.
 	labels := prometheus.Labels{
@@ -1119,6 +1122,7 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 	QueryNodeTwoStageSearchLatency.DeletePartialMatch(labels)
 	QueryNodeTwoStageSearchFallbackCount.DeletePartialMatch(labels)
 	QueryNodeGlobalRefineCount.DeletePartialMatch(labels)
+	QueryNodeSearchFTSNumTokens.DeletePartialMatch(labels)
 }
 
 // PoolStats holds the snapshot of a single pool's state.
