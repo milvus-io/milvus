@@ -171,11 +171,10 @@ func TestDelegatorMsgstreamAdaptor(t *testing.T) {
 // what a query delegator's msgstream ever sees.
 //
 // Filtering is silent by construction: a type left out is dropped at the WAL
-// scanner, so it never reaches the dispatcher, the flow graph, or any log. The
-// shard-split fence was left out, and the effect was a split whose new shards
-// were served by nothing between the fence and querycoord adopting them, with
-// the source still answering — from its pre-fence data, at a fully advanced
-// tsafe — so nothing anywhere reported a problem.
+// scanner, so it never reaches the dispatcher, the flow graph, or any log —
+// which makes a missing entry impossible to notice from a running system. The
+// shard-split fence has to be in the set for the read path to ever act on it;
+// the delegator-side handling itself lands in a later PR.
 func TestDelegatorMessageTypesCarryTheSplitFence(t *testing.T) {
 	required := []message.MessageType{
 		message.MessageTypeInsert,
@@ -184,7 +183,7 @@ func TestDelegatorMessageTypesCarryTheSplitFence(t *testing.T) {
 		message.MessageTypeAlterCollection,
 		message.MessageTypeManualFlush,
 		// A delegator that never learns its vchannel was split cannot front the
-		// split's targets, and their data goes unserved for the whole window.
+		// split's targets; without this entry the message never even reaches it.
 		message.MessageTypeSplitShard,
 	}
 	for _, mt := range required {
