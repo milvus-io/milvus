@@ -30,7 +30,6 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 )
 
 // checkInterval is the polling interval of the gate-processing loop. The
@@ -59,16 +58,16 @@ type gate struct {
 }
 
 // Confirmator is the one-shot cluster version confirmator. It is a
-// paramtable-level capability: it is created and started right after paramtable
-// initialization, builds its own etcd client from the etcd config (the same
-// way paramtable accesses etcd) and needs no external wiring. A single session
-// watch maintains the minimum online version across all nodes; every
+// paramtable-level capability: it is recovered right after paramtable
+// initialization (see RecoverConfirmator), reusing the etcd client paramtable
+// created for its config etcd source, and needs no external wiring. A single
+// session watch maintains the minimum online version across all nodes; every
 // registered gate is then driven by that minimum version: once the cluster
 // stays above the gate's GateVersion for the whole SwitchDelay stability
 // window, the gate flips its config item's value to TargetValue in the config
 // center (etcd source). The flip is guarded so an explicit operator value is
 // never overwritten. When every registered gate is resolved the confirmator
-// exits; nothing keeps running afterwards.
+// exits; nothing keeps running afterwards. Use Close to stop it.
 type Confirmator struct {
 	cli           *clientv3.Client
 	sessionPrefix string // prefix of the session keys (<metaRoot>/session)
@@ -83,38 +82,59 @@ type Confirmator struct {
 	wg     sync.WaitGroup
 }
 
-// NewConfirmator creates a confirmator that watches the sessions of all roles
-// under metaRoot. The etcd client is built internally from the given etcd
-// config, the same way paramtable accesses etcd (etcd.CreateEtcdClient), so
-// the confirmator never depends on clients injected from outside. The
-// confirmator owns the client and closes it in Stop.
-func NewConfirmator(etcdCfg *EtcdConfig, metaRoot, configRoot string) (*Confirmator, error) {
-	cli, err := etcd.CreateEtcdClient(
-		etcdCfg.UseEmbedEtcd.GetAsBool(),
-		etcdCfg.EtcdEnableAuth.GetAsBool(),
-		etcdCfg.EtcdAuthUserName.GetValue(),
-		etcdCfg.EtcdAuthPassword.GetValue(),
-		etcdCfg.EtcdUseSSL.GetAsBool(),
-		etcdCfg.Endpoints.GetAsStrings(),
-		etcdCfg.EtcdTLSCert.GetValue(),
-		etcdCfg.EtcdTLSKey.GetValue(),
-		etcdCfg.EtcdTLSCACert.GetValue(),
-		etcdCfg.EtcdTLSMinVersion.GetValue(),
-		etcd.WithDialTimeout(etcdCfg.DialTimeout.GetAsDuration(time.Millisecond)))
-	if err != nil {
-		return nil, err
-	}
+// newConfirmator creates a confirmator that watches the sessions of all roles
+// under metaRoot. The etcd client is injected by the caller — the same client
+// paramtable uses for its config etcd source — so the confirmator never opens
+// a second connection and does not own the client (Close does not close it).
+// Use RecoverConfirmator to create, register and start a confirmator.
+func newConfirmator(etcdCli *clientv3.Client, metaRoot, configRoot string) *Confirmator {
 	return &Confirmator{
-		cli:           cli,
+		cli:           etcdCli,
 		sessionPrefix: path.Join(metaRoot, "session"),
 		configRoot:    configRoot,
-	}, nil
+	}
 }
 
-// RegisterGate registers a version-gated config item. Registration is only
-// allowed before Start: the confirmator is one-shot and does not support gates
+// RecoverConfirmator creates and starts a cluster version confirmator in one
+// call: it registers a gate for every version-gated config item, then starts
+// the session watch and gate loop in the background. Gates are registered
+// before start (one-shot); items without a VersionGateSwitcher are skipped.
+// When no gate is left pending (all items skipped) it returns a nil
+// confirmator; when every registered gate is already resolved (explicit config
+// or flipped by a previous run) the confirmator exits on its own after the
+// initial pass. The etcd client is injected by the caller and shared with the
+// config etcd source; the confirmator does not own it. Call Close on the
+// returned confirmator to stop it.
+func RecoverConfirmator(etcdCli *clientv3.Client, metaRoot, configRoot string, items []*ParamItem) (*Confirmator, error) {
+	vg := newConfirmator(etcdCli, metaRoot, configRoot)
+	for _, item := range items {
+		if item == nil || item.VersionGateSwitcher == nil {
+			continue
+		}
+		if err := vg.registerGate(item.Key, item.VersionGateSwitcher); err != nil {
+			mlog.Warn(context.TODO(), "version gate: register gate failed, skip", zap.String("key", item.Key), mlog.Err(err))
+			continue
+		}
+	}
+	if len(vg.gates) == 0 {
+		vg.Close()
+		return nil, nil
+	}
+	// Start in the background: the initial resolution reads etcd and must not
+	// block paramtable initialization. Once every gate is resolved the
+	// confirmator stops itself.
+	go func() {
+		if err := vg.start(context.TODO()); err != nil {
+			mlog.Warn(context.TODO(), "version gate: start confirmator failed", mlog.Err(err))
+		}
+	}()
+	return vg, nil
+}
+
+// registerGate registers a version-gated config item. Registration is only
+// allowed before start: the confirmator is one-shot and does not support gates
 // registered at runtime.
-func (c *Confirmator) RegisterGate(key string, switcher *VersionGateSwitcher) error {
+func (c *Confirmator) registerGate(key string, switcher *VersionGateSwitcher) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.started {
@@ -131,12 +151,12 @@ func (c *Confirmator) RegisterGate(key string, switcher *VersionGateSwitcher) er
 	return nil
 }
 
-// Start resolves every registered gate. Gates whose config value is no longer
+// start resolves every registered gate. Gates whose config value is no longer
 // the sentinel (flipped earlier or explicitly configured by the operator) are
 // resolved immediately; for the remaining gates a single session watch and one
-// gate-processing loop are started in the background. Start returns after the
+// gate-processing loop are started in the background. start returns after the
 // initial pass. When all gates are resolved the confirmator stops itself.
-func (c *Confirmator) Start(ctx context.Context) error {
+func (c *Confirmator) start(ctx context.Context) error {
 	c.mu.Lock()
 	if c.started {
 		return errors.New("version gate: already started")
@@ -173,16 +193,15 @@ func (c *Confirmator) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops the confirmator and cancels the background session watch and
-// gate-processing loop, then closes the internally created etcd client.
-func (c *Confirmator) Stop() {
+// Close stops the confirmator and cancels the background session watch and
+// gate-processing loop, waiting for them to exit. The etcd client is injected
+// by the caller and shared with the config etcd source, so it is not closed
+// here.
+func (c *Confirmator) Close() {
 	if c.cancel != nil {
 		c.cancel()
 	}
 	c.wg.Wait()
-	if c.cli != nil {
-		c.cli.Close()
-	}
 }
 
 // watchLoop watches the session prefix and maintains the minimum online
