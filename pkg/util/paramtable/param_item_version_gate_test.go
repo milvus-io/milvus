@@ -136,4 +136,26 @@ func TestVersionGateSwitcher_EffectiveValue(t *testing.T) {
 		assert.Equal(t, "false", a.GetValue())
 		assert.Equal(t, "zstd-v1", b.GetValue())
 	})
+
+	t.Run("embedded-etcd localSatisfied resolves sentinel to TargetValue", func(t *testing.T) {
+		// A single-process (embedded-etcd) deployment whose local version already
+		// satisfies the gate: initVersionGates marks the switcher localSatisfied,
+		// so the sentinel resolves to TargetValue instead of PreSwitchValue.
+		// Use the initialized shared item (it has a manager). GetAsBool caches by
+		// raw value, and localSatisfied is a runtime hint invisible to the cache,
+		// so evict the cached value whenever the hint or the temp value changes.
+		item := &params.FunctionCfg.EnableWriteBeforeMaterialization
+		old := item.SwapTempValue("auto")
+		defer item.SwapTempValue(old)
+		item.manager.EvictCachedValue(item.Key)
+		assert.False(t, item.GetAsBool())
+		item.VersionGateSwitcher.localSatisfied = true
+		item.manager.EvictCachedValue(item.Key)
+		assert.Equal(t, "true", item.GetValue())
+		assert.True(t, item.GetAsBool())
+		// An explicit value still wins over the local-satisfied hint.
+		item.SwapTempValue("false")
+		assert.Equal(t, "false", item.GetValue())
+		assert.False(t, item.GetAsBool())
+	})
 }

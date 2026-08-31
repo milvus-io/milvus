@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	etcdkv "github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -200,6 +201,39 @@ func TestInitVersionGatesSkipRemote(t *testing.T) {
 	p := &ComponentParam{}
 	p.Init(NewBaseTable(SkipRemote(true)))
 	assert.Nil(t, p.versionGates)
+}
+
+func TestInitVersionGatesEmbeddedEtcd(t *testing.T) {
+	// Embedded-etcd deployments are single-process: when the local version
+	// already satisfies the gate, initVersionGates resolves the item directly
+	// (localSatisfied -> TargetValue) instead of creating a confirmator.
+	t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
+	p := &ComponentParam{}
+	bt := NewBaseTable(SkipRemote(true))
+	p.Init(bt)
+	item := &p.FunctionCfg.EnableWriteBeforeMaterialization
+	require.NotNil(t, item.VersionGateSwitcher)
+	assert.False(t, item.VersionGateSwitcher.localSatisfied)
+
+	// Same package: flip skipRemote off so initVersionGates actually runs, and
+	// enable embedded etcd. FunctionCfg is already initialized by Init.
+	bt.config.skipRemote = false
+	p.ServiceParam.EtcdCfg.UseEmbedEtcd.SwapTempValue("true")
+	defer func() {
+		p.ServiceParam.EtcdCfg.UseEmbedEtcd.SwapTempValue("")
+		bt.config.skipRemote = true
+	}()
+
+	p.initVersionGates()
+	// Local version (common.Version, 3.0.0-beta on master) >= 2.6.23: the gate
+	// is locally satisfied and no confirmator is created.
+	assert.True(t, item.VersionGateSwitcher.localSatisfied)
+	assert.Nil(t, p.versionGates)
+	// The sentinel default now resolves to TargetValue. (GetAsBool caches by
+	// raw value, which is unchanged, so evict to observe the runtime hint.)
+	item.manager.EvictCachedValue(item.Key)
+	assert.Equal(t, "true", item.GetValue())
+	assert.True(t, item.GetAsBool())
 }
 
 func gateSwitcher(gateVersion string, delay time.Duration) *VersionGateSwitcher {
