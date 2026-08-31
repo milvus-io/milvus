@@ -3891,25 +3891,26 @@ type queryNodeConfig struct {
 	StatsPublishInterval ParamItem `refreshable:"true"`
 
 	// segcore
-	KnowhereFetchThreadPoolSize    ParamItem `refreshable:"true"`
-	KnowhereThreadPoolSize         ParamItem `refreshable:"true"`
-	ChunkRows                      ParamItem `refreshable:"false"`
-	FmindexCostRatio               ParamItem `refreshable:"false"`
-	EnableInterminSegmentIndex     ParamItem `refreshable:"false"`
-	InterimIndexNlist              ParamItem `refreshable:"false"`
-	InterimIndexNProbe             ParamItem `refreshable:"false"`
-	InterimIndexSubDim             ParamItem `refreshable:"false"`
-	InterimIndexRefineRatio        ParamItem `refreshable:"false"`
-	InterimIndexBuildRatio         ParamItem `refreshable:"false"`
-	InterimIndexRefineQuantType    ParamItem `refreshable:"false"`
-	InterimIndexRefineWithQuant    ParamItem `refreshable:"false"`
-	DenseVectorInterminIndexType   ParamItem `refreshable:"false"`
-	InterimIndexMemExpandRate      ParamItem `refreshable:"false"`
-	InterimIndexBuildParallelRate  ParamItem `refreshable:"false"`
-	InterimIndexTargetIndexVersion ParamItem `refreshable:"false"`
-	MultipleChunkedEnable          ParamItem `refreshable:"false"` // Deprecated
-	EnableGeometryCache            ParamItem `refreshable:"false"`
-	EnableGISSplitFusion           ParamItem `refreshable:"false"`
+	KnowhereFetchThreadPoolSize        ParamItem `refreshable:"true"`
+	KnowhereThreadPoolSize             ParamItem `refreshable:"true"`
+	ChunkRows                          ParamItem `refreshable:"false"`
+	FmindexCostRatio                   ParamItem `refreshable:"false"`
+	EnableInterminSegmentIndex         ParamItem `refreshable:"false"`
+	InterimIndexNlist                  ParamItem `refreshable:"false"`
+	InterimIndexNProbe                 ParamItem `refreshable:"false"`
+	InterimIndexSubDim                 ParamItem `refreshable:"false"`
+	InterimIndexRefineRatio            ParamItem `refreshable:"false"`
+	InterimIndexBuildRatio             ParamItem `refreshable:"false"`
+	InterimIndexRefineQuantType        ParamItem `refreshable:"false"`
+	InterimIndexRefineWithQuant        ParamItem `refreshable:"false"`
+	DenseVectorInterminIndexType       ParamItem `refreshable:"false"`
+	InterimIndexMemExpandRate          ParamItem `refreshable:"false"`
+	InterimIndexBuildParallelRate      ParamItem `refreshable:"false"`
+	InterimIndexGrowingBuildThreadRate ParamItem `refreshable:"true"`
+	InterimIndexTargetIndexVersion     ParamItem `refreshable:"false"`
+	MultipleChunkedEnable              ParamItem `refreshable:"false"` // Deprecated
+	EnableGeometryCache                ParamItem `refreshable:"false"`
+	EnableGISSplitFusion               ParamItem `refreshable:"false"`
 
 	TieredWarmupScalarField         ParamItem `refreshable:"true"`
 	TieredWarmupScalarIndex         ParamItem `refreshable:"true"`
@@ -4623,6 +4624,20 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.InterimIndexBuildParallelRate.Init(base.mgr)
+
+	p.InterimIndexGrowingBuildThreadRate = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.growingBuildThreadRate",
+		Version:      "3.0.1",
+		DefaultValue: "0",
+		Doc: `The fraction of the interim index build thread pool that a single growing segment index build may use.
+The pool size is buildParallelRate * cpu num, so the thread number of one growing index build is
+buildParallelRate * cpu num * growingBuildThreadRate, at least 1.
+0 by default, which keeps every growing index build single threaded.
+Note this only bounds a single build: multiple growing segments may still build concurrently, so the
+worst case thread number is the pool size multiplied by this resolved thread number.`,
+		Export: true,
+	}
+	p.InterimIndexGrowingBuildThreadRate.Init(base.mgr)
 
 	p.InterimIndexTargetIndexVersion = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.targetIndexVersion",

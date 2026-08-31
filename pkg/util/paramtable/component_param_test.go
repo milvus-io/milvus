@@ -687,6 +687,14 @@ func TestComponentParam(t *testing.T) {
 		nprobe := Params.InterimIndexNProbe.GetAsInt64()
 		assert.Equal(t, int64(16), nprobe)
 
+		assert.Equal(t, 0.5, Params.InterimIndexBuildParallelRate.GetAsFloat())
+		// growingBuildThreadRate defaults to 0, which keeps growing index build single threaded.
+		assert.Equal(t, 0.0, Params.InterimIndexGrowingBuildThreadRate.GetAsFloat())
+		params.Save(Params.InterimIndexGrowingBuildThreadRate.Key, "0.25")
+		assert.Equal(t, 0.25, Params.InterimIndexGrowingBuildThreadRate.GetAsFloat())
+		params.Reset(Params.InterimIndexGrowingBuildThreadRate.Key)
+		assert.Equal(t, 0.0, Params.InterimIndexGrowingBuildThreadRate.GetAsFloat())
+
 		// enableGISSplitFusion defaults to true: the GIS coarse/refine split and
 		// same-column fusion rewrite is on unless explicitly disabled.
 		assert.True(t, Params.EnableGISSplitFusion.GetAsBool())
