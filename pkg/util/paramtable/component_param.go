@@ -709,7 +709,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 
 	p.UseArrowFSChunkManager = ParamItem{
 		Key:          "common.storage.useArrowFileSystemChunkManager",
-		Version:      "2.7.0",
+		Version:      "3.0.1",
 		DefaultValue: "false",
 		Doc: "Whether segcore routes chunk manager IO (segment load, index build/load) " +
 			"through the milvus-storage Arrow FileSystem, unified with storage v2. " +
