@@ -2703,7 +2703,7 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
                 if state in ("Pending", "PreImporting", "Importing", "Sorting", "IndexBuilding", "Uncommitted"):
                     self.import_job_client.abort_import_job(job_id)
 
-    @pytest.mark.parametrize("storage_version", [0, 2], ids=["storage_v1", "storage_v2"])
+    @pytest.mark.parametrize("storage_version", [0, 2, 3], ids=["storage_v1", "storage_v2", "storage_v3"])
     def test_import_2pc_real_source_backup_storage_version_manual_commit_restores_rows(
         self,
         release_name,
@@ -2751,60 +2751,6 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
             assert count_ok, {"expected_count": len(expected_ids), "last_count": count}
             search_ids = self._search_imported_ids(collection_name, rows[0]["vector"], limit=5)
             assert search_ids & expected_ids, {"search_ids": search_ids, "expected_any": list(expected_ids)[:5]}
-
-        finally:
-            if job_id is not None:
-                progress_rsp = self.import_job_client.get_import_job_progress(job_id)
-                state = progress_rsp.get("data", {}).get("state") if progress_rsp.get("code") == 0 else None
-                if state in ("Pending", "PreImporting", "Importing", "Sorting", "IndexBuilding", "Uncommitted"):
-                    self.import_job_client.abort_import_job(job_id)
-            self._delete_storage_prefix(self.storage_client, fixture["copiedPrefix"])
-
-    def test_import_2pc_real_source_backup_storage_v3_manifest_prefix_fails_closed(self, release_name):
-        """
-        target: verify REST backup=true prefix import does not silently misread StorageV3 manifest-layout objects
-        method: generate a real StorageV3 segment in a source instance, copy its _data/_metadata/_stats objects
-                into target MinIO, then submit backup=true with storage_version=3 through the REST import API
-        expected: the job fails with a reader/manifest-layout reason and no imported rows become visible
-        """
-        storage_version = 3
-        source = self._ensure_storage_fixture_source(storage_version, release_name)
-        rows = self._make_rows(30350, 12, phase=350)
-        fixture = self._build_copied_backup_fixture_from_source(source, storage_version, rows)
-        collection_name = gen_collection_name(prefix="import_2pc_real_backup_v3_guardrail")
-        self._create_base_collection(collection_name)
-
-        expected_ids = set(fixture["expectedIds"])
-        job_id = None
-        try:
-            job_id = self._create_manual_import_job_with_files(
-                collection_name,
-                fixture["files"],
-                {"backup": "true", "storage_version": "3"},
-                partition_name=fixture["partitionName"],
-            )
-            deadline = time.time() + min(IMPORT_2PC_TIMEOUT, 120)
-            rsp = None
-            failed = False
-            while time.time() < deadline:
-                rsp = self.import_job_client.get_import_job_progress(job_id)
-                assert rsp.get("code") == 0, rsp
-                state = rsp.get("data", {}).get("state")
-                if state == "Failed":
-                    failed = True
-                    break
-                if state in ("Uncommitted", "Committing", "Completed"):
-                    pytest.fail(f"StorageV3 manifest prefix became commit-capable through REST backup reader: {rsp}")
-                time.sleep(2)
-            assert failed, rsp
-            reason = str(rsp.get("data", {}).get("reason", rsp)).lower()
-            assert any(
-                token in reason
-                for token in ("field id", "system fields", "manifest", "failed to create reader", "import failed")
-            ), {"reason": reason, "rsp": rsp}
-
-            seen, absent = self._wait_imported_ids_absent(collection_name, expected_ids, timeout=20)
-            assert absent, {"unexpected_visible_ids": seen, "reason": reason}
 
         finally:
             if job_id is not None:

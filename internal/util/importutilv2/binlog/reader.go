@@ -34,7 +34,6 @@ import (
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -231,22 +230,16 @@ func (r *reader) initStorageV3(segmentBasePath string, tsStart, tsEnd uint64) er
 		return err
 	}
 
-	manifestDeltas, err := packed.GetDeltaLogsFromManifestWithExtfs(
-		manifestPath, r.storageConfig, packed.ExternalSpecContext{})
+	deltaPaths, err := packed.GetDeltaLogPathsFromManifest(manifestPath, r.storageConfig)
 	if err != nil {
 		r.dr.Close()
 		return merr.Wrap(err, "failed to read StorageV3 deltalogs from manifest")
 	}
-	deltaBinlogs, err := filterReadableStorageV3Deltalogs(manifestDeltas)
-	if err != nil {
-		r.dr.Close()
-		return err
-	}
-	if len(deltaBinlogs) == 0 {
+	if len(deltaPaths) == 0 {
 		return nil
 	}
 
-	r.deleteData, err = r.readDeleteV3(deltaBinlogs, tsStart, tsEnd)
+	r.deleteData, err = r.readDeleteV3(deltaPaths, tsStart, tsEnd)
 	if err != nil {
 		r.dr.Close()
 		return err
@@ -258,38 +251,6 @@ func (r *reader) initStorageV3(segmentBasePath string, tsStart, tsEnd uint64) er
 	}
 	r.filters = append(r.filters, deleteFilter)
 	return nil
-}
-
-// filterReadableStorageV3Deltalogs converts manifest metadata into physical
-// reader inputs. StorageV3 manifests may retain zero-entry markers to preserve
-// source deltalog identity even though no deltalog file was written. Those
-// markers are valid manifest state, but they must not reach the physical reader.
-func filterReadableStorageV3Deltalogs(fieldBinlogs []*datapb.FieldBinlog) ([]*datapb.Binlog, error) {
-	binlogs := make([]*datapb.Binlog, 0)
-	for _, fieldBinlog := range fieldBinlogs {
-		for _, binlog := range fieldBinlog.GetBinlogs() {
-			if binlog == nil {
-				continue
-			}
-
-			entriesNum := binlog.GetEntriesNum()
-			if entriesNum == 0 {
-				continue
-			}
-			if entriesNum < 0 {
-				return nil, merr.WrapErrImportFailedMsg(
-					"StorageV3 deltalog %s has negative entries num %d",
-					binlog.GetLogPath(), entriesNum)
-			}
-			if binlog.GetLogPath() == "" {
-				return nil, merr.WrapErrImportFailedMsg(
-					"StorageV3 deltalog with %d entries has an empty path", entriesNum)
-			}
-
-			binlogs = append(binlogs, binlog)
-		}
-	}
-	return binlogs, nil
 }
 
 func (r *reader) collectStorageV3Files(segmentBasePath, manifestPath string) error {
@@ -415,7 +376,7 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 }
 
 func (r *reader) readDeleteV3(
-	deltaLogs []*datapb.Binlog,
+	deltaPaths []string,
 	tsStart, tsEnd uint64,
 ) (map[any]typeutil.Timestamp, error) {
 	pkField, err := typeutil.GetPrimaryFieldSchema(r.schema)
@@ -426,14 +387,10 @@ func (r *reader) readDeleteV3(
 		storage.WithVersion(storage.StorageV3),
 		storage.WithStorageConfig(r.storageConfig),
 	}
-	// EntriesNum was consumed by filterReadableStorageV3Deltalogs to discard
-	// zero-entry manifest markers. Read the remaining physical files through the
-	// shared path reader so task cancellation is checked between files.
-	paths := make([]string, 0, len(deltaLogs))
-	for _, deltaLog := range deltaLogs {
-		paths = append(paths, deltaLog.GetLogPath())
-	}
-	reader, err := storage.NewDeltalogReader(r.ctx, pkField.DataType, paths, options...)
+	// GetDeltaLogPathsFromManifest has already removed zero-entry manifest
+	// markers. Read the remaining physical files through the shared path reader
+	// so task cancellation is checked between files.
+	reader, err := storage.NewDeltalogReader(r.ctx, pkField.DataType, deltaPaths, options...)
 	if err != nil {
 		return nil, err
 	}

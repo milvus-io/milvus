@@ -44,7 +44,6 @@ import (
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -869,55 +868,9 @@ func TestBinlogReader(t *testing.T) {
 	suite.Run(t, new(ReaderSuite))
 }
 
-func TestFilterReadableStorageV3Deltalogs_MarkerOnly(t *testing.T) {
-	marker := &datapb.Binlog{LogPath: "target/_delta/1", EntriesNum: 0}
-
-	binlogs, err := filterReadableStorageV3Deltalogs([]*datapb.FieldBinlog{
-		nil,
-		{Binlogs: []*datapb.Binlog{nil, marker}},
-	})
-
-	assert.NoError(t, err)
-	assert.Empty(t, binlogs)
-}
-
-func TestFilterReadableStorageV3Deltalogs_MixedMarkerAndReadableLog(t *testing.T) {
-	marker := &datapb.Binlog{LogPath: "target/_delta/1", EntriesNum: 0}
-	readable := &datapb.Binlog{LogPath: "target/_delta/2", EntriesNum: 3}
-
-	binlogs, err := filterReadableStorageV3Deltalogs([]*datapb.FieldBinlog{
-		{Binlogs: []*datapb.Binlog{marker}},
-		{Binlogs: []*datapb.Binlog{readable}},
-	})
-
-	assert.NoError(t, err)
-	assert.Equal(t, []*datapb.Binlog{readable}, binlogs)
-}
-
-func TestFilterReadableStorageV3Deltalogs_NegativeEntries(t *testing.T) {
-	binlogs, err := filterReadableStorageV3Deltalogs([]*datapb.FieldBinlog{{
-		Binlogs: []*datapb.Binlog{{LogPath: "target/_delta/1", EntriesNum: -1}},
-	}})
-
-	assert.Nil(t, binlogs)
-	assert.ErrorIs(t, err, merr.ErrImportFailed)
-	assert.ErrorContains(t, err, "negative entries num -1")
-}
-
-func TestFilterReadableStorageV3Deltalogs_EmptyReadablePath(t *testing.T) {
-	binlogs, err := filterReadableStorageV3Deltalogs([]*datapb.FieldBinlog{{
-		Binlogs: []*datapb.Binlog{{EntriesNum: 1}},
-	}})
-
-	assert.Nil(t, binlogs)
-	assert.ErrorIs(t, err, merr.ErrImportFailed)
-	assert.ErrorContains(t, err, "has an empty path")
-}
-
-func TestStorageV3Reader_FiltersManifestDeltalogMarkers(t *testing.T) {
+func TestStorageV3Reader_UsesManifestDeltalogPaths(t *testing.T) {
 	segmentPath := "backup/insert_log/1/2/3"
-	marker := &datapb.Binlog{LogPath: segmentPath + "/_delta/1", EntriesNum: 0}
-	readable := &datapb.Binlog{LogPath: segmentPath + "/_delta/2", EntriesNum: 3}
+	readablePath := segmentPath + "/_delta/2"
 
 	manifestReaderPatch := mockey.Mock(storage.NewManifestRecordReader).
 		Return(&storageV3DeltaRecordReader{read: true}, nil).Build()
@@ -932,8 +885,8 @@ func TestStorageV3Reader_FiltersManifestDeltalogMarkers(t *testing.T) {
 	defer walkPatch.UnPatch()
 	lobPatch := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo(nil), nil).Build()
 	defer lobPatch.UnPatch()
-	deltaManifestPatch := mockey.Mock(packed.GetDeltaLogsFromManifestWithExtfs).
-		Return([]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{marker, readable}}}, nil).Build()
+	deltaManifestPatch := mockey.Mock(packed.GetDeltaLogPathsFromManifest).
+		Return([]string{readablePath}, nil).Build()
 	defer deltaManifestPatch.UnPatch()
 
 	var readerPaths []string
@@ -954,7 +907,7 @@ func TestStorageV3Reader_FiltersManifestDeltalogMarkers(t *testing.T) {
 		retryAttempts:  1,
 	}
 	assert.NoError(t, r.initStorageV3(segmentPath, 0, math.MaxUint64))
-	assert.Equal(t, []string{readable.GetLogPath()}, readerPaths)
+	assert.Equal(t, []string{readablePath}, readerPaths)
 	assert.Len(t, r.filters, 1)
 	r.Close()
 }
@@ -1031,7 +984,7 @@ func TestStorageV3Reader_ReadsManifestDeletes(t *testing.T) {
 			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		}},
 	}
-	deletes, err := r.readDeleteV3([]*datapb.Binlog{{LogPath: "delta.parquet", EntriesNum: 4}}, 10, 20)
+	deletes, err := r.readDeleteV3([]string{"delta.parquet"}, 10, 20)
 	assert.NoError(t, err)
 	assert.Equal(t, map[any]typeutil.Timestamp{int64(2): 18}, deletes)
 }

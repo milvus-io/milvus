@@ -426,7 +426,6 @@ func TestManifestRecordReader_ResolvesOutOfLineTextLob(t *testing.T) {
 
 	got, err := reader.Next()
 	require.NoError(t, err)
-	defer got.Release()
 	textColumn, ok := got.Column(textFieldID).(*array.String)
 	require.True(t, ok)
 	gotText := make([]string, textColumn.Len())
