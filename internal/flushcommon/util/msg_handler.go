@@ -33,6 +33,14 @@ type MsgHandler interface {
 
 	HandleSchemaChange(ctx context.Context, schemaChangeMsg message.ImmutableSchemaChangeMessageV2) error
 
+	// HandleSplitShard seals the growing segments that the SplitShard fence
+	// sealed on the source vchannel. The fence replaces the ManualFlush the
+	// split used to append, so this is the only path that hands those segment
+	// ids to the write buffer: without it the source shard's rows up to
+	// T_switch stay buffered, are never flushed nor reported to DataCoord, and
+	// are discarded when the retired vchannel's data sync service is closed.
+	HandleSplitShard(ctx context.Context, splitShardMsg message.ImmutableSplitShardMessageV2) error
+
 	HandleAlterCollection(ctx context.Context, alterCollectionMsg message.ImmutableAlterCollectionMessageV2) error
 
 	HandleTruncateCollection(truncateCollectionMsg message.ImmutableTruncateCollectionMessageV2) error
