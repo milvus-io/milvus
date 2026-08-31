@@ -282,6 +282,7 @@ func TestSnapshotMetadata_ChannelSeekPositionsRoundTrip(t *testing.T) {
 	err = protojson.UnmarshalOptions{DiscardUnknown: true}.Unmarshal(metadataJSON, restored)
 	require.NoError(t, err)
 	require.NotNil(t, restored.GetSnapshotInfo())
+	assert.Equal(t, int32(4), restored.GetFormatVersion())
 	assert.True(t, restored.GetSnapshotInfo().GetSkipIndex())
 
 	positions := restored.GetSnapshotInfo().GetChannelSeekPositions()
@@ -3402,13 +3403,8 @@ func TestValidateFormatVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "version_4_legacy",
+			name:    "version_4_current",
 			version: 4,
-			wantErr: false,
-		},
-		{
-			name:    "version_5_current",
-			version: 5,
 			wantErr: false,
 		},
 		{
@@ -3460,13 +3456,8 @@ func TestGetManifestSchemaByVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "version_4_legacy",
+			name:    "version_4_current",
 			version: 4,
-			wantErr: false,
-		},
-		{
-			name:    "version_5_current",
-			version: 5,
 			wantErr: false,
 		},
 		{
