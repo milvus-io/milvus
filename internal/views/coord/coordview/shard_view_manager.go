@@ -526,9 +526,8 @@ func (m *ShardViewManager) makeOnSyncResponse(version qviews.QueryViewVersion, t
 				From:         before,
 				To:           sm.State(),
 			},
-			Node:                 target.WorkNode(),
-			ReportedState:        resp.State(),
-			ResourceReadyPercent: resourceReadyPercent(resp),
+			Node:          target.WorkNode(),
+			ReportedState: resp.State(),
 		})
 		m.processStateMachine(sm)
 		event := m.consumeDirtyEventLocked()
@@ -539,18 +538,6 @@ func (m *ShardViewManager) makeOnSyncResponse(version qviews.QueryViewVersion, t
 		m.submitDirtyEvent(event)
 		m.mu.Unlock()
 		return completed
-	}
-}
-
-func resourceReadyPercent(report qviews.QueryViewAtWorkNode) int64 {
-	if _, ok := report.WorkNode().(qviews.StreamingNode); !ok {
-		return 0
-	}
-	switch report.State() {
-	case qviews.QueryViewStateReady, qviews.QueryViewStateUp, qviews.QueryViewStateDown, qviews.QueryViewStateDropped:
-		return 100
-	default:
-		return 0
 	}
 }
 

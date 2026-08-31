@@ -5,6 +5,7 @@ import (
 	"context"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,32 +16,10 @@ import (
 const defaultViewStateMaxAgeTopN = 5
 
 const (
-	readyPercentLe0   = "0"
-	readyPercentLe25  = "25"
-	readyPercentLe50  = "50"
-	readyPercentLe75  = "75"
-	readyPercentLe90  = "90"
-	readyPercentLe99  = "99"
-	readyPercentLe100 = "100"
-	readyPercentLeInf = "+Inf"
-)
-
-const (
 	shardLoadStateLoading    = "loading"
 	shardLoadStateRecovering = "recovering"
 	shardLoadStateLoaded     = "loaded"
 )
-
-var readyPercentLeBounds = []string{
-	readyPercentLe0,
-	readyPercentLe25,
-	readyPercentLe50,
-	readyPercentLe75,
-	readyPercentLe90,
-	readyPercentLe99,
-	readyPercentLe100,
-	readyPercentLeInf,
-}
 
 type MetricsObserver struct {
 	mu              sync.Mutex
@@ -68,7 +47,6 @@ type metricViewState struct {
 	state        qviews.QueryViewState
 	enteredAt    time.Time
 	version      uint64
-	readyLe      string
 }
 
 type metricShardState struct {
@@ -126,7 +104,6 @@ func newMetricsObserverWithNow(now func() time.Time) *MetricsObserver {
 		topK:            make(map[string]*viewStateAgeHeap),
 		topKValidCounts: make(map[string]int),
 	}
-	metrics.SetQVViewStateMaxAgeProvider(observer.collectViewStateMaxAge)
 	return observer
 }
 
@@ -159,6 +136,7 @@ func (o *MetricsObserver) collectViewStateMaxAge() []metrics.QVViewStateMaxAgeMe
 		}
 		if h.Len() == 0 {
 			delete(o.topK, component)
+			delete(o.topKValidCounts, component)
 		}
 	}
 	return result
@@ -173,6 +151,14 @@ func (o *MetricsObserver) Observe(_ context.Context, event Event) {
 		o.setState(component, created.CollectionID, created.View, created.State)
 		return
 	}
+	if acquired, ok := event.(QueryNodeAcquireSegmentsEvent); ok {
+		o.setState(component, acquired.CollectionID, acquired.View, qviews.QueryViewStatePreparing)
+		return
+	}
+	if acquired, ok := event.(StreamingNodeAcquireResourceEvent); ok {
+		o.setState(component, acquired.CollectionID, acquired.View, qviews.QueryViewStatePreparing)
+		return
+	}
 	if persisted, ok := event.(CoordPersistViewEvent); ok && persisted.State == qviews.QueryViewStateDropped {
 		o.deleteState(component, persisted.View)
 	}
@@ -185,24 +171,16 @@ func (o *MetricsObserver) Observe(_ context.Context, event Event) {
 	if trigger == "" {
 		return
 	}
-	metrics.QVViewTransitionTotal.WithLabelValues(
-		component,
-		transition.From.String(),
-		transition.To.String(),
-		trigger,
-	).Inc()
+	if transition.From != transition.To {
+		metrics.QVViewTransitionTotal.WithLabelValues(
+			component,
+			viewStateLabel(transition.From),
+			viewStateLabel(transition.To),
+			trigger,
+		).Inc()
+	}
 	if transition.To == qviews.QueryViewStateDropped {
 		o.deleteState(component, transition.View)
-		return
-	}
-	if reported, ok := event.(CoordViewReportAppliedEvent); ok {
-		o.moveStateWithReadyLe(
-			component,
-			transition.CollectionID,
-			transition.View,
-			transition.To,
-			readyPercentLe(reported.ResourceReadyPercent),
-		)
 		return
 	}
 	o.moveState(component, transition.CollectionID, transition.View, transition.To)
@@ -213,7 +191,7 @@ func (o *MetricsObserver) setState(component string, collectionID int64, view qv
 	defer o.mu.Unlock()
 
 	key := metricViewKey{component: component, view: view}
-	o.upsertStateLocked(key, collectionID, state, "")
+	o.upsertStateLocked(key, collectionID, state)
 }
 
 func (o *MetricsObserver) moveState(component string, collectionID int64, view qviews.QueryViewKey, to qviews.QueryViewState) {
@@ -221,63 +199,46 @@ func (o *MetricsObserver) moveState(component string, collectionID int64, view q
 	defer o.mu.Unlock()
 
 	key := metricViewKey{component: component, view: view}
-	readyLe := ""
-	if old, ok := o.states[key]; ok {
-		if collectionID == 0 {
-			collectionID = old.collectionID
-		}
-		readyLe = old.readyLe
-	}
-	o.upsertStateLocked(key, collectionID, to, readyLe)
-}
-
-func (o *MetricsObserver) moveStateWithReadyLe(
-	component string,
-	collectionID int64,
-	view qviews.QueryViewKey,
-	to qviews.QueryViewState,
-	readyLe string,
-) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-
-	key := metricViewKey{component: component, view: view}
 	if old, ok := o.states[key]; ok && collectionID == 0 {
 		collectionID = old.collectionID
 	}
-	o.upsertStateLocked(key, collectionID, to, readyLe)
+	o.upsertStateLocked(key, collectionID, to)
 }
 
-func (o *MetricsObserver) upsertStateLocked(
-	key metricViewKey,
-	collectionID int64,
-	state qviews.QueryViewState,
-	readyLe string,
-) {
-	if old, ok := o.states[key]; ok {
-		metrics.QVViewStates.WithLabelValues(key.component, old.state.String()).Dec()
-		o.decReadyPercentBucket(key.component, old.state, old.readyLe)
+// upsertStateLocked inserts or updates a view state entry.
+//
+// A no-op transition (same state, e.g. a repeated report) keeps the original
+// enteredAt and version so a stuck view keeps aging and is not counted as a
+// fresh transition; only the collection id is refreshed.
+func (o *MetricsObserver) upsertStateLocked(key metricViewKey, collectionID int64, state qviews.QueryViewState) {
+	old, existed := o.states[key]
+	if existed && old.state == state {
+		if collectionID != 0 {
+			old.collectionID = collectionID
+		}
+		o.states[key] = old
+		return
+	}
+	if existed {
+		metrics.QVViewStates.WithLabelValues(key.component, viewStateLabel(old.state)).Dec()
 		o.removeShardState(key, old)
 		o.updateTopKValidCount(key.component, old.state, state)
 	} else if isMaxAgeCandidateState(state) {
 		o.topKValidCounts[key.component]++
 	}
-	readyLe = normalizeReadyPercentLe(key.component, state, readyLe)
 
 	stateSnapshot := metricViewState{
 		collectionID: collectionID,
 		state:        state,
 		enteredAt:    o.now(),
 		version:      o.nextVersion(),
-		readyLe:      readyLe,
 	}
 	o.states[key] = stateSnapshot
 	o.addShardState(key, stateSnapshot)
 	o.cleanupShardState(key)
 	o.pushTopKCandidate(key, stateSnapshot)
 	o.compactTopKCandidates(key.component)
-	metrics.QVViewStates.WithLabelValues(key.component, state.String()).Inc()
-	o.incReadyPercentBucket(key.component, state, readyLe)
+	metrics.QVViewStates.WithLabelValues(key.component, viewStateLabel(state)).Inc()
 }
 
 func (o *MetricsObserver) deleteState(component string, view qviews.QueryViewKey) {
@@ -298,9 +259,8 @@ func (o *MetricsObserver) deleteState(component string, view qviews.QueryViewKey
 			delete(o.topKValidCounts, component)
 		}
 	}
-	o.decReadyPercentBucket(component, old.state, old.readyLe)
 	o.compactTopKCandidates(component)
-	metrics.QVViewStates.WithLabelValues(component, old.state.String()).Dec()
+	metrics.QVViewStates.WithLabelValues(component, viewStateLabel(old.state)).Dec()
 }
 
 func (o *MetricsObserver) nextVersion() uint64 {
@@ -458,7 +418,7 @@ func (s *metricShardState) loadState() string {
 }
 
 func newMetricShardKey(key metricViewKey) (metricShardKey, bool) {
-	if key.component != "coord" {
+	if key.component != componentCoord {
 		return metricShardKey{}, false
 	}
 	return metricShardKey{
@@ -490,74 +450,10 @@ func isShardLoadCandidateState(state qviews.QueryViewState) bool {
 	}
 }
 
-func normalizeReadyPercentLe(component string, state qviews.QueryViewState, le string) string {
-	if component != "coord" || !isReadyPercentCandidateState(state) {
-		return ""
-	}
-	if le == "" {
-		return readyPercentLe0
-	}
-	return le
-}
-
-func isReadyPercentCandidateState(state qviews.QueryViewState) bool {
-	return state != qviews.QueryViewStateUp && state != qviews.QueryViewStateDropped
-}
-
-func readyPercentLe(percent int64) string {
-	switch {
-	case percent < 0:
-		return ""
-	case percent == 0:
-		return readyPercentLe0
-	case percent <= 25:
-		return readyPercentLe25
-	case percent <= 50:
-		return readyPercentLe50
-	case percent <= 75:
-		return readyPercentLe75
-	case percent <= 90:
-		return readyPercentLe90
-	case percent < 100:
-		return readyPercentLe99
-	default:
-		return readyPercentLe100
-	}
-}
-
-func (o *MetricsObserver) incReadyPercentBucket(component string, state qviews.QueryViewState, le string) {
-	idx := readyPercentLeIndex(le)
-	if idx < 0 {
-		return
-	}
-	for _, upperBound := range readyPercentLeBounds[idx:] {
-		metrics.QVViewReadyPercentBucket.WithLabelValues(component, state.String(), upperBound).Inc()
-	}
-}
-
-func (o *MetricsObserver) decReadyPercentBucket(component string, state qviews.QueryViewState, le string) {
-	idx := readyPercentLeIndex(le)
-	if idx < 0 {
-		return
-	}
-	for _, upperBound := range readyPercentLeBounds[idx:] {
-		metrics.QVViewReadyPercentBucket.WithLabelValues(component, state.String(), upperBound).Dec()
-	}
-}
-
-func readyPercentLeIndex(le string) int {
-	for idx, upperBound := range readyPercentLeBounds {
-		if upperBound == le {
-			return idx
-		}
-	}
-	return -1
-}
-
 func metricFromViewState(key metricViewKey, state metricViewState, rank int, now time.Time) metrics.QVViewStateMaxAgeMetric {
 	return metrics.QVViewStateMaxAgeMetric{
 		Component:        key.component,
-		State:            state.state.String(),
+		State:            viewStateLabel(state.state),
 		Rank:             strconv.Itoa(rank),
 		CollectionID:     strconv.FormatInt(state.collectionID, 10),
 		ReplicaID:        strconv.FormatInt(key.view.ShardID.ReplicaID, 10),
@@ -566,6 +462,12 @@ func metricFromViewState(key metricViewKey, state metricViewState, rank int, now
 		DataVersion:      key.view.QueryViewVersion.DataVersion.String(),
 		AgeSeconds:       now.Sub(state.enteredAt).Seconds(),
 	}
+}
+
+// viewStateLabel lowercases the state name so qv_* metrics keep one consistent
+// label vocabulary (the shard load lifecycle labels are already lowercase).
+func viewStateLabel(state qviews.QueryViewState) string {
+	return strings.ToLower(state.String())
 }
 
 func lessMetricViewKey(left, right metricViewKey) bool {
@@ -603,6 +505,8 @@ func metricTransition(event Event) (ViewStateTransition, bool) {
 		return e.ViewStateTransition, true
 	case CoordViewQueryNodeLostAppliedEvent:
 		return e.ViewStateTransition, true
+	case QueryNodeApplyCoordViewEvent:
+		return e.ViewStateTransition, true
 	case QueryNodeSegmentsReadyEvent:
 		return e.ViewStateTransition, true
 	case QueryNodeSegmentUnrecoverableEvent:
@@ -610,6 +514,8 @@ func metricTransition(event Event) (ViewStateTransition, bool) {
 	case QueryNodeReleaseDoneEvent:
 		return e.ViewStateTransition, true
 	case StreamingNodeResourceReadyEvent:
+		return e.ViewStateTransition, true
+	case StreamingNodeApplyCoordViewEvent:
 		return e.ViewStateTransition, true
 	case StreamingNodeRecoveringDoneEvent:
 		return e.ViewStateTransition, true

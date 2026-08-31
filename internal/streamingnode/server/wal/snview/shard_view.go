@@ -101,7 +101,8 @@ func (s *snShardView) startRecovery() {
 		entry := s.views[version]
 		v := version // capture loop variable
 		qvobserve.Observe(s.ctx, qvobserve.StreamingNodeRecoverAcquireResourceEvent{
-			View: key,
+			CollectionID: s.collectionID,
+			View:         key,
 		})
 		s.resMgr.Acquire(AcquireResource{
 			Key:  key,
@@ -175,7 +176,8 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 			entry = &snViewEntry{ApplyView: *av, sm: sm}
 			s.views[key.QueryViewVersion] = entry
 			qvobserve.Observe(s.ctx, qvobserve.StreamingNodeAcquireResourceEvent{
-				View: key,
+				CollectionID: s.collectionID,
+				View:         key,
 			})
 			// SN SM constructor generates a Preparing report.
 			s.consumeReport(entry)
@@ -220,7 +222,7 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 	entry.sm.OnCoordStateDelivered(pushedState)
 	qvobserve.Observe(s.ctx, qvobserve.StreamingNodeApplyCoordViewEvent{
 		ViewStateTransition: qvobserve.ViewStateTransition{
-			CollectionID: entry.View.IntoProto().GetMeta().GetCollectionId(),
+			CollectionID: s.collectionID,
 			View:         key,
 			From:         before,
 			To:           entry.sm.State(),
@@ -255,7 +257,7 @@ func (s *snShardView) notifyReady(version qviews.QueryViewVersion) {
 	entry.sm.OnReady()
 	qvobserve.Observe(s.ctx, qvobserve.StreamingNodeResourceReadyEvent{
 		ViewStateTransition: qvobserve.ViewStateTransition{
-			CollectionID: entry.View.IntoProto().GetMeta().GetCollectionId(),
+			CollectionID: s.collectionID,
 			View:         entry.View.QueryViewKey(),
 			From:         before,
 			To:           entry.sm.State(),
@@ -293,7 +295,7 @@ func (s *snShardView) notifyRecoveringDone(version qviews.QueryViewVersion) {
 	entry.sm.OnRecoveringDone()
 	qvobserve.Observe(s.ctx, qvobserve.StreamingNodeRecoveringDoneEvent{
 		ViewStateTransition: qvobserve.ViewStateTransition{
-			CollectionID: entry.View.IntoProto().GetMeta().GetCollectionId(),
+			CollectionID: s.collectionID,
 			View:         entry.View.QueryViewKey(),
 			From:         before,
 			To:           entry.sm.State(),
@@ -330,7 +332,7 @@ func (s *snShardView) notifyDropped(version qviews.QueryViewVersion) {
 	entry.sm.OnDropped()
 	qvobserve.Observe(s.ctx, qvobserve.StreamingNodeReleaseDoneEvent{
 		ViewStateTransition: qvobserve.ViewStateTransition{
-			CollectionID: entry.View.IntoProto().GetMeta().GetCollectionId(),
+			CollectionID: s.collectionID,
 			View:         entry.View.QueryViewKey(),
 			From:         before,
 			To:           entry.sm.State(),

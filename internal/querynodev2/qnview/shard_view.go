@@ -15,6 +15,7 @@ import (
 // qnShardView manages all query view state machines for a single shard on a QueryNode.
 // All public methods are concurrent-safe via the internal mutex.
 type qnShardView struct {
+	ctx      context.Context
 	mu       sync.Mutex
 	views    map[qviews.QueryViewVersion]*qnViewEntry
 	segMgr   SegmentManager
@@ -70,7 +71,8 @@ func (s *qnShardView) applyOneLocked(av *handler.ApplyView) {
 			)
 			entry = &qnViewEntry{ApplyView: *av, sm: sm}
 			s.views[key.QueryViewVersion] = entry
-			qvobserve.Observe(context.TODO(), qvobserve.QueryNodeAcquireSegmentsEvent{
+			qvobserve.Observe(s.ctx, qvobserve.QueryNodeAcquireSegmentsEvent{
+				CollectionID: sm.Meta().GetCollectionId(),
 				View:         key,
 				SegmentCount: countViewSegments(qnView.ViewOfQueryNode()),
 			})
@@ -110,7 +112,7 @@ func (s *qnShardView) applyOneLocked(av *handler.ApplyView) {
 	entry.ApplyView = *av
 	before := entry.sm.State()
 	entry.sm.OnCoordStateDelivered(pushedState)
-	qvobserve.Observe(context.TODO(), qvobserve.QueryNodeApplyCoordViewEvent{
+	qvobserve.Observe(s.ctx, qvobserve.QueryNodeApplyCoordViewEvent{
 		ViewStateTransition: qvobserve.ViewStateTransition{
 			CollectionID: entry.sm.Meta().GetCollectionId(),
 			View:         key,
@@ -135,7 +137,7 @@ func (s *qnShardView) notifySegmentsReady(version qviews.QueryViewVersion, ready
 	key := entry.View.QueryViewKey()
 	before := entry.sm.State()
 	entry.sm.OnSegmentsReady(readySegments)
-	qvobserve.Observe(context.TODO(), qvobserve.QueryNodeSegmentsReadyEvent{
+	qvobserve.Observe(s.ctx, qvobserve.QueryNodeSegmentsReadyEvent{
 		ViewStateTransition: qvobserve.ViewStateTransition{
 			CollectionID: entry.sm.Meta().GetCollectionId(),
 			View:         key,
@@ -161,7 +163,7 @@ func (s *qnShardView) notifyUnrecoverable(version qviews.QueryViewVersion) {
 	key := entry.View.QueryViewKey()
 	before := entry.sm.State()
 	entry.sm.OnUnrecoverable()
-	qvobserve.Observe(context.TODO(), qvobserve.QueryNodeSegmentUnrecoverableEvent{
+	qvobserve.Observe(s.ctx, qvobserve.QueryNodeSegmentUnrecoverableEvent{
 		ViewStateTransition: qvobserve.ViewStateTransition{
 			CollectionID: entry.sm.Meta().GetCollectionId(),
 			View:         key,
@@ -186,7 +188,7 @@ func (s *qnShardView) notifyDropped(version qviews.QueryViewVersion) {
 	key := entry.View.QueryViewKey()
 	before := entry.sm.State()
 	entry.sm.OnDropped()
-	qvobserve.Observe(context.TODO(), qvobserve.QueryNodeReleaseDoneEvent{
+	qvobserve.Observe(s.ctx, qvobserve.QueryNodeReleaseDoneEvent{
 		ViewStateTransition: qvobserve.ViewStateTransition{
 			CollectionID: entry.sm.Meta().GetCollectionId(),
 			View:         key,
@@ -203,14 +205,14 @@ func (s *qnShardView) notifyDropped(version qviews.QueryViewVersion) {
 func (s *qnShardView) consumeReportAndCleanup(key qviews.QueryViewKey, entry *qnViewEntry) {
 	report := entry.sm.ConsumeReport()
 	if report != nil && entry.OnReport != nil {
-		qvobserve.Observe(context.TODO(), qvobserve.QueryNodeReportViewEvent{
+		qvobserve.Observe(s.ctx, qvobserve.QueryNodeReportViewEvent{
 			View:  key,
 			State: qviews.QueryViewState(report.GetMeta().GetState()),
 		})
 		entry.OnReport(qviews.NewQueryViewAtWorkNodeFromProto(report))
 	}
 	if entry.sm.ConsumeRelease() {
-		qvobserve.Observe(context.TODO(), qvobserve.QueryNodeReleaseSegmentsEvent{
+		qvobserve.Observe(s.ctx, qvobserve.QueryNodeReleaseSegmentsEvent{
 			View: key,
 		})
 		s.segMgr.Release(ReleaseSegments{

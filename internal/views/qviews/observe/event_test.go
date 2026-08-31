@@ -27,14 +27,12 @@ func TestConcreteEventsImplementEvent(t *testing.T) {
 	var _ Event = StreamingNodeRecoveringDoneEvent{}
 	var _ Event = StreamingNodeReportViewEvent{}
 	var _ Event = StreamingNodeReleaseDoneEvent{}
-	var _ Event = QueryNodeSegmentFailureEvent{}
 	var _ Event = QueryNodeAcquireSegmentsEvent{}
 	var _ Event = QueryNodeSegmentsReadyEvent{}
 	var _ Event = QueryNodeReleaseSegmentsEvent{}
 	var _ Event = StreamingNodeAcquireResourceEvent{}
 	var _ Event = StreamingNodeRecoverAcquireResourceEvent{}
 	var _ Event = StreamingNodeResourceReadyEvent{}
-	var _ Event = StreamingNodeReleaseResourceEvent{}
 	var _ Event = CoordPersistViewEvent{}
 	var _ Event = StreamingNodePersistViewEvent{}
 	var _ Event = CoordSyncViewAcceptedEvent{}
@@ -102,9 +100,8 @@ func TestEventMarshalLogObjectSplitsQueryViewKeyAndUsesStringers(t *testing.T) {
 			From: qviews.QueryViewStatePreparing,
 			To:   qviews.QueryViewStateReady,
 		},
-		Node:                 qviews.NewQueryNode(10),
-		ReportedState:        qviews.QueryViewStateReady,
-		ResourceReadyPercent: 80,
+		Node:          qviews.NewQueryNode(10),
+		ReportedState: qviews.QueryViewStateReady,
 	}
 	enc := zapcore.NewMapObjectEncoder()
 
@@ -119,7 +116,6 @@ func TestEventMarshalLogObjectSplitsQueryViewKeyAndUsesStringers(t *testing.T) {
 	assertField(t, enc, "state", qviews.QueryViewStatePreparing.String()+"->"+qviews.QueryViewStateReady.String())
 	assertField(t, enc, "wn", qviews.NewQueryNode(10).String())
 	assertField(t, enc, "reportedState", qviews.QueryViewStateReady.String())
-	assertField(t, enc, "resourceReadyPercent", int64(80))
 }
 
 func TestEventMarshalLogObjectSplitsAdditionalQueryViewKey(t *testing.T) {
@@ -240,16 +236,11 @@ func TestEventLogLevel(t *testing.T) {
 		{
 			name:  "querynode lost event",
 			event: CoordQueryNodeLostDetectedEvent{},
-			level: mlog.WarnLevel,
+			level: mlog.DebugLevel,
 		},
 		{
 			name:  "segment unrecoverable event",
 			event: QueryNodeSegmentUnrecoverableEvent{},
-			level: mlog.WarnLevel,
-		},
-		{
-			name:  "segment failure event",
-			event: QueryNodeSegmentFailureEvent{},
 			level: mlog.WarnLevel,
 		},
 	}

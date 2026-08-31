@@ -368,17 +368,22 @@ func (s *DirtyViewFlushScheduler) flushBatch(
 		callback()
 	}
 	if len(viewsByNode) > 0 {
-		if err := s.syncer.SyncViews(ctx, syncer.SyncGroup{ViewsByNode: viewsByNode}); err != nil {
-			return err
-		}
-	}
-	for _, views := range viewsByNode {
-		for _, view := range views {
-			qvobserve.Observe(ctx, qvobserve.CoordSyncViewAcceptedEvent{
-				View:  view.View.QueryViewKey(),
-				Node:  view.View.WorkNode(),
-				State: view.View.State(),
-			})
+		// Enqueue per node so that views accepted before a mid-batch failure
+		// still get their acceptance event; a single grouped call would drop
+		// the events for every node when the last one fails.
+		for nodeKey, views := range viewsByNode {
+			if err := s.syncer.SyncViews(ctx, syncer.SyncGroup{
+				ViewsByNode: map[qviews.WorkNodeKey][]syncer.SyncView{nodeKey: views},
+			}); err != nil {
+				return err
+			}
+			for _, view := range views {
+				qvobserve.Observe(ctx, qvobserve.CoordSyncViewAcceptedEvent{
+					View:  view.View.QueryViewKey(),
+					Node:  view.View.WorkNode(),
+					State: view.View.State(),
+				})
+			}
 		}
 	}
 	return nil

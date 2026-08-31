@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
@@ -41,7 +42,17 @@ func (r *Registry) Observe(ctx context.Context, event Event) {
 	}
 }
 
-var defaultRegistry = NewRegistry(LogObserver{}, NewMetricsObserver())
+var (
+	defaultMetricsObserver = NewMetricsObserver()
+	defaultRegistry        = NewRegistry(LogObserver{}, defaultMetricsObserver)
+)
+
+// init wires the package-level metrics observer as the provider of the
+// qv_view_state_max_age_seconds collector exactly once. Constructing further
+// MetricsObserver instances must not replace the global provider.
+func init() {
+	metrics.SetQVViewStateMaxAgeProvider(defaultMetricsObserver.collectViewStateMaxAge)
+}
 
 func Register(observer Observer) {
 	defaultRegistry.Register(observer)

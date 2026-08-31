@@ -6,22 +6,20 @@ import (
 )
 
 const (
-	fieldType                 = "type"
-	fieldSID                  = "sid"
-	fieldQV                   = "qv"
-	fieldDV                   = "dv"
-	fieldState                = "state"
-	fieldPreemptingDV         = "preemptingDv"
-	fieldNewUpSID             = "newUpSid"
-	fieldNewUpQV              = "newUpQv"
-	fieldNewUpDV              = "newUpDv"
-	fieldWN                   = "wn"
-	fieldReportedState        = "reportedState"
-	fieldResourceReadyPercent = "resourceReadyPercent"
-	fieldError                = "error"
-	fieldSegmentID            = "segmentID"
-	fieldSegmentCount         = "segmentCount"
-	fieldReadySegmentCount    = "readySegmentCount"
+	fieldType              = "type"
+	fieldSID               = "sid"
+	fieldQV                = "qv"
+	fieldDV                = "dv"
+	fieldState             = "state"
+	fieldPreemptingDV      = "preemptingDv"
+	fieldNewUpSID          = "newUpSid"
+	fieldNewUpQV           = "newUpQv"
+	fieldNewUpDV           = "newUpDv"
+	fieldWN                = "wn"
+	fieldReportedState     = "reportedState"
+	fieldError             = "error"
+	fieldSegmentCount      = "segmentCount"
+	fieldReadySegmentCount = "readySegmentCount"
 )
 
 const (
@@ -41,21 +39,18 @@ const (
 	eventSNRecoveringDone                   = "SNRecoveringDone"
 	eventSNReportView                       = "SNReportView"
 	eventSNReleaseDone                      = "SNReleaseDone"
-	eventQNSegmentFailure                   = "QNSegmentFailure"
 	eventQNAcquireSegments                  = "QNAcquireSegments"
 	eventQNSegmentsReady                    = "QNSegmentsReady"
 	eventQNReleaseSegments                  = "QNReleaseSegments"
 	eventSNAcquireResource                  = "SNAcquireResource"
 	eventSNRecoverAcquireResource           = "SNRecoverAcquireResource"
 	eventSNResourceReady                    = "SNResourceReady"
-	eventSNReleaseResource                  = "SNReleaseResource"
 	eventCoordPersistView                   = "CoordPersistView"
 	eventSNPersistView                      = "SNPersistView"
 	eventCoordSyncViewAccepted              = "CoordSyncViewAccepted"
 )
 
 const (
-	triggerReportReady             = "reportReady"
 	triggerReportUnrecoverable     = "reportUnrecoverable"
 	triggerPreempt                 = "preempt"
 	triggerHandoff                 = "handoff"
@@ -67,6 +62,7 @@ const (
 	triggerStreamingResourceReady  = "streamingResourceReady"
 	triggerStreamingRecoveringDone = "streamingRecoveringDone"
 	triggerStreamingReleaseDone    = "streamingReleaseDone"
+	triggerCoordDelivered          = "coordDelivered"
 )
 
 const (
@@ -128,8 +124,11 @@ type CoordQueryNodeLostDetectedEvent struct {
 	Node qviews.QueryNode
 }
 
+// CoordQueryNodeLostDetectedEvent is emitted per view when a QueryNode is lost.
+// Debug level: emitted per view on a node outage, so a multi-view outage would
+// otherwise flood the log.
 func (e CoordQueryNodeLostDetectedEvent) LogLevel() mlog.Level {
-	return mlog.WarnLevel
+	return mlog.DebugLevel
 }
 
 func (e CoordQueryNodeLostDetectedEvent) MarshalLogObject(enc mlog.ObjectEncoder) error {
@@ -262,15 +261,12 @@ func (e CoordViewHandoffToNewUpEvent) MarshalLogObject(enc mlog.ObjectEncoder) e
 }
 
 // CoordViewReportAppliedEvent is emitted after ShardViewManager applies a
-// work-node report to a view. ResourceReadyPercent is the report-side resource
-// preparation progress in [0, 100]. StreamingNode reports derive this value
-// from view state: resource-ready states report 100, other states report 0.
+// work-node report to a view.
 type CoordViewReportAppliedEvent struct {
 	baseEvent
 	ViewStateTransition
-	Node                 qviews.WorkNode
-	ReportedState        qviews.QueryViewState
-	ResourceReadyPercent int64
+	Node          qviews.WorkNode
+	ReportedState qviews.QueryViewState
 }
 
 func (e CoordViewReportAppliedEvent) LogLevel() mlog.Level {
@@ -278,14 +274,7 @@ func (e CoordViewReportAppliedEvent) LogLevel() mlog.Level {
 }
 
 func (e CoordViewReportAppliedEvent) TriggerInfo() string {
-	switch e.ReportedState {
-	case qviews.QueryViewStateReady:
-		return triggerReportReady
-	case qviews.QueryViewStateUnrecoverable:
-		return triggerReportUnrecoverable
-	default:
-		return "report" + e.ReportedState.String()
-	}
+	return "report" + e.ReportedState.String()
 }
 
 func (e CoordViewReportAppliedEvent) MarshalLogObject(enc mlog.ObjectEncoder) error {
@@ -298,7 +287,6 @@ func (e CoordViewReportAppliedEvent) MarshalLogObject(enc mlog.ObjectEncoder) er
 		enc.AddString(fieldWN, e.Node.String())
 	}
 	enc.AddString(fieldReportedState, e.ReportedState.String())
-	enc.AddInt64(fieldResourceReadyPercent, e.ResourceReadyPercent)
 	return nil
 }
 
@@ -337,6 +325,10 @@ type QueryNodeApplyCoordViewEvent struct {
 
 func (e QueryNodeApplyCoordViewEvent) LogLevel() mlog.Level {
 	return mlog.InfoLevel
+}
+
+func (e QueryNodeApplyCoordViewEvent) TriggerInfo() string {
+	return triggerCoordDelivered
 }
 
 func (e QueryNodeApplyCoordViewEvent) MarshalLogObject(enc mlog.ObjectEncoder) error {
@@ -384,7 +376,7 @@ type QueryNodeReportViewEvent struct {
 }
 
 func (e QueryNodeReportViewEvent) LogLevel() mlog.Level {
-	return mlog.InfoLevel
+	return mlog.DebugLevel
 }
 
 func (e QueryNodeReportViewEvent) MarshalLogObject(enc mlog.ObjectEncoder) error {
@@ -431,6 +423,10 @@ func (e StreamingNodeApplyCoordViewEvent) LogLevel() mlog.Level {
 	return mlog.InfoLevel
 }
 
+func (e StreamingNodeApplyCoordViewEvent) TriggerInfo() string {
+	return triggerCoordDelivered
+}
+
 func (e StreamingNodeApplyCoordViewEvent) MarshalLogObject(enc mlog.ObjectEncoder) error {
 	enc.AddString(fieldType, eventSNApplyCoordView)
 	enc.AddString(fieldSID, e.View.ShardID.String())
@@ -473,7 +469,7 @@ type StreamingNodeReportViewEvent struct {
 }
 
 func (e StreamingNodeReportViewEvent) LogLevel() mlog.Level {
-	return mlog.InfoLevel
+	return mlog.DebugLevel
 }
 
 func (e StreamingNodeReportViewEvent) MarshalLogObject(enc mlog.ObjectEncoder) error {
@@ -509,35 +505,11 @@ func (e StreamingNodeReleaseDoneEvent) MarshalLogObject(enc mlog.ObjectEncoder) 
 	return nil
 }
 
-// QueryNodeSegmentFailureEvent is emitted when physical segment load or
-// transform-log catch-up fails.
-type QueryNodeSegmentFailureEvent struct {
-	baseEvent
-	View      qviews.QueryViewKey
-	SegmentID int64
-	Err       error
-}
-
-func (e QueryNodeSegmentFailureEvent) LogLevel() mlog.Level {
-	return mlog.WarnLevel
-}
-
-func (e QueryNodeSegmentFailureEvent) MarshalLogObject(enc mlog.ObjectEncoder) error {
-	enc.AddString(fieldType, eventQNSegmentFailure)
-	enc.AddString(fieldSID, e.View.ShardID.String())
-	enc.AddString(fieldQV, e.View.QueryViewVersion.String())
-	enc.AddString(fieldDV, e.View.QueryViewVersion.DataVersion.String())
-	enc.AddInt64(fieldSegmentID, e.SegmentID)
-	if e.Err != nil {
-		enc.AddString(fieldError, e.Err.Error())
-	}
-	return nil
-}
-
 // QueryNodeAcquireSegmentsEvent is emitted when QueryNode starts acquiring
 // segments for a new Preparing view.
 type QueryNodeAcquireSegmentsEvent struct {
 	baseEvent
+	CollectionID int64
 	View         qviews.QueryViewKey
 	SegmentCount int
 }
@@ -604,7 +576,8 @@ func (e QueryNodeReleaseSegmentsEvent) MarshalLogObject(enc mlog.ObjectEncoder) 
 // acquiring resources for a new Preparing view.
 type StreamingNodeAcquireResourceEvent struct {
 	baseEvent
-	View qviews.QueryViewKey
+	CollectionID int64
+	View         qviews.QueryViewKey
 }
 
 func (e StreamingNodeAcquireResourceEvent) LogLevel() mlog.Level {
@@ -623,7 +596,8 @@ func (e StreamingNodeAcquireResourceEvent) MarshalLogObject(enc mlog.ObjectEncod
 // acquiring resources for a recovered Up view.
 type StreamingNodeRecoverAcquireResourceEvent struct {
 	baseEvent
-	View qviews.QueryViewKey
+	CollectionID int64
+	View         qviews.QueryViewKey
 }
 
 func (e StreamingNodeRecoverAcquireResourceEvent) LogLevel() mlog.Level {
@@ -662,25 +636,6 @@ func (e StreamingNodeResourceReadyEvent) MarshalLogObject(enc mlog.ObjectEncoder
 	return nil
 }
 
-// StreamingNodeReleaseResourceEvent is emitted when StreamingNode starts
-// releasing resources for a view.
-type StreamingNodeReleaseResourceEvent struct {
-	baseEvent
-	View qviews.QueryViewKey
-}
-
-func (e StreamingNodeReleaseResourceEvent) LogLevel() mlog.Level {
-	return mlog.InfoLevel
-}
-
-func (e StreamingNodeReleaseResourceEvent) MarshalLogObject(enc mlog.ObjectEncoder) error {
-	enc.AddString(fieldType, eventSNReleaseResource)
-	enc.AddString(fieldSID, e.View.ShardID.String())
-	enc.AddString(fieldQV, e.View.QueryViewVersion.String())
-	enc.AddString(fieldDV, e.View.QueryViewVersion.DataVersion.String())
-	return nil
-}
-
 // CoordPersistViewEvent is emitted after DirtyViewFlushScheduler successfully
 // persists one QueryView state.
 type CoordPersistViewEvent struct {
@@ -690,7 +645,7 @@ type CoordPersistViewEvent struct {
 }
 
 func (e CoordPersistViewEvent) LogLevel() mlog.Level {
-	return mlog.InfoLevel
+	return mlog.DebugLevel
 }
 
 func (e CoordPersistViewEvent) MarshalLogObject(enc mlog.ObjectEncoder) error {
@@ -711,7 +666,7 @@ type StreamingNodePersistViewEvent struct {
 }
 
 func (e StreamingNodePersistViewEvent) LogLevel() mlog.Level {
-	return mlog.InfoLevel
+	return mlog.DebugLevel
 }
 
 func (e StreamingNodePersistViewEvent) MarshalLogObject(enc mlog.ObjectEncoder) error {
@@ -734,7 +689,7 @@ type CoordSyncViewAcceptedEvent struct {
 }
 
 func (e CoordSyncViewAcceptedEvent) LogLevel() mlog.Level {
-	return mlog.InfoLevel
+	return mlog.DebugLevel
 }
 
 func (e CoordSyncViewAcceptedEvent) MarshalLogObject(enc mlog.ObjectEncoder) error {
@@ -805,10 +760,6 @@ func (e QueryNodeReleaseDoneEvent) ComponentInfo() string {
 	return componentQueryNode
 }
 
-func (e QueryNodeSegmentFailureEvent) ComponentInfo() string {
-	return componentQueryNode
-}
-
 func (e QueryNodeAcquireSegmentsEvent) ComponentInfo() string {
 	return componentQueryNode
 }
@@ -846,10 +797,6 @@ func (e StreamingNodeRecoverAcquireResourceEvent) ComponentInfo() string {
 }
 
 func (e StreamingNodeResourceReadyEvent) ComponentInfo() string {
-	return componentStreamingNode
-}
-
-func (e StreamingNodeReleaseResourceEvent) ComponentInfo() string {
 	return componentStreamingNode
 }
 
