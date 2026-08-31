@@ -328,6 +328,10 @@ func (r *recoveryStorageImpl) handleMessage(ctx context.Context, msg message.Imm
 
 	if msg.VChannel() != "" && !msg.IsPChannelLevel() && msg.MessageType() != message.MessageTypeCreateCollection &&
 		msg.MessageType() != message.MessageTypeCreateVChannel &&
+		// A teardown for a vchannel whose meta has already been dropped and
+		// garbage-collected is a replay, not an inconsistency -- the same reason
+		// DropCollection is exempt.
+		msg.MessageType() != message.MessageTypeDropVChannel &&
 		msg.MessageType() != message.MessageTypeDropCollection && r.vchannels[msg.VChannel()] == nil && !funcutil.IsControlChannel(msg.VChannel()) {
 		r.detectInconsistency(ctx, msg, "vchannel not found")
 	}
@@ -396,13 +400,19 @@ func (r *recoveryStorageImpl) handleMessage(ctx context.Context, msg message.Imm
 }
 
 // handleSplitShard handles the split shard message.
+//
 // The split shard message fences the source vchannel: no new DML is appended
-// after it, so only the vchannel state flips here. The growing segments have
-// been sealed by the ManualFlush message written right before it; flush them
-// defensively anyway so the replay stays idempotent even if the two messages
-// were not persisted atomically.
+// after it, so only the vchannel state flips here. The growing segments were
+// already sealed by the interceptor while the fence was being built (there is
+// no ManualFlush before it -- this message IS the seal record); flushing them
+// again keeps the replay idempotent, since a replay can recreate GROWING
+// segments after the fence was persisted.
+//
+// Scoped by vchannel, not by collection: the fenced source is one shard of a
+// collection whose other shards are still taking writes, and flushing those
+// here would seal segments no message asked to seal.
 func (r *recoveryStorageImpl) handleSplitShard(msg message.ImmutableSplitShardMessageV2) {
-	r.flushAllSegmentOfCollection(context.TODO(), msg, msg.Header().CollectionId)
+	r.flushAllSegmentOfVChannel(context.TODO(), msg)
 	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok {
 		vchannelInfo.ObserveSplitShard(msg)
 	}
