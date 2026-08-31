@@ -100,10 +100,18 @@ func validateDesiredShardNum(coll *model.Collection, properties []*commonpb.KeyV
 			"%s must be at least 2, got %d", common.CollectionShardNum, desired)
 	}
 
+	// A request for the count the collection already has is satisfied, not
+	// invalid. The property is declarative, so re-applying the same declaration
+	// has to be accepted: a client retrying after a timeout, or a config the
+	// operator re-applies whole, must not get a hard error for asking for the
+	// state that already holds. It is also not merely a client-side pattern --
+	// the routable count reaches the desired value at the write switch, well
+	// before the rehash finishes, so a legitimate retry lands in this window on
+	// its own. The property write itself is then a no-op, which the caller's
+	// unchanged-properties check turns into a success.
 	current := routableShardCount(coll)
 	if desired == current {
-		return merr.WrapErrParameterInvalidMsg(
-			"collection %q already has %d shards", coll.Name, desired)
+		return nil
 	}
 	// Shrinking is allowed. The split machinery was always symmetric in the
 	// source and target counts; what made a shrink unshippable was that it

@@ -90,6 +90,24 @@ func (t *createCollectionTask) validate(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("shard num (%d) exceeds system limit (%d)", shardsNum, cfgShardLimit)
 	}
 
+	// 1b. check the shard-split properties.
+	//
+	// Checked here and not only on the alter path: a mode nothing recognises
+	// reads back as the "auto" default, so a typo at CREATE time would hand the
+	// size trigger a collection the operator believes they took control of, and
+	// no later request would ever tell them. A shard count set at create time is
+	// refused outright -- the collection is being created with exactly the count
+	// its shards_num asks for, so a desired count recorded alongside it would ask
+	// datacoord to rehash a collection that has not taken a write yet.
+	if err := validateShardSplitMode(t.Req.GetProperties()); err != nil {
+		return err
+	}
+	if _, exist := common.GetStringValue(t.Req.GetProperties(), common.CollectionShardNum); exist {
+		return merr.WrapErrParameterInvalidMsg(
+			"%s cannot be set at collection creation; use shards_num, and %s afterwards to change it",
+			common.CollectionShardNum, common.CollectionShardNum)
+	}
+
 	// 2. check db-collection capacity
 	dbCollectionCount, totalCollections, dbExists := t.meta.GetAvailableCollectionCount(ctx, t.header.DbId)
 	if err := t.checkMaxCollectionsPerDB(ctx, dbCollectionCount, dbExists); err != nil {
