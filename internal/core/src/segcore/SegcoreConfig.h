@@ -133,6 +133,21 @@ class SegcoreConfig {
         return build_ratio_;
     }
 
+    // Fraction of the knowhere build thread pool that a single growing
+    // segment interim index build may use
+    // (queryNode.segcore.interimIndex.growingBuildThreadRate). 0 keeps the
+    // build single threaded, which is the legacy behavior. Resolved against
+    // the live pool size in VectorFieldIndexing::get_build_params.
+    void
+    set_growing_index_build_thread_rate(float rate) {
+        growing_index_build_thread_rate_.store(rate);
+    }
+
+    float
+    get_growing_index_build_thread_rate() const {
+        return growing_index_build_thread_rate_.load();
+    }
+
     // FM-index count-first guard threshold (queryNode.fmindexCostRatio):
     // accelerate a pattern through FMINDEX iff
     // occ x sa_sample_rate < ratio x total_tokens. Default 0.001 is the
@@ -291,6 +306,7 @@ class SegcoreConfig {
     inline static int64_t sub_dim_ = 2;
     inline static float refine_ratio_ = 3.0;
     inline static float build_ratio_ = 0.1;
+    inline static std::atomic<float> growing_index_build_thread_rate_{0.0f};
     // FM-index guard threshold; overridden from queryNode.fmindexCostRatio.
     inline static float fmindex_cost_ratio_ = 0.001f;
     inline static std::string dense_index_type_ =

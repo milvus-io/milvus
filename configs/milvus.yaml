@@ -595,6 +595,7 @@ queryNode:
       denseVectorIndexType: IVF_FLAT_CC # Dense vector intermin index type
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
+      growingBuildThreadRate: 0 # The ratio of the interim index build thread pool that one growing segment index build may use, resolved as round(rate * pool size) and clamped to [1, pool size]. 0 means single threaded
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
     enableGeometryCache: false # Enable geometry cache for geometry data
     enableGISSplitFusion: true # Enable GIS filter coarse/refine split + same-column fusion optimization
