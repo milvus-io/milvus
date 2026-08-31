@@ -509,9 +509,6 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 			if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
 				return err
 			}
-			if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
-				return merr.WrapErrParameterInvalidMsg("nested array is not supported for field %s", field.GetName())
-			}
 			if err := checkNestedArrayTypeSchemaCapacity(field); err != nil {
 				return err
 			}

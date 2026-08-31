@@ -2259,3 +2259,10 @@ func (c *Client) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteCl
 		return client.DeleteClientCommand(ctx, req, opts...)
 	})
 }
+
+// ListClientCommands lists the commands currently held for clients
+func (c *Client) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest, opts ...grpc.CallOption) (*rootcoordpb.ListClientCommandsResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*rootcoordpb.ListClientCommandsResponse, error) {
+		return client.ListClientCommands(ctx, req, opts...)
+	})
+}

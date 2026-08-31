@@ -66,7 +66,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -202,7 +201,6 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 	core.UpdateStateCode(commonpb.StateCode_Abnormal)
 	core.SetProxyCreator(proxyutil.DefaultProxyCreator)
 
-	expr.Register("rootcoord", core)
 	return core, nil
 }
 
@@ -537,7 +535,7 @@ func (c *Core) initInternal() error {
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
 	// Initialize telemetry manager for client telemetry collection
-	c.telemetryMgr = telemetry.NewTelemetryManager(c.etcdCli)
+	c.telemetryMgr = telemetry.NewTelemetryManagerWithConfig(c.etcdCli, telemetryConfigFromParams())
 	mlog.Debug(context.TODO(), "init telemetry manager done")
 
 	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.mixCoord, c.tsoAllocator, c.meta)
@@ -3569,4 +3567,49 @@ func (c *Core) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClie
 	}
 
 	return c.telemetryMgr.DeleteCommand(ctx, req)
+}
+
+// ListClientCommands returns the commands the coordinator is currently holding for clients.
+//
+// The manager has been able to produce this list since the feature landed, but nothing
+// could reach it: there was no RPC, so the telemetry UI's command panel called an endpoint
+// that did not exist and showed an empty list no matter what was pending.
+func (c *Core) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest) (*rootcoordpb.ListClientCommandsResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &rootcoordpb.ListClientCommandsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	if c.telemetryMgr == nil {
+		return &rootcoordpb.ListClientCommandsResponse{
+			Status: merr.Status(merr.WrapErrServiceInternalMsg("telemetry manager not initialized")),
+		}, nil
+	}
+
+	infos, err := c.telemetryMgr.ListAllCommands(ctx)
+	if err != nil {
+		return &rootcoordpb.ListClientCommandsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	commands := make([]*commonpb.ClientCommand, 0, len(infos))
+	for _, info := range infos {
+		// Payload is deliberately left empty: the list is for showing what is outstanding,
+		// and a persistent config's payload can be large and hold whatever an operator put
+		// in it. Callers that need it can fetch the command itself.
+		commands = append(commands, &commonpb.ClientCommand{
+			CommandId:   info.CommandID,
+			CommandType: info.CommandType,
+			CreateTime:  info.CreateTime,
+			Persistent:  info.Persistent,
+			TargetScope: info.TargetScope,
+		})
+	}
+
+	return &rootcoordpb.ListClientCommandsResponse{
+		Status:   merr.Success(),
+		Commands: commands,
+	}, nil
 }

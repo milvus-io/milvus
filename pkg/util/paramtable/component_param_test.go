@@ -111,6 +111,75 @@ func TestMembershipFilterConfig(t *testing.T) {
 	})
 }
 
+// TestMembershipFilterSizeFallbackKeys pins the upgrade path for deployments
+// tuned under the pre-unification per-kind keys: with the new
+// proxy.maxMembershipFilterSize unset, the first fallback key that is
+// explicitly set (bloom-first order) supplies the value; an explicitly set new
+// key always wins over any fallback.
+func TestMembershipFilterSizeFallbackKeys(t *testing.T) {
+	Init()
+	params := Get()
+
+	t.Run("old bloom key feeds the unified param", func(t *testing.T) {
+		params.Save(params.ProxyCfg.MaxMembershipFilterSize.Key, "67108864")
+		defer params.Reset(params.ProxyCfg.MaxMembershipFilterSize.Key)
+		params.Save("proxy.maxBloomFilterSize", "1048576")
+		defer params.Reset("proxy.maxBloomFilterSize")
+		assert.Equal(t, int64(1048576), params.ProxyCfg.MaxMembershipFilterSize.GetAsInt64())
+	})
+
+	t.Run("explicit new key wins over fallbacks", func(t *testing.T) {
+		params.Save(params.ProxyCfg.MaxMembershipFilterSize.Key, "2097152")
+		defer params.Reset(params.ProxyCfg.MaxMembershipFilterSize.Key)
+		params.Save("proxy.maxBloomFilterSize", "1048576")
+		defer params.Reset("proxy.maxBloomFilterSize")
+		params.Save("proxy.maxRoaringFilterSize", "3145728")
+		defer params.Reset("proxy.maxRoaringFilterSize")
+		assert.Equal(t, int64(2097152), params.ProxyCfg.MaxMembershipFilterSize.GetAsInt64())
+	})
+
+	t.Run("roaring key is used when bloom key is absent", func(t *testing.T) {
+		params.Save(params.ProxyCfg.MaxMembershipFilterSize.Key, "67108864")
+		defer params.Reset(params.ProxyCfg.MaxMembershipFilterSize.Key)
+		params.Save("proxy.maxRoaringFilterSize", "4194304")
+		defer params.Reset("proxy.maxRoaringFilterSize")
+		assert.Equal(t, int64(4194304), params.ProxyCfg.MaxMembershipFilterSize.GetAsInt64())
+	})
+
+	t.Run("legacy plan key does not widen the per-blob limit", func(t *testing.T) {
+		params.Save(params.ProxyCfg.MaxMembershipFilterSize.Key, "67108864")
+		defer params.Reset(params.ProxyCfg.MaxMembershipFilterSize.Key)
+		params.Save("proxy.maxBloomFilterPlanSize", "134217728")
+		defer params.Reset("proxy.maxBloomFilterPlanSize")
+		assert.Equal(t, int64(64*1024*1024), params.ProxyCfg.MaxMembershipFilterSize.GetAsInt64())
+		assert.Equal(t, int64(128*1024*1024), params.ProxyCfg.MaxMembershipFilterPlanSize.GetAsInt64())
+	})
+}
+
+func TestComponentParam_StorageIopsParams(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
+
+	initialRate := &params.CommonCfg.StorageIopsInitialRate
+	maxRate := &params.CommonCfg.StorageIopsMaxRate
+	assert.Equal(t, "3.0.1", initialRate.Version)
+	assert.Equal(t, "3.0.1", maxRate.Version)
+	assert.Equal(t, DefaultStorageIopsInitialRate, initialRate.GetAsUint32())
+	assert.Equal(t, DefaultStorageIopsMaxRate, maxRate.GetAsUint32())
+
+	assert.NoError(t, params.Save(initialRate.Key, "3000"))
+	assert.NoError(t, params.Save(maxRate.Key, "0"))
+	assert.Equal(t, uint32(3000), initialRate.GetAsUint32())
+	assert.Equal(t, uint32(0), maxRate.GetAsUint32())
+
+	for _, invalid := range []string{"", "-1", "invalid", "4294967296"} {
+		assert.NoError(t, params.Save(initialRate.Key, invalid))
+		assert.Equal(t, DefaultStorageIopsInitialRate, initialRate.GetAsUint32())
+		assert.NoError(t, params.Save(maxRate.Key, invalid))
+		assert.Equal(t, DefaultStorageIopsMaxRate, maxRate.GetAsUint32())
+	}
+}
+
 func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()
@@ -154,6 +223,11 @@ func TestComponentParam(t *testing.T) {
 		params.Save(Params.IndexBuildReadWindowBytes.Key, "536870912")
 		assert.Equal(t, int32(16), Params.StorageReaderThreadPoolSize.GetAsInt32())
 		assert.Equal(t, int64(536870912), Params.IndexBuildReadWindowBytes.GetAsInt64())
+
+		defer params.Reset(Params.ExternalVectorPartialNullPolicy.Key)
+		assert.Equal(t, "error", Params.ExternalVectorPartialNullPolicy.GetValue())
+		params.Save(Params.ExternalVectorPartialNullPolicy.Key, "null")
+		assert.Equal(t, "null", Params.ExternalVectorPartialNullPolicy.GetValue())
 
 		assert.Equal(t, Params.GracefulTime.GetAsInt64(), int64(DefaultGracefulTime))
 		t.Logf("default grafeful time = %d", Params.GracefulTime.GetAsInt64())
@@ -246,6 +320,12 @@ func TestComponentParam(t *testing.T) {
 		params.Save("common.sync.taskPoolReleaseTimeoutSeconds", "100")
 		assert.Equal(t, 100*time.Second, params.CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second))
 
+		assert.Equal(t, 2.0, Params.NodeSchedulerMaxConcurrencyRatio.GetAsFloat())
+		params.Save(Params.NodeSchedulerMaxConcurrencyRatio.Key, "0.5")
+		assert.Equal(t, 0.5, Params.NodeSchedulerMaxConcurrencyRatio.GetAsFloat())
+		params.Reset(Params.NodeSchedulerMaxConcurrencyRatio.Key)
+		assert.Equal(t, 2.0, Params.NodeSchedulerMaxConcurrencyRatio.GetAsFloat())
+
 		assert.Equal(t, 1, params.CommonCfg.StorageZstdConcurrency.GetAsInt())
 		params.Save("common.storage.zstd.concurrency", "2")
 		assert.Equal(t, 2, params.CommonCfg.StorageZstdConcurrency.GetAsInt())
@@ -300,6 +380,20 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, "{}", Params.DefaultDBProperties.GetValue())
 		params.Save("rootCoord.defaultDBProperties", "{\"key\":\"value\"}")
 		assert.Equal(t, "{\"key\":\"value\"}", Params.DefaultDBProperties.GetValue())
+
+		// Client telemetry. The defaults are the contract the telemetry manager was written
+		// against, so they are asserted exactly rather than for mere presence.
+		assert.Equal(t, 2, Params.ClientTelemetryRetainedWindows.GetAsInt())
+		assert.Equal(t, time.Minute, Params.ClientTelemetryCleanupInterval.GetAsDuration(time.Second))
+		assert.Equal(t, 10*time.Minute, Params.ClientTelemetryInactiveClientThreshold.GetAsDuration(time.Second))
+		assert.Equal(t, time.Minute, Params.ClientTelemetryClientStatusThreshold.GetAsDuration(time.Second))
+		assert.Equal(t, 10*time.Second, Params.ClientTelemetryCommandCleanupTimeout.GetAsDuration(time.Second))
+		assert.Equal(t, 1024*1024, Params.ClientTelemetryMaxMetricsPerClient.GetAsInt())
+		assert.Equal(t, 100, Params.ClientTelemetryMaxOperationTypesPerClient.GetAsInt())
+		assert.Equal(t, 100000, Params.ClientTelemetryMaxClientsInMemory.GetAsInt())
+
+		params.Save("rootCoord.clientTelemetry.retainedWindows", "3")
+		assert.Equal(t, 3, Params.ClientTelemetryRetainedWindows.GetAsInt())
 
 		SetCreateTime(time.Now())
 		SetUpdateTime(time.Now())

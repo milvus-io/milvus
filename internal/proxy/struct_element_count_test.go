@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -488,7 +489,7 @@ func TestStructElementNullableFlattenFillAndValidate(t *testing.T) {
 
 	schemaInfo := mustNewSchemaInfo(schema)
 	require.NoError(t, fillFieldPropertiesOnly(insertMsg.FieldsData, schemaInfo))
-	require.NoError(t, newValidateUtil().Validate(insertMsg.FieldsData, schemaInfo.SchemaHelper, 1))
+	require.NoError(t, fieldvalidator.NewValidateUtil().Validate(insertMsg.FieldsData, schemaInfo.SchemaHelper, 1))
 
 	scalarArray := insertMsg.FieldsData[0].GetScalars().GetArrayData()
 	assert.Equal(t, int64(101), insertMsg.FieldsData[0].GetFieldId())

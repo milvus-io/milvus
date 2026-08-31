@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <atomic>
 #include <chrono>
 #include <deque>
 #include <filesystem>
@@ -26,10 +27,13 @@
 #include "arrow/array/builder_nested.h"
 #include "arrow/array/builder_primitive.h"
 #include "arrow/array/concatenate.h"
+#include "arrow/buffer.h"
 #include "arrow/buffer_builder.h"
 #include <arrow/c/bridge.h>
 #include "arrow/scalar.h"
 #include "arrow/type_fwd.h"
+#include "arrow/util/bitmap_ops.h"
+#include "arrow/util/bit_util.h"
 #include "common/type_c.h"
 #include "fmt/format.h"
 #include "index/Utils.h"
@@ -81,6 +85,24 @@
 
 namespace milvus::storage {
 
+namespace {
+
+std::atomic<bool> external_vector_partial_null_as_row_null{false};
+
+}  // namespace
+
+void
+SetExternalVectorPartialNullAsRowNull(bool enabled) {
+    external_vector_partial_null_as_row_null.store(enabled,
+                                                   std::memory_order_relaxed);
+}
+
+bool
+GetExternalVectorPartialNullAsRowNull() {
+    return external_vector_partial_null_as_row_null.load(
+        std::memory_order_relaxed);
+}
+
 constexpr const char* TEMP = "tmp";
 
 std::map<std::string, ChunkManagerType> ChunkManagerType_Map = {
@@ -115,13 +137,6 @@ std::map<std::string, CloudProviderType> CloudProviderType_Map = {
     {"tencent", CloudProviderType::TENCENTCLOUD},
     {"gcpnative", CloudProviderType::GCPNATIVE},
     {"huawei", CloudProviderType::HUAWEICLOUD}};
-
-std::map<std::string, int> ReadAheadPolicy_Map = {
-    {"normal", MADV_NORMAL},
-    {"random", MADV_RANDOM},
-    {"sequential", MADV_SEQUENTIAL},
-    {"willneed", MADV_WILLNEED},
-    {"dontneed", MADV_DONTNEED}};
 
 // in arrow, null_bitmap read from the least significant bit
 std::vector<uint8_t>
@@ -1108,16 +1123,6 @@ PutIndexData(ChunkManager* remote_chunk_manager,
     return remote_paths_to_size;
 }
 
-int64_t
-GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas) {
-    int64_t count = 0;
-    for (auto& field_data : field_datas) {
-        count += field_data->get_num_rows();
-    }
-
-    return count;
-}
-
 size_t
 GetNumRowsForLoadInfo(const LoadFieldDataInfo& load_info) {
     if (load_info.field_infos.empty()) {
@@ -1305,6 +1310,131 @@ CreateFieldData(const DataType& type,
         default:
             ThrowInfo(DataTypeInvalid,
                       "CreateFieldData not support data type " +
+                          GetDataTypeName(type));
+    }
+}
+
+template <typename Type, typename Getter>
+std::optional<Type>
+GetTypedDefaultValue(const std::optional<DefaultValueType>& default_value,
+                     Getter getter) {
+    if (!default_value.has_value()) {
+        return std::nullopt;
+    }
+    return getter(*default_value);
+}
+
+FieldDataPtr
+CreateFieldDataFromDefaultValue(
+    const DataType& type,
+    bool nullable,
+    int64_t element_count,
+    const std::optional<DefaultValueType>& default_value,
+    std::optional<proto::schema::TypeSchema> array_type) {
+    AssertInfo(nullable, "default value field data must be nullable");
+
+    switch (type) {
+        case DataType::BOOL:
+            return std::make_shared<FieldData<bool>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<bool>(
+                    default_value,
+                    [](const auto& value) { return value.bool_data(); }));
+        case DataType::INT8:
+            return std::make_shared<FieldData<int8_t>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<int8_t>(
+                    default_value,
+                    [](const auto& value) { return value.int_data(); }));
+        case DataType::INT16:
+            return std::make_shared<FieldData<int16_t>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<int16_t>(
+                    default_value,
+                    [](const auto& value) { return value.int_data(); }));
+        case DataType::INT32:
+            return std::make_shared<FieldData<int32_t>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<int32_t>(
+                    default_value,
+                    [](const auto& value) { return value.int_data(); }));
+        case DataType::INT64:
+            return std::make_shared<FieldData<int64_t>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<int64_t>(
+                    default_value,
+                    [](const auto& value) { return value.long_data(); }));
+        case DataType::FLOAT:
+            return std::make_shared<FieldData<float>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<float>(
+                    default_value,
+                    [](const auto& value) { return value.float_data(); }));
+        case DataType::DOUBLE:
+            return std::make_shared<FieldData<double>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<double>(
+                    default_value,
+                    [](const auto& value) { return value.double_data(); }));
+        case DataType::TIMESTAMPTZ:
+            return std::make_shared<FieldData<int64_t>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<int64_t>(
+                    default_value, [](const auto& value) {
+                        return value.timestamptz_data();
+                    }));
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+            return std::make_shared<FieldData<std::string>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<std::string>(
+                    default_value,
+                    [](const auto& value) { return value.string_data(); }));
+        case DataType::JSON:
+            return std::make_shared<FieldData<Json>>(
+                type, nullable, element_count, default_value);
+        case DataType::GEOMETRY:
+            return std::make_shared<FieldData<Geometry>>(
+                type,
+                nullable,
+                element_count,
+                GetTypedDefaultValue<std::string>(
+                    default_value,
+                    [](const auto& value) { return value.string_data(); }));
+        case DataType::ARRAY:
+            AssertInfo(!default_value.has_value(),
+                       "ARRAY default values are not supported");
+            if (array_type.has_value()) {
+                return std::make_shared<FieldData<ArrayValue>>(
+                    std::move(*array_type),
+                    nullable,
+                    element_count,
+                    default_value);
+            }
+            return std::make_shared<FieldData<Array>>(
+                type, nullable, element_count, std::optional<Array>{});
+        default:
+            ThrowInfo(DataTypeInvalid,
+                      "CreateFieldDataFromDefaultValue not support data type " +
                           GetDataTypeName(type));
     }
 }
@@ -2133,13 +2263,11 @@ CacheRawDataAndFillMissing(const MemFileManagerImplPtr& file_manager,
             }
             return field_schema.default_value();
         }();
-        auto field_data = storage::CreateFieldData(
+        auto field_data = storage::CreateFieldDataFromDefaultValue(
             static_cast<DataType>(field_schema.data_type()),
-            static_cast<DataType>(field_schema.element_type()),
             true,
-            1,
-            lack_binlog_rows);
-        field_data->FillFieldData(default_value, lack_binlog_rows);
+            lack_binlog_rows,
+            default_value);
         field_datas.insert(field_datas.begin(), field_data);
     }
 
@@ -2249,6 +2377,21 @@ ValidateNoNullValuesInRange(const std::shared_ptr<arrow::Array>& values,
                    context,
                    i);
     }
+}
+
+int64_t
+CountValidValuesInRange(const std::shared_ptr<arrow::Array>& values,
+                        int64_t begin,
+                        int64_t end) {
+    auto length = end - begin;
+    if (values->null_count() == 0) {
+        return length;
+    }
+    auto bitmap = values->null_bitmap_data();
+    AssertInfo(bitmap != nullptr,
+               "vector child array reports nulls without a validity bitmap");
+    return arrow::internal::CountSetBits(
+        bitmap, values->offset() + begin, length);
 }
 
 bool
@@ -2388,6 +2531,75 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             memset(dst, 0, num_rows * byte_width);
         }
 
+        // Allocate a replacement parent bitmap only if child nulls need to be
+        // promoted to row-level nulls. The common all-valid path keeps the
+        // existing zero-allocation behavior.
+        std::shared_ptr<arrow::Buffer> promoted_null_bitmap;
+        int64_t promoted_null_count = 0;
+        auto mark_row_null = [&](int64_t row) {
+            if (promoted_null_bitmap == nullptr) {
+                auto bitmap_result = arrow::AllocateEmptyBitmap(num_rows);
+                AssertInfo(bitmap_result.ok(),
+                           "Failed to allocate vector null bitmap");
+                promoted_null_bitmap = std::move(*bitmap_result);
+                auto promoted_bits = promoted_null_bitmap->mutable_data();
+                if (array->null_count() == 0) {
+                    arrow::bit_util::SetBitsTo(
+                        promoted_bits, 0, num_rows, true);
+                } else {
+                    arrow::internal::CopyBitmap(array->null_bitmap_data(),
+                                                array->offset(),
+                                                num_rows,
+                                                promoted_bits,
+                                                0);
+                }
+            }
+            arrow::bit_util::ClearBit(promoted_null_bitmap->mutable_data(),
+                                      row);
+            ++promoted_null_count;
+            // Null rows have no logical vector value. Keep their physical
+            // fixed-width slot deterministic and safe until the nullable
+            // Binary conversion drops it.
+            memset(dst + row * byte_width, 0, byte_width);
+        };
+
+        const bool coerce_partial_null =
+            GetExternalVectorPartialNullAsRowNull();
+        const bool can_promote_child_nulls =
+            field_meta.is_nullable() &&
+            IsVectorDataType(field_meta.get_data_type()) &&
+            !IsVectorArrayDataType(field_meta.get_data_type());
+        auto should_copy_row = [&](const std::shared_ptr<arrow::Array>& values,
+                                   int64_t begin,
+                                   int64_t end,
+                                   int64_t row) {
+            const auto length = end - begin;
+            const auto valid_count =
+                CountValidValuesInRange(values, begin, end);
+            if (valid_count == length) {
+                return true;
+            }
+
+            const auto null_count = length - valid_count;
+            const bool all_null = valid_count == 0;
+            if (can_promote_child_nulls && (all_null || coerce_partial_null)) {
+                mark_row_null(row);
+                return false;
+            }
+
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "vector list contains {} null element(s){} in child "
+                      "range [{}, {}) at row {}; field nullable={}, "
+                      "partial-null policy={}",
+                      null_count,
+                      FieldErrorSuffix(field_meta),
+                      begin,
+                      end,
+                      row,
+                      field_meta.is_nullable(),
+                      coerce_partial_null ? "null" : "error");
+        };
+
         if (type_id == arrow::Type::LIST) {
             auto list_array = std::static_pointer_cast<arrow::ListArray>(array);
             auto values = list_array->values();
@@ -2419,11 +2631,13 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                                expected_list_length,
                                actual_length,
                                i);
-                    ValidateNoNullValuesInRange(
-                        values, offset, offset + actual_length, "vector list");
-                    milvus::fastmem::FastMemcpy(dst + i * byte_width,
-                                                raw + offset * elem_byte_size,
-                                                byte_width);
+                    if (should_copy_row(
+                            values, offset, offset + actual_length, i)) {
+                        milvus::fastmem::FastMemcpy(
+                            dst + i * byte_width,
+                            raw + offset * elem_byte_size,
+                            byte_width);
+                    }
                 }
             }
         } else if (type_id == arrow::Type::FIXED_SIZE_LIST) {
@@ -2454,13 +2668,13 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             for (int64_t i = 0; i < num_rows; i++) {
                 if (array->IsValid(i)) {
                     auto offset = fsl_array->value_offset(i);
-                    ValidateNoNullValuesInRange(values,
-                                                offset,
-                                                offset + expected_list_length,
-                                                "vector list");
-                    milvus::fastmem::FastMemcpy(dst + i * byte_width,
-                                                raw + offset * elem_byte_size,
-                                                byte_width);
+                    if (should_copy_row(
+                            values, offset, offset + expected_list_length, i)) {
+                        milvus::fastmem::FastMemcpy(
+                            dst + i * byte_width,
+                            raw + offset * elem_byte_size,
+                            byte_width);
+                    }
                 }
             }
         } else {
@@ -2470,15 +2684,28 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                       array->type()->ToString());
         }
 
-        // Preserve null bitmap from the source array
+        // Preserve source nulls in an offset-zero bitmap. Reusing the source
+        // buffer directly is incorrect for sliced arrays because the new FSB
+        // array itself has offset zero.
         std::shared_ptr<arrow::Buffer> null_bitmap;
-        if (array->null_count() > 0 && array->data()->buffers[0]) {
-            null_bitmap = array->data()->buffers[0];
+        if (promoted_null_bitmap != nullptr) {
+            null_bitmap = std::move(promoted_null_bitmap);
+        } else if (array->null_count() > 0) {
+            auto bitmap_result = arrow::AllocateEmptyBitmap(num_rows);
+            AssertInfo(bitmap_result.ok(),
+                       "Failed to allocate vector null bitmap");
+            null_bitmap = std::move(*bitmap_result);
+            arrow::internal::CopyBitmap(array->null_bitmap_data(),
+                                        array->offset(),
+                                        num_rows,
+                                        null_bitmap->mutable_data(),
+                                        0);
         }
-        auto fsb_data = arrow::ArrayData::Make(fsb_type,
-                                               num_rows,
-                                               {null_bitmap, std::move(buffer)},
-                                               array->null_count());
+        auto fsb_data =
+            arrow::ArrayData::Make(fsb_type,
+                                   num_rows,
+                                   {null_bitmap, std::move(buffer)},
+                                   array->null_count() + promoted_null_count);
         result.push_back(
             std::make_shared<arrow::FixedSizeBinaryArray>(fsb_data));
     }
@@ -2557,221 +2784,9 @@ ConvertStringArrayToBinary(const arrow::ArrayVector& arrays) {
     return result;
 }
 
-// Coerce any binary-like Arrow array to canonical BinaryArray.
-// Source readers (e.g. vortex) may produce LARGE_BINARY / BINARY_VIEW /
-// LARGE_STRING / STRING_VIEW for the same logical bytes; downstream
-// ChunkWriters dynamic_cast to BinaryArray and would null-deref.
-arrow::ArrayVector
-CoerceToBinary(const arrow::ArrayVector& arrays) {
-    arrow::ArrayVector result;
-    result.reserve(arrays.size());
-    for (const auto& arr : arrays) {
-        const auto tid = arr->type_id();
-        if (tid == arrow::Type::BINARY) {
-            result.push_back(arr);
-            continue;
-        }
-        if (tid == arrow::Type::STRING) {
-            // Zero-copy: identical buffer layout
-            auto d = arr->data();
-            auto bin = arrow::ArrayData::Make(arrow::binary(),
-                                              d->length,
-                                              d->buffers,
-                                              d->null_count,
-                                              d->offset);
-            result.push_back(std::make_shared<arrow::BinaryArray>(bin));
-            continue;
-        }
-        if (tid == arrow::Type::LARGE_BINARY ||
-            tid == arrow::Type::LARGE_STRING ||
-            tid == arrow::Type::BINARY_VIEW ||
-            tid == arrow::Type::STRING_VIEW) {
-            // Different offset/buffer layout -> rebuild via builder.
-            arrow::BinaryBuilder builder;
-            auto status = builder.Reserve(arr->length());
-            AssertInfo(status.ok(),
-                       "BinaryBuilder reserve failed: " + status.ToString());
-            switch (tid) {
-                case arrow::Type::LARGE_BINARY: {
-                    auto src =
-                        std::static_pointer_cast<arrow::LargeBinaryArray>(arr);
-                    for (int64_t i = 0; i < src->length(); ++i) {
-                        if (src->IsNull(i)) {
-                            status = builder.AppendNull();
-                        } else {
-                            auto v = src->GetView(i);
-                            status = builder.Append(
-                                reinterpret_cast<const uint8_t*>(v.data()),
-                                v.size());
-                        }
-                        AssertInfo(status.ok(),
-                                   "BinaryBuilder append failed: " +
-                                       status.ToString());
-                    }
-                    break;
-                }
-                case arrow::Type::LARGE_STRING: {
-                    auto src =
-                        std::static_pointer_cast<arrow::LargeStringArray>(arr);
-                    for (int64_t i = 0; i < src->length(); ++i) {
-                        if (src->IsNull(i)) {
-                            status = builder.AppendNull();
-                        } else {
-                            auto v = src->GetView(i);
-                            status = builder.Append(
-                                reinterpret_cast<const uint8_t*>(v.data()),
-                                v.size());
-                        }
-                        AssertInfo(status.ok(),
-                                   "BinaryBuilder append failed: " +
-                                       status.ToString());
-                    }
-                    break;
-                }
-                case arrow::Type::BINARY_VIEW: {
-                    auto src =
-                        std::static_pointer_cast<arrow::BinaryViewArray>(arr);
-                    for (int64_t i = 0; i < src->length(); ++i) {
-                        if (src->IsNull(i)) {
-                            status = builder.AppendNull();
-                        } else {
-                            auto v = src->GetView(i);
-                            status = builder.Append(
-                                reinterpret_cast<const uint8_t*>(v.data()),
-                                v.size());
-                        }
-                        AssertInfo(status.ok(),
-                                   "BinaryBuilder append failed: " +
-                                       status.ToString());
-                    }
-                    break;
-                }
-                case arrow::Type::STRING_VIEW: {
-                    auto src =
-                        std::static_pointer_cast<arrow::StringViewArray>(arr);
-                    for (int64_t i = 0; i < src->length(); ++i) {
-                        if (src->IsNull(i)) {
-                            status = builder.AppendNull();
-                        } else {
-                            auto v = src->GetView(i);
-                            status = builder.Append(
-                                reinterpret_cast<const uint8_t*>(v.data()),
-                                v.size());
-                        }
-                        AssertInfo(status.ok(),
-                                   "BinaryBuilder append failed: " +
-                                       status.ToString());
-                    }
-                    break;
-                }
-                default:
-                    break;
-            }
-            std::shared_ptr<arrow::Array> out;
-            status = builder.Finish(&out);
-            AssertInfo(status.ok(),
-                       "BinaryBuilder finish failed: " + status.ToString());
-            result.push_back(out);
-            continue;
-        }
-        result.push_back(arr);
-    }
-    return result;
-}
-
 // Forward decl: defined alongside CanonicalizeArrowVariants below.
 static std::shared_ptr<arrow::Buffer>
 RebuildNullBitmap(const std::shared_ptr<arrow::Array>& array);
-
-// Coerce LARGE_LIST / LIST_VIEW to canonical (32-bit offset) ListArray.
-// Vortex schemaless mode may emit list variants for the same logical
-// List<T>; downstream code (ConvertListToProtobufBinary,
-// NormalizeVectorArrayInner, ArrowListToScalarFieldProto) expects
-// arrow::ListArray and would static_cast-fail otherwise.
-arrow::ArrayVector
-CoerceToList(const arrow::ArrayVector& arrays) {
-    arrow::ArrayVector result;
-    result.reserve(arrays.size());
-    for (const auto& arr : arrays) {
-        const auto tid = arr->type_id();
-        if (tid != arrow::Type::LARGE_LIST && tid != arrow::Type::LIST_VIEW) {
-            result.push_back(arr);
-            continue;
-        }
-
-        std::shared_ptr<arrow::Array> values;
-        std::vector<std::pair<int64_t, int64_t>> ranges;
-        ranges.reserve(arr->length());
-        if (tid == arrow::Type::LARGE_LIST) {
-            auto la = std::static_pointer_cast<arrow::LargeListArray>(arr);
-            values = la->values();
-            for (int64_t i = 0; i < la->length(); ++i) {
-                int64_t s = la->value_offset(i);
-                int64_t e = s + la->value_length(i);
-                ranges.emplace_back(s, e);
-            }
-        } else {
-            auto lv = std::static_pointer_cast<arrow::ListViewArray>(arr);
-            values = lv->values();
-            for (int64_t i = 0; i < lv->length(); ++i) {
-                int64_t s = lv->value_offset(i);
-                int64_t e = s + lv->value_length(i);
-                ranges.emplace_back(s, e);
-            }
-        }
-
-        arrow::Int32Builder offset_builder;
-        auto status = offset_builder.Reserve(arr->length() + 1);
-        AssertInfo(status.ok(),
-                   "CoerceToList: offset reserve failed: " + status.ToString());
-        std::vector<std::shared_ptr<arrow::Array>> value_slices;
-        int32_t cur = 0;
-        status = offset_builder.Append(0);
-        AssertInfo(status.ok(), "CoerceToList: offset append failed");
-        for (int64_t i = 0; i < arr->length(); ++i) {
-            if (!arr->IsNull(i)) {
-                auto [s, e] = ranges[i];
-                int64_t len = e - s;
-                AssertInfo(cur + len <= INT32_MAX,
-                           "CoerceToList: offset overflows int32");
-                value_slices.push_back(values->Slice(s, len));
-                cur += static_cast<int32_t>(len);
-            }
-            status = offset_builder.Append(cur);
-            AssertInfo(status.ok(), "CoerceToList: offset append failed");
-        }
-        std::shared_ptr<arrow::Array> offsets_arr;
-        status = offset_builder.Finish(&offsets_arr);
-        AssertInfo(status.ok(),
-                   "CoerceToList: offset finish failed: " + status.ToString());
-
-        std::shared_ptr<arrow::Array> concat_values;
-        if (value_slices.empty()) {
-            auto empty = arrow::MakeArrayOfNull(values->type(), 0);
-            AssertInfo(empty.ok(), "CoerceToList: empty values failed");
-            concat_values = *empty;
-        } else {
-            auto concat = arrow::Concatenate(value_slices);
-            AssertInfo(
-                concat.ok(),
-                "CoerceToList: concat failed: " + concat.status().ToString());
-            concat_values = *concat;
-        }
-
-        auto offsets_buf =
-            std::static_pointer_cast<arrow::Int32Array>(offsets_arr)->values();
-        auto list_arr =
-            std::make_shared<arrow::ListArray>(arrow::list(values->type()),
-                                               arr->length(),
-                                               offsets_buf,
-                                               concat_values,
-                                               RebuildNullBitmap(arr),
-                                               arr->null_count(),
-                                               0);
-        result.push_back(list_arr);
-    }
-    return result;
-}
 
 // Rebuild null bitmap as a fresh buffer at offset=0.
 // Required when constructing a new arrow::Array that does not share the

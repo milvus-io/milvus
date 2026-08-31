@@ -25,6 +25,8 @@
 #include <utility>
 #include <vector>
 
+#include "common/MRB1Limits.generated.h"
+
 namespace milvus {
 
 class RoaringMembership {
@@ -37,16 +39,37 @@ class RoaringMembership {
         uint64_t estimated_decoded_bytes;
     };
 
-    static constexpr std::string_view kMagic = "MRB1";
-    static constexpr uint16_t kVersion = 1;
-    static constexpr uint16_t kFormatPortableRoaring64 = 1;
-    static constexpr size_t kHeaderSize = 32;
-    static constexpr size_t kMaxBodySize = 128 * 1024 * 1024;
-    static constexpr uint64_t kMaxHighContainerCount = uint64_t{1} << 18;
-    static constexpr uint64_t kMaxEstimatedDecodedBytes =
-        uint64_t{64} * 1024 * 1024;
-    static constexpr uint64_t kEstimatedHighContainerOverheadBytes = 128;
-    static constexpr uint64_t kEstimatedLowContainerOverheadBytes = 64;
+    // The MRB1 envelope and admission limits are one contract with the Go SDK
+    // builder (client/v3/membership/roaringfilter) and the Go proxy validator
+    // (pkg/v3/util/roaringfilter): the SDK pre-rejects what the proxy would
+    // reject, and the proxy pre-rejects what segcore would reject. Nothing in
+    // the build linked the three, so a value edited on one side alone compiled
+    // and passed CI, and the symptom was the proxy admitting a blob every
+    // querynode refuses.
+    //
+    // These are aliases, not a second copy: the values are generated from the
+    // Go ones into MRB1Limits.generated.h, so there is nothing here that can
+    // diverge from them. To change a limit, change the Go constant and run
+    // `make generate-cpp-constants`; editing a number here is not possible
+    // without editing a file that says DO NOT EDIT, and a stale generated
+    // header fails TestGeneratedHeaderIsCurrent.
+    //
+    // They stay members so that RoaringMembership::kFoo keeps working at the
+    // call sites, and `auto` so the declared type is the generated one -- a
+    // narrowing spelled here would be a value this class does not actually use.
+    static constexpr auto kMagic = mrb1::kMagic;
+    static constexpr auto kVersion = mrb1::kVersion;
+    static constexpr auto kFormatPortableRoaring64 =
+        mrb1::kFormatPortableRoaring64;
+    static constexpr auto kHeaderSize = mrb1::kHeaderSize;
+    static constexpr auto kMaxBodySize = mrb1::kMaxBodySize;
+    static constexpr auto kMaxHighContainerCount = mrb1::kMaxHighContainerCount;
+    static constexpr auto kMaxEstimatedDecodedBytes =
+        mrb1::kMaxEstimatedDecodedBytes;
+    static constexpr auto kEstimatedHighContainerOverheadBytes =
+        mrb1::kEstimatedHighContainerOverheadBytes;
+    static constexpr auto kEstimatedLowContainerOverheadBytes =
+        mrb1::kEstimatedLowContainerOverheadBytes;
 
     // Validates MRB1 and reports its allocation shape without constructing any
     // CRoaring object. One bitmap may have at most a 64 MiB decoded estimate.

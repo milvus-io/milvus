@@ -59,14 +59,15 @@ func TestValidateFunctionChainSearchRequest(t *testing.T) {
 }
 
 func TestSplitFunctionChainsByStage(t *testing.T) {
-	t.Run("split l0 and l2 chains", func(t *testing.T) {
+	t.Run("split l0 l1 and l2 chains", func(t *testing.T) {
 		l0Chain := l0FunctionChain()
+		l1Chain := l1FunctionChain()
 		l2Chain := l2FunctionChain(mapOp(types.ScoreFieldName, "expr", columnArg(types.ScoreFieldName)))
 
-		l2Chains, querynodeChains, err := splitFunctionChainsByStage([]*schemapb.FunctionChain{l0Chain, l2Chain})
+		l2Chains, querynodeChains, err := splitFunctionChainsByStage([]*schemapb.FunctionChain{l0Chain, l1Chain, l2Chain})
 		require.NoError(t, err)
 		assert.Equal(t, []*schemapb.FunctionChain{l2Chain}, l2Chains)
-		assert.Equal(t, []*schemapb.FunctionChain{l0Chain}, querynodeChains)
+		assert.Equal(t, []*schemapb.FunctionChain{l0Chain, l1Chain}, querynodeChains)
 	})
 
 	t.Run("l0 chain is shallow routed without op validation", func(t *testing.T) {
@@ -93,12 +94,22 @@ func TestSplitFunctionChainsByStage(t *testing.T) {
 		assert.Contains(t, err.Error(), "appears more than once")
 	})
 
-	t.Run("l1 is not supported yet", func(t *testing.T) {
-		_, _, err := splitFunctionChainsByStage([]*schemapb.FunctionChain{{
-			Stage: schemapb.FunctionChainStage_FunctionChainStageL1Rerank,
-		}})
+	t.Run("l1 chain is shallow routed without op validation", func(t *testing.T) {
+		l1Chain := l1FunctionChain()
+
+		l2Chains, querynodeChains, err := splitFunctionChainsByStage([]*schemapb.FunctionChain{l1Chain})
+		require.NoError(t, err)
+		assert.Empty(t, l2Chains)
+		assert.Equal(t, []*schemapb.FunctionChain{l1Chain}, querynodeChains)
+	})
+
+	t.Run("duplicate l1 stage", func(t *testing.T) {
+		_, _, err := splitFunctionChainsByStage([]*schemapb.FunctionChain{
+			l1FunctionChain(),
+			l1FunctionChain(),
+		})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "is not supported yet")
+		assert.Contains(t, err.Error(), "appears more than once")
 	})
 }
 
@@ -134,6 +145,37 @@ func TestNewFunctionChainRerankMeta(t *testing.T) {
 		require.NotNil(t, meta)
 		assert.Equal(t, []string{"ts"}, meta.GetInputFieldNames())
 		assert.Equal(t, []int64{101}, meta.GetInputFieldIDs())
+	})
+
+	t.Run("merge generated system outputs are not user writes", func(t *testing.T) {
+		chainPB := l2FunctionChain(&schemapb.FunctionChainOp{
+			Op: types.OpTypeMerge,
+			Params: map[string]*schemapb.FunctionParamValue{
+				"strategy": chainStringParam("rrf"),
+			},
+		})
+
+		meta, err := newFunctionChainRerankMeta([]*schemapb.FunctionChain{chainPB}, schema)
+		require.NoError(t, err)
+		require.NotNil(t, meta)
+		assert.Empty(t, meta.GetInputFieldNames())
+	})
+
+	t.Run("group by system field is not planned as schema input", func(t *testing.T) {
+		chainPB := l2FunctionChain(&schemapb.FunctionChainOp{
+			Op: types.OpTypeGroupBy,
+			Params: map[string]*schemapb.FunctionParamValue{
+				"field":      chainStringParam("$group_by_101"),
+				"group_size": chainIntParam(2),
+				"limit":      chainIntParam(10),
+			},
+		})
+
+		meta, err := newFunctionChainRerankMeta([]*schemapb.FunctionChain{chainPB}, schema)
+		require.NoError(t, err)
+		require.NotNil(t, meta)
+		assert.Empty(t, meta.GetInputFieldNames())
+		assert.Empty(t, meta.GetInputFieldIDs())
 	})
 
 	t.Run("duplicate schema input is planned once", func(t *testing.T) {
@@ -286,6 +328,22 @@ func l0FunctionChain(ops ...*schemapb.FunctionChainOp) *schemapb.FunctionChain {
 	}
 }
 
+func l1FunctionChain(ops ...*schemapb.FunctionChainOp) *schemapb.FunctionChain {
+	return &schemapb.FunctionChain{
+		Stage: schemapb.FunctionChainStage_FunctionChainStageL1Rerank,
+		Ops:   ops,
+	}
+}
+
+func l1LimitFunctionChain(limit int64) *schemapb.FunctionChain {
+	return l1FunctionChain(&schemapb.FunctionChainOp{
+		Op: types.OpTypeLimit,
+		Params: map[string]*schemapb.FunctionParamValue{
+			"limit": {Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: limit}},
+		},
+	})
+}
+
 func l2LimitFunctionChain(limit int64) *schemapb.FunctionChain {
 	return l2FunctionChain(&schemapb.FunctionChainOp{
 		Op: types.OpTypeLimit,
@@ -293,6 +351,18 @@ func l2LimitFunctionChain(limit int64) *schemapb.FunctionChain {
 			"limit": {Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: limit}},
 		},
 	})
+}
+
+func chainStringParam(value string) *schemapb.FunctionParamValue {
+	return &schemapb.FunctionParamValue{
+		Value: &schemapb.FunctionParamValue_StringValue{StringValue: value},
+	}
+}
+
+func chainIntParam(value int64) *schemapb.FunctionParamValue {
+	return &schemapb.FunctionParamValue{
+		Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: value},
+	}
 }
 
 func mapOp(output string, exprName string, args ...*schemapb.FunctionChainExprArg) *schemapb.FunctionChainOp {

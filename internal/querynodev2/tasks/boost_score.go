@@ -83,6 +83,32 @@ func boostModeToScoreCombineMode(mode planpb.BoostMode) (string, error) {
 	}
 }
 
+type preparedBoostScore struct {
+	scorers      []*planpb.ScoreFunction
+	functionMode string
+	boostMode    string
+}
+
+func prepareBoostScore(plan *planpb.PlanNode) (*preparedBoostScore, error) {
+	if plan == nil || len(plan.GetScorers()) == 0 {
+		return nil, nil
+	}
+
+	functionMode, err := functionModeToScoreCombineMode(plan.GetScoreOption().GetFunctionMode())
+	if err != nil {
+		return nil, err
+	}
+	boostMode, err := boostModeToScoreCombineMode(plan.GetScoreOption().GetBoostMode())
+	if err != nil {
+		return nil, err
+	}
+	return &preparedBoostScore{
+		scorers:      plan.GetScorers(),
+		functionMode: functionMode,
+		boostMode:    boostMode,
+	}, nil
+}
+
 var boostScoreRunnerFactory = newSegmentBoostScoreRunner
 
 type boostScoreFunc func(context.Context, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction, *arrow.Chunked) (*arrow.Chunked, error)
@@ -172,29 +198,31 @@ func (t *SearchTask) applyBoostScores(segDFs []*chain.DataFrame, searchedSegment
 	if err != nil {
 		return merr.WrapErrServiceInternal(fmt.Sprintf("boost_score: failed to parse search plan scorers: %v", err))
 	}
-	return t.applyBoostScoresWithPlan(segDFs, plan, searchedSegments, searchReq)
+	prepared, err := prepareBoostScore(plan)
+	if err != nil {
+		return err
+	}
+	return t.applyPreparedBoostScores(segDFs, prepared, searchedSegments, searchReq)
 }
 
-func (t *SearchTask) applyBoostScoresWithPlan(segDFs []*chain.DataFrame, plan *planpb.PlanNode, searchedSegments []segments.Segment, searchReq *segcore.SearchRequest) error {
+func (t *SearchTask) applyPreparedBoostScores(segDFs []*chain.DataFrame, prepared *preparedBoostScore, searchedSegments []segments.Segment, searchReq *segcore.SearchRequest) error {
 	if len(segDFs) != len(searchedSegments) {
 		return merr.WrapErrServiceInternal(fmt.Sprintf("boost_score: DataFrame count %d does not match segment count %d", len(segDFs), len(searchedSegments)))
 	}
-	if plan == nil || len(plan.GetScorers()) == 0 {
+	if prepared == nil {
 		return nil
-	}
-
-	scorers := plan.GetScorers()
-	functionMode, err := functionModeToScoreCombineMode(plan.GetScoreOption().GetFunctionMode())
-	if err != nil {
-		return err
-	}
-	boostMode, err := boostModeToScoreCombineMode(plan.GetScoreOption().GetBoostMode())
-	if err != nil {
-		return err
 	}
 
 	scoreFunc := segments.AsyncComputeScorerScoresOnChunkedOffsets
 	return executeL0RerankChains(t.ctx, segDFs, func(_ context.Context, i int, df *chain.DataFrame) (*chain.FuncChain, error) {
-		return buildBoostScoreChain(df, searchedSegments[i], searchReq, scorers, scoreFunc, functionMode, boostMode)
+		return buildBoostScoreChain(
+			df,
+			searchedSegments[i],
+			searchReq,
+			prepared.scorers,
+			scoreFunc,
+			prepared.functionMode,
+			prepared.boostMode,
+		)
 	}, "boost_score")
 }

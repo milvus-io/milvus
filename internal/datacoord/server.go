@@ -53,7 +53,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -221,7 +220,6 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 	for _, opt := range opts {
 		opt(s)
 	}
-	expr.Register("datacoord", s)
 	return s
 }
 

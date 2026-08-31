@@ -226,14 +226,25 @@ MACRO(using_ccache_if_defined MILVUS_USE_CCACHE)
         find_program(CCACHE_FOUND ccache)
         if (CCACHE_FOUND)
             message(STATUS "Using ccache: ${CCACHE_FOUND}")
-            set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE_FOUND})
-            set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ${CCACHE_FOUND})
-            # let ccache preserve C++ comments, because some of them may be
-            # meaningful to the compiler
-            set(ENV{CCACHE_COMMENTS} "1")
+            set(_ccache_launcher
+                "${CMAKE_COMMAND};-E;env;CCACHE_COMMENTS=1;${CCACHE_FOUND}")
+            set(CMAKE_C_COMPILER_LAUNCHER "${_ccache_launcher}")
+            set(CMAKE_CXX_COMPILER_LAUNCHER "${_ccache_launcher}")
+
+            # PCH caching needs relaxed checks for state captured in the PCH.
+            # Keep those settings separate so only PCH-enabled targets use them.
+            set(MILVUS_PCH_CXX_COMPILER_LAUNCHER
+                "${CMAKE_COMMAND};-E;env;CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime;CCACHE_COMMENTS=1;${CCACHE_FOUND}")
+            unset(_ccache_launcher)
         else()
             message(WARNING "ccache not found!")
         endif()
     endif ()
 ENDMACRO(using_ccache_if_defined)
 
+MACRO(clear_global_ccache_launchers)
+    # Some vendored projects set these global properties while configuring.
+    # Targets already retain their compiler launcher; links should never use ccache.
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "")
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK "")
+ENDMACRO(clear_global_ccache_launchers)

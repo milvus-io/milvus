@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
@@ -39,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -87,7 +87,7 @@ type Proxy struct {
 
 	metaCacheMu sync.RWMutex
 	metaCache   Cache
-	chMgr       channelsMgr
+	chMgr       channelmgr.ChannelsMgr
 
 	sched *taskScheduler
 
@@ -138,7 +138,6 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		slowQueries:     expirable.NewLRU[Timestamp, *metricsinfo.SlowQuery](20, nil, time.Minute*15),
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
-	expr.Register("proxy", node)
 	hookutil.SetHook(connection.GetManager())
 	hookutil.InitOnceHook()
 	mlog.Debug(ctx, "create a new Proxy instance", mlog.Any("state", node.stateCode.Load()))
@@ -259,8 +258,25 @@ func (node *Proxy) Init() error {
 	node.tsoAllocator = tsoAllocator
 	mlog.Debug(node.ctx, "create timestamp allocator done", mlog.String("role", typeutil.ProxyRole), mlog.Int64("ProxyID", paramtable.GetNodeID()))
 
-	dmlChannelsFunc := getDmlChannelsFunc(node.ctx, node.mixCoord)
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, defaultInsertRepackFunc)
+	// The meta cache must be initialized before the channels manager so the
+	// injected channel resolver always observes a live cache (no nil window).
+	metaCache, err := initMetaCache(node.ctx, node.mixCoord)
+	if err != nil {
+		mlog.Warn(node.ctx, "failed to init meta cache", mlog.String("role", typeutil.ProxyRole), mlog.Err(err))
+		return err
+	}
+	node.setMetaCache(metaCache)
+	mlog.Debug(node.ctx, "init meta cache done", mlog.String("role", typeutil.ProxyRole))
+
+	chMgr := channelmgr.NewChannelsMgr(
+		func(collectionID typeutil.UniqueID) (channelmgr.ChannelInfo, error) {
+			collInfo, err := metaCache.GetCollectionInfo(node.ctx, "", "", collectionID)
+			if err != nil {
+				return channelmgr.ChannelInfo{}, err
+			}
+			return channelmgr.ChannelInfo{VChans: collInfo.VChannels, PChans: collInfo.PChannels}, nil
+		},
+	)
 	node.chMgr = chMgr
 	mlog.Debug(node.ctx, "create channels manager done", mlog.String("role", typeutil.ProxyRole))
 
@@ -274,14 +290,6 @@ func (node *Proxy) Init() error {
 	node.enableComplexDeleteLimit = Params.QuotaConfig.ComplexDeleteLimitEnable.GetAsBool()
 	node.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	mlog.Debug(node.ctx, "create metrics cache manager done", mlog.String("role", typeutil.ProxyRole))
-
-	metaCache, err := initMetaCache(node.ctx, node.mixCoord)
-	if err != nil {
-		mlog.Warn(node.ctx, "failed to init meta cache", mlog.String("role", typeutil.ProxyRole), mlog.Err(err))
-		return err
-	}
-	node.setMetaCache(metaCache)
-	mlog.Debug(node.ctx, "init meta cache done", mlog.String("role", typeutil.ProxyRole))
 
 	node.shardMgr = shardclient.NewShardClientMgr(node.mixCoord)
 	node.lbPolicy = shardclient.NewLBPolicyImpl(node.shardMgr)

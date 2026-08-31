@@ -1766,3 +1766,118 @@ TEST(BitmapIndexArrayNestedTest,
 
     boost::filesystem::remove_all(root_path);
 }
+
+namespace {
+
+// Exposes the protected array-type selection dispatcher so the
+// nested-vs-regular choice can be asserted directly.
+class TestHybridScalarIndexString
+    : public index::HybridScalarIndex<std::string> {
+ public:
+    using index::HybridScalarIndex<std::string>::HybridScalarIndex;
+    ScalarIndexType
+    SelectIndexBuildTypePublic(const std::vector<FieldDataPtr>& field_datas) {
+        return SelectIndexBuildType(field_datas);
+    }
+};
+
+std::vector<ScalarFieldProto>
+MakeStringScalarArrays(int rows, int distinct) {
+    std::vector<ScalarFieldProto> scalar_arrays(rows);
+    for (int i = 0; i < rows; ++i) {
+        scalar_arrays[i].mutable_string_data()->add_data(
+            fmt::format("value_{:04d}", i % distinct));
+    }
+    return scalar_arrays;
+}
+
+FieldDataPtr
+MakeStringArrayFieldData(const std::vector<ScalarFieldProto>& scalar_arrays) {
+    std::vector<milvus::Array> array_data;
+    array_data.reserve(scalar_arrays.size());
+    for (const auto& scalar_array : scalar_arrays) {
+        array_data.emplace_back(scalar_array);
+    }
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::NONE, false);
+    field_data->FillFieldData(array_data.data(), array_data.size());
+    return field_data;
+}
+
+}  // namespace
+
+// Nested (struct sub-field) HYBRID indexes flatten scalar elements, so the
+// sort index can serve high-cardinality data: STL_SORT must replace INVERTED
+// once distinct values reach the bitmap cardinality limit (default 100) AND
+// scalar_index_version_ >= kNestedHybridStlSortMinVersion. Regular array
+// fields keep INVERTED regardless of version because the sort index cannot
+// handle array values.
+TEST(BitmapIndexArrayNestedTest, HybridNestedHighCardinalitySelectsStlsort) {
+    auto root_path =
+        fmt::format("{}/hybrid_nested_high_card_stlsort", TestLocalPath);
+    auto ctx =
+        MakeNestedCtx(root_path, proto::schema::DataType::VarChar, false, 3140);
+
+    // 120 distinct elements spread over 240 rows -> high cardinality.
+    auto high_card_field_data =
+        MakeStringArrayFieldData(MakeStringScalarArrays(240, 120));
+
+    TestHybridScalarIndexString nested(7, ctx, true);
+    nested.scalar_index_version_ = kNestedHybridStlSortMinVersion;
+    EXPECT_EQ(nested.SelectIndexBuildTypePublic(
+                  std::vector<FieldDataPtr>{high_card_field_data}),
+              ScalarIndexType::STLSORT);
+
+    // Regular (non-nested) array fields must stay on INVERTED at high
+    // cardinality, even at/above the nested STL_SORT version threshold.
+    TestHybridScalarIndexString regular(7, ctx, false);
+    regular.scalar_index_version_ = kNestedHybridStlSortMinVersion;
+    EXPECT_EQ(regular.SelectIndexBuildTypePublic(
+                  std::vector<FieldDataPtr>{high_card_field_data}),
+              ScalarIndexType::INVERTED);
+
+    // Low cardinality keeps BITMAP for both nested and regular arrays.
+    auto low_card_field_data =
+        MakeStringArrayFieldData(MakeStringScalarArrays(10, 1));
+    TestHybridScalarIndexString nested_low(7, ctx, true);
+    nested_low.scalar_index_version_ = kNestedHybridStlSortMinVersion;
+    EXPECT_EQ(nested_low.SelectIndexBuildTypePublic(
+                  std::vector<FieldDataPtr>{low_card_field_data}),
+              ScalarIndexType::BITMAP);
+    TestHybridScalarIndexString regular_low(7, ctx, false);
+    regular_low.scalar_index_version_ = kNestedHybridStlSortMinVersion;
+    EXPECT_EQ(regular_low.SelectIndexBuildTypePublic(
+                  std::vector<FieldDataPtr>{low_card_field_data}),
+              ScalarIndexType::BITMAP);
+
+    boost::filesystem::remove_all(root_path);
+}
+
+// Below kNestedHybridStlSortMinVersion (e.g. the default v3 used by 3.0.x),
+// nested high-cardinality HYBRID indexes must keep selecting INVERTED so
+// that an older reader (e.g. 2.6, whose ScalarIndexSort predates nested-index
+// support) can still load the index after a rollback. Regression test for
+// https://github.com/milvus-io/milvus/issues/52893.
+TEST(BitmapIndexArrayNestedTest,
+     HybridNestedHighCardinalityBelowVersionKeepsInverted) {
+    auto root_path =
+        fmt::format("{}/hybrid_nested_high_card_legacy_version", TestLocalPath);
+    auto ctx =
+        MakeNestedCtx(root_path, proto::schema::DataType::VarChar, false, 3141);
+
+    // 120 distinct elements spread over 240 rows -> high cardinality.
+    auto high_card_field_data =
+        MakeStringArrayFieldData(MakeStringScalarArrays(240, 120));
+
+    for (int32_t version :
+         {0, kHybridIndexConfigVersion, kNestedHybridStlSortMinVersion - 1}) {
+        TestHybridScalarIndexString nested(7, ctx, true);
+        nested.scalar_index_version_ = version;
+        EXPECT_EQ(nested.SelectIndexBuildTypePublic(
+                      std::vector<FieldDataPtr>{high_card_field_data}),
+                  ScalarIndexType::INVERTED)
+            << "scalar_index_version_=" << version;
+    }
+
+    boost::filesystem::remove_all(root_path);
+}
