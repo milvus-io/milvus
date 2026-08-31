@@ -375,3 +375,26 @@ func TestApplyUpdatesShardSplitRoutingKeepsResidues(t *testing.T) {
 	// and the residues survive the trip out to a DescribeCollection response.
 	assert.Equal(t, []uint64{0, 1, 2}, coll.ShardInfos["v2"].ToPB().GetHashRouting().GetBuckets())
 }
+
+func TestShardInfoIsRoutable(t *testing.T) {
+	// Normal and Creating own keys; a fenced or released split source does not.
+	assert.True(t, (&ShardInfo{State: schemapb.ShardState_ShardNormal}).IsRoutable())
+	assert.True(t, (&ShardInfo{State: schemapb.ShardState_ShardCreating}).IsRoutable())
+	assert.False(t, (&ShardInfo{State: schemapb.ShardState_ShardSplitting}).IsRoutable())
+	assert.False(t, (&ShardInfo{State: schemapb.ShardState_ShardDropped}).IsRoutable())
+}
+
+// TestUnmarshalToleratesShortPhysicalChannelList covers a malformed record on
+// the meta load path. The two lists are written in lockstep, so a mismatch is a
+// bug upstream -- but this runs on every start, and reading past the end would
+// turn one bad record into a rootcoord that cannot be started at all, including
+// to repair it.
+func TestUnmarshalToleratesShortPhysicalChannelList(t *testing.T) {
+	coll := UnmarshalCollectionModel(&pb.CollectionInfo{
+		Schema:               &schemapb.CollectionSchema{Name: "c"},
+		VirtualChannelNames:  []string{"v0", "v1"},
+		PhysicalChannelNames: []string{"p0"},
+	})
+	assert.Equal(t, "p0", coll.ShardInfos["v0"].PChannelName)
+	assert.Empty(t, coll.ShardInfos["v1"].PChannelName)
+}

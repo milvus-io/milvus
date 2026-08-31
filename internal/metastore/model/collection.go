@@ -84,20 +84,36 @@ type ShardInfo struct {
 	Buckets []uint64
 }
 
+// IsRoutable reports whether a key can currently be routed to this shard. It is
+// the single definition of the rule; everything that counts a collection's
+// shards asks it, so no two counts can drift apart.
+//
+// A split source stops being routable from the moment it is fenced: it is
+// Splitting (and later Dropped) and owns no key range, so it is no longer one of
+// the collection's shards even though its vchannel lingers until its data has
+// been moved.
+func (s *ShardInfo) IsRoutable() bool {
+	return shardStateIsRoutable(s.State)
+}
+
+func shardStateIsRoutable(state schemapb.ShardState) bool {
+	switch state {
+	case schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardCreating:
+		return true
+	default:
+		return false
+	}
+}
+
 // routableShardCount counts the shards a key can currently be routed to, which
 // is what a collection's shard count means to a user.
 //
-// A split source is excluded from the moment it is fenced: it is Splitting (and
-// later Dropped) and owns no key range, so it is no longer one of the
-// collection's shards even though its vchannel lingers until its data has been
-// moved. Counting vchannels instead would report N+M during a rehash — every
-// source and every target at once — which is a number the collection never
-// actually has.
+// Counting vchannels instead would report N+M during a rehash — every source and
+// every target at once — which is a number the collection never actually has.
 func routableShardCount(infos []*schemapb.CollectionShardInfo) int32 {
 	var count int32
 	for _, info := range infos {
-		switch info.GetState() {
-		case schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardCreating:
+		if shardStateIsRoutable(info.GetState()) {
 			count++
 		}
 	}
@@ -359,7 +375,16 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		if idx < len(coll.ShardInfos) {
 			si = coll.ShardInfos[idx]
 		}
-		shardInfos[channelName] = shardInfoFromPB(channelName, coll.PhysicalChannelNames[idx], si)
+		// Guard the physical index the way ApplyUpdates does. The two lists are
+		// written in lockstep and a mismatch would be a bug upstream, but this runs
+		// on every meta load, so reading past the end would turn one malformed
+		// record into a rootcoord that panics on every start and cannot be started
+		// to repair it.
+		var pchannel string
+		if idx < len(coll.PhysicalChannelNames) {
+			pchannel = coll.PhysicalChannelNames[idx]
+		}
+		shardInfos[channelName] = shardInfoFromPB(channelName, pchannel, si)
 	}
 
 	return &Collection{

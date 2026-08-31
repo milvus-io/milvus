@@ -991,9 +991,6 @@ func GetStringValue(kvs []*commonpb.KeyValuePair, key string) (result string, ex
 	return kv.GetValue(), true
 }
 
-// GetDesiredShardNum reads the requested shard count from a collection's
-// properties. Returns exist=false when the collection has never been asked to
-// change it.
 // ParseShardSplitMode reads CollectionShardSplitMode out of a property list,
 // returning the canonical value.
 //
@@ -1030,6 +1027,9 @@ func ShardSplitModeOf(properties map[string]string) string {
 	}
 }
 
+// GetDesiredShardNum reads the requested shard count from a collection's
+// properties. Returns exist=false when the collection has never been asked to
+// change it.
 func GetDesiredShardNum(kvs []*commonpb.KeyValuePair) (num int32, parseErr error, exist bool) {
 	value, err, ok := GetInt64Value(kvs, CollectionShardNum)
 	if !ok || err != nil {

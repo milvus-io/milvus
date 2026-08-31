@@ -2935,7 +2935,7 @@ please adjust in embedded Milvus: false`,
 
 	p.EnableRoutingTable = ParamItem{
 		Key:          "proxy.enableRoutingTable",
-		Version:      "2.6.0",
+		Version:      "3.0.0",
 		DefaultValue: "true",
 		Doc:          "kill-switch for shard-split routing abstraction; when false, fall back to legacy HashPK2Channels",
 		Export:       false,
@@ -6071,7 +6071,7 @@ Compaction merges small-size segments into a large segment, and clears the entit
 
 	p.ShardSplitEnable = ParamItem{
 		Key:          "dataCoord.shardSplit.enable",
-		Version:      "2.7.0",
+		Version:      "3.0.0",
 		DefaultValue: "false",
 		Doc: `Master switch of online shard split. It gates the split trigger (automatic and manual);
 disabling it stops new split tasks but never interrupts a task already past the write fence.`,
@@ -6081,7 +6081,7 @@ disabling it stops new split tasks but never interrupts a task already past the 
 
 	p.ShardSplitAutoTriggerEnable = ParamItem{
 		Key:          "dataCoord.shardSplit.autoTriggerEnable",
-		Version:      "2.7.0",
+		Version:      "3.0.0",
 		DefaultValue: "true",
 		Doc: `Whether the cluster sizes its shards AUTOMATICALLY. It selects a mode, and the two modes
 are mutually exclusive:
@@ -6097,7 +6097,7 @@ Has no effect unless dataCoord.shardSplit.enable is on.`,
 
 	p.ShardSplitCheckInterval = ParamItem{
 		Key:          "dataCoord.shardSplit.checkInterval",
-		Version:      "2.7.0",
+		Version:      "3.0.0",
 		DefaultValue: "3600",
 		Doc:          "The interval in seconds the shard split trigger inspects the per-shard statistics.",
 		Export:       true,
@@ -6106,7 +6106,7 @@ Has no effect unless dataCoord.shardSplit.enable is on.`,
 
 	p.ShardSplitMaxShardSize = ParamItem{
 		Key:          "dataCoord.shardSplit.maxShardSize",
-		Version:      "2.7.0",
+		Version:      "3.0.0",
 		DefaultValue: "2048",
 		Doc:          "The data size of one shard that triggers a split, unit: GB.",
 		Export:       true,
@@ -6115,7 +6115,7 @@ Has no effect unless dataCoord.shardSplit.enable is on.`,
 
 	p.ShardSplitMinSiblingRatio = ParamItem{
 		Key:          "dataCoord.shardSplit.minSiblingRatio",
-		Version:      "2.7.0",
+		Version:      "3.0.0",
 		DefaultValue: "0.05",
 		Doc: `Guard against re-splitting a shard that a previous doubling did not relieve.
 A doubling cuts a shard's keys on the next hash bit, so its two halves should end up
@@ -6129,7 +6129,7 @@ half is smaller than this fraction of it, and warns instead. Set to 0 to disable
 
 	p.ShardSplitMaxShardRows = ParamItem{
 		Key:          "dataCoord.shardSplit.maxShardRows",
-		Version:      "2.7.0",
+		Version:      "3.0.0",
 		DefaultValue: "500000000",
 		Doc:          "The row count of one shard that triggers a split.",
 		Export:       true,
@@ -6138,7 +6138,7 @@ half is smaller than this fraction of it, and warns instead. Set to 0 to disable
 
 	p.ShardSplitMaxNamespaceCount = ParamItem{
 		Key:          "dataCoord.shardSplit.maxNamespaceCount",
-		Version:      "2.7.0",
+		Version:      "3.0.0",
 		DefaultValue: "100000",
 		Doc:          "The namespace (partition) count of one shard that triggers a split.",
 		Export:       true,
@@ -6147,7 +6147,7 @@ half is smaller than this fraction of it, and warns instead. Set to 0 to disable
 
 	p.ShardSplitMaxConcurrentTasks = ParamItem{
 		Key:          "dataCoord.shardSplit.maxConcurrentTasks",
-		Version:      "2.7.0",
+		Version:      "3.0.0",
 		DefaultValue: "1",
 		Doc:          "The cluster-wide maximum number of concurrent shard split tasks.",
 		Export:       true,
@@ -6156,7 +6156,7 @@ half is smaller than this fraction of it, and warns instead. Set to 0 to disable
 
 	p.ShardSplitRelabelBatchSize = ParamItem{
 		Key:          "dataCoord.shardSplit.relabelBatchSize",
-		Version:      "2.7.0",
+		Version:      "3.0.0",
 		DefaultValue: "256",
 		Doc:          "The number of segments relabeled to the target shards in one batch during shard split redistribution.",
 		Export:       true,
@@ -6165,7 +6165,7 @@ half is smaller than this fraction of it, and warns instead. Set to 0 to disable
 
 	p.ShardSplitRehashMaxCollectionSize = ParamItem{
 		Key:          "dataCoord.shardSplit.rehashMaxCollectionSize",
-		Version:      "2.7.0",
+		Version:      "3.0.0",
 		DefaultValue: "0",
 		Doc: `The largest collection, in GB, whose shard count may be changed by hand. 0 disables the check.
 
@@ -6179,7 +6179,7 @@ the whole collection. Set this to the largest collection your query nodes can ho
 
 	p.ShardSplitTaskRetention = ParamItem{
 		Key:          "dataCoord.shardSplit.taskRetention",
-		Version:      "2.7.0",
+		Version:      "3.0.0",
 		DefaultValue: "1800",
 		Doc:          "The retention in seconds a terminal (Done/Aborted) shard split task is kept before it is reaped from meta.",
 		Export:       true,
