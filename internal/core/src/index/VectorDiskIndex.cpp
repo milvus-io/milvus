@@ -46,6 +46,7 @@
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
+#include "knowhere/emb_list_utils.h"
 #include "knowhere/index/index_factory.h"
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
@@ -455,7 +456,12 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     auto index_lease =
         file_manager_->AcquireLocalDirWriteLease(local_index_path_prefix);
     auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
-    config_with_emb_list[VALID_DATA_PATH_KEY] = valid_data_path;
+    const bool use_element_id_space =
+        elem_type_ != DataType::NONE &&
+        !knowhere::get_el_metric_type(GetMetricType()).has_value();
+    if (!use_element_id_space) {
+        config_with_emb_list[VALID_DATA_PATH_KEY] = valid_data_path;
+    }
 
     auto local_data_path =
         file_manager_->CacheRawDataToDisk<T>(config_with_emb_list);
@@ -613,6 +619,20 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     auto index_lease =
         file_manager_->AcquireLocalDirWriteLease(local_index_path_prefix);
     build_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
+
+    const bool use_element_id_space =
+        elem_type_ != DataType::NONE &&
+        !knowhere::get_el_metric_type(GetMetricType()).has_value();
+    const auto parent_id_map_data =
+        dataset == nullptr ? knowhere::IdMapData{} : dataset->GetIdMapData();
+    if (use_element_id_space && parent_id_map_data.HasValue()) {
+        dataset->ClearIdMapData();
+    }
+    Defer restore_parent_id_map([&]() {
+        if (use_element_id_space && parent_id_map_data.HasValue()) {
+            dataset->SetIdMapData(parent_id_map_data);
+        }
+    });
 
     if (dataset != nullptr && dataset->HasIdMapData() &&
         !index_.GetIdMap().IsEnabled()) {

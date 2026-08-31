@@ -500,6 +500,20 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     knowhere::Json index_config;
     index_config.update(config);
 
+    const bool use_element_id_space =
+        elem_type_ != DataType::NONE &&
+        !knowhere::get_el_metric_type(GetMetricType()).has_value();
+    const auto parent_id_map_data =
+        dataset == nullptr ? knowhere::IdMapData{} : dataset->GetIdMapData();
+    if (use_element_id_space && parent_id_map_data.HasValue()) {
+        dataset->ClearIdMapData();
+    }
+    Defer restore_parent_id_map([&]() {
+        if (use_element_id_space && parent_id_map_data.HasValue()) {
+            dataset->SetIdMapData(parent_id_map_data);
+        }
+    });
+
     if (dataset != nullptr && dataset->HasIdMapData() &&
         !index_.GetIdMap().IsEnabled()) {
         index_.GetIdMap().SetType(knowhere::IdMap::Type::SEALED);
@@ -587,7 +601,12 @@ VectorMemIndex<T>::Build(const Config& config) {
         if (is_sparse) {
             dataset->SetIsSparse(true);
         }
-        if (nullable) {
+        const bool use_element_id_space =
+            elem_type_ != DataType::NONE &&
+            !knowhere::get_el_metric_type(GetMetricType()).has_value();
+        // Element-level vector-array indexes use flattened element IDs. Null
+        // parent rows contribute no elements, so their IdMap is not applicable.
+        if (nullable && !use_element_id_space) {
             dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
                 valid_data.get(), static_cast<size_t>(total_num_rows)));
         }
