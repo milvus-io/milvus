@@ -750,31 +750,33 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_invalid_schema_multi_pk(self):
         """
-        target: test create collection with schema containing multiple primary key fields
-        method: create schema with two primary key fields and use it to create collection
-        expected: raise exception due to multiple primary keys
+        target: test schema rejects multiple primary key fields
+        method: add conflicting primary key definitions to a schema
+        expected: raise exception while adding the conflicting field
         """
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # Create schema with multiple primary key fields
+        error = {ct.err_code: 1, ct.err_msg: "Expected only one primary key field"}
+
         schema_1 = self.create_schema(client, enable_dynamic_field=False)[0]
         schema_1.add_field("field1", DataType.INT64, is_primary=True, auto_id=False)
-        schema_1.add_field("field2", DataType.INT64, is_primary=True, auto_id=False)  # Second primary key
-        schema_1.add_field("vector_field", DataType.FLOAT_VECTOR, dim=32)
-        # Try to create collection with multiple primary keys
-        error = {ct.err_code: 999, ct.err_msg: "Expected only one primary key field"}
-        self.create_collection(
-            client, collection_name, schema=schema_1, check_task=CheckTasks.err_res, check_items=error
+        self.add_field(
+            schema_1,
+            "field2",
+            DataType.INT64,
+            is_primary=True,
+            auto_id=False,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
         schema_2 = self.create_schema(client, enable_dynamic_field=False, primary_field="field2")[0]
         schema_2.add_field("field1", DataType.INT64, is_primary=True, auto_id=False)
-        schema_2.add_field("field2", DataType.INT64)  # Second primary key
-        schema_2.add_field("vector_field", DataType.FLOAT_VECTOR, dim=32)
-        # Try to create collection with multiple primary keys
-        error = {ct.err_code: 999, ct.err_msg: "Expected only one primary key field"}
-        self.create_collection(
-            client, collection_name, schema=schema_2, check_task=CheckTasks.err_res, check_items=error
+        self.add_field(
+            schema_2,
+            "field2",
+            DataType.INT64,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
