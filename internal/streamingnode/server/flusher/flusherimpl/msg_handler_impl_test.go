@@ -86,13 +86,13 @@ func TestFlushMsgHandler_HandleSplitShard(t *testing.T) {
 	wbMgr := writebuffer.NewMockBufferManager(t)
 	wbMgr.EXPECT().SealSegments(mock.Anything, vchannel, []int64{1, 2}).Return(errors.New("mock err"))
 	handler := newMsgHandler(wbMgr)
-	assert.Error(t, handler.HandleSplitShard(im))
+	assert.Error(t, handler.HandleSplitShard(context.Background(), im))
 
 	// test normal
 	wbMgr = writebuffer.NewMockBufferManager(t)
 	wbMgr.EXPECT().SealSegments(mock.Anything, vchannel, []int64{1, 2}).Return(nil)
 	handler = newMsgHandler(wbMgr)
-	assert.NoError(t, handler.HandleSplitShard(im))
+	assert.NoError(t, handler.HandleSplitShard(context.Background(), im))
 }
 
 func TestFlushMsgHandler_HandleManualFlush(t *testing.T) {
