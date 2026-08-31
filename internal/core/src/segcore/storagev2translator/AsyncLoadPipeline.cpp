@@ -114,7 +114,7 @@ class PriorityThreadPoolExecutor final : public folly::CPUThreadPoolExecutor {
 
 // Maps load priority to the executor's two priority queues.
 [[nodiscard]] constexpr int8_t
-ExecutorPriority(milvus::proto::common::LoadPriority priority) noexcept {
+ExecutorPriority(const milvus::proto::common::LoadPriority priority) noexcept {
     return priority == milvus::proto::common::LoadPriority::LOW
                ? folly::Executor::LO_PRI
                : folly::Executor::HI_PRI;
@@ -122,7 +122,8 @@ ExecutorPriority(milvus::proto::common::LoadPriority priority) noexcept {
 
 // Applies a priority wrapper only when the executor exposes multiple queues.
 [[nodiscard]] folly::Executor::KeepAlive<>
-WithExecutorPriority(folly::Executor::KeepAlive<> executor, int8_t priority) {
+WithExecutorPriority(folly::Executor::KeepAlive<> executor,
+                     const int8_t priority) {
     if (executor->getNumPriorities() <= 1) {
         return executor;
     }
@@ -131,7 +132,7 @@ WithExecutorPriority(folly::Executor::KeepAlive<> executor, int8_t priority) {
 
 // Maps load priority to the transient-memory admission class.
 [[nodiscard]] constexpr storage::TransientBudgetPriority
-BudgetPriority(milvus::proto::common::LoadPriority priority) noexcept {
+BudgetPriority(const milvus::proto::common::LoadPriority priority) noexcept {
     return priority == milvus::proto::common::LoadPriority::LOW
                ? storage::TransientBudgetPriority::Low
                : storage::TransientBudgetPriority::High;
@@ -140,8 +141,8 @@ BudgetPriority(milvus::proto::common::LoadPriority priority) noexcept {
 // Throws FollyCancel when a pipeline phase observes cancellation.
 void
 CheckCancellationToken(const folly::CancellationToken& cancellation_token,
-                       int64_t segment_id,
-                       std::string_view operation) {
+                       const int64_t segment_id,
+                       const std::string_view operation) {
     if (cancellation_token.isCancellationRequested()) {
         throw SegcoreError(
             ErrorCode::FollyCancel,
@@ -151,7 +152,7 @@ CheckCancellationToken(const folly::CancellationToken& cancellation_token,
 
 // Converts a window's Arrow batches into cache cells in request order.
 WindowLoadResult
-FinalizeWindow(int64_t segment_id,
+FinalizeWindow(const int64_t segment_id,
                const folly::CancellationToken& cancellation_token,
                const AsyncReadWindow& window,
                const CellFinalizeFunc& finalize_cell,
@@ -198,7 +199,7 @@ FinalizeWindow(int64_t segment_id,
 // Runs finalization on an optional dedicated executor while retaining the
 // transient-memory lease until all Arrow-backed buffers are released.
 folly::coro::Task<WindowLoadResult>
-FinalizeWindowAsync(int64_t segment_id,
+FinalizeWindowAsync(const int64_t segment_id,
                     folly::CancellationToken cancellation_token,
                     AsyncReadWindow window,
                     std::shared_ptr<const CellFinalizeFunc> finalize_cell,
@@ -222,14 +223,14 @@ FinalizeWindowAsync(int64_t segment_id,
 
 // Reads one window and writes its completed cells into its exclusive slot.
 folly::coro::Task<void>
-LoadWindowAsync(int64_t segment_id,
+LoadWindowAsync(const int64_t segment_id,
                 std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
                 AsyncReadWindow window,
                 std::shared_ptr<const CellFinalizeFunc> finalize_cell,
                 storage::TransientBudgetLease lease,
                 std::function<folly::Executor::KeepAlive<>()>
                     finalization_executor_provider,
-                int8_t executor_priority,
+                const int8_t executor_priority,
                 folly::CancellationToken cancellation_token,
                 std::shared_ptr<WindowFailureState> failure_state,
                 std::optional<WindowLoadResult>& result_slot) {
@@ -288,13 +289,13 @@ LoadCellsAsyncImpl(
     std::vector<CellSpec> cells,
     std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
     CellFinalizeFunc finalize_cell,
-    int64_t segment_id,
-    std::optional<size_t> read_window_bytes,
+    const int64_t segment_id,
+    const std::optional<size_t> read_window_bytes,
     folly::Executor::KeepAlive<> executor_keep_alive,
     std::function<folly::Executor::KeepAlive<>()>
         finalization_executor_provider,
-    int8_t executor_priority,
-    storage::TransientBudgetPriority budget_priority,
+    const int8_t executor_priority,
+    const storage::TransientBudgetPriority budget_priority,
     folly::CancellationToken context_cancellation_token) {
     const auto caller_cancellation_token =
         co_await folly::coro::co_current_cancellation_token;
@@ -439,7 +440,7 @@ GetAsyncLoadExecutor() {
 
 std::vector<AsyncReadWindow>
 BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
-                      size_t read_window_bytes) {
+                      const size_t read_window_bytes) {
     AssertInfo(read_window_bytes > 0,
                "[StorageV3] async read window must be positive, got {}",
                read_window_bytes);
@@ -525,7 +526,7 @@ BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
 
 folly::coro::Task<std::vector<AsyncCellResult>>
 LoadCellsAsync(const milvus::OpContext* ctx,
-               int64_t segment_id,
+               const int64_t segment_id,
                std::vector<CellSpec> cells,
                std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
                CellFinalizeFunc finalize_cell,

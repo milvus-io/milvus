@@ -56,8 +56,8 @@ struct ActiveSliceTask {
 // Holds one transient-memory reservation for the lifetime of a slice task.
 class TransientBudgetGuard {
  public:
-    TransientBudgetGuard(size_t slice_transient_bytes,
-                         TransientBudgetPriority priority,
+    TransientBudgetGuard(const size_t slice_transient_bytes,
+                         const TransientBudgetPriority priority,
                          const folly::CancellationToken& cancellation_token,
                          const std::string& operation)
         : slice_transient_bytes_(slice_transient_bytes) {
