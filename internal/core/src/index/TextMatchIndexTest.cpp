@@ -75,6 +75,14 @@ using namespace milvus::query;
 using namespace milvus::segcore;
 
 namespace {
+
+TEST(TextMatch, WriterMemoryBudgets) {
+    EXPECT_EQ(milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+              500UL * 1024 * 1024);
+    EXPECT_EQ(milvus::tantivy::GROWING_TEXT_MEMORY_BUDGET_IN_BYTES,
+              15UL * 1024 * 1024);
+}
+
 SchemaPtr
 GenTestSchema(std::map<std::string, std::string> params = {},
               bool nullable = false) {

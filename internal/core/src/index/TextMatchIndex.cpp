@@ -51,7 +51,7 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
         analyzer_params,
         /*analyzer_extra_info=*/"",
         milvus::tantivy::DEFAULT_NUM_THREADS,
-        milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+        milvus::tantivy::GROWING_TEXT_MEMORY_BUDGET_IN_BYTES,
         enable_background_merge);
     set_is_growing(true);
 }
