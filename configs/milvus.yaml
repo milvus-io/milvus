@@ -783,6 +783,33 @@ dataCoord:
     # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
     # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
     expansionRate: 1.25
+  shardSplit:
+    # Master switch of online shard split. It gates the split trigger (automatic and manual);
+    # disabling it stops new split tasks but never interrupts a task already past the write fence.
+    enable: false
+    # Whether the cluster sizes its shards AUTOMATICALLY. It selects a mode, and the two modes
+    # are mutually exclusive:
+    #   true  - the size trigger splits over-loaded shards on its own, and a user request to change a
+    #           collection's shard count is REJECTED. Letting both act would have them fence the same
+    #           shards from two directions.
+    #   false - the size trigger is off and the shard count is the user's to set, through the
+    #           collection.shardNum property of AlterCollection.
+    # Has no effect unless dataCoord.shardSplit.enable is on.
+    autoTriggerEnable: true
+    checkInterval: 3600 # The interval in seconds the shard split trigger inspects the per-shard statistics.
+    maxShardSize: 2048 # The data size of one shard that triggers a split, unit: GB.
+    maxShardRows: 500000000 # The row count of one shard that triggers a split.
+    maxNamespaceCount: 100000 # The namespace (partition) count of one shard that triggers a split.
+    maxConcurrentTasks: 1 # The cluster-wide maximum number of concurrent shard split tasks.
+    relabelBatchSize: 256 # The number of segments relabeled to the target shards in one batch during shard split redistribution.
+    # The largest collection, in GB, whose shard count may be changed by hand. 0 disables the check.
+    # 
+    # A rehash rewrites every shard at once, and the pre-split copy of a shard cannot be dropped until the
+    # rewrite is adopted -- until then it is the only readable copy -- so the collection is resident TWICE
+    # for the length of the rewrite. An automatic doubling costs one shard's worth of that; a rehash costs
+    # the whole collection. Set this to the largest collection your query nodes can hold twice.
+    rehashMaxCollectionSize: 0
+    taskRetention: 1800 # The retention in seconds a terminal (Done/Aborted) shard split task is kept before it is reaped from meta.
   sealPolicy:
     channel:
       # The size threshold in MB, if the total size of growing segments of each shard
