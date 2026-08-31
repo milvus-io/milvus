@@ -2100,14 +2100,80 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 	assert.Equal(t, "ch-2", snapshotData.Segments[0].GetChannelName())
 }
 
+func TestHasCommittedManifest(t *testing.T) {
+	tests := []struct {
+		name        string
+		segment     *SegmentInfo
+		expected    bool
+		expectedErr error
+	}{
+		{
+			name: "empty manifest path",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				StorageVersion: storage.StorageV3,
+			}),
+		},
+		{
+			name: "non-v3 manifest path",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				ManifestPath: packed.MarshalManifestPath("/data/segments/2000", 1),
+			}),
+		},
+		{
+			name: "earliest manifest",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   packed.MarshalManifestPath("/data/segments/2001", packed.ManifestEarliest),
+			}),
+		},
+		{
+			name: "committed manifest version one",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   packed.MarshalManifestPath("/data/segments/2002", 1),
+			}),
+			expected: true,
+		},
+		{
+			name: "committed manifest version three",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   packed.MarshalManifestPath("/data/segments/2003", 3),
+			}),
+			expected: true,
+		},
+		{
+			name: "invalid manifest path",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				ID:             2004,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   "invalid",
+			}),
+			expectedErr: merr.ErrDataIntegrity,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual, err := hasCommittedManifest(test.segment)
+			if test.expectedErr != nil {
+				require.ErrorIs(t, err, test.expectedErr)
+				assert.Contains(t, err.Error(), "invalid manifest path for segment 2004")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, test.expected, actual)
+		})
+	}
+}
+
 // TestGenSnapshot_IncludesV3ManifestOnlySegment guards the snapshot filter: a
 // V3 segment that reloaded from etcd with empty Binlogs/Deltalogs (per-field
-// KVs are not persisted for V3) but a non-empty ManifestPath still carries
-// data and must not be dropped from the snapshot. An empty segment with no
-// manifest is the negative control.
+// KVs are not persisted for V3) must be retained only after its manifest is
+// committed. A growing segment's earliest manifest is only a placeholder.
 func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	schema := newTestSchema()
-	// V3 segment: empty binlog arrays but a live manifest path — must be kept.
+	// Committed V3 manifest with empty legacy arrays must be kept.
 	manifestSeg := NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             2001,
 		CollectionID:   200,
@@ -2119,9 +2185,21 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		StorageVersion: storage.StorageV3,
 		ManifestPath:   packed.MarshalManifestPath("/data/segments/2001", 3),
 	})
+	// A growing V3 segment only has an allocation placeholder and must be dropped.
+	growingSeg := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             2002,
+		CollectionID:   200,
+		PartitionID:    0,
+		InsertChannel:  "ch-1",
+		State:          commonpb.SegmentState_Growing,
+		StartPosition:  &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
+		DmlPosition:    &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 600},
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("/data/segments/2002", packed.ManifestEarliest),
+	})
 	// Empty segment with no manifest — must be dropped.
 	emptySeg := NewSegmentInfo(&datapb.SegmentInfo{
-		ID:            2002,
+		ID:            2003,
 		CollectionID:  200,
 		PartitionID:   0,
 		InsertChannel: "ch-1",
@@ -2129,6 +2207,7 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
 		DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 600},
 	})
+	candidates := []*SegmentInfo{manifestSeg, growingSeg, emptySeg}
 
 	mockMeta := &meta{indexMeta: &indexMeta{}}
 	handler := &ServerHandler{
@@ -2178,7 +2257,6 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 
 	mockSelectSegments := mockey.Mock((*meta).SelectSegments).To(
 		func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
-			candidates := []*SegmentInfo{manifestSeg, emptySeg}
 			var result []*SegmentInfo
 			for _, seg := range candidates {
 				pass := true
@@ -2213,6 +2291,22 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	require.Len(t, snapshotData.Segments, 1)
 	assert.Equal(t, int64(2001), snapshotData.Segments[0].GetSegmentId())
 	assert.NotEmpty(t, snapshotData.Segments[0].GetManifestPath())
+
+	candidates = []*SegmentInfo{NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             2004,
+		CollectionID:   200,
+		PartitionID:    0,
+		InsertChannel:  "ch-1",
+		State:          commonpb.SegmentState_Flushed,
+		StartPosition:  &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
+		DmlPosition:    &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 600},
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   "invalid",
+	})}
+	snapshotData, err = handler.GenSnapshot(context.Background(), 200)
+	assert.Nil(t, snapshotData)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	assert.Contains(t, err.Error(), "invalid manifest path for segment 2004")
 }
 
 func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
