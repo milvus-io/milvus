@@ -39,7 +39,7 @@ type functionConfig struct {
 	// the legacy format. Explicit "false" keeps legacy format forever (escape
 	// hatch); explicit "true" force-enables and bypasses the version gate (use
 	// with caution).
-	EnableWriteBeforeMaterialization ParamItem `refreshable:"false"`
+	EnableWriteBeforeMaterialization ParamItem `refreshable:"true"`
 }
 
 func (p *functionConfig) init(base *BaseTable) {
