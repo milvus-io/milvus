@@ -110,6 +110,36 @@ Exposed through the existing `GetMetrics` debug-request mechanism via a new
 `metricsinfo.CompactionTaskFailureKey` (`"compaction_task_failures"`), registered in
 `server.go` next to the existing `compaction_tasks` key — no new RPC.
 
+### 2.4 Fixes from code review
+
+Two issues surfaced in review, both addressed:
+
+- **`RecordTerminalFailure` recorded a blank `EndTime` (Medium).** `updateAndSaveTaskMeta`
+  only stamps `EndTime` when the task's state was *already* terminal before that save —
+  but the save that transitions a task *into* `failed`/`timeout` (via `classifyFailure`,
+  or the timeout branches in `QueryTaskOnWorker`) runs while the prior state was still
+  `executing`/`pipelining`. The stamp only lands on the *next* save after that (`Clean()`'s
+  `failed/timeout -> cleaned` transition), which runs later and asynchronously — after
+  `RecordTerminalFailure`'s snapshot is already taken. So every history entry's `EndTime`
+  was silently empty. Fixed by backfilling `EndTime` with the current time in
+  `RecordTerminalFailure` whenever it's still zero (on a clone, not mutating the caller's
+  task). The original regression test couldn't catch this because it hand-set `EndTime` on
+  the test fixture; `TestRecordTerminalFailureBackfillsEndTime` was added to drive the real
+  zero-`EndTime` path, plus `TestRecordTerminalFailurePreservesExistingEndTime` to confirm
+  the backfill doesn't clobber a task that legitimately already has one.
+- **`DataCoordCompactionTaskNum` mixes gauge and counter semantics (Low).**
+  `pending`/`executing` are true gauges (paired Inc/Dec); `done`/`failed`/`timeout` only
+  ever increase, which is counter behavior sharing a `GaugeVec` — meaning the count
+  resets to 0 on every DataCoord restart with no record that a restart happened, and
+  `rate()`/`increase()` (the standard way to watch for "failures spiking") isn't designed
+  for that. Two fixes were on the table: split the terminal-outcome labels into a proper
+  `CounterVec` (correct, but a new public metric name existing dashboards would need to
+  adopt), or clarify the Help text so the mixed semantics are at least visible to a reader
+  (fully backward compatible, doesn't fix the `rate()` problem). Went with the minimal
+  fix for this PR — `DataCoordCompactionTaskNum`'s Help text now explicitly states which
+  labels are live counts and which are cumulative-since-restart. The `CounterVec` split
+  remains a valid follow-up if the restart-reset behavior needs to be queryable correctly.
+
 ## 3. Config
 
 `dataCoord.compaction.maxRetryTimes` (`DataCoordCfg.CompactionMaxRetryTimes`,
@@ -129,21 +159,34 @@ literal as the shared budget for all task types using `classifyFailure`.
   real catalog-backed meta, not just a mock).
 - `compaction_task_meta_test.go`: failure history — empty state, recording, and the core
   regression case (`TestFailureHistorySurvivesTaskMetaDrop`) proving a failure reason
-  remains queryable after the normal task meta is dropped.
+  remains queryable after the normal task meta is dropped. Plus (§2.4)
+  `TestRecordTerminalFailureBackfillsEndTime` and
+  `TestRecordTerminalFailurePreservesExistingEndTime` for the `EndTime` backfill.
 - `compaction_inspector_test.go`: `checkCompaction()` no longer folds failed/timeout into
-  `done`, and failure history is populated before cleanup.
+  `done`, and failure history is populated before cleanup. `SetupTest()` also stubs
+  `MockCompactionMeta.GetCompactionTaskMeta()` (`.Maybe()`, returning a real
+  `compactionTaskMeta`) since `checkCompaction()` now calls it for every finished task —
+  see §5, this was the one gap hand-review missed and CI caught.
 
 ## 5. Verification note
 
-This environment could not run `go test` for `internal/datacoord` — the C++ core
-(`milvus_core.pc`) has not been built here, which blocks *any* Go test in that package
-tree independent of this change. The pure-Go pieces (`pkg/util/paramtable`,
-`pkg/metrics`, `pkg/util/metricsinfo`) were confirmed to `go build` cleanly. The
-`internal/datacoord` changes were verified by hand: every new getter/wrapper/mock call
-site was checked against its actual generated signature (`datapb.CompactionTask`
-getters, `merr.Wrap*` signatures, `MockCompactionMeta`/`MockCluster`/`DataCoordCatalog`
-mock signatures), but this is not a substitute for `go build`/`go test` — run those
-before merging.
+The dev environment used to write this PR could not run `go test` for
+`internal/datacoord` — the C++ core (`milvus_core.pc`) was never built there, which
+blocks *any* Go test in that package tree independent of this change. The pure-Go
+pieces (`pkg/util/paramtable`, `pkg/metrics`, `pkg/util/metricsinfo`) were confirmed to
+`go build` cleanly there; the `internal/datacoord` changes were instead verified by
+hand — every new getter/wrapper/mock call site checked against its actual generated
+signature.
+
+That hand-review had exactly one gap, and CI (which does have the core built) caught
+it: `checkCompaction()`'s new `c.meta.GetCompactionTaskMeta().RecordTerminalFailure(...)`
+call is a dependency none of the five pre-existing `TestCompactionPlanHandlerSuite`
+tests that reach a terminal task state had stubbed on `MockCompactionMeta` — hand-review
+only added the stub to the *new* test, not to the shared `SetupTest()` every other test
+in the suite also runs through. Fixed once, in `SetupTest()` (§4). All five failures
+traced back to this single root cause; everything else in the diff passed CI as
+hand-verified. Lesson for next time: a new call added to a widely-shared code path needs
+its mock stub added at the suite's shared setup, not just the test that motivated it.
 
 ## 6. Out of scope / follow-ups
 
