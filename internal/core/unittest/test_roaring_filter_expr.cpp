@@ -242,10 +242,8 @@ OverrideValidity(segcore::GeneratedData& data,
         if (field->field_id() != field_id.get()) {
             continue;
         }
-        // Validity lives in the field-specific ScalarField/VectorField now;
-        // FieldData.valid_data is only a legacy fallback, so writing it
-        // directly would be silently ignored in favour of the generated one.
-        auto* valid_data = MutableFieldDataRowValidData(field);
+        // The 3.0 protobuf stores row validity directly on FieldData.
+        auto* valid_data = field->mutable_valid_data();
         valid_data->Clear();
         for (bool valid : validity) {
             valid_data->Add(valid);
