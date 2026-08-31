@@ -78,35 +78,42 @@ func TestShardManagerSplitShard(t *testing.T) {
 	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, 0)
 
 	// the vchannel accepts DML before the split.
-	assert.NoError(t, m.CheckIfVChannelCanBeWritten(1))
+	assert.NoError(t, m.CheckIfVChannelCanBeWritten(1, "v1"))
 	// an unknown collection is reported as not found.
-	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(999), ErrCollectionNotFound)
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(999, "v999"), ErrCollectionNotFound)
 
 	// a split message on an unknown collection takes no effect.
 	m.SplitShard(newTestSplitShardImmutableMessage("v999", 999, 2000))
-	assert.NoError(t, m.CheckIfVChannelCanBeWritten(1))
+	assert.NoError(t, m.CheckIfVChannelCanBeWritten(1, "v1"))
+
+	// a split message naming another vchannel of the SAME collection takes no
+	// effect either. The entry is keyed by collection id, so a fence that
+	// ignored the name would fence whatever vchannel happens to hold the slot.
+	m.SplitShard(newTestSplitShardImmutableMessage("v1-successor", 1, 2000))
+	assert.NoError(t, m.CheckIfVChannelCanBeWritten(1, "v1"))
+	assert.Zero(t, m.GetSplitTimeTick(1, "v1"))
 
 	// an unfenced or unknown collection has no T_switch.
-	assert.Zero(t, m.GetSplitTimeTick(1))
-	assert.Zero(t, m.GetSplitTimeTick(999))
+	assert.Zero(t, m.GetSplitTimeTick(1, "v1"))
+	assert.Zero(t, m.GetSplitTimeTick(999, "v999"))
 
 	// the split message fences the vchannel and records T_switch.
 	m.SplitShard(newTestSplitShardImmutableMessage("v1", 1, 2000))
-	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1), ErrVChannelFenced)
-	assert.Equal(t, uint64(2000), m.GetSplitTimeTick(1))
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
+	assert.Equal(t, uint64(2000), m.GetSplitTimeTick(1, "v1"))
 
 	// the fence is idempotent and T_switch stays at the first fence.
 	m.SplitShard(newTestSplitShardImmutableMessage("v1", 1, 3000))
-	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1), ErrVChannelFenced)
-	assert.Equal(t, uint64(2000), m.GetSplitTimeTick(1))
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
+	assert.Equal(t, uint64(2000), m.GetSplitTimeTick(1, "v1"))
 }
 
 func TestShardManagerRecoverSplittedVChannel(t *testing.T) {
 	// a vchannel recovered in SPLITTED state keeps rejecting DML and restores
 	// T_switch, so an already-fenced re-fence can return it after a crash.
 	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, 2000)
-	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1), ErrVChannelFenced)
-	assert.Equal(t, uint64(2000), m.GetSplitTimeTick(1))
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
+	assert.Equal(t, uint64(2000), m.GetSplitTimeTick(1, "v1"))
 }
 
 func newTestCreateVChannelImmutableMessage(vchannel string, collectionID int64, partitionIDs []int64, timetick uint64) message.ImmutableCreateVChannelMessageV2 {
@@ -134,15 +141,79 @@ func TestShardManagerCreateVChannel(t *testing.T) {
 	// a shard split target vchannel of a new collection is registered for DML,
 	// exactly as a create collection genesis would register it.
 	m.CreateVChannel(newTestCreateVChannelImmutableMessage("v2", 7, []int64{8}, 2000))
-	assert.NoError(t, m.CheckIfVChannelCanBeWritten(7))
+	assert.NoError(t, m.CheckIfVChannelCanBeWritten(7, "v2"))
 
 	// a target without a schema still registers the collection.
 	m.CreateVChannel(newTestCreateVChannelImmutableMessageNoSchema("v3", 9, []int64{10}, 2500))
-	assert.NoError(t, m.CheckIfVChannelCanBeWritten(9))
+	assert.NoError(t, m.CheckIfVChannelCanBeWritten(9, "v3"))
 
-	// re-registering an already-known collection is a no-op (idempotent).
-	m.CreateVChannel(newTestCreateVChannelImmutableMessage("v1-dup", 1, []int64{2}, 3000))
-	assert.NoError(t, m.CheckIfVChannelCanBeWritten(1))
+	// replaying the genesis of an already-registered vchannel is a no-op.
+	m.CreateVChannel(newTestCreateVChannelImmutableMessage("v2", 7, []int64{8}, 3000))
+	assert.NoError(t, m.CheckIfVChannelCanBeWritten(7, "v2"))
+
+	// a genesis for a DIFFERENT vchannel of a collection this pchannel already
+	// holds must not take the incumbent's place, and must not be mistaken for
+	// an idempotent replay: the newcomer stays unregistered and the incumbent
+	// keeps serving.
+	m.CreateVChannel(newTestCreateVChannelImmutableMessage("v1-successor", 1, []int64{2}, 3000))
+	assert.NoError(t, m.CheckIfVChannelCanBeWritten(1, "v1"))
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1-successor"), ErrCollectionNotFound)
+}
+
+// TestShardManagerVChannelAdmissionChecks pins the three admission predicates
+// the interceptor consults before it appends a split message.
+func TestShardManagerVChannelAdmissionChecks(t *testing.T) {
+	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, 0)
+
+	// creation: free slot, idempotent replay, and the conflicting newcomer.
+	assert.NoError(t, m.CheckIfVChannelCanBeCreated(7, "v2"))
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeCreated(1, "v1"), ErrCollectionExists)
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeCreated(1, "v1-successor"), ErrVChannelConflict)
+
+	// teardown: a live shard must never be torn down...
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeDropped(1, "v1"), ErrVChannelNotFenced)
+	// ...while a teardown for a vchannel this pchannel does not hold is a
+	// replay and must still be allowed through, because the recovery storage
+	// and the flusher are keyed by vchannel and still have work to do.
+	assert.NoError(t, m.CheckIfVChannelCanBeDropped(1, "v1-successor"))
+	assert.NoError(t, m.CheckIfVChannelCanBeDropped(999, "v999"))
+
+	// once fenced, the teardown is admitted.
+	m.SplitShard(newTestSplitShardImmutableMessage("v1", 1, 2000))
+	assert.NoError(t, m.CheckIfVChannelCanBeDropped(1, "v1"))
+}
+
+// TestResolveVChannelCollision pins the recovery-time tie-break.
+//
+// The registration map holds one entry per collection per pchannel. If two
+// vchannels of one collection are recovered onto the same pchannel -- a fenced
+// source whose teardown has not been observed yet, plus its successor -- the
+// winner used to be whichever the map iteration reached last, so a restart
+// could leave the live shard unwritable at random and leave it that way.
+func TestResolveVChannelCollision(t *testing.T) {
+	normal := func(vchannel string) *CollectionInfo {
+		return &CollectionInfo{VChannel: vchannel, State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL}
+	}
+	splitted := func(vchannel string) *CollectionInfo {
+		return &CollectionInfo{VChannel: vchannel, State: streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED}
+	}
+
+	// The shard that can still take writes wins, whichever order they arrive in.
+	winner, loser := resolveVChannelCollision(splitted("v0"), normal("v7"))
+	assert.Equal(t, "v7", winner.VChannel)
+	assert.Equal(t, "v0", loser.VChannel)
+	winner, loser = resolveVChannelCollision(normal("v7"), splitted("v0"))
+	assert.Equal(t, "v7", winner.VChannel)
+	assert.Equal(t, "v0", loser.VChannel)
+
+	// When the state does not separate them the name does, so the answer does
+	// not depend on the order the snapshot happened to be walked in.
+	winner, _ = resolveVChannelCollision(normal("v7"), normal("v0"))
+	assert.Equal(t, "v0", winner.VChannel)
+	winner, _ = resolveVChannelCollision(normal("v0"), normal("v7"))
+	assert.Equal(t, "v0", winner.VChannel)
+	winner, _ = resolveVChannelCollision(splitted("v7"), splitted("v0"))
+	assert.Equal(t, "v0", winner.VChannel)
 }
 
 func newTestCreateVChannelImmutableMessageNoSchema(vchannel string, collectionID int64, partitionIDs []int64, timetick uint64) message.ImmutableCreateVChannelMessageV2 {
