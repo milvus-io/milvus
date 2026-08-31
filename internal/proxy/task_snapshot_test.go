@@ -24,6 +24,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -198,7 +199,7 @@ func TestCreateSnapshotTask_Execute_Success(t *testing.T) {
 
 	// Mock successful MixCoord call
 	mockCreateSnapshot := mockey.Mock((*MixCoordMock).CreateSnapshot).To(
-		func(_ *MixCoordMock, _ context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
+		func(_ *MixCoordMock, _ context.Context, req *datapb.CreateSnapshotRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
 			assert.True(t, req.GetSkipIndex())
 			return merr.Success(), nil
 		}).Build()
@@ -645,7 +646,7 @@ func TestRestoreSnapshotTask_Execute_Success(t *testing.T) {
 
 	// Mock RestoreSnapshot - proxy directly calls DataCoord
 	mockRestoreSnapshot := mockey.Mock((*MixCoordMock).RestoreSnapshot).To(
-		func(_ *MixCoordMock, _ context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
+		func(_ *MixCoordMock, _ context.Context, req *datapb.RestoreSnapshotRequest, _ ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error) {
 			assert.True(t, req.GetSkipIndex())
 			return &datapb.RestoreSnapshotResponse{
 				Status: merr.Success(),
