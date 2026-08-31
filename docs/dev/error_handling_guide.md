@@ -125,9 +125,10 @@ classification, so when you originate an error, ask one question first:
 Quick rules for the cases that get misclassified in practice:
 
 - A **plan / task type / request produced by a coordinator** is not user input.
-  An unrecognized task type or malformed compaction plan is an internal
-  protocol violation (think mixed-version rolling upgrade) →
-  `WrapErrServiceInternalMsg`, even though the check looks like validation.
+  A task type that the worker does not implement is a mixed-version capability
+  mismatch → `ErrServiceUnimplemented`. A malformed plan for a recognized task
+  type is an internal protocol violation → `WrapErrServiceInternalMsg`. Both are
+  system errors, even though the checks look like validation.
 - **Data produced by segcore or another internal component** is not user
   input. A violated data-shape contract (ValidData length, truncated vectors)
   is a Milvus bug → `WrapErrServiceInternalMsg`.

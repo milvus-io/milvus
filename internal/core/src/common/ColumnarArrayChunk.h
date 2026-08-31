@@ -152,6 +152,67 @@ class ColumnarArrayChunk final : public Chunk {
                                        !isValid(static_cast<int>(row)));
     }
 
+    template <typename ViewType = ArrayValueView>
+    std::pair<std::vector<ViewType>, ValidityView>
+    Views(std::optional<std::pair<int64_t, int64_t>> offset_len =
+              std::nullopt) const {
+        int64_t start_offset = 0;
+        int64_t len = row_nums_;
+        if (offset_len.has_value()) {
+            start_offset = offset_len->first;
+            len = offset_len->second;
+            AssertInfo(
+                start_offset >= 0 && start_offset < row_nums_,
+                "Retrieve array value views with out-of-bound offset:{}, "
+                "len:{}, wrong",
+                start_offset,
+                len);
+            AssertInfo(
+                len > 0 && len <= row_nums_,
+                "Retrieve array value views with out-of-bound offset:{}, "
+                "len:{}, wrong",
+                start_offset,
+                len);
+            AssertInfo(
+                start_offset + len <= row_nums_,
+                "Retrieve array value views with out-of-bound offset:{}, "
+                "len:{}, wrong",
+                start_offset,
+                len);
+        }
+
+        std::vector<ViewType> views;
+        views.reserve(len);
+        const auto end_offset = start_offset + len;
+        for (auto i = start_offset; i < end_offset; ++i) {
+            views.emplace_back(View<ViewType>(i));
+        }
+        return {std::move(views), Validity(start_offset)};
+    }
+
+    template <typename ViewType = ArrayValueView>
+    std::pair<std::vector<ViewType>, FixedVector<bool>>
+    ViewsByOffsets(const FixedVector<int32_t>& offsets) const {
+        std::vector<ViewType> views;
+        views.reserve(offsets.size());
+        FixedVector<bool> valid_data;
+        if (nullable_) {
+            valid_data.reserve(offsets.size());
+        }
+        for (auto offset : offsets) {
+            AssertInfo(offset >= 0 && offset < row_nums_,
+                       "Retrieve array value view with out-of-bound offset:{} "
+                       "for chunk rows:{}",
+                       offset,
+                       row_nums_);
+            views.emplace_back(View<ViewType>(offset));
+            if (nullable_) {
+                valid_data.push_back(isValid(offset));
+            }
+        }
+        return {std::move(views), std::move(valid_data)};
+    }
+
     void
     output_data(size_t row, ScalarFieldProto& output) const {
         AssertInfo(row < row_count(),

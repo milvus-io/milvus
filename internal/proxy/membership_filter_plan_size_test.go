@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v3/sbbf"
+	"github.com/milvus-io/milvus/client/v3/membership/sbbf"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -65,6 +65,15 @@ func TestWrapPlanCreationError(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrQueryPlan)
 		assert.Equal(t, int32(1100), merr.Code(err))
+	})
+
+	t.Run("preserves parameter too large", func(t *testing.T) {
+		cause := merr.WrapErrParameterTooLarge("membership-filter plan")
+		err := wrapPlanCreationError(cause, "failed to create query plan")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		assert.Equal(t, int32(1102), merr.Code(err))
+		assert.Equal(t, merr.InputError, merr.GetErrorType(err))
 	})
 }
 
@@ -252,7 +261,7 @@ func TestSearchTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 			},
 			request: &milvuspb.SearchRequest{
 				CollectionName:     schema.GetName(),
-				Dsl:                "bloom_match(pk, {bf})",
+				Dsl:                "membership_match(pk, {bf}, type=bloom)",
 				ExprTemplateValues: templateValues,
 				SearchParams:       bloomPlanSizeSearchParams(),
 			},
@@ -280,7 +289,7 @@ func TestSearchTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 				},
 				SubReqs: []*milvuspb.SubSearchRequest{{
 					Nq:                 1,
-					Dsl:                "bloom_match(pk, {bf})",
+					Dsl:                "membership_match(pk, {bf}, type=bloom)",
 					ExprTemplateValues: templateValues,
 					SearchParams:       bloomPlanSizeSearchParams(),
 				}},
@@ -293,6 +302,55 @@ func TestSearchTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
 		assert.Equal(t, int32(1102), merr.Code(err))
+	})
+
+	t.Run("hybrid sub-requests share parser preflight budget", func(t *testing.T) {
+		// Make the body large enough that one serialized plan (body plus proto
+		// overhead) fits below two body lengths. The first sub-request must pass;
+		// the second must be rejected by the shared pre-materialization budget,
+		// before it builds another blob-bearing plan.
+		builder, err := sbbf.NewBuilder(10_000, 0.01)
+		require.NoError(t, err)
+		builder.AddInt64(1)
+		blob := builder.Marshal()
+		bodySize := len(blob) - sbbf.HeaderSize
+		require.Greater(t, bodySize, 1024)
+		params.Save(key, strconv.Itoa(bodySize*2-1))
+
+		largeTemplateValues := map[string]*schemapb.TemplateValue{
+			"bf": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: blob}},
+		}
+		subReq := func() *milvuspb.SubSearchRequest {
+			return &milvuspb.SubSearchRequest{
+				Nq:                 1,
+				Dsl:                "membership_match(pk, {bf})",
+				ExprTemplateValues: largeTemplateValues,
+				SearchParams:       bloomPlanSizeSearchParams(),
+			}
+		}
+		task := &searchTask{
+			ctx:            ctx,
+			collectionName: schema.GetName(),
+			SearchRequest: &internalpb.SearchRequest{
+				CollectionID: 1,
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: schema.GetName(),
+				SearchParams: []*commonpb.KeyValuePair{
+					{Key: LimitKey, Value: "10"},
+				},
+				SubReqs: []*milvuspb.SubSearchRequest{subReq(), subReq()},
+			},
+			schema: schema,
+			tr:     timerecord.NewTimeRecorder("membership-preflight-hybrid-search"),
+		}
+
+		err = task.initAdvancedSearchRequest(ctx)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		assert.Equal(t, int32(1102), merr.Code(err))
+		assert.Contains(t, err.Error(), "before plan materialization")
+		assert.Contains(t, err.Error(), "proxy.maxMembershipFilterPlanSize")
 	})
 }
 
@@ -310,9 +368,6 @@ func TestQueryTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 		Return(&collectionInfo{}, nil).Maybe()
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).
 		Return(schema, nil).Maybe()
-	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(map[string]int64{}, nil)
-
 	task := &queryTask{
 		baseTask: baseTask{
 			metaCache: cache,
@@ -324,7 +379,7 @@ func TestQueryTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 		},
 		request: &milvuspb.QueryRequest{
 			CollectionName:     schema.GetName(),
-			Expr:               "bloom_match(pk, {bf})",
+			Expr:               "membership_match(pk, {bf}, type=bloom)",
 			ExprTemplateValues: templateValues,
 		},
 	}

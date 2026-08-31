@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -336,8 +337,8 @@ func TestUpsertTask(t *testing.T) {
 			mock.AnythingOfType("string"),
 		).Return(collectionID, nil)
 
-		chMgr := NewMockChannelsMgr(t)
-		chMgr.EXPECT().getChannels(mock.Anything).Return(channels, nil)
+		chMgr := channelmgr.NewMockChannelsMgr(t)
+		chMgr.EXPECT().GetChannels(mock.Anything).Return(channels, nil)
 		ut := upsertTask{
 			baseTask: baseTask{metaCache: cache},
 			ctx:      context.Background(),
@@ -786,15 +787,15 @@ var partialUpdateCASTestVChannels = []string{
 }
 
 func setPartialUpdateCASTestChannels(task *upsertTask, vchannels []string) {
-	task.chMgr = newChannelsMgrImpl(func(collectionID UniqueID) (channelInfos, error) {
-		vchans := make([]vChan, 0, len(vchannels))
-		pchans := make([]pChan, 0, len(vchannels))
+	task.chMgr = channelmgr.NewChannelsMgr(func(collectionID typeutil.UniqueID) (channelmgr.ChannelInfo, error) {
+		vchans := make([]string, 0, len(vchannels))
+		pchans := make([]string, 0, len(vchannels))
 		for _, vchannel := range vchannels {
 			vchans = append(vchans, vchannel)
 			pchans = append(pchans, funcutil.ToPhysicalChannel(vchannel))
 		}
-		return newChannels(vchans, pchans)
-	}, nil)
+		return channelmgr.ChannelInfo{VChans: vchans, PChans: pchans}, nil
+	})
 	proxy := task.node.(*Proxy)
 	if proxy.tsoAllocator == nil {
 		proxy.tsoAllocator = &timestampAllocator{
@@ -1303,7 +1304,7 @@ func TestRepackInsertDataByPartitionForStreamingServicePreservesEntityPackingOrd
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(maxMessageSize)))
 	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
 
-	entityPacked, err := genInsertMsgsByPartition(
+	entityPacked, err := channelmgr.GenInsertMsgsByPartition(
 		context.Background(),
 		0,
 		200,
@@ -1524,9 +1525,12 @@ func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 					CollectionName: "test_collection",
 				}},
 				result: &milvuspb.MutationResult{},
-				chMgr: newChannelsMgrImpl(func(UniqueID) (channelInfos, error) {
-					return newChannels([]vChan{partialUpdateCASTestVChannels[0]}, []pChan{funcutil.ToPhysicalChannel(partialUpdateCASTestVChannels[0])})
-				}, nil),
+				chMgr: channelmgr.NewChannelsMgr(func(typeutil.UniqueID) (channelmgr.ChannelInfo, error) {
+					return channelmgr.ChannelInfo{
+						VChans: []string{partialUpdateCASTestVChannels[0]},
+						PChans: []string{funcutil.ToPhysicalChannel(partialUpdateCASTestVChannels[0])},
+					}, nil
+				}),
 				schema: &schemapb.CollectionSchema{},
 			}
 			if partitionKey {

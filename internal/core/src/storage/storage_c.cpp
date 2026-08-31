@@ -32,6 +32,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/KeyRetriever.h"
 #include "storage/Types.h"
+#include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "milvus-storage/thread_pool.h"
 
@@ -200,6 +201,16 @@ InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config) {
     }
 }
 
+void
+SetExternalVectorPartialNullAsRowNull(bool enabled) {
+    milvus::storage::SetExternalVectorPartialNullAsRowNull(enabled);
+}
+
+bool
+GetExternalVectorPartialNullAsRowNull() {
+    return milvus::storage::GetExternalVectorPartialNullAsRowNull();
+}
+
 CStatus
 InitLoonReaderThreadPool(int32_t num_threads) {
     try {
@@ -250,6 +261,22 @@ InitIndexBuildReadWindow(int64_t window_bytes) {
         }
         milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
             .SetIndexBuildReadWindow(window_bytes);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+InitExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate) {
+    try {
+        if (initial_rate == 0) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "external IOPS initial rate must be greater than zero");
+        }
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .SetExternalIopsConfig(initial_rate, max_rate);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

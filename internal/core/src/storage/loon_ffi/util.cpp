@@ -49,125 +49,6 @@
 
 using json = nlohmann::json;
 
-std::shared_ptr<LoonProperties>
-MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
-    // Prepare key-value pairs from CStorageConfig
-    std::vector<const char*> keys;
-    std::vector<const char*> values;
-
-    // Add non-null string fields
-    if (c_storage_config.address != nullptr) {
-        keys.emplace_back(PROPERTY_FS_ADDRESS);
-        values.emplace_back(c_storage_config.address);
-    }
-    if (c_storage_config.bucket_name != nullptr) {
-        keys.emplace_back(PROPERTY_FS_BUCKET_NAME);
-        values.emplace_back(c_storage_config.bucket_name);
-    }
-    if (c_storage_config.access_key_id != nullptr) {
-        keys.emplace_back(PROPERTY_FS_ACCESS_KEY_ID);
-        values.emplace_back(c_storage_config.access_key_id);
-    }
-    if (c_storage_config.access_key_value != nullptr) {
-        keys.emplace_back(PROPERTY_FS_ACCESS_KEY_VALUE);
-        values.emplace_back(c_storage_config.access_key_value);
-    }
-    if (c_storage_config.root_path != nullptr) {
-        keys.emplace_back(PROPERTY_FS_ROOT_PATH);
-        values.emplace_back(c_storage_config.root_path);
-    }
-    if (c_storage_config.storage_type != nullptr) {
-        keys.emplace_back(PROPERTY_FS_STORAGE_TYPE);
-        values.emplace_back(c_storage_config.storage_type);
-    }
-    if (c_storage_config.cloud_provider != nullptr) {
-        keys.emplace_back(PROPERTY_FS_CLOUD_PROVIDER);
-        values.emplace_back(c_storage_config.cloud_provider);
-    }
-    if (c_storage_config.iam_endpoint != nullptr) {
-        keys.emplace_back(PROPERTY_FS_IAM_ENDPOINT);
-        values.emplace_back(c_storage_config.iam_endpoint);
-    }
-    if (c_storage_config.log_level != nullptr) {
-        keys.emplace_back(PROPERTY_FS_LOG_LEVEL);
-        values.emplace_back("Warn");
-    }
-    if (c_storage_config.region != nullptr) {
-        keys.emplace_back(PROPERTY_FS_REGION);
-        values.emplace_back(c_storage_config.region);
-    }
-    if (c_storage_config.sslCACert != nullptr) {
-        keys.emplace_back(PROPERTY_FS_SSL_CA_CERT);
-        values.emplace_back(c_storage_config.sslCACert);
-    }
-    if (c_storage_config.gcp_credential_json != nullptr) {
-        keys.emplace_back(PROPERTY_FS_GCP_CREDENTIAL_JSON);
-        values.emplace_back(c_storage_config.gcp_credential_json);
-    }
-
-    // Add boolean fields
-    keys.emplace_back(PROPERTY_FS_USE_SSL);
-    values.emplace_back(c_storage_config.useSSL ? "true" : "false");
-
-    keys.emplace_back(PROPERTY_FS_USE_IAM);
-    values.emplace_back(c_storage_config.useIAM ? "true" : "false");
-
-    keys.emplace_back(PROPERTY_FS_USE_VIRTUAL_HOST);
-    values.emplace_back(c_storage_config.useVirtualHost ? "true" : "false");
-
-    keys.emplace_back(PROPERTY_FS_USE_CUSTOM_PART_UPLOAD);
-    values.emplace_back(c_storage_config.use_custom_part_upload ? "true"
-                                                                : "false");
-
-    // Add integer field
-    std::string timeout_str = std::to_string(c_storage_config.requestTimeoutMs);
-    keys.emplace_back(PROPERTY_FS_REQUEST_TIMEOUT_MS);
-    values.emplace_back(timeout_str.c_str());
-
-    // 0 means "not set by the producer": leave the key absent so
-    // milvus-storage applies its registered default (100) instead of taking an
-    // explicit 0, which would drop the S3 connection cap to
-    // max(io_capacity, 25) and change the filesystem cache key. Same
-    // convention as ChunkManager.cpp / MinioChunkManager.cpp and the Go
-    // producer in storagev2/packed/ffi_common.go.
-    std::string max_connections_str =
-        std::to_string(c_storage_config.max_connections);
-    if (c_storage_config.max_connections > 0) {
-        keys.emplace_back(PROPERTY_FS_MAX_CONNECTIONS);
-        values.emplace_back(max_connections_str.c_str());
-    }
-
-    if (c_storage_config.tls_min_version != nullptr) {
-        std::string tls_ver(c_storage_config.tls_min_version);
-        if (!tls_ver.empty() && tls_ver != "default") {
-            keys.emplace_back(PROPERTY_FS_TLS_MIN_VERSION);
-            values.emplace_back(c_storage_config.tls_min_version);
-        }
-    }
-    // No extfs.default.* properties in FFI path. Per-collection extfs properties
-    // (extfs.{collectionID}.*) are passed as extraKVs by Go-side BuildExtfsOverrides.
-
-    keys.emplace_back(PROPERTY_FS_USE_CRC32C_CHECKSUM);
-    values.emplace_back(c_storage_config.use_crc32c_checksum ? "true"
-                                                             : "false");
-
-    // Create Properties using FFI
-    auto properties = std::make_shared<LoonProperties>();
-    LoonFFIResult result = loon_properties_create(
-        keys.data(), values.data(), keys.size(), properties.get());
-
-    if (!loon_ffi_is_success(&result)) {
-        auto message = loon_ffi_get_errmsg(&result);
-        // Copy the error message before freeing the LoonFFIResult
-        std::string error_msg = message ? message : "Unknown error";
-        loon_ffi_free_result(&result);
-        throw std::runtime_error(error_msg);
-    }
-
-    loon_ffi_free_result(&result);
-    return properties;
-}
-
 std::shared_ptr<milvus_storage::api::Properties>
 MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     auto properties_map = std::make_shared<milvus_storage::api::Properties>();
@@ -251,7 +132,8 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
         *properties_map,
         PROPERTY_FS_REQUEST_TIMEOUT_MS,
         std::to_string(c_storage_config.requestTimeoutMs).c_str());
-    // Absent when unset -- see the note in MakePropertiesFromStorageConfig.
+    // Absent when unset: leave the key absent so milvus-storage applies its
+    // registered default instead of taking an explicit 0.
     if (c_storage_config.max_connections > 0) {
         milvus_storage::api::SetValue(
             *properties_map,
@@ -341,6 +223,17 @@ static const std::vector<std::pair<std::string, bool /*is_bool*/>>
         {"anonymous", true},
 };
 
+static std::string
+ExternalFsPropertyKey(const std::string& extfs_prefix,
+                      const char* fs_property) {
+    constexpr std::string_view fs_prefix = PROPERTY_FS_PREFIX;
+    std::string_view property(fs_property);
+    AssertInfo(property.substr(0, fs_prefix.size()) == fs_prefix,
+               "Invalid filesystem property key: {}",
+               std::string(property));
+    return extfs_prefix + std::string(property.substr(fs_prefix.size()));
+}
+
 // kExtfsInheritedFsFields lists fs.* properties that extfs.{collectionID}.*
 // inherits verbatim from the process-level storage config.
 //
@@ -353,10 +246,8 @@ static const std::vector<std::pair<std::string, bool /*is_bool*/>>
 //
 // These are deliberately NOT in kAllowedExtfsSpecKeys: they come from
 // milvus.yaml, not from a user-supplied external_spec.
-static const std::vector<
-    std::pair<const char* /*fs key*/, const char* /*extfs suffix*/>>
-    kExtfsInheritedFsFields = {
-        {PROPERTY_FS_MAX_CONNECTIONS, "max_connections"},
+static const std::vector<const char*> kExtfsInheritedFsFields = {
+    PROPERTY_FS_MAX_CONNECTIONS,
 };
 
 // PropertyValueAsString renders a PropertyVariant back to the string form
@@ -515,12 +406,15 @@ IsCloudEndpointHost(const std::string& host) {
     return false;
 }
 
-void
-InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
-                             int64_t collection_id,
-                             const std::string& external_source,
-                             const std::string& external_spec) {
-    std::string extfs_prefix = "extfs." + std::to_string(collection_id) + ".";
+static void
+InjectExternalSpecProperties(
+    milvus_storage::api::Properties& properties,
+    int64_t collection_id,
+    const std::string& external_source,
+    const std::string& external_spec,
+    const milvus::storage::ExternalIopsConfig& iops_config) {
+    std::string extfs_prefix = std::string(PROPERTY_EXTFS_PREFIX) +
+                               std::to_string(collection_id) + ".";
 
     // Layer 0: zero-init bool fields only (milvus-storage rejects empty
     // strings on enum-constrained keys like cloud_provider).
@@ -541,6 +435,22 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
         }
     }
 
+    // IOPS limiting is an External Table read policy, not an attribute of the
+    // internal filesystem. Keep it out of fs.* and stamp it only into the
+    // per-collection extfs namespace. These keys are intentionally absent
+    // from kAllowedExtfsSpecKeys, so external_spec cannot override them.
+    const auto initial_rate_key =
+        ExternalFsPropertyKey(extfs_prefix, PROPERTY_FS_IOPS_INITIAL_RATE);
+    const auto max_rate_key =
+        ExternalFsPropertyKey(extfs_prefix, PROPERTY_FS_IOPS_MAX_RATE);
+    milvus_storage::api::SetValue(
+        properties,
+        initial_rate_key.c_str(),
+        std::to_string(iops_config.initial_rate).c_str());
+    milvus_storage::api::SetValue(properties,
+                                  max_rate_key.c_str(),
+                                  std::to_string(iops_config.max_rate).c_str());
+
     // Layer 0b: inherit process-level fs.* tuning. Position relative to the
     // later layers is arbitrary — none of these keys is in
     // kAllowedExtfsSpecKeys nor derived from the URI, so no other layer
@@ -555,13 +465,14 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
     // caps the external S3 client at max(io_capacity, 25). The producers are
     // guarded too; this is the last line of defence for the read path this
     // whole change exists to widen.
-    for (const auto& [fs_key, extfs_suffix] : kExtfsInheritedFsFields) {
+    for (const auto* fs_key : kExtfsInheritedFsFields) {
         auto value = PropertyValueAsString(properties, fs_key);
         if (!value.has_value() || *value == "0") {
             continue;
         }
+        const auto extfs_key = ExternalFsPropertyKey(extfs_prefix, fs_key);
         milvus_storage::api::SetValue(
-            properties, (extfs_prefix + extfs_suffix).c_str(), value->c_str());
+            properties, extfs_key.c_str(), value->c_str());
     }
 
     // Layer 1: derive bucket / address / storage_type / use_ssl from URI.
@@ -796,6 +707,20 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
     }
 }
 
+void
+InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
+                             int64_t collection_id,
+                             const std::string& external_source,
+                             const std::string& external_spec) {
+    // Native C++ callers rely on the process policy initialized during
+    // component startup.
+    const auto iops_config =
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .GetExternalIopsConfig();
+    InjectExternalSpecProperties(
+        properties, collection_id, external_source, external_spec, iops_config);
+}
+
 std::shared_ptr<milvus_storage::api::Properties>
 MakeInternalLocalProperies(const char* c_path) {
     auto properties_map = std::make_shared<milvus_storage::api::Properties>();
@@ -903,12 +828,18 @@ extern "C" LoonFFIResult
 loon_properties_inject_external_spec(LoonProperties* properties,
                                      int64_t collection_id,
                                      const char* external_source,
-                                     const char* external_spec) {
+                                     const char* external_spec,
+                                     uint32_t iops_initial_rate,
+                                     uint32_t iops_max_rate) {
     if (properties == nullptr) {
         RETURN_ERROR(LOON_INVALID_ARGS, "properties is null");
     }
     if (external_source == nullptr || external_source[0] == '\0') {
         RETURN_SUCCESS();  // no-op for internal (non-external) collections
+    }
+    if (iops_initial_rate == 0) {
+        RETURN_ERROR(LOON_INVALID_ARGS,
+                     "external IOPS initial rate must be greater than zero");
     }
     try {
         // Load existing flat LoonProperties into a typed Properties map.
@@ -920,10 +851,15 @@ loon_properties_inject_external_spec(LoonProperties* properties,
             }
         }
 
+        // Keep Go-provided values call-local. Publishing them to the singleton
+        // would couple concurrent FFI and native reads through global state.
+        const milvus::storage::ExternalIopsConfig iops_config{iops_initial_rate,
+                                                              iops_max_rate};
         InjectExternalSpecProperties(props,
                                      collection_id,
                                      external_source,
-                                     external_spec ? external_spec : "");
+                                     external_spec ? external_spec : "",
+                                     iops_config);
 
         // Rebuild LoonProperties from the merged map. Free old entries first
         // so ownership stays with loon_properties_free.

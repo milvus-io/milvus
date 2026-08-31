@@ -185,12 +185,6 @@ class SortBuffer {
         return sorted_;
     }
 
-    /// Number of columns in each row
-    size_t
-    NumColumns() const {
-        return column_types_.size();
-    }
-
  private:
     //=========================================================================
     // Internal Methods

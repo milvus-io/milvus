@@ -270,7 +270,8 @@ ConcurrentVector<ArrayValue>::set_mmap_proto_rows(
     while (source_offset < rows.size()) {
         const auto chunk_id = current_offset / size_per_chunk_;
         const auto chunk_offset = current_offset % size_per_chunk_;
-        const auto remaining_in_chunk = size_per_chunk_ - chunk_offset;
+        const auto remaining_in_chunk =
+            static_cast<ssize_t>(size_per_chunk_ - chunk_offset);
         const auto remaining_rows =
             static_cast<ssize_t>(rows.size() - source_offset);
         const auto copy_count = std::min(remaining_in_chunk, remaining_rows);

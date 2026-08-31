@@ -1830,6 +1830,10 @@ func TestPrepareMilvusTableSnapshotSchemaAlignsTargetFunctionOutputs(t *testing.
 				Schema: &schemapb.CollectionSchema{
 					Fields: []*schemapb.FieldSchema{
 						{FieldID: 101, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+						{FieldID: 103, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.MaxLengthKey, Value: "128"},
+							{Key: common.EnableAnalyzerKey, Value: "true"},
+						}},
 						{
 							FieldID:  105,
 							Name:     "vec",
@@ -1844,12 +1848,19 @@ func TestPrepareMilvusTableSnapshotSchemaAlignsTargetFunctionOutputs(t *testing.
 		}, nil).Build()
 	defer mockReadMetadata.UnPatch()
 
+	// The target function must also satisfy the non-runtime function
+	// validation that now runs on newly aligned milvus-table schemas: a
+	// typed BM25 over a VarChar input, no params.
 	schema := &schemapb.CollectionSchema{
 		Name:           "target",
 		ExternalSource: "minio://localhost:9000/bucket/snapshots/100/metadata/200.json",
 		ExternalSpec:   `{"format":"milvus-table","extfs":{"access_key_id":"AK","access_key_value":"SK"}}`,
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 0, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "pk"},
+			{FieldID: 0, Name: "doc", DataType: schemapb.DataType_VarChar, ExternalField: "text", TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "128"},
+				{Key: common.EnableAnalyzerKey, Value: "true"},
+			}},
 			{
 				FieldID:       0,
 				Name:          "embedding",
@@ -1864,7 +1875,8 @@ func TestPrepareMilvusTableSnapshotSchemaAlignsTargetFunctionOutputs(t *testing.
 		Functions: []*schemapb.FunctionSchema{
 			{
 				Name:             "bm25",
-				InputFieldNames:  []string{"id"},
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"doc"},
 				OutputFieldNames: []string{"sparse"},
 			},
 		},
@@ -1886,12 +1898,74 @@ func TestPrepareMilvusTableSnapshotSchemaAlignsTargetFunctionOutputs(t *testing.
 
 	assert.True(t, task.preserveFieldID)
 	assert.Equal(t, int64(101), schema.GetFields()[0].GetFieldID())
-	assert.Equal(t, int64(105), schema.GetFields()[1].GetFieldID())
-	assert.Equal(t, int64(106), schema.GetFields()[2].GetFieldID())
+	assert.Equal(t, int64(103), schema.GetFields()[1].GetFieldID())
+	assert.Equal(t, int64(105), schema.GetFields()[2].GetFieldID())
+	assert.Equal(t, int64(106), schema.GetFields()[3].GetFieldID())
 	require.Len(t, schema.GetFunctions(), 1)
 	assert.Equal(t, int64(StartOfUserFunctionID), schema.GetFunctions()[0].GetId())
-	assert.Equal(t, []int64{101}, schema.GetFunctions()[0].GetInputFieldIds())
+	assert.Equal(t, []int64{103}, schema.GetFunctions()[0].GetInputFieldIds())
 	assert.Equal(t, []int64{106}, schema.GetFunctions()[0].GetOutputFieldIds())
+}
+
+// The newly aligned milvus-table schema is a NEW schema that merely reuses
+// source field IDs, so it must pass the same non-runtime function validation
+// as any direct-path create; before this call a structurally impossible
+// function persisted through the milvus-table path (preserveFieldID bypassed
+// the prepareSchema validation).
+func TestPrepareMilvusTableSnapshotSchemaRejectsInvalidFunction(t *testing.T) {
+	mockReadMetadata := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
+		Return(&datapb.SnapshotMetadata{
+			Collection: &datapb.CollectionDescription{
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 101, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+						{FieldID: 103, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.MaxLengthKey, Value: "128"},
+						}},
+					},
+				},
+			},
+		}, nil).Build()
+	defer mockReadMetadata.UnPatch()
+
+	// (2^59+1)*32 wraps around int64 to 32; the division-based check must
+	// reject it on the milvus-table path too.
+	schema := &schemapb.CollectionSchema{
+		Name:           "target",
+		ExternalSource: "minio://localhost:9000/bucket/snapshots/100/metadata/200.json",
+		ExternalSpec:   `{"format":"milvus-table","extfs":{"access_key_id":"AK","access_key_value":"SK"}}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 0, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "pk"},
+			{FieldID: 0, Name: "doc", DataType: schemapb.DataType_VarChar, ExternalField: "text", TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "128"},
+			}},
+			{FieldID: 0, Name: "hash", DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "32"},
+			}},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name: "minhash", Type: schemapb.FunctionType_MinHash,
+				InputFieldNames: []string{"doc"}, OutputFieldNames: []string{"hash"},
+				Params: []*commonpb.KeyValuePair{{Key: "num_hashes", Value: "576460752303423489"}},
+			},
+		},
+	}
+	task := &createCollectionTask{
+		Req: &milvuspb.CreateCollectionRequest{
+			CollectionName: "target",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: util.PreserveFieldIdsKey, Value: "false"},
+			},
+		},
+		body: &message.CreateCollectionRequest{
+			CollectionSchema: schema,
+		},
+	}
+
+	err := task.prepareMilvusTableSnapshotSchema(context.Background())
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.ErrorContains(t, err, "does not match expected dim")
 }
 
 func TestPrepareMilvusTableSnapshotSchemaMapsSourceFunctionOutputAsDataField(t *testing.T) {
@@ -3128,38 +3202,71 @@ func Test_createCollectionTask_prepareSchema_validatesFunctions(t *testing.T) {
 	})
 }
 
-// External collections are exempt from the direct-path function validation:
-// prepareSchema sees the RESOLVED schema (e.g. nullability inferred from the
-// external source), not the user-submitted one the proxy validated — judging
-// it by user-schema rules rejects legal external tables (a nullable
-// TextEmbedding input resolved from parquet, as the go-sdk e2e creates).
-func Test_createCollectionTask_prepareSchema_skipsFunctionValidationForExternal(t *testing.T) {
-	collectionName := funcutil.GenRandomStr()
-	schema := &schemapb.CollectionSchema{
-		Name: collectionName,
-		Fields: []*schemapb.FieldSchema{
-			{Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk"},
-			{Name: "doc", DataType: schemapb.DataType_VarChar, Nullable: true, ExternalField: "doc", TypeParams: []*commonpb.KeyValuePair{
-				{Key: common.MaxLengthKey, Value: "1024"},
-			}},
-			{Name: "dense", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true, TypeParams: []*commonpb.KeyValuePair{
-				{Key: common.DimKey, Value: "8"},
-			}},
-		},
-		Functions: []*schemapb.FunctionSchema{{
-			Name: "tei_fn", Type: schemapb.FunctionType_TextEmbedding,
-			InputFieldNames: []string{"doc"}, OutputFieldNames: []string{"dense"},
-		}},
+// External collections go through the direct-path function validation like any
+// other schema; only the one resolution-sensitive rule (nullable input) exempts
+// externally-mapped fields at the rule level, because their nullability is
+// inferred from the external source (a nullable TextEmbedding input resolved
+// from parquet, as the go-sdk e2e creates) rather than declared by the user.
+// Structural checks — e.g. the MinHash dim/num_hashes relation — stay
+// authoritative for external schemas too.
+func Test_createCollectionTask_prepareSchema_validatesExternalFunctions(t *testing.T) {
+	buildTask := func(schema *schemapb.CollectionSchema) createCollectionTask {
+		return createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: schema.GetName(),
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
+		}
 	}
-	task := createCollectionTask{
-		Req: &milvuspb.CreateCollectionRequest{
-			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
-			CollectionName: collectionName,
-		},
-		body: &message.CreateCollectionRequest{
-			CollectionSchema: schema,
-		},
-	}
-	err := task.prepareSchema(context.TODO())
-	assert.NoError(t, err)
+
+	t.Run("nullable externally-mapped input accepted", func(t *testing.T) {
+		task := buildTask(&schemapb.CollectionSchema{
+			Name: funcutil.GenRandomStr(),
+			Fields: []*schemapb.FieldSchema{
+				{Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk"},
+				{Name: "doc", DataType: schemapb.DataType_VarChar, Nullable: true, ExternalField: "doc", TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "1024"},
+				}},
+				{Name: "dense", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "8"},
+				}},
+			},
+			Functions: []*schemapb.FunctionSchema{{
+				Name: "tei_fn", Type: schemapb.FunctionType_TextEmbedding,
+				InputFieldNames: []string{"doc"}, OutputFieldNames: []string{"dense"},
+				Params: []*commonpb.KeyValuePair{{Key: "provider", Value: "TEI"}},
+			}},
+		})
+		err := task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+	})
+
+	t.Run("overflowing minhash num_hashes rejected on external too", func(t *testing.T) {
+		// (2^59+1)*32 wraps around int64 to 32; before the rule-level exemption
+		// the whole ValidateFunction call was skipped for external schemas, so
+		// this impossible MinHash persisted through the direct RootCoord path.
+		task := buildTask(&schemapb.CollectionSchema{
+			Name: funcutil.GenRandomStr(),
+			Fields: []*schemapb.FieldSchema{
+				{Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk"},
+				{Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text", TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "128"},
+				}},
+				{Name: "hash", DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "32"},
+				}},
+			},
+			Functions: []*schemapb.FunctionSchema{{
+				Name: "minhash", Type: schemapb.FunctionType_MinHash,
+				InputFieldNames: []string{"text"}, OutputFieldNames: []string{"hash"},
+				Params: []*commonpb.KeyValuePair{{Key: "num_hashes", Value: "576460752303423489"}},
+			}},
+		})
+		err := task.prepareSchema(context.TODO())
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "does not match expected dim")
+	})
 }

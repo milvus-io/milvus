@@ -411,78 +411,69 @@ func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
 			},
 		},
 	})
-	err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
-		ID:            10,
-		CollectionID:  0,
-		PartitionID:   1,
-		InsertChannel: "ch1",
-		State:         commonpb.SegmentState_Sealed,
-		Level:         datapb.SegmentLevel_L1,
-		NumOfRows:     1,
-	}))
-	s.Require().NoError(err)
 
-	resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
-		Base:           &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
-		SegmentID:      10,
-		CollectionID:   0,
-		PartitionID:    1,
-		Channel:        "ch1",
-		SegLevel:       datapb.SegmentLevel_L1,
-		Flushed:        true,
-		StorageVersion: storage.StorageV2,
-	})
-	s.NoError(err)
+	addSegment := func(segmentID int64, state commonpb.SegmentState, storageVersion int64) {
+		err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             segmentID,
+			CollectionID:   0,
+			PartitionID:    1,
+			InsertChannel:  "ch1",
+			State:          state,
+			Level:          datapb.SegmentLevel_L1,
+			NumOfRows:      1,
+			StorageVersion: storageVersion,
+		}))
+		s.Require().NoError(err)
+	}
+
+	saveBinlog := func(segmentID int64, flushed bool, storageVersion int64, binlogs []*datapb.FieldBinlog) *commonpb.Status {
+		resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+			Base:              &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
+			SegmentID:         segmentID,
+			CollectionID:      0,
+			PartitionID:       1,
+			Channel:           "ch1",
+			SegLevel:          datapb.SegmentLevel_L1,
+			Flushed:           flushed,
+			StorageVersion:    storageVersion,
+			Field2BinlogPaths: binlogs,
+		})
+		s.NoError(err)
+		return resp
+	}
+
+	// Reject: a V3 segment requires a non-empty StorageV3 manifest path.
+	addSegment(10, commonpb.SegmentState_Sealed, storage.StorageV3)
+	resp := saveBinlog(10, true, storage.StorageV3, nil)
 	s.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
 
-	resp, err = s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
-		Base:           &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
-		SegmentID:      10,
-		CollectionID:   0,
-		PartitionID:    1,
-		Channel:        "ch1",
-		SegLevel:       datapb.SegmentLevel_L1,
-		Flushed:        true,
-		StorageVersion: storage.StorageV3,
-	})
-	s.NoError(err)
+	// Reject: a V3 sync without a manifest path, even when not flushing.
+	resp = saveBinlog(10, false, storage.StorageV3, nil)
 	s.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
 
-	resp, err = s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
-		Base:           &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
-		SegmentID:      10,
-		CollectionID:   0,
-		PartitionID:    1,
-		Channel:        "ch1",
-		SegLevel:       datapb.SegmentLevel_L1,
-		Flushed:        false,
-		StorageVersion: storage.StorageV3,
+	// Reject: a V2 segment whose data actually carries a TEXT column.
+	addSegment(11, commonpb.SegmentState_Sealed, storage.StorageV2)
+	resp = saveBinlog(11, true, storage.StorageV2, []*datapb.FieldBinlog{
+		{FieldID: 101, Binlogs: []*datapb.Binlog{{LogPath: "files/insert_log/0/1/11/101/1", EntriesNum: 1}}},
 	})
-	s.NoError(err)
 	s.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
+	s.ErrorContains(merr.Error(resp), "must be saved with StorageV3 manifest")
 
-	err = s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
-		ID:            11,
-		CollectionID:  0,
-		PartitionID:   1,
-		InsertChannel: "ch1",
-		State:         commonpb.SegmentState_Dropped,
-		Level:         datapb.SegmentLevel_L1,
-		NumOfRows:     1,
-	}))
-	s.Require().NoError(err)
+	// Allow: a legacy V2 segment with no binlogs at all (no TEXT column).
+	addSegment(12, commonpb.SegmentState_Sealed, storage.StorageV2)
+	resp = saveBinlog(12, true, storage.StorageV2, nil)
+	s.True(merr.Ok(resp))
 
-	resp, err = s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
-		Base:           &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
-		SegmentID:      11,
-		CollectionID:   0,
-		PartitionID:    1,
-		Channel:        "ch1",
-		SegLevel:       datapb.SegmentLevel_L1,
-		Flushed:        true,
-		StorageVersion: storage.StorageV2,
+	// Allow: a legacy V2 segment carrying only non-TEXT columns.
+	addSegment(13, commonpb.SegmentState_Sealed, storage.StorageV2)
+	resp = saveBinlog(13, true, storage.StorageV2, []*datapb.FieldBinlog{
+		{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "files/insert_log/0/1/13/100/1", EntriesNum: 1}}},
 	})
-	s.NoError(err)
+	s.True(merr.Ok(resp))
+
+	// Dropped segments are exempt from the TEXT storage validation.
+	addSegment(14, commonpb.SegmentState_Dropped, storage.StorageV2)
+	resp = saveBinlog(14, true, storage.StorageV2, nil)
 	s.True(merr.Ok(resp))
 }
 
@@ -1687,9 +1678,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
 		assert.NotEqual(t, 0, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
-		assert.Len(t, resp.GetChannels()[0].GetDroppedSegmentIds(), 0)
+		assert.ElementsMatch(t, []UniqueID{9, 10, 11, 12}, resp.GetChannels()[0].GetDroppedSegmentIds())
 		// assert.ElementsMatch(t, []UniqueID{}, resp.GetChannels()[0].GetUnflushedSegmentIds())
-		// assert.ElementsMatch(t, []UniqueID{9, 10, 12}, resp.GetChannels()[0].GetFlushedSegmentIds())
+		assert.ElementsMatch(t, []UniqueID{13}, resp.GetChannels()[0].GetFlushedSegmentIds())
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
@@ -4228,6 +4219,240 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	// Schema-version fence: a result computed against a schema version that no
+	// longer matches the collection's current schema version must be rejected
+	// as a whole (no broadcast), with every segment reported failed.
+	t.Run("schema_version_mismatch_rejected", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 501, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("/seg/501", 1),
+		}})
+		// Result computed against schema version 2, collection is now at version 5.
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "schemaVersion": 2,
+          "segments": {
+            "501": {"version": 10, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
+          }
+        }`
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:         merr.Success(),
+				DbName:         "default",
+				CollectionName: "c",
+				Schema:         &schemapb.CollectionSchema{Version: 5},
+			}, nil).Maybe()
+		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
+		wal := mock_streaming.NewMockWALAccesser(t)
+		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
+		streaming.SetWALForTest(wal)
+
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/result.json",
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetTotalSegments())
+		assert.Equal(t, int32(0), resp.GetCommittedSegments())
+		assert.Equal(t, int32(1), resp.GetFailedSegments())
+		require.Len(t, resp.GetSegmentStatuses(), 1)
+		assert.False(t, resp.GetSegmentStatuses()[0].GetOk())
+		assert.Contains(t, resp.GetSegmentStatuses()[0].GetReason(), "schema version")
+	})
+
+	// Schema-version fence: a matching version passes and reaches broadcast.
+	t.Run("schema_version_match_accepted", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 502, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("/seg/502", 1),
+		}})
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "schemaVersion": 5,
+          "segments": {
+            "502": {"version": 10, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
+          }
+        }`
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:         merr.Success(),
+				DbName:         "default",
+				CollectionName: "c",
+				Schema:         &schemapb.CollectionSchema{Version: 5},
+			}, nil).Maybe()
+		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
+		wal := mock_streaming.NewMockWALAccesser(t)
+		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
+		streaming.SetWALForTest(wal)
+
+		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&types2.BroadcastAppendResult{
+			BroadcastID: 1,
+			AppendResults: map[string]*types2.AppendResult{
+				"by-dev-rootcoord-dml_0": {
+					MessageID:              rmq.NewRmqID(1),
+					TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
+					LastConfirmedMessageID: rmq.NewRmqID(1),
+				},
+			},
+		}, nil)
+		bapi.EXPECT().Close().Return()
+		patch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				return bapi, nil
+			}).Build()
+		defer patch.UnPatch()
+
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/result.json",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetCommittedSegments())
+		assert.Equal(t, int32(0), resp.GetFailedSegments())
+	})
+
+	// Schema-version fence: the pre-broadcast check passes, but the version
+	// read again under the broadcast's resource keys no longer matches (a
+	// drop/alter-function committed in the window between the two reads). The
+	// broadcast must be aborted and every segment reported failed.
+	t.Run("schema_version_changed_before_broadcast_rejected", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 504, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("/seg/504", 1),
+		}})
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "schemaVersion": 5,
+          "segments": {
+            "504": {"version": 10, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
+          }
+        }`
+		// First read (pre-broadcast) sees version 5; the second read (inside
+		// the broadcast boundary) sees version 6, as if an alter/drop-function
+		// committed between the two.
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:         merr.Success(),
+				DbName:         "default",
+				CollectionName: "c",
+				Schema:         &schemapb.CollectionSchema{Version: 5},
+			}, nil).Once()
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:         merr.Success(),
+				DbName:         "default",
+				CollectionName: "c",
+				Schema:         &schemapb.CollectionSchema{Version: 6},
+			}, nil).Once()
+		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
+		wal := mock_streaming.NewMockWALAccesser(t)
+		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
+		streaming.SetWALForTest(wal)
+
+		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+		bapi.EXPECT().Close().Return()
+		patch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				return bapi, nil
+			}).Build()
+		defer patch.UnPatch()
+
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/result.json",
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetTotalSegments())
+		assert.Equal(t, int32(0), resp.GetCommittedSegments())
+		assert.Equal(t, int32(1), resp.GetFailedSegments())
+		require.Len(t, resp.GetSegmentStatuses(), 1)
+		assert.False(t, resp.GetSegmentStatuses()[0].GetOk())
+		assert.Contains(t, resp.GetSegmentStatuses()[0].GetReason(), "schema version")
+	})
+
+	// Schema-version fence: a result that carries no schema version (0 — legacy
+	// producer that does not stamp it) is exempt from the fence.
+	t.Run("schema_version_zero_exempt", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 503, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("/seg/503", 1),
+		}})
+		// No schemaVersion field in JSON -> 0, which must pass even though the
+		// collection is now at version 9.
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "503": {"version": 10, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
+          }
+        }`
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:         merr.Success(),
+				DbName:         "default",
+				CollectionName: "c",
+				Schema:         &schemapb.CollectionSchema{Version: 9},
+			}, nil).Maybe()
+		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
+		wal := mock_streaming.NewMockWALAccesser(t)
+		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
+		streaming.SetWALForTest(wal)
+
+		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&types2.BroadcastAppendResult{
+			BroadcastID: 1,
+			AppendResults: map[string]*types2.AppendResult{
+				"by-dev-rootcoord-dml_0": {
+					MessageID:              rmq.NewRmqID(1),
+					TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
+					LastConfirmedMessageID: rmq.NewRmqID(1),
+				},
+			},
+		}, nil)
+		bapi.EXPECT().Close().Return()
+		patch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				return bapi, nil
+			}).Build()
+		defer patch.UnPatch()
+
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/result.json",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetCommittedSegments())
+		assert.Equal(t, int32(0), resp.GetFailedSegments())
 	})
 
 	t.Run("success_false_rejected", func(t *testing.T) {

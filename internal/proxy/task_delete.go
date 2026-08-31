@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
@@ -44,8 +45,7 @@ type deleteTask struct {
 	req *milvuspb.DeleteRequest
 
 	// channel
-	chMgr     channelsMgr
-	chTicker  channelsTimeTicker
+	chMgr     channelmgr.ChannelsMgr
 	pChannels []pChan
 	vChannels []vChan
 
@@ -115,7 +115,7 @@ func (dt *deleteTask) setChannels() error {
 	if err != nil {
 		return err
 	}
-	channels, err := dt.chMgr.getChannels(collID)
+	channels, err := dt.chMgr.GetChannels(collID)
 	if err != nil {
 		return err
 	}
@@ -260,7 +260,7 @@ type deleteRunner struct {
 	metaCache Cache
 
 	// channel
-	chMgr     channelsMgr
+	chMgr     channelmgr.ChannelsMgr
 	vChannels []vChan
 
 	idAllocator     allocator.Interface
@@ -351,10 +351,14 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 
-	// bloom_match has false positives; a delete driven by it would remove rows
-	// outside the user's set (see design doc 20260707-bloom-filter-expression).
-	if planparserv2.PlanContainsBloomFilter(dr.plan) {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("bloom_match is approximate and cannot be used in delete expressions"))
+	// Approximate membership_match filters carrying an MBF1 blob must not drive
+	// deletes: a false positive would
+	// remove rows outside the user's set (design doc
+	// 20260707-bloom-filter-expression). Exact Roaring/MRB1 kinds are
+	// allowed; anything whose kind cannot be proven exact is rejected.
+	if planparserv2.PlanContainsMembershipFilterUnsafeForDelete(dr.plan) {
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(
+			"membership_match with an approximate bloom filter blob cannot be used in delete expressions"))
 	}
 
 	dr.plan.Namespace = namespaceForPlan(dr.schema.CollectionSchema, dr.req.Namespace)
@@ -404,7 +408,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	}
 
 	// set vchannels
-	channelNames, err := dr.chMgr.getVChannels(dr.collectionID)
+	channelNames, err := dr.chMgr.GetVChannels(dr.collectionID)
 	if err != nil {
 		return ErrWithLog(log, "Failed to get vchannels from collection", err)
 	}

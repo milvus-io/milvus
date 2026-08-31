@@ -29,6 +29,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -59,8 +61,7 @@ type upsertTask struct {
 	result           *milvuspb.MutationResult
 	idAllocator      *allocator.IDAllocator
 	collectionID     UniqueID
-	chMgr            channelsMgr
-	chTicker         channelsTimeTicker
+	chMgr            channelmgr.ChannelsMgr
 	vChannels        []vChan
 	pChannels        []pChan
 	schema           *schemaInfo
@@ -152,7 +153,7 @@ func (it *upsertTask) setChannels() error {
 	if err != nil {
 		return err
 	}
-	channels, err := it.chMgr.getChannels(collID)
+	channels, err := it.chMgr.GetChannels(collID)
 	if err != nil {
 		return err
 	}
@@ -349,9 +350,9 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 						return err
 					}
 					if subFieldSchema.GetDefaultValue() != nil {
-						err = FillWithDefaultValue(subField, subFieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
+						err = fieldvalidator.FillWithDefaultValue(subField, subFieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
 					} else {
-						err = FillWithNullValue(subField, subFieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
+						err = fieldvalidator.FillWithNullValue(subField, subFieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
 					}
 					if err != nil {
 						log.Info(ctx, "unify struct field data format failed", mlog.Err(err))
@@ -388,9 +389,9 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		if len(typeutil.GetFieldDataValidData(fieldData)) != 0 {
 			var err error
 			if fieldSchema.GetDefaultValue() != nil {
-				err = FillWithDefaultValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
+				err = fieldvalidator.FillWithDefaultValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
 			} else {
-				err = FillWithNullValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
+				err = fieldvalidator.FillWithNullValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
 			}
 			if err != nil {
 				log.Info(ctx, "unify field data format failed", mlog.Err(err))
@@ -401,7 +402,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	}
 
 	// Validate field data alignment before processing to prevent index out of range panic
-	if err := newValidateUtil().checkAligned(fieldsDataToCheckAligned, it.schema.SchemaHelper, uint64(upsertIDSize)); err != nil {
+	if err := fieldvalidator.NewValidateUtil().CheckAligned(fieldsDataToCheckAligned, it.schema.SchemaHelper, uint64(upsertIDSize)); err != nil {
 		log.Warn(ctx, "check field data aligned failed", mlog.Err(err))
 		return err
 	}
@@ -676,14 +677,14 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 // ToCompressedFormatNullable converts nullable field data from full format to compressed format.
 func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 	validData := typeutil.GetFieldDataValidData(field)
-	if getValidNumber(validData) == len(validData) {
+	if fieldvalidator.GetValidNumber(validData) == len(validData) {
 		return nil
 	}
 	switch field.Field.(type) {
 	case *schemapb.FieldData_Scalars:
 		switch sd := field.GetScalars().GetData().(type) {
 		case *schemapb.ScalarField_BoolData:
-			validRowNum := getValidNumber(validData)
+			validRowNum := fieldvalidator.GetValidNumber(validData)
 			if validRowNum == 0 {
 				sd.BoolData.Data = make([]bool, 0)
 			} else {
@@ -697,7 +698,7 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_IntData:
-			validRowNum := getValidNumber(validData)
+			validRowNum := fieldvalidator.GetValidNumber(validData)
 			if validRowNum == 0 {
 				sd.IntData.Data = make([]int32, 0)
 			} else {
@@ -711,7 +712,7 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_LongData:
-			validRowNum := getValidNumber(validData)
+			validRowNum := fieldvalidator.GetValidNumber(validData)
 			if validRowNum == 0 {
 				sd.LongData.Data = make([]int64, 0)
 			} else {
@@ -725,7 +726,7 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_FloatData:
-			validRowNum := getValidNumber(validData)
+			validRowNum := fieldvalidator.GetValidNumber(validData)
 			if validRowNum == 0 {
 				sd.FloatData.Data = make([]float32, 0)
 			} else {
@@ -739,7 +740,7 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_DoubleData:
-			validRowNum := getValidNumber(validData)
+			validRowNum := fieldvalidator.GetValidNumber(validData)
 			if validRowNum == 0 {
 				sd.DoubleData.Data = make([]float64, 0)
 			} else {
@@ -753,7 +754,7 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_StringData:
-			validRowNum := getValidNumber(validData)
+			validRowNum := fieldvalidator.GetValidNumber(validData)
 			if validRowNum == 0 {
 				sd.StringData.Data = make([]string, 0)
 			} else {
@@ -767,7 +768,7 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_JsonData:
-			validRowNum := getValidNumber(validData)
+			validRowNum := fieldvalidator.GetValidNumber(validData)
 			if validRowNum == 0 {
 				sd.JsonData.Data = make([][]byte, 0)
 			} else {
@@ -781,7 +782,7 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_ArrayData:
-			validRowNum := getValidNumber(validData)
+			validRowNum := fieldvalidator.GetValidNumber(validData)
 			if validRowNum == 0 {
 				sd.ArrayData.Data = make([]*schemapb.ScalarField, 0)
 			} else {
@@ -794,7 +795,7 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 				sd.ArrayData.Data = ret
 			}
 		case *schemapb.ScalarField_TimestamptzData:
-			validRowNum := getValidNumber(validData)
+			validRowNum := fieldvalidator.GetValidNumber(validData)
 			if validRowNum == 0 {
 				sd.TimestamptzData.Data = make([]int64, 0)
 			} else {
@@ -822,7 +823,7 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_GeometryWktData:
-			validRowNum := getValidNumber(validData)
+			validRowNum := fieldvalidator.GetValidNumber(validData)
 			if validRowNum == 0 {
 				sd.GeometryWktData.Data = make([]string, 0)
 			} else {
@@ -836,7 +837,7 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_GeometryData:
-			validRowNum := getValidNumber(validData)
+			validRowNum := fieldvalidator.GetValidNumber(validData)
 			if validRowNum == 0 {
 				sd.GeometryData.Data = make([][]byte, 0)
 			} else {
@@ -1201,7 +1202,7 @@ func ToCompressedFormatNullableStructField(fieldData *schemapb.FieldData) error 
 			continue
 		}
 
-		validRows := getValidNumber(validData)
+		validRows := fieldvalidator.GetValidNumber(validData)
 		if validRows == 0 && !subFieldHasData(subField) {
 			continue
 		}
@@ -1351,7 +1352,7 @@ func validateWholeStructFieldDataForPartialUpdate(schemaHelper *typeutil.SchemaH
 			}
 			continue
 		}
-		validRows := getValidNumber(validData)
+		validRows := fieldvalidator.GetValidNumber(validData)
 		if payloadRows != validRows {
 			return merr.WrapErrParameterInvalidMsg("nullable struct sub-field '%s' payload must be compact: payload row count %d does not match valid rows %d",
 				subField.GetFieldName(), payloadRows, validRows)
@@ -1523,7 +1524,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		}
 	}
 
-	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck(), withMaxCapCheck()).
+	if err := fieldvalidator.NewValidateUtil(fieldvalidator.WithNANCheck(), fieldvalidator.WithOverflowCheck(), fieldvalidator.WithMaxLenCheck(), fieldvalidator.WithMaxCapCheck()).
 		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.SchemaHelper, it.upsertMsg.InsertMsg.NRows()); err != nil {
 		return err
 	}

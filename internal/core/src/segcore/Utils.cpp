@@ -18,7 +18,6 @@
 #include <cmath>
 #include <cstdint>
 #include <exception>
-#include <future>
 #include <memory>
 #include <numeric>
 #include <optional>
@@ -27,8 +26,6 @@
 #include <variant>
 #include <vector>
 
-#include "arrow/api.h"
-#include "arrow/io/memory.h"
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
 #include "common/Channel.h"
@@ -52,7 +49,6 @@
 #include "log/Log.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "nlohmann/json.hpp"
-#include "parquet/arrow/reader.h"
 #include "pb/schema.pb.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/SegmentInterface.h"
@@ -62,8 +58,6 @@
 #include "storage/DataCodec.h"
 #include "storage/FileManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
-#include "storage/ThreadPool.h"
-#include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 
@@ -1339,60 +1333,6 @@ ReverseDataFromIndex(const index::IndexBase* index,
     }
 
     return data_array;
-}
-
-void
-LoadArrowReaderForJsonStatsFromRemote(
-    const std::vector<std::string>& remote_files,
-    std::shared_ptr<ArrowReaderChannel> channel) {
-    try {
-        auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
-                       .GetRemoteChunkManager();
-        auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
-
-        std::vector<std::future<std::shared_ptr<milvus::ArrowDataWrapper>>>
-            futures;
-        futures.reserve(remote_files.size());
-        for (const auto& file : remote_files) {
-            auto future = pool.Submit([rcm, file]() {
-                auto fileSize = rcm->Size(file);
-                auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
-                rcm->Read(file, buf.get(), fileSize);
-
-                auto arrow_buf =
-                    std::make_shared<arrow::Buffer>(buf.get(), fileSize);
-                auto buffer_reader =
-                    std::make_shared<arrow::io::BufferReader>(arrow_buf);
-
-                std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-                auto status = parquet::arrow::OpenFile(
-                    buffer_reader, arrow::default_memory_pool(), &arrow_reader);
-                AssertInfo(status.ok(),
-                           "failed to open parquet file: {}",
-                           status.message());
-
-                std::shared_ptr<arrow::RecordBatchReader> batch_reader;
-                status = arrow_reader->GetRecordBatchReader(&batch_reader);
-                AssertInfo(status.ok(),
-                           "failed to get record batch reader: {}",
-                           status.message());
-
-                return std::make_shared<ArrowDataWrapper>(
-                    std::move(batch_reader), std::move(arrow_reader), buf);
-            });
-            futures.emplace_back(std::move(future));
-        }
-
-        for (auto& future : futures) {
-            auto field_data = future.get();
-            channel->push(field_data);
-        }
-
-        channel->close();
-    } catch (std::exception& e) {
-        LOG_INFO("failed to load data from remote: {}", e.what());
-        channel->close(std::current_exception());
-    }
 }
 
 // init segcore storage config first, and create default remote chunk manager
