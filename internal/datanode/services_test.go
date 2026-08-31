@@ -39,9 +39,11 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
+	"github.com/milvus-io/milvus/internal/datanode/resource"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
@@ -63,6 +65,8 @@ type DataNodeServicesSuite struct {
 	node          *DataNode
 	storageConfig *indexpb.StorageConfig
 	etcdCli       *clientv3.Client
+	guardMock     *mockey.Mocker
+	guard         *resource.RecordingGuard
 	ctx           context.Context
 	cancel        context.CancelFunc
 }
@@ -147,6 +151,19 @@ func (s *DataNodeServicesSuite) SetupSuite() {
 }
 
 func (s *DataNodeServicesSuite) SetupTest() {
+	// The node's executors admit every task through the resource guard. Route
+	// that at a double: the process-wide guard freezes admission from the
+	// host's live memory reading, which would make these tests pass, fail or
+	// hang depending on what else the machine is doing.
+	//
+	// Several tests below re-enter SetupTest without a matching TearDownTest,
+	// and mockey panics on a second patch of a function it already holds, so
+	// the patch is installed once and left in place until teardown.
+	if s.guardMock == nil {
+		s.guard = resource.NewRecordingGuard()
+		s.guardMock = mockey.Mock(resource.GetGuard).Return(s.guard).Build()
+	}
+
 	s.node = NewIDLEDataNodeMock(s.ctx, schemapb.DataType_Int64)
 	s.node.SetEtcdClient(s.etcdCli)
 
@@ -181,6 +198,11 @@ func (s *DataNodeServicesSuite) TearDownTest() {
 	if s.node != nil {
 		s.node.Stop()
 		s.node = nil
+	}
+	if s.guardMock != nil {
+		s.guardMock.UnPatch()
+		s.guardMock = nil
+		s.guard = nil
 	}
 }
 
@@ -239,6 +261,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			State:  datapb.CompactionTaskState_completed,
 		}, nil)
 		mockC.EXPECT().GetStorageConfig().Return(s.storageConfig)
+		mockC.EXPECT().GetPlan().Return(nil)
 		s.node.compactionExecutor.Enqueue(mockC)
 
 		mockC2 := compactor.NewMockCompactor(s.T())
@@ -253,6 +276,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			State:  datapb.CompactionTaskState_failed,
 		}, nil)
 		mockC2.EXPECT().GetStorageConfig().Return(s.storageConfig)
+		mockC2.EXPECT().GetPlan().Return(nil)
 		s.node.compactionExecutor.Enqueue(mockC2)
 
 		s.Eventually(func() bool {
@@ -1896,4 +1920,184 @@ func TestChunkManagerFailureDoesNotLogStorageAccessKey(t *testing.T) {
 
 	assert.NotContains(t, logs.String(), accessKey)
 	assert.Contains(t, logs.String(), "audit-bucket")
+}
+
+// The 16-core / 64GiB node from issue #52180: CalculateNodeSlots reports 128
+// and the task budget is 64GiB x the 0.75 default.
+const (
+	incidentLegacyTotal = int64(128)
+	incidentBudget      = int64(48) << 30
+)
+
+func incidentSnapshot(committedMemory int64, committedCPU float64) resource.Snapshot {
+	return resource.Snapshot{
+		Capacity:  taskresource.Capacity{CPU: 16, Memory: incidentBudget},
+		Committed: taskresource.Capacity{CPU: committedCPU, Memory: committedMemory},
+		Admitting: true,
+	}
+}
+
+// The scalar an un-upgraded coordinator reads is the free FRACTION of the
+// memory budget applied to the slot total. There is no byte<->slot exchange
+// rate any more: a fraction does not need one, and having to keep two sides of
+// an RPC agreeing on such a rate is what made the earlier pricing need a kill
+// switch.
+func TestLegacyAvailableSlotsIsTheFreeMemoryFraction(t *testing.T) {
+	paramtable.Init()
+
+	// Nine tenths committed: a tenth of the slots left.
+	snap := incidentSnapshot(incidentBudget/10*9, 1)
+	assert.Equal(t, int64(12), legacyAvailableSlots(snap, incidentLegacyTotal))
+
+	// Idle node: all of them.
+	assert.Equal(t, incidentLegacyTotal, legacyAvailableSlots(incidentSnapshot(0, 0), incidentLegacyTotal))
+}
+
+// CPU must NOT enter the fold. It is a request: a node whose CPU requests are
+// spoken for can still host a compaction that shares no thread pool with them,
+// and reporting it as full would serialize exactly the work the request model
+// exists to keep concurrent.
+func TestLegacyAvailableSlotsIgnoresCPU(t *testing.T) {
+	paramtable.Init()
+
+	busyCPU := incidentSnapshot(0, 15.5)
+	assert.Equal(t, incidentLegacyTotal, legacyAvailableSlots(busyCPU, incidentLegacyTotal),
+		"a CPU-saturated node with free memory is not full")
+}
+
+// Expressed as the free fraction rather than as 1 - utilization on purpose.
+// `1 - committed/capacity` rounds twice and lands just under the true value, so
+// int64() truncation cost a whole slot on exactly-round inputs.
+func TestLegacyAvailableSlotsDoesNotLoseASlotToFloatingPoint(t *testing.T) {
+	paramtable.Init()
+
+	snap := resource.Snapshot{
+		Capacity:  taskresource.Capacity{Memory: 1000},
+		Committed: taskresource.Capacity{Memory: 900},
+		Admitting: true,
+	}
+	// A tenth of 80 is 8, not 7.
+	assert.Equal(t, int64(8), legacyAvailableSlots(snap, 80))
+}
+
+// A node that has stopped taking work reports zero regardless of arithmetic:
+// the old coordinator has no other way to be told.
+func TestLegacyAvailableSlotsZeroWhenNotAdmitting(t *testing.T) {
+	paramtable.Init()
+
+	snap := incidentSnapshot(0, 0)
+	snap.Admitting = false
+	assert.Zero(t, legacyAvailableSlots(snap, incidentLegacyTotal))
+}
+
+// Over-commitment must not read as capacity.
+func TestLegacyAvailableSlotsNeverNegative(t *testing.T) {
+	paramtable.Init()
+
+	over := incidentSnapshot(incidentBudget*2, 0)
+	assert.Zero(t, legacyAvailableSlots(over, incidentLegacyTotal))
+}
+
+// availableSlots takes whichever of the ledger and the executors' queues
+// reports the node busier. The ledger counts only tasks that have STARTED, so a
+// node holding a large queue of accepted-but-not-yet-started work has an empty
+// ledger and would otherwise advertise itself completely free.
+//
+// Both arms are on the same scale now: an un-upgraded worker is sent the legacy
+// slot constants, so subtracting the executors' counters from legacyTotal is
+// the arithmetic that predates this work, restored rather than reinterpreted.
+func TestAvailableSlotsCountsQueuedWorkToo(t *testing.T) {
+	paramtable.Init()
+
+	idle := incidentSnapshot(0, 0)
+
+	// Nothing started, nothing queued: the whole node.
+	assert.Equal(t, incidentLegacyTotal, availableSlots(idle, incidentLegacyTotal, 0, 0, 0))
+
+	// Nothing started, but the executors have accepted 50 of the 128 slots.
+	// The ledger still says "free"; the answer must not.
+	assert.Equal(t, int64(78), availableSlots(idle, incidentLegacyTotal, 40, 0, 10))
+	assert.Equal(t, int64(28), availableSlots(idle, incidentLegacyTotal, 0, 100, 0))
+
+	// The ledger stays authoritative when it is the more conservative of the
+	// two: 90% of the budget committed is 12 slots, well below what a small
+	// queue would allow.
+	loaded := incidentSnapshot(incidentBudget/10*9, 1)
+	assert.Equal(t, int64(12), availableSlots(loaded, incidentLegacyTotal, 10, 0, 0))
+
+	// Over-subscribed queues clamp at zero rather than going negative.
+	assert.Zero(t, availableSlots(idle, incidentLegacyTotal, 100, 0, 100))
+
+	// A node that has stopped taking work is zero however empty the queues are.
+	stopped := idle
+	stopped.Admitting = false
+	assert.Zero(t, availableSlots(stopped, incidentLegacyTotal, 0, 0, 0))
+}
+
+// The dimensioned report is what a current coordinator actually places on.
+func (s *DataNodeServicesSuite) TestQuerySlotReportsBothCurrencies() {
+	s.SetupTest()
+
+	s.guard.SetSnapshot(resource.Snapshot{
+		Capacity:  taskresource.Capacity{CPU: 16, Memory: 1000},
+		Committed: taskresource.Capacity{CPU: 4, Memory: 900},
+		Admitting: true,
+	})
+
+	resp, err := s.node.QuerySlot(context.Background(), nil)
+	s.NoError(err)
+	s.True(merr.Ok(resp.GetStatus()))
+
+	capacity, committed, ok := taskresource.NodeCapacityFromProto(resp.GetResources())
+	s.Require().True(ok, "a current worker must report dimensions, not only the scalar")
+	s.EqualValues(1000, capacity.Memory)
+	s.EqualValues(900, committed.Memory)
+	s.InDelta(4.0, committed.CPU, 1e-9)
+	s.True(resp.GetResources().GetAdmitting())
+
+	// And the scalar still follows, for a coordinator that reads only that.
+	s.Less(resp.GetAvailableSlots(), index.CalculateNodeSlots())
+}
+
+// The index side reports through a different RPC and must say the same thing.
+func (s *DataNodeServicesSuite) TestGetJobStatsReportsBothCurrencies() {
+	s.SetupTest()
+
+	s.guard.SetSnapshot(resource.Snapshot{
+		Capacity:  taskresource.Capacity{CPU: 16, Memory: 1000},
+		Committed: taskresource.Capacity{CPU: 1, Memory: 900},
+		Admitting: true,
+	})
+
+	resp, err := s.node.GetJobStats(context.Background(), &workerpb.GetJobStatsRequest{})
+	s.NoError(err)
+	s.True(merr.Ok(resp.GetStatus()))
+
+	s.Equal(index.CalculateNodeSlots(), resp.GetTotalSlots())
+	_, committed, ok := taskresource.NodeCapacityFromProto(resp.GetResources())
+	s.Require().True(ok)
+	s.EqualValues(900, committed.Memory)
+}
+
+// A node that has stopped taking work must say so in BOTH currencies: zero
+// slots for an old coordinator, admitting=false for a current one. The second
+// is what lets a current coordinator tell "full" from "stopped".
+func (s *DataNodeServicesSuite) TestQuerySlotReportsStoppedInBothCurrencies() {
+	s.SetupTest()
+
+	s.guard.SetSnapshot(resource.Snapshot{
+		Capacity:  taskresource.Capacity{CPU: 16, Memory: 1000},
+		Committed: taskresource.Capacity{},
+		Admitting: false,
+	})
+
+	resp, err := s.node.QuerySlot(context.Background(), nil)
+	s.NoError(err)
+	s.EqualValues(0, resp.GetAvailableSlots())
+	s.False(resp.GetResources().GetAdmitting())
+
+	jobResp, err := s.node.GetJobStats(context.Background(), &workerpb.GetJobStatsRequest{})
+	s.NoError(err)
+	s.EqualValues(0, jobResp.GetAvailableSlots())
+	s.False(jobResp.GetResources().GetAdmitting())
 }

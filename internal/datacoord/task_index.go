@@ -31,6 +31,7 @@ import (
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -56,6 +57,46 @@ type indexBuildTask struct {
 	handler                   Handler
 	chunkManager              storage.ChunkManager
 	indexEngineVersionManager IndexEngineVersionManager
+
+	pricing requirementCache
+}
+
+// TaskResources prices this index build before a node is picked for it.
+//
+// For a fixed-width type the size is Dim x rows, which needs no metadata that
+// storage V3 drops -- that is the only field-sizing route that survives a V3
+// segment at all. Everything else falls back through the per-field binlogs to
+// the schema apportionment.
+func (it *indexBuildTask) TaskResources() *datapb.TaskResources {
+	return it.pricing.get(func() (taskresource.Requirement, bool) {
+		segment := it.meta.GetHealthySegment(context.TODO(), it.SegmentID)
+		if segment == nil {
+			// Nothing to price from. Fall back to the scalar rather than
+			// reporting a free task, and do not cache: the segment may resolve
+			// on a later round.
+			return taskresource.LegacySlotToRequirement(it.taskSlot), false
+		}
+
+		collection, err := it.handler.GetCollection(context.TODO(), it.CollectionID)
+		if err != nil || collection == nil || collection.Schema == nil {
+			return taskresource.LegacySlotToRequirement(it.taskSlot), false
+		}
+
+		fieldID := it.meta.indexMeta.GetFieldIDByIndexID(it.CollectionID, it.IndexID)
+		var field *schemapb.FieldSchema
+		for _, f := range typeutil.GetAllFieldSchemas(collection.Schema) {
+			if f.GetFieldID() == fieldID {
+				field = f
+				break
+			}
+		}
+		if field == nil {
+			return taskresource.LegacySlotToRequirement(it.taskSlot), false
+		}
+
+		indexParams := it.meta.indexMeta.GetIndexParams(it.CollectionID, it.IndexID)
+		return indexBuildRequirement(segment, collection.Schema, field, GetIndexType(indexParams)), true
+	}).ToProto()
 }
 
 var _ globalTask.Task = (*indexBuildTask)(nil)
@@ -581,6 +622,12 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		ExternalSource:            schema.GetExternalSource(),
 		ExternalSpec:              schema.GetExternalSpec(),
 	}
+
+	// The same figure the scheduler placed this task on, or -- if it has not
+	// priced this task yet -- one derived from what is already in hand here.
+	req.TaskResources = it.pricing.fill(
+		indexBuildRequirement(segment, schema, field, indexType),
+	).ToProto()
 
 	WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req)
 

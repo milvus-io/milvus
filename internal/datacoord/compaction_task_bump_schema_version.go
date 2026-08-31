@@ -47,6 +47,17 @@ type bumpSchemaVersionTask struct {
 	meta      CompactionMeta
 	ievm      IndexEngineVersionManager
 	times     *taskcommon.Times
+
+	pricing compactionPricing
+}
+
+// TaskResources prices this schema-bump compaction before a node is picked for
+// it. It shares the streaming shape with mix compaction.
+func (t *bumpSchemaVersionTask) TaskResources() *datapb.TaskResources {
+	taskProto := t.GetTaskProto()
+	return t.pricing.requirement(t.meta, taskProto.GetPlanID(),
+		datapb.CompactionType_BumpSchemaVersionCompaction,
+		taskProto.GetInputSegments(), taskProto.GetSchema()).ToProto()
 }
 
 func newBumpSchemaVersionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, ievm IndexEngineVersionManager) *bumpSchemaVersionTask {
@@ -145,6 +156,9 @@ func (t *bumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan
 	}
 	plan.PreAllocatedLogIDs = logIDRange
 	plan.BeginLogID = logIDRange.Begin
+	plan.TaskResources = t.pricing.fill(
+		compactionRequirement(datapb.CompactionType_BumpSchemaVersionCompaction, segments, taskProto.GetSchema()),
+	).ToProto()
 	WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
 	return plan, nil
 }

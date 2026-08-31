@@ -1045,6 +1045,20 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			// so QueryNode skips the external-specific sampling path.
 			Binlogs: buildFakeBinlogs(work.binlogLogID, work.rowCount, memorySize, t.req.GetSchema(), t.parsedSpec.Format),
 		}
+		// Persist the same figure as Statistics, because the fake binlogs above
+		// do NOT survive. A segment with a manifest path is a V3 segment to the
+		// catalog, and V3 persistence deliberately strips the per-FieldBinlog
+		// KVs (kv_catalog.AlterSegments) -- so after a DataCoord restart an
+		// external segment that carried its size only in those arrays reports
+		// zero bytes, and every consumer of SegmentInfo.getSegmentSize (task
+		// resource estimation, the compaction trigger's residual size, TTL
+		// ratio decisions) silently reads it as empty.
+		//
+		// Deriving it from the arrays we just built, rather than assembling a
+		// Statistics by hand, keeps the persisted value identical to what
+		// EnsureStats would have computed in memory: one figure, not two that
+		// can drift.
+		seg.Stats = storage.BuildStatsFromFieldBinlogs(seg.GetBinlogs(), nil, nil, nil)
 		result = append(result, seg)
 	}
 

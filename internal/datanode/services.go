@@ -35,12 +35,14 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
+	"github.com/milvus-io/milvus/internal/datanode/resource"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -732,6 +734,81 @@ func (node *DataNode) DropCopySegment(ctx context.Context, req *datapb.DropCopyS
 	return merr.Success(), nil
 }
 
+// legacyAvailableSlots folds what this node has committed onto the scalar an
+// old coordinator still reads.
+//
+// A coordinator that understands `resources` ignores this entirely. This is
+// only for one that predates it, so it stays as simple as the thing it stands
+// in for: the free FRACTION of the memory budget, applied to the slot total
+// CalculateNodeSlots has always reported. There is no byte<->slot exchange rate
+// any more, because a fraction does not need one -- the earlier version derived
+// one, and having to keep two sides of an RPC agreeing on it was the reason
+// that pricing needed a kill switch.
+//
+// It is expressed as the free fraction rather than as 1 - utilization on
+// purpose. `1 - reserved/total` rounds twice: for a nine-tenths-consumed
+// dimension, 900/1000 is the double just ABOVE 0.9, and subtracting it from 1
+// lands just BELOW a tenth, so a node with exactly a tenth free reported 7
+// slots out of 80 instead of 8. Dividing the free capacity by the total is one
+// rounding instead of two.
+//
+// A node that has stopped taking work reports zero regardless of the
+// arithmetic. The old coordinator has no other way to be told.
+func legacyAvailableSlots(snap resource.Snapshot, legacyTotal int64) int64 {
+	if !snap.Admitting {
+		return 0
+	}
+
+	free := 1.0
+	if snap.Capacity.Memory > 0 {
+		free = float64(snap.Capacity.Memory-snap.Committed.Memory) / float64(snap.Capacity.Memory)
+	}
+	if free < 0 {
+		free = 0
+	}
+
+	available := int64(float64(legacyTotal) * free)
+	if available < 0 {
+		available = 0
+	}
+	return available
+}
+
+// queuedSlots is what the three executors have accepted but the ledger does not
+// know about: their counters move at ENQUEUE, the ledger only when a task
+// actually starts.
+func (node *DataNode) queuedSlots() (indexStats, compaction, imports int64) {
+	return node.taskScheduler.TaskQueue.GetUsingSlot(),
+		node.compactionExecutor.Slots(),
+		node.importScheduler.Slots()
+}
+
+// availableSlots is the scalar this node reports.
+//
+// Two inputs, and the reason is that they see different things. The ledger is
+// memory-aware but counts only tasks that have STARTED, so a node holding five
+// hundred queued compactions would advertise itself free. The executors'
+// counters are charged at enqueue and so do see the queue, but know nothing
+// about memory. Whichever currently reports the node busier wins.
+//
+// Both arms are now on the same scale. DataCoord sends an un-upgraded worker
+// the legacy slot constants -- the pricing it has always understood -- so
+// subtracting the executors' counters from legacyTotal is the arithmetic that
+// predates this work, restored rather than reinterpreted.
+func availableSlots(snap resource.Snapshot, legacyTotal, indexStatsUsed, compactionUsed, importUsed int64) int64 {
+	available := legacyAvailableSlots(snap, legacyTotal)
+	if !snap.Admitting {
+		return available
+	}
+	if fromQueue := legacyTotal - indexStatsUsed - compactionUsed - importUsed; fromQueue < available {
+		available = fromQueue
+	}
+	if available < 0 {
+		available = 0
+	}
+	return available
+}
+
 func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest) (*datapb.QuerySlotResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &datapb.QuerySlotResponse{
@@ -739,36 +816,63 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		}, nil
 	}
 
-	var (
-		totalSlots     = index.CalculateNodeSlots()
-		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
-		compactionUsed = node.compactionExecutor.Slots()
-		importUsed     = node.importScheduler.Slots()
-	)
+	snap := resource.GetGuard().Snapshot()
+	legacyTotal := index.CalculateNodeSlots()
+	indexStatsUsed, compactionUsed, importUsed := node.queuedSlots()
+	available := availableSlots(snap, legacyTotal, indexStatsUsed, compactionUsed, importUsed)
 
-	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed
-	if availableSlots < 0 {
-		availableSlots = 0
+	// A node that has stopped taking work reports zero, which is otherwise
+	// indistinguishable from being genuinely busy. The log line is what tells
+	// an operator which of the two they are looking at.
+	if !snap.Admitting {
+		mlog.Warn(ctx, "query slots done: node has stopped taking tasks on measured memory",
+			mlog.Int64("legacyTotalSlots", legacyTotal),
+			mlog.Float64("committedCPU", snap.Committed.CPU),
+			mlog.Int64("committedMemoryMiB", snap.Committed.Memory>>20),
+			mlog.Int64("capacityMemoryMiB", snap.Capacity.Memory>>20))
+	} else {
+		mlog.Info(ctx, "query slots done",
+			mlog.Int64("legacyTotalSlots", legacyTotal),
+			mlog.Int64("legacyAvailableSlots", available),
+			mlog.Float64("committedCPU", snap.Committed.CPU),
+			mlog.Int64("committedMemoryMiB", snap.Committed.Memory>>20),
+			mlog.Int64("capacityMemoryMiB", snap.Capacity.Memory>>20))
 	}
 
-	mlog.Info(ctx, "query slots done",
-		mlog.Int64("totalSlots", totalSlots),
-		mlog.Int64("availableSlots", availableSlots),
-		mlog.Int64("indexStatsUsed", indexStatsUsed),
-		mlog.Int64("compactionUsed", compactionUsed),
-		mlog.Int64("importUsed", importUsed),
-	)
-
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(availableSlots))
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "total").Set(float64(totalSlots))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(available))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "total").Set(float64(legacyTotal))
+	// The three gauges below report each executor's own bookkeeping, not the
+	// ledger that now governs admission (that's "available"/"total" above,
+	// folded from resource.GetGuard().Snapshot()). They no longer sum to
+	// "total" the way they used to, and a caller relying on them for
+	// admission math is reading stale semantics -- but existing dashboards
+	// and alerts key on these label names, and nothing here replaces them,
+	// so they are kept rather than dropped out from under those consumers.
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "indexStatsUsed").Set(float64(indexStatsUsed))
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsed").Set(float64(compactionUsed))
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(float64(importUsed))
 
 	return &datapb.QuerySlotResponse{
 		Status:         merr.Success(),
-		AvailableSlots: availableSlots,
+		AvailableSlots: available,
+		Resources:      nodeResources(snap),
 	}, nil
+}
+
+// nodeResources is the two-dimensional report, alongside the scalar fold above.
+//
+// Capacity is the budget rather than the raw machine, so what the coordinator
+// subtracts against is what this node will actually accept; committed is the
+// ledger of ACCEPTED tasks, never the measured usage, because a task admitted
+// a moment ago has not reached its peak yet and reporting observation is what
+// let eight compactions land on one node while every one was still downloading
+// (issue #52180).
+//
+// Frozen is reported through `admitting` rather than by zeroing the dimensions:
+// the coordinator needs to tell "this node is full" from "this node has stopped
+// taking work", because only the second is a reason to look at the node itself.
+func nodeResources(snap resource.Snapshot) *datapb.NodeResources {
+	return taskresource.NodeResourcesOf(snap.Capacity, snap.Committed, snap.Admitting)
 }
 
 // Not in used now

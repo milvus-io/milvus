@@ -23,10 +23,13 @@ import (
 
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus/internal/datanode/resource"
 	"github.com/milvus-io/milvus/internal/storagev2"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -100,6 +103,37 @@ func getTaskSlotUsage(task Compactor) int64 {
 	}
 
 	return taskSlotUsage
+}
+
+// taskRequirement is what this compaction is charged against the node.
+//
+// The coordinator's figure wins whenever it is there, and that is not a matter
+// of taste. DataCoord prices from SegmentInfo.Stats, which is populated on
+// every storage version; recomputing here can only read the plan's
+// per-FieldBinlog arrays, and those are EMPTY for a storage-V3 segment once
+// DataCoord has restarted -- kv_catalog.AlterSegments skips writing the
+// per-FieldBinlog KVs for V3 and the data is described by the manifest
+// instead. A local recompute therefore prices a multi-GiB V3 mix or sort
+// compaction at the estimator's 64MiB floor, which is exactly the workload
+// issue #52180 is about and exactly the protection this charge exists to
+// provide.
+//
+// The two fallbacks below are for an un-upgraded coordinator, in descending
+// order of how much the request still says:
+//
+//   - No vector but a plan: recompute from the binlog arrays. Correct on V1/V2,
+//     and on V3 no worse than the pre-branch behavior of not charging at all.
+//   - No plan: the legacy scalar slot, floored at one so an absent slot is
+//     never read as "this task is free".
+func taskRequirement(task Compactor) taskresource.Requirement {
+	plan := task.GetPlan()
+	if plan == nil {
+		return taskresource.LegacySlotToRequirement(getTaskSlotUsage(task))
+	}
+	if req, ok := taskresource.RequirementFromProto(plan.GetTaskResources()); ok {
+		return req
+	}
+	return taskresource.RequirementForCompaction(plan)
 }
 
 func (e *executor) Enqueue(task Compactor) (bool, error) {
@@ -192,32 +226,57 @@ func (e *executor) Start(ctx context.Context) {
 			return
 		case task := <-e.taskCh:
 			GetExecPool().Submit(func() (any, error) {
-				e.executeTask(task)
+				e.executeTask(ctx, task)
 				return nil, nil
 			})
 		}
 	}
 }
 
-func (e *executor) executeTask(task Compactor) {
+// executeTask runs one compaction. ctx is the node's lifecycle context, handed
+// down from Start: it is the only thing that bounds how long the task waits for
+// the node's budget, so a shutdown does not leave a task queued forever.
+func (e *executor) executeTask(ctx context.Context, task Compactor) {
+	planID := task.GetPlanID()
 	log := mlog.With(
-		mlog.Int64("planID", task.GetPlanID()),
+		mlog.Int64("planID", planID),
 		mlog.Int64("collection", task.GetCollection()),
 		mlog.String("channel", task.GetChannelName()),
 		mlog.String("type", task.GetCompactionType().String()),
 	)
 
-	log.Info(context.TODO(), "start to execute compaction")
+	// Reserve the node's budget before any work starts. Admission happens here,
+	// where the task actually begins, and not when the RPC arrived: waiting then
+	// shows up as a task sitting in this node's queue rather than as a dispatch
+	// the coordinator watches time out.
+	//
+	// The guard never refuses permanently -- a task larger than the whole node
+	// waits for it to drain and then runs alone -- so ctx is the only bound on
+	// this wait, and it is the node's lifecycle context. A timer here would only
+	// convert waiting into a re-dispatch of the same task by the coordinator,
+	// which is the same wait with a round trip added.
+	req := taskRequirement(task)
+	if err := resource.GetGuard().Accept(ctx, planID, taskcommon.Compaction, req); err != nil {
+		log.Warn(ctx, "compaction gave up waiting for the node's budget",
+			mlog.String("requirement", req.String()), mlog.Err(err))
+		// Nothing was reserved, so nothing is released. The executor's own slot
+		// accounting still has to be unwound, which completeTask does.
+		e.completeTask(planID, nil)
+		return
+	}
+	defer resource.GetGuard().Release(planID)
+
+	log.Info(ctx, "start to execute compaction")
 
 	result, err := task.Compact()
 	if err != nil {
-		log.Warn(context.TODO(), "compaction task failed", mlog.Err(err))
-		e.completeTask(task.GetPlanID(), nil)
+		log.Warn(ctx, "compaction task failed", mlog.Err(err))
+		e.completeTask(planID, nil)
 		return
 	}
 
 	// Update task with result
-	e.completeTask(task.GetPlanID(), result)
+	e.completeTask(planID, result)
 
 	// Emit metrics
 	getDataCount := func(binlogs []*datapb.FieldBinlog) int64 {
@@ -246,7 +305,7 @@ func (e *executor) executeTask(task Compactor) {
 		metrics.CompactionDataSourceLabel,
 		metrics.DeleteLabel,
 		fmt.Sprint(task.GetCollection())).Add(float64(deleteCount))
-	log.Info(context.TODO(), "end to execute compaction")
+	log.Info(ctx, "end to execute compaction")
 }
 
 func (e *executor) GetResults(planID int64) []*datapb.CompactionPlanResult {

@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -36,6 +37,9 @@ type mixCompactionTask struct {
 	times *taskcommon.Times
 
 	slotUsage atomic.Int64
+	// requirement caches the two-dimensional estimate the plan ships. The
+	// scalar above stays as its fold, for a worker that predates the vector.
+	requirement atomic.Pointer[taskresource.Requirement]
 }
 
 func (t *mixCompactionTask) GetTaskID() int64 {
@@ -50,21 +54,124 @@ func (t *mixCompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
 }
 
-func (t *mixCompactionTask) GetTaskSlot() int64 {
-	slotUsage := t.slotUsage.Load()
-	if slotUsage == 0 {
-		slotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
-		if t.GetTaskProto().GetType() == datapb.CompactionType_SortCompaction {
-			segment := t.meta.GetHealthySegment(context.Background(), t.GetTaskProto().GetInputSegments()[0])
-			if segment != nil {
-				segSize := segment.getSegmentSize()
-				slotUsage = calculateStatsTaskSlot(segSize)
-				mlog.Info(context.TODO(), "mixCompactionTask get task slot",
-					mlog.Int64("segment size", segSize), mlog.Int64("task slot", slotUsage))
-			}
-		}
-		t.slotUsage.Store(slotUsage)
+// price resolves the input segments ONCE and derives both currencies from that
+// single walk: the scalar an un-upgraded worker accounts in, and the vector a
+// current coordinator places on. Two independent walks would double the meta
+// lookups on the scheduler's per-round path, and could disagree about which
+// segments still exist.
+func (t *mixCompactionTask) price() (int64, taskresource.Requirement) {
+	if slot, req := t.slotUsage.Load(), t.requirement.Load(); slot != 0 && req != nil {
+		return slot, *req
 	}
+	segments, allResolved := t.resolveInputSegments(context.TODO())
+	return t.legacyTaskSlot(segments), t.computeAndCacheRequirement(segments, allResolved)
+}
+
+// GetTaskSlot is the scalar an un-upgraded worker reads, and it deliberately
+// reports the LEGACY figure -- the flat constant for mix, the segment-size step
+// function for sort.
+//
+// The estimate does not go here. Folding a byte estimate onto this field would
+// keep its name and change its scale, and a worker that has not restarted would
+// read the new number against the old scale: a 4.5GiB storage-v3 compaction
+// moves from 4 slots to about 36, so a new coordinator reads such a worker as
+// full roughly nine times too early, on every compaction. That is a
+// cluster-wide throughput collapse reachable by an ordinary partial rollout,
+// and it is what an earlier kill switch existed to undo. Sending each worker
+// the currency it understands -- the vector to those that understand it, the
+// old constants to those that do not -- removes the collision instead of
+// providing a lever for it.
+func (t *mixCompactionTask) GetTaskSlot() int64 {
+	slot, _ := t.price()
+	return slot
+}
+
+// TaskResources states this task's requirement to the scheduler BEFORE it is
+// dispatched, which is what lets the node be chosen for having room rather
+// than for a scalar that stands in for it.
+func (t *mixCompactionTask) TaskResources() *datapb.TaskResources {
+	_, req := t.price()
+	return req.ToProto()
+}
+
+// taskRequirement is the two-dimensional estimate that goes on the wire.
+func (t *mixCompactionTask) taskRequirement() taskresource.Requirement {
+	_, req := t.price()
+	return req
+}
+
+// resolveInputSegments fetches every input segment via meta.GetHealthySegment.
+// It returns the segments that resolved and whether every input segment did;
+// a segment that fails to resolve is logged by ID rather than silently
+// dropped, since it otherwise under-charges the estimate with no signal for
+// an operator to go on.
+func (t *mixCompactionTask) resolveInputSegments(ctx context.Context) ([]*SegmentInfo, bool) {
+	inputSegments := t.GetTaskProto().GetInputSegments()
+	segments := make([]*SegmentInfo, 0, len(inputSegments))
+	allResolved := true
+	for _, segID := range inputSegments {
+		segment := t.meta.GetHealthySegment(ctx, segID)
+		if segment == nil {
+			allResolved = false
+			mlog.Warn(ctx, "mixCompactionTask could not resolve input segment for slot estimation, estimate will under-count it",
+				mlog.Int64("planID", t.GetTaskID()), mlog.Int64("segmentID", segID))
+			continue
+		}
+		segments = append(segments, segment)
+	}
+	return segments, allResolved
+}
+
+// computeAndCacheTaskSlot derives the slot usage from already-resolved
+// segments, so callers that already have the segments in hand (i.e.
+// BuildCompactionRequest) don't pay for a second meta fetch -- and don't
+// race it, since the plan's own SlotUsage would then quietly disagree with
+// which segments the plan actually ships.
+//
+// allResolved must be true only when every one of the task's input segments
+// (not just the ones passed in) resolved: a partial estimate is a real,
+// immediately-usable number, but caching it would turn a transient
+// resolution failure into a permanently wrong slot count for this task
+// instance, since GetTaskSlot short-circuits once t.slotUsage is non-zero.
+func (t *mixCompactionTask) computeAndCacheRequirement(segments []*SegmentInfo, allResolved bool) taskresource.Requirement {
+	if cached := t.requirement.Load(); cached != nil {
+		return *cached
+	}
+
+	req := compactionRequirement(t.GetTaskProto().GetType(), segments, t.GetTaskProto().GetSchema())
+	// Cache only a complete estimate: a partial one is immediately usable but
+	// caching it would turn a transient resolution failure into a permanently
+	// wrong figure for this task instance.
+	if allResolved {
+		t.requirement.Store(&req)
+	}
+	mlog.Info(context.TODO(), "mixCompactionTask priced task",
+		mlog.Int64("planID", t.GetTaskID()),
+		mlog.String("requirement", req.String()),
+		mlog.Bool("cached", allResolved))
+	return req
+}
+
+// legacyTaskSlot is the pricing this task has always reported on the scalar
+// field: a flat constant for mix, the segment-size step function for sort. It
+// is not a fallback -- it is what the scalar field MEANS, and it keeps meaning
+// that so an un-upgraded worker's own accounting stays self-consistent.
+func (t *mixCompactionTask) legacyTaskSlot(segments []*SegmentInfo) int64 {
+	isSort := t.GetTaskProto().GetType() == datapb.CompactionType_SortCompaction
+	slotUsage := paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
+	if isSort && len(segments) > 0 {
+		segSize := segments[0].getSegmentSize()
+		slotUsage = calculateStatsTaskSlot(segSize)
+		mlog.Info(context.TODO(), "mixCompactionTask get legacy task slot",
+			mlog.Int64("segmentSize", segSize), mlog.Int64("taskSlot", slotUsage))
+	}
+	if isSort && len(segments) == 0 {
+		// A sort compaction whose segment did not resolve would otherwise be
+		// pinned at the mix constant for the rest of this task instance's life,
+		// because the cache short-circuits every later call.
+		return slotUsage
+	}
+	t.slotUsage.Store(slotUsage)
 	return slotUsage
 }
 
@@ -364,7 +471,6 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		TotalRows:                 taskProto.GetTotalRows(),
 		Schema:                    taskSchema,
 		PreAllocatedSegmentIDs:    taskProto.GetPreAllocatedSegmentIDs(),
-		SlotUsage:                 t.GetSlotUsage(),
 		MaxSize:                   taskProto.GetMaxSize(),
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
@@ -410,6 +516,15 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		segIDMap[segID] = segInfo.GetDeltalogs()
 		segments = append(segments, segInfo)
 	}
+	// Every input segment above either resolved or the function already
+	// returned, so segments is complete: reuse it here instead of making
+	// GetSlotUsage do its own independent meta fetch, which would both
+	// double the lookups and open a window where the two fetches disagree
+	// about which segments actually exist.
+	plan.TaskResources = t.computeAndCacheRequirement(segments, true).ToProto()
+	// The scalar keeps its original meaning for a worker that predates the
+	// vector; see GetTaskSlot.
+	plan.SlotUsage = t.legacyTaskSlot(segments)
 
 	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments, taskSchema)
 	if err != nil {

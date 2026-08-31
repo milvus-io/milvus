@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -421,7 +422,10 @@ const (
 	fmIndexDefaultSASampleRate = int64(8)
 	fmIndexDefaultBlockBytes   = int64(64)
 	fmIndexSuffixArrayExtra    = int64(6144)
-	bytesPerWorkerMemoryUnit   = int64(8 * 1024 * 1024 * 1024)
+	// The memory unit CalculateNodeSlots counts a worker's memory in. Aliased
+	// so there is a single definition of it across the packages that invert
+	// CalculateNodeSlots.
+	bytesPerWorkerMemoryUnit = taskresource.BytesPerWorkerMemoryUnit
 )
 
 func saturatingAdd(values ...int64) int64 {
@@ -540,17 +544,7 @@ func fmIndexBuildTaskSlots(fieldSize, numRows int64, indexParams []*commonpb.Key
 	// CalculateNodeSlots exposes WorkerSlotUnit * BuildParallel slots per 8 GiB
 	// memory unit. Use the inverse conversion so the coordinator and worker
 	// account for the same amount of memory per slot.
-	workerSlotsPerMemoryUnit := saturatingMul(
-		max(Params.DataNodeCfg.WorkerSlotUnit.GetAsInt64(), 1),
-		max(Params.DataNodeCfg.BuildParallel.GetAsInt64(), 1),
-	)
-	if paramtable.GetRole() == typeutil.StandaloneRole {
-		workerSlotsPerMemoryUnit = max(
-			int64(float64(workerSlotsPerMemoryUnit)*Params.DataNodeCfg.StandaloneSlotRatio.GetAsFloat()),
-			1,
-		)
-	}
-	bytesPerSlot := max(bytesPerWorkerMemoryUnit/workerSlotsPerMemoryUnit, 1)
+	bytesPerSlot := max(bytesPerWorkerMemoryUnit/taskresource.WorkerSlotsPerMemoryUnit(), 1)
 	return max(ceilDiv(estimateFMIndexBuildPeakBytes(fieldSize, numRows, indexParams), bytesPerSlot), 1)
 }
 

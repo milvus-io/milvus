@@ -63,6 +63,19 @@ type clusteringCompactionTask struct {
 	maxRetryTimes int32
 
 	times *taskcommon.Times
+
+	pricing compactionPricing
+}
+
+// TaskResources prices this clustering compaction before a node is picked for
+// it. What it charges is what the task ALLOCATES today -- the write buffer is
+// sized as a fraction of whole-node memory regardless of input size -- not the
+// input-derived grant the factor bounds describe.
+func (t *clusteringCompactionTask) TaskResources() *datapb.TaskResources {
+	taskProto := t.GetTaskProto()
+	return t.pricing.requirement(t.meta, taskProto.GetPlanID(),
+		datapb.CompactionType_ClusteringCompaction,
+		taskProto.GetInputSegments(), taskProto.GetSchema()).ToProto()
 }
 
 func (t *clusteringCompactionTask) GetTaskID() int64 {
@@ -382,11 +395,13 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		plan.FileResources = resources
 	}
 
+	inputSegments := make([]*SegmentInfo, 0, len(taskProto.GetInputSegments()))
 	for _, segID := range taskProto.GetInputSegments() {
 		segInfo := t.meta.GetHealthySegment(context.TODO(), segID)
 		if segInfo == nil {
 			return nil, merr.WrapErrSegmentNotFound(segID)
 		}
+		inputSegments = append(inputSegments, segInfo)
 		plan.SegmentBinlogs = append(plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 			SegmentID:           segID,
 			CollectionID:        segInfo.GetCollectionID(),
@@ -403,6 +418,9 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 			CommitTimestamp:     segInfo.GetCommitTimestamp(),
 		})
 	}
+	plan.TaskResources = t.pricing.fill(
+		compactionRequirement(datapb.CompactionType_ClusteringCompaction, inputSegments, taskProto.GetSchema()),
+	).ToProto()
 	WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
 	mlog.Info(context.TODO(), "Compaction handler build clustering compaction plan", mlog.Any("PreAllocatedLogIDs", logIDRange))
 	return plan, nil

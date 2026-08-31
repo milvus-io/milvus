@@ -5794,6 +5794,23 @@ type dataCoordConfig struct {
 	JSONStatsWriteBatchSize          ParamItem `refreshable:"true"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
+
+	// Task resource estimation
+	ResourceMixCompactionV3Factor ParamItem `refreshable:"true"`
+	ResourceClusteringFactor      ParamItem `refreshable:"true"`
+	ResourceClusteringMinMemory   ParamItem `refreshable:"true"`
+	ResourceClusteringMaxMemory   ParamItem `refreshable:"true"`
+	ResourceArrowExpansionFactor  ParamItem `refreshable:"true"`
+
+	ResourceIndexBuildFactorDefault ParamItem `refreshable:"true"`
+	ResourceIndexBuildCPU           ParamItem `refreshable:"true"`
+	ResourceIndexDecodeWindow       ParamItem `refreshable:"true"`
+	ResourceTextIndexFactor         ParamItem `refreshable:"true"`
+	ResourceJSONKeyIndexFactor      ParamItem `refreshable:"true"`
+
+	ResourceCopySegmentMemory     ParamItem `refreshable:"true"`
+	ResourceRefreshExternalMemory ParamItem `refreshable:"true"`
+	ResourceImportCPUPerFile      ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -7511,6 +7528,124 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 		Export:       true,
 	}
 	p.JSONStatsWriteBatchSize.Init(base.mgr)
+
+	p.ResourceMixCompactionV3Factor = ParamItem{
+		Key:          "dataCoord.resource.mixCompactionV3MemoryFactor",
+		Version:      "3.0.0",
+		DefaultValue: "1.0",
+		Doc: "memory per byte of input for storage-v3 mix compaction; empirically ~0.9 " +
+			"from issue #52180, kept at 1.0 as a conservative bound",
+		Export: true,
+	}
+	p.ResourceMixCompactionV3Factor.Init(base.mgr)
+
+	p.ResourceClusteringFactor = ParamItem{
+		Key:          "dataCoord.resource.clusteringMemoryFactor",
+		Version:      "3.0.0",
+		DefaultValue: "0.3",
+		Doc:          "memory per byte of input granted to clustering compaction",
+		Export:       true,
+	}
+	p.ResourceClusteringFactor.Init(base.mgr)
+
+	p.ResourceClusteringMinMemory = ParamItem{
+		Key:          "dataCoord.resource.clusteringMinMemory",
+		Version:      "3.0.0",
+		DefaultValue: "536870912",
+		Doc:          "lower bound in bytes of the clustering compaction grant",
+		Export:       true,
+	}
+	p.ResourceClusteringMinMemory.Init(base.mgr)
+
+	p.ResourceClusteringMaxMemory = ParamItem{
+		Key:          "dataCoord.resource.clusteringMaxMemory",
+		Version:      "3.0.0",
+		DefaultValue: "8589934592",
+		Doc:          "upper bound in bytes of the clustering compaction grant",
+		Export:       true,
+	}
+	p.ResourceClusteringMaxMemory.Init(base.mgr)
+
+	p.ResourceArrowExpansionFactor = ParamItem{
+		Key:          "dataCoord.resource.arrowExpansionFactor",
+		Version:      "3.0.0",
+		DefaultValue: "1.2",
+		Doc:          "arrow in-memory expansion over binlog MemorySize, for offsets and validity bitmaps",
+		Export:       true,
+	}
+	p.ResourceArrowExpansionFactor.Init(base.mgr)
+
+	p.ResourceIndexBuildFactorDefault = ParamItem{
+		Key:          "dataCoord.resource.indexBuildMemoryFactorDefault",
+		Version:      "3.0.0",
+		DefaultValue: "1.5",
+		Doc:          "build-stage memory multiplier over raw field size for index types not in the built-in factor table",
+		Export:       true,
+	}
+	p.ResourceIndexBuildFactorDefault.Init(base.mgr)
+
+	p.ResourceIndexBuildCPU = ParamItem{
+		Key:          "dataCoord.resource.indexBuildCPU",
+		Version:      "3.0.0",
+		DefaultValue: "1.0",
+		Doc:          "CPU cores charged per index build task; knowhere's build parallelism is fixed by its own pool, so this does not scale with data volume",
+		Export:       true,
+	}
+	p.ResourceIndexBuildCPU.Init(base.mgr)
+
+	p.ResourceIndexDecodeWindow = ParamItem{
+		Key:          "dataCoord.resource.indexBuildDecodeWindow",
+		Version:      "3.0.0",
+		DefaultValue: "67108864",
+		Doc:          "extra in-flight decode window (in bytes) added to storage-v3 index build memory on top of the retained column",
+		Export:       true,
+	}
+	p.ResourceIndexDecodeWindow.Init(base.mgr)
+
+	p.ResourceTextIndexFactor = ParamItem{
+		Key:          "dataCoord.resource.textIndexMemoryFactor",
+		Version:      "3.0.0",
+		DefaultValue: "2.0",
+		Doc:          "memory per byte of touched field for text-index stats sub-jobs",
+		Export:       true,
+	}
+	p.ResourceTextIndexFactor.Init(base.mgr)
+
+	p.ResourceJSONKeyIndexFactor = ParamItem{
+		Key:          "dataCoord.resource.jsonKeyIndexMemoryFactor",
+		Version:      "3.0.0",
+		DefaultValue: "2.0",
+		Doc:          "memory per byte of touched field for json-key-index stats sub-jobs",
+		Export:       true,
+	}
+	p.ResourceJSONKeyIndexFactor.Init(base.mgr)
+
+	p.ResourceCopySegmentMemory = ParamItem{
+		Key:          "dataCoord.resource.copySegmentMemory",
+		Version:      "3.0.0",
+		DefaultValue: "67108864",
+		Doc:          "flat memory in bytes charged for a copy-segment task; the copy is a server-side object-store operation, so no segment bytes pass through this process",
+		Export:       true,
+	}
+	p.ResourceCopySegmentMemory.Init(base.mgr)
+
+	p.ResourceRefreshExternalMemory = ParamItem{
+		Key:          "dataCoord.resource.refreshExternalMemory",
+		Version:      "3.0.0",
+		DefaultValue: "67108864",
+		Doc:          "flat memory in bytes charged for a refresh-external-collection task",
+		Export:       true,
+	}
+	p.ResourceRefreshExternalMemory.Init(base.mgr)
+
+	p.ResourceImportCPUPerFile = ParamItem{
+		Key:          "dataCoord.resource.importCPUPerFile",
+		Version:      "3.0.0",
+		DefaultValue: "0.5",
+		Doc:          "CPU cores charged per concurrently in-flight import file",
+		Export:       true,
+	}
+	p.ResourceImportCPUPerFile.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -7590,6 +7725,12 @@ type dataNodeConfig struct {
 
 	// slot
 	SlotCap ParamItem `refreshable:"true"`
+
+	// resource guard
+	ResourceCPURatio      ParamItem `refreshable:"true"`
+	ResourceMemoryRatio   ParamItem `refreshable:"true"`
+	ResourceHighWatermark ParamItem `refreshable:"true"`
+	ResourceLowWatermark  ParamItem `refreshable:"true"`
 
 	// clustering compaction
 	ClusteringCompactionMemoryBufferRatio ParamItem `refreshable:"true"`
@@ -8186,6 +8327,42 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export:       false,
 	}
 	p.ExternalCollectionTargetRowsPerSegment.Init(base.mgr)
+
+	p.ResourceCPURatio = ParamItem{
+		Key:          "dataNode.resource.cpuRatio",
+		Version:      "3.0.0",
+		DefaultValue: "1.0",
+		Doc:          "ratio of node CPU cores usable by scheduled tasks",
+		Export:       true,
+	}
+	p.ResourceCPURatio.Init(base.mgr)
+
+	p.ResourceMemoryRatio = ParamItem{
+		Key:          "dataNode.resource.memoryRatio",
+		Version:      "3.0.0",
+		DefaultValue: "0.75",
+		Doc:          "ratio of node memory usable by scheduled tasks",
+		Export:       true,
+	}
+	p.ResourceMemoryRatio.Init(base.mgr)
+
+	p.ResourceHighWatermark = ParamItem{
+		Key:          "dataNode.resource.highWatermark",
+		Version:      "3.0.0",
+		DefaultValue: "0.85",
+		Doc:          "measured memory ratio above which the node stops admitting new tasks",
+		Export:       true,
+	}
+	p.ResourceHighWatermark.Init(base.mgr)
+
+	p.ResourceLowWatermark = ParamItem{
+		Key:          "dataNode.resource.lowWatermark",
+		Version:      "3.0.0",
+		DefaultValue: "0.75",
+		Doc:          "measured memory ratio below which admission resumes",
+		Export:       true,
+	}
+	p.ResourceLowWatermark.Init(base.mgr)
 }
 
 type streamingConfig struct {

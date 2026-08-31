@@ -26,6 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus/internal/datanode/resource"
 	"github.com/milvus-io/milvus/internal/datanode/taskcost"
 	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -245,6 +246,31 @@ func (sched *TaskScheduler) processTask(t Task) {
 	}()
 	sched.TaskQueue.AddActiveTask(t)
 	defer sched.TaskQueue.PopActiveTask(t.Name())
+
+	// Reserve the node's budget before any stage runs, and hold it until the
+	// last one is over. Admission belongs here, where the task actually starts,
+	// rather than at the RPC that queued it: waiting then shows as a task
+	// sitting in this node's queue instead of a dispatch the coordinator watches
+	// time out.
+	//
+	// t.Ctx() is the only bound on that wait, and deliberately so. The guard
+	// never refuses permanently -- a task larger than the whole node waits for
+	// it to drain and then runs alone -- so a timeout here would only convert
+	// waiting into a re-dispatch of the same task. The task's own context ends
+	// when the job is dropped or the node shuts down, which are the two cases
+	// where waiting has stopped being useful.
+	req := t.GetResourceRequirement()
+	if err := resource.GetGuard().Accept(t.Ctx(), t.GetTaskID(), t.GetTaskType(), req); err != nil {
+		mlog.Warn(t.Ctx(), "task gave up waiting for the node's budget",
+			mlog.String("task", t.Name()), mlog.String("requirement", req.String()), mlog.Err(err))
+		// Nothing was reserved, so nothing is released. The wait ending says
+		// nothing about the task, so it goes back for another attempt -- which
+		// is what getStateFromError makes of a cancellation everywhere else.
+		t.SetState(getStateFromError(errCancel), err.Error())
+		return
+	}
+	defer resource.GetGuard().Release(t.GetTaskID())
+
 	var (
 		indexTask  *indexBuildTask
 		costCPUNum int64
