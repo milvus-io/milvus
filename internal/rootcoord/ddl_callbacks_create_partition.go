@@ -61,11 +61,7 @@ func (c *Core) broadcastCreatePartition(ctx context.Context, in *milvuspb.Create
 		return 0, merr.Wrap(err, "failed to allocate partition ID")
 	}
 
-	channels := make([]string, 0, collMeta.ShardsNum+1)
-	channels = append(channels, streaming.WAL().ControlChannel())
-	for i := 0; i < int(collMeta.ShardsNum); i++ {
-		channels = append(channels, collMeta.VirtualChannelNames[i])
-	}
+	channels := partitionDDLBroadcastChannels(collMeta.VirtualChannelNames)
 	msg := message.NewCreatePartitionMessageBuilderV1().
 		WithHeader(&message.CreatePartitionMessageHeader{
 			CollectionId: collMeta.CollectionID,
@@ -107,4 +103,25 @@ func (c *DDLCallback) createPartitionV1AckCallback(ctx context.Context, result m
 			ce.OptLPCMPartitionName(body.PartitionName),
 			ce.OptLPCMMsgType(commonpb.MsgType_CreatePartition),
 		))
+}
+
+// partitionDDLBroadcastChannels lists the channels a partition DDL must reach:
+// the control channel plus EVERY vchannel the collection has.
+//
+// Not VirtualChannelNames[0:ShardsNum]. That indexing assumes the live shards
+// are the first ShardsNum entries of the list, which a shard split breaks in
+// both directions at once: the list grows with the split's targets while the
+// retired sources stay in it, and ShardsNum counts only the routable shards. A
+// collection rehashed from 2 to 3 has five vchannels and ShardsNum 3, so the
+// slice is the two dead sources plus one of the three live shards -- the other
+// two never learn the partition was created or dropped.
+//
+// A retired source is included deliberately. It still holds that partition's
+// segments until adoption drops them, the streamingnode tracks partitions per
+// vchannel, and neither partition handler is gated on the split fence, so the
+// append succeeds and keeps the two views in agreement.
+func partitionDDLBroadcastChannels(vchannels []string) []string {
+	channels := make([]string, 0, len(vchannels)+1)
+	channels = append(channels, streaming.WAL().ControlChannel())
+	return append(channels, vchannels...)
 }

@@ -286,6 +286,10 @@ func (m *GrpcRootCoordClient) AlterCollection(ctx context.Context, in *milvuspb.
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) CommitShardSplitRouting(ctx context.Context, in *rootcoordpb.CommitShardSplitRoutingRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) AlterCollectionField(ctx context.Context, in *milvuspb.AlterCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

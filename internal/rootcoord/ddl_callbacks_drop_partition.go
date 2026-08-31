@@ -22,7 +22,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
@@ -59,11 +58,7 @@ func (c *Core) broadcastDropPartition(ctx context.Context, in *milvuspb.DropPart
 		return errIgnoredDropPartition
 	}
 
-	channels := make([]string, 0, collMeta.ShardsNum+1)
-	channels = append(channels, streaming.WAL().ControlChannel())
-	for i := 0; i < int(collMeta.ShardsNum); i++ {
-		channels = append(channels, collMeta.VirtualChannelNames[i])
-	}
+	channels := partitionDDLBroadcastChannels(collMeta.VirtualChannelNames)
 
 	msg := message.NewDropPartitionMessageBuilderV1().
 		WithHeader(&message.DropPartitionMessageHeader{
