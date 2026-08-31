@@ -26,19 +26,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDeriveHashCompatMatchesLegacyModulo(t *testing.T) {
+// lookup fails the test on an unowned residue, which every table built by
+// DeriveHash forbids.
+func lookup(t *testing.T, table *ResidueTable, value uint64) string {
+	t.Helper()
+	vchannel, ok := table.LookupOK(value)
+	require.True(t, ok, "value %d is unowned", value)
+	return vchannel
+}
+
+func TestDeriveCompatMatchesLegacyModulo(t *testing.T) {
 	channels := []string{"ch0", "ch1", "ch2"}
-	table, err := DeriveHashCompat(channels)
+	table, err := deriveCompat(channels)
 	require.NoError(t, err)
 	assert.EqualValues(t, 3, table.NumSlots())
 
 	for hash := uint64(0); hash < 30; hash++ {
-		assert.Equal(t, channels[hash%3], table.Lookup(hash), "hash %d", hash)
+		assert.Equal(t, channels[hash%3], lookup(t, table, hash), "hash %d", hash)
 	}
 }
 
-func TestDeriveHashCompatRejectsNoChannels(t *testing.T) {
-	_, err := DeriveHashCompat(nil)
+func TestDeriveCompatRejectsNoChannels(t *testing.T) {
+	_, err := deriveCompat(nil)
 	assert.Error(t, err)
 }
 
@@ -47,7 +56,7 @@ func TestDeriveHashSingleShardOwnsEverything(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, table.NumSlots())
 	for hash := uint64(0); hash < 10; hash++ {
-		assert.Equal(t, "only", table.Lookup(hash))
+		assert.Equal(t, "only", lookup(t, table, hash))
 	}
 }
 
@@ -64,13 +73,13 @@ func TestDeriveHashAfterOneDoubling(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 4, table.NumSlots())
 
-	assert.Equal(t, "left", table.Lookup(0))
-	assert.Equal(t, "survivor", table.Lookup(1))
-	assert.Equal(t, "right", table.Lookup(2))
-	assert.Equal(t, "survivor", table.Lookup(3))
+	assert.Equal(t, "left", lookup(t, table, 0))
+	assert.Equal(t, "survivor", lookup(t, table, 1))
+	assert.Equal(t, "right", lookup(t, table, 2))
+	assert.Equal(t, "survivor", lookup(t, table, 3))
 	// And it wraps: 4 is residue 0 again.
-	assert.Equal(t, "left", table.Lookup(4))
-	assert.Equal(t, "survivor", table.Lookup(101))
+	assert.Equal(t, "left", lookup(t, table, 4))
+	assert.Equal(t, "survivor", lookup(t, table, 101))
 }
 
 func TestDeriveHashMultiResidueShard(t *testing.T) {
@@ -80,10 +89,10 @@ func TestDeriveHashMultiResidueShard(t *testing.T) {
 	})
 	require.NoError(t, err)
 	for r := uint64(0); r < 6; r++ {
-		assert.Equal(t, "wide", table.Lookup(r))
+		assert.Equal(t, "wide", lookup(t, table, r))
 	}
-	assert.Equal(t, "narrow", table.Lookup(6))
-	assert.Equal(t, "narrow", table.Lookup(7))
+	assert.Equal(t, "narrow", lookup(t, table, 6))
+	assert.Equal(t, "narrow", lookup(t, table, 7))
 }
 
 func TestDeriveHashRejectsMalformed(t *testing.T) {
@@ -91,21 +100,25 @@ func TestDeriveHashRejectsMalformed(t *testing.T) {
 		name    string
 		modulus uint64
 		shards  []HashShard
+		errText string
 	}{
 		{
 			name:    "zero modulus",
 			modulus: 0,
 			shards:  []HashShard{{Vchannel: "a", Buckets: []uint64{0}}},
+			errText: "must be positive",
 		},
 		{
 			name:    "modulus above the cap",
 			modulus: maxModulus + 1,
 			shards:  []HashShard{{Vchannel: "a", Buckets: []uint64{0}}},
+			errText: "exceeds the cap",
 		},
 		{
 			name:    "no shards",
 			modulus: 2,
 			shards:  nil,
+			errText: "at least one shard",
 		},
 		{
 			name:    "shard owning no residue",
@@ -114,11 +127,13 @@ func TestDeriveHashRejectsMalformed(t *testing.T) {
 				{Vchannel: "a", Buckets: []uint64{0, 1}},
 				{Vchannel: "dead", Buckets: nil},
 			},
+			errText: `shard "dead" owns no residue`,
 		},
 		{
 			name:    "residue not below the modulus",
 			modulus: 2,
 			shards:  []HashShard{{Vchannel: "a", Buckets: []uint64{0, 2}}},
+			errText: "not below the modulus",
 		},
 		{
 			name:    "gap",
@@ -127,6 +142,7 @@ func TestDeriveHashRejectsMalformed(t *testing.T) {
 				{Vchannel: "a", Buckets: []uint64{0, 1}},
 				{Vchannel: "b", Buckets: []uint64{2}},
 			},
+			errText: "gap: residue 3",
 		},
 		{
 			name:    "overlap between shards",
@@ -135,22 +151,34 @@ func TestDeriveHashRejectsMalformed(t *testing.T) {
 				{Vchannel: "a", Buckets: []uint64{0, 1}},
 				{Vchannel: "b", Buckets: []uint64{1}},
 			},
+			errText: `overlap at residue 1 (mod 2): shards "a" and "b"`,
 		},
 		{
+			// Reported as one shard's malformed entry, not as an overlap with a
+			// second shard that does not exist.
 			name:    "residue listed twice by one shard",
 			modulus: 2,
 			shards: []HashShard{
 				{Vchannel: "a", Buckets: []uint64{0, 0}},
 				{Vchannel: "b", Buckets: []uint64{1}},
 			},
+			errText: `shard "a" lists residue 0 (mod 2) twice`,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := DeriveHash(tc.modulus, tc.shards)
-			assert.Error(t, err)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.errText)
 		})
 	}
+}
+
+// The cap matches the bound schemapb states for routing_modulus, so a value the
+// meta can legitimately carry is never rejected and a corrupt one cannot make
+// the slot array enormous.
+func TestModulusCapMatchesTheMetaBound(t *testing.T) {
+	assert.EqualValues(t, 1<<15, maxModulus)
 }
 
 // A split's targets deliberately cover only their source's keys, so the partial
@@ -176,7 +204,6 @@ func TestDeriveHashPartialAllowsAnUncoveredKeySpace(t *testing.T) {
 	assert.False(t, ok)
 	_, ok = table.LookupOK(3)
 	assert.False(t, ok)
-	assert.Equal(t, "", table.Lookup(3))
 }
 
 func TestDeriveHashPartialStillRejectsOverlap(t *testing.T) {
@@ -328,7 +355,7 @@ func TestRepeatedSplitsPreserveOwnership(t *testing.T) {
 
 		out := make([]string, numKeys)
 		for hash := 0; hash < numKeys; hash++ {
-			out[hash] = table.Lookup(uint64(hash))
+			out[hash] = lookup(t, table, uint64(hash))
 		}
 		return out
 	}
