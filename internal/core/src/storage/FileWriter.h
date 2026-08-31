@@ -354,22 +354,40 @@ class FileWriteWorkerPool {
                 std::thread::hardware_concurrency());
             nr_worker = std::thread::hardware_concurrency();
         }
-        std::shared_ptr<folly::CPUThreadPoolExecutor> old_executor = nullptr;
+        std::shared_ptr<folly::CPUThreadPoolExecutor> retired_executor = nullptr;
         {
+            // held across the resize so no task is submitted to a pool that is
+            // being taken down, and so two reconfigurations cannot interleave
             std::lock_guard<std::mutex> lock(executor_mutex_);
-            old_executor = executor_;
-            if (nr_worker > 0) {
+            auto current = executor_ == nullptr
+                               ? 0
+                               : static_cast<int>(executor_->numThreads());
+            if (nr_worker == current) {
+                // every common.diskWrite* key funnels into this call, so most
+                // reconfigurations do not touch the worker count at all
+                return;
+            }
+            if (nr_worker == 0) {
+                retired_executor = std::move(executor_);
+                executor_ = nullptr;
+            } else if (executor_ == nullptr) {
                 executor_ = std::make_shared<folly::CPUThreadPoolExecutor>(
                     nr_worker,
                     std::make_shared<folly::NamedThreadFactory>(
                         "MILVUS_FL_WR_"));
             } else {
-                executor_ = nullptr;
+                // resize in place: replacing the executor would either discard
+                // the tasks still queued on it or, while the old one drains,
+                // run up to 2 * nr_worker writes at once and break the very
+                // concurrency cap this setting exists to enforce
+                executor_->setNumThreads(nr_worker);
             }
         }
-        if (old_executor != nullptr) {
-            old_executor->stop();
-            old_executor->join();
+        if (retired_executor != nullptr) {
+            // join(), not stop(): stop() makes every worker return as soon as
+            // its current task ends and leaves the queued tasks unexecuted,
+            // which breaks the promises they carry.
+            retired_executor->join();
         }
         LOG_INFO("Set the number of write worker to {}", nr_worker);
     }
@@ -386,8 +404,7 @@ class FileWriteWorkerPool {
 
     bool
     HasPool() const {
-        // no lock here, so it's not thread-safe
-        // but it's ok because we still can write without the pool
+        std::lock_guard<std::mutex> lock(executor_mutex_);
         return executor_ != nullptr;
     }
 
@@ -402,7 +419,7 @@ class FileWriteWorkerPool {
 
  private:
     std::shared_ptr<folly::CPUThreadPoolExecutor> executor_{nullptr};
-    std::mutex executor_mutex_{};
+    mutable std::mutex executor_mutex_{};
 };
 
 }  // namespace milvus::storage

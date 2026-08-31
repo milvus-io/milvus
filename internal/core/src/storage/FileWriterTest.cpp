@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <stdint.h>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -1149,4 +1150,145 @@ TEST_F(FileWriterTest, ConfigChangeDuringFileWriterOperations) {
     std::string content2((std::istreambuf_iterator<char>(file2)),
                          std::istreambuf_iterator<char>());
     EXPECT_EQ(content2, test_data2);
+}
+
+// A write that fails inside the worker pool must reach the caller. folly's
+// Future::wait() does not rethrow the stored exception, so taking the result
+// out explicitly is what makes this observable instead of a phantom success.
+TEST_F(FileWriterTest, PooledWriteFailureIsReportedToCaller) {
+    // /dev/full is seekable and fails every write with ENOSPC
+    if (!std::filesystem::exists("/dev/full")) {
+        GTEST_SKIP() << "/dev/full is not available on this platform";
+    }
+
+    FileWriteWorkerPool::GetInstance().Configure(1);
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+    FileWriter::SetBufferSize(kBufferSize);
+
+    FileWriter writer("/dev/full");
+    // larger than the internal buffer, so the write is handed to the pool
+    std::vector<char> data(kBufferSize * 4, 'x');
+    EXPECT_THROW(writer.Write(data.data(), data.size()), std::runtime_error);
+
+    FileWriteWorkerPool::GetInstance().Configure(0);
+}
+
+// Swapping the pool must not discard the tasks that are still queued on the
+// outgoing executor: their promises would be broken and, since the caller is
+// blocked on the future, the write would be silently skipped.
+TEST_F(FileWriterTest, ExecutorReconfigDoesNotDropQueuedTasks) {
+    auto& pool = FileWriteWorkerPool::GetInstance();
+    pool.SetWorker(1);
+
+    std::atomic<bool> started{false};
+    std::atomic<int> executed{0};
+
+    // occupy the only worker long enough for the tasks below to queue up
+    ASSERT_TRUE(pool.AddTask([&]() {
+        started.store(true, std::memory_order_release);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        executed.fetch_add(1, std::memory_order_acq_rel);
+    }));
+
+    constexpr int kQueuedTasks = 8;
+    for (int i = 0; i < kQueuedTasks; ++i) {
+        ASSERT_TRUE(pool.AddTask([&]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            executed.fetch_add(1, std::memory_order_acq_rel);
+        }));
+    }
+
+    // make sure the worker is busy, i.e. the tasks above are really queued
+    while (!started.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+
+    // resizing keeps the same executor, so this returns without waiting; what
+    // matters is that no queued task is discarded on the way
+    pool.SetWorker(2);
+
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (executed.load(std::memory_order_acquire) < kQueuedTasks + 1 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_EQ(executed.load(std::memory_order_acquire), kQueuedTasks + 1);
+
+    pool.SetWorker(0);
+}
+
+// A write that failed has already closed the file and freed the aligned
+// buffer, so a caller that swallows the error and keeps writing used to
+// memcpy into a null pointer. It must get an error instead.
+TEST_F(FileWriterTest, WriteAfterFailedWriteIsRejected) {
+    if (!std::filesystem::exists("/dev/full")) {
+        GTEST_SKIP() << "/dev/full is not available on this platform";
+    }
+
+    FileWriteWorkerPool::GetInstance().Configure(1);
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+    FileWriter::SetBufferSize(kBufferSize);
+
+    FileWriter writer("/dev/full");
+    std::vector<char> data(kBufferSize * 4, 'x');
+    EXPECT_THROW(writer.Write(data.data(), data.size()), std::runtime_error);
+
+    // small enough to take the fast path, which is where the freed buffer was
+    // dereferenced before the guard was added
+    std::vector<char> small(16, 'y');
+    EXPECT_THROW(writer.Write(small.data(), small.size()), std::runtime_error);
+
+    FileWriteWorkerPool::GetInstance().Configure(0);
+}
+
+// The same invalidation applies to Finish(): with direct I/O it would memset
+// the freed aligned buffer, and with an empty buffer it would report the stale
+// file_size_ as a successful finalization.
+TEST_F(FileWriterTest, FinishAfterFailedWriteIsRejected) {
+    if (!std::filesystem::exists("/dev/full")) {
+        GTEST_SKIP() << "/dev/full is not available on this platform";
+    }
+
+    FileWriteWorkerPool::GetInstance().Configure(1);
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+    FileWriter::SetBufferSize(kBufferSize);
+
+    FileWriter writer("/dev/full");
+    std::vector<char> data(kBufferSize * 4, 'x');
+    EXPECT_THROW(writer.Write(data.data(), data.size()), std::runtime_error);
+    EXPECT_THROW(writer.Finish(), std::runtime_error);
+
+    FileWriteWorkerPool::GetInstance().Configure(0);
+}
+
+// Turning the pool off is the one path that still tears an executor down, so
+// it must drain the queue rather than discard it.
+TEST_F(FileWriterTest, ExecutorShutdownDrainsQueuedTasks) {
+    auto& pool = FileWriteWorkerPool::GetInstance();
+    pool.SetWorker(1);
+
+    std::atomic<bool> started{false};
+    std::atomic<int> executed{0};
+
+    ASSERT_TRUE(pool.AddTask([&]() {
+        started.store(true, std::memory_order_release);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        executed.fetch_add(1, std::memory_order_acq_rel);
+    }));
+
+    constexpr int kQueuedTasks = 8;
+    for (int i = 0; i < kQueuedTasks; ++i) {
+        ASSERT_TRUE(pool.AddTask([&]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            executed.fetch_add(1, std::memory_order_acq_rel);
+        }));
+    }
+
+    while (!started.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+
+    pool.SetWorker(0);
+
+    EXPECT_EQ(executed.load(std::memory_order_acquire), kQueuedTasks + 1);
 }
