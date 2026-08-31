@@ -33,9 +33,12 @@ import (
 )
 
 const (
-	// SnapshotFormatVersion is the current snapshot metadata format. Version 5
-	// adds skip-index semantics while retaining the version-4 Avro manifest layout.
-	SnapshotFormatVersion = 5
+	// SnapshotFormatVersion is the current snapshot metadata and manifest format.
+	// skip_index stays on version 4 because it adds optional protobuf metadata
+	// without changing the Avro manifest layout. Snapshot compatibility is
+	// forward-only across upgrades: an older binary may discard this field and
+	// does not have to preserve skip-index behavior when reading a newer snapshot.
+	SnapshotFormatVersion = 4
 )
 
 var (
@@ -85,7 +88,7 @@ func ManifestSchemaV3() (avro.Schema, error) {
 	return manifestSchemaV3, manifestSchemaV3Err
 }
 
-// ManifestSchemaV4 returns the Avro schema used by version-4 and version-5 snapshots.
+// ManifestSchemaV4 returns the Avro schema used by current snapshot manifests.
 func ManifestSchemaV4() (avro.Schema, error) {
 	manifestSchemaV4Once.Do(func() {
 		manifestSchemaV4, manifestSchemaV4Err = avro.Parse(AvroSchemaV4())
@@ -102,8 +105,7 @@ func ManifestSchemaByVersion(version int) (avro.Schema, error) {
 		return ManifestSchemaV2()
 	case 3:
 		return ManifestSchemaV3()
-	case 4, 5:
-		// Version 5 changes snapshot metadata semantics only.
+	case 4:
 		return ManifestSchemaV4()
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported manifest schema version: %d", version)

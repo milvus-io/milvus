@@ -206,7 +206,9 @@ func (c *snapshotFileRefCollector) addStorageV3Segment(ctx context.Context, segm
 		// list concrete objects separately so export copies physical files. The
 		// complete StorageV3 root is copied even for skip-index snapshots because
 		// the source manifest is not rewritten and data shares this directory with
-		// reusable index artifacts. Index metadata is omitted separately.
+		// reusable index artifacts. Index metadata is omitted separately, and new
+		// readers use that metadata as the loading allowlist. Older readers may not
+		// preserve this skip-index behavior after a version downgrade.
 		walkPrefix := normalizedBasePath
 		if walkPrefix[len(walkPrefix)-1] != '/' {
 			walkPrefix += "/"

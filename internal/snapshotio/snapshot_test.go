@@ -46,14 +46,9 @@ func TestManifestSchemaByVersion(t *testing.T) {
 	assert.NotContains(t, AvroSchemaV3(), "child_fields")
 	assert.Contains(t, AvroSchemaV4(), "child_fields")
 
-	version4Schema, err := ManifestSchemaByVersion(4)
-	require.NoError(t, err)
-	require.NotNil(t, version4Schema)
-
 	currentSchema, err := ManifestSchemaByVersion(SnapshotFormatVersion)
 	require.NoError(t, err)
 	assert.NotNil(t, currentSchema)
-	assert.Equal(t, version4Schema, currentSchema)
 
 	schema, err = ManifestSchemaByVersion(SnapshotFormatVersion + 1)
 	require.Error(t, err)
@@ -71,12 +66,8 @@ func TestParseSnapshotMetadataWithVersionCheck(t *testing.T) {
 	assert.Equal(t, int32(3), metadata.GetFormatVersion())
 	assert.Equal(t, int64(10), metadata.GetSnapshotInfo().GetId())
 
-	metadata, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{"format_version":4}`))
-	require.NoError(t, err)
-	assert.Equal(t, int32(4), metadata.GetFormatVersion())
-
 	metadata, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{
-		"format_version": 5,
+		"format_version": 4,
 		"snapshot_info": {"skip_index": true}
 	}`))
 	require.NoError(t, err)
