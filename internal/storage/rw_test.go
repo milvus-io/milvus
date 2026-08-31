@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -299,6 +300,7 @@ func (s *PackedBinlogRecordSuite) TestStorageV1RejectsNullableArrayOfVectorWrite
 		WithStorageConfig(s.storageConfig),
 	)
 	s.Error(err)
+	s.ErrorIs(err, merr.ErrStorage)
 	s.Contains(err.Error(), "nullable ArrayOfVector is not supported in V1 storage format")
 }
 
@@ -404,6 +406,7 @@ func (s *PackedBinlogRecordSuite) TestStorageV1RejectsElementNullableArrayWriter
 				WithStorageConfig(s.storageConfig),
 			)
 			s.Error(err)
+			s.ErrorIs(err, merr.ErrStorage)
 			s.Contains(err.Error(), tc.errString)
 		})
 	}

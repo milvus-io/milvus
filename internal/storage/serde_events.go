@@ -205,7 +205,7 @@ func valueDeserializer(r Record, v []*Value, fields []*schemapb.FieldSchema, sho
 
 				d, err := serdeMap[dt].deserialize(r.Column(j), i, elementType, dim, shouldCopy, f.GetElementNullable())
 				if err != nil {
-					return merr.WrapErrServiceInternalMsg("deserialize error on type %s: %v", dt, err)
+					return merr.Wrapf(err, "deserialize error on type %s", dt)
 				}
 				m[j] = d // TODO: avoid memory copy here.
 			}
@@ -459,11 +459,26 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 		arrowSchema = arrow.NewSchema(fields, nil)
 	}
 
+	type arrayOfVectorSerdeConfig struct {
+		elementType     schemapb.DataType
+		dim             int
+		elementNullable bool
+	}
 	builders := make(map[FieldID]array.Builder, len(allFieldsSchema))
-	elementTypes := make(map[FieldID]schemapb.DataType, len(allFieldsSchema)) // For ArrayOfVector
+	arrayOfVectorConfigs := make(map[FieldID]arrayOfVectorSerdeConfig, len(allFieldsSchema))
 	for i, f := range allFieldsSchema {
 		if f.DataType == schemapb.DataType_ArrayOfVector {
-			elementTypes[f.FieldID] = f.GetElementType()
+			dim, err := typeutil.GetDim(f)
+			if err != nil {
+				return nil, merr.WrapErrAsSysError(
+					merr.Wrapf(err, "get dimension for ArrayOfVector field %s", f.GetName()),
+				)
+			}
+			arrayOfVectorConfigs[f.FieldID] = arrayOfVectorSerdeConfig{
+				elementType:     f.GetElementType(),
+				dim:             int(dim),
+				elementNullable: f.GetElementNullable(),
+			}
 		}
 
 		builders[f.FieldID] = array.NewBuilder(memory.DefaultAllocator, arrowSchema.Field(i).Type)
@@ -479,14 +494,9 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 				panic("unknown type")
 			}
 
-			// Get element type for ArrayOfVector, otherwise use None
-			elementType := schemapb.DataType_None
-			if types[fid] == schemapb.DataType_ArrayOfVector {
-				elementType = elementTypes[fid]
-			}
-
-			if err := typeEntry.serialize(builders[fid], e, elementType); err != nil {
-				return nil, merr.WrapErrServiceInternalMsg("serialize error on type %s: %v", types[fid], err)
+			config := arrayOfVectorConfigs[fid]
+			if err := typeEntry.serialize(builders[fid], e, config.elementType, config.dim, config.elementNullable); err != nil {
+				return nil, merr.Wrapf(err, "serialize error on type %s", types[fid])
 			}
 		}
 	}

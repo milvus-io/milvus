@@ -2189,10 +2189,8 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 			switch subFieldData := subField.Field.(type) {
 			case *schemapb.FieldData_Scalars:
 				if scalarArray := subFieldData.Scalars.GetArrayData(); scalarArray != nil {
-					currentArrayLen = len(scalarArray.GetData())
+					currentArrayLen = len(scalarArray.Data)
 					if totalSubFields > 1 {
-						subFieldSchema := subFieldSchema
-						scalarArray := scalarArray
 						rowElementCounters = append(rowElementCounters, rowElementCounter{
 							name: subField.GetFieldName(),
 							count: func(physicalRow int) (int, error) {
@@ -2231,10 +2229,8 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 				}
 			case *schemapb.FieldData_Vectors:
 				if vectorArray := subFieldData.Vectors.GetVectorArray(); vectorArray != nil {
-					currentArrayLen = len(vectorArray.GetData())
+					currentArrayLen = len(vectorArray.Data)
 					if totalSubFields > 1 {
-						subFieldSchema := subFieldSchema
-						vectorArray := vectorArray
 						var vectorWidth int
 						rowElementCounters = append(rowElementCounters, rowElementCounter{
 							name: subField.GetFieldName(),

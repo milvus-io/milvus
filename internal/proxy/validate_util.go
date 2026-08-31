@@ -1107,15 +1107,8 @@ func (v *validateUtil) checkDoubleFieldData(field *schemapb.FieldData, fieldSche
 
 func (v *validateUtil) checkArrayElement(array *schemapb.ArrayArray, field *schemapb.FieldSchema) error {
 	data := array.GetData()
-	rowAt := func(i int) (*schemapb.ScalarField, []bool) {
-		return data[i], typeutil.GetArrayElementValidData(data[i])
-	}
-	return v.checkArrayElementRows(len(data), rowAt, field, field.GetElementNullable())
-}
-
-func (v *validateUtil) checkArrayElementRows(rows int, rowAt func(int) (*schemapb.ScalarField, []bool), field *schemapb.FieldSchema, elementNullable bool) error {
 	validateValidity := func(validData []bool, payloadLen, rowIdx int) error {
-		if elementNullable {
+		if field.GetElementNullable() {
 			validElements := getValidNumber(validData)
 			if validElements != payloadLen {
 				return merr.WrapErrParameterInvalid(validElements, payloadLen,
@@ -1131,8 +1124,8 @@ func (v *validateUtil) checkArrayElementRows(rows int, rowAt func(int) (*schemap
 
 	switch field.GetElementType() {
 	case schemapb.DataType_Bool:
-		for rowIdx := 0; rowIdx < rows; rowIdx++ {
-			row, validData := rowAt(rowIdx)
+		for rowIdx, row := range data {
+			validData := typeutil.GetArrayElementValidData(row)
 			if row.GetData() == nil {
 				return merr.WrapErrParameterInvalid("bool array", "nil array", "insert data does not match")
 			}
@@ -1146,8 +1139,8 @@ func (v *validateUtil) checkArrayElementRows(rows int, rowAt func(int) (*schemap
 			}
 		}
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-		for rowIdx := 0; rowIdx < rows; rowIdx++ {
-			row, validData := rowAt(rowIdx)
+		for rowIdx, row := range data {
+			validData := typeutil.GetArrayElementValidData(row)
 			if row.GetData() == nil {
 				return merr.WrapErrParameterInvalid("int array", "nil array", "insert data does not match")
 			}
@@ -1174,8 +1167,8 @@ func (v *validateUtil) checkArrayElementRows(rows int, rowAt func(int) (*schemap
 			}
 		}
 	case schemapb.DataType_Int64:
-		for rowIdx := 0; rowIdx < rows; rowIdx++ {
-			row, validData := rowAt(rowIdx)
+		for rowIdx, row := range data {
+			validData := typeutil.GetArrayElementValidData(row)
 			if row.GetData() == nil {
 				return merr.WrapErrParameterInvalid("int64 array", "nil array", "insert data does not match")
 			}
@@ -1189,8 +1182,8 @@ func (v *validateUtil) checkArrayElementRows(rows int, rowAt func(int) (*schemap
 			}
 		}
 	case schemapb.DataType_Float:
-		for rowIdx := 0; rowIdx < rows; rowIdx++ {
-			row, validData := rowAt(rowIdx)
+		for rowIdx, row := range data {
+			validData := typeutil.GetArrayElementValidData(row)
 			if row.GetData() == nil {
 				return merr.WrapErrParameterInvalid("float array", "nil array", "insert data does not match")
 			}
@@ -1204,8 +1197,8 @@ func (v *validateUtil) checkArrayElementRows(rows int, rowAt func(int) (*schemap
 			}
 		}
 	case schemapb.DataType_Double:
-		for rowIdx := 0; rowIdx < rows; rowIdx++ {
-			row, validData := rowAt(rowIdx)
+		for rowIdx, row := range data {
+			validData := typeutil.GetArrayElementValidData(row)
 			if row.GetData() == nil {
 				return merr.WrapErrParameterInvalid("double array", "nil array", "insert data does not match")
 			}
@@ -1219,8 +1212,8 @@ func (v *validateUtil) checkArrayElementRows(rows int, rowAt func(int) (*schemap
 			}
 		}
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
-		for rowIdx := 0; rowIdx < rows; rowIdx++ {
-			row, validData := rowAt(rowIdx)
+		for rowIdx, row := range data {
+			validData := typeutil.GetArrayElementValidData(row)
 			if row.GetData() == nil {
 				return merr.WrapErrParameterInvalid("string array", "nil array", "insert data does not match")
 			}
@@ -1295,6 +1288,14 @@ func (v *validateUtil) checkNestedArrayValue(
 
 	elementSchema := arrayType.GetArrayElement()
 	if elementSchema.GetArrayElement() != nil {
+		// TODO: handle this when we support element valid_data for nested array
+		if len(typeutil.GetArrayElementValidData(row)) > 0 {
+			return merr.WrapErrParameterInvalidMsg(
+				"nested array field %s does not support element valid_data at level %d",
+				fieldName,
+				level,
+			)
+		}
 		arrayData := row.GetArrayData()
 		if arrayData == nil {
 			return merr.WrapErrParameterInvalidMsg(
@@ -1351,7 +1352,7 @@ func (v *validateUtil) checkNestedArrayValue(
 		if err != nil {
 			return err
 		}
-		if err := verifyCapacityPerRow(leafArray.GetData(), maxCapacity, elementType); err != nil {
+		if err := verifyCapacityPerRow(leafArray, maxCapacity, elementType, false); err != nil {
 			return err
 		}
 	}
@@ -1527,14 +1528,15 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 		validData := typeutil.GetVectorArrayElementValidData(vector)
 		if fieldSchema.GetElementNullable() {
 			requireValidData := vectorCount > 0 || len(validData) > 0
-			if err := funcutil.ValidateNullableVectorCompactRows(
-				fmt.Sprintf("%s[%d]", field.GetFieldName(), rowIdx),
+			if err := funcutil.ValidateNullableVectorCompactRow(
+				field.GetFieldName(),
+				rowIdx,
 				validData,
 				uint64(vectorCount),
 				uint64(len(validData)),
 				requireValidData,
 			); err != nil {
-				return merr.WrapErrParameterInvalidMsg(err.Error())
+				return err
 			}
 			if err := checkCapacity(len(validData), rowIdx); err != nil {
 				return err

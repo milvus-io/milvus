@@ -9401,6 +9401,18 @@ func TestValidateNestedArrayFieldData(t *testing.T) {
 		assert.Contains(t, err.Error(), "undeclared null value at level 1")
 	})
 
+	t.Run("intermediate element validity is rejected", func(t *testing.T) {
+		intermediate := arrayRow(intRow(1))
+		intermediate.ValidData = []bool{false}
+		data := fieldData(arrayRow(intermediate))
+		helper, err := typeutil.CreateSchemaHelper(intSchema("3"))
+		require.NoError(t, err)
+
+		err = newValidateUtil(withMaxCapCheck()).Validate([]*schemapb.FieldData{data}, helper, 1)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not support element valid_data at level 1")
+	})
+
 	t.Run("leaf capacity is checked at its own level", func(t *testing.T) {
 		data := fieldData(arrayRow(arrayRow(intRow(1, 2, 3))))
 		helper, err := typeutil.CreateSchemaHelper(intSchema("2"))

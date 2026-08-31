@@ -36,6 +36,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -118,8 +119,8 @@ func TestSerDe(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dt := tt.args.dt
 			v := tt.args.v
-			builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[dt].arrowType(1, schemapb.DataType_None))
-			serdeMap[dt].serialize(builder, v, schemapb.DataType_None)
+			builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[dt].arrowType(1, schemapb.DataType_None, false))
+			serdeMap[dt].serialize(builder, v, schemapb.DataType_None, 0, false)
 			// assert.True(t, ok)
 			a := builder.NewArray()
 			got, err := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, false, false)
@@ -152,9 +153,9 @@ func TestSerDeCopy(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dt := tt.dt
 			v := tt.v
-			builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[dt].arrowType(1, schemapb.DataType_None))
+			builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[dt].arrowType(1, schemapb.DataType_None, false))
 			defer builder.Release()
-			serdeMap[dt].serialize(builder, v, schemapb.DataType_None)
+			serdeMap[dt].serialize(builder, v, schemapb.DataType_None, 0, false)
 			a := builder.NewArray()
 
 			// Test deserialize with shouldCopy parameter
@@ -321,13 +322,31 @@ func TestArrayOfVectorArrowType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			arrowType := getArrayOfVectorArrowType(tt.elementType, tt.dim)
-			assert.NotNil(t, arrowType)
+			nonNullableArrowType := getArrayOfVectorArrowType(tt.elementType, tt.dim, false)
+			assert.NotNil(t, nonNullableArrowType)
 
-			listType, ok := arrowType.(*arrow.ListType)
+			listType, ok := nonNullableArrowType.(*arrow.ListType)
 			assert.True(t, ok)
 			assert.Equal(t, tt.expectedChild, listType.Elem())
+
+			elementNullableArrowType := getArrayOfVectorArrowType(tt.elementType, tt.dim, true)
+			listType, ok = elementNullableArrowType.(*arrow.ListType)
+			assert.True(t, ok)
+			assert.Equal(t, arrow.BinaryTypes.Binary, listType.Elem())
 		})
+	}
+
+	for _, elementType := range []schemapb.DataType{
+		schemapb.DataType_SparseFloatVector,
+		schemapb.DataType_Float,
+	} {
+		for _, elementNullable := range []bool{false, true} {
+			t.Run(fmt.Sprintf("reject_%s_element_nullable_%t", elementType, elementNullable), func(t *testing.T) {
+				assert.Panics(t, func() {
+					getArrayOfVectorArrowType(elementType, dim, elementNullable)
+				})
+			})
+		}
 	}
 }
 
@@ -443,14 +462,14 @@ func TestArrayOfVectorSerialization(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			entry := serdeMap[schemapb.DataType_ArrayOfVector]
 
-			arrowType := entry.arrowType(tt.dim, tt.elementType)
+			arrowType := entry.arrowType(tt.dim, tt.elementType, false)
 			assert.NotNil(t, arrowType)
 
 			builder := array.NewBuilder(memory.DefaultAllocator, arrowType)
 			defer builder.Release()
 
 			for _, vector := range tt.vectors {
-				err := entry.serialize(builder, vector, tt.elementType)
+				err := entry.serialize(builder, vector, tt.elementType, tt.dim, false)
 				assert.NoError(t, err)
 			}
 
@@ -500,17 +519,166 @@ func TestArrayOfVectorSerialization(t *testing.T) {
 
 func TestArrayOfVectorSerializationRejectsInvalidPayloadLength(t *testing.T) {
 	entry := serdeMap[schemapb.DataType_ArrayOfVector]
-	arrowType := entry.arrowType(4, schemapb.DataType_FloatVector)
+	arrowType := entry.arrowType(4, schemapb.DataType_FloatVector, false)
 	builder := array.NewBuilder(memory.DefaultAllocator, arrowType)
 	defer builder.Release()
 
 	err := entry.serialize(builder, &schemapb.VectorField{
+		Dim: 4,
 		Data: &schemapb.VectorField_FloatVector{
 			FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5}},
 		},
-	}, schemapb.DataType_FloatVector)
+	}, schemapb.DataType_FloatVector, 4, false)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not divisible")
+}
+
+func TestArrayOfVectorSerializationRejectsInvalidElementValidity(t *testing.T) {
+	tests := []struct {
+		name            string
+		elementType     schemapb.DataType
+		dim             int
+		row             *schemapb.VectorField
+		elementNullable bool
+		errorText       string
+	}{
+		{
+			name:            "valid bitmap has too many physical vectors",
+			elementType:     schemapb.DataType_FloatVector,
+			dim:             2,
+			row:             makeFloatVec(2, 1, 2),
+			elementNullable: true,
+			errorText:       "2 valid vectors, but compact physical payload has 1 vectors",
+		},
+		{
+			name:        "valid bitmap has too few physical vectors",
+			elementType: schemapb.DataType_Int8Vector,
+			dim:         2,
+			row: &schemapb.VectorField{
+				Dim:       2,
+				Data:      &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 3, 4}},
+				ValidData: []bool{true},
+			},
+			elementNullable: true,
+			errorText:       "1 valid vectors, but compact physical payload has 2 vectors",
+		},
+		{
+			name:        "non-nullable schema rejects child validity",
+			elementType: schemapb.DataType_BinaryVector,
+			dim:         16,
+			row: &schemapb.VectorField{
+				Dim:       16,
+				Data:      &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2}},
+				ValidData: []bool{true},
+			},
+			errorText: "non-element-nullable ArrayOfVector row cannot carry element valid_data",
+		},
+		{
+			name:            "nullable schema requires child validity",
+			elementType:     schemapb.DataType_FloatVector,
+			dim:             2,
+			row:             makeFloatVec(2, 1, 2),
+			elementNullable: true,
+			errorText:       "requires element valid_data",
+		},
+	}
+	tests[0].row.ValidData = []bool{true, true}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := serdeMap[schemapb.DataType_ArrayOfVector]
+			builder := array.NewBuilder(memory.DefaultAllocator,
+				entry.arrowType(tt.dim, tt.elementType, tt.elementNullable))
+			defer builder.Release()
+
+			err := entry.serialize(builder, tt.row, tt.elementType, tt.dim, tt.elementNullable)
+			require.Error(t, err)
+			require.ErrorIs(t, err, merr.ErrStorage)
+			require.ErrorContains(t, err, tt.errorText)
+			require.Zero(t, builder.Len())
+			require.Zero(t, builder.(*array.ListBuilder).ValueBuilder().Len())
+		})
+	}
+}
+
+func TestDeserializeArrayOfVectorRejectsUnexpectedNullChild(t *testing.T) {
+	builder := array.NewListBuilder(memory.DefaultAllocator, &arrow.FixedSizeBinaryType{ByteWidth: 8})
+	defer builder.Release()
+	builder.Append(true)
+	builder.ValueBuilder().(*array.FixedSizeBinaryBuilder).AppendNull()
+	column := builder.NewArray()
+	defer column.Release()
+
+	_, err := deserializeArrayOfVector(column, 0, schemapb.DataType_FloatVector, 2, true, false)
+	require.Error(t, err)
+	require.ErrorIs(t, err, merr.ErrStorage)
+	require.ErrorContains(t, err, "non-element-nullable ArrayOfVector contains null child")
+}
+
+func TestElementNullableArrayOfVectorSerializationUsesSchemaDim(t *testing.T) {
+	const schemaDim = 2
+	entry := serdeMap[schemapb.DataType_ArrayOfVector]
+	builder := array.NewBuilder(
+		memory.DefaultAllocator,
+		entry.arrowType(schemaDim, schemapb.DataType_FloatVector, true),
+	)
+	defer builder.Release()
+
+	err := entry.serialize(builder, &schemapb.VectorField{
+		Dim: 1,
+		Data: &schemapb.VectorField_FloatVector{
+			FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}},
+		},
+		ValidData: []bool{true},
+	}, schemapb.DataType_FloatVector, schemaDim, true)
+	require.NoError(t, err)
+	require.Equal(t, 1, builder.Len())
+}
+
+func TestElementNullableArrayOfVectorNullChildrenHaveNoVectorPayload(t *testing.T) {
+	const dim = 1024
+	entry := serdeMap[schemapb.DataType_ArrayOfVector]
+	builder := array.NewBuilder(
+		memory.DefaultAllocator,
+		entry.arrowType(dim, schemapb.DataType_FloatVector, true),
+	)
+	defer builder.Release()
+
+	err := entry.serialize(builder, &schemapb.VectorField{
+		Dim:       dim,
+		Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}},
+		ValidData: []bool{false, false, false, false},
+	}, schemapb.DataType_FloatVector, dim, true)
+	require.NoError(t, err)
+
+	column := builder.NewArray().(*array.List)
+	defer column.Release()
+	child := column.ListValues().(*array.Binary)
+	require.Equal(t, 4, child.Len())
+	require.Equal(t, 4, child.NullN())
+	if values := child.Data().Buffers()[2]; values != nil {
+		require.Zero(t, values.Len())
+	}
+
+	value, err := entry.deserialize(column, 0, schemapb.DataType_FloatVector, dim, true, true)
+	require.NoError(t, err)
+	row := value.(*schemapb.VectorField)
+	require.Equal(t, []bool{false, false, false, false}, row.GetValidData())
+	require.Empty(t, row.GetFloatVector().GetData())
+}
+
+func TestDeserializeElementNullableArrayOfVectorRejectsMismatchedChildWidth(t *testing.T) {
+	builder := array.NewListBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+	defer builder.Release()
+	builder.Append(true)
+	builder.ValueBuilder().(*array.BinaryBuilder).Append(make([]byte, 7))
+	column := builder.NewArray()
+	defer column.Release()
+
+	_, err := deserializeArrayOfVector(column, 0, schemapb.DataType_FloatVector, 2, true, true)
+	require.Error(t, err)
+	require.ErrorIs(t, err, merr.ErrStorage)
+	require.ErrorContains(t, err, "byte width 7, expected 8")
 }
 
 func TestArrayOfVectorEmptyArray(t *testing.T) {
@@ -530,7 +698,7 @@ func TestArrayOfVectorEmptyArray(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			entry := serdeMap[schemapb.DataType_ArrayOfVector]
 
-			arrowType := entry.arrowType(tt.dim, tt.elementType)
+			arrowType := entry.arrowType(tt.dim, tt.elementType, false)
 			assert.NotNil(t, arrowType)
 
 			// Create empty VectorField based on element type
@@ -567,7 +735,7 @@ func TestArrayOfVectorEmptyArray(t *testing.T) {
 			defer builder.Release()
 
 			// Serialize empty vector
-			err := entry.serialize(builder, emptyVector, tt.elementType)
+			err := entry.serialize(builder, emptyVector, tt.elementType, tt.dim, false)
 			assert.NoError(t, err)
 
 			arr := builder.NewArray()
@@ -1507,13 +1675,14 @@ func TestBuildRecord_ElementNullableArrayOfVectorRoundTrip(t *testing.T) {
 			assert.True(t, listArray.IsValid(0))
 			assert.True(t, listArray.IsValid(1))
 			assert.True(t, listArray.IsNull(2))
-			child := listArray.ListValues().(*array.FixedSizeBinary)
+			child := listArray.ListValues().(*array.Binary)
 			require.Equal(t, 5, child.Len())
 			assert.True(t, child.IsValid(0))
 			assert.True(t, child.IsNull(1))
 			assert.True(t, child.IsValid(2))
 			assert.True(t, child.IsNull(3))
 			assert.True(t, child.IsNull(4))
+			assert.Equal(t, len(child.Value(0))+len(child.Value(2)), child.Data().Buffers()[2].Len())
 			assertRoundTrip(t, record.Column(0))
 
 			var parquetBuffer bytes.Buffer
@@ -1713,6 +1882,40 @@ func TestBuildRecordRejectsElementNullableMismatch(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "element_nullable mismatch")
 	})
+
+	t.Run("array of vector child validity conflicts with schema", func(t *testing.T) {
+		dim := 4
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:     100,
+				Name:        "vec_arr",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: fmt.Sprintf("%d", dim)},
+				},
+			},
+		}}
+		row := makeFloatVec(dim, 1, 2, 3, 4)
+		row.ValidData = []bool{true}
+		insertData := &InsertData{Data: map[FieldID]FieldData{
+			100: &VectorArrayFieldData{
+				ElementType: schemapb.DataType_FloatVector,
+				Dim:         int64(dim),
+				Data:        []*schemapb.VectorField{row},
+			},
+		}}
+
+		arrowSchema, err := ConvertToArrowSchema(schema, false)
+		require.NoError(t, err)
+		recordBuilder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+		defer recordBuilder.Release()
+
+		err = BuildRecord(recordBuilder, insertData, schema)
+		require.Error(t, err)
+		require.ErrorIs(t, err, merr.ErrStorage)
+		require.ErrorContains(t, err, "non-element-nullable ArrayOfVector row cannot carry element valid_data")
+	})
 }
 
 func TestBuildRecord_ElementNullableArrayOfVectorRejectsMissingTypedData(t *testing.T) {
@@ -1749,7 +1952,7 @@ func TestBuildRecord_ElementNullableArrayOfVectorRejectsMissingTypedData(t *test
 					ElementNullable: true,
 					Dim:             int64(tt.dim),
 					Data: []*schemapb.VectorField{
-						{ValidData: []bool{false}},
+						{Dim: int64(tt.dim), ValidData: []bool{false}},
 					},
 				},
 			}}
