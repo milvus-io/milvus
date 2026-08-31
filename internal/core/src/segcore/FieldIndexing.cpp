@@ -12,6 +12,7 @@
 #include <string.h>
 #include "common/FastMem.h"
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <exception>
 #include <map>
@@ -39,6 +40,7 @@
 #include "index/VectorIndexValidDataUtils.h"
 #include "index/VectorMemIndex.h"
 #include "knowhere/comp/index_param.h"
+#include "knowhere/comp/knowhere_config.h"
 #include "knowhere/dataset.h"
 #include "knowhere/expected.h"
 #include "knowhere/object.h"
@@ -627,13 +629,31 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
     }
 }
 
+int64_t
+VectorFieldIndexing::resolve_build_thread_num() const {
+    // A growing interim index build occupies one slot of the knowhere build
+    // thread pool and may fan out into `num_build_thread` OMP threads inside
+    // that slot. The pool size (queryNode.segcore.interimIndex.buildParallelRate
+    // x cpu num) is the cpu budget of index building, so the rate is resolved
+    // against the live pool size rather than against the cpu num directly.
+    auto rate = segcore_config_.get_growing_index_build_thread_rate();
+    if (rate <= 0.0f) {
+        return 1;
+    }
+    auto pool_size =
+        static_cast<double>(knowhere::KnowhereConfig::GetBuildThreadPoolSize());
+    auto thread_num = static_cast<int64_t>(std::llround(rate * pool_size));
+    return std::max<int64_t>(thread_num, 1);
+}
+
 knowhere::Json
 VectorFieldIndexing::get_build_params(DataType data_type) const {
     auto config = config_->GetBuildBaseParams(data_type);
     if (!IsSparseFloatVectorDataType(get_data_type())) {
         config[knowhere::meta::DIM] = std::to_string(get_dim());
     }
-    config[knowhere::meta::NUM_BUILD_THREAD] = std::to_string(1);
+    config[knowhere::meta::NUM_BUILD_THREAD] =
+        std::to_string(resolve_build_thread_num());
     // for sparse float vector: drop_ratio_build config is not allowed to be set
     // on growing segment index.
     return config;

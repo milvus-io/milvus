@@ -779,6 +779,15 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		paramtable.Get().QueryNodeCfg.InterimIndexGrowingBuildThreadRate.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			rate, err := strconv.ParseFloat(newValue, 32)
+			if err != nil {
+				return err
+			}
+			C.SegcoreSetGrowingIndexBuildThreadRate(C.float(rate))
+			return nil
+		})
+
 		paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {
@@ -846,6 +855,9 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 
 	indexBuildRatio := C.float(params.QueryNodeCfg.InterimIndexBuildRatio.GetAsFloat())
 	C.SegcoreSetIndexBuildRatio(indexBuildRatio)
+
+	growingBuildThreadRate := C.float(params.QueryNodeCfg.InterimIndexGrowingBuildThreadRate.GetAsFloat())
+	C.SegcoreSetGrowingIndexBuildThreadRate(growingBuildThreadRate)
 
 	denseVecIndexType := C.CString(params.QueryNodeCfg.DenseVectorInterminIndexType.GetValue())
 	defer C.free(unsafe.Pointer(denseVecIndexType))
