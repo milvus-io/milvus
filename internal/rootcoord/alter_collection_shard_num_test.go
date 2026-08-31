@@ -17,15 +17,19 @@
 package rootcoord
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -132,12 +136,6 @@ func TestValidateDesiredShardNumRejections(t *testing.T) {
 			coll:   hashCollection(3),
 			props:  shardNumProp("1"),
 			errStr: "at least 2",
-		},
-		{
-			name:   "already at that count",
-			coll:   hashCollection(4),
-			props:  shardNumProp("4"),
-			errStr: "already has 4 shards",
 		},
 		{
 			// The sources are not retired until their data is rewritten, so the
@@ -286,4 +284,71 @@ func TestValidateDesiredShardNumIgnoresTheModeWhenNoShardNumIsSet(t *testing.T) 
 
 	props := []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "60"}}
 	assert.NoError(t, validateDesiredShardNum(hashCollection(2), props, nil))
+}
+
+// TestValidateDesiredShardNumIsIdempotent covers re-applying a declaration the
+// collection already satisfies. The property is declarative, so this must be
+// accepted rather than refused: a client retrying after a timeout, or an
+// operator re-applying a whole config, would otherwise get a hard error for
+// asking for the state that already holds. The window is reached in normal
+// operation too, since the routable count catches up to the desired value at
+// the write switch, long before the rehash finishes.
+func TestValidateDesiredShardNumIsIdempotent(t *testing.T) {
+	manualMode(t)
+
+	require.NoError(t, validateDesiredShardNum(hashCollection(4), shardNumProp("4"), nil))
+
+	// Mid-rehash: the two sources are fenced and four targets are up, so the
+	// routable count already reads 4 while three of the six vchannels are still
+	// being rewritten.
+	coll := &model.Collection{
+		Name:                "c",
+		VirtualChannelNames: []string{"v0", "v1", "v2", "v3", "v4", "v5"},
+		ShardInfos: map[string]*model.ShardInfo{
+			"v0": {State: schemapb.ShardState_ShardSplitting},
+			"v1": {State: schemapb.ShardState_ShardSplitting},
+			"v2": {State: schemapb.ShardState_ShardCreating},
+			"v3": {State: schemapb.ShardState_ShardCreating},
+			"v4": {State: schemapb.ShardState_ShardCreating},
+			"v5": {State: schemapb.ShardState_ShardCreating},
+		},
+	}
+	require.EqualValues(t, 4, routableShardCount(coll))
+	require.NoError(t, validateDesiredShardNum(coll, shardNumProp("4"), nil))
+}
+
+// TestCreateCollectionRejectsShardSplitProperties covers the create path.
+//
+// ParseShardSplitMode exists so a typo cannot silently mean "auto", but the
+// check used to hang off AlterCollection only -- so a collection could be
+// CREATED with an unrecognised mode, which then read back as the auto default
+// and handed the size trigger a collection the operator believed they had taken
+// manual control of. Nothing would ever report it.
+func TestCreateCollectionRejectsShardSplitProperties(t *testing.T) {
+	newTask := func(props []*commonpb.KeyValuePair) *createCollectionTask {
+		return &createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				CollectionName: "c",
+				ShardsNum:      2,
+				Properties:     props,
+			},
+			header: &message.CreateCollectionMessageHeader{},
+		}
+	}
+
+	err := newTask([]*commonpb.KeyValuePair{
+		{Key: common.CollectionShardSplitMode, Value: "manaul"},
+	}).validate(context.Background())
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.Contains(t, err.Error(), common.CollectionShardSplitMode)
+
+	// A desired count at create time asks datacoord to rehash a collection that
+	// has not taken a write yet; shards_num already says what to create.
+	err = newTask(shardNumProp("8")).validate(context.Background())
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.Contains(t, err.Error(), common.CollectionShardNum)
+
+	// A recognised mode is not what these two reject; that it passes the property
+	// checks and reaches the capacity ones is covered by TestValidateShardSplitMode
+	// and by the create-collection suite.
 }
