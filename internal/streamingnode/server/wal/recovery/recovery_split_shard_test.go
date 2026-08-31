@@ -4,9 +4,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
@@ -136,4 +138,113 @@ func TestVChannelRecoveryInfoObserveSplitShard(t *testing.T) {
 	}
 	dropped.ObserveSplitShard(newSplitShardMessage("v2", 2, 100))
 	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, dropped.meta.State)
+}
+
+func newDropVChannelMessage(vchannel string, collectionID int64, timetick uint64) message.ImmutableDropVChannelMessageV2 {
+	msg := message.NewDropVChannelMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.DropVChannelMessageHeader{
+			CollectionId: collectionID,
+			SplitTaskId:  100,
+		}).
+		WithBody(&message.DropVChannelMessageBody{}).
+		MustBuildMutable().
+		WithTimeTick(timetick).
+		WithLastConfirmedUseMessageID()
+	return message.MustAsImmutableDropVChannelMessageV2(msg.IntoImmutableMessage(rmq.NewRmqID(5)))
+}
+
+// TestRecoveryStorageSplitAndDropAreScopedToOneVChannel pins the scope of both
+// teardown paths.
+//
+// A recovery storage covers one PCHANNEL, and a collection's other shards can
+// live on it too. Scoping either handler by collection id would seal segments
+// belonging to shards that are still taking writes and that no message asked to
+// seal -- a silent, collection-wide flush triggered by one shard's split.
+func TestRecoveryStorageSplitAndDropAreScopedToOneVChannel(t *testing.T) {
+	rs := newTestRecoveryStorage(t)
+	addActiveVChannel(rs, "v0", 1, []int64{2})
+	addActiveVChannel(rs, "v1", 1, []int64{2})
+	addGrowingSegment(rs, 1001, 1, 2, "v0")
+	addGrowingSegment(rs, 1002, 1, 2, "v1")
+
+	// Fencing v0 must leave v1's growing segment alone.
+	rs.handleSplitShard(newSplitShardMessage("v0", 1, 100))
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, rs.vchannels["v0"].meta.State)
+	assert.False(t, rs.segments[1001].IsGrowing())
+	assert.True(t, rs.segments[1002].IsGrowing(), "the sibling shard is still live and must not be sealed")
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, rs.vchannels["v1"].meta.State)
+
+	// Retiring v0 must likewise leave v1 alone.
+	rs.handleDropVChannel(context.Background(), newDropVChannelMessage("v0", 1, 200))
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, rs.vchannels["v0"].meta.State)
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, rs.vchannels["v1"].meta.State)
+	assert.True(t, rs.segments[1002].IsGrowing())
+}
+
+func TestRecoveryStorageHandleDropVChannel(t *testing.T) {
+	rs := newTestRecoveryStorage(t)
+	addActiveVChannel(rs, "v0", 1, []int64{2})
+	addGrowingSegment(rs, 1001, 1, 2, "v0")
+
+	rs.handleDropVChannel(context.Background(), newDropVChannelMessage("v0", 1, 100))
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, rs.vchannels["v0"].meta.State)
+	// Flushed unconditionally: a replay can recreate GROWING segments after the
+	// vchannel was marked dropped, so the teardown must not assume there is
+	// nothing left.
+	assert.False(t, rs.segments[1001].IsGrowing())
+
+	// Replaying the teardown is harmless, and one for a vchannel that is gone
+	// entirely must not panic either.
+	rs.handleDropVChannel(context.Background(), newDropVChannelMessage("v0", 1, 200))
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, rs.vchannels["v0"].meta.State)
+	assert.NotPanics(t, func() {
+		rs.handleDropVChannel(context.Background(), newDropVChannelMessage("v-gone", 1, 300))
+	})
+}
+
+// TestRecoveryStorageDropVChannelReplayIsNotAnInconsistency: once a retired
+// vchannel's meta is garbage-collected, a WAL replay from an older checkpoint
+// meets its DropVChannel again. That is a replay, not a broken invariant, and
+// must not be reported as one -- exactly as DropCollection is not.
+func TestRecoveryStorageDropVChannelReplayIsNotAnInconsistency(t *testing.T) {
+	rs := newTestRecoveryStorage(t)
+
+	reasons := make([]string, 0)
+	mockDetect := mockey.Mock((*recoveryStorageImpl).detectInconsistency).To(
+		func(r *recoveryStorageImpl, ctx context.Context, msg message.ImmutableMessage, reason string, extra ...mlog.Field) {
+			reasons = append(reasons, reason)
+		}).Build()
+	defer mockDetect.UnPatch()
+
+	rs.handleMessage(context.Background(), newDropVChannelMessage("v-already-gc-ed", 1, 100))
+	assert.Empty(t, reasons)
+
+	// A message type that genuinely requires the vchannel still reports it, so
+	// the exemption is not a blanket one.
+	addGrowingSegment(rs, 2001, 1, 2, "v-already-gc-ed")
+	rs.handleMessage(context.Background(), newSplitShardMessage("v-already-gc-ed", 1, 100))
+	assert.Equal(t, []string{"vchannel not found"}, reasons)
+}
+
+// TestVChannelRecoveryInfoSplitTimeTickIsPersisted: T_switch has to reach the
+// catalog, because the whole point of recording it is to answer a re-fence
+// after the streamingnode that recorded it has restarted.
+func TestVChannelRecoveryInfoSplitTimeTickIsPersisted(t *testing.T) {
+	info := &vchannelRecoveryInfo{
+		meta: &streamingpb.VChannelMeta{
+			Vchannel: "v1",
+			State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+				CollectionId: 1,
+			},
+		},
+	}
+	info.ObserveSplitShard(newSplitShardMessage("v1", 1, 4242))
+
+	snapshot, shouldBeRemoved := info.ConsumeDirtyAndGetSnapshot()
+	assert.False(t, shouldBeRemoved)
+	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, snapshot.State)
+	assert.Equal(t, uint64(4242), snapshot.SplitTimeTick,
+		"T_switch must be persisted; a re-fence after restart reads it back from here")
 }
