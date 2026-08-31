@@ -31,6 +31,7 @@ import "C"
 import (
 	"context"
 	"encoding/base64"
+	"math"
 	"strconv"
 	"sync"
 	"time"
@@ -641,6 +642,12 @@ func SetupCoreConfigChangelCallback() {
 			rate, err := strconv.ParseFloat(newValue, 32)
 			if err != nil {
 				return err
+			}
+			// ParseFloat accepts "Inf" and "NaN"; reject them here so the
+			// operator gets an error instead of a silently clamped value.
+			if math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 {
+				return merr.WrapErrParameterInvalidMsg(
+					"%s must be a finite non-negative number, got %s", key, newValue)
 			}
 			C.SegcoreSetGrowingIndexBuildThreadRate(C.float(rate))
 			return nil

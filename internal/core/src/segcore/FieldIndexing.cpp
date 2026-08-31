@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <algorithm>
 #include <cmath>
 #include <map>
 #include <new>
@@ -523,17 +524,26 @@ int64_t
 VectorFieldIndexing::resolve_build_thread_num() const {
     // A growing interim index build occupies one slot of the knowhere build
     // thread pool and may fan out into `num_build_thread` OMP threads inside
-    // that slot. The pool size (queryNode.segcore.interimIndex.buildParallelRate
-    // x cpu num) is the cpu budget of index building, so the rate is resolved
-    // against the live pool size rather than against the cpu num directly.
+    // that slot. The pool is the cpu budget of index building, so the rate is
+    // resolved against its live size rather than against the cpu num directly.
+    // The result is clamped to [1, pool size]: knowhere declares
+    // `num_build_thread` without a range and hands it straight to
+    // `omp_set_num_threads`, and this config is refreshable, so an out of range
+    // value must not be able to reach that call.
     auto rate = segcore_config_.get_growing_index_build_thread_rate();
-    if (rate <= 0.0f) {
+    if (!std::isfinite(rate) || rate <= 0.0f) {
         return 1;
     }
-    auto pool_size =
-        static_cast<double>(knowhere::KnowhereConfig::GetBuildThreadPoolSize());
-    auto thread_num = static_cast<int64_t>(std::llround(rate * pool_size));
-    return std::max<int64_t>(thread_num, 1);
+    auto pool_size = static_cast<int64_t>(
+        knowhere::KnowhereConfig::GetBuildThreadPoolSize());
+    if (pool_size <= 1) {
+        return 1;
+    }
+    // Cap the rate before scaling so the product can never overflow llround.
+    auto capped_rate = std::min(static_cast<double>(rate), 1.0);
+    auto thread_num = static_cast<int64_t>(
+        std::llround(capped_rate * static_cast<double>(pool_size)));
+    return std::clamp<int64_t>(thread_num, 1, pool_size);
 }
 
 knowhere::Json
