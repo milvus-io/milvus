@@ -18,7 +18,6 @@ package rootcoord
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -54,7 +53,7 @@ import (
 // collection the operator believes they took control of.
 func validateShardSplitMode(properties []*commonpb.KeyValuePair) error {
 	if _, _, err := common.ParseShardSplitMode(properties); err != nil {
-		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
+		return merr.Wrap(merr.ErrParameterInvalid, err.Error())
 	}
 	return nil
 }
@@ -69,10 +68,10 @@ func validateDesiredShardNum(coll *model.Collection, properties []*commonpb.KeyV
 		// retires the task if it has not fenced yet (a fenced one still runs to
 		// completion — an unfinished split cannot be unwound, only finished).
 		//
-		// Withdrawing asks for no work, so none of the checks below apply. It is
-		// answered first because the caller applies deletes AFTER sets, so a
-		// request that both sets and deletes the key ends up withdrawing it —
-		// validating the set would refuse a request that in fact asks for nothing.
+		// Withdrawing asks for no work, so none of the checks below apply, and it
+		// is answered before them. AlterCollection refuses a request that carries
+		// properties and delete keys at once, so a withdrawal never arrives
+		// alongside a set; the early return is for clarity, not to disambiguate.
 		return nil
 	}
 
@@ -146,14 +145,13 @@ func validateDesiredShardNum(coll *model.Collection, properties []*commonpb.KeyV
 	return nil
 }
 
-// autoTriggerModeForbidsManualShardNum reports the cluster-level mode conflict.
+// autoModeForbidsManualShardNum refuses a hand-set shard count on a collection
+// the size trigger owns.
 //
 // The two ways of sizing shards are mutually exclusive by construction: the size
 // trigger doubles one shard, a user request rehashes all of them, and both fence
 // shards. Whichever fenced second would find the other's T_switch already
 // recorded, with two tasks then believing they own the same fence.
-// autoModeForbidsManualShardNum refuses a hand-set shard count on a collection
-// the size trigger owns.
 //
 // The mode is per COLLECTION (§15 decision 10): its own property decides, so a
 // collection sized by hand can sit beside one that is managed. The cluster
@@ -178,7 +176,7 @@ func autoModeForbidsManualShardNum(coll *model.Collection, properties []*commonp
 
 	mode, requested, err := common.ParseShardSplitMode(properties)
 	if err != nil {
-		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
+		return merr.Wrap(merr.ErrParameterInvalid, err.Error())
 	}
 	if !requested {
 		mode = common.ShardSplitModeOf(funcutil.KeyValuePair2Map(coll.Properties))
@@ -213,19 +211,15 @@ func availablePChannelCount() (int, string) {
 // routableShardCount counts the collection's shards a key can currently reach,
 // which is what the desired count is compared against. Shards retired by an
 // earlier split still appear in the vchannel list but own no key range.
+//
+// The rule itself lives in model.ShardInfo.IsRoutable, so this and the count a
+// routing commit writes into ShardsNum cannot drift apart. A vchannel with no
+// shard info is a plain, never-split shard and counts.
 func routableShardCount(coll *model.Collection) int32 {
-	if len(coll.ShardInfos) == 0 {
-		return int32(len(coll.VirtualChannelNames))
-	}
 	var count int32
 	for _, vchannel := range coll.VirtualChannelNames {
 		info, ok := coll.ShardInfos[vchannel]
-		if !ok {
-			count++ // no shard info: a plain, never-split shard
-			continue
-		}
-		switch info.State {
-		case schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardCreating:
+		if !ok || info.IsRoutable() {
 			count++
 		}
 	}
