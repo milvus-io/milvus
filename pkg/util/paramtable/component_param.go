@@ -4629,15 +4629,8 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Key:          "queryNode.segcore.interimIndex.growingBuildThreadRate",
 		Version:      "3.0.1",
 		DefaultValue: "0",
-		Doc: `The fraction of the interim index build thread pool that a single growing segment index build may use.
-The thread number of one growing index build is round(growingBuildThreadRate * build thread pool size),
-clamped to [1, pool size]. The pool size is buildParallelRate * cpu num on a QueryNode; in standalone the
-DataNode initializes the same process-global pool from common.buildIndexThreadPoolRatio instead, so the
-effective pool size there depends on which component initializes it last.
-0 by default, which keeps every growing index build single threaded.
-Note this only bounds a single build: multiple growing segments may still build concurrently, so the
-worst case thread number is the pool size multiplied by this resolved thread number.`,
-		Export: true,
+		Doc:          "The ratio of the interim index build thread pool that one growing segment index build may use, resolved as round(rate * pool size) and clamped to [1, pool size]. 0 means single threaded",
+		Export:       true,
 	}
 	p.InterimIndexGrowingBuildThreadRate.Init(base.mgr)
 

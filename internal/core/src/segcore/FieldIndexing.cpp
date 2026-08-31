@@ -631,14 +631,10 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
 
 int64_t
 VectorFieldIndexing::resolve_build_thread_num() const {
-    // A growing interim index build occupies one slot of the knowhere build
-    // thread pool and may fan out into `num_build_thread` OMP threads inside
-    // that slot. The pool is the cpu budget of index building, so the rate is
-    // resolved against its live size rather than against the cpu num directly.
-    // The result is clamped to [1, pool size]: knowhere declares
-    // `num_build_thread` without a range and hands it straight to
-    // `omp_set_num_threads`, and this config is refreshable, so an out of range
-    // value must not be able to reach that call.
+    // Resolved against the live build pool size, the cpu budget of index
+    // building. Clamped to [1, pool size] because knowhere declares
+    // num_build_thread without a range and passes it to omp_set_num_threads,
+    // and this config is refreshable.
     auto rate = segcore_config_.get_growing_index_build_thread_rate();
     if (!std::isfinite(rate) || rate <= 0.0f) {
         return 1;
