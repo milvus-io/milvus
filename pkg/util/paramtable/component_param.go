@@ -28,11 +28,9 @@ import (
 
 	"github.com/shirou/gopsutil/v3/disk"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/fips"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
@@ -206,37 +204,19 @@ func (p *ComponentParam) initVersionGates() {
 	if p.baseTable == nil || p.baseTable.config.skipRemote {
 		return
 	}
-	if p.EtcdCfg.Endpoints.GetValue() == "" {
+	// The confirmator shares the etcd client created for the config etcd
+	// source: when remote config is disabled or there is no usable etcd, no
+	// client exists and there is nothing to confirm against.
+	if p.baseTable.etcdClient == nil {
 		return
 	}
-	if p.EtcdCfg.UseEmbedEtcd.GetAsBool() && !etcd.HasServer() {
-		return
-	}
-	vg, err := NewConfirmator(&p.EtcdCfg, p.EtcdCfg.MetaRootPath.GetValue(), p.EtcdCfg.RootPath.GetValue())
+	vg, err := RecoverConfirmator(p.baseTable.etcdClient,
+		p.EtcdCfg.MetaRootPath.GetValue(), p.EtcdCfg.RootPath.GetValue(), p.versionGateItems())
 	if err != nil {
-		log.Warn("create version gate confirmator failed", zap.Error(err))
+		log.Warn("recover version gate confirmator failed", zap.Error(err))
 		return
 	}
-	for _, item := range p.versionGateItems() {
-		if item == nil || item.VersionGateSwitcher == nil {
-			continue
-		}
-		if err := vg.RegisterGate(item.Key, item.VersionGateSwitcher); err != nil {
-			log.Warn("register version gate failed, skip", zap.String("key", item.Key), zap.Error(err))
-			continue
-		}
-	}
-	if len(vg.gates) == 0 {
-		vg.Stop()
-		return
-	}
-	// Start asynchronously: the initial gate resolution reads etcd and must
-	// not block paramtable initialization.
-	go func() {
-		if err := vg.Start(context.TODO()); err != nil {
-			log.Warn("start version gate confirmator failed", zap.Error(err))
-		}
-	}()
+
 	p.versionGates = vg
 }
 
