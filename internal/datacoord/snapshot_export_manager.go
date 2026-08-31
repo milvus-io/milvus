@@ -964,6 +964,9 @@ func snapshotExportSecretValues(externalSpec string) []string {
 		externalspec.ExtfsKeySSLCACert,
 		externalspec.ExtfsKeyExternalID,
 		"credential_json",
+		// Azure source-read SAS: SDK copy errors can echo the SAS-bearing
+		// source URL, so scrub the token from failure reasons too.
+		"source_sas_token",
 	} {
 		var value string
 		if err := json.Unmarshal(spec.Extfs[key], &value); err == nil && value != "" {
