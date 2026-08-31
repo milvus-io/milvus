@@ -368,8 +368,8 @@ func TestQueryTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 		Return(&collectionInfo{}, nil).Maybe()
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).
 		Return(schema, nil).Maybe()
-	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(map[string]int64{}, nil)
+	// The membership-filter size preflight must fail before partition lookup.
+	// An unexpected GetPartitions call will still fail this strict mock.
 
 	task := &queryTask{
 		baseTask: baseTask{metaCache: cache},
