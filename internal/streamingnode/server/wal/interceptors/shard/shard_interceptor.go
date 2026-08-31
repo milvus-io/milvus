@@ -103,9 +103,23 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 func (impl *shardInterceptor) handleCreateVChannel(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	createVChannelMsg := message.MustAsMutableCreateVChannelMessageV2(msg)
 	header := createVChannelMsg.Header()
-	if err := impl.shardManager.CheckIfCollectionCanBeCreated(header.GetCollectionId()); err != nil {
-		impl.shardManager.Logger().Warn(ctx, "collection already exists when creating vchannel", mlog.FieldCollectionID(header.GetCollectionId()))
-		// The collection can not be created at current shard, ignored.
+	if err := impl.shardManager.CheckIfVChannelCanBeCreated(header.GetCollectionId(), msg.VChannel()); err != nil {
+		if errors.Is(err, shards.ErrVChannelConflict) {
+			// Refuse rather than warn-and-continue. The shard manager holds one
+			// entry per collection per pchannel, so appending anyway would give
+			// the new shard a WAL genesis and a recovery-storage entry while
+			// leaving it with no segment assignment at all -- and, if the
+			// incumbent is a fenced split source, an inherited fence that makes
+			// the new shard permanently unwritable. The coordinator must retire
+			// the source (DropVChannel) before placing a successor here.
+			impl.shardManager.Logger().Warn(ctx, "cannot create vchannel on this pchannel",
+				mlog.FieldCollectionID(header.GetCollectionId()), mlog.Err(err))
+			return nil, status.NewUnrecoverableError("%s", err.Error())
+		}
+		// ErrCollectionExists: the same vchannel is already registered. The
+		// genesis is still appended and applied; every consumer is idempotent.
+		impl.shardManager.Logger().Warn(ctx, "vchannel already exists when creating vchannel",
+			mlog.FieldCollectionID(header.GetCollectionId()))
 	}
 
 	msgID, err := appendOp(ctx, msg)
@@ -150,6 +164,16 @@ func (impl *shardInterceptor) handleDropCollection(ctx context.Context, msg mess
 // vchannel of the same collection can be registered here.
 func (impl *shardInterceptor) handleDropVChannel(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	dropVChannelMsg := message.MustAsMutableDropVChannelMessageV2(msg)
+	if err := impl.shardManager.CheckIfVChannelCanBeDropped(dropVChannelMsg.Header().GetCollectionId(), msg.VChannel()); err != nil {
+		// Only a vchannel a shard split has fenced may be retired. Tearing down
+		// a live one removes its segment assignment with no way back, so a
+		// teardown that names one is refused instead of applied. A teardown for
+		// a vchannel this pchannel no longer holds is not refused: it is a
+		// replay, and the recovery storage and flusher -- keyed by vchannel --
+		// still need it.
+		impl.shardManager.Logger().Warn(ctx, "cannot drop vchannel", mlog.Err(err))
+		return nil, status.NewUnrecoverableError("%s", err.Error())
+	}
 	msgID, err := appendOp(ctx, msg)
 	if err != nil {
 		return msgID, err
@@ -208,7 +232,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 
 	collectionID := header.GetCollectionId()
 	schemaVersion := header.GetSchemaVersion()
-	if err := impl.shardManager.CheckIfVChannelCanBeWritten(collectionID); errors.Is(err, shards.ErrVChannelFenced) {
+	if err := impl.shardManager.CheckIfVChannelCanBeWritten(collectionID, msg.VChannel()); errors.Is(err, shards.ErrVChannelFenced) {
 		// the vchannel is fenced by shard split, the client should refresh
 		// the routing table and write to the new shards. T_switch is not
 		// carried here: the DML client refreshes routing, it never reads it.
@@ -305,7 +329,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	deleteMessage := message.MustAsMutableDeleteMessageV1(msg)
 	header := deleteMessage.Header()
-	if err := impl.shardManager.CheckIfVChannelCanBeWritten(header.GetCollectionId()); errors.Is(err, shards.ErrVChannelFenced) {
+	if err := impl.shardManager.CheckIfVChannelCanBeWritten(header.GetCollectionId(), msg.VChannel()); errors.Is(err, shards.ErrVChannelFenced) {
 		// the vchannel is fenced by shard split, the client should refresh
 		// the routing table and write to the new shards. T_switch is not
 		// carried here: the DML client refreshes routing, it never reads it.
@@ -328,12 +352,12 @@ func (impl *shardInterceptor) handleSplitShardMessage(ctx context.Context, msg m
 	splitShardMsg := message.MustAsMutableSplitShardMessageV2(msg)
 	header := splitShardMsg.Header()
 	collectionID := header.GetCollectionId()
-	if err := impl.shardManager.CheckIfVChannelCanBeWritten(collectionID); err != nil {
+	if err := impl.shardManager.CheckIfVChannelCanBeWritten(collectionID, msg.VChannel()); err != nil {
 		if errors.Is(err, shards.ErrVChannelFenced) {
 			// idempotent: the vchannel is already fenced by a previous split
 			// message; carry the recorded T_switch back on the error so the
 			// split coordinator recovers it after a crash that lost it.
-			return nil, status.NewShardFenced(msg.VChannel(), impl.shardManager.GetSplitTimeTick(collectionID))
+			return nil, status.NewShardFenced(msg.VChannel(), impl.shardManager.GetSplitTimeTick(collectionID, msg.VChannel()))
 		}
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
@@ -343,6 +367,13 @@ func (impl *shardInterceptor) handleSplitShardMessage(ctx context.Context, msg m
 	// is the single authoritative seal record for T_switch — there is no
 	// separate ManualFlush anymore — so the downstream consumers (flusher,
 	// delegator, recovery) learn the sealed set only from here.
+	//
+	// The seal happens before the append, as it must: the ids have to be in the
+	// header the append persists. If the append then fails, the source is left
+	// with segments sealed early and assignment fenced at this tick while the
+	// vchannel stays NORMAL — writes continue into fresh segments and a retry
+	// re-seals. That is the same trade ManualFlush makes, and it costs a
+	// premature flush, never correctness.
 	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(collectionID, msg.TimeTick())
 	if err != nil {
 		return nil, status.NewUnrecoverableError(err.Error())

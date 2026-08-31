@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -50,7 +51,7 @@ func newTestShardInterceptor(t *testing.T) (interceptors.Interceptor, *mock_shar
 
 func TestShardInterceptorSplitShardMessage(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
-	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1)).Return(nil).Once()
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v1").Return(nil).Once()
 	shardManager.EXPECT().FlushAndFenceSegmentAllocUntil(int64(1), uint64(100)).Return([]int64{7}, nil).Once()
 	shardManager.EXPECT().SplitShard(mock.Anything).Once()
 
@@ -88,7 +89,7 @@ func newTestCreateVChannelMutableMessage(vchannel string, collectionID int64) me
 
 func TestShardInterceptorCreateVChannelMessage(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
-	shardManager.EXPECT().CheckIfCollectionCanBeCreated(int64(7)).Return(nil).Once()
+	shardManager.EXPECT().CheckIfVChannelCanBeCreated(int64(7), "v2").Return(nil).Once()
 	shardManager.EXPECT().CreateVChannel(mock.Anything).Once()
 
 	appended := false
@@ -104,7 +105,7 @@ func TestShardInterceptorCreateVChannelMessage(t *testing.T) {
 
 func TestShardInterceptorCreateVChannelMessageAppendFailure(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
-	shardManager.EXPECT().CheckIfCollectionCanBeCreated(int64(7)).Return(nil).Once()
+	shardManager.EXPECT().CheckIfVChannelCanBeCreated(int64(7), "v2").Return(nil).Once()
 
 	_, err := i.DoAppend(context.Background(), newTestCreateVChannelMutableMessage("v2", 7),
 		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
@@ -117,7 +118,7 @@ func TestShardInterceptorCreateVChannelMessageOnExistingCollection(t *testing.T)
 	i, shardManager := newTestShardInterceptor(t)
 	// the collection already exists on this pchannel: the genesis is still
 	// appended and applied (idempotent), only a warning is logged.
-	shardManager.EXPECT().CheckIfCollectionCanBeCreated(int64(7)).Return(errors.New("already exists")).Once()
+	shardManager.EXPECT().CheckIfVChannelCanBeCreated(int64(7), "v2").Return(shards.ErrCollectionExists).Once()
 	shardManager.EXPECT().CreateVChannel(mock.Anything).Once()
 
 	appended := false
@@ -134,8 +135,8 @@ func TestShardInterceptorSplitShardMessageOnFencedVChannel(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
 	// idempotent: the vchannel is already fenced by a previous split message;
 	// the recorded T_switch is carried back on the error for crash recovery.
-	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1)).Return(shards.ErrVChannelFenced).Once()
-	shardManager.EXPECT().GetSplitTimeTick(int64(1)).Return(uint64(1900)).Once()
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v1").Return(shards.ErrVChannelFenced).Once()
+	shardManager.EXPECT().GetSplitTimeTick(int64(1), "v1").Return(uint64(1900)).Once()
 
 	msgID, err := i.DoAppend(context.Background(), newTestSplitShardMutableMessage(),
 		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
@@ -150,7 +151,7 @@ func TestShardInterceptorSplitShardMessageOnFencedVChannel(t *testing.T) {
 
 func TestShardInterceptorSplitShardMessageOnUnknownCollection(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
-	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1)).Return(shards.ErrCollectionNotFound).Once()
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v1").Return(shards.ErrCollectionNotFound).Once()
 
 	msgID, err := i.DoAppend(context.Background(), newTestSplitShardMutableMessage(),
 		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
@@ -164,7 +165,7 @@ func TestShardInterceptorSplitShardMessageOnUnknownCollection(t *testing.T) {
 
 func TestShardInterceptorSplitShardMessageFlushFailure(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
-	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1)).Return(nil).Once()
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v1").Return(nil).Once()
 	shardManager.EXPECT().FlushAndFenceSegmentAllocUntil(int64(1), uint64(100)).Return(nil, errors.New("mock flush error")).Once()
 
 	msgID, err := i.DoAppend(context.Background(), newTestSplitShardMutableMessage(),
@@ -178,7 +179,7 @@ func TestShardInterceptorSplitShardMessageFlushFailure(t *testing.T) {
 
 func TestShardInterceptorInsertOnFencedVChannel(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
-	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1)).Return(shards.ErrVChannelFenced).Once()
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v1").Return(shards.ErrVChannelFenced).Once()
 
 	msg := message.NewInsertMessageBuilderV1().
 		WithVChannel("v1").
@@ -202,7 +203,7 @@ func TestShardInterceptorInsertOnFencedVChannel(t *testing.T) {
 
 func TestShardInterceptorDeleteOnFencedVChannel(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
-	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1)).Return(shards.ErrVChannelFenced).Once()
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v1").Return(shards.ErrVChannelFenced).Once()
 
 	msg := message.NewDeleteMessageBuilderV1().
 		WithVChannel("v1").
@@ -256,7 +257,7 @@ func TestShardInterceptorCreateVChannelAllocatesFunctionRunners(t *testing.T) {
 	}
 
 	i, shardManager := newTestShardInterceptor(t)
-	shardManager.EXPECT().CheckIfCollectionCanBeCreated(collectionID).Return(nil).Once()
+	shardManager.EXPECT().CheckIfVChannelCanBeCreated(collectionID, vchannel).Return(nil).Once()
 	shardManager.EXPECT().CreateVChannel(mock.Anything).Once()
 
 	_, err := i.DoAppend(context.Background(),
@@ -281,3 +282,97 @@ type stubInsertMessage struct{ body *msgpb.InsertRequest }
 func (s *stubInsertMessage) MustBody() *msgpb.InsertRequest { return s.body }
 
 func (s *stubInsertMessage) OverwriteBody(body *msgpb.InsertRequest) { s.body = body }
+
+func newTestDropVChannelMutableMessage(vchannel string, collectionID int64) message.MutableMessage {
+	return message.NewDropVChannelMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.DropVChannelMessageHeader{
+			CollectionId: collectionID,
+			SplitTaskId:  100,
+		}).
+		WithBody(&message.DropVChannelMessageBody{}).
+		MustBuildMutable().
+		WithTimeTick(200).
+		WithLastConfirmedUseMessageID()
+}
+
+// TestShardInterceptorCreateVChannelRejectsForeignVChannel pins the contract the
+// split coordinator has to honor.
+//
+// The shard manager keys its registrations by collection id, one entry per
+// pchannel. If a target lands on a pchannel that still holds another vchannel of
+// the same collection, appending its genesis anyway would give the new shard a
+// WAL entry and a recovery-storage entry but no segment assignment -- and, when
+// the incumbent is the fenced split source, an inherited fence that leaves the
+// new shard unwritable for as long as the process lives. Refusing the append is
+// what turns that silent, permanent breakage into a visible failure.
+func TestShardInterceptorCreateVChannelRejectsForeignVChannel(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeCreated(int64(7), "v2").
+		Return(errors.Wrap(shards.ErrVChannelConflict, "registered as v1")).Once()
+
+	msgID, err := i.DoAppend(context.Background(), newTestCreateVChannelMutableMessage("v2", 7),
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			assert.Fail(t, "the genesis must not be appended when the pchannel holds another vchannel of the collection")
+			return nil, nil
+		})
+	assert.Nil(t, msgID)
+	assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
+}
+
+func TestShardInterceptorDropVChannel(t *testing.T) {
+	collectionID := int64(99201)
+	vchannel := "by-dev-rootcoord-dml_9_99201v0"
+
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeDropped(collectionID, vchannel).Return(nil).Once()
+	shardManager.EXPECT().DropVChannel(mock.Anything).Once()
+
+	// Creation took the WAL function-runner key per vchannel; the teardown must
+	// give back exactly that one, or the key outlives the shard it belongs to.
+	key := walFunctionRunnerKey(vchannel)
+	require.NoError(t, function.GetManager().Alloc(collectionID, key, &schemapb.CollectionSchema{}))
+
+	appended := false
+	msgID, err := i.DoAppend(context.Background(), newTestDropVChannelMutableMessage(vchannel, collectionID),
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			appended = true
+			return rmq.NewRmqID(1), nil
+		})
+	assert.NoError(t, err)
+	assert.True(t, appended)
+	assert.True(t, msgID.EQ(rmq.NewRmqID(1)))
+
+	_, err = function.GetManager().Materialize(context.Background(), collectionID, key, 0,
+		&stubInsertMessage{body: &msgpb.InsertRequest{}})
+	assert.Error(t, err, "the retired vchannel's function runner key must be released")
+}
+
+// TestShardInterceptorDropVChannelRefusesLiveShard: a teardown may only retire a
+// vchannel a shard split has fenced. Applying one to a live shard deletes its
+// segment assignment with no way back -- every later DML on it fails with
+// collection-not-found and nothing recreates the registration.
+func TestShardInterceptorDropVChannelRefusesLiveShard(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeDropped(int64(1), "v1").
+		Return(errors.Wrap(shards.ErrVChannelNotFenced, "state NORMAL")).Once()
+
+	msgID, err := i.DoAppend(context.Background(), newTestDropVChannelMutableMessage("v1", 1),
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			assert.Fail(t, "a live shard must never be torn down")
+			return nil, nil
+		})
+	assert.Nil(t, msgID)
+	assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
+}
+
+func TestShardInterceptorDropVChannelAppendFailure(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeDropped(int64(1), "v1").Return(nil).Once()
+
+	_, err := i.DoAppend(context.Background(), newTestDropVChannelMutableMessage("v1", 1),
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			return nil, errors.New("mock append error")
+		})
+	assert.Error(t, err)
+}
