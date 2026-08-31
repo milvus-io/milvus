@@ -108,7 +108,7 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 		return nil, errors.Wrap(err, "failed to assign kafka consumer")
 	}
 	consumerOwnedByScanner = true
-	return newScanner(opt.Name, topic, exclude, c), nil
+	return newScanner(opt.Name, exclude, c), nil
 }
 
 func (w *walImpl) consumerConfigForRead() kafka.ConfigMap {

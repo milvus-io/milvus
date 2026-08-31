@@ -86,7 +86,7 @@ func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 // newScannerAdaptor creates a new scanner adaptor.
 func newScannerAdaptor(
 	name string,
-	innerWAL walimpls.ROWALImpls,
+	l walimpls.ROWALImpls,
 	readOption wal.ReadOption,
 	roOpener roWALOpener,
 	scanMetrics *metricsutil.ScannerMetrics,
@@ -100,12 +100,12 @@ func newScannerAdaptor(
 	logger := resource.Resource().Logger().With(
 		mlog.FieldComponent("scanner"),
 		mlog.String("name", name),
-		mlog.String("channel", innerWAL.Channel().Name),
+		mlog.String("channel", l.Channel().Name),
 	)
 	s := &scannerAdaptorImpl{
 		logger:          logger,
 		recovery:        recovery,
-		innerWAL:        innerWAL,
+		innerWAL:        l,
 		readOption:      readOption,
 		roOpener:        roOpener,
 		filterFunc:      options.GetFilterFunc(readOption.MessageFilter),

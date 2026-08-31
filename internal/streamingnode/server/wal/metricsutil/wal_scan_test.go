@@ -21,16 +21,16 @@ func TestScannerMetricsSetReaderWALName(t *testing.T) {
 	scannerMetrics := scanMetrics.NewConsumerScannerMetrics("v1", "reader-1")
 	scannerMetrics.SetReaderWALName(message.WALNamePulsar)
 	assert.Equal(t, float64(1), testutil.ToFloat64(
-		scannerMetrics.consumerReaderInfo.WithLabelValues("v1", "reader-1", message.WALNamePulsar.String()),
+		scannerMetrics.readerInfo.WithLabelValues("v1", "reader-1", message.WALNamePulsar.String()),
 	))
-	assert.Equal(t, 1, testutil.CollectAndCount(scannerMetrics.consumerReaderInfo))
+	assert.Equal(t, 1, testutil.CollectAndCount(scannerMetrics.readerInfo))
 
 	scannerMetrics.SetReaderWALName(message.WALNameWoodpecker)
 	assert.Equal(t, float64(1), testutil.ToFloat64(
-		scannerMetrics.consumerReaderInfo.WithLabelValues("v1", "reader-1", message.WALNameWoodpecker.String()),
+		scannerMetrics.readerInfo.WithLabelValues("v1", "reader-1", message.WALNameWoodpecker.String()),
 	))
-	assert.Equal(t, 1, testutil.CollectAndCount(scannerMetrics.consumerReaderInfo))
+	assert.Equal(t, 1, testutil.CollectAndCount(scannerMetrics.readerInfo))
 
 	scannerMetrics.Close()
-	assert.Equal(t, 0, testutil.CollectAndCount(scannerMetrics.consumerReaderInfo))
+	assert.Equal(t, 0, testutil.CollectAndCount(scannerMetrics.readerInfo))
 }

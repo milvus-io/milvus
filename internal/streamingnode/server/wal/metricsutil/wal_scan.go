@@ -22,10 +22,10 @@ func NewScanMetrics(pchannel types.PChannelInfo) *ScanMetrics {
 	catchupLabel[metrics.WALScannerModelLabelName] = metrics.WALScannerModelCatchup
 	tailingLabel[metrics.WALScannerModelLabelName] = metrics.WALScannerModelTailing
 	return &ScanMetrics{
-		constLabel:         constLabel,
-		scannerTotal:       metrics.WALScannerTotal.MustCurryWith(constLabel),
-		consumerReaderInfo: metrics.WALConsumerReaderInfo.MustCurryWith(constLabel),
-		scannerPaused:      metrics.WALScannerPauseConsumption.With(constLabel),
+		constLabel:    constLabel,
+		scannerTotal:  metrics.WALScannerTotal.MustCurryWith(constLabel),
+		readerInfo:    metrics.WALConsumerReaderInfo.MustCurryWith(constLabel),
+		scannerPaused: metrics.WALScannerPauseConsumption.With(constLabel),
 		tailing: underlyingScannerMetrics{
 			messageBytes:           metrics.WALScanMessageBytes.With(tailingLabel),
 			passMessageBytes:       metrics.WALScanPassMessageBytes.With(tailingLabel),
@@ -48,16 +48,16 @@ func NewScanMetrics(pchannel types.PChannelInfo) *ScanMetrics {
 }
 
 type ScanMetrics struct {
-	constLabel         prometheus.Labels
-	scannerTotal       *prometheus.GaugeVec
-	consumerReaderInfo *prometheus.GaugeVec
-	scannerPaused      prometheus.Gauge
-	catchup            underlyingScannerMetrics
-	tailing            underlyingScannerMetrics
-	txnTotal           *prometheus.CounterVec
-	timeTickBufSize    prometheus.Gauge
-	txnBufSize         prometheus.Gauge
-	pendingQueueSize   prometheus.Gauge
+	constLabel       prometheus.Labels
+	scannerTotal     *prometheus.GaugeVec
+	readerInfo       *prometheus.GaugeVec
+	scannerPaused    prometheus.Gauge
+	catchup          underlyingScannerMetrics
+	tailing          underlyingScannerMetrics
+	txnTotal         *prometheus.CounterVec
+	timeTickBufSize  prometheus.Gauge
+	txnBufSize       prometheus.Gauge
+	pendingQueueSize prometheus.Gauge
 }
 
 type underlyingScannerMetrics struct {
@@ -140,14 +140,14 @@ func (m *ScannerMetrics) SetReaderWALName(walName message.WALName) {
 		return
 	}
 	m.deleteReaderInfo()
-	m.consumerReaderInfo.WithLabelValues(m.readerVChannel, m.readerName, walName.String()).Set(1)
+	m.readerInfo.WithLabelValues(m.readerVChannel, m.readerName, walName.String()).Set(1)
 }
 
 func (m *ScannerMetrics) deleteReaderInfo() {
 	if m.readerName == "" {
 		return
 	}
-	m.consumerReaderInfo.DeletePartialMatch(prometheus.Labels{
+	m.readerInfo.DeletePartialMatch(prometheus.Labels{
 		metrics.WALVChannelLabelName:   m.readerVChannel,
 		metrics.WALReaderNameLabelName: m.readerName,
 	})
