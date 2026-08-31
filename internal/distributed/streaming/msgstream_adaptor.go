@@ -123,12 +123,18 @@ func (m *delegatorMsgstreamAdaptor) Seek(ctx context.Context, msgPositions []*ms
 // is dropped at the WAL scanner, before the dispatcher, before the flow graph,
 // and without a trace in any log.
 //
-// SplitShard is in it because that fence is how a delegator learns its vchannel
-// was split. Dropped, the source delegator never spawns the in-process children
-// that answer for the new shards until querycoord adopts them, so every row
-// written after the fence is served by nothing for the length of the split —
-// while the source keeps answering from its own pre-fence data with a fully
-// advanced tsafe, so the loss looks like nothing at all.
+// SplitShard is in it because that fence is how a delegator will learn its
+// vchannel was split. Filtered out here, the message cannot reach a delegator
+// at all, so the read path could never be taught to react to it: the source
+// delegator would never spawn the in-process children that answer for the new
+// shards until querycoord adopts them, and every row written after the fence
+// would be served by nothing for the length of the split — while the source
+// kept answering from its own pre-fence data with a fully advanced tsafe, so
+// the loss would look like nothing at all.
+//
+// Opening the whitelist is necessary, not sufficient: the querynode filter node
+// still drops SplitShard through its default branch. The delegator-side
+// handling lands with the read path, in a later PR.
 var delegatorMessageTypes = []message.MessageType{
 	message.MessageTypeInsert,
 	message.MessageTypeDelete,
