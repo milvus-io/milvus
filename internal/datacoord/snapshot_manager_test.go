@@ -2549,6 +2549,7 @@ func TestSnapshotManager_RestoreData_Success(t *testing.T) {
 		snapshotS3Location string,
 		externalSpec string,
 		snapshotFingerprint string,
+		skipIndex bool,
 	) error {
 		assert.Equal(t, int64(200), collectionID)
 		assert.Equal(t, int64(12345), jobID)
@@ -2556,6 +2557,7 @@ func TestSnapshotManager_RestoreData_Success(t *testing.T) {
 		assert.Empty(t, snapshotS3Location)
 		assert.Empty(t, externalSpec)
 		assert.Empty(t, snapshotFingerprint)
+		assert.False(t, skipIndex)
 		return nil
 	}).Build()
 	defer mockCreateJob.UnPatch()
@@ -2799,11 +2801,13 @@ func TestSnapshotManager_RestoreData_CreateJobError(t *testing.T) {
 		snapshotS3Location string,
 		externalSpec string,
 		snapshotFingerprint string,
+		skipIndex bool,
 	) error {
 		assert.False(t, external)
 		assert.Empty(t, snapshotS3Location)
 		assert.Empty(t, externalSpec)
 		assert.Empty(t, snapshotFingerprint)
+		assert.False(t, skipIndex)
 		return expectedErr
 	}).Build()
 	defer mockCreateJob.UnPatch()
