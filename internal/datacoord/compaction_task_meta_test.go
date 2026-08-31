@@ -149,6 +149,60 @@ func (suite *CompactionTaskMetaSuite) TestFailureHistoryJSON() {
 	suite.JSONEq(string(expectedJSON), suite.meta.FailureHistoryJSON())
 }
 
+// TestRecordTerminalFailureBackfillsEndTime is the regression test for the bug where a
+// history entry silently carried no timestamp: updateAndSaveTaskMeta only stamps EndTime
+// when the task's state was ALREADY terminal before the save, but the save that transitions
+// a task INTO failed/timeout runs while EndTime is still unset -- so, unlike
+// TestFailureHistoryJSON above, this test deliberately does NOT set EndTime on the input,
+// to actually exercise the real (buggy, pre-fix) path instead of masking it.
+func (suite *CompactionTaskMetaSuite) TestRecordTerminalFailureBackfillsEndTime() {
+	failedTask := &datapb.CompactionTask{
+		PlanID:     1,
+		Type:       datapb.CompactionType_MixCompaction,
+		State:      datapb.CompactionTaskState_failed,
+		FailReason: "segment integrity check failed",
+		// EndTime deliberately left at its zero value.
+	}
+	before := time.Now()
+	suite.meta.RecordTerminalFailure(failedTask)
+	after := time.Now()
+
+	// The task passed in by the caller must not be mutated in place -- RecordTerminalFailure
+	// clones before backfilling.
+	suite.Zero(failedTask.GetEndTime())
+
+	tasks := suite.meta.failureHistory.Values()
+	suite.Require().Len(tasks, 1)
+	recorded := tasks[0]
+	suite.NotEmpty(recorded.EndTime, "EndTime must be backfilled, not left blank")
+
+	// newCompactionTaskStats renders EndTime via typeutil.TimestampToString, i.e. a
+	// second-precision formatted timestamp -- parse it back to compare against the window
+	// this call ran in, with a 1s allowance for the format's truncated precision.
+	parsed, err := time.ParseInLocation(time.DateTime, recorded.EndTime, time.Local)
+	suite.NoError(err)
+	suite.WithinRange(parsed, before.Add(-time.Second), after.Add(time.Second))
+}
+
+// TestRecordTerminalFailurePreservesExistingEndTime confirms the backfill only kicks in
+// when EndTime is actually unset -- a task that legitimately already has one (e.g. recorded
+// after Clean()'s failed -> cleaned transition already stamped it) keeps its real value.
+func (suite *CompactionTaskMetaSuite) TestRecordTerminalFailurePreservesExistingEndTime() {
+	explicitEndTime := time.Now().Add(-time.Hour).Unix()
+	failedTask := &datapb.CompactionTask{
+		PlanID:     1,
+		Type:       datapb.CompactionType_MixCompaction,
+		State:      datapb.CompactionTaskState_failed,
+		FailReason: "segment integrity check failed",
+		EndTime:    explicitEndTime,
+	}
+	suite.meta.RecordTerminalFailure(failedTask)
+
+	expectedJSON, err := json.Marshal([]*metricsinfo.CompactionTask{newCompactionTaskStats(failedTask)})
+	suite.NoError(err)
+	suite.JSONEq(string(expectedJSON), suite.meta.FailureHistoryJSON())
+}
+
 // TestFailureHistorySurvivesTaskMetaDrop is the core regression test for the issue this
 // history exists to fix: today, once a failed task's regular meta is dropped (see
 // compactionInspector.cleanCompactionTaskMeta), its FailReason is gone for good. The

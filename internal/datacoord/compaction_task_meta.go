@@ -223,9 +223,23 @@ func (csm *compactionTaskMeta) TaskStatsJSON() string {
 // RecordTerminalFailure snapshots a task that just reached a terminal failed/timeout state,
 // so it stays queryable after cleanCompactionTaskMeta later deletes its regular task meta.
 // Safe to call for any task; callers are expected to only call it for failed/timeout tasks.
+//
+// The task's own EndTime is usually still unset here: updateAndSaveTaskMeta only stamps
+// EndTime when the task's state was ALREADY terminal before the save, but the save that
+// transitions a task INTO failed/timeout (classifyFailure, or the timeout branches in
+// QueryTaskOnWorker) runs while the prior state was still executing/pipelining -- so the
+// stamp only lands on the next save after that (Clean()'s failed/timeout -> cleaned
+// transition), which happens later and asynchronously, after this snapshot is taken. So
+// EndTime is backfilled with the current time here whenever it is still zero, rather than
+// recording a diagnostically useless blank timestamp.
 func (csm *compactionTaskMeta) RecordTerminalFailure(task *datapb.CompactionTask) {
 	csm.Lock()
 	defer csm.Unlock()
+	if task.GetEndTime() == 0 {
+		clone := proto.Clone(task).(*datapb.CompactionTask)
+		setEndTime(time.Now().Unix())(clone)
+		task = clone
+	}
 	csm.failureHistory.Add(task.GetPlanID(), newCompactionTaskStats(task))
 }
 
