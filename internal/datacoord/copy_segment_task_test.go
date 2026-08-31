@@ -2047,18 +2047,14 @@ func TestAssembleCopySegmentRequest_SkipIndex(t *testing.T) {
 		}},
 	}
 
-	snapshotMeta := &snapshotMeta{}
-	mockRead := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(snapshotData, nil).Build()
-	defer mockRead.UnPatch()
 	mockStorageConfig := mockey.Mock(createStorageConfig).Return(nil).Build()
 	defer mockStorageConfig.UnPatch()
 
 	task := &copySegmentTask{
-		ctx:          context.Background(),
-		snapshotMeta: snapshotMeta,
-		alloc:        &embeddedAllocator{},
-		tr:           timerecord.NewTimeRecorder("test"),
-		times:        taskcommon.NewTimes(),
+		ctx:   context.Background(),
+		alloc: &embeddedAllocator{},
+		tr:    timerecord.NewTimeRecorder("test"),
+		times: taskcommon.NewTimes(),
 	}
 	task.task.Store(&datapb.CopySegmentTask{
 		TaskId:       1001,
@@ -2076,7 +2072,7 @@ func TestAssembleCopySegmentRequest_SkipIndex(t *testing.T) {
 			SkipIndex:    true,
 		},
 		tr:            timerecord.NewTimeRecorder("test_job"),
-		snapshotCache: &copySegmentSnapshotCache{},
+		snapshotCache: &copySegmentSnapshotCache{data: snapshotData},
 	}
 
 	req, err := AssembleCopySegmentRequest(task, job)
