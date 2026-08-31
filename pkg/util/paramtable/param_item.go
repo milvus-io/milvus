@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 
@@ -39,15 +40,19 @@ type ParamChangeCallback func(ctx context.Context, key, oldValue, newValue strin
 //     sentinel), AutoSwitch is triggered;
 //   - once the cluster-wide confirmed version reaches GateVersion and the
 //     SwitchDelay stability window has elapsed since the confirmation, the
-//     effective value of the item becomes TargetValue;
-//   - before that the item keeps PreSwitchValue (the value used before the
-//     switch, i.e. the pre-change behavior) and EffectiveValue returns
-//     activated=false so callers know the gated behavior is not yet in effect.
+//     one-shot confirmator flips the config-center value to TargetValue;
+//   - before that the item resolves to PreSwitchValue (the value used before
+//     the switch, i.e. the pre-change behavior) on every read path.
 //
 // DefaultValue is allowed to equal EnableAutoSwitchValue, which means the item
 // is in AutoSwitch mode by default (no explicit user configuration needed);
-// the "not activated" state is expressed by the activated flag plus
-// PreSwitchValue instead of a sentinel value leaking to callers.
+// the "not yet switched" state is expressed by resolving reads to
+// PreSwitchValue instead of leaking the sentinel value to callers.
+//
+// The gate is applied at the value-resolution layer (getWithRaw), so GetValue
+// and all GetAs* accessors uniformly return the effective value. The raw
+// configured value is left untouched for callers that need to detect the
+// sentinel (e.g. the version gate confirmator).
 //
 // nil means no version gating (default, backward compatible).
 type VersionGateSwitcher struct {
@@ -56,6 +61,37 @@ type VersionGateSwitcher struct {
 	GateVersion           string        // minimum cluster version (semver) required to switch
 	TargetValue           string        // effective value after AutoSwitch takes effect
 	SwitchDelay           time.Duration // stability window to wait after cluster-wide confirmation before switching
+}
+
+// Validate checks the switcher's field contract, panicking on a missing or
+// malformed field. A version-gated item must declare its full semantics:
+//   - EnableAutoSwitchValue: the sentinel that triggers AutoSwitch;
+//   - PreSwitchValue:        the pre-change behavior — without it the sentinel
+//     would leak to callers, so an empty value is a coding error;
+//   - GateVersion:           a valid semver (the confirmator parses it);
+//   - TargetValue:           the post-switch value.
+//
+// Validate is called from ParamItem.Init, so a misconfigured gated item fails
+// fast at startup instead of silently degrading at runtime.
+func (sw *VersionGateSwitcher) Validate() {
+	if sw.EnableAutoSwitchValue == "" {
+		panic("version gate: EnableAutoSwitchValue must not be empty")
+	}
+	if sw.PreSwitchValue == "" {
+		panic("version gate: PreSwitchValue must not be empty (the pre-change behavior is required)")
+	}
+	if sw.GateVersion == "" {
+		panic("version gate: GateVersion must not be empty")
+	}
+	if _, err := semver.Parse(sw.GateVersion); err != nil {
+		panic(fmt.Sprintf("version gate: invalid GateVersion %q: %v", sw.GateVersion, err))
+	}
+	if sw.TargetValue == "" {
+		panic("version gate: TargetValue must not be empty")
+	}
+	if sw.SwitchDelay < 0 {
+		panic("version gate: SwitchDelay must not be negative")
+	}
 }
 
 type ParamItem struct {
@@ -86,6 +122,11 @@ type ParamItem struct {
 
 func (pi *ParamItem) Init(manager *config.Manager) {
 	pi.manager = manager
+	if pi.VersionGateSwitcher != nil {
+		// A version-gated item must declare its full semantics; a
+		// misconfigured switcher is a coding error and must fail fast.
+		pi.VersionGateSwitcher.Validate()
+	}
 	if pi.Forbidden {
 		pi.manager.ForbidUpdate(pi.Key)
 	}
@@ -155,7 +196,7 @@ func (pi *ParamItem) get() (string, error) {
 func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 	// For unittest.
 	if s := pi.tempValue.Load(); s != nil {
-		return *s, *s, nil
+		return pi.gateValue(*s), *s, nil
 	}
 
 	if pi.manager == nil {
@@ -183,7 +224,7 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 		effectiveRaw = pi.DefaultValue
 		raw = pi.DefaultValue
 	}
-	result = effectiveRaw
+	result = pi.gateValue(effectiveRaw)
 	if pi.Formatter != nil {
 		result = pi.Formatter(result)
 	}
@@ -191,6 +232,21 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 		panic(fmt.Sprintf("%s is empty", pi.Key))
 	}
 	return result, raw, err
+}
+
+// gateValue applies the version-gated auto-switch semantics to a configured
+// value: when the item carries a VersionGateSwitcher and the value is the
+// sentinel (EnableAutoSwitchValue), the effective value is PreSwitchValue
+// (the pre-change behavior) until the one-shot confirmator flips the config
+// center value to TargetValue. Every read path (GetValue and all GetAs*)
+// resolves through this, so the gate is uniformly visible regardless of the
+// caller's accessor type. The raw value is unaffected: callers that need to
+// detect the sentinel (e.g. the version gate confirmator) still see it.
+func (pi *ParamItem) gateValue(v string) string {
+	if pi.VersionGateSwitcher == nil || v != pi.VersionGateSwitcher.EnableAutoSwitchValue {
+		return v
+	}
+	return pi.VersionGateSwitcher.PreSwitchValue
 }
 
 // SetTempValue set the value for this ParamItem,
@@ -212,38 +268,6 @@ func (pi *ParamItem) SwapTempValue(s string) string {
 func (pi *ParamItem) GetValue() string {
 	v, _ := pi.get()
 	return v
-}
-
-// EffectiveValue returns the effective (version-gated) value and whether the
-// gated behavior is activated:
-//   - no VersionGateSwitcher   -> (GetValue(), true)            // unchanged behavior
-//   - value == EnableAutoSwitchValue (sentinel) -> (PreSwitchValue, false)
-//     // the gate is not yet flipped: the caller gets the pre-switch value
-//     // (pre-change behavior) and activated=false; once the one-shot
-//     // confirmator flips the config value to TargetValue, GetValue() itself
-//     // returns TargetValue and this branch is no longer taken
-//   - any other explicit value -> (GetValue(), true)            // explicit config wins
-func (pi *ParamItem) EffectiveValue() (string, bool) {
-	if pi.VersionGateSwitcher == nil {
-		return pi.GetValue(), true
-	}
-	sw := pi.VersionGateSwitcher
-	v := pi.GetValue()
-	if v == sw.EnableAutoSwitchValue {
-		if sw.PreSwitchValue != "" {
-			return sw.PreSwitchValue, false
-		}
-		return pi.DefaultValue, false
-	}
-	return v, true
-}
-
-// GetAsBoolEffective returns the effective value parsed as bool. When the
-// gated behavior is not activated it always returns false (the pre-change
-// behavior of a bool config).
-func (pi *ParamItem) GetAsBoolEffective() bool {
-	v, ok := pi.EffectiveValue()
-	return ok && getAsBool(v)
 }
 
 func (pi *ParamItem) GetAsStrings() []string {
