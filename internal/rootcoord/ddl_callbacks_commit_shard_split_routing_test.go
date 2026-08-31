@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -195,4 +196,142 @@ func TestCommitShardSplitRoutingValidation(t *testing.T) {
 		ShardInfos:           []*schemapb.CollectionShardInfo{pbShard(schemapb.ShardState_ShardNormal, 0)},
 	})
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+func TestRoutingCommitAlreadyApplied(t *testing.T) {
+	coll := &model.Collection{
+		VirtualChannelNames: []string{"v0", "v1"},
+		RoutingModulus:      2,
+		ShardBy:             "hash(pk)",
+		ShardInfos: map[string]*model.ShardInfo{
+			"v0": {VChannelName: "v0", State: schemapb.ShardState_ShardNormal, Buckets: []uint64{0}},
+			"v1": {VChannelName: "v1", State: schemapb.ShardState_ShardNormal, Buckets: []uint64{1}},
+		},
+	}
+	req := func(modulus uint64, left, right []uint64) *rootcoordpb.CommitShardSplitRoutingRequest {
+		return &rootcoordpb.CommitShardSplitRoutingRequest{
+			VirtualChannelNames: []string{"v0", "v1"},
+			RoutingModulus:      modulus,
+			ShardInfos: []*schemapb.CollectionShardInfo{
+				pbShard(schemapb.ShardState_ShardNormal, left...),
+				pbShard(schemapb.ShardState_ShardNormal, right...),
+			},
+		}
+	}
+
+	require.True(t, routingCommitAlreadyApplied(coll, req(2, []uint64{0}, []uint64{1})))
+
+	// A rebase onto a doubled modulus leaves every state alone and changes only
+	// the residues. Comparing states alone would call this already committed and
+	// silently drop it.
+	require.False(t, routingCommitAlreadyApplied(coll, req(4, []uint64{0, 2}, []uint64{1, 3})))
+	// Same modulus, different residues.
+	require.False(t, routingCommitAlreadyApplied(coll, req(2, []uint64{1}, []uint64{0})))
+	// A shard_by back-fill the collection does not carry yet.
+	backfill := req(2, []uint64{0}, []uint64{1})
+	backfill.ShardBy = "hash($namespace_id)"
+	require.False(t, routingCommitAlreadyApplied(coll, backfill))
+	// An empty shard_by asks for no back-fill, so it does not make the commit
+	// look different.
+	require.True(t, routingCommitAlreadyApplied(coll, req(2, []uint64{0}, []uint64{1})))
+	// A vchannel the collection does not have.
+	unknown := req(2, []uint64{0}, []uint64{1})
+	unknown.VirtualChannelNames = []string{"v0", "v9"}
+	require.False(t, routingCommitAlreadyApplied(coll, unknown))
+}
+
+func TestShardStateMayAdvance(t *testing.T) {
+	all := []schemapb.ShardState{
+		schemapb.ShardState_ShardNormal,
+		schemapb.ShardState_ShardCreating,
+		schemapb.ShardState_ShardSplitting,
+		schemapb.ShardState_ShardDropped,
+	}
+	// Staying put is always allowed; that is what makes a retried commit a no-op.
+	for _, s := range all {
+		require.True(t, shardStateMayAdvance(s, s), s.String())
+	}
+	// Forward: fence a source, release it, adopt a target, abandon a target.
+	require.True(t, shardStateMayAdvance(schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardSplitting))
+	require.True(t, shardStateMayAdvance(schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardDropped))
+	require.True(t, shardStateMayAdvance(schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardNormal))
+	require.True(t, shardStateMayAdvance(schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardDropped))
+	// Backward: the fence is recorded in the WAL and cannot be undone, an adopted
+	// target cannot go back to not-yet-serviceable, and Dropped is terminal.
+	require.False(t, shardStateMayAdvance(schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardNormal))
+	require.False(t, shardStateMayAdvance(schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardCreating))
+	require.False(t, shardStateMayAdvance(schemapb.ShardState_ShardDropped, schemapb.ShardState_ShardSplitting))
+	require.False(t, shardStateMayAdvance(schemapb.ShardState_ShardDropped, schemapb.ShardState_ShardNormal))
+}
+
+func TestCheckRoutingCommitAgainstMeta(t *testing.T) {
+	// A collection mid-split: source fenced, two targets adopted.
+	coll := &model.Collection{
+		Name:                "c",
+		VirtualChannelNames: []string{"v0", "v1", "v2"},
+		RoutingModulus:      2,
+		ShardInfos: map[string]*model.ShardInfo{
+			"v0": {VChannelName: "v0", State: schemapb.ShardState_ShardDropped},
+			"v1": {VChannelName: "v1", State: schemapb.ShardState_ShardNormal, Buckets: []uint64{0}},
+			"v2": {VChannelName: "v2", State: schemapb.ShardState_ShardNormal, Buckets: []uint64{1}},
+		},
+	}
+
+	// A late duplicate of the write-switch commit, arriving after adoption. With
+	// no collection lock this is the lost update the check exists to stop: it
+	// would put the released source back to fenced and un-adopt both targets.
+	stale := &rootcoordpb.CommitShardSplitRoutingRequest{
+		CollectionName:      "c",
+		VirtualChannelNames: []string{"v0", "v1", "v2"},
+		RoutingModulus:      2,
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			pbShard(schemapb.ShardState_ShardSplitting),
+			pbShard(schemapb.ShardState_ShardCreating, 0),
+			pbShard(schemapb.ShardState_ShardCreating, 1),
+		},
+	}
+	require.ErrorIs(t, checkRoutingCommitAgainstMeta(coll, stale), merr.ErrParameterInvalid)
+
+	// Routing is not revocable: a commit cannot take a split collection back to
+	// no modulus, which would make it read as never-split and route by position
+	// over a channel list that still holds the retired source.
+	revoke := &rootcoordpb.CommitShardSplitRoutingRequest{
+		CollectionName:      "c",
+		VirtualChannelNames: []string{"v0", "v1", "v2"},
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			pbShard(schemapb.ShardState_ShardDropped),
+			pbShard(schemapb.ShardState_ShardNormal),
+			pbShard(schemapb.ShardState_ShardNormal),
+		},
+	}
+	require.ErrorIs(t, checkRoutingCommitAgainstMeta(coll, revoke), merr.ErrParameterInvalid)
+
+	// Forward is fine: retire the source's vchannel and keep the two targets.
+	forward := &rootcoordpb.CommitShardSplitRoutingRequest{
+		CollectionName:      "c",
+		VirtualChannelNames: []string{"v1", "v2"},
+		RoutingModulus:      2,
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			pbShard(schemapb.ShardState_ShardNormal, 0),
+			pbShard(schemapb.ShardState_ShardNormal, 1),
+		},
+	}
+	require.NoError(t, checkRoutingCommitAgainstMeta(coll, forward))
+
+	// A doubling that rebases every shard onto the new modulus is forward too.
+	rebase := &rootcoordpb.CommitShardSplitRoutingRequest{
+		CollectionName:      "c",
+		VirtualChannelNames: []string{"v1", "v2", "v3"},
+		RoutingModulus:      4,
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			pbShard(schemapb.ShardState_ShardSplitting),
+			pbShard(schemapb.ShardState_ShardNormal, 1, 3),
+			pbShard(schemapb.ShardState_ShardCreating, 0, 2),
+		},
+	}
+	require.NoError(t, checkRoutingCommitAgainstMeta(coll, rebase))
+
+	// A collection that has never been split may of course start at zero.
+	fresh := &model.Collection{Name: "c", VirtualChannelNames: []string{"v0"}}
+	require.NoError(t, checkRoutingCommitAgainstMeta(fresh, revoke))
 }
