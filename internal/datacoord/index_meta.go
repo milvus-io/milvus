@@ -86,6 +86,39 @@ type indexMeta struct {
 	keyLock *lock.KeyLock[UniqueID]
 	// segmentID -> indexID -> segmentIndex
 	segmentIndexes *typeutil.ConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]
+
+	// manifestBackedSegment reports whether a segment records its indexes in a
+	// manifest, which is what makes suppressing its etcd record recoverable.
+	// It is wired by newMeta once the segment list exists; a nil value (a
+	// directly-constructed indexMeta in tests) means "assume not", so the
+	// catalog write always happens.
+	manifestBackedSegment func(segmentID UniqueID) bool
+}
+
+// skipSegmentIndexEtcdWrite reports whether this segment's index record may be
+// left out of etcd. It requires BOTH the switch to be off AND the segment to
+// be manifest-backed: only a StorageV3 segment records its indexes in a
+// manifest, so suppressing the write for a StorageV1/V2 segment would destroy
+// the only copy rather than defer to another one.
+//
+// It resolves the segment through meta, which takes segMu, so it must not be
+// called while that lock is held. The one write path that runs inside a segMu
+// critical section - the manifest commit - passes the answer in instead (see
+// skipStagedSegmentIndexEtcdWrite).
+func (m *indexMeta) skipSegmentIndexEtcdWrite(segmentID UniqueID) bool {
+	if writeSegmentIndexToEtcd() {
+		return false
+	}
+	if m.manifestBackedSegment == nil {
+		return false
+	}
+	return m.manifestBackedSegment(segmentID)
+}
+
+// skipStagedSegmentIndexEtcdWrite is the segMu-free form for a caller that
+// already knows whether the segment is manifest-backed.
+func skipStagedSegmentIndexEtcdWrite(manifestBacked bool) bool {
+	return !writeSegmentIndexToEtcd() && manifestBacked
 }
 
 func newIndexTaskStats(s *model.SegmentIndex) *metricsinfo.IndexTaskStats {
@@ -277,12 +310,32 @@ func (m *indexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 	m.segmentBuildInfo.Add(segIdx)
 }
 
+// writeSegmentIndexToEtcd reports whether SegmentIndex records are persisted.
+// When it is off, every catalog write below is skipped while the in-memory
+// update that follows it still runs: the switch controls durability only, not
+// what DataCoord itself observes. Reload then rebuilds the finished records
+// from segment manifests (see meta.reloadSegmentIndexesFromManifests).
+func writeSegmentIndexToEtcd() bool {
+	return paramtable.Get().DataCoordCfg.WriteSegmentIndexToEtcd.GetAsBool()
+}
+
 func (m *indexMeta) alterSegmentIndexes(segIdxes []*model.SegmentIndex) error {
-	err := m.catalog.AlterSegmentIndexes(m.ctx, segIdxes)
-	if err != nil {
-		mlog.Error(context.TODO(), "failed to alter segments index in meta store", mlog.Int("segment indexes num", len(segIdxes)),
-			mlog.Err(err))
-		return err
+	// The decision is per record, not per batch: a batch can mix a
+	// manifest-backed segment with a StorageV1/V2 one, and only the former may
+	// be left out of etcd.
+	persist := make([]*model.SegmentIndex, 0, len(segIdxes))
+	for _, segIdx := range segIdxes {
+		if !m.skipSegmentIndexEtcdWrite(segIdx.SegmentID) {
+			persist = append(persist, segIdx)
+		}
+	}
+	if len(persist) > 0 {
+		err := m.catalog.AlterSegmentIndexes(m.ctx, persist)
+		if err != nil {
+			mlog.Error(context.TODO(), "failed to alter segments index in meta store", mlog.Int("segment indexes num", len(persist)),
+				mlog.Err(err))
+			return err
+		}
 	}
 	for _, segIdx := range segIdxes {
 		m.updateSegmentIndex(segIdx)
@@ -634,11 +687,13 @@ func (m *indexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.Segment
 	if segIndex.IndexState == commonpb.IndexState_IndexStateNone {
 		segIndex.IndexState = commonpb.IndexState_Unissued
 	}
-	if err := m.catalog.CreateSegmentIndex(ctx, segIndex); err != nil {
-		mlog.Warn(ctx, "meta update: adding segment index failed",
-			mlog.Int64("segmentID", segIndex.SegmentID), mlog.Int64("indexID", segIndex.IndexID),
-			mlog.Int64("buildID", segIndex.BuildID), mlog.String("indexType", segIndex.IndexType), mlog.Err(err))
-		return err
+	if !m.skipSegmentIndexEtcdWrite(segIndex.SegmentID) {
+		if err := m.catalog.CreateSegmentIndex(ctx, segIndex); err != nil {
+			mlog.Warn(ctx, "meta update: adding segment index failed",
+				mlog.Int64("segmentID", segIndex.SegmentID), mlog.Int64("indexID", segIndex.IndexID),
+				mlog.Int64("buildID", segIndex.BuildID), mlog.String("indexType", segIndex.IndexType), mlog.Err(err))
+			return err
+		}
 	}
 
 	// Insert + gauge Add must be serialized vs MarkIndexAsDeleted.
@@ -1197,6 +1252,11 @@ func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) er
 		return nil
 	}
 
+	// Deliberately not gated by writeSegmentIndexToEtcd: the switch stops
+	// DataCoord adding durable index state, it never stops it removing state.
+	// A record written while the switch was on must still be deleted, or reload
+	// would resurrect an index this cycle just collected. Removing a key that
+	// was never written is a harmless no-op.
 	err := m.catalog.DropSegmentIndex(ctx, segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, buildID)
 	if err != nil {
 		return err
@@ -1262,7 +1322,10 @@ type stagedSegmentIndexMutation struct {
 // A missing record is terminal for an upsert (errSegmentIndexRecordGone) and
 // benign for a removal - the record already being gone is that mutation's
 // intended end state, so the caller's manifest revision still publishes.
-func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation) (*stagedSegmentIndexMutation, error) {
+// manifestBacked reports whether the committing segment records its indexes in
+// a manifest. The caller supplies it rather than letting this resolve it,
+// because the manifest commit holds segMu across this call.
+func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation, manifestBacked bool) (*stagedSegmentIndexMutation, error) {
 	if mut.BuildID == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("segment index mutation requires a build ID")
 	}
@@ -1309,8 +1372,13 @@ func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation) (*staged
 	if err != nil {
 		return staged, err
 	}
-	action := metastore.UpdateSegmentIndex(finished)
-	staged.action = &action
+	if !skipStagedSegmentIndexEtcdWrite(manifestBacked) {
+		// When it is skipped, the manifest revision this commit publishes is
+		// the sole record of the finished artifact - the migration's end state
+		// - and the commit carries the segment record alone.
+		action := metastore.UpdateSegmentIndex(finished)
+		staged.action = &action
+	}
 	staged.install = func() {
 		m.updateSegmentIndex(finished)
 		m.recordFinishedTask(previous, finished, previousSize, mut.FinishedTask)

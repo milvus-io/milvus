@@ -28,8 +28,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
 // buildManifestIndexInfo assembles the manifest entry for a completed index
@@ -292,4 +295,105 @@ func resolveManifestIndexFilePathInfos(
 		ret = append(ret, info)
 	}
 	return ret
+}
+
+// reloadSegmentIndexesFromManifests rebuilds the finished-index half of
+// indexMeta from the segment manifests, for the deployment where
+// dataCoord.index.writeSegmentIndexToEtcd is off and a manifest is therefore
+// the only durable record of a completed artifact.
+//
+// etcd wins on conflict, matching every other manifest-index consumer: a
+// buildID already loaded from the catalog is left untouched, so records
+// written while the switch was on are never overwritten by a manifest
+// projection of the same build. Only StorageV3 segments carry index entries,
+// so an index on a StorageV1/V2 segment is not recoverable here - that is the
+// documented cost of turning the switch off.
+//
+// A manifest that cannot be read is logged and skipped rather than failing
+// startup: refusing to start would turn one unreadable object into a total
+// outage, whereas skipping degrades to "that segment looks unindexed", which
+// the index inspector repairs by reissuing the build.
+func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) {
+	record := timerecord.NewTimeRecorder("indexMeta-reloadFromManifests")
+	segments := m.SelectSegments(ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
+		return segment.GetStorageVersion() >= storage.StorageV3 &&
+			segment.GetManifestPath() != "" &&
+			isSegmentHealthy(segment)
+	}))
+	if len(segments) == 0 {
+		return
+	}
+
+	storageConfig := createStorageConfig()
+	pool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
+	defer pool.Release()
+
+	recovered := make([][]*model.SegmentIndex, len(segments))
+	futures := make([]*conc.Future[any], 0, len(segments))
+	for i, segment := range segments {
+		i, segment := i, segment
+		futures = append(futures, pool.Submit(func() (any, error) {
+			manifestIndexes, err := packed.GetManifestIndexInfos(segment.GetManifestPath(), storageConfig)
+			if err != nil {
+				mlog.Warn(ctx, "failed to read segment manifest index metadata during reload, segment will look unindexed",
+					mlog.Int64("segmentID", segment.GetID()),
+					mlog.String("manifestPath", segment.GetManifestPath()),
+					mlog.Err(err))
+				return nil, nil
+			}
+			for _, manifestIndex := range manifestIndexes {
+				recovered[i] = append(recovered[i], segmentIndexFromManifest(segment, manifestIndex))
+			}
+			return nil, nil
+		}))
+	}
+	// Every failure is absorbed above, so this only waits.
+	_ = conc.AwaitAll(futures...)
+
+	installed := 0
+	for _, segIdxes := range recovered {
+		for _, segIdx := range segIdxes {
+			if _, ok := m.indexMeta.segmentBuildInfo.Get(segIdx.BuildID); ok {
+				continue
+			}
+			m.indexMeta.updateSegmentIndex(segIdx)
+			m.indexMeta.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID,
+				float64(segIdx.IndexSerializedSize))
+			installed++
+		}
+	}
+
+	mlog.Info(ctx, "recovered segment indexes from manifests",
+		mlog.Int("segments", len(segments)),
+		mlog.Int("recoveredIndexes", installed),
+		mlog.Duration("duration", record.ElapseSpan()))
+}
+
+// segmentIndexFromManifest projects a manifest index entry back into the
+// SegmentIndex record the catalog would have held.
+//
+// The entry carries every field that describes a finished artifact. What it
+// cannot carry is the build task's own history - the assigned node, the
+// failure reason, and the create/finish timestamps - because a manifest
+// records the artifact, not the build that produced it. Those are left zero:
+// the state is Finished by construction, so the only consumer of the
+// timestamps is the human-readable projection in DescribeIndex.
+func segmentIndexFromManifest(segment *SegmentInfo, manifestIndex packed.ManifestIndexInfo) *model.SegmentIndex {
+	return &model.SegmentIndex{
+		SegmentID:                 segment.GetID(),
+		CollectionID:              segment.GetCollectionID(),
+		PartitionID:               segment.GetPartitionID(),
+		NumRows:                   manifestIndex.NumRows,
+		IndexID:                   manifestIndex.IndexID,
+		BuildID:                   manifestIndex.BuildID,
+		IndexVersion:              manifestIndex.IndexVersion,
+		IndexState:                commonpb.IndexState_Finished,
+		IndexFileKeys:             manifestIndex.IndexFileKeys,
+		IndexSerializedSize:       uint64(manifestIndex.SerializedSize),
+		IndexMemSize:              uint64(manifestIndex.MemSize),
+		CurrentIndexVersion:       manifestIndex.CurrentIndexVersion,
+		CurrentScalarIndexVersion: manifestIndex.CurrentScalarIndexVersion,
+		IndexType:                 manifestIndex.IndexType,
+		IndexStorePathVersion:     manifestIndex.IndexStorePathVersion,
+	}
 }

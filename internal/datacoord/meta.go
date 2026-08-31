@@ -364,7 +364,34 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	mt.externalCollectionRefreshMeta = ecrm
 	mt.snapshotMeta = spm
 
+	// indexMeta decides per segment whether an index record may be left out of
+	// etcd, which it can only answer once the segment list exists. Wiring it
+	// here rather than at construction is what keeps newIndexMeta and the
+	// segment reload running in parallel above.
+	mt.indexMeta.manifestBackedSegment = mt.isManifestBackedSegment
+
+	// Runs only when SegmentIndex records are not persisted, where a manifest is
+	// the sole durable record of a finished artifact. Keeping it behind the
+	// switch also keeps the default startup free of a per-segment manifest read.
+	if !writeSegmentIndexToEtcd() {
+		mt.reloadSegmentIndexesFromManifests(ctx)
+	}
+
 	return mt, nil
+}
+
+// isManifestBackedSegment reports whether a segment records its indexes in a
+// manifest, i.e. whether an index record left out of etcd is recoverable from
+// object storage. An unknown segment answers false so the durable write
+// happens: the only safe default is the one that keeps a copy.
+func (m *meta) isManifestBackedSegment(segmentID UniqueID) bool {
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
+	segment := m.segments.GetSegment(segmentID)
+	if segment == nil {
+		return false
+	}
+	return segment.GetStorageVersion() >= storage.StorageV3 && segment.GetManifestPath() != ""
 }
 
 // reloadFromKV loads meta from KV storage

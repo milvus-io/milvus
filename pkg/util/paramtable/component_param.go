@@ -5720,6 +5720,7 @@ type dataCoordConfig struct {
 	// Index related configuration
 	IndexMemSizeEstimateMultiplier      ParamItem `refreshable:"true"`
 	IndexStorePathVersion               ParamItem `refreshable:"true"`
+	WriteSegmentIndexToEtcd             ParamItem `refreshable:"false"`
 	HybridIndexLowCardinalityIndexType  ParamItem `refreshable:"true"`
 	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
 
@@ -6488,6 +6489,18 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Export: true,
 	}
 	p.IndexStorePathVersion.Init(base.mgr)
+
+	p.WriteSegmentIndexToEtcd = ParamItem{
+		Key:          "dataCoord.index.writeSegmentIndexToEtcd",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc: `Whether a segment's index-build record is persisted to etcd. The end state of the StorageV3 migration is that a segment manifest is the only place a finished index artifact is recorded, and this switch is the seam that gets there: turning it off stops the SegmentIndex etcd writes for segments whose indexes a manifest can carry, while leaving DataCoord's in-memory index state untouched, and makes reload rebuild that state from the segment manifests.
+It applies per segment, not globally: only a StorageV3 segment with a manifest records its indexes there, so a StorageV1/V2 segment keeps persisting its index records regardless of this setting - skipping that write would destroy the only copy rather than defer to another one.
+A SegmentIndex is also the build task record - its state machine, assigned node and failure reason have no manifest home - so an in-flight or failed build on a manifest-backed segment is lost across a restart and is simply reissued. Removals are never skipped, so an index collected by GC cannot come back.
+Existing etcd records are still read on reload and take precedence over the manifest, so turning this off does not strand metadata written while it was on.`,
+		Export: true,
+	}
+	p.WriteSegmentIndexToEtcd.Init(base.mgr)
 
 	p.HybridIndexLowCardinalityIndexType = ParamItem{
 		Key:          "dataCoord.index.hybridIndex.lowCardinalityIndexType",

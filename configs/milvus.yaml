@@ -884,6 +884,11 @@ dataCoord:
     # Layout 1 cannot be read by 2.6, so enabling it commits the upgrade and gives up the ability to roll back to 2.6. Existing index files keep the layout they were built with, so this switch only affects index files built from now on.
     # Layout 1 is additionally gated on no QueryNode still reporting an older release line, so setting this to 1 during a 2.6 -> 3.0 upgrade still builds layout 0 until every QueryNode is upgraded. That check reads the version each QueryNode publishes in its session, which is a per-release-line constant, so it separates 2.6.x from 3.0.x but does not differentiate binaries within the same release line.
     storePathVersion: 0
+    # Whether a segment's index-build record is persisted to etcd. The end state of the StorageV3 migration is that a segment manifest is the only place a finished index artifact is recorded, and this switch is the seam that gets there: turning it off stops the SegmentIndex etcd writes for segments whose indexes a manifest can carry, while leaving DataCoord's in-memory index state untouched, and makes reload rebuild that state from the segment manifests.
+    # It applies per segment, not globally: only a StorageV3 segment with a manifest records its indexes there, so a StorageV1/V2 segment keeps persisting its index records regardless of this setting - skipping that write would destroy the only copy rather than defer to another one.
+    # A SegmentIndex is also the build task record - its state machine, assigned node and failure reason have no manifest home - so an in-flight or failed build on a manifest-backed segment is lost across a restart and is simply reissued. Removals are never skipped, so an index collected by GC cannot come back.
+    # Existing etcd records are still read on reload and take precedence over the manifest, so turning this off does not strand metadata written while it was on.
+    writeSegmentIndexToEtcd: true
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.

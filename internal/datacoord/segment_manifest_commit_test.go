@@ -23,11 +23,13 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	metastoremocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -937,4 +939,88 @@ func TestCommitSegmentManifestRejectsMalformedSegmentIndexMutation(t *testing.T)
 				m.GetSegment(context.Background(), 216).GetManifestPath())
 		})
 	}
+}
+
+// With SegmentIndex etcd writes off, the manifest revision this commit
+// publishes is the sole record of the finished artifact - which is the
+// migration's end state. The commit must then carry the segment record alone,
+// while indexMeta's in-memory view still completes the task.
+func TestCommitSegmentManifestSkipsIndexCatalogWriteWhenGated(t *testing.T) {
+	withSegmentIndexEtcdWrites(t, false)
+
+	const (
+		collectionID = int64(1)
+		partitionID  = int64(10)
+		segmentID    = int64(217)
+		indexID      = int64(900)
+		buildID      = int64(901)
+	)
+	basePath := "/tmp/milvus/insert_log/1/10/217"
+	newManifest := packed.MarshalManifestPath(basePath, 4)
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		CollectionID:   collectionID,
+		PartitionID:    partitionID,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath(basePath, 3),
+	})))
+	require.NoError(t, meta.indexMeta.AddSegmentIndex(context.Background(), &model.SegmentIndex{
+		CollectionID: collectionID,
+		PartitionID:  partitionID,
+		SegmentID:    segmentID,
+		IndexID:      indexID,
+		BuildID:      buildID,
+		IndexVersion: 1,
+		IndexState:   commonpb.IndexState_InProgress,
+	}))
+
+	commit := mockey.Mock(packed.CommitManifestUpdates).Return(newManifest, nil).Build()
+	defer commit.UnPatch()
+
+	var actionCount int
+	update := mockey.Mock((*datacoord.Catalog).Update).To(
+		func(_ *datacoord.Catalog, _ context.Context, actions ...metastore.UpdateAction) error {
+			actionCount = len(actions)
+			for _, action := range actions {
+				if _, ok := action.Entry.(metastore.SegmentIndexEntry); ok {
+					t.Fatal("segment index must not be staged while etcd writes are gated")
+				}
+			}
+			return nil
+		},
+	).Build()
+	defer update.UnPatch()
+
+	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID:     segmentID,
+		StorageConfig: &indexpb.StorageConfig{},
+		Mutation: ManifestMutation{
+			Type:    ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{{IndexID: indexID, BuildID: buildID}}},
+		},
+		CatalogMutation: SegmentCatalogMutation{
+			SegmentIndex: &SegmentIndexMutation{
+				Type:    SegmentIndexUpsert,
+				BuildID: buildID,
+				FinishedTask: &workerpb.IndexTaskInfo{
+					BuildID:        buildID,
+					State:          commonpb.IndexState_Finished,
+					IndexFileKeys:  []string{"0"},
+					SerializedSize: 100,
+				},
+			},
+		},
+	}))
+
+	assert.Equal(t, 1, actionCount, "only the segment record is written")
+	assert.Equal(t, newManifest, meta.GetSegment(context.Background(), segmentID).GetManifestPath())
+	// The in-memory task still completes: the switch is durability-only.
+	published, ok := meta.indexMeta.GetIndexJob(buildID)
+	require.True(t, ok)
+	assert.Equal(t, commonpb.IndexState_Finished, published.IndexState)
+	assert.Equal(t, []string{"0"}, published.IndexFileKeys)
 }

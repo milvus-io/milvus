@@ -297,7 +297,12 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	// nor claimed by a record after the revision dropped it.
 	var stagedIndex *stagedSegmentIndexMutation
 	if indexMutation := commit.CatalogMutation.SegmentIndex; indexMutation != nil {
-		staged, err := m.indexMeta.stageSegmentIndexMutation(*indexMutation)
+		// This commit has already established the segment is StorageV3 and is
+		// advancing its manifest pointer, so its indexes are manifest-backed by
+		// construction. Passing that in rather than re-deriving it through
+		// meta matters: the resolver takes segMu, which this critical section
+		// already holds for writing.
+		staged, err := m.indexMeta.stageSegmentIndexMutation(*indexMutation, true)
 		if staged != nil {
 			defer staged.unlock()
 		}
