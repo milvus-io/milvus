@@ -26,9 +26,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/shirou/gopsutil/v3/disk"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/fips"
@@ -202,6 +205,31 @@ func (p *ComponentParam) versionGateItems() []*ParamItem {
 // confirmator stops itself.
 func (p *ComponentParam) initVersionGates() {
 	if p.baseTable == nil || p.baseTable.config.skipRemote {
+		return
+	}
+	// Embedded-etcd deployments are single-process (service_param.go enforces
+	// "embedded etcd can not be used under distributed mode"): the local process
+	// is the whole cluster, so when the local version already satisfies a gate
+	// there is nothing to coordinate across nodes — resolve the gate directly
+	// and skip the confirmator (there is no usable etcd client anyway).
+	if p.ServiceParam.EtcdCfg.UseEmbedEtcd.GetAsBool() {
+		for _, item := range p.versionGateItems() {
+			if item == nil || item.VersionGateSwitcher == nil {
+				continue
+			}
+			gv, err := semver.Parse(item.VersionGateSwitcher.GateVersion)
+			if err != nil {
+				// Validate() at Init already rejected malformed versions; on any
+				// residual parse issue keep the gate unresolved (PreSwitchValue).
+				continue
+			}
+			if common.Version.GE(gv) {
+				item.VersionGateSwitcher.localSatisfied = true
+				log.Info("version gate: embedded-etcd deployment, local version satisfies the gate",
+					zap.String("key", item.Key), zap.String("localVersion", common.Version.String()),
+					zap.String("gateVersion", item.VersionGateSwitcher.GateVersion))
+			}
+		}
 		return
 	}
 	// The confirmator shares the etcd client created for the config etcd
