@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -853,4 +854,44 @@ func TestWALFlusher_DispatchCreateVChannelDoesNotForward(t *testing.T) {
 	require.NotPanics(t, func() {
 		require.NoError(t, flusher.dispatch(msg))
 	})
+}
+
+// TestWALFlusher_DispatchDropVChannelDoesNotForward is the mirror of the
+// CreateVChannel case, and it exists for the same reason.
+//
+// DropVChannel is a V2 message and the msgpack adaptor (fromMessageToTsMsgV2)
+// has no case for it, so forwarding it to the data sync service would panic the
+// process with "unsupported message type". DropCollection survives the same
+// fall-through only because it is V1 and goes through the unmarshaler path.
+// Closing the data sync service and returning is the whole handling.
+func TestWALFlusher_DispatchDropVChannelDoesNotForward(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+	flusher := newTestWALFlusher(rs)
+	flusher.flusherComponents.dataServices["v2"] = &dataSyncServiceWrapper{}
+
+	closed := 0
+	mockClose := mockey.Mock((*dataSyncServiceWrapper).Close).To(func(ds *dataSyncServiceWrapper) {
+		closed++
+	}).Build()
+	defer mockClose.UnPatch()
+
+	msg := message.NewDropVChannelMessageBuilderV2().
+		WithVChannel("v2").
+		WithHeader(&message.DropVChannelMessageHeader{
+			CollectionId: 7,
+			SplitTaskId:  100,
+		}).
+		WithBody(&message.DropVChannelMessageBody{}).
+		MustBuildMutable().
+		WithTimeTick(100).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(4))
+
+	require.NotPanics(t, func() {
+		require.NoError(t, flusher.dispatch(msg))
+	})
+	// The retired vchannel must stop holding a flusher.
+	assert.Equal(t, 1, closed)
+	assert.Empty(t, flusher.flusherComponents.dataServices)
 }
