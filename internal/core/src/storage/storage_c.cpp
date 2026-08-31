@@ -29,6 +29,7 @@
 #include "storage/MmapManager.h"
 #include "storage/PluginLoader.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/KeyRetriever.h"
 #include "storage/Types.h"
@@ -110,6 +111,11 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
     }
+}
+
+void
+SetArrowFileSystemChunkManagerEnabled(bool enable) {
+    milvus::storage::SetUseArrowFileSystemChunkManager(enable);
 }
 
 CStatus

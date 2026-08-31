@@ -111,6 +111,12 @@ endif()
 # once done, move this line to the else branch of `if (DEFINED AZURE_BUILD_DIR)`
 list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "RemoteChunkManagerTest\\.cpp$")
 
+# ArrowFileSystemChunkManagerRemoteTest needs a live object store (MinIO); the
+# cpp-ut environment has none (MINIO_ADDRESS points at the docker-compose
+# `minio` service, unresolvable there), so keep it out of all_tests like the
+# real-object-storage tests above.
+list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "ArrowFileSystemChunkManagerRemoteTest\\.cpp$")
+
 if (ENABLE_GCP_NATIVE)
     add_definitions(-DENABLE_GCP_NATIVE)
 else()

@@ -224,6 +224,11 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int32(16), Params.StorageReaderThreadPoolSize.GetAsInt32())
 		assert.Equal(t, int64(536870912), Params.IndexBuildReadWindowBytes.GetAsInt64())
 
+		assert.False(t, Params.UseArrowFSChunkManager.GetAsBool())
+		params.Save(Params.UseArrowFSChunkManager.Key, "true")
+		assert.True(t, Params.UseArrowFSChunkManager.GetAsBool())
+		params.Reset(Params.UseArrowFSChunkManager.Key)
+
 		defer params.Reset(Params.ExternalVectorPartialNullPolicy.Key)
 		assert.Equal(t, "error", Params.ExternalVectorPartialNullPolicy.GetValue())
 		params.Save(Params.ExternalVectorPartialNullPolicy.Key, "null")

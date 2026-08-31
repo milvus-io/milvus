@@ -195,6 +195,7 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		return err
 	}
 
+	SetArrowFSChunkManagerEnabled(paramtable.Get())
 	err = InitRemoteChunkManager(paramtable.Get())
 	if err != nil {
 		return err

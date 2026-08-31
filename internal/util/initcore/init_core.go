@@ -228,6 +228,14 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitArrowFileSystem failed")
 }
 
+// SetArrowFSChunkManagerEnabled selects the segcore remote chunk manager
+// backend for this process: milvus-storage Arrow FileSystem vs the legacy
+// AWS-SDK based implementations. Must run during component init, before any
+// remote chunk manager is created (segment load, index build/load).
+func SetArrowFSChunkManagerEnabled(params *paramtable.ComponentParam) {
+	C.SetArrowFileSystemChunkManagerEnabled(C.bool(params.CommonCfg.UseArrowFSChunkManager.GetAsBool()))
+}
+
 func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cAddress := C.CString(params.MinioCfg.Address.GetValue())
 	cBucketName := C.CString(params.MinioCfg.BucketName.GetValue())
