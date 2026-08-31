@@ -42,7 +42,6 @@
 #include "common/Schema.h"
 #include "common/TracerBase.h"
 #include "common/Types.h"
-#include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
@@ -296,7 +295,7 @@ TEST_F(TestGrowingStorageV2, LoadFieldDataWithAddedTextFieldBackfillsEmpty) {
     std::iota(offsets.begin(), offsets.end(), 0);
     auto out = segment->bulk_subscript(nullptr, text_fid, offsets.data(), 3000);
     ASSERT_NE(out, nullptr);
-    const auto& valid = GetFieldDataRowValidData(*out);
+    const auto& valid = out->valid_data();
     ASSERT_EQ(valid.size(), 3000);
     for (int64_t i = 0; i < 3000; ++i) {
         EXPECT_FALSE(valid[i]) << "row " << i << " not null via bulk_subscript";
