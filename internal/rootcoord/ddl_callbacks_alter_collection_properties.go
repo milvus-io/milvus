@@ -93,6 +93,17 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		return err
 	}
 
+	// A shard-count change is declarative: the property records the target and
+	// datacoord reconciles toward it. Everything rootcoord can already decide is
+	// decided now, so the common mistakes land in this response instead of in a
+	// background task the caller never sees.
+	if err := validateShardSplitMode(req.GetProperties()); err != nil {
+		return err
+	}
+	if err := validateDesiredShardNum(coll, req.GetProperties(), req.GetDeleteKeys()); err != nil {
+		return err
+	}
+
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err

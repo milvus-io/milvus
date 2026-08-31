@@ -335,6 +335,20 @@ func (c *Client) AlterCollection(ctx context.Context, request *milvuspb.AlterCol
 	})
 }
 
+// CommitShardSplitRouting commits a shard-split routing change into the
+// collection meta. Called by datacoord at the write switch and at the adoption
+// flip of a split.
+func (c *Client) CommitShardSplitRouting(ctx context.Context, request *rootcoordpb.CommitShardSplitRoutingRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	request = typeutil.Clone(request)
+	commonpbutil.UpdateMsgBase(
+		request.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.CommitShardSplitRouting(ctx, request)
+	})
+}
+
 func (c *Client) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	request = typeutil.Clone(request)
 	commonpbutil.UpdateMsgBase(

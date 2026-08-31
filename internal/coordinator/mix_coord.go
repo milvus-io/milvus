@@ -469,6 +469,13 @@ func (s *mixCoordImpl) AlterCollectionField(ctx context.Context, req *milvuspb.A
 	return s.rootcoordServer.AlterCollectionField(ctx, req)
 }
 
+// CommitShardSplitRouting commits a shard-split routing change into the
+// collection meta; it is a rootcoord DDL, reached here because datacoord calls
+// it through the mixcoord surface.
+func (s *mixCoordImpl) CommitShardSplitRouting(ctx context.Context, req *rootcoordpb.CommitShardSplitRoutingRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.CommitShardSplitRouting(ctx, req)
+}
+
 func (s *mixCoordImpl) AlterCollectionSchema(ctx context.Context, req *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
 	return s.rootcoordServer.AlterCollectionSchema(ctx, req)
 }
