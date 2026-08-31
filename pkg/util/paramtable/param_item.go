@@ -61,6 +61,13 @@ type VersionGateSwitcher struct {
 	GateVersion           string        // minimum cluster version (semver) required to switch
 	TargetValue           string        // effective value after AutoSwitch takes effect
 	SwitchDelay           time.Duration // stability window to wait after cluster-wide confirmation before switching
+
+	// localSatisfied is set by ComponentParam.initVersionGates for embedded-etcd
+	// (single-process) deployments: the local process is the entire cluster, so
+	// when the local version is already >= GateVersion there is nothing to
+	// coordinate and the gate resolves directly to TargetValue. It is a pure
+	// paramtable-internal hint, never part of the configurable contract.
+	localSatisfied bool
 }
 
 // Validate checks the switcher's field contract, panicking on a missing or
@@ -236,8 +243,10 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 
 // gateValue applies the version-gated auto-switch semantics to a configured
 // value: when the item carries a VersionGateSwitcher and the value is the
-// sentinel (EnableAutoSwitchValue), the effective value is PreSwitchValue
-// (the pre-change behavior) until the one-shot confirmator flips the config
+// sentinel (EnableAutoSwitchValue), the effective value is TargetValue when
+// the gate is locally satisfied (embedded-etcd single-process deployments
+// where the local version is already >= GateVersion, see localSatisfied), and
+// PreSwitchValue otherwise, until the one-shot confirmator flips the config
 // center value to TargetValue. Every read path (GetValue and all GetAs*)
 // resolves through this, so the gate is uniformly visible regardless of the
 // caller's accessor type. The raw value is unaffected: callers that need to
@@ -245,6 +254,9 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 func (pi *ParamItem) gateValue(v string) string {
 	if pi.VersionGateSwitcher == nil || v != pi.VersionGateSwitcher.EnableAutoSwitchValue {
 		return v
+	}
+	if pi.VersionGateSwitcher.localSatisfied {
+		return pi.VersionGateSwitcher.TargetValue
 	}
 	return pi.VersionGateSwitcher.PreSwitchValue
 }
