@@ -264,6 +264,55 @@ it does make the manifest revision and the `SegmentIndex` removal atomic; what
 it still cannot do is make object deletion atomic with either. Ordering the
 metadata first is what confines that residual gap to storage accounting.
 
+## Retiring the etcd SegmentIndex Record
+
+The end state of this migration is that a manifest is the only durable record
+of a finished index artifact. `dataCoord.index.writeSegmentIndexToEtcd`
+(default on) is the seam to that end state, and the way it is exercised before
+it becomes unconditional.
+
+Turning it off stops the `SegmentIndex` catalog *writes* - `CreateSegmentIndex`,
+`AlterSegmentIndexes`, and the upsert action staged into a manifest commit -
+while leaving DataCoord's in-memory index state untouched. Durability is what
+the switch controls; what DataCoord itself observes is not.
+
+The suppression is decided **per segment, not globally**: it requires both the
+switch to be off and the segment to be manifest-backed (StorageV3 with a
+manifest path). A StorageV1/V2 segment records its indexes nowhere else, so
+skipping its write would destroy the only copy rather than defer to another
+one, and it keeps persisting regardless of the switch. `indexMeta` answers that
+question through `manifestBackedSegment`, wired by `newMeta` once the segment
+list exists; a batch that mixes both kinds persists only the records that need
+it. Removals are likewise never skipped: the switch stops DataCoord adding
+durable state, it never stops it removing state, or a record written while the
+switch was on would be resurrected by the reload below after GC had already
+collected it.
+
+Reload closes the loop. `meta.reloadSegmentIndexesFromManifests` reads each
+healthy StorageV3 segment's manifest and projects its index entries back into
+`SegmentIndex` records, with etcd winning on conflict - the same precedence
+every other manifest-index consumer uses. It runs only while the switch is off,
+so the default startup performs no per-segment manifest read.
+
+Three limits are inherent rather than incidental, and are why the switch is
+off-by-default rather than removed:
+
+- Only StorageV3 segments record indexes in a manifest, which is why the switch
+  cannot apply to StorageV1/V2 segments at all - the etcd record stays their
+  sole copy, and retiring it needs a different mechanism.
+- A `SegmentIndex` is also the build *task* record. Its state machine, assigned
+  node, failure reason and timestamps have no manifest home, so an in-flight or
+  failed build on a manifest-backed segment is lost across a restart and is
+  simply reissued. A recovered record is `Finished` by construction.
+- Records written while the switch was off exist only in manifests, so turning
+  it back on does not re-persist them; they stay manifest-only until rewritten.
+
+The consumers that decide *whether a segment is indexed* -
+`indexMeta.GetSegmentIndexes` / `GetIndexedSegments`, read by the index
+inspector, the compaction trigger and segment load - have no manifest fallback
+of their own, and are the reason the reload exists at all: the six read paths
+that do fall back to the manifest only resolve *file paths*.
+
 ## Required Caller Migration
 
 | Current owner/path | Framework migration |
