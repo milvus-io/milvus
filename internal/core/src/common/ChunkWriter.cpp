@@ -910,7 +910,7 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
                                                     data + chunk_offsets[i],
                                                     chunk_sizes[i],
                                                     chunk_mmap_guard));
-        LOG_INFO(
+        LOG_DEBUG(
             "created chunk for field {} with chunk offset: {}, chunk "
             "size: {}, file path: {}",
             field_ids[i].get(),
@@ -918,6 +918,13 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
             chunk_sizes[i],
             file_path);
     }
+    LOG_INFO(
+        "created group chunk with {} fields, row count: {}, total aligned "
+        "size: {}, file path: {}",
+        field_ids.size(),
+        final_row_nums,
+        total_aligned_size,
+        file_path);
 
     return chunks;
 }
