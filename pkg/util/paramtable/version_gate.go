@@ -159,6 +159,7 @@ func (c *Confirmator) registerGate(key string, switcher *VersionGateSwitcher) er
 func (c *Confirmator) start(ctx context.Context) error {
 	c.mu.Lock()
 	if c.started {
+		c.mu.Unlock()
 		return errors.New("version gate: already started")
 	}
 	c.started = true
