@@ -23,6 +23,41 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestVersionGateSwitcher_Validate(t *testing.T) {
+	valid := func() *VersionGateSwitcher {
+		return &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false",
+			GateVersion:           "2.6.23",
+			TargetValue:           "true",
+			SwitchDelay:           time.Second,
+		}
+	}
+
+	t.Run("valid switcher passes", func(t *testing.T) {
+		assert.NotPanics(t, func() { valid().Validate() })
+	})
+
+	cases := []struct {
+		name   string
+		mutate func(*VersionGateSwitcher)
+	}{
+		{"empty sentinel", func(s *VersionGateSwitcher) { s.EnableAutoSwitchValue = "" }},
+		{"empty pre-switch value", func(s *VersionGateSwitcher) { s.PreSwitchValue = "" }},
+		{"empty gate version", func(s *VersionGateSwitcher) { s.GateVersion = "" }},
+		{"malformed gate version", func(s *VersionGateSwitcher) { s.GateVersion = "not-a-version" }},
+		{"empty target value", func(s *VersionGateSwitcher) { s.TargetValue = "" }},
+		{"negative switch delay", func(s *VersionGateSwitcher) { s.SwitchDelay = -time.Second }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := valid()
+			tc.mutate(s)
+			assert.Panics(t, func() { s.Validate() })
+		})
+	}
+}
+
 func TestVersionGateSwitcher_EffectiveValue(t *testing.T) {
 	// ComponentParam.Init is guarded by sync.Once, so one initialized instance
 	// is shared by all subtests (they never run in parallel).
@@ -31,9 +66,8 @@ func TestVersionGateSwitcher_EffectiveValue(t *testing.T) {
 
 	t.Run("no switcher keeps original behavior", func(t *testing.T) {
 		item := &params.FunctionCfg.BatchFactor // no VersionGateSwitcher
-		v, ok := item.EffectiveValue()
-		assert.True(t, ok)
-		assert.Equal(t, item.GetValue(), v)
+		assert.Equal(t, "5", item.GetValue())
+		assert.Equal(t, 5, item.GetAsInt())
 	})
 
 	t.Run("write-before-materialization default is auto (default equals sentinel)", func(t *testing.T) {
@@ -46,32 +80,28 @@ func TestVersionGateSwitcher_EffectiveValue(t *testing.T) {
 		assert.Equal(t, "auto", item.DefaultValue) // default == sentinel -> auto switch by default
 	})
 
-	t.Run("sentinel value -> not activated, keeps pre-switch value", func(t *testing.T) {
+	t.Run("sentinel value -> gate not flipped, keeps pre-switch value", func(t *testing.T) {
 		item := &params.FunctionCfg.EnableWriteBeforeMaterialization
-		v, ok := item.EffectiveValue()
-		assert.False(t, ok) // the gate has not flipped (value is still the sentinel)
-		assert.Equal(t, "false", v)
-		assert.False(t, item.GetAsBoolEffective())
+		// The value is still the sentinel (default "auto"): every read path
+		// resolves the pre-switch value until the confirmator flips it.
+		assert.Equal(t, "false", item.GetValue())
+		assert.False(t, item.GetAsBool())
 	})
 
 	t.Run("explicit false keeps legacy value", func(t *testing.T) {
 		item := &params.FunctionCfg.EnableWriteBeforeMaterialization
 		old := item.SwapTempValue("false")
 		defer item.SwapTempValue(old)
-		v, ok := item.EffectiveValue()
-		assert.True(t, ok)
-		assert.Equal(t, "false", v)
-		assert.False(t, item.GetAsBoolEffective())
+		assert.Equal(t, "false", item.GetValue())
+		assert.False(t, item.GetAsBool())
 	})
 
 	t.Run("explicit true force enables and bypasses the gate", func(t *testing.T) {
 		item := &params.FunctionCfg.EnableWriteBeforeMaterialization
 		old := item.SwapTempValue("true")
 		defer item.SwapTempValue(old)
-		v, ok := item.EffectiveValue()
-		assert.True(t, ok)
-		assert.Equal(t, "true", v)
-		assert.True(t, item.GetAsBoolEffective())
+		assert.Equal(t, "true", item.GetValue())
+		assert.True(t, item.GetAsBool())
 	})
 
 	t.Run("different switchers keep their own pre-switch values", func(t *testing.T) {
@@ -103,11 +133,7 @@ func TestVersionGateSwitcher_EffectiveValue(t *testing.T) {
 		auto := "auto"
 		a.tempValue.Store(&auto)
 		b.tempValue.Store(&auto)
-		av, aok := a.EffectiveValue()
-		assert.False(t, aok)
-		assert.Equal(t, "false", av)
-		bv, bok := b.EffectiveValue()
-		assert.False(t, bok)
-		assert.Equal(t, "zstd-v1", bv)
+		assert.Equal(t, "false", a.GetValue())
+		assert.Equal(t, "zstd-v1", b.GetValue())
 	})
 }

@@ -164,13 +164,16 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	schemaVersion := function.LatestFunctionRunnerVersion
 	// Write-before function materialization is version-gated: it only runs once
 	// the whole cluster has confirmed version >= GateVersion (config default
-	// "auto"); before that the write path keeps the legacy format.
-	if paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization.GetAsBoolEffective() {
+	// "auto"); before that the write path keeps the legacy format. The gate is
+	// applied at the config-item read layer, so GetAsBool already returns the
+	// effective value.
+	if paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization.GetAsBool() {
 		if err := impl.materializeFunctionFields(ctx, insertMsg, collectionID, schemaVersion); err != nil {
 			impl.shardManager.Logger().Warn("failed to materialize function fields before WAL append",
 				zap.Int64("collectionID", collectionID),
 				zap.Int32("schemaVersion", schemaVersion),
 				zap.Error(err))
+
 			return nil, status.NewUnrecoverableError("failed to materialize function fields before WAL append: %s", err.Error())
 		}
 	}
