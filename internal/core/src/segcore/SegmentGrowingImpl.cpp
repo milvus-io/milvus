@@ -363,14 +363,22 @@ ValidateGeometryInsertDataShape(const proto::schema::FieldData& field_data,
     }
 }
 
+// A StorageV2 column-group load only carries fields that were written to
+// binlogs. A TEXT field added to the schema after the segment was written
+// (AddField) has no binlog column, so the schema alone must not reject the
+// load: the empty column is backfilled by FillAbsentFields. Only a load info
+// that actually carries TEXT field data is invalid, because TEXT cannot be
+// persisted without a StorageV3 manifest (LOB spillover / query path).
 bool
-SchemaHasTextField(const Schema& schema) {
-    return std::any_of(schema.get_fields().begin(),
-                       schema.get_fields().end(),
-                       [](const auto& field) {
-                           return field.second.get_data_type() ==
-                                  DataType::TEXT;
-                       });
+LoadInfoHasTextField(const LoadFieldDataInfo& load_info, const Schema& schema) {
+    for (const auto& [_, info] : load_info.field_infos) {
+        auto fid = FieldId(info.field_id);
+        if (schema.has_field(fid) &&
+            schema.operator[](fid).get_data_type() == DataType::TEXT) {
+            return true;
+        }
+    }
+    return false;
 }
 
 }  // anonymous namespace
@@ -1177,7 +1185,7 @@ void
 SegmentGrowingImpl::load_column_group_data_internal(
     const LoadFieldDataInfo& infos) {
     auto schema = get_schema_snapshot();
-    AssertInfo(!SchemaHasTextField(*schema),
+    AssertInfo(!LoadInfoHasTextField(infos, *schema),
                "TEXT growing segment cannot be loaded from StorageV2 column "
                "groups; StorageV3 manifest is required");
 
