@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // ErrSourceVChannelFenced is returned by SplitShard when the source vchannel
@@ -41,13 +42,13 @@ type SplitShardParam struct {
 // Validate validates the parameter.
 func (p *SplitShardParam) Validate() error {
 	if p.CollectionID <= 0 {
-		return errors.New("collection id must be positive")
+		return merr.WrapErrParameterInvalidMsg("collection id must be positive, got %d", p.CollectionID)
 	}
 	if p.SourceVChannel == "" {
-		return errors.New("source vchannel must be set")
+		return merr.WrapErrParameterMissingMsg("source vchannel must be set")
 	}
 	if p.RoutingModulus == 0 {
-		return errors.New("routing modulus must be set")
+		return merr.WrapErrParameterMissingMsg("routing modulus must be set")
 	}
 	// No lower bound on the target count. Targets here are the shards THIS source
 	// must front during the split window, not the shards the split produces: a
@@ -59,10 +60,10 @@ func (p *SplitShardParam) Validate() error {
 	vchannels[p.SourceVChannel] = struct{}{}
 	for _, target := range p.Targets {
 		if target.GetVchannel() == "" {
-			return errors.New("target vchannel must be set")
+			return merr.WrapErrParameterMissingMsg("target vchannel must be set")
 		}
 		if _, ok := vchannels[target.GetVchannel()]; ok {
-			return errors.Errorf("duplicated vchannel %s in shard split", target.GetVchannel())
+			return merr.WrapErrParameterInvalidMsg("duplicated vchannel %s in shard split", target.GetVchannel())
 		}
 		vchannels[target.GetVchannel()] = struct{}{}
 	}
@@ -141,10 +142,14 @@ type InitSplitTargetVChannelsParam struct {
 	// count: every target is then carved out of every source at once.
 	SplitTaskID     int64
 	SourceVChannels []string
-	// BarrierTimeTick is a freshly allocated time tick (always greater than
-	// T_switch). It is carried as the barrier time tick of the CreateVChannel
-	// messages, so every message of the new WALs is strictly greater than
-	// T_switch even if the hosting node holds an older prefetched TSO batch.
+	// BarrierTimeTick is the barrier the CreateVChannel appends are held
+	// behind: the hosting streamingnode blocks each one until its TSO has
+	// passed this tick, so every message of the new WALs is strictly greater
+	// than it even if that node holds an older prefetched TSO batch.
+	//
+	// The caller sets it to T_switch (the largest one, when the targets are
+	// carved out of several sources). Any value >= T_switch is correct; a
+	// larger one only makes the targets wait longer to be born.
 	BarrierTimeTick uint64
 	// Targets are the target shards to create, each with its vchannel and the
 	// residues it owns (embedded into the CreateVChannel header).
@@ -157,39 +162,39 @@ type InitSplitTargetVChannelsParam struct {
 // Validate validates the parameter.
 func (p *InitSplitTargetVChannelsParam) Validate() error {
 	if p.CollectionID <= 0 {
-		return errors.New("collection id must be positive")
+		return merr.WrapErrParameterInvalidMsg("collection id must be positive, got %d", p.CollectionID)
 	}
 	if p.Schema == nil {
-		return errors.New("collection schema must be set")
+		return merr.WrapErrParameterMissingMsg("collection schema must be set")
 	}
 	if len(p.PartitionIDs) == 0 {
-		return errors.New("partition snapshot must not be empty")
+		return merr.WrapErrParameterMissingMsg("partition snapshot must not be empty")
 	}
 	if len(p.SourceVChannels) == 0 {
-		return errors.New("source vchannels must be set")
+		return merr.WrapErrParameterMissingMsg("source vchannels must be set")
 	}
 	if p.BarrierTimeTick == 0 {
-		return errors.New("barrier time tick must be set")
+		return merr.WrapErrParameterMissingMsg("barrier time tick must be set")
 	}
 	if len(p.Targets) == 0 {
-		return errors.New("targets must not be empty")
+		return merr.WrapErrParameterMissingMsg("targets must not be empty")
 	}
 	if p.RoutingModulus == 0 {
-		return errors.New("routing modulus must be set")
+		return merr.WrapErrParameterMissingMsg("routing modulus must be set")
 	}
 	vchannels := make(map[string]struct{}, len(p.Targets)+len(p.SourceVChannels))
 	for _, source := range p.SourceVChannels {
 		if source == "" {
-			return errors.New("source vchannel must be set")
+			return merr.WrapErrParameterMissingMsg("source vchannel must be set")
 		}
 		vchannels[source] = struct{}{}
 	}
 	for _, target := range p.Targets {
 		if target.GetVchannel() == "" {
-			return errors.New("target vchannel must be set")
+			return merr.WrapErrParameterMissingMsg("target vchannel must be set")
 		}
 		if _, ok := vchannels[target.GetVchannel()]; ok {
-			return errors.Errorf("duplicated vchannel %s in split target initialization", target.GetVchannel())
+			return merr.WrapErrParameterInvalidMsg("duplicated vchannel %s in split target initialization", target.GetVchannel())
 		}
 		vchannels[target.GetVchannel()] = struct{}{}
 	}
@@ -197,21 +202,19 @@ func (p *InitSplitTargetVChannelsParam) Validate() error {
 }
 
 // InitSplitTargetVChannels creates every target vchannel of a shard split by
-// appending a CreateVChannel message — the dedicated genesis message that the
-// shard manager, the recovery storage and the flusher handle — carrying the
-// collection's current schema and partition snapshot, the target's routing
-// residues, and BarrierTimeTick = T_switch (so every message of the new WAL is
-// strictly greater than T_switch, and creation doubles as activation).
-//
-// It does not return any consume start position: a split target is an ordinary
-// vchannel, so its genesis checkpoint reaches the datacoord channel-checkpoint
-// store through the normal streamingnode WAL-open report, and the child
-// delegators read it back via the standard GetRecoveryInfoV2 seek path.
+// appending one CreateVChannel message per target — the dedicated genesis
+// message that the shard manager, the recovery storage and the flusher handle —
+// carrying the collection's current schema and partition snapshot, the target's
+// routing residues, and BarrierTimeTick = T_switch (so every message of the new
+// WAL is strictly greater than T_switch, and creation doubles as activation).
+// It returns the WAL position each target vchannel was born at.
 //
 // The call is idempotent: every consumer of the CreateVChannel message skips an
-// already-known vchannel, so a retry after a partial failure is safe.
-// InitSplitTargetVChannels appends one CreateVChannel message per target and
-// returns the WAL position each target vchannel was born at.
+// already-known vchannel, so a retry after a partial failure is safe. A retry
+// does report the RE-appended genesis position rather than the original one;
+// that is still a position from which every message the vchannel carries is
+// readable, because a target takes no write until the coordinator commits the
+// routing, which happens after this call returns.
 //
 // The positions are not a convenience. A vchannel that exists but has never
 // been written to has no checkpoint, and datacoord's seek-position fallback
@@ -296,10 +299,10 @@ type DropSplitVChannelParam struct {
 // Validate validates the parameter.
 func (p *DropSplitVChannelParam) Validate() error {
 	if p.CollectionID <= 0 {
-		return errors.New("collection id must be positive")
+		return merr.WrapErrParameterInvalidMsg("collection id must be positive, got %d", p.CollectionID)
 	}
 	if p.VChannel == "" {
-		return errors.New("vchannel must be set")
+		return merr.WrapErrParameterMissingMsg("vchannel must be set")
 	}
 	return nil
 }
