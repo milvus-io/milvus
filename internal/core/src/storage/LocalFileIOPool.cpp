@@ -29,7 +29,7 @@ namespace {
 
 // Clamps configured workers to the executor's supported local range.
 [[nodiscard]] int
-ClampWorkerCount(int worker_count) {
+ClampWorkerCount(const int worker_count) {
     if (worker_count < 0) {
         LOG_WARN("Invalid local file I/O worker count {}, using 0",
                  worker_count);
@@ -81,7 +81,7 @@ LocalFileIOPool::GetInstance() {
 }
 
 void
-LocalFileIOPool::Configure(int worker_count) {
+LocalFileIOPool::Configure(const int worker_count) {
     const int effective_worker_count = ClampWorkerCount(worker_count);
     std::lock_guard configure_lock(configure_mutex_);
 

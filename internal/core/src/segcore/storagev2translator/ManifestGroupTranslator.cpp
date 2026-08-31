@@ -77,26 +77,26 @@ FetchColumnSizeEstimates(milvus_storage::api::ChunkReader& chunk_reader) {
 }
 
 ManifestGroupTranslator::ManifestGroupTranslator(
-    int64_t segment_id,
-    GroupChunkType group_chunk_type,
-    int64_t column_group_index,
+    const int64_t segment_id,
+    const GroupChunkType group_chunk_type,
+    const int64_t column_group_index,
     std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
     const std::vector<std::string>& column_group_columns,
     const std::vector<std::string>& projected_columns,
-    bool use_mmap,
-    bool mmap_populate,
+    const bool use_mmap,
+    const bool mmap_populate,
     const std::string& mmap_dir_path,
-    int64_t num_fields,
-    milvus::proto::common::LoadPriority load_priority,
-    bool eager_load,
+    const int64_t num_fields,
+    const milvus::proto::common::LoadPriority load_priority,
+    const bool eager_load,
     const std::string& warmup_policy,
     const std::string& cache_key_suffix,
-    int64_t fallback_bytes_per_row,
+    const int64_t fallback_bytes_per_row,
     std::string shard,
     std::optional<ColumnSizeEstimateResult> column_size_estimate,
-    MmapChunkWritebackMode writeback_mode,
-    bool enable_async_load)
+    const MmapChunkWritebackMode writeback_mode,
+    const bool enable_async_load)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -588,7 +588,7 @@ ManifestGroupTranslator::get_cells_legacy(
         FieldDataLoadBatchSplitTargetBytes(),
         load_priority_,
         [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
-               int64_t cid) {
+               const int64_t cid) {
             return load_group_chunk(
                 tables, static_cast<milvus::cachinglayer::cid_t>(cid));
         });
@@ -674,7 +674,7 @@ ManifestGroupTranslator::get_cells_via_async_pipeline(
         std::move(cell_specs),
         chunk_reader_,
         [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
-               int64_t cid) {
+               const int64_t cid) {
             return load_group_chunk(
                 tables, static_cast<milvus::cachinglayer::cid_t>(cid));
         },

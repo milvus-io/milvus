@@ -299,8 +299,8 @@ std::vector<CellLoadFuture>
 LoadCellBatchAsync(milvus::OpContext* op_ctx,
                    std::vector<CellSpec> cell_specs,
                    BatchReaderFactory reader_factory,
-                   int64_t memory_limit,
-                   milvus::proto::common::LoadPriority priority,
+                   const int64_t memory_limit,
+                   const milvus::proto::common::LoadPriority priority,
                    CellFinalizeFunc finalize_cell) {
     if (cell_specs.empty()) {
         return {};
@@ -334,7 +334,7 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
         std::vector<CellSpec> cells;
     };
 
-    auto batch_limit_bytes =
+    const auto batch_limit_bytes =
         static_cast<size_t>(std::max<int64_t>(memory_limit, 1));
     std::vector<CellBatch> batches;
     CellBatch current{};

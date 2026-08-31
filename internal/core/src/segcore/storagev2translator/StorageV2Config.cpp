@@ -33,7 +33,7 @@ StorageV2AsyncLoadEnabled() {
 }
 
 void
-SetStorageV2AsyncLoadEnabled(bool enabled) {
+SetStorageV2AsyncLoadEnabled(const bool enabled) {
     g_async_load_enabled.store(enabled, std::memory_order_release);
 }
 
@@ -43,7 +43,7 @@ StorageV2AsyncLoadReadWindowSizeBytes() {
 }
 
 void
-SetStorageV2AsyncLoadReadWindowSizeBytes(int64_t bytes) {
+SetStorageV2AsyncLoadReadWindowSizeBytes(const int64_t bytes) {
     const auto normalized_bytes =
         bytes > 0 ? bytes : kDefaultStorageV2AsyncLoadReadWindowSizeBytes;
     g_async_load_read_window_size_bytes.store(normalized_bytes,

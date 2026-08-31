@@ -222,12 +222,12 @@ SetStorageV2CellTargetSizeBytes(int64_t bytes) {
 }
 
 void
-SetStorageV2AsyncLoadEnabled(bool enabled) {
+SetStorageV2AsyncLoadEnabled(const bool enabled) {
     milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
 }
 
 void
-SetStorageV2AsyncLoadReadWindowSizeBytes(int64_t bytes) {
+SetStorageV2AsyncLoadReadWindowSizeBytes(const int64_t bytes) {
     milvus::segcore::storagev2translator::
         SetStorageV2AsyncLoadReadWindowSizeBytes(bytes);
 }
