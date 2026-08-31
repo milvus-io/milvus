@@ -69,7 +69,11 @@ func Init(opts ...Option) (*Manager, error) {
 		sourceManager.AddSource(NewEnvSource(o.EnvKeyFormatter))
 	}
 	if o.EtcdInfo != nil {
-		s, err := NewEtcdSource(o.EtcdInfo)
+		etcdCli, err := newEtcdClient(o.EtcdInfo)
+		if err != nil {
+			return nil, err
+		}
+		s, err := NewEtcdSource(etcdCli, o.EtcdInfo)
 		if err != nil {
 			return nil, err
 		}

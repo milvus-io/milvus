@@ -56,45 +56,40 @@ func testRoots(t *testing.T) (metaRoot, configRoot string) {
 }
 
 // newTestConfirmator builds a confirmator against the embedded etcd server
-// through the same paramtable etcd-config path used in production (the
-// confirmator creates its own client from the etcd config).
-func newTestConfirmator(t *testing.T, clientPort int, metaRoot, configRoot string) *Confirmator {
+// using the same shared etcd client that production injects (the confirmator
+// never opens its own connection).
+func newTestConfirmator(t *testing.T, etcdCli *clientv3.Client, metaRoot, configRoot string) *Confirmator {
 	t.Helper()
-	etcdCfg := &EtcdConfig{}
-	etcdCfg.Init(NewBaseTable(SkipRemote(true)))
-	etcdCfg.Endpoints.SwapTempValue(fmt.Sprintf("127.0.0.1:%d", clientPort))
-	c, err := NewConfirmator(etcdCfg, metaRoot, configRoot)
-	require.NoError(t, err)
-	return c
+	return newConfirmator(etcdCli, metaRoot, configRoot)
 }
 
 func TestConfirmator_RegisterGate(t *testing.T) {
-	_, clientPort := setupEmbedEtcd(t)
+	cli, _ := setupEmbedEtcd(t)
 	metaRoot, configRoot := testRoots(t)
-	c := newTestConfirmator(t, clientPort, metaRoot, configRoot)
+	c := newTestConfirmator(t, cli, metaRoot, configRoot)
 
 	// nil switcher is rejected.
-	assert.Error(t, c.RegisterGate(testConfigKey, nil))
+	assert.Error(t, c.registerGate(testConfigKey, nil))
 	// unparseable gate version is rejected.
-	assert.Error(t, c.RegisterGate(testConfigKey, &VersionGateSwitcher{GateVersion: "not-a-version"}))
+	assert.Error(t, c.registerGate(testConfigKey, &VersionGateSwitcher{GateVersion: "not-a-version"}))
 
-	require.NoError(t, c.RegisterGate(testConfigKey, gateSwitcher("2.6.23", 10*time.Millisecond)))
-	require.NoError(t, c.Start(context.Background()))
-	defer c.Stop()
+	require.NoError(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 10*time.Millisecond)))
+	require.NoError(t, c.start(context.Background()))
+	defer c.Close()
 
 	// one-shot: no gate can be registered after Start.
-	assert.Error(t, c.RegisterGate(testConfigKey, gateSwitcher("2.6.23", 10*time.Millisecond)))
+	assert.Error(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 10*time.Millisecond)))
 }
 
 func TestConfirmator_FlipsAfterAllUpAndDelay(t *testing.T) {
-	cli, clientPort := setupEmbedEtcd(t)
+	cli, _ := setupEmbedEtcd(t)
 	metaRoot, configRoot := testRoots(t)
 	putAllUpSessions(t, cli, metaRoot)
 
-	c := newTestConfirmator(t, clientPort, metaRoot, configRoot)
-	require.NoError(t, c.RegisterGate(testConfigKey, gateSwitcher("2.6.23", 50*time.Millisecond)))
-	require.NoError(t, c.Start(context.Background()))
-	defer c.Stop()
+	c := newTestConfirmator(t, cli, metaRoot, configRoot)
+	require.NoError(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 50*time.Millisecond)))
+	require.NoError(t, c.start(context.Background()))
+	defer c.Close()
 
 	waitConfigValue(t, cli, configRoot, testConfigKey, testConfigValue)
 }
@@ -102,41 +97,41 @@ func TestConfirmator_FlipsAfterAllUpAndDelay(t *testing.T) {
 func TestConfirmator_NoSessionsNoFlip(t *testing.T) {
 	// No session at all: the minimum online version is unknown (zero), so no
 	// gate can ever be above its GateVersion and nothing is flipped.
-	cli, clientPort := setupEmbedEtcd(t)
+	cli, _ := setupEmbedEtcd(t)
 	metaRoot, configRoot := testRoots(t)
 
-	c := newTestConfirmator(t, clientPort, metaRoot, configRoot)
-	require.NoError(t, c.RegisterGate(testConfigKey, gateSwitcher("2.6.23", 50*time.Millisecond)))
-	require.NoError(t, c.Start(context.Background()))
-	defer c.Stop()
+	c := newTestConfirmator(t, cli, metaRoot, configRoot)
+	require.NoError(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 50*time.Millisecond)))
+	require.NoError(t, c.start(context.Background()))
+	defer c.Close()
 
 	assertNoFlip(t, cli, configRoot, testConfigKey)
 }
 
 func TestConfirmator_MixedVersionsNoFlip(t *testing.T) {
-	cli, clientPort := setupEmbedEtcd(t)
+	cli, _ := setupEmbedEtcd(t)
 	metaRoot, configRoot := testRoots(t)
 	putSession(t, cli, metaRoot, typeutil.DataNodeRole, "node-1", "2.6.23")
 	putSession(t, cli, metaRoot, typeutil.ProxyRole, "node-1", "2.6.22")
 
-	c := newTestConfirmator(t, clientPort, metaRoot, configRoot)
-	require.NoError(t, c.RegisterGate(testConfigKey, gateSwitcher("2.6.23", 30*time.Millisecond)))
-	require.NoError(t, c.Start(context.Background()))
-	defer c.Stop()
+	c := newTestConfirmator(t, cli, metaRoot, configRoot)
+	require.NoError(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 30*time.Millisecond)))
+	require.NoError(t, c.start(context.Background()))
+	defer c.Close()
 
 	assertNoFlip(t, cli, configRoot, testConfigKey)
 }
 
 func TestConfirmator_SessionDipResetsStabilityWindow(t *testing.T) {
-	cli, clientPort := setupEmbedEtcd(t)
+	cli, _ := setupEmbedEtcd(t)
 	metaRoot, configRoot := testRoots(t)
 	putSession(t, cli, metaRoot, typeutil.ProxyRole, "node-1", "2.6.23")
 	putSession(t, cli, metaRoot, typeutil.QueryNodeRole, "node-1", "2.6.23")
 
-	c := newTestConfirmator(t, clientPort, metaRoot, configRoot)
-	require.NoError(t, c.RegisterGate(testConfigKey, gateSwitcher("2.6.23", 200*time.Millisecond)))
-	require.NoError(t, c.Start(context.Background()))
-	defer c.Stop()
+	c := newTestConfirmator(t, cli, metaRoot, configRoot)
+	require.NoError(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 200*time.Millisecond)))
+	require.NoError(t, c.start(context.Background()))
+	defer c.Close()
 
 	// A session dips below the gate version during the stability window:
 	// the window must reset and the flip must not happen.
@@ -151,29 +146,29 @@ func TestConfirmator_SessionDipResetsStabilityWindow(t *testing.T) {
 }
 
 func TestConfirmator_ExplicitEtcdValueWins(t *testing.T) {
-	cli, clientPort := setupEmbedEtcd(t)
+	cli, _ := setupEmbedEtcd(t)
 	metaRoot, configRoot := testRoots(t)
 	putAllUpSessions(t, cli, metaRoot)
 	putConfig(t, cli, configRoot, testConfigKey, "false")
 
-	c := newTestConfirmator(t, clientPort, metaRoot, configRoot)
-	require.NoError(t, c.RegisterGate(testConfigKey, gateSwitcher("2.6.23", 30*time.Millisecond)))
-	require.NoError(t, c.Start(context.Background()))
-	defer c.Stop()
+	c := newTestConfirmator(t, cli, metaRoot, configRoot)
+	require.NoError(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 30*time.Millisecond)))
+	require.NoError(t, c.start(context.Background()))
+	defer c.Close()
 
 	// The explicit value must not be overwritten by the flip.
 	waitConfigValue(t, cli, configRoot, testConfigKey, "false")
 }
 
 func TestConfirmator_AlreadyFlippedAtStart(t *testing.T) {
-	cli, clientPort := setupEmbedEtcd(t)
+	cli, _ := setupEmbedEtcd(t)
 	metaRoot, configRoot := testRoots(t)
 	putConfig(t, cli, configRoot, testConfigKey, testConfigValue)
 
-	c := newTestConfirmator(t, clientPort, metaRoot, configRoot)
-	require.NoError(t, c.RegisterGate(testConfigKey, gateSwitcher("2.6.23", 10*time.Millisecond)))
-	require.NoError(t, c.Start(context.Background()))
-	defer c.Stop()
+	c := newTestConfirmator(t, cli, metaRoot, configRoot)
+	require.NoError(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 10*time.Millisecond)))
+	require.NoError(t, c.start(context.Background()))
+	defer c.Close()
 
 	// The gate is resolved immediately: no session watch is running.
 	c.mu.Lock()
@@ -183,15 +178,15 @@ func TestConfirmator_AlreadyFlippedAtStart(t *testing.T) {
 }
 
 func TestConfirmator_MultipleGatesIndependent(t *testing.T) {
-	cli, clientPort := setupEmbedEtcd(t)
+	cli, _ := setupEmbedEtcd(t)
 	metaRoot, configRoot := testRoots(t)
 	putAllUpSessions(t, cli, metaRoot)
 
-	c := newTestConfirmator(t, clientPort, metaRoot, configRoot)
-	require.NoError(t, c.RegisterGate(testConfigKey, gateSwitcher("2.6.23", 50*time.Millisecond)))
-	require.NoError(t, c.RegisterGate("function.testGate2", gateSwitcher("3.0.0", 50*time.Millisecond)))
-	require.NoError(t, c.Start(context.Background()))
-	defer c.Stop()
+	c := newTestConfirmator(t, cli, metaRoot, configRoot)
+	require.NoError(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 50*time.Millisecond)))
+	require.NoError(t, c.registerGate("function.testGate2", gateSwitcher("3.0.0", 50*time.Millisecond)))
+	require.NoError(t, c.start(context.Background()))
+	defer c.Close()
 
 	// The 2.6.23 gate flips; the 3.0.0 gate stays pending.
 	waitConfigValue(t, cli, configRoot, testConfigKey, testConfigValue)
