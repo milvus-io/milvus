@@ -19,9 +19,7 @@ from spark_backfill.backfill_helpers import (
     unique_name,
 )
 from spark_backfill.case import DEFAULT_COMPACTION_PROTECTION_SECONDS, BackfillCase, infer_root_path
-from spark_backfill.config import SparkBackfillSettings, SparkJobsSettings
-from spark_backfill.jobs_case import SparkJobsCase
-from spark_backfill.jobs_client import SparkBatchJobsClient
+from spark_backfill.config import SparkBackfillSettings, SparkJobsSettings, is_spark_backfill_path
 from spark_backfill.k8s_resources import (
     assert_rbac_permissions,
     build_ephemeral_secret,
@@ -30,7 +28,26 @@ from spark_backfill.k8s_resources import (
 )
 from spark_backfill.k8s_runner import KubernetesSparkRunner, SparkRuntimeConfig
 from spark_backfill.toolbox_runner import ToolboxRuntimeConfig, ToolboxSparkRunner
-from spark_backfill.volume_helpers import VolumeStorage
+
+
+def pytest_ignore_collect(collection_path, config):
+    """Collect this suite only in its dedicated Jenkins job."""
+    if not config.getoption("--run-spark-backfill"):
+        return True
+    return None
+
+
+def pytest_collection_modifyitems(config, items):
+    """Deselect explicitly named Spark Backfill files outside the dedicated job."""
+    if config.getoption("--run-spark-backfill"):
+        return
+
+    spark_items = [item for item in items if is_spark_backfill_path(item.path)]
+    if not spark_items:
+        return
+
+    items[:] = [item for item in items if item not in spark_items]
+    config.hook.pytest_deselected(items=spark_items)
 
 
 @pytest.fixture(scope="session")
@@ -416,6 +433,8 @@ def spark_jobs_minio(spark_jobs_settings):
 
 @pytest.fixture(scope="session")
 def spark_jobs_volume(spark_jobs_settings, spark_jobs_minio):
+    from spark_backfill.volume_helpers import VolumeStorage
+
     return VolumeStorage(
         spark_jobs_minio,
         spark_jobs_settings.volume_bucket,
@@ -425,6 +444,8 @@ def spark_jobs_volume(spark_jobs_settings, spark_jobs_minio):
 
 @pytest.fixture(scope="session")
 def spark_jobs_client(spark_jobs_settings):
+    from spark_backfill.jobs_client import SparkBatchJobsClient
+
     return SparkBatchJobsClient(
         spark_jobs_settings.endpoint,
         spark_jobs_settings.api_key,
@@ -444,6 +465,8 @@ def spark_jobs_test_jar(request):
 
 @pytest.fixture
 def spark_jobs_case_factory(spark_jobs_settings, spark_jobs_client, spark_jobs_volume, tmp_path):
+    from spark_backfill.jobs_case import SparkJobsCase
+
     cases: list[SparkJobsCase] = []
 
     def factory() -> SparkJobsCase:
