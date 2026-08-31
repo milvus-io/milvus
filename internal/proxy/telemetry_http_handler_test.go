@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -31,8 +32,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -43,6 +46,10 @@ func init() {
 
 func TestTelemetryAuthMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	originalAdminAuth := Params.CommonCfg.AdminAuthEnabled.GetValue()
+	t.Cleanup(func() {
+		_ = Params.Save(Params.CommonCfg.AdminAuthEnabled.Key, originalAdminAuth)
+	})
 
 	t.Run("auth disabled - allows request", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
@@ -174,6 +181,93 @@ func TestTelemetryAuthMiddleware(t *testing.T) {
 	// initializing the privilege cache which is complex to set up. The password verification
 	// logic is tested elsewhere in the codebase (util_test.go, authentication_interceptor_test.go).
 	// The tests above cover all the middleware's input validation before password verification.
+}
+
+// With the gate on, these routes run the root-only management check themselves
+// rather than the legacy RBAC verifier, and rather than trusting a middleware
+// installed by whoever mounted them. They push commands to connected clients;
+// their protection must not be a property of the call site.
+func TestTelemetryAuthMiddleware_UsesManagementCheckWhenAdminAuthEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	Params.Save(Params.CommonCfg.AdminAuthEnabled.Key, "true")
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	t.Cleanup(func() {
+		Params.Reset(Params.CommonCfg.AdminAuthEnabled.Key)
+		Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		internalhttp.RegisterManagementVerifier(internalhttp.VerifierSlotProxy, nil)
+		internalhttp.RegisterPasswordVerifyFunc(nil)
+	})
+
+	internalhttp.RegisterManagementVerifier(internalhttp.VerifierSlotProxy, func(_ context.Context, username, password string) error {
+		if username == util.UserRoot && password == "s3cr3t" {
+			return nil
+		}
+		return internalhttp.NewAuthenticationError("invalid root password")
+	})
+	internalhttp.RegisterPasswordVerifyFunc(func(context.Context, string, string) bool {
+		// Error, not Fatal: this runs on the request's goroutine, where
+		// FailNow's behavior is undefined.
+		t.Error("the legacy RBAC verifier must not be consulted while the gate is on")
+		return false
+	})
+
+	newRouter := func(called *bool) *gin.Engine {
+		router := gin.New()
+		router.Use(TelemetryAuthMiddleware())
+		router.GET("/", func(c *gin.Context) {
+			*called = true
+			c.Status(http.StatusOK)
+		})
+		return router
+	}
+
+	t.Run("anonymous is rejected", func(t *testing.T) {
+		called := false
+		recorder := httptest.NewRecorder()
+		newRouter(&called).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+		assert.False(t, called, "a command-push route must not run for an unauthenticated caller")
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+	})
+
+	t.Run("non-root is rejected", func(t *testing.T) {
+		called := false
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.SetBasicAuth("alice", "s3cr3t")
+		recorder := httptest.NewRecorder()
+		newRouter(&called).ServeHTTP(recorder, req)
+		assert.False(t, called)
+		assert.Equal(t, http.StatusForbidden, recorder.Code)
+	})
+
+	t.Run("root passes", func(t *testing.T) {
+		called := false
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.SetBasicAuth(util.UserRoot, "s3cr3t")
+		recorder := httptest.NewRecorder()
+		newRouter(&called).ServeHTTP(recorder, req)
+		assert.True(t, called)
+		assert.Equal(t, http.StatusOK, recorder.Code)
+	})
+
+	t.Run("root survives the outer metrics-port gate", func(t *testing.T) {
+		router := gin.New()
+		router.Use(internalhttp.GinAdminAuthMiddleware(false))
+		router.GET("/", TelemetryAuthMiddleware(), func(c *gin.Context) {
+			err := checkTelemetryAdmin(c.Request.Context(), "test")
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.Status(http.StatusOK)
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.SetBasicAuth(util.UserRoot, "s3cr3t")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	})
 }
 
 func TestGetTelemetryClientsHandler(t *testing.T) {

@@ -461,6 +461,63 @@ func TestHandleGetConfig(t *testing.T) {
 	})
 }
 
+// This endpoint is itself behind common.security.adminAuthEnabled, so while
+// that flag is off anyone who can reach port 9091 -- the exposure the flag
+// exists to close -- could use it to plant "false" in etcd, which outranks the
+// yaml an operator later edits. The rejection has to survive every spelling
+// that lands on the same stored key, which is why the guard shares
+// config.FormatKey rather than normalizing by hand.
+//
+// No etcd needed: the guard answers before the request reaches a source.
+func TestHandleAlterConfigRefusesTheAdminAuthGate(t *testing.T) {
+	paramtable.Init()
+	coord := &mixCoordImpl{}
+	key := paramtable.Get().CommonCfg.AdminAuthEnabled.Key
+
+	for _, spelling := range []string{
+		key,
+		"common_security_adminAuthEnabled",
+		"common/security/adminAuthEnabled",
+		"COMMON.SECURITY.ADMINAUTHENABLED",
+		"commonsecurityadminauthenabled",
+	} {
+		t.Run(spelling, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{
+				"configs": []map[string]any{{"key": spelling, "value": "false"}},
+			})
+			require.NoError(t, err)
+			w := httptest.NewRecorder()
+			coord.HandleAlterConfig(w,
+				httptest.NewRequest(http.MethodPost, "/management/config/alter", bytes.NewReader(body)))
+
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), key)
+		})
+	}
+
+	// A reset (value omitted) is the same attack with a different shape.
+	body, err := json.Marshal(map[string]any{
+		"configs": []map[string]any{{"key": "common_security_adminAuthEnabled"}},
+	})
+	require.NoError(t, err)
+	w := httptest.NewRecorder()
+	coord.HandleAlterConfig(w,
+		httptest.NewRequest(http.MethodPost, "/management/config/alter", bytes.NewReader(body)))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	// The mqtype guard is spelling-sensitive for the same reason.
+	for _, spelling := range []string{"mq.type", "mq_type", "mqType"} {
+		body, err := json.Marshal(map[string]any{
+			"configs": []map[string]any{{"key": spelling, "value": "kafka"}},
+		})
+		require.NoError(t, err)
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w,
+			httptest.NewRequest(http.MethodPost, "/management/config/alter", bytes.NewReader(body)))
+		assert.Equal(t, http.StatusBadRequest, w.Code, spelling)
+	}
+}
+
 func TestNewAlterWALBroadcastMessage(t *testing.T) {
 	clusterChannels := message.ClusterChannels{
 		Channels:       []string{"pchannel1", "pchannel2"},

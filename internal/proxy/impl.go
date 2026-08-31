@@ -7323,6 +7323,12 @@ func (node *Proxy) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.Com
 // =============================================================================
 
 func checkTelemetryAdmin(ctx context.Context, method string) error {
+	if username, ok := http.AuthenticatedAdminFromContext(ctx); ok {
+		if username == util.UserRoot {
+			return nil
+		}
+		return merr.WrapErrPrivilegeNotPermitted("telemetry %s requires root user", method)
+	}
 	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		return nil
 	}

@@ -1178,6 +1178,17 @@ common:
     lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
     authorizationEnabled: false
+    # Whether the metrics port (default 9091) requires the root credential via HTTP
+    # Basic Auth. When true it covers the operator surface -- /management/*, /log/level,
+    # /eventlog, /debug/pprof/* and the web console -- while probe and scrape endpoints
+    # (/healthz, /livez, /metrics, /metrics_default, /management/check/ready, /api/v1/health)
+    # stay open, and the legacy REST data plane on this port follows
+    # common.security.authorizationEnabled. Enabling it breaks callers that use the port
+    # anonymously, including Milvus Operator's graceful shutdown and profiling scripts, and
+    # moves /eventlog's gRPC stream to loopback. The port is plaintext HTTP, so keep it on a
+    # trusted network and rotate the root password with UpdateCredential first. Not settable
+    # through /management/config/alter; watch milvus_admin_auth_total for what this rejects.
+    adminAuthEnabled: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 

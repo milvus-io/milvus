@@ -26,7 +26,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -49,13 +51,17 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	grpcproxyclient "github.com/milvus-io/milvus/internal/distributed/proxy/client"
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
+	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/netutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1444,6 +1450,399 @@ func TestHttpAuthenticate(t *testing.T) {
 		assert.Equal(t, "foo", ctxName)
 	}
 }
+
+// runAdminAuthMiddleware drives a console request through the whole assembled
+// chain rather than the middleware alone: a middleware exercised on its own
+// cannot show that something ahead of it answered first, which is the failure
+// this design is arranged to prevent.
+func runAdminAuthMiddleware(t *testing.T, setAuth func(*http.Request)) *httptest.ResponseRecorder {
+	t.Helper()
+	return requestMetricsPort(t, http.MethodGet, mhttp.ClusterConfigsPath, setAuth)
+}
+
+func TestAdminAuthMiddlewareIsInertWhileDisabled(t *testing.T) {
+	paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key)
+	require.False(t, proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool())
+
+	// A verifier that fails the test if consulted: asserting only on the status
+	// would pass with the middleware deleted outright, since with both flags
+	// off every branch is a no-op anyway.
+	mhttp.RegisterManagementVerifier(mhttp.VerifierSlotProxy, func(context.Context, string, string) error {
+		t.Error("no credential may be checked while the gate is off")
+		return nil
+	})
+	t.Cleanup(func() { mhttp.RegisterManagementVerifier(mhttp.VerifierSlotProxy, nil) })
+
+	// Assert the request reached a handler, not just that nothing wrote a
+	// status: an untouched recorder reports 200 all on its own. A cross-site
+	// header must be ignored too — the refusal is part of the gate, not
+	// something the flag-off posture does.
+	w := requestMetricsPort(t, http.MethodGet, mhttp.ClusterConfigsPath, func(req *http.Request) {
+		req.SetBasicAuth("alice", "whatever")
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "ok", w.Body.String())
+}
+
+func TestAdminAuthMiddlewarePreservesManagementStoreFailure(t *testing.T) {
+	paramtable.Get().Save(proxy.Params.CommonCfg.AdminAuthEnabled.Key, "true")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key)
+		mhttp.RegisterManagementVerifier(mhttp.VerifierSlotProxy, nil)
+	})
+
+	const internalCause = "credential backend sentinel must stay private"
+	mhttp.RegisterManagementVerifier(mhttp.VerifierSlotProxy, func(context.Context, string, string) error {
+		return errors.New(internalCause)
+	})
+
+	w := runAdminAuthMiddleware(t, func(req *http.Request) {
+		req.SetBasicAuth(util.UserRoot, "correct-password")
+	})
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.NotContains(t, w.Body.String(), internalCause)
+	assert.Contains(t, w.Body.String(), "cannot verify credentials on this node")
+	assert.Empty(t, w.Header().Get("WWW-Authenticate"))
+}
+
+func TestAdminAuthMiddlewareRejectsNonRootBeforePasswordVerification(t *testing.T) {
+	paramtable.Get().Save(proxy.Params.CommonCfg.AdminAuthEnabled.Key, "true")
+	verifierCalls := 0
+	mhttp.RegisterManagementVerifier(mhttp.VerifierSlotProxy, func(context.Context, string, string) error {
+		verifierCalls++
+		return nil
+	})
+	t.Cleanup(func() {
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key)
+		mhttp.RegisterManagementVerifier(mhttp.VerifierSlotProxy, nil)
+	})
+
+	for _, password := range []string{"wrong-password", "otherwise-valid-password"} {
+		w := runAdminAuthMiddleware(t, func(req *http.Request) {
+			req.SetBasicAuth("alice", password)
+		})
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "only root user")
+		assert.Empty(t, w.Header().Get("WWW-Authenticate"))
+	}
+	assert.Zero(t, verifierCalls, "a non-root username must not reach the credential store")
+}
+
+func TestAdminAuthMiddlewareRequiresCredentials(t *testing.T) {
+	paramtable.Get().Save(proxy.Params.CommonCfg.AdminAuthEnabled.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key) })
+
+	w := runAdminAuthMiddleware(t, nil)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	// These routes are what the web console fetches, and it has no login form:
+	// without the challenge the browser swallows the 401 and every panel shows
+	// an error the operator has no way to clear.
+	assert.Contains(t, w.Header().Get("WWW-Authenticate"), "Basic realm=")
+}
+
+// metricsPortEngine builds the metrics-port gin tree through the same function
+// registerHTTPServer uses, so these tests exercise the handler chain that
+// actually runs. Reassembling it by hand instead would leave every test green
+// if the production assembly changed shape -- and the assembly is exactly what
+// makes the gate apply, since RouterGroup.Group snapshots the parent's handler
+// slice.
+//
+// consoleAPIPaths mirrors the console half of Proxy.RegisterRestRouter, so a
+// test can drive newMetricsPortEngine without a real *proxy.Proxy. It is a
+// sample, not the source of truth: what actually keeps the console surface
+// gated is that every route it registers carries the /_ prefix the middleware
+// classifies on, which TestRegisterRestRouterOnlyPublishesConsolePaths pins in
+// the package that owns those registrations.
+var consoleAPIPaths = []string{
+	mhttp.ClusterInfoPath, mhttp.ClusterConfigsPath, mhttp.ClusterClientsPath,
+	mhttp.ClusterDependenciesPath, mhttp.HookConfigsPath, mhttp.SlowQueryPath,
+	mhttp.QCTargetPath, mhttp.QCDistPath, mhttp.QCReplicaPath, mhttp.QCResourceGroupPath,
+	mhttp.QCAllTasksPath, mhttp.QCSegmentsPath,
+	mhttp.QNSegmentsPath, mhttp.QNChannelsPath,
+	mhttp.DCDistPath, mhttp.DCCompactionTasksPath, mhttp.DCImportTasksPath,
+	mhttp.DCBuildIndexTasksPath, mhttp.IndexListPath, mhttp.DCSegmentsPath,
+	mhttp.DNSyncTasksPath, mhttp.DNSegmentsPath, mhttp.DNChannelsPath,
+	mhttp.DatabaseListPath, mhttp.DatabaseDescPath,
+	mhttp.CollectionListPath, mhttp.CollectionDescPath,
+}
+
+// telemetryAPIPaths are the console routes that also carry their own copy of
+// the check, and the only parameterised ones on this port.
+var telemetryAPIPaths = []string{
+	mhttp.TelemetryClientsPath,
+	mhttp.TelemetryClientsPath + "/:clientId",
+	mhttp.TelemetryClientsPath + "/:clientId/config",
+	mhttp.TelemetryClientHistoryPath,
+	mhttp.TelemetryCommandsPath,
+	mhttp.TelemetryCommandsPath + "/:commandId",
+}
+
+// consoleProxy is a ProxyComponent that also registers the console routes, so
+// newMetricsPortEngine takes the same branch it takes in production. Without
+// it the assertion is on a concrete *proxy.Proxy that no test can build, and
+// the entire console surface stays uncovered.
+type consoleProxy struct {
+	types.ProxyComponent
+}
+
+func (consoleProxy) RegisterRestRouter(router gin.IRouter) {
+	ok := func(c *gin.Context) { c.String(http.StatusOK, "ok") }
+	for _, path := range consoleAPIPaths {
+		router.GET(path, ok)
+	}
+	telemetryAuth := proxy.TelemetryAuthMiddleware()
+	for _, path := range telemetryAPIPaths {
+		router.GET(path, telemetryAuth, ok)
+	}
+}
+
+func metricsPortEngine(t *testing.T) *gin.Engine {
+	t.Helper()
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	mockProxy := mocks.NewMockProxy(t)
+	mockProxy.EXPECT().DropCollection(mock.Anything, mock.Anything).
+		Return(merr.Success(), nil).Maybe()
+	return newMetricsPortEngine(gin.New(), consoleProxy{mockProxy})
+}
+
+func requestMetricsPort(t *testing.T, method, path string, setAuth func(*http.Request)) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(method, apiPathPrefix+path, nil)
+	if setAuth != nil {
+		setAuth(req)
+	}
+	metricsPortEngine(t).ServeHTTP(w, req)
+	return w
+}
+
+func runDataPlaneAuthMiddleware(t *testing.T, setAuth func(*http.Request)) *httptest.ResponseRecorder {
+	t.Helper()
+	return requestMetricsPort(t, http.MethodDelete, "/collection", setAuth)
+}
+
+// The console has no login form; its credentials come from the browser, which
+// only prompts when a 401 carries WWW-Authenticate. Nothing in the chain may
+// answer the console's 401 before the middleware that sets that header — which
+// is exactly what a second, stacked credential check would do.
+//
+// The data plane must NOT send it. The challenge is what makes a browser hold
+// root's credential for a path, and holding it for a route that drops
+// collections is the thing the cross-site check then has to defend.
+func TestChallengeOnConsoleRoutesOnly(t *testing.T) {
+	paramtable.Get().Save(proxy.Params.CommonCfg.AdminAuthEnabled.Key, "true")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key)
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+	})
+
+	w := requestMetricsPort(t, http.MethodGet, mhttp.ClusterConfigsPath, nil)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Contains(t, w.Header().Get("WWW-Authenticate"), "Basic realm=",
+		"without this the browser swallows the 401 and the console cannot sign in")
+
+	w = runDataPlaneAuthMiddleware(t, nil)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Empty(t, w.Header().Get("WWW-Authenticate"),
+		"a browser must not be taught to hold root's credential for the data plane")
+
+	// The authorization-enabled branch uses the legacy data-plane verifier.
+	// A syntactically valid Basic header used to make ParseUsernamePassword set
+	// the challenge as a parsing side effect, even though this route must never
+	// teach the browser to retain credentials.
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	passwordMock := mockey.Mock(proxy.PasswordVerify).Return(false).Build()
+	defer passwordMock.UnPatch()
+	apiKeyMock := mockey.Mock(proxy.VerifyAPIKey).Return("", errors.New("invalid API key")).Build()
+	defer apiKeyMock.UnPatch()
+
+	w = runDataPlaneAuthMiddleware(t, func(req *http.Request) {
+		req.SetBasicAuth("alice", "wrong-password")
+	})
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Empty(t, w.Header().Get("WWW-Authenticate"),
+		"wrong Basic credentials on the data plane must not trigger a browser challenge")
+}
+
+// /api/v1/health predates /healthz and is still wired into load balancers.
+// A flag named after the management plane must not take it down.
+func TestHealthStaysOpenWithGateOn(t *testing.T) {
+	paramtable.Get().Save(proxy.Params.CommonCfg.AdminAuthEnabled.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key) })
+
+	w := requestMetricsPort(t, http.MethodGet, "/health", nil)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// The exemption has to stay narrow: a neighboring data-plane route must
+	// not inherit it.
+	w = runDataPlaneAuthMiddleware(t, nil)
+	assert.Equal(t, http.StatusUnauthorized, w.Code,
+		"only /api/v1/health is exempt, not everything near it")
+}
+
+// ... and must not take the opposite trade either. Exempting /api/v1/health
+// from the new gate must not also drop the authentication authorizationEnabled
+// already required there: a hardening flag that loosens an existing check is
+// worse than one that does nothing.
+func TestHealthKeepsExistingAuthWhenGateOn(t *testing.T) {
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	paramtable.Get().Save(proxy.Params.CommonCfg.AdminAuthEnabled.Key, "true")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key)
+	})
+
+	w := requestMetricsPort(t, http.MethodGet, "/health", nil)
+	assert.Equal(t, http.StatusUnauthorized, w.Code,
+		"enabling the gate must not remove authorizationEnabled's coverage of /api/v1/health")
+}
+
+// The metrics port also carries the legacy REST data plane, where DELETE
+// /api/v1/collection drops a collection. Gating only the operator surface would
+// leave an operator who enabled adminAuthEnabled — and then exposed the port,
+// which is what the flag is for — one unauthenticated request from data loss.
+//
+// With no data-plane authentication configured it requires root, verified from
+// the cached hash: accepting a caller-chosen username would mean one credential
+// lookup per name that the proxy's cache cannot absorb, and with
+// authorizationEnabled off there is no non-root caller to lock out.
+func TestDataPlaneRequiresRootWhenAuthorizationDisabled(t *testing.T) {
+	paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key)
+	require.False(t, proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool(),
+		"this test is about the default posture: data-plane authorization off")
+
+	w := runDataPlaneAuthMiddleware(t, nil)
+	assert.Equal(t, http.StatusOK, w.Code, "unchanged while both gates are off")
+
+	paramtable.Get().Save(proxy.Params.CommonCfg.AdminAuthEnabled.Key, "true")
+	verifierCalls := 0
+	mhttp.RegisterManagementVerifier(mhttp.VerifierSlotProxy, func(context.Context, string, string) error {
+		verifierCalls++
+		return nil
+	})
+	t.Cleanup(func() {
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key)
+		mhttp.RegisterManagementVerifier(mhttp.VerifierSlotProxy, nil)
+	})
+
+	w = runDataPlaneAuthMiddleware(t, nil)
+	assert.Equal(t, http.StatusUnauthorized, w.Code,
+		"the metrics port must not carry an anonymous drop-collection route once the gate is on")
+
+	w = runDataPlaneAuthMiddleware(t, func(req *http.Request) {
+		req.SetBasicAuth("alice", "any-password")
+	})
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Zero(t, verifierCalls,
+		"a caller-chosen username must not reach the credential store")
+
+	w = runDataPlaneAuthMiddleware(t, func(req *http.Request) {
+		req.SetBasicAuth(util.UserRoot, "any-password")
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, verifierCalls)
+}
+
+// Where data-plane authentication IS configured, the gate must not narrow it:
+// an RBAC user or an API key that works on the main service port has to keep
+// working here, because there is nowhere else for it to go.
+func TestDataPlaneKeepsNonRootCallersWhenAuthorizationEnabled(t *testing.T) {
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	paramtable.Get().Save(proxy.Params.CommonCfg.AdminAuthEnabled.Key, "true")
+	hookutil.SetMockAPIHook("alice", nil)
+	t.Cleanup(func() {
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key)
+		hookutil.SetMockAPIHook("", nil)
+	})
+
+	w := runDataPlaneAuthMiddleware(t, func(req *http.Request) {
+		req.Header.Set("Authorization", "Bearer some-api-key")
+	})
+	assert.Equal(t, http.StatusOK, w.Code,
+		"enabling the operator gate must not lock non-root callers out of the data plane")
+}
+
+// The console's challenge is what teaches a browser to hold root's credential
+// for this origin, and the browser replays it at the data-plane routes on the
+// same origin just as readily: a cross-site form post to /api/v1/collection is
+// a top-level navigation, which carries cached credentials and needs no
+// preflight. Every gated branch has to refuse it, not just the console one.
+func TestMetricsPortRefusesCrossSiteOnEveryGatedBranch(t *testing.T) {
+	paramtable.Get().Save(proxy.Params.CommonCfg.AdminAuthEnabled.Key, "true")
+	mhttp.RegisterManagementVerifier(mhttp.VerifierSlotProxy, func(context.Context, string, string) error {
+		return nil
+	})
+	t.Cleanup(func() {
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key)
+		mhttp.RegisterManagementVerifier(mhttp.VerifierSlotProxy, nil)
+	})
+
+	crossSite := func(req *http.Request) {
+		req.SetBasicAuth(util.UserRoot, "any-password")
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+	}
+	for _, tc := range []struct{ name, method, path string }{
+		{"data plane", http.MethodDelete, "/collection"},
+		{"console API", http.MethodGet, mhttp.ClusterConfigsPath},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := requestMetricsPort(t, tc.method, tc.path, crossSite)
+			assert.Equal(t, http.StatusForbidden, w.Code)
+			assert.Contains(t, w.Body.String(), "cross-site")
+		})
+	}
+
+	// The probe stays open, cross-site or not: a load balancer health check is
+	// not something a browser replays credentials at.
+	w := requestMetricsPort(t, http.MethodGet, "/health", crossSite)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// The Register guard in internal/http cannot see this gin tree, so nothing else
+// stops a route being mounted on the engine instead of the group — where no
+// auth middleware would apply to it. Every route the real assembly produces
+// must sit under the prefix the middleware is installed on, and every one of
+// them must actually answer 401 to an anonymous caller once the gate is on.
+func TestEveryMetricsPortRouteIsGated(t *testing.T) {
+	paramtable.Get().Save(proxy.Params.CommonCfg.AdminAuthEnabled.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key) })
+
+	engine := metricsPortEngine(t)
+	routes := engine.Routes()
+	require.NotEmpty(t, routes)
+
+	// The exemption set is asserted, not consulted: using it as the test's own
+	// judge would mean widening it silently widens the test too.
+	assert.Equal(t, map[string]struct{}{apiPathPrefix + "/health": {}}, openMetricsPortPaths)
+
+	gated := 0
+	for _, route := range routes {
+		assert.True(t, strings.HasPrefix(route.Path, apiPathPrefix+"/"),
+			"%s %s is served on the metrics port outside the authenticated group",
+			route.Method, route.Path)
+		if route.Path == apiPathPrefix+"/health" {
+			continue
+		}
+		// Parameterised routes need a concrete value to match; ":clientId"
+		// would otherwise 404 and quietly prove nothing.
+		concrete := paramSegment.ReplaceAllString(route.Path, "/x")
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, httptest.NewRequest(route.Method, concrete, nil))
+		assert.Equal(t, http.StatusUnauthorized, w.Code,
+			"%s %s answered an anonymous caller while the gate is on", route.Method, concrete)
+		gated++
+	}
+	assert.Greater(t, gated, len(consoleAPIPaths)+len(telemetryAPIPaths),
+		"the console and telemetry surfaces must be among the routes checked")
+}
+
+var paramSegment = regexp.MustCompile(`/:[^/]+`)
 
 func Test_Service_GracefulStop(t *testing.T) {
 	var count int32

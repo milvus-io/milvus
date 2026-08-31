@@ -28,7 +28,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
-	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
@@ -42,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/adminauth"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -1620,7 +1620,7 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 	// meanwhile, generating Sha256Password depends on raw password and encrypted password will not cache.
 	credInfo, err := privilege.GetPrivilegeCache().GetCredentialInfo(ctx, username)
 	if err != nil {
-		mlog.Error(context.TODO(), "found no credential", mlog.String("username", username), mlog.Err(err))
+		mlog.Error(ctx, "found no credential", mlog.String("username", username), mlog.Err(err))
 		return false
 	}
 
@@ -1630,9 +1630,12 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 		return sha256Pwd == credInfo.Sha256Password
 	}
 
-	// miss cache, verify against encrypted password from etcd
-	if err := bcrypt.CompareHashAndPassword([]byte(credInfo.EncryptedPassword), []byte(rawPwd)); err != nil {
-		mlog.Error(context.TODO(), "Verify password failed", mlog.Err(err))
+	// Miss cache: verify against the encrypted password from etcd. Shared with
+	// the management-plane verifier rather than calling bcrypt here, so the
+	// stored-credential format, the cost parameter and the "wrong password"
+	// versus "unusable hash" split cannot drift between the two.
+	if err := adminauth.VerifyStoredPassword(credInfo.EncryptedPassword, rawPwd); err != nil {
+		mlog.Error(ctx, "Verify password failed", mlog.Err(err))
 		return false
 	}
 

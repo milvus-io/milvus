@@ -126,11 +126,91 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 	return server, err
 }
 
+// metricsPortAuthMiddleware is the authentication rule for everything the
+// proxy serves on the metrics port under /api/v1.
+//
+// It is installed once, on the parent group, rather than per route class.
+// RouterGroup.Group snapshots the parent's handler slice, so a second stacked
+// check either runs ahead of this one and answers the console's 401 without
+// the WWW-Authenticate a browser needs, or is skipped entirely, depending on
+// where the Use() sits relative to the Group() — and neither failure shows up
+// in a test that exercises a middleware on its own.
+//
+// The port carries two different things once the gate is on: the web console
+// API (/api/v1/_*) is operator surface and requires root, while the legacy REST
+// data plane follows authorizationEnabled where that is set and requires root
+// where it is not. Every gated branch runs the cross-site check first, because
+// the browser replays root's cached credential at the data-plane routes on this
+// origin just as readily as at the console ones.
+//
+// While the gate is off, behavior is exactly what it was before it existed:
+// the legacy rule, applied only when authorizationEnabled is set.
+func metricsPortAuthMiddleware() gin.HandlerFunc {
+	consoleAuth := mhttp.GinAdminAuthMiddleware(true)
+	dataPlaneAuth := mhttp.GinAdminAuthMiddleware(false)
+	legacyEnabled := proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool()
+	return func(c *gin.Context) {
+		gateOn := mhttp.AdminAuthEnabled()
+		if isOpenMetricsPortPath(c) {
+			// /api/v1/health is a liveness probe that predates /healthz and is
+			// still wired into load balancers. Turning a flag named after the
+			// management plane into a health-check outage is not a trade
+			// anyone opted into. The exemption is from the new gate only:
+			// authorizationEnabled's existing coverage of this path stays,
+			// because a hardening flag must never loosen an existing check.
+			if legacyEnabled {
+				authenticate(c)
+			}
+			return
+		}
+		switch {
+		case gateOn && isConsoleAPIPath(c):
+			consoleAuth(c)
+		case legacyEnabled:
+			// The data plane's own rule. It still has to refuse a cross-site
+			// request, because the console's challenge teaches the browser to
+			// replay a credential at this origin; consoleAuth and dataPlaneAuth
+			// get that from CheckAdminRequest, this branch does not.
+			if gateOn {
+				if !mhttp.ApplyGinAuthDecision(c,
+					mhttp.CheckCrossSite(c.Request, c.FullPath(), false), false) {
+					return
+				}
+			}
+			authenticate(c)
+		case gateOn:
+			dataPlaneAuth(c)
+		}
+	}
+}
+
+// openMetricsPortPaths stay reachable without credentials while the gate is on.
+var openMetricsPortPaths = map[string]struct{}{
+	apiPathPrefix + "/health": {},
+}
+
+// consoleAPIPrefix is what every web console route under /api/v1 starts with:
+// /_cluster, /_db, /_collection, /_index, /_qc, /_dc, /_qn, /_dn, /_hook and
+// /_telemetry. Nothing on the legacy data plane uses a leading underscore.
+const consoleAPIPrefix = apiPathPrefix + "/_"
+
+// isConsoleAPIPath and isOpenMetricsPortPath both read FullPath, the matched
+// route template, so neither can be steered by a crafted URL the way the raw
+// path can.
+func isConsoleAPIPath(c *gin.Context) bool {
+	return strings.HasPrefix(c.FullPath(), consoleAPIPrefix)
+}
+
+func isOpenMetricsPortPath(c *gin.Context) bool {
+	_, ok := openMetricsPortPaths[c.FullPath()]
+	return ok
+}
+
 func authenticate(c *gin.Context) {
 	username, password, ok := httpserver.ParseUsernamePassword(c)
 	if ok {
 		if proxy.PasswordVerify(c, username, password) {
-			mlog.Debug(context.TODO(), "auth successful", mlog.String("username", username))
+			mlog.Debug(c.Request.Context(), "auth successful", mlog.String("username", username))
 			c.Set(httpserver.ContextUsername, username)
 			c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, password))
 			return
@@ -144,10 +224,10 @@ func authenticate(c *gin.Context) {
 			c.Set(httpserver.ContextToken, rawToken)
 			return
 		}
-		mlog.Warn(context.TODO(), "fail to verify apikey", mlog.Err(err))
+		mlog.Warn(c.Request.Context(), "fail to verify apikey", mlog.Err(err))
 	}
 
-	hookutil.GetExtension().ReportAction(context.Background(), nil, &milvuspb.BoolResponse{
+	hookutil.GetExtension().ReportAction(c.Request.Context(), nil, &milvuspb.BoolResponse{
 		Status: merr.Status(merr.ErrNeedAuthenticate),
 	}, nil, c.FullPath(), hookutil.ActionAuthorize)
 	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{mhttp.HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), mhttp.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
@@ -165,24 +245,39 @@ func (s *Server) registerHTTPServer() {
 	if !proxy.Params.HTTPCfg.DebugMode.GetAsBool() {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	metricsGinHandler := gin.Default()
-	apiv1 := metricsGinHandler.Group(apiPathPrefix)
-	apiv1.Use(httpserver.RequestHandlerFunc)
-	// Add authentication middleware if authorization is enabled
-	// This ensures the metrics port follows the same security policy as the main HTTP server
-	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
-		apiv1.Use(authenticate)
-	}
-	handlers := httpserver.NewHandlers(s.proxy)
-	handlers.RegisterRoutesTo(apiv1)
-	if p, ok := s.proxy.(*proxy.Proxy); ok {
-		p.RegisterRestRouter(apiv1)
-	}
 	mhttp.Register(&mhttp.Handler{
 		Path:        mhttp.RootPath,
 		HandlerFunc: nil,
-		Handler:     metricsGinHandler.Handler(),
+		Handler:     newMetricsPortEngine(gin.Default(), s.proxy).Handler(),
 	})
+}
+
+// newMetricsPortEngine mounts everything the proxy serves on the metrics port.
+//
+// One group, one auth middleware, passed to Group rather than Use'd after it,
+// so the handler slice the routes inherit is the one this builds. Tests drive
+// this function rather than repeating its shape, because a test that
+// reassembles the tree by hand cannot notice the assembly changing under it —
+// and the assembly is exactly what makes the gate apply.
+func newMetricsPortEngine(engine *gin.Engine, proxyComponent types.ProxyComponent) *gin.Engine {
+	apiv1 := engine.Group(apiPathPrefix,
+		httpserver.RequestHandlerFunc, metricsPortAuthMiddleware())
+	httpserver.NewHandlers(proxyComponent).RegisterRoutesTo(apiv1)
+	if p, ok := proxyComponent.(consoleRouterRegistrar); ok {
+		// The web console API — cluster info and configs, database and
+		// collection listings, slow queries, coordinator and node distribution,
+		// plus the telemetry routes that push commands to connected clients.
+		p.RegisterRestRouter(apiv1)
+	}
+	return engine
+}
+
+// consoleRouterRegistrar is what *proxy.Proxy satisfies. Asserting on the
+// behavior rather than the concrete type is what lets a test put the console
+// routes on this tree; with a concrete assertion the whole console surface is
+// unreachable from any test and silently uncovered.
+type consoleRouterRegistrar interface {
+	RegisterRestRouter(router gin.IRouter)
 }
 
 func (s *Server) httpHandler(ginHandler http.Handler) http.Handler {

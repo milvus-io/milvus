@@ -282,6 +282,7 @@ type commonConfig struct {
 	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
 
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
+	AdminAuthEnabled      ParamItem `refreshable:"true"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
@@ -966,6 +967,31 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 		Export:       true,
 	}
 	p.AuthorizationEnabled.Init(base.mgr)
+
+	p.AdminAuthEnabled = ParamItem{
+		Key:          "common.security.adminAuthEnabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc: `Whether the metrics port (default 9091) requires the root credential via HTTP
+Basic Auth. When true it covers the operator surface -- /management/*, /log/level,
+/eventlog, /debug/pprof/* and the web console -- while probe and scrape endpoints
+(/healthz, /livez, /metrics, /metrics_default, /management/check/ready, /api/v1/health)
+stay open, and the legacy REST data plane on this port follows
+common.security.authorizationEnabled. Enabling it breaks callers that use the port
+anonymously, including Milvus Operator's graceful shutdown and profiling scripts, and
+moves /eventlog's gRPC stream to loopback. The port is plaintext HTTP, so keep it on a
+trusted network and rotate the root password with UpdateCredential first. Not settable
+through /management/config/alter; watch milvus_admin_auth_total for what this rejects.`,
+		Export: true,
+		// Deliberately NOT Immutable. ProcessImmutableConfigs persists an
+		// Immutable key's value into etcd on first startup, and the etcd source
+		// outranks file and env, so the first boot of any cluster would pin
+		// "false" there and an operator later setting adminAuthEnabled: true in
+		// yaml would get no gate and no warning. Unauthorized mutation is
+		// prevented by the gate itself: /management/config/alter already
+		// requires the root credential this flag demands.
+	}
+	p.AdminAuthEnabled.Init(base.mgr)
 
 	p.SuperUsers = ParamItem{
 		Key:     "common.security.superUsers",

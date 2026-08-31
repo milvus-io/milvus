@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cast"
@@ -78,7 +79,10 @@ func Init(opts ...Option) (*Manager, error) {
 	return sourceManager, nil
 }
 
-var formattedKeys = typeutil.NewConcurrentMap[string, string]()
+var (
+	formattedKeys   = typeutil.NewConcurrentMap[string, string]()
+	formattedKeysMu sync.Mutex
+)
 
 func lowerKey(key string) string {
 	if strings.HasPrefix(key, NotFormatPrefix) {
@@ -86,6 +90,21 @@ func lowerKey(key string) string {
 	}
 	return strings.ToLower(key)
 }
+
+// FormatKey is the identity a config key is stored and looked up under.
+// Callers that guard a specific key must compare against this rather than a
+// hand-rolled normalization: separators are stripped, not translated, so
+// "a.b.c", "a_b_c", "a/b/c" and "abc" are all the same key.
+func FormatKey(key string) string { return formatKey(key) }
+
+// maxFormattedKeys bounds the normalization memo. The cache exists for the
+// fixed config vocabulary, which is a few hundred keys and is resolved on every
+// ParamItem read -- but /management/config/get and /management/config/alter
+// normalize caller-supplied keys, and both answer anonymously while
+// common.security.adminAuthEnabled is off. An unbounded memo therefore lets
+// anyone who can reach the metrics port grow it without limit. Past the bound
+// the result is still correct, it is just recomputed.
+const maxFormattedKeys = 4096
 
 func formatKey(key string) string {
 	if strings.HasPrefix(key, NotFormatPrefix) {
@@ -95,9 +114,23 @@ func formatKey(key string) string {
 	if ok {
 		return cached
 	}
-	result := strings.NewReplacer("/", "", "_", "", ".", "").Replace(strings.ToLower(key))
-	formattedKeys.Insert(key, result)
+	result := normalizeKey(key)
+	formattedKeysMu.Lock()
+	defer formattedKeysMu.Unlock()
+	// A concurrent miss may have populated this key while this goroutine waited.
+	if cached, ok := formattedKeys.Get(key); ok {
+		return cached
+	}
+	if formattedKeys.Len() < maxFormattedKeys {
+		formattedKeys.Insert(key, result)
+	}
 	return result
+}
+
+// normalizeKey is the normalization itself, split out so the memoized and
+// unmemoized paths cannot drift.
+func normalizeKey(key string) string {
+	return strings.NewReplacer("/", "", "_", "", ".", "").Replace(strings.ToLower(key))
 }
 
 func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[string]string) {

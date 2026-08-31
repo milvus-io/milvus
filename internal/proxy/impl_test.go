@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -3524,4 +3525,25 @@ func TestProxy_ListRefreshExternalCollectionJobs_ByCollection(t *testing.T) {
 	assert.Contains(t, redactedSpec, `"region":"us-east-1"`)
 	assert.NotContains(t, redactedSpec, "AKIAEXAMPLE")
 	assert.NotContains(t, redactedSpec, "SUPERSECRET")
+}
+
+// Everything RegisterRestRouter publishes lands on the metrics port, where the
+// gate classifies operator surface by a leading underscore. A console route
+// added without that prefix would be silently sorted into the data plane —
+// authenticated, but by the data plane's rule, so any valid user or API key
+// could call it. The prefix is the whole classification, so pin it here rather
+// than trusting a hand-copied list two packages away.
+func TestRegisterRestRouterOnlyPublishesConsolePaths(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	(&Proxy{}).RegisterRestRouter(engine)
+
+	routes := engine.Routes()
+	require.NotEmpty(t, routes)
+	for _, route := range routes {
+		assert.True(t, strings.HasPrefix(route.Path, "/_"),
+			"%s %s is registered by RegisterRestRouter but does not carry the /_ prefix "+
+				"the metrics-port gate classifies console routes by",
+			route.Method, route.Path)
+	}
 }
