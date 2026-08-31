@@ -1086,7 +1086,6 @@ TEST_F(RoaringFilterExprEvalTest,
             if (physical != nullptr) {
                 EXPECT_EQ(physical->GetReorder(), (std::vector<size_t>{1, 0}));
             }
-            compiled[0]->MarkNullRejecting();
             if (count_lookups) {
                 g_roaring_reverse_lookup_calls.store(0);
             }
@@ -1100,13 +1099,16 @@ TEST_F(RoaringFilterExprEvalTest,
     auto actual = eval_conjunction(index_only.get(), true);
     ExpectSameColumn(actual, expected);
 
-    size_t selector_survivors = 0;
+    size_t selector_active_rows = 0;
     for (size_t i = 0; i < N; ++i) {
-        selector_survivors += validity_[i] && i32_values_[i] == -7;
+        // 3.0 preserves strict three-valued logic here: UNKNOWN rows must
+        // remain active because UNKNOWN AND FALSE becomes FALSE. The later
+        // null-rejecting optimization from #51182 is not part of this branch.
+        selector_active_rows += !validity_[i] || i32_values_[i] == -7;
     }
-    ASSERT_GT(selector_survivors, 0u);
-    ASSERT_LT(selector_survivors, N);
-    EXPECT_EQ(g_roaring_reverse_lookup_calls.load(), selector_survivors);
+    ASSERT_GT(selector_active_rows, 0u);
+    ASSERT_LT(selector_active_rows, N);
+    EXPECT_EQ(g_roaring_reverse_lookup_calls.load(), selector_active_rows);
 }
 
 }  // namespace
