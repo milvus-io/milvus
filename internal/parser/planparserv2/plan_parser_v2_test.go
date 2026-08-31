@@ -2913,6 +2913,14 @@ func Test_ArrayLength(t *testing.T) {
 		}, nil, nil)
 		assert.Error(t, err, expr)
 	}
+
+	t.Run("struct sub-field shorthand is rejected by the 3.0 grammar", func(t *testing.T) {
+		expr := `array_length($[sub_int]) == 1`
+		_, err := ParseExpr(schema, expr, nil)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "line 1:")
+		require.NotContains(t, err.Error(), "unsupported expression")
+	})
 }
 
 // Test randome sample with all other predicate expressions.

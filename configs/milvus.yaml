@@ -451,7 +451,7 @@ proxy:
   internalPort: 19529
   grpc:
     serverMaxSendSize: 268435456 # The maximum size of each RPC request that the proxy can send, unit: byte
-    serverMaxRecvSize: 67108864 # The maximum size of each RPC request that the proxy can receive, unit: byte
+    serverMaxRecvSize: 134217728 # The maximum size of each RPC request that the proxy can receive, unit: byte
     clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on proxy can send, unit: byte
     clientMaxRecvSize: 67108864 # The maximum size of each RPC request that the clients on proxy can receive, unit: byte
 

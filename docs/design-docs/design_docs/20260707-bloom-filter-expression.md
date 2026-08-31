@@ -36,8 +36,8 @@ creator_id not in [...]    -- exclude: hide what I've already seen
 This works well for bounded sets (thousands of values), but degrades for large sets:
 
 1. **Transfer cost.** A TermExpr serializes every value per request. 10M random int64 IDs
-   are ~80 MB of protobuf — beyond the default 64 MB gRPC receive limit, and re-sent on
-   every query.
+   are ~80 MB of protobuf — consuming most of the default 128 MiB gRPC receive budget and
+   re-sent on every query.
 2. **Per-query rebuild.** Each segment rebuilds a hash set from the value list on every
    query (`SetElement` in segcore); with many segments this dominates p99.
 3. **No compact encoding exists** for "a large set of values" in the expression API today.
@@ -58,7 +58,7 @@ pre-rounding estimate:
 | Members | Exact int64 list (proto) | SBBF @ 1% | SBBF @ 0.5% (default) | SBBF @ 0.01% |
 |---|---|---|---|---|
 | 1 M | ~8–10 MB | 2 MiB | 2 MiB | 4 MiB |
-| 10 M | ~80–100 MB (raw list exceeds the 64 MiB proxy recv limit) | 16 MiB | **16 MiB** | 32 MiB |
+| 10 M | ~80–100 MB (raw list approaches the 128 MiB proxy recv limit) | 16 MiB | **16 MiB** | 32 MiB |
 | 100 M | ~800 MB (impossible) | 128 MiB | 128 MiB (at ceiling; FPR degraded) | 128 MiB (degraded) |
 
 Bloom filter size depends only on member count and FPR — **not** on the value domain. It
@@ -66,8 +66,8 @@ works unchanged for random 64-bit IDs and for strings, with no dense-ID remappin
 prerequisite.
 
 **Transport reality and the practical ceiling.** The proxy's default gRPC receive limit is
-**64 MiB** (`proxy.grpc.serverMaxRecvSize`). This is precisely why the filter is **always
-built on the client**: a raw 10 M-member list is ~90 MB and would be rejected outright,
+**128 MiB** (`proxy.grpc.serverMaxRecvSize`). The filter is **always built on the client**:
+a raw 10 M-member list is ~90 MB and consumes most of that request budget on every query,
 whereas its blob is ~16 MiB at the default FPR. The blob travels as a native protobuf `bytes`
 value with **no base64 inflation**. Because the SBBF body is rounded **up to a power of two**,
 usable capacity comes in size tiers, so the practical ceilings under the default FPR (0.5%,
@@ -156,8 +156,8 @@ not bloom_match(...)
   (`NewBloomFilterBlob(members, fpr)`) and encoded in the blob header; the expression carries
   only the field and the blob.
 - **Why client-only build:** it removes the client→proxy transfer cliff by construction (a raw
-  10M-member list is ~90 MB and exceeds the 64 MiB proxy recv limit, but its blob is ~16 MiB
-  at the default FPR),
+  10M-member list is ~90 MB and consumes most of the 128 MiB proxy receive budget, but its
+  blob is ~16 MiB at the default FPR),
   eliminates per-query proxy build CPU, and uses one uniform wire form that the roaring/bitset
   exact encodings (below) reuse without change.
 
