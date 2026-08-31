@@ -60,7 +60,6 @@ func TestScannerAdaptorReadError(t *testing.T) {
 		return nil, err
 	})
 	l.EXPECT().Channel().Return(types.PChannelInfo{})
-	l.EXPECT().WALName().Return(message.WALNameTest)
 
 	s := newScannerAdaptor("scanner", l,
 		wal.ReadOption{

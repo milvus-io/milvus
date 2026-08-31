@@ -155,7 +155,7 @@ func TestUnderlyingWALScannerAdaptorFollowsAlterWAL(t *testing.T) {
 	outputCh := make(chan message.ImmutableMessage, 2)
 	opened := make([]message.WALName, 0, 2)
 
-	scanner := newSwitchableScanner(
+	scanner := newSwithableScanner(
 		"switch-reader",
 		mlog.With(),
 		currentWAL,
@@ -289,7 +289,7 @@ func TestUnderlyingWALScannerAdaptorFollowsChainWithCleanRepeatedWAL(t *testing.
 	opened := 0
 	readerWALNames := make([]message.WALName, 0, 4)
 	outputCh := make(chan message.ImmutableMessage, 10)
-	scanner := newSwitchableScanner(
+	scanner := newSwithableScanner(
 		"migration-chain-reader",
 		mlog.With(),
 		currentWAL,
@@ -353,7 +353,7 @@ func TestUnderlyingWALScannerAdaptorStartAfterAlterWALMarker(t *testing.T) {
 	currentReadWAL := newTestReadWAL(t, message.WALNameTest, channel, currentMessage)
 	outputCh := make(chan message.ImmutableMessage, 2)
 
-	scanner := newSwitchableScanner(
+	scanner := newSwithableScanner(
 		"start-after-marker-reader",
 		mlog.With(),
 		currentWAL,
@@ -380,7 +380,7 @@ func TestUnderlyingWALScannerAdaptorFailsWhenWALNameMismatches(t *testing.T) {
 	channel := types.PChannelInfo{Name: "test-channel"}
 	currentWAL := newTestCurrentWAL(t, channel)
 
-	scanner := newSwitchableScanner(
+	scanner := newSwithableScanner(
 		"missing-reader",
 		mlog.With(),
 		currentWAL,
@@ -573,7 +573,7 @@ func TestUnderlyingWALScannerAdaptorRejectsInvalidStartPosition(t *testing.T) {
 		},
 	}
 
-	scanner := newSwitchableScanner(
+	scanner := newSwithableScanner(
 		"invalid-start-reader",
 		mlog.With(),
 		currentWAL,
@@ -609,7 +609,7 @@ func TestUnderlyingWALScannerAdaptorFailsWhenWALExhaustsBeforeBoundary(t *testin
 	historicalWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(innerScanner, nil).Once()
 	historicalWAL.EXPECT().Close().Return().Once()
 
-	scanner := newSwitchableScanner(
+	scanner := newSwithableScanner(
 		"exhausted-reader",
 		mlog.With(),
 		currentWAL,
@@ -636,7 +636,7 @@ func TestUnderlyingWALScannerAdaptorRejectsInvalidAlterWALTarget(t *testing.T) {
 		newTestAlterWALMessage(commonpb.WALName(12345), 100, rmq.NewRmqID(2), rmq.NewRmqID(1)),
 	)
 
-	scanner := newSwitchableScanner(
+	scanner := newSwithableScanner(
 		"invalid-target-reader",
 		mlog.With(),
 		currentWAL,
@@ -680,7 +680,7 @@ func TestUnderlyingWALScannerAdaptorReopensWALAfterReaderFailure(t *testing.T) {
 	currentReadWAL := newTestReadWAL(t, message.WALNameTest, channel, currentMessage)
 	openCount := 0
 	outputCh := make(chan message.ImmutableMessage, 4)
-	scanner := newSwitchableScanner(
+	scanner := newSwithableScanner(
 		"retry-reader",
 		mlog.With(),
 		currentWAL,
@@ -721,7 +721,7 @@ func TestUnderlyingWALScannerAdaptorRetriesWALOpenFailure(t *testing.T) {
 
 	historicalOpenAttempts := 0
 	outputCh := make(chan message.ImmutableMessage, 2)
-	scanner := newSwitchableScanner(
+	scanner := newSwithableScanner(
 		"retry-open-reader",
 		mlog.With(),
 		currentWAL,

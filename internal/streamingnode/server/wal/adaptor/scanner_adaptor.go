@@ -243,7 +243,7 @@ func (s *scannerAdaptorImpl) produceEventLoop(ctx context.Context, msgChan chan<
 		roOpener = nil
 	}
 
-	scanner := newSwitchableScanner(
+	scanner := newSwithableScanner(
 		s.Name(),
 		s.logger,
 		s.innerWAL,

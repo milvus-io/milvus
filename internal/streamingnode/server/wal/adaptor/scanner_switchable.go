@@ -24,7 +24,7 @@ var (
 )
 
 // newSwitchableScanner creates a new switchable scanner.
-func newSwitchableScanner(
+func newSwithableScanner(
 	scannerName string,
 	logger *mlog.Logger,
 	innerWAL walimpls.ROWALImpls,
@@ -34,16 +34,19 @@ func newSwitchableScanner(
 	roOpener roWALOpener,
 	onReaderChanged func(message.WALName),
 ) switchableScanner {
-	impl := switchableScannerImpl{
-		scannerName:      scannerName,
-		logger:           logger,
-		innerWAL:         innerWAL,
-		msgChan:          msgChan,
-		writeAheadBuffer: writeAheadBuffer,
-		roOpener:         roOpener,
-		onReaderChanged:  onReaderChanged,
+	return &catchupScanner{
+		switchableScannerImpl: switchableScannerImpl{
+			scannerName:      scannerName,
+			logger:           logger,
+			innerWAL:         innerWAL,
+			msgChan:          msgChan,
+			writeAheadBuffer: writeAheadBuffer,
+			roOpener:         roOpener,
+			onReaderChanged:  onReaderChanged,
+		},
+		deliverPolicy:          deliverPolicy,
+		exclusiveStartTimeTick: 0,
 	}
-	return newCatchupScanner(impl, deliverPolicy, 0)
 }
 
 // switchableScanner is a scanner that can switch between Catchup and Tailing mode
@@ -111,18 +114,6 @@ func (t *oldVersionLastConfirmedTracker) Track(msgID message.MessageID) message.
 	return t.window[0]
 }
 
-func newCatchupScanner(
-	impl switchableScannerImpl,
-	deliverPolicy options.DeliverPolicy,
-	exclusiveStartTimeTick uint64,
-) *catchupScanner {
-	return &catchupScanner{
-		switchableScannerImpl:  impl,
-		deliverPolicy:          deliverPolicy,
-		exclusiveStartTimeTick: exclusiveStartTimeTick,
-	}
-}
-
 // catchupScanner is a scanner that make a read at underlying wal, and try to catchup the writeahead buffer then switch to tailing mode.
 type catchupScanner struct {
 	switchableScannerImpl
@@ -150,7 +141,7 @@ func (s *catchupScanner) Do(ctx context.Context) (switchableScanner, error) {
 				return nil, err
 			}
 			waker, nextInterval := backoffTimer.NextTimer()
-			s.logger.Warn(ctx, "scanner consuming was interrupted with error, start a backoff",
+			s.logger.Warn(ctx, "scanner consuming was interrpurted with error, start a backoff",
 				mlog.Duration("nextInterval", nextInterval),
 				mlog.Err(err))
 			select {
@@ -175,7 +166,7 @@ func (s *catchupScanner) openCatchupScannerImpls(ctx context.Context) (walimpls.
 	// whatever chain the position belongs to, and a position of the current
 	// generation simply never meets a marker.
 	if !hasWALSpecificPosition || s.roOpener == nil {
-		scanner, err := s.createInnerWALScannerWithBackoff(ctx, s.deliverPolicy)
+		scanner, err := s.createReaderWithBackoff(ctx, s.deliverPolicy)
 		if err == nil && s.onReaderChanged != nil {
 			s.onReaderChanged(s.innerWAL.WALName())
 		}
@@ -249,8 +240,7 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 			}
 			// Here's a timetick message from the scanner, make tailing read if we catch up the writeahead buffer.
 			if reader, err := s.writeAheadBuffer.ReadFromExclusiveTimeTick(ctx, msg.TimeTick()); err == nil {
-				s.logger.Info(
-					ctx, "scanner consuming was interrpted because catup done",
+				s.logger.Info(ctx, "scanner consuming was interrpted because catup done",
 					mlog.Uint64("timetick", msg.TimeTick()),
 					mlog.Stringer("messageID", msg.MessageID()),
 					mlog.Stringer("lastConfirmedMessageID", msg.LastConfirmedMessageID()),
@@ -265,10 +255,7 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 	}
 }
 
-func (s *switchableScannerImpl) createInnerWALScannerWithBackoff(
-	ctx context.Context,
-	deliverPolicy options.DeliverPolicy,
-) (walimpls.ScannerImpls, error) {
+func (s *catchupScanner) createReaderWithBackoff(ctx context.Context, deliverPolicy options.DeliverPolicy) (walimpls.ScannerImpls, error) {
 	backoffTimer := newScannerReadBackoffTimer()
 	for {
 		innerScanner, err := s.innerWAL.Read(ctx, walimpls.ReadOption{
@@ -284,9 +271,7 @@ func (s *switchableScannerImpl) createInnerWALScannerWithBackoff(
 			return nil, ctx.Err()
 		}
 		waker, nextInterval := backoffTimer.NextTimer()
-		s.logger.Warn(
-			ctx, "create inner WAL scanner failed, start a backoff",
-			mlog.Stringer("walName", s.innerWAL.WALName()),
+		s.logger.Warn(ctx, "create underlying scanner for wal scanner, start a backoff",
 			mlog.Duration("nextInterval", nextInterval),
 			mlog.Err(err),
 		)
@@ -331,17 +316,16 @@ func (s *tailingScanner) Do(ctx context.Context) (switchableScanner, error) {
 		msg, err := s.reader.Next(ctx)
 		if errors.Is(err, wab.ErrEvicted) {
 			// The tailing read is failure, switch into catchup mode.
-			s.logger.Info(
-				ctx, "scanner consuming was interrpted because tailing eviction",
+			s.logger.Info(ctx, "scanner consuming was interrpted because tailing eviction",
 				mlog.Uint64("timetick", s.lastConsumedMessage.TimeTick()),
 				mlog.Stringer("messageID", s.lastConsumedMessage.MessageID()),
 				mlog.Stringer("lastConfirmedMessageID", s.lastConsumedMessage.LastConfirmedMessageID()),
 			)
-			return newCatchupScanner(
-				s.switchableScannerImpl,
-				options.DeliverPolicyStartFrom(s.lastConsumedMessage.LastConfirmedMessageID()),
-				s.lastConsumedMessage.TimeTick(),
-			), nil
+			return &catchupScanner{
+				switchableScannerImpl:  s.switchableScannerImpl,
+				deliverPolicy:          options.DeliverPolicyStartFrom(s.lastConsumedMessage.LastConfirmedMessageID()),
+				exclusiveStartTimeTick: s.lastConsumedMessage.TimeTick(),
+			}, nil
 		}
 		if err != nil {
 			return nil, err

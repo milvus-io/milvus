@@ -27,7 +27,7 @@ func TestCatchupScannerUsesAdaptorForCurrentWALPosition(t *testing.T) {
 	readWAL := newTestReadWAL(t, message.WALNameTest, channel, currentMessage)
 	openedWALNames := make(chan message.WALName, 4)
 
-	scanner := newSwitchableScanner(
+	scanner := newSwithableScanner(
 		"current-reader",
 		mlog.With(),
 		currentWAL,
@@ -70,7 +70,7 @@ func TestCatchupScannerReplaysChainForOldGenerationPosition(t *testing.T) {
 	currentGenerationWAL := newTestReadWAL(t, message.WALNameTest, channel, currentGenerationMessage)
 	testWALs := []walimpls.ROWALImpls{oldGenerationWAL, currentGenerationWAL}
 
-	scanner := newSwitchableScanner(
+	scanner := newSwithableScanner(
 		"old-generation-reader",
 		mlog.With(),
 		currentWAL,
@@ -129,7 +129,7 @@ func TestCrossWALCatchupSwitchesToTailingWAB(t *testing.T) {
 
 	outputCh := make(chan message.ImmutableMessage, 4)
 	readerWALNames := make([]message.WALName, 0, 2)
-	scanner := newSwitchableScanner(
+	scanner := newSwithableScanner(
 		"cross-wal-catchup-reader",
 		mlog.With(),
 		currentWAL,
