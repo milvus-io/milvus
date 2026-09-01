@@ -3453,8 +3453,10 @@ func (mt *MetaTable) PrepareSetRLSPrincipalTags(ctx context.Context, req *rlsuti
 		return nil, err
 	}
 
-	_, err = mt.catalog.GetRLSPrincipal(ctx, coll.CollectionID, req.GetPrincipalName())
+	existingPrincipal, err := mt.catalog.GetRLSPrincipal(ctx, coll.CollectionID, req.GetPrincipalName())
+	isNew := false
 	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		isNew = true
 		if err := validateRLSPrincipalNameForSet(req.GetPrincipalName()); err != nil {
 			return nil, err
 		}
@@ -3465,11 +3467,25 @@ func (mt *MetaTable) PrepareSetRLSPrincipalTags(ctx context.Context, req *rlsuti
 		return nil, merr.Wrap(err, "failed to get RLS principal")
 	}
 
+	mergedTags := cloneRLSTags(req.GetTags())
+	if !isNew {
+		mergedTags = cloneRLSTags(existingPrincipal.Tags)
+		if mergedTags == nil {
+			mergedTags = make(map[string]string, len(req.GetTags()))
+		}
+		for key, value := range req.GetTags() {
+			mergedTags[key] = value
+		}
+		if len(mergedTags) > Params.ProxyCfg.RLSMaxTagsPerPrincipal.GetAsInt() {
+			return nil, merr.WrapErrServiceQuotaExceeded("unable to set RLS principal tags because the number of tags has reached the limit")
+		}
+	}
+
 	principal := &model.RLSPrincipal{
 		DBID:          coll.DBID,
 		CollectionID:  coll.CollectionID,
 		PrincipalName: req.GetPrincipalName(),
-		Tags:          cloneRLSTags(req.GetTags()),
+		Tags:          mergedTags,
 	}
 	return principal, nil
 }

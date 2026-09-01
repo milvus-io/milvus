@@ -900,8 +900,7 @@ func TestDDLCallbacksAlterCollectionDropField(t *testing.T) {
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrDatabaseNotFound)
 
 	// create collection with field1
-	createCollectionForTest(t, ctx, core, dbName, collectionName,
-		&commonpb.KeyValuePair{Key: common.RLSEnabledKey, Value: "true"})
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
 
 	// add field2 and field3
 	addResp, err := core.AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
@@ -968,6 +967,16 @@ func TestDDLCallbacksAlterCollectionDropField(t *testing.T) {
 	assertFieldExists(t, ctx, core, dbName, collectionName, "field4", 103)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 5)
 	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 103)
+
+	meta := core.meta.(*MetaTable)
+	coll, err := meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	meta.ddLock.Lock()
+	meta.collID2Meta[coll.CollectionID].Properties = append(
+		meta.collID2Meta[coll.CollectionID].Properties,
+		&commonpb.KeyValuePair{Key: common.RLSEnabledKey, Value: "true"},
+	)
+	meta.ddLock.Unlock()
 
 	policy, err := core.meta.PrepareCreateRLSPolicy(ctx, &rlsutil.CreateRowPolicyRequest{
 		DbName:         dbName,

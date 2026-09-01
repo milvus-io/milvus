@@ -1,5 +1,10 @@
 # Milvus Row-Level Security (RLS) Design
 
+- **Feature DRI:** TBD
+- **Primary Approver:** TBD
+- **Independent Approver:** TBD
+- **Design Review:** TBD
+
 ## Overview
 
 Row-Level Security (RLS) restricts row-bearing operations on a collection by
@@ -69,14 +74,16 @@ Supported principal tag APIs:
 
 | API | Behavior |
 | --- | --- |
-| `set_rls_principal_tags` | Set the full, non-empty tag map for one principal. Existing tags are overwritten; an empty map is rejected. |
+| `set_rls_principal_tags` | Incrementally upsert a non-empty tag map for one principal. Supplied keys are added or overwritten, while unspecified tags are preserved; an empty map is rejected. |
 | `get_rls_principal_tags` | Return the tag map for one principal. |
 | `list_rls_principals` | List principals with tags on one collection. |
 | `delete_rls_principal_tags` | Delete selected tag keys. If no keys remain, delete the principal tag record. |
 
-Passing no tag keys deletes the complete principal tag record. Deleting an
-already-missing principal succeeds as an idempotent retry. Repeated tag keys are
-deduplicated, and the number of distinct keys in one delete request is bounded
+Passing no tag keys deletes the complete principal tag record. A non-empty key
+list deletes only those tags, and the principal record is also deleted when no
+tags remain afterward. Deleting an already-missing principal succeeds as an
+idempotent retry. Repeated tag keys are deduplicated, and the number of distinct
+keys in one delete request is bounded
 by `proxy.rls.maxTagsPerPrincipal` before RootCoord broadcasts the mutation.
 The raw list is also subject to a separate fixed transport/work bound before
 deduplication.
