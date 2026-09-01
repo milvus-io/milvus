@@ -120,20 +120,6 @@ SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value) {
 }
 
 extern "C" void
-SegcoreSetTakeForOutputResultCountLimit(const int64_t value) {
-    milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
-    config.set_take_for_output_result_count_limit(value);
-}
-
-extern "C" int64_t
-SegcoreGetTakeForOutputResultCountLimit() {
-    milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
-    return config.get_take_for_output_result_count_limit();
-}
-
-extern "C" void
 SegcoreSetNlist(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();

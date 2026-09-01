@@ -3,10 +3,13 @@ package tasks
 import (
 	"context"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
@@ -68,6 +71,13 @@ func (t *QueryStreamTask) Execute() error {
 		return err
 	}
 	defer retrievePlan.Delete()
+	plan := &planpb.PlanNode{}
+	if err := proto.Unmarshal(t.req.Req.GetSerializedExprPlan(), plan); err != nil {
+		return err
+	}
+	retrievePlan.SetTakeForOutputAllowed(requestAllowsTakeForOutput(
+		retrieveTakeForOutputResultCount(t.req.GetReq(), plan),
+	))
 
 	srv := streamrpc.NewResultCacheServer(t.srv, t.minMsgSize, t.maxMsgSize)
 	defer srv.Flush()
