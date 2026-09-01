@@ -362,6 +362,11 @@ func (t *SearchTask) materializeAndAssignResult(
 	if err != nil {
 		return err
 	}
+	takeForOutputAllowed := false
+	if i < len(t.takeForOutputAllowed) {
+		takeForOutputAllowed = t.takeForOutputAllowed[i]
+	}
+	plan.SetTakeForOutputAllowed(takeForOutputAllowed)
 	if err := lateMaterializeOutputFields(t.ctx, results, plan, reduced.Sources, searchResultData); err != nil {
 		return err
 	}
