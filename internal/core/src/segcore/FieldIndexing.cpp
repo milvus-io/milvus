@@ -1145,6 +1145,18 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
                 consumed_rows += round_rows;
                 consumed_ms += round_ms;
             }
+            // Once this round drained every physical row below the snapshot,
+            // the logical tail [OutCount, pending_snapshot) is null-only
+            // (a valid logical row always maps to a physical row that the
+            // drain just absorbed), so it can be registered OUTSIDE
+            // append_mutex_. This keeps the O(logical-tail) bitmap work off
+            // the locked finalize: the in-lock RegisterNullLogicalTail call
+            // below then only covers rows that slipped in after this
+            // snapshot -- about one insert batch.
+            if (static_cast<int64_t>(index_cur_.load()) >= target &&
+                field_raw_data->is_mapping_storage()) {
+                RegisterNullLogicalTail(field_raw_data, pending_snapshot);
+            }
             CallBuildHook(GrowingBuildPhase::kAfterCatchupRound);
 
             int64_t latest_target =
