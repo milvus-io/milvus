@@ -5197,3 +5197,65 @@ func TestGarbageCollector_recycleUnusedSegIndexes_NonManifestKeepsLegacyOrder(t 
 	_, ok := m.indexMeta.segmentBuildInfo.Get(4100)
 	assert.True(t, ok, "files-first ordering must leave the record for the next cycle")
 }
+
+// The manifest fallback in getDroppedSegmentIndexFiles is NOT redundant with
+// the SegmentIndex records, because "in-memory records and manifest agree" does
+// not hold for a dropped segment once the etcd write switch is off.
+//
+// reloadSegmentIndexesFromManifests filters on isSegmentHealthy, so a segment
+// already Dropped at restart is never rebuilt from its manifest - deliberately,
+// since reading manifests for segments that GC is actively deleting would make
+// a fail-closed boot depend on files being concurrently removed. The records
+// are therefore legitimately absent while the manifest still names the
+// artifacts, and only the manifest can tell GC what to delete. Restoring the
+// old "no records -> nothing to delete" early return leaks those artifacts:
+// BUILD_ROOTED bytes are still swept as V0 orphans, but a COLLECTION_ROOTED
+// artifact leaks permanently because recycleUnusedIndexFilesV1 is record-driven.
+func TestGarbageCollector_DroppedSegmentIndexFilesComeFromManifestAfterReload(t *testing.T) {
+	withSegmentIndexEtcdWrites(t, false)
+
+	const segmentID = int64(3101)
+	basePath := "/tmp/test-gc-dropped-reload/insert_log/100/10/3101"
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, m.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		CollectionID:   100,
+		PartitionID:    10,
+		State:          commonpb.SegmentState_Dropped,
+		NumOfRows:      100,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+	})))
+
+	infos := mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{{
+		IndexID:               500,
+		BuildID:               5300,
+		FieldID:               101,
+		IndexName:             "idx",
+		IndexType:             "HNSW",
+		IndexVersion:          1,
+		NumRows:               100,
+		SerializedSize:        2000,
+		MemSize:               3000,
+		Path:                  "root/index/100/10/3101/5300/1",
+		IndexFileKeys:         []string{"f0"},
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+	}}, nil).Build()
+	defer infos.UnPatch()
+
+	// Restart: the reload deliberately walks past the dropped segment, so the
+	// records GC would normally use simply do not exist.
+	require.NoError(t, m.reloadSegmentIndexesFromManifests(context.TODO()))
+	require.Empty(t, m.indexMeta.GetAllSegmentIndexes(segmentID),
+		"reload must skip an unhealthy segment - this is the precondition that makes the fallback load-bearing")
+
+	gc := newGarbageCollector(m, newMockHandler(), GcOption{
+		cli: storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test")),
+	})
+	segIndexes, indexFiles, blocked := gc.getDroppedSegmentIndexFiles(context.TODO(), segmentID)
+	assert.False(t, blocked)
+	assert.Empty(t, segIndexes)
+	require.NotEmpty(t, indexFiles,
+		"with no records, the manifest is the only thing naming the artifacts; without the fallback they leak")
+}
