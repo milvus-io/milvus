@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -138,6 +139,33 @@ func TestClientBase_NodeSessionNotExist(t *testing.T) {
 
 func TestClientBase_Call(t *testing.T) {
 	testCall(t, false)
+}
+
+func TestClientBase_DDLImportConflictDoesNotRetry(t *testing.T) {
+	for _, responseType := range []string{"ddl status", "import response"} {
+		t.Run(responseType, func(t *testing.T) {
+			base := ClientBase[*mockClient]{
+				MaxAttempts: 3,
+				isNode:      true,
+				grpcClient:  &clientConnWrapper[*mockClient]{client: &mockClient{}},
+			}
+			conflict := merr.WrapErrCollectionDDLImportConflict("coll", "collection metadata changed")
+			calls := 0
+			resp, err := base.ReCall(context.Background(), func(_ *mockClient) (any, error) {
+				calls++
+				status := merr.Status(merr.Wrap(conflict, "failed to prepare broadcast"))
+				if responseType == "import response" {
+					return &internalpb.ImportResponse{Status: status}, nil
+				}
+				return status, nil
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, 1, calls)
+			resultErr := merr.CheckRPCCall(resp, err)
+			assert.ErrorIs(t, resultErr, merr.ErrCollectionDDLImportConflict)
+			assert.False(t, merr.IsRetryableErr(resultErr))
+		})
+	}
 }
 
 func TestClientBase_CompressCall(t *testing.T) {

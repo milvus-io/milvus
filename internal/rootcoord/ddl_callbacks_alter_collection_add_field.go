@@ -31,6 +31,9 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	if err != nil {
 		return err
 	}
+	if err := c.checkNoInFlightImportJob(ctx, coll.Name, coll.CollectionID); err != nil {
+		return err
+	}
 
 	// check if the field schema is illegal.
 	fieldSchema := &schemapb.FieldSchema{}

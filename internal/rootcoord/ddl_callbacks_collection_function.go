@@ -180,6 +180,9 @@ func (c *Core) broadcastAlterCollectionForAlterFunction(ctx context.Context, req
 	if err != nil {
 		return err
 	}
+	if err := c.checkNoInFlightImportJob(ctx, oldColl.Name, oldColl.CollectionID); err != nil {
+		return err
+	}
 	if err := rejectExternalCollectionFunctionMutation(oldColl.ToCollectionSchemaPB()); err != nil {
 		return err
 	}

@@ -303,7 +303,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError()
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
+		lockedImportCollection(1, false).Schema,
 		1000,
 		[]string{"v1"},
 	)
@@ -335,7 +335,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to fail (called in startBroadcastWithCollectionID)
+	// Mock the pre-lock metadata lookup to fail
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(nil, errors.New("collection not found"))
 
@@ -351,7 +351,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
+		lockedImportCollection(1, false).Schema,
 		1000,
 		[]string{"v1"},
 	)
@@ -383,7 +383,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to return dbName (called in startBroadcastWithCollectionID)
+	// Mock the pre-lock database and collection name lookup
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
@@ -409,7 +409,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
+		lockedImportCollection(1, false).Schema,
 		1000,
 		[]string{"v1"},
 	)
@@ -472,13 +472,108 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
+		lockedImportCollection(1, false).Schema,
 		1000,
 		[]string{"v1"},
 	)
 
 	s.Error(err)
 	s.True(errors.Is(err, merr.ErrCollectionNotFound))
+}
+
+func (s *ImportCallbacksSuite) TestBroadcastImport_RenamedCollectionRejected() {
+	ctx := context.Background()
+
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 1
+	}).Build()
+	defer mockCount.UnPatch()
+
+	mockBalancer := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancer, nil
+	}).Build()
+	defer mockBalance.UnPatch()
+
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{
+				ReplicateConfiguration: nil,
+			}, nil
+		}).Build()
+	defer mockAssignment.UnPatch()
+
+	mockBroadcastAPI := newMockBroadcastAPIImpl()
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return mockBroadcastAPI, nil
+		}).Build()
+	defer mockBroadcast.UnPatch()
+
+	// The collection is renamed between the pre-lock describe (locks old_name)
+	// and the post-lock describe (returns new_name).
+	mockBroker := broker.NewMockBroker(s.T())
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "old_name",
+	}, nil).Once()
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "new_name",
+		Schema:         &schemapb.CollectionSchema{Name: "new_name"},
+	}, nil).Once()
+
+	server := &Server{
+		importMeta: &importMeta{},
+		broker:     mockBroker,
+	}
+
+	err := server.broadcastImport(
+		ctx,
+		"old_name",
+		100,
+		[]int64{1},
+		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
+		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		lockedImportCollection(1, false).Schema,
+		1000,
+		[]string{"v1"},
+	)
+
+	s.Error(err)
+	s.True(errors.Is(err, merr.ErrCollectionDDLImportConflict))
+	s.False(merr.Status(err).GetRetriable())
+	s.False(mockBroadcastAPI.broadcastCalled.Load(), "renamed collection must be rejected before the import message is broadcast")
+}
+
+func (s *ImportCallbacksSuite) TestFirstInFlightImportJob() {
+	ctx := context.Background()
+	server := &Server{importMeta: &importMeta{}}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	inFlight := mockey.Mock((*importMeta).GetJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) []ImportJob {
+		return []ImportJob{&importJob{ImportJob: &datapb.ImportJob{
+			JobID: 7, CollectionID: 100, State: internalpb.ImportJobState_Sorting,
+		}}}
+	}).Build()
+	jobID, state, found, err := server.FirstInFlightImportJob(ctx, 100)
+	inFlight.UnPatch()
+	s.NoError(err)
+	s.True(found)
+	s.EqualValues(7, jobID)
+	s.Equal(internalpb.ImportJobState_Sorting, state)
+
+	empty := mockey.Mock((*importMeta).GetJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) []ImportJob {
+		return nil
+	}).Build()
+	_, _, found, err = server.FirstInFlightImportJob(ctx, 100)
+	empty.UnPatch()
+	s.NoError(err)
+	s.False(found)
+
+	server.stateCode.Store(commonpb.StateCode_Abnormal)
+	_, _, _, err = server.FirstInFlightImportJob(ctx, 100)
+	s.Error(err)
 }
 
 func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() {
@@ -514,11 +609,13 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 	defer mockBroadcast.UnPatch()
 
 	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startBroadcastWithCollectionID, second call in broadcastImport
+	// Resolve the lock key first, then read authoritative metadata under the lock
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
+		DbName:              "test_db",
+		CollectionName:      "test_collection",
+		Schema:              lockedImportCollection(1, false).Schema,
+		VirtualChannelNames: []string{"v1"},
 	}, nil).Times(2)
 
 	server := &Server{
@@ -533,7 +630,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
+		lockedImportCollection(1, false).Schema,
 		1000,
 		[]string{"v1"},
 	)
@@ -574,11 +671,13 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	defer mockBroadcast.UnPatch()
 
 	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startBroadcastWithCollectionID, second call in broadcastImport
+	// Resolve the lock key first, then read authoritative metadata under the lock
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
+		DbName:              "test_db",
+		CollectionName:      "test_collection",
+		Schema:              lockedImportCollection(1, false).Schema,
+		VirtualChannelNames: []string{"v1"},
 	}, nil).Times(2)
 
 	server := &Server{
@@ -593,7 +692,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
+		lockedImportCollection(1, false).Schema,
 		1000,
 		[]string{"v1"},
 	)
@@ -634,6 +733,7 @@ type mockBroadcastAPIImpl struct {
 	broadcastResult *types.BroadcastAppendResult
 	broadcastErr    error
 	closeCalled     atomic.Bool
+	broadcastCalled atomic.Bool
 }
 
 func newMockBroadcastAPIImpl() *mockBroadcastAPIImpl {
@@ -649,6 +749,7 @@ func newMockBroadcastAPIImpl() *mockBroadcastAPIImpl {
 }
 
 func (m *mockBroadcastAPIImpl) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	m.broadcastCalled.Store(true)
 	// Add operations to ensure the function is long enough for mockey
 	if ctx == nil {
 		return nil, errors.New("context is nil")

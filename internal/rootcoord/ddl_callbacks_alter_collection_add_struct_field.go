@@ -49,6 +49,9 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 	if err != nil {
 		return err
 	}
+	if err := c.checkNoInFlightImportJob(ctx, coll.Name, coll.CollectionID); err != nil {
+		return err
+	}
 
 	if req.GetStructArrayFieldSchema() == nil {
 		return merr.WrapErrParameterInvalidMsg("struct array field schema is nil")

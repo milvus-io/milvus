@@ -267,7 +267,7 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 		}
 	}
 
-	broadcaster, err := c.startBroadcastWithCollectionLock(ctx, req.GetDbName(), coll.Name)
+	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -279,6 +279,9 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 	}
 	if coll.EnableDynamicField == targetValue {
 		return errIgnoredAlterCollection
+	}
+	if err := c.checkNoInFlightImportJob(ctx, coll.Name, coll.CollectionID); err != nil {
+		return err
 	}
 
 	// Disable dynamic field: remove $meta field from schema.

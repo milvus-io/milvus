@@ -743,6 +743,9 @@ func withValidMixCoord() Opt {
 	mixc.EXPECT().BroadcastAlteredCollection(mock.Anything, mock.Anything).Return(
 		merr.Success(), nil,
 	)
+	mixc.EXPECT().ListImports(mock.Anything, mock.Anything).Return(
+		&internalpb.ListImportsResponse{Status: merr.Success()}, nil,
+	).Maybe()
 	mixc.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(
 		merr.Success(), nil,
 	)

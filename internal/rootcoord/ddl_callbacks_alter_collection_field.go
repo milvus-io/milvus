@@ -108,6 +108,9 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 		// if there's no change, return nil directly to promise idempotent.
 		return errIgnoredAlterCollection
 	}
+	if err := c.checkNoInFlightImportJob(ctx, coll.Name, coll.CollectionID); err != nil {
+		return err
+	}
 
 	// build new collection schema.
 	schema := coll.ToCollectionSchemaPB()

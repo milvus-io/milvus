@@ -18,9 +18,11 @@ package datacoord
 
 import (
 	"context"
+	"slices"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -28,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -224,7 +227,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 
 	// Get database name from collection metadata via broker
 	// This is safer than extracting from schema which may be stale
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
+	broadcaster, locked, err := s.startBroadcastWithCollectionID(ctx, collectionID)
 	if err != nil {
 		return merr.Wrap(err, "failed to start broadcast with collection id")
 	}
@@ -244,6 +247,36 @@ func (s *Server) broadcastImport(ctx context.Context,
 	if err := merr.CheckRPCCall(coll, err); err != nil {
 		return err
 	}
+	// Rename can finish while we wait for the old collection key.
+	if coll.GetDbName() != locked.GetDbName() || coll.GetCollectionName() != locked.GetCollectionName() {
+		return merr.WrapErrCollectionDDLImportConflict(collectionName,
+			"collection renamed concurrently (locked %s.%s, now %s.%s), retry the import",
+			locked.GetDbName(), locked.GetCollectionName(), coll.GetDbName(), coll.GetCollectionName())
+	}
+	if schema == nil || coll.GetSchema() == nil {
+		return merr.WrapErrImportSysFailed("collection schema is unavailable")
+	}
+	// Proxy removes system fields from its schema snapshot. Compare the same
+	// representation, allowing legacy proxies to omit only the schema version.
+	current := proto.Clone(coll.GetSchema()).(*schemapb.CollectionSchema)
+	current.Fields = lo.Filter(current.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+		return field.GetFieldID() >= common.StartOfUserFieldID
+	})
+	if schema.GetVersion() == 0 {
+		// For legacy compatibility, treat 0 as an unspecified version.
+		// This changes only the comparison clone, never collection metadata;
+		// all other schema content must still match. The message below uses
+		// the authoritative version regardless of the request's version.
+		current.Version = 0
+	}
+	if !proto.Equal(schema, current) || !slices.Equal(vchannels, coll.GetVirtualChannelNames()) {
+		return merr.WrapErrCollectionDDLImportConflict(collectionName,
+			"collection schema or channels changed, retry the import with refreshed metadata")
+	}
+	// Preserve the validated snapshot and attach the authoritative version even
+	// for legacy callers, without modifying the proxy's request.
+	schema = proto.Clone(schema).(*schemapb.CollectionSchema)
+	schema.Version = coll.GetSchema().GetVersion()
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
@@ -258,7 +291,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 			PartitionIDs:   partitionIDs,
 			Options:        funcutil.KeyValuePair2Map(options),
 			Files:          msgFiles,
-			Schema:         schema, // TODO: should we use the schema from the collection?
+			Schema:         schema,
 			JobID:          jobID,
 		}).
 		WithBroadcast(vchannels).

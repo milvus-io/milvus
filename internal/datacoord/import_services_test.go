@@ -287,11 +287,13 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 	defer mockBroadcast.UnPatch()
 
 	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startBroadcastWithCollectionID, second call in broadcastImport
+	// Resolve the lock key first, then read authoritative metadata under the lock
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
+		DbName:              "test_db",
+		CollectionName:      "test_collection",
+		Schema:              lockedImportCollection(1, false).Schema,
+		VirtualChannelNames: []string{"v1"},
 	}, nil).Times(2)
 
 	server := &Server{
@@ -309,10 +311,7 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 		CollectionName: "test_collection",
 		PartitionIDs:   []int64{1},
 		ChannelNames:   []string{"v1"},
-		Schema: &schemapb.CollectionSchema{
-			Name:   "test_collection",
-			DbName: "test_db",
-		},
+		Schema:         lockedImportCollection(1, false).Schema,
 		Files: []*internalpb.ImportFile{
 			{Id: 1, Paths: []string{"/test/file.json"}},
 		},

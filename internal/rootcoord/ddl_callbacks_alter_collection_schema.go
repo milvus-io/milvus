@@ -58,7 +58,7 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 		}
 	}
 
-	broadcaster, err := c.startBroadcastWithCollectionLock(ctx, req.GetDbName(), coll.Name)
+	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -66,6 +66,9 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 
 	coll, err = c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
+		return err
+	}
+	if err := c.checkNoInFlightImportJob(ctx, coll.Name, coll.CollectionID); err != nil {
 		return err
 	}
 
