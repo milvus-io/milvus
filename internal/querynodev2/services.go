@@ -19,6 +19,7 @@ package querynodev2
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -274,7 +275,8 @@ func materializeLoadSegmentsCachePolicyOverrides(req *querypb.LoadSegmentsReques
 			if indexInfo == nil {
 				continue
 			}
-			clonedIndex := typeutil.Clone(indexInfo)
+			clonedIndex := shallowcopy.ShallowCopyFieldIndexInfo(indexInfo)
+			clonedIndex.IndexParams = slices.Clone(indexInfo.GetIndexParams())
 			if field, ok := fieldByID[indexInfo.GetFieldID()]; ok {
 				changes := changesForIndex(field, indexInfo)
 				if changes.setWarmup {

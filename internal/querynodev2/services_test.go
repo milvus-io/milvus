@@ -1506,6 +1506,37 @@ func TestMaterializeLoadSegmentsCachePolicyOverridesClonesLoaderMutableEnvelopes
 	assert.NotEmpty(t, indexInfo.GetIndexParams())
 }
 
+func TestMaterializeLoadSegmentsCachePolicyOverridesSharesImmutableIndexMetadata(t *testing.T) {
+	indexParams := make([]*commonpb.KeyValuePair, 1, 4)
+	indexParams[0] = &commonpb.KeyValuePair{Key: common.IndexTypeKey, Value: "INVERTED"}
+	indexInfo := &querypb.FieldIndexInfo{
+		FieldID:        1,
+		IndexParams:    indexParams,
+		IndexFilePaths: []string{"index/1/part-0", "index/1/part-1"},
+	}
+	req := &querypb.LoadSegmentsRequest{
+		Schema: &schemapb.CollectionSchema{
+			Properties: []*commonpb.KeyValuePair{{Key: common.WarmupScalarIndexKey, Value: common.WarmupSync}},
+			Fields:     []*schemapb.FieldSchema{{FieldID: 1, DataType: schemapb.DataType_Int64}},
+		},
+		Infos: []*querypb.SegmentLoadInfo{{IndexInfos: []*querypb.FieldIndexInfo{indexInfo}}},
+	}
+
+	materialized := materializeLoadSegmentsCachePolicyOverrides(req)
+	materializedIndex := materialized.GetInfos()[0].GetIndexInfos()[0]
+
+	require.NotSame(t, indexInfo, materializedIndex)
+	require.NotEmpty(t, materializedIndex.GetIndexFilePaths())
+	assert.True(t,
+		&indexInfo.IndexFilePaths[0] == &materializedIndex.IndexFilePaths[0],
+		"immutable index-file metadata should keep its backing storage")
+	require.NotEmpty(t, materializedIndex.GetIndexParams())
+	assert.False(t,
+		&indexInfo.IndexParams[0] == &materializedIndex.IndexParams[0],
+		"the mutable index-parameter slice needs independent backing storage")
+	assert.Same(t, indexInfo.IndexParams[0], materializedIndex.IndexParams[0])
+}
+
 func TestMaterializeLoadSegmentsCachePolicyOverridesNoOp(t *testing.T) {
 	t.Run("no collection defaults", func(t *testing.T) {
 		req := &querypb.LoadSegmentsRequest{

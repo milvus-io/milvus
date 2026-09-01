@@ -27,6 +27,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
@@ -2578,6 +2579,130 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_StorageV2G
 	usage, err := estimateLogicalResourceUsageOfSegment(schema, loadInfo, factor)
 	suite.NoError(err)
 	suite.EqualValues(1000, usage.MemorySize, "group with any non-evictable child must not be multiplied by cache ratio")
+}
+
+func TestColumnGroupEstimateMatchesSegcoreMmapAggregation(t *testing.T) {
+	paramtable.Init()
+	fieldParams := func(mmapValue string) []*commonpb.KeyValuePair {
+		params := []*commonpb.KeyValuePair{{Key: common.EvictableKey, Value: "false"}}
+		if mmapValue == "" {
+			return params
+		}
+		return append(params, &commonpb.KeyValuePair{Key: common.MmapEnabledKey, Value: mmapValue})
+	}
+	tests := []struct {
+		name            string
+		scalarMmap      string
+		vectorMmap      string
+		firstType       schemapb.DataType
+		firstFieldMmap  string
+		secondType      schemapb.DataType
+		secondFieldMmap string
+		storageVersion  int64
+		expectedMemory  uint64
+		expectedDisk    uint64
+	}{
+		{
+			name:            "any explicit mmap true enables the group",
+			scalarMmap:      "false",
+			vectorMmap:      "false",
+			firstType:       schemapb.DataType_Int32,
+			firstFieldMmap:  "false",
+			secondType:      schemapb.DataType_Int32,
+			secondFieldMmap: "true",
+			storageVersion:  storage.StorageV2,
+			expectedDisk:    1000,
+		},
+		{
+			name:           "explicit false overrides the global default",
+			scalarMmap:     "true",
+			vectorMmap:     "false",
+			firstType:      schemapb.DataType_Int32,
+			firstFieldMmap: "false",
+			secondType:     schemapb.DataType_Int32,
+			storageVersion: storage.StorageV2,
+			expectedMemory: 1000,
+		},
+		{
+			name:           "any vector child selects the vector default",
+			scalarMmap:     "false",
+			vectorMmap:     "true",
+			firstType:      schemapb.DataType_Int32,
+			secondType:     schemapb.DataType_FloatVector,
+			storageVersion: storage.StorageV2,
+			expectedDisk:   1000,
+		},
+		{
+			name:           "mixed group preserves variable-length expansion",
+			scalarMmap:     "false",
+			vectorMmap:     "false",
+			firstType:      schemapb.DataType_FloatVector,
+			secondType:     schemapb.DataType_VarChar,
+			storageVersion: storage.StorageV2,
+			expectedMemory: 2000,
+		},
+		{
+			name:            "storage v3 mixed projections reserve both resource classes",
+			scalarMmap:      "false",
+			vectorMmap:      "false",
+			firstType:       schemapb.DataType_Int32,
+			firstFieldMmap:  "false",
+			secondType:      schemapb.DataType_Int32,
+			secondFieldMmap: "true",
+			storageVersion:  storage.StorageV3,
+			expectedMemory:  1000,
+			expectedDisk:    1000,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			oldScalarMmap := paramtable.Get().QueryNodeCfg.MmapScalarField.SwapTempValue(test.scalarMmap)
+			defer paramtable.Get().QueryNodeCfg.MmapScalarField.SwapTempValue(oldScalarMmap)
+			oldVectorMmap := paramtable.Get().QueryNodeCfg.MmapVectorField.SwapTempValue(test.vectorMmap)
+			defer paramtable.Get().QueryNodeCfg.MmapVectorField.SwapTempValue(oldVectorMmap)
+
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:    101,
+					Name:       "first",
+					DataType:   test.firstType,
+					TypeParams: fieldParams(test.firstFieldMmap),
+				},
+				{
+					FieldID:    102,
+					Name:       "second",
+					DataType:   test.secondType,
+					TypeParams: fieldParams(test.secondFieldMmap),
+				},
+			}}
+			for _, field := range schema.GetFields() {
+				if typeutil.IsVectorType(field.GetDataType()) {
+					field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{Key: common.DimKey, Value: "8"})
+				}
+			}
+			loadInfo := &querypb.SegmentLoadInfo{
+				StorageVersion: test.storageVersion,
+				NumOfRows:      100,
+				BinlogPaths: []*datapb.FieldBinlog{{
+					FieldID:     0,
+					ChildFields: []int64{101, 102},
+					Binlogs:     []*datapb.Binlog{{MemorySize: 1000, LogSize: 1000}},
+				}},
+			}
+			factor := resourceEstimateFactor{TieredEvictionEnabled: true}
+
+			logicalUsage, err := estimateLogicalResourceUsageOfSegment(schema, loadInfo, factor)
+			require.NoError(t, err)
+			assert.Equal(t, test.expectedMemory, logicalUsage.MemorySize)
+			assert.Equal(t, test.expectedDisk, logicalUsage.DiskSize)
+
+			loadingUsage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor)
+			require.NoError(t, err)
+			assert.Equal(t, test.expectedMemory, loadingUsage.MemorySize)
+			assert.Equal(t, test.expectedDisk, loadingUsage.DiskSize)
+		})
+	}
 }
 
 func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_TieredEvictionEnabled_NonEvictableRawFieldCounted() {

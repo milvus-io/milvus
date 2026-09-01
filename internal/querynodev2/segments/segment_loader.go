@@ -1971,6 +1971,58 @@ func resolveSegmentEstimateLogs(schema *schemapb.CollectionSchema, loadInfo *que
 	return binlogs, deltalogs
 }
 
+// fieldDataGroupMmapPolicy captures segcore's physical column-group policy and
+// the per-field resource classes needed for conservative Storage V3 estimates.
+// Explicit field settings take precedence over global defaults, any explicit
+// true enables mmap for the group, and any vector child selects the vector
+// default when no field has an explicit setting.
+type fieldDataGroupMmapPolicy struct {
+	hasField           bool
+	hasExplicitSetting bool
+	explicitEnabled    bool
+	containsVector     bool
+	mayUseMemory       bool
+	mayUseDisk         bool
+}
+
+func (policy *fieldDataGroupMmapPolicy) include(fieldSchema *schemapb.FieldSchema) {
+	policy.hasField = true
+	policy.containsVector = policy.containsVector || typeutil.IsVectorType(fieldSchema.GetDataType())
+	fieldMmapEnabled, fieldHasSetting := common.IsMmapDataEnabled(fieldSchema.GetTypeParams()...)
+	policy.hasExplicitSetting = policy.hasExplicitSetting || fieldHasSetting
+	policy.explicitEnabled = policy.explicitEnabled || (fieldHasSetting && fieldMmapEnabled)
+	if isDataMmapEnable(fieldSchema) {
+		policy.mayUseDisk = true
+	} else {
+		policy.mayUseMemory = true
+	}
+}
+
+func (policy fieldDataGroupMmapPolicy) enabled() bool {
+	if policy.hasExplicitSetting {
+		return policy.explicitEnabled
+	}
+	if policy.containsVector {
+		return paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
+	}
+	return paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
+}
+
+func (policy fieldDataGroupMmapPolicy) resourceClasses(storageVersion int64) (memory, disk bool) {
+	if !policy.hasField {
+		// Preserve the legacy estimate for a group whose fields were all dropped.
+		return false, true
+	}
+	if storageVersion == storage.StorageV3 {
+		// Storage V3 can split one physical group into multiple cache-policy
+		// projections, but Go currently has only the whole-group byte size.
+		// Reserve the full size in every resource class a child may use.
+		return policy.mayUseMemory, policy.mayUseDisk
+	}
+	mmapEnabled := policy.enabled()
+	return !mmapEnabled, mmapEnabled
+}
+
 // this function is used to estimate the logical resource usage of a segment, which should only be used when tiered eviction is enabled
 // the result is the final resource usage of the segment inevictable part plus the final usage of evictable part with cache ratio applied
 // TODO: the inevictable part is not correct, since we cannot know the final resource usage of interim index and default-value column before loading,
@@ -2065,9 +2117,8 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		var containsTimestampField bool
 		var doubleMemoryDataField bool
 		var legacyNilSchema bool
-		mmapEnabled := true
 		evictableEnabled := true
-		isVectorType := true
+		var mmapPolicy fieldDataGroupMmapPolicy
 
 		for _, fieldID := range fieldIDs {
 			// get field schema from fieldID
@@ -2084,9 +2135,8 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			}
 
 			supportInterimIndexDataType = supportInterimIndexDataType || SupportInterimIndexDataType(fieldSchema.GetDataType())
-			isVectorType = isVectorType && typeutil.IsVectorType(fieldSchema.GetDataType())
+			mmapPolicy.include(fieldSchema)
 			// constainSystemField = constainSystemField || common.IsSystemField(fieldSchema.GetFieldID())
-			mmapEnabled = mmapEnabled && isDataMmapEnable(fieldSchema)
 			evictableEnabled = evictableEnabled && isDataEvictableEnable(fieldSchema)
 			containsTimestampField = containsTimestampField || DoubleMemorySystemField(fieldSchema.GetFieldID())
 			doubleMemoryDataField = doubleMemoryDataField || DoubleMemoryDataType(fieldSchema.GetDataType())
@@ -2099,6 +2149,7 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			segmentEvictableMemorySize += binlogSize
 			continue
 		}
+		useMemory, useDisk := mmapPolicy.resourceClasses(loadInfo.GetStorageVersion())
 
 		// timestamp field double in InsertRecord & TimestampIndex
 		if containsTimestampField {
@@ -2108,21 +2159,7 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			segmentInevictableMemorySize += 2 * uint64(timestampSize)
 		}
 
-		if isVectorType {
-			if mmapEnabled {
-				if evictableEnabled {
-					segmentEvictableDiskSize += binlogSize
-				} else {
-					segmentInevictableDiskSize += binlogSize
-				}
-			} else {
-				if evictableEnabled {
-					segmentEvictableMemorySize += binlogSize
-				} else {
-					segmentInevictableMemorySize += binlogSize
-				}
-			}
-		} else if !mmapEnabled {
+		if useMemory {
 			if evictableEnabled {
 				segmentEvictableMemorySize += binlogSize
 			} else {
@@ -2135,7 +2172,8 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 					segmentInevictableMemorySize += binlogSize
 				}
 			}
-		} else {
+		}
+		if useDisk {
 			if evictableEnabled {
 				segmentEvictableDiskSize += binlogSize
 			} else {
@@ -2335,11 +2373,10 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 		var supportInterimIndexDataType bool
 		var containsTimestampField bool
-		var doubleMomoryDataField bool
+		var doubleMemoryDataField bool
 		var legacyNilSchema bool
-		mmapEnabled := true
 		evictableEnabled := true
-		isVectorType := true
+		var mmapPolicy fieldDataGroupMmapPolicy
 		hasIndex := true
 
 		for _, fieldID := range fieldIDs {
@@ -2365,16 +2402,16 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			}
 
 			supportInterimIndexDataType = supportInterimIndexDataType || SupportInterimIndexDataType(fieldSchema.GetDataType())
-			isVectorType = isVectorType && typeutil.IsVectorType(fieldSchema.GetDataType())
-			mmapEnabled = mmapEnabled && isDataMmapEnable(fieldSchema)
+			mmapPolicy.include(fieldSchema)
 			evictableEnabled = evictableEnabled && isDataEvictableEnable(fieldSchema)
 			containsTimestampField = containsTimestampField || DoubleMemorySystemField(fieldSchema.GetFieldID())
-			doubleMomoryDataField = doubleMomoryDataField || DoubleMemoryDataType(fieldSchema.GetDataType())
+			doubleMemoryDataField = doubleMemoryDataField || DoubleMemoryDataType(fieldSchema.GetDataType())
 		}
 		// legacy v2 segment without children
 		if legacyNilSchema {
 			continue
 		}
+		useMemory, useDisk := mmapPolicy.resourceClasses(loadInfo.GetStorageVersion())
 
 		if !hasIndex {
 			if !multiplyFactor.TieredEvictionEnabled {
@@ -2385,19 +2422,6 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			}
 		}
 
-		if isVectorType {
-			if mmapEnabled {
-				if !multiplyFactor.TieredEvictionEnabled || !evictableEnabled {
-					segDiskLoadingSize += binlogSize
-				}
-			} else {
-				if !multiplyFactor.TieredEvictionEnabled || !evictableEnabled {
-					segMemoryLoadingSize += binlogSize
-				}
-			}
-			continue
-		}
-
 		// timestamp field double in InsertRecord & TimestampIndex
 		if containsTimestampField {
 			timestampSize := lo.SumBy(fieldBinlog.GetBinlogs(), func(binlog *datapb.Binlog) int64 {
@@ -2406,14 +2430,15 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			segMemoryLoadingSize += 2 * uint64(timestampSize)
 		}
 
-		if !mmapEnabled {
+		if useMemory {
 			if !multiplyFactor.TieredEvictionEnabled || !evictableEnabled {
 				segMemoryLoadingSize += binlogSize
-				if doubleMomoryDataField {
+				if doubleMemoryDataField {
 					segMemoryLoadingSize += binlogSize
 				}
 			}
-		} else {
+		}
+		if useDisk {
 			if !multiplyFactor.TieredEvictionEnabled || !evictableEnabled {
 				segDiskLoadingSize += uint64(getBinlogDataMemorySize(fieldBinlog))
 			}

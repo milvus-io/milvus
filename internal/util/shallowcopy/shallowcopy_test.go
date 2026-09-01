@@ -197,3 +197,16 @@ func TestShallowCopySegmentLoadInfo(t *testing.T) {
 	assert.Same(t, src.GetIndexInfos()[0], dst.GetIndexInfos()[0])
 	assert.Same(t, src.GetStats(), dst.GetStats())
 }
+
+func TestShallowCopyFieldIndexInfo(t *testing.T) {
+	assert.Nil(t, ShallowCopyFieldIndexInfo(nil))
+
+	src := &querypb.FieldIndexInfo{}
+	populateAllProtoFields(src)
+	dst := ShallowCopyFieldIndexInfo(src)
+
+	require.True(t, proto.Equal(src, dst))
+	assert.NotSame(t, src, dst)
+	assert.Same(t, src.GetIndexParams()[0], dst.GetIndexParams()[0])
+	assert.True(t, &src.IndexFilePaths[0] == &dst.IndexFilePaths[0])
+}

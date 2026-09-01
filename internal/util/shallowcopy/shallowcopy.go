@@ -151,3 +151,28 @@ func ShallowCopySegmentLoadInfo(src *querypb.SegmentLoadInfo) *querypb.SegmentLo
 		Stats:                src.Stats,
 	}
 }
+
+// ShallowCopyFieldIndexInfo copies the index descriptor envelope while sharing
+// its parameter messages and index-file paths. Callers must copy a shared slice
+// before changing its length or elements.
+func ShallowCopyFieldIndexInfo(src *querypb.FieldIndexInfo) *querypb.FieldIndexInfo {
+	if src == nil {
+		return nil
+	}
+	return &querypb.FieldIndexInfo{
+		FieldID:                   src.FieldID,
+		EnableIndex:               src.EnableIndex,
+		IndexName:                 src.IndexName,
+		IndexID:                   src.IndexID,
+		BuildID:                   src.BuildID,
+		IndexParams:               src.IndexParams,
+		IndexFilePaths:            src.IndexFilePaths,
+		IndexSize:                 src.IndexSize,
+		IndexVersion:              src.IndexVersion,
+		NumRows:                   src.NumRows,
+		CurrentIndexVersion:       src.CurrentIndexVersion,
+		IndexStoreVersion:         src.IndexStoreVersion,
+		CurrentScalarIndexVersion: src.CurrentScalarIndexVersion,
+		IndexStorePathVersion:     src.IndexStorePathVersion,
+	}
+}
