@@ -706,63 +706,77 @@ struct ArithOpIndexFunc {
 
 // Applies a single arithmetic op to a value. Shared by ArithOpElementFunc2
 // and ArithOpIndexFunc2 (the depth-2 counterparts of ArithOpElementFunc /
-// ArithOpIndexFunc above) to compose op1's contribution before the existing
-// per-op comparison logic (reused via bitset::ArithCompareOperator2, for the
-// batch/sequential path) or the inline chain below (for the random /
-// iterative-filter path) applies op2 and compares.
-template <typename HighPrecisonType, proto::plan::ArithOpType arith_op>
+// ArithOpIndexFunc above) to compose op1's contribution before op2 is
+// applied and the result is compared.
+//
+// arith_op is a runtime parameter (not a template non-type parameter) on
+// purpose: the two-op case has cmp_op x arith_op1 x arith_op2 = 6x10x10 = 600
+// combinations, and instantiating a distinct template per combination (times
+// 7 data types, times index/data paths) blew up a single translation unit to
+// ~8400 template instantiations, which OOM-killed the compiler under
+// -O2 -g --coverage. There is no dedicated SIMD kernel for the two-op case
+// (it was always a scalar loop either way), so nothing is lost by resolving
+// the op with a runtime switch instead of compile-time branching.
+template <typename HighPrecisonType>
 HighPrecisonType
-ApplyArithOp(HighPrecisonType v, HighPrecisonType right_operand) {
-    if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-        return v + right_operand;
-    } else if constexpr (arith_op == proto::plan::ArithOpType::Sub) {
-        return v - right_operand;
-    } else if constexpr (arith_op == proto::plan::ArithOpType::Mul) {
-        return v * right_operand;
-    } else if constexpr (arith_op == proto::plan::ArithOpType::Div) {
-        return v / right_operand;
-    } else if constexpr (arith_op == proto::plan::ArithOpType::Mod) {
-        return HighPrecisonType(long(v) % long(right_operand));
-    } else if constexpr (arith_op == proto::plan::ArithOpType::BitAnd) {
-        return HighPrecisonType(long(v) & long(right_operand));
-    } else if constexpr (arith_op == proto::plan::ArithOpType::BitOr) {
-        return HighPrecisonType(long(v) | long(right_operand));
-    } else if constexpr (arith_op == proto::plan::ArithOpType::BitXor) {
-        return HighPrecisonType(long(v) ^ long(right_operand));
-    } else if constexpr (arith_op == proto::plan::ArithOpType::Shl) {
-        return HighPrecisonType(long(v) << long(right_operand));
-    } else if constexpr (arith_op == proto::plan::ArithOpType::Shr) {
-        return HighPrecisonType(long(v) >> long(right_operand));
-    } else {
-        ThrowInfo(UnexpectedError,
-                  fmt::format("unsupported arith type:{} for ApplyArithOp",
-                              arith_op));
-        return HighPrecisonType();
+ApplyArithOp(HighPrecisonType v,
+             HighPrecisonType right_operand,
+             proto::plan::ArithOpType arith_op) {
+    switch (arith_op) {
+        case proto::plan::ArithOpType::Add:
+            return v + right_operand;
+        case proto::plan::ArithOpType::Sub:
+            return v - right_operand;
+        case proto::plan::ArithOpType::Mul:
+            return v * right_operand;
+        case proto::plan::ArithOpType::Div:
+            return v / right_operand;
+        case proto::plan::ArithOpType::Mod:
+            return HighPrecisonType(long(v) % long(right_operand));
+        case proto::plan::ArithOpType::BitAnd:
+            return HighPrecisonType(long(v) & long(right_operand));
+        case proto::plan::ArithOpType::BitOr:
+            return HighPrecisonType(long(v) | long(right_operand));
+        case proto::plan::ArithOpType::BitXor:
+            return HighPrecisonType(long(v) ^ long(right_operand));
+        case proto::plan::ArithOpType::Shl:
+            return HighPrecisonType(long(v) << long(right_operand));
+        case proto::plan::ArithOpType::Shr:
+            return HighPrecisonType(long(v) >> long(right_operand));
+        default:
+            ThrowInfo(UnexpectedError,
+                      fmt::format("unsupported arith type:{} for ApplyArithOp",
+                                  arith_op));
+            return HighPrecisonType();
     }
 }
 
-// Compares a fully-composed arithmetic result to val. Shared tail of the
-// random-filter path in ArithOpElementFunc2/ArithOpIndexFunc2.
-template <typename HighPrecisonType, proto::plan::OpType cmp_op>
+// Compares a fully-composed arithmetic result to val. See ApplyArithOp above
+// for why cmp_op is a runtime parameter rather than a template parameter.
+template <typename HighPrecisonType>
 bool
-CompareArithResult(HighPrecisonType result, HighPrecisonType val) {
-    if constexpr (cmp_op == proto::plan::OpType::Equal) {
-        return result == val;
-    } else if constexpr (cmp_op == proto::plan::OpType::NotEqual) {
-        return result != val;
-    } else if constexpr (cmp_op == proto::plan::OpType::GreaterThan) {
-        return result > val;
-    } else if constexpr (cmp_op == proto::plan::OpType::GreaterEqual) {
-        return result >= val;
-    } else if constexpr (cmp_op == proto::plan::OpType::LessThan) {
-        return result < val;
-    } else if constexpr (cmp_op == proto::plan::OpType::LessEqual) {
-        return result <= val;
-    } else {
-        ThrowInfo(UnexpectedError,
-                  fmt::format("unsupported cmp type:{} for CompareArithResult",
-                              cmp_op));
-        return false;
+CompareArithResult(HighPrecisonType result,
+                    HighPrecisonType val,
+                    proto::plan::OpType cmp_op) {
+    switch (cmp_op) {
+        case proto::plan::OpType::Equal:
+            return result == val;
+        case proto::plan::OpType::NotEqual:
+            return result != val;
+        case proto::plan::OpType::GreaterThan:
+            return result > val;
+        case proto::plan::OpType::GreaterEqual:
+            return result >= val;
+        case proto::plan::OpType::LessThan:
+            return result < val;
+        case proto::plan::OpType::LessEqual:
+            return result <= val;
+        default:
+            ThrowInfo(
+                UnexpectedError,
+                fmt::format("unsupported cmp type:{} for CompareArithResult",
+                            cmp_op));
+            return false;
     }
 }
 
@@ -771,11 +785,13 @@ CompareArithResult(HighPrecisonType result, HighPrecisonType val) {
 // right_operand2) cmp_op val. Kept as a separate sibling struct (rather than
 // extending ArithOpElementFunc with a defaultable second op parameter) so
 // the existing single-op hot path's codegen is untouched.
-template <typename T,
-          proto::plan::OpType cmp_op,
-          proto::plan::ArithOpType arith_op1,
-          proto::plan::ArithOpType arith_op2,
-          FilterType filter_type = FilterType::sequential>
+//
+// cmp_op/arith_op1/arith_op2 are runtime parameters rather than template
+// parameters — see ApplyArithOp's comment above for why. There is no
+// dedicated SIMD kernel for the two-op case (it was always a scalar loop),
+// so both the sequential and random/iterative-filter paths share the same
+// plain loop below, differing only in how the source offset is computed.
+template <typename T, FilterType filter_type = FilterType::sequential>
 struct ArithOpElementFunc2 {
     typedef std::conditional_t<std::is_integral_v<T> &&
                                    !std::is_same_v<bool, T>,
@@ -788,18 +804,21 @@ struct ArithOpElementFunc2 {
                HighPrecisonType val,
                HighPrecisonType right_operand1,
                HighPrecisonType right_operand2,
+               proto::plan::OpType cmp_op,
+               proto::plan::ArithOpType arith_op1,
+               proto::plan::ArithOpType arith_op2,
                TargetBitmapView res,
                const int32_t* offsets = nullptr) {
-        if constexpr (arith_op1 == proto::plan::ArithOpType::Div ||
-                      arith_op1 == proto::plan::ArithOpType::Mod) {
+        if (arith_op1 == proto::plan::ArithOpType::Div ||
+            arith_op1 == proto::plan::ArithOpType::Mod) {
             if (right_operand1 == 0) {
                 ThrowInfo(
                     ErrorCode::ExprInvalid,
                     "division or modulus by zero in arithmetic expression");
             }
         }
-        if constexpr (arith_op2 == proto::plan::ArithOpType::Div ||
-                      arith_op2 == proto::plan::ArithOpType::Mod) {
+        if (arith_op2 == proto::plan::ArithOpType::Div ||
+            arith_op2 == proto::plan::ArithOpType::Mod) {
             if (right_operand2 == 0) {
                 ThrowInfo(
                     ErrorCode::ExprInvalid,
@@ -807,44 +826,29 @@ struct ArithOpElementFunc2 {
             }
         }
 
-        // Used for iterative filter, which does not execute in a batch
-        // manner (mirrors ArithOpElementFunc's random-filter fallback).
-        if constexpr (filter_type == FilterType::random) {
-            for (int i = 0; i < size; ++i) {
-                auto offset = (offsets) ? offsets[i] : i;
-                auto intermediate = ApplyArithOp<HighPrecisonType, arith_op1>(
-                    static_cast<HighPrecisonType>(src[offset]), right_operand1);
-                auto result = ApplyArithOp<HighPrecisonType, arith_op2>(
-                    intermediate, right_operand2);
-                res[i] =
-                    CompareArithResult<HighPrecisonType, cmp_op>(result, val);
+        for (int i = 0; i < size; ++i) {
+            size_t offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
             }
-            return;
+            auto intermediate = ApplyArithOp<HighPrecisonType>(
+                static_cast<HighPrecisonType>(src[offset]),
+                right_operand1,
+                arith_op1);
+            auto result = ApplyArithOp<HighPrecisonType>(
+                intermediate, right_operand2, arith_op2);
+            res[i] =
+                CompareArithResult<HighPrecisonType>(result, val, cmp_op);
         }
-
-        // Generic scalar two-op path (no dedicated SIMD kernel yet — see
-        // bitset::inplace_arith_compare2; true fusion for chained
-        // Add/Sub/Mul/Div is a possible follow-up).
-        constexpr auto cmp_op_cvt = CmpOpHelper<cmp_op>::op;
-        constexpr auto arith_op1_cvt = ArithOpHelper<arith_op1>::op;
-        constexpr auto arith_op2_cvt = ArithOpHelper<arith_op2>::op;
-
-        res.template inplace_arith_compare2<T,
-                                            arith_op1_cvt,
-                                            arith_op2_cvt,
-                                            cmp_op_cvt>(
-            src, right_operand1, right_operand2, val, size);
     }
 };
 
 // Depth-2 counterpart of ArithOpIndexFunc, reading through a ScalarIndex
 // instead of a raw pointer. No SIMD path exists for the index case even for
 // a single op (see ArithOpIndexFunc above), so this is a plain scalar loop.
-template <typename T,
-          proto::plan::OpType cmp_op,
-          proto::plan::ArithOpType arith_op1,
-          proto::plan::ArithOpType arith_op2,
-          FilterType filter_type>
+// cmp_op/arith_op1/arith_op2 are runtime parameters — see ApplyArithOp's
+// comment above for why.
+template <typename T, FilterType filter_type>
 struct ArithOpIndexFunc2 {
     typedef std::conditional_t<std::is_integral_v<T> &&
                                    !std::is_same_v<bool, T>,
@@ -858,17 +862,20 @@ struct ArithOpIndexFunc2 {
                HighPrecisonType val,
                HighPrecisonType right_operand1,
                HighPrecisonType right_operand2,
+               proto::plan::OpType cmp_op,
+               proto::plan::ArithOpType arith_op1,
+               proto::plan::ArithOpType arith_op2,
                const int32_t* offsets = nullptr) {
-        if constexpr (arith_op1 == proto::plan::ArithOpType::Div ||
-                      arith_op1 == proto::plan::ArithOpType::Mod) {
+        if (arith_op1 == proto::plan::ArithOpType::Div ||
+            arith_op1 == proto::plan::ArithOpType::Mod) {
             if (right_operand1 == 0) {
                 ThrowInfo(
                     ErrorCode::ExprInvalid,
                     "division or modulus by zero in arithmetic expression");
             }
         }
-        if constexpr (arith_op2 == proto::plan::ArithOpType::Div ||
-                      arith_op2 == proto::plan::ArithOpType::Mod) {
+        if (arith_op2 == proto::plan::ArithOpType::Div ||
+            arith_op2 == proto::plan::ArithOpType::Mod) {
             if (right_operand2 == 0) {
                 ThrowInfo(
                     ErrorCode::ExprInvalid,
@@ -887,11 +894,14 @@ struct ArithOpIndexFunc2 {
                 res[i] = false;
                 continue;
             }
-            auto intermediate = ApplyArithOp<HighPrecisonType, arith_op1>(
-                static_cast<HighPrecisonType>(raw.value()), right_operand1);
-            auto result = ApplyArithOp<HighPrecisonType, arith_op2>(
-                intermediate, right_operand2);
-            res[i] = CompareArithResult<HighPrecisonType, cmp_op>(result, val);
+            auto intermediate = ApplyArithOp<HighPrecisonType>(
+                static_cast<HighPrecisonType>(raw.value()),
+                right_operand1,
+                arith_op1);
+            auto result = ApplyArithOp<HighPrecisonType>(
+                intermediate, right_operand2, arith_op2);
+            res[i] =
+                CompareArithResult<HighPrecisonType>(result, val, cmp_op);
         }
         return res;
     }

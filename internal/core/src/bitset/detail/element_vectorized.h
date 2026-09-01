@@ -400,56 +400,6 @@ struct VectorizedElementWiseBitsetPolicy {
             });
     }
 
-    // Depth-2 counterpart of op_arith_compare. VectorizedT::op_arith_compare2
-    // (see vectorized_ref.h and the per-platform impls) always returns false
-    // today — no dedicated SIMD kernel exists yet for chained two-op
-    // comparisons, so this always falls back to the generic scalar
-    // ElementWiseBitsetPolicy::op_arith_compare2 path. True SIMD fusion is a
-    // possible follow-up, not required for correctness.
-    template <typename T,
-              ArithOpType AOp1,
-              ArithOpType AOp2,
-              CompareOpType CmpOp>
-    static inline void
-    op_arith_compare2(data_type* const __restrict data,
-                      const size_t start,
-                      const T* const __restrict src,
-                      const ArithHighPrecisionType<T>& right_operand1,
-                      const ArithHighPrecisionType<T>& right_operand2,
-                      const ArithHighPrecisionType<T>& value,
-                      const size_t size) {
-        op_func(
-            start,
-            size,
-            [data, src, right_operand1, right_operand2, value](
-                const size_t starting_bit,
-                const size_t ptr_offset,
-                const size_t nbits) {
-                ElementWiseBitsetPolicy<ElementT>::
-                    template op_arith_compare2<T, AOp1, AOp2, CmpOp>(
-                        data,
-                        starting_bit,
-                        src + ptr_offset,
-                        right_operand1,
-                        right_operand2,
-                        value,
-                        nbits);
-            },
-            [data, src, right_operand1, right_operand2, value](
-                const size_t starting_element,
-                const size_t ptr_offset,
-                const size_t nbits) {
-                return VectorizedT::
-                    template op_arith_compare2<T, AOp1, AOp2, CmpOp>(
-                        reinterpret_cast<uint8_t*>(data + starting_element),
-                        src + ptr_offset,
-                        right_operand1,
-                        right_operand2,
-                        value,
-                        nbits);
-            });
-    }
-
     //
     static inline size_t
     op_and_with_count(data_type* const left,

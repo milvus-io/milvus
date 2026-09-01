@@ -1540,70 +1540,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
     auto arith_type2 = expr_->arith_op_type2_;
     auto sub_batch_size = has_offset_input_ ? input->size() : size_per_chunk_;
 
-// Dispatches (op_type, arith_type, arith_type2) at runtime to the
-// compile-time-templated ArithOpIndexFunc2 instantiation. Generated via
-// macro (mirroring the codebase's own DECLARE_PARTIAL_* pattern in the
-// bitset platform headers) rather than hand-authoring the full
-// (cmp x arith x arith) combinatorial switch by hand.
-#define DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, ARITH_OP2) \
-    case proto::plan::ArithOpType::ARITH_OP2: {                  \
-        ArithOpIndexFunc2<T,                                     \
-                          proto::plan::OpType::CMP_OP,           \
-                          proto::plan::ArithOpType::ARITH_OP1,   \
-                          proto::plan::ArithOpType::ARITH_OP2,   \
-                          filter_type>                           \
-            func;                                                \
-        res = std::move(func(index_ptr,                          \
-                             sub_batch_size,                     \
-                             value,                              \
-                             right_operand,                      \
-                             right_operand2,                     \
-                             offsets));                          \
-        break;                                                   \
-    }
-#define DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, ARITH_OP1)                    \
-    case proto::plan::ArithOpType::ARITH_OP1: {                            \
-        switch (arith_type2) {                                             \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Add)             \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Sub)             \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Mul)             \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Div)             \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Mod)             \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, BitAnd)          \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, BitOr)           \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, BitXor)          \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Shl)             \
-            DISPATCH_ARITH2_INDEX_LEAF(CMP_OP, ARITH_OP1, Shr)             \
-            default:                                                       \
-                ThrowInfo(UnexpectedError,                                 \
-                          fmt::format("unsupported second arith type for " \
-                                      "binary arithmetic eval expr: {}",   \
-                                      arith_type2));                       \
-        }                                                                  \
-        break;                                                             \
-    }
-#define DISPATCH_ARITH2_INDEX_CMP(CMP_OP)                                  \
-    case proto::plan::OpType::CMP_OP: {                                    \
-        switch (arith_type) {                                              \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Add)                      \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Sub)                      \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Mul)                      \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Div)                      \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Mod)                      \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, BitAnd)                   \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, BitOr)                    \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, BitXor)                   \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Shl)                      \
-            DISPATCH_ARITH2_INDEX_ARITH1(CMP_OP, Shr)                      \
-            default:                                                       \
-                ThrowInfo(UnexpectedError,                                 \
-                          fmt::format("unsupported arith type for binary " \
-                                      "arithmetic eval expr: {}",          \
-                                      arith_type));                        \
-        }                                                                  \
-        break;                                                             \
-    }
-
     auto execute_sub_batch =
         [
             op_type,
@@ -1619,19 +1555,20 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
             const int32_t* offsets = nullptr) {
         TargetBitmap res;
         if (has_second_op) {
-            switch (op_type) {
-                DISPATCH_ARITH2_INDEX_CMP(Equal)
-                DISPATCH_ARITH2_INDEX_CMP(NotEqual)
-                DISPATCH_ARITH2_INDEX_CMP(GreaterThan)
-                DISPATCH_ARITH2_INDEX_CMP(GreaterEqual)
-                DISPATCH_ARITH2_INDEX_CMP(LessThan)
-                DISPATCH_ARITH2_INDEX_CMP(LessEqual)
-                default:
-                    ThrowInfo(UnexpectedError,
-                              "unsupported operator type for binary "
-                              "arithmetic eval expr: {}",
-                              op_type);
-            }
+            // op_type/arith_type/arith_type2 are resolved at runtime inside
+            // ArithOpIndexFunc2 rather than via a (cmp x arith x arith)
+            // combinatorial template switch — see ApplyArithOp's comment in
+            // the header for why.
+            ArithOpIndexFunc2<T, filter_type> func;
+            res = std::move(func(index_ptr,
+                                 sub_batch_size,
+                                 value,
+                                 right_operand,
+                                 right_operand2,
+                                 op_type,
+                                 arith_type,
+                                 arith_type2,
+                                 offsets));
             return res;
         }
         switch (op_type) {
@@ -2489,9 +2426,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
         }
         return res;
     };
-#undef DISPATCH_ARITH2_INDEX_LEAF
-#undef DISPATCH_ARITH2_INDEX_ARITH1
-#undef DISPATCH_ARITH2_INDEX_CMP
     if (has_offset_input_) {
         auto res = ProcessIndexChunksByOffsets<T>(
             execute_sub_batch, input, value, right_operand);
@@ -2561,61 +2495,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
     auto arith_type = expr_->arith_op_type_;
     auto arith_type2 = expr_->arith_op_type2_;
 
-// See ExecRangeVisitorImplForIndex above for why this is macro-generated.
-#define DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, ARITH_OP2)               \
-    case proto::plan::ArithOpType::ARITH_OP2: {                               \
-        ArithOpElementFunc2<T,                                                \
-                            proto::plan::OpType::CMP_OP,                      \
-                            proto::plan::ArithOpType::ARITH_OP1,              \
-                            proto::plan::ArithOpType::ARITH_OP2,              \
-                            filter_type>                                      \
-            func;                                                             \
-        func(data, size, value, right_operand, right_operand2, res, offsets); \
-        break;                                                                \
-    }
-#define DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, ARITH_OP1)                     \
-    case proto::plan::ArithOpType::ARITH_OP1: {                            \
-        switch (arith_type2) {                                             \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Add)              \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Sub)              \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Mul)              \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Div)              \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Mod)              \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, BitAnd)           \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, BitOr)            \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, BitXor)           \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Shl)              \
-            DISPATCH_ARITH2_DATA_LEAF(CMP_OP, ARITH_OP1, Shr)              \
-            default:                                                       \
-                ThrowInfo(UnexpectedError,                                 \
-                          fmt::format("unsupported second arith type for " \
-                                      "binary arithmetic eval expr: {}",   \
-                                      arith_type2));                       \
-        }                                                                  \
-        break;                                                             \
-    }
-#define DISPATCH_ARITH2_DATA_CMP(CMP_OP)                                   \
-    case proto::plan::OpType::CMP_OP: {                                    \
-        switch (arith_type) {                                              \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Add)                       \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Sub)                       \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Mul)                       \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Div)                       \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Mod)                       \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, BitAnd)                    \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, BitOr)                     \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, BitXor)                    \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Shl)                       \
-            DISPATCH_ARITH2_DATA_ARITH1(CMP_OP, Shr)                       \
-            default:                                                       \
-                ThrowInfo(UnexpectedError,                                 \
-                          fmt::format("unsupported arith type for binary " \
-                                      "arithmetic eval expr: {}",          \
-                                      arith_type));                        \
-        }                                                                  \
-        break;                                                             \
-    }
-
     auto execute_sub_batch =
         [ op_type, arith_type, arith_type2, has_second_op,
           right_operand2 ]<FilterType filter_type = FilterType::sequential>(
@@ -2633,19 +2512,21 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
             return;
         }
         if (has_second_op) {
-            switch (op_type) {
-                DISPATCH_ARITH2_DATA_CMP(Equal)
-                DISPATCH_ARITH2_DATA_CMP(NotEqual)
-                DISPATCH_ARITH2_DATA_CMP(GreaterThan)
-                DISPATCH_ARITH2_DATA_CMP(GreaterEqual)
-                DISPATCH_ARITH2_DATA_CMP(LessThan)
-                DISPATCH_ARITH2_DATA_CMP(LessEqual)
-                default:
-                    ThrowInfo(UnexpectedError,
-                              "unsupported operator type for binary "
-                              "arithmetic eval expr: {}",
-                              op_type);
-            }
+            // op_type/arith_type/arith_type2 are resolved at runtime inside
+            // ArithOpElementFunc2 rather than via a (cmp x arith x arith)
+            // combinatorial template switch — see ApplyArithOp's comment in
+            // the header for why.
+            ArithOpElementFunc2<T, filter_type> func;
+            func(data,
+                 size,
+                 value,
+                 right_operand,
+                 right_operand2,
+                 op_type,
+                 arith_type,
+                 arith_type2,
+                 res,
+                 offsets);
             // Shared tail (valid-mask application) below still needs to run;
             // fall through instead of returning early.
         } else {
@@ -3349,9 +3230,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
             }
         }
     };
-#undef DISPATCH_ARITH2_DATA_LEAF
-#undef DISPATCH_ARITH2_DATA_ARITH1
-#undef DISPATCH_ARITH2_DATA_CMP
 
     auto skip_index_func = [op_ctx = op_ctx_,
                             op_type,

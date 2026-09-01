@@ -368,23 +368,6 @@ struct VectorizedDynamic {
             bitmask, src, right_operand, value, size);
     }
 
-    // Depth-2 counterpart of op_arith_compare. No dynamically-dispatched
-    // kernel exists for chained two-op comparisons; always falls back to
-    // the generic scalar path (see ElementWiseBitsetPolicy::op_arith_compare2).
-    template <typename T,
-              ArithOpType AOp1,
-              ArithOpType AOp2,
-              CompareOpType CmpOp>
-    static inline bool
-    op_arith_compare2(uint8_t* const __restrict bitmask,
-                      const T* const __restrict src,
-                      const ArithHighPrecisionType<T>& right_operand1,
-                      const ArithHighPrecisionType<T>& right_operand2,
-                      const ArithHighPrecisionType<T>& value,
-                      const size_t size) {
-        return false;
-    }
-
     // The following functions just forward parameters to the reference code,
     //   generated for a particular platform.
 
