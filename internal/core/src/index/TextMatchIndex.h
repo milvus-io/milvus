@@ -23,11 +23,16 @@ namespace milvus::index {
 using stdclock = std::chrono::high_resolution_clock;
 class TextMatchIndex : public InvertedIndexTantivy<std::string> {
  public:
-    // for growing segment.
+    // In-memory writer used by both growing segments and sealed interim index
+    // builds. Growing segments enable background merge because periodic
+    // commits would otherwise grow the segment count unbounded; sealed builds
+    // use INT64_MAX as the commit interval and disable background merge to
+    // avoid merge write amplification.
     explicit TextMatchIndex(int64_t commit_interval_in_ms,
                             const char* unique_id,
                             const char* tokenizer_name,
-                            const char* analyzer_params);
+                            const char* analyzer_params,
+                            bool enable_background_merge);
     // for sealed segment to create index from raw data during loading.
     explicit TextMatchIndex(const std::string& path,
                             const char* unique_id,

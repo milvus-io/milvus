@@ -113,6 +113,10 @@ impl IndexWriterWrapperImpl {
         let index = Index::create_in_dir(path.clone(), schema)?;
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
+        // Scalar writers are only used for sealed index builds. Keep the
+        // segments produced by memory-budget flushes and avoid background
+        // merge write amplification.
+        index_writer.set_merge_policy(Box::new(tantivy_5::merge_policy::NoMergePolicy));
         Ok(IndexWriterWrapperImpl {
             field,
             index_writer: Either::Left(index_writer),
@@ -271,13 +275,6 @@ impl IndexWriterWrapperImpl {
         match self.index_writer {
             Either::Left(mut index_writer) => {
                 index_writer.commit()?;
-
-                // merge all segments
-                let segment_ids = index_writer.index().searchable_segment_ids()?;
-                if segment_ids.len() > 1 {
-                    let _ = index_writer.merge(&segment_ids).wait();
-                }
-
                 index_writer.garbage_collect_files().wait()?;
 
                 index_writer.wait_merging_threads()?;

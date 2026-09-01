@@ -1820,11 +1820,15 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id,
     std::string unique_id = GetUniqueFieldId(field_meta.get_id().get());
     if (!cfg.GetScalarIndexEnableMmap()) {
         // build text index in ram.
+        // Sealed interim index: no background merge. Its bounded build keeps
+        // the small number of segments produced by memory-budget flushes and
+        // avoids merge write amplification.
         index = std::make_unique<index::TextMatchIndex>(
             std::numeric_limits<int64_t>::max(),
             unique_id.c_str(),
             "milvus_tokenizer",
-            field_meta.get_analyzer_params().c_str());
+            field_meta.get_analyzer_params().c_str(),
+            /*enable_background_merge=*/false);
     } else {
         // build text index using mmap.
         index = std::make_unique<index::TextMatchIndex>(
