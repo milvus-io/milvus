@@ -418,15 +418,7 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 	if err := validateSchemaEvolution(coll, schema); err != nil {
 		return err
 	}
-	if functionName := dropReq.GetFunctionName(); functionName != "" {
-		if err := validateRLSFunctionOutputNotReferenced(coll, findRLSFunctionByName(coll, functionName), "dropped"); err != nil {
-			return err
-		}
-	}
 	if err := validateRLSNoReferencedFieldDropped(coll, droppedFieldIds); err != nil {
-		return err
-	}
-	if err := validateRLSPoliciesWithSchema(coll.RLSPolicies, schema); err != nil {
 		return err
 	}
 

@@ -767,8 +767,14 @@ func ValidateRLSProperties(kvs ...*commonpb.KeyValuePair) error {
 				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSForceKey)
 			}
 			seen[RLSForceKey] = struct{}{}
-			if _, err := IsRLSForce(kv); err != nil {
+			force, err := IsRLSForce(kv)
+			if err != nil {
 				return err
+			}
+			// rls.force only affects runtime enforcement. Reject it together
+			// with rls.enabled while the enforcement slice is not available.
+			if force {
+				return merr.WrapErrParameterInvalidMsg("RLS runtime enforcement is not available yet; %s cannot be enabled", RLSForceKey)
 			}
 		default:
 			for _, key := range []string{RLSEnabledKey, RLSForceKey} {

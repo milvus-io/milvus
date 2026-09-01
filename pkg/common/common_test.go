@@ -761,10 +761,17 @@ func TestRLSEnabled(t *testing.T) {
 		}
 	})
 
-	t.Run("accepts force values", func(t *testing.T) {
-		for _, value := range []string{"1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False"} {
+	t.Run("rejects force until runtime enforcement lands", func(t *testing.T) {
+		for _, value := range []string{"1", "t", "T", "TRUE", "true", "True"} {
 			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSForceKey, Value: value})
-			assert.NoError(t, err)
+			assert.ErrorContains(t, err, "runtime enforcement is not available")
+		}
+	})
+
+	t.Run("accepts standard force-disabled values", func(t *testing.T) {
+		for _, value := range []string{"0", "f", "F", "FALSE", "false", "False"} {
+			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSForceKey, Value: value})
+			assert.NoError(t, err, "value %q should be accepted", value)
 		}
 	})
 
