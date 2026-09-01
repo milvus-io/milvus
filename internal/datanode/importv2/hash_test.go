@@ -55,6 +55,10 @@ func TestHashData(t *testing.T) {
 	mockTask := NewMockTask(t)
 	mockTask.On("GetSchema").Return(schema).Maybe()
 	mockTask.On("GetVchannels").Return([]string{"channel1", "channel2"}).Maybe()
+	// no routing meta: a collection that has never been split, which must keep
+	// the legacy hash(pk) % shardNum these expectations were written against.
+	mockTask.On("GetShardInfos").Return([]*schemapb.CollectionShardInfo(nil)).Maybe()
+	mockTask.On("GetRoutingModulus").Return(uint64(0)).Maybe()
 	mockTask.On("GetPartitionIDs").Return([]int64{1, 2}).Maybe()
 	mockTask.On("Execute").Return([]*conc.Future[any]{}).Maybe()
 	mockTask.On("GetJobID").Return(int64(1)).Maybe()
@@ -103,6 +107,10 @@ func TestHashDeleteData(t *testing.T) {
 	mockTask := NewMockTask(t)
 	mockTask.On("GetSchema").Return(schema).Maybe()
 	mockTask.On("GetVchannels").Return([]string{"channel1", "channel2"}).Maybe()
+	// no routing meta: a collection that has never been split, which must keep
+	// the legacy hash(pk) % shardNum these expectations were written against.
+	mockTask.On("GetShardInfos").Return([]*schemapb.CollectionShardInfo(nil)).Maybe()
+	mockTask.On("GetRoutingModulus").Return(uint64(0)).Maybe()
 	mockTask.On("Execute").Return([]*conc.Future[any]{}).Maybe()
 	mockTask.On("GetJobID").Return(int64(1)).Maybe()
 	mockTask.On("GetTaskID").Return(int64(1)).Maybe()
@@ -141,6 +149,10 @@ func TestGetRowsStats(t *testing.T) {
 		mockTask := NewMockTask(t)
 		mockTask.On("GetSchema").Return(schema).Maybe()
 		mockTask.On("GetVchannels").Return([]string{"channel1", "channel2"}).Maybe()
+		// no routing meta: a collection that has never been split, which must keep
+		// the legacy hash(pk) % shardNum these expectations were written against.
+		mockTask.On("GetShardInfos").Return([]*schemapb.CollectionShardInfo(nil)).Maybe()
+		mockTask.On("GetRoutingModulus").Return(uint64(0)).Maybe()
 		mockTask.On("GetPartitionIDs").Return([]int64{1, 2}).Maybe()
 		mockTask.On("Execute").Return([]*conc.Future[any]{}).Maybe()
 		mockTask.On("GetJobID").Return(int64(1)).Maybe()
@@ -198,6 +210,10 @@ func TestGetRowsStats(t *testing.T) {
 		mockTask := NewMockTask(t)
 		mockTask.On("GetSchema").Return(schema).Maybe()
 		mockTask.On("GetVchannels").Return([]string{"channel1", "channel2"}).Maybe()
+		// no routing meta: a collection that has never been split, which must keep
+		// the legacy hash(pk) % shardNum these expectations were written against.
+		mockTask.On("GetShardInfos").Return([]*schemapb.CollectionShardInfo(nil)).Maybe()
+		mockTask.On("GetRoutingModulus").Return(uint64(0)).Maybe()
 		mockTask.On("GetPartitionIDs").Return([]int64{1, 2}).Maybe()
 		mockTask.On("Execute").Return([]*conc.Future[any]{}).Maybe()
 		mockTask.On("GetJobID").Return(int64(1)).Maybe()
@@ -264,6 +280,10 @@ func TestGetDeleteStats(t *testing.T) {
 	mockTask := NewMockTask(t)
 	mockTask.On("GetSchema").Return(schema).Maybe()
 	mockTask.On("GetVchannels").Return([]string{"channel1", "channel2"}).Maybe()
+	// no routing meta: a collection that has never been split, which must keep
+	// the legacy hash(pk) % shardNum these expectations were written against.
+	mockTask.On("GetShardInfos").Return([]*schemapb.CollectionShardInfo(nil)).Maybe()
+	mockTask.On("GetRoutingModulus").Return(uint64(0)).Maybe()
 	mockTask.On("GetPartitionIDs").Return([]int64{1}).Maybe()
 	mockTask.On("Execute").Return([]*conc.Future[any]{}).Maybe()
 	mockTask.On("GetJobID").Return(int64(1)).Maybe()

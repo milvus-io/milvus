@@ -102,6 +102,14 @@ func (t *ImportTask) GetVchannels() []string {
 	return t.req.GetVchannels()
 }
 
+func (t *ImportTask) GetShardInfos() []*schemapb.CollectionShardInfo {
+	return t.req.GetShardInfos()
+}
+
+func (t *ImportTask) GetRoutingModulus() uint64 {
+	return t.req.GetRoutingModulus()
+}
+
 func (t *ImportTask) GetSchema() *schemapb.CollectionSchema {
 	return t.req.GetSchema()
 }

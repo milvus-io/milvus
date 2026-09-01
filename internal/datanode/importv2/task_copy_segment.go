@@ -147,6 +147,14 @@ func (t *CopySegmentTask) GetVchannels() []string {
 	return nil // CopySegmentTask doesn't need vchannels (no streaming data)
 }
 
+func (t *CopySegmentTask) GetShardInfos() []*schemapb.CollectionShardInfo {
+	return nil // no vchannels to route to
+}
+
+func (t *CopySegmentTask) GetRoutingModulus() uint64 {
+	return 0 // no vchannels to route to, so no modulus to route by
+}
+
 func (t *CopySegmentTask) GetJobID() int64 {
 	return t.jobID
 }

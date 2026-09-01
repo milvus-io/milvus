@@ -853,6 +853,8 @@ message CompactionPlan {
   // decides which rows it takes and the target vchannel its output segment
   // belongs to. Two for a doubling, M for a rehash to M shards.
   repeated SplitShardTaskTarget hash_split_targets = 32;
+  // The routing modulus the residues above are taken against.
+  uint64 hash_split_modulus = 33;
 }
 
 // ManifestColumnGroupFile is one loon/parquet file belonging to a column

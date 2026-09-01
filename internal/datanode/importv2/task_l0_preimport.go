@@ -43,6 +43,8 @@ type L0PreImportTask struct {
 	cancel       context.CancelFunc
 	partitionIDs []int64
 	vchannels    []string
+	shardInfos   []*schemapb.CollectionShardInfo
+	routingMode  uint64
 	schema       *schemapb.CollectionSchema
 	req          *datapb.PreImportRequest
 
@@ -72,6 +74,8 @@ func NewL0PreImportTask(req *datapb.PreImportRequest,
 		cancel:       cancel,
 		partitionIDs: req.GetPartitionIDs(),
 		vchannels:    req.GetVchannels(),
+		shardInfos:   req.GetShardInfos(),
+		routingMode:  req.GetRoutingModulus(),
 		schema:       req.GetSchema(),
 		req:          req,
 		manager:      manager,
@@ -85,6 +89,14 @@ func (t *L0PreImportTask) GetPartitionIDs() []int64 {
 
 func (t *L0PreImportTask) GetVchannels() []string {
 	return t.vchannels
+}
+
+func (t *L0PreImportTask) GetShardInfos() []*schemapb.CollectionShardInfo {
+	return t.shardInfos
+}
+
+func (t *L0PreImportTask) GetRoutingModulus() uint64 {
+	return t.routingMode
 }
 
 func (t *L0PreImportTask) GetType() TaskType {

@@ -45,6 +45,8 @@ type PreImportTask struct {
 	cancel       context.CancelFunc
 	partitionIDs []int64
 	vchannels    []string
+	shardInfos   []*schemapb.CollectionShardInfo
+	routingMode  uint64
 	schema       *schemapb.CollectionSchema
 	options      []*commonpb.KeyValuePair
 	req          *datapb.PreImportRequest
@@ -80,6 +82,8 @@ func NewPreImportTask(req *datapb.PreImportRequest,
 		cancel:       cancel,
 		partitionIDs: req.GetPartitionIDs(),
 		vchannels:    req.GetVchannels(),
+		shardInfos:   req.GetShardInfos(),
+		routingMode:  req.GetRoutingModulus(),
 		schema:       req.GetSchema(),
 		options:      req.GetOptions(),
 		req:          req,
@@ -94,6 +98,14 @@ func (t *PreImportTask) GetPartitionIDs() []int64 {
 
 func (t *PreImportTask) GetVchannels() []string {
 	return t.vchannels
+}
+
+func (t *PreImportTask) GetShardInfos() []*schemapb.CollectionShardInfo {
+	return t.shardInfos
+}
+
+func (t *PreImportTask) GetRoutingModulus() uint64 {
+	return t.routingMode
 }
 
 func (t *PreImportTask) GetType() TaskType {

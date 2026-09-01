@@ -21,7 +21,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -58,7 +60,10 @@ func HashData(task Task, rows *storage.InsertData) (HashedData, error) {
 	id1 := pkField.GetFieldID()
 	id2 := partKeyField.GetFieldID()
 
-	f1 := hashByVChannel(int64(channelNum), pkField)
+	f1, err := vchannelRouter(task, pkField)
+	if err != nil {
+		return nil, err
+	}
 	f2 := hashByPartition(int64(partitionNum), partKeyField)
 
 	res, err := newHashedData(schema, channelNum, partitionNum)
@@ -68,9 +73,12 @@ func HashData(task Task, rows *storage.InsertData) (HashedData, error) {
 
 	for i := 0; i < rows.GetRowNum(); i++ {
 		row := rows.GetRow(i)
-		p1, p2 := f1(row[id1]), f2(row[id2])
-		err = res[p1][p2].Append(row)
+		p1, err := f1(row[id1])
 		if err != nil {
+			return nil, err
+		}
+		p2 := f2(row[id2])
+		if err = res[p1][p2].Append(row); err != nil {
 			return nil, err
 		}
 	}
@@ -88,7 +96,10 @@ func HashDeleteData(task Task, delData *storage.DeleteData) ([]*storage.DeleteDa
 		return nil, err
 	}
 
-	f1 := hashByVChannel(int64(channelNum), pkField)
+	f1, err := vchannelRouter(task, pkField)
+	if err != nil {
+		return nil, err
+	}
 
 	res := make([]*storage.DeleteData, channelNum)
 	for i := 0; i < channelNum; i++ {
@@ -98,7 +109,10 @@ func HashDeleteData(task Task, delData *storage.DeleteData) ([]*storage.DeleteDa
 	for i := 0; i < int(delData.RowCount); i++ {
 		pk := delData.Pks[i]
 		ts := delData.Tss[i]
-		p := f1(pk.GetValue())
+		p, err := f1(pk.GetValue())
+		if err != nil {
+			return nil, err
+		}
 		res[p].Append(pk, ts)
 	}
 	return res, nil
@@ -174,11 +188,18 @@ func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.Parti
 			}
 		}
 	} else {
-		f1 := hashByVChannel(int64(channelNum), pkField)
+		f1, err := vchannelRouter(task, pkField)
+		if err != nil {
+			return nil, err
+		}
 		f2 := hashByPartition(int64(partitionNum), partKeyField)
 		for i := 0; i < rowNum; i++ {
 			row := getRowFromInsertData(rows, i)
-			p1, p2 := f1(row[id1]), f2(row[id2])
+			p1, err := f1(row[id1])
+			if err != nil {
+				return nil, err
+			}
+			p2 := f2(row[id2])
 			hashRowsCount[p1][p2]++
 			hashDataSize[p1][p2] += getRowSizeFromInsertData(rows, i)
 		}
@@ -213,7 +234,10 @@ func GetDeleteStats(task Task, delData *storage.DeleteData) (map[string]*datapb.
 		return nil, err
 	}
 
-	f1 := hashByVChannel(int64(channelNum), pkField)
+	f1, err := vchannelRouter(task, pkField)
+	if err != nil {
+		return nil, err
+	}
 
 	hashRowsCount := make([][]int, channelNum)
 	hashDataSize := make([][]int, channelNum)
@@ -224,7 +248,10 @@ func GetDeleteStats(task Task, delData *storage.DeleteData) (map[string]*datapb.
 
 	for i := 0; i < int(delData.RowCount); i++ {
 		pk := delData.Pks[i]
-		p := f1(pk.GetValue())
+		p, err := f1(pk.GetValue())
+		if err != nil {
+			return nil, err
+		}
 		hashRowsCount[p][0]++
 		hashDataSize[p][0] += int(pk.Size()) + 8 // pk + ts
 	}
@@ -242,6 +269,104 @@ func GetDeleteStats(task Task, delData *storage.DeleteData) (map[string]*datapb.
 	}
 
 	return res, nil
+}
+
+// vchannelRouter maps a primary key to the index, within task.GetVchannels(),
+// of the shard that owns it.
+//
+// A collection that has been split routes by explicit hash buckets, and no
+// modulo over the vchannel list reproduces them: after a doubling the untouched
+// shard owns {2,1} while its two targets own {4,0} and {4,2}. An import routing
+// by position would put rows on shards that do not own their keys -- invisible
+// to a fan-out read, but a later delete of such a row resolves to the shard that
+// does own the key and finds nothing there.
+//
+// COMPATIBILITY. The legacy hash(pk) % len(vchannels) is kept for every case
+// that is not a split hash collection, and reaching it is never an error:
+//
+//   - the job carries no routing snapshot at all -- a job persisted before this
+//     field existed, or one assembled by an older datacoord in a rolling
+//     upgrade. Its rows must land exactly where that version would have put
+//     them, which is also where its own datanodes are still putting them;
+//   - the collection is range-routed (a namespace collection). Its imports have
+//     always placed rows by primary key, and that is not what this change is
+//     about; deriving its range table here would additionally fail an import
+//     outright whenever the snapshot is absent or momentarily does not tile;
+//   - the collection is hash-routed but has never been split, so no shard
+//     carries a bucket and the modulo IS the routing rule.
+//
+// A snapshot that is PRESENT but does not describe the job's vchannels is not a
+// compatibility case, it is a broken one, and it fails the import rather than
+// quietly routing by position.
+//
+// The index is into the FULL vchannel list, including any shard the routing
+// table excludes (a fenced or retired split source), because the caller's
+// per-channel arrays are sized and indexed by that list.
+func vchannelRouter(task Task, pkField *schemapb.FieldSchema) (func(pk any) (int64, error), error) {
+	vchannels := task.GetVchannels()
+	legacy := func() (func(pk any) (int64, error), error) {
+		fn := hashByVChannel(int64(len(vchannels)), pkField)
+		if fn == nil {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"unsupported primary key type %s for import routing", pkField.GetDataType())
+		}
+		return func(pk any) (int64, error) { return fn(pk), nil }, nil
+	}
+
+	infos := task.GetShardInfos()
+	if len(infos) == 0 {
+		return legacy()
+	}
+
+	shards, err := routing.ShardsFromMeta(vchannels, infos)
+	if err != nil {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"import routing snapshot does not describe the job's vchannels: %s", err.Error())
+	}
+	table, err := routing.Derive(task.GetRoutingModulus(), vchannels, shards)
+	if err != nil {
+		return nil, merr.WrapErrServiceInternalMsg("import routing table is unusable: %s", err.Error())
+	}
+	if !table.IsExplicit() {
+		// Never split: no shard carries residues, and the legacy modulo is what
+		// the collection actually routes by.
+		return legacy()
+	}
+
+	index := make(map[string]int64, len(vchannels))
+	for i, vchannel := range vchannels {
+		index[vchannel] = int64(i)
+	}
+	byHash := func(rawHash uint64) (int64, error) {
+		vchannel, err := table.Route(rawHash)
+		if err != nil {
+			return 0, merr.WrapErrServiceInternal(err.Error())
+		}
+		position, ok := index[vchannel]
+		if !ok {
+			return 0, merr.WrapErrServiceInternalMsg(
+				"shard %q owns the key but is not one of the import's vchannels", vchannel)
+		}
+		return position, nil
+	}
+
+	switch pkField.GetDataType() {
+	case schemapb.DataType_Int64:
+		return func(pk any) (int64, error) {
+			hash, err := typeutil.Hash32Int64(pk.(int64))
+			if err != nil {
+				return 0, err
+			}
+			return byHash(uint64(hash))
+		}, nil
+	case schemapb.DataType_VarChar:
+		return func(pk any) (int64, error) {
+			return byHash(uint64(typeutil.HashString2Uint32(pk.(string))))
+		}, nil
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"unsupported primary key type %s for import routing", pkField.GetDataType())
+	}
 }
 
 func hashByVChannel(channelNum int64, pkField *schemapb.FieldSchema) func(pk any) int64 {

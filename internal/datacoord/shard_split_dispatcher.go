@@ -126,6 +126,10 @@ func (d *inspectorRewriteDispatcher) DispatchHashSplit(
 		Schema:                 collection.Schema,
 		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: segIDBegin, End: segIDEnd},
 		HashSplitTargets:       task.GetTargets(),
+		// Without the modulus the datanode cannot read the residues, and would
+		// partition the rewrite by a different rule than the one the routing
+		// commit published.
+		HashSplitModulus: task.GetRoutingModulus(),
 	}
 	if err := d.inspector.enqueueCompaction(plan); err != nil {
 		return 0, err

@@ -506,8 +506,10 @@ func TestAllocVirtualChannelsForExistingCollection(t *testing.T) {
 		"by-dev-rootcoord-dml_1": {},
 	}
 	for i, vchannel := range vchannels {
-		assert.Equal(t, int64(1), funcutil.GetCollectionIDFromVChannel(vchannel))
-		assert.Equal(t, 2+i, funcutil.GetShardIndexFromVChannel(vchannel))
+		_, collectionID, shardIdx, err := funcutil.ParseVChannel(vchannel)
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), collectionID)
+		assert.Equal(t, 2+i, shardIdx)
 		_, ok := occupied[funcutil.ToPhysicalChannel(vchannel)]
 		assert.False(t, ok, "allocated vchannel %s must not reuse an occupied pchannel", vchannel)
 	}

@@ -321,6 +321,19 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			compactionParams,
 			sortFields,
 		)
+	case datapb.CompactionType_HashSplitCompaction:
+		// The rewrite phase of a hash-routed (primary-key) shard split: one
+		// input segment is repartitioned into one output segment per split
+		// target, each on that target's vchannel.
+		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
+			return merr.Status(merr.WrapErrServiceInternalMsg("invalid pre-allocated segmentID range")), nil
+		}
+		task = compactor.NewHashSplitCompactionTask(
+			taskCtx,
+			io.NewBinlogIO(cm),
+			req,
+			compactionParams,
+		)
 	case datapb.CompactionType_ClusteringCompaction:
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
 			return merr.Status(merr.WrapErrServiceInternalMsg("invalid pre-allocated segmentID range")), nil

@@ -197,6 +197,12 @@ type Task interface {
 	GetCollectionID() int64
 	GetPartitionIDs() []int64
 	GetVchannels() []string
+	// GetShardInfos returns the collection's per-shard routing meta as it stood
+	// when the import job was created, parallel to GetVchannels. Empty for a
+	// collection that has never been split, which keeps routing on the legacy
+	// hash(pk) % shardNum rule.
+	GetShardInfos() []*schemapb.CollectionShardInfo
+	GetRoutingModulus() uint64
 	GetType() TaskType
 	GetState() datapb.ImportTaskStateV2
 	GetReason() string
