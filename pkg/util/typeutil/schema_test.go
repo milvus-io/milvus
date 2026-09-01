@@ -7243,3 +7243,71 @@ func TestMergeDynamicJSONKeepsUntouchedValues(t *testing.T) {
 	assert.Contains(t, string(merged), `"big":12345678901234567890`)
 	assert.Contains(t, string(merged), `"tag":"new"`)
 }
+
+func TestQualifyStructSubFieldNames(t *testing.T) {
+	newSchema := func(names ...string) *schemapb.CollectionSchema {
+		// Two structs that share sub-field names: the case the qualification
+		// exists for.
+		return &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id"}},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{FieldID: 138, Name: "duplicate_radar_struct", Fields: []*schemapb.FieldSchema{
+					{FieldID: 139, Name: names[0]},
+					{FieldID: 141, Name: names[1]},
+				}},
+				{FieldID: 142, Name: "title_struct", Fields: []*schemapb.FieldSchema{
+					{FieldID: 143, Name: names[2]},
+					{FieldID: 145, Name: names[3]},
+				}},
+			},
+		}
+	}
+	subFieldNames := func(s *schemapb.CollectionSchema) []string {
+		var out []string
+		for _, sf := range s.GetStructArrayFields() {
+			for _, f := range sf.GetFields() {
+				out = append(out, f.GetName())
+			}
+		}
+		return out
+	}
+	qualified := []string{
+		"duplicate_radar_struct[chunk_number]",
+		"duplicate_radar_struct[chunk_vector]",
+		"title_struct[chunk_number]",
+		"title_struct[chunk_vector]",
+	}
+
+	t.Run("bare names are qualified", func(t *testing.T) {
+		s := newSchema("chunk_number", "chunk_vector", "chunk_number", "chunk_vector")
+		assert.True(t, QualifyStructSubFieldNames(s))
+		assert.Equal(t, qualified, subFieldNames(s))
+		// Flat fields and field ids are untouched.
+		assert.Equal(t, "id", s.Fields[0].Name)
+		assert.EqualValues(t, 141, s.StructArrayFields[0].Fields[1].FieldID)
+	})
+
+	t.Run("already qualified names are left alone", func(t *testing.T) {
+		s := newSchema(qualified[0], qualified[1], qualified[2], qualified[3])
+		assert.False(t, QualifyStructSubFieldNames(s))
+		assert.Equal(t, qualified, subFieldNames(s))
+	})
+
+	t.Run("a mix is qualified only where needed", func(t *testing.T) {
+		s := newSchema(qualified[0], "chunk_vector", "chunk_number", qualified[3])
+		assert.True(t, QualifyStructSubFieldNames(s))
+		assert.Equal(t, qualified, subFieldNames(s))
+	})
+
+	t.Run("a name qualified for a different struct is not mistaken for qualified", func(t *testing.T) {
+		s := newSchema("title_struct[chunk_number]", "chunk_vector", "chunk_number", "chunk_vector")
+		assert.True(t, QualifyStructSubFieldNames(s))
+		// It belongs to duplicate_radar_struct, so it is qualified under that name.
+		assert.Equal(t, "duplicate_radar_struct[title_struct[chunk_number]]", s.StructArrayFields[0].Fields[0].Name)
+	})
+
+	t.Run("no struct fields is a no-op", func(t *testing.T) {
+		s := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id"}}}
+		assert.False(t, QualifyStructSubFieldNames(s))
+	})
+}
