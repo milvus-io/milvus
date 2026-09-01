@@ -333,7 +333,8 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 			// meta matters: the resolver takes segMu, which this critical section
 			// already holds for writing.
 			// The buildID key lock was taken above, before segMu.
-			staged, err := m.indexMeta.stageSegmentIndexMutation(*indexMutation, true)
+			staged, err := m.indexMeta.stageSegmentIndexMutation(*indexMutation, true,
+				commitPublishesIndexEntry(commit, indexMutation.BuildID))
 			if err != nil {
 				if errors.Is(err, errSegmentIndexRecordGone) {
 					// The task can be dropped while its worker result is in flight.
@@ -377,6 +378,27 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		deferredIndexMetric()
 	}
 	return nil
+}
+
+// commitPublishesIndexEntry reports whether the revision this commit creates
+// carries an index entry for buildID, which is what lets the staged
+// SegmentIndex record be marked ManifestPublished.
+//
+// It reads the mutation rather than trusting the mutation type, because
+// "upsert a SegmentIndex" and "publish that index in the manifest" are separate
+// facts. A Noop mutation publishes a revision this framework did not build and
+// therefore cannot vouch for at all - validateExpectedManifestUsage already
+// refuses to pair one with an upsert, and this returns false for it either way.
+func commitPublishesIndexEntry(commit SegmentManifestCommit, buildID int64) bool {
+	if commit.Mutation.Type != ManifestMutationCommitUpdates || commit.Mutation.Updates == nil {
+		return false
+	}
+	for _, index := range commit.Mutation.Updates.Indexes {
+		if index.BuildID == buildID {
+			return true
+		}
+	}
+	return false
 }
 
 // getSegmentManifestLocks also supports focused unit tests that construct a

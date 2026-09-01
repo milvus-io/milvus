@@ -99,6 +99,13 @@ message SegmentIndex {
     // BUILD_ROOTED (0): index_files/{buildID}/{indexVersion}/{partID}/{segID}/{fileKey}
     // COLLECTION_ROOTED (1): index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}/{fileKey}
     IndexStorePathVersion index_store_path_version = 22;
+    // Whether this build's index entry is recorded in the manifest revision the
+    // segment currently publishes. It is written in the same catalog transaction
+    // that publishes that revision, so true implies the entry is visible.
+    // Records that predate manifest index publication decode as false, which is
+    // what identifies them as still needing to be backfilled into their
+    // segment's manifest.
+    bool manifest_published = 23;
 }
 
 message RegisterNodeRequest {

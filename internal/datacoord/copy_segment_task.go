@@ -1224,12 +1224,27 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 		}
 	}
 	numRows := result.GetImportedRows()
+	// A copy target records its indexes in its own manifest: the worker retracts
+	// the entries inherited from the source and writes the target's own in the
+	// manifest revision this result points at, which
+	// verifyCopiedManifestIndexOwnership has already read back and validated by
+	// the time we get here. Anything else - a StorageV1/V2 target, or a result
+	// carrying no manifest pointer - has no manifest entry, so its record must
+	// stay unpublished.
+	manifestPublished := false
+	backfillPending := false
 	if meta.segments != nil {
 		// StorageV3 bundles intentionally omit legacy PB insert binlogs, so
 		// DataNode cannot derive row count from EntriesNum. The target segment was
 		// pre-registered from snapshot metadata and remains the authoritative value.
 		if segment := meta.GetSegment(ctx, result.GetSegmentId()); segment != nil {
 			numRows = segment.GetNumOfRows()
+			storageV3 := segment.GetStorageVersion() >= storage.StorageV3
+			manifestPublished = storageV3 && result.GetManifestPath() != ""
+			// A StorageV3 target left without a manifest entry is the one shape a
+			// backfill can still fix, so flag it rather than waiting for a restart
+			// to rediscover it from the records.
+			backfillPending = storageV3 && !manifestPublished
 		}
 	}
 
@@ -1265,6 +1280,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			FinishedUTCTime:           uint64(now),
 			NumRows:                   numRows,
 			IndexStorePathVersion:     indexInfo.GetIndexStorePathVersion(),
+			ManifestPublished:         manifestPublished,
 		}
 
 		err := meta.indexMeta.AddSegmentIndex(ctx, segIndex)
@@ -1303,6 +1319,9 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 				mlog.FieldIndexID(targetIndexID),
 				mlog.Int64("sourceIndexID", indexInfo.GetIndexId()),
 				mlog.FieldBuildID(indexInfo.GetBuildId()))...)
+	}
+	if backfillPending {
+		meta.markManifestIndexBackfillPending(result.GetSegmentId())
 	}
 	return nil
 }

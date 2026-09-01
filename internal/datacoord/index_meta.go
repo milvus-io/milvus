@@ -93,6 +93,16 @@ type indexMeta struct {
 	// directly-constructed indexMeta in tests) means "assume not", so the
 	// catalog write always happens.
 	manifestBackedSegment func(segmentID UniqueID) bool
+
+	// onSegmentIndexRemoved lets the segment-level manifest backfill hint be
+	// recomputed after a record disappears, which can be what made the segment
+	// pending. Wired by newMeta; nil in directly-constructed test metas.
+	//
+	// It is invoked under keyLock and takes segMu, matching the
+	// keyLock -> segMu order every other SegmentIndex writer follows. It is
+	// therefore deliberately NOT called from removeSegmentIndexRecordInMemory,
+	// which manifest commits run while already holding segMu.
+	onSegmentIndexRemoved func(segmentID UniqueID)
 }
 
 func (m *indexMeta) skipSegmentIndexEtcdWrite(segmentID UniqueID) bool {
@@ -1254,6 +1264,12 @@ func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) er
 
 	m.removeSegmentIndexInMemory(segIdx)
 
+	if m.onSegmentIndexRemoved != nil {
+		// The removed record may have been the only reason its segment was
+		// flagged for manifest index backfill, so let the hint be recomputed.
+		m.onSegmentIndexRemoved(segIdx.SegmentID)
+	}
+
 	return nil
 }
 
@@ -1340,12 +1356,20 @@ type stagedSegmentIndexMutation struct {
 // a manifest. The caller supplies it rather than letting this resolve it,
 // because the manifest commit holds segMu across this call.
 //
+// entryPublished reports that the manifest revision this commit publishes
+// actually carries an entry for mut.BuildID, and is what marks the record
+// ManifestPublished. The caller derives it from the revision it is committing
+// rather than letting an upsert assume it: a future upsert composed with a
+// revision that does not carry the entry would otherwise silently claim a
+// publication that never happened, and the backfill that consumes the flag
+// would skip the segment forever.
+//
 // Precondition: the caller holds keyLock(mut.BuildID) across this projection,
 // the returned install, and the deferred metric closure install returns. It is
 // acquired by the caller rather than here so that it is ordered before segMu,
 // matching every other SegmentIndex writer; see CommitSegmentManifest's
 // lock-order note.
-func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation, manifestBacked bool) (*stagedSegmentIndexMutation, error) {
+func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation, manifestBacked bool, entryPublished bool) (*stagedSegmentIndexMutation, error) {
 	if mut.BuildID == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("segment index mutation requires a build ID")
 	}
@@ -1390,6 +1414,14 @@ func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation, manifest
 	finished, previousSize, err := m.buildFinishedSegmentIndex(previous, mut.FinishedTask)
 	if err != nil {
 		return staged, err
+	}
+	if entryPublished {
+		// Set, never cleared: the flag records that an entry for this build
+		// exists in a published revision, and a later revision only ever
+		// replaces that entry with a newer one under the same index ID. Clearing
+		// it here would also lose the flag the projection inherited from the
+		// previous record via CloneSegmentIndex.
+		finished.ManifestPublished = true
 	}
 	if !skipStagedSegmentIndexEtcdWrite(manifestBacked) {
 		// When it is skipped, the manifest revision this commit publishes is

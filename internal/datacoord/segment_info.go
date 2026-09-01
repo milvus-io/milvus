@@ -54,6 +54,31 @@ type SegmentInfo struct {
 	lastFlushTime   time.Time
 	isCompacting    bool
 	lastWrittenTime time.Time
+	// manifestIndexBackfillPending is a process-local hint that this segment
+	// holds at least one finished index whose entry is not in its manifest, so a
+	// scan looking for backfill work can answer from the segment record alone
+	// instead of walking every SegmentIndex.
+	//
+	// It is a HINT, deliberately conservative in one direction: it is set
+	// whenever an unpublished finished record can appear and cleared only by a
+	// recompute against the authoritative SegmentIndex records
+	// (meta.refreshManifestIndexBackfillPending). A stale true therefore costs
+	// one extra recompute; a stale false would silently exempt the segment from
+	// the migration, which is why nothing clears it speculatively.
+	//
+	// Not persisted: it is derived from the SegmentIndex records, which reload
+	// rebuilds at startup - see meta.initManifestIndexBackfillPending.
+	manifestIndexBackfillPending bool
+}
+
+// NeedsManifestIndexBackfill reports the backfill hint described on
+// manifestIndexBackfillPending. A true answer means "recheck this segment's
+// index records", not "this segment definitely has work".
+func (s *SegmentInfo) NeedsManifestIndexBackfill() bool {
+	if s == nil {
+		return false
+	}
+	return s.manifestIndexBackfillPending
 }
 
 // EnsureStats returns a non-nil Statistics view for read-only aggregate
@@ -369,11 +394,12 @@ func (s *SegmentInfo) IsStatsLogExists(logID int64) bool {
 func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 	info := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
 	cloned := &SegmentInfo{
-		SegmentInfo:     info,
-		allocations:     s.allocations,
-		lastFlushTime:   s.lastFlushTime,
-		isCompacting:    s.isCompacting,
-		lastWrittenTime: s.lastWrittenTime,
+		SegmentInfo:                  info,
+		allocations:                  s.allocations,
+		lastFlushTime:                s.lastFlushTime,
+		isCompacting:                 s.isCompacting,
+		lastWrittenTime:              s.lastWrittenTime,
+		manifestIndexBackfillPending: s.manifestIndexBackfillPending,
 	}
 	for _, opt := range opts {
 		opt(cloned)
@@ -384,11 +410,12 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 // ShadowClone shadow clone the segment and return a new instance
 func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 	cloned := &SegmentInfo{
-		SegmentInfo:     s.SegmentInfo,
-		allocations:     s.allocations,
-		lastFlushTime:   s.lastFlushTime,
-		isCompacting:    s.isCompacting,
-		lastWrittenTime: s.lastWrittenTime,
+		SegmentInfo:                  s.SegmentInfo,
+		allocations:                  s.allocations,
+		lastFlushTime:                s.lastFlushTime,
+		isCompacting:                 s.isCompacting,
+		lastWrittenTime:              s.lastWrittenTime,
+		manifestIndexBackfillPending: s.manifestIndexBackfillPending,
 	}
 	for _, opt := range opts {
 		opt(cloned)
