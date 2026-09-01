@@ -405,6 +405,79 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 	failReason string,
 	preApply func(*datapb.ExternalCollectionRefreshJob) error,
 ) (bool, error) {
+	return m.updateJobStateWithPreApply(jobID, state, failReason, preApply, jobStateWriteOpts{})
+}
+
+// BeginIndexWait applies the job's segment results and marks it as waiting for
+// those segments to be indexed, in the same transition the Finished path would
+// have used. The job stays InProgress.
+//
+// The two are NOT one catalog write. preApply commits the segment mutations
+// through UpdateSegmentsInfo/AlterSegments, and only after it returns does
+// SaveExternalCollectionRefreshJob persist the marker. The job lock serializes
+// both against any other transition, but it does not make them atomic: a crash
+// between them leaves durable segments with no marker, and recovery rests on
+// the apply being replay-safe - which is what the manifest short-circuits in
+// applyExternalCollectionSegmentUpdateForBaseline provide. This is the same
+// window the Finished transition has always had; the wait does not add one.
+//
+// What the ordering buys is that no state is ever published claiming less than
+// what is durable: the marker appears only after the segments are committed,
+// never before. IndexWaitStartedTime is that field, and the skip predicate
+// below turns it into the apply-once guard - but only because that predicate is
+// evaluated under the job lock. Testing the marker anywhere else, including in
+// the caller, orders nothing.
+func (m *externalCollectionRefreshMeta) BeginIndexWait(
+	jobID int64,
+	preApply func(*datapb.ExternalCollectionRefreshJob) error,
+) (bool, error) {
+	return m.updateJobStateWithPreApply(jobID, indexpb.JobState_JobStateInProgress, "", preApply,
+		jobStateWriteOpts{
+			// The apply-once guard, and the reason it has to live HERE. Every
+			// other transition through this function writes a terminal state,
+			// so the terminal-state check above serializes it for free. This
+			// one stays InProgress, so that check cannot see it: two callers
+			// that both read the job before the marker landed - the eager task
+			// path and the periodic tick, or two tasks of the same job
+			// finishing at once - would both pass and both run the apply.
+			// Checking the marker in the caller does not help; only a read
+			// under this lock is ordered against the write below.
+			skip: func(job *datapb.ExternalCollectionRefreshJob) bool {
+				return job.GetIndexWaitStartedTime() != 0
+			},
+			mutate: func(job *datapb.ExternalCollectionRefreshJob) {
+				job.IndexWaitStartedTime = time.Now().UnixMilli()
+				// Enter the reserved band in the same job write. Two reasons: the
+				// value a poller sees changes phase exactly when the job does,
+				// and no later write is needed to get it out of whatever the
+				// ingest last reported - which could be 100, and an InProgress
+				// job reporting 100 reads as done to a poller waiting for it.
+				job.Progress = indexWaitProgressFloor
+			},
+		})
+}
+
+// jobStateWriteOpts carries the parts of a job state write that only some
+// transitions need.
+type jobStateWriteOpts struct {
+	// skip is evaluated under the job lock, immediately after the
+	// terminal-state check, and reports that this transition has already been
+	// performed. Returning true aborts the write - including preApply - and
+	// reports "not applied" so the caller does not re-run one-time side
+	// effects. A transition that writes a non-terminal state needs this; the
+	// terminal-state check cannot serialize it.
+	skip func(*datapb.ExternalCollectionRefreshJob) bool
+	// mutate adjusts the cloned job just before it is persisted.
+	mutate func(*datapb.ExternalCollectionRefreshJob)
+}
+
+func (m *externalCollectionRefreshMeta) updateJobStateWithPreApply(
+	jobID int64,
+	state indexpb.JobState,
+	failReason string,
+	preApply func(*datapb.ExternalCollectionRefreshJob) error,
+	opts jobStateWriteOpts,
+) (bool, error) {
 	job, ok := m.jobs.Get(jobID)
 	if !ok {
 		return false, merr.WrapErrServiceInternalMsg("job %d not found", jobID)
@@ -422,6 +495,13 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 	if job.GetState() == indexpb.JobState_JobStateFinished ||
 		job.GetState() == indexpb.JobState_JobStateFailed {
 		mlog.Info(m.ctx, "skip update job state with pre-apply, already in terminal state",
+			mlog.Int64("jobID", jobID),
+			mlog.String("currentState", job.GetState().String()),
+			mlog.String("requestedState", state.String()))
+		return false, nil
+	}
+	if opts.skip != nil && opts.skip(job) {
+		mlog.Info(m.ctx, "skip update job state with pre-apply, transition already performed",
 			mlog.Int64("jobID", jobID),
 			mlog.String("currentState", job.GetState().String()),
 			mlog.String("requestedState", state.String()))
@@ -452,6 +532,9 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 	cloneJob := proto.Clone(job).(*datapb.ExternalCollectionRefreshJob)
 	cloneJob.State = state
 	cloneJob.FailReason = failReason
+	if opts.mutate != nil {
+		opts.mutate(cloneJob)
+	}
 	if state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed {
 		cloneJob.EndTime = time.Now().UnixMilli()
 		if state == indexpb.JobState_JobStateFinished {
@@ -477,6 +560,22 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 // UpdateJobProgress updates job progress
 func (m *externalCollectionRefreshMeta) UpdateJobProgress(jobID int64, progress int64) error {
 	_, err := m.mutateJob(jobID, "update job progress", func(job *datapb.ExternalCollectionRefreshJob) (bool, error) {
+		// A terminal job owns its progress: Finished pins 100. Without this a
+		// held-progress write racing the terminal transition - the index wait
+		// and the eager finish run on different goroutines - would leave a
+		// Finished job reporting 95 forever, and pollers waiting for 100 would
+		// never see it.
+		if job.GetState() == indexpb.JobState_JobStateFinished ||
+			job.GetState() == indexpb.JobState_JobStateFailed {
+			return true, nil
+		}
+		// Nothing to persist when the value already matches. Callers compare
+		// against their own snapshot, which can be a tick stale; this is the
+		// authoritative check, and it keeps a job that sits in the index wait
+		// from rewriting the same number every tick.
+		if job.GetProgress() == progress {
+			return true, nil
+		}
 		job.Progress = progress
 		return false, nil
 	})
