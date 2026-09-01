@@ -332,7 +332,7 @@ class ArrayBitmapIndexTest : public testing::Test {
         for (size_t i = 0; i < data_.size() && s.size() < max_vals; i++) {
             auto& array = data_[i];
             for (size_t j = 0; j < array.length() && s.size() < max_vals; ++j) {
-                auto val = array.template get_data<T>(j);
+                auto val = array.template get_data_unchecked<T>(j);
                 if (s.insert(val).second) {
                     test_data.push_back(val);
                 }
@@ -362,7 +362,7 @@ class ArrayBitmapIndexTest : public testing::Test {
                     return false;
                 }
                 for (size_t j = 0; j < array.length(); ++j) {
-                    auto val = array.template get_data<T>(j);
+                    auto val = array.template get_data_unchecked<T>(j);
                     if (s.find(val) != s.end()) {
                         return true;
                     }
@@ -395,7 +395,7 @@ class ArrayBitmapIndexTest : public testing::Test {
                     return false;
                 }
                 for (size_t j = 0; j < array.length(); ++j) {
-                    auto val = array.template get_data<T>(j);
+                    auto val = array.template get_data_unchecked<T>(j);
                     if (s.find(val) != s.end()) {
                         // contains a queried value -> excluded from NotIn
                         return false;
@@ -1314,7 +1314,8 @@ TEST(BitmapIndexArrayNestedTest, NullableNullsBeforeValidUnifiedLoad) {
     boost::filesystem::remove_all(root_path);
 }
 
-// Bug #2: int8/int16 elements are physically stored as int32. get_data<T> must
+// Bug #2: int8/int16 elements are physically stored as int32.
+// get_data_unchecked<T> must
 // take the 4-byte-stride-then-narrow branch; the old code fell through to a
 // 1-byte reinterpret for int8_t/int16_t and produced garbage values during the
 // nested build. Build a typed nested bitmap and confirm element values index

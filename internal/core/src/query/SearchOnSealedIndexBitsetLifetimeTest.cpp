@@ -1413,4 +1413,63 @@ TEST(SearchOnSealedColumnBitsetLifetime,
     AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count, 0);
 }
 
+TEST(ElementNullableVectorArraySearch, RejectsUnsupportedRepresentation) {
+    auto schema = std::make_shared<Schema>();
+    auto primary_key = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(primary_key);
+    auto vector_array =
+        schema->AddDebugVectorArrayField("vectors",
+                                         DataType::VECTOR_FLOAT,
+                                         kDim,
+                                         knowhere::metric::L2,
+                                         /*nullable=*/false,
+                                         /*element_nullable=*/true);
+
+    SearchInfo search_info;
+    search_info.field_id_ = vector_array;
+    search_info.topk_ = 1;
+    search_info.round_decimal_ = -1;
+    search_info.metric_type_ = knowhere::metric::L2;
+    std::vector<float> query(kDim, 0.0F);
+
+    segcore::SealedIndexingEntry entry;
+    SearchResult sealed_index_result;
+    EXPECT_ANY_THROW(SearchOnSealedIndex(*schema,
+                                         entry,
+                                         search_info,
+                                         query.data(),
+                                         nullptr,
+                                         1,
+                                         BitsetView{},
+                                         nullptr,
+                                         sealed_index_result));
+
+    SearchResult sealed_column_result;
+    EXPECT_ANY_THROW(SearchOnSealedColumn(*schema,
+                                          nullptr,
+                                          search_info,
+                                          {},
+                                          query.data(),
+                                          nullptr,
+                                          1,
+                                          0,
+                                          BitsetView{},
+                                          nullptr,
+                                          sealed_column_result));
+
+    auto segment = segcore::CreateGrowingSegment(schema, empty_index_meta);
+    auto* growing = dynamic_cast<segcore::SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+    SearchResult growing_result;
+    EXPECT_ANY_THROW(SearchOnGrowing(*growing,
+                                     search_info,
+                                     query.data(),
+                                     nullptr,
+                                     1,
+                                     MAX_TIMESTAMP,
+                                     BitsetView{},
+                                     nullptr,
+                                     growing_result));
+}
+
 }  // namespace milvus::query

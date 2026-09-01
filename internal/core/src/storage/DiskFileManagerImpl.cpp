@@ -875,7 +875,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
             if (offsets != nullptr) {
                 // Add cumulative offset (number of vectors processed so far)
                 size_t last_offset = offsets->back();
-                offsets->push_back(last_offset + vec_array->length());
+                offsets->push_back(last_offset + vec_array->physical_length());
             }
 
             if (size > 0) {

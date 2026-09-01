@@ -172,6 +172,12 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     // step 1.2: get which vector field to search
     auto vecfield_id = info.field_id_;
     auto& field = (*schema)[vecfield_id];
+    if (field.get_data_type() == DataType::VECTOR_ARRAY &&
+        field.is_element_nullable()) {
+        ThrowInfo(NotImplemented,
+                  "search on element-nullable VECTOR_ARRAY fields is not "
+                  "supported");
+    }
     CheckBruteForceSearchParam(field, info);
 
     auto data_type = field.get_data_type();
@@ -428,7 +434,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                             milvus::fastmem::FastMemcpy(
                                 ptr, vec_ptr[i].data(), vec_ptr[i].byte_size());
                             ptr += vec_ptr[i].byte_size();
-                            count += vec_ptr[i].length();
+                            count += vec_ptr[i].physical_length();
                         }
                         sub_data = query::dataset::RawDataset{
                             cumulative_element_offset, dim, count, buf.get()};
@@ -445,7 +451,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                 ptr, vec_ptr[i].data(), vec_ptr[i].byte_size());
                             ptr += vec_ptr[i].byte_size();
 
-                            offset += vec_ptr[i].length();
+                            offset += vec_ptr[i].physical_length();
                             offsets.push_back(offset);
                         }
                         sub_data = query::dataset::RawDataset{range_begin,

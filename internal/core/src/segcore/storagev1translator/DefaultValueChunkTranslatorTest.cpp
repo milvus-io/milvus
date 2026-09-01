@@ -487,6 +487,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestArrayType) {
                          DataType::ARRAY,
                          DataType::INT32,
                          false,
+                         false,
                          std::nullopt);
 
     FieldDataInfo field_data_info(902, row_count, getMmapDirPath());
@@ -1102,7 +1103,8 @@ TEST_P(DefaultValueChunkTranslatorTest, TestNullableVectorArray) {
                          DataType::VECTOR_FLOAT,
                          dim,
                          std::nullopt,  // metric_type
-                         true);         // nullable
+                         true,          // nullable
+                         false);        // element_nullable
 
     FieldDataInfo field_data_info(1302, row_count, getMmapDirPath());
 

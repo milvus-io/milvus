@@ -234,7 +234,7 @@ CopyLeafRow(ColumnarArrayBuildNode& node,
     const auto row_size = row.size();
     if (IsStringDataType(data_type)) {
         for (size_t i = 0; i < row_size; ++i) {
-            const auto value = row.get_data<std::string_view>(i);
+            const auto value = row.get_data_unchecked<std::string_view>(i);
             node.string_data.append(value);
             node.string_offsets.push_back(
                 static_cast<uint32_t>(node.string_data.size()));
@@ -445,7 +445,8 @@ BuildNodeFromViews(const std::vector<ArrayValueView>& rows,
             child_count += GetLeafElementCount(row, node->leaf_type);
             if (is_string_leaf) {
                 for (size_t i = 0; i < row.size(); ++i) {
-                    const auto value = row.get_data<std::string_view>(i);
+                    const auto value =
+                        row.get_data_unchecked<std::string_view>(i);
                     AssertInfo(
                         value.size() <= std::numeric_limits<uint32_t>::max() -
                                             string_data_size,

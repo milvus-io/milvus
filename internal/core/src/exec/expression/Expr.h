@@ -1205,8 +1205,8 @@ class SegmentExpr : public Expr {
             // String elements are not contiguous values, and INT8/INT16 are
             // physically stored as INT32. Normalize them one at a time.
             for (int32_t i = 0; i < length; ++i) {
-                auto value =
-                    row.template get_data<ElementType>(first_element + i);
+                auto value = row.template get_data_unchecked<ElementType>(
+                    first_element + i);
                 consume(&value, ValidityView{}, 1);
             }
         } else {

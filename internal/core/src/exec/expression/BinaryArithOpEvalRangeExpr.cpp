@@ -810,26 +810,26 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             "division or modulus by zero in Array field arithmetic expression");
     }
 
-#define BinaryArithRangeArrayCompare(cmp)                       \
-    do {                                                        \
-        for (size_t i = 0; i < size; ++i) {                     \
-            auto offset = i;                                    \
-            if constexpr (filter_type == FilterType::random) {  \
-                offset = (offsets) ? offsets[i] : i;            \
-            }                                                   \
-            if (valid_data && !valid_data[offset]) {            \
-                res[i] = false;                                 \
-                valid_res[i] = false;                           \
-                continue;                                       \
-            }                                                   \
-            if (index >= data[offset].length()) {               \
-                res[i] = false;                                 \
-                valid_res[i] = false;                           \
-                continue;                                       \
-            }                                                   \
-            auto value = data[offset].get_data<GetType>(index); \
-            res[i] = (cmp);                                     \
-        }                                                       \
+#define BinaryArithRangeArrayCompare(cmp)                                 \
+    do {                                                                  \
+        for (size_t i = 0; i < size; ++i) {                               \
+            auto offset = i;                                              \
+            if constexpr (filter_type == FilterType::random) {            \
+                offset = (offsets) ? offsets[i] : i;                      \
+            }                                                             \
+            if (valid_data && !valid_data[offset]) {                      \
+                res[i] = false;                                           \
+                valid_res[i] = false;                                     \
+                continue;                                                 \
+            }                                                             \
+            if (index >= data[offset].length()) {                         \
+                res[i] = false;                                           \
+                valid_res[i] = false;                                     \
+                continue;                                                 \
+            }                                                             \
+            auto value = data[offset].get_data_unchecked<GetType>(index); \
+            res[i] = (cmp);                                               \
+        }                                                                 \
     } while (false)
 
     auto execute_sub_batch =

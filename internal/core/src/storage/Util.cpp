@@ -398,7 +398,7 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                                "Failed to append list: {}",
                                status.ToString());
 
-                    int num_vectors = array.length();
+                    int num_vectors = array.physical_length();
                     if (num_vectors > 0) {
                         auto ast = value_builder->AppendValues(
                             reinterpret_cast<const uint8_t*>(array.data()),
