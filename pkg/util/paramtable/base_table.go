@@ -24,13 +24,12 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // UniqueID is type alias of typeutil.UniqueID

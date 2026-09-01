@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // checkInterval is the polling interval of the gate-processing loop. The
@@ -138,10 +139,10 @@ func (c *Confirmator) registerGate(key string, switcher *VersionGateSwitcher) er
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.started {
-		return errors.New("version gate: register gate after start is not supported")
+		return merr.WrapErrServiceInternal("version gate: register gate after start is not supported")
 	}
 	if switcher == nil {
-		return errors.New("version gate: nil switcher")
+		return merr.WrapErrServiceInternal("version gate: nil switcher")
 	}
 	if _, err := semver.Parse(switcher.GateVersion); err != nil {
 		return errors.Wrapf(err, "version gate: parse gate version %s", switcher.GateVersion)
@@ -160,7 +161,7 @@ func (c *Confirmator) start(ctx context.Context) error {
 	c.mu.Lock()
 	if c.started {
 		c.mu.Unlock()
-		return errors.New("version gate: already started")
+		return merr.WrapErrServiceInternal("version gate: already started")
 	}
 	c.started = true
 	c.mu.Unlock()
@@ -436,7 +437,7 @@ func (c *Confirmator) flip(ctx context.Context, g *gate) error {
 				zap.String("key", g.key), zap.String("value", cur))
 			return nil
 		}
-		return errors.New("version gate: config flip CAS failed, value unchanged")
+		return merr.WrapErrServiceInternal("version gate: config flip CAS failed, value unchanged")
 	}
 	// Make the flip visible in this process immediately instead of waiting for
 	// the periodic config refresher.
