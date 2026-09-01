@@ -154,6 +154,21 @@ func manifestIndexFilePathInfo(segmentID int64, manifestIndex packed.ManifestInd
 	}, true
 }
 
+// validateManifestIndexPublishable is the writer-side twin of
+// manifestIndexFilePathInfo: an entry the fail-closed readers (GC's
+// retraction resolve, the startup reload) would refuse can neither be served
+// nor retired, so no writer may commit one. It applies the exact reader
+// predicate rather than restating the field checks, so writer and readers
+// cannot drift apart.
+func validateManifestIndexPublishable(segmentID int64, manifestIndex packed.ManifestIndexInfo) error {
+	if _, ok := manifestIndexFilePathInfo(segmentID, manifestIndex); !ok {
+		return merr.WrapErrServiceInternalMsg(
+			"refusing to publish unusable index entry for segment %d: indexID %d buildID %d indexName %q",
+			segmentID, manifestIndex.IndexID, manifestIndex.BuildID, manifestIndex.IndexName)
+	}
+	return nil
+}
+
 func manifestIndexParams(manifestIndex packed.ManifestIndexInfo) []*commonpb.KeyValuePair {
 	properties := make(map[string]string, len(manifestIndex.Properties)+1)
 	for key, value := range manifestIndex.Properties {

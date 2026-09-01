@@ -925,3 +925,143 @@ func TestDroppedSegmentKeepsSegmentIndexEtcdWrite(t *testing.T) {
 		"a dropped segment publishes no manifest entry and the reload skips it, so the etcd write must not be withheld")
 	assert.False(t, m.indexMeta.skipSegmentIndexEtcdWrite(droppedID))
 }
+
+// seedUnpublishedBuild is seedRestartFixture up to but not including the
+// publish: the segment, an index definition with the given name, and an
+// in-flight build record - the state a build is in when its worker result
+// arrives.
+func seedUnpublishedBuild(t *testing.T, m *meta, indexName string) {
+	t.Helper()
+	ctx := context.TODO()
+	basePath := "/tmp/test-restart/insert_log/300/30/8001"
+
+	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             restartSegID,
+		CollectionID:   restartCollID,
+		PartitionID:    restartPartID,
+		State:          commonpb.SegmentState_Flushed,
+		NumOfRows:      1000,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+	})))
+	require.NoError(t, m.indexMeta.CreateIndex(ctx, &model.Index{
+		CollectionID: restartCollID,
+		FieldID:      restartFieldID,
+		IndexID:      restartIndexID,
+		IndexName:    indexName,
+		TypeParams:   []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
+		IndexParams:  []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}},
+	}))
+	require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+		CollectionID:          restartCollID,
+		PartitionID:           restartPartID,
+		SegmentID:             restartSegID,
+		NumRows:               1000,
+		IndexID:               restartIndexID,
+		BuildID:               restartBuildID,
+		IndexVersion:          1,
+		IndexState:            commonpb.IndexState_InProgress,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+	}))
+}
+
+// A user can drop an index while its build is in flight: GC's
+// recycleUnusedIndexes removes the definition without waiting for the build,
+// while the non-terminal SegmentIndex record survives recycleUnusedSegIndexes.
+// The manifest entry is named from the definition, so publishing the late
+// Finished result would mint an IndexName-less entry that every fail-closed
+// reader rejects - GC could never retire it, and with SegmentIndex etcd
+// writes off the reload would abort every DataCoord restart. The publish must
+// decline, and setJobInfo must record the result the legacy way so the record
+// goes terminal and dies with the ordinary dropped-index GC path.
+func TestPublishIndexToManifestDeclinesDroppedIndexDefinition(t *testing.T) {
+	withSegmentIndexEtcdWrites(t, true)
+	store := newFakeManifestStore(t)
+	ctx := context.TODO()
+
+	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	m := bootMetaForRestart(t, catalog, restartCollID)
+	seedUnpublishedBuild(t, m, "vec_idx")
+
+	// The drop that races the build: definition gone, build record still live.
+	require.NoError(t, m.indexMeta.RemoveIndex(ctx, restartCollID, restartIndexID))
+	require.False(t, m.indexMeta.IsIndexExist(restartCollID, restartIndexID))
+
+	segIdx, ok := m.indexMeta.GetIndexJob(restartBuildID)
+	require.True(t, ok)
+	it := newIndexBuildTask(segIdx, 1, m, nil, nil, nil)
+	result := &workerpb.IndexTaskInfo{
+		BuildID:               restartBuildID,
+		State:                 commonpb.IndexState_Finished,
+		IndexFileKeys:         []string{"0", "1"},
+		SerializedSize:        4096,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+	}
+
+	published, err := it.publishIndexToManifest(result)
+	require.NoError(t, err)
+	require.False(t, published, "a build whose index definition was dropped must not take ownership of the result")
+	assert.Empty(t, store.revisions, "no manifest commit may be issued for a dropped index")
+
+	// setJobInfo therefore takes the legacy FinishTask path; the terminal
+	// record is what lets recycleUnusedSegIndexes retire the build.
+	require.NoError(t, it.setJobInfo(result))
+	assert.Empty(t, store.revisions)
+	finished, ok := m.indexMeta.GetIndexJob(restartBuildID)
+	require.True(t, ok)
+	assert.Equal(t, commonpb.IndexState_Finished, finished.IndexState)
+	assert.Equal(t, []string{"0", "1"}, finished.IndexFileKeys)
+}
+
+// The writer-side backstop behind the gate above: an entry the fail-closed
+// readers would refuse - here one whose definition still exists but carries an
+// empty IndexName - must fail the publish attempt with an error rather than
+// commit, and rather than silently falling back to the legacy path.
+func TestPublishIndexToManifestRejectsUnusableEntry(t *testing.T) {
+	withSegmentIndexEtcdWrites(t, true)
+	store := newFakeManifestStore(t)
+
+	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	m := bootMetaForRestart(t, catalog, restartCollID)
+	// A definition with an empty name: IsIndexExist passes, but the entry
+	// built from it is one every manifest reader rejects.
+	seedUnpublishedBuild(t, m, "")
+
+	segIdx, ok := m.indexMeta.GetIndexJob(restartBuildID)
+	require.True(t, ok)
+	it := newIndexBuildTask(segIdx, 1, m, nil, nil, nil)
+
+	published, err := it.publishIndexToManifest(&workerpb.IndexTaskInfo{
+		BuildID:               restartBuildID,
+		State:                 commonpb.IndexState_Finished,
+		IndexFileKeys:         []string{"0", "1"},
+		SerializedSize:        4096,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+	})
+	require.Error(t, err, "an entry the readers would refuse must fail the publish, not commit or fall back")
+	require.False(t, published)
+	assert.Contains(t, err.Error(), "unusable index entry")
+	assert.Empty(t, store.revisions, "the unusable entry must never reach the manifest")
+}
+
+// validateManifestIndexPublishable must apply exactly the reader predicate.
+func TestValidateManifestIndexPublishable(t *testing.T) {
+	good := packed.ManifestIndexInfo{
+		IndexID:               500,
+		BuildID:               5100,
+		IndexName:             "idx",
+		IndexType:             "HNSW",
+		Path:                  "root/index/100/10/5001/5100/1",
+		IndexFileKeys:         []string{"0"},
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+	}
+	require.NoError(t, validateManifestIndexPublishable(5001, good))
+
+	nameless := good
+	nameless.IndexName = ""
+	require.Error(t, validateManifestIndexPublishable(5001, nameless))
+
+	pathless := good
+	pathless.Path = ""
+	require.Error(t, validateManifestIndexPublishable(5001, pathless))
+}
