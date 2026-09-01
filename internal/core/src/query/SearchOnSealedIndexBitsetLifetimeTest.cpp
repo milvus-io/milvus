@@ -1148,11 +1148,37 @@ TEST(SearchOnGrowingSnapshot,
     AssertDirectGrowingFallbackUsesACompatibleSnapshot(true);
 }
 
+// Pins the legacy synchronous growing-index build: this helper asserts
+// SyncDataWithIndex() right after the threshold-crossing insert, which is a
+// statement about bitset lifetime with a synced index, not about build
+// timing. When asyncGrowingBuild is enabled, the sync flag flips later on a
+// background thread; async build semantics are covered by
+// GrowingIndexAsyncBuildTest.
+class ScopedSyncGrowingBuild {
+ public:
+    explicit ScopedSyncGrowingBuild(segcore::SegcoreConfig& config)
+        : config_(config),
+          previous_(config.get_enable_async_growing_index_build()) {
+        config_.set_enable_async_growing_index_build(false);
+    }
+    ~ScopedSyncGrowingBuild() {
+        config_.set_enable_async_growing_index_build(previous_);
+    }
+    ScopedSyncGrowingBuild(const ScopedSyncGrowingBuild&) = delete;
+    ScopedSyncGrowingBuild&
+    operator=(const ScopedSyncGrowingBuild&) = delete;
+
+ private:
+    segcore::SegcoreConfig& config_;
+    bool previous_;
+};
+
 void
 AssertGrowingIndexEmptyBitsetHonorsPlannedPrefix(bool nullable) {
     constexpr int64_t initial_count = 64;
     constexpr int64_t appended_count = 32;
     SCOPED_TRACE(nullable ? "nullable" : "non-nullable");
+    ScopedSyncGrowingBuild sync_build(segcore::SegcoreConfig::default_config());
 
     auto schema = std::make_shared<Schema>();
     auto vector_field = schema->AddDebugField(
