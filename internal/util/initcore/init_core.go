@@ -782,11 +782,6 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
-		paramtable.Get().QueryNodeCfg.TakeForOutputResultCountLimit.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
-			SyncTakeForOutputResultCountLimit(paramtable.Get())
-			return nil
-		})
-
 		paramtable.Get().QueryNodeCfg.InterimIndexGrowingBuildThreadRate.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			rate, err := strconv.ParseFloat(newValue, 32)
 			if err != nil {

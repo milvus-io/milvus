@@ -9528,18 +9528,8 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     milvus::OpContext* op_ctx) const {
     auto snapshot = CapturePublishedState();
     auto schema_snapshot = snapshot->schema;
-    if (size == 0 || !snapshot->use_take_for_output) {
-        return false;
-    }
-    auto result_count_limit = SegcoreConfig::default_config()
-                                  .get_take_for_output_result_count_limit();
-    if (result_count_limit > 0 && size > result_count_limit) {
-        LOG_DEBUG(
-            "[TakeAPI] retrieve skipped take() for segment {} because "
-            "result count {} exceeds limit {}",
-            id_,
-            size,
-            result_count_limit);
+    if (size == 0 || !snapshot->use_take_for_output ||
+        !plan->take_for_output_allowed_) {
         return false;
     }
     const bool is_external_collection =
@@ -9829,22 +9819,9 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
                                            milvus::OpContext* op_ctx) const {
     auto snapshot = CapturePublishedState();
     auto schema_snapshot = snapshot->schema;
-    if (size == 0 || !snapshot->use_take_for_output) {
+    if (size == 0 || !snapshot->use_take_for_output ||
+        !plan->take_for_output_allowed_) {
         return false;
-    }
-    auto result_count_limit = SegcoreConfig::default_config()
-                                  .get_take_for_output_result_count_limit();
-    if (plan->plan_node_ != nullptr) {
-        auto topk = plan->plan_node_->search_info_.topk_;
-        if (result_count_limit > 0 && topk > result_count_limit) {
-            LOG_DEBUG(
-                "[TakeAPI] search skipped take() for segment {} because "
-                "topk {} exceeds limit {}",
-                id_,
-                topk,
-                result_count_limit);
-            return false;
-        }
     }
     const bool is_external_collection =
         schema_snapshot->is_external_collection();
@@ -9876,16 +9853,6 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
     }
 
     auto ctx = BuildTakeContext(seg_offsets, size);
-    if (result_count_limit > 0 &&
-        ctx.unique_offsets.size() > static_cast<size_t>(result_count_limit)) {
-        LOG_DEBUG(
-            "[TakeAPI] search skipped take() for segment {} because "
-            "unique offset count {} exceeds limit {}",
-            id_,
-            ctx.unique_offsets.size(),
-            result_count_limit);
-        return false;
-    }
     if (SegcoreConfig::default_config().get_reject_remote_vector_output() &&
         has_vector_output) {
         LogTakeFallback("search",

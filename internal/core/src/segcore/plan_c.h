@@ -44,6 +44,12 @@ GetNumOfQueries(CPlaceholderGroup placeholder_group);
 int64_t
 GetTopK(CSearchPlan plan);
 
+int64_t
+GetGroupSize(CSearchPlan plan);
+
+void
+SetSearchPlanTakeForOutputAllowed(CSearchPlan plan, bool allowed);
+
 CStatus
 GetFieldID(CSearchPlan plan, int64_t* field_id);
 
@@ -70,6 +76,9 @@ CreateRetrievePlanByExpr(CCollection c_col,
 
 void
 DeleteRetrievePlan(CRetrievePlan plan);
+
+void
+SetRetrievePlanTakeForOutputAllowed(CRetrievePlan plan, bool allowed);
 
 bool
 ShouldIgnoreNonPk(CRetrievePlan plan);
