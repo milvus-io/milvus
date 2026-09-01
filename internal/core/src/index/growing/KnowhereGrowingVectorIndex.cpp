@@ -611,8 +611,12 @@ KnowhereGrowingVectorIndex<T>::BuildAndCatchUp() {
         BuildHook(GrowingBuildPhase::kBeforeFinalize);
         std::lock_guard lock(writer_mutex_);
         const auto gap = accepted_row_end_ - logical;
+        // No newly accepted vector does not mean no work: advancing a
+        // nullable IdMap still materializes and consumes a logical bitmap.
+        // Drain a null-only tail in the next unlocked slice.
         if (gap != 0 &&
-            (gap > slice || drained == 0 ||
+            (accepted_physical_count_ == physical || gap > slice ||
+             drained == 0 ||
              gap * elapsed / drained > async_build_.finalize_budget_ms)) {
             continue;
         }

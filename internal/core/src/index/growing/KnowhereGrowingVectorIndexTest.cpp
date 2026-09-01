@@ -86,6 +86,7 @@ class WriterPause {
 };
 
 struct NativeControl {
+    WriterPause build;
     WriterPause add;
     std::atomic<int> adds{0};
     std::atomic<bool> fail_publication_after_add{false};
@@ -111,6 +112,7 @@ class ControlledVectorNode final : public knowhere::IndexNode {
           std::shared_ptr<knowhere::Config> cfg,
           bool use_pool,
           milvus::OpContext* ctx) override {
+        control_->build.Enter();
         return inner_.Node()->Build(dataset, std::move(cfg), use_pool, ctx);
     }
 
@@ -245,6 +247,11 @@ class TestVectorSource final : public GrowingVectorSource<float> {
 
 class KnowhereGrowingVectorIndexTest : public ::testing::Test {
  protected:
+    virtual GrowingBuildOptions
+    BuildOptions() const {
+        return {};
+    }
+
     void
     SetUp() override {
         static std::atomic<int> next_id{0};
@@ -272,7 +279,9 @@ class KnowhereGrowingVectorIndexTest : public ::testing::Test {
                            {knowhere::meta::NUM_BUILD_THREAD, "1"}},
             knowhere::Json{{knowhere::indexparam::NPROBE, "1"}},
             source_,
-            false);
+            false,
+            std::function<int64_t()>{},
+            BuildOptions());
         owner_ = owner.get();
         segcore::GrowingIndexSet::AppenderMap staged;
         staged.emplace(field_,
@@ -342,6 +351,47 @@ TEST_F(KnowhereGrowingVectorIndexTest, PublicationRetryStaysOnFlush) {
     owner_->Flush();
     EXPECT_EQ(control_->adds.load(), 1);
     EXPECT_EQ(Pin().CoveredRowEnd(), 5);
+}
+
+class AsyncGrowingVectorIndexTest : public KnowhereGrowingVectorIndexTest {
+ protected:
+    GrowingBuildOptions
+    BuildOptions() const override {
+        return {.enabled = true};
+    }
+};
+
+TEST_F(AsyncGrowingVectorIndexTest,
+       FlushWaitsForNullOnlyTailBeforePublication) {
+    control_->build.Arm();
+    FirstBatch();
+    const bool entered = control_->build.WaitUntilEntered();
+    if (!entered) {
+        control_->build.Release();
+        FAIL() << "background build did not reach the native engine";
+    }
+    // Longer than one staging slice but no new physical vectors. Flush is
+    // the boundary used by load/reopen; a query in the meantime gets no pin.
+    constexpr int64_t tail_rows = (1 << 20) + 17;
+    const auto nulls = std::make_unique<bool[]>(tail_rows);
+    owner_->Append(4, VectorBatch<float>{tail_rows, nullptr, 2, nulls.get()});
+    auto flush = std::async(std::launch::async, [&] { owner_->Flush(); });
+    EXPECT_EQ(flush.wait_for(std::chrono::milliseconds(20)),
+              std::future_status::timeout);
+    EXPECT_FALSE(Pin());
+    control_->build.Release();
+    flush.get();
+    const auto pin = Pin();
+    ASSERT_TRUE(pin);
+    EXPECT_EQ(pin.CoveredRowEnd(), 4 + tail_rows);
+    EXPECT_EQ(pin.Reader().Count(), 2);
+    const bool valid = true;
+    owner_->Append(
+        4 + tail_rows,
+        VectorBatch<float>{1, source_->values.data() + 4, 2, &valid});
+    EXPECT_EQ(Pin().CoveredRowEnd(), 5 + tail_rows);
+    EXPECT_EQ(Pin().Reader().Count(), 3);
+    EXPECT_EQ(pin.CoveredRowEnd(), 4 + tail_rows);
 }
 
 }  // namespace
