@@ -25,11 +25,12 @@ import (
 	"sync"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // UniqueID is type alias of typeutil.UniqueID
