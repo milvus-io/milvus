@@ -224,6 +224,11 @@ func (p *ComponentParam) initVersionGates() {
 			}
 			if common.Version.GE(gv) {
 				item.VersionGateSwitcher.localSatisfied = true
+				// GetAs* accessors short-circuit on the value cache, which is
+				// keyed by config key only and is blind to the runtime
+				// localSatisfied hint, so evict the cached entry to make the
+				// resolved value observable immediately.
+				p.baseTable.mgr.EvictCachedValue(item.Key)
 				log.Info("version gate: embedded-etcd deployment, local version satisfies the gate",
 					zap.String("key", item.Key), zap.String("localVersion", common.Version.String()),
 					zap.String("gateVersion", item.VersionGateSwitcher.GateVersion))
