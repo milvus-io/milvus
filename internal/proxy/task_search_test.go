@@ -5890,6 +5890,76 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 	})
 }
 
+func TestSearchTaskHybridSearchSubRequestFunctionScore(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	schema := &schemapb.CollectionSchema{
+		Name: "test_hybrid_sub_request_function_score",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+		},
+	}
+
+	placeholderGroup, err := proto.Marshal(&commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{{
+			Tag:    "$0",
+			Type:   commonpb.PlaceholderType_FloatVector,
+			Values: [][]byte{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
+		}},
+	})
+	require.NoError(t, err)
+
+	subRequestFunctionScore := &schemapb.FunctionScore{
+		Functions: []*schemapb.FunctionSchema{{
+			Type: schemapb.FunctionType_Rerank,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "reranker", Value: "boost"},
+				{Key: "weight", Value: "2.0"},
+			},
+		}},
+	}
+	subRequest := &milvuspb.SearchRequest{
+		Nq: 1,
+		SearchParams: []*commonpb.KeyValuePair{
+			{Key: AnnsFieldKey, Value: "vec"},
+			{Key: TopKKey, Value: "10"},
+			{Key: common.MetricTypeKey, Value: metric.L2},
+			{Key: ParamsKey, Value: `{"nprobe": 10}`},
+		},
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: placeholderGroup},
+	}
+	boostSubRequest := proto.Clone(subRequest).(*milvuspb.SearchRequest)
+	boostSubRequest.FunctionScore = subRequestFunctionScore
+
+	searchRequest, subReqFunctionScores := convertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
+		CollectionName: "test_hybrid_sub_request_function_score",
+		RankParams:     []*commonpb.KeyValuePair{{Key: LimitKey, Value: "10"}},
+		Requests:       []*milvuspb.SearchRequest{subRequest, boostSubRequest},
+	})
+
+	task := &searchTask{
+		ctx:                    ctx,
+		collectionName:         searchRequest.GetCollectionName(),
+		SearchRequest:          &internalpb.SearchRequest{CollectionID: 1, PartitionIDs: []int64{1}, OutputFieldsId: []int64{100}},
+		request:                searchRequest,
+		subReqFunctionScores:   subReqFunctionScores,
+		schema:                 mustNewSchemaInfo(schema),
+		translatedOutputFields: []string{"pk"},
+		tr:                     timerecord.NewTimeRecorder("test"),
+	}
+
+	require.NoError(t, task.initAdvancedSearchRequest(ctx))
+	require.Len(t, task.SubReqs, 2)
+	firstPlan := &planpb.PlanNode{}
+	require.NoError(t, proto.Unmarshal(task.SubReqs[0].GetSerializedExprPlan(), firstPlan))
+	assert.Empty(t, firstPlan.GetScorers())
+	secondPlan := &planpb.PlanNode{}
+	require.NoError(t, proto.Unmarshal(task.SubReqs[1].GetSerializedExprPlan(), secondPlan))
+	require.Len(t, secondPlan.GetScorers(), 1)
+	assert.Equal(t, float64(2), secondPlan.GetScorers()[0].GetWeight())
+}
+
 func TestSearchTask_AddHighlightTask(t *testing.T) {
 	paramtable.Init()
 

@@ -1155,7 +1155,7 @@ func getGroupScorerStr(params []*commonpb.KeyValuePair) string {
 	return groupScorerStr
 }
 
-func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.SearchRequest {
+func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) (*milvuspb.SearchRequest, []*schemapb.FunctionScore) {
 	ret := &milvuspb.SearchRequest{
 		Base:                  req.GetBase(),
 		DbName:                req.GetDbName(),
@@ -1174,6 +1174,7 @@ func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.Se
 		SubReqs:               nil,
 		FunctionScore:         req.FunctionScore,
 	}
+	subReqFunctionScores := make([]*schemapb.FunctionScore, 0, len(req.GetRequests()))
 
 	for _, sub := range req.GetRequests() {
 		subReq := &milvuspb.SubSearchRequest{
@@ -1185,8 +1186,9 @@ func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.Se
 			ExprTemplateValues: sub.GetExprTemplateValues(),
 		}
 		ret.SubReqs = append(ret.SubReqs, subReq)
+		subReqFunctionScores = append(subReqFunctionScores, sub.GetFunctionScore())
 	}
-	return ret
+	return ret, subReqFunctionScores
 }
 
 func getMetricType(toReduceResults []*internalpb.SearchResults) string {
