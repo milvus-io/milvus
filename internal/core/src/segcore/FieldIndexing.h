@@ -339,6 +339,11 @@ class VectorFieldIndexing : public FieldIndexing {
  private:
     void
     recreate_index(DataType data_type, const VectorBase* field_raw_data);
+
+    // Number of threads a single growing index build/add may use, derived from
+    // queryNode.segcore.interimIndex.growingBuildThreadRate.
+    int64_t
+    resolve_build_thread_num() const;
     // current number of rows in index.
     std::atomic<idx_t> index_cur_ = 0;
     // whether the growing index has been built.

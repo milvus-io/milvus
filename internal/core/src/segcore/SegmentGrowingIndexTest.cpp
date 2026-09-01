@@ -10,8 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <limits>
 
 #include "common/Utils.h"
+#include "knowhere/comp/knowhere_config.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "query/Plan.h"
@@ -433,6 +435,172 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
         EXPECT_EQ(index->Count(), (add_cont + 1) * N);
     } else {
         throw std::invalid_argument("Unsupported data type");
+    }
+}
+
+TEST(GrowingIndexBuildThreadRateTest, ResolvedAgainstBuildThreadPoolSize) {
+    constexpr int64_t dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "embeddings", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+
+    std::map<std::string, std::string> index_params = {
+        {"index_type", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+        {"metric_type", knowhere::metric::L2},
+        {"nlist", "128"}};
+    std::map<std::string, std::string> type_params = {
+        {"dim", std::to_string(dim)}};
+    FieldIndexMeta field_index_meta(
+        vec, std::move(index_params), std::move(type_params));
+    std::map<FieldId, FieldIndexMeta> field_map = {{vec, field_index_meta}};
+    IndexMetaPtr meta_ptr =
+        std::make_shared<CollectionIndexMeta>(226985, std::move(field_map));
+
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    InterimIndexConfigForTest interim_config;
+    interim_config.chunk_rows = 1024;
+    ApplyInterimIndexConfigForTest(interim_config, config);
+
+    auto segment = CreateGrowingSegment(schema, meta_ptr);
+    auto* growing_segment = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing_segment, nullptr);
+    const auto& indexing =
+        growing_segment->get_indexing_record().get_vec_field_indexing(vec);
+
+    const auto pool_size = static_cast<int64_t>(
+        knowhere::KnowhereConfig::GetBuildThreadPoolSize());
+    ASSERT_GT(pool_size, 0);
+
+    auto build_thread_num = [&]() {
+        auto params = indexing.get_build_params(DataType::VECTOR_FLOAT);
+        return std::stoll(
+            params[knowhere::meta::NUM_BUILD_THREAD].get<std::string>());
+    };
+
+    // 0 is the default and keeps every growing index build single threaded.
+    config.set_growing_index_build_thread_rate(0.0F);
+    EXPECT_EQ(build_thread_num(), 1);
+
+    // The rate is a fraction of the build thread pool size, not of cpu num.
+    config.set_growing_index_build_thread_rate(1.0F);
+    EXPECT_EQ(build_thread_num(), pool_size);
+
+    // A rate too small to reach a whole thread still resolves to one thread.
+    config.set_growing_index_build_thread_rate(
+        1.0F / static_cast<float>(pool_size * 8));
+    EXPECT_EQ(build_thread_num(), 1);
+
+    // knowhere declares num_build_thread without a range and passes it straight
+    // to omp_set_num_threads, and this config is refreshable, so an out of range
+    // rate must be clamped to the pool size rather than reach that call.
+    config.set_growing_index_build_thread_rate(8.0F);
+    EXPECT_EQ(build_thread_num(), pool_size);
+
+    // Non-finite values must not reach llround or knowhere either.
+    config.set_growing_index_build_thread_rate(
+        std::numeric_limits<float>::infinity());
+    EXPECT_EQ(build_thread_num(), 1);
+    config.set_growing_index_build_thread_rate(
+        std::numeric_limits<float>::quiet_NaN());
+    EXPECT_EQ(build_thread_num(), 1);
+    config.set_growing_index_build_thread_rate(-1.0F);
+    EXPECT_EQ(build_thread_num(), 1);
+}
+
+TEST(GrowingIndexBuildThreadRateTest, MultiThreadedBuildKeepsSearchCorrect) {
+    constexpr int64_t dim = 16;
+    constexpr int64_t per_batch = 10000;
+    constexpr int64_t n_batch = 3;
+    constexpr int64_t top_k = 5;
+    constexpr int64_t num_queries = 5;
+
+    auto build_and_search = [&](float build_thread_rate) {
+        auto schema = std::make_shared<Schema>();
+        auto pk = schema->AddDebugField("pk", DataType::INT64);
+        auto vec = schema->AddDebugField(
+            "embeddings", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+        schema->set_primary_field_id(pk);
+
+        std::map<std::string, std::string> index_params = {
+            {"index_type", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+            {"metric_type", knowhere::metric::L2},
+            {"nlist", "128"}};
+        std::map<std::string, std::string> type_params = {
+            {"dim", std::to_string(dim)}};
+        FieldIndexMeta field_index_meta(
+            vec, std::move(index_params), std::move(type_params));
+        std::map<FieldId, FieldIndexMeta> field_map = {{vec, field_index_meta}};
+        IndexMetaPtr meta_ptr =
+            std::make_shared<CollectionIndexMeta>(226985, std::move(field_map));
+
+        auto& config = SegcoreConfig::default_config();
+        ScopedSegcoreConfigRestore config_restore(config);
+        InterimIndexConfigForTest interim_config;
+        interim_config.chunk_rows = 1024;
+        // Scan every inverted list so that the compared distances are exact and
+        // independent of how the coarse quantizer happens to be trained.
+        interim_config.nprobe = interim_config.nlist;
+        interim_config.growing_index_build_thread_rate = build_thread_rate;
+        ApplyInterimIndexConfigForTest(interim_config, config);
+
+        auto segment = CreateGrowingSegment(schema, meta_ptr);
+
+        milvus::proto::plan::PlanNode plan_node;
+        auto* vector_anns = plan_node.mutable_vector_anns();
+        vector_anns->set_vector_type(
+            milvus::proto::plan::VectorType::FloatVector);
+        vector_anns->set_placeholder_tag("$0");
+        vector_anns->set_field_id(vec.get());
+        auto* query_info = vector_anns->mutable_query_info();
+        query_info->set_topk(top_k);
+        query_info->set_round_decimal(3);
+        query_info->set_metric_type(knowhere::metric::L2);
+        query_info->set_search_params(R"({})");
+        auto plan_str = plan_node.SerializeAsString();
+
+        for (int64_t i = 0; i < n_batch; i++) {
+            auto dataset = DataGen(schema, per_batch, 42 + i);
+            auto offset = segment->PreInsert(per_batch);
+            segment->Insert(offset,
+                            per_batch,
+                            dataset.row_ids_.data(),
+                            dataset.timestamps_.data(),
+                            dataset.raw_);
+        }
+
+        // Guard against a vacuous comparison: if the interim index were never
+        // built, both runs would fall back to brute force and match trivially.
+        auto* growing_segment =
+            dynamic_cast<SegmentGrowingImpl*>(segment.get());
+        EXPECT_NE(growing_segment, nullptr);
+        EXPECT_TRUE(
+            growing_segment != nullptr &&
+            growing_segment->get_indexing_record().SyncDataWithIndex(vec));
+
+        auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024);
+        auto plan = milvus::query::CreateSearchPlanByExpr(
+            schema, plan_str.data(), plan_str.size());
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto sr = segment->Search(plan.get(), ph_group.get(), 1000000);
+        EXPECT_EQ(sr->total_nq_, num_queries);
+        EXPECT_EQ(sr->unity_topK_, top_k);
+        EXPECT_EQ(sr->distances_.size(), num_queries * top_k);
+        return sr->distances_;
+    };
+
+    // A growing index built with the whole build thread pool must return the
+    // same results as the single threaded build: IVF_FLAT_CC partitions the
+    // inverted lists across the OMP threads, so parallelism must not drop or
+    // duplicate any row.
+    auto single_threaded = build_and_search(0.0F);
+    auto multi_threaded = build_and_search(1.0F);
+    ASSERT_EQ(single_threaded.size(), multi_threaded.size());
+    for (size_t i = 0; i < single_threaded.size(); i++) {
+        EXPECT_FLOAT_EQ(single_threaded[i], multi_threaded[i]);
     }
 }
 

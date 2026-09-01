@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <algorithm>
+#include <cmath>
 #include <map>
 #include <new>
 #include <optional>
@@ -23,6 +25,7 @@
 #include "index/StringIndexMarisa.h"
 
 #include "common/SystemProperty.h"
+#include "knowhere/comp/knowhere_config.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/FieldIndexing.h"
 #include "index/VectorMemIndex.h"
@@ -517,13 +520,36 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
     }
 }
 
+int64_t
+VectorFieldIndexing::resolve_build_thread_num() const {
+    // Resolved against the live build pool size, the cpu budget of index
+    // building. Clamped to [1, pool size] because knowhere declares
+    // num_build_thread without a range and passes it to omp_set_num_threads,
+    // and this config is refreshable.
+    auto rate = segcore_config_.get_growing_index_build_thread_rate();
+    if (!std::isfinite(rate) || rate <= 0.0f) {
+        return 1;
+    }
+    auto pool_size = static_cast<int64_t>(
+        knowhere::KnowhereConfig::GetBuildThreadPoolSize());
+    if (pool_size <= 1) {
+        return 1;
+    }
+    // Cap the rate before scaling so the product can never overflow llround.
+    auto capped_rate = std::min(static_cast<double>(rate), 1.0);
+    auto thread_num = static_cast<int64_t>(
+        std::llround(capped_rate * static_cast<double>(pool_size)));
+    return std::clamp<int64_t>(thread_num, 1, pool_size);
+}
+
 knowhere::Json
 VectorFieldIndexing::get_build_params(DataType data_type) const {
     auto config = config_->GetBuildBaseParams(data_type);
     if (!IsSparseFloatVectorDataType(get_data_type())) {
         config[knowhere::meta::DIM] = std::to_string(get_dim());
     }
-    config[knowhere::meta::NUM_BUILD_THREAD] = std::to_string(1);
+    config[knowhere::meta::NUM_BUILD_THREAD] =
+        std::to_string(resolve_build_thread_num());
     // for sparse float vector: drop_ratio_build config is not allowed to be set
     // on growing segment index.
     return config;
