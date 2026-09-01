@@ -1504,6 +1504,64 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 	assert.Contains(t, err.Error(), "collides with existing metadata")
 }
 
+func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayPatchedBaselineSegment(t *testing.T) {
+	// A replayed patch is not harmless: applyExternalRefreshPatch clears
+	// TextStatsLogs and JsonKeyStats unconditionally, so writing the same
+	// result twice discards a text index or JSON key stats built between the
+	// two applies and orphans their files. New segments have always had this
+	// short-circuit; patches need it for the same reason.
+	ctx := context.Background()
+	collectionID := int64(100)
+	segmentID := int64(10)
+	base := "files/insert_log/100/1/10"
+	catalog := &stubCatalog{}
+	mt := &meta{
+		collections: newTestCollections(collectionID),
+		segments:    NewSegmentsInfo(),
+		catalog:     catalog,
+	}
+
+	baseline := newTestExternalRefreshSegment(segmentID, collectionID, 100)
+	baseline.ManifestPath = packed.MarshalManifestPath(base, 1)
+	mt.segments.SetSegment(segmentID, NewSegmentInfo(baseline))
+
+	patch := proto.Clone(baseline).(*datapb.SegmentInfo)
+	patch.ManifestPath = packed.MarshalManifestPath(base, 2)
+	patch.SchemaVersion = 2
+
+	err := applyExternalCollectionSegmentUpdateForBaseline(
+		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{patch})
+	assert.NoError(t, err)
+	assert.Equal(t, packed.MarshalManifestPath(base, 2), mt.segments.GetSegment(segmentID).GetManifestPath())
+
+	// Model what the index wait exists to let happen: indexes built on the
+	// freshly patched segment.
+	indexed := mt.segments.GetSegment(segmentID).Clone()
+	indexed.TextStatsLogs = map[int64]*datapb.TextIndexStats{1: {FieldID: 1}}
+	indexed.JsonKeyStats = map[int64]*datapb.JsonKeyStats{2: {FieldID: 2}}
+	mt.segments.SetSegment(segmentID, indexed)
+	catalog.alteredSegments = nil
+
+	err = applyExternalCollectionSegmentUpdateForBaseline(
+		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{patch})
+	assert.NoError(t, err)
+	assert.Nil(t, catalog.alteredSegments, "a replayed patch must not write at all")
+	assert.Contains(t, mt.segments.GetSegment(segmentID).GetTextStatsLogs(), int64(1),
+		"a replayed patch must not discard a text index built since the first apply")
+	assert.Contains(t, mt.segments.GetSegment(segmentID).GetJsonKeyStats(), int64(2))
+
+	// The short-circuit keys on the manifest, not on "seen before": a later
+	// refresh installs a strictly newer manifest and must still apply.
+	newer := proto.Clone(patch).(*datapb.SegmentInfo)
+	newer.ManifestPath = packed.MarshalManifestPath(base, 3)
+	err = applyExternalCollectionSegmentUpdateForBaseline(
+		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{newer})
+	assert.NoError(t, err)
+	assert.Equal(t, packed.MarshalManifestPath(base, 3), mt.segments.GetSegment(segmentID).GetManifestPath())
+	assert.Empty(t, mt.segments.GetSegment(segmentID).GetTextStatsLogs(),
+		"a genuine patch still invalidates the stats it supersedes")
+}
+
 func TestApplyExternalRefreshPatchClearsStatsPlaceholders(t *testing.T) {
 	oldManifest := packed.MarshalManifestPath("files/insert_log/100/200/300", 1)
 	newManifest := packed.MarshalManifestPath("files/insert_log/100/200/300", 2)
