@@ -1487,7 +1487,11 @@ func pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.F
 	// FloatVector while its payload says nothing at all. Consumers that switch
 	// on the payload type then see no vector column -- searching by IDs that
 	// all name null-vector rows failed on exactly that.
-	fieldsData := typeutil.PrepareResultFieldData(fields, int64(size))
+	//
+	// Capacity 0: the seeding is all that is needed here. Sizing by the ID
+	// count would reserve dim*size for a dense vector column even when every
+	// picked row is null and nothing is ever appended.
+	fieldsData := typeutil.PrepareResultFieldData(fields, 0)
 	idxComputer := typeutil.NewFieldDataIdxComputerWithSchema(fields, schema)
 
 	rowIdxs := make([]int64, 0, size)
