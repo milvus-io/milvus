@@ -41,6 +41,10 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
     d_type_ = TantivyDataType::Text;
+    auto memory_budget_in_bytes =
+        commit_interval_in_ms == std::numeric_limits<int64_t>::max()
+            ? milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES
+            : milvus::tantivy::GROWING_TEXT_MEMORY_BUDGET_IN_BYTES;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         unique_id,
         true,
@@ -51,7 +55,7 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
         analyzer_params,
         /*analyzer_extra_info=*/"",
         milvus::tantivy::DEFAULT_NUM_THREADS,
-        milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+        memory_budget_in_bytes,
         enable_background_merge);
     set_is_growing(true);
 }
