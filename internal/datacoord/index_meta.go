@@ -1259,19 +1259,35 @@ func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) er
 
 // removeSegmentIndexInMemory drops a SegmentIndex from the in-memory indexes
 // and reconciles its metrics, after its catalog record has been removed. The
-// caller must hold keyLock for segIdx.BuildID. It is shared by
-// RemoveSegmentIndex, which owns the catalog removal itself, and by the
-// manifest-commit staging below, where the removal rides in the catalog
-// transaction that publishes the retracting manifest revision, so the two
-// paths cannot drift.
+// caller must hold keyLock for segIdx.BuildID. RemoveSegmentIndex, which owns
+// the catalog removal itself, uses this combined form; the manifest-commit
+// staging below uses the same two halves but runs the record removal under
+// segMu and defers the gauge until segMu is released, so the two paths cannot
+// drift.
 func (m *indexMeta) removeSegmentIndexInMemory(segIdx *model.SegmentIndex) {
+	m.subtractStoredIndexSizeOnRemoval(segIdx)
+	m.removeSegmentIndexRecordInMemory(segIdx)
+}
+
+// subtractStoredIndexSizeOnRemoval is the fieldIndexLock-guarded metric half of
+// removeSegmentIndexInMemory. It is split out because the manifest-commit
+// install defers it until segMu is released (see stagedSegmentIndexMutation):
+// every index DDL holds fieldIndexLock's write side across an etcd round trip,
+// so blocking on it inside segMu would stall every segment reader behind that
+// round trip.
+func (m *indexMeta) subtractStoredIndexSizeOnRemoval(segIdx *model.SegmentIndex) {
 	// Reclaim size only when the index is still alive (segment-drop case);
 	// MarkIndexAsDeleted already subtracted otherwise.
 	m.fieldIndexLock.RLock()
 	m.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID,
 		-float64(segIdx.IndexSerializedSize))
 	m.fieldIndexLock.RUnlock()
+}
 
+// removeSegmentIndexRecordInMemory is the record half: it mutates only the
+// in-memory segment-index maps and acquires no locks, so it is safe to run
+// inside a segMu critical section.
+func (m *indexMeta) removeSegmentIndexRecordInMemory(segIdx *model.SegmentIndex) {
 	segIndexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
 	if ok {
 		segIndexes.Remove(segIdx.IndexID)
@@ -1295,9 +1311,20 @@ var errSegmentIndexRecordGone = errors.New("segment index record no longer exist
 // stagedSegmentIndexMutation carries a SegmentIndex change from its projection
 // under keyLock to the in-memory install that follows a successful catalog
 // write. action is nil when the mutation resolves to no catalog write at all.
+//
+// install performs the in-memory record change only — it acquires no locks, so
+// the manifest commit may run it inside its segMu critical section. It returns
+// the observability update it deferred (never nil): the stored-index-size gauge
+// must serialize against MarkIndexAsDeleted via fieldIndexLock, whose write
+// side every index DDL (CreateIndex, AlterIndex, MarkIndexAsDeleted,
+// RemoveIndex) holds across an etcd round trip. The caller MUST run the
+// returned closure only after releasing segMu — acquiring fieldIndexLock inside
+// segMu would let one slow DDL stall every segment reader — and before
+// releasing keyLock(BuildID), so the install-then-metric sequence stays ordered
+// against the next writer of the same build.
 type stagedSegmentIndexMutation struct {
 	action  *metastore.UpdateAction
-	install func()
+	install func() (deferredMetric func())
 }
 
 // stageSegmentIndexMutation projects mut against the SegmentIndex record
@@ -1313,10 +1340,11 @@ type stagedSegmentIndexMutation struct {
 // a manifest. The caller supplies it rather than letting this resolve it,
 // because the manifest commit holds segMu across this call.
 //
-// Precondition: the caller holds keyLock(mut.BuildID) across both this
-// projection and the returned install. It is acquired by the caller rather
-// than here so that it is ordered before segMu, matching every other
-// SegmentIndex writer; see CommitSegmentManifest's lock-order note.
+// Precondition: the caller holds keyLock(mut.BuildID) across this projection,
+// the returned install, and the deferred metric closure install returns. It is
+// acquired by the caller rather than here so that it is ordered before segMu,
+// matching every other SegmentIndex writer; see CommitSegmentManifest's
+// lock-order note.
 func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation, manifestBacked bool) (*stagedSegmentIndexMutation, error) {
 	if mut.BuildID == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("segment index mutation requires a build ID")
@@ -1338,7 +1366,7 @@ func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation, manifest
 		return nil, merr.WrapErrServiceInternalMsg("unknown segment index mutation type %d, buildID=%d", mut.Type, mut.BuildID)
 	}
 
-	staged := &stagedSegmentIndexMutation{install: func() {}}
+	staged := &stagedSegmentIndexMutation{install: func() func() { return func() {} }}
 
 	previous, ok := m.segmentBuildInfo.Get(mut.BuildID)
 	if !ok {
@@ -1352,7 +1380,10 @@ func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation, manifest
 		segIdx := previous
 		action := metastore.DropSegmentIndex(segIdx)
 		staged.action = &action
-		staged.install = func() { m.removeSegmentIndexInMemory(segIdx) }
+		staged.install = func() func() {
+			m.removeSegmentIndexRecordInMemory(segIdx)
+			return func() { m.subtractStoredIndexSizeOnRemoval(segIdx) }
+		}
 		return staged, nil
 	}
 
@@ -1367,9 +1398,11 @@ func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation, manifest
 		action := metastore.UpdateSegmentIndex(finished)
 		staged.action = &action
 	}
-	staged.install = func() {
+	staged.install = func() func() {
 		m.updateSegmentIndex(finished)
-		m.recordFinishedTask(previous, finished, previousSize, mut.FinishedTask)
+		// recordFinishedTask is observability only, but its stored-size gauge
+		// takes fieldIndexLock, so the whole step is deferred out of segMu.
+		return func() { m.recordFinishedTask(previous, finished, previousSize, mut.FinishedTask) }
 	}
 	return staged, nil
 }

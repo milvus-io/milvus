@@ -141,7 +141,10 @@ type SegmentManifestCommit struct {
 // order is segmentManifestLocks[segmentID] -> indexMeta.keyLock -> segMu. No
 // caller may enter this protocol while holding segMu. Manifest I/O runs outside
 // segMu; the final catalog mutation is rebased onto the latest SegmentInfo and
-// catalog + memory publication stays in one segMu critical section.
+// catalog + memory publication stays in one segMu critical section. No lock is
+// ever acquired inside that section: the fieldIndexLock-guarded index gauge
+// update a staged SegmentIndex mutation defers runs only after segMu is
+// released (still under keyLock).
 func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifestCommit) error {
 	if commit.SegmentID == 0 {
 		return merr.WrapErrServiceInternalMsg("segment manifest commit requires a segment ID")
@@ -234,122 +237,144 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	// Re-enter segMu only for the final full-record publication. Ordinary
 	// segment writers may have changed unrelated fields during manifest I/O, so
 	// apply the catalog mutation to the latest clone rather than the I/O input.
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
-	latest := m.segments.GetSegment(commit.SegmentID)
-	if isNewSegment {
-		if latest != nil {
-			return staleSegmentManifestError(commit.SegmentID, "", latest.GetManifestPath())
-		}
-	} else {
-		if latest == nil {
-			return merr.WrapErrSegmentNotFound(commit.SegmentID)
-		}
-		latest = latest.Clone()
-		if latest.GetStorageVersion() != storage.StorageV3 {
-			return merr.WrapErrServiceInternalMsg("segment manifest commit requires StorageV3, segmentID=%d", commit.SegmentID)
-		}
-		if !isSegmentHealthy(latest) {
-			// Same as the pre-I/O check above: a segment dropped during manifest
-			// I/O is treated as not-found so callers discard rather than retry.
-			return merr.WrapErrSegmentNotFound(commit.SegmentID, "segment dropped or unhealthy during manifest commit")
-		}
-		if commit.Mutation.Type == ManifestMutationNoop {
-			// A Noop mutation publishes a revision prepared outside this framework;
-			// it was not generated from the in-lock base, so publication is guarded
-			// by the caller's optional CAS plus the monotonic check below rather
-			// than base stability.
-			if !matchesExpectedManifest(commit.ExpectedManifest, latest.GetManifestPath()) {
-				return staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, latest.GetManifestPath())
+	//
+	// The section is an inner function so segMu is released before
+	// deferredIndexMetric runs. That closure takes indexMeta.fieldIndexLock for
+	// the stored-index-size gauge, and every index DDL (CreateIndex, AlterIndex,
+	// MarkIndexAsDeleted, RemoveIndex) holds that lock's write side across an
+	// etcd round trip; sync.RWMutex is writer-preferring, so acquiring it inside
+	// segMu would park this commit — segMu held — behind that round trip and
+	// stall every segment reader. No lock is acquired inside segMu.
+	var deferredIndexMetric func()
+	if err := func() error {
+		m.segMu.Lock()
+		defer m.segMu.Unlock()
+		latest := m.segments.GetSegment(commit.SegmentID)
+		if isNewSegment {
+			if latest != nil {
+				return staleSegmentManifestError(commit.SegmentID, "", latest.GetManifestPath())
 			}
-		} else if latest.GetManifestPath() != segment.GetManifestPath() {
-			// A structured mutation was generated from the in-lock snapshot. The
-			// manifest lock serializes every framework writer, so a pointer that
-			// moved between that snapshot and this publication section can only
-			// come from an out-of-lock writer (the DDL/backfill ack path adopting
-			// an externally minted version). The loon OVERWRITE transaction built
-			// the prepared revision from the snapshot base alone — it does not
-			// merge the concurrent revision's contents — so publishing here would
-			// silently drop that revision. Fail as stale so the caller discards or
-			// re-drives against the fresh base.
-			return staleSegmentManifestError(commit.SegmentID, segment.GetManifestPath(), latest.GetManifestPath())
+		} else {
+			if latest == nil {
+				return merr.WrapErrSegmentNotFound(commit.SegmentID)
+			}
+			latest = latest.Clone()
+			if latest.GetStorageVersion() != storage.StorageV3 {
+				return merr.WrapErrServiceInternalMsg("segment manifest commit requires StorageV3, segmentID=%d", commit.SegmentID)
+			}
+			if !isSegmentHealthy(latest) {
+				// Same as the pre-I/O check above: a segment dropped during manifest
+				// I/O is treated as not-found so callers discard rather than retry.
+				return merr.WrapErrSegmentNotFound(commit.SegmentID, "segment dropped or unhealthy during manifest commit")
+			}
+			if commit.Mutation.Type == ManifestMutationNoop {
+				// A Noop mutation publishes a revision prepared outside this framework;
+				// it was not generated from the in-lock base, so publication is guarded
+				// by the caller's optional CAS plus the monotonic check below rather
+				// than base stability.
+				if !matchesExpectedManifest(commit.ExpectedManifest, latest.GetManifestPath()) {
+					return staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, latest.GetManifestPath())
+				}
+			} else if latest.GetManifestPath() != segment.GetManifestPath() {
+				// A structured mutation was generated from the in-lock snapshot. The
+				// manifest lock serializes every framework writer, so a pointer that
+				// moved between that snapshot and this publication section can only
+				// come from an out-of-lock writer (the DDL/backfill ack path adopting
+				// an externally minted version). The loon OVERWRITE transaction built
+				// the prepared revision from the snapshot base alone — it does not
+				// merge the concurrent revision's contents — so publishing here would
+				// silently drop that revision. Fail as stale so the caller discards or
+				// re-drives against the fresh base.
+				return staleSegmentManifestError(commit.SegmentID, segment.GetManifestPath(), latest.GetManifestPath())
+			}
+			if err := validatePreparedManifest(latest.GetManifestPath(), manifestPath); err != nil {
+				return merr.Wrap(err, "validate manifest before publication")
+			}
+			segment = latest
 		}
-		if err := validatePreparedManifest(latest.GetManifestPath(), manifestPath); err != nil {
-			return merr.Wrap(err, "validate manifest before publication")
-		}
-		segment = latest
-	}
 
-	updated, metricMutation, err := m.applySegmentCatalogMutation(segment, commit.CatalogMutation)
-	if err != nil {
-		// Preserve UpdateSegmentsInfo's contract for stale SaveBinlogPaths
-		// requests: the prepared immutable revision remains unpublished and
-		// the caller need not retry an operation that is no longer applicable.
-		if errors.Is(err, errIgnoredSegmentMetaOperation) {
-			mlog.Info(ctx, "segment manifest commit ignored stale segment meta operation", mlog.Err(err))
-			return nil
-		}
-		return err
-	}
-	updated.ManifestPath = manifestPath
-	var action metastore.UpdateAction
-	if isNewSegment {
-		action = metastore.AddSegment(updated.SegmentInfo)
-		metricMutation.addNewSeg(
-			updated.GetState(),
-			updated.GetLevel(),
-			updated.GetIsSorted(),
-			updated.GetStorageVersion(),
-			segmentMetricFormatLabel(updated),
-			updated.GetNumOfRows(),
-		)
-	} else {
-		action = metastore.AlterSegment(updated.SegmentInfo)
-	}
-	actions := []metastore.UpdateAction{action}
-
-	// The index record and the manifest pointer whose revision publishes or
-	// retracts its artifact are staged into one catalog transaction, so an
-	// index can never be visible against a revision that does not carry it,
-	// nor claimed by a record after the revision dropped it.
-	var stagedIndex *stagedSegmentIndexMutation
-	if indexMutation := commit.CatalogMutation.SegmentIndex; indexMutation != nil {
-		// This commit has already established the segment is StorageV3 and is
-		// advancing its manifest pointer, so its indexes are manifest-backed by
-		// construction. Passing that in rather than re-deriving it through
-		// meta matters: the resolver takes segMu, which this critical section
-		// already holds for writing.
-		// The buildID key lock was taken above, before segMu.
-		staged, err := m.indexMeta.stageSegmentIndexMutation(*indexMutation, true)
+		updated, metricMutation, err := m.applySegmentCatalogMutation(segment, commit.CatalogMutation)
 		if err != nil {
-			if errors.Is(err, errSegmentIndexRecordGone) {
-				// The task can be dropped while its worker result is in flight.
-				// Abandon the commit: the prepared revision stays unreferenced and
-				// is invisible, whereas publishing it would strand an index entry
-				// that no SegmentIndex record can ever drive GC for.
-				mlog.Warn(ctx, "index task no longer exists, discarding prepared manifest",
-					mlog.Int64("buildID", indexMutation.BuildID),
-					mlog.Int64("segmentID", commit.SegmentID),
-					mlog.String("manifestPath", manifestPath))
+			// Preserve UpdateSegmentsInfo's contract for stale SaveBinlogPaths
+			// requests: the prepared immutable revision remains unpublished and
+			// the caller need not retry an operation that is no longer applicable.
+			if errors.Is(err, errIgnoredSegmentMetaOperation) {
+				mlog.Info(ctx, "segment manifest commit ignored stale segment meta operation", mlog.Err(err))
 				return nil
 			}
 			return err
 		}
-		stagedIndex = staged
-		if staged.action != nil {
-			actions = append(actions, *staged.action)
+		updated.ManifestPath = manifestPath
+		var action metastore.UpdateAction
+		if isNewSegment {
+			action = metastore.AddSegment(updated.SegmentInfo)
+			metricMutation.addNewSeg(
+				updated.GetState(),
+				updated.GetLevel(),
+				updated.GetIsSorted(),
+				updated.GetStorageVersion(),
+				segmentMetricFormatLabel(updated),
+				updated.GetNumOfRows(),
+			)
+		} else {
+			action = metastore.AlterSegment(updated.SegmentInfo)
 		}
-	}
+		actions := []metastore.UpdateAction{action}
 
-	if err := m.catalog.Update(ctx, actions...); err != nil {
-		return merr.Wrap(err, "publish segment manifest")
+		// The index record and the manifest pointer whose revision publishes or
+		// retracts its artifact are staged into one catalog transaction, so an
+		// index can never be visible against a revision that does not carry it,
+		// nor claimed by a record after the revision dropped it.
+		var stagedIndex *stagedSegmentIndexMutation
+		if indexMutation := commit.CatalogMutation.SegmentIndex; indexMutation != nil {
+			// This commit has already established the segment is StorageV3 and is
+			// advancing its manifest pointer, so its indexes are manifest-backed by
+			// construction. Passing that in rather than re-deriving it through
+			// meta matters: the resolver takes segMu, which this critical section
+			// already holds for writing.
+			// The buildID key lock was taken above, before segMu.
+			staged, err := m.indexMeta.stageSegmentIndexMutation(*indexMutation, true)
+			if err != nil {
+				if errors.Is(err, errSegmentIndexRecordGone) {
+					// The task can be dropped while its worker result is in flight.
+					// Abandon the commit: the prepared revision stays unreferenced and
+					// is invisible, whereas publishing it would strand an index entry
+					// that no SegmentIndex record can ever drive GC for.
+					mlog.Warn(ctx, "index task no longer exists, discarding prepared manifest",
+						mlog.Int64("buildID", indexMutation.BuildID),
+						mlog.Int64("segmentID", commit.SegmentID),
+						mlog.String("manifestPath", manifestPath))
+					return nil
+				}
+				return err
+			}
+			stagedIndex = staged
+			if staged.action != nil {
+				actions = append(actions, *staged.action)
+			}
+		}
+
+		if err := m.catalog.Update(ctx, actions...); err != nil {
+			return merr.Wrap(err, "publish segment manifest")
+		}
+		metricMutation.commit()
+		// Memory is installed only after the catalog write has succeeded while the
+		// same segMu critical section still excludes competing full-record writers.
+		m.segments.SetSegment(commit.SegmentID, updated)
+		if stagedIndex != nil {
+			deferredIndexMetric = stagedIndex.install()
+		}
+		return nil
+	}(); err != nil {
+		return err
 	}
-	metricMutation.commit()
-	// Memory is installed only after the catalog write has succeeded while the
-	// same segMu critical section still excludes competing full-record writers.
-	m.segments.SetSegment(commit.SegmentID, updated)
-	if stagedIndex != nil {
-		stagedIndex.install()
+	// segMu is released; the segment manifest lock and keyLock(buildID) are
+	// still held, so the deferred gauge update stays serialized against
+	// MarkIndexAsDeleted (via fieldIndexLock) and ordered before the next
+	// writer of the same build, without ever awaiting fieldIndexLock inside
+	// segMu.
+	if deferredIndexMetric != nil {
+		deferredIndexMetric()
 	}
 	return nil
 }
