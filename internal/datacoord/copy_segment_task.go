@@ -753,7 +753,10 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		// entry the source manifest holds. An entry's stored path is relative to
 		// the segment base but points outside it, so it hardcodes the SOURCE
 		// collection/partition/segment/build IDs; the worker must retract these
-		// before recording the target's own, and is told which by ID.
+		// before recording the target's own. The IDs shipped here are advisory
+		// only - the worker enumerates the copied manifest itself (already in the
+		// target bucket) as the authoritative drop set and merely cross-checks it
+		// against this list.
 		//
 		// This is why the read is not conditional on the snapshot lacking index
 		// metadata: in the normal case the snapshot HAS the files and the source
@@ -763,9 +766,10 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		//
 		// Only for a local source: the manifest is read with the target-side
 		// storage config, which cannot address a foreign bucket. An external
-		// restore therefore keeps its pre-existing behavior - no manifest-resolved
-		// index files, and inherited entries left in place - until a source-side
-		// storage config is plumbed through the request.
+		// restore therefore ships no manifest-resolved index files and no
+		// inherited IDs - but its stale inherited entries are still retracted,
+		// because the worker derives the drop set from the copied manifest
+		// rather than from this list.
 		var inheritedIndexIDs []int64
 		if !job.GetExternal() && source.GetStorageVersion() >= storage.StorageV3 && source.GetManifestPath() != "" {
 			manifestIndexes, err := packed.GetManifestIndexInfos(source.GetManifestPath(), storageConfig)
@@ -969,10 +973,18 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			// UpdateManifest; no CommitSegmentManifest serialization is needed for
 			// a segment no other writer touches, and no second revision is needed
 			// to correct what the worker already published.
+			//
+			// "Re-derives" is verified, not assumed: an old DataNode silently
+			// skips the republication (the result carries no acknowledgement and
+			// the cluster RPC has no version gate), so the pointer is read back
+			// and rejected before publication if it still carries foreign entries.
 			if manifestPath := result.GetManifestPath(); manifestPath != "" {
 				operators = append(operators, UpdateManifest(result.GetSegmentId(), manifestPath))
+				err = verifyCopiedManifestIndexOwnership(ctx, result, task, meta)
 			}
-			err = meta.UpdateSegmentsInfo(ctx, operators...)
+			if err == nil {
+				err = meta.UpdateSegmentsInfo(ctx, operators...)
+			}
 			if err != nil {
 				// On error, mark task and job as failed
 				updateErr := copyMeta.UpdateTask(ctx, task.GetTaskId(),
@@ -1038,6 +1050,66 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 		return copyMeta.UpdateTask(ctx, task.GetTaskId(),
 			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
 			UpdateCopyTaskReason(resp.GetReason()))
+	}
+	return nil
+}
+
+// verifyCopiedManifestIndexOwnership reads back the manifest pointer a worker
+// returned for a StorageV3 copy target and rejects it while it still carries an
+// index entry that does not belong to the target collection.
+//
+// The worker is supposed to retract every inherited entry and re-derive the
+// target's own before returning the pointer (republishCopiedManifestIndexes on
+// the DataNode). A DataNode from before that behavior existed completes the
+// copy without any retraction, and nothing in the protocol reveals it:
+// CopySegmentResult carries no acknowledgement and the cluster RPC has no
+// version gate. The manifest itself is therefore the only reliable evidence.
+// Publishing an unverified pointer would permanently record entries whose
+// stored paths walk back to the SOURCE collection's index artifacts, so a
+// leftover foreign entry is a hard failure - version skew must surface as a
+// failed task, not as silent metadata pollution.
+//
+// A copied entry belongs to the target iff its IndexID is one of the target
+// collection's index definitions - the same authoritative set
+// buildCopySegmentTargetIndexes shipped to the worker and
+// syncVectorScalarIndexes resolves against. The cost is one manifest read per
+// copied StorageV3 segment; other targets (including StorageV2, whose
+// manifest_path is a plain copied object, not a loon pointer) skip it.
+func verifyCopiedManifestIndexOwnership(ctx context.Context, result *datapb.CopySegmentResult,
+	task CopySegmentTask, meta *meta,
+) error {
+	manifestPath := result.GetManifestPath()
+	if manifestPath == "" || meta == nil {
+		return nil
+	}
+	segment := meta.GetSegment(ctx, result.GetSegmentId())
+	if segment == nil || segment.GetStorageVersion() < storage.StorageV3 {
+		return nil
+	}
+	entries, err := packed.GetManifestIndexInfos(manifestPath, createStorageConfig())
+	if err != nil {
+		return merr.Wrapf(err, "failed to read back copied manifest indexes for segment %d", result.GetSegmentId())
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	targetIndexIDs := make(map[int64]struct{})
+	if meta.indexMeta != nil {
+		for _, index := range meta.indexMeta.GetIndexesForCollection(task.GetCollectionId(), "") {
+			targetIndexIDs[index.IndexID] = struct{}{}
+		}
+	}
+	foreign := make([]int64, 0)
+	for _, entry := range entries {
+		if _, ok := targetIndexIDs[entry.IndexID]; !ok {
+			foreign = append(foreign, entry.IndexID)
+		}
+	}
+	if len(foreign) > 0 {
+		return merr.WrapErrServiceInternalMsg(
+			"copied manifest of segment %d still carries index entries %v foreign to collection %d; "+
+				"the DataNode that ran the copy likely predates manifest index republication - upgrade it and retry the restore",
+			result.GetSegmentId(), foreign, task.GetCollectionId())
 	}
 	return nil
 }
