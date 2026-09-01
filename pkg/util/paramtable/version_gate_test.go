@@ -226,14 +226,26 @@ func TestInitVersionGatesEmbeddedEtcd(t *testing.T) {
 
 	p.initVersionGates()
 	// Local version (common.Version, 3.0.0-beta on master) >= 2.6.23: the gate
-	// is locally satisfied and no confirmator is created.
+	// is locally satisfied and no confirmator is created. initVersionGates
+	// itself evicts the value cache, so the resolution is observable directly.
 	assert.True(t, item.VersionGateSwitcher.localSatisfied)
 	assert.Nil(t, p.versionGates)
-	// The sentinel default now resolves to TargetValue. (GetAsBool caches by
-	// raw value, which is unchanged, so evict to observe the runtime hint.)
-	item.manager.EvictCachedValue(item.Key)
 	assert.Equal(t, "true", item.GetValue())
 	assert.True(t, item.GetAsBool())
+
+	// Negative branch: a gate whose version is above the local version stays
+	// closed — localSatisfied remains false and the item reads PreSwitchValue.
+	// (Reset the hint set by the positive branch, then re-run.)
+	item.VersionGateSwitcher.localSatisfied = false
+	oldGateVersion := item.VersionGateSwitcher.GateVersion
+	item.VersionGateSwitcher.GateVersion = "99.0.0"
+	defer func() { item.VersionGateSwitcher.GateVersion = oldGateVersion }()
+
+	p.initVersionGates()
+	assert.False(t, item.VersionGateSwitcher.localSatisfied)
+	item.manager.EvictCachedValue(item.Key)
+	assert.Equal(t, "false", item.GetValue())
+	assert.False(t, item.GetAsBool())
 }
 
 func gateSwitcher(gateVersion string, delay time.Duration) *VersionGateSwitcher {

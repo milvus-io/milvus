@@ -143,10 +143,10 @@ func (c *Confirmator) registerGate(key string, switcher *VersionGateSwitcher) er
 	if switcher == nil {
 		return merr.WrapErrServiceInternal("version gate: nil switcher")
 	}
-	if _, err := semver.Parse(switcher.GateVersion); err != nil {
+	v, err := semver.Parse(switcher.GateVersion)
+	if err != nil {
 		return errors.Wrapf(err, "version gate: parse gate version %s", switcher.GateVersion)
 	}
-	v, _ := semver.Parse(switcher.GateVersion)
 	c.gates = append(c.gates, &gate{key: key, switcher: switcher, version: v})
 	return nil
 }
@@ -354,11 +354,12 @@ func (c *Confirmator) processGates(ctx context.Context) bool {
 				allDone = false
 				continue
 			}
+			// recheckAndFlip returned true: the gate is resolved (flipped, or
+			// superseded by an explicit config value). flip logs the actual
+			// outcome; mark the gate resolved and move on.
 			c.mu.Lock()
 			g.resolved = true
 			c.mu.Unlock()
-			mlog.Info(ctx, "version gate: gate flipped",
-				mlog.String("key", g.key), mlog.String("value", g.switcher.TargetValue))
 			continue
 		}
 		allDone = false
@@ -441,6 +442,8 @@ func (c *Confirmator) flip(ctx context.Context, g *gate) error {
 	// Make the flip visible in this process immediately instead of waiting for
 	// the periodic config refresher.
 	refreshLocalConfig()
+	mlog.Info(ctx, "version gate: gate flipped",
+		mlog.String("key", g.key), mlog.String("value", g.switcher.TargetValue))
 	return nil
 }
 
