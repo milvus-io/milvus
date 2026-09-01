@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 const (
@@ -73,7 +74,7 @@ func newEtcdClient(etcdInfo *EtcdInfo) (*clientv3.Client, error) {
 // source would otherwise fail asynchronously in its refresher.
 func NewEtcdSource(etcdCli *clientv3.Client, etcdInfo *EtcdInfo) (*EtcdSource, error) {
 	if etcdCli == nil {
-		return nil, errors.New("nil etcd client")
+		return nil, merr.WrapErrServiceInternal("nil etcd client")
 	}
 	log.Ctx(context.TODO()).Debug("init etcd source", zap.Any("etcdInfo", etcdInfo))
 	es := &EtcdSource{
