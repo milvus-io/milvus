@@ -7771,6 +7771,10 @@ func Test_ValidateUtil_checkJSONData(t *testing.T) {
 
 		err := v.checkJSONFieldData(data, f)
 		assert.Error(t, err)
+		// pin the limit the message reports, so a hoist that resolved the wrong
+		// config item shows up here
+		assert.Contains(t, err.Error(), fmt.Sprintf("of json field (json) exceeds max length (%d)",
+			paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64()))
 	})
 
 	t.Run("dynamic field exceed max length", func(t *testing.T) {
@@ -7799,6 +7803,8 @@ func Test_ValidateUtil_checkJSONData(t *testing.T) {
 
 		err := v.checkJSONFieldData(data, f)
 		assert.Error(t, err)
+		assert.Contains(t, err.Error(), fmt.Sprintf("of dynamic field exceeds max length (%d)",
+			paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64()))
 	})
 }
 

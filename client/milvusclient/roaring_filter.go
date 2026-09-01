@@ -19,11 +19,11 @@ package milvusclient
 import (
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/client/v3/roaringfilter"
+	"github.com/milvus-io/milvus/client/v3/membership/roaringfilter"
 )
 
 // RoaringBitmapBlob is a client-built exact integer membership bitmap for
-// roaring_match(field, {bitmap}). It travels as a native protobuf bytes
+// membership_match(field, {bitmap}, type=roaring). It travels as a native protobuf bytes
 // template value and contains an MRB1 envelope around portable Roaring64 data.
 type RoaringBitmapBlob []byte
 

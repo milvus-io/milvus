@@ -147,6 +147,7 @@ var secretExtfsKeys = map[string]bool{
 	ExtfsKeySSLCACert:      true,
 	ExtfsKeyExternalID:     true, // STS shared secret; confused-deputy guard.
 	"credential_json":      true, // Snapshot request-level GCP service-account JSON.
+	"source_sas_token":     true, // Snapshot request-level Azure source-read SAS.
 }
 
 // ParseExternalSpec parses the JSON external spec string

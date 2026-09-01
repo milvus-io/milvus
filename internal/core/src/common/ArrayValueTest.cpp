@@ -728,10 +728,8 @@ TEST(ArrayValue, RecursiveSchemaSelectsStorageFieldData) {
 TEST(ArrayValue, NullableBackfillSharesNullStorage) {
     auto type =
         NestedArrayType(LeafArrayType(proto::schema::DataType::Int32), true);
-    auto field_data = storage::CreateFieldData(
-        DataType::ARRAY, DataType::NONE, true, 1, 0, type);
-
-    field_data->FillFieldData(std::nullopt, 3);
+    auto field_data = storage::CreateFieldDataFromDefaultValue(
+        DataType::ARRAY, true, 3, std::nullopt, type);
 
     ASSERT_EQ(field_data->get_num_rows(), 3);
     ASSERT_EQ(field_data->get_null_count(), 3);

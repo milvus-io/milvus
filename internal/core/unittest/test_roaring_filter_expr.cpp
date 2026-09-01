@@ -43,7 +43,7 @@
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
 #include "exec/expression/LogicalUnaryExpr.h"
-#include "exec/expression/RoaringFilterExpr.h"
+#include "exec/expression/MembershipFilterExpr.h"
 #include "expr/ITypeExpr.h"
 #include "index/BitmapIndex.h"
 #include "index/ScalarIndexSort.h"

@@ -389,7 +389,7 @@ proxy:
   maxFieldNum: 256 # The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 256.
   maxVectorFieldNum: 10 # The maximum number of vector fields that can be specified in a collection
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
-  maxMembershipFilterSize: 67108864 # The maximum byte size of one client pre-built bloom_match or roaring_match filter body accepted by the proxy (the fixed 32-byte MBF1/MRB1 header is allowed on top). The blob is embedded into the query plan and fanned out to every QueryNode, so this bounds per-membership-filter memory/network amplification. Must not exceed the format cap (128 MiB). Bloom SBBF bodies are powers of two, so the default admits bodies up to 64 MiB: ~48.6M int64 members at the default fpr=0.005, ~55.4M at fpr=0.01. Raising the member count past a tier boundary requires raising the fpr too, not only this limit. Roaring filters remain independently limited to 262144 high containers and a 64 MiB decoded-memory estimate per filter. Keep proxy.grpc.serverMaxRecvSize above this plus the rest of the request.
+  maxMembershipFilterSize: 67108864 # The maximum byte size of one client pre-built membership_match filter body accepted by the proxy (the fixed 32-byte MBF1/MRB1 header is allowed on top). The blob is embedded into the query plan and fanned out to every QueryNode, so this bounds per-membership-filter memory/network amplification. Must not exceed the format cap (128 MiB). Bloom SBBF bodies are powers of two, so the default admits bodies up to 64 MiB: ~48.6M int64 members at the default fpr=0.005, ~55.4M at fpr=0.01. Raising the member count past a tier boundary requires raising the fpr too, not only this limit. Roaring filters remain independently limited to 262144 high containers and a 64 MiB decoded-memory estimate per filter. Keep proxy.grpc.serverMaxRecvSize above this plus the rest of the request.
   maxMembershipFilterPlanSize: 134217728 # The maximum aggregate serialized byte size of membership-filter-bearing expression plans in one Search, HybridSearch, Query, or complex Delete request. The proxy checks the assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches share the configured budget. Must be positive; invalid values fall back to 128 MiB.
   maxDimension: 32768 # The maximum number of dimensions of a vector can have when creating in a collection.
   # Whether to produce gin logs.\n
@@ -595,6 +595,7 @@ queryNode:
       denseVectorIndexType: IVF_FLAT_CC # Dense vector intermin index type
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
+      growingBuildThreadRate: 0 # The ratio of the interim index build thread pool that one growing segment index build may use, resolved as round(rate * pool size) and clamped to [1, pool size]. 0 means single threaded
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
     enableGeometryCache: false # Enable geometry cache for geometry data
     enableGISSplitFusion: true # Enable GIS filter coarse/refine split + same-column fusion optimization
@@ -641,7 +642,7 @@ queryNode:
     storageV2:
       cellTargetSizeBytes: 4194304 # Target average byte size per storage v2 cache cell. Parquet row groups are greedily packed so that rgs_per_cell * avg_row_group_size ≈ this target. Each cell always contains at least one row group and cells never cross file boundaries. Tune larger for bigger batch IO (fewer cells) or smaller to get finer cache granularity. Default 4 MiB.
     deleteDumpBatchSize: 10000 # Batch size for delete snapshot dump in segcore.
-  fmindexCostRatio: 0.001 # FM-index count-first guard threshold. An FMINDEX-accelerated LIKE prefix/infix/suffix runs through the index only when occ * sa_sample_rate < fmindexCostRatio * total_tokens; otherwise it falls back to the raw-data scan (both paths are exact, this only picks the cheaper one). Normalized by tokens (bytes), not rows, so it is row-length invariant. Must be in (0, 1]; larger favors the index. Default 0.001 is the conservative crossover measured in benchmarks.
+  fmindexCostRatio: 0.001 # FM-index count-first guard threshold. An FMINDEX-accelerated LIKE (prefix/infix/suffix and general LIKE with interior wildcards) runs through the index only when occ * sa_sample_rate < fmindexCostRatio * total_tokens; otherwise it falls back to the raw-data scan (all paths are exact, this only picks the cheaper one). For the anchored forms the index answer is exact; for general LIKE it is candidate generation followed by an exact recheck of the candidate rows on the original VARCHAR data. The bound prices only FM locate, not the recheck bytes, so it stays row-length invariant only for the anchored forms; very long rows with unselective fragments may be routed to a path slower than the scan. Must be in (0, 1]; larger favors the index. Default 0.001 is the conservative crossover measured in benchmarks.
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
@@ -1126,6 +1127,7 @@ common:
   storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote], value minio is deprecated, use remote instead
   storage:
     manifestTransactionRetryLimit: 10 # Maximum number of retry attempts for V3 storage manifest transaction commits on optimistic concurrency conflicts
+    useArrowFileSystemChunkManager: false # Whether segcore routes chunk manager IO (segment load, index build/load) through the milvus-storage Arrow FileSystem, unified with storage v2. Applies to both remote and local storage types; when false, the legacy chunk managers are used. Not effective for cloudProvider=gcpnative, which always uses the legacy implementation.
     stv2:
       splitSystemColumn:
         enabled: true # enable split system column policy in storage v2
@@ -1144,6 +1146,11 @@ common:
       # Set to 0 to disable the rate ceiling. This is not a strict aggregate limit across all filesystem instances.
       # The default matches the milvus-storage default.
       maxRate: 5000
+    externalVector:
+      # Policy for parent-valid external dense-vector rows containing a mix of valid and null child elements.
+      # Options: error, null. error rejects the row as malformed input; null promotes the whole row to a row-level null when the field is nullable.
+      # Rows whose child elements are all null are always promoted to row-level null for nullable fields, regardless of this setting.
+      partialNullPolicy: error
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.

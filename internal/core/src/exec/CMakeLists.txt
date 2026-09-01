@@ -10,6 +10,16 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
 add_source_at_current_directory_recursively()
+
+# Keep the generated unity composition platform-independent. CMake excludes
+# sources with per-architecture flags automatically, but only on architectures
+# where those flags are attached.
+set_source_files_properties(
+    expression/SimdFilter.cpp
+    expression/SimdFilterAvx2.cpp
+    expression/SimdFilterAvx512.cpp
+    PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+
 add_library(milvus_exec OBJECT ${SOURCE_FILES})
 target_link_libraries(milvus_exec PUBLIC milvus_conan_deps)
 

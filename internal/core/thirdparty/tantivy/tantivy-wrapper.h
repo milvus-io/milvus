@@ -25,7 +25,9 @@ static const char* DEFAULT_ANALYZER_PARAMS = "{}";
 static constexpr uintptr_t DEFAULT_NUM_THREADS =
     1;  // Every field with index writer will generate a thread, make huge thread amount, wait for refactoring.
 static constexpr uintptr_t DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES =
-    DEFAULT_NUM_THREADS * 15 * 1024 * 1024;
+    500 * 1024 * 1024;
+static constexpr uintptr_t GROWING_TEXT_MEMORY_BUDGET_IN_BYTES =
+    15 * 1024 * 1024;
 
 template <typename T>
 inline TantivyDataType
@@ -136,8 +138,8 @@ struct TantivyIndexWrapper {
     // create index writer for text type with tokenizer.
     // enable_background_merge: growing segments must keep tantivy's default
     // merge policy (periodic commits would otherwise grow the segment count
-    // unbounded); sealed index builds pass false since finish() ends with an
-    // explicit merge-all.
+    // unbounded); sealed index builds pass false to avoid merge write
+    // amplification during their bounded build.
     TantivyIndexWrapper(const char* field_name,
                         bool in_ram,
                         const char* path,
