@@ -238,17 +238,6 @@ class Expr : public std::enable_shared_from_this<Expr> {
         return false;
     }
 
-    // Called when this expression's output feeds a null-rejecting consumer:
-    // one that treats an UNKNOWN (NULL) row exactly like FALSE, such as the
-    // top-level filter, which folds UNKNOWN into the excluded set. Nodes
-    // whose operands keep that property (AND/OR) override this to accept the
-    // mark and propagate it to their inputs; everywhere else (in particular
-    // NOT, where FALSE and UNKNOWN produce different results) the default
-    // no-op stops the propagation.
-    virtual void
-    MarkNullRejecting() {
-    }
-
     // Whether this expression's result may be cached by ExprResCacheManager.
     // Cacheability propagates from children: a composite expression is
     // cacheable only if every child is. Expressions whose compact cache key
