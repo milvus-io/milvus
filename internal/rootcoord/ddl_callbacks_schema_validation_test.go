@@ -76,7 +76,7 @@ func TestDDLCallbacksSchemaEvolutionRejectsUnsafeAddCollectionFieldBeforeSideEff
 			mockBroadcastAPI.EXPECT().Broadcast(mock.Anything, mock.Anything).Run(func(context.Context, message.BroadcastMutableMessage) {
 				broadcasts++
 			}).Return(&types.BroadcastAppendResult{}, nil).Maybe()
-			lockMocker := mockey.Mock((*Core).startBroadcastWithAliasOrCollectionLock).Return(mockBroadcastAPI, nil).Build()
+			lockMocker := mockey.Mock((*Core).tryStartBroadcastWithAliasOrCollectionLock).Return(mockBroadcastAPI, nil).Build()
 			t.Cleanup(func() { lockMocker.UnPatch() })
 
 			schemaBytes, err := proto.Marshal(test.field)

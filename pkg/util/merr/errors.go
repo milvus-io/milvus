@@ -85,6 +85,14 @@ var (
 	// ErrCollectionPartialUpdateConflict prevents clients from automatically
 	// replaying non-idempotent relative updates after a CAS rejection.
 	ErrCollectionPartialUpdateConflict = newMilvusError("partial update conflict", 111, false)
+	// ErrCollectionDDLImportConflict rejects a schema-version-advancing DDL while
+	// an import job is in flight on the collection. Non-retriable: auto-retry
+	// would just spin until the possibly hours-long import finishes.
+	ErrCollectionDDLImportConflict = newMilvusError("conflicting ddl/import in progress on collection", 112, false)
+	// ErrCollectionDDLImportBusy marks the seconds-scale transient flavors of the
+	// ddl/import mutual exclusion (broadcast lock contention, stale schema
+	// snapshot): a plain retry is expected to succeed.
+	ErrCollectionDDLImportBusy = newMilvusError("transient ddl/import conflict on collection", 113, true)
 
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false) // SystemError by default; the proxy GetPartitionInfo name chokepoint stamps InputError for user-supplied partition names, while id-based lookups stay system.

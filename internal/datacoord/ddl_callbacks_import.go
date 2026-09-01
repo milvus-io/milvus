@@ -207,24 +207,37 @@ func (s *Server) broadcastImport(ctx context.Context,
 	// autoID PKs, non-autoID collections never allocate, and jobs created before
 	// this version carry no range. A schema without a resolvable primary key is
 	// left to normal validation.
+	//
+	// Only the repeatable sizing half runs before the lock; the irrevocable id
+	// reservation waits until every fence below has passed, so a rejected
+	// request burns no id range on retry.
+	var pkSizings []fileSizing
 	if pkField, pkErr := typeutil.GetPrimaryFieldSchema(schema); pkErr == nil &&
 		pkField.GetAutoID() && !importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
-		if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, schema, files,
-			s.allocator.AllocN,
-			Params.CommonCfg.ClusterID.GetAsUint64(),
-		); err != nil {
-			return merr.Wrap(err, "failed to assign per-file PK ranges")
+		// Cheap version precheck: skip the per-file object-store sizing for a
+		// request that the authoritative under-lock fence would reject anyway.
+		precheck, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+		if err := merr.CheckRPCCall(precheck, err); err != nil {
+			return err
 		}
-		// msgFiles is a 1:1 lo.Map of files; bound the walk by both lengths so the
-		// pairing stays provable rather than assumed.
-		for i := 0; i < len(files) && i < len(msgFiles); i++ {
-			msgFiles[i].PreAllocatedAutoIds = files[i].GetPreAllocatedAutoIds()
+		if schema.GetVersion() != precheck.GetSchema().GetVersion() {
+			return merr.WrapErrCollectionDDLImportBusy(collectionName,
+				"schema version changed by a concurrent ddl (snapshot %d, current %d), retry the import with a refreshed schema",
+				schema.GetVersion(), precheck.GetSchema().GetVersion())
 		}
+		sizings, err := computeFileRowUpperBounds(ctx, s.meta.chunkManager, schema, files)
+		if err != nil {
+			return merr.Wrap(err, "failed to size import files for PK ranges")
+		}
+		if err := sizeReservations(sizings); err != nil {
+			return merr.Wrap(err, "failed to size PK reservations")
+		}
+		pkSizings = sizings
 	}
 
 	// Get database name from collection metadata via broker
 	// This is safer than extracting from schema which may be stale
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
+	broadcaster, lockedCollectionName, err := s.tryStartBroadcastWithCollectionID(ctx, collectionID)
 	if err != nil {
 		return merr.Wrap(err, "failed to start broadcast with collection id")
 	}
@@ -243,6 +256,41 @@ func (s *Server) broadcastImport(ctx context.Context,
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err := merr.CheckRPCCall(coll, err); err != nil {
 		return err
+	}
+	// The lock was taken on the name the pre-lock describe returned; a rename
+	// completing in between leaves this broadcast holding the wrong key.
+	if coll.GetCollectionName() != lockedCollectionName {
+		return merr.WrapErrCollectionDDLImportBusy(collectionName,
+			"collection renamed concurrently (locked %s, now %s), retry the import",
+			lockedCollectionName, coll.GetCollectionName())
+	}
+	// The snapshot must belong to the locked collection: the proxy resolves
+	// collectionID and schema in two separate cache reads, so an alias repoint
+	// in between can pair one collection's ID with another's schema while the
+	// numeric versions still match.
+	if schema.GetName() != coll.GetCollectionName() {
+		return merr.WrapErrCollectionDDLImportBusy(collectionName,
+			"schema snapshot belongs to collection %s but the import targets %s, retry the import",
+			schema.GetName(), coll.GetCollectionName())
+	}
+	// Import side of the DDL/import mutual exclusion (issue #52154): a stale
+	// schema snapshot means a schema-advancing DDL completed since the proxy
+	// captured it; reject under the lock, before anything is persisted.
+	if schema.GetVersion() != coll.GetSchema().GetVersion() {
+		return merr.WrapErrCollectionDDLImportBusy(collectionName,
+			"schema version changed by a concurrent ddl (snapshot %d, current %d), retry the import with a refreshed schema",
+			schema.GetVersion(), coll.GetSchema().GetVersion())
+	}
+	// Every fence has passed: only now spend the irrevocable id reservation.
+	if pkSizings != nil {
+		if err := reserveRanges(pkSizings, s.allocator.AllocN, Params.CommonCfg.ClusterID.GetAsUint64()); err != nil {
+			return merr.Wrap(err, "failed to reserve per-file PK ranges")
+		}
+		// msgFiles is a 1:1 lo.Map of files; bound the walk by both lengths so the
+		// pairing stays provable rather than assumed.
+		for i := 0; i < len(files) && i < len(msgFiles); i++ {
+			msgFiles[i].PreAllocatedAutoIds = files[i].GetPreAllocatedAutoIds()
+		}
 	}
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().

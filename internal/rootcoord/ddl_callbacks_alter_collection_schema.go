@@ -58,7 +58,7 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 		}
 	}
 
-	broadcaster, err := c.startBroadcastWithCollectionLock(ctx, req.GetDbName(), coll.Name)
+	broadcaster, err := c.tryStartBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -66,6 +66,9 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 
 	coll, err = c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
+		return err
+	}
+	if err := c.checkNoInFlightImportJob(ctx, coll.Name, coll.CollectionID); err != nil {
 		return err
 	}
 
@@ -361,7 +364,7 @@ func buildAlterSchemaAddSchema(coll *model.Collection, plan *schemautil.AlterSch
 		schema.Functions = append(schema.Functions, function)
 	}
 
-	schema.Version = coll.SchemaVersion + 1
+	schema.Version = nextSchemaVersion(coll)
 	switch plan.Kind {
 	case schemautil.AlterSchemaAddField:
 		plan.Field.IsFunctionOutput = false
@@ -501,7 +504,7 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 		properties = updateMaxFieldIDProperty(coll.Properties, maxFieldID)
 		schema.Fields = newFields
 		schema.Properties = properties
-		schema.Version = coll.SchemaVersion + 1
+		schema.Version = nextSchemaVersion(coll)
 		return schema, properties, []int64{droppedField.FieldID}, nil
 	}
 
@@ -531,7 +534,7 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 		properties = updateMaxFieldIDProperty(coll.Properties, maxFieldID)
 		schema.StructArrayFields = newStructs
 		schema.Properties = properties
-		schema.Version = coll.SchemaVersion + 1
+		schema.Version = nextSchemaVersion(coll)
 		droppedFieldIds = append(droppedFieldIds, droppedStruct.FieldID)
 		for _, subField := range droppedStruct.Fields {
 			droppedFieldIds = append(droppedFieldIds, subField.FieldID)
@@ -646,7 +649,7 @@ func buildSchemaForDropFunctionField(coll *model.Collection, functionName string
 	schema.Fields = newFields
 	schema.Functions = newFunctions
 	schema.Properties = properties
-	schema.Version = coll.SchemaVersion + 1
+	schema.Version = nextSchemaVersion(coll)
 
 	return schema, properties, droppedFieldIds, nil
 }

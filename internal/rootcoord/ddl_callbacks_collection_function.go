@@ -46,7 +46,7 @@ func rejectExternalCollectionFunctionMutation(schema *schemapb.CollectionSchema)
 func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.BroadcastAPI, oldColl *model.Collection, newColl *model.Collection, dbName string, collectionName string) error {
 	// build new collection schema.
 	schema := newColl.ToCollectionSchemaPB()
-	schema.Version = newColl.SchemaVersion + 1
+	schema.Version = nextSchemaVersion(newColl)
 	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func alterFunctionGenNewCollection(ctx context.Context, fSchema *schemapb.Functi
 }
 
 func (c *Core) broadcastAlterCollectionForAlterFunction(ctx context.Context, req *milvuspb.AlterCollectionFunctionRequest) error {
-	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
+	broadcaster, err := c.tryStartBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -178,6 +178,9 @@ func (c *Core) broadcastAlterCollectionForAlterFunction(ctx context.Context, req
 
 	oldColl, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
+		return err
+	}
+	if err := c.checkNoInFlightImportJob(ctx, oldColl.Name, oldColl.CollectionID); err != nil {
 		return err
 	}
 	if err := rejectExternalCollectionFunctionMutation(oldColl.ToCollectionSchemaPB()); err != nil {

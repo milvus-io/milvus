@@ -28,6 +28,13 @@ type Broadcaster interface {
 	// Return ErrNotPrimary if the cluster is not primary, so no DDL message can be broadcasted.
 	WithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error)
 
+	// TryWithResourceKeys is the fail-fast variant of WithResourceKeys: an
+	// EXCLUSIVE key held by an in-flight broadcast fails immediately with an
+	// IsFastLockFailed error (waiting on it is unbounded: the holder's broadcast
+	// releases keys only after its ack callbacks succeed); shared keys are still
+	// acquired blocking.
+	TryWithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error)
+
 	// WithSecondaryClusterResourceKey acquires an exclusive cluster-level resource key
 	// and verifies the cluster is secondary. Returns error if the cluster is primary.
 	// This is used for force promote operations that should only be executed on secondary clusters.
