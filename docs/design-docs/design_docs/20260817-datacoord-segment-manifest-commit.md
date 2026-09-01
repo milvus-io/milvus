@@ -214,14 +214,29 @@ For one segment, the protocol is:
 The lock ordering is always:
 
 ```text
-segmentManifestLock(segmentID) -> segMu -> indexMeta.keyLock(buildID)
+segmentManifestLock(segmentID) -> indexMeta.keyLock(buildID) -> segMu
 ```
 
-`segMu` is never held during object-storage I/O.  A path requiring both segment
-and index state follows this order; no code may take a BuildID lock first and
+`segMu` is never held during object-storage I/O, and the BuildID key lock is
+acquired only after the manifest I/O completes, immediately before the final
+`segMu` publication (the pre-I/O `segMu` snapshot is a read lock released
+before any I/O or key-lock acquisition). Every other `SegmentIndex` writer
+takes `keyLock` and only then reads segment state under `segMu`, so a commit
+must take the key lock before - never inside or after - its final `segMu`
+section. No code may take a BuildID lock first and
 then attempt a segment manifest commit.  Multi-segment operations sort segment
 IDs before locking.  Where possible, compaction creates independent target
 segments rather than committing two segments under one lock.
+
+One known bypass predates this design and is not closed by it: backfill
+adoption and batch DDL advance `manifest_path` through `UpdateManifestVersion`,
+outside `segmentManifestLocks`, guarded only by version monotonicity. A
+revision built from base N and adopted after a commit published N+1 wins on
+version alone, and the storage layer's overwrite resolver does not merge, so
+the newer revision's content is silently dropped - index entries included, now
+that manifests carry them. Until adoption carries the base version the revision
+was built from and rejects a stale one (follow-up), no index build or GC
+retraction may overlap a backfill window on the same segment.
 
 ## Failure and Recovery Semantics
 
@@ -370,8 +385,16 @@ off-by-default rather than removed:
   restart, and its `FailReason` is never visible to an operator who did not read
   the logs before the restart. A fake-finished build (too small to train) is
   likewise not persisted, though rebuilding it is free.
-- Records written while the switch was off exist only in manifests, so turning
-  it back on does not re-persist them; they stay manifest-only until rewritten.
+- Turning the switch off commits the migration: off is a one-way transition,
+  and off -> on is forbidden. Records written while the switch was off exist
+  only in manifests, and reload scans manifests only while the switch is off -
+  so after an off -> on restart those records are invisible to DataCoord, and
+  `recycleUnusedIndexFilesV0`'s miss path deletes their index files as orphans
+  (no time tolerance; under the default `storePathVersion: 0` that prefix is
+  exactly where live index files land). The prohibition is documented, not
+  enforced. The only safe moment to return to on is before any index has
+  finished with the switch off; after that, going back means rebuilding every
+  index published during the off window.
 
 One invariant carries the whole scheme: **a visible StorageV3 segment always
 has a non-empty `ManifestPath`.** It holds by construction - `AllocSegment`
@@ -398,7 +421,7 @@ reload, by GC when it retracts one, and by the copy worker.
 | Current owner/path | Framework migration |
 |---|---|
 | `task_index.go` / DataNode index task | Return index artifact metadata.  `meta.CommitSegmentManifest(AddIndexes)` creates the revision and, via a `SegmentIndexUpsert` catalog mutation, atomically completes `SegmentIndex`. |
-| `garbage_collector.go` | Use `DropIndexes` with a `SegmentIndexRemove` catalog mutation, so the retracting revision's pointer and the `SegmentIndex` removal land in one catalog transaction, then delete the objects. Applies to the manifest-backed path only: a StorageV2 segment, a dropped segment, or a manifest that never carried the entry keeps the legacy delete-then-remove ordering. |
+| `garbage_collector.go` | Delete the objects first, then use `DropIndexes` with a `SegmentIndexRemove` catalog mutation so the retracting revision's pointer and the `SegmentIndex` removal land in one catalog transaction - the same bytes-first ordering as the legacy path (see Failure and Recovery Semantics). A StorageV2 segment, a dropped segment, or a manifest that never carried the entry follows the same file deletion with a bare `RemoveSegmentIndex` instead of a manifest commit. |
 | `copy_segment_task.go`, `import_task_import.go` / restore | A copy or import target is a fresh, exclusively owned segment whose worker returns a complete manifest pointer, so DataCoord publishes that first pointer inline via `UpdateManifest`. No `CommitSegmentManifest` serialization is needed for a segment no other writer touches. Index entries are part of "complete": the copied manifest inherits the source's entries, whose stored paths point outside the segment base and therefore encode the source IDs, so the copy worker retracts them and records the target's own entries in the same transaction. DataCoord supplies the identity it owns (reallocated index IDs, the inherited entry IDs to retract) in the copy request rather than creating a revision of its own. |
 | `task_stats.go` | Text, JSON, and sort stats all use `AddStats`; remove the bare sort `UpdateManifest` path. |
 | flush / `SaveBinlogPaths` | No migration. Publishes inline via `UpdateManifest`. A growing or L0 segment is flushed by its single WAL owner and advanced sequentially, so its manifest write has no concurrent writer and needs no `CommitSegmentManifest` serialization even though the manifest advances from `ManifestEarliest`. |

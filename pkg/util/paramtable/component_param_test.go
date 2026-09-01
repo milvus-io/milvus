@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -915,6 +916,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 4, Params.L0ManifestUpdatePoolSize.GetAsInt())
 		params.Save("dataCoord.compaction.levelzero.manifestUpdatePoolSize", "0")
 		assert.Equal(t, 1, Params.L0ManifestUpdatePoolSize.GetAsInt())
+		// Above int32 the pool backend's capacity wraps negative and Submit
+		// blocks forever, so the formatter clamps the top as well.
+		params.Save("dataCoord.compaction.levelzero.manifestUpdatePoolSize", "2147483648")
+		assert.Equal(t, math.MaxInt32, Params.L0ManifestUpdatePoolSize.GetAsInt())
 		params.Save("datacoord.scheduler.taskSlowThreshold", "1000")
 		assert.Equal(t, 1000*time.Second, Params.TaskSlowThreshold.GetAsDuration(time.Second))
 
@@ -1339,4 +1344,9 @@ func TestSegmentIndexManifestLoadConcurrency(t *testing.T) {
 	assert.Equal(t, 1, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
 	params.Save(params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key, "-8")
 	assert.Equal(t, 1, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
+
+	// Above int32 the pool backend's capacity wraps negative and the first
+	// Submit blocks forever inside the startup scan, so the top is clamped too.
+	params.Save(params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key, "2147483648")
+	assert.Equal(t, math.MaxInt32, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
 }

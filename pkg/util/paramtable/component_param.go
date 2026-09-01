@@ -6140,10 +6140,16 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Doc:          "The goroutine pool size for committing L0 compaction manifest updates inside DataCoord meta update.",
 		Export:       false,
 		Formatter: func(v string) string {
-			if getAsInt(v) < 1 {
+			size := getAsInt(v)
+			if size < 1 {
 				return "1"
 			}
-			return v
+			// The pool backend stores capacity as int32; a larger value wraps
+			// negative and the first Submit blocks forever.
+			if size > math.MaxInt32 {
+				return strconv.Itoa(math.MaxInt32)
+			}
+			return strconv.Itoa(size)
 		},
 	}
 	p.L0ManifestUpdatePoolSize.Init(base.mgr)
@@ -6498,7 +6504,9 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Doc: `Whether a segment's index-build record is persisted to etcd. The end state of the StorageV3 migration is that a segment manifest is the only place a finished index artifact is recorded, and this switch is the seam that gets there: turning it off stops the SegmentIndex etcd writes for segments whose indexes a manifest can carry, while leaving DataCoord's in-memory index state untouched, and makes reload rebuild that state from the segment manifests.
 It applies per segment, not globally: only a StorageV3 segment with a manifest records its indexes there, so a StorageV1/V2 segment keeps persisting its index records regardless of this setting - skipping that write would destroy the only copy rather than defer to another one.
 A SegmentIndex is also the build task record - its state machine, assigned node and failure reason have no manifest home - so an in-flight or failed build on a manifest-backed segment is lost across a restart and is simply reissued. Removals are never skipped, so an index collected by GC cannot come back.
-Existing etcd records are still read on reload and take precedence over the manifest, so turning this off does not strand metadata written while it was on.`,
+Existing etcd records are still read on reload and take precedence over the manifest, so turning this off does not strand metadata written while it was on.
+Turning it off commits the migration: off is one-way, and switching back on is forbidden. Reload scans manifests only while the switch is off, so after an off -> on restart every index finished during the off window is invisible to DataCoord, and garbage collection then deletes its files as orphans. The only safe moment to return to on is before any index has finished with the switch off; after that, going back means rebuilding every index published while it was off.
+The value must be exactly true or false. A value that does not parse as a boolean, such as yes, is silently read as false and enters the one-way off state unintentionally.`,
 		Export: true,
 	}
 	p.WriteSegmentIndexToEtcd.Init(base.mgr)
@@ -6511,6 +6519,11 @@ Existing etcd records are still read on reload and take precedence over the mani
 			concurrency := getAsInt(v)
 			if concurrency < 1 {
 				return "1"
+			}
+			// The pool backend stores capacity as int32; a larger value wraps
+			// negative and the first Submit blocks forever.
+			if concurrency > math.MaxInt32 {
+				return strconv.Itoa(math.MaxInt32)
 			}
 			return strconv.Itoa(concurrency)
 		},
