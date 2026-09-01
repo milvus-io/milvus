@@ -275,13 +275,41 @@ func (c *MiniClusterV3) ShowReplicas() ([]*querypb.Replica, error) {
 
 // ShowSegments shows the segments of a collection.
 func (c *MiniClusterV3) ShowSegments(collectionName string) ([]*datapb.SegmentInfo, error) {
-	resp, err := c.MilvusClient.ShowCollections(c.ctx, &milvuspb.ShowCollectionsRequest{
+	return c.showSegmentsWithContext(c.ctx, "", collectionName)
+}
+
+// ShowSegmentsWithDB shows the segments of a collection in the given database.
+func (c *MiniClusterV3) ShowSegmentsWithDB(dbName, collectionName string) ([]*datapb.SegmentInfo, error) {
+	ctx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
+	defer cancel()
+	return c.showSegmentsWithContext(ctx, dbName, collectionName)
+}
+
+func (c *MiniClusterV3) showSegmentsWithContext(ctx context.Context, dbName, collectionName string) ([]*datapb.SegmentInfo, error) {
+	return showSegmentsWithContext(ctx, dbName, collectionName,
+		func(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+			return c.MilvusClient.ShowCollections(ctx, req)
+		}, c.metaWatcher.ShowSegments)
+}
+
+func showSegmentsWithContext(
+	ctx context.Context,
+	dbName string,
+	collectionName string,
+	showCollections func(context.Context, *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error),
+	showSegments func(int64) ([]*datapb.SegmentInfo, error),
+) ([]*datapb.SegmentInfo, error) {
+	resp, err := showCollections(ctx, &milvuspb.ShowCollectionsRequest{
+		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		return nil, err
 	}
-	return c.metaWatcher.ShowSegments(resp.CollectionIds[0])
+	if len(resp.GetCollectionIds()) == 0 {
+		return nil, fmt.Errorf("collection %q not found in database %q", collectionName, dbName)
+	}
+	return showSegments(resp.CollectionIds[0])
 }
 
 func (c *MiniClusterV3) GetContext() context.Context {
