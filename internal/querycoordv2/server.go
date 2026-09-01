@@ -107,6 +107,9 @@ type Server struct {
 
 	// Checkers
 	checkerController *checkers.CheckerController
+	// splitState answers "is this channel a retired split source", consulted by
+	// GetShardLeaders so a read is not failed by a shard that has handed over.
+	splitState *meta.ShardSplitStateCache
 
 	// Observers
 	collectionObserver   *observers.CollectionObserver
@@ -341,13 +344,15 @@ func (s *Server) initQueryCoord() error {
 
 	// Init checker controller
 	mlog.Info(s.ctx, "init checker controller")
-	s.checkerController = checkers.NewCheckerController(
+	s.splitState = checkers.NewSplitStateCache(s.broker)
+	s.checkerController = checkers.NewCheckerControllerWithSplitState(
 		s.meta,
 		s.dist,
 		s.targetMgr,
 		s.nodeMgr,
 		s.taskScheduler,
 		s.broker,
+		s.splitState,
 	)
 
 	// Init observers

@@ -282,6 +282,25 @@ func (sd *shardDelegator) ProcessDeleteBatches(batches []DeleteBatch) {
 	tr := timerecord.NewTimeRecorder(method)
 	// block load segment handle delete buffer
 	sd.deleteMut.Lock()
+	// shard-split fronting: a split child forwards every delete it consumes (all
+	// past T_switch, since its WAL is born past the fence) to its source
+	// delegator, which applies it to the sealed and pre-switch growing segments it
+	// serves. Forwarding must run AFTER this child releases its own delete lock —
+	// the parent's apply does remote (retried) segment deletes, and holding the
+	// child's deleteMut across that would couple the child's ingest (and the
+	// merged shard's serviceable timestamp) to the parent's worker-delete latency.
+	// This defer is registered before the unlock defer, so LIFO runs it after the
+	// unlock. Forwarding is one-directional (the parent has no frontingParent), so
+	// there is no lock cycle.
+	var forwardParent ShardDelegator
+	defer func() {
+		if forwardParent != nil {
+			// Forward the same batches this child consumed, preserving each
+			// batch's own Ts (master refactored ProcessDelete(deleteData, ts)
+			// into a thin wrapper over ProcessDeleteBatches).
+			forwardParent.ProcessDeleteBatches(batches)
+		}
+	}()
 	defer sd.deleteMut.Unlock()
 
 	log := sd.getLogger(context.Background())
@@ -315,6 +334,9 @@ func (sd *shardDelegator) ProcessDeleteBatches(batches []DeleteBatch) {
 	if len(allDeleteData) > 0 {
 		sd.forwardStreamingDeletion(context.Background(), allDeleteData)
 	}
+
+	// hand the forward to the deferred call above, to run after deleteMut is released.
+	forwardParent = sd.frontingParent
 
 	metrics.QueryNodeProcessCost.WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -1316,6 +1338,16 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 
 func (sd *shardDelegator) SyncTargetVersion(action *querypb.SyncAction, partitions []int64) {
 	sd.distribution.SyncTargetVersion(action, partitions)
+	// Carry the partition set down to the children this shard answers for.
+	// querycoord syncs the source and does not yet know the children exist, so
+	// this is their only way to hear about a partition created after the fence —
+	// and without it a child rejects a request the source has already admitted,
+	// which surfaces as "partition not loaded" for the whole fronting window.
+	// Only the membership is copied: the segments and target version of a child
+	// are its own.
+	for _, child := range sd.frontingChildren() {
+		child.distribution.SyncPartitions(partitions)
+	}
 	// clean delete buffer after distribution becomes serviceable
 	if sd.distribution.queryView.Serviceable() {
 		checkpoint := action.GetCheckpoint()

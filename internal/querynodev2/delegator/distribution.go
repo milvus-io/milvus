@@ -47,6 +47,12 @@ const (
 	unreadableTargetVersion = int64(-2)
 )
 
+// InitialTargetVersion is the target version a delegator is born with before
+// querycoord injects a real one via SyncTargetVersion. A delegator at this
+// version is non-serviceable, which is exactly what a shard-split child needs
+// while it is fronted by the source delegator and invisible to querycoord.
+const InitialTargetVersion = initialTargetVersion
+
 var (
 	closedCh  chan struct{}
 	closeOnce sync.Once
@@ -173,6 +179,20 @@ func (d *distribution) SetIDFOracle(idfOracle IDFOracle) {
 
 // return segment distribution in query view
 func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, sealedRowCount map[int64]int64, version int64, err error) {
+	return d.pinReadableSegments(requiredLoadRatio, false, partitions...)
+}
+
+// PinReadableSegmentsAsChild pins this delegator's readable segments for a
+// shard-split fronting fan-out, skipping the serviceability gate. A split child
+// is externally non-serviceable (no querycoord target version) and is reached
+// only in-process by its source delegator, which is itself serviceable; this
+// method lets the source read the child's growing data without exposing the
+// child to proxy reads.
+func (d *distribution) PinReadableSegmentsAsChild(requiredLoadRatio float64, partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, sealedRowCount map[int64]int64, version int64, err error) {
+	return d.pinReadableSegments(requiredLoadRatio, true, partitions...)
+}
+
+func (d *distribution) pinReadableSegments(requiredLoadRatio float64, skipServiceableCheck bool, partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, sealedRowCount map[int64]int64, version int64, err error) {
 	d.mut.RLock()
 	defer d.mut.RUnlock()
 
@@ -185,7 +205,7 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 		isServiceable = loadRatioSatisfy
 	}
 
-	if !isServiceable {
+	if !skipServiceableCheck && !isServiceable {
 		mlog.Warn(context.TODO(), "channel distribution is not serviceable",
 			mlog.String("channel", d.channelName),
 			mlog.Float64("requiredLoadRatio", requiredLoadRatio),
@@ -206,7 +226,13 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 	sealed, growing = current.Get(partitions...)
 	version = current.version
 	sealedRowCount = d.queryView.sealedSegmentRowCount
-	if d.queryView.Serviceable() {
+	// A shard-split child is fronted in-process (skipServiceableCheck): it is
+	// externally non-serviceable but owns growing segments at the initial target
+	// version that the source must read. Route it through the target-version
+	// readable filter (which admits initial-target-version segments) instead of
+	// the partial-result branch, whose queryView.growingSegments set is only
+	// populated by querycoord adoption and so would drop all of the child's data.
+	if skipServiceableCheck || d.queryView.Serviceable() {
 		// if query view is serviceable, we can use current target version to filter segments
 		targetVersion := current.GetTargetVersion()
 		filterReadable := d.readableFilter(targetVersion)
@@ -460,6 +486,31 @@ func (d *distribution) MarkOfflineSegments(segmentIDs ...int64) {
 // 2. update readable channel view to support full result after new distribution is serviceable
 // Notice: if we don't need to be compatible with 2.5.x, we can just update new query view to support query,
 // and new query view will become serviceable automatically, a sync action after distribution is serviceable is unnecessary
+// SyncPartitions replaces the readable partition set, leaving the rest of the
+// query view alone.
+//
+// It exists for shard-split children. A child's view is built once, at spawn,
+// and afterwards only querycoord's SyncTargetVersion refreshes it — which an
+// unadopted child never receives, because querycoord does not know it exists
+// yet. So a partition created after the fence stayed missing from the child for
+// the whole fronting window, and the child rejected, with "partition not
+// loaded", a request its own source had already accepted.
+//
+// Widening the set is all this does, and it cannot make a child serve data it
+// does not hold: a child only ever holds segments of its own vchannel.
+func (d *distribution) SyncPartitions(partitions []int64) {
+	d.mut.Lock()
+	defer d.mut.Unlock()
+
+	updated := typeutil.NewUniqueSet(partitions...)
+	if len(updated) == len(d.queryView.partitions) &&
+		d.queryView.partitions.Contain(updated.Collect()...) {
+		return // unchanged: do not churn a new snapshot on every sync
+	}
+	d.queryView.partitions = updated
+	d.genSnapshot()
+}
+
 func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions []int64) {
 	d.mut.Lock()
 	defer d.mut.Unlock()

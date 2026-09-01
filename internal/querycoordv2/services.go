@@ -788,11 +788,72 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		req.GetWithUnserviceableShards(),
 		func(replica *meta.Replica) bool {
 			return replica.IsQueryVisible()
-		})
+		},
+		s.retiredSplitSources(ctx, req.GetCollectionID()))
 	return &querypb.GetShardLeadersResponse{
 		Status: merr.Status(err),
 		Shards: leaders,
 	}, nil
+}
+
+// retiredSplitSources lists the shard-split sources a read should no longer fan
+// out to: handed over, and already replaced by targets that are serving.
+//
+// Both halves matter, and the pairing is what makes the handover look atomic to
+// a reader. While the targets are not serviceable yet the source is the only
+// copy of that data, so it stays in the read set even though the routing has
+// retired it. Once they are serving it holds nothing they do not, and leaving
+// it in produces the same primary key from two shards -- which the proxy's
+// reduce rejects outright as a data-integrity failure rather than deduplicating.
+//
+// Its own leader state is deliberately not consulted. A source with no leader
+// and no serving replacement means that data really is unavailable, and the
+// caller should hear about it rather than silently read a short collection.
+func (s *Server) retiredSplitSources(ctx context.Context, collectionID int64) typeutil.Set[string] {
+	if s.splitState == nil {
+		return nil
+	}
+	dropped := s.splitState.DroppedSourceChannels(ctx, collectionID)
+	if len(dropped) == 0 {
+		return nil
+	}
+	// Which targets replaced THIS source is provenance, and lives in the split
+	// task rather than the collection meta. So the test is the collection-wide
+	// one: a retired source counts as replaced once every live target of the
+	// collection is serving. That is stronger than checking its own targets, so
+	// it can only under-report a replacement -- which surfaces as the caller
+	// hearing about an unavailable channel, never as a silently short read.
+	replicas := s.meta.GetByCollection(ctx, collectionID)
+	live := s.splitState.LiveChannels(ctx, collectionID)
+	replaced := typeutil.NewSet[string]()
+	if len(live) > 0 && s.allTargetsServing(live, replicas) {
+		for _, src := range dropped {
+			replaced.Insert(src)
+		}
+	}
+	if replaced.Len() == 0 {
+		return nil
+	}
+	return replaced
+}
+
+// allTargetsServing reports whether every target channel has a serviceable
+// leader in some replica of the collection.
+func (s *Server) allTargetsServing(targets []string, replicas []*meta.Replica) bool {
+	for _, target := range targets {
+		serving := false
+		for _, replica := range replicas {
+			leader := s.dist.ChannelDistManager.GetShardLeader(target, replica)
+			if leader != nil && leader.IsServiceable() {
+				serving = true
+				break
+			}
+		}
+		if !serving {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {

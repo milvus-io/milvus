@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func CheckNodeAvailable(nodeID int64, info *session.NodeInfo) error {
@@ -170,7 +171,7 @@ func GetShardLeadersWithChannels(
 	channels map[string]*meta.DmChannel,
 	withUnserviceableShards bool,
 ) ([]*querypb.ShardLeadersList, error) {
-	return GetShardLeadersWithChannelsAndReplicaFilter(ctx, m, dist, nodeMgr, collectionID, channels, withUnserviceableShards, nil)
+	return GetShardLeadersWithChannelsAndReplicaFilter(ctx, m, dist, nodeMgr, collectionID, channels, withUnserviceableShards, nil, nil)
 }
 
 func GetShardLeadersWithChannelsAndReplicaFilter(
@@ -182,11 +183,25 @@ func GetShardLeadersWithChannelsAndReplicaFilter(
 	channels map[string]*meta.DmChannel,
 	withUnserviceableShards bool,
 	replicaFilter func(*meta.Replica) bool,
+	retiredSources typeutil.Set[string],
 ) ([]*querypb.ShardLeadersList, error) {
 	ret := make([]*querypb.ShardLeadersList, 0)
 
 	replicas := m.GetByCollection(ctx, collectionID)
 	for _, channel := range channels {
+		// A split source that has handed over to targets which are already
+		// serving holds nothing they do not. It lingers in the current target
+		// until that advances, and reading it alongside them returns the same
+		// primary key from two shards, which the proxy rejects as a data
+		// integrity failure. Leaving it out is what makes the handover look
+		// atomic to a reader; the caller only puts a source in this set once its
+		// replacements serve, so nothing is dropped from the answer.
+		if retiredSources.Contain(channel.GetChannelName()) {
+			mlog.RatedInfo(ctx, rate.Limit(1.0/10.0),
+				"skip a handed-over split source, its targets are serving",
+				mlog.String("channel", channel.GetChannelName()))
+			continue
+		}
 		ids := make([]int64, 0, len(replicas))
 		addrs := make([]string, 0, len(replicas))
 		serviceable := make([]bool, 0, len(replicas))
@@ -247,7 +262,7 @@ func GetShardLeaders(ctx context.Context,
 	collectionID int64,
 	withUnserviceableShards bool,
 ) ([]*querypb.ShardLeadersList, error) {
-	return GetShardLeadersWithReplicaFilter(ctx, m, targetMgr, dist, nodeMgr, collectionID, withUnserviceableShards, nil)
+	return GetShardLeadersWithReplicaFilter(ctx, m, targetMgr, dist, nodeMgr, collectionID, withUnserviceableShards, nil, nil)
 }
 
 func GetShardLeadersWithReplicaFilter(ctx context.Context,
@@ -258,6 +273,7 @@ func GetShardLeadersWithReplicaFilter(ctx context.Context,
 	collectionID int64,
 	withUnserviceableShards bool,
 	replicaFilter func(*meta.Replica) bool,
+	retiredSources typeutil.Set[string],
 ) ([]*querypb.ShardLeadersList, error) {
 	if err := checkLoadStatus(ctx, m, collectionID, withUnserviceableShards); err != nil {
 		return nil, err
@@ -270,7 +286,7 @@ func GetShardLeadersWithReplicaFilter(ctx context.Context,
 		mlog.Warn(ctx, "failed to get channels", mlog.Err(err))
 		return nil, err
 	}
-	return GetShardLeadersWithChannelsAndReplicaFilter(ctx, m, dist, nodeMgr, collectionID, channels, withUnserviceableShards, replicaFilter)
+	return GetShardLeadersWithChannelsAndReplicaFilter(ctx, m, dist, nodeMgr, collectionID, channels, withUnserviceableShards, replicaFilter, retiredSources)
 }
 
 // CheckCollectionsQueryable check all channels are watched and all segments are loaded for this collection

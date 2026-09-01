@@ -70,6 +70,9 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 		}
 	case commonpb.MsgType_ManualFlush:
 		// ManualFlush is consumed in filterNode.filtrate(); no insert/delete payload here.
+	case commonpb.MsgType_SplitShard:
+		// SplitShard is consumed in filterNode.filtrate() to spawn the in-process
+		// child delegators; no insert/delete payload here.
 	default:
 		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
 	}

@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type ChannelCheckerTestSuite struct {
@@ -88,7 +90,7 @@ func (suite *ChannelCheckerTestSuite) SetupTest() {
 	// Initialize global assign policy factory before creating checker
 	assign.InitGlobalAssignPolicyFactory(scheduler, suite.nodeMgr, distManager, suite.meta, targetManager)
 
-	suite.checker = NewChannelChecker(suite.meta, distManager, targetManager, suite.nodeMgr, scheduler)
+	suite.checker = NewChannelChecker(suite.meta, distManager, targetManager, suite.nodeMgr, scheduler, nil)
 
 	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 }
@@ -362,4 +364,43 @@ func (suite *ChannelCheckerTestSuite) TestReleaseDirtyChannels() {
 
 func TestChannelCheckerSuite(t *testing.T) {
 	suite.Run(t, new(ChannelCheckerTestSuite))
+}
+
+func TestLiveTargetsServing(t *testing.T) {
+	dmChannel := func(name string, serviceable bool) *meta.DmChannel {
+		return &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{ChannelName: name},
+			View: &meta.LeaderView{
+				Channel: name,
+				Status:  &querypb.LeaderViewStatus{Serviceable: serviceable},
+			},
+		}
+	}
+	// "src" is the dropped split source; t1/t2 are the live targets that replaced it.
+	nextTarget := map[string]*meta.DmChannel{
+		"src": dmChannel("src", true),
+		"t1":  dmChannel("t1", true),
+		"t2":  dmChannel("t2", true),
+	}
+	dropped := typeutil.NewSet("src")
+
+	t.Run("all live targets serving -> source releasable", func(t *testing.T) {
+		dist := []*meta.DmChannel{dmChannel("src", true), dmChannel("t1", true), dmChannel("t2", true)}
+		assert.True(t, liveTargetsServing(nextTarget, dist, dropped))
+	})
+
+	t.Run("a target not yet serving -> hold the source", func(t *testing.T) {
+		dist := []*meta.DmChannel{dmChannel("src", true), dmChannel("t1", true), dmChannel("t2", false)}
+		assert.False(t, liveTargetsServing(nextTarget, dist, dropped))
+	})
+
+	t.Run("a target missing from dist -> hold the source", func(t *testing.T) {
+		dist := []*meta.DmChannel{dmChannel("src", true), dmChannel("t1", true)}
+		assert.False(t, liveTargetsServing(nextTarget, dist, dropped))
+	})
+
+	t.Run("the dropped source's own serviceability is ignored", func(t *testing.T) {
+		dist := []*meta.DmChannel{dmChannel("src", false), dmChannel("t1", true), dmChannel("t2", true)}
+		assert.True(t, liveTargetsServing(nextTarget, dist, dropped))
+	})
 }

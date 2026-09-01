@@ -46,6 +46,11 @@ type ChannelChecker struct {
 	scheduler    task.Scheduler
 	assignPolicy assign.AssignPolicy
 
+	// splitState skips watching a collection's not-yet-adopted split targets
+	// (ShardState_ShardCreating): they are fronted in-process by the source
+	// delegator and must not be picked up by querycoord until adoption. May be nil.
+	splitState *meta.ShardSplitStateCache
+
 	// version cache for fast skip when nothing changed
 	versionCache map[int64]*collectionVersionCache
 }
@@ -56,6 +61,7 @@ func NewChannelChecker(
 	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
+	splitState *meta.ShardSplitStateCache,
 ) *ChannelChecker {
 	// Create RoundRobin assign policy in constructor to maximize loading speed
 	// Note: RoundRobin may break short-term balance but prioritizes loading speed
@@ -69,6 +75,7 @@ func NewChannelChecker(
 		nodeMgr:           nodeMgr,
 		scheduler:         scheduler,
 		assignPolicy:      assignPolicy,
+		splitState:        splitState,
 		versionCache:      make(map[int64]*collectionVersionCache),
 	}
 }
@@ -233,15 +240,114 @@ func (c *ChannelChecker) getDmChannelDiff(ctx context.Context, collectionID int6
 		}
 	}
 
+	// not-yet-adopted split targets are fronted in-process by the source
+	// delegator; querycoord must not watch them until they leave the Creating
+	// state at adoption, or it would build a fresh delegator and replay the WAL.
+	creatingTargets := typeutil.NewSet[string]()
+	if c.splitState != nil {
+		creatingTargets.Insert(c.splitState.CreatingTargetChannels(ctx, collectionID)...)
+	}
+
 	// get channels which exists on next target, but not on dist
 	for name, channel := range nextTargetMap {
 		_, existOnDist := distMap[name]
-		if !existOnDist {
+		if !existOnDist && !creatingTargets.Contain(name) {
 			toLoad = append(toLoad, channel)
 		}
 	}
 
+	// release a fully-handed-off split source: after adoption datacoord marks the
+	// source ShardDropped, but it lingers in dist and the target list. A dropped
+	// source is released only once the targets that replaced it are serving, so it
+	// fronts nothing by then and the split key range is never left unserved
+	// (design defense 3). Each dropped source is gated on its OWN targets
+	// (source_vchannel); when that mapping is absent (older meta) it falls back to
+	// the collection-wide check.
+	//
+	// It is ALSO gated on the source having left the current target, and that
+	// second gate is what keeps reads alive. GetShardLeaders enumerates the
+	// current target, so a source released while it is still listed there leaves
+	// a channel with no leader — and one such channel fails the whole call, not
+	// just that shard, so every read of the collection errors with "no available
+	// shard leaders" until the current target catches up. Measured at 44s in an
+	// E2E run: the source was unsubscribed at 19:14:28 and was still being
+	// enumerated at 19:15:09.
+	//
+	// The two conditions are not the same: the targets serve as soon as they are
+	// loaded, while the current target advances only once EVERY next-target
+	// channel has a delegator that is both synced and data-ready. Waiting for the
+	// later one costs nothing — the source is only a safety net by then — and
+	// holding it cannot stall the advance, because the advance looks at the next
+	// target, which no longer contains it.
+	if c.splitState != nil {
+		droppedSources := c.splitState.DroppedSourceChannels(ctx, collectionID)
+		if len(droppedSources) > 0 {
+			droppedSet := typeutil.NewSet(droppedSources...)
+			for _, src := range droppedSources {
+				if _, stillRouted := currentTargetMap[src]; stillRouted {
+					// reads still fan out here; releasing now would break them.
+					continue
+				}
+				// Which targets came from THIS source is provenance, and lives in
+				// the split task rather than the collection meta -- so the check
+				// is the collection-wide one: every live target must be serving
+				// before any retired source is released. That is strictly
+				// stronger than "this source's own targets are serving", so it
+				// can only delay a release, never allow an early one.
+				if !liveTargetsServing(nextTargetMap, dist, droppedSet) {
+					continue
+				}
+				for _, ch := range dist {
+					if ch.GetChannelName() == src {
+						toRelease = append(toRelease, ch)
+					}
+				}
+			}
+		}
+	}
+
 	return toLoad, toRelease
+}
+
+// serviceableSet collects the channels in dist that have a serviceable leader.
+func serviceableSet(dist []*meta.DmChannel) typeutil.Set[string] {
+	serviceable := typeutil.NewSet[string]()
+	for _, ch := range dist {
+		if ch.View != nil && ch.View.Status.GetServiceable() {
+			serviceable.Insert(ch.GetChannelName())
+		}
+	}
+	return serviceable
+}
+
+// allChannelsServing reports whether every one of the given channels has a
+// serviceable leader in dist. Used to gate a dropped split source's release on
+// its own targets serving.
+func allChannelsServing(channels []string, dist []*meta.DmChannel) bool {
+	serviceable := serviceableSet(dist)
+	for _, ch := range channels {
+		if !serviceable.Contain(ch) {
+			return false
+		}
+	}
+	return true
+}
+
+// liveTargetsServing reports whether every non-dropped target channel of the
+// collection has a serviceable leader in dist. It is the collection-wide
+// fallback used to release a dropped split source when its own source_vchannel
+// mapping is unavailable.
+func liveTargetsServing(nextTargetMap map[string]*meta.DmChannel, dist []*meta.DmChannel, droppedSources typeutil.Set[string]) bool {
+	serviceable := serviceableSet(dist)
+	for name := range nextTargetMap {
+		if droppedSources.Contain(name) {
+			continue
+		}
+		if !serviceable.Contain(name) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int64) []*meta.DmChannel {

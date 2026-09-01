@@ -138,6 +138,11 @@ type BalanceChecker struct {
 	// used when nodes are being gracefully stopped
 	stoppingBalanceQueue *assign.PriorityQueue
 
+	// splitState freezes balance for a collection while one of its shards is
+	// being split: a rebalance would tear down the source delegator together with
+	// the in-process split children it fronts. May be nil (no freeze).
+	splitState *meta.ShardSplitStateCache
+
 	// autoBalanceTs records the timestamp of the last auto balance operation
 	// to ensure balance operations don't happen too frequently
 	autoBalanceTs time.Time
@@ -148,6 +153,7 @@ func NewBalanceChecker(meta *meta.Meta,
 	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
+	splitState *meta.ShardSplitStateCache,
 ) *BalanceChecker {
 	return &BalanceChecker{
 		checkerActivation:    newCheckerActivation(),
@@ -158,6 +164,7 @@ func NewBalanceChecker(meta *meta.Meta,
 		normalBalanceQueue:   assign.NewPriorityQueuePtr(),
 		stoppingBalanceQueue: assign.NewPriorityQueuePtr(),
 		scheduler:            scheduler,
+		splitState:           splitState,
 	}
 }
 
@@ -178,6 +185,13 @@ func (b *BalanceChecker) Description() string {
 func (b *BalanceChecker) readyToCheck(ctx context.Context, collectionID int64) bool {
 	metaExist := (b.meta.GetCollection(ctx, collectionID) != nil)
 	targetExist := b.targetMgr.IsNextTargetExist(ctx, collectionID) || b.targetMgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID)
+
+	// freeze balance while a shard of this collection is splitting: moving the
+	// source channel would tear down the source delegator and the in-process
+	// split children it fronts, breaking the split read path.
+	if b.splitState != nil && b.splitState.IsShardSplitting(ctx, collectionID) {
+		return false
+	}
 
 	return metaExist && targetExist
 }

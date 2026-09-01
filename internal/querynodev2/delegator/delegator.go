@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -93,6 +94,15 @@ type ShardDelegator interface {
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
 	ProcessDelete(deleteData []*DeleteData, ts uint64)
+	ProcessSplitShard(ctx context.Context, targets []*messagespb.SplitShardTarget) error
+	SetChildSpawner(spawner ChildSpawner)
+	SetFrontingParent(parent ShardDelegator)
+	FrontingParent() ShardDelegator
+	SplitChildVChannels() []string
+	DetachSplitChild(childVChannel string)
+	MarkAdopted()
+	IsUnadoptedSplitChild() bool
+	MarkReleasing()
 	ProcessDeleteBatches(batches []DeleteBatch)
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadL0(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
@@ -214,6 +224,35 @@ type shardDelegator struct {
 	growingSourceProvider     *delegatorGrowingSourceProvider
 
 	leaderViewUpdatedCallback func(channel string)
+
+	// shard-split fronting: on the SplitShard fence this (source) delegator spawns
+	// an in-process child delegator per target vchannel and fronts their growing
+	// data during the split window. childSpawner is injected by the querynode;
+	// children is keyed by target vchannel and guarded by childMut.
+	childMut     sync.Mutex
+	children     map[string]ShardDelegator
+	childSpawner ChildSpawner
+	// spawning tracks target vchannels whose child is being spawned in the
+	// background, so a re-consume of the fence does not launch a duplicate spawn.
+	spawning map[string]struct{}
+	// frontingParent is set on a split child to the source delegator that fronts
+	// it: the child forwards every delete it consumes (all of which are past
+	// T_switch) to the parent so the parent applies it to its own sealed and
+	// pre-switch growing segments. nil on a non-child delegator. It stays set
+	// until the source is released, after which the child is fully independent.
+	frontingParent ShardDelegator
+	// adopted flips true when querycoord adopts a split child (WatchDmChannel on
+	// the target). Before adoption the child is fronted in-process and must stay
+	// invisible to querycoord (GetDataDistribution skips it); after adoption it is
+	// reported and follows the normal SyncTargetVersion path to serviceable, while
+	// the source keeps fronting it until it actually becomes serviceable.
+	adopted atomic.Bool
+	// releasing flips true on a SOURCE delegator when its channel is being
+	// released, before releaseSplitChildren snapshots the children. A child spawn
+	// still in flight (the spawner can block for seconds) checks it under childMut
+	// before publishing, so a child created after the source is gone is aborted
+	// instead of orphaned.
+	releasing atomic.Bool
 }
 
 // getLogger returns the logger with pre-defined shard attributes.
@@ -560,14 +599,20 @@ func (sd *shardDelegator) getVectorFieldDim(fieldID int64) int64 {
 }
 
 // Search preforms search operation on shard.
-func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error) {
+// searchInternal searches only this delegator's own view (its sealed and
+// growing segments). asChild is set when a source delegator fronts this
+// delegator as a shard-split child: it pins readable segments through the
+// serviceability-gate bypass so a non-serviceable child can still serve its
+// growing data in-process. The public Search adds the channel check and the
+// fronting fan-out on top.
+func (sd *shardDelegator) searchInternal(ctx context.Context, req *querypb.SearchRequest, asChild bool) ([]*internalpb.SearchResults, error) {
 	log := sd.getLogger(ctx)
 	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
 		return nil, err
 	}
 	defer sd.lifetime.Done()
 
-	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
+	if sd.misroutedFor(req.GetDmlChannels(), asChild) {
 		log.Warn(ctx, "delegator received search request not belongs to it",
 			mlog.Strings("reqChannels", req.GetDmlChannels()),
 		)
@@ -614,7 +659,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		req.Req.MvccTimestamp = tSafe
 	}
 
-	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)
+	sealed, growing, sealedRowCount, version, err := sd.pinReadableSegments(asChild, partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		mlog.Warn(ctx, "delegator failed to search, current distribution is not serviceable", mlog.Err(err))
 		return nil, err
@@ -707,17 +752,21 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	return results, nil
 }
 
-func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
+func (sd *shardDelegator) queryStreamInternal(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer, asChild bool) error {
 	log := sd.getLogger(ctx)
 	if err := sd.lifetime.Add(sd.NotStopped); err != nil {
 		return err
 	}
 	defer sd.lifetime.Done()
-	if !sd.Serviceable() {
+	// A child delegator serves its parent's fan-out during the split window and
+	// is deliberately not serviceable on its own, so the readiness gate applies
+	// to direct requests only. The lifetime guard above still applies to both:
+	// a stopped delegator must serve nothing, child or not.
+	if !asChild && !sd.Serviceable() {
 		return merr.WrapErrServiceUnavailable("delegator", "not serviceable")
 	}
 
-	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
+	if sd.misroutedFor(req.GetDmlChannels(), asChild) {
 		mlog.Warn(ctx, "deletgator received query request not belongs to it",
 			mlog.Strings("reqChannels", req.GetDmlChannels()),
 		)
@@ -749,7 +798,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		req.Req.MvccTimestamp = tSafe
 	}
 
-	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(float64(1.0), req.GetReq().GetPartitionIDs()...)
+	sealed, growing, sealedRowCount, version, err := sd.pinReadableSegments(asChild, float64(1.0), req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		mlog.Warn(ctx, "delegator failed to query, current distribution is not serviceable", mlog.Err(err))
 		return err
@@ -799,14 +848,14 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 }
 
 // Query performs query operation on shard.
-func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error) {
+func (sd *shardDelegator) queryInternal(ctx context.Context, req *querypb.QueryRequest, asChild bool) ([]*internalpb.RetrieveResults, error) {
 	log := sd.getLogger(ctx)
 	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
 		return nil, err
 	}
 	defer sd.lifetime.Done()
 
-	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
+	if sd.misroutedFor(req.GetDmlChannels(), asChild) {
 		mlog.Warn(ctx, "delegator received query request not belongs to it",
 			mlog.Strings("reqChannels", req.GetDmlChannels()),
 		)
@@ -840,7 +889,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		req.Req.MvccTimestamp = tSafe
 	}
 
-	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(float64(1.0), req.GetReq().GetPartitionIDs()...)
+	sealed, growing, sealedRowCount, version, err := sd.pinReadableSegments(asChild, float64(1.0), req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		mlog.Warn(ctx, "delegator failed to query, current distribution is not serviceable", mlog.Err(err))
 		return nil, err
@@ -916,14 +965,14 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 }
 
 // GetStatistics returns statistics aggregated by delegator.
-func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error) {
+func (sd *shardDelegator) getStatisticsInternal(ctx context.Context, req *querypb.GetStatisticsRequest, asChild bool) ([]*internalpb.GetStatisticsResponse, error) {
 	log := sd.getLogger(ctx)
 	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
 		return nil, err
 	}
 	defer sd.lifetime.Done()
 
-	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
+	if sd.misroutedFor(req.GetDmlChannels(), asChild) {
 		mlog.Warn(ctx, "delegator received GetStatistics request not belongs to it",
 			mlog.Strings("reqChannels", req.GetDmlChannels()),
 		)
@@ -938,7 +987,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 		return nil, err
 	}
 
-	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(1.0, req.Req.GetPartitionIDs()...)
+	sealed, growing, sealedRowCount, version, err := sd.pinReadableSegments(asChild, 1.0, req.Req.GetPartitionIDs()...)
 	if err != nil {
 		mlog.Warn(ctx, "delegator failed to GetStatistics, current distribution is not servicable")
 		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not serviceable")
@@ -1196,6 +1245,15 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 		return typeutil.MaxTimestamp, nil
 	}
 
+	// shard-split fronting: after the fence the source delegator consumes nothing
+	// so its own tsafe freezes at T_switch; a query past T_switch must instead
+	// wait on the children's tsafe (their TimeTick progress), which the source
+	// serves at the min over — it never answers at t before every child has
+	// forwarded all deletes <= t.
+	if children := sd.frontingChildren(); len(children) > 0 {
+		return sd.waitChildrenTSafe(ctx, children, ts)
+	}
+
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "Delegator-waitTSafe")
 	defer sp.End()
 	log := sd.getLogger(ctx)
@@ -1338,6 +1396,19 @@ func (sd *shardDelegator) UpdateTSafe(tsafe uint64) {
 }
 
 func (sd *shardDelegator) GetTSafe() uint64 {
+	// shard-split fronting: the source serves the merged shard at min(child
+	// tsafes) — its own tsafe is frozen at T_switch and its data is complete, so
+	// the children's TimeTick progress governs the serviceable timestamp.
+	if children := sd.frontingChildren(); len(children) > 0 {
+		var minTSafe uint64
+		for i, child := range children {
+			childTSafe := child.GetTSafe()
+			if i == 0 || childTSafe < minTSafe {
+				minTSafe = childTSafe
+			}
+		}
+		return minTSafe
+	}
 	return sd.latestTsafe.Load()
 }
 
@@ -1529,6 +1600,19 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 	}
 }
 
+// misroutedFor reports whether this delegator must refuse a read addressed to
+// reqChannels. Normally it must, unless the request names its own vchannel:
+// that is the check that catches a proxy addressing the wrong shard.
+//
+// A fronted split child is the one exception. It answers on its SOURCE's
+// behalf, so the request it is handed names the source, and the source has
+// already run this same check for it. Without the exception the source cannot
+// serve the split's new shards at all, and the first fronted read of every
+// split fails with "channel misrouted".
+func (sd *shardDelegator) misroutedFor(reqChannels []string, asChild bool) bool {
+	return !asChild && !funcutil.SliceContain(reqChannels, sd.vchannelName)
+}
+
 // NewShardDelegator creates a new ShardDelegator instance with all fields initialized.
 func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID UniqueID, channel string, version int64,
 	workerManager cluster.Manager, manager *segments.Manager, loader segments.Loader, startTs uint64, queryHook optimizers.QueryHook, chunkManager storage.ChunkManager,
@@ -1601,6 +1685,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		skipStreamingForExternalTable: skipStreamingForExternalTable,
 		latestRequiredMVCCTimeTick:    atomic.NewUint64(0),
 		schemaBarrierTs:               schemaBarrierTs,
+		children:                      make(map[string]ShardDelegator),
 	}
 	for _, opt := range opts {
 		opt(sd)

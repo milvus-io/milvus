@@ -221,8 +221,37 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Status(err), nil
 	}
 
-	_, exist := node.delegators.Get(channel.GetChannelName())
-	if exist {
+	if existing, exist := node.delegators.Get(channel.GetChannelName()); exist {
+		// shard-split adoption: querycoord watches a split target whose child
+		// delegator already exists in-process (loaded, fronted by the source).
+		// Promote it instead of rebuilding it and replaying the WAL: mark it
+		// adopted so GetDataDistribution starts reporting it, and the normal
+		// SyncTargetVersion path drives it to serviceable. The source keeps
+		// fronting it (reads + delete forwarding) until it actually becomes
+		// serviceable and, finally, the source is released — so there is no
+		// window where neither serves the split key range.
+		if existing.IsUnadoptedSplitChild() {
+			existing.MarkAdopted()
+			// Lifting the visibility flag is not enough on its own: the report is
+			// a DELTA, and a channel only appears in it if the tracker was told it
+			// changed. A child was deliberately never marked while un-adopted, so
+			// without this it stays out of every delta report and querycoord never
+			// learns the channel exists -- only a full report would carry it, and
+			// those are rare enough that in practice it takes a restart.
+			//
+			// That gap deadlocks the collection: querycoord advances the current
+			// target only once every channel of the next target has a delegator in
+			// dist, so an invisible target freezes it for good. A frozen current
+			// target then means new partitions never enter it (their sync times
+			// out) and the retired split source is never released -- so it keeps
+			// answering reads with the partition set it had at the fence.
+			node.distDeltaTracker.markChannelUpsert(channel.GetChannelName())
+			nodeIDStr := fmt.Sprint(node.GetNodeID())
+			metrics.QueryNodeSplitChildAdoptedTotal.WithLabelValues(nodeIDStr).Inc()
+			// the child is no longer an un-adopted fronted child.
+			metrics.QueryNodeSplitChildNum.WithLabelValues(nodeIDStr).Dec()
+			log.Info(ctx, "promoted in-process shard-split child delegator on adoption")
+		}
 		log.Info(ctx, "channel already subscribed")
 		return merr.Success(), nil
 	}
@@ -267,6 +296,9 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Status(err), nil
 	}
 	node.delegators.Insert(channel.GetChannelName(), delegator)
+	// the node spawns this delegator's in-process split children when it consumes
+	// a SplitShard fence on its vchannel.
+	delegator.SetChildSpawner(node)
 	defer func() {
 		if err != nil {
 			node.delegators.GetAndRemove(channel.GetChannelName())
@@ -367,6 +399,12 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	// delegator after all steps done
 	delegator.Start()
 	node.distDeltaTracker.markChannelUpsert(channel.GetChannelName())
+	// recover in-process split children if this source vchannel is mid-split: on a
+	// restart the SplitShard fence may sit behind the channel checkpoint and never
+	// be re-consumed, so re-derive the targets from durable coordinator state. This
+	// runs in the background so it does not slow the watch, and is a no-op on a
+	// normal watch (the vchannel is not yet a fenced split source).
+	go node.respawnSplitChildrenOnRecovery(node.ctx, delegator, req.GetCollectionID(), channel.GetChannelName())
 	log.Info(ctx, "watch dml channel success")
 	return merr.Success(), nil
 }
@@ -425,6 +463,11 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		}
 		node.pipelineManager.Remove(req.GetChannelName())
 		preparedGrowingSourceSegments := syncmgr.DefaultGrowingSourceRegistry().ReleasePreparedSegments(req.GetChannelName())
+		// tear down any in-process shard-split children this source delegator
+		// spawned: they are registered under their own (target) vchannels and hold
+		// their own collection ref + pipeline, so releasing the source alone would
+		// leak them. Capture before Close, then release each like a normal channel.
+		node.releaseSplitChildren(ctx, delegator, req.GetCollectionID())
 		// close the delegator first to block all coming query/search requests
 		delegator.Close()
 
@@ -1352,6 +1395,12 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	var removedChannelNames []string
 	var totalChannelCount int
 	node.delegators.Range(func(channel string, shardDelegator delegator.ShardDelegator) bool {
+		// an un-adopted shard-split child is served in-process by its source
+		// delegator and must stay invisible to querycoord until adoption, or
+		// querycoord would try to route reads to / manage its half-built channel.
+		if shardDelegator.IsUnadoptedSplitChild() {
+			return true
+		}
 		if !shardDelegator.Serviceable() {
 			return true
 		}

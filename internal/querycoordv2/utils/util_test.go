@@ -23,14 +23,19 @@ import (
 
 	"github.com/blang/semver/v4"
 	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type UtilTestSuite struct {
@@ -407,4 +412,104 @@ func (suite *UtilTestSuite) TestCheckSegmentDataReady_DataVersion() {
 
 func TestUtilSuite(t *testing.T) {
 	suite.Run(t, new(UtilTestSuite))
+}
+
+func TestAHandedOverSplitSourceIsSkippedNotFatal(t *testing.T) {
+	// A split source lingers in the current target until the target advances,
+	// but querycoord may already have let it go. Failing the call there takes
+	// down every read of the collection, not just that shard -- measured as a
+	// 44s outage in an E2E run. It owns no key range by then, so it is skipped.
+	ctx := context.Background()
+	nodeMgr := session.NewNodeManager()
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 1, Address: "localhost", Hostname: "localhost",
+	}))
+
+	catalog := catalogmocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil).Maybe()
+	m := meta.NewMeta(params.RandomIncrementIDAllocator(), catalog, nodeMgr)
+	require.NoError(t, m.PutCollection(ctx, CreateTestCollection(1, 1)))
+	require.NoError(t, m.Put(ctx, CreateTestReplica(1, 1, []int64{1})))
+
+	dist := meta.NewDistributionManager(nodeMgr)
+	// only the live shard has a leader; the retired source has none.
+	dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v1"},
+		Node:         1,
+		Version:      1,
+		View: &meta.LeaderView{
+			ID: 1, Channel: "v1", Version: 1,
+			Status: &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+
+	channels := map[string]*meta.DmChannel{
+		"v0": {VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v0"}},
+		"v1": {VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v1"}},
+	}
+
+	// Without the retired-source set, one leaderless channel fails everything.
+	_, err := GetShardLeadersWithChannelsAndReplicaFilter(ctx, m, dist, nodeMgr, 1, channels, false, nil, nil)
+	assert.Error(t, err, "an ordinary leaderless channel still fails the call")
+
+	// Knowing v0 has handed over, the live shard is served instead.
+	got, err := GetShardLeadersWithChannelsAndReplicaFilter(ctx, m, dist, nodeMgr, 1, channels, false, nil,
+		typeutil.NewSet("v0"))
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "v1", got[0].GetChannelName())
+}
+
+func TestAReplacedSplitSourceIsLeftOutEvenWhileItStillServes(t *testing.T) {
+	// The duplicate half: the source is still loaded and answering, and so are
+	// the targets that replaced it, so the same primary key comes back from two
+	// shards and the proxy rejects the whole query. Once the caller says the
+	// replacements are serving, the source has to leave the read set even though
+	// it could still answer.
+	ctx := context.Background()
+	nodeMgr := session.NewNodeManager()
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 1, Address: "localhost", Hostname: "localhost",
+	}))
+
+	catalog := catalogmocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil).Maybe()
+	m := meta.NewMeta(params.RandomIncrementIDAllocator(), catalog, nodeMgr)
+	require.NoError(t, m.PutCollection(ctx, CreateTestCollection(2, 1)))
+	require.NoError(t, m.Put(ctx, CreateTestReplica(2, 2, []int64{1})))
+
+	serving := func(name string) *meta.DmChannel {
+		return &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: 2, ChannelName: name},
+			Node:         1,
+			Version:      1,
+			View: &meta.LeaderView{
+				ID: 1, Channel: name, Version: 1,
+				Status: &querypb.LeaderViewStatus{Serviceable: true},
+			},
+		}
+	}
+	dist := meta.NewDistributionManager(nodeMgr)
+	// the source is still perfectly serviceable -- that is the point
+	dist.ChannelDistManager.Update(1, serving("v0"), serving("v1"))
+
+	channels := map[string]*meta.DmChannel{
+		"v0": {VchannelInfo: &datapb.VchannelInfo{CollectionID: 2, ChannelName: "v0"}},
+		"v1": {VchannelInfo: &datapb.VchannelInfo{CollectionID: 2, ChannelName: "v1"}},
+	}
+
+	// Nothing retired: both shards are read, which is where the duplicate came from.
+	got, err := GetShardLeadersWithChannelsAndReplicaFilter(ctx, m, dist, nodeMgr, 2, channels, false, nil, nil)
+	require.NoError(t, err)
+	assert.Len(t, got, 2)
+
+	got, err = GetShardLeadersWithChannelsAndReplicaFilter(ctx, m, dist, nodeMgr, 2, channels, false, nil,
+		typeutil.NewSet("v0"))
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "v1", got[0].GetChannelName())
 }

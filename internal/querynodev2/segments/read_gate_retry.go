@@ -18,8 +18,9 @@ package segments
 
 import (
 	"context"
-	"math/rand/v2"
 	"time"
+
+	"math/rand/v2"
 
 	segcoreutil "github.com/milvus-io/milvus/internal/util/segcore"
 )

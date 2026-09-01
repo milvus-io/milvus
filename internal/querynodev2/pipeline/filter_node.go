@@ -156,6 +156,26 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 			return merr.WrapErrCollectionNotFound(header.GetCollectionId())
 		}
 		return nil
+	case commonpb.MsgType_SplitShard:
+		// The SplitShard fence on the source vchannel: the source delegator spawns
+		// an in-process child delegator per target so it can front their growing
+		// data during the split window. ProcessSplitShard is idempotent, so a
+		// pipeline replay of the fence does not double-spawn.
+		splitShardMsg := msg.(*adaptor.SplitShardMessageBody)
+		header := splitShardMsg.SplitShardMessage.Header()
+		if header.GetCollectionId() != fNode.collectionID {
+			return merr.WrapErrCollectionNotFound(header.GetCollectionId())
+		}
+		// The one point where the read path learns a split happened. Logged
+		// because its absence is indistinguishable, in every other log, from a
+		// split whose targets simply have no traffic — and the whole fronting
+		// window depends on this line being reached.
+		mlog.Info(context.TODO(), "source vchannel consumed its shard-split fence",
+			mlog.Int64("collectionID", header.GetCollectionId()),
+			mlog.String("vchannel", fNode.channel),
+			mlog.Int64("splitTaskID", header.GetSplitTaskId()),
+			mlog.Int("targets", len(header.GetTargets())))
+		return fNode.delegator.ProcessSplitShard(context.Background(), header.GetTargets())
 	default:
 		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
 	}

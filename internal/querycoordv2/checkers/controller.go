@@ -53,6 +53,21 @@ type CheckerController struct {
 	stopOnce sync.Once
 }
 
+// shardSplitStateCacheTTL bounds how stale the balance freeze's view of a
+// collection's split state may be; splits last minutes, so a few seconds is
+// plenty and keeps the per-cycle DescribeCollection load negligible.
+const shardSplitStateCacheTTL = 5 * time.Second
+
+// NewSplitStateCache builds the shard-split state cache at package scope, where
+// the meta package is not shadowed by NewCheckerController's `meta` parameter.
+//
+// Exported because the same view is needed outside the checkers: GetShardLeaders
+// has to recognize a retired split source too, and two caches would disagree
+// about when a handover finished.
+func NewSplitStateCache(broker meta.Broker) *meta.ShardSplitStateCache {
+	return meta.NewShardSplitStateCache(broker, shardSplitStateCacheTTL)
+}
+
 func NewCheckerController(
 	meta *meta.Meta,
 	dist *meta.DistributionManager,
@@ -61,13 +76,29 @@ func NewCheckerController(
 	scheduler task.Scheduler,
 	broker meta.Broker,
 ) *CheckerController {
+	return NewCheckerControllerWithSplitState(meta, dist, targetMgr, nodeMgr, scheduler, broker,
+		NewSplitStateCache(broker))
+}
+
+// NewCheckerControllerWithSplitState is NewCheckerController with the shard-split
+// state cache supplied by the caller, so the server can share one view with
+// GetShardLeaders.
+func NewCheckerControllerWithSplitState(
+	meta *meta.Meta,
+	dist *meta.DistributionManager,
+	targetMgr meta.TargetManagerInterface,
+	nodeMgr *session.NodeManager,
+	scheduler task.Scheduler,
+	broker meta.Broker,
+	splitState *meta.ShardSplitStateCache,
+) *CheckerController {
 	// CheckerController runs checkers with the order,
 	// the former checker has higher priority
 	// Note: ChannelChecker and SegmentChecker now create their own RoundRobin policy internally
 	checkers := map[utils.CheckerType]Checker{
-		utils.ChannelChecker: NewChannelChecker(meta, dist, targetMgr, nodeMgr, scheduler),
+		utils.ChannelChecker: NewChannelChecker(meta, dist, targetMgr, nodeMgr, scheduler, splitState),
 		utils.SegmentChecker: NewSegmentChecker(meta, dist, targetMgr, nodeMgr, scheduler),
-		utils.BalanceChecker: NewBalanceChecker(meta, dist, targetMgr, nodeMgr, scheduler),
+		utils.BalanceChecker: NewBalanceChecker(meta, dist, targetMgr, nodeMgr, scheduler, splitState),
 		utils.IndexChecker:   NewIndexChecker(meta, dist, broker, nodeMgr, targetMgr),
 		utils.LeaderChecker:  NewLeaderChecker(meta, dist, targetMgr, nodeMgr),
 	}
