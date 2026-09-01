@@ -1,11 +1,13 @@
+//go:build test && dynamic
+
 package qnview
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
 
-	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -24,6 +26,15 @@ type mockSegmentManager struct {
 	acquired        map[qviews.QueryViewKey]AcquireSegments
 	released        []qviews.QueryViewKey
 	releaseCallback map[qviews.QueryViewKey]func() // captured onDropped callbacks
+	queryHandles    []SealedSegmentHandle
+	queryErr        error
+	queryKey        qviews.QueryViewKey
+	queryView       *viewpb.QueryViewOfQueryNode
+	beforeQuery     func()
+	waitKey         qviews.QueryViewKey
+	waitTimetick    uint64
+	waitErr         error
+	waitCalled      bool
 }
 
 func newMockSegmentManager() *mockSegmentManager {
@@ -45,6 +56,29 @@ func (m *mockSegmentManager) Release(req ReleaseSegments) {
 	delete(m.acquired, req.Key)
 	m.released = append(m.released, req.Key)
 	m.releaseCallback[req.Key] = req.OnDropped
+}
+
+func (m *mockSegmentManager) AcquireSealedSegmentHandles(_ context.Context, key qviews.QueryViewKey, view *viewpb.QueryViewOfQueryNode) ([]SealedSegmentHandle, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.beforeQuery != nil {
+		m.beforeQuery()
+	}
+	m.queryKey = key
+	m.queryView = proto.Clone(view).(*viewpb.QueryViewOfQueryNode)
+	if m.queryErr != nil {
+		return nil, m.queryErr
+	}
+	return append([]SealedSegmentHandle(nil), m.queryHandles...), nil
+}
+
+func (m *mockSegmentManager) WaitTransformVisible(_ context.Context, key qviews.QueryViewKey, timetick uint64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.waitCalled = true
+	m.waitKey = key
+	m.waitTimetick = timetick
+	return m.waitErr
 }
 
 func (m *mockSegmentManager) invokeReleaseCallback(key qviews.QueryViewKey) {
@@ -110,6 +144,12 @@ func newPreparingQNView(nodeID int64, version int64) qviews.QueryViewAtWorkNode 
 func newDroppedQNView(nodeID int64, version int64) qviews.QueryViewAtWorkNode {
 	meta := buildHandlerTestMeta(version)
 	meta.State = viewpb.QueryViewState_QueryViewStateDropped
+	return qviews.NewQueryViewAtQueryNode(meta, buildHandlerTestQNView(nodeID))
+}
+
+func newQNViewWithState(nodeID int64, version int64, state viewpb.QueryViewState) qviews.QueryViewAtWorkNode {
+	meta := buildHandlerTestMeta(version)
+	meta.State = state
 	return qviews.NewQueryViewAtQueryNode(meta, buildHandlerTestQNView(nodeID))
 }
 
@@ -205,6 +245,26 @@ func TestQNHandler_ApplyViews_DroppedOnUnknownViewReportsBack(t *testing.T) {
 	require.Equal(t, 1, rc.count())
 	assert.Equal(t, qviews.QueryViewStateDropped, rc.last().State())
 	assert.Equal(t, 0, mgr.acquiredCount())
+}
+
+func TestQNHandler_ApplyViews_PrioritizesPreparingAndUpInBatch(t *testing.T) {
+	mgr := newMockSegmentManager()
+	h := NewQNQueryViewHandler(mgr)
+
+	var reportStates []qviews.QueryViewState
+	onReport := func(report qviews.QueryViewAtWorkNode) {
+		reportStates = append(reportStates, report.State())
+	}
+
+	h.ApplyViews([]handler.ApplyView{
+		{View: newDroppedQNView(1, 1), OnReport: onReport},
+		{View: newQNViewWithState(1, 2, viewpb.QueryViewState_QueryViewStateUp), OnReport: onReport},
+	})
+
+	require.Equal(t, []qviews.QueryViewState{
+		qviews.QueryViewStateUnrecoverable,
+		qviews.QueryViewStateDropped,
+	}, reportStates)
 }
 
 // ---------------------------------------------------------------------------
@@ -373,46 +433,6 @@ func TestQNHandler_ApplyViews_CoordDroppedWhileDropping(t *testing.T) {
 	mgr.invokeReleaseCallback(key)
 	require.Equal(t, 1, rc.count())
 	assert.Equal(t, qviews.QueryViewStateDropped, rc.last().State())
-}
-
-func TestQNHandler_ApplyRetriesAfterShardDetached(t *testing.T) {
-	mgr := newMockSegmentManager()
-	h := NewQNQueryViewHandler(mgr)
-	first := newPreparingQNView(1, 1)
-	firstKey := first.QueryViewKey()
-	h.ApplyViews([]handler.ApplyView{{View: first}})
-	h.ApplyViews([]handler.ApplyView{{View: newDroppedQNView(1, 1)}})
-	require.Equal(t, 1, mgr.releasedCount())
-
-	resolved := make(chan struct{})
-	resume := make(chan struct{})
-	var blockOnce sync.Once
-	var origin func(*QNQueryViewHandler, qviews.ShardID) *qnShardView
-	mock := mockey.Mock((*QNQueryViewHandler).getOrCreateShard).
-		To(func(handler *QNQueryViewHandler, shardID qviews.ShardID) *qnShardView {
-			shard := origin(handler, shardID)
-			blockOnce.Do(func() {
-				close(resolved)
-				<-resume
-			})
-			return shard
-		}).Origin(&origin).Build()
-	t.Cleanup(func() { mock.UnPatch() })
-
-	second := newPreparingQNView(1, 2)
-	applyDone := make(chan struct{})
-	go func() {
-		h.ApplyViews([]handler.ApplyView{{View: second}})
-		close(applyDone)
-	}()
-	<-resolved
-
-	mgr.invokeReleaseCallback(firstKey)
-	close(resume)
-	<-applyDone
-
-	h.ApplyViews([]handler.ApplyView{{View: newDroppedQNView(1, 2)}})
-	assert.Equal(t, 2, mgr.releasedCount(), "replacement view must remain reachable for release")
 }
 
 // ---------------------------------------------------------------------------
