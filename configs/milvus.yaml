@@ -618,7 +618,12 @@ queryNode:
       # eviction is necessary and the amount of data to evict from memory/disk.
       # - If the current memory/disk usage exceeds the high watermark, an eviction will be triggered to evict data from memory/disk
       #   until the memory/disk usage is below the low watermark.
-      # - The max amount of memory/disk that can be used for cache is controlled by overloadedMemoryThresholdPercentage and diskMaxUsagePercentage.
+      # - Disk watermark ratios are fractions of the effective local-storage disk capacity, not fractions of
+      #   queryNode.maxDiskUsagePercentage. They must satisfy diskLowWatermarkRatio <= diskHighWatermarkRatio <=
+      #   queryNode.maxDiskUsagePercentage / 100. When lowering queryNode.maxDiskUsagePercentage, adjust the
+      #   disk watermarks as needed to preserve this ordering.
+      # - The max amount of memory/disk that can be used for cache is controlled by
+      #   queryCoord.overloadedMemoryThresholdPercentage and queryNode.maxDiskUsagePercentage.
       memoryLowWatermarkRatio: 0.75
       memoryHighWatermarkRatio: 0.8
       diskLowWatermarkRatio: 0.75
@@ -645,7 +650,7 @@ queryNode:
   fmindexCostRatio: 0.001 # FM-index count-first guard threshold. An FMINDEX-accelerated LIKE (prefix/infix/suffix and general LIKE with interior wildcards) runs through the index only when occ * sa_sample_rate < fmindexCostRatio * total_tokens; otherwise it falls back to the raw-data scan (all paths are exact, this only picks the cheaper one). For the anchored forms the index answer is exact; for general LIKE it is candidate generation followed by an exact recheck of the candidate rows on the original VARCHAR data. The bound prices only FM locate, not the recheck bytes, so it stays row-length invariant only for the anchored forms; very long rows with unselective fragments may be routed to a path slower than the scan. Must be in (0, 1]; larger favors the index. Default 0.001 is the conservative crossover measured in benchmarks.
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
-  maxDiskUsagePercentage: 95
+  maxDiskUsagePercentage: 95 # Maximum disk usage as a percentage of the effective local-storage disk capacity.
   cache:
     memoryLimit: 2147483648 # Deprecated: 2 GB, 2 * 1024 *1024 *1024
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
