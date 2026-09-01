@@ -134,6 +134,33 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 	}, nil
 }
 
+func (bm *broadcastTaskManager) WithResourceKeysFast(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
+	startLockInstant := time.Now()
+	resourceKeys = bm.appendSharedClusterRK(resourceKeys...)
+	guards, err := bm.resourceKeyLocker.FastLock(resourceKeys...)
+	if err != nil {
+		return nil, err
+	}
+
+	id, err := resource.Resource().IDAllocator().Allocate(ctx)
+	if err != nil {
+		guards.Unlock()
+		return nil, merr.Wrapf(err, "allocate new id failed")
+	}
+
+	if err := bm.checkClusterRole(ctx); err != nil {
+		guards.Unlock()
+		return nil, err
+	}
+	bm.metrics.ObserveAcquireLockDuration(startLockInstant, guards.ResourceKeys())
+
+	return &broadcasterWithRK{
+		broadcaster: bm,
+		broadcastID: id,
+		guards:      guards,
+	}, nil
+}
+
 // WithSecondaryClusterResourceKey acquires an exclusive cluster-level resource key
 // and verifies the cluster is secondary. Returns error if the cluster is primary.
 // This is used for force promote operations that should only be executed on secondary clusters.

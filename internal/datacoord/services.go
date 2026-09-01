@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -1059,7 +1060,9 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			Status: merr.Status(err),
 		}, nil
 	}
-	channels, err := s.getChannelsByCollectionID(ctx, collectionID)
+	// A handed-off split source must not reach querycoord: see
+	// getServingChannelsByCollectionID.
+	channels, err := s.getServingChannelsByCollectionID(ctx, collectionID)
 	if err != nil {
 		return &datapb.GetRecoveryInfoResponseV2{
 			Status: merr.Status(err),
@@ -1562,6 +1565,36 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 
 // getChannelsByCollectionID gets the channels of the collection.
 func (s *Server) getChannelsByCollectionID(ctx context.Context, collectionID int64) ([]RWChannel, error) {
+	return s.collectionChannels(ctx, collectionID, false)
+}
+
+// getServingChannelsByCollectionID gets the channels a query replica should be
+// built on, which excludes a split source that has already been handed off.
+func (s *Server) getServingChannelsByCollectionID(ctx context.Context, collectionID int64) ([]RWChannel, error) {
+	return s.collectionChannels(ctx, collectionID, true)
+}
+
+// collectionChannels lists a collection's vchannels, optionally dropping the
+// ones that no longer take part in serving.
+//
+// A shard split's source shard stays in the vchannel list after adoption — its
+// data is still being reclaimed and its WAL still holds a truncation point — but
+// it is ShardDropped: its key space belongs to the targets now. Handing it to
+// querycoord as part of the recovery info keeps it in the collection's target,
+// so the replica keeps a leader on it and every read fans out to it. For a
+// namespace split that is merely wasteful (a relabel MOVED the segments off the
+// source, so the leader answers with nothing), but a primary-key split REWRITES:
+// the source's segments stay where they are and the targets hold fresh copies of
+// the same rows, so a read that reaches both gets every rewritten primary key
+// twice — the reduce rejects the whole query.
+//
+// Dropping the source here is also what makes the handoff atomic rather than
+// merely ordered. The source leaves the NEXT target immediately, but querycoord
+// only promotes next to current once the target channels are loaded and
+// serviceable, and shard leaders are served from the CURRENT target — so reads
+// go to the source right up to the flip and to the targets from then on, with
+// neither a gap nor an overlap.
+func (s *Server) collectionChannels(ctx context.Context, collectionID int64, servingOnly bool) ([]RWChannel, error) {
 	describeRsp, err := s.mixCoord.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_DescribeCollection,
@@ -1571,8 +1604,15 @@ func (s *Server) getChannelsByCollectionID(ctx context.Context, collectionID int
 	if err != nil {
 		return nil, err
 	}
+	shardInfos := describeRsp.GetShardInfos()
 	channels := make([]RWChannel, 0, len(describeRsp.GetVirtualChannelNames()))
-	for _, channel := range describeRsp.GetVirtualChannelNames() {
+	for i, channel := range describeRsp.GetVirtualChannelNames() {
+		// shard_infos is parallel to virtual_channel_names; a response that
+		// predates the field carries none, and every shard is then Normal.
+		if servingOnly && i < len(shardInfos) &&
+			shardInfos[i].GetState() == schemapb.ShardState_ShardDropped {
+			continue
+		}
 		startPos := toMsgPosition(channel, describeRsp.GetStartPositions())
 		channels = append(channels, &channelMeta{
 			Name:          channel,
@@ -1782,20 +1822,22 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 		properties[pair.GetKey()] = pair.GetValue()
 	}
 
-	// cache miss and update cache
+	// Cache miss. The request does not carry the routing topology, so building a
+	// collectionInfo straight out of it would leave RoutingModulus at zero and
+	// ShardInfos empty — quietly describing a split collection as one that never
+	// split, from a call that only meant to change some properties. Load the authoritative record first and
+	// apply this change on top of it; if that fails, cache nothing rather than
+	// cache something wrong, and let the next reader load it.
 	if clonedColl == nil {
-		collInfo := &collectionInfo{
-			ID:             req.GetCollectionID(),
-			Schema:         req.GetSchema(),
-			Partitions:     req.GetPartitionIDs(),
-			StartPositions: req.GetStartPositions(),
-			Properties:     properties,
-			DatabaseID:     req.GetDbID(),
-			DatabaseName:   req.GetSchema().GetDbName(),
-			VChannelNames:  req.GetVChannels(),
+		if err := s.loadCollectionFromRootCoord(ctx, req.GetCollectionID()); err != nil {
+			mlog.Warn(ctx, "failed to load collection while applying an alteration, leaving the cache empty",
+				mlog.FieldCollectionID(req.GetCollectionID()), mlog.Err(err))
+			return merr.Success(), nil
 		}
-		s.meta.AddCollection(collInfo)
-		return merr.Success(), nil
+		clonedColl = s.meta.GetClonedCollectionInfo(req.GetCollectionID())
+		if clonedColl == nil {
+			return merr.Success(), nil
+		}
 	}
 
 	clonedColl.Properties = properties
@@ -2064,6 +2106,13 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 			CollectionName: in.GetCollectionName(),
 			PartitionIDs:   in.GetPartitionIDs(),
 			Vchannels:      importCollectionInfo.VChannelNames,
+			// Captured together with the vchannels, from the same snapshot: a
+			// job routes by the topology it was created against, and the split
+			// waits for it to finish before rewriting those shards. Reading
+			// routing later, at request assembly, could pair a stale vchannel
+			// list with newer residues and place rows nowhere valid.
+			ShardInfos:     importJobShardInfos(importCollectionInfo),
+			RoutingModulus: importCollectionInfo.RoutingModulus,
 			Schema:         in.GetSchema(),
 			TimeoutTs:      timeoutTs,
 			CleanupTs:      math.MaxUint64,

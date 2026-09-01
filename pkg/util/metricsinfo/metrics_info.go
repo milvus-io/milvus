@@ -409,6 +409,35 @@ type CompactionTask struct {
 	NodeID         int64    `json:"node_id,omitempty,string"`
 }
 
+// ShardSplitTask reports one shard split, automatic or user-requested, and how
+// far its data redistribution has got.
+//
+// Progress is derived, never remembered: RewrittenSegments comes from the
+// outputs' compaction lineage and PendingSegments from a live scan of the source
+// shards, so the denominator is their sum rather than a total recorded when the
+// task started. That is what lets it stay honest when an import adds segments to
+// a source after the split fenced it — the new work enters both halves of the
+// fraction instead of pushing a finished-looking task past 100%.
+type ShardSplitTask struct {
+	TaskID       int64  `json:"task_id,omitempty,string"`
+	CollectionID int64  `json:"collection_id,omitempty,string"`
+	Kind         string `json:"kind,omitempty"` // "namespace" | "hash" | "rehash"
+	State        string `json:"state,omitempty"`
+	FailReason   string `json:"fail_reason,omitempty"`
+	StartTime    string `json:"start_time,omitempty"`
+	EndTime      string `json:"end_time,omitempty"`
+
+	SourceVChannels []string `json:"source_vchannels,omitempty"`
+	TargetVChannels []string `json:"target_vchannels,omitempty"`
+
+	// Redistribution progress. Zero for a namespace split, which relabels
+	// metadata instead of rewriting data.
+	RewrittenSegments int64 `json:"rewritten_segments,string"`
+	PendingSegments   int64 `json:"pending_segments,string"`
+	RewrittenBytes    int64 `json:"rewritten_bytes,string"`
+	PendingBytes      int64 `json:"pending_bytes,string"`
+}
+
 // RootCoordConfiguration records the configuration of RootCoord.
 type RootCoordConfiguration struct {
 	MinSegmentSizeToEnableIndex int64 `json:"min_segment_size_to_enable_index"`

@@ -130,6 +130,10 @@ type DataCoordCatalog interface {
 	UpdateCompactionTargetState(ctx context.Context, targetID int64, state datapb.TargetState, inactivatedAtTS uint64) error
 	DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error
 
+	ListSplitShardTask(ctx context.Context) ([]*datapb.SplitShardTask, error)
+	SaveSplitShardTask(ctx context.Context, task *datapb.SplitShardTask) error
+	DropSplitShardTask(ctx context.Context, task *datapb.SplitShardTask) error
+
 	ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error)
 	SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error
 

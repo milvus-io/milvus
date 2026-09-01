@@ -45,6 +45,7 @@ var maxCompactionTaskExecutionDuration = map[datapb.CompactionType]time.Duration
 	datapb.CompactionType_MixCompaction:               30 * time.Minute,
 	datapb.CompactionType_Level0DeleteCompaction:      30 * time.Minute,
 	datapb.CompactionType_ClusteringCompaction:        60 * time.Minute,
+	datapb.CompactionType_HashSplitCompaction:         60 * time.Minute,
 	datapb.CompactionType_SortCompaction:              20 * time.Minute,
 	datapb.CompactionType_BumpSchemaVersionCompaction: 30 * time.Minute,
 }
@@ -89,6 +90,10 @@ type compactionInspector struct {
 	handler          Handler
 	scheduler        task.GlobalScheduler
 	ievm             IndexEngineVersionManager
+	// isChannelSplitting reports whether the channel is referenced by an
+	// active shard split task; such a channel accepts no new compaction
+	// during the split window. Nil means no shard split manager is wired.
+	isChannelSplitting func(channel string) bool
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -197,6 +202,67 @@ func newCompactionInspector(meta CompactionMeta,
 	}
 }
 
+// setChannelSplittingChecker installs the shard-split freeze predicate: a
+// channel referenced by an active split task accepts no new compaction.
+func (c *compactionInspector) setChannelSplittingChecker(checker func(channel string) bool) {
+	c.isChannelSplitting = checker
+}
+
+// preemptTasksByChannel removes every queued and executing compaction task
+// of the channel and cleans them properly: the cleaned state is persisted
+// (so the task is not revived from the catalog after a restart) and the
+// compacting flags of the input segments are released (so the shard split
+// redistribution is never starved by segments locked by a dead task).
+// Together with the enqueue-time freeze it guarantees the split preempts
+// compaction instead of waiting behind it: in-flight tasks are killed here,
+// and new ones are rejected for the whole split window. A preempted task
+// still running on the worker is orphaned; its result is rejected at report
+// time because the task is no longer tracked — the same semantics as the
+// channel-release path.
+func (c *compactionInspector) preemptTasksByChannel(channel string) {
+	logger := mlog.With(mlog.String("channel", channel))
+	preempted := make([]CompactionTask, 0)
+	// A hash split's own rewrite runs on the channel being split, so it must
+	// survive the preemption the split itself triggers — killing it would undo
+	// the split's redistribution as fast as it is dispatched.
+	victim := func(task CompactionTask) bool {
+		return task.GetTaskProto().GetChannel() == channel &&
+			task.GetTaskProto().GetType() != datapb.CompactionType_HashSplitCompaction
+	}
+	c.queueTasks.RemoveAll(func(task CompactionTask) bool {
+		if victim(task) {
+			preempted = append(preempted, task)
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", task.GetTaskProto().GetNodeID()), task.GetTaskProto().GetType().String(), metrics.Pending).Dec()
+			return true
+		}
+		return false
+	})
+
+	c.executingGuard.Lock()
+	for id, task := range c.executingTasks {
+		if victim(task) {
+			preempted = append(preempted, task)
+			delete(c.executingTasks, id)
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", task.GetTaskProto().GetNodeID()), task.GetTaskProto().GetType().String(), metrics.Executing).Dec()
+		}
+	}
+	c.executingGuard.Unlock()
+
+	for _, task := range preempted {
+		logger.Info(context.TODO(), "compaction task preempted by shard split",
+			mlog.Int64("planID", task.GetTaskProto().GetPlanID()),
+			mlog.String("type", task.GetTaskProto().GetType().String()),
+			mlog.String("state", task.GetTaskProto().GetState().String()))
+		if !task.Clean() {
+			logger.Warn(context.TODO(), "failed to clean the preempted compaction task, it will be retried by the clean loop",
+				mlog.Int64("planID", task.GetTaskProto().GetPlanID()))
+			c.cleaningGuard.Lock()
+			c.cleaningTasks[task.GetTaskProto().GetPlanID()] = task
+			c.cleaningGuard.Unlock()
+		}
+	}
+}
+
 func (c *compactionInspector) checkSchedule() {
 	err := c.checkCompaction()
 	if err != nil {
@@ -230,7 +296,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
-		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction:
+		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction, datapb.CompactionType_HashSplitCompaction:
 			mixChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			mixLabelExcludes.Insert(t.GetLabel())
 		case datapb.CompactionType_ClusteringCompaction:
@@ -266,7 +332,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 			}
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			selected = append(selected, t)
-		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction:
+		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction, datapb.CompactionType_HashSplitCompaction:
 			// BumpSchemaVersionCompaction shares the same exclusion rules as Mix/Sort:
 			// - Channel-level mutual exclusion with L0 (L0 may write delta logs to any segment on the channel)
 			// - Label-level exclusion registered for Clustering awareness
@@ -593,8 +659,31 @@ func (c *compactionInspector) getCompactionTask(planID int64) CompactionTask {
 	return t
 }
 
+// frozenBySplit reports whether a shard split in flight on the task's channel
+// forbids it.
+//
+// The freeze keeps other compactions from churning the redistribution work list
+// and replacing the segment IDs the in-place delegator handoff relies on. Every
+// compaction path (mix, L0, clustering, manual) funnels through enqueue, so this
+// is the split window's single freeze point.
+//
+// A hash split's own rewrite is exempt. It IS the redistribution, dispatched by
+// the split task, and it runs on the source channel by construction — so
+// freezing it would block the very work the freeze protects and leave the task
+// retrying a dispatch that can never succeed.
+func (c *compactionInspector) frozenBySplit(task *datapb.CompactionTask) bool {
+	if task.GetType() == datapb.CompactionType_HashSplitCompaction {
+		return false
+	}
+	return c.isChannelSplitting != nil && c.isChannelSplitting(task.GetChannel())
+}
+
 func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) error {
 	log := mlog.With(mlog.Int64("planID", task.GetPlanID()), mlog.Int64("triggerID", task.GetTriggerID()), mlog.FieldCollectionID(task.GetCollectionID()), mlog.String("type", task.GetType().String()))
+	if c.frozenBySplit(task) {
+		log.RatedInfo(context.TODO(), rate.Limit(60), "channel is splitting, reject compaction during the split window", mlog.String("channel", task.GetChannel()))
+		return merr.WrapErrCompactionPlanConflict("channel is splitting")
+	}
 	t, err := c.createCompactTask(task)
 	if err != nil {
 		// Conflict is normal
@@ -633,7 +722,10 @@ func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) err
 func (c *compactionInspector) createCompactTask(t *datapb.CompactionTask) (CompactionTask, error) {
 	var task CompactionTask
 	switch t.GetType() {
-	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
+	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction,
+		datapb.CompactionType_HashSplitCompaction:
+		// A hash split rewrite runs the mix task's lifecycle; only the plan it
+		// builds differs, by carrying the split targets to the datanode.
 		task = newMixCompactionTask(t, c.allocator, c.meta, c.ievm)
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = newL0CompactionTask(t, c.allocator, c.meta)

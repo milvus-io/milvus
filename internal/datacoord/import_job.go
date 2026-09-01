@@ -106,6 +106,11 @@ type ImportJob interface {
 	GetCollectionName() string
 	GetPartitionIDs() []int64
 	GetVchannels() []string
+	// GetShardInfos returns the per-shard routing meta captured with the
+	// vchannels at job creation, parallel to them. Empty for a collection that
+	// has never been split.
+	GetShardInfos() []*schemapb.CollectionShardInfo
+	GetRoutingModulus() uint64
 	GetReadyVchannels() []string
 	GetCommittedVchannels() []string
 	GetSchema() *schemapb.CollectionSchema

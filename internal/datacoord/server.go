@@ -35,11 +35,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -130,6 +132,7 @@ type Server struct {
 	snapshotExportManager *snapshotExportManager
 
 	compactionTrigger        trigger
+	shardSplitManager        *shardSplitManager
 	compactionInspector      CompactionInspector
 	compactionTriggerManager TriggerManager
 
@@ -318,6 +321,11 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
+	if err = s.initShardSplitManager(); err != nil {
+		return err
+	}
+	mlog.Info(s.ctx, "init shard split manager done")
+
 	s.initCompaction()
 	mlog.Info(s.ctx, "init compaction done")
 
@@ -484,7 +492,7 @@ func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 }
 
 func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
-	s.garbageCollector = newGarbageCollector(s.meta, s.handler, GcOption{
+	opt := GcOption{
 		cli:              cli,
 		broker:           s.broker,
 		enabled:          Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
@@ -492,7 +500,15 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 		scanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
-	})
+	}
+	if s.shardSplitManager != nil {
+		// freeze the dropped-segment GC on the channels referenced by an
+		// active shard split task, so the segment set the in-place delegator
+		// handoff and the merged recovery view rely on stays stable across
+		// the split window.
+		opt.isChannelSplitting = s.shardSplitManager.IsVChannelSplitting
+	}
+	s.garbageCollector = newGarbageCollector(s.meta, s.handler, opt)
 }
 
 func (s *Server) initServiceDiscovery() error {
@@ -681,11 +697,45 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 
 func (s *Server) initCompaction() {
 	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
+	if s.shardSplitManager != nil {
+		// freeze compaction on the channels referenced by an active shard
+		// split task for the whole split window, and let the split preempt
+		// the in-flight compaction instead of waiting behind it.
+		cph.setChannelSplittingChecker(s.shardSplitManager.IsVChannelSplitting)
+		s.shardSplitManager.setCompactionPreempter(cph)
+		// A hash split redistributes by REWRITING its sources, and it dispatches
+		// that rewrite as compaction plans — so it needs the inspector too, not
+		// just the freeze. Wired here rather than at manager construction because
+		// the inspector is built after the manager (it consumes the manager's own
+		// freeze predicate above).
+		s.shardSplitManager.setRewriteDispatcher(
+			newInspectorRewriteDispatcher(s.ctx, s.meta, cph, s.meta, s.allocator))
+	}
 	cph.loadMeta()
 	s.compactionInspector = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexEngineVersionManager)
 	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
 	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
+}
+
+// initShardSplitManager creates the shard split manager. The split tasks are
+// recovered from the catalog, so an in-flight split resumes after a datacoord
+// restart. The planner divides the source shard's residues between the two
+// targets, which is the same rule the proxy router and the streamingnode read
+// out of the collection meta, so all three agree on the split boundary without
+// sharing anything but the meta. The whole feature stays gated by
+// dataCoord.shardSplit.enable.
+func (s *Server) initShardSplitManager() error {
+	planner := newResidueSplitPlanner(s.meta, brokerNamespaceResolver(s.broker))
+	manager, err := newShardSplitManager(s.ctx, s.meta, s.meta.catalog, s.allocator,
+		streaming.WAL(), snmanager.StaticStreamingNodeManager, planner)
+	if err != nil {
+		return err
+	}
+	manager.setImportMeta(s.importMeta)
+	manager.setRoutingCommitter(s.broker)
+	s.shardSplitManager = manager
+	return nil
 }
 
 func (s *Server) stopCompaction() {
@@ -708,6 +758,10 @@ func (s *Server) startCompaction() {
 
 	if s.compactionTrigger != nil {
 		s.compactionTrigger.start()
+	}
+
+	if s.shardSplitManager != nil {
+		s.shardSplitManager.Start()
 	}
 
 	if s.compactionTriggerManager != nil {
@@ -1078,6 +1132,9 @@ func (s *Server) Stop() error {
 	s.copySegmentChecker.Close()
 	mlog.Info(s.ctx, "datacoord copy segment inspector and checker stopped")
 
+	if s.shardSplitManager != nil {
+		s.shardSplitManager.Stop()
+	}
 	s.stopCompaction()
 	mlog.Info(s.ctx, "datacoord compaction stopped")
 
@@ -1155,6 +1212,14 @@ func (s *Server) registerMetricsRequest() {
 			return s.meta.compactionTaskMeta.TaskStatsJSON(), nil
 		})
 
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ShardSplitTaskKey,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			if s.shardSplitManager == nil {
+				return "[]", nil
+			}
+			return s.shardSplitManager.TaskStatsJSON(), nil
+		})
+
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.BuildIndexTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.meta.indexMeta.TaskStatsJSON(), nil
@@ -1218,6 +1283,17 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		DatabaseName:   resp.GetDbName(),
 		DatabaseID:     resp.GetDbId(),
 		VChannelNames:  resp.GetVirtualChannelNames(),
+		// The routing topology must come along, or a load-on-demand quietly
+		// DOWNGRADES the collection in datacoord's view: RoutingModulus falls back
+		// to zero, which reads as "never split", so a split collection's residues
+		// would be interpreted against no modulus and every plan against it is
+		// refused. ShardInfos carries each shard's residues and lifecycle state,
+		// and an empty map leaves datacoord with no description of a topology it
+		// is responsible for. The startup bulk load
+		// (reloadCollectionsFromRootcoord) always carried both; this path did
+		// not, and the two disagreeing is what made it hard to see.
+		RoutingModulus: resp.GetRoutingModulus(),
+		ShardInfos:     buildShardInfoMap(resp.GetVirtualChannelNames(), resp.GetShardInfos()),
 	}
 	s.meta.AddCollection(collInfo)
 	return nil

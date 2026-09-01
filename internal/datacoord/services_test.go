@@ -1041,19 +1041,62 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("test meta non exist", func(t *testing.T) {
+	// A cache miss must NOT be filled from the request. The request carries no
+	// routing topology, so a collectionInfo built from it has RoutingModulus at
+	// zero and no ShardInfos -- quietly describing a split collection as one that
+	// never split, from a call that only meant to change a property.
+	t.Run("cache miss caches nothing when the collection cannot be loaded", func(t *testing.T) {
 		s := &Server{meta: &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
-		ctx := context.Background()
-		req := &datapb.AlterCollectionRequest{
+		load := mockey.Mock((*Server).loadCollectionFromRootCoord).Return(errors.New("rootcoord down")).Build()
+		defer load.UnPatch()
+
+		resp, err := s.BroadcastAlteredCollection(context.Background(), &datapb.AlterCollectionRequest{
 			CollectionID: 1,
 			PartitionIDs: []int64{1},
 			Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
-		}
-		resp, err := s.BroadcastAlteredCollection(ctx, req)
+		})
 		assert.NotNil(t, resp)
+		assert.NoError(t, err, "the caller is not failed for a cache it does not know about")
+		assert.Equal(t, 0, s.meta.collections.Len(),
+			"caching nothing beats caching something wrong; the next reader loads it")
+	})
+
+	t.Run("cache miss keeps the routing topology it loads", func(t *testing.T) {
+		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		s := &Server{meta: &meta{collections: collections}}
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		// The authoritative load is what carries the modulus and the shard infos.
+		load := mockey.Mock((*Server).loadCollectionFromRootCoord).To(
+			func(_ *Server, _ context.Context, collectionID int64) error {
+				collections.Insert(collectionID, &collectionInfo{
+					ID:             collectionID,
+					RoutingModulus: 2,
+					VChannelNames:  []string{"v0"},
+					ShardInfos: map[string]*schemapb.CollectionShardInfo{
+						"v0": {
+							VchannelName: "v0", State: schemapb.ShardState_ShardNormal,
+							Routing: &schemapb.CollectionShardInfo_HashRouting{
+								HashRouting: &schemapb.HashRouting{Buckets: []uint64{0, 1}},
+							},
+						},
+					},
+				})
+				return nil
+			}).Build()
+		defer load.UnPatch()
+
+		_, err := s.BroadcastAlteredCollection(context.Background(), &datapb.AlterCollectionRequest{
+			CollectionID: 1,
+			Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
+		})
 		assert.NoError(t, err)
-		assert.Equal(t, 1, s.meta.collections.Len())
+		cached, ok := collections.Get(1)
+		require.True(t, ok)
+		assert.EqualValues(t, 2, cached.RoutingModulus,
+			"a property change must not describe a split collection as one that never split")
+		assert.Len(t, cached.ShardInfos, 1)
+		assert.Equal(t, "v", cached.Properties["k"], "and the change itself still lands")
 	})
 
 	t.Run("test update meta", func(t *testing.T) {

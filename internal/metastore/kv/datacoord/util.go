@@ -290,6 +290,19 @@ func buildCompactionTargetPath(targetID int64) string {
 	return fmt.Sprintf("%s/%d", CompactionTargetPrefix, targetID)
 }
 
+func buildSplitShardTaskKV(task *datapb.SplitShardTask) (string, string, error) {
+	valueBytes, err := proto.Marshal(task)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal SplitShardTask: %d/%d, err: %w", task.GetCollectionId(), task.GetTaskId(), err)
+	}
+	key := buildSplitShardTaskPath(task)
+	return key, string(valueBytes), nil
+}
+
+func buildSplitShardTaskPath(task *datapb.SplitShardTask) string {
+	return fmt.Sprintf("%s/%d/%d", SplitShardTaskPrefix, task.GetCollectionId(), task.GetTaskId())
+}
+
 func buildPartitionStatsInfoKv(info *datapb.PartitionStatsInfo) (string, string, error) {
 	valueBytes, err := proto.Marshal(info)
 	if err != nil {

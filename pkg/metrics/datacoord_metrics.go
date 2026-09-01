@@ -459,6 +459,63 @@ var (
 			Help:      "total latency of snapshot export jobs in milliseconds",
 			Buckets:   longTaskBuckets,
 		}, []string{statusLabelName})
+	// DataCoordShardSplitTaskNum records the number of active shard split tasks
+	// in each FSM state (preparing/fencing/redistributing/adopting). It lets
+	// operators see how many splits are in flight and where they are stuck.
+	DataCoordShardSplitTaskNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "shard_split_task_num",
+			Help:      "number of active shard split tasks per FSM state",
+		}, []string{statusLabelName})
+
+	// DataCoordShardSplitTaskTotal counts the shard split tasks that reached a
+	// terminal state, labeled by outcome (done/aborted).
+	DataCoordShardSplitTaskTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "shard_split_task_total",
+			Help:      "total number of finished shard split tasks per outcome",
+		}, []string{statusLabelName})
+
+	// DataCoordShardSplitDuration records the wall-clock duration of a finished
+	// shard split, from task creation to the terminal state, in milliseconds.
+	DataCoordShardSplitDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "shard_split_duration",
+			Help:      "duration of a finished shard split in milliseconds",
+			Buckets:   longTaskBuckets,
+		}, []string{statusLabelName})
+)
+
+var (
+	// DataCoordShardSplitPendingBytes is the source data a split still has to
+	// rewrite. It falls to zero as the rewrite drains, and RISES when an import
+	// adds segments to a source the split has already fenced -- a real event
+	// worth seeing rather than an accounting error to hide.
+	DataCoordShardSplitPendingBytes = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "shard_split_pending_bytes",
+			Help:      "source bytes a shard split has left to rewrite",
+		}, []string{collectionIDLabelName})
+
+	// DataCoordShardSplitRewrittenBytes is the source data a split has already
+	// rewritten. Paired with the pending gauge it gives both the fraction and the
+	// rate, so a stalled rewrite reads as a flat line rather than having to be
+	// inferred from one number that stopped moving.
+	DataCoordShardSplitRewrittenBytes = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "shard_split_rewritten_bytes",
+			Help:      "source bytes a shard split has already rewritten",
+		}, []string{collectionIDLabelName})
 )
 
 // RegisterDataCoord registers DataCoord metrics
@@ -477,6 +534,8 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordCompactedSegmentSize)
 	registry.MustRegister(DataCoordCompactionTaskNum)
 	registry.MustRegister(DataCoordCompactionLatency)
+	registry.MustRegister(DataCoordShardSplitPendingBytes)
+	registry.MustRegister(DataCoordShardSplitRewrittenBytes)
 	registry.MustRegister(ImportJobLatency)
 	registry.MustRegister(ImportTaskLatency)
 	registry.MustRegister(DataCoordSizeStoredL0Segment)
@@ -501,6 +560,9 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordSnapshotExportActiveJobs)
 	registry.MustRegister(DataCoordSnapshotExportTerminalJobs)
 	registry.MustRegister(DataCoordSnapshotExportJobLatency)
+	registry.MustRegister(DataCoordShardSplitTaskNum)
+	registry.MustRegister(DataCoordShardSplitTaskTotal)
+	registry.MustRegister(DataCoordShardSplitDuration)
 	registerStreamingCoord(registry)
 }
 

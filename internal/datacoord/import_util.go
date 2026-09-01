@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -302,17 +303,19 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 		})
 
 	req := &datapb.PreImportRequest{
-		JobID:         task.GetJobID(),
-		TaskID:        task.GetTaskID(),
-		CollectionID:  task.GetCollectionID(),
-		PartitionIDs:  job.GetPartitionIDs(),
-		Vchannels:     job.GetVchannels(),
-		Schema:        job.GetSchema(),
-		ImportFiles:   importFiles,
-		Options:       job.GetOptions(),
-		TaskSlot:      task.GetTaskSlot(),
-		StorageConfig: createStorageConfig(),
-		PluginContext: GetReadPluginContext(job.GetOptions()),
+		JobID:          task.GetJobID(),
+		TaskID:         task.GetTaskID(),
+		CollectionID:   task.GetCollectionID(),
+		PartitionIDs:   job.GetPartitionIDs(),
+		Vchannels:      job.GetVchannels(),
+		ShardInfos:     job.GetShardInfos(),
+		RoutingModulus: job.GetRoutingModulus(),
+		Schema:         job.GetSchema(),
+		ImportFiles:    importFiles,
+		Options:        job.GetOptions(),
+		TaskSlot:       task.GetTaskSlot(),
+		StorageConfig:  createStorageConfig(),
+		PluginContext:  GetReadPluginContext(job.GetOptions()),
 	}
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
 	return req
@@ -400,6 +403,8 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		CollectionID:    task.GetCollectionID(),
 		PartitionIDs:    job.GetPartitionIDs(),
 		Vchannels:       job.GetVchannels(),
+		ShardInfos:      job.GetShardInfos(),
+		RoutingModulus:  job.GetRoutingModulus(),
 		Schema:          job.GetSchema(),
 		Files:           importFiles,
 		Options:         job.GetOptions(),
@@ -958,4 +963,27 @@ func createSortCompactionTask(ctx context.Context,
 	log.Info(ctx, "create sort compaction task success", mlog.FieldSegmentID(originSegment.GetID()),
 		mlog.Int64("targetSegmentID", targetSegmentID), mlog.Int64("num rows", originSegment.GetNumOfRows()))
 	return task, nil
+}
+
+// importJobShardInfos snapshots a collection's per-shard routing meta in
+// vchannel order, for an import job to route by.
+//
+// Parallel to VChannelNames, with an empty entry standing in for a shard the
+// meta does not describe, so a consumer can index one by the other. Returns nil
+// when the collection carries no routing meta at all — a collection that has
+// never been split — which is what keeps such an import on the legacy
+// hash(pk) % shardNum rule, bit for bit.
+func importJobShardInfos(collection *collectionInfo) []*schemapb.CollectionShardInfo {
+	if collection == nil || len(collection.ShardInfos) == 0 {
+		return nil
+	}
+	infos := make([]*schemapb.CollectionShardInfo, len(collection.VChannelNames))
+	for i, vchannel := range collection.VChannelNames {
+		if info, ok := collection.ShardInfos[vchannel]; ok && info != nil {
+			infos[i] = info
+			continue
+		}
+		infos[i] = &schemapb.CollectionShardInfo{VchannelName: vchannel}
+	}
+	return infos
 }

@@ -2963,3 +2963,41 @@ func TestServer_InitMessageCallback(t *testing.T) {
 	)
 	assert.Error(t, err) // server not healthy
 }
+
+// A load-on-demand must carry the routing topology. Without it the collection
+// reads as range-routed in datacoord and every rehash of it is refused with
+// "is not hash-routed" -- forever, and from nothing the operator did.
+func TestLoadCollectionFromRootCoordCarriesTheRoutingTopology(t *testing.T) {
+	svr := newTestServer(t)
+	defer closeTestServer(t, svr)
+
+	resp := &milvuspb.DescribeCollectionResponse{
+		Status:              merr.Success(),
+		CollectionID:        1234,
+		Schema:              newTestSchema(),
+		RoutingModulus:      2,
+		VirtualChannelNames: []string{"vch0", "vch1"},
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			{VchannelName: "vch0", State: schemapb.ShardState_ShardNormal, Routing: &schemapb.CollectionShardInfo_HashRouting{
+				HashRouting: &schemapb.HashRouting{Buckets: []uint64{0}},
+			}},
+			{VchannelName: "vch1", State: schemapb.ShardState_ShardNormal, Routing: &schemapb.CollectionShardInfo_HashRouting{
+				HashRouting: &schemapb.HashRouting{Buckets: []uint64{1}},
+			}},
+		},
+	}
+	desc := mockey.Mock(mockey.GetMethod(svr.broker, "DescribeCollectionInternal")).
+		Return(resp, nil).Build()
+	defer desc.UnPatch()
+	parts := mockey.Mock(mockey.GetMethod(svr.broker, "ShowPartitionsInternal")).
+		Return([]int64{100}, nil).Build()
+	defer parts.UnPatch()
+
+	require.NoError(t, svr.loadCollectionFromRootCoord(context.Background(), 1234))
+
+	cached := svr.meta.GetCollection(1234)
+	require.NotNil(t, cached)
+	assert.EqualValues(t, 2, cached.RoutingModulus)
+	assert.Len(t, cached.ShardInfos, 2)
+	assert.Contains(t, cached.ShardInfos, "vch0")
+}

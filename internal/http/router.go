@@ -128,6 +128,8 @@ const (
 	DCImportTasksPath = "/_dc/tasks/import"
 	// DCCompactionTasksPath is the path to get compaction tasks in DataCoord.
 	DCCompactionTasksPath = "/_dc/tasks/compaction"
+	// DCShardSplitTasksPath is the path to get shard split tasks in DataCoord.
+	DCShardSplitTasksPath = "/_dc/tasks/shard_split"
 	// DCBuildIndexTasksPath is the path to get build index tasks in DataCoord.
 	DCBuildIndexTasksPath = "/_dc/tasks/build_index"
 	// DCSegmentsPath is the path to get segments in DataCoord.

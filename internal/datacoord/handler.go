@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -133,6 +134,23 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 	}
 }
 
+// getRealSegmentsForSplitFamily returns the channel's segments, and — when
+// the channel is the source of an active shard split — the segments already
+// relabeled to the split targets (including the ones flushed from the
+// target WALs during the window). This merged recovery view guarantees a
+// target refresh never sees a segment disappear mid-window, so no release
+// task can be produced against a segment still serving on the source
+// delegator.
+func (h *ServerHandler) getRealSegmentsForSplitFamily(channelName string) []*SegmentInfo {
+	segments := h.s.meta.GetRealSegmentsForChannel(channelName)
+	if manager := h.s.shardSplitManager; manager != nil {
+		for _, target := range manager.SplitTargetsOfSource(channelName) {
+			segments = append(segments, h.s.meta.GetRealSegmentsForChannel(target)...)
+		}
+	}
+	return segments
+}
+
 // GetQueryVChanPositions gets vchannel latest positions with provided dml channel names for QueryCoord.
 // unflushend segmentIDs ---> L1, growing segments
 // flushend segmentIDs   ---> L1&L2, flushed segments, including indexed or unindexed
@@ -163,7 +181,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	)
 
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
-	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
+	segments := h.getRealSegmentsForSplitFamily(channel.GetName())
 
 	validSegmentInfos := make(map[int64]*SegmentInfo)
 	indexedSegments := FilterInIndexedSegments(context.Background(), h, h.s.meta, false, segments...)
@@ -621,14 +639,22 @@ func (h *ServerHandler) getCollectionStartPos(channel RWChannel) *msgpb.MsgPosit
 //     And would return if any position is valid.
 func (h *ServerHandler) GetChannelSeekPosition(channel RWChannel, partitionIDs ...UniqueID) *msgpb.MsgPosition {
 	log := mlog.With(mlog.String("channel", channel.GetName()))
+	// Each candidate must be SEEKABLE, not merely non-nil. A position with a
+	// timestamp but no message id and no WAL name reads as a valid answer and is
+	// not one: whoever builds a dispatcher on it skips the seek, and the
+	// delegator's streaming adaptor panics the process on its first read. The
+	// earliest-segment fallback produces exactly that on a shard-split target
+	// whose only segments came from a rewrite, because compaction wrote them
+	// instead of the WAL delivering them. Falling through to the next candidate
+	// costs nothing; returning an unusable one costs the querynode.
 	var seekPosition *msgpb.MsgPosition
 	seekPosition = h.s.meta.GetChannelCheckpoint(channel.GetName())
-	if seekPosition != nil {
+	if msgdispatcher.SeekablePosition(seekPosition) {
 		return seekPosition
 	}
 
 	seekPosition = h.getEarliestSegmentDMLPos(channel.GetName(), partitionIDs...)
-	if seekPosition != nil {
+	if msgdispatcher.SeekablePosition(seekPosition) {
 		log.Info(context.TODO(), "channel seek position set from earliest segment dml position",
 			mlog.Uint64("posTs", seekPosition.Timestamp),
 			mlog.Time("posTime", tsoutil.PhysicalTime(seekPosition.GetTimestamp())))
@@ -636,7 +662,7 @@ func (h *ServerHandler) GetChannelSeekPosition(channel RWChannel, partitionIDs .
 	}
 
 	seekPosition = h.getCollectionStartPos(channel)
-	if seekPosition != nil {
+	if msgdispatcher.SeekablePosition(seekPosition) {
 		log.Info(context.TODO(), "channel seek position set from collection start position",
 			mlog.Uint64("posTs", seekPosition.Timestamp),
 			mlog.Time("posTime", tsoutil.PhysicalTime(seekPosition.GetTimestamp())))

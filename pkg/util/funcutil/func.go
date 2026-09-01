@@ -461,6 +461,9 @@ func GetCollectionIDFromVChannel(vChannelName string) int64 {
 	return -1
 }
 
+// GetShardIndexFromVChannel returns the shard index parsed from the vchannel name,
+// e.g. "by-dev-rootcoord-dml_0_100v2" returns 2.
+// It returns -1 if the name does not end with a shard index.
 func getNumRowsOfScalarField(datas interface{}) uint64 {
 	realTypeDatas := reflect.ValueOf(datas)
 	return uint64(realTypeDatas.Len())

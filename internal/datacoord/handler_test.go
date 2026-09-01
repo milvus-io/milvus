@@ -16,11 +16,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -2850,5 +2852,99 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		assert.NotNil(t, snapshotData)
 		assert.Equal(t, 1, len(snapshotData.Segments), "segment with commit_ts=5000 must appear at snapshotTs=6000")
 		assert.Equal(t, int64(999), snapshotData.Segments[0].SegmentId)
+	})
+}
+
+// TestGetChannelSeekPositionRequiresSeekable pins the rule that every candidate
+// in the fallback chain must be SEEKABLE, not merely non-nil.
+//
+// The unseekable candidate is not hypothetical: it is what a shard-split target
+// holding only rewrite output produces. Those segments were written by
+// compaction rather than delivered by the WAL, so their DML position carries a
+// timestamp and nothing else. Returning it looks like an answer, and the
+// dispatcher built on it skips its Seek — leaving the delegator's streaming
+// adaptor half-built until the first read panics the querynode.
+func TestGetChannelSeekPositionRequiresSeekable(t *testing.T) {
+	const channel = "by-dev-rootcoord-dml_9_400v3"
+
+	newHandler := func(m *meta) *ServerHandler {
+		return &ServerHandler{s: &Server{ctx: context.Background(), meta: m}}
+	}
+	newMeta := func() *meta {
+		m := &meta{
+			ctx:         context.Background(),
+			catalog:     &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:    NewSegmentsInfo(),
+			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			channelCPs:  newChannelCps(),
+		}
+		// Registered so the last fallback resolves from meta instead of reaching
+		// for rootcoord. It carries no start position for this pchannel, which
+		// is the real shape for a split target: the collection was created long
+		// before the target's pchannel joined it.
+		m.collections.Insert(400, &collectionInfo{ID: 400, Schema: newTestSchema()})
+		return m
+	}
+	// A rewrite output: flushed on the target, DML position with a timestamp but
+	// no message id and no WAL name.
+	addRewriteOnly := func(m *meta) {
+		m.segments.SetSegment(9001, &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            9001,
+				CollectionID:  400,
+				InsertChannel: channel,
+				State:         commonpb.SegmentState_Flushed,
+				NumOfRows:     50,
+				DmlPosition:   &msgpb.MsgPosition{ChannelName: channel, Timestamp: 777},
+			},
+		})
+	}
+	ch := &channelMeta{Name: channel, CollectionID: 400}
+
+	t.Run("an unseekable earliest-segment position is not returned", func(t *testing.T) {
+		m := newMeta()
+		addRewriteOnly(m)
+		// No checkpoint, no collection start position: every candidate fails, so
+		// the answer is nil rather than the unusable position.
+		assert.Nil(t, newHandler(m).GetChannelSeekPosition(ch))
+	})
+
+	t.Run("a seeded genesis checkpoint wins", func(t *testing.T) {
+		m := newMeta()
+		addRewriteOnly(m)
+		require.NoError(t, m.UpdateChannelCheckpoints(context.Background(), []*msgpb.MsgPosition{{
+			ChannelName: channel,
+			MsgID:       []byte{0x07},
+			WALName:     commonpb.WALName_RocksMQ,
+			Timestamp:   500,
+		}}))
+
+		pos := newHandler(m).GetChannelSeekPosition(ch)
+		require.NotNil(t, pos)
+		assert.Equal(t, uint64(500), pos.GetTimestamp())
+		assert.True(t, msgdispatcher.SeekablePosition(pos))
+	})
+
+	t.Run("a seekable earliest-segment position is still used", func(t *testing.T) {
+		m := newMeta()
+		m.segments.SetSegment(9002, &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            9002,
+				CollectionID:  400,
+				InsertChannel: channel,
+				State:         commonpb.SegmentState_Flushed,
+				NumOfRows:     50,
+				DmlPosition: &msgpb.MsgPosition{
+					ChannelName: channel,
+					MsgID:       []byte{0x09},
+					WALName:     commonpb.WALName_RocksMQ,
+					Timestamp:   900,
+				},
+			},
+		})
+
+		pos := newHandler(m).GetChannelSeekPosition(ch)
+		require.NotNil(t, pos)
+		assert.Equal(t, uint64(900), pos.GetTimestamp())
 	})
 }

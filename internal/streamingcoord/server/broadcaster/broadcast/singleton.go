@@ -26,6 +26,24 @@ func GetWithContext(ctx context.Context) (broadcaster.Broadcaster, error) {
 	return singleton.GetWithContext(ctx)
 }
 
+// StartBroadcastWithResourceKeysFast is StartBroadcastWithResourceKeys for a
+// caller that must not wait: it returns ErrResourceKeyBusy rather than blocking
+// on a contended key, so a background loop can skip the round and retry.
+func StartBroadcastWithResourceKeysFast(ctx context.Context, resourceKeys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	broadcaster, err := singleton.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	b, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.WaitUntilWALbasedDDLReady(ctx); err != nil {
+		return nil, merr.Wrap(err, "failed to wait until WAL based DDL ready")
+	}
+	return broadcaster.WithResourceKeysFast(ctx, resourceKeys...)
+}
+
 // StartBroadcastWithResourceKeys starts a broadcast with resource keys.
 // Return ErrNotPrimary if the cluster is not primary, so no DDL message can be broadcasted.
 func StartBroadcastWithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {

@@ -178,6 +178,28 @@ type collectionInfo struct {
 	DatabaseName   string
 	DatabaseID     int64
 	VChannelNames  []string
+	// RoutingModulus and ShardInfos carry the collection's authoritative routing
+	// topology, read from DescribeCollection. ShardInfos is keyed by vchannel.
+	// They are needed by the shard split planner (the source shard's residues)
+	// and by the routing commit (every other shard's residues, which a doubling
+	// re-expresses).
+	RoutingModulus uint64
+	ShardInfos     map[string]*schemapb.CollectionShardInfo
+}
+
+// buildShardInfoMap zips the parallel vchannel and shard-info arrays of a
+// DescribeCollection response into a map keyed by vchannel.
+func buildShardInfoMap(vchannels []string, shardInfos []*schemapb.CollectionShardInfo) map[string]*schemapb.CollectionShardInfo {
+	if len(shardInfos) == 0 {
+		return nil
+	}
+	out := make(map[string]*schemapb.CollectionShardInfo, len(vchannels))
+	for i, vchannel := range vchannels {
+		if i < len(shardInfos) {
+			out[vchannel] = shardInfos[i]
+		}
+	}
+	return out
 }
 
 const (
@@ -469,6 +491,8 @@ func (m *meta) reloadCollectionsFromRootcoord(ctx context.Context, broker broker
 				DatabaseName:   descResp.GetDbName(),
 				DatabaseID:     descResp.GetDbId(),
 				VChannelNames:  descResp.GetVirtualChannelNames(),
+				RoutingModulus: descResp.GetRoutingModulus(),
+				ShardInfos:     buildShardInfoMap(descResp.GetVirtualChannelNames(), descResp.GetShardInfos()),
 			}
 			m.AddCollection(collection)
 		}
@@ -526,6 +550,8 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 		DatabaseName:   coll.DatabaseName,
 		DatabaseID:     coll.DatabaseID,
 		VChannelNames:  coll.VChannelNames,
+		RoutingModulus: coll.RoutingModulus,
+		ShardInfos:     coll.ShardInfos,
 	}
 
 	return cloneColl
@@ -1003,6 +1029,26 @@ func UpdateStorageVersionOperator(segmentID int64, version int64) UpdateOperator
 		}
 
 		segment.StorageVersion = version
+		return true
+	}
+}
+
+// UpdateInsertChannelOperator relabels a segment to another vchannel.
+// It is used by shard split redistribution: the segment keeps its ID and
+// data, only the shard ownership changes.
+func UpdateInsertChannelOperator(segmentID int64, channel string) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			mlog.Warn(context.TODO(), "meta update: update insert channel failed - segment not found",
+				mlog.Int64("segmentID", segmentID),
+				mlog.String("channel", channel))
+			return false
+		}
+		if segment.GetInsertChannel() == channel {
+			return false
+		}
+		segment.InsertChannel = channel
 		return true
 	}
 }
@@ -2863,6 +2909,10 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 		return m.completeSortCompactionMutation(t, result)
 	case datapb.CompactionType_BumpSchemaVersionCompaction:
 		return m.completeBumpSchemaVersionCompactionMutation(t, result)
+	case datapb.CompactionType_HashSplitCompaction:
+		// Not the mix mutation: a rewrite's outputs belong to other vchannels and
+		// its inputs must survive until adoption (meta_hash_split.go).
+		return m.completeHashSplitCompactionMutation(t, result)
 	}
 	return nil, nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 }

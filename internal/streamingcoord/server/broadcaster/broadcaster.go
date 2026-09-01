@@ -21,12 +21,28 @@ func IsBroadcastTaskNotCreated(err error) bool {
 	return errors.Is(err, ErrBroadcastTaskNotCreated)
 }
 
+// ErrResourceKeyBusy is returned by WithResourceKeysFast when one of the
+// requested keys is already held. It means "someone else is operating on this
+// resource right now", never "the operation is invalid", so a caller that can
+// come back later should treat it as a skip rather than a failure.
+var ErrResourceKeyBusy = errFastLockFailed
+
 type Broadcaster interface {
 	// WithResourceKeys sets the resource keys of the broadcast operation.
 	// It will acquire locks of the resource keys and return the broadcast api.
 	// Once the broadcast api is returned, the Close() method of the broadcast api should be called to release the resource safely.
 	// Return ErrNotPrimary if the cluster is not primary, so no DDL message can be broadcasted.
 	WithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error)
+
+	// WithResourceKeysFast is WithResourceKeys that never waits: it returns
+	// ErrResourceKeyBusy instead of blocking when a key is already held.
+	//
+	// For a background reconciler rather than a user request. WithResourceKeys
+	// blocks in a way its context cannot interrupt, so a loop that drives many
+	// tasks on one goroutine would stall all of them behind an unrelated DDL,
+	// and would not shut down until that DDL finished. Such a caller wants to
+	// skip this round and come back.
+	WithResourceKeysFast(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error)
 
 	// WithSecondaryClusterResourceKey acquires an exclusive cluster-level resource key
 	// and verifies the cluster is secondary. Returns error if the cluster is primary.
