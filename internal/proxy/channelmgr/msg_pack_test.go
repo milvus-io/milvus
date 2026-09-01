@@ -18,6 +18,7 @@ package channelmgr
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -32,50 +33,58 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+const minWALMessageSizeForTest = 256 * 1024
+
 func TestGenInsertMsgsByPartitionRejectsSingleOversizedRow(t *testing.T) {
-	assert.NoError(t, paramtable.Get().Save(paramtable.Get().PulsarCfg.MaxMessageSize.Key, "64"))
-	defer paramtable.Get().Reset(paramtable.Get().PulsarCfg.MaxMessageSize.Key)
+	params := paramtable.Get()
+	assert.NoError(t, params.Save(params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(minWALMessageSizeForTest)))
+	t.Cleanup(func() { assert.NoError(t, params.Reset(params.PulsarCfg.MaxMessageSize.Key)) })
 
 	t.Run("only row", func(t *testing.T) {
-		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
+		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", minWALMessageSizeForTest+1024))
 		msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNamePulsar)
 		assert.Nil(t, msgs)
-		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
-		assert.Contains(t, err.Error(), "single row at offset 0")
-		assert.False(t, merr.Status(err).GetRetriable())
+		if assert.ErrorIs(t, err, merr.ErrParameterTooLarge) {
+			assert.Contains(t, err.Error(), "single row at offset 0")
+			assert.False(t, merr.Status(err).GetRetriable())
+		}
 	})
 
 	t.Run("row at limit", func(t *testing.T) {
-		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 64))
+		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", minWALMessageSizeForTest))
 		msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNamePulsar)
 		assert.Nil(t, msgs)
 		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	})
 
 	t.Run("later row", func(t *testing.T) {
-		insertMsg := newVarCharInsertMsgForPackTest("small", strings.Repeat("x", 1024))
+		insertMsg := newVarCharInsertMsgForPackTest("small", strings.Repeat("x", minWALMessageSizeForTest+1024))
 		msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0, 1}, "test_channel", insertMsg, message.WALNamePulsar)
 		assert.Nil(t, msgs)
-		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
-		assert.Contains(t, err.Error(), "single row at offset 1")
+		if assert.ErrorIs(t, err, merr.ErrParameterTooLarge) {
+			assert.Contains(t, err.Error(), "single row at offset 1")
+		}
 	})
 }
 
 func TestGenInsertMsgsByPartitionUsesWALSpecificSingleRowLimit(t *testing.T) {
-	assert.NoError(t, paramtable.Get().Save(paramtable.Get().PulsarCfg.MaxMessageSize.Key, "64"))
-	defer paramtable.Get().Reset(paramtable.Get().PulsarCfg.MaxMessageSize.Key)
-	assert.NoError(t, paramtable.Get().Save(paramtable.Get().KafkaCfg.ProducerMessageMaxBytes.Key, "2048"))
-	defer paramtable.Get().Reset(paramtable.Get().KafkaCfg.ProducerMessageMaxBytes.Key)
+	params := paramtable.Get()
+	assert.NoError(t, params.Save(params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(minWALMessageSizeForTest)))
+	assert.NoError(t, params.Save(params.KafkaCfg.ProducerMessageMaxBytes.Key, strconv.Itoa(2*minWALMessageSizeForTest)))
+	t.Cleanup(func() {
+		assert.NoError(t, params.Reset(params.KafkaCfg.ProducerMessageMaxBytes.Key))
+		assert.NoError(t, params.Reset(params.PulsarCfg.MaxMessageSize.Key))
+	})
 
 	t.Run("kafka allows row above pulsar split threshold", func(t *testing.T) {
-		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
+		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", minWALMessageSizeForTest+minWALMessageSizeForTest/2))
 		msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNameKafka)
 		assert.NoError(t, err)
 		assert.Len(t, msgs, 1)
 	})
 
 	t.Run("kafka rejects row at its own limit", func(t *testing.T) {
-		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 2048))
+		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 2*minWALMessageSizeForTest))
 		msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNameKafka)
 		assert.Nil(t, msgs)
 		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
@@ -83,7 +92,7 @@ func TestGenInsertMsgsByPartitionUsesWALSpecificSingleRowLimit(t *testing.T) {
 
 	for _, walName := range []message.WALName{message.WALNameRocksmq, message.WALNameWoodpecker} {
 		t.Run(walName.String()+" has no single row limit", func(t *testing.T) {
-			insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
+			insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", minWALMessageSizeForTest+minWALMessageSizeForTest/2))
 			msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, walName)
 			assert.NoError(t, err)
 			assert.Len(t, msgs, 1)
@@ -92,10 +101,14 @@ func TestGenInsertMsgsByPartitionUsesWALSpecificSingleRowLimit(t *testing.T) {
 }
 
 func TestGenInsertMsgsByPartitionSplitsMultipleRows(t *testing.T) {
-	assert.NoError(t, paramtable.Get().Save(paramtable.Get().PulsarCfg.MaxMessageSize.Key, "512"))
-	defer paramtable.Get().Reset(paramtable.Get().PulsarCfg.MaxMessageSize.Key)
+	params := paramtable.Get()
+	assert.NoError(t, params.Save(params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(minWALMessageSizeForTest)))
+	t.Cleanup(func() { assert.NoError(t, params.Reset(params.PulsarCfg.MaxMessageSize.Key)) })
 
-	insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 300), strings.Repeat("y", 300))
+	insertMsg := newVarCharInsertMsgForPackTest(
+		strings.Repeat("x", 160*1024),
+		strings.Repeat("y", 160*1024),
+	)
 	msgs, err := GenInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0, 1}, "test_channel", insertMsg, message.WALNamePulsar)
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 2)

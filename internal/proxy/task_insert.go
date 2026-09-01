@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"go.opentelemetry.io/otel"
@@ -101,6 +102,25 @@ func (it *insertTask) OnEnqueue() error {
 	return nil
 }
 
+// checkMaxInsertSize rejects a materialized insert message whose protobuf body
+// exceeds quotaAndLimits.limits.maxInsertSize.
+//
+// Both insert and upsert call this after Proxy-side field materialization so
+// generated fields, row IDs, timestamps, and partial-upsert query results are
+// included in the measured size.
+func checkMaxInsertSize(ctx context.Context, op string, size int) error {
+	maxInsertSize := Params.QuotaConfig.MaxInsertSize.GetAsInt()
+	if maxInsertSize == -1 || size <= maxInsertSize {
+		return nil
+	}
+	mlog.Warn(ctx, "materialized insert message exceeds maxInsertSize",
+		mlog.String("op", op),
+		mlog.Int("message size", size),
+		mlog.Int("maxInsertSize", maxInsertSize))
+	return merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge(
+		fmt.Sprintf("%s materialized message size %d exceeds maxInsertSize %d", op, size, maxInsertSize)))
+}
+
 func (it *insertTask) PreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-PreExecute")
 	defer sp.End()
@@ -121,13 +141,6 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	if err := validateCollectionName(collectionName); err != nil {
 		log.Warn(ctx, "valid collection name failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
-	}
-
-	maxInsertSize := Params.QuotaConfig.MaxInsertSize.GetAsInt()
-	if maxInsertSize != -1 && it.insertMsg.Size() > maxInsertSize {
-		log.Warn(ctx, "insert request size exceeds maxInsertSize",
-			mlog.Int("request size", it.insertMsg.Size()), mlog.Int("maxInsertSize", maxInsertSize))
-		return merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge("insert request size exceeds maxInsertSize"))
 	}
 
 	collID, err := it.getMetaCache().GetCollectionID(context.Background(), it.insertMsg.GetDbName(), collectionName)
@@ -294,6 +307,10 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	if err := fieldvalidator.NewValidateUtil(fieldvalidator.WithNANCheck(), fieldvalidator.WithOverflowCheck(), fieldvalidator.WithMaxLenCheck(), fieldvalidator.WithMaxCapCheck()).
 		Validate(it.insertMsg.GetFieldsData(), schema.SchemaHelper, it.insertMsg.NRows()); err != nil {
 		return merr.WrapErrAsInputError(err)
+	}
+
+	if err := checkMaxInsertSize(ctx, "insert", it.insertMsg.Size()); err != nil {
+		return err
 	}
 
 	log.Debug(ctx, "Proxy Insert PreExecute done")

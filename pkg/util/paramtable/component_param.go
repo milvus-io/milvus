@@ -2351,6 +2351,9 @@ type proxyConfig struct {
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
+	// WAL payload chunking rollout switch.
+	SplitChunkProxy ParamItem `refreshable:"true"`
+
 	TimeTickInterval               ParamItem `refreshable:"false"`
 	HealthCheckTimeout             ParamItem `refreshable:"true"`
 	MsgStreamTimeTickBufSize       ParamItem `refreshable:"true"`
@@ -2420,6 +2423,17 @@ type proxyConfig struct {
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
+	p.SplitChunkProxy = ParamItem{
+		Key:          "proxy.splitChunk",
+		Version:      "3.0.2",
+		DefaultValue: "true",
+		Doc: `Whether Proxy keeps the legacy row-based size packing before sending messages to StreamingNode.
+Keep this enabled until chunk writing is enabled and observed on every StreamingNode that can own a pchannel.
+For migration, enable streaming.splitChunkSN first, then disable proxy.splitChunk. Both parameters support live refresh.`,
+		Export: true,
+	}
+	p.SplitChunkProxy.Init(base.mgr)
+
 	p.TimeTickInterval = ParamItem{
 		Key:          "proxy.timeTickInterval",
 		Version:      "2.2.0",
@@ -8222,6 +8236,9 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 }
 
 type streamingConfig struct {
+	// WAL payload chunking rollout switch.
+	SplitChunkSN ParamItem `refreshable:"true"`
+
 	// primary resource group
 	PrimaryResourceGroup ParamItem `refreshable:"true"`
 
@@ -8320,6 +8337,17 @@ type streamingConfig struct {
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
+	p.SplitChunkSN = ParamItem{
+		Key:          "streaming.splitChunkSN",
+		Version:      "3.0.2",
+		DefaultValue: "false",
+		Doc: `Whether StreamingNode splits oversized logical messages into physical WAL records.
+Enable this on every StreamingNode and confirm the live update before disabling proxy.splitChunk.
+Once chunk records have been written, do not roll StreamingNode back to a version that cannot reassemble them. Both parameters support live refresh.`,
+		Export: true,
+	}
+	p.SplitChunkSN.Init(base.mgr)
+
 	// primary resource group
 	p.PrimaryResourceGroup = ParamItem{
 		Key:     "streaming.primaryResourceGroup",
