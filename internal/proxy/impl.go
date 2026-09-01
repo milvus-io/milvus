@@ -3404,6 +3404,37 @@ func adjustSearchResultsForNullVectors(results *milvuspb.SearchResults, validDat
 	resultData.Topks = newTopks
 }
 
+func reorderQueryResultsByRequestedIDs(results *milvuspb.QueryResults, pkFieldData *schemapb.FieldData, ids *schemapb.IDs) error {
+	if results == nil || pkFieldData == nil || ids == nil {
+		return nil
+	}
+
+	pkCount := typeutil.GetPKSize(pkFieldData)
+	pkIndexByValue := make(map[interface{}]int, pkCount)
+	pkIterator := typeutil.GetDataIterator(pkFieldData)
+	for i := 0; i < pkCount; i++ {
+		pkIndexByValue[pkIterator(i)] = i
+	}
+
+	indices := make([]int, 0, typeutil.GetSizeOfIDs(ids))
+	for i := 0; i < typeutil.GetSizeOfIDs(ids); i++ {
+		pk := typeutil.GetPK(ids, int64(i))
+		idx, ok := pkIndexByValue[pk]
+		if !ok {
+			return merr.WrapErrServiceInternalMsg("search by ids result missing primary key %v", pk)
+		}
+		indices = append(indices, idx)
+	}
+
+	for _, field := range results.GetFieldsData() {
+		if err := reorderFieldData(field, indices); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // validateIDsType validates that the IDs type matches the primary key field type
 func validateIDsType(pkField *schemapb.FieldSchema, ids *schemapb.IDs) error {
 	if ids == nil {
@@ -3612,6 +3643,10 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 
 		return nil, merr.WrapErrParameterInvalidMsg(
 			fmt.Sprintf("some of the provided primary key IDs do not exist: missing IDs = %v", missingIDs))
+	}
+
+	if err := reorderQueryResultsByRequestedIDs(queryResult, pkFieldData, ids); err != nil {
+		return nil, err
 	}
 
 	// Extract the field data from query result

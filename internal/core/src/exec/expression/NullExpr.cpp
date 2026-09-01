@@ -16,10 +16,12 @@
 
 #include "NullExpr.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "common/Array.h"
 #include "common/EasyAssert.h"
@@ -44,6 +46,7 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
                                  static_cast<int>(expr_->column_.data_type_));
 
     auto input = context.get_offset_input();
+    SetHasOffsetInput(input != nullptr);
     auto data_type = expr_->column_.data_type_;
     if (expr_->column_.element_level_) {
         data_type = expr_->column_.element_type_;
@@ -115,6 +118,15 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
             }
             break;
         }
+        case DataType::VECTOR_FLOAT:
+        case DataType::VECTOR_BINARY:
+        case DataType::VECTOR_FLOAT16:
+        case DataType::VECTOR_BFLOAT16:
+        case DataType::VECTOR_SPARSE_U32_F32:
+        case DataType::VECTOR_INT8: {
+            result = ExecVectorNull(input);
+            break;
+        }
         default:
             ThrowInfo(UnexpectedError,
                       "unsupported data type: {}",
@@ -124,7 +136,7 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
 void
 PhyNullExpr::DetermineExecPath() {
-    if (expr_->column_.data_type_ == DataType::VECTOR_ARRAY) {
+    if (IsVectorDataType(expr_->column_.data_type_)) {
         exec_path_ = ExprExecPath::RawData;
         return;
     }
@@ -137,6 +149,76 @@ PhyNullExpr::DetermineExecPath() {
     }
 }
 
+void
+PhyNullExpr::MoveCursor() {
+    if (IsOrdinaryVectorDataType(expr_->column_.data_type_)) {
+        if (!has_offset_input_ && !execute_all_at_once_) {
+            current_data_global_pos_ +=
+                std::min(batch_size_, active_count_ - current_data_global_pos_);
+        }
+        return;
+    }
+
+    SegmentExpr::MoveCursor();
+}
+
+bool
+PhyNullExpr::CanExecuteAllAtOnce() const {
+    if (IsOrdinaryVectorDataType(expr_->column_.data_type_)) {
+        return false;
+    }
+    return SegmentExpr::CanExecuteAllAtOnce();
+}
+
+void
+PhyNullExpr::PrefetchRawData() {
+    if (IsOrdinaryVectorDataType(expr_->column_.data_type_)) {
+        return;
+    }
+    SegmentExpr::PrefetchRawData();
+}
+
+VectorPtr
+PhyNullExpr::ExecVectorNull(OffsetVector* input) {
+    if (!expr_->column_.nullable_) {
+        const auto batch_size =
+            input != nullptr
+                ? static_cast<int64_t>(input->size())
+                : std::min(batch_size_,
+                           active_count_ - current_data_global_pos_);
+        if (input == nullptr) {
+            current_data_global_pos_ += batch_size;
+        }
+        return BuildNullResult(TargetBitmap(batch_size, true));
+    }
+
+    if (input != nullptr) {
+        TargetBitmap valid_res(input->size(), true);
+        std::vector<int64_t> offsets(input->begin(), input->end());
+        segment_->ApplyFieldValidDataByOffsets(op_ctx_,
+                                               field_id_,
+                                               offsets.data(),
+                                               offsets.size(),
+                                               TargetBitmapView(valid_res));
+        return BuildNullResult(std::move(valid_res));
+    }
+
+    const auto batch_size =
+        std::min(batch_size_, active_count_ - current_data_global_pos_);
+    TargetBitmap valid_res(batch_size, true);
+    std::vector<int64_t> offsets(batch_size);
+    for (int64_t i = 0; i < batch_size; ++i) {
+        offsets[i] = current_data_global_pos_ + i;
+    }
+    segment_->ApplyFieldValidDataByOffsets(op_ctx_,
+                                           field_id_,
+                                           offsets.data(),
+                                           offsets.size(),
+                                           TargetBitmapView(valid_res));
+    current_data_global_pos_ += batch_size;
+    return BuildNullResult(std::move(valid_res));
+}
+
 template <typename T>
 VectorPtr
 PhyNullExpr::ExecVisitorImpl(OffsetVector* input) {
@@ -147,13 +229,7 @@ PhyNullExpr::ExecVisitorImpl(OffsetVector* input) {
         (input != nullptr)
             ? ProcessChunksForValidByOffsets<T>(UseIndexCursor(), *input)
             : ProcessChunksForValid<T>(UseIndexCursor());
-    TargetBitmap res = valid_res.clone();
-    if (expr_->op_ == proto::plan::NullExpr_NullOp_IsNull) {
-        res.flip();
-    }
-    auto res_vec = std::make_shared<ColumnVector>(
-        std::move(res), TargetBitmap(valid_res.size(), true));
-    return res_vec;
+    return BuildNullResult(std::move(valid_res));
 }
 
 // if nullable is false, no need to process chunks
@@ -174,18 +250,18 @@ PhyNullExpr::PreCheckNullable(OffsetVector* input) {
         precheck_pos_ += batch_size;
     }
 
-    auto res_vec = std::make_shared<ColumnVector>(TargetBitmap(batch_size),
-                                                  TargetBitmap(batch_size));
-    TargetBitmapView res(res_vec->GetRawData(), batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), batch_size);
-    valid_res.set();
+    return BuildNullResult(TargetBitmap(batch_size, true));
+}
+
+ColumnVectorPtr
+PhyNullExpr::BuildNullResult(TargetBitmap&& field_valid) const {
+    auto size = field_valid.size();
     switch (expr_->op_) {
         case proto::plan::NullExpr_NullOp_IsNull: {
-            res.reset();
+            field_valid.flip();
             break;
         }
         case proto::plan::NullExpr_NullOp_IsNotNull: {
-            res.set();
             break;
         }
         default:
@@ -193,7 +269,8 @@ PhyNullExpr::PreCheckNullable(OffsetVector* input) {
                       "unsupported null expr type {}",
                       proto::plan::NullExpr_NullOp_Name(expr_->op_));
     }
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(field_valid),
+                                          TargetBitmap(size, true));
 }
 
 }  //namespace exec

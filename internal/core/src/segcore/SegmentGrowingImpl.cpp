@@ -1538,9 +1538,27 @@ SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
         return;
     }
 
+    if (IsOrdinaryVectorDataType(field_meta.get_data_type()) &&
+        indexing_record_.SyncDataWithIndex(field_id)) {
+        const auto& field_indexing =
+            indexing_record_.get_vec_field_indexing(field_id);
+        auto indexing = field_indexing.get_segment_indexing();
+        auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
+        if (vec_index != nullptr && vec_index->HasValidData()) {
+            for (int64_t i = 0; i < count; ++i) {
+                if (!vec_index->IsRowValid(offsets[i])) {
+                    valid_result[i] = false;
+                }
+            }
+            return;
+        }
+    }
+
     auto valid_vec_ptr = insert_record_.get_valid_data(field_id);
+    std::unique_ptr<bool[]> valid_data(new bool[count]);
+    valid_vec_ptr->bulk_is_valid(offsets, count, valid_data.get());
     for (int64_t i = 0; i < count; ++i) {
-        if (!valid_vec_ptr->is_valid(offsets[i])) {
+        if (!valid_data[i]) {
             valid_result[i] = false;
         }
     }

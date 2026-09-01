@@ -56,7 +56,16 @@ class PhyNullExpr : public SegmentExpr {
     Eval(EvalCtx& context, VectorPtr& result) override;
 
     void
+    MoveCursor() override;
+
+    bool
+    CanExecuteAllAtOnce() const override;
+
+    void
     DetermineExecPath() override;
+
+    void
+    PrefetchRawData() override;
 
     std::string
     ToString() const override {
@@ -76,6 +85,12 @@ class PhyNullExpr : public SegmentExpr {
  private:
     ColumnVectorPtr
     PreCheckNullable(OffsetVector* input);
+
+    ColumnVectorPtr
+    BuildNullResult(TargetBitmap&& field_valid) const;
+
+    VectorPtr
+    ExecVectorNull(OffsetVector* input);
 
     template <typename T>
     VectorPtr

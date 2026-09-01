@@ -3327,6 +3327,30 @@ ChunkedSegmentSealedImpl::ApplyFieldValidDataByOffsets(
     }
 
     auto snapshot = CapturePublishedState();
+    auto& field_meta = snapshot->schema->operator[](field_id);
+    if (!field_meta.is_nullable()) {
+        return;
+    }
+
+    if (IsOrdinaryVectorDataType(field_meta.get_data_type())) {
+        auto vector_entry = GetVectorIndexing(snapshot->runtime, field_id);
+        if (vector_entry != nullptr) {
+            auto ca =
+                SemiInlineGet(vector_entry->indexing_->PinCells(op_ctx, {0}));
+            auto vec_index =
+                dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
+            AssertInfo(vec_index != nullptr, "invalid vector indexing");
+            if (vec_index->HasValidData()) {
+                for (int64_t i = 0; i < count; ++i) {
+                    if (!vec_index->IsRowValid(offsets[i])) {
+                        valid_result[i] = false;
+                    }
+                }
+                return;
+            }
+        }
+    }
+
     std::shared_ptr<ChunkedColumnInterface> column;
     AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
