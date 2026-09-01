@@ -1477,10 +1477,23 @@ func pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.F
 	//  3  2  5  4  1  (result ids)
 	// v3 v2 v5 v4 v1  (result vectors)
 	// ===========================================
-	fieldsData := make([]*schemapb.FieldData, len(fields))
+	size := typeutil.GetSizeOfIDs(ids)
+
+	// Seed the destination columns, the way the search and query reduce paths
+	// do (search_reduce_util.go, task_query.go). AppendFieldData appends only
+	// the rows that carry a payload, and a nullable vector column carries none
+	// for a null row, so a destination of bare nils leaves the vector oneof
+	// unset when every picked row is null: the column's Type still says
+	// FloatVector while its payload says nothing at all. Consumers that switch
+	// on the payload type then see no vector column -- searching by IDs that
+	// all name null-vector rows failed on exactly that.
+	//
+	// Capacity 0: the seeding is all that is needed here. Sizing by the ID
+	// count would reserve dim*size for a dense vector column even when every
+	// picked row is null and nothing is ever appended.
+	fieldsData := typeutil.PrepareResultFieldData(fields, 0)
 	idxComputer := typeutil.NewFieldDataIdxComputerWithSchema(fields, schema)
 
-	size := typeutil.GetSizeOfIDs(ids)
 	rowIdxs := make([]int64, 0, size)
 	for i := 0; i < size; i++ {
 		id := typeutil.GetPK(ids, int64(i))

@@ -2872,16 +2872,29 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		Status: merr.Success(),
 	}
 
+	// A search by primary keys is rewritten in place by handleIfSearchByPK:
+	// the IDs become a placeholder group of the non-null vectors, and the
+	// per-ID validity mask that re-expands the result lives only in that
+	// attempt. Hand every attempt its own copy so a later one still finds
+	// the IDs and produces the mask again, instead of treating the rewritten
+	// request as an ordinary search and dropping the null positions.
+	attemptRequest := func() *milvuspb.SearchRequest {
+		if request.GetIds() == nil {
+			return request
+		}
+		return proto.Clone(request).(*milvuspb.SearchRequest)
+	}
+
 	optimizedSearch := true
 	resultSizeInsufficient := false
 	isTopkReduce := false
 	isRecallEvaluation := false
 	err2 := retry.Handle(ctx, func() (bool, error) {
-		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false)
+		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, attemptRequest(), optimizedSearch, false)
 		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false)
+			rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, attemptRequest(), optimizedSearch, false)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -2904,7 +2917,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		// search for ground truth and compute recall
 		if isRecallEvaluation && merr.Ok(rsp.GetStatus()) {
 			var rspGT *milvuspb.SearchResults
-			rspGT, _, _, _, err = node.search(ctx, request, false, true)
+			rspGT, _, _, _, err = node.search(ctx, attemptRequest(), false, true)
 			metrics.ProxyRecallSearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -3614,14 +3627,62 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 			fmt.Sprintf("some of the provided primary key IDs do not exist: missing IDs = %v", missingIDs))
 	}
 
+	// The query pipeline merges per-segment results by primary key ascending
+	// (queryutil.NewSortAndCheckPKOperator), while search treats the Nq
+	// dimension positionally: result block N belongs to ids[N]. Reorder the
+	// rows into the requested ID order first, so both the vectors packed into
+	// the placeholder group and the validData returned below follow it.
+	pkOffset := make(map[any]int, returnedPKCount)
+	pkItr := typeutil.GetDataIterator(pkFieldData)
+	for i := 0; i < returnedPKCount; i++ {
+		pkOffset[pkItr(i)] = i
+	}
+	orderedFieldsData, err := pickFieldData(ids, pkOffset, queryResult.GetFieldsData(),
+		collectionInfo.Schema.CollectionSchema, collectionInfo.CollID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Extract the field data from query result
 	// For BM25: extract text field; for vector search: extract vector field
-	fieldData := lo.FindOrElse(queryResult.GetFieldsData(), nil, func(f *schemapb.FieldData) bool {
+	fieldData := lo.FindOrElse(orderedFieldsData, nil, func(f *schemapb.FieldData) bool {
 		return f.GetFieldName() == fieldToFetch || f.GetType() == schemapb.DataType_ArrayOfStruct
 	})
 
 	if fieldData == nil {
 		return nil, merr.WrapErrFieldNotFound(fieldToFetch, "field not found in query result")
+	}
+
+	// validData is per requested ID: one entry per row, in request order.
+	validData := typeutil.GetFieldDataValidData(fieldData)
+
+	// The placeholder group must hold only the rows that can be searched, one
+	// per true entry of validData, since adjustSearchResultsForNullVectors
+	// re-expands the result blocks from that count. A nullable vector column
+	// already carries no payload for a null row, but a nullable scalar column
+	// keeps a zero-value slot for it, so the BM25 text has to be compacted here
+	// or a null row would be searched as an empty string and shift every
+	// following result block by one.
+	if isBM25Search && len(validData) > 0 {
+		strs := fieldData.GetScalars().GetStringData().GetData()
+		compact := make([]string, 0, len(strs))
+		for i, str := range strs {
+			if validData[i] {
+				compact = append(compact, str)
+			}
+		}
+		fieldData = &schemapb.FieldData{
+			FieldName: fieldData.GetFieldName(),
+			FieldId:   fieldData.GetFieldId(),
+			Type:      fieldData.GetType(),
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: compact},
+					},
+				},
+			},
+		}
 	}
 
 	// For BM25: converts VarChar to VarChar placeholder (text input for BM25 function)
@@ -3639,7 +3700,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		PlaceholderGroup: placeholderBytes,
 	}
 
-	return typeutil.GetFieldDataValidData(fieldData), nil
+	return validData, nil
 }
 
 // Flush notify data nodes to persist the data of collection.
