@@ -590,6 +590,83 @@ func TestResolveForeignStorageAzureCrossAccountExportWithSourceSAS(t *testing.T)
 	assert.False(t, captured[0].AzureSourceUseSSL)
 }
 
+func TestResolveForeignStorageAzureCrossAccountExportWithSourceSASDefaultPort(t *testing.T) {
+	// Regression: Milvus normalizes minio.address to host:port, so a real
+	// instance config reads "core.windows.net:443", while snapshot URI parsing
+	// drops ports. The default-port spelling difference must not break the
+	// same-cloud comparison that gates a SAS-authorized cross-account copy.
+	t.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
+
+	var captured []objectstorage.Config
+	patchRemoteChunkManager(t, &captured)
+
+	instanceCfg := azureInstanceCfg()
+	instanceCfg.Address = "core.windows.net:443"
+	instanceCfg.UseSSL = true
+
+	resolved, err := ResolveForeignStorage(
+		context.Background(),
+		instanceCfg,
+		DirectionExport,
+		"azure://backup-account.blob.core.windows.net/backup-container/export-root",
+		`{"extfs":{"cloud_provider":"azure","access_key_id":"backup-account","access_key_value":"backup-key","source_sas_token":"sv=2024-08-04&sig=abc"}}`,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "backup-container", resolved.ForeignBucket)
+
+	// The copy source endpoint is emitted in the canonical portless form.
+	require.Len(t, captured, 1)
+	assert.Equal(t, "instance-account.blob.core.windows.net", captured[0].AzureSourceEndpoint)
+	assert.True(t, captured[0].AzureSourceUseSSL)
+}
+
+func TestResolveForeignStorageAzureSameAccountExportDefaultPort(t *testing.T) {
+	// Same regression on the no-SAS path: a same-account export must not be
+	// misclassified as cross-account just because the instance address carries
+	// the default https port.
+	t.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
+
+	var captured []objectstorage.Config
+	patchRemoteChunkManager(t, &captured)
+
+	instanceCfg := azureInstanceCfg()
+	instanceCfg.Address = "core.windows.net:443"
+	instanceCfg.UseSSL = true
+
+	_, err := ResolveForeignStorage(
+		context.Background(),
+		instanceCfg,
+		DirectionExport,
+		"azure://instance-account.blob.core.windows.net/instance-container/export-root",
+		`{"extfs":{"cloud_provider":"azure","access_key_id":"instance-account","access_key_value":"instance-key"}}`,
+	)
+	require.NoError(t, err)
+	require.Len(t, captured, 1)
+}
+
+func TestResolveForeignStorageAzureCrossAccountSourceSASNonDefaultPort(t *testing.T) {
+	// Only the scheme's default port is normalized away; a non-default port is
+	// preserved and still fails the same-cloud check.
+	t.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
+
+	var captured []objectstorage.Config
+	patchRemoteChunkManager(t, &captured)
+
+	instanceCfg := azureInstanceCfg()
+	instanceCfg.Address = "core.windows.net:1443"
+	instanceCfg.UseSSL = true
+
+	_, err := ResolveForeignStorage(
+		context.Background(),
+		instanceCfg,
+		DirectionExport,
+		"azure://backup-account.blob.core.windows.net/backup-container/export-root",
+		`{"extfs":{"cloud_provider":"azure","access_key_id":"backup-account","access_key_value":"backup-key","source_sas_token":"sv=2024-08-04&sig=abc"}}`,
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must stay within one Azure cloud")
+}
+
 func TestResolveForeignStorageAzureCrossAccountRestoreWithSourceSAS(t *testing.T) {
 	t.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
 
