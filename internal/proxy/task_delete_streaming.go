@@ -38,8 +38,13 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		collectionSchema = schema.CollectionSchema
 	}
 
+	collInfo, err := dt.getMetaCache().GetCollectionInfo(ctx, dt.req.GetDbName(), dt.req.GetCollectionName(), dt.collectionID)
+	if err != nil {
+		return err
+	}
+
 	result, numRows, err := repackDeleteMsgByHash(
-		ctx, dt.primaryKeys,
+		ctx, routingOf(collInfo), dt.primaryKeys,
 		dt.vChannels, dt.idAllocator,
 		dt.ts, dt.collectionID,
 		dt.req.GetCollectionName(),

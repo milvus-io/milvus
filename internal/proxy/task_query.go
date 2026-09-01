@@ -948,7 +948,11 @@ func (t *queryTask) Execute(ctx context.Context) error {
 			log.Warn(ctx, "get vChannels failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
 			return err
 		}
-		channelName, ok, err := namespaceShardingChannel(t.schema.CollectionSchema, t.request.Namespace, channelNames)
+		collInfo, err := t.getMetaCache().GetCollectionInfo(ctx, t.request.GetDbName(), t.collectionName, t.CollectionID)
+		if err != nil {
+			return err
+		}
+		channelName, ok, err := namespaceShardingChannel(routingOf(collInfo), t.schema.CollectionSchema, t.request.Namespace, channelNames)
 		if err != nil {
 			return err
 		}

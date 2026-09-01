@@ -11,12 +11,14 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -62,25 +64,56 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		ez = hookutil.GetEzByCollProperties(it.schema.GetProperties(), it.collectionID).AsMessageConfig()
 	}
 
-	// start to repack insert data
-	var msgs []message.MutableMessage
-	if it.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion, nil)
-	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion, nil)
-	}
-	if err != nil {
-		mlog.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
-		it.result.Status = merr.Status(err)
-		return err
-	}
-	resp := streaming.WAL().AppendMessages(ctx, msgs...)
-	if err := resp.UnwrapFirstError(); err != nil {
-		mlog.Warn(ctx, "append messages to wal failed", mlog.Err(err))
-		if status.AsStreamingError(err).IsSchemaVersionMismatch() {
+	// Route, repack and append in a bounded loop. A concurrent shard split fences
+	// the source shard, and the streamingnode then rejects an append to it with
+	// ShardFenced; the proxy drops its stale routing cache and retries, so the
+	// split is transparent to the client.
+	//
+	// Only the rows the WAL actually refused are retried. A request spans several
+	// shards and each one commits independently, so re-sending the whole request
+	// after a single shard was fenced would write the committed rows twice (see
+	// shard_fenced_retry.go).
+	var resp streaming.AppendResponses
+	pending := newRowSet(allRowOffsets(int(it.insertMsg.NumRows)))
+	appendErr := retry.Handle(ctx, func() (bool, error) {
+		collInfo, err := it.getMetaCache().GetCollectionInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
+		if err != nil {
+			return false, err
+		}
+		table := routingOf(collInfo)
+
+		// start to repack insert data
+		var msgs []message.MutableMessage
+		var messageOffsets [][]int
+		if it.partitionKeys == nil {
+			msgs, messageOffsets, err = repackInsertDataForStreamingService(it.TraceCtx(), it.getMetaCache(), table, channelNames, it.insertMsg, it.result, ez, it.schemaVersion, nil, pending)
+		} else {
+			msgs, messageOffsets, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), it.getMetaCache(), table, channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion, nil, pending)
+		}
+		if err != nil {
+			return false, err
+		}
+		resp = streaming.WAL().AppendMessages(ctx, msgs...)
+		refused, fenceErr, fatalErr := refusedRows(resp, messageOffsets)
+		if fatalErr != nil {
+			return false, fatalErr
+		}
+		if len(refused) == 0 {
+			return false, nil
+		}
+		// Those shards were fenced by a shard split; the rows that did land are
+		// done and drop out of the set. Drop the stale routing cache so the next
+		// attempt places the rest against the post-split topology.
+		pending = newRowSet(refused)
+		it.getMetaCache().RemoveCollection(ctx, it.insertMsg.GetDbName(), collectionName)
+		return true, fenceErr
+	}, retry.Attempts(shardFencedRetryAttempts))
+	if appendErr != nil {
+		mlog.Warn(ctx, "append messages to wal failed", mlog.Err(appendErr))
+		if status.AsStreamingError(appendErr).IsSchemaVersionMismatch() {
 			it.result.Status = merr.Status(merr.ErrCollectionSchemaMismatch)
 		} else {
-			it.result.Status = merr.Status(err)
+			it.result.Status = merr.Status(appendErr)
 		}
 	}
 	// Update result.Timestamp for session consistency.
@@ -88,37 +121,44 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	return nil
 }
 
+// repackInsertDataForStreamingService returns the messages to append and, for
+// each one, the row offsets it carries. The caller needs that mapping to know
+// which rows a refused message failed to write.
 func repackInsertDataForStreamingService(
 	ctx context.Context,
 	metaCache Cache,
+	table *routing.Table,
 	channelNames []string,
 	insertMsg *msgstream.InsertMsg,
 	result *milvuspb.MutationResult,
 	ez *message.CipherConfig,
 	schemaVersion int32,
 	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS,
-) ([]message.MutableMessage, error) {
+	pending rowSet,
+) ([]message.MutableMessage, [][]int, error) {
 	messages := make([]message.MutableMessage, 0)
+	messageOffsets := make([][]int, 0)
 	walName := channelmgr.GetActiveWALName()
 
-	channel2RowOffsets, err := assignChannelsByPK(result.IDs, channelNames, insertMsg)
+	channel2RowOffsets, err := assignChannelsByPK(table, result.IDs, channelNames, insertMsg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	channel2RowOffsets = pending.retain(channel2RowOffsets)
 	partitionName := insertMsg.PartitionName
 	partitionID, err := metaCache.GetPartitionID(ctx, insertMsg.GetDbName(), insertMsg.CollectionName, partitionName)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	for channel, rowOffsets := range channel2RowOffsets {
 		partialUpdateCAS, err := getPartialUpdateCASForStreamingService(partialUpdateCASGroups, channel)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		// segment id is assigned at streaming node.
-		msgs, err := repackInsertDataByPartitionForStreamingService(
+		msgs, msgOffsets, err := repackInsertDataByPartitionForStreamingService(
 			ctx,
 			partitionID,
 			partitionName,
@@ -131,16 +171,18 @@ func repackInsertDataForStreamingService(
 			walName,
 		)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		messages = append(messages, msgs...)
+		messageOffsets = append(messageOffsets, msgOffsets...)
 	}
-	return messages, nil
+	return messages, messageOffsets, nil
 }
 
 func repackInsertDataWithPartitionKeyForStreamingService(
 	ctx context.Context,
 	metaCache Cache,
+	table *routing.Table,
 	channelNames []string,
 	insertMsg *msgstream.InsertMsg,
 	result *milvuspb.MutationResult,
@@ -149,26 +191,29 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	schema *schemapb.CollectionSchema,
 	schemaVersion int32,
 	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS,
-) ([]message.MutableMessage, error) {
+	pending rowSet,
+) ([]message.MutableMessage, [][]int, error) {
 	messages := make([]message.MutableMessage, 0)
+	messageOffsets := make([][]int, 0)
 	walName := channelmgr.GetActiveWALName()
 
 	var channel2RowOffsets map[string][]int
 	var err error
 	if namespacePartitionKeyModeEnabled(schema) && insertMsg.Namespace != nil {
-		channel2RowOffsets, err = assignChannelsByNamespace(*insertMsg.Namespace, channelNames, insertMsg)
+		channel2RowOffsets, err = assignChannelsByNamespace(table, *insertMsg.Namespace, channelNames, insertMsg)
 	} else {
-		channel2RowOffsets, err = assignChannelsByPK(result.IDs, channelNames, insertMsg)
+		channel2RowOffsets, err = assignChannelsByPK(table, result.IDs, channelNames, insertMsg)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	channel2RowOffsets = pending.retain(channel2RowOffsets)
 	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, metaCache, insertMsg.GetDbName(), insertMsg.CollectionName)
 	if err != nil {
 		mlog.Warn(ctx, "get default partition names failed in partition key mode",
 			mlog.FieldCollectionName(insertMsg.CollectionName),
 			mlog.Err(err))
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Get partition ids
@@ -180,7 +225,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 				mlog.FieldCollectionName(insertMsg.CollectionName),
 				mlog.FieldPartitionName(partitionName),
 				mlog.Err(err))
-			return nil, err
+			return nil, nil, err
 		}
 		partitionIDs[partitionName] = partitionID
 	}
@@ -190,12 +235,12 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 		mlog.Warn(ctx, "has partition keys to partitions failed",
 			mlog.FieldCollectionName(insertMsg.CollectionName),
 			mlog.Err(err))
-		return nil, err
+		return nil, nil, err
 	}
 	for channel, rowOffsets := range channel2RowOffsets {
 		partialUpdateCAS, err := getPartialUpdateCASForStreamingService(partialUpdateCASGroups, channel)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		partition2RowOffsets := make(map[string][]int)
@@ -208,7 +253,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 		}
 
 		for partitionName, rowOffsets := range partition2RowOffsets {
-			msgs, err := repackInsertDataByPartitionForStreamingService(
+			msgs, msgOffsets, err := repackInsertDataByPartitionForStreamingService(
 				ctx,
 				partitionIDs[partitionName],
 				partitionName,
@@ -221,12 +266,13 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 				walName,
 			)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			messages = append(messages, msgs...)
+			messageOffsets = append(messageOffsets, msgOffsets...)
 		}
 	}
-	return messages, nil
+	return messages, messageOffsets, nil
 }
 
 func getPartialUpdateCASForStreamingService(
@@ -257,7 +303,7 @@ func repackInsertDataByPartitionForStreamingService(
 	schemaVersion int32,
 	partialUpdateCAS *messagespb.PartialUpdateCAS,
 	walName message.WALName,
-) ([]message.MutableMessage, error) {
+) ([]message.MutableMessage, [][]int, error) {
 	type pendingInsertPack struct {
 		rowOffsets []int
 		insertMsg  *msgstream.InsertMsg
@@ -265,6 +311,9 @@ func repackInsertDataByPartitionForStreamingService(
 
 	maxMessageSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
 	messages := make([]message.MutableMessage, 0)
+	// Each built message carries exactly its pack's row offsets, which is what
+	// lets a refused message hand its rows back for a re-route.
+	messageOffsets := make([][]int, 0)
 	pending := []pendingInsertPack{{rowOffsets: rowOffsets}}
 	for len(pending) > 0 {
 		pack := pending[0]
@@ -281,7 +330,7 @@ func repackInsertDataByPartitionForStreamingService(
 				walName,
 			)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 
 			generated := make([]pendingInsertPack, 0, len(packedMsgs))
@@ -309,7 +358,7 @@ func repackInsertDataByPartitionForStreamingService(
 			partialUpdateCAS,
 		)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		// Entity-size packing does not include the streaming header or CAS
@@ -317,10 +366,11 @@ func repackInsertDataByPartitionForStreamingService(
 		// offsets again when that final envelope crosses the transport limit.
 		if partialUpdateCAS == nil || msg.EstimateSize() <= maxMessageSize {
 			messages = append(messages, msg)
+			messageOffsets = append(messageOffsets, pack.rowOffsets)
 			continue
 		}
 		if len(pack.rowOffsets) == 1 {
-			return nil, merr.WrapErrParameterTooLarge("single partial update row exceeds max message size")
+			return nil, nil, merr.WrapErrParameterTooLarge("single partial update row exceeds max message size")
 		}
 
 		middle := len(pack.rowOffsets) / 2
@@ -330,7 +380,7 @@ func repackInsertDataByPartitionForStreamingService(
 		}
 		pending = append(split, pending...)
 	}
-	return messages, nil
+	return messages, messageOffsets, nil
 }
 
 func buildInsertMessageForStreamingService(

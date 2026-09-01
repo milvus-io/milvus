@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -147,8 +148,24 @@ func (dt *deleteTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+// deleteHashValues returns the per-row channel index the delete repacker uses.
+//
+// A collection whose shards carry explicit residues -- one that has been split --
+// is routed by them; a tombstone placed by position would land on a shard that
+// does not hold the row, or on a fenced split source that rejects it. Everything
+// else keeps typeutil.HashPK2Channels verbatim, including its errors on an empty
+// channel set and an unsupported id type, which the delete path relies on to
+// reject a malformed request.
+func deleteHashValues(table *routing.Table, primaryKeys *schemapb.IDs, vChannels []string) ([]uint32, error) {
+	if table.IsExplicit() {
+		return table.RouteDelete(primaryKeys, vChannels)
+	}
+	return typeutil.HashPK2Channels(primaryKeys, vChannels)
+}
+
 func repackDeleteMsgByHash(
 	ctx context.Context,
+	table *routing.Table,
 	primaryKeys *schemapb.IDs,
 	vChannels []string,
 	idAllocator allocator.Interface,
@@ -166,7 +183,7 @@ func repackDeleteMsgByHash(
 	// Delete tombstones are PK+timestamp based. Namespace can narrow routing,
 	// but it is not part of the tombstone identity; PKs must stay unique across
 	// namespaces in the same collection.
-	channelID, ok, err := namespaceShardingChannelID(schema, namespace, vChannels)
+	channelID, ok, err := namespaceShardingChannelID(table, schema, namespace, vChannels)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -177,7 +194,7 @@ func repackDeleteMsgByHash(
 			hashValues[i] = channelID
 		}
 	} else {
-		hashValues, err = typeutil.HashPK2Channels(primaryKeys, vChannels)
+		hashValues, err = deleteHashValues(table, primaryKeys, vChannels)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -622,7 +639,11 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 		return err
 	}
 
-	channelName, useNamespaceChannel, err := namespaceShardingChannel(dr.schema.CollectionSchema, dr.req.Namespace, dr.vChannels)
+	deleteCollInfo, err := dr.getMetaCache().GetCollectionInfo(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), dr.collectionID)
+	if err != nil {
+		return err
+	}
+	channelName, useNamespaceChannel, err := namespaceShardingChannel(routingOf(deleteCollInfo), dr.schema.CollectionSchema, dr.req.Namespace, dr.vChannels)
 	if err != nil {
 		return err
 	}

@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -2728,7 +2729,46 @@ func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, metaCache Cache
 	return partitionNames, nil
 }
 
-func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
+// shardFencedRetryAttempts bounds how many times a write retries after a
+// ShardFenced rejection. A shard split fences the source shard for a brief
+// window before the post-split routing is committed and visible through
+// DescribeCollection; a handful of attempts with backoff covers that window
+// without blocking the write indefinitely.
+const shardFencedRetryAttempts uint = 5
+
+// routingOf returns a collection's derived routing table, tolerating a nil
+// entry: GetCollectionInfo can hand back nil with no error (an uncached
+// describe path, and several test doubles), and a write must degrade to legacy
+// routing there rather than dereference it.
+func routingOf(info *collectionInfo) *routing.Table {
+	if info == nil {
+		return nil
+	}
+	return info.RoutingTable
+}
+
+// assignChannelsByPK maps a write's primary keys to the vchannels that own them.
+//
+// table is the collection's derived routing table, nil for a collection that has
+// never been split. It is what makes a split collection writable at all: its
+// shards own explicit residues, which no modulo over a channel list reproduces,
+// and routing by position sends part of every write to a shard that does not own
+// its keys -- or to a fenced split source, which rejects it.
+func assignChannelsByPK(table *routing.Table, pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
+	if table.IsExplicit() {
+		if len(channelNames) == 0 {
+			// Reported rather than reduced modulo zero, which is how this used to
+			// take the proxy down.
+			return nil, common.ErrRoutingTableNoValues
+		}
+		offsets, hashValues, err := table.RouteInsert(pks, channelNames)
+		if err != nil {
+			return nil, merr.WrapErrServiceInternal(err.Error())
+		}
+		insertMsg.HashValues = hashValues
+		return offsets, nil
+	}
+
 	hashValues, err := typeutil.HashPK2Channels(pks, channelNames)
 	if err != nil {
 		return nil, err
@@ -2762,9 +2802,33 @@ func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msg
 	return channel2RowOffsets, nil
 }
 
-func assignChannelsByNamespace(namespace string, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
+// assignChannelsByNamespace places a whole request on the shard owning its
+// namespace. Every row of one request shares one namespace, so the request lands
+// on a single shard either way; what the routing table changes is WHICH one.
+//
+// The two paths hash the same value with the same function -- the legacy
+// HashNamespace2Channels is HashString2Uint32(namespace) % len(channels), and
+// the table is that same hash resolved through the collection's residues. So a
+// namespace collection that has never been split places exactly where it always
+// did, and a split one follows its shards instead of their positions.
+func assignChannelsByNamespace(table *routing.Table, namespace string, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
 	if len(channelNames) == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("no virtual channels available for namespace sharding")
+	}
+	if table.IsExplicit() {
+		vchannel, err := table.Route(uint64(typeutil.HashString2Uint32(namespace)))
+		if err != nil {
+			return nil, merr.WrapErrServiceInternal(err.Error())
+		}
+		channelID := lo.IndexOf(channelNames, vchannel)
+		if channelID < 0 {
+			// The routing table names a shard the caller did not resolve -- the two
+			// views of the topology disagree, and picking any other channel would
+			// place the whole request on a shard that does not own the namespace.
+			return nil, merr.WrapErrServiceInternalMsg(
+				"shard %s owns namespace %s but is not in the request's channel set", vchannel, namespace)
+		}
+		return assignChannelsByChannel(uint32(channelID), channelNames, insertMsg), nil
 	}
 	channelID := typeutil.HashNamespace2Channels(namespace, channelNames)
 	return assignChannelsByChannel(channelID, channelNames, insertMsg), nil
@@ -2912,18 +2976,41 @@ func namespacePartitionModeEnabled(schema *schemapb.CollectionSchema) bool {
 	return schema != nil && schema.GetEnableNamespace() && common.IsNamespaceModePartition(schema.GetProperties()...)
 }
 
-func namespaceShardingChannelID(schema *schemapb.CollectionSchema, namespace *string, channelNames []string) (uint32, bool, error) {
+// namespaceShardingChannelID resolves the single shard a namespace-routed write
+// lands on, and reports whether namespace routing applies at all.
+//
+// A collection that has been split routes through its residues; one that has not
+// keeps HashNamespace2Channels. Both hash the same value with the same function,
+// so the two agree on a collection that never split.
+func namespaceShardingChannelID(table *routing.Table, schema *schemapb.CollectionSchema, namespace *string, channelNames []string) (uint32, bool, error) {
 	if namespace == nil || !namespacePartitionKeyModeEnabled(schema) {
 		return 0, false, nil
 	}
 	if len(channelNames) == 0 {
 		return 0, false, merr.WrapErrServiceInternalMsg("no virtual channels available for namespace sharding")
 	}
+	if table.IsExplicit() {
+		vchannel, err := table.Route(uint64(typeutil.HashString2Uint32(*namespace)))
+		if err != nil {
+			return 0, false, merr.WrapErrServiceInternal(err.Error())
+		}
+		channelID := lo.IndexOf(channelNames, vchannel)
+		if channelID < 0 {
+			return 0, false, merr.WrapErrServiceInternalMsg(
+				"shard %s owns namespace %s but is not in the request's channel set", vchannel, *namespace)
+		}
+		return uint32(channelID), true, nil
+	}
 	return typeutil.HashNamespace2Channels(*namespace, channelNames), true, nil
 }
 
-func namespaceShardingChannel(schema *schemapb.CollectionSchema, namespace *string, channelNames []string) (string, bool, error) {
-	channelID, ok, err := namespaceShardingChannelID(schema, namespace, channelNames)
+// namespaceShardingChannel is namespaceShardingChannelID by name. Reads use it to
+// narrow a namespace-scoped request to the one shard holding that namespace, so
+// it has to follow the routing table too: after a split the namespace lives on a
+// different shard, and narrowing by position would read the wrong one and return
+// nothing.
+func namespaceShardingChannel(table *routing.Table, schema *schemapb.CollectionSchema, namespace *string, channelNames []string) (string, bool, error) {
+	channelID, ok, err := namespaceShardingChannelID(table, schema, namespace, channelNames)
 	if !ok || err != nil {
 		return "", ok, err
 	}

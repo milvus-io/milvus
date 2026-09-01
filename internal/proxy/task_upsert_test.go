@@ -1076,58 +1076,54 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 	}
 
 	task, vchannel, groups := newInput()
-	msgs, err := repackInsertDataForStreamingService(
+	msgs, _, err := repackInsertDataForStreamingService(
 		context.Background(),
-		mockCache,
+		mockCache, nil,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
 		nil,
 		1,
-		groups,
-	)
+		groups, nil)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
 	require.True(t, streamingmessage.HasPartialUpdateCAS(msgs[0]))
 
 	task, vchannel, _ = newInput()
-	_, err = repackInsertDataForStreamingService(
+	_, _, err = repackInsertDataForStreamingService(
 		context.Background(),
-		mockCache,
+		mockCache, nil,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
 		nil,
 		1,
-		map[string]*messagespb.PartialUpdateCAS{},
-	)
+		map[string]*messagespb.PartialUpdateCAS{}, nil)
 	require.Error(t, err)
 
 	task, vchannel, _ = newInput()
-	_, err = repackInsertDataForStreamingService(
+	_, _, err = repackInsertDataForStreamingService(
 		context.Background(),
-		mockCache,
+		mockCache, nil,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
 		nil,
 		1,
-		map[string]*messagespb.PartialUpdateCAS{vchannel: nil},
-	)
+		map[string]*messagespb.PartialUpdateCAS{vchannel: nil}, nil)
 	require.Error(t, err)
 
 	task, vchannel, groups = newInput()
 	groups[vchannel].ReadTs = 0
-	_, err = repackInsertDataForStreamingService(
+	_, _, err = repackInsertDataForStreamingService(
 		context.Background(),
-		mockCache,
+		mockCache, nil,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
 		nil,
 		1,
-		groups,
-	)
+		groups, nil)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
@@ -1146,32 +1142,30 @@ func TestRepackInsertDataForStreamingServiceSplitsOversizedCASMessage(t *testing
 		},
 	}
 
-	unsplit, err := repackInsertDataForStreamingService(
+	unsplit, _, err := repackInsertDataForStreamingService(
 		context.Background(),
-		mockCache,
+		mockCache, nil,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
 		nil,
 		1,
-		groups,
-	)
+		groups, nil)
 	require.NoError(t, err)
 	require.Len(t, unsplit, 1)
 	maxMessageSize := unsplit[0].EstimateSize() - 1
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(maxMessageSize)))
 	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
 
-	msgs, err := repackInsertDataForStreamingService(
+	msgs, _, err := repackInsertDataForStreamingService(
 		context.Background(),
-		mockCache,
+		mockCache, nil,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
 		nil,
 		1,
-		groups,
-	)
+		groups, nil)
 	require.NoError(t, err)
 	require.Len(t, msgs, 2)
 
@@ -1202,31 +1196,29 @@ func TestRepackInsertDataForStreamingServiceRejectsOversizedSingleRow(t *testing
 		},
 	}
 
-	baseline, err := repackInsertDataForStreamingService(
+	baseline, _, err := repackInsertDataForStreamingService(
 		context.Background(),
-		mockCache,
+		mockCache, nil,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
 		nil,
 		1,
-		groups,
-	)
+		groups, nil)
 	require.NoError(t, err)
 	require.Len(t, baseline, 1)
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(baseline[0].EstimateSize()-1)))
 	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
 
-	_, err = repackInsertDataForStreamingService(
+	_, _, err = repackInsertDataForStreamingService(
 		context.Background(),
-		mockCache,
+		mockCache, nil,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
 		nil,
 		1,
-		groups,
-	)
+		groups, nil)
 	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 }
 
@@ -1245,7 +1237,7 @@ func TestRepackInsertDataByPartitionForStreamingServicePropagatesPackingError(t 
 		},
 	}
 
-	_, err := repackInsertDataByPartitionForStreamingService(
+	_, _, err := repackInsertDataByPartitionForStreamingService(
 		context.Background(),
 		200,
 		"_default",
@@ -1255,8 +1247,7 @@ func TestRepackInsertDataByPartitionForStreamingServicePropagatesPackingError(t 
 		nil,
 		1,
 		nil,
-		streamingmessage.WALNamePulsar,
-	)
+		streamingmessage.WALNamePulsar)
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
 
@@ -1285,7 +1276,7 @@ func TestRepackInsertDataByPartitionForStreamingServicePreservesEntityPackingOrd
 		ObservedPchannelTerm: 1,
 	}
 
-	baseline, err := repackInsertDataByPartitionForStreamingService(
+	baseline, _, err := repackInsertDataByPartitionForStreamingService(
 		context.Background(),
 		200,
 		"_default",
@@ -1295,8 +1286,7 @@ func TestRepackInsertDataByPartitionForStreamingServicePreservesEntityPackingOrd
 		nil,
 		1,
 		meta,
-		streamingmessage.WALNamePulsar,
-	)
+		streamingmessage.WALNamePulsar)
 	require.NoError(t, err)
 	require.Len(t, baseline, 1)
 	maxMessageSize := baseline[0].EstimateSize()
@@ -1316,7 +1306,7 @@ func TestRepackInsertDataByPartitionForStreamingServicePreservesEntityPackingOrd
 	require.NoError(t, err)
 	require.Len(t, entityPacked, 2)
 
-	msgs, err := repackInsertDataByPartitionForStreamingService(
+	msgs, _, err := repackInsertDataByPartitionForStreamingService(
 		context.Background(),
 		200,
 		"_default",
@@ -1326,8 +1316,7 @@ func TestRepackInsertDataByPartitionForStreamingServicePreservesEntityPackingOrd
 		nil,
 		1,
 		meta,
-		streamingmessage.WALNamePulsar,
-	)
+		streamingmessage.WALNamePulsar)
 	require.NoError(t, err)
 	require.Len(t, msgs, 2)
 
@@ -1364,9 +1353,9 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 	}
 
 	task, vchannel, groups := newInput()
-	msgs, err := repackInsertDataWithPartitionKeyForStreamingService(
+	msgs, _, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
-		mockCache,
+		mockCache, nil,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1374,16 +1363,15 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 		nil,
 		task.schema.CollectionSchema,
 		1,
-		groups,
-	)
+		groups, nil)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
 	require.True(t, streamingmessage.HasPartialUpdateCAS(msgs[0]))
 
 	task, vchannel, _ = newInput()
-	_, err = repackInsertDataWithPartitionKeyForStreamingService(
+	_, _, err = repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
-		mockCache,
+		mockCache, nil,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1391,14 +1379,13 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 		nil,
 		task.schema.CollectionSchema,
 		1,
-		map[string]*messagespb.PartialUpdateCAS{},
-	)
+		map[string]*messagespb.PartialUpdateCAS{}, nil)
 	require.Error(t, err)
 
 	task, vchannel, _ = newInput()
-	_, err = repackInsertDataWithPartitionKeyForStreamingService(
+	_, _, err = repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
-		mockCache,
+		mockCache, nil,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1406,15 +1393,14 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 		nil,
 		task.schema.CollectionSchema,
 		1,
-		map[string]*messagespb.PartialUpdateCAS{vchannel: nil},
-	)
+		map[string]*messagespb.PartialUpdateCAS{vchannel: nil}, nil)
 	require.Error(t, err)
 
 	task, vchannel, groups = newInput()
 	groups[vchannel].ReadTs = 0
-	_, err = repackInsertDataWithPartitionKeyForStreamingService(
+	_, _, err = repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
-		mockCache,
+		mockCache, nil,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1422,8 +1408,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 		nil,
 		task.schema.CollectionSchema,
 		1,
-		groups,
-	)
+		groups, nil)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
@@ -1449,9 +1434,9 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceSplitsOversizedCASMe
 		},
 	}
 
-	unsplit, err := repackInsertDataWithPartitionKeyForStreamingService(
+	unsplit, _, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
-		mockCache,
+		mockCache, nil,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1459,17 +1444,16 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceSplitsOversizedCASMe
 		nil,
 		task.schema.CollectionSchema,
 		1,
-		groups,
-	)
+		groups, nil)
 	require.NoError(t, err)
 	require.Len(t, unsplit, 1)
 	maxMessageSize := unsplit[0].EstimateSize() - 1
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(maxMessageSize)))
 	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
 
-	msgs, err := repackInsertDataWithPartitionKeyForStreamingService(
+	msgs, _, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
-		mockCache,
+		mockCache, nil,
 		[]string{vchannel},
 		task.upsertMsg.InsertMsg,
 		task.result,
@@ -1477,8 +1461,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceSplitsOversizedCASMe
 		nil,
 		task.schema.CollectionSchema,
 		1,
-		groups,
-	)
+		groups, nil)
 	require.NoError(t, err)
 	require.Len(t, msgs, 2)
 
@@ -1500,13 +1483,18 @@ func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 		t.Run(map[bool]string{false: "primary key", true: "partition key"}[partitionKey], func(t *testing.T) {
 			collectionPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 			defer collectionPatch.UnPatch()
+			// Execute reads the collection's routing table before it repacks. The
+			// empty info routes by the legacy modulo, which is what this test is
+			// about: which repack function the partition key selects.
+			infoPatch := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{}, nil).Build()
+			defer infoPatch.UnPatch()
 
 			primaryPatch := mockey.Mock(repackInsertDataForStreamingService).
-				Return([]streamingmessage.MutableMessage{}, nil).
+				Return([]streamingmessage.MutableMessage{}, [][]int{}, nil).
 				Build()
 			defer primaryPatch.UnPatch()
 			partitionPatch := mockey.Mock(repackInsertDataWithPartitionKeyForStreamingService).
-				Return([]streamingmessage.MutableMessage{}, nil).
+				Return([]streamingmessage.MutableMessage{}, [][]int{}, nil).
 				Build()
 			defer partitionPatch.UnPatch()
 
@@ -1548,11 +1536,11 @@ func TestPackInsertMessageUsesPartitionKeyRouting(t *testing.T) {
 	collectionPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
 	defer collectionPatch.UnPatch()
 	partitionPatch := mockey.Mock(repackInsertDataWithPartitionKeyForStreamingService).
-		Return([]streamingmessage.MutableMessage{}, nil).
+		Return([]streamingmessage.MutableMessage{}, [][]int{}, nil).
 		Build()
 	defer partitionPatch.UnPatch()
 
-	msgs, err := task.packInsertMessage(context.Background(), nil)
+	msgs, _, err := task.packInsertMessage(context.Background(), nil, nil)
 	require.NoError(t, err)
 	require.Empty(t, msgs)
 }
@@ -1568,7 +1556,7 @@ func TestAppendUpsertAttemptMapsSchemaVersionMismatch(t *testing.T) {
 	oldWAL := streaming.WAL()
 	streaming.SetWALForTest(fakeWAL)
 	t.Cleanup(func() { streaming.SetWALForTest(oldWAL) })
-	insertPatch := mockey.Mock((*upsertTask).packInsertMessage).Return(insertMsgs, nil).Build()
+	insertPatch := mockey.Mock((*upsertTask).packInsertMessage).Return(insertMsgs, nil, nil).Build()
 	defer insertPatch.UnPatch()
 	deletePatch := mockey.Mock((*upsertTask).packDeleteMessage).Return(nil, nil).Build()
 	defer deletePatch.UnPatch()
@@ -1637,7 +1625,7 @@ func TestPartialUpdateAppendAcceptsBuilderCASMetadata(t *testing.T) {
 		task.partialUpdateCASGroups,
 	)
 
-	m := mockey.Mock((*upsertTask).packInsertMessage).Return(insertMsgs, nil).Build()
+	m := mockey.Mock((*upsertTask).packInsertMessage).Return(insertMsgs, nil, nil).Build()
 	defer m.UnPatch()
 	m = mockey.Mock((*upsertTask).packDeleteMessage).Return(deleteMsgs, nil).Build()
 	defer m.UnPatch()
@@ -1705,7 +1693,7 @@ func TestPartialUpdateRetriesAfterCASConflict(t *testing.T) {
 	firstAttemptReadTS := task.partialUpdateReadTs
 
 	m := mockey.Mock((*upsertTask).packInsertMessage).To(
-		func(task *upsertTask, ctx context.Context, ez *streamingmessage.CipherConfig) ([]streamingmessage.MutableMessage, error) {
+		func(task *upsertTask, ctx context.Context, ez *streamingmessage.CipherConfig, pending rowSet) ([]streamingmessage.MutableMessage, [][]int, error) {
 			insertMsgs, _ := buildPartialUpdateCASTestMessages(
 				t,
 				task.collectionID,
@@ -1714,7 +1702,7 @@ func TestPartialUpdateRetriesAfterCASConflict(t *testing.T) {
 				[]int64{20},
 				task.partialUpdateCASGroups,
 			)
-			return insertMsgs, nil
+			return insertMsgs, nil, nil
 		},
 	).Build()
 	defer m.UnPatch()
@@ -2076,7 +2064,7 @@ func TestPartialUpdateAppendAcceptsBuilderCASMetadataForVarCharPK(t *testing.T) 
 		task.partialUpdateCASGroups,
 	)
 
-	m := mockey.Mock((*upsertTask).packInsertMessage).Return(insertMsgs, nil).Build()
+	m := mockey.Mock((*upsertTask).packInsertMessage).Return(insertMsgs, nil, nil).Build()
 	defer m.UnPatch()
 	m = mockey.Mock((*upsertTask).packDeleteMessage).Return(deleteMsgs, nil).Build()
 	defer m.UnPatch()
@@ -2115,7 +2103,7 @@ func TestNonPartialUpsertDoesNotAttachCASMetadata(t *testing.T) {
 	streaming.SetWALForTest(fakeWAL)
 	defer streaming.SetWALForTest(oldWAL)
 
-	m := mockey.Mock((*upsertTask).packInsertMessage).Return(insertMsgs, nil).Build()
+	m := mockey.Mock((*upsertTask).packInsertMessage).Return(insertMsgs, nil, nil).Build()
 	defer m.UnPatch()
 	m = mockey.Mock((*upsertTask).packDeleteMessage).Return(deleteMsgs, nil).Build()
 	defer m.UnPatch()
@@ -2265,7 +2253,7 @@ func TestAttachPartialUpdateCASRejectsVChannelMismatch(t *testing.T) {
 func TestPartialUpdateCASMetadataSizeIsBounded(t *testing.T) {
 	smallTask, _, _ := partialUpdateCASTestTask(t, true, []int64{10}, []int64{10}, nil)
 	setPartialUpdateCASTestChannels(smallTask, partialUpdateCASTestVChannels[:1])
-	smallGroups, err := smallTask.buildPartialUpdateCASGroups()
+	smallGroups, err := smallTask.buildPartialUpdateCASGroups(context.Background())
 	require.NoError(t, err)
 
 	largePKs := make([]int64, 1000)
@@ -2274,7 +2262,7 @@ func TestPartialUpdateCASMetadataSizeIsBounded(t *testing.T) {
 	}
 	largeTask, _, _ := partialUpdateCASTestTask(t, true, largePKs, largePKs, nil)
 	setPartialUpdateCASTestChannels(largeTask, partialUpdateCASTestVChannels[:1])
-	largeGroups, err := largeTask.buildPartialUpdateCASGroups()
+	largeGroups, err := largeTask.buildPartialUpdateCASGroups(context.Background())
 	require.NoError(t, err)
 
 	smallEncoded, err := streamingmessage.EncodeProto(smallGroups[partialUpdateCASTestVChannels[0]])

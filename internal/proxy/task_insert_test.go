@@ -63,7 +63,7 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 
 	mockMetaCache := NewMockCache(t)
 	mockMetaCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(0), nil)
-	msgs, err := repackInsertDataForStreamingService(context.Background(), mockMetaCache, []string{"ch"}, insertMsg, result, nil, 0, nil)
+	msgs, _, err := repackInsertDataForStreamingService(context.Background(), mockMetaCache, nil, []string{"ch"}, insertMsg, result, nil, 0, nil, nil)
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 1)
 

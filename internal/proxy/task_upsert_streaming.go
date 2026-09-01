@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -140,32 +141,74 @@ func (ut *upsertTask) refreshPartialUpdateReadTs(ctx context.Context) error {
 	return nil
 }
 
+// appendUpsertAttempt packs and appends one upsert, retrying the rows a
+// concurrent shard split refused.
+//
+// The two halves retry differently, because they fail differently. The INSERT
+// half is retried by ROW: its messages commit independently, so re-sending the
+// whole half after one shard was fenced would write the committed rows twice
+// (see shard_fenced_retry.go). The DELETE half is re-packed whole, which is safe
+// because applying a delete twice is indistinguishable from applying it once.
 func (ut *upsertTask) appendUpsertAttempt(ctx context.Context, ez *message.CipherConfig) error {
 	logger := mlog.With(mlog.FieldCollectionName(ut.req.CollectionName))
 
-	insertMsgs, err := ut.packInsertMessage(ctx, ez)
-	if err != nil {
-		logger.Warn(ctx, "pack insert message failed", mlog.Err(err))
-		return err
-	}
-	deleteMsgs, err := ut.packDeleteMessage(ctx, ez)
-	if err != nil {
-		logger.Warn(ctx, "pack delete message failed", mlog.Err(err))
-		return err
-	}
-
-	messages := append(insertMsgs, deleteMsgs...)
-	if ut.req.GetPartialUpdate() {
-		if err := ut.attachPartialUpdateCAS(messages); err != nil {
-			logger.Warn(ctx, "attach partial update CAS metadata failed", mlog.Err(err))
-			return err
+	var resp streaming.AppendResponses
+	pending := newRowSet(allRowOffsets(int(ut.upsertMsg.InsertMsg.NumRows)))
+	appendErr := retry.Handle(ctx, func() (bool, error) {
+		insertMsgs, messageOffsets, err := ut.packInsertMessage(ctx, ez, pending)
+		if err != nil {
+			logger.Warn(ctx, "pack insert message failed", mlog.Err(err))
+			return false, err
 		}
-	}
-	resp := streaming.WAL().AppendMessages(ctx, messages...)
-	appendErr := resp.UnwrapFirstError()
-	if ut.req.GetPartialUpdate() {
-		appendErr = unwrapPartialUpdateAppendError(resp)
-	}
+		deleteMsgs, err := ut.packDeleteMessage(ctx, ez)
+		if err != nil {
+			logger.Warn(ctx, "pack delete message failed", mlog.Err(err))
+			return false, err
+		}
+
+		messages := append(insertMsgs, deleteMsgs...)
+		if ut.req.GetPartialUpdate() {
+			if err := ut.attachPartialUpdateCAS(messages); err != nil {
+				logger.Warn(ctx, "attach partial update CAS metadata failed", mlog.Err(err))
+				return false, err
+			}
+		}
+		resp = streaming.WAL().AppendMessages(ctx, messages...)
+
+		// A partial update reports CAS outcomes the fence logic must not swallow,
+		// so it keeps its own unwrapping and never enters the fence retry.
+		if ut.req.GetPartialUpdate() {
+			return false, unwrapPartialUpdateAppendError(resp)
+		}
+
+		// The response is positional, so the insert half is the leading slice. It
+		// is clamped rather than assumed: a WAL that reports fewer responses than
+		// messages tells us nothing about the rest, and UnwrapFirstError tolerated
+		// that too.
+		insertRespCount := min(len(insertMsgs), len(resp.Responses))
+		insertResp := streaming.AppendResponses{Responses: resp.Responses[:insertRespCount]}
+		refused, insertFenceErr, fatalErr := refusedRows(insertResp, messageOffsets)
+		if fatalErr != nil {
+			return false, fatalErr
+		}
+		deleteResp := streaming.AppendResponses{Responses: resp.Responses[insertRespCount:]}
+		_, deleteFenceErr, fatalErr := refusedRows(deleteResp, nil)
+		if fatalErr != nil {
+			return false, fatalErr
+		}
+		if insertFenceErr == nil && deleteFenceErr == nil {
+			return false, nil
+		}
+		// The rows that landed are done and drop out of the set; an empty set packs
+		// no insert messages at all, which is what a run where only the delete half
+		// was fenced needs.
+		pending = newRowSet(refused)
+		ut.getMetaCache().RemoveCollection(ctx, ut.req.GetDbName(), ut.req.GetCollectionName())
+		if insertFenceErr != nil {
+			return true, insertFenceErr
+		}
+		return true, deleteFenceErr
+	}, retry.Attempts(shardFencedRetryAttempts))
 	if appendErr != nil {
 		logger.Warn(ctx, "append messages to wal failed", mlog.Err(appendErr))
 		if status.AsStreamingError(appendErr).IsSchemaVersionMismatch() {
@@ -196,14 +239,14 @@ func unwrapPartialUpdateAppendError(resp streaming.AppendResponses) error {
 	return casErr
 }
 
-func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
+func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherConfig, pending rowSet) ([]message.MutableMessage, [][]int, error) {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy insertExecute upsert %d", ut.ID()))
 	defer tr.Elapse("insert execute done when insertExecute")
 
 	collectionName := ut.upsertMsg.InsertMsg.CollectionName
 	collID, err := ut.getMetaCache().GetCollectionID(ctx, ut.req.GetDbName(), collectionName)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	ut.upsertMsg.InsertMsg.CollectionID = collID
 	log := mlog.With(
@@ -216,7 +259,7 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 		log.Warn(ctx, "get vChannels failed when insertExecute",
 			mlog.Err(err))
 		ut.result.Status = merr.Status(err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	log.Debug(ctx, "send insert request to virtual channels when insertExecute",
@@ -228,19 +271,26 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 		mlog.Duration("get cache duration", getCacheDur),
 		mlog.Duration("get msgStream duration", getMsgStreamDur))
 
+	collInfo, err := ut.getMetaCache().GetCollectionInfo(ctx, ut.req.GetDbName(), collectionName, collID)
+	if err != nil {
+		return nil, nil, err
+	}
+	table := routingOf(collInfo)
+
 	// start to repack insert data
 	var msgs []message.MutableMessage
+	var messageOffsets [][]int
 	if ut.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), ut.getMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups)
+		msgs, messageOffsets, err = repackInsertDataForStreamingService(ut.TraceCtx(), ut.getMetaCache(), table, channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups, pending)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), ut.getMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion, ut.partialUpdateCASGroups)
+		msgs, messageOffsets, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), ut.getMetaCache(), table, channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion, ut.partialUpdateCASGroups, pending)
 	}
 	if err != nil {
 		log.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
 		ut.result.Status = merr.Status(err)
-		return nil, err
+		return nil, nil, err
 	}
-	return msgs, nil
+	return msgs, messageOffsets, nil
 }
 
 func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
@@ -259,8 +309,13 @@ func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherC
 		ut.result.Status = merr.Status(err)
 		return nil, err
 	}
+	table, err := ut.routingTable(ctx)
+	if err != nil {
+		return nil, err
+	}
 	result, numRows, err := repackDeleteMsgByHash(
 		ctx,
+		table,
 		ut.upsertMsg.DeleteMsg.PrimaryKeys,
 		vChannels, ut.idAllocator,
 		ut.BeginTs(),
@@ -347,7 +402,7 @@ func (ut *upsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) 
 func (ut *upsertTask) preparePartialUpdateCASGroups(ctx context.Context) error {
 	ut.partialUpdateCASGroups = nil
 	ut.partialUpdateReadTs = 0
-	groups, err := ut.buildPartialUpdateCASGroups()
+	groups, err := ut.buildPartialUpdateCASGroups(ctx)
 	if err != nil {
 		return err
 	}
@@ -379,7 +434,7 @@ func (ut *upsertTask) preparePartialUpdateCASGroups(ctx context.Context) error {
 	return nil
 }
 
-func (ut *upsertTask) buildPartialUpdateCASGroups() (map[string]*messagespb.PartialUpdateCAS, error) {
+func (ut *upsertTask) buildPartialUpdateCASGroups(ctx context.Context) (map[string]*messagespb.PartialUpdateCAS, error) {
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(ut.schema.CollectionSchema)
 	if err != nil {
 		return nil, err
@@ -404,7 +459,7 @@ func (ut *upsertTask) buildPartialUpdateCASGroups() (map[string]*messagespb.Part
 	if err != nil {
 		return nil, err
 	}
-	channelIndexes, err := ut.partialUpdateCASChannelIndexes(originalIDs, vchannels)
+	channelIndexes, err := ut.partialUpdateCASChannelIndexes(ctx, originalIDs, vchannels)
 	if err != nil {
 		return nil, err
 	}
@@ -420,15 +475,30 @@ func (ut *upsertTask) buildPartialUpdateCASGroups() (map[string]*messagespb.Part
 	return groups, nil
 }
 
+// routingTable returns the collection's derived routing table. Every routing
+// site of an upsert reads it through here, so the insert half, the delete half
+// and the partial-update CAS proof cannot disagree about which shard owns a key.
+func (ut *upsertTask) routingTable(ctx context.Context) (*routing.Table, error) {
+	collInfo, err := ut.getMetaCache().GetCollectionInfo(ctx, ut.req.GetDbName(), ut.req.GetCollectionName(), ut.collectionID)
+	if err != nil {
+		return nil, err
+	}
+	return routingOf(collInfo), nil
+}
+
 // partialUpdateCASChannelIndexes mirrors normal upsert routing so CAS proof
 // and the corresponding DML transaction target the same vchannel.
-func (ut *upsertTask) partialUpdateCASChannelIndexes(ids *schemapb.IDs, vchannels []string) ([]uint32, error) {
-	channelID, ok, err := namespaceShardingChannelID(ut.schema.CollectionSchema, ut.req.Namespace, vchannels)
+func (ut *upsertTask) partialUpdateCASChannelIndexes(ctx context.Context, ids *schemapb.IDs, vchannels []string) ([]uint32, error) {
+	table, err := ut.routingTable(ctx)
+	if err != nil {
+		return nil, err
+	}
+	channelID, ok, err := namespaceShardingChannelID(table, ut.schema.CollectionSchema, ut.req.Namespace, vchannels)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return typeutil.HashPK2Channels(ids, vchannels)
+		return deleteHashValues(table, ids, vchannels)
 	}
 	size := typeutil.GetSizeOfIDs(ids)
 	channelIndexes := make([]uint32, size)

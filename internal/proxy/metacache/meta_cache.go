@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -124,6 +125,16 @@ type CollectionInfo struct {
 	ShardsNum             int32
 	Aliases               []string
 	Properties            []*commonpb.KeyValuePair
+	// RoutingModulus is the modulus the shards' residues are taken against, and
+	// ShardBy names the value that gets hashed. Both are zero/empty on a
+	// collection that has never been split, which routes by hash % ShardsNum.
+	RoutingModulus uint64
+	ShardBy        string
+	// RoutingTable is the collection's derived routing table. Built once here so
+	// the write path does no per-request derivation. Nil when the collection has
+	// never been split, and also when its routing meta is malformed -- the write
+	// path then falls back to the legacy modulo rather than risk mis-routing.
+	RoutingTable *routing.Table
 }
 
 type DatabaseInfo struct {
@@ -556,13 +567,17 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			// the response uncached instead of inventing a compat mechanism for
 			// an upgrade-window-only entry class -- repeat lookups just
 			// re-describe until the rootcoords are upgraded.
-			return newCollectionInfo(collection, schemaInfo, isolation, queryMode), nil
+			// Routing is attached here too, not only on the cached path below: an
+			// entry served without it would route a split collection by the legacy
+			// modulo, sending part of every write to a shard that does not own its
+			// keys.
+			return attachRouting(ctx, newCollectionInfo(collection, schemaInfo, isolation, queryMode), collection), nil
 		}
 		// By-name lookup: the request database is authoritative.
 		bucketDB = normalizeDBName(database)
 	}
 
-	info := newCollectionInfo(collection, schemaInfo, isolation, queryMode)
+	info := attachRouting(ctx, newCollectionInfo(collection, schemaInfo, isolation, queryMode), collection)
 	if info.DBName == "" {
 		info.DBName = bucketDB // authoritative for by-name fills
 	}
@@ -657,7 +672,48 @@ func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, schemaIn
 		ShardsNum:             collection.ShardsNum,
 		Aliases:               collection.Aliases,
 		Properties:            collection.Properties,
+		RoutingModulus:        collection.GetRoutingModulus(),
+		ShardBy:               collection.GetShardBy(),
 	}
+}
+
+// buildRoutingTable derives a collection's routing table from the routing
+// modulus and the per-shard residues DescribeCollection returns parallel to
+// virtual_channel_names.
+//
+// A collection with no shard infos at all has never been split; deriving from
+// the channel list alone gives exactly the legacy hash % shardNum placement.
+// A non-nil error means the routing meta is malformed (a gap, an overlap, or a
+// residue outside the modulus).
+func buildRoutingTable(modulus uint64, vChannels []string, shardInfos []*schemapb.CollectionShardInfo) (*routing.Table, error) {
+	if len(shardInfos) == 0 {
+		return routing.Derive(modulus, vChannels, nil)
+	}
+	shards, err := routing.ShardsFromMeta(vChannels, shardInfos)
+	if err != nil {
+		return nil, err
+	}
+	return routing.Derive(modulus, vChannels, shards)
+}
+
+// attachRouting derives the routing table onto a freshly built entry.
+//
+// A malformed routing meta logs and leaves the table nil; the write path then
+// keeps the legacy modulo. That is the safe fallback only because a collection
+// that has never been split is exactly the case the legacy modulo is correct
+// for -- for a split collection the write is rejected instead, because its
+// table is what tells insert and delete which shard owns a key.
+func attachRouting(ctx context.Context, info *CollectionInfo, collection *milvuspb.DescribeCollectionResponse) *CollectionInfo {
+	table, err := buildRoutingTable(collection.GetRoutingModulus(), collection.GetVirtualChannelNames(), collection.GetShardInfos())
+	if err != nil {
+		mlog.Warn(ctx, "build routing table failed, fall back to no explicit routing",
+			mlog.FieldCollectionName(collection.GetCollectionName()),
+			mlog.FieldCollectionID(collection.GetCollectionID()),
+			mlog.Err(err))
+		return info
+	}
+	info.RoutingTable = table
+	return info
 }
 
 func buildSfKeyByName(database, collectionName string) string {

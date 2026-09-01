@@ -40,7 +40,7 @@ func TestAssignChannelsByPKPreservesModuloRouting(t *testing.T) {
 	}
 	insertMsg := &msgstream.InsertMsg{}
 
-	got, err := assignChannelsByPK(ids, channelNames, insertMsg)
+	got, err := assignChannelsByPK(nil, ids, channelNames, insertMsg)
 
 	expectedHashes := expectedInt64ModuloHashes(t, pks, len(channelNames))
 	assert.NoError(t, err)
@@ -56,7 +56,7 @@ func TestAssignChannelsByPKReturnsRoutingErrorWithoutChannels(t *testing.T) {
 	}
 	insertMsg := &msgstream.InsertMsg{}
 
-	got, err := assignChannelsByPK(ids, nil, insertMsg)
+	got, err := assignChannelsByPK(nil, ids, nil, insertMsg)
 
 	assert.ErrorIs(t, err, common.ErrRoutingTableNoValues)
 	assert.Nil(t, got)
@@ -75,6 +75,7 @@ func TestRepackDeleteMsgByHashPreservesModuloRouting(t *testing.T) {
 
 	got, rows, err := repackDeleteMsgByHash(
 		context.Background(),
+		nil,
 		primaryKeys,
 		vChannels,
 		allocator.NewLocalAllocator(100, 200),
@@ -118,6 +119,7 @@ func TestRepackDeleteMsgByHashReturnsRoutingErrorWithoutChannels(t *testing.T) {
 
 	got, rows, err := repackDeleteMsgByHash(
 		context.Background(),
+		nil,
 		primaryKeys,
 		nil,
 		allocator.NewLocalAllocator(100, 200),
