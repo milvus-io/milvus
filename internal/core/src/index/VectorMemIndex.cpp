@@ -693,6 +693,13 @@ VectorMemIndex<T>::Build(const Config& config) {
         if (!offsets.empty()) {
             dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                          const_cast<const size_t*>(offsets.data()));
+            // offsets holds the prefix sums of every embedding list plus the
+            // terminal total, so the embedding list count is one less than its
+            // size. Knowhere requires this count explicitly: it cannot infer
+            // the array length from the offsets alone, and scanning for a
+            // sentinel silently drops trailing empty lists.
+            dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                         static_cast<int64_t>(offsets.size() - 1));
         }
         BuildWithDataset(dataset, build_config);
     } else {
