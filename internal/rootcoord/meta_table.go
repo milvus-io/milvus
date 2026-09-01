@@ -2863,6 +2863,10 @@ func validateRLSPolicyExpressionsWithSchemaOptions(schema *schemapb.CollectionSc
 	if err != nil {
 		return merr.Wrap(err, "failed to build schema helper for RLS policy")
 	}
+	return validateRLSPolicyExpressionsWithSchemaHelper(schemaHelper, usingExpr, checkExpr, enforceArrayLiteralLimit)
+}
+
+func validateRLSPolicyExpressionsWithSchemaHelper(schemaHelper *typeutil.SchemaHelper, usingExpr string, checkExpr string, enforceArrayLiteralLimit bool) error {
 	if err := validateRLSPolicyExpression(schemaHelper, "using", usingExpr, enforceArrayLiteralLimit); err != nil {
 		return err
 	}
@@ -2870,6 +2874,10 @@ func validateRLSPolicyExpressionsWithSchemaOptions(schema *schemapb.CollectionSc
 }
 
 func validateRLSPoliciesWithSchema(policies []*model.RLSPolicy, schema *schemapb.CollectionSchema) error {
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		return merr.Wrap(err, "failed to build schema helper for RLS policy")
+	}
 	for _, policy := range policies {
 		if policy == nil {
 			continue
@@ -2877,7 +2885,7 @@ func validateRLSPoliciesWithSchema(policies []*model.RLSPolicy, schema *schemapb
 		// Existing policies are grandfathered when refreshable creation quotas
 		// are lowered. Schema DDL only checks whether their fields and expression
 		// shapes remain compatible with the proposed schema.
-		if err := validateRLSPolicyExpressionsWithSchemaOptions(schema, policy.UsingExpr, policy.CheckExpr, false); err != nil {
+		if err := validateRLSPolicyExpressionsWithSchemaHelper(schemaHelper, policy.UsingExpr, policy.CheckExpr, false); err != nil {
 			return merr.Wrapf(err, "RLS policy %q is incompatible with schema change", policy.PolicyName)
 		}
 	}
