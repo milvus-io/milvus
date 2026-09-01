@@ -38,6 +38,15 @@ type SegmentIndex struct {
 	// FinishTask. Readers that construct paths from this field must check
 	// IndexState == Finished first.
 	IndexStorePathVersion indexpb.IndexStorePathVersion
+	// ManifestPublished reports that this build's index entry is recorded in the
+	// manifest revision its segment publishes. It is persisted by the same
+	// catalog transaction that advances the manifest pointer, so true implies
+	// the entry is visible in the published revision.
+	//
+	// A record written before manifest index publication existed decodes as
+	// false, which is exactly what makes it identifiable as still needing a
+	// backfill into its segment's manifest.
+	ManifestPublished bool
 }
 
 func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
@@ -66,6 +75,7 @@ func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
 		CurrentScalarIndexVersion: segIndex.CurrentScalarIndexVersion,
 		IndexType:                 segIndex.IndexType,
 		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
+		ManifestPublished:         segIndex.GetManifestPublished(),
 	}
 }
 
@@ -96,6 +106,7 @@ func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
 		CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
 		IndexType:                 segIdx.IndexType,
 		IndexStorePathVersion:     segIdx.IndexStorePathVersion,
+		ManifestPublished:         segIdx.ManifestPublished,
 	}
 }
 
@@ -122,5 +133,15 @@ func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
 		CurrentScalarIndexVersion: segIndex.CurrentScalarIndexVersion,
 		IndexType:                 segIndex.IndexType,
 		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
+		ManifestPublished:         segIndex.ManifestPublished,
 	}
+}
+
+// GetManifestPublished is nil-safe so callers projecting a record can ask
+// without a preceding nil check, matching the generated proto accessors.
+func (s *SegmentIndex) GetManifestPublished() bool {
+	if s == nil {
+		return false
+	}
+	return s.ManifestPublished
 }

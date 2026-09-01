@@ -1170,6 +1170,68 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_MultipleIndexesPerFie
 	}
 }
 
+// A copy target whose worker wrote the target's own index entries into the
+// target manifest yields records that are already published, so the backfill
+// migration must not queue them. Anything without a manifest revision to point
+// at - a StorageV1/V2 target, or a result carrying no manifest pointer - has no
+// entry and must stay unpublished.
+func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_ManifestPublishedFollowsTarget() {
+	collectionID := int64(1)
+
+	cases := []struct {
+		name           string
+		segmentID      int64
+		storageVersion int64
+		manifestPath   string
+		published      bool
+		// Only a StorageV3 segment is a backfill candidate at all, so a legacy
+		// target stays unflagged even though its record is unpublished.
+		hinted bool
+	}{
+		{"v3 target with manifest", 100, storage.StorageV3, "files/manifest/100/1", true, false},
+		{"v3 target without manifest pointer", 101, storage.StorageV3, "", false, true},
+		{"legacy storage target", 102, storage.StorageV2, "files/manifest/102/1", false, false},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			indexes := map[int64]*model.Index{
+				300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
+			}
+			im := createTestIndexMeta(s.T(), collectionID, indexes)
+			m := &meta{indexMeta: im, segments: NewSegmentsInfo()}
+			m.segments.SetSegment(tc.segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+				ID:             tc.segmentID,
+				CollectionID:   collectionID,
+				NumOfRows:      100,
+				StorageVersion: tc.storageVersion,
+			}))
+
+			buildID := 6000 + tc.segmentID
+			result := &datapb.CopySegmentResult{
+				SegmentId:    tc.segmentID,
+				ManifestPath: tc.manifestPath,
+				IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{
+					buildID: {
+						FieldId:        101,
+						BuildId:        buildID,
+						IndexName:      "vec_idx",
+						IndexFilePaths: []string{"HNSW"},
+					},
+				},
+			}
+			task := createTestCopyTask(collectionID, tc.segmentID)
+
+			s.NoError(syncVectorScalarIndexes(context.Background(), result, task, m, nil))
+
+			segIdx, ok := im.segmentBuildInfo.Get(buildID)
+			s.Require().True(ok)
+			s.Equal(tc.published, segIdx.ManifestPublished)
+			s.Equal(tc.hinted, m.GetSegment(context.Background(), tc.segmentID).NeedsManifestIndexBackfill())
+		})
+	}
+}
+
 func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_IndexNameNotFound() {
 	collectionID := int64(1)
 	segmentID := int64(100)

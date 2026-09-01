@@ -188,6 +188,123 @@ func manifestIndexParams(manifestIndex packed.ManifestIndexInfo) []*commonpb.Key
 	return params
 }
 
+// segmentIndexNeedsManifestBackfill reports whether one index record describes
+// a finished artifact that is not yet recorded in its segment's manifest, i.e.
+// whether it is work for the manifest index backfill.
+//
+// The predicate deliberately matches the one publishIndexToManifest applies
+// when it decides to publish at all: a fake-finished build (a segment too small
+// to train an index) uploads no files, has no artifact, and therefore has
+// nothing to record in a manifest - it must not hold a segment pending forever.
+func segmentIndexNeedsManifestBackfill(segIdx *model.SegmentIndex) bool {
+	return segIdx != nil &&
+		!segIdx.ManifestPublished &&
+		!segIdx.IsDeleted &&
+		segIdx.IndexState == commonpb.IndexState_Finished &&
+		len(segIdx.IndexFileKeys) > 0
+}
+
+// markManifestIndexBackfillPending sets the backfill hint on a segment. It is
+// called whenever a finished index record can have appeared without a manifest
+// entry: the legacy FinishTask path, which records a result the manifest commit
+// declined to publish, and a copy target that arrived without a manifest
+// pointer.
+//
+// Setting is intentionally unconditional and never checks the current value:
+// the hint is allowed to be pessimistic, and the recompute below is the only
+// thing that clears it.
+func (m *meta) markManifestIndexBackfillPending(segmentID UniqueID) {
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
+	segment := m.segments.GetSegment(segmentID)
+	if segment == nil || segment.NeedsManifestIndexBackfill() {
+		return
+	}
+	// ShadowClone, not Clone: only the process-local hint changes, so copying the
+	// protobuf record would be pure cost. Publishing a new wrapper rather than
+	// writing the field in place is what keeps concurrent RLock readers race-free.
+	m.segments.SetSegment(segmentID, segment.ShadowClone(func(cloned *SegmentInfo) {
+		cloned.manifestIndexBackfillPending = true
+	}))
+}
+
+// refreshManifestIndexBackfillPending recomputes the hint for one segment from
+// its authoritative SegmentIndex records. It is the only path that may clear
+// the hint, so that a cleared value always reflects a real check rather than an
+// assumption about which writer ran last.
+func (m *meta) refreshManifestIndexBackfillPending(segmentID UniqueID) {
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
+	segment := m.segments.GetSegment(segmentID)
+	if segment == nil {
+		return
+	}
+	pending := m.segmentHasUnpublishedIndex(segmentID)
+	if pending == segment.NeedsManifestIndexBackfill() {
+		return
+	}
+	m.segments.SetSegment(segmentID, segment.ShadowClone(func(cloned *SegmentInfo) {
+		cloned.manifestIndexBackfillPending = pending
+	}))
+}
+
+// segmentHasUnpublishedIndex answers from indexMeta's in-memory records only.
+//
+// It reads GetAllSegmentIndexes, which takes no fieldIndexLock, and it
+// deliberately does NOT consult IsIndexExist to drop records whose index
+// definition is already gone. Doing so would take fieldIndexLock underneath
+// segMu, an order the existing code goes out of its way to avoid (see the
+// staging note about not stalling every segment reader behind a slow DDL). The
+// cost is that a segment carrying only dropped-definition records keeps the
+// hint set until GC removes them; the hint is a "recheck me" flag, and the
+// consumer applies the authoritative filter, so this is conservative in the
+// safe direction.
+func (m *meta) segmentHasUnpublishedIndex(segmentID UniqueID) bool {
+	if m.indexMeta == nil {
+		return false
+	}
+	for _, segIdx := range m.indexMeta.GetAllSegmentIndexes(segmentID) {
+		if segmentIndexNeedsManifestBackfill(segIdx) {
+			return true
+		}
+	}
+	return false
+}
+
+// initManifestIndexBackfillPending seeds the hint for every segment once meta
+// is fully loaded. Records that predate manifest index publication decode with
+// ManifestPublished false, so this single pass is what surfaces the entire
+// existing backlog after an upgrade.
+//
+// It runs over the index records rather than the segments: the backlog is
+// bounded by the number of indexed segments, not the cluster's segment count.
+func (m *meta) initManifestIndexBackfillPending(ctx context.Context) {
+	if m.indexMeta == nil {
+		return
+	}
+	candidates := make(map[UniqueID]struct{})
+	for _, segIdx := range m.indexMeta.GetAllSegIndexes() {
+		if segmentIndexNeedsManifestBackfill(segIdx) {
+			candidates[segIdx.SegmentID] = struct{}{}
+		}
+	}
+	pending := 0
+	m.segMu.Lock()
+	for segmentID := range candidates {
+		segment := m.segments.GetSegment(segmentID)
+		if segment == nil || segment.NeedsManifestIndexBackfill() {
+			continue
+		}
+		m.segments.SetSegment(segmentID, segment.ShadowClone(func(cloned *SegmentInfo) {
+			cloned.manifestIndexBackfillPending = true
+		}))
+		pending++
+	}
+	m.segMu.Unlock()
+	mlog.Info(ctx, "seeded manifest index backfill hints",
+		mlog.Int("segmentsPendingBackfill", pending))
+}
+
 // reloadSegmentIndexesFromManifests rebuilds the finished-index half of
 // indexMeta from the segment manifests, for the deployment where
 // dataCoord.index.writeSegmentIndexToEtcd is off and a manifest is therefore
@@ -375,5 +492,8 @@ func segmentIndexFromManifest(segment *SegmentInfo, manifestIndex packed.Manifes
 		CurrentScalarIndexVersion: manifestIndex.CurrentScalarIndexVersion,
 		IndexType:                 manifestIndex.IndexType,
 		IndexStorePathVersion:     manifestIndex.IndexStorePathVersion,
+		// The entry was read out of the segment's published manifest revision,
+		// so it is published by construction - there is nothing left to backfill.
+		ManifestPublished: true,
 	}
 }

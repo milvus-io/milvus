@@ -159,6 +159,11 @@ func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
 		if err := it.meta.indexMeta.FinishTask(result); err != nil {
 			return err
 		}
+		// The record was written without a manifest entry. Flag the segment so a
+		// backfill can find it without walking every index record; the flag is a
+		// hint, so setting it for a case that turns out not to need work (a
+		// fake-finished build, a dropped segment) only costs a later recheck.
+		it.meta.markManifestIndexBackfillPending(it.SegmentID)
 	}
 	it.SetState(indexpb.JobState(result.GetState()), result.GetFailReason())
 	return nil

@@ -369,6 +369,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// here rather than at construction is what keeps newIndexMeta and the
 	// segment reload running in parallel above.
 	mt.indexMeta.manifestBackedSegment = mt.isManifestBackedSegment
+	mt.indexMeta.onSegmentIndexRemoved = mt.refreshManifestIndexBackfillPending
 
 	// Runs only when SegmentIndex records are not persisted, where a manifest is
 	// the sole durable record of a finished artifact. Keeping it behind the
@@ -378,6 +379,10 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 			return nil, err
 		}
 	}
+
+	// After both halves of meta are loaded, so the hint reflects the final
+	// record set - including anything the manifest reload just installed.
+	mt.initManifestIndexBackfillPending(ctx)
 
 	return mt, nil
 }
