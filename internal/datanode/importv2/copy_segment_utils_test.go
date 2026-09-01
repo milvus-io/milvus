@@ -3288,13 +3288,22 @@ func TestRepublishCopiedManifestIndexes_LegacySourceStillRecordsIndexes(t *testi
 		},
 	}
 
-	var gotUpdates *packed.ManifestUpdates
+	// Read the fields out HERE rather than stashing the *ManifestUpdates for
+	// later. The caller passes a composite literal whose address does not
+	// escape through the real CommitManifestUpdates, so the compiler is free to
+	// stack-allocate it; monkey-patching the callee does not change that
+	// decision, and the pointer dangles the moment
+	// republishCopiedManifestIndexes returns. The slices themselves are
+	// heap-allocated, so copying the headers out is enough.
+	var gotDrops []packed.DropIndexEntry
+	var gotIndexes []packed.ManifestIndexInfo
+	var captured bool
 	republished := packed.MarshalManifestPath("files/insert_log/100/200/300", 4)
 	defer mockey.Mock(packed.CommitManifestUpdates).To(
 		func(basePath string, baseVersion int64, storageConfig *indexpb.StorageConfig,
 			updates *packed.ManifestUpdates,
 		) (string, error) {
-			gotUpdates = updates
+			gotDrops, gotIndexes, captured = updates.DropIndexes, updates.Indexes, true
 			return republished, nil
 		}).Build().UnPatch()
 
@@ -3302,10 +3311,10 @@ func TestRepublishCopiedManifestIndexes_LegacySourceStillRecordsIndexes(t *testi
 	assert.NoError(t, err)
 	assert.Equal(t, republished, got, "a new revision must be published")
 
-	require.NotNil(t, gotUpdates)
-	assert.Empty(t, gotUpdates.DropIndexes, "nothing was inherited, so nothing is retracted")
-	require.Len(t, gotUpdates.Indexes, 1, "the etcd-recorded index must still be written to the new manifest")
-	assert.Equal(t, int64(777), gotUpdates.Indexes[0].IndexID)
-	assert.Equal(t, "vec_idx", gotUpdates.Indexes[0].IndexName)
-	assert.Equal(t, int64(888), gotUpdates.Indexes[0].BuildID)
+	require.True(t, captured, "the commit must have been reached")
+	assert.Empty(t, gotDrops, "nothing was inherited, so nothing is retracted")
+	require.Len(t, gotIndexes, 1, "the etcd-recorded index must still be written to the new manifest")
+	assert.Equal(t, int64(777), gotIndexes[0].IndexID)
+	assert.Equal(t, "vec_idx", gotIndexes[0].IndexName)
+	assert.Equal(t, int64(888), gotIndexes[0].BuildID)
 }
