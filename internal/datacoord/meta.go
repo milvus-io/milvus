@@ -1866,8 +1866,12 @@ func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
 		// owner) and the finalization of a fresh copy/import target. These segments
 		// have no concurrent manifest writer, so no CommitSegmentManifest
 		// serialization is needed even for StorageV3. Concurrent post-flush writers
-		// (stats, index, GC, compaction, batch DDL) never reach this operator; they
-		// build revisions and advance the pointer through CommitSegmentManifest.
+		// (stats, index, GC, compaction) never reach this operator; they build
+		// revisions and advance the pointer through CommitSegmentManifest. Batch
+		// DDL and backfill adoption do not: they adopt an externally built
+		// revision through UpdateManifestVersion below, guarded only by version
+		// monotonicity - a known bypass of the manifest lock (see the design
+		// doc's known limitations).
 		segment.ManifestPath = manifestPath
 		return true
 	}
