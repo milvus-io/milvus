@@ -204,8 +204,9 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	}
 	for _, partition := range header.GetPartitions() {
 		if partition.BinarySize == 0 {
-			// Proxy does not estimate binary size today. Use payload size after
-			// write-before materialization when the estimate is absent.
+			// Proxy does not estimate binary size today. Use the payload size;
+			// note this excludes materialized function output fields while the
+			// version gate is off (matching pre-feature behavior).
 			partition.BinarySize = uint64(msg.EstimateSize())
 		}
 		req := &shards.AssignSegmentRequest{
