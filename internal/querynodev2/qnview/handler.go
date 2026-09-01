@@ -3,6 +3,7 @@ package qnview
 import (
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/views/optimizer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 )
@@ -51,16 +52,18 @@ var _ handler.QueryViewHandler = (*QNQueryViewHandler)(nil)
 //   - Dropped, SM in Dropped: responds immediately with Dropped re-report.
 //     (In practice unreachable — entry is deleted upon reaching Dropped.)
 type QNQueryViewHandler struct {
-	mu     sync.Mutex
-	shards map[qviews.ShardID]*qnShardView
-	segMgr SegmentManager
+	mu             sync.Mutex
+	shards         map[qviews.ShardID]*qnShardView
+	segMgr         SegmentManager
+	localOptimizer optimizer.LocalOptimizer
 }
 
 // NewQNQueryViewHandler creates a new QNQueryViewHandler.
 func NewQNQueryViewHandler(segMgr SegmentManager) *QNQueryViewHandler {
 	return &QNQueryViewHandler{
-		shards: make(map[qviews.ShardID]*qnShardView),
-		segMgr: segMgr,
+		shards:         make(map[qviews.ShardID]*qnShardView),
+		segMgr:         segMgr,
+		localOptimizer: optimizer.NewNoopLocalOptimizer(),
 	}
 }
 
@@ -77,12 +80,8 @@ func (h *QNQueryViewHandler) ApplyViews(views []handler.ApplyView) {
 
 	// Apply each group atomically under the shard lock.
 	for shardID, shardViews := range grouped {
-		for {
-			shard := h.getOrCreateShard(shardID)
-			if shard.ApplyViews(shardViews) {
-				break
-			}
-		}
+		shard := h.getOrCreateShard(shardID)
+		shard.ApplyViews(shardViews)
 	}
 }
 
@@ -94,12 +93,10 @@ func (h *QNQueryViewHandler) getOrCreateShard(shardID qviews.ShardID) *qnShardVi
 		shard = &qnShardView{
 			views:  make(map[qviews.QueryViewVersion]*qnViewEntry),
 			segMgr: h.segMgr,
-			onEmpty: func(emptyShard *qnShardView) {
+			onEmpty: func() {
 				h.mu.Lock()
 				defer h.mu.Unlock()
-				if h.shards[shardID] == emptyShard {
-					delete(h.shards, shardID)
-				}
+				delete(h.shards, shardID)
 			},
 		}
 		h.shards[shardID] = shard
