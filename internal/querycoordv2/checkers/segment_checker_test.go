@@ -77,7 +77,12 @@ func (suite *SegmentCheckerTestSuite) SetupTest() {
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 
 	balancer := suite.createMockBalancer()
-	suite.checker = NewSegmentChecker(suite.meta, distManager, targetManager, suite.nodeMgr, func() balance.Balance { return balancer })
+	suite.checker = NewSegmentChecker(suite.meta, distManager, targetManager, suite.nodeMgr,
+		func() balance.Balance { return balancer },
+		// #43576 added this predicate; the upstream test supplies it via a
+		// mocking library that is not in this module graph, so the baseline
+		// test is adapted to always report the segment as existing.
+		func(ctx context.Context, collectionID int64, segmentID int64) bool { return true })
 
 	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 }
