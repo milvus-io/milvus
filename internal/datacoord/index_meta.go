@@ -95,16 +95,6 @@ type indexMeta struct {
 	manifestBackedSegment func(segmentID UniqueID) bool
 }
 
-// skipSegmentIndexEtcdWrite reports whether this segment's index record may be
-// left out of etcd. It requires BOTH the switch to be off AND the segment to
-// be manifest-backed: only a StorageV3 segment records its indexes in a
-// manifest, so suppressing the write for a StorageV1/V2 segment would destroy
-// the only copy rather than defer to another one.
-//
-// It resolves the segment through meta, which takes segMu, so it must not be
-// called while that lock is held. The one write path that runs inside a segMu
-// critical section - the manifest commit - passes the answer in instead (see
-// skipStagedSegmentIndexEtcdWrite).
 func (m *indexMeta) skipSegmentIndexEtcdWrite(segmentID UniqueID) bool {
 	if writeSegmentIndexToEtcd() {
 		return false
@@ -1304,13 +1294,10 @@ var errSegmentIndexRecordGone = errors.New("segment index record no longer exist
 
 // stagedSegmentIndexMutation carries a SegmentIndex change from its projection
 // under keyLock to the in-memory install that follows a successful catalog
-// write. action is nil when the mutation resolves to no catalog write at all;
-// unlock releases the key lock the projection was made under and must be
-// called by the staging caller even when staging fails.
+// write. action is nil when the mutation resolves to no catalog write at all.
 type stagedSegmentIndexMutation struct {
 	action  *metastore.UpdateAction
 	install func()
-	unlock  func()
 }
 
 // stageSegmentIndexMutation projects mut against the SegmentIndex record
@@ -1325,6 +1312,11 @@ type stagedSegmentIndexMutation struct {
 // manifestBacked reports whether the committing segment records its indexes in
 // a manifest. The caller supplies it rather than letting this resolve it,
 // because the manifest commit holds segMu across this call.
+//
+// Precondition: the caller holds keyLock(mut.BuildID) across both this
+// projection and the returned install. It is acquired by the caller rather
+// than here so that it is ordered before segMu, matching every other
+// SegmentIndex writer; see CommitSegmentManifest's lock-order note.
 func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation, manifestBacked bool) (*stagedSegmentIndexMutation, error) {
 	if mut.BuildID == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("segment index mutation requires a build ID")
@@ -1346,11 +1338,7 @@ func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation, manifest
 		return nil, merr.WrapErrServiceInternalMsg("unknown segment index mutation type %d, buildID=%d", mut.Type, mut.BuildID)
 	}
 
-	m.keyLock.Lock(mut.BuildID)
-	staged := &stagedSegmentIndexMutation{
-		install: func() {},
-		unlock:  func() { m.keyLock.Unlock(mut.BuildID) },
-	}
+	staged := &stagedSegmentIndexMutation{install: func() {}}
 
 	previous, ok := m.segmentBuildInfo.Get(mut.BuildID)
 	if !ok {

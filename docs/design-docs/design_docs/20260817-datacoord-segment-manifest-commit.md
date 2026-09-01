@@ -245,24 +245,35 @@ artifact files -> manifest revision -> etcd/catalog pointer -> memory
   task-specific consumers such as Stats can discard obsolete worker output
   without classifying unrelated service-unavailable failures as stale.
 
-Drop inverts the ordering, because the risk is inverted: an artifact whose
-bytes are gone but whose metadata still claims it is a read failure, while an
-artifact whose metadata is gone but whose bytes remain is only wasted storage.
+Drop keeps the same ordering - bytes first, then the metadata naming them:
 
 ```text
-commit manifest without index + remove SegmentIndex (one catalog transaction)
-  -> delete index objects (best effort; a failure leaks bytes, never visibility)
+resolve delete list (meta + manifest)
+  -> delete index objects
+  -> commit manifest without index + remove SegmentIndex (one catalog transaction)
 ```
 
-No pending marker is needed. Both stores stop referencing the artifact in the
-same transaction, so after it commits there is nothing left to rediscover -
-only bytes. A deletion failure is therefore logged with the leaked paths rather
-than retried from metadata that no longer exists.
+The usual argument for retiring metadata first - "bytes gone but metadata still
+claims them is a read failure" - does not apply here. `recycleUnusedSegIndexes`
+reaches this path only when the index definition no longer exists or the segment
+itself is gone, and only for a task in a terminal state. Nothing consumes the
+artifact, so a window where metadata still names deleted files harms no reader,
+and the next GC cycle simply repeats the whole step; deleting already-deleted
+files is a no-op.
 
-The framework prevents an interleaved index/stat commit during these steps, and
-it does make the manifest revision and the `SegmentIndex` removal atomic; what
-it still cannot do is make object deletion atomic with either. Ordering the
-metadata first is what confines that residual gap to storage accounting.
+Retiring the metadata first is what would be unsafe. Once the `SegmentIndex`
+record is removed, a failed deletion leaks bytes that nothing can re-drive:
+`recycleUnusedIndexFilesV1` is meta-driven through `GetDeletedIndexesWithV1Path`,
+so a COLLECTION_ROOTED artifact leaks permanently. Only the BUILD_ROOTED layout
+would be reclaimed, by `recycleUnusedIndexFilesV0`'s orphan-buildID sweep - and
+that is the older layout, so the leak would grow rather than shrink over time.
+
+What the framework still contributes is atomicity between the two metadata
+stores: the manifest revision and the `SegmentIndex` removal retire in one
+catalog transaction, so they can never disagree about whether the index exists.
+Only their ordering relative to the bytes is what changed. Object deletion
+remains non-atomic with either, which is why it runs first, where a failure
+costs a retry rather than an unreclaimable leak.
 
 ## Retiring the etcd SegmentIndex Record
 
@@ -294,6 +305,57 @@ healthy StorageV3 segment's manifest and projects its index entries back into
 every other manifest-index consumer uses. It runs only while the switch is off,
 so the default startup performs no per-segment manifest read.
 
+**A manifest that cannot be read fails startup.** This is the same fail-closed
+contract the etcd path has - a `ListSegmentIndexes` error aborts `newIndexMeta`
+and therefore `newMeta` - and the switch is exactly what makes the two paths
+equal in authority. Skipping an unreadable manifest would leave `indexMeta`
+silently incomplete, and an incomplete `indexMeta` is not merely "that segment
+looks unindexed": GC reads an absent `SegmentIndex` as proof the artifact is
+garbage. `recycleUnusedIndexFilesV0`'s `CheckCleanSegmentIndex` miss path
+removes the entire buildID prefix with no time tolerance, and the default
+`storePathVersion: 0` places index files under exactly the `index_files/`
+prefix it walks - so one transient object-store error would delete live index
+files the manifest still references. Failing to start is recoverable; that is
+not. Startup logs scanned / read / recovered counts, because otherwise a
+partial reload is indistinguishable from a cluster that has no indexes.
+
+The candidate set is deliberately NOT narrowed by which index definitions are
+still live. Skipping a segment whose definitions all have records would strand
+precisely the entry the system still needs: a manifest entry whose definition is
+already dropped has no `SegmentIndex` record by construction, and GC is entirely
+record-driven (`GetAllSegIndexes`, `GetDeletedIndexesWithV1Path`), so an entry
+with no record is never visited again and its bytes leak for the
+COLLECTION_ROOTED layout. The filter is therefore only: healthy, non-L0,
+StorageV3, has a manifest pointer.
+
+Every entry read is validated with the same predicate the other manifest
+consumers use (`manifestIndexFilePathInfo`) before it becomes a record, because
+the reload is the one path that promotes a manifest entry into a record whose
+file keys later reach `removeObjectFiles`. A malformed entry fails startup for
+the same reason an unreadable manifest does.
+
+The cost is therefore one object read per healthy V3 segment at startup - not
+per *indexed* segment, since which segments are indexed is not knowable without
+the read. That fan-out is pooled at `dataCoord.index.segmentIndexManifestLoadConcurrency`
+(default 4096) rather than `metastore.readConcurrency`: the latter is shared with
+the querycoord and rootcoord catalogs and defaults to 32, which is a sane etcd
+fan-out and a badly wrong one for object-storage GETs. At 32 in flight a
+million-segment cluster would serialize its boot into hours, and since the scan
+is fail-closed inside `newMeta` that time is downtime, not background warmup.
+Each slot holds a cgo call for the duration of one GET and so pins an OS thread,
+which is the ceiling the knob trades against; a throttling object store is the
+reason to lower it.
+
+**Lock order.** Gating the etcd write requires knowing whether a segment is
+manifest-backed, which resolves through `meta` under `segMu`. Every
+`SegmentIndex` writer reaches that gate while holding `indexMeta.keyLock`, so
+the global order is `segmentManifestLocks -> indexMeta.keyLock -> segMu`.
+`CommitSegmentManifest` therefore acquires the build's key lock before its
+first `segMu` acquisition and holds it through publication; acquiring it during
+staging, after `segMu`, inverts the order and deadlocks against a concurrent
+transition of the same build. `TestCommitSegmentManifestTakesKeyLockBeforeSegMu`
+pins this: parked on the key lock, the commit must hold no `segMu`.
+
 Three limits are inherent rather than incidental, and are why the switch is
 off-by-default rather than removed:
 
@@ -303,15 +365,33 @@ off-by-default rather than removed:
 - A `SegmentIndex` is also the build *task* record. Its state machine, assigned
   node, failure reason and timestamps have no manifest home, so an in-flight or
   failed build on a manifest-backed segment is lost across a restart and is
-  simply reissued. A recovered record is `Finished` by construction.
+  simply reissued. A recovered record is `Finished` by construction. The cost is
+  concrete: a deterministically failing build re-runs in full after every
+  restart, and its `FailReason` is never visible to an operator who did not read
+  the logs before the restart. A fake-finished build (too small to train) is
+  likewise not persisted, though rebuilding it is free.
 - Records written while the switch was off exist only in manifests, so turning
   it back on does not re-persist them; they stay manifest-only until rewritten.
 
+One invariant carries the whole scheme: **a visible StorageV3 segment always
+has a non-empty `ManifestPath`.** It holds by construction - `AllocSegment`
+mints the pointer in the same `SegmentInfo` literal that sets `StorageVersion`,
+and flush, compaction, import and copy all publish `ManifestPath` atomically
+with the segment record; there is no in-place V1/V2 to V3 conversion. Nothing
+validated it, however, and a violation is silent: the segment would answer "not
+manifest-backed", keep writing to etcd, and quietly exempt itself from the
+migration. Both the gate and the reload filter now log an error when they see
+a visible V3 segment with an empty pointer.
+
 The consumers that decide *whether a segment is indexed* -
 `indexMeta.GetSegmentIndexes` / `GetIndexedSegments`, read by the index
-inspector, the compaction trigger and segment load - have no manifest fallback
-of their own, and are the reason the reload exists at all: the six read paths
-that do fall back to the manifest only resolve *file paths*.
+inspector, the compaction trigger and segment load - answer from in-memory
+records alone, which is the reason the reload exists at all. No DataCoord read
+path falls back to the manifest: the reload makes the in-memory records
+complete before the server serves, and every publication installs its record in
+memory in the same commit, so an absent record means an absent artifact rather
+than a record kept elsewhere. Manifest index entries are read only by the
+reload, by GC when it retracts one, and by the copy worker.
 
 ## Required Caller Migration
 
@@ -376,8 +456,9 @@ After the clean branch is complete:
 2. replace its local `packed.AddIndexInfosToManifest`,
    `RemoveIndexInfosFromManifest`, and manifest-pointer publication logic with
    `CommitSegmentManifest` actions;
-3. preserve the read fallback from legacy `SegmentIndex.IndexFileKeys` to
-   manifest entries for migration compatibility; and
+3. keep `SegmentIndex.IndexFileKeys` as the read path's only file-list source -
+   no manifest fallback is needed, since a record without keys is a
+   fake-finished build, which publishes no manifest entry either; and
 4. re-run the full lifecycle audit: build, load, query, copy/restore, snapshot,
    compaction, dropped-segment GC, and recovery.
 

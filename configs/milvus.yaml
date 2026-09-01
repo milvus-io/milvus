@@ -889,6 +889,10 @@ dataCoord:
     # A SegmentIndex is also the build task record - its state machine, assigned node and failure reason have no manifest home - so an in-flight or failed build on a manifest-backed segment is lost across a restart and is simply reissued. Removals are never skipped, so an index collected by GC cannot come back.
     # Existing etcd records are still read on reload and take precedence over the manifest, so turning this off does not strand metadata written while it was on.
     writeSegmentIndexToEtcd: true
+    # Concurrency of the startup scan that rebuilds SegmentIndex records from segment manifests when dataCoord.index.writeSegmentIndexToEtcd is off.
+    # This is object-storage IO, not metastore IO, which is why it is not metastore.readConcurrency: that setting is shared with the querycoord and rootcoord catalogs and defaults to 32, so one manifest read per segment would serialize a large cluster's boot into hours - and the scan is fail-closed inside newMeta, so that time is downtime.
+    # Each slot holds one cgo call into the manifest reader for the duration of an object-storage GET, which pins an OS thread. Raising it trades threads and object-storage request rate for boot time; lower it if the object store throttles.
+    segmentIndexManifestLoadConcurrency: 4096
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.

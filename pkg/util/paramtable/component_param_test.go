@@ -1320,3 +1320,23 @@ func TestFallbackParam(t *testing.T) {
 
 	assert.Equal(t, "foo", params.CommonCfg.ClusterPrefix.GetValue())
 }
+
+func TestSegmentIndexManifestLoadConcurrency(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+
+	// The manifest reload is object-storage IO behind cgo, not metastore IO:
+	// borrowing metastore.readConcurrency (32, and shared with the querycoord
+	// and rootcoord catalogs) would cap a fail-closed startup scan that runs
+	// once per healthy V3 segment.
+	assert.Equal(t, 4096, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
+	assert.NotEqual(t,
+		params.MetaStoreCfg.ReadConcurrency.Key,
+		params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key)
+
+	// A pool size below 1 would deadlock the scan, so it is clamped, not trusted.
+	params.Save(params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key, "0")
+	assert.Equal(t, 1, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
+	params.Save(params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key, "-8")
+	assert.Equal(t, 1, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
+}

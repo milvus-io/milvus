@@ -5721,6 +5721,7 @@ type dataCoordConfig struct {
 	IndexMemSizeEstimateMultiplier      ParamItem `refreshable:"true"`
 	IndexStorePathVersion               ParamItem `refreshable:"true"`
 	WriteSegmentIndexToEtcd             ParamItem `refreshable:"false"`
+	SegmentIndexManifestLoadConcurrency ParamItem `refreshable:"false"`
 	HybridIndexLowCardinalityIndexType  ParamItem `refreshable:"true"`
 	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
 
@@ -6501,6 +6502,24 @@ Existing etcd records are still read on reload and take precedence over the mani
 		Export: true,
 	}
 	p.WriteSegmentIndexToEtcd.Init(base.mgr)
+
+	p.SegmentIndexManifestLoadConcurrency = ParamItem{
+		Key:          "dataCoord.index.segmentIndexManifestLoadConcurrency",
+		Version:      "3.0.0",
+		DefaultValue: "4096",
+		Formatter: func(v string) string {
+			concurrency := getAsInt(v)
+			if concurrency < 1 {
+				return "1"
+			}
+			return strconv.Itoa(concurrency)
+		},
+		Doc: `Concurrency of the startup scan that rebuilds SegmentIndex records from segment manifests when dataCoord.index.writeSegmentIndexToEtcd is off.
+This is object-storage IO, not metastore IO, which is why it is not metastore.readConcurrency: that setting is shared with the querycoord and rootcoord catalogs and defaults to 32, so one manifest read per segment would serialize a large cluster's boot into hours - and the scan is fail-closed inside newMeta, so that time is downtime.
+Each slot holds one cgo call into the manifest reader for the duration of an object-storage GET, which pins an OS thread. Raising it trades threads and object-storage request rate for boot time; lower it if the object store throttles.`,
+		Export: true,
+	}
+	p.SegmentIndexManifestLoadConcurrency.Init(base.mgr)
 
 	p.HybridIndexLowCardinalityIndexType = ParamItem{
 		Key:          "dataCoord.index.hybridIndex.lowCardinalityIndexType",

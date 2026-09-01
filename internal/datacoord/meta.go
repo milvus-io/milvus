@@ -374,7 +374,9 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// the sole durable record of a finished artifact. Keeping it behind the
 	// switch also keeps the default startup free of a per-segment manifest read.
 	if !writeSegmentIndexToEtcd() {
-		mt.reloadSegmentIndexesFromManifests(ctx)
+		if err := mt.reloadSegmentIndexesFromManifests(ctx); err != nil {
+			return nil, err
+		}
 	}
 
 	return mt, nil
@@ -384,6 +386,10 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 // manifest, i.e. whether an index record left out of etcd is recoverable from
 // object storage. An unknown segment answers false so the durable write
 // happens: the only safe default is the one that keeps a copy.
+//
+// It takes segMu, so callers must not hold it. Every caller reaches it while
+// holding indexMeta.keyLock, which is why CommitSegmentManifest takes that key
+// lock before segMu rather than after - see its lock-order note.
 func (m *meta) isManifestBackedSegment(segmentID UniqueID) bool {
 	m.segMu.RLock()
 	defer m.segMu.RUnlock()
@@ -391,7 +397,35 @@ func (m *meta) isManifestBackedSegment(segmentID UniqueID) bool {
 	if segment == nil {
 		return false
 	}
-	return segment.GetStorageVersion() >= storage.StorageV3 && segment.GetManifestPath() != ""
+	if segment.GetStorageVersion() < storage.StorageV3 {
+		return false
+	}
+	if !isSegmentHealthy(segment) {
+		// This predicate must stay at least as strong as the reload filter in
+		// reloadSegmentIndexesFromManifests, which skips unhealthy segments.
+		// A build that finishes after its segment was dropped is declined by
+		// publishIndexToManifest for exactly that reason and falls back to the
+		// legacy FinishTask path, so answering true here would withhold the
+		// etcd write for a record that no manifest holds and no reload can
+		// rebuild. The artifact's files would then be named by nothing after a
+		// restart: BUILD_ROOTED bytes are still reclaimed by the V0 orphan
+		// sweep, but a COLLECTION_ROOTED artifact leaks permanently, since
+		// recycleUnusedIndexFilesV1 is driven by metadata that no longer
+		// exists.
+		return false
+	}
+	if segment.GetManifestPath() == "" {
+		// The whole switch rests on "a visible V3 segment carries a manifest
+		// pointer". A violation does not corrupt anything here - answering
+		// false keeps the etcd write, which is the safe side - but it silently
+		// exempts the segment from the migration, so it must not pass quietly.
+		mlog.Error(m.ctx, "invariant violated: visible StorageV3 segment has no manifest path",
+			mlog.Int64("segmentID", segmentID),
+			mlog.Int64("collectionID", segment.GetCollectionID()),
+			mlog.Int64("storageVersion", segment.GetStorageVersion()))
+		return false
+	}
+	return true
 }
 
 // reloadFromKV loads meta from KV storage

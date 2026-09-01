@@ -18,8 +18,10 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"sort"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -27,11 +29,13 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -111,33 +115,6 @@ func collectionFieldName(m *meta, collectionID, fieldID int64) string {
 	return ""
 }
 
-// getManifestIndexesForSegment reads a StorageV3 manifest for a legacy
-// metadata fallback. Callers invoke it lazily and reuse the result for every
-// missing SegmentIndex entry on the segment.
-func (s *Server) getManifestIndexesForSegment(ctx context.Context, segmentID int64) ([]packed.ManifestIndexInfo, string) {
-	// A server can briefly be partially initialized while metadata is being
-	// wired up. Treat an absent segment store as a segment without a manifest
-	// rather than dereferencing a nil SegmentsInfo during fallback.
-	if s == nil || s.meta == nil || s.meta.segments == nil {
-		return nil, ""
-	}
-	segment := s.meta.GetSegment(ctx, segmentID)
-	if segment == nil || segment.GetStorageVersion() != storage.StorageV3 || segment.GetManifestPath() == "" {
-		return nil, ""
-	}
-
-	manifestPath := segment.GetManifestPath()
-	manifestIndexes, err := packed.GetManifestIndexInfos(manifestPath, createStorageConfig())
-	if err != nil {
-		mlog.Warn(ctx, "failed to read index metadata from manifest",
-			mlog.FieldSegmentID(segmentID),
-			mlog.String("manifestPath", manifestPath),
-			mlog.Err(err))
-		return nil, ""
-	}
-	return manifestIndexes, manifestPath
-}
-
 // manifestIndexFilePathInfo projects one manifest index entry into the load
 // metadata QueryNode consumes. It returns false for an entry that cannot
 // produce a safe file list, which the caller treats as "no manifest artifact".
@@ -196,107 +173,6 @@ func manifestIndexParams(manifestIndex packed.ManifestIndexInfo) []*commonpb.Key
 	return params
 }
 
-// resolveManifestIndexFilePathInfo returns the unique manifest artifact for a
-// completed SegmentIndex task. It is used only when the task's etcd metadata
-// does not carry index_file_keys.
-func resolveManifestIndexFilePathInfo(
-	ctx context.Context,
-	manifestPath string,
-	manifestIndexes []packed.ManifestIndexInfo,
-	segIdx *model.SegmentIndex,
-	fieldID int64,
-) (*indexpb.IndexFilePathInfo, bool) {
-	if manifestPath == "" {
-		return nil, false
-	}
-
-	var matchedIndex *packed.ManifestIndexInfo
-	for i := range manifestIndexes {
-		manifestIndex := &manifestIndexes[i]
-		if !manifestIndexMatches(*manifestIndex, segIdx, fieldID) {
-			continue
-		}
-		if matchedIndex != nil {
-			mlog.Warn(ctx, "multiple manifest indexes match one index task",
-				mlog.FieldSegmentID(segIdx.SegmentID),
-				mlog.FieldBuildID(segIdx.BuildID),
-				mlog.FieldIndexID(segIdx.IndexID),
-				mlog.String("manifestPath", manifestPath))
-			return nil, false
-		}
-		matchedIndex = manifestIndex
-	}
-	if matchedIndex == nil {
-		return nil, false
-	}
-
-	info, ok := manifestIndexFilePathInfo(segIdx.SegmentID, *matchedIndex)
-	if !ok {
-		mlog.Warn(ctx, "invalid matching manifest index metadata",
-			mlog.FieldSegmentID(segIdx.SegmentID),
-			mlog.FieldBuildID(segIdx.BuildID),
-			mlog.FieldIndexID(segIdx.IndexID),
-			mlog.String("manifestPath", manifestPath))
-	}
-	return info, ok
-}
-
-func manifestIndexMatches(manifestIndex packed.ManifestIndexInfo, segIdx *model.SegmentIndex, fieldID int64) bool {
-	return manifestIndex.FieldID == fieldID &&
-		manifestIndex.IndexID == segIdx.IndexID &&
-		manifestIndex.BuildID == segIdx.BuildID &&
-		manifestIndex.IndexVersion == segIdx.IndexVersion &&
-		(segIdx.IndexType == "" || manifestIndex.IndexType == segIdx.IndexType)
-}
-
-// resolveManifestIndexFilePathInfos returns manifest-backed index artifacts
-// that still belong to active collection index definitions. SegmentIndex
-// metadata may be absent for StorageV3, so the collection-level index
-// definitions are the source of truth for filtering dropped indexes.
-func resolveManifestIndexFilePathInfos(
-	ctx context.Context,
-	segmentID int64,
-	manifestPath string,
-	manifestIndexes []packed.ManifestIndexInfo,
-	activeIndexes []*model.Index,
-) []*indexpb.IndexFilePathInfo {
-	activeByID := make(map[int64]*model.Index, len(activeIndexes))
-	for _, index := range activeIndexes {
-		if index == nil || index.IsDeleted {
-			continue
-		}
-		activeByID[index.IndexID] = index
-	}
-
-	ret := make([]*indexpb.IndexFilePathInfo, 0, len(manifestIndexes))
-	seen := make(map[int64]struct{}, len(manifestIndexes))
-	for _, manifestIndex := range manifestIndexes {
-		index, ok := activeByID[manifestIndex.IndexID]
-		if !ok || manifestIndex.FieldID != index.FieldID {
-			continue
-		}
-		if _, ok := seen[manifestIndex.IndexID]; ok {
-			mlog.Warn(ctx, "multiple manifest indexes match one active index",
-				mlog.FieldSegmentID(segmentID),
-				mlog.FieldIndexID(manifestIndex.IndexID),
-				mlog.String("manifestPath", manifestPath))
-			continue
-		}
-
-		info, ok := manifestIndexFilePathInfo(segmentID, manifestIndex)
-		if !ok {
-			mlog.Warn(ctx, "invalid manifest index metadata for active index",
-				mlog.FieldSegmentID(segmentID),
-				mlog.FieldIndexID(manifestIndex.IndexID),
-				mlog.String("manifestPath", manifestPath))
-			continue
-		}
-		seen[manifestIndex.IndexID] = struct{}{}
-		ret = append(ret, info)
-	}
-	return ret
-}
-
 // reloadSegmentIndexesFromManifests rebuilds the finished-index half of
 // indexMeta from the segment manifests, for the deployment where
 // dataCoord.index.writeSegmentIndexToEtcd is off and a manifest is therefore
@@ -309,23 +185,67 @@ func resolveManifestIndexFilePathInfos(
 // so an index on a StorageV1/V2 segment is not recoverable here - that is the
 // documented cost of turning the switch off.
 //
-// A manifest that cannot be read is logged and skipped rather than failing
-// startup: refusing to start would turn one unreadable object into a total
-// outage, whereas skipping degrades to "that segment looks unindexed", which
-// the index inspector repairs by reissuing the build.
-func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) {
+// A manifest that cannot be read FAILS STARTUP. This is deliberately the same
+// fail-closed contract the etcd path has - a ListSegmentIndexes error aborts
+// newIndexMeta and therefore newMeta - and the switch is precisely what makes
+// the two paths equivalent in authority. Skipping an unreadable manifest would
+// leave meta silently incomplete, and a silently incomplete indexMeta is not
+// merely "that segment looks unindexed": garbage collection treats an absent
+// SegmentIndex as proof the artifact is garbage. recycleUnusedIndexFilesV0's
+// CheckCleanSegmentIndex miss path deletes the whole buildID prefix with no
+// time tolerance, and the default storePathVersion 0 puts index files exactly
+// under the index_files/ prefix it walks. One transient object-store error
+// would therefore destroy live index files that the manifest still references.
+// Failing to start is recoverable; that is not.
+func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) error {
 	record := timerecord.NewTimeRecorder("indexMeta-reloadFromManifests")
+	scanned := 0
 	segments := m.SelectSegments(ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
-		return segment.GetStorageVersion() >= storage.StorageV3 &&
-			segment.GetManifestPath() != "" &&
-			isSegmentHealthy(segment)
+		if !isSegmentHealthy(segment) || segment.GetStorageVersion() < storage.StorageV3 {
+			return false
+		}
+		if segment.GetLevel() == datapb.SegmentLevel_L0 {
+			// L0 carries deltalogs only; it never has an index entry, so
+			// reading its manifest is pure cost and pure failure surface.
+			return false
+		}
+		scanned++
+		if segment.GetManifestPath() == "" {
+			// Load-bearing invariant: a visible V3 segment always carries a
+			// manifest pointer, set at registration and never converted in
+			// place. If it is ever violated the segment silently routes to the
+			// etcd path and bypasses the switch, so say so loudly rather than
+			// letting it look like an unindexed segment.
+			mlog.Error(ctx, "invariant violated: visible StorageV3 segment has no manifest path",
+				mlog.Int64("segmentID", segment.GetID()),
+				mlog.Int64("collectionID", segment.GetCollectionID()),
+				mlog.Int64("storageVersion", segment.GetStorageVersion()))
+			return false
+		}
+		// Deliberately NOT narrowed by which index definitions are still live.
+		// A manifest entry whose definition is already gone is precisely what
+		// GC still needs: recycleUnusedSegIndexes is driven entirely by
+		// SegmentIndex records (GetAllSegIndexes), so an entry with no record
+		// is never visited again. Skipping those segments would strand the
+		// manifest entry forever and, when the artifact deletion that preceded
+		// the retraction had failed, leak its bytes permanently for
+		// COLLECTION_ROOTED paths whose sweep is itself record-driven.
+		return true
 	}))
 	if len(segments) == 0 {
-		return
+		mlog.Info(ctx, "no segment manifests to recover indexes from", mlog.Int("scannedV3Segments", scanned))
+		return nil
 	}
 
 	storageConfig := createStorageConfig()
-	pool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
+	// Deliberately NOT metastore.readConcurrency. That knob is shared with the
+	// querycoord and rootcoord catalogs and defaults to 32, which is a sane
+	// etcd fan-out and a badly wrong one here: every task below is an
+	// object-storage GET behind a cgo call, and this loop runs once per healthy
+	// V3 segment. At 32 in flight a million-segment cluster serializes its boot
+	// into hours, and because the scan is fail-closed inside newMeta that time
+	// is downtime, not background warmup.
+	pool := conc.NewPool[any](paramtable.Get().DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
 	defer pool.Release()
 
 	recovered := make([][]*model.SegmentIndex, len(segments))
@@ -333,22 +253,56 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) {
 	for i, segment := range segments {
 		i, segment := i, segment
 		futures = append(futures, pool.Submit(func() (any, error) {
-			manifestIndexes, err := packed.GetManifestIndexInfos(segment.GetManifestPath(), storageConfig)
+			// Absorb a transient object-store error here rather than letting it
+			// abort startup: a failure propagates to newMeta, and initMeta
+			// replays the whole scan up to connMetaMaxRetryTime times, so one
+			// unretried throttle would re-read every segment's manifest again.
+			var manifestIndexes []packed.ManifestIndexInfo
+			err := retry.Do(ctx, func() error {
+				var readErr error
+				manifestIndexes, readErr = packed.GetManifestIndexInfos(segment.GetManifestPath(), storageConfig)
+				return readErr
+			}, retry.Attempts(3), retry.Sleep(200*time.Millisecond))
 			if err != nil {
-				mlog.Warn(ctx, "failed to read segment manifest index metadata during reload, segment will look unindexed",
+				mlog.Error(ctx, "failed to read segment manifest index metadata during reload",
 					mlog.Int64("segmentID", segment.GetID()),
 					mlog.String("manifestPath", segment.GetManifestPath()),
 					mlog.Err(err))
-				return nil, nil
+				return nil, merr.Wrap(err, fmt.Sprintf("recover segment %d indexes from manifest", segment.GetID()))
 			}
 			for _, manifestIndex := range manifestIndexes {
+				// Validate with the SAME predicate every other manifest
+				// consumer applies - GC's retraction resolve, dropped-segment
+				// GC and snapshot copy all route entries through
+				// manifestIndexFilePathInfo. The reload is the one path that
+				// promotes a manifest entry into a durable-looking
+				// SegmentIndex record, and that record's IndexFileKeys reach
+				// removeObjectFiles through BuildFilePath, whose path.Join
+				// normalizes "..": an entry we did not write could otherwise
+				// aim a delete outside its own buildID prefix.
+				//
+				// Rejecting at boot rather than skipping is the same trade the
+				// unreadable-manifest case makes above, and it also surfaces an
+				// entry that resolveManifestIndexRetraction would reject on
+				// every GC cycle forever while only logging a warning.
+				if _, ok := manifestIndexFilePathInfo(segment.GetID(), manifestIndex); !ok {
+					return nil, merr.WrapErrServiceInternalMsg(
+						"segment %d manifest holds an unusable index entry: indexID %d buildID %d",
+						segment.GetID(), manifestIndex.IndexID, manifestIndex.BuildID)
+				}
 				recovered[i] = append(recovered[i], segmentIndexFromManifest(segment, manifestIndex))
 			}
 			return nil, nil
 		}))
 	}
-	// Every failure is absorbed above, so this only waits.
-	_ = conc.AwaitAll(futures...)
+	// BlockOnAll, not AwaitAll: AwaitAll returns at the first failing future
+	// and leaves the rest in flight, so the deferred pool.Release would close
+	// the pool under running tasks and initMeta's retry loop - up to
+	// connMetaMaxRetryTime attempts - would stack a fresh set of orphaned
+	// object-store reads on every attempt.
+	if err := conc.BlockOnAll(futures...); err != nil {
+		return merr.Wrap(err, "recover segment indexes from manifests")
+	}
 
 	installed := 0
 	for _, segIdxes := range recovered {
@@ -356,6 +310,12 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) {
 			if _, ok := m.indexMeta.segmentBuildInfo.Get(segIdx.BuildID); ok {
 				continue
 			}
+			// Entries for indexes whose definition is already gone are
+			// installed too, on purpose. The record is the ONLY thing that
+			// re-drives GC's delete-then-retract for that artifact, and
+			// consumers gate on the index definition (IsIndexExist), so a
+			// record for a dropped index is inert to readers and load-bearing
+			// to GC.
 			m.indexMeta.updateSegmentIndex(segIdx)
 			m.indexMeta.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID,
 				float64(segIdx.IndexSerializedSize))
@@ -363,10 +323,15 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) {
 		}
 	}
 
+	// scanned vs candidates vs recovered is the only signal that meta came up
+	// complete; without it a partial reload is indistinguishable from a
+	// cluster that simply has no indexes.
 	mlog.Info(ctx, "recovered segment indexes from manifests",
-		mlog.Int("segments", len(segments)),
+		mlog.Int("scannedV3Segments", scanned),
+		mlog.Int("manifestsRead", len(segments)),
 		mlog.Int("recoveredIndexes", installed),
 		mlog.Duration("duration", record.ElapseSpan()))
+	return nil
 }
 
 // segmentIndexFromManifest projects a manifest index entry back into the
