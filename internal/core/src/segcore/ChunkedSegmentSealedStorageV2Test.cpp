@@ -1325,6 +1325,61 @@ TEST_P(TestChunkSegmentStorageV2, LoadGroupedBinlogPreservesChildFieldIds) {
     ASSERT_EQ(1, final.count());
 }
 
+TEST_P(TestChunkSegmentStorageV2,
+       GroupedBinlogEvictableRequiresEveryChildEnabled) {
+    auto schema_proto = schema_->ToProto();
+    UseCanonicalSystemFieldNames(schema_proto);
+    for (auto& field : *schema_proto.mutable_fields()) {
+        if (field.fieldid() != fields.at("int64").get() &&
+            field.fieldid() != fields.at("pk").get() &&
+            field.fieldid() != TimestampFieldID.get()) {
+            continue;
+        }
+        auto* evictable = field.add_type_params();
+        evictable->set_key(EVICTABLE_KEY);
+        evictable->set_value(field.fieldid() == fields.at("pk").get() ? "false"
+                                                                      : "true");
+    }
+    auto schema = Schema::ParseFrom(schema_proto);
+
+    proto::segcore::SegmentLoadInfo segment_load_info;
+    segment_load_info.set_segmentid(100);
+    segment_load_info.set_num_of_rows(RowCount());
+    segment_load_info.set_storageversion(2);
+    segment_load_info.set_is_sorted(true);
+
+    auto* grouped_binlog = segment_load_info.add_binlog_paths();
+    grouped_binlog->set_fieldid(0);
+    grouped_binlog->add_child_fields(fields.at("int64").get());
+    grouped_binlog->add_child_fields(fields.at("pk").get());
+    grouped_binlog->add_child_fields(TimestampFieldID.get());
+    auto* grouped_log = grouped_binlog->add_binlogs();
+    grouped_log->set_log_path(load_info_.field_infos.at(0).insert_files[0]);
+    grouped_log->set_entries_num(RowCount());
+    grouped_log->set_memory_size(
+        load_info_.field_infos.at(0).memory_sizes.front());
+
+    auto loaded_segment = segcore::CreateSealedSegment(
+        schema, nullptr, -1, segcore::SegcoreConfig::default_config(), true);
+    auto* sealed =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(loaded_segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetLoadInfo(std::move(segment_load_info));
+    milvus::OpContext op_ctx;
+    milvus::tracer::TraceContext trace_ctx;
+    sealed->Load(trace_ctx, &op_ctx);
+
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    for (const auto field_id : {fields.at("int64"), fields.at("pk")}) {
+        auto field = runtime->fields.find(field_id);
+        ASSERT_NE(field, runtime->fields.end());
+        auto proxy_column =
+            std::dynamic_pointer_cast<ProxyChunkColumn>(field->second);
+        ASSERT_NE(proxy_column, nullptr);
+        EXPECT_FALSE(proxy_column->TestSupportEviction());
+    }
+}
+
 TEST_P(TestChunkSegmentStorageV2, FullLoadPreservesNonEvictableFieldPolicy) {
     auto schema_proto = schema_->ToProto();
     // The fixture uses the local alias "ts"; protobuf parsing requires the

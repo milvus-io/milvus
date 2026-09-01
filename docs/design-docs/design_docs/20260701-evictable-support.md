@@ -167,11 +167,20 @@ QueryNode parses the final properties:
 Storage V2 column groups use a conservative aggregation rule: a group is marked
 evictable only when every child field in that group is evictable.
 
+Storage V3 keeps the existing load/reopen planner boundaries, then partitions
+each planned entry by the fields' effective `(warmup, evictable)` values.
+Fields with the same pair share one projected reader and cache slot; fields
+with different pairs use independent projections, size estimates, and cache
+keys. `mmap` does not participate in this partitioning and keeps its existing
+entry-level behavior.
+
 #### StructArray Semantics
 
 StructArray follows the same configuration-versus-storage model as `warmup`:
-configuration is resolved through its nested fields, while the physical column
-group is managed as one cache resource.
+configuration is resolved through its nested fields. Storage V2 manages the
+physical column group as one cache resource; Storage V3 may project nested
+fields into separate cache entries when their effective warmup or evictable
+values differ.
 
 For raw field data, precedence within a StructArray is:
 
@@ -188,13 +197,12 @@ nested field property > struct field property > collection property > QueryNode 
 - QueryCoord does not materialize `evictable.scalarField` onto the StructArray
   container itself.
 
-Segcore flattens the nested fields into its field schema, but the StructArray
-binlog/column group still has a single cache slot and therefore a single
-`support_eviction` value. The effective group value is the logical AND of its
-nested field values: if any nested field is non-evictable, the entire group is
-non-evictable. This is analogous to `warmup`, which resolves policies per
-nested field and then folds them into one group policy using
-`sync > async > disable`.
+Segcore flattens the nested fields into its field schema. For Storage V2, the
+StructArray binlog/column group has one cache slot and therefore one
+`support_eviction` value: if any nested field is non-evictable, the entire
+group is non-evictable. For Storage V3, nested fields first inherit their
+effective values and then follow the same `(warmup, evictable)` projection rule
+as ordinary fields.
 
 Indexes belong to individual nested fields and use their own scalar/vector
 index evictable settings; they are not combined with the raw StructArray column
