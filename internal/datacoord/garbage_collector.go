@@ -944,8 +944,8 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 	}
 }
 
-// recycleDroppedSegment deletes a single dropped segment's object files,
-// segment-index files, segment-index meta, and segment meta in that order.
+// recycleDroppedSegment deletes a single dropped segment's object and
+// segment-index files, then its segment-index meta, then its segment meta.
 //
 // The ordering matters: files first so a meta-only retry after partial
 // file deletion can still observe the leftover keys; segment-index meta
@@ -977,10 +977,15 @@ func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID
 		return
 	}
 
-	segIndexes, indexFiles, indexSnapshotBlocked := gc.getDroppedSegmentIndexFiles(ctx, segmentID)
-	if indexSnapshotBlocked {
+	segIndexes, indexFiles, blockReason := gc.getDroppedSegmentIndexFiles(ctx, segmentID)
+	switch blockReason {
+	case gcBlockedBySnapshot:
 		log.Info(ctx, "skip GC segment since segment index is protected by snapshot",
 			mlog.Int("segmentIndexes", len(segIndexes)))
+		return
+	case gcBlockedByManifest:
+		// The class-specific message (transient read failure vs invalid
+		// entry) is logged where the manifest error is classified.
 		return
 	}
 
@@ -1010,30 +1015,54 @@ func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID
 	log.Info(ctx, "GC segment meta drop segment done", mlog.Int("segmentIndexes", len(segIndexes)))
 }
 
-func (gc *garbageCollector) getDroppedSegmentIndexFiles(ctx context.Context, segmentID int64) ([]*model.SegmentIndex, map[string]struct{}, bool) {
+// gcBlockReason says why getDroppedSegmentIndexFiles refused to release a
+// dropped segment for recycling, so the caller reports the actual cause
+// instead of folding every block into "protected by snapshot".
+type gcBlockReason int
+
+const (
+	gcNotBlocked gcBlockReason = iota
+	// gcBlockedBySnapshot: a snapshot still references one of the segment's
+	// index buildIDs, from a SegmentIndex record or a manifest entry.
+	gcBlockedBySnapshot
+	// gcBlockedByManifest: the manifest could not be read, or carries an
+	// entry that fails validation, so the full delete list is unknown.
+	gcBlockedByManifest
+)
+
+func (gc *garbageCollector) getDroppedSegmentIndexFiles(ctx context.Context, segmentID int64) ([]*model.SegmentIndex, map[string]struct{}, gcBlockReason) {
 	segIndexes := gc.getAllSegmentIndexesForDroppedSegment(segmentID)
-	if len(segIndexes) > 0 {
-		if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
-			for _, segIdx := range segIndexes {
-				if snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
-					return segIndexes, nil, true
-				}
-			}
-		}
-		indexFiles := make(map[string]struct{}, len(segIndexes))
+	if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
 		for _, segIdx := range segIndexes {
-			for key := range gc.getAllIndexFilesOfIndex(segIdx) {
-				indexFiles[key] = struct{}{}
+			if snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
+				return segIndexes, nil, gcBlockedBySnapshot
 			}
 		}
-		return segIndexes, indexFiles, false
+	}
+	indexFiles := make(map[string]struct{}, len(segIndexes))
+	for _, segIdx := range segIndexes {
+		for key := range gc.getAllIndexFilesOfIndex(segIdx) {
+			indexFiles[key] = struct{}{}
+		}
 	}
 
-	// A StorageV3 segment may have no SegmentIndex rows left. Its manifest is
-	// then the only record of the index artifacts that must be deleted with it.
+	// A dropped StorageV3 segment can hold both kinds of index metadata at
+	// once - a manifest-only entry published while the etcd write switch was
+	// off, and a record-only one whose build finished after the drop - so the
+	// delete list is always the union of records and manifest, mirroring
+	// recycleUnusedSegIndexes.
 	segment := gc.meta.GetSegment(ctx, segmentID)
-	indexFiles, blocked, err := gc.getManifestIndexFiles(ctx, segment)
+	manifestIndexFiles, blocked, err := gc.getManifestIndexFiles(ctx, segment)
 	if err != nil {
+		if errors.Is(err, errManifestIndexEntryInvalid) {
+			// Deterministic: re-reading the same manifest cannot clear it,
+			// and recycling anyway would leak whatever the entry names.
+			mlog.Error(ctx, "dropped segment manifest carries an invalid index entry; GC for this segment is blocked until the manifest is repaired",
+				mlog.FieldSegmentID(segmentID),
+				mlog.String("manifestPath", segment.GetManifestPath()),
+				mlog.Err(err))
+			return segIndexes, nil, gcBlockedByManifest
+		}
 		// An unreadable manifest may still reference artifacts that live
 		// outside the segment directory, and no scan reclaims those once the
 		// segment record is gone. Wait for the next cycle instead - unless the
@@ -1041,18 +1070,23 @@ func (gc *garbageCollector) getDroppedSegmentIndexFiles(ctx context.Context, seg
 		// absent, there is nothing left to protect, and blocking would strand
 		// this segment's metadata forever.
 		if gc.manifestExists(ctx, segment) {
-			mlog.Warn(ctx, "failed to read dropped segment manifest index files, skip GC",
+			mlog.Warn(ctx, "failed to read dropped segment manifest index files, blocking GC, will retry",
 				mlog.FieldSegmentID(segmentID), mlog.Err(err))
-			return nil, nil, true
+			return segIndexes, nil, gcBlockedByManifest
 		}
 		mlog.Info(ctx, "dropped segment manifest is already gone, recycling without manifest index metadata",
 			mlog.FieldSegmentID(segmentID), mlog.Err(err))
-		return nil, nil, false
 	}
-	if blocked || len(indexFiles) == 0 {
-		return nil, nil, blocked
+	if blocked {
+		return segIndexes, nil, gcBlockedBySnapshot
 	}
-	return nil, indexFiles, false
+	for file := range manifestIndexFiles {
+		indexFiles[file] = struct{}{}
+	}
+	if len(indexFiles) == 0 {
+		indexFiles = nil
+	}
+	return segIndexes, indexFiles, gcNotBlocked
 }
 
 // manifestExists reports whether the segment's manifest revision is still in
@@ -1075,9 +1109,17 @@ func (gc *garbageCollector) manifestExists(ctx context.Context, segment *Segment
 	return exists
 }
 
+// errManifestIndexEntryInvalid classifies a manifest index entry that fails
+// manifestIndexFilePathInfo validation. Unlike a read failure this is
+// deterministic: retrying the read cannot clear it, only a repaired manifest
+// revision can.
+var errManifestIndexEntryInvalid = errors.New("manifest carries an invalid index entry")
+
 // getManifestIndexFiles returns the object-storage paths of every completed
 // index artifact a StorageV3 segment's manifest still references. Any read or
-// validation failure is returned so callers can fail closed.
+// validation failure is returned so callers can fail closed; a validation
+// rejection wraps errManifestIndexEntryInvalid so callers can tell "retry the
+// read" apart from "the manifest needs repair".
 func (gc *garbageCollector) getManifestIndexFiles(ctx context.Context, segment *SegmentInfo) (map[string]struct{}, bool, error) {
 	if segment == nil || segment.GetStorageVersion() != storage.StorageV3 || segment.GetManifestPath() == "" {
 		return nil, false, nil
@@ -1094,7 +1136,8 @@ func (gc *garbageCollector) getManifestIndexFiles(ctx context.Context, segment *
 		}
 		info, ok := manifestIndexFilePathInfo(segment.GetID(), manifestIndex)
 		if !ok {
-			return nil, false, merr.WrapErrServiceInternalMsg("invalid manifest index metadata for segment %d", segment.GetID())
+			return nil, false, errors.Wrapf(errManifestIndexEntryInvalid,
+				"segment %d index %d build %d", segment.GetID(), manifestIndex.IndexID, manifestIndex.BuildID)
 		}
 		for _, file := range info.GetIndexFilePaths() {
 			files[file] = struct{}{}
@@ -1118,8 +1161,12 @@ func (gc *garbageCollector) getAllSegmentIndexesForDroppedSegment(segmentID int6
 func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, cloned *SegmentInfo, indexFiles map[string]struct{}) error {
 	log := mlog.With(mlog.Int64("segmentID", cloned.GetID()))
 
-	// V3 segment data lives under the manifest base path. Segment index files still
-	// live under index file prefixes and must be deleted from recorded file keys.
+	// V3 segment data lives under the manifest base path. Segment index files
+	// still live under index file prefixes outside it, while the manifest that
+	// names them lives inside it: index files go first, so a partial deletion
+	// failure leaves the manifest for the next cycle to re-derive the
+	// survivors from (re-deleting removed keys is a no-op - removeObjectFiles
+	// swallows NotFound), and the basePath prefix goes last.
 	if cloned.GetStorageVersion() == storage.StorageV3 {
 		basePath, _, err := packed.UnmarshalManifestPath(cloned.GetManifestPath())
 		if err != nil {
@@ -1128,21 +1175,17 @@ func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, clone
 				mlog.Err(err))
 			return err
 		}
-		log.Info(ctx, "GC V3 segment start, removing basePath...",
+		log.Info(ctx, "GC V3 segment start...",
 			mlog.String("basePath", basePath),
 			mlog.Int("indexFiles", len(indexFiles)))
+		if err := gc.removeObjectFiles(ctx, indexFiles); err != nil {
+			log.Warn(ctx, "GC V3 segment remove index files failed", mlog.Err(err))
+			return err
+		}
 		if err := gc.option.cli.RemoveWithPrefix(ctx, basePath); err != nil {
 			log.Warn(ctx, "GC V3 segment remove basePath failed",
 				mlog.String("basePath", basePath),
 				mlog.Err(err))
-			return err
-		}
-		if len(indexFiles) == 0 {
-			log.Info(ctx, "GC V3 segment files done")
-			return nil
-		}
-		if err := gc.removeObjectFiles(ctx, indexFiles); err != nil {
-			log.Warn(ctx, "GC V3 segment remove index files failed", mlog.Err(err))
 			return err
 		}
 		log.Info(ctx, "GC V3 segment files done")
