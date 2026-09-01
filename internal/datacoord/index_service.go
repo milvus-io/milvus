@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -1066,61 +1065,48 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 		SegmentInfo: map[int64]*indexpb.SegmentInfo{},
 	}
 
+	// Served entirely from in-memory SegmentIndex metadata, with no manifest
+	// read: a manifest index entry is never published without the matching
+	// record being installed in memory in the same commit (see
+	// CommitSegmentManifest), a copy target gets its records from
+	// syncVectorScalarIndexes, and with the etcd write switch off reload
+	// rebuilds them from the manifests at startup. An empty record set here
+	// therefore means the segment has no index artifact, not that its record
+	// is elsewhere. This is a load-path RPC driven by QueryCoord's index
+	// checker, so a per-segment object read would be paid on every round by
+	// exactly the segments that are legitimately unindexed.
 	segmentsIndexes := s.meta.indexMeta.GetSegmentsIndexes(req.GetCollectionID(), req.GetSegmentIDs())
 	for _, segID := range req.GetSegmentIDs() {
 		segIdxes := segmentsIndexes[segID]
 		ret.SegmentInfo[segID] = &indexpb.SegmentInfo{
 			CollectionID: req.GetCollectionID(),
 			SegmentID:    segID,
-			EnableIndex:  false,
+			EnableIndex:  len(segIdxes) != 0,
 			IndexInfos:   make([]*indexpb.IndexFilePathInfo, 0),
 		}
-		if len(segIdxes) == 0 {
-			// A StorageV3 segment can have no SegmentIndex rows at all (a copy
-			// target, or metadata already recycled). The manifest is then the
-			// only record of its completed index artifacts.
-			manifestIndexes, manifestPath := s.getManifestIndexesForSegment(ctx, segID)
-			if manifestPath != "" {
-				activeIndexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), "")
-				ret.SegmentInfo[segID].IndexInfos = resolveManifestIndexFilePathInfos(ctx, segID, manifestPath, manifestIndexes, activeIndexes)
-			}
-		} else {
-			ret.SegmentInfo[segID].IndexInfos = s.getIndexFilePathInfosFromSegmentIndexes(ctx, segID, segIdxes)
+		if len(segIdxes) != 0 {
+			ret.SegmentInfo[segID].IndexInfos = s.getIndexFilePathInfosFromSegmentIndexes(segID, segIdxes)
 		}
-		// Keep the historical meaning (index metadata exists for the segment)
-		// and extend it to a segment whose only record is its manifest.
-		ret.SegmentInfo[segID].EnableIndex = len(segIdxes) != 0 || len(ret.SegmentInfo[segID].IndexInfos) > 0
 	}
 
 	return ret, nil
 }
 
 // getIndexFilePathInfosFromSegmentIndexes projects SegmentIndex metadata into
-// full object-storage paths. A finished StorageV3 task whose index_file_keys
-// were not recorded falls back to the matching manifest entry, which is read
-// at most once per segment.
-func (s *Server) getIndexFilePathInfosFromSegmentIndexes(ctx context.Context, segID int64, segIdxes map[UniqueID]*model.SegmentIndex) []*indexpb.IndexFilePathInfo {
+// full object-storage paths.
+//
+// A record with no index_file_keys needs no manifest lookup: the only way a
+// finished build records none is a fake-finished one (a segment too small to
+// train), and publishIndexToManifest skips exactly that case, so no manifest
+// entry exists to find. The copy path derives the target's records and its
+// manifest entries from the same worker result, so the two agree there too.
+func (s *Server) getIndexFilePathInfosFromSegmentIndexes(segID int64, segIdxes map[UniqueID]*model.SegmentIndex) []*indexpb.IndexFilePathInfo {
 	infos := make([]*indexpb.IndexFilePathInfo, 0, len(segIdxes))
-	var (
-		manifestIndexes []packed.ManifestIndexInfo
-		manifestPath    string
-		manifestLoaded  bool
-	)
 	for _, segIdx := range segIdxes {
 		if segIdx.IndexState != commonpb.IndexState_Finished {
 			continue
 		}
 		fieldID := s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
-		if len(segIdx.IndexFileKeys) == 0 {
-			if !manifestLoaded {
-				manifestIndexes, manifestPath = s.getManifestIndexesForSegment(ctx, segID)
-				manifestLoaded = true
-			}
-			if info, ok := resolveManifestIndexFilePathInfo(ctx, manifestPath, manifestIndexes, segIdx, fieldID); ok {
-				infos = append(infos, info)
-				continue
-			}
-		}
 		builder := metautil.NewIndexPathBuilder(s.meta.chunkManager.RootPath(),
 			segIdx.IndexStorePathVersion, segIdx.CollectionID,
 			segIdx.PartitionID, segIdx.SegmentID,

@@ -5120,22 +5120,22 @@ func mockV3ManifestIndexEntry(t *testing.T, newManifest string) {
 	t.Cleanup(func() { blocked.UnPatch() })
 }
 
-// The atomic commit that retracts a manifest index entry also removes the
-// SegmentIndex record, and both must land before any artifact is deleted: a
-// file removed while the record still advertises it is an unloadable index,
-// which is strictly worse than the leaked bytes the reverse order risks.
-func TestGarbageCollector_recycleUnusedSegIndexes_V3RemovesMetaBeforeFiles(t *testing.T) {
+// Artifact bytes are deleted BEFORE the metadata naming them, on the manifest
+// path as much as the legacy one. This path only runs for an index whose
+// definition or segment is already gone, so a window where metadata still names
+// deleted files harms no reader - whereas removing the record first would strip
+// GC of the only thing that can re-drive a failed deletion.
+func TestGarbageCollector_recycleUnusedSegIndexes_V3DeletesFilesBeforeMeta(t *testing.T) {
 	m, newManifest, manifestFile := setupV3SegIndexGC(t)
 	mockV3ManifestIndexEntry(t, newManifest)
 
-	var metaGoneAtFirstRemove bool
+	var metaPresentAtFirstRemove bool
 	var removed []string
 	cm := mocks.NewChunkManager(t)
 	cm.EXPECT().RootPath().Return("root")
 	cm.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, file string) error {
 		if len(removed) == 0 {
-			_, stillThere := m.indexMeta.segmentBuildInfo.Get(4100)
-			metaGoneAtFirstRemove = !stillThere
+			_, metaPresentAtFirstRemove = m.indexMeta.segmentBuildInfo.Get(4100)
 		}
 		removed = append(removed, file)
 		return nil
@@ -5144,7 +5144,9 @@ func TestGarbageCollector_recycleUnusedSegIndexes_V3RemovesMetaBeforeFiles(t *te
 	gc := newGarbageCollector(m, nil, GcOption{cli: cm})
 	gc.recycleUnusedSegIndexes(context.TODO(), nil)
 
-	assert.True(t, metaGoneAtFirstRemove, "SegmentIndex must be removed before artifact deletion starts")
+	assert.True(t, metaPresentAtFirstRemove, "artifact deletion must start while the metadata naming it still exists")
+	// The retraction still lands, and still atomically: manifest pointer
+	// advanced and the record gone in the same catalog transaction.
 	_, ok := m.indexMeta.segmentBuildInfo.Get(4100)
 	assert.False(t, ok)
 	assert.Equal(t, newManifest, m.GetSegment(context.TODO(), 4001).GetManifestPath())
@@ -5153,12 +5155,14 @@ func TestGarbageCollector_recycleUnusedSegIndexes_V3RemovesMetaBeforeFiles(t *te
 	assert.Contains(t, removed, "root/index_v1/100/10/4001/4100/1/etcd-file")
 }
 
-// A deletion failure after the atomic commit is the accepted residual of that
-// ordering: the metadata stays removed (there is nothing left to re-drive a
-// retry from) and only bytes leak.
-func TestGarbageCollector_recycleUnusedSegIndexes_V3FileDeletionFailureLeaksOnly(t *testing.T) {
+// A deletion failure must leave BOTH the record and the manifest entry intact,
+// so the next cycle re-drives the whole step. This is the property the ordering
+// exists for: a COLLECTION_ROOTED artifact whose record was already removed is
+// unreclaimable, because recycleUnusedIndexFilesV1 is meta-driven.
+func TestGarbageCollector_recycleUnusedSegIndexes_V3FileDeletionFailureRetriesFromMeta(t *testing.T) {
 	m, newManifest, _ := setupV3SegIndexGC(t)
 	mockV3ManifestIndexEntry(t, newManifest)
+	originalManifest := m.GetSegment(context.TODO(), 4001).GetManifestPath()
 
 	cm := mocks.NewChunkManager(t)
 	cm.EXPECT().RootPath().Return("root")
@@ -5168,13 +5172,14 @@ func TestGarbageCollector_recycleUnusedSegIndexes_V3FileDeletionFailureLeaksOnly
 	gc.recycleUnusedSegIndexes(context.TODO(), nil)
 
 	_, ok := m.indexMeta.segmentBuildInfo.Get(4100)
-	assert.False(t, ok, "the removal is committed; a failed delete must not resurrect it")
-	assert.Equal(t, newManifest, m.GetSegment(context.TODO(), 4001).GetManifestPath())
+	assert.True(t, ok, "a failed delete must leave the record to re-drive the retry from")
+	assert.Equal(t, originalManifest, m.GetSegment(context.TODO(), 4001).GetManifestPath(),
+		"the manifest entry must not be retracted while its bytes are still there")
+	assert.NotEqual(t, newManifest, originalManifest)
 }
 
-// A manifest that does not carry the entry keeps the legacy ordering: no
-// atomic commit happens, so the record must survive a failed file deletion and
-// be retried next cycle.
+// A manifest that does not carry the entry takes the same ordering through the
+// plain RemoveSegmentIndex path.
 func TestGarbageCollector_recycleUnusedSegIndexes_NonManifestKeepsLegacyOrder(t *testing.T) {
 	m, _, _ := setupV3SegIndexGC(t)
 	infos := mockey.Mock(packed.GetManifestIndexInfos).Return(nil, nil).Build()

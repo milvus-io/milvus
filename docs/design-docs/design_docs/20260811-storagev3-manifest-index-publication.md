@@ -183,17 +183,30 @@ The worker protocol is unchanged; `workerpb.IndexTaskInfo` gains no field. No
 local `minor_version` is introduced: milvus-storage removed that field from its
 manifest model.
 
-DataCoord normally passes completed `SegmentIndex` metadata through QueryCoord
-to QueryNode without reading object storage. Two fallbacks read the manifest,
-each at most once per segment:
+DataCoord passes completed `SegmentIndex` metadata through QueryCoord to
+QueryNode without reading object storage, on every read path and without
+exception. `GetIndexInfos` and the snapshot-export projection carry no manifest
+fallback, because neither of the two states one could recover is reachable:
 
-- a finished StorageV3 `SegmentIndex` that has no `index_file_keys` resolves the
-  matching typed manifest entry; and
-- a StorageV3 segment with no `SegmentIndex` rows at all resolves every manifest
-  entry that still matches an active collection index definition.
+- a segment with no `SegmentIndex` record has no index artifact. A manifest
+  index entry is only ever published by `CommitSegmentManifest`, which installs
+  the matching record in memory in the same commit, or by the copy worker, whose
+  target records `syncVectorScalarIndexes` writes from the same worker result;
+  GC retracts an entry and removes its record in one catalog transaction; and
+  with the etcd write switch off, reload rebuilds the records from the manifests
+  at startup before the server serves.
+- a finished record with no `index_file_keys` has no manifest entry either: the
+  only build that records no files is a fake-finished one (a segment too small
+  to train), which `publishIndexToManifest` skips.
 
-Segment index GC also falls back to the manifest for a dropped StorageV3 segment
-that no longer has `SegmentIndex` rows. That read fails closed, with one
+This matters for cost as well as clarity: `GetIndexInfos` is driven by
+QueryCoord's index checker every `checkIndexInterval` for exactly the segments
+that are missing an index, so a fallback read there is paid repeatedly by the
+segments it can never help.
+
+Segment index GC does read the manifest for a dropped StorageV3 segment that no
+longer has `SegmentIndex` rows - it must, since it is deciding whether artifacts
+may be deleted rather than which paths to serve. That read fails closed, with one
 exception: if the manifest file itself is no longer in object storage there is
 nothing left to protect, and blocking would strand the segment's metadata
 permanently, so the segment is recycled. The FFI reports every manifest read
@@ -213,8 +226,9 @@ never succeed.
 - `CommitSegmentManifest` writes the segment record and the `SegmentIndex`
   record in one catalog transaction, and refuses the write rather than falling
   back to a chunked flush that could expose them separately.
-- DataCoord uses `SegmentIndex` metadata without manifest I/O and falls back to
-  a matching typed manifest entry only when `index_file_keys` are absent.
+- DataCoord read paths use `SegmentIndex` metadata with no manifest I/O at all,
+  including for a segment with no records and for a finished record carrying no
+  `index_file_keys`.
 - Drop semantics are exercised against the real FFI: a drop whose expected build
   no longer matches the manifest is refused, a drop for an absent index is a
   no-op rather than an empty commit (which loon rejects), and a drop removes

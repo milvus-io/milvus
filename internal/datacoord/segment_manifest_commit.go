@@ -138,7 +138,7 @@ type SegmentManifestCommit struct {
 
 // CommitSegmentManifest is the only DataCoord primitive that both creates a
 // StorageV3 manifest revision and advances SegmentInfo.manifest_path. Lock
-// order is segmentManifestLocks[segmentID] -> segMu -> indexMeta.keyLock. No
+// order is segmentManifestLocks[segmentID] -> indexMeta.keyLock -> segMu. No
 // caller may enter this protocol while holding segMu. Manifest I/O runs outside
 // segMu; the final catalog mutation is rebased onto the latest SegmentInfo and
 // catalog + memory publication stays in one segMu critical section.
@@ -160,6 +160,9 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	defer locks.Unlock(commit.SegmentID)
 	lockWait := time.Since(lockStart)
 	holdStart := time.Now()
+	if indexMutation := commit.CatalogMutation.SegmentIndex; indexMutation != nil && indexMutation.BuildID == 0 {
+		return merr.WrapErrServiceInternalMsg("segment index mutation requires a build ID")
+	}
 	defer func() {
 		mlog.Debug(ctx, "segment manifest commit completed",
 			mlog.Int64("segmentID", commit.SegmentID),
@@ -212,6 +215,20 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	manifestPath, err := commitManifestMutation(segment.GetManifestPath(), commit)
 	if err != nil {
 		return err
+	}
+
+	// The per-buildID key lock is taken HERE, immediately before segMu and
+	// held through publication. Every other SegmentIndex writer
+	// (AddSegmentIndex, FinishTask, UpdateIndexState, ...) takes keyLock first
+	// and only then reads segment state under segMu, so acquiring it after
+	// segMu - as staging used to - inverts that order and deadlocks against a
+	// concurrent transition of the same build. Taking it here rather than at
+	// the top of the function keeps it off the manifest I/O above, which is a
+	// seconds-long object-storage transaction; the snapshot RLock is already
+	// released by then, so nothing is held across it and the order still holds.
+	if indexMutation := commit.CatalogMutation.SegmentIndex; indexMutation != nil {
+		m.indexMeta.keyLock.Lock(indexMutation.BuildID)
+		defer m.indexMeta.keyLock.Unlock(indexMutation.BuildID)
 	}
 
 	// Re-enter segMu only for the final full-record publication. Ordinary
@@ -302,10 +319,8 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		// construction. Passing that in rather than re-deriving it through
 		// meta matters: the resolver takes segMu, which this critical section
 		// already holds for writing.
+		// The buildID key lock was taken above, before segMu.
 		staged, err := m.indexMeta.stageSegmentIndexMutation(*indexMutation, true)
-		if staged != nil {
-			defer staged.unlock()
-		}
 		if err != nil {
 			if errors.Is(err, errSegmentIndexRecordGone) {
 				// The task can be dropped while its worker result is in flight.
@@ -466,6 +481,19 @@ func validateExpectedManifestUsage(commit SegmentManifestCommit) error {
 		return merr.WrapErrServiceInternalMsg(
 			"segment manifest commit with a structured mutation must not set ExpectedManifest, segmentID=%d", commit.SegmentID)
 	}
+	// A Noop publishes a revision this framework did not build, so it cannot
+	// know the revision actually carries the artifact an upsert would claim.
+	// Pairing the two would let a SegmentIndex record point at an index entry
+	// that may not exist in the published revision - the exact cross-store
+	// inconsistency the atomic commit exists to prevent. A removal stays legal:
+	// dropping a record for an artifact the revision does not carry is the
+	// intended end state either way.
+	if commit.Mutation.Type == ManifestMutationNoop &&
+		commit.CatalogMutation.SegmentIndex != nil &&
+		commit.CatalogMutation.SegmentIndex.Type == SegmentIndexUpsert {
+		return merr.WrapErrServiceInternalMsg(
+			"segment manifest commit cannot pair a noop mutation with a segment index upsert, segmentID=%d", commit.SegmentID)
+	}
 	return nil
 }
 
@@ -559,8 +587,10 @@ var segmentManifestLockEscalationThreshold = 30 * time.Second
 //  3. Publish every prepared pointer plus the caller's extraOperators in one
 //     m.UpdateSegmentsInfo call: a single segMu critical section, one catalog write.
 //
-// Lock order stays segmentManifestLocks -> segMu -> indexMeta.keyLock (the manifest
-// locks are all held before UpdateSegmentsInfo takes segMu). No caller may hold segMu.
+// Lock order is segmentManifestLocks -> segMu (the manifest locks are all held
+// before UpdateSegmentsInfo takes segMu). indexMeta.keyLock never enters this path
+// at all, because SegmentIndex mutations are rejected below; the single-segment
+// commit, which does take it, orders it BEFORE segMu. No caller may hold segMu.
 //
 // commits must target existing StorageV3 segments; NewSegment is rejected because the
 // single AlterSegments batch cannot create a segment, SegmentIndex is rejected
