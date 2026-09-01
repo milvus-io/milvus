@@ -19,6 +19,7 @@ package coordinator
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -55,6 +56,12 @@ type FileResourceMeta interface {
 	GetResources() ([]*internalpb.FileResourceInfo, uint64)
 }
 
+// gateState is the snapshot CheckNodesSynced judges against without a lock.
+type gateState struct {
+	version uint64
+	gated   bool
+}
+
 type FileResourceObserver struct {
 	ctx  context.Context
 	meta rootcoord.IMetaTable
@@ -72,6 +79,14 @@ type FileResourceObserver struct {
 	qnMode    fileresource.Mode // tips: streaming node used as query node now
 	dnMode    fileresource.Mode
 	proxyMode fileresource.Mode
+
+	// gateSnapshot caches the one fact CheckNodesSynced needs from the meta
+	// table - whether file resources are registered, and at which version - so
+	// the task executors' per-dispatch gate never takes rootcoord's ddLock.
+	// Refreshed by every Sync pass; between a resource change and the next
+	// pass the gate may briefly judge against the previous version, which is
+	// the same convergence window the node syncs themselves have.
+	gateSnapshot atomic.Pointer[gateState]
 
 	notifyCh  chan struct{}
 	closeCh   chan struct{}
@@ -190,12 +205,75 @@ func (m *FileResourceObserver) CheckAllQnReady() error {
 	return err
 }
 
+// CheckNodesSynced reports whether the given query nodes hold the current
+// analyzer file resources.
+//
+// This is the query-side counterpart of CheckAllQnReady. A DDL only needs
+// whatever process validates analyzer parameters to hold the files; a node
+// that actually runs an analyzer over data - BM25, raw text match - needs them
+// on its own disk. Callers pass the nodes they are about to put data on, so a
+// lagging node they are not using cannot block them.
+//
+// A node with no record has confirmed nothing and must not be read as ready: a
+// node registers its session, which is what puts it in a resource group and in
+// the task executor, before its first sync has been asked for. The comparison
+// is against the version rather than mere presence for the same reason - a node
+// that acknowledged one sync keeps its record, so presence alone would pass a
+// node still downloading the version registered after it.
+func (m *FileResourceObserver) CheckNodesSynced(nodeIDs []int64) error {
+	if len(nodeIDs) == 0 {
+		return nil
+	}
+	// Mode first: it is a plain field, and on a deployment that does not sync
+	// query nodes the gate must cost nothing.
+	if m.qnMode != fileresource.SyncMode {
+		return nil
+	}
+	if m.meta == nil {
+		return merr.WrapErrServiceUnavailable("rootcoord meta is not ready")
+	}
+
+	// The cached snapshot keeps this off rootcoord's ddLock: the task
+	// executors consult the gate for every pending grow action on every
+	// dispatch, and taking a DDL lock there couples querycoord's scheduling
+	// tick to rootcoord's DDL throughput. Only the first call before any Sync
+	// pass reads the meta table directly.
+	snap := m.gateSnapshot.Load()
+	if snap == nil {
+		resources, version := m.meta.ListFileResource(m.ctx)
+		snap = &gateState{version: version, gated: version != 0 && len(resources) > 0}
+		// CAS, not Store: a Sync pass finishing right now has fresher data,
+		// and this lazy first read must not clobber it with an older view.
+		if !m.gateSnapshot.CompareAndSwap(nil, snap) {
+			snap = m.gateSnapshot.Load()
+		}
+	}
+	if !snap.gated {
+		return nil
+	}
+	version := snap.version
+
+	for _, nodeID := range nodeIDs {
+		info, ok := m.distribution.Get(nodeID)
+		if !ok {
+			return merr.WrapErrServiceUnavailableMsg(
+				"node %d has not synced any analyzer file resource yet", nodeID)
+		}
+		if info.Version < version {
+			return merr.WrapErrServiceUnavailableMsg(
+				"node %d analyzer file resource version %d is behind %d", nodeID, info.Version, version)
+		}
+	}
+	return nil
+}
+
 func (m *FileResourceObserver) Sync() error {
 	m.syncMu.Lock()
 	defer m.syncMu.Unlock()
 	var syncErr error
 	activeNodes := make(map[int64]struct{})
 	resources, targetVersion := m.meta.ListFileResource(m.ctx)
+	m.gateSnapshot.Store(&gateState{version: targetVersion, gated: targetVersion != 0 && len(resources) > 0})
 
 	// sync file resource to query node if file resource mode was Sync
 	if m.qnMode == fileresource.SyncMode {
@@ -206,6 +284,15 @@ func (m *FileResourceObserver) Sync() error {
 					Resources: resources,
 					Version:   targetVersion,
 				})
+				// A node that does not implement the RPC cannot be asked to
+				// download anything, and holding grow actions off it forever
+				// would wedge a rolling upgrade on its oldest node. It is
+				// recorded as synced: whatever it serves, it served before
+				// file resources existed, which is the compatibility floor.
+				if errors.Is(err, merr.ErrServiceUnimplemented) {
+					err = nil
+					status = merr.Success()
+				}
 				if err != nil {
 					mlog.Warn(m.ctx, "sync file resource failed", mlog.FieldNodeID(node.ID()), mlog.Err(err))
 					syncErr = err
