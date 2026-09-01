@@ -5349,10 +5349,9 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
     std::string unique_id = GetUniqueFieldId(field_meta.get_id().get());
     if (!cfg.GetScalarIndexEnableMmap()) {
         // build text index in ram.
-        // Sealed interim index: no background merge — finish() ends with an
-        // explicit merge-all, and a racing policy merge (which finish()'s
-        // NoMergePolicy cannot cancel once started) would reintroduce the
-        // "segments could not be found in the SegmentManager" failure.
+        // Sealed interim index: no background merge. Its bounded build keeps
+        // the small number of segments produced by memory-budget flushes and
+        // avoids merge write amplification.
         index = std::make_unique<index::TextMatchIndex>(
             std::numeric_limits<int64_t>::max(),
             unique_id.c_str(),
