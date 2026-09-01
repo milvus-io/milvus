@@ -30,7 +30,6 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/shirou/gopsutil/v4/disk"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
@@ -222,7 +221,7 @@ func (p *ComponentParam) initVersionGates() {
 	// is the whole cluster, so when the local version already satisfies a gate
 	// there is nothing to coordinate across nodes — resolve the gate directly
 	// and skip the confirmator (there is no usable etcd client anyway).
-	if p.ServiceParam.EtcdCfg.UseEmbedEtcd.GetAsBool() {
+	if p.EtcdCfg.UseEmbedEtcd.GetAsBool() {
 		for _, item := range p.versionGateItems() {
 			if item == nil || item.VersionGateSwitcher == nil {
 				continue
@@ -236,8 +235,8 @@ func (p *ComponentParam) initVersionGates() {
 			if common.Version.GE(gv) {
 				item.VersionGateSwitcher.localSatisfied = true
 				mlog.Info(context.TODO(), "version gate: embedded-etcd deployment, local version satisfies the gate",
-					zap.String("key", item.Key), zap.String("localVersion", common.Version.String()),
-					zap.String("gateVersion", item.VersionGateSwitcher.GateVersion))
+					mlog.String("key", item.Key), mlog.String("localVersion", common.Version.String()),
+					mlog.String("gateVersion", item.VersionGateSwitcher.GateVersion))
 			}
 		}
 		return

@@ -26,10 +26,10 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // checkInterval is the polling interval of the gate-processing loop. The
@@ -112,7 +112,7 @@ func RecoverConfirmator(etcdCli *clientv3.Client, metaRoot, configRoot string, i
 			continue
 		}
 		if err := vg.registerGate(item.Key, item.VersionGateSwitcher); err != nil {
-			mlog.Warn(context.TODO(), "version gate: register gate failed, skip", zap.String("key", item.Key), mlog.Err(err))
+			mlog.Warn(context.TODO(), "version gate: register gate failed, skip", mlog.String("key", item.Key), mlog.Err(err))
 			continue
 		}
 	}
@@ -138,10 +138,10 @@ func (c *Confirmator) registerGate(key string, switcher *VersionGateSwitcher) er
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.started {
-		return errors.New("version gate: register gate after start is not supported")
+		return merr.WrapErrServiceInternal("version gate: register gate after start is not supported")
 	}
 	if switcher == nil {
-		return errors.New("version gate: nil switcher")
+		return merr.WrapErrServiceInternal("version gate: nil switcher")
 	}
 	if _, err := semver.Parse(switcher.GateVersion); err != nil {
 		return errors.Wrapf(err, "version gate: parse gate version %s", switcher.GateVersion)
@@ -160,7 +160,7 @@ func (c *Confirmator) start(ctx context.Context) error {
 	c.mu.Lock()
 	if c.started {
 		c.mu.Unlock()
-		return errors.New("version gate: already started")
+		return merr.WrapErrServiceInternal("version gate: already started")
 	}
 	c.started = true
 	c.mu.Unlock()
@@ -173,7 +173,7 @@ func (c *Confirmator) start(ctx context.Context) error {
 		if c.gateResolvedLocked(g) {
 			g.resolved = true
 			mlog.Info(startCtx, "version gate: gate resolved at startup (explicit config or already flipped)",
-				zap.String("key", g.key))
+				mlog.String("key", g.key))
 		}
 		c.mu.Unlock()
 		if !g.resolved {
@@ -182,7 +182,7 @@ func (c *Confirmator) start(ctx context.Context) error {
 	}
 	if pending == 0 {
 		mlog.Info(startCtx, "version gate: all gates resolved at startup, confirmator exits",
-			zap.Int("gates", len(c.gates)))
+			mlog.Int("gates", len(c.gates)))
 		return nil
 	}
 	// One shared session watch maintaining the minimum online version...
@@ -219,7 +219,7 @@ func (c *Confirmator) watchLoop(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			mlog.Warn(ctx, "version gate: session scan failed, retry", zap.Error(err))
+			mlog.Warn(ctx, "version gate: session scan failed, retry", mlog.Err(err))
 			if !sleepCtx(ctx, checkInterval) {
 				return
 			}
@@ -229,14 +229,14 @@ func (c *Confirmator) watchLoop(ctx context.Context) {
 		for resp := range wch {
 			if err := resp.Err(); err != nil {
 				// e.g. compacted revision: rebuild from a fresh scan.
-				mlog.Warn(ctx, "version gate: session watch error, rescan", zap.Error(err))
+				mlog.Warn(ctx, "version gate: session watch error, rescan", mlog.Err(err))
 				break
 			}
 			if len(resp.Events) == 0 {
 				continue
 			}
 			if _, err := c.reloadSessions(ctx); err != nil {
-				mlog.Warn(ctx, "version gate: session rescan failed", zap.Error(err))
+				mlog.Warn(ctx, "version gate: session rescan failed", mlog.Err(err))
 			}
 		}
 		if ctx.Err() != nil {
@@ -337,13 +337,13 @@ func (c *Confirmator) processGates(ctx context.Context) bool {
 		case above && !g.wasAbove:
 			g.armedAt = now
 			mlog.Info(ctx, "version gate: cluster above gate version, start stability window",
-				zap.String("key", g.key), zap.String("gateVersion", g.switcher.GateVersion),
-				zap.String("minOnline", c.minOnline.String()))
+				mlog.String("key", g.key), mlog.String("gateVersion", g.switcher.GateVersion),
+				mlog.String("minOnline", c.minOnline.String()))
 		case !above && g.wasAbove:
 			g.armedAt = time.Time{}
 			mlog.Warn(ctx, "version gate: cluster below gate version, reset stability window",
-				zap.String("key", g.key), zap.String("gateVersion", g.switcher.GateVersion),
-				zap.String("minOnline", c.minOnline.String()))
+				mlog.String("key", g.key), mlog.String("gateVersion", g.switcher.GateVersion),
+				mlog.String("minOnline", c.minOnline.String()))
 		}
 		g.wasAbove = above
 		due := above && !g.armedAt.IsZero() && now.Sub(g.armedAt) >= g.switcher.SwitchDelay
@@ -358,7 +358,7 @@ func (c *Confirmator) processGates(ctx context.Context) bool {
 			g.resolved = true
 			c.mu.Unlock()
 			mlog.Info(ctx, "version gate: gate flipped",
-				zap.String("key", g.key), zap.String("value", g.switcher.TargetValue))
+				mlog.String("key", g.key), mlog.String("value", g.switcher.TargetValue))
 			continue
 		}
 		allDone = false
@@ -375,7 +375,7 @@ func (c *Confirmator) recheckAndFlip(ctx context.Context, g *gate) bool {
 	min, _, err := c.scanSessions(ctx)
 	if err != nil {
 		mlog.Warn(ctx, "version gate: re-check sessions failed, retry later",
-			zap.String("key", g.key), zap.Error(err))
+			mlog.String("key", g.key), mlog.Err(err))
 		return false
 	}
 	if isZero(min) || !min.GE(g.version) {
@@ -384,13 +384,13 @@ func (c *Confirmator) recheckAndFlip(ctx context.Context, g *gate) bool {
 		g.wasAbove = false
 		c.mu.Unlock()
 		mlog.Warn(ctx, "version gate: cluster below gate version at flip time, reset stability window",
-			zap.String("key", g.key), zap.String("gateVersion", g.switcher.GateVersion),
-			zap.String("minOnline", min.String()))
+			mlog.String("key", g.key), mlog.String("gateVersion", g.switcher.GateVersion),
+			mlog.String("minOnline", min.String()))
 		return false
 	}
 	if err := c.flip(ctx, g); err != nil {
 		mlog.Warn(ctx, "version gate: flip failed, will retry",
-			zap.String("key", g.key), zap.Error(err))
+			mlog.String("key", g.key), mlog.Err(err))
 		return false
 	}
 	return true
@@ -416,7 +416,7 @@ func (c *Confirmator) flip(ctx context.Context, g *gate) error {
 	default:
 		// An explicit etcd value is present: nothing to flip.
 		mlog.Info(ctx, "version gate: explicit etcd config value wins, skip flip",
-			zap.String("key", g.key), zap.String("value", string(resp.Kvs[0].Value)))
+			mlog.String("key", g.key), mlog.String("value", string(resp.Kvs[0].Value)))
 		return nil
 	}
 	txn.Then(clientv3.OpPut(key, g.switcher.TargetValue))
@@ -433,10 +433,10 @@ func (c *Confirmator) flip(ctx context.Context, g *gate) error {
 		}
 		if present && cur != g.switcher.EnableAutoSwitchValue {
 			mlog.Info(ctx, "version gate: concurrent writer resolved the gate, skip flip",
-				zap.String("key", g.key), zap.String("value", cur))
+				mlog.String("key", g.key), mlog.String("value", cur))
 			return nil
 		}
-		return errors.New("version gate: config flip CAS failed, value unchanged")
+		return merr.WrapErrServiceInternal("version gate: config flip CAS failed, value unchanged")
 	}
 	// Make the flip visible in this process immediately instead of waiting for
 	// the periodic config refresher.
@@ -513,6 +513,6 @@ func refreshLocalConfig() {
 		return
 	}
 	if err := etcdSource.RefreshConfigurationsLinearizable(); err != nil {
-		mlog.Warn(context.TODO(), "version gate: refresh local config failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "version gate: refresh local config failed", mlog.Err(err))
 	}
 }

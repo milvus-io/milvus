@@ -218,9 +218,9 @@ func TestInitVersionGatesEmbeddedEtcd(t *testing.T) {
 	// Same package: flip skipRemote off so initVersionGates actually runs, and
 	// enable embedded etcd. FunctionCfg is already initialized by Init.
 	bt.config.skipRemote = false
-	p.ServiceParam.EtcdCfg.UseEmbedEtcd.SwapTempValue("true")
+	p.EtcdCfg.UseEmbedEtcd.SwapTempValue("true")
 	defer func() {
-		p.ServiceParam.EtcdCfg.UseEmbedEtcd.SwapTempValue("")
+		p.EtcdCfg.UseEmbedEtcd.SwapTempValue("")
 		bt.config.skipRemote = true
 	}()
 
