@@ -17,6 +17,8 @@
 package model
 
 import (
+	"sort"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -109,6 +111,49 @@ func CloneRLSPolicies(policies []*RLSPolicy) []*RLSPolicy {
 		cloned[i] = CloneRLSPolicy(policy)
 	}
 	return cloned
+}
+
+func CloneRLSPolicyMap(policies map[string]*RLSPolicy) map[string]*RLSPolicy {
+	if policies == nil {
+		return nil
+	}
+	cloned := make(map[string]*RLSPolicy, len(policies))
+	for name, policy := range policies {
+		cloned[name] = CloneRLSPolicy(policy)
+	}
+	return cloned
+}
+
+func RLSPolicyMapFromSlice(policies []*RLSPolicy) map[string]*RLSPolicy {
+	if policies == nil {
+		return nil
+	}
+	policyMap := make(map[string]*RLSPolicy, len(policies))
+	for _, policy := range policies {
+		if policy != nil {
+			policyMap[policy.PolicyName] = CloneRLSPolicy(policy)
+		}
+	}
+	return policyMap
+}
+
+func RLSPolicyMapToSlice(policies map[string]*RLSPolicy) []*RLSPolicy {
+	if policies == nil {
+		return nil
+	}
+	policyList := make([]*RLSPolicy, 0, len(policies))
+	for _, policy := range policies {
+		if policy != nil {
+			policyList = append(policyList, CloneRLSPolicy(policy))
+		}
+	}
+	sort.Slice(policyList, func(i, j int) bool {
+		if policyList[i].PolicyName != policyList[j].PolicyName {
+			return policyList[i].PolicyName < policyList[j].PolicyName
+		}
+		return policyList[i].PolicyID < policyList[j].PolicyID
+	})
+	return policyList
 }
 
 type RLSPrincipal struct {

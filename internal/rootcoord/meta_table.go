@@ -793,7 +793,7 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 		Fields:            model.CloneFields(coll.Fields),
 		StructArrayFields: model.CloneStructArrayFields(coll.StructArrayFields),
 		Functions:         model.CloneFunctions(coll.Functions),
-		RLSPolicies:       model.CloneRLSPolicies(coll.RLSPolicies),
+		RLSPolicies:       model.CloneRLSPolicyMap(coll.RLSPolicies),
 		RLSPrincipals:     model.CloneRLSPrincipals(coll.RLSPrincipals),
 		Aliases:           aliases,
 		DBID:              coll.DBID,
@@ -2593,7 +2593,7 @@ func (mt *MetaTable) reloadEnabledCollectionRLSMetadata(ctx context.Context, col
 	if err != nil {
 		return merr.Wrapf(err, "failed to reload RLS principals for collection %d", collection.CollectionID)
 	}
-	collection.RLSPolicies = model.CloneRLSPolicies(policies)
+	collection.RLSPolicies = model.RLSPolicyMapFromSlice(policies)
 	collection.RLSPrincipals = model.CloneRLSPrincipals(principals)
 	// RLS records are keyed by the globally unique collection ID, so their
 	// persisted DB ID may be stale after a cross-database rename. Recover the
@@ -2647,23 +2647,17 @@ func upsertCollectionRLSPolicy(collection *model.Collection, policy *model.RLSPo
 	if collection == nil || policy == nil {
 		return
 	}
-	cloned := model.CloneRLSPolicy(policy)
-	for i, cached := range collection.RLSPolicies {
-		if cached != nil && cached.PolicyName == policy.PolicyName {
-			collection.RLSPolicies[i] = cloned
-			return
-		}
+	if collection.RLSPolicies == nil {
+		collection.RLSPolicies = make(map[string]*model.RLSPolicy)
 	}
-	collection.RLSPolicies = append(collection.RLSPolicies, cloned)
+	collection.RLSPolicies[policy.PolicyName] = model.CloneRLSPolicy(policy)
 }
 
 func removeCollectionRLSPolicy(collection *model.Collection, policyName string) {
 	if collection == nil {
 		return
 	}
-	collection.RLSPolicies = lo.Filter(collection.RLSPolicies, func(policy *model.RLSPolicy, _ int) bool {
-		return policy == nil || policy.PolicyName != policyName
-	})
+	delete(collection.RLSPolicies, policyName)
 }
 
 func upsertCollectionRLSPrincipal(collection *model.Collection, principal *model.RLSPrincipal) {
@@ -2831,10 +2825,10 @@ func joinRLSPolicyExpressions(expressions []string, operator string) string {
 	return strings.Join(nonEmpty, " "+operator+" ")
 }
 
-func upsertRLSPolicyList(policies []*model.RLSPolicy, replacement *model.RLSPolicy) []*model.RLSPolicy {
-	prospective := model.CloneRLSPolicies(policies)
+func upsertRLSPolicyList(policies map[string]*model.RLSPolicy, replacement *model.RLSPolicy) []*model.RLSPolicy {
+	prospective := model.RLSPolicyMapToSlice(policies)
 	for index, policy := range prospective {
-		if policy != nil && policy.PolicyName == replacement.PolicyName {
+		if policy.PolicyName == replacement.PolicyName {
 			prospective[index] = model.CloneRLSPolicy(replacement)
 			return prospective
 		}
@@ -2873,15 +2867,12 @@ func validateRLSPolicyExpressionsWithSchemaHelper(schemaHelper *typeutil.SchemaH
 	return validateRLSPolicyExpression(schemaHelper, "check", checkExpr, enforceArrayLiteralLimit)
 }
 
-func validateRLSPoliciesWithSchema(policies []*model.RLSPolicy, schema *schemapb.CollectionSchema) error {
+func validateRLSPoliciesWithSchema(policies map[string]*model.RLSPolicy, schema *schemapb.CollectionSchema) error {
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	if err != nil {
 		return merr.Wrap(err, "failed to build schema helper for RLS policy")
 	}
-	for _, policy := range policies {
-		if policy == nil {
-			continue
-		}
+	for _, policy := range model.RLSPolicyMapToSlice(policies) {
 		// Existing policies are grandfathered when refreshable creation quotas
 		// are lowered. Schema DDL only checks whether their fields and expression
 		// shapes remain compatible with the proposed schema.
@@ -2898,10 +2889,7 @@ func collectRLSPolicyFieldRefs(coll *model.Collection) (map[int64][]string, erro
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to build schema helper for RLS policy dependency check")
 	}
-	for _, policy := range coll.RLSPolicies {
-		if policy == nil {
-			continue
-		}
+	for _, policy := range model.RLSPolicyMapToSlice(coll.RLSPolicies) {
 		for _, expr := range []string{policy.UsingExpr, policy.CheckExpr} {
 			refs, err := collectRLSPolicyExprFieldRefs(schemaHelper, expr)
 			if err != nil {
@@ -3263,11 +3251,8 @@ func (mt *MetaTable) PrepareCreateRLSPolicy(ctx context.Context, req *rlsutil.Cr
 		return nil, err
 	}
 
-	_, err = mt.catalog.GetRLSPolicy(ctx, coll.CollectionID, req.GetPolicyName())
-	if err == nil {
+	if _, ok := coll.RLSPolicies[req.GetPolicyName()]; ok {
 		return nil, merr.WrapErrParameterInvalidMsg("RLS policy [%s] already exists", req.GetPolicyName())
-	} else if !errors.Is(err, merr.ErrIoKeyNotFound) {
-		return nil, merr.Wrap(err, "failed to get RLS policy")
 	}
 
 	if err := validateRLSPolicy(req.GetPolicyName(), req.GetPolicyType(), req.GetActions(), req.GetUsingExpr(), req.GetCheckExpr()); err != nil {
@@ -3321,12 +3306,9 @@ func (mt *MetaTable) PrepareUpdateRLSPolicy(ctx context.Context, req *rlsutil.Up
 		return nil, err
 	}
 
-	oldPolicy, err := mt.catalog.GetRLSPolicy(ctx, coll.CollectionID, req.GetPolicyName())
-	if err != nil {
-		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return nil, merr.WrapErrParameterInvalidMsg("RLS policy [%s] does not exist", req.GetPolicyName())
-		}
-		return nil, merr.Wrap(err, "failed to get RLS policy")
+	oldPolicy, ok := coll.RLSPolicies[req.GetPolicyName()]
+	if !ok {
+		return nil, merr.WrapErrParameterInvalidMsg("RLS policy [%s] does not exist", req.GetPolicyName())
 	}
 
 	policy := &model.RLSPolicy{
@@ -3356,16 +3338,13 @@ func (mt *MetaTable) PrepareDropRLSPolicy(ctx context.Context, req *rlsutil.Drop
 		return nil, err
 	}
 
-	policy, err := mt.catalog.GetRLSPolicy(ctx, coll.CollectionID, req.GetPolicyName())
-	if err != nil {
-		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return &model.RLSPolicy{
-				DBID:         coll.DBID,
-				CollectionID: coll.CollectionID,
-				PolicyName:   req.GetPolicyName(),
-			}, nil
-		}
-		return nil, merr.Wrap(err, "failed to get RLS policy")
+	policy, ok := coll.RLSPolicies[req.GetPolicyName()]
+	if !ok {
+		return &model.RLSPolicy{
+			DBID:         coll.DBID,
+			CollectionID: coll.CollectionID,
+			PolicyName:   req.GetPolicyName(),
+		}, nil
 	}
 	policy = model.CloneRLSPolicy(policy)
 	policy.DBID = coll.DBID
@@ -3387,12 +3366,29 @@ func (mt *MetaTable) ApplyAlterRLSPolicy(ctx context.Context, policy *model.RLSP
 }
 
 func (mt *MetaTable) ApplyDropRLSPolicy(ctx context.Context, collectionID int64, policyName string) error {
-	if err := mt.catalog.DropRLSPolicy(ctx, collectionID, policyName); err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
+	mt.ddLock.RLock()
+	collection := mt.collID2Meta[collectionID]
+	var policy *model.RLSPolicy
+	if collection != nil {
+		policy = model.CloneRLSPolicy(collection.RLSPolicies[policyName])
+	}
+	mt.ddLock.RUnlock()
+	if policy == nil {
+		return nil
+	}
+
+	if err := mt.catalog.DropRLSPolicy(ctx, collectionID, policy.PolicyID); err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
 		return merr.Wrap(err, "failed to drop RLS policy")
 	}
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-	removeCollectionRLSPolicy(mt.collID2Meta[collectionID], policyName)
+	collection = mt.collID2Meta[collectionID]
+	if collection != nil {
+		current := collection.RLSPolicies[policyName]
+		if current != nil && current.PolicyID == policy.PolicyID {
+			removeCollectionRLSPolicy(collection, policyName)
+		}
+	}
 	return nil
 }
 
@@ -3405,12 +3401,11 @@ func (mt *MetaTable) ListRLSPolicies(ctx context.Context, req *rlsutil.ListRowPo
 		return nil, err
 	}
 
-	policies := lo.Map(coll.RLSPolicies, func(policy *model.RLSPolicy, _ int) *rlsutil.RowPolicy {
-		return policy.ToRowPolicy()
-	})
-	sort.Slice(policies, func(i, j int) bool {
-		return policies[i].GetPolicyName() < policies[j].GetPolicyName()
-	})
+	policyModels := model.RLSPolicyMapToSlice(coll.RLSPolicies)
+	policies := make([]*rlsutil.RowPolicy, 0, len(policyModels))
+	for _, policy := range policyModels {
+		policies = append(policies, policy.ToRowPolicy())
+	}
 	return policies, nil
 }
 

@@ -2371,35 +2371,8 @@ func (kc *Catalog) SaveRLSPolicy(ctx context.Context, policy *model.RLSPolicy) e
 	return kc.Txn.Save(ctx, key, string(value))
 }
 
-func (kc *Catalog) GetRLSPolicy(ctx context.Context, collectionID int64, policyName string) (*model.RLSPolicy, error) {
-	_, policy, err := kc.getRLSPolicyByName(ctx, collectionID, policyName)
-	return policy, err
-}
-
-func (kc *Catalog) getRLSPolicyByName(ctx context.Context, collectionID int64, policyName string) (string, *model.RLSPolicy, error) {
-	keys, values, err := kc.Txn.LoadWithPrefix(ctx, BuildRLSPolicyPrefix(collectionID))
-	if err != nil {
-		return "", nil, err
-	}
-	for i, value := range values {
-		info := &rootcoordpb.RLSPolicyInfo{}
-		if err := proto.Unmarshal([]byte(value), info); err != nil {
-			return "", nil, merr.WrapErrDataIntegrity(err, "unmarshal RLS policy info")
-		}
-		policy := model.UnmarshalRLSPolicyModel(info)
-		if policy != nil && policy.PolicyName == policyName {
-			return keys[i], policy, nil
-		}
-	}
-	return "", nil, merr.WrapErrIoKeyNotFound(fmt.Sprintf("RLS policy %d/%s", collectionID, policyName))
-}
-
-func (kc *Catalog) DropRLSPolicy(ctx context.Context, collectionID int64, policyName string) error {
-	_, policy, err := kc.getRLSPolicyByName(ctx, collectionID, policyName)
-	if err != nil {
-		return err
-	}
-	return kc.Txn.Remove(ctx, BuildRLSPolicyKey(collectionID, policy.PolicyID))
+func (kc *Catalog) DropRLSPolicy(ctx context.Context, collectionID int64, policyID int64) error {
+	return kc.Txn.Remove(ctx, BuildRLSPolicyKey(collectionID, policyID))
 }
 
 func (kc *Catalog) ListRLSPolicies(ctx context.Context, collectionID int64) ([]*model.RLSPolicy, error) {

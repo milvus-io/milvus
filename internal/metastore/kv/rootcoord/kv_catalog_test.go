@@ -1554,8 +1554,8 @@ func TestCatalog_DropCollection(t *testing.T) {
 		coll := &model.Collection{
 			DBID:         10,
 			CollectionID: 20,
-			RLSPolicies: []*model.RLSPolicy{
-				{PolicyID: 30, PolicyName: "dept_read"},
+			RLSPolicies: map[string]*model.RLSPolicy{
+				"dept_read": {PolicyID: 30, PolicyName: "dept_read"},
 			},
 			RLSPrincipals: []*model.RLSPrincipal{
 				{PrincipalName: "team/a user"},
@@ -1662,11 +1662,6 @@ func TestCatalog_RLSMetadata(t *testing.T) {
 		PolicyName:   "missing_id",
 	}), merr.ErrServiceInternal)
 
-	loadedPolicy, err := catalog.GetRLSPolicy(ctx, 20, policyA.PolicyName)
-	require.NoError(t, err)
-	assert.Equal(t, policyA.PolicyID, loadedPolicy.PolicyID)
-	assert.Equal(t, policyA.UsingExpr, loadedPolicy.UsingExpr)
-
 	policies, err := catalog.ListRLSPolicies(ctx, 20)
 	require.NoError(t, err)
 	require.Len(t, policies, 2)
@@ -1675,16 +1670,13 @@ func TestCatalog_RLSMetadata(t *testing.T) {
 	assert.Equal(t, policyA.UsingExpr, policies[0].UsingExpr)
 	assert.Equal(t, policyB.CheckExpr, policies[1].CheckExpr)
 
-	require.NoError(t, catalog.DropRLSPolicy(ctx, 20, policyA.PolicyName))
+	require.NoError(t, catalog.DropRLSPolicy(ctx, 20, policyA.PolicyID))
 	_, err = kv.Load(ctx, BuildRLSPolicyKey(20, policyA.PolicyID))
 	assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
 	policies, err = catalog.ListRLSPolicies(ctx, 20)
 	require.NoError(t, err)
 	require.Len(t, policies, 1)
 	assert.Equal(t, "owner_write", policies[0].PolicyName)
-	_, err = catalog.GetRLSPolicy(ctx, 20, policyA.PolicyName)
-	assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
-
 	principal := &model.RLSPrincipal{
 		DBID:          10,
 		CollectionID:  20,
@@ -1728,22 +1720,15 @@ func TestCatalog_DropRLSPolicyUsesLogicalKey(t *testing.T) {
 		Actions:      []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
 		UsingExpr:    "dept == 'sales'",
 	}
-	value, err := proto.Marshal(model.MarshalRLSPolicyModel(policy))
-	require.NoError(t, err)
-
 	logicalKey := BuildRLSPolicyKey(policy.CollectionID, policy.PolicyID)
 	kvmock := mocks.NewTxnKV(t)
-	kvmock.EXPECT().
-		LoadWithPrefix(mock.Anything, BuildRLSPolicyPrefix(policy.CollectionID)).
-		Return([]string{"/root-path/" + logicalKey}, []string{string(value)}, nil).
-		Once()
 	kvmock.EXPECT().
 		Remove(mock.Anything, logicalKey).
 		Return(nil).
 		Once()
 
 	catalog := NewCatalog(kvmock).(*Catalog)
-	require.NoError(t, catalog.DropRLSPolicy(ctx, policy.CollectionID, policy.PolicyName))
+	require.NoError(t, catalog.DropRLSPolicy(ctx, policy.CollectionID, policy.PolicyID))
 }
 
 func getUserInfoMetaString(username string) string {

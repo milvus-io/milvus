@@ -88,6 +88,12 @@ by `proxy.rls.maxTagsPerPrincipal` before RootCoord broadcasts the mutation.
 The raw list is also subject to a separate fixed transport/work bound before
 deduplication.
 
+One principal-tag request currently performs either incremental upserts or
+deletions, not both. Applications that need both changes issue separate
+requests and should revoke tags before granting new ones so a partial failure
+fails closed. A future atomic patch API may carry tag upserts and removals in
+one collection-serialized mutation.
+
 Policy expressions may reference:
 
 | Variable | Meaning |
@@ -219,6 +225,14 @@ separate records and cached in RootCoord collection metadata for collection
 cleanup. Persistent RLS records are addressed only by the globally unique
 collection ID; database ID and collection name are descriptive metadata and do
 not participate in identity.
+
+RootCoord collection metadata stores row policies in a name-keyed map whose
+values are the complete policy records, including their internal policy IDs.
+Create, update, and drop validation therefore resolves a policy name from the
+in-memory collection metadata rather than scanning its etcd prefix. A policy
+drop resolves the internal ID from that map, releases the global collection
+metadata lock, and removes the single ID-keyed etcd record before deleting the
+matching map entry.
 
 Policy and principal-tag mutations use the same broadcast task mechanism and
 the same `SharedDBName + ExclusiveCollectionName` resource keys as collection

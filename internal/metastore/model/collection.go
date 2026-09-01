@@ -17,6 +17,7 @@
 package model
 
 import (
+	"maps"
 	"slices"
 
 	"github.com/samber/lo"
@@ -43,7 +44,7 @@ type Collection struct {
 	Functions         []*Function
 	// RLS metadata is an internal RootCoord cache. It is persisted in its own
 	// KV namespace and must not be marshaled into collection info.
-	RLSPolicies          []*RLSPolicy
+	RLSPolicies          map[string]*RLSPolicy
 	RLSPrincipals        []*RLSPrincipal
 	VirtualChannelNames  []string
 	PhysicalChannelNames []string
@@ -98,7 +99,7 @@ func (c *Collection) ShallowClone() *Collection {
 		EnableDynamicField:   c.EnableDynamicField,
 		EnableNamespace:      c.EnableNamespace,
 		Functions:            c.Functions,
-		RLSPolicies:          slices.Clone(c.RLSPolicies),
+		RLSPolicies:          maps.Clone(c.RLSPolicies),
 		RLSPrincipals:        slices.Clone(c.RLSPrincipals),
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
@@ -141,7 +142,7 @@ func (c *Collection) Clone() *Collection {
 		EnableDynamicField:   c.EnableDynamicField,
 		EnableNamespace:      c.EnableNamespace,
 		Functions:            CloneFunctions(c.Functions),
-		RLSPolicies:          CloneRLSPolicies(c.RLSPolicies),
+		RLSPolicies:          CloneRLSPolicyMap(c.RLSPolicies),
 		RLSPrincipals:        CloneRLSPrincipals(c.RLSPrincipals),
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,

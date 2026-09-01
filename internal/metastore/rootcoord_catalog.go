@@ -98,8 +98,7 @@ type RootCoordCatalog interface {
 	ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error)
 
 	SaveRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error
-	GetRLSPolicy(ctx context.Context, collectionID int64, policyName string) (*model.RLSPolicy, error)
-	DropRLSPolicy(ctx context.Context, collectionID int64, policyName string) error
+	DropRLSPolicy(ctx context.Context, collectionID int64, policyID int64) error
 	ListRLSPolicies(ctx context.Context, collectionID int64) ([]*model.RLSPolicy, error)
 	SaveRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error
 	GetRLSPrincipal(ctx context.Context, collectionID int64, principalName string) (*model.RLSPrincipal, error)

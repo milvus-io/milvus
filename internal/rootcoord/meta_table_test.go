@@ -278,7 +278,7 @@ func TestReloadEnabledCollectionRLSMetadataUsesCollectionIdentity(t *testing.T) 
 
 	require.NoError(t, meta.reloadEnabledCollectionRLSMetadata(context.Background(), collection))
 	require.Len(t, collection.RLSPolicies, 1)
-	require.Equal(t, int64(11), collection.RLSPolicies[0].DBID)
+	require.Equal(t, int64(11), collection.RLSPolicies["tenant"].DBID)
 	require.Len(t, collection.RLSPrincipals, 1)
 	require.Equal(t, int64(11), collection.RLSPrincipals[0].DBID)
 }
@@ -302,7 +302,7 @@ func TestReloadCollectionsRLSMetadataSkipsDisabledCollection(t *testing.T) {
 			collection := &model.Collection{
 				CollectionID: 20,
 				Properties:   tc.properties,
-				RLSPolicies:  []*model.RLSPolicy{{PolicyName: "stale"}},
+				RLSPolicies:  map[string]*model.RLSPolicy{"stale": {PolicyName: "stale"}},
 				RLSPrincipals: []*model.RLSPrincipal{
 					{PrincipalName: "stale"},
 				},
@@ -471,7 +471,6 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 			Description:    "department read policy",
 		}
 
-		catalog.EXPECT().GetRLSPolicy(mock.Anything, int64(20), "dept_read").Return(nil, merr.ErrIoKeyNotFound).Once()
 		catalog.EXPECT().SaveRLSPolicy(mock.Anything, mock.Anything).RunAndReturn(
 			func(_ context.Context, policy *model.RLSPolicy) error {
 				assert.Equal(t, int64(10), policy.DBID)
@@ -485,7 +484,7 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int64(20), collectionID)
 		require.Len(t, meta.collID2Meta[20].RLSPolicies, 1)
-		assert.Equal(t, "dept_read", meta.collID2Meta[20].RLSPolicies[0].PolicyName)
+		assert.Equal(t, "dept_read", meta.collID2Meta[20].RLSPolicies["dept_read"].PolicyName)
 
 		t.Run("duplicate create ignores lowered creation limits", func(t *testing.T) {
 			paramtable.Get().Save(Params.ProxyCfg.RLSMaxPolicyNameLength.Key, "1")
@@ -497,47 +496,17 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 				paramtable.Get().Reset(Params.ProxyCfg.RLSMaxExpressionLength.Key)
 			})
 
-			catalog.EXPECT().GetRLSPolicy(mock.Anything, int64(20), "dept_read").Return(&model.RLSPolicy{
-				DBID:         10,
-				CollectionID: 20,
-				PolicyID:     100,
-				PolicyName:   createReq.GetPolicyName(),
-				PolicyType:   createReq.GetPolicyType(),
-				Actions:      createReq.GetActions(),
-				UsingExpr:    createReq.GetUsingExpr(),
-				CheckExpr:    createReq.GetCheckExpr(),
-				Description:  createReq.GetDescription(),
-			}, nil).Once()
 			_, err := meta.PrepareCreateRLSPolicy(ctx, createReq, unallocatedRLSPolicyID)
 			require.ErrorIs(t, err, merr.ErrParameterInvalid)
 			require.Contains(t, err.Error(), "already exists")
 		})
 
-		catalog.EXPECT().GetRLSPolicy(mock.Anything, int64(20), "dept_read").Return(&model.RLSPolicy{
-			DBID:         10,
-			CollectionID: 20,
-			PolicyID:     100,
-			PolicyName:   createReq.GetPolicyName(),
-			PolicyType:   createReq.GetPolicyType(),
-			Actions:      createReq.GetActions(),
-			UsingExpr:    createReq.GetUsingExpr(),
-			CheckExpr:    createReq.GetCheckExpr(),
-			Description:  createReq.GetDescription(),
-		}, nil).Once()
 		_, err = meta.CreateRLSPolicy(ctx, createReq, 101)
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)
 		require.Contains(t, err.Error(), "already exists")
 		require.Len(t, meta.collID2Meta[20].RLSPolicies, 1)
-		require.Equal(t, int64(100), meta.collID2Meta[20].RLSPolicies[0].PolicyID)
+		require.Equal(t, int64(100), meta.collID2Meta[20].RLSPolicies["dept_read"].PolicyID)
 
-		catalog.EXPECT().GetRLSPolicy(mock.Anything, int64(20), "dept_read").Return(&model.RLSPolicy{
-			PolicyID:    100,
-			PolicyName:  createReq.GetPolicyName(),
-			PolicyType:  createReq.GetPolicyType(),
-			Actions:     createReq.GetActions(),
-			UsingExpr:   createReq.GetUsingExpr(),
-			Description: "different definition",
-		}, nil).Once()
 		_, err = meta.CreateRLSPolicy(ctx, createReq, 102)
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)
 		require.Contains(t, err.Error(), "already exists")
@@ -551,10 +520,6 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 			UsingExpr:      "owner == $current_principal",
 			Description:    "updated policy",
 		}
-		catalog.EXPECT().GetRLSPolicy(mock.Anything, int64(20), "dept_read").Return(&model.RLSPolicy{
-			PolicyID:   100,
-			PolicyName: "dept_read",
-		}, nil).Once()
 		catalog.EXPECT().SaveRLSPolicy(mock.Anything, mock.Anything).RunAndReturn(
 			func(_ context.Context, policy *model.RLSPolicy) error {
 				assert.Equal(t, int64(100), policy.PolicyID)
@@ -568,8 +533,8 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int64(20), collectionID)
 		require.Len(t, meta.collID2Meta[20].RLSPolicies, 1)
-		assert.Equal(t, int64(100), meta.collID2Meta[20].RLSPolicies[0].PolicyID)
-		assert.Equal(t, updateReq.GetUsingExpr(), meta.collID2Meta[20].RLSPolicies[0].UsingExpr)
+		assert.Equal(t, int64(100), meta.collID2Meta[20].RLSPolicies["dept_read"].PolicyID)
+		assert.Equal(t, updateReq.GetUsingExpr(), meta.collID2Meta[20].RLSPolicies["dept_read"].UsingExpr)
 
 		t.Run("update ignores lowered creation name limit", func(t *testing.T) {
 			paramtable.Get().Save(Params.ProxyCfg.RLSMaxPolicyNameLength.Key, "1")
@@ -577,18 +542,12 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 				paramtable.Get().Reset(Params.ProxyCfg.RLSMaxPolicyNameLength.Key)
 			})
 
-			catalog.EXPECT().GetRLSPolicy(mock.Anything, int64(20), "dept_read").Return(&model.RLSPolicy{
-				PolicyID:   100,
-				PolicyName: "dept_read",
-			}, nil).Once()
-
 			policy, err := meta.PrepareUpdateRLSPolicy(ctx, updateReq)
 			require.NoError(t, err)
 			require.Equal(t, int64(100), policy.PolicyID)
 			require.Equal(t, "dept_read", policy.PolicyName)
 		})
 
-		catalog.EXPECT().GetRLSPolicy(mock.Anything, int64(20), "missing_policy").Return(nil, merr.ErrIoKeyNotFound).Once()
 		_, err = meta.UpdateRLSPolicy(ctx, &rlsutil.UpdateRowPolicyRequest{
 			DbName:         "db1",
 			CollectionName: "coll1",
@@ -607,8 +566,7 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 	})
 
 	t.Run("reject unknown action value", func(t *testing.T) {
-		meta, catalog := newRLSMetaTableForTest(t)
-		catalog.EXPECT().GetRLSPolicy(mock.Anything, int64(20), "unknown_action_value").Return(nil, merr.ErrIoKeyNotFound).Once()
+		meta, _ := newRLSMetaTableForTest(t)
 		_, err := meta.CreateRLSPolicy(ctx, &rlsutil.CreateRowPolicyRequest{
 			DbName:         "db1",
 			CollectionName: "coll1",
@@ -795,7 +753,7 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 		assert.Contains(t, err.Error(), "reserved character")
 
 		paramtable.Get().Save(Params.ProxyCfg.RLSMaxExpressionLength.Key, "100")
-		meta, catalog := newRLSMetaTableForTest(t)
+		meta, _ := newRLSMetaTableForTest(t)
 		err = validateRLSPolicyExpressions(meta.collID2Meta[20], "dept == $current_principal_tags['team']", "")
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)
 		assert.Contains(t, err.Error(), "tag key exceeds max length 3")
@@ -805,8 +763,7 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 			"",
 		))
 
-		catalog.EXPECT().GetRLSPolicy(mock.Anything, int64(20), "p").Return(nil, merr.ErrIoKeyNotFound).Once()
-		meta.collID2Meta[20].RLSPolicies = []*model.RLSPolicy{{PolicyName: "existing"}}
+		meta.collID2Meta[20].RLSPolicies = map[string]*model.RLSPolicy{"existing": {PolicyName: "existing"}}
 		_, err = meta.CreateRLSPolicy(ctx, &rlsutil.CreateRowPolicyRequest{
 			DbName:         "db1",
 			CollectionName: "coll1",
@@ -831,7 +788,7 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 
 		err := validateRLSPolicyExpressionsWithSchema(coll.ToCollectionSchemaPB(), policy.UsingExpr, "")
 		require.ErrorContains(t, err, "max array literal elements")
-		require.NoError(t, validateRLSPoliciesWithSchema([]*model.RLSPolicy{policy}, coll.ToCollectionSchemaPB()))
+		require.NoError(t, validateRLSPoliciesWithSchema(map[string]*model.RLSPolicy{"existing": policy}, coll.ToCollectionSchemaPB()))
 	})
 
 	t.Run("reject policy descriptions before persistence", func(t *testing.T) {
@@ -840,8 +797,7 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 			paramtable.Get().Reset(Params.ProxyCfg.RLSMaxPolicyDescriptionLength.Key)
 		})
 
-		meta, catalog := newRLSMetaTableForTest(t)
-		catalog.EXPECT().GetRLSPolicy(mock.Anything, int64(20), "policy").Return(nil, merr.ErrIoKeyNotFound).Once()
+		meta, _ := newRLSMetaTableForTest(t)
 		_, err := meta.CreateRLSPolicy(ctx, &rlsutil.CreateRowPolicyRequest{
 			DbName:         "db1",
 			CollectionName: "coll1",
@@ -871,10 +827,9 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 			paramtable.Get().Reset(Params.ProxyCfg.RLSMaxCombinedExpressionLength.Key)
 		})
 
-		meta, catalog := newRLSMetaTableForTest(t)
-		catalog.EXPECT().GetRLSPolicy(mock.Anything, int64(20), "too_long").Return(nil, merr.ErrIoKeyNotFound).Once()
-		meta.collID2Meta[20].RLSPolicies = []*model.RLSPolicy{
-			{
+		meta, _ := newRLSMetaTableForTest(t)
+		meta.collID2Meta[20].RLSPolicies = map[string]*model.RLSPolicy{
+			"existing": {
 				PolicyName: "existing",
 				PolicyType: rlsutil.PolicyTypePermissive,
 				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
@@ -893,7 +848,7 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 		assert.Contains(t, err.Error(), "combined RLS using expression")
 		assert.Contains(t, err.Error(), "max length 24")
 
-		meta, catalog = newRLSMetaTableForTest(t)
+		meta, _ = newRLSMetaTableForTest(t)
 		otherPolicy := &model.RLSPolicy{
 			PolicyID:     100,
 			PolicyName:   "other",
@@ -912,8 +867,10 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 			DBID:         10,
 			CollectionID: 20,
 		}
-		meta.collID2Meta[20].RLSPolicies = []*model.RLSPolicy{otherPolicy, oldPolicy}
-		catalog.EXPECT().GetRLSPolicy(mock.Anything, int64(20), "existing").Return(oldPolicy, nil).Once()
+		meta.collID2Meta[20].RLSPolicies = map[string]*model.RLSPolicy{
+			"other":    otherPolicy,
+			"existing": oldPolicy,
+		}
 		policy, err := meta.PrepareUpdateRLSPolicy(ctx, &rlsutil.UpdateRowPolicyRequest{
 			DbName:         "db1",
 			CollectionName: "coll1",
@@ -971,12 +928,11 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 
 	t.Run("drop policy by name", func(t *testing.T) {
 		meta, catalog := newRLSMetaTableForTest(t)
-		meta.collID2Meta[20].RLSPolicies = []*model.RLSPolicy{{PolicyName: "dept_read"}}
-		catalog.EXPECT().GetRLSPolicy(mock.Anything, int64(20), "dept_read").Return(&model.RLSPolicy{
+		meta.collID2Meta[20].RLSPolicies = map[string]*model.RLSPolicy{"dept_read": {
 			PolicyID:   100,
 			PolicyName: "dept_read",
-		}, nil).Once()
-		catalog.EXPECT().DropRLSPolicy(mock.Anything, int64(20), "dept_read").Return(nil).Once()
+		}}
+		catalog.EXPECT().DropRLSPolicy(mock.Anything, int64(20), int64(100)).Return(nil).Once()
 
 		collectionID, err := meta.DropRLSPolicy(ctx, &rlsutil.DropRowPolicyRequest{
 			DbName:         "db1",
@@ -987,8 +943,6 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 		require.Equal(t, int64(20), collectionID)
 		require.Empty(t, meta.collID2Meta[20].RLSPolicies)
 
-		catalog.EXPECT().GetRLSPolicy(mock.Anything, int64(20), "dept_read").Return(nil, merr.ErrIoKeyNotFound).Once()
-		catalog.EXPECT().DropRLSPolicy(mock.Anything, int64(20), "dept_read").Return(merr.ErrIoKeyNotFound).Once()
 		collectionID, err = meta.DropRLSPolicy(ctx, &rlsutil.DropRowPolicyRequest{
 			DbName:         "db1",
 			CollectionName: "coll1",
@@ -1274,28 +1228,27 @@ func TestMetaTable_RLSCatalogIODoesNotHoldGlobalDDLock(t *testing.T) {
 		}
 	}
 
-	t.Run("prepare", func(t *testing.T) {
+	t.Run("drop", func(t *testing.T) {
 		meta, catalog := newRLSMetaTableForTest(t)
+		meta.collID2Meta[20].RLSPolicies = map[string]*model.RLSPolicy{
+			"policy": {
+				CollectionID: 20,
+				PolicyID:     100,
+				PolicyName:   "policy",
+			},
+		}
 		catalogStarted := make(chan struct{})
 		releaseCatalog := make(chan struct{})
-		catalog.EXPECT().GetRLSPolicy(mock.Anything, int64(20), "policy").RunAndReturn(
-			func(context.Context, int64, string) (*model.RLSPolicy, error) {
+		catalog.EXPECT().DropRLSPolicy(mock.Anything, int64(20), int64(100)).RunAndReturn(
+			func(context.Context, int64, int64) error {
 				close(catalogStarted)
 				<-releaseCatalog
-				return nil, merr.ErrIoKeyNotFound
+				return nil
 			}).Once()
 
 		done := make(chan error, 1)
 		go func() {
-			_, err := meta.PrepareCreateRLSPolicy(ctx, &rlsutil.CreateRowPolicyRequest{
-				DbName:         "db1",
-				CollectionName: "coll1",
-				PolicyName:     "policy",
-				PolicyType:     rlsutil.PolicyTypePermissive,
-				Actions:        []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
-				UsingExpr:      "true",
-			}, 100)
-			done <- err
+			done <- meta.ApplyDropRLSPolicy(ctx, 20, "policy")
 		}()
 		<-catalogStarted
 		assertCollectionReadCompletes(t, meta)

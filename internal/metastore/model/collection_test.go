@@ -618,19 +618,19 @@ func TestClone(t *testing.T) {
 	assert.Equal(t, clone2, collection)
 }
 
-func TestCollectionShallowCloneCopiesRLSBackingSlices(t *testing.T) {
+func TestCollectionShallowCloneCopiesRLSContainers(t *testing.T) {
 	policy := &RLSPolicy{PolicyName: "policy"}
 	principal := &RLSPrincipal{PrincipalName: "principal"}
 	collection := &Collection{
-		RLSPolicies:   []*RLSPolicy{policy},
+		RLSPolicies:   map[string]*RLSPolicy{"policy": policy},
 		RLSPrincipals: []*RLSPrincipal{principal},
 	}
 
 	clone := collection.ShallowClone()
-	clone.RLSPolicies[0] = &RLSPolicy{PolicyName: "updated-policy"}
+	clone.RLSPolicies["policy"] = &RLSPolicy{PolicyName: "updated-policy"}
 	clone.RLSPrincipals[0] = &RLSPrincipal{PrincipalName: "updated-principal"}
 
-	assert.Same(t, policy, collection.RLSPolicies[0])
+	assert.Same(t, policy, collection.RLSPolicies["policy"])
 	assert.Same(t, principal, collection.RLSPrincipals[0])
 }
 
@@ -689,7 +689,7 @@ func TestApplyUpdates_DBUpdatesRLSMetadata(t *testing.T) {
 	collection := &Collection{
 		DBID:          10,
 		DBName:        "old_db",
-		RLSPolicies:   []*RLSPolicy{{DBID: 10, CollectionID: 20, PolicyID: 30}},
+		RLSPolicies:   map[string]*RLSPolicy{"policy": {DBID: 10, CollectionID: 20, PolicyID: 30}},
 		RLSPrincipals: []*RLSPrincipal{{DBID: 10, CollectionID: 20, PrincipalName: "alice"}},
 	}
 
@@ -700,7 +700,7 @@ func TestApplyUpdates_DBUpdatesRLSMetadata(t *testing.T) {
 
 	assert.Equal(t, int64(11), collection.DBID)
 	assert.Equal(t, "new_db", collection.DBName)
-	assert.Equal(t, int64(11), collection.RLSPolicies[0].DBID)
+	assert.Equal(t, int64(11), collection.RLSPolicies["policy"].DBID)
 	assert.Equal(t, int64(11), collection.RLSPrincipals[0].DBID)
 }
 
