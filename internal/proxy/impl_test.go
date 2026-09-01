@@ -60,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	pulsar2 "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
@@ -2398,6 +2399,454 @@ func TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery(t *testing.T) {
 		assert.NoError(t, err)
 		require.NotNil(t, capturedNamespace)
 		assert.Equal(t, namespace, *capturedNamespace)
+	})
+}
+
+// searchByPKTestSchema builds a two-field schema: int64 PK "id" and a
+// float-vector field "vec" of dim 2, optionally nullable.
+func searchByPKTestSchema(nullableVec bool) *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{
+				FieldID:    101,
+				Name:       "vec",
+				DataType:   schemapb.DataType_FloatVector,
+				Nullable:   nullableVec,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}},
+			},
+		},
+	}
+}
+
+// searchByPKQueryResult builds a query result laid out in primary key
+// ascending order, the way the query pipeline always returns it. vecData is
+// the compact float payload (invalid rows contribute no floats).
+func searchByPKQueryResult(pks []int64, vecData []float32, validData []bool) *milvuspb.QueryResults {
+	return &milvuspb.QueryResults{
+		Status: merr.Success(),
+		FieldsData: []*schemapb.FieldData{
+			{
+				FieldName: "id",
+				FieldId:   100,
+				Type:      schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: pks},
+						},
+					},
+				},
+			},
+			{
+				FieldName: "vec",
+				FieldId:   101,
+				Type:      schemapb.DataType_FloatVector,
+				ValidData: validData,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: 2,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{Data: vecData},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func searchByPKRequest(ids []int64) *milvuspb.SearchRequest {
+	return &milvuspb.SearchRequest{
+		DbName:         "default",
+		CollectionName: "test_collection",
+		SearchInput: &milvuspb.SearchRequest_Ids{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}},
+			},
+		},
+		SearchParams: []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "vec"}},
+	}
+}
+
+// The query pipeline returns rows sorted by primary key ascending, but search
+// treats the Nq dimension positionally: result block N belongs to ids[N]. The
+// rewritten placeholder group must therefore follow the request's ID order.
+func TestHandleIfSearchByPK_PreservesInputIDOrder(t *testing.T) {
+	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesInputIDOrder", t, func() {
+		paramtable.Init()
+
+		cache := NewMockCache(t)
+		cache.EXPECT().
+			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
+			Return(&collectionInfo{Schema: mustNewSchemaInfo(searchByPKTestSchema(false))}, nil)
+		node := &Proxy{metaCache: cache}
+
+		// query returns PK ascending: 1, 2, 3
+		mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, _ *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+			return searchByPKQueryResult(
+				[]int64{1, 2, 3},
+				[]float32{1, 1, 2, 2, 3, 3},
+				nil,
+			), segcore.StorageCost{}, nil
+		}).Build()
+
+		// caller asks in a different order
+		req := searchByPKRequest([]int64{3, 1, 2})
+		_, err := node.handleIfSearchByPK(context.Background(), req)
+		require.NoError(t, err)
+
+		pb := &commonpb.PlaceholderGroup{}
+		require.NoError(t, proto.Unmarshal(req.GetPlaceholderGroup(), pb))
+		require.Len(t, pb.GetPlaceholders(), 1)
+		require.Len(t, pb.GetPlaceholders()[0].GetValues(), 3)
+		assert.Equal(t, int64(3), req.GetNq())
+
+		want := [][]float32{{3, 3}, {1, 1}, {2, 2}}
+		for i, w := range want {
+			assert.Equal(t, typeutil.Float32ArrayToBytes(w), pb.GetPlaceholders()[0].GetValues()[i],
+				"placeholder %d must hold the vector of the %d-th requested ID", i, i)
+		}
+	})
+}
+
+// Same as above with a VARCHAR primary key: the PK-to-offset map is keyed by
+// the value the query result's PK column yields, and looked up with the value
+// the request's IDs yield; both must be the same Go type for a string key.
+func TestHandleIfSearchByPK_PreservesInputIDOrderForVarCharPK(t *testing.T) {
+	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesInputIDOrderForVarCharPK", t, func() {
+		paramtable.Init()
+
+		schema := searchByPKTestSchema(false)
+		schema.Fields[0].DataType = schemapb.DataType_VarChar
+		schema.Fields[0].TypeParams = []*commonpb.KeyValuePair{{Key: "max_length", Value: "16"}}
+
+		cache := NewMockCache(t)
+		cache.EXPECT().
+			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
+			Return(&collectionInfo{Schema: mustNewSchemaInfo(schema)}, nil)
+		node := &Proxy{metaCache: cache}
+
+		// query returns PK ascending: "a", "b", "c"
+		mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, _ *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+			result := searchByPKQueryResult(nil, []float32{1, 1, 2, 2, 3, 3}, nil)
+			result.FieldsData[0].Type = schemapb.DataType_VarChar
+			result.FieldsData[0].Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: []string{"a", "b", "c"}},
+					},
+				},
+			}
+			return result, segcore.StorageCost{}, nil
+		}).Build()
+
+		req := searchByPKRequest(nil)
+		req.SearchInput = &milvuspb.SearchRequest_Ids{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"c", "a", "b"}}},
+			},
+		}
+		_, err := node.handleIfSearchByPK(context.Background(), req)
+		require.NoError(t, err)
+
+		pb := &commonpb.PlaceholderGroup{}
+		require.NoError(t, proto.Unmarshal(req.GetPlaceholderGroup(), pb))
+		require.Len(t, pb.GetPlaceholders(), 1)
+		require.Len(t, pb.GetPlaceholders()[0].GetValues(), 3)
+		assert.Equal(t, int64(3), req.GetNq())
+
+		want := [][]float32{{3, 3}, {1, 1}, {2, 2}}
+		for i, w := range want {
+			assert.Equal(t, typeutil.Float32ArrayToBytes(w), pb.GetPlaceholders()[0].GetValues()[i],
+				"placeholder %d must hold the vector of the %d-th requested ID", i, i)
+		}
+	})
+}
+
+// validData is consumed positionally by adjustSearchResultsForNullVectors, so
+// it must follow the request's ID order too, not the query result's PK order.
+func TestHandleIfSearchByPK_PreservesInputIDOrderForValidData(t *testing.T) {
+	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesInputIDOrderForValidData", t, func() {
+		paramtable.Init()
+
+		cache := NewMockCache(t)
+		cache.EXPECT().
+			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
+			Return(&collectionInfo{Schema: mustNewSchemaInfo(searchByPKTestSchema(true))}, nil)
+		node := &Proxy{metaCache: cache}
+
+		// PK ascending 1, 2, 3 where row of PK 1 has a null vector, so the
+		// float payload only carries the vectors of PK 2 and PK 3.
+		mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, _ *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+			return searchByPKQueryResult(
+				[]int64{1, 2, 3},
+				[]float32{2, 2, 3, 3},
+				[]bool{false, true, true},
+			), segcore.StorageCost{}, nil
+		}).Build()
+
+		req := searchByPKRequest([]int64{3, 1, 2})
+		validData, err := node.handleIfSearchByPK(context.Background(), req)
+		require.NoError(t, err)
+
+		// ids are 3, 1, 2 and only PK 1 is null
+		assert.Equal(t, []bool{true, false, true}, validData)
+
+		pb := &commonpb.PlaceholderGroup{}
+		require.NoError(t, proto.Unmarshal(req.GetPlaceholderGroup(), pb))
+		require.Len(t, pb.GetPlaceholders(), 1)
+		want := [][]float32{{3, 3}, {2, 2}}
+		require.Len(t, pb.GetPlaceholders()[0].GetValues(), len(want))
+		for i, w := range want {
+			assert.Equal(t, typeutil.Float32ArrayToBytes(w), pb.GetPlaceholders()[0].GetValues()[i])
+		}
+	})
+}
+
+// A search whose IDs all point at rows with a null vector has no vector to
+// search with. Search must still succeed: handleIfSearchByPK reports Nq == 0
+// and the per-ID validData, and the caller turns that into an empty result
+// block per requested ID. Reordering the fetched rows must not lose the
+// typed-but-empty vector payload that carries this case.
+func TestHandleIfSearchByPK_AllNullVectorsYieldEmptySearch(t *testing.T) {
+	mockey.PatchConvey("TestHandleIfSearchByPK_AllNullVectorsYieldEmptySearch", t, func() {
+		paramtable.Init()
+
+		cache := NewMockCache(t)
+		cache.EXPECT().
+			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
+			Return(&collectionInfo{Schema: mustNewSchemaInfo(searchByPKTestSchema(true))}, nil)
+		node := &Proxy{metaCache: cache}
+
+		// Every requested row is null, so the float payload is empty while the
+		// oneof itself is still set -- exactly what the query pipeline returns.
+		mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, _ *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+			return searchByPKQueryResult(
+				[]int64{1, 2, 3},
+				[]float32{},
+				[]bool{false, false, false},
+			), segcore.StorageCost{}, nil
+		}).Build()
+
+		req := searchByPKRequest([]int64{3, 1, 2})
+		validData, err := node.handleIfSearchByPK(context.Background(), req)
+		require.NoError(t, err)
+
+		assert.Equal(t, []bool{false, false, false}, validData)
+		assert.Equal(t, int64(0), req.GetNq())
+
+		pb := &commonpb.PlaceholderGroup{}
+		require.NoError(t, proto.Unmarshal(req.GetPlaceholderGroup(), pb))
+		require.Len(t, pb.GetPlaceholders(), 1)
+		assert.Empty(t, pb.GetPlaceholders()[0].GetValues())
+	})
+}
+
+// searchByPKBM25Schema builds a BM25 collection: int64 PK "id", a nullable
+// VARCHAR "text" feeding a BM25 function, and its sparse output "sparse".
+func searchByPKBM25Schema() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{
+				FieldID:    101,
+				Name:       "text",
+				DataType:   schemapb.DataType_VarChar,
+				Nullable:   true,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "64"}, {Key: "enable_analyzer", Value: "true"}},
+			},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"text"},
+				InputFieldIds:    []int64{101},
+				OutputFieldNames: []string{"sparse"},
+				OutputFieldIds:   []int64{102},
+			},
+		},
+	}
+}
+
+// searchByPKBM25QueryResult builds a query result in primary key ascending
+// order. Unlike a nullable vector column, a nullable scalar column keeps a
+// zero-value slot for every null row, so texts has one entry per row.
+func searchByPKBM25QueryResult(pks []int64, texts []string, validData []bool) *milvuspb.QueryResults {
+	return &milvuspb.QueryResults{
+		Status: merr.Success(),
+		FieldsData: []*schemapb.FieldData{
+			{
+				FieldName: "id",
+				FieldId:   100,
+				Type:      schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: pks},
+						},
+					},
+				},
+			},
+			{
+				FieldName: "text",
+				FieldId:   101,
+				Type:      schemapb.DataType_VarChar,
+				ValidData: validData,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{Data: texts},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// A nullable BM25 input column keeps an empty-string slot for a null row. The
+// placeholder group must carry only the searchable texts, in request order,
+// so that Nq equals the number of true entries in validData -- the contract
+// adjustSearchResultsForNullVectors re-expands the result blocks from.
+func TestHandleIfSearchByPK_CompactsNullableBM25Text(t *testing.T) {
+	mockey.PatchConvey("TestHandleIfSearchByPK_CompactsNullableBM25Text", t, func() {
+		paramtable.Init()
+
+		cache := NewMockCache(t)
+		cache.EXPECT().
+			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
+			Return(&collectionInfo{Schema: mustNewSchemaInfo(searchByPKBM25Schema())}, nil)
+		node := &Proxy{metaCache: cache}
+
+		// PK ascending 1, 2, 3 where the row of PK 1 has a null text.
+		mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, _ *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+			return searchByPKBM25QueryResult(
+				[]int64{1, 2, 3},
+				[]string{"", "text two", "text three"},
+				[]bool{false, true, true},
+			), segcore.StorageCost{}, nil
+		}).Build()
+
+		req := searchByPKRequest([]int64{3, 1, 2})
+		req.SearchParams = []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "sparse"}}
+		validData, err := node.handleIfSearchByPK(context.Background(), req)
+		require.NoError(t, err)
+
+		// ids are 3, 1, 2 and only PK 1 is null
+		assert.Equal(t, []bool{true, false, true}, validData)
+		assert.Equal(t, int64(2), req.GetNq())
+
+		pb := &commonpb.PlaceholderGroup{}
+		require.NoError(t, proto.Unmarshal(req.GetPlaceholderGroup(), pb))
+		require.Len(t, pb.GetPlaceholders(), 1)
+		assert.Equal(t, commonpb.PlaceholderType_VarChar, pb.GetPlaceholders()[0].GetType())
+		assert.Equal(t, []string{"text three", "text two"}, funcutil.GetVarCharFromPlaceholder(pb.GetPlaceholders()[0]))
+	})
+}
+
+func TestHandleIfSearchByPK_AllNullBM25TextYieldsEmptySearch(t *testing.T) {
+	mockey.PatchConvey("TestHandleIfSearchByPK_AllNullBM25TextYieldsEmptySearch", t, func() {
+		paramtable.Init()
+
+		cache := NewMockCache(t)
+		cache.EXPECT().
+			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
+			Return(&collectionInfo{Schema: mustNewSchemaInfo(searchByPKBM25Schema())}, nil)
+		node := &Proxy{metaCache: cache}
+
+		mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, _ *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+			return searchByPKBM25QueryResult(
+				[]int64{1, 2},
+				[]string{"", ""},
+				[]bool{false, false},
+			), segcore.StorageCost{}, nil
+		}).Build()
+
+		req := searchByPKRequest([]int64{2, 1})
+		req.SearchParams = []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "sparse"}}
+		validData, err := node.handleIfSearchByPK(context.Background(), req)
+		require.NoError(t, err)
+
+		assert.Equal(t, []bool{false, false}, validData)
+		assert.Equal(t, int64(0), req.GetNq())
+
+		pb := &commonpb.PlaceholderGroup{}
+		require.NoError(t, proto.Unmarshal(req.GetPlaceholderGroup(), pb))
+		require.Len(t, pb.GetPlaceholders(), 1)
+		assert.Empty(t, pb.GetPlaceholders()[0].GetValues())
+	})
+}
+
+// Proxy.Search may run node.search more than once (the non-optimized
+// fallback, recall evaluation, requery retry), and handleIfSearchByPK
+// rewrites the request it is given in place. Each attempt must therefore get
+// its own copy of a search-by-IDs request, so that the later ones still find
+// the IDs and re-derive the validity mask; otherwise they run as an ordinary
+// search over the rewritten placeholder and drop the null positions.
+func TestProxy_Search_SearchByPKCopiesRequestPerAttempt(t *testing.T) {
+	mockey.PatchConvey("TestProxy_Search_SearchByPKCopiesRequestPerAttempt", t, func() {
+		paramtable.Init()
+
+		node := &Proxy{}
+
+		// The first attempt reports a topk-reduced, insufficient result so
+		// that Proxy.Search runs the non-optimized fallback.
+		var attempts []*milvuspb.SearchRequest
+		mockey.Mock((*Proxy).search).To(func(_ *Proxy, _ context.Context, req *milvuspb.SearchRequest, _ bool, _ bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+			attempts = append(attempts, req)
+			// what handleIfSearchByPK does to the request it is handed
+			req.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: []byte("rewritten")}
+			insufficient := len(attempts) == 1
+			return &milvuspb.SearchResults{Status: merr.Success()}, insufficient, insufficient, false, nil
+		}).Build()
+
+		request := searchByPKRequest([]int64{3, 1, 2})
+		rsp, err := node.Search(context.Background(), request)
+		require.NoError(t, err)
+		require.True(t, merr.Ok(rsp.GetStatus()), rsp.GetStatus().GetReason())
+
+		require.Len(t, attempts, 2)
+		assert.NotSame(t, attempts[0], attempts[1])
+		assert.NotSame(t, request, attempts[0])
+		assert.NotSame(t, request, attempts[1])
+		// the caller's request is left untouched, and each attempt saw the IDs
+		assert.Equal(t, []int64{3, 1, 2}, request.GetIds().GetIntId().GetData())
+		for i := range attempts {
+			assert.NotNil(t, attempts[i].GetPlaceholderGroup(), "attempt %d must have been handed a request that was then rewritten", i)
+		}
+	})
+}
+
+// An ordinary search is not copied: the request goes to every attempt as-is.
+func TestProxy_Search_PlainRequestNotCopied(t *testing.T) {
+	mockey.PatchConvey("TestProxy_Search_PlainRequestNotCopied", t, func() {
+		paramtable.Init()
+
+		node := &Proxy{}
+		var attempts []*milvuspb.SearchRequest
+		mockey.Mock((*Proxy).search).To(func(_ *Proxy, _ context.Context, req *milvuspb.SearchRequest, _ bool, _ bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+			attempts = append(attempts, req)
+			insufficient := len(attempts) == 1
+			return &milvuspb.SearchResults{Status: merr.Success()}, insufficient, insufficient, false, nil
+		}).Build()
+
+		request := &milvuspb.SearchRequest{
+			DbName:         "default",
+			CollectionName: "test_collection",
+			SearchInput:    &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: []byte("vectors")},
+		}
+		rsp, err := node.Search(context.Background(), request)
+		require.NoError(t, err)
+		require.True(t, merr.Ok(rsp.GetStatus()))
+
+		require.Len(t, attempts, 2)
+		assert.Same(t, request, attempts[0])
+		assert.Same(t, request, attempts[1])
 	})
 }
 
