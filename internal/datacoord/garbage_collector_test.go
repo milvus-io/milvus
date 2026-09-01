@@ -5129,11 +5129,18 @@ func TestGarbageCollector_recycleUnusedSegIndexes_V3DeletesFilesBeforeMeta(t *te
 	m, newManifest, manifestFile := setupV3SegIndexGC(t)
 	mockV3ManifestIndexEntry(t, newManifest)
 
+	// removeObjectFiles fans the deletions out over a conc.Pool, so this
+	// callback runs on several goroutines at once and every piece of state it
+	// touches has to be guarded - including the "is this the first remove?"
+	// read, which is what decides when the metadata snapshot is taken.
+	var mu sync.Mutex
 	var metaPresentAtFirstRemove bool
 	var removed []string
 	cm := mocks.NewChunkManager(t)
 	cm.EXPECT().RootPath().Return("root")
 	cm.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, file string) error {
+		mu.Lock()
+		defer mu.Unlock()
 		if len(removed) == 0 {
 			_, metaPresentAtFirstRemove = m.indexMeta.segmentBuildInfo.Get(4100)
 		}
