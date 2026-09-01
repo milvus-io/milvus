@@ -2688,8 +2688,7 @@ TEST(GrowingIndexAsyncBuildTest, NullableVectorBuildsAsynchronously) {
     auto pinned = indexing.get_segment_indexing();
     auto* vec_index = dynamic_cast<index::VectorIndex*>(pinned.get());
     ASSERT_NE(vec_index, nullptr);
-    EXPECT_EQ(vec_index->GetLogicalCount(),
-              n_batch * per_batch);
+    EXPECT_EQ(vec_index->GetLogicalCount(), n_batch * per_batch);
 
     auto sr = segment->Search(plan.get(), ph_group.get(), 1000000);
     EXPECT_EQ(sr->seg_offsets_.size(), num_queries * top_k);
@@ -2701,8 +2700,7 @@ TEST(GrowingIndexAsyncBuildTest, NullableVectorBuildsAsynchronously) {
     InsertAsyncBatch(segment.get(), fixture.schema, per_batch, 88);
     EXPECT_EQ(IndexedRowCount(segment_impl, fixture.vec),
               (n_batch + 1) * valid_per_batch);
-    EXPECT_EQ(vec_index->GetLogicalCount(),
-              (n_batch + 1) * per_batch);
+    EXPECT_EQ(vec_index->GetLogicalCount(), (n_batch + 1) * per_batch);
     // The ownership hand-off, pinned explicitly: this batch never reached the
     // raw vector (Insert skipped set_data_raw because the index reports
     // HasRawData), so the raw counters stay where the publish left them. This
