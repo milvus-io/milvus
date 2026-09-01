@@ -418,8 +418,8 @@ TEST(ArrayValue, ScalarLeavesRoundTrip) {
         auto row = BoolArrayRow({true, false, true});
         auto array = ArrayValue::FromProto(
             row, LeafArrayType(proto::schema::DataType::Bool));
-        ASSERT_TRUE(array.View().get_data<bool>(0));
-        ASSERT_FALSE(array.View().get_data<bool>(1));
+        ASSERT_TRUE(array.View().get_data_unchecked<bool>(0));
+        ASSERT_FALSE(array.View().get_data_unchecked<bool>(1));
         AssertProtoEqual(row, array.output_data());
     }
     {
@@ -430,31 +430,31 @@ TEST(ArrayValue, ScalarLeavesRoundTrip) {
         ASSERT_EQ(array.child().RowNums(), 2);
         ASSERT_EQ(array.child().Data(), array.data());
         ASSERT_EQ(array.byte_size(), 2 * sizeof(int32_t) + MMAP_ARRAY_PADDING);
-        ASSERT_EQ(array.View().get_data<int16_t>(0), -3);
-        ASSERT_EQ(array.View().get_data<int16_t>(1), 7);
-        ASSERT_EQ(array.View().get_data<int64_t>(0), -3);
-        ASSERT_EQ(array.View().get_data<int64_t>(1), 7);
+        ASSERT_EQ(array.View().get_data_unchecked<int16_t>(0), -3);
+        ASSERT_EQ(array.View().get_data_unchecked<int16_t>(1), 7);
+        ASSERT_EQ(array.View().get_data_unchecked<int64_t>(0), -3);
+        ASSERT_EQ(array.View().get_data_unchecked<int64_t>(1), 7);
         AssertProtoEqual(row, array.output_data());
     }
     {
         auto row = LongArrayRow({-9, 11});
         auto array = ArrayValue::FromProto(
             row, LeafArrayType(proto::schema::DataType::Int64));
-        ASSERT_EQ(array.View().get_data<int64_t>(1), 11);
+        ASSERT_EQ(array.View().get_data_unchecked<int64_t>(1), 11);
         AssertProtoEqual(row, array.output_data());
     }
     {
         auto row = FloatArrayRow({1.5F, -2.0F});
         auto array = ArrayValue::FromProto(
             row, LeafArrayType(proto::schema::DataType::Float));
-        ASSERT_FLOAT_EQ(array.View().get_data<float>(0), 1.5F);
+        ASSERT_FLOAT_EQ(array.View().get_data_unchecked<float>(0), 1.5F);
         AssertProtoEqual(row, array.output_data());
     }
     {
         auto row = DoubleArrayRow({1.25, -4.5});
         auto array = ArrayValue::FromProto(
             row, LeafArrayType(proto::schema::DataType::Double));
-        ASSERT_DOUBLE_EQ(array.View().get_data<double>(1), -4.5);
+        ASSERT_DOUBLE_EQ(array.View().get_data_unchecked<double>(1), -4.5);
         AssertProtoEqual(row, array.output_data());
     }
     {
@@ -462,7 +462,7 @@ TEST(ArrayValue, ScalarLeavesRoundTrip) {
         auto array = ArrayValue::FromProto(
             row, LeafArrayType(proto::schema::DataType::VarChar));
         ASSERT_NE(dynamic_cast<const StringChunk*>(&array.child()), nullptr);
-        ASSERT_EQ(array.View().get_data<std::string_view>(1), "bb");
+        ASSERT_EQ(array.View().get_data_unchecked<std::string_view>(1), "bb");
         AssertProtoEqual(row, array.output_data());
     }
 }
@@ -508,9 +508,9 @@ TEST(ArrayValue, NestedStringArrayUsesRecursiveNodes) {
 
     ASSERT_EQ(root.size(), 3);
     ASSERT_TRUE(root.is_nested_array());
-    ASSERT_EQ(root.array_at(0).get_data<std::string_view>(1), "bb");
+    ASSERT_EQ(root.array_at(0).get_data_unchecked<std::string_view>(1), "bb");
     ASSERT_TRUE(root.array_at(1).empty());
-    ASSERT_EQ(root.array_at(2).get_data<std::string_view>(0), "c");
+    ASSERT_EQ(root.array_at(2).get_data_unchecked<std::string_view>(0), "c");
 
     const auto* inner = dynamic_cast<const ColumnarArrayChunk*>(&array.child());
     ASSERT_NE(inner, nullptr);
@@ -558,7 +558,7 @@ TEST(ArrayValue, NullAndEmptyArraysRemainDistinctAtEveryLevel) {
     ASSERT_TRUE(root.array_at(0).array_at(1).is_null());
     ASSERT_FALSE(root.array_at(0).array_at(2).is_null());
     ASSERT_TRUE(root.array_at(0).array_at(2).empty());
-    ASSERT_EQ(root.array_at(2).array_at(0).get_data<int32_t>(0), 4);
+    ASSERT_EQ(root.array_at(2).array_at(0).get_data_unchecked<int32_t>(0), 4);
 
     const auto* level_one =
         dynamic_cast<const ColumnarArrayChunk*>(&array.child());
@@ -597,7 +597,7 @@ TEST(ArrayValue, TripleNestedIntAccess) {
     auto array = ArrayValue::FromProto(row, type);
     auto root = array.View();
 
-    ASSERT_EQ(root.array_at(2).array_at(0).get_data<int32_t>(0), 4);
+    ASSERT_EQ(root.array_at(2).array_at(0).get_data_unchecked<int32_t>(0), 4);
 
     const auto* level_one =
         dynamic_cast<const ColumnarArrayChunk*>(&array.child());
@@ -624,7 +624,9 @@ TEST(ArrayValue, QuadrupleNestedIntAccess) {
     auto array = ArrayValue::FromProto(row, type);
     auto root = array.View();
 
-    ASSERT_EQ(root.array_at(0).array_at(0).array_at(1).get_data<int32_t>(0), 3);
+    ASSERT_EQ(
+        root.array_at(0).array_at(0).array_at(1).get_data_unchecked<int32_t>(0),
+        3);
     const auto output = array.output_data();
     ASSERT_EQ(output.array_data().element_type(),
               proto::schema::DataType::Array);
@@ -1004,15 +1006,17 @@ TEST(ColumnarArrayChunk, WriterAndChunkShareOneContiguousBuffer) {
     ASSERT_FALSE(array_chunk.is_valid(1));
     ASSERT_TRUE(array_chunk.is_valid(2));
     AssertOffsets(array_chunk.offsets(), {0, 4, 4, 5});
-    ASSERT_EQ(array_chunk.View(0).array_at(0).get_data<std::string_view>(1),
-              "bb");
+    ASSERT_EQ(
+        array_chunk.View(0).array_at(0).get_data_unchecked<std::string_view>(1),
+        "bb");
     ASSERT_TRUE(array_chunk.View(0).array_at(1).is_null());
     ASSERT_FALSE(array_chunk.View(0).array_at(2).is_null());
     ASSERT_TRUE(array_chunk.View(0).array_at(2).empty());
     ASSERT_TRUE(array_chunk.View(1).is_null());
     ASSERT_TRUE(array_chunk.View(1).empty());
-    ASSERT_EQ(array_chunk.View(2).array_at(0).get_data<std::string_view>(0),
-              "d");
+    ASSERT_EQ(
+        array_chunk.View(2).array_at(0).get_data_unchecked<std::string_view>(0),
+        "d");
 
     const auto* inner =
         dynamic_cast<const ColumnarArrayChunk*>(&array_chunk.child());

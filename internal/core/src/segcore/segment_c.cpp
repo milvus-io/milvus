@@ -1442,7 +1442,7 @@ BuildVectorArrayForChunk(const FieldInfo& field_info,
         ARROW_RETURN_NOT_OK(builder.Append());
         ARROW_RETURN_NOT_OK(value_builder->AppendValues(
             reinterpret_cast<const uint8_t*>(vector_array.data()),
-            vector_array.length()));
+            vector_array.physical_length()));
     }
 
     return builder.Finish();

@@ -262,6 +262,9 @@ class Schema {
                                     element_type,
                                     nullable,
                                     element_nullable,
+                                    std::nullopt,
+                                    std::string{},
+                                    LOCAL_FORMAT_RAW,
                                     std::nullopt);
         this->AddField(std::move(field_meta));
     }

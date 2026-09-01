@@ -434,7 +434,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                             milvus::fastmem::FastMemcpy(
                                 ptr, vec_ptr[i].data(), vec_ptr[i].byte_size());
                             ptr += vec_ptr[i].byte_size();
-                            count += vec_ptr[i].length();
+                            count += vec_ptr[i].physical_length();
                         }
                         sub_data = query::dataset::RawDataset{
                             cumulative_element_offset, dim, count, buf.get()};
@@ -451,7 +451,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                 ptr, vec_ptr[i].data(), vec_ptr[i].byte_size());
                             ptr += vec_ptr[i].byte_size();
 
-                            offset += vec_ptr[i].length();
+                            offset += vec_ptr[i].physical_length();
                             offsets.push_back(offset);
                         }
                         sub_data = query::dataset::RawDataset{range_begin,

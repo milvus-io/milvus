@@ -571,6 +571,10 @@ class Array {
     DataType element_type_ = DataType::NONE;
     std::unique_ptr<uint32_t[]> offsets_ptr_{nullptr};
     bool element_nullable_ = false;
+    // TODO: TargetBitmap currently adds 32 bytes per row on 64-bit builds,
+    // including for non-element-nullable arrays. If this becomes an issue, use
+    // std::unique_ptr<uint64_t[]> for the validity bitmap or move nullable
+    // storage into a dedicated NullableArray class.
     TargetBitmap element_valid_data_{};
     bool has_invalid_element_ = false;
 };
@@ -587,7 +591,6 @@ class ArrayView {
           offsets_ptr_(other.offsets_ptr_),
           element_nullable_(other.element_nullable_),
           element_valid_data_(other.element_valid_data_),
-          has_invalid_element_computed_(other.has_invalid_element_computed_),
           has_invalid_element_(other.has_invalid_element_) {
         AssertInfo(data_ != nullptr || (length_ == 0 && size_ == 0),
                    "data pointer for non-empty ArrayView cannot be nullptr");
@@ -633,6 +636,7 @@ class ArrayView {
                 "length, bitmap_length={}, array_length={}",
                 element_valid_data_.size(),
                 length_);
+            has_invalid_element_ = !element_valid_data_.all();
         } else {
             AssertInfo(element_valid_data_.size() == 0,
                        "non-element-nullable array cannot carry element valid "
@@ -785,7 +789,7 @@ class ArrayView {
         if (!arr2.same_type()) {
             return false;
         }
-        if (has_invalid_element()) {
+        if (has_invalid_element_) {
             // TODO(SpadeA): support nullable proto::plan::Array constants.
             return false;
         }
@@ -874,18 +878,6 @@ class ArrayView {
     }
 
  private:
-    bool
-    has_invalid_element() const {
-        if (!element_nullable_) {
-            return false;
-        }
-        if (!has_invalid_element_computed_) {
-            has_invalid_element_ = !element_valid_data_.all();
-            has_invalid_element_computed_ = true;
-        }
-        return has_invalid_element_;
-    }
-
     template <typename T>
     T
     get_raw_data(const int index) const {
@@ -937,8 +929,7 @@ class ArrayView {
     uint32_t* offsets_ptr_{nullptr};
     bool element_nullable_ = false;
     TargetBitmapView element_valid_data_{};
-    mutable bool has_invalid_element_computed_ = false;
-    mutable bool has_invalid_element_ = false;
+    bool has_invalid_element_ = false;
 };
 
 }  // namespace milvus

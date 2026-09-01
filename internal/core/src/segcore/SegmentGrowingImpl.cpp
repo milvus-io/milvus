@@ -208,7 +208,8 @@ ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
                     continue;
                 }
                 auto source_index = data->IsNullable() ? physical_row++ : i;
-                array_lengths[offset + i] = raw_data[source_index].length();
+                array_lengths[offset + i] =
+                    raw_data[source_index].physical_length();
             }
         } else {
             if (field_meta.is_nested_array()) {
@@ -1733,7 +1734,7 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
                    logical_offset);
         views.emplace_back(const_cast<char*>(vector_array->data()),
                            vector_array->dim(),
-                           vector_array->length(),
+                           vector_array->physical_length(),
                            vector_array->byte_size(),
                            vector_array->get_element_type());
     };

@@ -608,12 +608,14 @@ TEST(test_chunk_segment,
                          new_label,
                          DataType::ARRAY,
                          DataType::VARCHAR,
-                         true);
+                         true,
+                         false);
     new_schema->AddField(FieldName("chunks[score]"),
                          new_score,
                          DataType::ARRAY,
                          DataType::INT32,
-                         true);
+                         true,
+                         false);
 
     // Model lazy reopen skipping the intermediate drop-only schema: the struct
     // name is unchanged, while every child field ID belongs to a new generation.

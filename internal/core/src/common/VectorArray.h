@@ -279,8 +279,8 @@ class VectorArray : public milvus::VectorTrait {
     }
 
     int
-    length() const {
-        return length_;
+    physical_length() const {
+        return physical_length_;
     }
 
     size_t
@@ -350,6 +350,10 @@ class VectorArray : public milvus::VectorTrait {
     int size_ = 0;
     DataType element_type_ = DataType::NONE;
     bool element_nullable_ = false;
+    // TODO: TargetBitmap currently adds 32 bytes per row on 64-bit builds,
+    // including for non-element-nullable arrays. If this becomes an issue, use
+    // std::unique_ptr<uint64_t[]> for the validity bitmap or move nullable
+    // storage into a dedicated NullableVectorArray class.
     TargetBitmap element_valid_data_{};
 };
 
@@ -468,8 +472,8 @@ class VectorArrayView {
     }
 
     int
-    length() const {
-        return length_;
+    physical_length() const {
+        return physical_length_;
     }
 
  private:
