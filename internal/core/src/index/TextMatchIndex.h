@@ -72,9 +72,14 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
                     const bool* valids,
                     int64_t offset_begin);
 
+    // `offset_begin` is the logical offset of the batch's first row, the same
+    // doc-id space AddTextsGrowing writes into. A growing segment that already
+    // holds rows must pass the offset its caller reserved, or the batch lands
+    // on top of doc ids the index already owns.
     void
     BuildIndexFromFieldData(const std::vector<FieldDataPtr>& field_datas,
-                            bool nullable);
+                            bool nullable,
+                            int64_t offset_begin);
 
     void
     Finish();

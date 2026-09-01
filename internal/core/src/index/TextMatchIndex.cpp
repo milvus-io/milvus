@@ -291,9 +291,20 @@ TextMatchIndex::AddTextsGrowing(size_t n,
 // schema_ may not be initialized so we need this `nullable` parameter
 void
 TextMatchIndex::BuildIndexFromFieldData(
-    const std::vector<FieldDataPtr>& field_datas, bool nullable) {
-    int64_t offset = 0;
+    const std::vector<FieldDataPtr>& field_datas,
+    bool nullable,
+    int64_t offset_begin) {
+    int64_t offset = offset_begin;
     if (nullable) {
+        int64_t total = 0;
+        for (const auto& data : field_datas) {
+            total += data->get_null_count();
+        }
+        {
+            std::unique_lock<folly::SharedMutex> lock(mutex_);
+            null_offset_.reserve(null_offset_.size() +
+                                 static_cast<size_t>(total));
+        }
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
             auto null_count = data->get_null_count();
