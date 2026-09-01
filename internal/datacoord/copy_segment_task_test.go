@@ -1340,6 +1340,11 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 	segmentID := int64(102)
 	manifestPath := `{"ver":3,"base_path":"files/insert_log/1/10/102"}`
 
+	// A StorageV3 pointer is read back before publication; this worker's
+	// manifest carries no index entries, so it passes.
+	defer mockey.Mock(createStorageConfig).Return(nil).Build().UnPatch()
+	defer mockey.Mock(packed.GetManifestIndexInfos).Return(nil, nil).Build().UnPatch()
+
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	// A fresh StorageV3 copy target publishes its first manifest inline via
 	// UpdateManifest/UpdateSegmentsInfo, which writes through AlterSegments.
@@ -1382,6 +1387,95 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 	s.Equal(commonpb.SegmentState_Flushed, updated.GetState())
 	s.False(updated.GetIsImporting())
 	s.Equal(manifestPath, updated.GetManifestPath())
+}
+
+// newCopiedManifestReadBackFixture wires a StorageV3 copy target plus a target
+// index definition (indexID 300, "vec_idx") into the sync-path test meta, so a
+// test only has to say what reading back the worker's manifest pointer reports.
+func (s *CopySegmentTaskSuite) newCopiedManifestReadBackFixture() (CopySegmentTask, CopySegmentMeta, *meta, *datapb.QueryCopySegmentResponse) {
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, m := newCopySegmentTaskTestMeta(s.T(), task)
+	m.indexMeta = createTestIndexMeta(s.T(), 100, map[int64]*model.Index{
+		300: {CollectionID: 100, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
+	})
+	s.Require().NoError(m.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             2001,
+		CollectionID:   100,
+		PartitionID:    10,
+		State:          commonpb.SegmentState_Importing,
+		InsertChannel:  "ch1",
+		StorageVersion: storage.StorageV3,
+	})))
+
+	resp := &datapb.QueryCopySegmentResponse{
+		TaskID: 1001,
+		State:  datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		SegmentResults: []*datapb.CopySegmentResult{{
+			SegmentId:    2001,
+			Binlogs:      makeTestCopySegmentBinlogs(),
+			ManifestPath: `{"ver":3,"base_path":"files/insert_log/100/10/2001"}`,
+		}},
+	}
+	return task, copyMeta, m, resp
+}
+
+// A worker result whose target manifest still carries an index entry foreign to
+// the target collection is the fingerprint of an old DataNode that skipped the
+// republication (it ignores inherited_index_ids and sends no acknowledgement).
+// The pointer must be rejected before publication and surface as a hard task
+// failure, not silent metadata pollution.
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ForeignManifestIndexEntryFailsTask() {
+	ctx := context.Background()
+	task, copyMeta, m, resp := s.newCopiedManifestReadBackFixture()
+
+	defer mockey.Mock(createStorageConfig).Return(nil).Build().UnPatch()
+	defer mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{
+		// The target's own re-derived entry may coexist with the leftover; only
+		// the foreign one is the failure.
+		{IndexID: 300, BuildID: 9001, IndexName: "vec_idx"},
+		// Inherited from the SOURCE collection - its stored path walks back to
+		// the source's artifacts.
+		{IndexID: 5001, BuildID: 6001, IndexName: "vec_idx"},
+	}, nil).Build().UnPatch()
+
+	err := SyncCopySegmentTask(task, resp, copyMeta, m)
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrServiceInternal)
+	s.Contains(err.Error(), "2001", "the error must name the segment")
+	s.Contains(err.Error(), "5001", "the error must name the foreign index ID")
+
+	// The poisoned pointer was never published and the segment was not flushed.
+	segment := m.GetSegment(ctx, 2001)
+	s.Require().NotNil(segment)
+	s.Equal(commonpb.SegmentState_Importing, segment.GetState())
+	s.Empty(segment.GetManifestPath())
+
+	updatedTask := copyMeta.GetTask(ctx, 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
+	s.Contains(updatedTask.GetReason(), "5001")
+}
+
+// A read-back that finds only target-owned entries (an upgraded worker that ran
+// the republication) publishes the pointer as before.
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CleanManifestReadBackPublishes() {
+	ctx := context.Background()
+	task, copyMeta, m, resp := s.newCopiedManifestReadBackFixture()
+
+	defer mockey.Mock(createStorageConfig).Return(nil).Build().UnPatch()
+	defer mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{
+		{IndexID: 300, BuildID: 9001, IndexName: "vec_idx"},
+	}, nil).Build().UnPatch()
+
+	err := SyncCopySegmentTask(task, resp, copyMeta, m)
+	s.Require().NoError(err)
+
+	segment := m.GetSegment(ctx, 2001)
+	s.Require().NotNil(segment)
+	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
+	s.Equal(resp.GetSegmentResults()[0].GetManifestPath(), segment.GetManifestPath())
+
+	updatedTask := copyMeta.GetTask(ctx, 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, updatedTask.GetState())
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnFailure() {

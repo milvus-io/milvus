@@ -561,22 +561,52 @@ func CopySegmentAndIndexFiles(
 // this copy actually wrote, in one transaction on top of the copied manifest, so
 // the pointer DataCoord publishes is already correct and needs no second commit.
 //
-// The inherited set is not re-read here: DataCoord already read the source
-// manifest to assemble the request and ships the entry IDs in
-// CopySegmentTarget.inherited_index_ids, so a segment that carries no index
-// entries and copied no artifacts skips the transaction and the read alike.
+// The entries to drop are enumerated from the copied manifest ITSELF, never
+// from the CopySegmentTarget.inherited_index_ids list DataCoord shipped. The
+// manifest object was already byte-copied into the target bucket, so it is
+// readable with the target storage config even when the source sits in a
+// foreign bucket DataCoord cannot address - an external restore, which ships
+// no inherited IDs at all and whose stale entries a shipped-list-driven drop
+// would leave behind. The shipped list is advisory only: a mismatch with what
+// the manifest actually holds is logged as an inconsistency, never trusted as
+// the source of drops and never fatal. Only a manifest that genuinely holds no
+// entries, for a copy that recorded no artifacts, skips the transaction.
 func republishCopiedManifestIndexes(
 	targetManifestPath string,
 	target *datapb.CopySegmentTarget,
 	targetStorageConfig *indexpb.StorageConfig,
 	indexInfos map[int64]*datapb.VectorScalarIndexInfo,
 ) (string, error) {
-	inherited := target.GetInheritedIndexIds()
-	drops := make([]packed.DropIndexEntry, 0, len(inherited))
-	for _, indexID := range inherited {
+	existing, err := packed.GetManifestIndexInfos(targetManifestPath, targetStorageConfig)
+	if err != nil {
+		return "", merr.Wrap(err, "failed to enumerate copied manifest index entries")
+	}
+	existingIDs := make(map[int64]struct{}, len(existing))
+	drops := make([]packed.DropIndexEntry, 0, len(existing))
+	for _, entry := range existing {
+		if _, seen := existingIDs[entry.IndexID]; seen {
+			// milvus-storage drops every entry whose index_id matches, so one
+			// drop per unique ID covers duplicates.
+			continue
+		}
+		existingIDs[entry.IndexID] = struct{}{}
 		// No ExpectedBuildID: the target segment is freshly created and
 		// exclusively owned by this task, so no rebuild can race this drop.
-		drops = append(drops, packed.DropIndexEntry{IndexID: indexID})
+		drops = append(drops, packed.DropIndexEntry{IndexID: entry.IndexID})
+	}
+	if inherited := target.GetInheritedIndexIds(); !inheritedIndexSetMatches(existingIDs, inherited) {
+		// Expected for an external restore (DataCoord ships nothing); for a
+		// local source it flags drift between the manifest DataCoord read and
+		// the one this copy actually carried. Either way the manifest is the
+		// authority, so this is a consistency log, not a failure.
+		enumerated := make([]int64, 0, len(existingIDs))
+		for indexID := range existingIDs {
+			enumerated = append(enumerated, indexID)
+		}
+		mlog.Warn(context.TODO(), "copied manifest index entries differ from the inherited set DataCoord shipped; retracting what the manifest holds",
+			mlog.Int64("targetSegmentID", target.GetSegmentId()),
+			mlog.Int64s("manifestIndexIDs", enumerated),
+			mlog.Int64s("shippedInheritedIndexIDs", inherited))
 	}
 
 	adds, err := buildTargetManifestIndexes(targetManifestPath, target, indexInfos)
@@ -602,6 +632,19 @@ func republishCopiedManifestIndexes(
 		mlog.Int("addedEntries", len(adds)),
 		mlog.String("manifestPath", republished))
 	return republished, nil
+}
+
+// inheritedIndexSetMatches reports whether the index-entry IDs DataCoord
+// shipped as inherited match the set the copied manifest actually holds.
+func inheritedIndexSetMatches(enumerated map[int64]struct{}, shipped []int64) bool {
+	shippedSet := make(map[int64]struct{}, len(shipped))
+	for _, indexID := range shipped {
+		if _, ok := enumerated[indexID]; !ok {
+			return false
+		}
+		shippedSet[indexID] = struct{}{}
+	}
+	return len(shippedSet) == len(enumerated)
 }
 
 // buildTargetManifestIndexes projects the index artifacts this copy wrote into
@@ -635,6 +678,20 @@ func buildTargetManifestIndexes(
 			// to be recorded under. DataCoord's syncVectorScalarIndexes logs and
 			// skips the same case.
 			mlog.Warn(context.TODO(), "copied index has no target definition, skipping manifest entry",
+				mlog.Int64("targetSegmentID", target.GetSegmentId()),
+				mlog.String("indexName", info.GetIndexName()))
+			continue
+		}
+		if len(info.GetIndexFilePaths()) == 0 {
+			// An index record that names no artifact - a build too small to
+			// produce files, or an index whose files a snapshot never captured -
+			// has nothing to record in a manifest. It reaches here because
+			// uncompressIndexFiles emits a record per finished SegmentIndex
+			// regardless of its file keys, and the rest of the copy path has
+			// always carried it through harmlessly: syncVectorScalarIndexes
+			// installs it with empty IndexFileKeys. Failing the whole copy on it
+			// here would turn a benign empty record into a failed restore.
+			mlog.Warn(context.TODO(), "copied index carries no artifact path, skipping manifest entry",
 				mlog.Int64("targetSegmentID", target.GetSegmentId()),
 				mlog.String("indexName", info.GetIndexName()))
 			continue
@@ -681,6 +738,8 @@ func buildTargetManifestIndexes(
 // manifest index entry stores exactly that shape, and every reader rebuilds a
 // full path by joining the two, so paths spread across directories cannot be
 // represented and are rejected instead of silently truncated.
+// The caller rejects an empty list before calling; the guard here keeps that a
+// precondition rather than a silent empty prefix.
 func splitIndexArtifactPaths(filePaths []string) (string, []string, error) {
 	if len(filePaths) == 0 {
 		return "", nil, merr.WrapErrServiceInternalMsg("copied index carries no artifact path")
