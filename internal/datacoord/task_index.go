@@ -198,6 +198,17 @@ func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo)
 	if !ok || segIdx == nil {
 		return false, nil
 	}
+	// The index definition can be dropped while the build runs: GC's
+	// recycleUnusedIndexes removes it without waiting for in-flight builds,
+	// and only this build's SegmentIndex record survives. The manifest entry
+	// is named from that definition (GetIndexNameByID), so publishing now
+	// would mint an entry with an empty IndexName that every fail-closed
+	// reader rejects and GC can therefore never retire. Record the result the
+	// legacy way instead; the record goes terminal and dies with the ordinary
+	// dropped-index GC path.
+	if !it.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+		return false, nil
+	}
 	// Project the worker result now so an invalid one is rejected before any
 	// manifest I/O. CommitSegmentManifest repeats this under indexMeta's
 	// per-buildID lock and persists that authoritative copy.
@@ -207,6 +218,15 @@ func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo)
 	}
 	manifestIndex, err := buildManifestIndexInfo(it.meta, segment, finished)
 	if err != nil {
+		return false, err
+	}
+	// Backstop: never commit an entry the fail-closed readers would refuse.
+	// GC's retraction resolve and the startup reload both gate on
+	// manifestIndexFilePathInfo, so an entry it rejects could never be retired
+	// and, with SegmentIndex etcd writes off, would abort every restart. Fail
+	// this publish attempt - do NOT fall back to legacy - so the retry
+	// surfaces the metadata bug instead of papering over it.
+	if err := validateManifestIndexPublishable(it.SegmentID, manifestIndex); err != nil {
 		return false, err
 	}
 
