@@ -43,8 +43,7 @@ ExecPlanNodeVisitor::ExecuteTask(
     std::shared_ptr<milvus::exec::QueryContext> query_context,
     bool collect_bitset) {
     tracer::AutoSpan span("ExecuteTask", tracer::GetRootSpan(), true);
-    span.SetAttribute("active_count",
-                                 query_context->get_active_count());
+    span.SetAttribute("active_count", query_context->get_active_count());
 
     LOG_DEBUG("plannode: {}, active_count: {}, timestamp: {}",
               plan.plan_node_->ToString(),

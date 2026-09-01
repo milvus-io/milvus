@@ -320,7 +320,7 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
         case proto::plan::OpType::InnerMatch: {
             span.SetAttribute("op_type", "InnerMatch");
             span.SetAttribute("query_literal_length",
-                                         static_cast<int>(literal.length()));
+                              static_cast<int>(literal.length()));
             span.SetAttribute("min_gram", min_gram_);
             span.SetAttribute("max_gram", max_gram_);
             bool need_post_filter = literal.length() > max_gram_;
@@ -350,7 +350,7 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
         case proto::plan::OpType::PrefixMatch: {
             span.SetAttribute("op_type", "PrefixMatch");
             span.SetAttribute("query_literal_length",
-                                         static_cast<int>(literal.length()));
+                              static_cast<int>(literal.length()));
             span.SetAttribute("min_gram", min_gram_);
             span.SetAttribute("max_gram", max_gram_);
             if (schema_.data_type() == proto::schema::DataType::JSON) {
@@ -383,7 +383,7 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
         case proto::plan::OpType::PostfixMatch: {
             span.SetAttribute("op_type", "PostfixMatch");
             span.SetAttribute("query_literal_length",
-                                         static_cast<int>(literal.length()));
+                              static_cast<int>(literal.length()));
             span.SetAttribute("min_gram", min_gram_);
             span.SetAttribute("max_gram", max_gram_);
             if (schema_.data_type() == proto::schema::DataType::JSON) {

@@ -29,8 +29,7 @@ void
 PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     tracer::AutoSpan span(
         "PhyExistsFilterExpr::Eval", tracer::GetRootSpan(), true);
-    span.SetAttribute("data_type",
-                                 static_cast<int>(expr_->column_.data_type_));
+    span.SetAttribute("data_type", static_cast<int>(expr_->column_.data_type_));
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
