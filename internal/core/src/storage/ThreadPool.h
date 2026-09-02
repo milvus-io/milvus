@@ -159,7 +159,8 @@ class ThreadPool {
         try {
             executor_->add(std::move(wrap_func));
         } catch (const std::exception& e) {
-            LOG_WARN("Failed to submit task to thread pool {}: {}", name_, e.what());
+            LOG_WARN(
+                "Failed to submit task to thread pool {}: {}", name_, e.what());
         } catch (...) {
             LOG_WARN("Failed to submit task to thread pool {}", name_);
         }
