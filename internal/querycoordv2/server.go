@@ -138,6 +138,7 @@ type Server struct {
 
 type FileResourceObserver interface {
 	InitQueryCoord(manager *session.NodeManager, cluster session.Cluster)
+	IsEmpty() bool
 	Notify()
 }
 
@@ -679,7 +680,7 @@ func (s *Server) watchNodes(revision int64) {
 					Labels:   event.Session.GetServerLabel(),
 				}))
 				s.handleNodeUp(nodeID)
-				if s.fileResourceObserver != nil {
+				if s.fileResourceObserver != nil && !s.fileResourceObserver.IsEmpty() {
 					s.fileResourceObserver.Notify()
 				}
 
