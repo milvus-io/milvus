@@ -321,7 +321,15 @@ func (p *DropSplitVChannelParam) Validate() error {
 // first would never receive another teardown message of any kind — its
 // streamingnode state would outlive the collection itself, with no code path
 // left to clean it.
-
+//
+// PRECONDITION, enforced by the caller: the source must be DRAINED, i.e.
+// channelCheckpoint(source) >= T_switch. The streamingnode side only checks that
+// the vchannel is SPLITTED; the teardown then closes the data sync service with
+// drop=false, which discards the write buffer WITHOUT syncing it, and the
+// coordinator's DropVirtualChannel marks any residual segment dropped. Appending
+// this while the source buffer still holds fence-sealed data therefore loses
+// writes from before T_switch, silently and with a successful append. The drain
+// gate that establishes the precondition lives in the split task, not here.
 func DropSplitVChannel(ctx context.Context, w WALAccesser, param DropSplitVChannelParam) error {
 	if err := param.Validate(); err != nil {
 		return err
