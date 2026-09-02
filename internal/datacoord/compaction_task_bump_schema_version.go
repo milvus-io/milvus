@@ -74,6 +74,11 @@ func (t *bumpSchemaVersionTask) GetTaskProto() *datapb.CompactionTask {
 	return t.taskProto.Load().(*datapb.CompactionTask)
 }
 
+// GetTaskResource: a schema bump rewrites one segment, so it is bounded like a mix compaction.
+func (t *bumpSchemaVersionTask) GetTaskResource() taskcommon.Resource {
+	return mixCompactionTaskResource()
+}
+
 func (t *bumpSchemaVersionTask) GetTaskSlot() int64 {
 	return paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionSlotUsage.GetAsInt64()
 }
@@ -227,7 +232,8 @@ func (t *bumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session
 		return
 	}
 
-	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
+	resource := t.GetTaskResource()
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		log.Warn(context.TODO(), "bumpSchemaVersionTask failed to notify compaction tasks to DataNode",
 			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),

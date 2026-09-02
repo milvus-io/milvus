@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1354,4 +1355,53 @@ func TestImportUtil_ValidateMaxImportJobExceed(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "The number of jobs has reached the limit")
 	})
+}
+
+func TestCalculateTaskBufferSize(t *testing.T) {
+	paramtable.Init()
+	base := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
+	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, Vchannels: []string{"a", "b"}, PartitionIDs: []int64{1, 2, 3}}}
+
+	pre := &preImportTask{}
+	pre.task.Store(&datapb.PreImportTask{JobID: 1, TaskID: 2})
+	assert.Equal(t, base, CalculateTaskBufferSize(pre, job))
+
+	imp := &importTask{}
+	imp.task.Store(&datapb.ImportTaskV2{JobID: 1, TaskID: 3})
+	assert.Equal(t, base*2*3, CalculateTaskBufferSize(imp, job))
+
+	l0Job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 1, Vchannels: []string{"a"}, PartitionIDs: []int64{1},
+		Options: []*commonpb.KeyValuePair{{Key: importutilv2.L0Import, Value: "true"}},
+	}}
+	assert.Equal(t, paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt64(), CalculateTaskBufferSize(imp, l0Job))
+
+	assert.Equal(t, importTaskResource(base*2*3), taskcommon.Resource{CPU: 1, Memory: max(base*2*3, 64<<20)})
+}
+
+func TestImportTaskResource(t *testing.T) {
+	paramtable.Init()
+	base := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
+	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, Vchannels: []string{"a", "b"}, PartitionIDs: []int64{1, 2, 3}}}
+
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetJob(mock.Anything, int64(1)).Return(job)
+	importMeta.EXPECT().GetJob(mock.Anything, int64(2)).Return(nil)
+
+	imp := &importTask{importMeta: importMeta}
+	imp.task.Store(&datapb.ImportTaskV2{JobID: 1, TaskID: 3})
+	assert.Equal(t, importTaskResource(base*2*3), imp.GetTaskResource())
+
+	pre := &preImportTask{importMeta: importMeta}
+	pre.task.Store(&datapb.PreImportTask{JobID: 1, TaskID: 4})
+	assert.Equal(t, importTaskResource(base), pre.GetTaskResource())
+
+	// Job dropped between enqueue and dispatch: the floor, never zero.
+	orphanImport := &importTask{importMeta: importMeta}
+	orphanImport.task.Store(&datapb.ImportTaskV2{JobID: 2, TaskID: 5})
+	assert.Equal(t, defaultTaskResource(), orphanImport.GetTaskResource())
+
+	orphanPre := &preImportTask{importMeta: importMeta}
+	orphanPre.task.Store(&datapb.PreImportTask{JobID: 2, TaskID: 6})
+	assert.Equal(t, defaultTaskResource(), orphanPre.GetTaskResource())
 }

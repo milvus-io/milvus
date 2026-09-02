@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -136,11 +137,46 @@ func (s *SchedulerSuite) TestScheduler_Slots() {
 		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
 		TaskSlot:     10,
 	}
-	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
+	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm, taskcommon.Resource{})
 	s.manager.Add(preimportTask)
 
 	slots := s.scheduler.Slots()
 	s.Equal(int64(10), slots)
+}
+
+func (s *SchedulerSuite) TestScheduler_Resource() {
+	// A pending task books what DataCoord priced it at.
+	preimportReq := &datapb.PreImportRequest{
+		JobID:        1,
+		TaskID:       2,
+		CollectionID: 3,
+		PartitionIDs: []int64{4},
+		Vchannels:    []string{"ch-0"},
+		Schema:       s.schema,
+		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
+		TaskSlot:     10,
+	}
+	s.manager.Add(NewPreImportTask(preimportReq, s.manager, s.cm, taskcommon.Resource{CPU: 1, Memory: 256 << 20}))
+	s.Equal(taskcommon.Resource{CPU: 1, Memory: 256 << 20}, s.scheduler.Resource())
+
+	// A second task adds to the ledger.
+	importReq := &datapb.ImportRequest{
+		JobID:        1,
+		TaskID:       3,
+		CollectionID: 3,
+		PartitionIDs: []int64{4},
+		Vchannels:    []string{"ch-0"},
+		Schema:       s.schema,
+		Files:        []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
+		TaskSlot:     10,
+	}
+	s.manager.Add(NewImportTask(importReq, s.manager, s.syncMgr, s.cm, taskcommon.Resource{CPU: 2, Memory: 512 << 20}))
+	s.Equal(taskcommon.Resource{CPU: 3, Memory: 768 << 20}, s.scheduler.Resource())
+
+	// A completed task no longer books anything.
+	s.manager.Update(2, UpdateState(datapb.ImportTaskStateV2_Completed))
+	s.manager.Update(3, UpdateState(datapb.ImportTaskStateV2_Completed))
+	s.Equal(taskcommon.Resource{}, s.scheduler.Resource())
 }
 
 func (s *SchedulerSuite) TestScheduler_Start_Preimport() {
@@ -173,7 +209,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Preimport() {
 		Schema:       s.schema,
 		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
 	}
-	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
+	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm, taskcommon.Resource{})
 	s.manager.Add(preimportTask)
 
 	go s.scheduler.Start()
@@ -221,7 +257,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Preimport_Failed() {
 		Schema:       s.schema,
 		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
 	}
-	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
+	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm, taskcommon.Resource{})
 	s.manager.Add(preimportTask)
 
 	go s.scheduler.Start()
@@ -282,7 +318,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import() {
 			},
 		},
 	}
-	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
+	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm, taskcommon.Resource{})
 	s.manager.Add(importTask)
 
 	go s.scheduler.Start()
@@ -343,7 +379,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import_Failed() {
 			},
 		},
 	}
-	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
+	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm, taskcommon.Resource{})
 	s.manager.Add(importTask)
 
 	go s.scheduler.Start()
@@ -382,7 +418,7 @@ func (s *SchedulerSuite) TestScheduler_ReadFileStat() {
 		Schema:       s.schema,
 		ImportFiles:  []*internalpb.ImportFile{importFile},
 	}
-	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
+	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm, taskcommon.Resource{})
 	s.manager.Add(preimportTask)
 	err = preimportTask.(*PreImportTask).readFileStat(s.reader, 0)
 	s.NoError(err)
@@ -434,7 +470,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFile() {
 			},
 		},
 	}
-	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
+	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm, taskcommon.Resource{})
 	s.manager.Add(importTask)
 	err = importTask.(*ImportTask).importFile(s.reader)
 	s.NoError(err)
@@ -547,7 +583,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
 			},
 		},
 	}
-	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
+	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm, taskcommon.Resource{})
 	s.manager.Add(importTask)
 	err = importTask.(*ImportTask).importFile(s.reader)
 	s.NoError(err)

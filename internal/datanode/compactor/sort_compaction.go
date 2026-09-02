@@ -254,6 +254,10 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithCollectionID(t.collectionID),
+		// The default read buffer (32MB) makes the packed reader fetch column
+		// chunks nearly serially; a sort streams its whole input exactly once,
+		// so give it a large prefetch window.
+		storage.WithBufferSize(paramtable.Get().DataNodeCfg.CompactionSortReadBufferSize.GetAsSize()),
 	)
 	if err != nil {
 		log.Warn(ctx, "error creating insert binlog reader", mlog.Err(err))

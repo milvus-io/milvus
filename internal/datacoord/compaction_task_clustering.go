@@ -77,6 +77,12 @@ func (t *clusteringCompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
 }
 
+// GetTaskResource: a clustering compaction buffers many output segments at
+// once, so it is priced by a flat configured budget rather than its input.
+func (t *clusteringCompactionTask) GetTaskResource() taskcommon.Resource {
+	return clusteringCompactionTaskResource()
+}
+
 func (t *clusteringCompactionTask) GetTaskSlot() int64 {
 	return paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
 }
@@ -771,7 +777,8 @@ func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 		mlog.Warn(context.TODO(), "Failed to BuildCompactionRequest", mlog.Err(err))
 		return err
 	}
-	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID())
+	resource := t.GetTaskResource()
+	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		originNodeID := t.GetTaskProto().GetNodeID()
 		mlog.Warn(context.TODO(), "Failed to notify compaction tasks to DataNode",

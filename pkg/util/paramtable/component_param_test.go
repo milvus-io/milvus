@@ -809,6 +809,17 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100, Params.MaxSegmentsPerCopyTask.GetAsInt())
 		params.Save("dataCoord.import.maxSegmentsPerCopyTask", "200")
 		assert.Equal(t, 200, Params.MaxSegmentsPerCopyTask.GetAsInt())
+
+		assert.Equal(t, int64(8), Params.TaskResourceVectorIndexCPU.GetAsInt64())
+		assert.Equal(t, int64(8), Params.TaskResourceAnalyzeCPU.GetAsInt64())
+		assert.Equal(t, int64(8), Params.TaskResourceClusteringCompactionCPU.GetAsInt64())
+		assert.Equal(t, int64(1), Params.TaskResourceDefaultCPU.GetAsInt64())
+		assert.Equal(t, 2.0, Params.TaskResourceIndexMemoryFactor.GetAsFloat())
+		assert.Equal(t, 2.0, Params.TaskResourceStatsMemoryFactor.GetAsFloat())
+		assert.Equal(t, 2.0, Params.TaskResourceL0CompactionMemoryFactor.GetAsFloat())
+		assert.Equal(t, 2.0, Params.TaskResourceAnalyzeMemoryFactor.GetAsFloat())
+		assert.Equal(t, int64(32)<<30, Params.TaskResourceClusteringCompactionMemory.GetAsSize())
+		assert.Equal(t, int64(64)<<20, Params.TaskResourceMinTaskMemory.GetAsSize())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
@@ -892,6 +903,7 @@ func TestComponentParam(t *testing.T) {
 
 		// compaction
 		assert.Equal(t, 10, Params.MaxCompactionConcurrency.GetAsInt())
+		assert.Equal(t, int64(2)<<30, Params.CompactionSortReadBufferSize.GetAsSize())
 
 		assert.Equal(t, 4, Params.MaxVecIndexBuildConcurrency.GetAsInt())
 

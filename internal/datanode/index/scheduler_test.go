@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -129,6 +130,10 @@ func (t *fakeTask) GetSlot() int64 {
 	return 1
 }
 
+func (t *fakeTask) GetResource() taskcommon.Resource {
+	return taskcommon.Resource{CPU: 1, Memory: 100}
+}
+
 func (t *fakeTask) OnEnqueue(ctx context.Context) error {
 	_taskwg.Add(1)
 	t.state = fakeTaskEnqueued
@@ -202,6 +207,28 @@ func newTask(cancelStage fakeTaskState, reterror map[fakeTaskState]error, expect
 	}
 }
 
+func TestIndexTaskQueue_Resource(t *testing.T) {
+	paramtable.Init()
+
+	queue := NewIndexBuildTaskQueue(&TaskScheduler{ctx: context.Background()})
+	task := newTask(fakeTaskSavedIndexes, nil, indexpb.JobState_JobStateFinished)
+
+	assert.NoError(t, queue.Enqueue(task))
+	// Reset() balances the _taskwg.Add(1) that OnEnqueue did, so the other
+	// tests in this package that wait on _taskwg are unaffected.
+	defer task.Reset()
+
+	assert.Equal(t, int64(1), queue.GetUsingSlot())
+	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 100}, queue.GetUsingResource())
+
+	queue.AddActiveTask(task)
+	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 100}, queue.GetUsingResource())
+
+	queue.PopActiveTask(task.Name())
+	assert.Equal(t, int64(0), queue.GetUsingSlot())
+	assert.Equal(t, taskcommon.Resource{}, queue.GetUsingResource())
+}
+
 func TestIndexTaskScheduler(t *testing.T) {
 	paramtable.Init()
 
@@ -270,7 +297,7 @@ func newSchedulerIndexBuildTask(t *testing.T, manager *TaskManager, buildID int6
 	manager.LoadOrStoreIndexTask(req.GetClusterID(), req.GetBuildID(), &IndexTaskInfo{
 		State: commonpb.IndexState_InProgress,
 	})
-	return NewIndexBuildTask(ctx, cancel, req, nil, manager, nil)
+	return NewIndexBuildTask(ctx, cancel, req, nil, manager, nil, taskcommon.Resource{})
 }
 
 func TestIndexTaskSchedulerRecordsIndexTaskCost(t *testing.T) {
@@ -344,4 +371,29 @@ func TestIndexTaskSchedulerRecordsIndexTaskCost(t *testing.T) {
 		assert.GreaterOrEqual(t, info.CostTimeMs, int64(0))
 		assert.Equal(t, int64(hardware.GetCPUNum()), info.CostCPUNum)
 	})
+}
+
+// Every index-family task reports exactly the cpu/memory its constructor was
+// handed -- the estimate DataCoord put in the CreateTask properties -- and
+// nothing when the coordinator predates them.
+func TestIndexTaskGetResource(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager := NewTaskManager(ctx)
+	want := taskcommon.Resource{CPU: 2, Memory: 1 << 30}
+
+	assert.Equal(t, want, NewIndexBuildTask(ctx, cancel,
+		&workerpb.CreateJobRequest{}, nil, manager, nil, want).GetResource())
+	assert.Equal(t, want, NewStatsTask(ctx, cancel,
+		&workerpb.CreateStatsRequest{}, manager, nil, nil, want).GetResource())
+	assert.Equal(t, want, NewAnalyzeTask(ctx, cancel,
+		&workerpb.AnalyzeRequest{}, manager, nil, want).GetResource())
+
+	// A coordinator that predates the properties books nothing.
+	assert.True(t, NewIndexBuildTask(ctx, cancel,
+		&workerpb.CreateJobRequest{}, nil, manager, nil, taskcommon.Resource{}).GetResource().IsZero())
+	assert.True(t, NewStatsTask(ctx, cancel,
+		&workerpb.CreateStatsRequest{}, manager, nil, nil, taskcommon.Resource{}).GetResource().IsZero())
+	assert.True(t, NewAnalyzeTask(ctx, cancel,
+		&workerpb.AnalyzeRequest{}, manager, nil, taskcommon.Resource{}).GetResource().IsZero())
 }

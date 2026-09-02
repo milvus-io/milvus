@@ -43,6 +43,8 @@ type analyzeTask struct {
 
 	schema *schemapb.CollectionSchema
 	meta   *meta
+
+	resource resourceCache
 }
 
 var _ globalTask.Task = (*analyzeTask)(nil)
@@ -79,6 +81,44 @@ func (at *analyzeTask) GetTaskType() taskcommon.Type {
 
 func (at *analyzeTask) GetTaskState() taskcommon.State {
 	return at.State
+}
+
+// GetTaskResource prices the analyze by the raw vectors it trains on:
+// rows x dim x element size across every input segment.
+func (at *analyzeTask) GetTaskResource() taskcommon.Resource {
+	return at.resource.get(func() (taskcommon.Resource, bool) {
+		// newAnalyzeTask snapshots the schema, and the snapshot is empty when
+		// the collection was not cached yet. Resolve it again here, or a task
+		// built before the cache was warmed would be priced at the floor for
+		// its whole life - and, since the floor is never cached, re-walk every
+		// input segment on every scheduling round.
+		//
+		// The result is deliberately not written back to at.schema: other code
+		// reads that field without synchronization.
+		schema := at.schema
+		if schema == nil {
+			if coll := at.meta.GetCollection(at.GetCollectionID()); coll != nil {
+				schema = coll.Schema
+			}
+		}
+		field := typeutil.GetFieldByID(schema, at.GetFieldID())
+		if field == nil {
+			return defaultTaskResource(), false
+		}
+		var rows int64
+		for _, segID := range at.GetSegmentIDs() {
+			segment := at.meta.GetHealthySegment(context.TODO(), segID)
+			if segment == nil {
+				return defaultTaskResource(), false
+			}
+			rows += segment.GetNumOfRows()
+		}
+		raw := vectorFieldBytes(field, rows)
+		if raw <= 0 {
+			return defaultTaskResource(), false
+		}
+		return analyzeTaskResource(raw), true
+	})
 }
 
 func (at *analyzeTask) GetTaskSlot() int64 {
@@ -231,6 +271,7 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 	req.MaxClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxClusterSizeRatio.GetAsFloat()
 	req.MaxClusterSize = Params.DataCoordCfg.ClusteringCompactionMaxClusterSize.GetAsSize()
 	req.TaskSlot = Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64()
+	resource := at.GetTaskResource()
 
 	WrapPluginContext(task.CollectionID, at.schema.GetProperties(), req)
 
@@ -242,7 +283,7 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		}
 	}()
 
-	err = cluster.CreateAnalyze(nodeID, req)
+	err = cluster.CreateAnalyze(nodeID, req, resource)
 	if err != nil {
 		log.Warn(context.TODO(), "assign analyze task to worker failed", mlog.Err(err))
 		return

@@ -129,6 +129,20 @@ func (t *importTask) GetTaskSlot() int64 {
 	return int64(CalculateTaskSlot(t, t.importMeta))
 }
 
+// GetTaskResource prices an import by the write buffer it holds. It is not
+// cached, and does not need to be: CalculateTaskBufferSize reads three cheap
+// job fields (vchannels, partitions, the L0 option), so re-reading them every
+// round costs nothing a cache would save. Not caching also means a job whose
+// partitions or vchannels are amended between enqueue and dispatch is priced on
+// what it will actually run with.
+func (t *importTask) GetTaskResource() taskcommon.Resource {
+	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
+	if job == nil {
+		return defaultTaskResource()
+	}
+	return importTaskResource(CalculateTaskBufferSize(t, job))
+}
+
 func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	mlog.Info(context.TODO(), "processing pending import task...", WrapTaskLog(t)...)
 	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
@@ -137,7 +151,8 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
 		return
 	}
-	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
+	resource := t.GetTaskResource()
+	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "import failed", WrapTaskLog(t, mlog.Err(err))...)
 		t.retryTimes++

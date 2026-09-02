@@ -319,7 +319,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestCreateTaskOnWorker() {
 
 		task := s.generateBasicTask()
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(merr.WrapErrNodeNotFound(1))
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(merr.WrapErrNodeNotFound(1))
 		task.CreateTaskOnWorker(1, cluster)
 		// Should remain in pipelining state when CreateCompaction fails
 		s.Equal(datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
@@ -353,7 +353,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestCreateTaskOnWorker() {
 
 		task := s.generateBasicTask()
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		task.CreateTaskOnWorker(1, cluster)
 		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
 		s.Equal(int64(1), task.GetTaskProto().GetNodeID())

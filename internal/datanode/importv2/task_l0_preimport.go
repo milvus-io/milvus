@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -45,6 +46,7 @@ type L0PreImportTask struct {
 	vchannels    []string
 	schema       *schemapb.CollectionSchema
 	req          *datapb.PreImportRequest
+	resource     taskcommon.Resource
 
 	manager TaskManager
 	cm      storage.ChunkManager
@@ -53,6 +55,7 @@ type L0PreImportTask struct {
 func NewL0PreImportTask(req *datapb.PreImportRequest,
 	manager TaskManager,
 	cm storage.ChunkManager,
+	resource taskcommon.Resource,
 ) Task {
 	fileStats := lo.Map(req.GetImportFiles(), func(file *internalpb.ImportFile, _ int) *datapb.ImportFileStats {
 		return &datapb.ImportFileStats{
@@ -74,6 +77,7 @@ func NewL0PreImportTask(req *datapb.PreImportRequest,
 		vchannels:    req.GetVchannels(),
 		schema:       req.GetSchema(),
 		req:          req,
+		resource:     resource,
 		manager:      manager,
 		cm:           cm,
 	}
@@ -99,6 +103,10 @@ func (t *L0PreImportTask) GetSlots() int64 {
 	return t.req.GetTaskSlot()
 }
 
+func (t *L0PreImportTask) GetResource() taskcommon.Resource {
+	return t.resource
+}
+
 // L0 preimport task buffer size is fixed
 func (t *L0PreImportTask) GetBufferSize() int64 {
 	return paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
@@ -118,6 +126,7 @@ func (t *L0PreImportTask) Clone() Task {
 		vchannels:     t.GetVchannels(),
 		schema:        t.GetSchema(),
 		req:           t.req,
+		resource:      t.resource,
 		manager:       t.manager,
 		cm:            t.cm,
 	}

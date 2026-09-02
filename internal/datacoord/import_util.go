@@ -828,6 +828,26 @@ func ValidateMaxImportJobExceed(ctx context.Context, importMeta ImportMeta) erro
 	return nil
 }
 
+// CalculateTaskBufferSize is the write buffer an import task holds in memory:
+// the base buffer per (vchannel, partition) pair for a full import, one base
+// buffer for a pre-import, and the delete buffer for an L0 import.
+func CalculateTaskBufferSize(task ImportTask, job ImportJob) int64 {
+	baseBufferSize := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
+	var taskBufferSize int64
+	if task.GetType() == ImportTaskType {
+		// ImportTask use dynamic buffer size calculated by vchannels and partitions
+		taskBufferSize = baseBufferSize * int64(len(job.GetVchannels())) * int64(len(job.GetPartitionIDs()))
+	} else {
+		// PreImportTask use fixed buffer size
+		taskBufferSize = baseBufferSize
+	}
+	if importutilv2.IsL0Import(job.GetOptions()) {
+		// L0 import use fixed buffer size
+		taskBufferSize = paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt64()
+	}
+	return taskBufferSize
+}
+
 // CalculateTaskSlot calculates the required resource slots for an import task based on CPU and memory constraints
 // The function uses a dual-constraint approach:
 // 1. CPU constraint: Based on the number of files to process in parallel
@@ -844,22 +864,8 @@ func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
 	}
 
 	// Calculate memory-based slots
-	var taskBufferSize int
-	baseBufferSize := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt()
-	if task.GetType() == ImportTaskType {
-		// ImportTask use dynamic buffer size calculated by vchannels and partitions
-		taskBufferSize = baseBufferSize * len(job.GetVchannels()) * len(job.GetPartitionIDs())
-	} else {
-		// PreImportTask use fixed buffer size
-		taskBufferSize = baseBufferSize
-	}
-	isL0Import := importutilv2.IsL0Import(job.GetOptions())
-	if isL0Import {
-		// L0 import use fixed buffer size
-		taskBufferSize = paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt()
-	}
 	memoryLimitPerSlot := paramtable.Get().DataCoordCfg.ImportMemoryLimitPerSlot.GetAsInt()
-	memoryBasedSlots := taskBufferSize / memoryLimitPerSlot
+	memoryBasedSlots := int(CalculateTaskBufferSize(task, job)) / memoryLimitPerSlot
 
 	// Return the larger value to ensure both CPU and memory constraints are satisfied
 	if cpuBasedSlots > memoryBasedSlots {

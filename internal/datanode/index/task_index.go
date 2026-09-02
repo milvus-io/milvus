@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -59,6 +60,7 @@ type indexBuildTask struct {
 	tr             *timerecord.TimeRecorder
 	queueDur       time.Duration
 	manager        *TaskManager
+	resource       taskcommon.Resource
 
 	pluginContext *indexcgopb.StoragePluginContext
 }
@@ -69,6 +71,7 @@ func NewIndexBuildTask(ctx context.Context,
 	cm storage.ChunkManager,
 	manager *TaskManager,
 	pluginContext *indexcgopb.StoragePluginContext,
+	resource taskcommon.Resource,
 ) *indexBuildTask {
 	t := &indexBuildTask{
 		ident:         fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetBuildID()),
@@ -79,6 +82,7 @@ func NewIndexBuildTask(ctx context.Context,
 		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.GetBuildID(), req.GetClusterID())),
 		manager:       manager,
 		pluginContext: pluginContext,
+		resource:      resource,
 	}
 
 	t.parseParams()
@@ -155,6 +159,10 @@ func (it *indexBuildTask) OnEnqueue(ctx context.Context) error {
 
 func (it *indexBuildTask) GetSlot() int64 {
 	return it.req.GetTaskSlot()
+}
+
+func (it *indexBuildTask) GetResource() taskcommon.Resource {
+	return it.resource
 }
 
 func (it *indexBuildTask) IsVectorIndex() bool {

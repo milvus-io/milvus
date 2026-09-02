@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -40,7 +41,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetPlanID().Return(int64(1))
 		mockC.EXPECT().GetSlotUsage().Return(int64(8))
 
-		succeed, err := ex.Enqueue(mockC)
+		succeed, err := ex.Enqueue(mockC, taskcommon.Resource{})
 		assert.True(t, succeed)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(ex.taskCh))
@@ -60,11 +61,11 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetSlotUsage().Return(int64(8))
 		mockC.EXPECT().GetChannelName().Return("ch1")
 
-		succeed, err := ex.Enqueue(mockC)
+		succeed, err := ex.Enqueue(mockC, taskcommon.Resource{})
 		assert.True(t, succeed)
 		assert.NoError(t, err)
 
-		succeed, err = ex.Enqueue(mockC)
+		succeed, err = ex.Enqueue(mockC, taskcommon.Resource{})
 		assert.False(t, succeed)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, merr.ErrDuplicatedCompactionTask))
@@ -87,7 +88,7 @@ func TestCompactionExecutor(t *testing.T) {
 		enqueueDone := make(chan struct{})
 		go func() {
 			defer close(enqueueDone)
-			succeed, err := ex.Enqueue(mockC)
+			succeed, err := ex.Enqueue(mockC, taskcommon.Resource{})
 			assert.True(t, succeed)
 			assert.NoError(t, err)
 		}()
@@ -173,7 +174,7 @@ func TestCompactionExecutor(t *testing.T) {
 				mockC.EXPECT().GetSlotUsage().Return(int64(0)).Times(2)
 				mockC.EXPECT().GetCompactionType().Return(tc.compactionType)
 
-				succeed, err := ex.Enqueue(mockC)
+				succeed, err := ex.Enqueue(mockC, taskcommon.Resource{})
 				assert.True(t, succeed)
 				assert.NoError(t, err)
 				assert.Equal(t, tc.expectedSlotUsage, ex.Slots())
@@ -207,7 +208,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().Compact().Return(result, nil)
 		mockC.EXPECT().Complete().Return()
 
-		succeed, err := ex.Enqueue(mockC)
+		succeed, err := ex.Enqueue(mockC, taskcommon.Resource{})
 		assert.True(t, succeed)
 		assert.NoError(t, err)
 
@@ -235,7 +236,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().Compact().Return(nil, errors.New("compaction failed"))
 		mockC.EXPECT().Complete().Return()
 
-		succeed, err := ex.Enqueue(mockC)
+		succeed, err := ex.Enqueue(mockC, taskcommon.Resource{})
 		assert.True(t, succeed)
 		assert.NoError(t, err)
 
@@ -401,7 +402,7 @@ func TestCompactionExecutor(t *testing.T) {
 				mockC.EXPECT().GetSlotUsage().Return(int64(1))
 				mockC.EXPECT().GetChannelName().Return("ch1").Maybe()
 
-				ex.Enqueue(mockC)
+				ex.Enqueue(mockC, taskcommon.Resource{})
 			}(i)
 		}
 
@@ -422,7 +423,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetSlotUsage().Return(slotUsage).Times(2)
 		mockC.EXPECT().Complete().Return()
 
-		ex.Enqueue(mockC)
+		ex.Enqueue(mockC, taskcommon.Resource{})
 		assert.Equal(t, slotUsage, ex.Slots())
 
 		result := &datapb.CompactionPlanResult{PlanID: planID}
@@ -502,7 +503,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().Complete().Return()
 		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
 
-		ex.Enqueue(mockC)
+		ex.Enqueue(mockC, taskcommon.Resource{})
 		ex.mu.RLock()
 		assert.Equal(t, datapb.CompactionTaskState_executing, ex.tasks[planID].state)
 		ex.mu.RUnlock()
@@ -566,7 +567,7 @@ func TestCompactionExecutor(t *testing.T) {
 			}
 			mockC.EXPECT().Compact().Return(result, nil)
 
-			succeed, err := ex.Enqueue(mockC)
+			succeed, err := ex.Enqueue(mockC, taskcommon.Resource{})
 			require.True(t, succeed)
 			require.NoError(t, err)
 
@@ -578,5 +579,34 @@ func TestCompactionExecutor(t *testing.T) {
 		for _, result := range results {
 			assert.Equal(t, datapb.CompactionTaskState_completed, result.State)
 		}
+	})
+
+	t.Run("Test_Resource_Bookkeeping", func(t *testing.T) {
+		ex := NewExecutor()
+		mockC := NewMockCompactor(t)
+		mockC.EXPECT().GetPlanID().Return(int64(1))
+		mockC.EXPECT().GetSlotUsage().Return(int64(8))
+		mockC.EXPECT().Complete().Return()
+
+		_, err := ex.Enqueue(mockC, taskcommon.Resource{CPU: 2, Memory: 1 << 30})
+		assert.NoError(t, err)
+		assert.Equal(t, taskcommon.Resource{CPU: 2, Memory: 1 << 30}, ex.Resource())
+
+		// Completion releases exactly what enqueue booked, without asking the task again.
+		ex.completeTask(1, &datapb.CompactionPlanResult{PlanID: 1})
+		assert.Equal(t, taskcommon.Resource{}, ex.Resource())
+	})
+
+	t.Run("Test_Resource_Bookkeeping_OldCoordinator", func(t *testing.T) {
+		ex := NewExecutor()
+		mockC := NewMockCompactor(t)
+		mockC.EXPECT().GetPlanID().Return(int64(2))
+		mockC.EXPECT().GetSlotUsage().Return(int64(8))
+
+		// A task from a coordinator that predates the properties books nothing.
+		_, err := ex.Enqueue(mockC, taskcommon.Resource{})
+		assert.NoError(t, err)
+		assert.Equal(t, int64(8), ex.Slots())
+		assert.True(t, ex.Resource().IsZero())
 	})
 }

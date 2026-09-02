@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/taskcost"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -44,6 +45,7 @@ type TaskQueue interface {
 	Enqueue(t Task) error
 	GetTaskNum() (int, int)
 	GetUsingSlot() int64
+	GetUsingResource() taskcommon.Resource
 	GetActiveSlot() int64
 }
 
@@ -59,6 +61,11 @@ type IndexTaskQueue struct {
 
 	utBufChan chan struct{} // to block scheduler
 	usingSlot atomic.Int64
+
+	// Cpu/memory booked for enqueued and active tasks. Sits beside usingSlot
+	// with the identical lifecycle; DataCoord estimates it.
+	usingCPU    atomic.Int64
+	usingMemory atomic.Int64
 
 	sched *TaskScheduler
 }
@@ -92,6 +99,11 @@ func (queue *IndexTaskQueue) addUnissuedTask(t Task) error {
 
 func (queue *IndexTaskQueue) GetUsingSlot() int64 {
 	return queue.usingSlot.Load()
+}
+
+// GetUsingResource returns the cpu/memory booked by enqueued and active tasks.
+func (queue *IndexTaskQueue) GetUsingResource() taskcommon.Resource {
+	return taskcommon.Resource{CPU: queue.usingCPU.Load(), Memory: queue.usingMemory.Load()}
 }
 
 func (queue *IndexTaskQueue) GetActiveSlot() int64 {
@@ -143,6 +155,9 @@ func (queue *IndexTaskQueue) PopActiveTask(tName string) Task {
 	if ok {
 		delete(queue.activeTasks, tName)
 		queue.usingSlot.Sub(t.GetSlot())
+		res := t.GetResource()
+		queue.usingCPU.Sub(res.CPU)
+		queue.usingMemory.Sub(res.Memory)
 		return t
 	}
 	mlog.Debug(queue.sched.ctx, "task was not found in the active task list", mlog.String("TaskName", tName))
@@ -160,6 +175,9 @@ func (queue *IndexTaskQueue) Enqueue(t Task) error {
 	}
 
 	queue.usingSlot.Add(t.GetSlot())
+	res := t.GetResource()
+	queue.usingCPU.Add(res.CPU)
+	queue.usingMemory.Add(res.Memory)
 	return nil
 }
 
