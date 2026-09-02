@@ -371,15 +371,14 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	mt.indexMeta.manifestBackedSegment = mt.isManifestBackedSegment
 	mt.indexMeta.onSegmentIndexRemoved = mt.refreshManifestIndexBackfillPending
 
-	// Runs only when index records are published to manifests, where a manifest
-	// is the sole durable record of a finished artifact. Transitional: this
-	// becomes unconditional (driven by the per-segment manifestHasIndex marker)
-	// once the marker exists, so records published while the switch was on stay
-	// visible after it is turned back off.
-	if writeSegmentIndexToManifest() {
-		if err := mt.reloadSegmentIndexesFromManifests(ctx); err != nil {
-			return nil, err
-		}
+	// Unconditional and driven by the durable per-segment manifest_has_index
+	// marker, NOT by writeSegmentIndexToManifest: a record published to a
+	// manifest under either setting must stay visible after any flip of the
+	// switch, or flipping it would orphan those indexes and GC would delete
+	// their files. A cluster with no marked segments reads nothing here, so
+	// the default startup stays free of object-storage I/O.
+	if err := mt.reloadSegmentIndexesFromManifests(ctx); err != nil {
+		return nil, err
 	}
 
 	// After both halves of meta are loaded, so the hint reflects the final

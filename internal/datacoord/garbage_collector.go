@@ -1124,6 +1124,14 @@ func (gc *garbageCollector) getManifestIndexFiles(ctx context.Context, segment *
 	if segment == nil || segment.GetStorageVersion() != storage.StorageV3 || segment.GetManifestPath() == "" {
 		return nil, false, nil
 	}
+	// A false marker proves the manifest never carried an index entry:
+	// nothing to enumerate, and a dropped V3 segment on an all-etcd cluster
+	// must not have its recycling blocked by an unreadable manifest that
+	// cannot name index files anyway. The etcd-record side of the sweep
+	// covers the same files independently.
+	if !segment.GetManifestHasIndex() {
+		return nil, false, nil
+	}
 	manifestIndexes, err := packed.GetManifestIndexInfos(segment.GetManifestPath(), createStorageConfig())
 	if err != nil {
 		return nil, false, merr.Wrap(err, "failed to read manifest index metadata")
@@ -1615,6 +1623,14 @@ func (gc *garbageCollector) resolveManifestIndexRetraction(ctx context.Context, 
 	// impossible and pointless there, and treating the refusal as an error
 	// would block this index's files from ever being deleted.
 	if !isSegmentHealthy(segment) {
+		return nil, false, nil
+	}
+	// A false marker proves the manifest never carried an entry, so there is
+	// nothing to retract and no reason to pay the read or its failure
+	// surface. ManifestPublished keeps the read for a record that claims its
+	// entry was published even though the segment lacks the marker - defense
+	// in depth for state written by pre-marker builds of this feature.
+	if !segment.GetManifestHasIndex() && !segIdx.ManifestPublished {
 		return nil, false, nil
 	}
 	manifestIndexes, err := packed.GetManifestIndexInfos(segment.GetManifestPath(), createStorageConfig())
