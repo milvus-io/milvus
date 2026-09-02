@@ -32,7 +32,6 @@ type roWALAdaptorImpl struct {
 	scanners        *typeutil.ConcurrentMap[int64, wal.Scanner]
 	cleanup         func()
 	scanMetrics     *metricsutil.ScanMetrics
-	forceRecovery   bool
 }
 
 func (w *roWALAdaptorImpl) WALName() message.WALName {
@@ -55,6 +54,10 @@ func (w *roWALAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel 
 	panic("we cannot acquire lastest mvcc timestamp from a read only wal")
 }
 
+func (w *roWALAdaptorImpl) TransformLog() wal.TransformLogAccesser {
+	return wal.NewTransformLogErrorAccesser(status.NewOnShutdownError("read only wal does not serve transform log"))
+}
+
 func (w *roWALAdaptorImpl) GetReplicateCheckpoint() (*wal.ReplicateCheckpoint, error) {
 	panic("we cannot get replicate checkpoint from a read only wal")
 }
@@ -63,7 +66,7 @@ func (w *roWALAdaptorImpl) GetSalvageCheckpoint() []*wal.ReplicateCheckpoint {
 	panic("we cannot get salvage checkpoint from a read only wal")
 }
 
-// Append writes a record to the log.
+// Append writes a record to the logger.
 func (w *roWALAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage) (*wal.AppendResult, error) {
 	panic("we cannot append message into a read only wal")
 }
@@ -71,11 +74,6 @@ func (w *roWALAdaptorImpl) Append(ctx context.Context, msg message.MutableMessag
 // Append a record to the log asynchronously.
 func (w *roWALAdaptorImpl) AppendAsync(ctx context.Context, msg message.MutableMessage, cb func(*wal.AppendResult, error)) {
 	panic("we cannot append message into a read only wal")
-}
-
-// ForceRecovery force recovery wal, currently only used for Alter WAL
-func (w *roWALAdaptorImpl) ForceRecovery(forceRecovery bool) {
-	w.forceRecovery = forceRecovery
 }
 
 // Read returns a scanner for reading records from the wal.
@@ -101,8 +99,7 @@ func (w *roWALAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.S
 		w.roWALImpls,
 		opts,
 		w.scanMetrics.NewScannerMetrics(),
-		func() { w.scanners.Remove(id) },
-		w.forceRecovery)
+		func() { w.scanners.Remove(id) })
 	w.scanners.Insert(id, s)
 	return s, nil
 }

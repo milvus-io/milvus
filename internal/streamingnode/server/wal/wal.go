@@ -21,8 +21,12 @@ type WAL interface {
 
 	ROWAL
 
-	// GetLatestMVCCTimestamp get the latest mvcc timestamp of the wal at vchannel.
+	// GetLatestMVCCTimestamp returns the growing MVCC frontier of the vchannel.
+	// TODO: remove it after legacy consumers switch to QueryPlanMVCC.
 	GetLatestMVCCTimestamp(ctx context.Context, vchannel string) (uint64, error)
+
+	// TransformLog returns the RecoveryStorage-owned TransformLog accesser.
+	TransformLog() TransformLogAccesser
 
 	// GetReplicateCheckpoint returns the replicate checkpoint of the wal.
 	// If the wal is not on replicating mode, it will return ReplicateViolationError.
@@ -40,6 +44,19 @@ type WAL interface {
 
 	// Append a record to the log asynchronously.
 	AppendAsync(ctx context.Context, msg message.MutableMessage, cb func(*AppendResult, error))
+}
+
+type WALUnwrapper interface {
+	UnwrapWAL() WAL
+}
+
+func Unwrap(l WAL) WAL {
+	if unwrapper, ok := l.(WALUnwrapper); ok {
+		if raw := unwrapper.UnwrapWAL(); raw != nil {
+			return raw
+		}
+	}
+	return l
 }
 
 // ROWAL is the read-only WAL interface.

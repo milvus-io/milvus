@@ -490,11 +490,6 @@ var (
 		Help: "the final persisted timetick tick of recovery storage seen",
 	}, WALChannelLabelName, WALChannelTermLabelName)
 
-	WALRecoveryInconsistentEventTotal = newWALCounterVec(prometheus.CounterOpts{
-		Name: "recovery_inconsistent_event_total",
-		Help: "Total of recovery inconsistent event",
-	}, WALChannelLabelName, WALChannelTermLabelName)
-
 	WALRecoveryIsOnPersisting = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "recovery_is_on_persisting",
 		Help: "Is recovery storage on persisting",
@@ -703,7 +698,6 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALRecoveryInfo)
 	registry.MustRegister(WALRecoveryInMemTimeTick)
 	registry.MustRegister(WALRecoveryPersistedTimeTick)
-	registry.MustRegister(WALRecoveryInconsistentEventTotal)
 	registry.MustRegister(WALRecoveryIsOnPersisting)
 	registry.MustRegister(WALDelegatorEmptyTimeTickFilteredTotal)
 	registry.MustRegister(WALDelegatorTsafeTimeTickUnfilteredTotal)

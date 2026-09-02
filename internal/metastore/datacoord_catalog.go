@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -79,6 +80,10 @@ type DataCoordCatalog interface {
 	Update(ctx context.Context, actions ...UpdateAction) error
 	SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error
 	DropSegment(ctx context.Context, segment *datapb.SegmentInfo) error
+	SaveDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection) error
+	ListDataViews(ctx context.Context, collectionID int64) ([]*viewpb.DataViewOfCollection, error)
+	DropDataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) error
+	DropDataViews(ctx context.Context, collectionID int64) error
 
 	// TODO: From MarkChannelAdded to DropChannel, it's totally a redundant design by now, remove it in future.
 	MarkChannelAdded(ctx context.Context, channel string) error

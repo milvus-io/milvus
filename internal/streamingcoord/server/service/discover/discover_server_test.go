@@ -5,6 +5,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
@@ -16,6 +17,85 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestSendFullAssignmentPublishesSecondaryChannelsAndShardAssignments(t *testing.T) {
+	mc := mock_manager.NewMockManagerClient(t)
+	mc.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
+		1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}, ResourceGroup: "rg1"},
+		2: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 2, Address: "localhost:2"}, ResourceGroup: "rg1"},
+	}, nil)
+	resource.InitForTest(resource.OptStreamingManagerClient(mc))
+
+	streamServer := mock_streamingpb.NewMockStreamingCoordAssignmentService_AssignmentDiscoverServer(t)
+	streamServer.EXPECT().Context().Return(context.Background())
+	streamServer.EXPECT().Send(mock.Anything).RunAndReturn(func(resp *streamingpb.AssignmentDiscoverResponse) error {
+		fullAssignment := resp.GetFullAssignment()
+		assignments := make(map[int64]*streamingpb.StreamingNodeAssignment, len(fullAssignment.Assignments))
+		for _, assignment := range fullAssignment.Assignments {
+			assignments[assignment.GetNode().GetServerId()] = assignment
+		}
+
+		node1Assignment := assignments[1]
+		assert.NotNil(t, node1Assignment)
+		assert.Equal(t, []string{"rw-channel"}, pchannelNames(node1Assignment.Channels))
+		assert.Equal(t, []string{"ro-channel"}, pchannelNames(node1Assignment.SecondaryChannels))
+		assert.Equal(t, types.ShardAssignmentInfo{
+			PChannelAssignments: []types.PChannelShardAssignment{
+				{
+					PChannel: "ro-channel",
+					Entries: []types.ShardAssignmentEntry{
+						{CollectionID: 100, ShardIndex: 1, ReplicaID: 10},
+					},
+				},
+			},
+		}, types.NewShardAssignmentInfoFromProto(node1Assignment.GetShardAssignment()))
+
+		node2Assignment := assignments[2]
+		assert.NotNil(t, node2Assignment)
+		assert.Empty(t, node2Assignment.Channels)
+		assert.Empty(t, node2Assignment.SecondaryChannels)
+		return nil
+	})
+
+	helper := &discoverGrpcServerHelper{
+		StreamingCoordAssignmentService_AssignmentDiscoverServer: streamServer,
+	}
+	err := helper.SendFullAssignment(balancer.WatchChannelAssignmentsCallbackParam{
+		Version:            typeutil.VersionInt64Pair{Global: 1, Local: 2},
+		CChannelAssignment: &streamingpb.CChannelAssignment{Meta: &streamingpb.CChannelMeta{Pchannel: "pchannel"}},
+		Relations: []types.PChannelInfoAssigned{
+			{
+				Channel: types.PChannelInfo{Name: "rw-channel", Term: 1, AccessMode: types.AccessModeRW},
+				Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
+			},
+			{
+				Channel: types.PChannelInfo{Name: "ro-channel", Term: 2, AccessMode: types.AccessModeRO},
+				Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
+			},
+		},
+		ShardAssignments: map[int64]types.ShardAssignmentInfo{
+			1: {
+				PChannelAssignments: []types.PChannelShardAssignment{
+					{
+						PChannel: "ro-channel",
+						Entries: []types.ShardAssignmentEntry{
+							{CollectionID: 100, ShardIndex: 1, ReplicaID: 10},
+						},
+					},
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+}
+
+func pchannelNames(channels []*streamingpb.PChannelInfo) []string {
+	names := make([]string, 0, len(channels))
+	for _, channel := range channels {
+		names = append(names, channel.GetName())
+	}
+	return names
+}
 
 func TestAssignmentDiscover(t *testing.T) {
 	mc := mock_manager.NewMockManagerClient(t)

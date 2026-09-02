@@ -166,9 +166,15 @@ func (c *assignmentDiscoverClient) recvLoop() (err error) {
 				for _, channel := range assignment.Channels {
 					channels[channel.Name] = types.NewPChannelInfoFromProto(channel)
 				}
+				secondaryChannels := make(map[string]types.PChannelInfo, len(assignment.SecondaryChannels))
+				for _, channel := range assignment.SecondaryChannels {
+					secondaryChannels[channel.Name] = types.NewPChannelInfoFromProto(channel)
+				}
 				newIncomingAssignments[assignment.GetNode().GetServerId()] = types.StreamingNodeAssignment{
-					NodeInfo: types.NewStreamingNodeInfoFromProto(assignment.Node),
-					Channels: channels,
+					NodeInfo:          types.NewStreamingNodeInfoFromProto(assignment.Node),
+					Channels:          channels,
+					SecondaryChannels: secondaryChannels,
+					ShardAssignment:   types.NewShardAssignmentInfoFromProto(assignment.ShardAssignment),
 				}
 			}
 			c.w.Update(types.VersionedStreamingNodeAssignments{

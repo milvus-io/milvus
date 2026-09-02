@@ -8,17 +8,26 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel/codes"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
+	queryplanprovider "github.com/milvus-io/milvus/internal/streamingnode/server/queryplan/provider"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
@@ -28,6 +37,7 @@ import (
 )
 
 var _ wal.WAL = (*walAdaptorImpl)(nil)
+var _ queryplanprovider.QueryPlanProvider = (*walAdaptorImpl)(nil)
 
 type gracefulCloseFunc func()
 
@@ -66,20 +76,19 @@ func adaptImplsToRWWAL(
 	roWAL *roWALAdaptorImpl,
 	builders []interceptors.InterceptorBuilder,
 	interceptorParam *interceptors.InterceptorBuildParam,
-	flusher *flusherimpl.WALFlusherImpl,
 ) *walAdaptorImpl {
 	if roWAL.Channel().AccessMode != types.AccessModeRW {
 		panic("wal should be read-write")
 	}
 	// build append interceptor for a wal.
+	interceptorBuildResult := buildInterceptorsAndReleaseInitialSnapshot(builders, interceptorParam)
 	wal := &walAdaptorImpl{
 		roWALAdaptorImpl: roWAL,
 		rwWALImpls:       roWAL.roWALImpls.(walimpls.WALImpls),
 		// TODO: remove the pool, use a queue instead.
 		appendExecutionPool:    conc.NewPool[struct{}](0),
 		param:                  interceptorParam,
-		interceptorBuildResult: buildInterceptor(builders, interceptorParam),
-		flusher:                flusher,
+		interceptorBuildResult: interceptorBuildResult,
 		writeMetrics:           metricsutil.NewWriteMetrics(roWAL.Channel(), roWAL.WALName()),
 		isFenced:               atomic.NewBool(false),
 		appendRateCounter:      utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
@@ -99,35 +108,309 @@ type walAdaptorImpl struct {
 	appendExecutionPool    *conc.Pool[struct{}]
 	param                  *interceptors.InterceptorBuildParam
 	interceptorBuildResult interceptorBuildResult
-	flusher                *flusherimpl.WALFlusherImpl
 	writeMetrics           *metricsutil.WriteMetrics
 	isFenced               *atomic.Bool
 	appendRateCounter      *utility.AverageRateCounter // tracks append rate (bytes/sec)
+	queryViewHandler       *snview.SNQueryViewHandler
+	viewResourceManager    *vchannel.PChannelRecoveryManager
 }
 
 // Metrics returns the metrics of the wal.
 func (w *walAdaptorImpl) Metrics() types.WALMetrics {
 	currentMVCC := w.param.MVCCManager.GetMVCCOfVChannel(w.Channel().Name)
-	recoveryMetrics := w.flusher.Metrics()
+	recoveryTimeTick := uint64(0)
+	if w.param.RecoveryStorage != nil {
+		recoveryTimeTick = w.param.RecoveryStorage.Metrics().RecoveryTimeTick
+	}
 	return types.RWWALMetrics{
 		ChannelInfo:      w.Channel(),
-		MVCCTimeTick:     currentMVCC.Timetick,
-		RecoveryTimeTick: recoveryMetrics.RecoveryTimeTick,
+		MVCCTimeTick:     currentMVCC.GrowingTimetick,
+		RecoveryTimeTick: recoveryTimeTick,
 	}
 }
 
-// GetLatestMVCCTimestamp get the latest mvcc timestamp of the wal at vchannel.
+// GetLatestMVCCTimestamp returns the growing MVCC frontier of the vchannel.
+// TODO: remove it after legacy consumers switch to QueryPlanMVCC.
 func (w *walAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel string) (uint64, error) {
+	mvcc, err := w.GetLatestQueryPlanMVCC(ctx, vchannel)
+	if err != nil {
+		return 0, err
+	}
+	return mvcc.GetGrowingTimetick(), nil
+}
+
+func (w *walAdaptorImpl) GetLatestQueryPlanMVCC(ctx context.Context, vchannel string) (*viewpb.QueryPlanMVCC, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return 0, status.NewOnShutdownError("wal is on shutdown")
+		return nil, status.NewOnShutdownError("wal is on shutdown")
 	}
 	defer w.lifetime.Done()
 	currentMVCC := w.param.MVCCManager.GetMVCCOfVChannel(vchannel)
+	if currentMVCC.GrowingTimetick == 0 && currentMVCC.TransformingTimetick == 0 {
+		return nil, viewerror.NewViewNotFound("query mvcc for vchannel %s is unavailable", vchannel)
+	}
 	if !currentMVCC.Confirmed {
 		// if the mvcc is not confirmed, trigger a sync operation to make it confirmed as soon as possible.
 		resource.Resource().TimeTickInspector().TriggerSync(w.rwWALImpls.Channel(), false)
 	}
-	return currentMVCC.Timetick, nil
+	mlog.Debug(ctx, "query view latest mvcc resolved",
+		mlog.FieldVChannel(vchannel),
+		mlog.Uint64("growingTimeTick", currentMVCC.GrowingTimetick),
+		mlog.Uint64("transformingTimeTick", currentMVCC.TransformingTimetick),
+		mlog.Bool("confirmed", currentMVCC.Confirmed),
+	)
+	return &viewpb.QueryPlanMVCC{
+		GrowingTimetick:      currentMVCC.GrowingTimetick,
+		TransformingTimetick: currentMVCC.TransformingTimetick,
+	}, nil
+}
+
+func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryPlanRequest) (*viewpb.QueryPlan, error) {
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, viewerror.NewOnShutdownError("wal is on shutdown")
+	}
+	defer w.lifetime.Done()
+
+	if req == nil || req.GetShardId() == nil {
+		return nil, viewerror.NewUnknownError("query plan request misses shard id")
+	}
+	if w.queryViewHandler == nil {
+		return nil, viewerror.NewViewNotFound("query view handler is unavailable")
+	}
+
+	shardID := qviews.FromProtoShardID(req.GetShardId())
+	lease, err := w.queryViewHandler.AcquireLatestUpView(ctx, shardID)
+	if err != nil {
+		return nil, err
+	}
+	defer lease.Release()
+	if req.GetCollectionId() != 0 && lease.Meta.GetCollectionId() != req.GetCollectionId() {
+		return nil, viewerror.NewViewNotFound("query view collection mismatch, expected %d, got %d", req.GetCollectionId(), lease.Meta.GetCollectionId())
+	}
+
+	mvcc, err := w.resolveQueryPlanMVCC(ctx, req, shardID.VChannel)
+	if err != nil {
+		return nil, err
+	}
+
+	var runtime *queryresource.QueryRuntime
+	if w.viewResourceManager != nil {
+		runtime, _ = w.viewResourceManager.GetQueryRuntime(qviews.QueryViewKey{
+			ShardID:          shardID,
+			QueryViewVersion: lease.Version,
+		})
+	}
+	optimizer := queryresource.NewGlobalOptimizer(runtime, lease.Version.DataVersion, shard.WALFunctionRunnerKey(shardID.VChannel))
+	plan := &viewpb.QueryPlan{
+		Version: lease.Version.IntoProto(),
+		ShardId: shardID.IntoProto(),
+		Mvcc:    mvcc,
+	}
+	switch request := req.GetRequest().(type) {
+	case *viewpb.GetQueryPlanRequest_LegacySearchRequest:
+		if request.LegacySearchRequest == nil {
+			return nil, viewerror.NewUnknownError("query plan request misses legacy search request")
+		}
+		searchReq := proto.Clone(request.LegacySearchRequest).(*internalpb.SearchRequest)
+		fillSearchRequestPartitionIDs(searchReq, req.GetPartitionIds())
+		optimization, err := optimizer.OptimizeSearch(ctx, searchReq)
+		if err != nil {
+			return nil, err
+		}
+		plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: searchReq}
+		if !optimization.Skip {
+			plan.WorkNodes = buildQueryPlanWorkNodes(lease.View, searchQueryPlanWorkNodeOptions(searchReq, runtime, mvcc))
+		}
+	case *viewpb.GetQueryPlanRequest_LegacyRetrieveRequest:
+		if request.LegacyRetrieveRequest == nil {
+			return nil, viewerror.NewUnknownError("query plan request misses legacy retrieve request")
+		}
+		retrieveReq := proto.Clone(request.LegacyRetrieveRequest).(*internalpb.RetrieveRequest)
+		fillRetrieveRequestPartitionIDs(retrieveReq, req.GetPartitionIds())
+		if err := optimizer.OptimizeRetrieve(ctx, retrieveReq); err != nil {
+			return nil, err
+		}
+		plan.Request = &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: retrieveReq}
+		plan.WorkNodes = buildQueryPlanWorkNodes(lease.View, queryPlanWorkNodeOptions{
+			ignoreGrowing: retrieveReq.GetIgnoreGrowing(),
+			partitionIDs:  retrieveReq.GetPartitionIDs(),
+			runtime:       runtime,
+			mvcc:          mvcc,
+		})
+	default:
+		return nil, viewerror.NewUnknownError("query plan request misses legacy request")
+	}
+	mlog.Debug(ctx, "query view plan created",
+		mlog.FieldCollectionID(lease.Meta.GetCollectionId()),
+		mlog.FieldVChannel(shardID.VChannel),
+		mlog.Int64("replicaID", shardID.ReplicaID),
+		mlog.Uint64("growingTimeTick", mvcc.GetGrowingTimetick()),
+		mlog.Uint64("transformingTimeTick", mvcc.GetTransformingTimetick()),
+		mlog.Int("workNodeCount", len(plan.WorkNodes)),
+	)
+	return plan, nil
+}
+
+func fillSearchRequestPartitionIDs(req *internalpb.SearchRequest, partitionIDs []int64) {
+	if req == nil || len(req.GetPartitionIDs()) > 0 || len(partitionIDs) == 0 {
+		return
+	}
+	req.PartitionIDs = append([]int64(nil), partitionIDs...)
+}
+
+func fillRetrieveRequestPartitionIDs(req *internalpb.RetrieveRequest, partitionIDs []int64) {
+	if req == nil || len(req.GetPartitionIDs()) > 0 || len(partitionIDs) == 0 {
+		return
+	}
+	req.PartitionIDs = append([]int64(nil), partitionIDs...)
+}
+
+func (w *walAdaptorImpl) GetMVCCTimestamp(ctx context.Context, req *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {
+	if req == nil || req.GetVchannel() == "" {
+		return nil, viewerror.NewUnknownError("mvcc request misses vchannel")
+	}
+	if w.Channel().AccessMode != types.AccessModeRW {
+		return nil, viewerror.NewNotPrimaryError("wal %s is not primary", w.Channel().String())
+	}
+	mvcc, err := w.GetLatestQueryPlanMVCC(ctx, req.GetVchannel())
+	if err != nil {
+		return nil, err
+	}
+	return &viewpb.GetMVCCTimestampResponse{Mvcc: mvcc}, nil
+}
+
+func (w *walAdaptorImpl) resolveQueryPlanMVCC(ctx context.Context, req *viewpb.GetQueryPlanRequest, vchannel string) (*viewpb.QueryPlanMVCC, error) {
+	switch mvcc := req.GetMvcc().(type) {
+	case *viewpb.GetQueryPlanRequest_QueryPlanMvcc:
+		return mvcc.QueryPlanMvcc, nil
+	case *viewpb.GetQueryPlanRequest_ConsistencyLevel:
+		if w.Channel().AccessMode != types.AccessModeRW {
+			return nil, viewerror.NewNotPrimaryError("wal %s is not primary", w.Channel().String())
+		}
+		return w.GetLatestQueryPlanMVCC(ctx, vchannel)
+	default:
+		return nil, viewerror.NewUnknownError("query plan request misses mvcc source")
+	}
+}
+
+type queryPlanGrowingRuntime interface {
+	MayHaveVisibleGrowingSegments(growingTimetick uint64, transformingTimetick uint64, partitionIDs []int64) bool
+}
+
+type queryPlanWorkNodeOptions struct {
+	ignoreGrowing bool
+	partitionIDs  []int64
+	runtime       queryPlanGrowingRuntime
+	mvcc          *viewpb.QueryPlanMVCC
+}
+
+func searchQueryPlanWorkNodeOptions(req *internalpb.SearchRequest, runtime queryPlanGrowingRuntime, mvcc *viewpb.QueryPlanMVCC) queryPlanWorkNodeOptions {
+	if !req.GetIsAdvanced() {
+		return queryPlanWorkNodeOptions{
+			ignoreGrowing: req.GetIgnoreGrowing(),
+			partitionIDs:  req.GetPartitionIDs(),
+			runtime:       runtime,
+			mvcc:          mvcc,
+		}
+	}
+
+	ignoreGrowing := true
+	allPartitions := false
+	partitionSet := make(map[int64]struct{})
+	for _, subReq := range req.GetSubReqs() {
+		if subReq.GetSkip() {
+			continue
+		}
+		if !subReq.GetIgnoreGrowing() {
+			ignoreGrowing = false
+		}
+		if len(subReq.GetPartitionIDs()) == 0 {
+			allPartitions = true
+			continue
+		}
+		for _, partitionID := range subReq.GetPartitionIDs() {
+			partitionSet[partitionID] = struct{}{}
+		}
+	}
+
+	var partitionIDs []int64
+	if !allPartitions {
+		partitionIDs = make([]int64, 0, len(partitionSet))
+		for partitionID := range partitionSet {
+			partitionIDs = append(partitionIDs, partitionID)
+		}
+	}
+	return queryPlanWorkNodeOptions{
+		ignoreGrowing: ignoreGrowing,
+		partitionIDs:  partitionIDs,
+		runtime:       runtime,
+		mvcc:          mvcc,
+	}
+}
+
+func buildQueryPlanWorkNodes(view *viewpb.QueryViewOfShard, options queryPlanWorkNodeOptions) []*viewpb.QueryPlanWorkNode {
+	nodes := make([]*viewpb.QueryPlanWorkNode, 0, 1+len(view.GetQueryNode()))
+	if queryPlanIncludesStreamingNode(view, options) {
+		nodes = append(nodes, &viewpb.QueryPlanWorkNode{
+			Node: &viewpb.QueryPlanWorkNode_StreamingNode{
+				StreamingNode: &viewpb.StreamingWorkNode{
+					Pchannel: qviews.NewStreamingNodeFromVChannel(view.GetMeta().GetVchannel()).PChannel,
+				},
+			},
+		})
+	}
+	for _, qn := range view.GetQueryNode() {
+		if !queryNodeHasSelectedSegments(qn, options.partitionIDs) {
+			continue
+		}
+		nodes = append(nodes, &viewpb.QueryPlanWorkNode{
+			Node: &viewpb.QueryPlanWorkNode_QueryNode{
+				QueryNode: &viewpb.QueryWorkNode{NodeId: qn.GetNodeId()},
+			},
+		})
+	}
+	return nodes
+}
+
+func queryPlanIncludesStreamingNode(view *viewpb.QueryViewOfShard, options queryPlanWorkNodeOptions) bool {
+	if view.GetStreamingNode() == nil || options.ignoreGrowing {
+		return false
+	}
+	if options.runtime == nil || options.mvcc == nil {
+		return true
+	}
+	return options.runtime.MayHaveVisibleGrowingSegments(
+		options.mvcc.GetGrowingTimetick(),
+		options.mvcc.GetTransformingTimetick(),
+		options.partitionIDs,
+	)
+}
+
+func queryNodeHasSelectedSegments(qn *viewpb.QueryViewOfQueryNode, partitionIDs []int64) bool {
+	if len(partitionIDs) == 0 {
+		for _, partition := range qn.GetPartitions() {
+			if len(partition.GetSegmentIds()) > 0 {
+				return true
+			}
+		}
+		return false
+	}
+	selectedPartitions := make(map[int64]struct{}, len(partitionIDs))
+	for _, partitionID := range partitionIDs {
+		selectedPartitions[partitionID] = struct{}{}
+	}
+	for _, partition := range qn.GetPartitions() {
+		if _, ok := selectedPartitions[partition.GetPartitionId()]; ok && len(partition.GetSegmentIds()) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (w *walAdaptorImpl) TransformLog() wal.TransformLogAccesser {
+	if w.param == nil || w.param.RecoveryStorage == nil {
+		return wal.NewTransformLogErrorAccesser(status.NewOnShutdownError("recovery storage is unavailable"))
+	}
+	return w.param.RecoveryStorage.TransformLog()
 }
 
 // GetReplicateCheckpoint returns the replicate checkpoint of the wal.
@@ -213,11 +496,6 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 				return nil, walimpls.ErrFenced
 			}
 
-			if notPersistHint := utility.GetNotPersisted(ctx); notPersistHint != nil {
-				// do not persist the message if the hint is set.
-				return notPersistHint.MessageID, nil
-			}
-
 			metricsGuard.StartWALImplAppend()
 			msgID, err := w.retryAppendWhenRecoverableError(ctx, msg)
 			metricsGuard.FinishWALImplAppend()
@@ -243,7 +521,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 			// if the append operation of wal is fenced, we should report the error to the client.
 			if w.isFenced.CompareAndSwap(false, true) {
 				w.forceCancelAfterGracefulTimeout()
-				w.Logger().Warn(ctx, "wal is fenced, mark as unavailable, all append opertions will be rejected", mlog.Err(err))
+				w.Logger().Warn(context.TODO(), "wal is fenced, mark as unavailable, all append opertions will be rejected", mlog.Err(err))
 			}
 			return nil, status.NewChannelFenced(w.Channel().String())
 		}
@@ -304,7 +582,7 @@ func (w *walAdaptorImpl) retryAppendWhenRecoverableError(ctx context.Context, ms
 		if err == nil {
 			if msg.MessageType() == message.MessageTypeAlterWAL {
 				// if the append operation is a alter WAL message, we should log the message
-				w.Logger().Info(ctx, "append alter WAL message to WAL finish", mlog.String("channel", msg.VChannel()), mlog.Uint64("timetick", msg.TimeTick()))
+				w.Logger().Info(context.TODO(), "append alter WAL message to WAL finish", mlog.String("channel", msg.VChannel()), mlog.Uint64("timetick", msg.TimeTick()))
 			}
 			return msgID, nil
 		}
@@ -313,7 +591,7 @@ func (w *walAdaptorImpl) retryAppendWhenRecoverableError(ctx context.Context, ms
 		}
 		w.writeMetrics.ObserveRetry()
 		nextInterval := backoff.NextBackOff()
-		w.Logger().Warn(ctx, "append message into wal impls failed, retrying...", mlog.FieldMessage(msg), mlog.Int("retry", i), mlog.Duration("nextInterval", nextInterval), mlog.Err(err))
+		w.Logger().Warn(context.TODO(), "append message into wal impls failed, retrying...", mlog.FieldMessage(msg), mlog.Int("retry", i), mlog.Duration("nextInterval", nextInterval), mlog.Err(err))
 
 		select {
 		case <-ctx.Done():
@@ -354,11 +632,19 @@ func (w *walAdaptorImpl) Close() {
 	w.forceCancelAfterGracefulTimeout()
 	w.lifetime.Wait()
 
-	// close the flusher.
-	w.Logger().Info(context.TODO(), "wal begin to close flusher...")
-	if w.flusher != nil {
-		// only in test, the flusher is nil.
-		w.flusher.Close()
+	if w.queryViewHandler != nil {
+		w.Logger().Info(context.TODO(), "wal begin to close query view state machine...")
+		w.queryViewHandler.CloseForHandoff()
+	}
+	if w.viewResourceManager != nil {
+		w.Logger().Info(context.TODO(), "wal begin to close query view resources...")
+		w.viewResourceManager.Close()
+	}
+
+	// close the recovery-owned data path.
+	w.Logger().Info(context.TODO(), "wal begin to close recovery data path...")
+	if w.param.RecoveryStorage != nil {
+		w.param.RecoveryStorage.Close()
 	}
 
 	w.Logger().Info(context.TODO(), "wal begin to close scanners...")
@@ -424,4 +710,13 @@ func buildInterceptor(builders []interceptors.InterceptorBuilder, param *interce
 			}
 		},
 	}
+}
+
+func buildInterceptorsAndReleaseInitialSnapshot(
+	builders []interceptors.InterceptorBuilder,
+	param *interceptors.InterceptorBuildParam,
+) interceptorBuildResult {
+	result := buildInterceptor(builders, param)
+	param.InitialRecoverSnapshot = nil
+	return result
 }

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/ratelimit"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -51,6 +52,7 @@ var (
 func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 	startMessageID message.MessageID,
 	scanMetrics *metricsutil.ScannerMetrics,
+	useWriteAheadBuffer bool,
 ) *scannerAdaptorImpl {
 	name := "recovery"
 	logger := resource.Resource().Logger().With(
@@ -66,18 +68,18 @@ func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 	}
 
 	s := &scannerAdaptorImpl{
-		logger:          logger,
-		recovery:        true,
-		innerWAL:        l,
-		readOption:      readOption,
-		filterFunc:      func(message.ImmutableMessage) bool { return true },
-		reorderBuffer:   utility.NewReOrderBuffer(),
-		pendingQueue:    utility.NewPendingQueue(),
-		txnBuffer:       utility.NewTxnBuffer(logger, scanMetrics),
-		cleanup:         func() {},
-		ScannerHelper:   helper.NewScannerHelper(name),
-		metrics:         scanMetrics,
-		readRateCounter: utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
+		logger:              logger,
+		useWriteAheadBuffer: useWriteAheadBuffer,
+		innerWAL:            l,
+		readOption:          readOption,
+		filterFunc:          func(message.ImmutableMessage) bool { return true },
+		reorderBuffer:       utility.NewReOrderBuffer(),
+		pendingQueue:        utility.NewPendingQueue(),
+		txnBuffer:           utility.NewTxnBuffer(logger, scanMetrics),
+		cleanup:             func() {},
+		ScannerHelper:       helper.NewScannerHelper(name),
+		metrics:             scanMetrics,
+		readRateCounter:     utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
 	go s.execute()
 	return s
@@ -90,7 +92,6 @@ func newScannerAdaptor(
 	readOption wal.ReadOption,
 	scanMetrics *metricsutil.ScannerMetrics,
 	cleanup func(),
-	recovery bool,
 ) *scannerAdaptorImpl {
 	if readOption.MesasgeHandler == nil {
 		readOption.MesasgeHandler = adaptor.ChanMessageHandler(make(chan message.ImmutableMessage))
@@ -102,18 +103,18 @@ func newScannerAdaptor(
 		mlog.String("channel", l.Channel().Name),
 	)
 	s := &scannerAdaptorImpl{
-		logger:          logger,
-		recovery:        recovery,
-		innerWAL:        l,
-		readOption:      readOption,
-		filterFunc:      options.GetFilterFunc(readOption.MessageFilter),
-		reorderBuffer:   utility.NewReOrderBuffer(),
-		pendingQueue:    utility.NewPendingQueue(),
-		txnBuffer:       utility.NewTxnBuffer(logger, scanMetrics),
-		cleanup:         cleanup,
-		ScannerHelper:   helper.NewScannerHelper(name),
-		metrics:         scanMetrics,
-		readRateCounter: utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
+		logger:              logger,
+		useWriteAheadBuffer: true,
+		innerWAL:            l,
+		readOption:          readOption,
+		filterFunc:          options.GetFilterFunc(readOption.MessageFilter),
+		reorderBuffer:       utility.NewReOrderBuffer(),
+		pendingQueue:        utility.NewPendingQueue(),
+		txnBuffer:           utility.NewTxnBuffer(logger, scanMetrics),
+		cleanup:             cleanup,
+		ScannerHelper:       helper.NewScannerHelper(name),
+		metrics:             scanMetrics,
+		readRateCounter:     utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
 	go s.execute()
 	return s
@@ -122,14 +123,14 @@ func newScannerAdaptor(
 // scannerAdaptorImpl is a wrapper of ScannerImpls to extend it into a Scanner interface.
 type scannerAdaptorImpl struct {
 	*helper.ScannerHelper
-	recovery      bool
-	logger        *mlog.Logger
-	innerWAL      walimpls.ROWALImpls
-	readOption    wal.ReadOption
-	filterFunc    func(message.ImmutableMessage) bool
-	reorderBuffer *utility.ReOrderByTimeTickBuffer // support time tick reorder.
-	pendingQueue  *utility.PendingQueue
-	txnBuffer     *utility.TxnBuffer // txn buffer for txn message.
+	useWriteAheadBuffer bool
+	logger              *mlog.Logger
+	innerWAL            walimpls.ROWALImpls
+	readOption          wal.ReadOption
+	filterFunc          func(message.ImmutableMessage) bool
+	reorderBuffer       *utility.ReOrderByTimeTickBuffer // support time tick reorder.
+	pendingQueue        *utility.PendingQueue
+	txnBuffer           *utility.TxnBuffer // txn buffer for txn message.
 
 	cleanup         func()
 	clearOnce       sync.Once
@@ -201,16 +202,10 @@ func (s *scannerAdaptorImpl) execute() {
 func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMessage) error {
 	var wb wab.ROWriteAheadBuffer
 	var err error
-	if s.Channel().AccessMode == types.AccessModeRW && !s.recovery {
-		// recovery scanner can not use the write ahead buffer, should not trigger sync.
-
-		// Trigger a persisted time tick to make sure the timetick is pushed forward.
-		// because the underlying wal may be deleted because of retention policy.
-		// So we cannot get the timetick from the wal.
-		// Trigger the timetick inspector to append a new persisted timetick,
-		// then the catch up scanner can see the latest timetick and make a catchup.
-		resource.Resource().TimeTickInspector().TriggerSync(s.Channel(), true)
-		wb = resource.Resource().TimeTickInspector().MustGetOperator(s.Channel()).WriteAheadBuffer()
+	if s.Channel().AccessMode == types.AccessModeRW && s.useWriteAheadBuffer {
+		if wb, err = s.waitWriteAheadBuffer(); err != nil {
+			return err
+		}
 	}
 
 	scanner := newSwithableScanner(s.Name(), s.logger, s.innerWAL, wb, s.readOption.DeliverPolicy, msgChan)
@@ -237,6 +232,28 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 		m := getScannerModel(scanner)
 		s.metrics.SwitchModel(m)
 		s.logger.Info(context.TODO(), "switch scanner model", mlog.String("model", m))
+	}
+}
+
+func (s *scannerAdaptorImpl) waitWriteAheadBuffer() (wab.ROWriteAheadBuffer, error) {
+	inspector := resource.Resource().TimeTickInspector()
+	for {
+		if operator, ok := inspector.GetOperator(s.Channel()); ok {
+			// Trigger a persisted time tick to make sure the timetick is pushed forward.
+			// The underlying WAL may be deleted by retention policy, so catchup needs
+			// a fresh durable timetick before switching to WAB tailing.
+			inspector.TriggerSync(s.Channel(), true)
+			return operator.WriteAheadBuffer(), nil
+		}
+
+		s.logger.Debug(context.TODO(), "wait for timetick sync operator before using write ahead buffer")
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-s.Context().Done():
+			timer.Stop()
+			return nil, s.Context().Err()
+		case <-timer.C:
+		}
 	}
 }
 
@@ -349,9 +366,9 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 	var isTailing bool
 	msg, isTailing = isTailingScanImmutableMessage(msg)
 	s.metrics.ObserveMessage(isTailing, msg.MessageType(), msg.EstimateSize())
-	if msg.MessageType() == message.MessageTypeTimeTick {
-		// If the time tick message incoming,
-		// the reorder buffer can be consumed until latest confirmed timetick.
+	if messageutil.IsTimeTickConfirmBarrier(msg.MessageType()) {
+		// If a timetick confirm barrier arrives, the reorder buffer can be
+		// consumed until the latest confirmed timetick.
 		messages := s.reorderBuffer.PopUtilTimeTick(msg.TimeTick())
 		s.metrics.UpdateTimeTickBufSize(s.reorderBuffer.Bytes())
 
@@ -371,13 +388,9 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 			}
 			s.pendingQueue.Add(msgs)
 		}
-		if msg.IsPersisted() || s.pendingQueue.Len() == 0 {
-			// If the ts message is persisted, it must can be seen by the consumer.
-			//
-			// Otherwise if there's no new message incoming and there's no pending message in the queue.
-			// Add current timetick message into pending queue to make timetick push forward.
-			// TODO: current milvus can only run on timetick pushing,
-			// after qview is applied, those trival time tick message can be erased.
+		// TimeTick only advances the confirmation frontier and is not delivered to consumers.
+		// Other confirmation barriers keep their existing delivery behavior.
+		if msg.MessageType() != message.MessageTypeTimeTick {
 			s.pendingQueue.Add([]message.ImmutableMessage{msg})
 		}
 		s.metrics.UpdatePendingQueueSize(s.pendingQueue.Bytes())

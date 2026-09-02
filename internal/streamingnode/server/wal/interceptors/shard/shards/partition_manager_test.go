@@ -22,9 +22,33 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
+
+func TestPartitionManagerReusesPChannelLogger(t *testing.T) {
+	logger := mlog.With(
+		mlog.FieldComponent("shard-manager"),
+		mlog.FieldPChannel("pchannel"),
+	)
+	m := newPartitionSegmentManager(
+		context.Background(),
+		logger,
+		nil,
+		nil,
+		types.PChannelInfo{Name: "pchannel", Term: 1},
+		"vchannel",
+		1,
+		2,
+		map[int64]*segmentAllocManager{},
+		nil,
+		0,
+		nil,
+	)
+
+	assert.Same(t, logger, m.Logger())
+}
 
 func TestPartitionManager(t *testing.T) {
 	paramtable.Init()
@@ -61,9 +85,12 @@ func TestPartitionManager(t *testing.T) {
 	}).Maybe()
 	f := syncutil.NewFuture[wal.WAL]()
 	f.Set(w)
+	nodeScheduler := nodescheduler.New(4)
+	t.Cleanup(nodeScheduler.Close)
 	m := newPartitionSegmentManager(ctx,
 		mlog.With(),
 		f,
+		nodeScheduler,
 		types.PChannelInfo{
 			Name: "pchannel",
 			Term: 1,

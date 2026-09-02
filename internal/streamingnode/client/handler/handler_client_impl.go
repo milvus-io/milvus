@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
+	transformlogclient "github.com/milvus-io/milvus/internal/streamingnode/client/handler/transformlog"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
@@ -33,13 +34,16 @@ var (
 )
 
 type handlerClientImpl struct {
-	lifetime         *typeutil.Lifetime
-	service          lazygrpc.Service[streamingpb.StreamingNodeHandlerServiceClient]
-	rb               resolver.Builder
-	watcher          assignment.Watcher
-	rebalanceTrigger types.AssignmentRebalanceTrigger
-	newProducer      func(ctx context.Context, opts *producer.ProducerOptions, handler streamingpb.StreamingNodeHandlerServiceClient) (Producer, error)
-	newConsumer      func(ctx context.Context, opts *consumer.ConsumerOptions, handlerClient streamingpb.StreamingNodeHandlerServiceClient) (Consumer, error)
+	lifetime                   *typeutil.Lifetime
+	service                    lazygrpc.Service[streamingpb.StreamingNodeHandlerServiceClient]
+	queryViewClient            QueryViewClient
+	queryViewSyncClient        QueryViewSyncClient
+	rb                         resolver.Builder
+	watcher                    assignment.Watcher
+	rebalanceTrigger           types.AssignmentRebalanceTrigger
+	newProducer                func(ctx context.Context, opts *producer.ProducerOptions, handler streamingpb.StreamingNodeHandlerServiceClient) (Producer, error)
+	newConsumer                func(ctx context.Context, opts *consumer.ConsumerOptions, handlerClient streamingpb.StreamingNodeHandlerServiceClient) (Consumer, error)
+	newTransformLogEventStream func(ctx context.Context, opts *transformlogclient.EventStreamOptions, handlerClient streamingpb.StreamingNodeHandlerServiceClient) (*transformlogclient.EventStream, error)
 }
 
 // GetLatestMVCCTimestampIfLocal gets the latest mvcc timestamp of the vchannel.
@@ -297,6 +301,38 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 		return nil, err
 	}
 	return c.(Consumer), nil
+}
+
+func (hc *handlerClientImpl) AcquireTransformLogStream(ctx context.Context, pchannel string) (wal.TransformLogStream, error) {
+	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrClientClosed
+	}
+	defer hc.lifetime.Done()
+
+	if pchannel == "" {
+		return nil, errors.New("pchannel is required")
+	}
+	logger := mlog.With(mlog.String("pchannel", pchannel), mlog.String("handler", "transformlog-event-stream"))
+	s, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
+		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
+		if err == nil {
+			return localWAL.TransformLog().AcquireStream(ctx, pchannel)
+		}
+		if !shouldUseRemoteWAL(err) {
+			return nil, err
+		}
+		handlerService, err := hc.service.GetService(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return hc.newTransformLogEventStream(ctx, &transformlogclient.EventStreamOptions{
+			Assignment: assign,
+		}, handlerService)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.(wal.TransformLogStream), nil
 }
 
 type handlerCreateFunc func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error)

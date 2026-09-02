@@ -110,6 +110,8 @@ type Server struct {
 
 	etcdCli        *clientv3.Client
 	mixCoordClient types.MixCoordClient
+
+	viewQueryClientClose func()
 }
 
 // NewServer create a Proxy server.
@@ -591,6 +593,21 @@ func (s *Server) init() error {
 	s.proxy.SetMixCoordClient(s.mixCoordClient)
 	mlog.Debug(context.TODO(), "set MixCoord client for Proxy done")
 
+	viewQueryClientReady := false
+	if setter, ok := s.proxy.(viewQueryClientSetter); ok {
+		mlog.Debug(context.TODO(), "init view query client for Proxy")
+		if err := s.initViewQueryClient(setter); err != nil {
+			mlog.Warn(context.TODO(), "failed to init view query client for Proxy", mlog.Err(err))
+			return err
+		}
+		defer func() {
+			if !viewQueryClientReady {
+				s.closeViewQueryClient()
+			}
+		}()
+		mlog.Debug(context.TODO(), "init view query client for Proxy done")
+	}
+
 	if HTTPParams.Enabled.GetAsBool() {
 		registerHTTPHandlerOnce.Do(func() {
 			mlog.Info(context.TODO(), "register Proxy http server")
@@ -611,6 +628,7 @@ func (s *Server) init() error {
 	// Intentionally print to stdout, which is usually a sign that Milvus is ready to serve.
 	fmt.Println("---Milvus Proxy successfully initialized and ready to serve!---")
 
+	viewQueryClientReady = true
 	return nil
 }
 
@@ -655,6 +673,7 @@ func (s *Server) Stop() (err error) {
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
 	}
+	defer s.closeViewQueryClient()
 
 	gracefulWg := sync.WaitGroup{}
 
@@ -1000,7 +1019,7 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 	return s.proxy.GetCompactionStateWithPlans(ctx, req)
 }
 
-// GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
+// GetFlushState gets the flush state based on the provided segment IDs.
 func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	return s.proxy.GetFlushState(ctx, req)
 }

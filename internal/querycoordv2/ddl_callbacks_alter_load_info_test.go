@@ -20,61 +20,73 @@ import (
 	"context"
 	"testing"
 
-	"github.com/bytedance/mockey"
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/querycoordv2/job"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
-func buildAlterLoadConfigBroadcastResult(collectionID int64) message.BroadcastResultAlterLoadConfigMessageV2 {
-	controlChannel := "_ctrl_channel"
+func buildAlterLoadConfigBroadcastResult(collectionID int64, vchannels ...string) message.BroadcastResultAlterLoadConfigMessageV2 {
+	if len(vchannels) == 0 {
+		vchannels = []string{funcutil.GetControlChannel("test")}
+	}
 	broadcastMsg := message.NewAlterLoadConfigMessageBuilderV2().
 		WithHeader(&messagespb.AlterLoadConfigMessageHeader{
 			CollectionId: collectionID,
 			Replicas: []*messagespb.LoadReplicaConfig{
-				{ReplicaId: 1, ResourceGroupName: "__default_resource_group"},
+				{ReplicaId: 1000, ResourceGroupName: "__default_resource_group"},
 			},
 		}).
 		WithBody(&messagespb.AlterLoadConfigMessageBody{}).
-		WithBroadcast([]string{controlChannel}).
+		WithBroadcast(vchannels).
 		MustBuildBroadcast()
 
+	results := make(map[string]*message.AppendResult, len(vchannels))
+	for _, vchannel := range vchannels {
+		results[vchannel] = &message.AppendResult{}
+	}
 	return message.BroadcastResultAlterLoadConfigMessageV2{
 		Message: message.MustAsBroadcastAlterLoadConfigMessageV2(broadcastMsg),
-		Results: map[string]*message.AppendResult{
-			controlChannel: {},
-		},
+		Results: results,
 	}
 }
 
-// TestAlterLoadConfigV2AckCallback verifies that the ack callback swallows the
-// dropped-sentinel error (so the broadcaster stops retrying forever) while still
-// propagating any other error from the load job.
-func TestAlterLoadConfigV2AckCallback(t *testing.T) {
-	paramtable.Init()
+func TestAlterLoadConfigV2AckCallbackUpdatesQViewsRuntime(t *testing.T) {
 	ctx := context.Background()
-	s := &Server{}
-	result := buildAlterLoadConfigBroadcastResult(1000)
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().GetCollections(mock.Anything).Return(nil, nil).Once()
+	catalog.EXPECT().GetPartitions(mock.Anything, mock.Anything).
+		Return(map[int64][]*querypb.PartitionLoadInfo{}, nil).Once()
+	catalog.EXPECT().GetReplicas(mock.Anything).Return(nil, nil).Once()
 
-	mockey.PatchConvey("dropped sentinel is acked with no-op", t, func() {
-		mockey.Mock((*job.LoadCollectionJob).Execute).
-			Return(merr.WrapErrChannelDroppedSentinel("_ctrl_channel")).Build()
-
-		err := s.alterLoadConfigV2AckCallback(ctx, result)
-		assert.NoError(t, err)
+	fakeBalancer := &fakeRuntimeBalancer{}
+	runtime, err := newQViewsRuntime(ctx, qviewsRuntimeDependencies{
+		queryCoordCatalog:    catalog,
+		queryViewCatalog:     &fakeQueryViewCatalog{},
+		viewSyncClient:       &fakeRuntimeViewSyncClient{},
+		queryNodeClient:      &fakeRuntimeQueryNodeClient{},
+		resourceGroupManager: &fakeRuntimeResourceGroupManager{},
+		dataViewProvider:     &fakeRuntimeDataViewProvider{},
+		balancerFactory: func(*balancer.SnapshotBuilder) qviewsBalancer {
+			return fakeBalancer
+		},
 	})
+	require.NoError(t, err)
 
-	mockey.PatchConvey("generic error is propagated", t, func() {
-		expectedErr := errors.New("broker unavailable")
-		mockey.Mock((*job.LoadCollectionJob).Execute).Return(expectedErr).Build()
+	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
+	s := &Server{qviewsRuntime: runtime}
+	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil).Once()
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Once()
 
-		err := s.alterLoadConfigV2AckCallback(ctx, result)
-		assert.Error(t, err)
-		assert.True(t, errors.Is(err, expectedErr))
-	})
+	require.NoError(t, s.alterLoadConfigV2AckCallback(ctx, buildAlterLoadConfigBroadcastResult(100)))
+
+	assert.Contains(t, runtime.loadConfigStore.Snapshot().ConfigsMap(), int64(100))
+	assert.Equal(t, []balancer.TriggerScope{{DirtyCollections: []int64{100}}}, fakeBalancer.triggers)
 }

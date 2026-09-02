@@ -28,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -93,6 +95,7 @@ func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoord
 	rootCoordServer, _ := rootcoord.NewCore(ctx, factory)
 	queryCoordServer, _ := querycoordv2.NewQueryCoord(c)
 	dataCoordServer := datacoord.CreateServer(c, factory)
+	dataCoordServer.SetQueryViewLoadInfoNotifier(queryCoordServer)
 
 	return &mixCoordImpl{
 		ctx:              ctx,
@@ -180,15 +183,30 @@ func (s *mixCoordImpl) initInternal() error {
 		return err
 	}
 
-	// DataCoord and QueryCoord are independent of each other;
-	// both only depend on RootCoord being ready. Initialize and start them in parallel.
+	if err := s.initDataAndQueryCoord(); err != nil {
+		return err
+	}
+
+	s.fileResourceObserver.Start()
+	return nil
+}
+
+func (s *mixCoordImpl) initDataAndQueryCoord() error {
+	// DataCoord recovers terminal collection state first. QueryCoord then
+	// rebuilds every persisted QueryView pin before DataCoord starts GC.
+	s.datacoordServer.SetFileResourceObserver(s.fileResourceObserver)
+	if err := s.datacoordServer.Init(); err != nil {
+		mlog.Error(s.ctx, "dataCoord init failed", mlog.Err(err))
+		return err
+	}
+	s.queryCoordServer.SetFileResourceObserver(s.fileResourceObserver)
+	if err := s.queryCoordServer.Init(); err != nil {
+		mlog.Error(s.ctx, "queryCoord init failed", mlog.Err(err))
+		return err
+	}
+
 	g, _ := errgroup.WithContext(s.ctx)
 	g.Go(func() error {
-		s.datacoordServer.SetFileResourceObserver(s.fileResourceObserver)
-		if err := s.datacoordServer.Init(); err != nil {
-			mlog.Error(s.ctx, "dataCoord init failed", mlog.Err(err))
-			return err
-		}
 		if err := s.datacoordServer.Start(); err != nil {
 			mlog.Error(s.ctx, "dataCoord start failed", mlog.Err(err))
 			return err
@@ -196,23 +214,13 @@ func (s *mixCoordImpl) initInternal() error {
 		return nil
 	})
 	g.Go(func() error {
-		s.queryCoordServer.SetFileResourceObserver(s.fileResourceObserver)
-		if err := s.queryCoordServer.Init(); err != nil {
-			mlog.Error(s.ctx, "queryCoord init failed", mlog.Err(err))
-			return err
-		}
 		if err := s.queryCoordServer.Start(); err != nil {
 			mlog.Error(s.ctx, "queryCoord start failed", mlog.Err(err))
 			return err
 		}
 		return nil
 	})
-	if err := g.Wait(); err != nil {
-		return err
-	}
-
-	s.fileResourceObserver.Start()
-	return nil
+	return g.Wait()
 }
 
 func (s *mixCoordImpl) initKVCreator() {
@@ -249,6 +257,35 @@ func (s *mixCoordImpl) IsServerActive(serverID int64) bool {
 	return s.queryCoordServer.ServerExist(serverID) ||
 		s.datacoordServer.ServerExist(serverID) ||
 		s.rootcoordServer.ServerExist(serverID)
+}
+
+func (s *mixCoordImpl) DataViewProvider() balancer.DataViewProvider {
+	return s.datacoordServer.DataViewProvider()
+}
+
+func (s *mixCoordImpl) CreateCollectionDataView(ctx context.Context, collectionID int64, vchannels []string) error {
+	_, err := s.datacoordServer.CreateCollectionDataView(ctx, collectionID, vchannels)
+	return err
+}
+
+func (s *mixCoordImpl) DropCollectionDataView(ctx context.Context, collectionID int64) error {
+	return s.datacoordServer.DropCollectionDataView(ctx, collectionID)
+}
+
+func (s *mixCoordImpl) FinalizeDropCollectionDataView(ctx context.Context, collectionID int64) error {
+	return s.datacoordServer.FinalizeDropCollectionDataView(ctx, collectionID)
+}
+
+func (s *mixCoordImpl) PinDataView(ctx context.Context, collectionID int64, version qviews.DataVersion) error {
+	return s.datacoordServer.PinDataView(ctx, collectionID, version)
+}
+
+func (s *mixCoordImpl) RecoverDataViewReference(ctx context.Context, collectionID int64, version qviews.DataVersion) (bool, error) {
+	return s.datacoordServer.RecoverDataViewReference(ctx, collectionID, version)
+}
+
+func (s *mixCoordImpl) UnpinDataView(collectionID int64, version qviews.DataVersion) {
+	s.datacoordServer.UnpinDataView(collectionID, version)
 }
 
 func (s *mixCoordImpl) checkExpiredPOSIXDIR() {
@@ -964,6 +1001,23 @@ func (s *mixCoordImpl) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetS
 	return s.queryCoordServer.GetLoadSegmentInfo(ctx, req)
 }
 
+func (s *mixCoordImpl) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
+	return s.datacoordServer.GetQueryViewSegmentLoadInfos(ctx, collectionID, segmentIDs)
+}
+
+func (s *mixCoordImpl) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	resp, err := s.queryCoordServer.GetQueryViewLoadInfo(ctx, req)
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		return resp, nil
+	}
+	resp.IndexInfoList = s.datacoordServer.GetQueryViewCollectionIndexInfos(req.GetCollectionID())
+	return resp, nil
+}
+
+func (s *mixCoordImpl) WatchQueryViewSegmentLoadInfo(stream querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer) error {
+	return s.queryCoordServer.WatchQueryViewSegmentLoadInfo(stream)
+}
+
 func (s *mixCoordImpl) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
 	return s.queryCoordServer.LoadBalance(ctx, req)
 }
@@ -1091,6 +1145,32 @@ func (s *mixCoordImpl) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecov
 
 func (s *mixCoordImpl) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error) {
 	return s.datacoordServer.GetRecoveryInfoV2(ctx, req)
+}
+
+func (s *mixCoordImpl) GetStreamingNodeQueryViewResources(ctx context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	if req.GetLoadInfoVersion() != 0 {
+		loadInfo, err := s.queryCoordServer.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{
+			CollectionID: req.GetCollectionId(),
+			Version:      req.GetLoadInfoVersion(),
+		})
+		if err := merr.CheckRPCCall(loadInfo, err); err != nil {
+			return &datapb.GetStreamingNodeQueryViewResourcesResponse{
+				Status:       merr.Status(err),
+				CollectionId: req.GetCollectionId(),
+				Vchannel:     req.GetVchannel(),
+				DataVersion:  req.GetDataVersion(),
+			}, nil
+		}
+		req = &datapb.GetStreamingNodeQueryViewResourcesRequest{
+			Base:            req.GetBase(),
+			CollectionId:    req.GetCollectionId(),
+			Vchannel:        req.GetVchannel(),
+			DataVersion:     req.GetDataVersion(),
+			LoadInfoVersion: req.GetLoadInfoVersion(),
+			PartitionIds:    append([]int64(nil), loadInfo.GetPartitionIDs()...),
+		}
+	}
+	return s.datacoordServer.GetStreamingNodeQueryViewResources(ctx, req)
 }
 
 func (s *mixCoordImpl) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChannelRecoveryInfoRequest) (*datapb.GetChannelRecoveryInfoResponse, error) {

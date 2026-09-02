@@ -34,10 +34,13 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -67,10 +70,11 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 	defer meta.GlobalFailedLoadCache.TryExpire()
 
 	isGetAll := false
+	configs := s.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap()
 	collectionSet := typeutil.NewUniqueSet(req.GetCollectionIDs()...)
 	if len(req.GetCollectionIDs()) == 0 {
-		for _, collection := range s.meta.GetAllCollections(ctx) {
-			collectionSet.Insert(collection.GetCollectionID())
+		for collectionID := range configs {
+			collectionSet.Insert(collectionID)
 		}
 		isGetAll = true
 	}
@@ -83,11 +87,8 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 		QueryServiceAvailable: make([]bool, 0, len(collectionSet)),
 	}
 	for _, collectionID := range collections {
-		collection := s.meta.GetCollection(ctx, collectionID)
-		percentage := s.meta.CalculateLoadPercentage(ctx, collectionID)
-		loadFields := s.meta.GetLoadFields(ctx, collectionID)
-		refreshProgress := int64(0)
-		if percentage < 0 {
+		cfg := configs[collectionID]
+		if cfg == nil {
 			if isGetAll {
 				// The collection is released during this,
 				// ignore it
@@ -109,16 +110,13 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 			}, nil
 		}
 
-		if collection.IsRefreshed() {
-			refreshProgress = 100
-		}
-
 		resp.CollectionIDs = append(resp.CollectionIDs, collectionID)
-		resp.InMemoryPercentages = append(resp.InMemoryPercentages, int64(percentage))
-		resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, s.checkAnyReplicaAvailable(collectionID))
-		resp.RefreshProgress = append(resp.RefreshProgress, refreshProgress)
+		percentage := s.qviewsLoadPercentage(cfg)
+		resp.InMemoryPercentages = append(resp.InMemoryPercentages, percentage)
+		resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, percentage == 100)
+		resp.RefreshProgress = append(resp.RefreshProgress, 0)
 		resp.LoadFields = append(resp.LoadFields, &schemapb.LongArray{
-			Data: loadFields,
+			Data: qviewsLoadFieldIDs(cfg),
 		})
 	}
 
@@ -137,19 +135,33 @@ func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartit
 	}
 	defer meta.GlobalFailedLoadCache.TryExpire()
 
+	cfg := s.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap()[req.GetCollectionID()]
+	if cfg == nil {
+		err := meta.GlobalFailedLoadCache.Get(req.GetCollectionID())
+		if err != nil {
+			err = merr.WrapErrCollectionNotLoaded(req.GetCollectionID(), err.Error())
+			return &querypb.ShowPartitionsResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+		err = merr.WrapErrCollectionNotLoaded(req.GetCollectionID())
+		return &querypb.ShowPartitionsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
 	partitions := req.GetPartitionIDs()
 	percentages := make([]int64, 0)
 	refreshProgress := int64(0)
 
 	if len(partitions) == 0 {
-		partitions = lo.Map(s.meta.GetPartitionsByCollection(ctx, req.GetCollectionID()), func(partition *meta.Partition, _ int) int64 {
-			return partition.GetPartitionID()
-		})
+		partitions = append([]int64{}, cfg.PartitionIDs...)
 	}
 
+	loadedPartitions := typeutil.NewUniqueSet(cfg.PartitionIDs...)
+	loadPercentage := s.qviewsLoadPercentage(cfg)
 	for _, partitionID := range partitions {
-		percentage := s.meta.GetPartitionLoadPercentage(ctx, partitionID)
-		if percentage < 0 {
+		if !loadedPartitions.Contain(partitionID) {
 			err := meta.GlobalFailedLoadCache.Get(req.GetCollectionID())
 			if err != nil {
 				partitionErr := merr.WrapErrPartitionNotLoaded(partitionID, err.Error())
@@ -167,13 +179,9 @@ func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartit
 			}, nil
 		}
 
-		percentages = append(percentages, int64(percentage))
+		percentages = append(percentages, loadPercentage)
 	}
 
-	collection := s.meta.GetCollection(ctx, req.GetCollectionID())
-	if collection != nil && collection.IsRefreshed() {
-		refreshProgress = 100
-	}
 	refreshProgresses := make([]int64, len(partitions))
 	for i := range partitions {
 		refreshProgresses[i] = refreshProgress
@@ -185,6 +193,76 @@ func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartit
 		InMemoryPercentages: percentages,
 		RefreshProgress:     refreshProgresses,
 	}, nil
+}
+
+func (s *Server) qviewsLoadPercentage(cfg *loadmgr.LoadConfig) int64 {
+	replicaIDs := typeutil.NewUniqueSet()
+	for _, replica := range cfg.Replicas {
+		replicaIDs.Insert(replica.ReplicaID)
+	}
+	total := int64(0)
+	loaded := int64(0)
+	for shardID, stats := range s.qviewsRuntime.shardViewRegistry.Snapshot().StatsMap() {
+		if !replicaIDs.Contain(shardID.ReplicaID) {
+			continue
+		}
+		total++
+		if stats != nil && stats.UpVersion != nil {
+			loaded++
+		}
+	}
+	if total == 0 {
+		return 0
+	}
+	return loaded * 100 / total
+}
+
+func qviewsLoadFieldIDs(cfg *loadmgr.LoadConfig) []int64 {
+	fields := make([]int64, 0, len(cfg.LoadFields))
+	for _, field := range cfg.LoadFields {
+		fields = append(fields, field.GetFieldId())
+	}
+	return fields
+}
+
+func cloneLoadFields(fields []*messagespb.LoadFieldConfig) []*messagespb.LoadFieldConfig {
+	cloned := make([]*messagespb.LoadFieldConfig, 0, len(fields))
+	for _, field := range fields {
+		cloned = append(cloned, &messagespb.LoadFieldConfig{
+			FieldId: field.GetFieldId(),
+			IndexId: field.GetIndexId(),
+		})
+	}
+	return cloned
+}
+
+func (s *Server) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	resp := &querypb.GetQueryViewLoadInfoResponse{
+		Status:       merr.Success(),
+		CollectionID: req.GetCollectionID(),
+	}
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	if req.GetCollectionID() == 0 {
+		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("collection id is zero"))
+		return resp, nil
+	}
+	if s.qviewsRuntime == nil || s.qviewsRuntime.loadConfigStore == nil {
+		resp.Status = merr.Status(merr.WrapErrServiceInternalMsg("query view runtime is nil"))
+		return resp, nil
+	}
+	snapshot := s.qviewsRuntime.loadConfigStore.Snapshot()
+	cfg := snapshot.ConfigsMap()[req.GetCollectionID()]
+	if cfg == nil {
+		resp.Status = merr.Status(merr.WrapErrCollectionNotLoaded(req.GetCollectionID()))
+		return resp, nil
+	}
+	resp.Version = snapshot.Version()
+	resp.PartitionIDs = append([]int64(nil), cfg.PartitionIDs...)
+	resp.LoadFields = cloneLoadFields(cfg.LoadFields)
+	return resp, nil
 }
 
 func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
@@ -1161,15 +1239,39 @@ func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnal
 	nodeIDs := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Collect()
 
 	if len(nodeIDs) == 0 {
-		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.WrapErrServiceUnavailable("failed to validate analyzer, no delegator"))}, nil
+		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.WrapErrServiceUnavailable("failed to validate analyzer, no streamingnode"))}, nil
+	}
+	if s.streamingNodeManager == nil {
+		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.WrapErrServiceInternalMsg("failed to validate analyzer, streamingnode manager is nil"))}, nil
 	}
 
 	idx := s.nodeIdx.Inc() % uint32(len(nodeIDs))
-	resp, err := s.cluster.ValidateAnalyzer(ctx, nodeIDs[idx], req)
+	resp, err := s.streamingNodeManager.ValidateRuntime(ctx, nodeIDs[idx], newStreamingNodeValidateAnalyzerRequest(req))
 	if err != nil {
 		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(err)}, nil
 	}
-	return resp, nil
+	return &querypb.ValidateAnalyzerResponse{
+		Status:      resp.GetStatus(),
+		ResourceIds: resp.GetResourceIds(),
+	}, nil
+}
+
+func newStreamingNodeValidateAnalyzerRequest(req *querypb.ValidateAnalyzerRequest) *streamingpb.StreamingNodeManagerValidateRuntimeRequest {
+	infos := make([]*streamingpb.StreamingNodeRuntimeAnalyzerInfo, 0, len(req.GetAnalyzerInfos()))
+	for _, info := range req.GetAnalyzerInfos() {
+		infos = append(infos, &streamingpb.StreamingNodeRuntimeAnalyzerInfo{
+			Params: info.GetParams(),
+			Field:  info.GetField(),
+			Name:   info.GetName(),
+		})
+	}
+	return &streamingpb.StreamingNodeManagerValidateRuntimeRequest{
+		Validation: &streamingpb.StreamingNodeManagerValidateRuntimeRequest_Analyzer{
+			Analyzer: &streamingpb.StreamingNodeRuntimeAnalyzerValidation{
+				AnalyzerInfos: infos,
+			},
+		},
+	}
 }
 
 func (s *Server) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {

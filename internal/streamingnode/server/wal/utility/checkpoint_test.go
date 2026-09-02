@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -21,23 +22,33 @@ func TestNewWALCheckpointFromProto(t *testing.T) {
 		MessageId:     messageID.IntoProto(),
 		TimeTick:      timeTick,
 		RecoveryMagic: recoveryMagic,
+		DataCheckpoint: &streamingpb.WALConsumeCheckpoint{
+			MessageId: rmq.NewRmqID(10).IntoProto(),
+			TimeTick:  1000,
+		},
 	}
 	checkpoint := NewWALCheckpointFromProto(protoCheckpoint)
 
 	assert.True(t, messageID.EQ(checkpoint.MessageID))
 	assert.Equal(t, timeTick, checkpoint.TimeTick)
 	assert.Equal(t, recoveryMagic, checkpoint.Magic)
+	assert.True(t, rmq.NewRmqID(10).EQ(checkpoint.DataCheckpoint.MessageID))
+	assert.Equal(t, uint64(1000), checkpoint.DataCheckpoint.TimeTick)
 
 	proto := checkpoint.IntoProto()
 	checkpoint2 := NewWALCheckpointFromProto(proto)
 	assert.True(t, messageID.EQ(checkpoint2.MessageID))
 	assert.Equal(t, timeTick, checkpoint2.TimeTick)
 	assert.Equal(t, recoveryMagic, checkpoint2.Magic)
+	assert.True(t, rmq.NewRmqID(10).EQ(checkpoint2.DataCheckpoint.MessageID))
+	assert.Equal(t, uint64(1000), checkpoint2.DataCheckpoint.TimeTick)
 
 	checkpoint3 := checkpoint.Clone()
 	assert.True(t, messageID.EQ(checkpoint3.MessageID))
 	assert.Equal(t, timeTick, checkpoint3.TimeTick)
 	assert.Equal(t, recoveryMagic, checkpoint3.Magic)
+	assert.True(t, rmq.NewRmqID(10).EQ(checkpoint3.DataCheckpoint.MessageID))
+	assert.Equal(t, uint64(1000), checkpoint3.DataCheckpoint.TimeTick)
 
 	protoCheckpoint.ReplicateConfig = &commonpb.ReplicateConfiguration{}
 	protoCheckpoint.ReplicateCheckpoint = &commonpb.ReplicateCheckpoint{
@@ -83,4 +94,28 @@ func TestNewWALCheckpointFromProto(t *testing.T) {
 	assert.Equal(t, uint64(123456), checkpoint2.ReplicateCheckpoint.TimeTick)
 	assert.True(t, rmq.NewRmqID(2).EQ(checkpoint2.ReplicateCheckpoint.MessageID))
 	assert.NotNil(t, checkpoint2.ReplicateConfig)
+}
+
+func TestWALCheckpointCloneDeepCopiesMutableProtoFields(t *testing.T) {
+	checkpoint := &WALCheckpoint{
+		ReplicateConfig: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{{ClusterId: "source"}},
+		},
+		AlterWalState: &streamingpb.AlterWALState{
+			Configs: map[string]string{"endpoint": "original"},
+			Stage:   streamingpb.AlterWALStage_FLUSHING,
+		},
+	}
+
+	cloned := checkpoint.Clone()
+	checkpoint.ReplicateConfig.Clusters[0].ClusterId = "mutated"
+	checkpoint.AlterWalState.Configs["endpoint"] = "mutated"
+	checkpoint.AlterWalState.Stage = streamingpb.AlterWALStage_ADVANCE_CHECKPOINT
+
+	require.NotNil(t, cloned.ReplicateConfig)
+	require.Len(t, cloned.ReplicateConfig.Clusters, 1)
+	assert.Equal(t, "source", cloned.ReplicateConfig.Clusters[0].GetClusterId())
+	require.NotNil(t, cloned.AlterWalState)
+	assert.Equal(t, "original", cloned.AlterWalState.GetConfigs()["endpoint"])
+	assert.Equal(t, streamingpb.AlterWALStage_FLUSHING, cloned.AlterWalState.GetStage())
 }

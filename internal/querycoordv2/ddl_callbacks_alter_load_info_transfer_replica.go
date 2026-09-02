@@ -78,6 +78,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForTransferReplica(ctx cont
 	alterLoadConfigReq := &job.AlterLoadConfigRequest{
 		Meta:           s.meta,
 		CollectionInfo: coll,
+		ControlChannel: loadConfigBroadcastChannel(),
 		Current:        currentLoadConfig,
 		Expected: job.ExpectedLoadConfig{
 			ExpectedPartitionIDs:             currentLoadConfig.GetPartitionIDs(),

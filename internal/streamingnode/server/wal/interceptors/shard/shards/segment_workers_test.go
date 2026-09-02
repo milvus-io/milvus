@@ -9,9 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_utils"
@@ -25,8 +27,99 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
+
+type capturedShardScheduler struct {
+	tasks chan nodescheduler.Task
+}
+
+func (s *capturedShardScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
+	s.tasks <- task
+	return noopShardTaskHandle{}
+}
+
+type noopShardTaskHandle struct{}
+
+func (noopShardTaskHandle) Cancel() {}
+
+func (noopShardTaskHandle) Wait(context.Context) error { return nil }
+
+func runShardWorkerAndWait(t *testing.T, run func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		run()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for segment worker to complete")
+	}
+}
+
+func TestPartitionManagerRunsFlushAndAllocationOutsideNodeScheduler(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+
+	flushStarted := make(chan struct{}, 1)
+	flushMock := mockey.Mock((*segmentFlushWorker).do).To(func(*segmentFlushWorker) {
+		flushStarted <- struct{}{}
+	}).Build()
+	defer flushMock.UnPatch()
+	allocStarted := make(chan struct{}, 1)
+	allocMock := mockey.Mock((*segmentAllocWorker).do).To(func(*segmentAllocWorker) {
+		allocStarted <- struct{}{}
+	}).Build()
+	defer allocMock.UnPatch()
+
+	scheduler := &capturedShardScheduler{tasks: make(chan nodescheduler.Task, 2)}
+	walFuture := syncutil.NewFuture[wal.WAL]()
+	walFuture.Set(mock_wal.NewMockWAL(t))
+	channel := types.PChannelInfo{Name: "pchannel", Term: 1}
+	operator := mock_utils.NewMockSealOperator(t)
+	operator.EXPECT().Channel().Return(channel)
+	operator.EXPECT().AsyncFlushSegment(mock.Anything).Return().Maybe()
+	resource.Resource().SegmentStatsManager().RegisterSealOperator(operator, nil, nil)
+	segment := newTestSegmentAllocManager(channel, &message.CreateSegmentMessageHeader{
+		CollectionId: 1,
+		PartitionId:  2,
+		SegmentId:    1001,
+	}, 100)
+	segment.Flush(policy.PolicyCapacity())
+	m := &partitionManager{
+		ctx:          context.Background(),
+		scheduler:    scheduler,
+		txnManager:   &mockedTxnManager{},
+		wal:          walFuture,
+		vchannel:     "v1",
+		collectionID: 1,
+		partitionID:  2,
+	}
+	m.SetLogger(mlog.With())
+
+	m.asyncFlushSegment(context.Background(), segment)
+	m.asyncAllocSegment(7, true)
+
+	select {
+	case <-flushStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("flush worker was not started directly")
+	}
+	select {
+	case <-allocStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("allocation worker was not started directly")
+	}
+	select {
+	case task := <-scheduler.tasks:
+		t.Fatalf("unexpected NodeScheduler task %T", task)
+	default:
+	}
+}
 
 // TestSegmentFlushWorker_RetryAfterAppendFailure tests that the flush worker
 // regenerates the message after a failed append operation.
@@ -330,77 +423,45 @@ func TestSegmentAllocWorkerStorageVersionFollowsRequirements(t *testing.T) {
 	}
 }
 
-// TestSegmentFlushWorker_WaitForTxnManagerRecoverDone tests the txn manager wait behavior
-func TestSegmentFlushWorker_WaitForTxnManagerRecoverDone(t *testing.T) {
-	paramtable.Init()
-	resource.InitForTest(t)
-
+func TestSegmentFlushWorkerWaitForTxnManagerRecoverDone(t *testing.T) {
 	t.Run("txn manager ready", func(t *testing.T) {
-		ctx := context.Background()
 		mockWAL := mock_wal.NewMockWAL(t)
-		mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
-			return make(chan struct{})
-		}).Maybe()
-
+		mockWAL.EXPECT().Available().Return(make(chan struct{})).Maybe()
 		w := &segmentFlushWorker{
-			txnManager: &mockedTxnManager{}, // RecoverDone returns closed channel
-			ctx:        ctx,
+			txnManager: &mockedTxnManager{},
+			ctx:        context.Background(),
 			wal:        mockWAL,
 		}
 		w.SetLogger(mlog.With())
-
-		err := w.waitForTxnManagerRecoverDone()
-		assert.NoError(t, err)
+		require.NoError(t, w.waitForTxnManagerRecoverDone())
 	})
 
 	t.Run("context canceled", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
-		cancel() // Cancel immediately
-
+		cancel()
 		mockWAL := mock_wal.NewMockWAL(t)
-		mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
-			return make(chan struct{})
-		}).Maybe()
-
-		// Create a txn manager that never becomes ready
-		neverReadyTxnMgr := &neverReadyTxnManager{}
-
+		mockWAL.EXPECT().Available().Return(make(chan struct{})).Maybe()
 		w := &segmentFlushWorker{
-			txnManager: neverReadyTxnMgr,
+			txnManager: &neverReadyTxnManager{},
 			ctx:        ctx,
 			wal:        mockWAL,
 		}
 		w.SetLogger(mlog.With())
-
-		err := w.waitForTxnManagerRecoverDone()
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, context.Canceled)
+		require.ErrorIs(t, w.waitForTxnManagerRecoverDone(), context.Canceled)
 	})
 
 	t.Run("wal unavailable", func(t *testing.T) {
-		ctx := context.Background()
-
-		// Create a WAL that becomes unavailable
-		unavailableCh := make(chan struct{})
-		close(unavailableCh)
+		unavailable := make(chan struct{})
+		close(unavailable)
 		mockWAL := mock_wal.NewMockWAL(t)
-		mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
-			return unavailableCh
-		}).Maybe()
-
-		// Create a txn manager that never becomes ready
-		neverReadyTxnMgr := &neverReadyTxnManager{}
-
+		mockWAL.EXPECT().Available().Return(unavailable).Maybe()
 		w := &segmentFlushWorker{
-			txnManager: neverReadyTxnMgr,
-			ctx:        ctx,
+			txnManager: &neverReadyTxnManager{},
+			ctx:        context.Background(),
 			wal:        mockWAL,
 		}
 		w.SetLogger(mlog.With())
-
-		err := w.waitForTxnManagerRecoverDone()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "wal is unavailable")
+		require.Error(t, w.waitForTxnManagerRecoverDone())
 	})
 }
 
@@ -425,7 +486,6 @@ func TestSegmentAllocWorker_DoLoop(t *testing.T) {
 				}, nil
 			}).Once()
 
-		done := make(chan struct{})
 		w := &segmentAllocWorker{
 			ctx:          ctx,
 			collectionID: 1,
@@ -436,17 +496,7 @@ func TestSegmentAllocWorker_DoLoop(t *testing.T) {
 		}
 		w.SetLogger(mlog.With())
 
-		go func() {
-			w.do()
-			close(done)
-		}()
-
-		select {
-		case <-done:
-			// Success
-		case <-time.After(5 * time.Second):
-			t.Fatal("timeout waiting for do() to complete")
-		}
+		runShardWorkerAndWait(t, w.do)
 	})
 
 	t.Run("context canceled during retry", func(t *testing.T) {
@@ -463,7 +513,6 @@ func TestSegmentAllocWorker_DoLoop(t *testing.T) {
 				return nil, errors.New("simulated failure")
 			}).Once()
 
-		done := make(chan struct{})
 		w := &segmentAllocWorker{
 			ctx:          ctx,
 			collectionID: 1,
@@ -474,17 +523,7 @@ func TestSegmentAllocWorker_DoLoop(t *testing.T) {
 		}
 		w.SetLogger(mlog.With())
 
-		go func() {
-			w.do()
-			close(done)
-		}()
-
-		select {
-		case <-done:
-			// Success - should exit due to context cancellation
-		case <-time.After(5 * time.Second):
-			t.Fatal("timeout waiting for do() to complete")
-		}
+		runShardWorkerAndWait(t, w.do)
 	})
 }
 
@@ -526,7 +565,6 @@ func TestSegmentFlushWorker_DoLoop(t *testing.T) {
 				}, nil
 			}).Once()
 
-		done := make(chan struct{})
 		w := &segmentFlushWorker{
 			txnManager:   &mockedTxnManager{},
 			ctx:          ctx,
@@ -537,17 +575,7 @@ func TestSegmentFlushWorker_DoLoop(t *testing.T) {
 		}
 		w.SetLogger(mlog.With())
 
-		go func() {
-			w.do()
-			close(done)
-		}()
-
-		select {
-		case <-done:
-			// Success
-		case <-time.After(5 * time.Second):
-			t.Fatal("timeout waiting for do() to complete")
-		}
+		runShardWorkerAndWait(t, w.do)
 	})
 }
 
@@ -758,7 +786,6 @@ func TestSegmentAllocWorker_UnrecoverableError(t *testing.T) {
 			return nil, status.NewUnrecoverableError("unrecoverable error")
 		}).Once()
 
-	done := make(chan struct{})
 	w := &segmentAllocWorker{
 		ctx:          ctx,
 		collectionID: 1,
@@ -769,17 +796,7 @@ func TestSegmentAllocWorker_UnrecoverableError(t *testing.T) {
 	}
 	w.SetLogger(mlog.With())
 
-	go func() {
-		w.do()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Success - should exit due to unrecoverable error
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for do() to complete")
-	}
+	runShardWorkerAndWait(t, w.do)
 }
 
 // TestSegmentFlushWorker_UnrecoverableError tests handling of unrecoverable errors
@@ -816,7 +833,6 @@ func TestSegmentFlushWorker_UnrecoverableError(t *testing.T) {
 			return nil, status.NewUnrecoverableError("unrecoverable error")
 		}).Once()
 
-	done := make(chan struct{})
 	w := &segmentFlushWorker{
 		txnManager:   &mockedTxnManager{},
 		ctx:          ctx,
@@ -827,17 +843,7 @@ func TestSegmentFlushWorker_UnrecoverableError(t *testing.T) {
 	}
 	w.SetLogger(mlog.With())
 
-	go func() {
-		w.do()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Success - should exit due to unrecoverable error
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for do() to complete")
-	}
+	runShardWorkerAndWait(t, w.do)
 }
 
 // TestSegmentAllocWorker_WALUnavailable tests handling when WAL becomes unavailable
@@ -860,7 +866,6 @@ func TestSegmentAllocWorker_WALUnavailable(t *testing.T) {
 			return nil, errors.New("simulated failure")
 		}).Once()
 
-	done := make(chan struct{})
 	w := &segmentAllocWorker{
 		ctx:          ctx,
 		collectionID: 1,
@@ -871,17 +876,7 @@ func TestSegmentAllocWorker_WALUnavailable(t *testing.T) {
 	}
 	w.SetLogger(mlog.With())
 
-	go func() {
-		w.do()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Success - should exit because WAL became unavailable
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for do() to complete")
-	}
+	runShardWorkerAndWait(t, w.do)
 }
 
 // TestSegmentFlushWorker_ContextCanceledDuringRetry tests context cancellation during retry
@@ -919,7 +914,6 @@ func TestSegmentFlushWorker_ContextCanceledDuringRetry(t *testing.T) {
 			return nil, errors.New("simulated failure")
 		}).Once()
 
-	done := make(chan struct{})
 	w := &segmentFlushWorker{
 		txnManager:   &mockedTxnManager{},
 		ctx:          ctx,
@@ -930,17 +924,7 @@ func TestSegmentFlushWorker_ContextCanceledDuringRetry(t *testing.T) {
 	}
 	w.SetLogger(mlog.With())
 
-	go func() {
-		w.do()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Success - should exit due to context cancellation
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for do() to complete")
-	}
+	runShardWorkerAndWait(t, w.do)
 }
 
 // TestSegmentFlushWorker_TxnManagerRecoverFailed tests when txn manager recovery fails
@@ -974,7 +958,6 @@ func TestSegmentFlushWorker_TxnManagerRecoverFailed(t *testing.T) {
 		return unavailableCh
 	}).Maybe()
 
-	done := make(chan struct{})
 	w := &segmentFlushWorker{
 		txnManager:   &neverReadyTxnManager{},
 		ctx:          ctx,
@@ -985,17 +968,7 @@ func TestSegmentFlushWorker_TxnManagerRecoverFailed(t *testing.T) {
 	}
 	w.SetLogger(mlog.With())
 
-	go func() {
-		w.do()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Success - should exit due to context cancellation in waitForTxnManagerRecoverDone
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for do() to complete")
-	}
+	runShardWorkerAndWait(t, w.do)
 }
 
 // TestSegmentFlushWorker_WALUnavailableDuringRetry tests WAL unavailable during retry
@@ -1035,7 +1008,6 @@ func TestSegmentFlushWorker_WALUnavailableDuringRetry(t *testing.T) {
 			return nil, errors.New("simulated failure")
 		}).Once()
 
-	done := make(chan struct{})
 	w := &segmentFlushWorker{
 		txnManager:   &mockedTxnManager{},
 		ctx:          ctx,
@@ -1046,15 +1018,5 @@ func TestSegmentFlushWorker_WALUnavailableDuringRetry(t *testing.T) {
 	}
 	w.SetLogger(mlog.With())
 
-	go func() {
-		w.do()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Success - should exit because WAL became unavailable
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for do() to complete")
-	}
+	runShardWorkerAndWait(t, w.do)
 }

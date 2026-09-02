@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -67,7 +66,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 				CollectionId: coll.CollectionID,
 			}).
 			WithBody(&message.DropLoadConfigMessageBody{}).
-			WithBroadcast([]string{streaming.WAL().ControlChannel()}). // TODO: after we support query view in 3.0, we should broadcast the drop load config message to all vchannels.
+			WithBroadcast([]string{loadConfigBroadcastChannel()}).
 			MustBuildBroadcast()
 		collectionReleased = true
 	} else {
@@ -75,6 +74,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 		alterLoadConfigReq := &job.AlterLoadConfigRequest{
 			Meta:           s.meta,
 			CollectionInfo: coll,
+			ControlChannel: loadConfigBroadcastChannel(),
 			Current:        s.getCurrentLoadConfig(ctx, req.GetCollectionID()),
 			Expected: job.ExpectedLoadConfig{
 				ExpectedPartitionIDs:             partitionIDsSet.Collect(),

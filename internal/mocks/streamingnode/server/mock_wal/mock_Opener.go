@@ -5,7 +5,7 @@ package mock_wal
 import (
 	context "context"
 
-	wal "github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	mock "github.com/stretchr/testify/mock"
 )
 

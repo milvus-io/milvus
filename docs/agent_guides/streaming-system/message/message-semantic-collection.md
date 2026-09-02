@@ -19,7 +19,9 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | DropSnapshot | Broadcast: CChannel | No | ExclusiveSnapshotName |
 | RestoreSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshotsByCollection | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
-| Import | Broadcast: VChannels (no CChannel) | No | — |
+| Import | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
+| CommitImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
+| RollbackImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
 | Insert | Single VChannel | No | — |
 | Delete | Single VChannel | No | — |
 | CreateSegment *(SelfControlled)* | Single VChannel | No | — |
@@ -39,12 +41,16 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **CreatePartition** / **DropPartition**: Creates or drops a partition. DropPartition implicitly flushes the partition's growing segments.
 - **CreateIndex** / **AlterIndex** / **DropIndex**: Manages indexes on a collection's field. CChannel-only.
 - **CreateSnapshot** / **DropSnapshot** / **RestoreSnapshot** / **DropSnapshotsByCollection**: Manages collection snapshots. CChannel-only.
-- **Import**: Initiates a bulk import job for a collection.
+- **Import**: Initiates a bulk import job for a collection. Import,
+  CommitImport, and RollbackImport include CChannel as the common ordered copy
+  used by replicated broadcast callback processing. Their per-VChannel work is
+  still performed only on data VChannels; CommitImport ignores the CChannel in
+  its per-message AckOnce callback.
 - **Insert** / **Delete**: DML on a single VChannel. CipherEnabled.
 - **CreateSegment** / **Flush**: WAL-generated (SelfControlled). Allocates or seals a growing segment.
 - **ManualFlush**: Seals all growing segments for a collection on a VChannel.
-- **AlterLoadConfig**: Modifies load configuration — partition set, replica count, load fields, etc. CChannel-only, consumed by QueryCoord.
-- **DropLoadConfig**: Removes load configuration, unloading/releasing from query nodes. Uses ExclusiveCluster when part of DropCollection flow.
+- **AlterLoadConfig**: Modifies load configuration — partition set, replica count, load fields, etc. Broadcasts only to the CChannel and uses append-result FastAck. The callback persists the desired load config in QueryCoord; the Balancer expands shards from DataView, and QueryView state machines drive StreamingNode resource loading through `Acquire`.
+- **DropLoadConfig**: Removes load configuration, unloading/releasing from query nodes. Broadcasts only to the CChannel and uses append-result FastAck. Uses ExclusiveCluster when part of DropCollection flow.
 - **BatchUpdateManifest**: Updates segment manifest versions in batch. Used after compaction or index building. CChannel-only.
 - **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. CChannel-only.
 

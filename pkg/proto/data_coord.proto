@@ -10,6 +10,7 @@ import "milvus.proto";
 import "schema.proto";
 import "msg.proto";
 import "index_coord.proto";
+import "view.proto";
 
 // TODO: import google/protobuf/empty.proto
 message Empty {}
@@ -52,6 +53,8 @@ service DataCoord {
   rpc SaveBinlogPaths(SaveBinlogPathsRequest) returns (common.Status){}
   rpc GetRecoveryInfo(GetRecoveryInfoRequest) returns (GetRecoveryInfoResponse){}
   rpc GetRecoveryInfoV2(GetRecoveryInfoRequestV2) returns (GetRecoveryInfoResponseV2){}
+  rpc GetStreamingNodeQueryViewResources(GetStreamingNodeQueryViewResourcesRequest)
+      returns (GetStreamingNodeQueryViewResourcesResponse) {}
   rpc GetChannelRecoveryInfo(GetChannelRecoveryInfoRequest) returns (GetChannelRecoveryInfoResponse){}
   rpc GetFlushedSegments(GetFlushedSegmentsRequest) returns(GetFlushedSegmentsResponse){}
   rpc GetSegmentsByStates(GetSegmentsByStatesRequest) returns(GetSegmentsByStatesResponse){}
@@ -479,6 +482,11 @@ message SegmentInfo {
   // create_ts records the planning/create timestamp for replacement segment metadata.
   // Legacy segments keep the zero value, which means unknown.
   uint64 create_ts = 39;
+  // delete_apply_start_after_timetick is the exclusive lower bound for delete
+  // data that must be retained/applied when this segment is loaded.
+  // DataView derives shard-level delete_apply_start_after_timetick from this
+  // persisted segment metadata field.
+  uint64 delete_apply_start_after_timetick = 40;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
@@ -558,13 +566,13 @@ message SaveBinlogPathsRequest {
   repeated FieldBinlog field2Bm25logPaths = 16;
   bool with_full_binlogs = 17; // report with full data for verification.
   string manifest_path = 18; //
-
   // V3 stats live in the manifest, not in the statslogs FieldBinlog array,
   // so the writer ships the cumulative stats footprint here. The handler
   // overlays these onto the segment Statistics after computing insert/delta
   // from the cumulative arrays. Nil / zero for V2 flushes — V2 stats come
   // from req.Field2StatslogPaths via the iteration helper.
   Statistics stats = 19;
+  uint64 delete_apply_start_after_timetick = 20;
 }
 
 message CheckPoint {
@@ -679,6 +687,31 @@ message GetRecoveryInfoRequestV2 {
   common.MsgBase base = 1;
   int64 collectionID = 2;
   repeated int64 partitionIDs = 3;
+}
+
+message GetStreamingNodeQueryViewResourcesRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+  string vchannel = 3;
+  view.DataVersion data_version = 4;
+  uint64 load_info_version = 5;
+  repeated int64 partition_ids = 6;
+}
+
+message GetStreamingNodeQueryViewResourcesResponse {
+  common.Status status = 1;
+  int64 collection_id = 2;
+  string vchannel = 3;
+  view.DataVersion data_version = 4;
+  repeated StreamingNodeBM25Resource bm25_resources = 5;
+}
+
+message StreamingNodeBM25Resource {
+  int64 segment_id = 1;
+  int64 partition_id = 2;
+  repeated FieldBinlog bm25_binlogs = 3;
+  int64 storage_version = 4;
+  string manifest_path = 5;
 }
 
 message GetChannelRecoveryInfoRequest {
@@ -1810,6 +1843,8 @@ message SegmentDescription {
   // Must be preserved across snapshot/restore so temporal protections
   // (GC, TTL, MVCC) are not lost on the restored segments.
   uint64 commit_timestamp = 18;
+  // Mirrors SegmentInfo.delete_apply_start_after_timetick.
+  uint64 delete_apply_start_after_timetick = 19;
 }
 
 message CollectionDescription {

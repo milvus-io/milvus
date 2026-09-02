@@ -1169,6 +1169,17 @@ func (c *Client) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 	})
 }
 
+func (c *Client) GetStreamingNodeQueryViewResources(ctx context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest, opts ...grpc.CallOption) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+		return client.GetStreamingNodeQueryViewResources(ctx, req)
+	})
+}
+
 // GetChannelRecoveryInfo returns the corresponding vchannel info.
 func (c *Client) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChannelRecoveryInfoRequest, opts ...grpc.CallOption) (*datapb.GetChannelRecoveryInfoResponse, error) {
 	req = typeutil.Clone(req)
@@ -1248,7 +1259,7 @@ func (c *Client) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	})
 }
 
-// GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
+// GetFlushState gets the flush state based on the provided segment IDs.
 func (c *Client) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushStateResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.GetFlushStateResponse, error) {
 		return client.GetFlushState(ctx, req)
@@ -1684,6 +1695,30 @@ func (c *Client) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegment
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*querypb.GetSegmentInfoResponse, error) {
 		return client.GetLoadSegmentInfo(ctx, req)
 	})
+}
+
+func (c *Client) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQueryViewLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*querypb.GetQueryViewLoadInfoResponse, error) {
+		return client.GetQueryViewLoadInfo(ctx, req)
+	})
+}
+
+func (c *Client) WatchQueryViewSegmentLoadInfo(ctx context.Context, opts ...grpc.CallOption) (querypb.QueryCoord_WatchQueryViewSegmentLoadInfoClient, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client MixCoordClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.WatchQueryViewSegmentLoadInfo(ctx, opts...)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(querypb.QueryCoord_WatchQueryViewSegmentLoadInfoClient), nil
 }
 
 // LoadBalance migrate the sealed segments on the source node to the dst nodes.

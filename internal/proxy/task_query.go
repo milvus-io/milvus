@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -76,6 +77,7 @@ type queryTask struct {
 	partitionKeyMode bool
 	shardclientMgr   shardclient.ShardClientMgr
 	lb               shardclient.LBPolicy
+	viewQueryClient  queryclient.Client
 	channelsMvcc     map[string]Timestamp
 	// fixedSnapshotTimestamp pins internal queries whose read timestamp is
 	// also used as a later write-side correctness proof.
@@ -930,6 +932,14 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		mlog.String("requestType", t.getQueryLabel()))
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
+	if t.viewQueryClient != nil {
+		if err := t.executeByQueryView(ctx); err != nil {
+			log.Warn(ctx, "fail to execute query by query view", mlog.Err(err))
+			return errors.Wrap(err, "failed to query")
+		}
+		log.Debug(ctx, "Query Execute done.")
+		return nil
+	}
 	// Built once, ahead of the namespace fast path below, so that the fast
 	// path derives its single-channel workload from the same value Execute
 	// would fan out -- every collection-level field, the resource-group scope
@@ -969,6 +979,19 @@ func (t *queryTask) Execute(ctx context.Context) error {
 	}
 
 	log.Debug(ctx, "Query Execute done.")
+	return nil
+}
+
+func (t *queryTask) executeByQueryView(ctx context.Context) error {
+	result, err := t.viewQueryClient.Legacy().Query(ctx, &queryclient.LegacyQueryRequest{
+		Req: t.RetrieveRequest,
+	})
+	if err != nil {
+		return err
+	}
+	for _, retrieveResult := range result.Results {
+		t.resultBuf.Insert(retrieveResult)
+	}
 	return nil
 }
 

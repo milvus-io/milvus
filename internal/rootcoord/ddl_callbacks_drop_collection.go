@@ -37,6 +37,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+type collectionDataViewDropper interface {
+	DropCollectionDataView(ctx context.Context, collectionID int64) error
+	FinalizeDropCollectionDataView(ctx context.Context, collectionID int64) error
+}
+
 func (c *Core) broadcastDropCollectionV1(ctx context.Context, req *milvuspb.DropCollectionRequest) error {
 	broadcaster, err := c.startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
@@ -125,21 +130,25 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 					mlog.Int64("collectionID", collectionID), mlog.Err(err))
 			}
 
-			// 3. drop the collection meta itself.
+			// 3. drop DataView metadata before the collection becomes unavailable.
+			// The ack callback is retried until it succeeds, so returning an error
+			// here preserves the deletion across coordinator failures.
+			if dropper, ok := c.mixCoord.(collectionDataViewDropper); ok {
+				if err := dropper.DropCollectionDataView(ctx, collectionID); err != nil {
+					return merr.Wrap(err, "failed to drop collection data view")
+				}
+			}
+
+			// 4. drop the collection meta itself.
 			if err := c.meta.DropCollection(ctx, collectionID, result.TimeTick); err != nil {
 				return merr.Wrap(err, "failed to drop collection")
 			}
+			if dropper, ok := c.mixCoord.(collectionDataViewDropper); ok {
+				if err := dropper.FinalizeDropCollectionDataView(ctx, collectionID); err != nil {
+					return merr.Wrap(err, "failed to finalize collection data view drop")
+				}
+			}
 			continue
-		}
-		// Drop virtual channel data when the vchannel is acknowledged.
-		resp, err := c.mixCoord.DropVirtualChannel(ctx, &datapb.DropVirtualChannelRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			ChannelName: vchannel,
-		})
-		if err := merr.CheckRPCCall(resp, err); err != nil {
-			return merr.Wrap(err, "failed to drop virtual channel")
 		}
 	}
 	// add the collection tombstone to the sweeper.
@@ -158,6 +167,23 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 		ce.OptLPCMCollectionName(body.CollectionName),
 		ce.OptLPCMCollectionID(header.CollectionId),
 		ce.OptLPCMMsgType(commonpb.MsgType_DropCollection)).Build())
+}
+
+func (c *DDLCallback) dropCollectionV1AckOnceCallback(ctx context.Context, result message.AckResultDropCollectionMessageV1) error {
+	msg := result.Message
+	if funcutil.IsControlChannel(msg.VChannel()) {
+		return nil
+	}
+	resp, err := c.mixCoord.DropVirtualChannel(ctx, &datapb.DropVirtualChannelRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		ChannelName: msg.VChannel(),
+	})
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		return merr.Wrap(err, "failed to drop virtual channel")
+	}
+	return nil
 }
 
 // newCollectionTombstone creates a new collection tombstone.

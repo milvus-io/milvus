@@ -21,19 +21,72 @@ import (
 	"testing"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+type dataViewDropTrackingMixCoord struct {
+	types.MixCoord
+	droppedCollectionIDs       []int64
+	finalizedCollectionIDs     []int64
+	dropCollectionDataView     func(context.Context, int64) error
+	finalizeCollectionDataView func(context.Context, int64) error
+}
+
+func (m *dataViewDropTrackingMixCoord) FinalizeDropCollectionDataView(ctx context.Context, collectionID int64) error {
+	m.finalizedCollectionIDs = append(m.finalizedCollectionIDs, collectionID)
+	if m.finalizeCollectionDataView != nil {
+		return m.finalizeCollectionDataView(ctx, collectionID)
+	}
+	return nil
+}
+
+func (m *dataViewDropTrackingMixCoord) DropCollectionDataView(ctx context.Context, collectionID int64) error {
+	m.droppedCollectionIDs = append(m.droppedCollectionIDs, collectionID)
+	if m.dropCollectionDataView != nil {
+		return m.dropCollectionDataView(ctx, collectionID)
+	}
+	return nil
+}
+
 func TestDDLCallbacksCollectionDDL(t *testing.T) {
 	core := initStreamingSystemAndCore(t)
+	dropAttempts := 0
+	finalizeAttempts := 0
+	mixCoord := &dataViewDropTrackingMixCoord{
+		MixCoord: core.mixCoord,
+		dropCollectionDataView: func(context.Context, int64) error {
+			dropAttempts++
+			if dropAttempts == 1 {
+				return merr.WrapErrServiceInternalMsg("injected data view drop failure")
+			}
+			return nil
+		},
+		finalizeCollectionDataView: func(ctx context.Context, collectionID int64) error {
+			finalizeAttempts++
+			_, err := core.meta.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, false)
+			require.Error(t, err, "the terminal marker must be finalized after RootCoord metadata is dropped")
+			if finalizeAttempts == 1 {
+				return merr.WrapErrServiceInternalMsg("injected data view finalize failure")
+			}
+			return nil
+		},
+	}
+	core.mixCoord = mixCoord
 
 	ctx := context.Background()
 	dbName := "testDB" + funcutil.RandomString(10)
@@ -163,6 +216,8 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 		CollectionName: collectionName,
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
+	require.Equal(t, []int64{coll.CollectionID, coll.CollectionID, coll.CollectionID}, mixCoord.droppedCollectionIDs)
+	require.Equal(t, []int64{coll.CollectionID, coll.CollectionID}, mixCoord.finalizedCollectionIDs)
 	_, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.Error(t, err)
 	// drop a dropped collection should be idempotent.
@@ -171,6 +226,34 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 		CollectionName: collectionName,
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
+}
+
+func TestDropCollectionAckOnceCallbackDropsVirtualChannel(t *testing.T) {
+	ctx := context.Background()
+	mixCoord := mocks.NewMixCoord(t)
+	mixCoord.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
+			require.Equal(t, "v1", req.GetChannelName())
+			return &datapb.DropVirtualChannelResponse{Status: merr.Success()}, nil
+		})
+
+	callback := &DDLCallback{Core: &Core{mixCoord: mixCoord}}
+	err := callback.dropCollectionV1AckOnceCallback(ctx, buildDropCollectionAckResult("v1"))
+	require.NoError(t, err)
+}
+
+func buildDropCollectionAckResult(vchannel string) message.AckResultDropCollectionMessageV1 {
+	msg := message.NewDropCollectionMessageBuilderV1().
+		WithVChannel(vchannel).
+		WithHeader(&message.DropCollectionMessageHeader{CollectionId: 100}).
+		WithBody(&msgpb.DropCollectionRequest{}).
+		MustBuildMutable().
+		WithTimeTick(10).
+		WithLastConfirmed(rmq.NewRmqID(10)).
+		IntoImmutableMessage(rmq.NewRmqID(10))
+	return message.AckResultDropCollectionMessageV1{
+		Message: message.MustAsImmutableDropCollectionMessageV1(msg),
+	}
 }
 
 func TestCreatePartitionMaxCountIgnoresDroppedPartitions(t *testing.T) {

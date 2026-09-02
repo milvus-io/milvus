@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -14,11 +15,20 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
+
+type oldVersionMixCoordClient struct {
+	*mocks.MockMixCoordClient
+}
+
+func (c oldVersionMixCoordClient) WatchQueryViewSegmentLoadInfo(context.Context, ...grpc.CallOption) (querypb.QueryCoord_WatchQueryViewSegmentLoadInfoClient, error) {
+	return nil, nil
+}
 
 func TestNewOldVersionImmutableMessage(t *testing.T) {
 	rc := mocks.NewMockMixCoordClient(t)
@@ -29,7 +39,7 @@ func TestNewOldVersionImmutableMessage(t *testing.T) {
 		VirtualChannelNames:  []string{"test1-v0", "test2-v0"},
 	}, nil)
 	rcf := syncutil.NewFuture[types.MixCoordClient]()
-	rcf.Set(rc)
+	rcf.Set(oldVersionMixCoordClient{MockMixCoordClient: rc})
 	resource.InitForTest(t, resource.OptMixCoordClient(rcf))
 
 	ctx := context.Background()

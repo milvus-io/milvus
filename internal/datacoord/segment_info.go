@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"runtime/debug"
 	"time"
 
@@ -599,4 +600,34 @@ func segmentEffectiveDmlTs(seg *datapb.SegmentInfo) uint64 {
 		return ts
 	}
 	return seg.GetDmlPosition().GetTimestamp()
+}
+
+func segmentDeleteApplyStartAfterTimetick(seg *datapb.SegmentInfo) uint64 {
+	if seg == nil {
+		return 0
+	}
+	if ts := seg.GetDeleteApplyStartAfterTimetick(); ts != 0 {
+		return ts
+	}
+	if ts := seg.GetCommitTimestamp(); ts != 0 {
+		return ts
+	}
+	if seg.GetStartPosition() != nil {
+		return seg.GetStartPosition().GetTimestamp()
+	}
+	return 0
+}
+
+func minSegmentDeleteApplyStartAfterTimetick(segments []*SegmentInfo) uint64 {
+	minTs := uint64(math.MaxUint64)
+	for _, segment := range segments {
+		ts := segmentDeleteApplyStartAfterTimetick(segment.SegmentInfo)
+		if ts < minTs {
+			minTs = ts
+		}
+	}
+	if minTs == math.MaxUint64 {
+		return 0
+	}
+	return minTs
 }

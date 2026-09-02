@@ -61,6 +61,11 @@ type GcOption struct {
 
 	broker           broker.Broker
 	removeObjectPool *conc.Pool[struct{}]
+	dataViewGC       DataViewGarbageCollector
+}
+
+type DataViewGarbageCollector interface {
+	GarbageCollect(ctx context.Context, collectionID int64, retainLatest int) error
 }
 
 // garbageCollector handles garbage files in object storage
@@ -366,6 +371,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 	go func() {
 		defer gc.wg.Done()
 		gc.runRecycleTaskWithPauser(ctx, "meta", gc.option.checkInterval, func(ctx context.Context, signal <-chan gcCmd) {
+			gc.recycleDataViews(ctx, signal)
 			gc.recycleDroppedSegments(ctx, signal)
 			gc.recycleChannelCPMeta(ctx, signal)
 			gc.recycleUnusedIndexes(ctx, signal)
@@ -807,6 +813,33 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 		Observe(float64(cost.Milliseconds()))
 }
 
+func (gc *garbageCollector) recycleDataViews(ctx context.Context, signal <-chan gcCmd) {
+	if gc.meta == nil || gc.option.dataViewGC == nil {
+		return
+	}
+	start := time.Now()
+	logger := mlog.With(mlog.String("gcName", "recycleDataViews"), mlog.Time("startAt", start))
+	logger.Info(ctx, "start recycleDataViews")
+	defer func() { logger.Info(ctx, "recycleDataViews done", mlog.Duration("timeCost", time.Since(start))) }()
+
+	for _, collection := range gc.meta.GetCollections() {
+		if ctx.Err() != nil {
+			return
+		}
+		gc.ackSignal(signal)
+
+		collectionID := collection.ID
+		if gc.collectionGCPaused(collectionID) {
+			logger.Info(ctx, "skip DataView GC since collection is paused", mlog.FieldCollectionID(collectionID))
+			continue
+		}
+
+		if err := gc.option.dataViewGC.GarbageCollect(ctx, collectionID, 1); err != nil {
+			logger.Warn(ctx, "DataView GC failed", mlog.FieldCollectionID(collectionID), mlog.Err(err))
+		}
+	}
+}
+
 func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 	childSegment *SegmentInfo,
 	indexSet typeutil.UniqueSet,
@@ -922,6 +955,26 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			continue
 		}
 
+		if gc.meta.dataViewManager != nil {
+			referenced, err := gc.meta.dataViewManager.IsSegmentReferenced(ctx, segment.GetCollectionID(), segmentID)
+			if err != nil {
+				log.Warn(ctx, "skip GC segment since DataView reference check failed",
+					mlog.FieldCollectionID(segment.GetCollectionID()),
+					mlog.FieldPartitionID(segment.GetPartitionID()),
+					mlog.String("channel", segInsertChannel),
+					mlog.FieldSegmentID(segmentID),
+					mlog.Err(err))
+				continue
+			}
+			if referenced {
+				log.Info(ctx, "skip GC segment since it is referenced by retained DataView",
+					mlog.FieldCollectionID(segment.GetCollectionID()),
+					mlog.FieldPartitionID(segment.GetPartitionID()),
+					mlog.String("channel", segInsertChannel),
+					mlog.FieldSegmentID(segmentID))
+				continue
+			}
+		}
 		// Skip segments protected by snapshot references. IsSegmentGCBlocked is O(1)
 		// and embeds the "RefIndex not loaded → fail-closed" check, so we don't need
 		// a separate loaded-state probe.

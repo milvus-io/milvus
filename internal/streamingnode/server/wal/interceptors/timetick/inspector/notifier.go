@@ -22,16 +22,16 @@ type syncNotifier struct {
 }
 
 // AddAndNotify adds a signal and notifies the waiter.
-func (n *syncNotifier) AddAndNotify(pChannelInfo types.PChannelInfo, persisted bool) {
+func (n *syncNotifier) AddAndNotify(pChannelInfo types.PChannelInfo, forcePersisted bool) {
 	n.cond.LockAndBroadcast()
 	defer n.cond.L.Unlock()
 	if _, ok := n.signal[pChannelInfo]; !ok {
-		n.signal[pChannelInfo] = persisted
+		n.signal[pChannelInfo] = forcePersisted
 		return
 	}
-	if persisted {
-		// only persisted signal can overwrite the previous signal
-		n.signal[pChannelInfo] = persisted
+	if forcePersisted {
+		// A force-persisted signal can upgrade a pending regular sync.
+		n.signal[pChannelInfo] = forcePersisted
 	}
 }
 

@@ -22,6 +22,43 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestSealWorkerCoalescesNotificationsWithoutBlocking(t *testing.T) {
+	worker := newSealWorker(nil)
+	first := policy.PolicyCapacity()
+	latest := policy.PolicyFenced(100)
+	other := policy.PolicyCollectionRemoved()
+
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 1000; i++ {
+			worker.NotifySealSegment(1, first)
+		}
+		worker.NotifySealSegment(1, latest)
+		worker.NotifySealSegment(2, other)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("seal notification blocked")
+	}
+
+	pending := worker.takePendingSeals()
+	require.Len(t, pending, 2)
+	assert.Equal(t, latest, pending[1])
+	assert.Equal(t, other, pending[2])
+	select {
+	case <-worker.sealNotifier:
+	case <-time.After(time.Second):
+		t.Fatal("missing seal worker wakeup")
+	}
+	select {
+	case <-worker.sealNotifier:
+		t.Fatal("seal worker wakeups were not coalesced")
+	default:
+	}
+}
+
 func TestStatsManager(t *testing.T) {
 	paramtable.Init()
 	m := NewStatsManager()

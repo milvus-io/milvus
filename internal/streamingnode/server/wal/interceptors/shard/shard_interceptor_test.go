@@ -30,7 +30,7 @@ import (
 
 func allocWALSchemaForTest(t *testing.T, collectionID int64, vchannel string, schemaVersion int32) {
 	t.Helper()
-	key := walFunctionRunnerKey(vchannel)
+	key := WALFunctionRunnerKey(vchannel)
 	assert.NoError(t, function.GetManager().Alloc(collectionID, key, &schemapb.CollectionSchema{Version: schemaVersion}))
 	t.Cleanup(func() {
 		function.GetManager().Release(collectionID, key)
@@ -159,10 +159,10 @@ func TestShardInterceptorUpdateFunctionRunnersRetainsSchemaWhenFunctionsDropped(
 			},
 		},
 	}
-	assert.NoError(t, function.GetManager().Alloc(collectionID, walFunctionRunnerKey(vchannel), schema))
-	defer function.GetManager().Release(collectionID, walFunctionRunnerKey(vchannel))
+	assert.NoError(t, function.GetManager().Alloc(collectionID, WALFunctionRunnerKey(vchannel), schema))
+	defer function.GetManager().Release(collectionID, WALFunctionRunnerKey(vchannel))
 
-	ok, err := function.GetManager().RunWithAnalyzer(context.Background(), collectionID, walFunctionRunnerKey(vchannel), 101, func(function.Analyzer) error {
+	ok, err := function.GetManager().RunWithAnalyzer(context.Background(), collectionID, WALFunctionRunnerKey(vchannel), 101, func(function.Analyzer) error {
 		return nil
 	})
 	assert.NoError(t, err)
@@ -177,7 +177,7 @@ func TestShardInterceptorUpdateFunctionRunnersRetainsSchemaWhenFunctionsDropped(
 	noFunctionSchema.Functions = nil
 	impl.updateFunctionRunners(collectionID, vchannel, noFunctionSchema)
 
-	ok, err = function.GetManager().RunWithAnalyzer(context.Background(), collectionID, walFunctionRunnerKey(vchannel), 101, func(function.Analyzer) error {
+	ok, err = function.GetManager().RunWithAnalyzer(context.Background(), collectionID, WALFunctionRunnerKey(vchannel), 101, func(function.Analyzer) error {
 		return nil
 	})
 	assert.NoError(t, err)
@@ -197,7 +197,7 @@ func TestShardInterceptorUpdateFunctionRunnersRetainsSchemaWhenFunctionsDropped(
 func TestShardInterceptorCreateCollectionAllocatesFunctionRunnersFromLegacySchema(t *testing.T) {
 	collectionID := int64(99003)
 	vchannel := "by-dev-rootcoord-dml_0_99003v0"
-	key := walFunctionRunnerKey(vchannel)
+	key := WALFunctionRunnerKey(vchannel)
 	schema := &schemapb.CollectionSchema{
 		Version: 1,
 		Fields: []*schemapb.FieldSchema{
@@ -291,7 +291,7 @@ func TestShardInterceptorRejectsInvalidLegacySchemaBeforeAppend(t *testing.T) {
 func TestShardInterceptorAlterCollectionSkipsPartialSchemaForFunctionManager(t *testing.T) {
 	collectionID := int64(99002)
 	vchannel := "by-dev-rootcoord-dml_0_99002v0"
-	key := walFunctionRunnerKey(vchannel)
+	key := WALFunctionRunnerKey(vchannel)
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},

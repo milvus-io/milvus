@@ -4,8 +4,10 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -14,19 +16,27 @@ import (
 
 type WALCheckpoint = utility.WALCheckpoint
 
-const RecoveryMagicStreamingInitialized = utility.RecoveryMagicStreamingInitialized
-
 // RecoverySnapshot is the snapshot of the recovery info.
 type RecoverySnapshot struct {
 	VChannels          map[string]*streamingpb.VChannelMeta
 	SegmentAssignments map[int64]*streamingpb.SegmentAssignmentMeta
+	WritePathRecovery  *moduleapi.WritePathRecoveryModuleSnapshot
 	Checkpoint         *WALCheckpoint
+	CheckpointDirty    bool
 	TxnBuffer          *utility.TxnBuffer
 	// Used during WAL alteration process
 	AlterWALInfo *AlterWALInfo
 	// SalvageCheckpoint captures the replicate checkpoint at force-promote time.
 	// It must be persisted before the consume checkpoint so that the ordering guarantee holds.
 	SalvageCheckpoint *utility.ReplicateCheckpoint
+}
+
+type dirtyPersistSnapshot struct {
+	Checkpoint         *WALCheckpoint
+	CheckpointDirty    bool
+	ModuleDirtySnaps   []moduleapi.DirtySnapshot
+	ModuleSnapshotsAck bool
+	SalvageCheckpoint  *utility.ReplicateCheckpoint
 }
 
 // AlterWALInfo contains information about WAL alteration process.
@@ -40,6 +50,9 @@ type AlterWALInfo struct {
 type BuildRecoveryStreamParam struct {
 	StartCheckpoint message.MessageID
 	EndTimeTick     uint64
+	// UseWriteAheadBuffer lets unbounded live scanners switch to WAB tailing after
+	// catching up durable WAL. Bounded startup recovery keeps this disabled.
+	UseWriteAheadBuffer bool
 }
 
 // RecoveryMetrics is the metrics of the recovery info.
@@ -82,24 +95,19 @@ type RecoveryStream interface {
 	Close() error
 }
 
-// RecoveryStorage is an interface that is used to observe the messages from the WAL.
+// RecoveryStorage owns WAL recovery state for one pchannel.
 type RecoveryStorage interface {
 	// Metrics gets the metrics of the recovery storage.
 	Metrics() RecoveryMetrics
 
-	// TODO: should be removed in future,
-	// GetSchema gets last schema of the collection which timetick is less than the given timetick.
-	GetSchema(ctx context.Context, vchannel string, timetick uint64) (*schemapb.CollectionSchema, error)
+	// GetDataCheckpoint returns the recovery-owned data checkpoint.
+	GetDataCheckpoint(ctx context.Context) *WALCheckpoint
 
-	// ObserveMessage observes the message from the WAL.
-	ObserveMessage(ctx context.Context, msg message.ImmutableMessage) error
+	// TransformLog returns the TransformLog accesser owned by RecoveryStorage.
+	TransformLog() wal.TransformLogAccesser
 
-	// UpdateFlusherCheckpoint updates the checkpoint of flusher.
-	// TODO: should be removed in future, after merge the flusher logic into recovery storage.
-	UpdateFlusherCheckpoint(vchannel string, checkpoint *WALCheckpoint)
-
-	// GetFlusherCheckpointByTimeTick returns the minimum flush checkpoint among all vchannels based on time tick.
-	GetFlusherCheckpointByTimeTick(ctx context.Context) *WALCheckpoint
+	// VChannelManager returns the PChannel-local vchannel recovery manager.
+	VChannelManager() *vchannel.PChannelRecoveryManager
 
 	// Close closes the recovery storage.
 	Close()

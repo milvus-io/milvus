@@ -16,13 +16,38 @@ type StreamingNodeCataLog interface {
 	// ListVChannel list all vchannels on current pchannel.
 	ListVChannel(ctx context.Context, pchannelName string) ([]*streamingpb.VChannelMeta, error)
 
+	// SaveVChannels save vchannel on current pchannel.
+	SaveVChannels(ctx context.Context, pchannelName string, vchannels map[string]*streamingpb.VChannelMeta) error
+
+	// SaveVChannelBaseMetas saves only the vchannel base records without
+	// rewriting separately stored schema records.
+	SaveVChannelBaseMetas(ctx context.Context, pchannelName string, vchannels map[string]*streamingpb.VChannelMeta) error
+
+	// DropVChannels drops retained vchannel recovery meta on current pchannel.
+	DropVChannels(ctx context.Context, pchannelName string, vchannels map[string]*streamingpb.VChannelMeta) error
+
+	// ListTransformLogMeta lists transform log metas on current pchannel.
+	ListTransformLogMeta(ctx context.Context, pchannelName string) (map[string]*streamingpb.VChannelTransformLogMeta, error)
+
+	// SaveTransformLogMeta saves transform log metas on current pchannel.
+	SaveTransformLogMeta(ctx context.Context, pchannelName string, metas map[string]*streamingpb.VChannelTransformLogMeta) error
+
+	// DropTransformLogMeta drops transform log metas on current pchannel.
+	DropTransformLogMeta(ctx context.Context, pchannelName string, vchannels []string) error
+
 	// ListSegmentAssignment list all segment assignments for the wal.
 	ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error)
 
-	// ListQueryViews lists persisted StreamingNode query views for the WAL.
+	// SaveSegmentAssignments save the segment assignments for the wal.
+	SaveSegmentAssignments(ctx context.Context, pChannelName string, infos map[int64]*streamingpb.SegmentAssignmentMeta) error
+
+	// DropSegmentAssignments drops retained segment assignment recovery meta for the wal.
+	DropSegmentAssignments(ctx context.Context, pChannelName string, segmentIDs []int64) error
+
+	// ListQueryViews lists persisted StreamingNode query views for the wal.
 	ListQueryViews(ctx context.Context, pChannelName string) ([]*viewpb.QueryViewOfShard, error)
 
-	// SaveQueryViews persists Up views and removes non-Up recovery records.
+	// SaveQueryViews saves StreamingNode query views for the wal.
 	SaveQueryViews(ctx context.Context, pChannelName string, views []*viewpb.QueryViewOfShard) error
 
 	// GetConsumeCheckpoint gets the consuming checkpoint of the wal.
@@ -39,11 +64,10 @@ type StreamingNodeCataLog interface {
 	// SaveRecoverySnapshot applies a WAL recovery DELTA in one compound
 	// operation. Despite the name it is not a full-state replacement: only the
 	// entries present in the payload are touched, missing keys are left
-	// unchanged, and deletion is expressed by state (a FLUSHED segment or a
-	// DROPPED vchannel/schema), never by omission. It therefore cannot express
-	// "replace the persisted recovery state with this set" (in particular an
-	// empty payload is a no-op, not a wipe); pruning stale keys is the caller's
-	// responsibility.
+	// unchanged, and closed/tombstoned recovery metadata is retained until an
+	// explicit DropVChannels or DropSegmentAssignments cleanup. It therefore
+	// cannot express "replace the persisted recovery state with this set" (in
+	// particular an empty payload is a no-op, not a wipe).
 	//
 	// The etcd-based implementation stages the delta as a single composite
 	// write via the shared txn.Builder/txn.Commit primitive - atomically when
@@ -61,8 +85,8 @@ type StreamingNodeCataLog interface {
 
 // WALRecoverySnapshot is the compound payload of
 // StreamingNodeCataLog.SaveRecoverySnapshot. It is a delta, not a full
-// snapshot: absent sections mean "unchanged", and deletion is carried by
-// entry state (FLUSHED/DROPPED), not by omission. See SaveRecoverySnapshot.
+// snapshot: absent sections mean "unchanged", and cleanup is handled by the
+// explicit catalog drop methods. See SaveRecoverySnapshot.
 type WALRecoverySnapshot struct {
 	// SegmentAssignments are the segment assignments to save; skipped if empty.
 	SegmentAssignments map[int64]*streamingpb.SegmentAssignmentMeta

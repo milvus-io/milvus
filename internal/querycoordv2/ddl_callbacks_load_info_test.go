@@ -47,8 +47,6 @@ func (suite *ServiceSuite) TestDDLCallbacksLoadCollectionInfo() {
 		resp, err := suite.server.LoadCollection(ctx, req)
 		suite.Require().NoError(merr.CheckRPCCall(resp, err))
 		suite.NoError(err)
-		suite.EqualValues(1, suite.meta.GetReplicaNumber(ctx, collection))
-		suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 		suite.assertCollectionLoaded(collection)
 	}
 
@@ -161,8 +159,6 @@ func (suite *ServiceSuite) TestDDLCallbacksLoadCollectionWithLoadFields() {
 			}
 			resp, err := suite.server.LoadCollection(ctx, req)
 			suite.Require().NoError(merr.CheckRPCCall(resp, err))
-			suite.EqualValues(1, suite.meta.GetReplicaNumber(ctx, collection))
-			suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 			suite.assertCollectionLoaded(collection)
 		}
 	})
@@ -237,7 +233,7 @@ func (suite *ServiceSuite) TestDDLCallbacksLoadPartition() {
 		suite.Require().NoError(merr.CheckRPCCall(resp, err))
 		suite.EqualValues(1, suite.meta.GetReplicaNumber(ctx, collection))
 		suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
-		suite.assertCollectionLoaded(collection)
+		suite.assertQViewsLoadConfigured(collection, 1, suite.partitions[collection], false)
 	}
 
 	// Test load partition again
@@ -353,7 +349,7 @@ func (suite *ServiceSuite) TestLoadPartitionWithLoadFields() {
 			suite.Require().NoError(merr.CheckRPCCall(resp, err))
 			suite.EqualValues(1, suite.meta.GetReplicaNumber(ctx, collection))
 			suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
-			suite.assertCollectionLoaded(collection)
+			suite.assertQViewsLoadConfigured(collection, 1, suite.partitions[collection], false)
 		}
 	})
 
@@ -762,13 +758,9 @@ func (suite *ServiceSuite) TestDDLCallbacksLoadCollectionWithUserSpecifiedReplic
 		resp, err := suite.server.LoadCollection(ctx, req)
 		suite.Require().NoError(merr.CheckRPCCall(resp, err))
 
-		// Verify UserSpecifiedReplicaMode is set correctly
-		loadedCollection := suite.meta.GetCollection(ctx, collection)
-		suite.NotNil(loadedCollection)
-		suite.True(loadedCollection.GetUserSpecifiedReplicaMode())
-
-		suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 		suite.assertCollectionLoaded(collection)
+		cfg := suite.server.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap()[collection]
+		suite.True(cfg.UserSpecifiedReplicaMode)
 	}
 }
 
@@ -827,7 +819,7 @@ func (suite *ServiceSuite) TestLoadPartitionWithUserSpecifiedReplicaMode() {
 		suite.True(loadedCollection.GetUserSpecifiedReplicaMode())
 
 		suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
-		suite.assertCollectionLoaded(collection)
+		suite.assertQViewsLoadConfigured(collection, 1, suite.partitions[collection], false)
 	}
 }
 
@@ -935,15 +927,5 @@ func (suite *ServiceSuite) TestSyncNewCreatedPartition() {
 }
 
 func (suite *ServiceSuite) assertCollectionLoaded(collection int64) {
-	ctx := context.Background()
-	suite.True(suite.meta.Exist(ctx, collection))
-	suite.NotEqual(0, len(suite.meta.GetByCollection(ctx, collection)))
-	for _, channel := range suite.channels[collection] {
-		suite.NotNil(suite.targetMgr.GetDmChannel(ctx, collection, channel, meta.CurrentTarget))
-	}
-	for _, segments := range suite.segments[collection] {
-		for _, segment := range segments {
-			suite.NotNil(suite.targetMgr.GetSealedSegment(ctx, collection, segment, meta.CurrentTarget))
-		}
-	}
+	suite.assertQViewsLoadConfigured(collection, 0, suite.partitions[collection], true)
 }

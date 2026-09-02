@@ -19,6 +19,8 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -39,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -295,7 +298,10 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 	if err != nil {
 		return err
 	}
+	return kc.saveSegmentAndBinlogKVs(ctx, kvs, removals)
+}
 
+func (kc *Catalog) saveSegmentAndBinlogKVs(ctx context.Context, kvs map[string]string, removals []string) error {
 	if err := kc.SaveByBatch(ctx, kvs); err != nil {
 		return err
 	}
@@ -498,6 +504,87 @@ func (kc *Catalog) DropSegment(ctx context.Context, segment *datapb.SegmentInfo)
 	}
 
 	return nil
+}
+
+func (kc *Catalog) SaveDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection) error {
+	key := buildDataViewVersionKey(
+		dataView.GetCollectionId(),
+		dataView.GetDataVersion().GetStreamingVersion(),
+		dataView.GetDataVersion().GetCompactVersion(),
+	)
+	value, err := proto.Marshal(dataView)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) ListDataViews(ctx context.Context, collectionID int64) ([]*viewpb.DataViewOfCollection, error) {
+	return kc.listDataViewsWithPrefix(ctx, buildDataViewVersionPrefix(collectionID))
+}
+
+func (kc *Catalog) ListAllDataViews(ctx context.Context) ([]*viewpb.DataViewOfCollection, error) {
+	return kc.listDataViewsWithPrefix(ctx, DataViewPrefix+"/")
+}
+
+func (kc *Catalog) listDataViewsWithPrefix(ctx context.Context, prefix string) ([]*viewpb.DataViewOfCollection, error) {
+	dataViews := make([]*viewpb.DataViewOfCollection, 0)
+	applyFn := func(key []byte, value []byte) error {
+		if isDataViewDropMarkerKey(string(key)) {
+			return nil
+		}
+		dataView := &viewpb.DataViewOfCollection{}
+		if err := proto.Unmarshal(value, dataView); err != nil {
+			return err
+		}
+		dataViews = append(dataViews, dataView)
+		return nil
+	}
+
+	if err := kc.MetaKv.WalkWithPrefix(ctx, prefix, kc.paginationSize, applyFn); err != nil {
+		return nil, err
+	}
+	return dataViews, nil
+}
+
+func (kc *Catalog) DropDataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) error {
+	return kc.MetaKv.Remove(ctx, buildDataViewVersionKey(collectionID, dataVersion.GetStreamingVersion(), dataVersion.GetCompactVersion()))
+}
+
+func (kc *Catalog) DropDataViews(ctx context.Context, collectionID int64) error {
+	return kc.MetaKv.RemoveWithPrefix(ctx, buildDataViewVersionPrefix(collectionID))
+}
+
+func (kc *Catalog) MarkDataViewCollectionDropped(ctx context.Context, collectionID int64) error {
+	return kc.MetaKv.Save(ctx, buildDataViewDropMarkerKey(collectionID), "1")
+}
+
+func (kc *Catalog) ListDroppedDataViewCollections(ctx context.Context) ([]int64, error) {
+	prefix := DataViewDropMarkerPrefix + "/"
+	keys, _, err := kc.MetaKv.LoadWithPrefix(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	collectionIDs := make([]int64, 0, len(keys))
+	for _, key := range keys {
+		collectionID, err := strconv.ParseInt(path.Base(key), 10, 64)
+		if err != nil {
+			return nil, merr.WrapErrDataIntegrityMsg("invalid data view drop marker key %s", key)
+		}
+		collectionIDs = append(collectionIDs, collectionID)
+	}
+	slices.Sort(collectionIDs)
+	return collectionIDs, nil
+}
+
+func isDataViewDropMarkerKey(key string) bool {
+	markerPrefix := DataViewDropMarkerPrefix + "/"
+	return strings.HasPrefix(key, markerPrefix) || strings.Contains(key, "/"+markerPrefix)
+}
+
+func (kc *Catalog) UnmarkDataViewCollectionDropped(ctx context.Context, collectionID int64) error {
+	return kc.MetaKv.Remove(ctx, buildDataViewDropMarkerKey(collectionID))
 }
 
 func (kc *Catalog) MarkChannelAdded(ctx context.Context, channel string) error {
@@ -1244,7 +1331,6 @@ func (kc *Catalog) ListSnapshots(ctx context.Context) ([]*datapb.SnapshotInfo, e
 	}
 	return snapshots, nil
 }
-
 func (kc *Catalog) SaveExportSnapshotJob(ctx context.Context, job *datapb.ExportSnapshotJob) error {
 	value, err := proto.Marshal(job)
 	if err != nil {

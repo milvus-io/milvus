@@ -63,6 +63,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 	alterLoadConfigReq := &job.AlterLoadConfigRequest{
 		Meta:           s.meta,
 		CollectionInfo: coll,
+		ControlChannel: loadConfigBroadcastChannel(),
 		Current:        s.getCurrentLoadConfig(ctx, req.GetCollectionID()),
 		Expected: job.ExpectedLoadConfig{
 			ExpectedPartitionIDs:             partitionIDsSet.Collect(),

@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -75,6 +76,7 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 	}
 
 	collectionInfo := newCollectionInfo(vchannel, partitionIDs)
+	collectionInfo.FencedAssignTimeTick = timetick
 	// Set schema when creating collection.
 	if schema != nil {
 		collectionInfo.setSchema(&streamingpb.CollectionSchemaOfVChannel{
@@ -85,21 +87,24 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 	}
 	m.collections[collectionID] = collectionInfo
 
-	for partitionID := range collectionInfo.PartitionIDs {
-		uniqueKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
-		if _, ok := m.partitionManagers[uniqueKey]; ok {
+	for partitionID := range collectionInfo.Partitions {
+		if partitionID == common.AllPartitionsID {
+			continue
+		}
+		if collectionInfo.Partitions[partitionID] != nil {
 			logger.Warn(context.TODO(), "partition already exists", mlog.Int64("partitionID", partitionID))
 			continue
 		}
-		m.partitionManagers[uniqueKey] = newPartitionSegmentManager(
+		collectionInfo.Partitions[partitionID] = newPartitionSegmentManager(
 			m.ctx,
 			m.Logger(),
 			m.wal,
+			m.scheduler,
 			m.pchannel,
 			vchannel,
 			collectionID,
 			partitionID,
-			make(map[int64]*segmentAllocManager),
+			nil,
 			m.txnManager,
 			timetick,
 			m.metrics,
@@ -127,20 +132,16 @@ func (m *shardManagerImpl) DropCollection(msg message.ImmutableDropCollectionMes
 	collectionInfo := m.collections[collectionID]
 	delete(m.collections, collectionID)
 	// remove all partition and segment
-	partitionIDs := make([]int64, 0, len(collectionInfo.PartitionIDs))
-	segmentIDs := make([]int64, 0, len(collectionInfo.PartitionIDs))
-	for partitionID := range collectionInfo.PartitionIDs {
-		uniqueKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
-		pm, ok := m.partitionManagers[uniqueKey]
-		if !ok {
-			logger.Warn(context.TODO(), "partition not exists", mlog.Int64("partitionID", partitionID))
+	partitionIDs := make([]int64, 0, len(collectionInfo.Partitions))
+	segmentIDs := make([]int64, 0, len(collectionInfo.Partitions))
+	for partitionID, pm := range collectionInfo.Partitions {
+		if pm == nil {
 			continue
 		}
 		// Flush all segments and fence assign to the partition manager.
 		segments := pm.FlushAndDropPartition(policy.PolicyCollectionRemoved())
 		partitionIDs = append(partitionIDs, partitionID)
 		segmentIDs = append(segmentIDs, segments...)
-		delete(m.partitionManagers, uniqueKey)
 	}
 	logger.Info(context.TODO(), "collection removed", mlog.Int64s("partitionIDs", partitionIDs), mlog.Int64s("segmentIDs", segmentIDs))
 	m.updateMetrics()

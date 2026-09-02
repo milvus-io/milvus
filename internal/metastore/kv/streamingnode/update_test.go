@@ -108,10 +108,9 @@ func TestCatalog_SaveRecoverySnapshot_EmptyPartsSkipped(t *testing.T) {
 	assert.Contains(t, saves, buildConsumeCheckpointKey("p1"))
 }
 
-// TestCatalog_SaveRecoverySnapshot_FlushedSegmentIsRemoved proves a flushed
-// segment assignment is staged as a Remove, matching SaveSegmentAssignments'
-// encoding.
-func TestCatalog_SaveRecoverySnapshot_FlushedSegmentIsRemoved(t *testing.T) {
+// TestCatalog_SaveRecoverySnapshot_FlushedSegmentIsRetained proves a flushed
+// segment assignment remains recoverable until explicit cleanup.
+func TestCatalog_SaveRecoverySnapshot_FlushedSegmentIsRetained(t *testing.T) {
 	kv := mocks.NewMetaKv(t)
 	kv.EXPECT().MaxTxnOps().Return(128).Maybe()
 	var saves map[string]string
@@ -130,19 +129,20 @@ func TestCatalog_SaveRecoverySnapshot_FlushedSegmentIsRemoved(t *testing.T) {
 		},
 	})
 	assert.NoError(t, err)
-	assert.Empty(t, saves)
-	assert.Equal(t, []string{buildSegmentAssignmentKey("p1", 1)}, removals)
+	assert.Empty(t, removals)
+	assert.Contains(t, saves, buildSegmentAssignmentKey("p1", 1))
 }
 
-// TestCatalog_SaveRecoverySnapshot_DroppedVChannelIsRemoved proves a dropped
-// vchannel (and its schema versions) is staged as Removes, matching
-// SaveVChannels' encoding.
-func TestCatalog_SaveRecoverySnapshot_DroppedVChannelIsRemoved(t *testing.T) {
+// TestCatalog_SaveRecoverySnapshot_DroppedVChannelIsRetained proves a dropped
+// vchannel and its schemas remain recoverable until explicit cleanup.
+func TestCatalog_SaveRecoverySnapshot_DroppedVChannelIsRetained(t *testing.T) {
 	kv := mocks.NewMetaKv(t)
 	kv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	var saves map[string]string
 	var removals []string
 	kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(_ context.Context, s map[string]string, dels []string, _ ...predicates.Predicate) error {
+			saves = s
 			removals = dels
 			return nil
 		}).Once()
@@ -154,16 +154,18 @@ func TestCatalog_SaveRecoverySnapshot_DroppedVChannelIsRemoved(t *testing.T) {
 				Vchannel: "vch1",
 				State:    streamingpb.VChannelState_VCHANNEL_STATE_DROPPED,
 				CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
-					Schemas: []*streamingpb.CollectionSchemaOfVChannel{{CheckpointTimeTick: 5}},
+					Schemas: []*streamingpb.CollectionSchemaOfVChannel{{
+						State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+						CheckpointTimeTick: 5,
+					}},
 				},
 			},
 		},
 	})
 	assert.NoError(t, err)
-	assert.ElementsMatch(t, []string{
-		buildVChannelSchemaKey("p1", "vch1", 5),
-		buildVChannelKey("p1", "vch1"),
-	}, removals)
+	assert.Empty(t, removals)
+	assert.Contains(t, saves, buildVChannelSchemaKey("p1", "vch1", 5))
+	assert.Contains(t, saves, buildVChannelKey("p1", "vch1"))
 }
 
 // TestCatalog_SaveRecoverySnapshot_VChannelEncodingMatchesEncoder proves the

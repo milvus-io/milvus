@@ -17,9 +17,11 @@
 package datacoord
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"time"
 
@@ -35,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
@@ -47,16 +50,26 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+const (
+	statusExtraInfoDataViewStreamingVersion = "data_view_streaming_version"
+	statusExtraInfoDataViewCompactVersion   = "data_view_compact_version"
 )
 
 // GetTimeTickChannel legacy API, returns time tick channel name
@@ -652,6 +665,17 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 		if segment.State == commonpb.SegmentState_Dropped {
 			mlog.Info(context.TODO(), "save to dropped segment, ignore this request")
+			if s.dataViewManager != nil && req.GetFlushed() {
+				version, err := s.dataViewManager.OnFlush(ctx, FlushDataViewEvent{
+					CollectionID: req.GetCollectionID(),
+					SegmentIDs:   []int64{req.GetSegmentID()},
+				})
+				if err != nil {
+					mlog.Warn(ctx, "failed to recover DataView version for dropped segment", mlog.Err(err))
+				} else {
+					return successWithFlushedDataVersion(version), nil
+				}
+			}
 			return merr.Success(), nil
 		}
 
@@ -701,6 +725,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	operators = append(operators,
 		UpdateManifest(req.GetSegmentID(), req.GetManifestPath()),
 		UpdateStartPosition(req.GetStartPositions()),
+		UpdateDeleteApplyStartAfterTimetick(req.GetSegmentID(), req.GetDeleteApplyStartAfterTimetick()),
 		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
 		// The request ships the complete cumulative Statistics published
 		// from the growing-segment collector; the receiver stores it
@@ -716,6 +741,19 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
 		mlog.Error(context.TODO(), "save binlog and checkpoints failed", mlog.Err(err))
 		return merr.Status(err), nil
+	}
+	var flushedDataVersion *viewpb.DataVersion
+	if s.dataViewManager != nil && req.GetFlushed() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
+		version, err := s.dataViewManager.OnFlush(ctx, FlushDataViewEvent{
+			CollectionID:         req.GetCollectionID(),
+			SegmentIDs:           []int64{req.GetSegmentID()},
+			TemporaryUnavailable: enableSortCompaction(),
+		})
+		if err != nil {
+			mlog.Warn(ctx, "failed to publish DataView after flush", mlog.Err(err))
+		} else {
+			flushedDataVersion = version
+		}
 	}
 
 	s.meta.SetLastWrittenTime(req.GetSegmentID())
@@ -738,7 +776,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		metrics.DataCoordSizeStoredL0Segment.WithLabelValues(fmt.Sprint(req.GetCollectionID())).Observe(calculateL0SegmentSize(req.GetField2StatslogPaths()))
 
 		s.compactionTriggerManager.OnCollectionUpdate(req.GetCollectionID())
-		return merr.Success(), nil
+		return successWithFlushedDataVersion(flushedDataVersion), nil
 	}
 
 	// notify building index and compaction for "flushing/flushed" level one segment
@@ -758,7 +796,19 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		}
 	}
 
-	return merr.Success(), nil
+	return successWithFlushedDataVersion(flushedDataVersion), nil
+}
+
+func successWithFlushedDataVersion(version *viewpb.DataVersion) *commonpb.Status {
+	status := merr.Success()
+	if version == nil {
+		return status
+	}
+	status.ExtraInfo = map[string]string{
+		statusExtraInfoDataViewStreamingVersion: strconv.FormatInt(version.GetStreamingVersion(), 10),
+		statusExtraInfoDataViewCompactVersion:   strconv.FormatInt(version.GetCompactVersion(), 10),
+	}
+	return status
 }
 
 func (s *Server) validateTextSegmentStorage(req *datapb.SaveBinlogPathsRequest, storageVersion int64) error {
@@ -813,15 +863,16 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	segments := make([]*SegmentInfo, 0, len(req.GetSegments()))
 	for _, seg2Drop := range req.GetSegments() {
 		info := &datapb.SegmentInfo{
-			ID:            seg2Drop.GetSegmentID(),
-			CollectionID:  seg2Drop.GetCollectionID(),
-			InsertChannel: channel,
-			Binlogs:       seg2Drop.GetField2BinlogPaths(),
-			Statslogs:     seg2Drop.GetField2StatslogPaths(),
-			Deltalogs:     seg2Drop.GetDeltalogs(),
-			StartPosition: seg2Drop.GetStartPosition(),
-			DmlPosition:   seg2Drop.GetCheckPoint(),
-			NumOfRows:     seg2Drop.GetNumOfRows(),
+			ID:                            seg2Drop.GetSegmentID(),
+			CollectionID:                  seg2Drop.GetCollectionID(),
+			InsertChannel:                 channel,
+			Binlogs:                       seg2Drop.GetField2BinlogPaths(),
+			Statslogs:                     seg2Drop.GetField2StatslogPaths(),
+			Deltalogs:                     seg2Drop.GetDeltalogs(),
+			StartPosition:                 seg2Drop.GetStartPosition(),
+			DmlPosition:                   seg2Drop.GetCheckPoint(),
+			NumOfRows:                     seg2Drop.GetNumOfRows(),
+			DeleteApplyStartAfterTimetick: seg2Drop.GetStartPosition().GetTimestamp(),
 		}
 		segment := NewSegmentInfo(info)
 		segments = append(segments, segment)
@@ -1118,22 +1169,291 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 		}
 
 		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
-			ID:                  segment.ID,
-			PartitionID:         segment.PartitionID,
-			CollectionID:        segment.CollectionID,
-			InsertChannel:       segment.InsertChannel,
-			NumOfRows:           rowCount,
-			Level:               segment.GetLevel(),
-			IsSorted:            segment.GetIsSorted(),
-			IsSortedByNamespace: segment.GetIsSortedByNamespace(),
-			ManifestPath:        segment.GetManifestPath(),
-			DataVersion:         segment.GetDataVersion(),
+			ID:                            segment.ID,
+			PartitionID:                   segment.PartitionID,
+			CollectionID:                  segment.CollectionID,
+			InsertChannel:                 segment.InsertChannel,
+			NumOfRows:                     rowCount,
+			Level:                         segment.GetLevel(),
+			IsSorted:                      segment.GetIsSorted(),
+			IsSortedByNamespace:           segment.GetIsSortedByNamespace(),
+			ManifestPath:                  segment.GetManifestPath(),
+			DataVersion:                   segment.GetDataVersion(),
+			DeleteApplyStartAfterTimetick: segment.GetDeleteApplyStartAfterTimetick(),
 		})
 	}
 
 	resp.Channels = channelInfos
 	resp.Segments = segmentInfos
 	return resp, nil
+}
+
+func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	resp := &datapb.GetStreamingNodeQueryViewResourcesResponse{
+		Status:       merr.Success(),
+		CollectionId: req.GetCollectionId(),
+		Vchannel:     req.GetVchannel(),
+		DataVersion:  req.GetDataVersion(),
+	}
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	if req.GetCollectionId() == 0 {
+		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("collection id is zero"))
+		return resp, nil
+	}
+	if req.GetVchannel() == "" {
+		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("vchannel is empty"))
+		return resp, nil
+	}
+	if req.GetDataVersion() == nil {
+		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("data version is nil"))
+		return resp, nil
+	}
+	if s.dataViewManager == nil {
+		resp.Status = merr.Status(merr.WrapErrServiceInternalMsg("data view manager is nil"))
+		return resp, nil
+	}
+	dataView, err := s.dataViewManager.DataView(ctx, req.GetCollectionId(), req.GetDataVersion())
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	shard := dataViewShard(dataView, req.GetVchannel())
+	if shard == nil {
+		resp.Status = merr.Status(merr.WrapErrServiceInternalMsg(
+			"data view shard not found, collectionID=%d, vchannel=%s, dataVersion=(%d,%d)",
+			req.GetCollectionId(),
+			req.GetVchannel(),
+			req.GetDataVersion().GetStreamingVersion(),
+			req.GetDataVersion().GetCompactVersion(),
+		))
+		return resp, nil
+	}
+
+	segmentIDs := dataViewShardSegmentIDs(shard, req.GetPartitionIds())
+	if len(segmentIDs) == 0 {
+		return resp, nil
+	}
+	byID := make(map[int64]*datapb.StreamingNodeBM25Resource, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		segment := s.meta.GetSegment(ctx, segmentID)
+		if segment == nil {
+			resp.Status = merr.Status(merr.WrapErrSegmentNotFound(segmentID, "missing segment info for data view"))
+			return resp, nil
+		}
+		if segment.GetInsertChannel() != "" && segment.GetInsertChannel() != req.GetVchannel() {
+			resp.Status = merr.Status(merr.WrapErrServiceInternalMsg(
+				"segment channel mismatch, segmentID=%d, expected=%s, actual=%s",
+				segment.GetID(),
+				req.GetVchannel(),
+				segment.GetInsertChannel(),
+			))
+			return resp, nil
+		}
+		byID[segment.GetID()] = &datapb.StreamingNodeBM25Resource{
+			SegmentId:      segment.GetID(),
+			PartitionId:    segment.GetPartitionID(),
+			Bm25Binlogs:    segment.GetBm25Statslogs(),
+			StorageVersion: segment.GetStorageVersion(),
+			ManifestPath:   segment.GetManifestPath(),
+		}
+	}
+	for _, segmentID := range segmentIDs {
+		resource, ok := byID[segmentID]
+		if !ok {
+			resp.Status = merr.Status(merr.WrapErrSegmentNotFound(segmentID, "missing segment info for data view"))
+			return resp, nil
+		}
+		resp.Bm25Resources = append(resp.Bm25Resources, resource)
+	}
+	return resp, nil
+}
+
+func (s *Server) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return nil, nil, err
+	}
+	if collectionID == 0 {
+		return nil, nil, merr.WrapErrParameterInvalidMsg("collection id is zero")
+	}
+	if len(segmentIDs) == 0 {
+		return nil, nil, nil
+	}
+
+	indexes, segmentIndexes := s.meta.indexMeta.getQueryViewIndexSnapshot(collectionID, segmentIDs)
+	indexInfos := packQueryViewCollectionIndexInfos(indexes)
+	infos := make([]*querypb.SegmentLoadInfo, 0, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		segment := s.meta.GetSegment(ctx, segmentID)
+		if segment == nil {
+			return nil, nil, merr.WrapErrSegmentNotFound(segmentID, "missing segment info for query view")
+		}
+		if segment.GetCollectionID() != collectionID {
+			return nil, nil, merr.WrapErrSegmentNotFound(segmentID, fmt.Sprintf("segment does not belong to collection %d", collectionID))
+		}
+		cloned := segment.Clone()
+		if err := binlog.DecompressBinLogs(cloned.SegmentInfo); err != nil {
+			return nil, nil, err
+		}
+		segmentutil.ReCalcRowCount(segment.SegmentInfo, cloned.SegmentInfo)
+		infos = append(infos, s.packQueryViewSegmentLoadInfo(cloned.SegmentInfo, indexInfos, segmentIndexes[segmentID]))
+	}
+	return infos, indexInfos, nil
+}
+
+func (s *Server) GetQueryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {
+	return s.queryViewCollectionIndexInfos(collectionID)
+}
+
+func (s *Server) queryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {
+	indexes := s.meta.indexMeta.GetIndexesForCollection(collectionID, "")
+	return packQueryViewCollectionIndexInfos(indexes)
+}
+
+func packQueryViewCollectionIndexInfos(indexes []*model.Index) []*indexpb.IndexInfo {
+	infos := lo.Map(indexes, func(index *model.Index, _ int) *indexpb.IndexInfo {
+		return &indexpb.IndexInfo{
+			CollectionID:    index.CollectionID,
+			FieldID:         index.FieldID,
+			IndexName:       index.IndexName,
+			IndexID:         index.IndexID,
+			TypeParams:      index.TypeParams,
+			IndexParams:     index.IndexParams,
+			IsAutoIndex:     index.IsAutoIndex,
+			UserIndexParams: index.UserIndexParams,
+		}
+	})
+	slices.SortFunc(infos, func(left, right *indexpb.IndexInfo) int {
+		return cmp.Compare(left.GetIndexID(), right.GetIndexID())
+	})
+	return infos
+}
+
+func (s *Server) packQueryViewSegmentLoadInfo(segment *datapb.SegmentInfo, indexInfos []*indexpb.IndexInfo, segmentIndexes map[int64]*model.SegmentIndex) *querypb.SegmentLoadInfo {
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:       segment.GetID(),
+		PartitionID:     segment.GetPartitionID(),
+		CollectionID:    segment.GetCollectionID(),
+		BinlogPaths:     segment.GetBinlogs(),
+		NumOfRows:       segment.GetNumOfRows(),
+		Deltalogs:       segment.GetDeltalogs(),
+		CompactionFrom:  segment.GetCompactionFrom(),
+		IndexInfos:      s.packQueryViewFieldIndexInfos(segmentIndexes, indexInfos),
+		InsertChannel:   segment.GetInsertChannel(),
+		StartPosition:   segment.GetStartPosition(),
+		DeltaPosition:   segment.GetDmlPosition(),
+		Level:           segment.GetLevel(),
+		StorageVersion:  segment.GetStorageVersion(),
+		IsSorted:        segment.GetIsSorted(),
+		Priority:        commonpb.LoadPriority_HIGH,
+		ManifestPath:    segment.GetManifestPath(),
+		DataVersion:     segment.GetDataVersion(),
+		CommitTimestamp: segment.GetCommitTimestamp(),
+	}
+	if segment.GetManifestPath() == "" {
+		loadInfo.Statslogs = segment.GetStatslogs()
+		loadInfo.TextStatsLogs = segment.GetTextStatsLogs()
+		loadInfo.Bm25Logs = segment.GetBm25Statslogs()
+		loadInfo.JsonKeyStatsLogs = segment.GetJsonKeyStats()
+	} else {
+		loadInfo.JsonKeyStatsLogs = segment.GetJsonKeyStats()
+	}
+	return loadInfo
+}
+
+func (s *Server) packQueryViewFieldIndexInfos(segmentIndexes map[int64]*model.SegmentIndex, collectionIndexes []*indexpb.IndexInfo) []*querypb.FieldIndexInfo {
+	if len(segmentIndexes) == 0 {
+		return nil
+	}
+	collectionIndexByID := lo.SliceToMap(collectionIndexes, func(index *indexpb.IndexInfo) (int64, *indexpb.IndexInfo) {
+		return index.GetIndexID(), index
+	})
+	infos := make([]*querypb.FieldIndexInfo, 0, len(segmentIndexes))
+	for _, segmentIndex := range segmentIndexes {
+		if segmentIndex.IndexState != commonpb.IndexState_Finished {
+			continue
+		}
+		collectionIndex, ok := collectionIndexByID[segmentIndex.IndexID]
+		if !ok {
+			continue
+		}
+		indexParams := common.CloneKeyValuePairs(collectionIndex.GetIndexParams())
+		indexParams = append(indexParams, common.CloneKeyValuePairs(collectionIndex.GetTypeParams())...)
+		for _, param := range indexParams {
+			if param.Key == common.IndexTypeKey && segmentIndex.IndexType != "" && segmentIndex.IndexType != param.Value {
+				param.Value = segmentIndex.IndexType
+				break
+			}
+		}
+		indexName := collectionIndex.GetIndexName()
+		if segmentIndex.IndexType != "" && segmentIndex.IndexType != indexName {
+			indexName = segmentIndex.IndexType
+		}
+		params := funcutil.KeyValuePair2Map(indexParams)
+		for _, kv := range collectionIndex.GetUserIndexParams() {
+			if indexparams.IsConfigableIndexParam(kv.GetKey()) {
+				params[kv.GetKey()] = kv.GetValue()
+			}
+		}
+		indexParams = funcutil.Map2KeyValuePair(params)
+		indexParams = append(indexParams, &commonpb.KeyValuePair{
+			Key:   common.LoadPriorityKey,
+			Value: commonpb.LoadPriority_HIGH.String(),
+		})
+		builder := metautil.NewIndexPathBuilder(s.meta.chunkManager.RootPath(),
+			segmentIndex.IndexStorePathVersion,
+			segmentIndex.CollectionID,
+			segmentIndex.PartitionID,
+			segmentIndex.SegmentID,
+			segmentIndex.BuildID,
+			segmentIndex.IndexVersion)
+		infos = append(infos, &querypb.FieldIndexInfo{
+			FieldID:                   collectionIndex.GetFieldID(),
+			EnableIndex:               true,
+			IndexName:                 indexName,
+			IndexID:                   segmentIndex.IndexID,
+			BuildID:                   segmentIndex.BuildID,
+			IndexParams:               indexParams,
+			IndexFilePaths:            builder.BuildFilePaths(segmentIndex.IndexFileKeys),
+			IndexSize:                 int64(segmentIndex.IndexMemSize),
+			IndexVersion:              segmentIndex.IndexVersion,
+			NumRows:                   segmentIndex.NumRows,
+			CurrentIndexVersion:       segmentIndex.CurrentIndexVersion,
+			CurrentScalarIndexVersion: segmentIndex.CurrentScalarIndexVersion,
+			IndexStorePathVersion:     segmentIndex.IndexStorePathVersion,
+		})
+	}
+	return infos
+}
+
+func dataViewShard(dataView *viewpb.DataViewOfCollection, vchannel string) *viewpb.DataViewOfShard {
+	if dataView == nil {
+		return nil
+	}
+	for _, shard := range dataView.GetShards() {
+		if shard.GetVchannel() == vchannel {
+			return shard
+		}
+	}
+	return nil
+}
+
+func dataViewShardSegmentIDs(shard *viewpb.DataViewOfShard, partitionIDs []int64) []int64 {
+	if shard == nil {
+		return nil
+	}
+	requiredPartitions := typeutil.NewSet(partitionIDs...)
+	loadsAllPartitions := len(requiredPartitions) == 0
+	segmentIDs := make([]int64, 0)
+	for _, partition := range shard.GetPartitions() {
+		if !loadsAllPartitions && !requiredPartitions.Contain(partition.GetPartitionId()) {
+			continue
+		}
+		segmentIDs = append(segmentIDs, partition.GetSegmentIds()...)
+	}
+	return segmentIDs
 }
 
 // GetChannelRecoveryInfo get recovery channel info.
@@ -1492,11 +1812,8 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	return resp, nil
 }
 
-// GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
+// GetFlushState gets the flush state based on the provided segment IDs.
 func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
-	log := mlog.With(mlog.Int64("collection", req.GetCollectionID()),
-		mlog.Uint64("flushTs", req.GetFlushTs()),
-		mlog.Time("flushTs in time", tsoutil.PhysicalTime(req.GetFlushTs())))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &milvuspb.GetFlushStateResponse{
 			Status: merr.Status(err),
@@ -1504,58 +1821,22 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 	}
 
 	resp := &milvuspb.GetFlushStateResponse{Status: merr.Success()}
-	if len(req.GetSegmentIDs()) > 0 {
-		var unflushed []UniqueID
-		for _, sid := range req.GetSegmentIDs() {
-			segment := s.meta.GetHealthySegment(ctx, sid)
-			// segment is nil if it was compacted, or it's an empty segment and is set to dropped
-			// TODO: Here's a dirty implementation, because a growing segment may cannot be seen right away by mixcoord,
-			// it can only be seen by streamingnode right away, so we need to check the flush state at streamingnode but not here.
-			// use timetick for GetFlushState in-future but not segment list.
-			if segment == nil || isFlushState(segment.GetState()) {
-				continue
-			}
-			unflushed = append(unflushed, sid)
+	var unflushed []UniqueID
+	for _, sid := range req.GetSegmentIDs() {
+		segment := s.meta.GetHealthySegment(ctx, sid)
+		// segment is nil if it was compacted, or it's an empty segment and is set to dropped.
+		if segment == nil || isFlushState(segment.GetState()) {
+			continue
 		}
-		if len(unflushed) != 0 {
-			log.RatedInfo(ctx, rate.Limit(10), "DataCoord receive GetFlushState request, Flushed is false", mlog.Int64s("unflushed", unflushed), mlog.Int("len", len(unflushed)))
-			resp.Flushed = false
-
-			return resp, nil
-		}
+		unflushed = append(unflushed, sid)
 	}
+	if len(unflushed) != 0 {
+		resp.Flushed = false
 
-	channels, err := s.getChannelsByCollectionID(ctx, req.GetCollectionID())
-	if err != nil {
-		return &milvuspb.GetFlushStateResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	if len(channels) == 0 { // For compatibility with old client
-		resp.Flushed = true
-
-		mlog.Info(context.TODO(), "GetFlushState all flushed without checking flush ts")
 		return resp, nil
 	}
 
-	for _, channel := range channels {
-		cp := s.meta.GetChannelCheckpoint(channel.GetName())
-		cpTs := uint64(0)
-		if cp != nil {
-			cpTs = cp.GetTimestamp()
-		}
-		if cp == nil || cpTs < req.GetFlushTs() {
-			resp.Flushed = false
-
-			log.RatedInfo(ctx, rate.Limit(10), "GetFlushState failed, channel unflushed", mlog.String("channel", channel.GetName()),
-				mlog.Time("CP", tsoutil.PhysicalTime(cpTs)),
-				mlog.Duration("lag", tsoutil.PhysicalTime(req.GetFlushTs()).Sub(tsoutil.PhysicalTime(cpTs))))
-			return resp, nil
-		}
-	}
-
 	resp.Flushed = true
-	mlog.Info(context.TODO(), "GetFlushState all flushed")
 
 	return resp, nil
 }
@@ -1986,10 +2267,10 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 // enableL0Import=true land here directly without passing that gate, so it must
 // be re-checked. The gate here must NOT return an error: ack callbacks are
 // retried forever (callMessageAckCallbackUntilDone), and skipping job creation
-// would wedge the replicated CommitImport path (HandleCommitVchannel retries
-// on job-not-found). Instead the job is created directly in Failed state — a
-// terminal no-op for both commitImportV2AckCallback and HandleCommitVchannel —
-// and the failure stays visible via GetImportProgress.
+// would wedge the replicated CommitImport path (commitImportV2AckCallback
+// retries on job-not-found). Instead the job is created directly in Failed
+// state — a terminal no-op for commitImportV2AckCallback — and the failure
+// stays visible via GetImportProgress.
 func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{
@@ -2177,6 +2458,16 @@ func (s *Server) NotifyDropPartition(ctx context.Context, channel string, partit
 	mlog.Info(ctx, "receive NotifyDropPartition request",
 		mlog.String("channelname", channel),
 		mlog.Any("partitionID", partitionIDs))
+	if s.dataViewManager != nil {
+		for _, collectionID := range s.meta.GetCollectionIDsByPartition(ctx, partitionIDs) {
+			if _, err := s.dataViewManager.OnDropPartition(ctx, DropPartitionDataViewEvent{
+				CollectionID: collectionID,
+				PartitionIDs: partitionIDs,
+			}); err != nil {
+				return err
+			}
+		}
+	}
 	s.segmentManager.DropSegmentsOfPartition(ctx, channel, partitionIDs)
 	// release all segments of the partition.
 	return s.meta.DropSegmentsOfPartition(ctx, partitionIDs)
@@ -2197,6 +2488,17 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 		if err != nil {
 			mlog.Warn(ctx, "WatchChannelCheckpoint failed", mlog.Err(err))
 			return err
+		}
+		if s.dataViewManager != nil {
+			_, err = s.dataViewManager.OnTruncate(ctx, TruncateDataViewEvent{
+				CollectionID: collectionID,
+				VChannel:     channelName,
+				FlushTs:      flushTs,
+			})
+			if err != nil {
+				mlog.Warn(ctx, "OnTruncate DataView failed", mlog.Err(err))
+				return err
+			}
 		}
 		// drop segments that were updated before the flush timestamp
 		err = s.meta.TruncateChannelByTime(ctx, channelName, flushTs)
@@ -3033,10 +3335,10 @@ func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *dat
 }
 
 // broadcastCommitImportMessage broadcasts a CommitImport WAL message for the given import job.
-// The message is broadcast to the job's data vchannels so each vchannel's WAL flusher
-// can observe the commit fence, flush pending DML, and call HandleCommitVchannel.
-// (Control-channel-only broadcast is dropped by the flusher's IsControlChannel guard
-// before reaching the CommitImport case, so it cannot drive per-vchannel commits.)
+// The message is broadcast to the job's data vchannels; once every channel acks, the
+// unified commit callback (commitImportV2AckCallback) completes the whole commit flow:
+// it makes all of the job's segments visible and transitions the job to Completed.
+// CChannel provides the common ordering point used by replicated broadcasts.
 func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
@@ -3055,7 +3357,7 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 			JobId:        job.GetJobID(),
 		}).
 		WithBody(&messagespb.CommitImportMessageBody{}).
-		WithBroadcast(vchannels).
+		WithBroadcast(importBroadcastChannels(vchannels)).
 		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)
@@ -3071,7 +3373,7 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 var errRollbackImportNoVchannels = errors.New("import job has no vchannels")
 
 // broadcastRollbackImportMessage broadcasts a RollbackImport WAL message for the given import job.
-// Targets the job's data vchannels, matching the CommitImport routing.
+// It targets the job's data vchannels and CChannel, matching CommitImport ordering.
 func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJob) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
@@ -3090,7 +3392,7 @@ func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJ
 			JobId:        job.GetJobID(),
 		}).
 		WithBody(&messagespb.RollbackImportMessageBody{}).
-		WithBroadcast(vchannels).
+		WithBroadcast(importBroadcastChannels(vchannels)).
 		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)
@@ -3201,44 +3503,23 @@ func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest
 }
 
 // HandleCommitVchannel records that a vchannel has processed the commit fence for a 2PC import job.
-// When all vchannels have acknowledged, the import job transitions to Completed and segments become visible.
+//
+// Upgrade compatibility: legacy streaming nodes (deployed before the import
+// commit flow was unified into the CommitImport ack callback) still invoke this
+// RPC per vchannel during a rolling upgrade. The full commit flow — terminal job
+// transition and segment visibility — is now handled once by
+// commitImportV2AckCallback, so this RPC returns Success without doing any work:
+// legacy nodes must not be wedged by a changed control plane during upgrade.
 func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-	jobID := req.GetJobId()
-	vchannel := req.GetVchannel()
-
-	// Pre-fetch segment IDs for this job+vchannel BEFORE calling HandleCommitVchannel.
-	// The callback must not access importMeta because HandleCommitVchannel holds m.mu (write lock);
-	// calling GetTaskBy inside the callback would attempt to re-acquire m.mu (read lock) → deadlock.
-	segIDs := s.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
-
-	commitTs := req.GetCommitTimestamp()
-	err := s.importMeta.HandleCommitVchannel(ctx, jobID, vchannel, func() error {
-		// Only access s.meta (segment meta) here, NOT s.importMeta.
-		// Set CommitTimestamp and clear isImporting in a single call per segment.
-		ops := make([]UpdateOperator, 0, len(segIDs)*2)
-		for _, segID := range segIDs {
-			ops = append(ops,
-				UpdateCommitTimestamp(segID, commitTs),
-				UpdateIsImporting(segID, false),
-			)
-		}
-		if len(ops) == 0 {
-			return nil
-		}
-		return s.meta.UpdateSegmentsInfo(ctx, ops...)
-	})
-	if err != nil {
 		return merr.Status(err), nil
 	}
 	return merr.Success(), nil
 }
 
-// getImportSegmentIDsByVchannel returns all segment IDs (including sorted segments) belonging to
-// the given import job that are assigned to the given vchannel.
-// This must be called BEFORE acquiring importMeta's mutex (i.e., before HandleCommitVchannel).
+// getImportSegmentIDsByVchannel returns all segment IDs (including sorted segments)
+// belonging to the given import job that are assigned to the given vchannel.
+// This must be called WITHOUT holding importMeta's mutex (the callback never holds it).
 func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64, vchannel string) []int64 {
 	tasks := s.importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	var segIDs []int64

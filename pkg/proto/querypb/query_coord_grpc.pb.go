@@ -22,47 +22,49 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	QueryCoord_ShowLoadCollections_FullMethodName        = "/milvus.proto.query.QueryCoord/ShowLoadCollections"
-	QueryCoord_ShowLoadPartitions_FullMethodName         = "/milvus.proto.query.QueryCoord/ShowLoadPartitions"
-	QueryCoord_LoadPartitions_FullMethodName             = "/milvus.proto.query.QueryCoord/LoadPartitions"
-	QueryCoord_ReleasePartitions_FullMethodName          = "/milvus.proto.query.QueryCoord/ReleasePartitions"
-	QueryCoord_LoadCollection_FullMethodName             = "/milvus.proto.query.QueryCoord/LoadCollection"
-	QueryCoord_ReleaseCollection_FullMethodName          = "/milvus.proto.query.QueryCoord/ReleaseCollection"
-	QueryCoord_SyncNewCreatedPartition_FullMethodName    = "/milvus.proto.query.QueryCoord/SyncNewCreatedPartition"
-	QueryCoord_GetPartitionStates_FullMethodName         = "/milvus.proto.query.QueryCoord/GetPartitionStates"
-	QueryCoord_GetLoadSegmentInfo_FullMethodName         = "/milvus.proto.query.QueryCoord/GetLoadSegmentInfo"
-	QueryCoord_LoadBalance_FullMethodName                = "/milvus.proto.query.QueryCoord/LoadBalance"
-	QueryCoord_ShowConfigurations_FullMethodName         = "/milvus.proto.query.QueryCoord/ShowConfigurations"
-	QueryCoord_GetMetrics_FullMethodName                 = "/milvus.proto.query.QueryCoord/GetMetrics"
-	QueryCoord_GetReplicas_FullMethodName                = "/milvus.proto.query.QueryCoord/GetReplicas"
-	QueryCoord_GetShardLeaders_FullMethodName            = "/milvus.proto.query.QueryCoord/GetShardLeaders"
-	QueryCoord_CheckHealth_FullMethodName                = "/milvus.proto.query.QueryCoord/CheckHealth"
-	QueryCoord_CreateResourceGroup_FullMethodName        = "/milvus.proto.query.QueryCoord/CreateResourceGroup"
-	QueryCoord_UpdateResourceGroups_FullMethodName       = "/milvus.proto.query.QueryCoord/UpdateResourceGroups"
-	QueryCoord_DropResourceGroup_FullMethodName          = "/milvus.proto.query.QueryCoord/DropResourceGroup"
-	QueryCoord_TransferNode_FullMethodName               = "/milvus.proto.query.QueryCoord/TransferNode"
-	QueryCoord_TransferReplica_FullMethodName            = "/milvus.proto.query.QueryCoord/TransferReplica"
-	QueryCoord_ListResourceGroups_FullMethodName         = "/milvus.proto.query.QueryCoord/ListResourceGroups"
-	QueryCoord_DescribeResourceGroup_FullMethodName      = "/milvus.proto.query.QueryCoord/DescribeResourceGroup"
-	QueryCoord_ListLoadedSegments_FullMethodName         = "/milvus.proto.query.QueryCoord/ListLoadedSegments"
-	QueryCoord_ListCheckers_FullMethodName               = "/milvus.proto.query.QueryCoord/ListCheckers"
-	QueryCoord_ActivateChecker_FullMethodName            = "/milvus.proto.query.QueryCoord/ActivateChecker"
-	QueryCoord_DeactivateChecker_FullMethodName          = "/milvus.proto.query.QueryCoord/DeactivateChecker"
-	QueryCoord_ListQueryNode_FullMethodName              = "/milvus.proto.query.QueryCoord/ListQueryNode"
-	QueryCoord_GetQueryNodeDistribution_FullMethodName   = "/milvus.proto.query.QueryCoord/GetQueryNodeDistribution"
-	QueryCoord_SuspendBalance_FullMethodName             = "/milvus.proto.query.QueryCoord/SuspendBalance"
-	QueryCoord_ResumeBalance_FullMethodName              = "/milvus.proto.query.QueryCoord/ResumeBalance"
-	QueryCoord_CheckBalanceStatus_FullMethodName         = "/milvus.proto.query.QueryCoord/CheckBalanceStatus"
-	QueryCoord_SuspendNode_FullMethodName                = "/milvus.proto.query.QueryCoord/SuspendNode"
-	QueryCoord_ResumeNode_FullMethodName                 = "/milvus.proto.query.QueryCoord/ResumeNode"
-	QueryCoord_TransferSegment_FullMethodName            = "/milvus.proto.query.QueryCoord/TransferSegment"
-	QueryCoord_TransferChannel_FullMethodName            = "/milvus.proto.query.QueryCoord/TransferChannel"
-	QueryCoord_CheckQueryNodeDistribution_FullMethodName = "/milvus.proto.query.QueryCoord/CheckQueryNodeDistribution"
-	QueryCoord_ClearReadTaskQueue_FullMethodName         = "/milvus.proto.query.QueryCoord/ClearReadTaskQueue"
-	QueryCoord_UpdateLoadConfig_FullMethodName           = "/milvus.proto.query.QueryCoord/UpdateLoadConfig"
-	QueryCoord_RunAnalyzer_FullMethodName                = "/milvus.proto.query.QueryCoord/RunAnalyzer"
-	QueryCoord_ComputePhraseMatchSlop_FullMethodName     = "/milvus.proto.query.QueryCoord/ComputePhraseMatchSlop"
-	QueryCoord_ValidateAnalyzer_FullMethodName           = "/milvus.proto.query.QueryCoord/ValidateAnalyzer"
+	QueryCoord_ShowLoadCollections_FullMethodName           = "/milvus.proto.query.QueryCoord/ShowLoadCollections"
+	QueryCoord_ShowLoadPartitions_FullMethodName            = "/milvus.proto.query.QueryCoord/ShowLoadPartitions"
+	QueryCoord_LoadPartitions_FullMethodName                = "/milvus.proto.query.QueryCoord/LoadPartitions"
+	QueryCoord_ReleasePartitions_FullMethodName             = "/milvus.proto.query.QueryCoord/ReleasePartitions"
+	QueryCoord_LoadCollection_FullMethodName                = "/milvus.proto.query.QueryCoord/LoadCollection"
+	QueryCoord_ReleaseCollection_FullMethodName             = "/milvus.proto.query.QueryCoord/ReleaseCollection"
+	QueryCoord_SyncNewCreatedPartition_FullMethodName       = "/milvus.proto.query.QueryCoord/SyncNewCreatedPartition"
+	QueryCoord_GetPartitionStates_FullMethodName            = "/milvus.proto.query.QueryCoord/GetPartitionStates"
+	QueryCoord_GetLoadSegmentInfo_FullMethodName            = "/milvus.proto.query.QueryCoord/GetLoadSegmentInfo"
+	QueryCoord_GetQueryViewLoadInfo_FullMethodName          = "/milvus.proto.query.QueryCoord/GetQueryViewLoadInfo"
+	QueryCoord_WatchQueryViewSegmentLoadInfo_FullMethodName = "/milvus.proto.query.QueryCoord/WatchQueryViewSegmentLoadInfo"
+	QueryCoord_LoadBalance_FullMethodName                   = "/milvus.proto.query.QueryCoord/LoadBalance"
+	QueryCoord_ShowConfigurations_FullMethodName            = "/milvus.proto.query.QueryCoord/ShowConfigurations"
+	QueryCoord_GetMetrics_FullMethodName                    = "/milvus.proto.query.QueryCoord/GetMetrics"
+	QueryCoord_GetReplicas_FullMethodName                   = "/milvus.proto.query.QueryCoord/GetReplicas"
+	QueryCoord_GetShardLeaders_FullMethodName               = "/milvus.proto.query.QueryCoord/GetShardLeaders"
+	QueryCoord_CheckHealth_FullMethodName                   = "/milvus.proto.query.QueryCoord/CheckHealth"
+	QueryCoord_CreateResourceGroup_FullMethodName           = "/milvus.proto.query.QueryCoord/CreateResourceGroup"
+	QueryCoord_UpdateResourceGroups_FullMethodName          = "/milvus.proto.query.QueryCoord/UpdateResourceGroups"
+	QueryCoord_DropResourceGroup_FullMethodName             = "/milvus.proto.query.QueryCoord/DropResourceGroup"
+	QueryCoord_TransferNode_FullMethodName                  = "/milvus.proto.query.QueryCoord/TransferNode"
+	QueryCoord_TransferReplica_FullMethodName               = "/milvus.proto.query.QueryCoord/TransferReplica"
+	QueryCoord_ListResourceGroups_FullMethodName            = "/milvus.proto.query.QueryCoord/ListResourceGroups"
+	QueryCoord_DescribeResourceGroup_FullMethodName         = "/milvus.proto.query.QueryCoord/DescribeResourceGroup"
+	QueryCoord_ListLoadedSegments_FullMethodName            = "/milvus.proto.query.QueryCoord/ListLoadedSegments"
+	QueryCoord_ListCheckers_FullMethodName                  = "/milvus.proto.query.QueryCoord/ListCheckers"
+	QueryCoord_ActivateChecker_FullMethodName               = "/milvus.proto.query.QueryCoord/ActivateChecker"
+	QueryCoord_DeactivateChecker_FullMethodName             = "/milvus.proto.query.QueryCoord/DeactivateChecker"
+	QueryCoord_ListQueryNode_FullMethodName                 = "/milvus.proto.query.QueryCoord/ListQueryNode"
+	QueryCoord_GetQueryNodeDistribution_FullMethodName      = "/milvus.proto.query.QueryCoord/GetQueryNodeDistribution"
+	QueryCoord_SuspendBalance_FullMethodName                = "/milvus.proto.query.QueryCoord/SuspendBalance"
+	QueryCoord_ResumeBalance_FullMethodName                 = "/milvus.proto.query.QueryCoord/ResumeBalance"
+	QueryCoord_CheckBalanceStatus_FullMethodName            = "/milvus.proto.query.QueryCoord/CheckBalanceStatus"
+	QueryCoord_SuspendNode_FullMethodName                   = "/milvus.proto.query.QueryCoord/SuspendNode"
+	QueryCoord_ResumeNode_FullMethodName                    = "/milvus.proto.query.QueryCoord/ResumeNode"
+	QueryCoord_TransferSegment_FullMethodName               = "/milvus.proto.query.QueryCoord/TransferSegment"
+	QueryCoord_TransferChannel_FullMethodName               = "/milvus.proto.query.QueryCoord/TransferChannel"
+	QueryCoord_CheckQueryNodeDistribution_FullMethodName    = "/milvus.proto.query.QueryCoord/CheckQueryNodeDistribution"
+	QueryCoord_ClearReadTaskQueue_FullMethodName            = "/milvus.proto.query.QueryCoord/ClearReadTaskQueue"
+	QueryCoord_UpdateLoadConfig_FullMethodName              = "/milvus.proto.query.QueryCoord/UpdateLoadConfig"
+	QueryCoord_RunAnalyzer_FullMethodName                   = "/milvus.proto.query.QueryCoord/RunAnalyzer"
+	QueryCoord_ComputePhraseMatchSlop_FullMethodName        = "/milvus.proto.query.QueryCoord/ComputePhraseMatchSlop"
+	QueryCoord_ValidateAnalyzer_FullMethodName              = "/milvus.proto.query.QueryCoord/ValidateAnalyzer"
 )
 
 // QueryCoordClient is the client API for QueryCoord service.
@@ -78,6 +80,8 @@ type QueryCoordClient interface {
 	SyncNewCreatedPartition(ctx context.Context, in *SyncNewCreatedPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	GetPartitionStates(ctx context.Context, in *GetPartitionStatesRequest, opts ...grpc.CallOption) (*GetPartitionStatesResponse, error)
 	GetLoadSegmentInfo(ctx context.Context, in *GetSegmentInfoRequest, opts ...grpc.CallOption) (*GetSegmentInfoResponse, error)
+	GetQueryViewLoadInfo(ctx context.Context, in *GetQueryViewLoadInfoRequest, opts ...grpc.CallOption) (*GetQueryViewLoadInfoResponse, error)
+	WatchQueryViewSegmentLoadInfo(ctx context.Context, opts ...grpc.CallOption) (QueryCoord_WatchQueryViewSegmentLoadInfoClient, error)
 	LoadBalance(ctx context.Context, in *LoadBalanceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
@@ -203,6 +207,46 @@ func (c *queryCoordClient) GetLoadSegmentInfo(ctx context.Context, in *GetSegmen
 		return nil, err
 	}
 	return out, nil
+}
+
+func (c *queryCoordClient) GetQueryViewLoadInfo(ctx context.Context, in *GetQueryViewLoadInfoRequest, opts ...grpc.CallOption) (*GetQueryViewLoadInfoResponse, error) {
+	out := new(GetQueryViewLoadInfoResponse)
+	err := c.cc.Invoke(ctx, QueryCoord_GetQueryViewLoadInfo_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryCoordClient) WatchQueryViewSegmentLoadInfo(ctx context.Context, opts ...grpc.CallOption) (QueryCoord_WatchQueryViewSegmentLoadInfoClient, error) {
+	stream, err := c.cc.NewStream(ctx, &QueryCoord_ServiceDesc.Streams[0], QueryCoord_WatchQueryViewSegmentLoadInfo_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &queryCoordWatchQueryViewSegmentLoadInfoClient{stream}
+	return x, nil
+}
+
+type QueryCoord_WatchQueryViewSegmentLoadInfoClient interface {
+	Send(*WatchQueryViewSegmentLoadInfoRequest) error
+	Recv() (*WatchQueryViewSegmentLoadInfoResponse, error)
+	grpc.ClientStream
+}
+
+type queryCoordWatchQueryViewSegmentLoadInfoClient struct {
+	grpc.ClientStream
+}
+
+func (x *queryCoordWatchQueryViewSegmentLoadInfoClient) Send(m *WatchQueryViewSegmentLoadInfoRequest) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *queryCoordWatchQueryViewSegmentLoadInfoClient) Recv() (*WatchQueryViewSegmentLoadInfoResponse, error) {
+	m := new(WatchQueryViewSegmentLoadInfoResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 func (c *queryCoordClient) LoadBalance(ctx context.Context, in *LoadBalanceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -507,6 +551,8 @@ type QueryCoordServer interface {
 	SyncNewCreatedPartition(context.Context, *SyncNewCreatedPartitionRequest) (*commonpb.Status, error)
 	GetPartitionStates(context.Context, *GetPartitionStatesRequest) (*GetPartitionStatesResponse, error)
 	GetLoadSegmentInfo(context.Context, *GetSegmentInfoRequest) (*GetSegmentInfoResponse, error)
+	GetQueryViewLoadInfo(context.Context, *GetQueryViewLoadInfoRequest) (*GetQueryViewLoadInfoResponse, error)
+	WatchQueryViewSegmentLoadInfo(QueryCoord_WatchQueryViewSegmentLoadInfoServer) error
 	LoadBalance(context.Context, *LoadBalanceRequest) (*commonpb.Status, error)
 	ShowConfigurations(context.Context, *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
@@ -575,6 +621,12 @@ func (UnimplementedQueryCoordServer) GetPartitionStates(context.Context, *GetPar
 }
 func (UnimplementedQueryCoordServer) GetLoadSegmentInfo(context.Context, *GetSegmentInfoRequest) (*GetSegmentInfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetLoadSegmentInfo not implemented")
+}
+func (UnimplementedQueryCoordServer) GetQueryViewLoadInfo(context.Context, *GetQueryViewLoadInfoRequest) (*GetQueryViewLoadInfoResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetQueryViewLoadInfo not implemented")
+}
+func (UnimplementedQueryCoordServer) WatchQueryViewSegmentLoadInfo(QueryCoord_WatchQueryViewSegmentLoadInfoServer) error {
+	return status.Errorf(codes.Unimplemented, "method WatchQueryViewSegmentLoadInfo not implemented")
 }
 func (UnimplementedQueryCoordServer) LoadBalance(context.Context, *LoadBalanceRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LoadBalance not implemented")
@@ -844,6 +896,50 @@ func _QueryCoord_GetLoadSegmentInfo_Handler(srv interface{}, ctx context.Context
 		return srv.(QueryCoordServer).GetLoadSegmentInfo(ctx, req.(*GetSegmentInfoRequest))
 	}
 	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryCoord_GetQueryViewLoadInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetQueryViewLoadInfoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryCoordServer).GetQueryViewLoadInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryCoord_GetQueryViewLoadInfo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryCoordServer).GetQueryViewLoadInfo(ctx, req.(*GetQueryViewLoadInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryCoord_WatchQueryViewSegmentLoadInfo_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(QueryCoordServer).WatchQueryViewSegmentLoadInfo(&queryCoordWatchQueryViewSegmentLoadInfoServer{stream})
+}
+
+type QueryCoord_WatchQueryViewSegmentLoadInfoServer interface {
+	Send(*WatchQueryViewSegmentLoadInfoResponse) error
+	Recv() (*WatchQueryViewSegmentLoadInfoRequest, error)
+	grpc.ServerStream
+}
+
+type queryCoordWatchQueryViewSegmentLoadInfoServer struct {
+	grpc.ServerStream
+}
+
+func (x *queryCoordWatchQueryViewSegmentLoadInfoServer) Send(m *WatchQueryViewSegmentLoadInfoResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *queryCoordWatchQueryViewSegmentLoadInfoServer) Recv() (*WatchQueryViewSegmentLoadInfoRequest, error) {
+	m := new(WatchQueryViewSegmentLoadInfoRequest)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 func _QueryCoord_LoadBalance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -1466,6 +1562,10 @@ var QueryCoord_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _QueryCoord_GetLoadSegmentInfo_Handler,
 		},
 		{
+			MethodName: "GetQueryViewLoadInfo",
+			Handler:    _QueryCoord_GetQueryViewLoadInfo_Handler,
+		},
+		{
 			MethodName: "LoadBalance",
 			Handler:    _QueryCoord_LoadBalance_Handler,
 		},
@@ -1594,7 +1694,14 @@ var QueryCoord_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _QueryCoord_ValidateAnalyzer_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "WatchQueryViewSegmentLoadInfo",
+			Handler:       _QueryCoord_WatchQueryViewSegmentLoadInfo_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
 	Metadata: "query_coord.proto",
 }
 

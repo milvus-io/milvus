@@ -9,6 +9,7 @@ import (
 	mock "github.com/stretchr/testify/mock"
 
 	streaming "github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 
 	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
@@ -439,6 +440,53 @@ func (_c *MockWALAccesser_Read_Call) Return(_a0 streaming.Scanner) *MockWALAcces
 }
 
 func (_c *MockWALAccesser_Read_Call) RunAndReturn(run func(context.Context, streaming.ReadOption) streaming.Scanner) *MockWALAccesser_Read_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// TransformLogStreamManager provides a mock function with no fields
+func (_m *MockWALAccesser) TransformLogStreamManager() wal.TransformLogStreamManager {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for TransformLogStreamManager")
+	}
+
+	var r0 wal.TransformLogStreamManager
+	if rf, ok := ret.Get(0).(func() wal.TransformLogStreamManager); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(wal.TransformLogStreamManager)
+		}
+	}
+
+	return r0
+}
+
+// MockWALAccesser_TransformLogStreamManager_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TransformLogStreamManager'
+type MockWALAccesser_TransformLogStreamManager_Call struct {
+	*mock.Call
+}
+
+// TransformLogStreamManager is a helper method to define mock.On call
+func (_e *MockWALAccesser_Expecter) TransformLogStreamManager() *MockWALAccesser_TransformLogStreamManager_Call {
+	return &MockWALAccesser_TransformLogStreamManager_Call{Call: _e.mock.On("TransformLogStreamManager")}
+}
+
+func (_c *MockWALAccesser_TransformLogStreamManager_Call) Run(run func()) *MockWALAccesser_TransformLogStreamManager_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_TransformLogStreamManager_Call) Return(_a0 wal.TransformLogStreamManager) *MockWALAccesser_TransformLogStreamManager_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWALAccesser_TransformLogStreamManager_Call) RunAndReturn(run func() wal.TransformLogStreamManager) *MockWALAccesser_TransformLogStreamManager_Call {
 	_c.Call.Return(run)
 	return _c
 }

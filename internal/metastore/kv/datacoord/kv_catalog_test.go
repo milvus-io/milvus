@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -2222,4 +2223,85 @@ func TestCatalog_ExternalCollectionRefresh(t *testing.T) {
 		assert.Equal(t, 1, len(tasks))
 		assert.Equal(t, int64(54321), tasks[0].TaskId)
 	})
+}
+
+func TestDataViewCatalog(t *testing.T) {
+	ctx := context.Background()
+	txn := mocks.NewMetaKv(t)
+	catalog := NewCatalog(txn, rootPath, "")
+	dataView := &viewpb.DataViewOfCollection{
+		CollectionId: 100,
+		DataVersion: &viewpb.DataVersion{
+			StreamingVersion: 2,
+			CompactVersion:   1,
+		},
+		Shards: []*viewpb.DataViewOfShard{
+			{
+				Vchannel: "ch-1",
+				Partitions: []*viewpb.DataViewOfPartition{
+					{PartitionId: 10, SegmentIds: []int64{101, 102}},
+				},
+			},
+		},
+	}
+	value, err := proto.Marshal(dataView)
+	assert.NoError(t, err)
+
+	dataViewKey := "coord/dv/100/versions/2/1"
+	dataViewPrefix := "coord/dv/100/versions/"
+	allDataViewsPrefix := "coord/dv/"
+	txn.EXPECT().Save(ctx, dataViewKey, string(value)).Return(nil).Once()
+	assert.NoError(t, catalog.SaveDataView(ctx, dataView))
+
+	txn.EXPECT().WalkWithPrefix(ctx, dataViewPrefix, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+			return f([]byte(dataViewKey), value)
+		}).Once()
+	views, err := catalog.ListDataViews(ctx, 100)
+	assert.NoError(t, err)
+	assert.Len(t, views, 1)
+	assert.True(t, proto.Equal(dataView, views[0]))
+
+	otherDataView := proto.Clone(dataView).(*viewpb.DataViewOfCollection)
+	otherDataView.CollectionId = 200
+	otherDataView.DataVersion = &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 0}
+	otherValue, err := proto.Marshal(otherDataView)
+	assert.NoError(t, err)
+	otherDataViewKey := "coord/dv/200/versions/1/0"
+	txn.EXPECT().WalkWithPrefix(ctx, allDataViewsPrefix, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+			assert.NoError(t, f([]byte("/meta-root/coord/dv/drop/100"), []byte("1")))
+			assert.NoError(t, f([]byte(dataViewKey), value))
+			return f([]byte(otherDataViewKey), otherValue)
+		}).Once()
+	allViews, err := catalog.ListAllDataViews(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, allViews, 2)
+	assert.True(t, proto.Equal(dataView, allViews[0]))
+	assert.True(t, proto.Equal(otherDataView, allViews[1]))
+
+	txn.EXPECT().Remove(ctx, dataViewKey).Return(nil).Once()
+	assert.NoError(t, catalog.DropDataView(ctx, 100, dataView.GetDataVersion()))
+
+	txn.EXPECT().RemoveWithPrefix(ctx, dataViewPrefix).Return(nil).Once()
+	assert.NoError(t, catalog.DropDataViews(ctx, 100))
+}
+
+func TestDataViewDropMarkerCatalog(t *testing.T) {
+	ctx := context.Background()
+	txn := mocks.NewMetaKv(t)
+	catalog := NewCatalog(txn, rootPath, "")
+
+	const markerKey = "coord/dv/drop/100"
+	txn.EXPECT().Save(ctx, markerKey, "1").Return(nil).Once()
+	require.NoError(t, catalog.MarkDataViewCollectionDropped(ctx, 100))
+
+	txn.EXPECT().LoadWithPrefix(ctx, "coord/dv/drop/").
+		Return([]string{"/meta-root/" + markerKey}, []string{"1"}, nil).Once()
+	ids, err := catalog.ListDroppedDataViewCollections(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []int64{100}, ids)
+
+	txn.EXPECT().Remove(ctx, markerKey).Return(nil).Once()
+	require.NoError(t, catalog.UnmarkDataViewCollectionDropped(ctx, 100))
 }

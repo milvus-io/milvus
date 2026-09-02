@@ -294,6 +294,22 @@ func (c *managerClientImpl) Remove(ctx context.Context, pchannel types.PChannelI
 	return err
 }
 
+// ValidateRuntime validates runtime-dependent artifacts on the streaming node of given server id.
+func (c *managerClientImpl) ValidateRuntime(ctx context.Context, serverID int64, req *streamingpb.StreamingNodeManagerValidateRuntimeRequest) (*streamingpb.StreamingNodeManagerValidateRuntimeResponse, error) {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, status.NewOnShutdownError("manager client is closing")
+	}
+	defer c.lifetime.Done()
+
+	manager, err := c.service.GetService(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx = contextutil.WithPickServerID(ctx, serverID)
+	return manager.ValidateRuntime(ctx, req)
+}
+
 // Close closes the manager client.
 func (c *managerClientImpl) Close() {
 	c.lifetime.SetState(typeutil.LifetimeStateStopped)

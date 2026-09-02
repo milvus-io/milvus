@@ -28,10 +28,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func newTestNodeScheduler(t *testing.T) nodescheduler.Scheduler {
+	t.Helper()
+	scheduler := nodescheduler.New(4)
+	t.Cleanup(scheduler.Close)
+	return scheduler
+}
 
 func TestShardManager(t *testing.T) {
 	paramtable.Init()
@@ -54,6 +62,7 @@ func TestShardManager(t *testing.T) {
 	m := RecoverShardManager(&ShardManagerRecoverParam{
 		ChannelInfo: channel,
 		WAL:         f,
+		Scheduler:   newTestNodeScheduler(t),
 		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
 			VChannels: map[string]*streamingpb.VChannelMeta{
 				"v1": {
@@ -181,6 +190,12 @@ func TestShardManager(t *testing.T) {
 		IntoImmutableMessage(rmq.NewRmqID(1))
 	m.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(createCollectionMsg))
 	assert.NoError(t, m.CheckIfCollectionExists(7))
+	require.Contains(t, m.collections[7].Partitions, common.AllPartitionsID)
+	assert.Nil(t, m.collections[7].Partitions[common.AllPartitionsID])
+	assert.Nil(t, m.collections[7].Partitions[8].segments)
+	allPartitions := m.ensurePartitionManager(PartitionUniqueKey{CollectionID: 7, PartitionID: common.AllPartitionsID})
+	require.NotNil(t, allPartitions)
+	assert.Nil(t, allPartitions.segments)
 	assert.NoError(t, m.CheckIfPartitionExists(PartitionUniqueKey{CollectionID: 7, PartitionID: 8}))
 	assert.NoError(t, m.CheckIfPartitionExists(PartitionUniqueKey{CollectionID: 7, PartitionID: 9}))
 	assert.NoError(t, m.CheckIfPartitionExists(PartitionUniqueKey{CollectionID: 7, PartitionID: common.AllPartitionsID}))
@@ -213,7 +228,7 @@ func TestShardManager(t *testing.T) {
 		WithTimeTick(600).
 		WithLastConfirmedUseMessageID().
 		IntoImmutableMessage(rmq.NewRmqID(3))
-	m.partitionManagers[PartitionUniqueKey{CollectionID: 7, PartitionID: 10}].onAllocating = make(chan struct{})
+	m.collections[7].Partitions[10].onAllocating = make(chan struct{})
 	ch, err := m.WaitUntilGrowingSegmentReady(PartitionUniqueKey{CollectionID: 7, PartitionID: 10})
 	assert.NoError(t, err)
 	select {
@@ -329,6 +344,7 @@ func TestShardManagerAssignSegmentTextUsesV3CreateSegmentWhenStorageV3Enabled(t 
 	m := RecoverShardManager(&ShardManagerRecoverParam{
 		ChannelInfo: channel,
 		WAL:         f,
+		Scheduler:   newTestNodeScheduler(t),
 		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
 			VChannels: map[string]*streamingpb.VChannelMeta{
 				"v_text": {
@@ -402,6 +418,7 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	m := RecoverShardManager(&ShardManagerRecoverParam{
 		ChannelInfo: channel,
 		WAL:         f,
+		Scheduler:   newTestNodeScheduler(t),
 		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
 			VChannels:          map[string]*streamingpb.VChannelMeta{},
 			SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{},
@@ -639,8 +656,8 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	m.mu.Lock()
 	m.collections[102] = &CollectionInfo{
 		VChannel: "v_corrupt",
-		PartitionIDs: map[int64]struct{}{
-			common.AllPartitionsID: {},
+		Partitions: map[int64]*partitionManager{
+			common.AllPartitionsID: nil,
 		},
 		Schema: &streamingpb.CollectionSchemaOfVChannel{
 			Schema:             nil,
@@ -760,6 +777,7 @@ func newShardManagerWithGrowingSegment(t *testing.T, collID, partID, segID int64
 	return RecoverShardManager(&ShardManagerRecoverParam{
 		ChannelInfo: channel,
 		WAL:         f,
+		Scheduler:   newTestNodeScheduler(t),
 		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
 			VChannels: map[string]*streamingpb.VChannelMeta{
 				"v_alter": {
@@ -805,8 +823,12 @@ func TestAsyncFlushSegmentDoesNotHoldShardManagerLockWhileWaitingForWAL(t *testi
 	readyWAL := m.wal.Get()
 	pendingWAL := syncutil.NewFuture[wal.WAL]()
 	m.wal = pendingWAL
-	for _, pm := range m.partitionManagers {
-		pm.wal = pendingWAL
+	for _, collection := range m.collections {
+		for _, pm := range collection.Partitions {
+			if pm != nil {
+				pm.wal = pendingWAL
+			}
+		}
 	}
 
 	flushDone := make(chan struct{})

@@ -261,6 +261,12 @@ func (m *mockMixCoord) GetRefreshExternalCollectionProgress(ctx context.Context,
 	}, nil
 }
 
+func (m *mockMixCoord) GetStreamingNodeQueryViewResources(ctx context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	return &datapb.GetStreamingNodeQueryViewResourcesResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
 func (m *mockMixCoord) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
 	return &datapb.ListRefreshExternalCollectionJobsResponse{
 		Status: merr.Success(),
@@ -735,6 +741,20 @@ func (s *mockMixCoord) GetPartitionStates(ctx context.Context, req *querypb.GetP
 }
 
 func (s *mockMixCoord) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	return &querypb.GetQueryViewLoadInfoResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
+func (s *mockMixCoord) WatchQueryViewSegmentLoadInfo(querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer) error {
 	panic("implement me")
 }
 

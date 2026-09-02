@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
@@ -50,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	types2 "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -70,6 +70,20 @@ type ServerSuite struct {
 
 	testServer   *Server
 	mockMixCoord *mocks2.MixCoord
+}
+
+func TestPackQueryViewCollectionIndexInfosUsesDeterministicOrder(t *testing.T) {
+	indexes := []*model.Index{
+		{CollectionID: 1, FieldID: 103, IndexID: 30, IndexName: "third"},
+		{CollectionID: 1, FieldID: 101, IndexID: 10, IndexName: "first"},
+		{CollectionID: 1, FieldID: 102, IndexID: 20, IndexName: "second"},
+	}
+
+	infos := packQueryViewCollectionIndexInfos(indexes)
+
+	require.Equal(t, []int64{10, 20, 30}, lo.Map(infos, func(info *indexpb.IndexInfo, _ int) int64 {
+		return info.GetIndexID()
+	}))
 }
 
 func (s *ServerSuite) SetupSuite() {
@@ -101,19 +115,6 @@ func TestServerSuite(t *testing.T) {
 }
 
 func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
-	s.mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-		if req.CollectionID == 0 {
-			return &milvuspb.DescribeCollectionResponse{
-				Status:              merr.Success(),
-				CollectionID:        0,
-				VirtualChannelNames: []string{"ch1"},
-			}, nil
-		}
-		return &milvuspb.DescribeCollectionResponse{
-			Status:       merr.Success(),
-			CollectionID: 1,
-		}, nil
-	})
 	tests := []struct {
 		description string
 		inTs        Timestamp
@@ -122,7 +123,7 @@ func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
 	}{
 		{"channel cp > flush ts", 11, true},
 		{"channel cp = flush ts", 12, true},
-		{"channel cp < flush ts", 13, false},
+		{"channel cp < flush ts", 13, true},
 	}
 
 	err := s.testServer.meta.UpdateChannelCheckpoint(context.TODO(), "ch1", &msgpb.MsgPosition{
@@ -150,27 +151,15 @@ func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
 }
 
 func (s *ServerSuite) TestGetFlushState_ByFlushTsMissingCheckpoint() {
-	s.mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status:              merr.Success(),
-		CollectionID:        0,
-		VirtualChannelNames: []string{"missing-cp-channel"},
-	}, nil)
-
 	resp, err := s.testServer.GetFlushState(context.TODO(), &datapb.GetFlushStateRequest{FlushTs: 13})
 	s.NoError(err)
 	s.EqualValues(&milvuspb.GetFlushStateResponse{
 		Status:  merr.Success(),
-		Flushed: false,
+		Flushed: true,
 	}, resp)
 }
 
 func (s *ServerSuite) TestGetFlushState_BySegment() {
-	s.mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-		return &milvuspb.DescribeCollectionResponse{
-			Status:              merr.Success(),
-			VirtualChannelNames: []string{"ch1"},
-		}, nil
-	})
 	tests := []struct {
 		description string
 		segID       int64
@@ -200,7 +189,7 @@ func (s *ServerSuite) TestGetFlushState_BySegment() {
 			})
 			s.Require().NoError(err)
 
-			resp, err := s.testServer.GetFlushState(context.TODO(), &datapb.GetFlushStateRequest{SegmentIDs: []int64{test.segID}})
+			resp, err := s.testServer.GetFlushState(context.TODO(), &datapb.GetFlushStateRequest{SegmentIDs: []int64{test.segID}, FlushTs: 13})
 			s.NoError(err)
 			s.EqualValues(&milvuspb.GetFlushStateResponse{
 				Status:  merr.Success(),
@@ -477,8 +466,67 @@ func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
 	s.True(merr.Ok(resp))
 }
 
+func (s *ServerSuite) TestSaveBinlogPath_DroppedSegmentReturnsOriginalDataVersion() {
+	manager := &fakeGCDataViewManager{
+		flushVersion: &viewpb.DataVersion{StreamingVersion: 2, CompactVersion: 1},
+	}
+	s.testServer.dataViewManager = manager
+	err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            11,
+		CollectionID:  100,
+		PartitionID:   10,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Dropped,
+		Level:         datapb.SegmentLevel_L1,
+	}))
+	s.Require().NoError(err)
+
+	resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+		SegmentID:    11,
+		CollectionID: 100,
+		PartitionID:  10,
+		Channel:      "ch1",
+		SegLevel:     datapb.SegmentLevel_L1,
+		Flushed:      true,
+	})
+	s.Require().NoError(err)
+	s.Require().True(merr.Ok(resp))
+	s.Equal("2", resp.GetExtraInfo()[statusExtraInfoDataViewStreamingVersion])
+	s.Equal("1", resp.GetExtraInfo()[statusExtraInfoDataViewCompactVersion])
+	s.Equal([]FlushDataViewEvent{{CollectionID: 100, SegmentIDs: []int64{11}}}, manager.flushEvents)
+}
+
+func (s *ServerSuite) TestSaveBinlogPath_DroppedSegmentOmitsUnknownDataVersion() {
+	manager := &fakeGCDataViewManager{}
+	s.testServer.dataViewManager = manager
+	err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            11,
+		CollectionID:  100,
+		PartitionID:   10,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Dropped,
+		Level:         datapb.SegmentLevel_L1,
+	}))
+	s.Require().NoError(err)
+
+	resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+		SegmentID:    11,
+		CollectionID: 100,
+		PartitionID:  10,
+		Channel:      "ch1",
+		SegLevel:     datapb.SegmentLevel_L1,
+		Flushed:      true,
+	})
+	s.Require().NoError(err)
+	s.Require().True(merr.Ok(resp))
+	s.Empty(resp.GetExtraInfo())
+	s.Equal([]FlushDataViewEvent{{CollectionID: 100, SegmentIDs: []int64{11}}}, manager.flushEvents)
+}
+
 func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
+	manager := &fakeGCDataViewManager{}
+	s.testServer.dataViewManager = manager
 
 	segment := s.testServer.meta.GetHealthySegment(context.TODO(), 1)
 	s.Require().Nil(segment)
@@ -527,6 +575,8 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 1)
 	s.NotNil(segment)
 	s.EqualValues(datapb.SegmentLevel_L0, segment.GetLevel())
+	s.Empty(manager.l0CompactEvents)
+	s.Empty(manager.flushEvents)
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
@@ -6197,79 +6247,15 @@ func TestAbortImport_UserAbortedJobIsIdempotent(t *testing.T) {
 	assert.True(t, merr.Ok(resp))
 }
 
-func TestHandleCommitVchannelRPC(t *testing.T) {
+// TestHandleCommitVchannelRPC_NoOpSuccess pins the upgrade-compat contract of the
+// HandleCommitVchannel RPC: after the import commit flow was unified into the
+// CommitImport ack callback (commitImportV2AckCallback), this RPC is a no-op that
+// always returns Success. Legacy streaming nodes deployed before the change still
+// call it per vchannel during a rolling upgrade, and must never be wedged by a
+// changed control plane.
+func TestHandleCommitVchannelRPC_NoOpSuccess(t *testing.T) {
 	ctx := context.Background()
-
-	importMetaMock := NewMockImportMeta(t)
-	importMetaMock.EXPECT().HandleCommitVchannel(mock.Anything, int64(3001), "vchan-0", mock.AnythingOfType("func() error")).
-		RunAndReturn(func(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
-			// Execute the callback to verify it works correctly.
-			return callback()
-		})
-
-	segIDs := []int64{10, 20, 30}
-	getSegIDsMock := mockey.Mock((*Server).getImportSegmentIDsByVchannel).
-		Return(segIDs).Build()
-	defer getSegIDsMock.UnPatch()
-
-	updateSegsMock := mockey.Mock((*meta).UpdateSegmentsInfo).
-		Return(nil).Build()
-	defer updateSegsMock.UnPatch()
-
-	server := &Server{
-		importMeta: importMetaMock,
-		meta:       &meta{},
-	}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-
-	resp, err := server.HandleCommitVchannel(ctx, &datapb.HandleCommitVchannelRequest{
-		JobId:    3001,
-		Vchannel: "vchan-0",
-	})
-	assert.NoError(t, err)
-	assert.True(t, merr.Ok(resp))
-}
-
-func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {
-	ctx := context.Background()
-
-	importMetaMock := NewMockImportMeta(t)
-	importMetaMock.EXPECT().HandleCommitVchannel(mock.Anything, int64(3001), "vchan-0", mock.AnythingOfType("func() error")).
-		RunAndReturn(func(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
-			return callback()
-		})
-
-	segIDs := []int64{10, 20}
-	getSegIDsMock := mockey.Mock((*Server).getImportSegmentIDsByVchannel).
-		Return(segIDs).Build()
-	defer getSegIDsMock.UnPatch()
-
-	segments := NewSegmentsInfo()
-	for _, segID := range segIDs {
-		segments.SetSegment(segID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-			ID:            segID,
-			CollectionID:  100,
-			PartitionID:   10,
-			InsertChannel: "vchan-0",
-			State:         commonpb.SegmentState_Flushed,
-			IsImporting:   true,
-			Binlogs: []*datapb.FieldBinlog{{
-				FieldID: 100,
-				Binlogs: []*datapb.Binlog{{
-					LogID:       segID,
-					TimestampTo: 100,
-				}},
-			}},
-		}})
-	}
-
-	server := &Server{
-		importMeta: importMetaMock,
-		meta: &meta{
-			catalog:  &datacoordkv.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: segments,
-		},
-	}
+	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
 	resp, err := server.HandleCommitVchannel(ctx, &datapb.HandleCommitVchannelRequest{
@@ -6279,90 +6265,22 @@ func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.True(t, merr.Ok(resp))
-	for _, segID := range segIDs {
-		seg := server.meta.GetSegment(ctx, segID)
-		require.NotNil(t, seg)
-		assert.EqualValues(t, 500, seg.GetCommitTimestamp())
-		assert.False(t, seg.GetIsImporting())
-	}
 }
 
-func TestHandleCommitVchannelRPC_RejectsCommitTimestampBelowBinlogTimestamp(t *testing.T) {
+// TestHandleCommitVchannelRPC_NoOpEvenForMissingJob pins that the no-op RPC does
+// not consult import meta at all: a job that never existed still yields Success,
+// so a legacy streaming node racing a job creation cannot observe an error.
+func TestHandleCommitVchannelRPC_NoOpEvenForMissingJob(t *testing.T) {
 	ctx := context.Background()
-
-	importMetaMock := NewMockImportMeta(t)
-	importMetaMock.EXPECT().HandleCommitVchannel(mock.Anything, int64(3001), "vchan-0", mock.AnythingOfType("func() error")).
-		RunAndReturn(func(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
-			return callback()
-		})
-
-	segIDs := []int64{10}
-	getSegIDsMock := mockey.Mock((*Server).getImportSegmentIDsByVchannel).
-		Return(segIDs).Build()
-	defer getSegIDsMock.UnPatch()
-
-	segments := NewSegmentsInfo()
-	segments.SetSegment(10, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-		ID:            10,
-		CollectionID:  100,
-		PartitionID:   10,
-		InsertChannel: "vchan-0",
-		State:         commonpb.SegmentState_Flushed,
-		IsImporting:   true,
-		Binlogs: []*datapb.FieldBinlog{{
-			FieldID: 100,
-			Binlogs: []*datapb.Binlog{{
-				LogID:       10,
-				TimestampTo: 500,
-			}},
-		}},
-	}})
-
-	server := &Server{
-		importMeta: importMetaMock,
-		meta: &meta{
-			catalog:  &datacoordkv.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: segments,
-		},
-	}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-
-	resp, err := server.HandleCommitVchannel(ctx, &datapb.HandleCommitVchannelRequest{
-		JobId:           3001,
-		Vchannel:        "vchan-0",
-		CommitTimestamp: 300,
-	})
-	assert.NoError(t, err)
-	assert.False(t, merr.Ok(resp))
-	assert.ErrorIs(t, merr.Error(resp), merr.ErrImportSysFailed)
-
-	seg := server.meta.GetSegment(ctx, 10)
-	require.NotNil(t, seg)
-	assert.EqualValues(t, 0, seg.GetCommitTimestamp())
-	assert.True(t, seg.GetIsImporting())
-}
-
-func TestHandleCommitVchannelRPC_MissingJobReturnsError(t *testing.T) {
-	ctx := context.Background()
-
-	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-
-	importMeta, err := NewImportMeta(ctx, catalog, nil, nil)
-	require.NoError(t, err)
-
-	server := &Server{
-		importMeta: importMeta,
-	}
+	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
 	resp, err := server.HandleCommitVchannel(ctx, &datapb.HandleCommitVchannelRequest{
 		JobId:    3001,
 		Vchannel: "vchan-0",
 	})
-	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrImportSysFailed)
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp))
 }
 
 // Named helper types for mockey interface-method patching. Using named types
@@ -6440,66 +6358,22 @@ func TestAbortImport_CommittingRejected(t *testing.T) {
 	assert.False(t, merr.Ok(resp))
 }
 
-// TestHandleCommitVchannelRPC_V3SegmentIsNotFencedYet pins a pre-existing gap
-// that this PR does not close: the fence derives its bound from the segment's
-// binlog arrays, and a V3 (manifest-backed) segment never persists those --
-// buildAlterSegmentsKvs skips the per-FieldBinlog KVs for it and the SegmentInfo
-// is written without them -- so a V3 segment reloaded after a DataCoord restart
-// compares against 0 and admits any commit timestamp, however low.
-//
-// Import segments become V3 as soon as UpdateManifest runs, so this is the main
-// import path, not a corner. The follow-up that reads Stats.TimestampTo instead
-// should flip these assertions; until then the current behavior is recorded
-// rather than left to be discovered.
-func TestHandleCommitVchannelRPC_V3SegmentIsNotFencedYet(t *testing.T) {
+// TestHandleCommitVchannelRPC_NoOpForAnyCommitTimestamp pins that the no-op RPC
+// is agnostic to the commit timestamp: the fence/visibility work that used to run
+// here (rejecting commit_ts below max binlog timestamp, storing commit timestamps
+// on segments, clearing is_importing) now lives in commitImportV2AckCallback.
+// This RPC must still succeed so legacy streaming nodes can complete their
+// per-vchannel fence reporting during a rolling upgrade.
+func TestHandleCommitVchannelRPC_NoOpForAnyCommitTimestamp(t *testing.T) {
 	ctx := context.Background()
-
-	importMetaMock := NewMockImportMeta(t)
-	importMetaMock.EXPECT().HandleCommitVchannel(mock.Anything, int64(3002), "vchan-0", mock.AnythingOfType("func() error")).
-		RunAndReturn(func(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
-			return callback()
-		})
-
-	segIDs := []int64{11}
-	getSegIDsMock := mockey.Mock((*Server).getImportSegmentIDsByVchannel).
-		Return(segIDs).Build()
-	defer getSegIDsMock.UnPatch()
-
-	segments := NewSegmentsInfo()
-	// Exactly the shape a reloaded V3 import segment has: a manifest, no binlog
-	// arrays, and Stats carrying the row timestamps that did survive the restart.
-	segments.SetSegment(11, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-		ID:            11,
-		CollectionID:  100,
-		PartitionID:   10,
-		InsertChannel: "vchan-0",
-		State:         commonpb.SegmentState_Flushed,
-		IsImporting:   true,
-		ManifestPath:  "files/insert_log/100/10/11/manifest",
-		Stats:         &datapb.Statistics{TimestampTo: 500},
-	}})
-
-	server := &Server{
-		importMeta: importMetaMock,
-		meta: &meta{
-			catalog:  &datacoordkv.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: segments,
-		},
-	}
+	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
 	resp, err := server.HandleCommitVchannel(ctx, &datapb.HandleCommitVchannelRequest{
 		JobId:           3002,
 		Vchannel:        "vchan-0",
-		CommitTimestamp: 300, // below Stats.TimestampTo=500, yet admitted
+		CommitTimestamp: 300, // below any plausible binlog timestamp; still succeeds
 	})
 	assert.NoError(t, err)
-	assert.True(t, merr.Ok(resp), "the fence does not fire for a reloaded V3 segment")
-
-	seg := server.meta.GetSegment(ctx, 11)
-	require.NotNil(t, seg)
-	assert.EqualValues(t, 300, seg.GetCommitTimestamp())
-	assert.False(t, seg.GetIsImporting())
-	assert.EqualValues(t, 0, maxBinlogTimestampTo(seg.GetBinlogs()),
-		"the bound the fence compares against is 0 despite Stats.TimestampTo=500")
+	assert.True(t, merr.Ok(resp))
 }

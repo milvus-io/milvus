@@ -2330,6 +2330,65 @@ func (_c *MockDataCoord_GetRecoveryInfoV2_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// GetStreamingNodeQueryViewResources provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) GetStreamingNodeQueryViewResources(_a0 context.Context, _a1 *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetStreamingNodeQueryViewResources")
+	}
+
+	var r0 *datapb.GetStreamingNodeQueryViewResourcesResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetStreamingNodeQueryViewResourcesRequest) *datapb.GetStreamingNodeQueryViewResourcesResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.GetStreamingNodeQueryViewResourcesResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetStreamingNodeQueryViewResourcesRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_GetStreamingNodeQueryViewResources_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetStreamingNodeQueryViewResources'
+type MockDataCoord_GetStreamingNodeQueryViewResources_Call struct {
+	*mock.Call
+}
+
+// GetStreamingNodeQueryViewResources is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.GetStreamingNodeQueryViewResourcesRequest
+func (_e *MockDataCoord_Expecter) GetStreamingNodeQueryViewResources(_a0 interface{}, _a1 interface{}) *MockDataCoord_GetStreamingNodeQueryViewResources_Call {
+	return &MockDataCoord_GetStreamingNodeQueryViewResources_Call{Call: _e.mock.On("GetStreamingNodeQueryViewResources", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_GetStreamingNodeQueryViewResources_Call) Run(run func(_a0 context.Context, _a1 *datapb.GetStreamingNodeQueryViewResourcesRequest)) *MockDataCoord_GetStreamingNodeQueryViewResources_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.GetStreamingNodeQueryViewResourcesRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_GetStreamingNodeQueryViewResources_Call) Return(_a0 *datapb.GetStreamingNodeQueryViewResourcesResponse, _a1 error) *MockDataCoord_GetStreamingNodeQueryViewResources_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_GetStreamingNodeQueryViewResources_Call) RunAndReturn(run func(context.Context, *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error)) *MockDataCoord_GetStreamingNodeQueryViewResources_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetRefreshExternalCollectionProgress provides a mock function with given fields: _a0, _a1
 func (_m *MockDataCoord) GetRefreshExternalCollectionProgress(_a0 context.Context, _a1 *datapb.GetRefreshExternalCollectionProgressRequest) (*datapb.GetRefreshExternalCollectionProgressResponse, error) {
 	ret := _m.Called(_a0, _a1)

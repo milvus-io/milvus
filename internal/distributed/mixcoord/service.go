@@ -633,6 +633,14 @@ func (s *Server) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegment
 	return s.mixCoord.GetLoadSegmentInfo(ctx, req)
 }
 
+func (s *Server) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	return s.mixCoord.GetQueryViewLoadInfo(ctx, req)
+}
+
+func (s *Server) WatchQueryViewSegmentLoadInfo(stream querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer) error {
+	return s.mixCoord.WatchQueryViewSegmentLoadInfo(stream)
+}
+
 // LoadBalance migrate the sealed segments on the source node to the dst nodes
 func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
 	return s.mixCoord.LoadBalance(ctx, req)
@@ -812,6 +820,10 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 	return s.mixCoord.GetRecoveryInfoV2(ctx, req)
 }
 
+func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	return s.mixCoord.GetStreamingNodeQueryViewResources(ctx, req)
+}
+
 // GetChannelRecoveryInfo gets the corresponding vchannel info.
 func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChannelRecoveryInfoRequest) (*datapb.GetChannelRecoveryInfoResponse, error) {
 	return s.mixCoord.GetChannelRecoveryInfo(ctx, req)
@@ -847,7 +859,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	return s.mixCoord.WatchChannels(ctx, req)
 }
 
-// GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
+// GetFlushState gets the flush state based on the provided segment IDs.
 func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	return s.mixCoord.GetFlushState(ctx, req)
 }

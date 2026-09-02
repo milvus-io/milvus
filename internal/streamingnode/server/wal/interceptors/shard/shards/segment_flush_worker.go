@@ -24,6 +24,9 @@ func (m *partitionManager) asyncFlushSegment(
 		l, err := m.wal.GetWithContext(ctx)
 		if err != nil {
 			m.Logger().Info(ctx, "stop flushing segment before wal is ready",
+				mlog.FieldVChannel(m.vchannel),
+				mlog.FieldCollectionID(m.collectionID),
+				mlog.FieldPartitionID(m.partitionID),
 				mlog.FieldSegmentID(segment.GetSegmentID()),
 				mlog.Err(err))
 			return
@@ -34,6 +37,7 @@ func (m *partitionManager) asyncFlushSegment(
 			txnManager:   m.txnManager,
 			ctx:          ctx,
 			collectionID: m.collectionID,
+			partitionID:  m.partitionID,
 			vchannel:     m.vchannel,
 			segment:      segment,
 			wal:          l,
@@ -49,6 +53,7 @@ type segmentFlushWorker struct {
 	txnManager   TxnManager
 	ctx          context.Context
 	collectionID int64
+	partitionID  int64
 	vchannel     string
 	segment      *segmentAllocManager // the segment is belong to one collection
 	wal          wal.WAL
@@ -56,19 +61,22 @@ type segmentFlushWorker struct {
 
 // do is the main loop of the segment flush worker.
 func (w *segmentFlushWorker) do() {
-	backoff := backoff.NewExponentialBackOff()
-	backoff.InitialInterval = 10 * time.Millisecond
-	backoff.MaxInterval = 1 * time.Second
-	backoff.MaxElapsedTime = 0
-	backoff.Reset()
+	retryBackoff := backoff.NewExponentialBackOff()
+	retryBackoff.InitialInterval = 10 * time.Millisecond
+	retryBackoff.MaxInterval = time.Second
+	retryBackoff.MaxElapsedTime = 0
+	retryBackoff.Reset()
 
-	// waitForTxnManagerRecoverReady waits for the txn manager to be ready for recovery.
-	// The segment assignment manager lost the txnSem for the recovered txn message,
-	// So the seal worker should wait for all the recovered txn to be done.
-	// Otherwise, the flush message may be sent into wal before the txn is done.
-	// Break the wal consistency: All insert message is written into wal before the flush message.
+	// The recovered segment assignment state does not include txnSem. Wait for
+	// recovered transactions before writing a Flush message, so all inserts stay
+	// ordered before the flush in the WAL.
 	if err := w.waitForTxnManagerRecoverDone(); err != nil {
-		w.Logger().Error(w.ctx, "failed to wait for txn manager recover ready", mlog.Err(err))
+		w.Logger().Error(w.ctx, "failed to wait for txn manager recover ready",
+			mlog.FieldVChannel(w.vchannel),
+			mlog.FieldCollectionID(w.collectionID),
+			mlog.FieldPartitionID(w.partitionID),
+			mlog.Err(err),
+		)
 		return
 	}
 
@@ -77,34 +85,56 @@ func (w *segmentFlushWorker) do() {
 		if err == nil {
 			return
 		}
-		if e := status.AsStreamingError(err); e.IsUnrecoverable() {
-			w.Logger().Warn(w.ctx, "flush growing segement with unrecoverable error, stop retrying", mlog.Err(err))
+		if status.AsStreamingError(err).IsUnrecoverable() {
+			w.Logger().Warn(w.ctx, "flush growing segment with unrecoverable error, stop retrying",
+				mlog.FieldVChannel(w.vchannel),
+				mlog.FieldCollectionID(w.collectionID),
+				mlog.FieldPartitionID(w.partitionID),
+				mlog.Err(err),
+			)
 			return
 		}
-
-		nextInterval := backoff.NextBackOff()
-		w.Logger().Info(w.ctx, "failed to flush new growing segment, retrying", mlog.Duration("nextInterval", nextInterval), mlog.Err(err))
+		nextInterval := retryBackoff.NextBackOff()
+		w.Logger().Info(w.ctx, "failed to flush growing segment, retrying",
+			mlog.FieldVChannel(w.vchannel),
+			mlog.FieldCollectionID(w.collectionID),
+			mlog.FieldPartitionID(w.partitionID),
+			mlog.Duration("nextInterval", nextInterval),
+			mlog.Err(err),
+		)
 		select {
 		case <-w.ctx.Done():
-			w.Logger().Info(w.ctx, "flush segment canceled", mlog.Err(w.ctx.Err()))
+			w.Logger().Info(w.ctx, "flush segment canceled",
+				mlog.FieldVChannel(w.vchannel),
+				mlog.FieldCollectionID(w.collectionID),
+				mlog.FieldPartitionID(w.partitionID),
+				mlog.Err(w.ctx.Err()),
+			)
 			return
 		case <-w.wal.Available():
-			// wal is unavailable, stop the worker.
-			w.Logger().Warn(w.ctx, "wal is unavailable, stop flush segment")
+			w.Logger().Warn(w.ctx, "wal is unavailable, stop flush segment",
+				mlog.FieldVChannel(w.vchannel),
+				mlog.FieldCollectionID(w.collectionID),
+				mlog.FieldPartitionID(w.partitionID),
+			)
 			return
-		case <-time.After(backoff.NextBackOff()):
+		case <-time.After(nextInterval):
 		}
 	}
 }
 
-// waitForTxnManagerRecoverDone waits for the txn manager to be recovery done.
+// waitForTxnManagerRecoverDone waits until transaction recovery is complete.
 func (w *segmentFlushWorker) waitForTxnManagerRecoverDone() error {
 	select {
 	case <-w.txnManager.RecoverDone():
-		// txn manager is ready, continue to do the flush.
 		return nil
 	case <-w.ctx.Done():
-		w.Logger().Info(w.ctx, "flush segment canceled", mlog.Err(w.ctx.Err()))
+		w.Logger().Info(w.ctx, "flush segment canceled",
+			mlog.FieldVChannel(w.vchannel),
+			mlog.FieldCollectionID(w.collectionID),
+			mlog.FieldPartitionID(w.partitionID),
+			mlog.Err(w.ctx.Err()),
+		)
 		return w.ctx.Err()
 	case <-w.wal.Available():
 		return status.NewOnShutdownError("wal is unavailable")
@@ -131,12 +161,21 @@ func (w *segmentFlushWorker) doOnce() error {
 
 	result, err := w.wal.Append(w.ctx, msg)
 	if err != nil {
-		w.Logger().Error(w.ctx, "failed to append flush message", mlog.FieldMessage(msg), mlog.Err(err))
+		w.Logger().Error(w.ctx, "failed to append flush message",
+			mlog.FieldVChannel(w.vchannel),
+			mlog.FieldCollectionID(w.collectionID),
+			mlog.FieldPartitionID(w.partitionID),
+			mlog.FieldMessage(msg),
+			mlog.Err(err),
+		)
 		return err
 	}
 	policy := w.segment.SealPolicy()
 	w.Logger().Info(w.ctx,
 		"segment has been flushed",
+		mlog.FieldVChannel(w.vchannel),
+		mlog.FieldCollectionID(w.collectionID),
+		mlog.FieldPartitionID(w.partitionID),
 		mlog.FieldMessage(msg),
 		mlog.String("policy", string(policy.Policy)),
 		mlog.Any("extras", policy.Extra),
@@ -150,12 +189,24 @@ func (w *segmentFlushWorker) doOnce() error {
 func (w *segmentFlushWorker) checkIfReady() bool {
 	// if there're flying acks, wait them acked, delay the flush at next retry.
 	if ackSem := w.segment.AckSem(); ackSem > 0 {
-		w.Logger().Info(w.ctx, "segment has flying insert operation, delay it", mlog.Int32("ackSem", ackSem), mlog.FieldSegmentID(w.segment.GetSegmentID()))
+		w.Logger().Info(w.ctx, "segment has flying insert operation, delay it",
+			mlog.FieldVChannel(w.vchannel),
+			mlog.FieldCollectionID(w.collectionID),
+			mlog.FieldPartitionID(w.partitionID),
+			mlog.FieldSegmentID(w.segment.GetSegmentID()),
+			mlog.Int32("ackSem", ackSem),
+		)
 		return false
 	}
 	// if there're flying txns, wait them committed, delay the flush at next retry.
 	if txnSem := w.segment.TxnSem(); txnSem > 0 {
-		w.Logger().Info(w.ctx, "segment has flying txns, delay it", mlog.Int32("txnSem", txnSem), mlog.FieldSegmentID(w.segment.GetSegmentID()))
+		w.Logger().Info(w.ctx, "segment has flying txns, delay it",
+			mlog.FieldVChannel(w.vchannel),
+			mlog.FieldCollectionID(w.collectionID),
+			mlog.FieldPartitionID(w.partitionID),
+			mlog.FieldSegmentID(w.segment.GetSegmentID()),
+			mlog.Int32("txnSem", txnSem),
+		)
 		return false
 	}
 	return true

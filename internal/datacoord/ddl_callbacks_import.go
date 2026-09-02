@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -25,9 +26,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -261,7 +264,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 			Schema:         schema, // TODO: should we use the schema from the collection?
 			JobID:          jobID,
 		}).
-		WithBroadcast(vchannels).
+		WithBroadcast(importBroadcastChannels(vchannels)).
 		MustBuildBroadcast()
 
 	// Broadcast the message
@@ -275,8 +278,10 @@ func (c *DDLCallbacks) registerImportCallbacks() {
 	registry.RegisterRollbackImportV2AckCallback(c.rollbackImportV2AckCallback)
 }
 
-// commitImportV2AckCallback handles the ack callback for CommitImport WAL message.
-// It transitions the import job from Uncommitted → Committing state.
+// commitImportV2AckCallback handles the ack callback for the CommitImport WAL message.
+// It completes the entire import commit flow in one shot: makes all segments of the
+// job visible (commit timestamp, is_importing=false, DataView publish) and transitions
+// the job from Uncommitted to Completed.
 // Concurrency safety is guaranteed by the broadcaster framework's resource key lock
 // (exclusive collection-level lock), so no CAS is needed here.
 func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result message.BroadcastResultCommitImportMessageV2) error {
@@ -300,7 +305,7 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 		// Divergence signal: the source committed but this replica already failed, so
 		// this replica will NOT make the data visible. Left as a no-op here; surfaced
 		// at WARN for alerting.
-		mlog.Warn(ctx, "CommitImport ack landed on a Failed import job; this replica will NOT commit while the source commits — potential primary/standby divergence",
+		mlog.Warn(ctx, "CommitImport ack landed on a Failed import job; this replica will NOT commit while the source commits - potential primary/standby divergence",
 			mlog.FieldJobID(jobID), mlog.String("reason", job.GetReason()))
 		return nil
 	default:
@@ -312,17 +317,81 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 		return merr.WrapErrImportSysFailedMsg("job %d is in state %s, waiting for Uncommitted", jobID, job.GetState())
 	}
 
+	// Make all segments of the job visible in one shot. Each business vchannel
+	// receives its own append timetick for the CommitImport broadcast; MVCC only
+	// advances that vchannel's TransformingTimetick to its own timetick, so the
+	// commit timestamp must be derived per vchannel — never from the global max
+	// (which may come from the control channel and would permanently mask the
+	// imported rows on lower-timetick vchannels).
+	collectionID := job.GetCollectionID()
+	var allSegIDs []int64
+	ops := make([]UpdateOperator, 0)
+	for vchannel, appendResult := range result.Results {
+		if funcutil.IsControlChannel(vchannel) {
+			// The control channel carries no data segments; its timetick must
+			// not be used as a segment commit timestamp.
+			continue
+		}
+		segIDs := c.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
+		if len(segIDs) == 0 {
+			continue
+		}
+		allSegIDs = append(allSegIDs, segIDs...)
+		commitTs := appendResult.TimeTick
+		for _, segID := range segIDs {
+			ops = append(ops,
+				UpdateCommitTimestamp(segID, commitTs),
+				UpdateIsImporting(segID, false),
+			)
+		}
+	}
+	if len(ops) > 0 {
+		if err := c.meta.UpdateSegmentsInfo(ctx, ops...); err != nil {
+			return err
+		}
+	}
+	if c.dataViewManager != nil && collectionID != 0 && len(allSegIDs) > 0 {
+		if _, err := c.dataViewManager.OnImport(ctx, ImportDataViewEvent{
+			CollectionID: collectionID,
+			SegmentIDs:   allSegIDs,
+		}); err != nil {
+			mlog.Warn(ctx, "failed to publish DataView after import commit",
+				mlog.FieldJobID(jobID),
+				mlog.Err(err))
+			// The full callback retries indefinitely, so surface the failure and
+			// only transition to Completed once the DataView has been persisted.
+			return err
+		}
+	}
+
+	completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
 	if err := c.importMeta.UpdateJob(ctx, jobID,
-		UpdateJobState(internalpb.ImportJobState_Committing),
+		UpdateJobState(internalpb.ImportJobState_Completed),
+		UpdateJobCompleteTime(completeTime),
 	); err != nil {
 		return err
 	}
-
-	uncommittedDuration := job.GetTR().RecordSpan()
-	mlog.Info(ctx, "import job uncommitted stage done",
+	totalDuration := job.GetTR().ElapseSpan()
+	metrics.ImportJobLatency.WithLabelValues(metrics.TotalLabel).Observe(float64(totalDuration.Milliseconds()))
+	mlog.Info(ctx, "import job committed to Completed",
 		mlog.FieldJobID(jobID),
-		mlog.Duration("jobTimeCost/uncommitted", uncommittedDuration))
+		mlog.Duration("jobTimeCost/total", totalDuration))
 	return nil
+}
+
+func importBroadcastChannels(vchannels []string) []string {
+	controlChannel := streaming.WAL().ControlChannel()
+	channels := make([]string, 0, len(vchannels)+1)
+	for _, vchannel := range vchannels {
+		channels = append(channels, vchannel)
+		if vchannel == controlChannel {
+			controlChannel = ""
+		}
+	}
+	if controlChannel != "" {
+		channels = append(channels, controlChannel)
+	}
+	return channels
 }
 
 // rollbackImportV2AckCallback handles the ack callback for RollbackImport WAL message.

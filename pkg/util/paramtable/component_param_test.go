@@ -180,6 +180,49 @@ func TestComponentParam_StorageIopsParams(t *testing.T) {
 	}
 }
 
+func TestComponentParam_QueryViewConcurrency(t *testing.T) {
+	Init()
+	params := Get()
+	for _, test := range []struct {
+		name string
+		item *ParamItem
+	}{
+		{name: "segment catch-up", item: &params.QueryNodeCfg.QueryViewSegmentCatchupConcurrency},
+		{name: "transform log drain", item: &params.QueryNodeCfg.QueryViewTransformLogDrainConcurrency},
+		{name: "transform log stream catch-up", item: &params.StreamingCfg.TransformLogCatchupConcurrencyPerStream},
+		{name: "live event dispatch", item: &params.StreamingCfg.QueryViewLiveEventDispatchConcurrencyPerPChannel},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			key := test.item.Key
+			params.Reset(key)
+			t.Cleanup(func() { params.Reset(key) })
+
+			assert.Equal(t, 4, test.item.GetAsInt())
+			params.Save(key, "32")
+			assert.Equal(t, 32, test.item.GetAsInt())
+			params.Save(key, "0")
+			assert.Equal(t, 1, test.item.GetAsInt())
+		})
+	}
+}
+
+func TestComponentParam_QueryViewFullReconsileInterval(t *testing.T) {
+	Init()
+	params := Get()
+	item := &params.QueryCoordCfg.QueryViewFullReconsileInterval
+	params.Reset(item.Key)
+	t.Cleanup(func() { params.Reset(item.Key) })
+
+	assert.Equal(t, "queryCoord.queryView.fullReconsileInterval", item.Key)
+	assert.Equal(t, "10", item.DefaultValue)
+	assert.True(t, item.Export)
+	assert.Equal(t, 10*time.Second, item.GetAsDuration(time.Second))
+	params.Save(item.Key, "300")
+	assert.Equal(t, 5*time.Minute, item.GetAsDuration(time.Second))
+	params.Save(item.Key, "0")
+	assert.Equal(t, time.Second, item.GetAsDuration(time.Second))
+}
+
 func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()
@@ -1057,12 +1100,14 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 24*time.Hour, params.StreamingCfg.WALRecoverySchemaExpirationTolerance.GetAsDurationByParse())
 		assert.Equal(t, 100, params.StreamingCfg.WALRecoveryMaxDirtyMessage.GetAsInt())
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.WALRecoveryPersistInterval.GetAsDurationByParse())
+		assert.Equal(t, 16, params.StreamingCfg.WALRecoveryTaskConcurrency.GetAsInt())
 		assert.Equal(t, float64(0.6), params.StreamingCfg.FlushMemoryThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.2), params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.1), params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.GetAsFloat())
 		assert.Equal(t, 10*time.Minute, params.StreamingCfg.FlushL0MaxLifetime.GetAsDurationByParse())
 		assert.Equal(t, 500000, params.StreamingCfg.FlushL0MaxRowNum.GetAsInt())
 		assert.Equal(t, int64(32*1024*1024), params.StreamingCfg.FlushL0MaxSize.GetAsSize())
+		assert.Equal(t, 4, params.StreamingCfg.FlushL1CommitConcurrency.GetAsInt())
 		assert.Equal(t, 30, params.StreamingCfg.OldVersionLastConfirmedWindowSize.GetAsInt())
 		assert.Equal(t, 2*time.Second, params.StreamingCfg.DelegatorEmptyTimeTickMaxFilterInterval.GetAsDurationByParse())
 		assert.Equal(t, 1*time.Second, params.StreamingCfg.FlushEmptyTimeTickMaxFilterInterval.GetAsDurationByParse())
@@ -1151,9 +1196,11 @@ func TestComponentParam(t *testing.T) {
 		params.Save(params.StreamingCfg.WALRecoveryGracefulCloseTimeout.Key, "4s")
 		params.Save(params.StreamingCfg.WALRecoveryMaxDirtyMessage.Key, "200")
 		params.Save(params.StreamingCfg.WALRecoveryPersistInterval.Key, "20s")
+		params.Save(params.StreamingCfg.WALRecoveryTaskConcurrency.Key, "32")
 		params.Save(params.StreamingCfg.FlushMemoryThreshold.Key, "0.7")
 		params.Save(params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.Key, "0.25")
 		params.Save(params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.Key, "0.15")
+		params.Save(params.StreamingCfg.FlushL1CommitConcurrency.Key, "8")
 		params.Save(params.StreamingCfg.WALRateLimitDefaultBurst.Key, "10485760") // 10MB
 		params.Save(params.StreamingCfg.WALRateLimitAppendRateEnabled.Key, "true")
 		params.Save(params.StreamingCfg.WALRateLimitAppendRateSlowdownThreshold.Key, "128m")
@@ -1178,9 +1225,11 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 4*time.Second, params.StreamingCfg.WALRecoveryGracefulCloseTimeout.GetAsDurationByParse())
 		assert.Equal(t, 200, params.StreamingCfg.WALRecoveryMaxDirtyMessage.GetAsInt())
 		assert.Equal(t, 20*time.Second, params.StreamingCfg.WALRecoveryPersistInterval.GetAsDurationByParse())
+		assert.Equal(t, 32, params.StreamingCfg.WALRecoveryTaskConcurrency.GetAsInt())
 		assert.Equal(t, float64(0.7), params.StreamingCfg.FlushMemoryThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.25), params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.15), params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.GetAsFloat())
+		assert.Equal(t, 8, params.StreamingCfg.FlushL1CommitConcurrency.GetAsInt())
 		assert.Equal(t, 10*1024*1024, params.StreamingCfg.WALRateLimitDefaultBurst.GetAsInt())
 		assert.Equal(t, true, params.StreamingCfg.WALRateLimitAppendRateEnabled.GetAsBool())
 		assert.Equal(t, int64(128*1024*1024), params.StreamingCfg.WALRateLimitAppendRateSlowdownThreshold.GetAsSize())

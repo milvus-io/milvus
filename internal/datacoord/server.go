@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/dataview"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
@@ -47,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -100,15 +102,18 @@ type Server struct {
 	quitCh           chan struct{}
 	stateCode        atomic.Value
 
-	etcdCli        *clientv3.Client
-	tikvCli        *txnkv.Client
-	address        string
-	watchClient    kv.WatchKV
-	kv             kv.MetaKv
-	metaRootPath   string
-	meta           *meta
-	segmentManager Manager
-	allocator      allocator.Allocator
+	etcdCli                   *clientv3.Client
+	tikvCli                   *txnkv.Client
+	address                   string
+	watchClient               kv.WatchKV
+	kv                        kv.MetaKv
+	metaRootPath              string
+	meta                      *meta
+	dataViewManager           DataViewManager
+	dataViewReferences        *dataViewReferenceManager
+	queryViewLoadInfoNotifier QueryViewLoadInfoNotifier
+	segmentManager            Manager
+	allocator                 allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
 	idAllocator      *globalIDAllocator.GlobalIDAllocator
 	nodeManager      session.NodeManager
@@ -206,15 +211,16 @@ func WithSegmentManager(manager Manager) Option {
 func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Option) *Server {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
-		ctx:                 ctx,
-		quitCh:              make(chan struct{}),
-		factory:             factory,
-		flushCh:             make(chan UniqueID, 1024),
-		notifyIndexChan:     make(chan UniqueID, 1024),
-		dataNodeCreator:     defaultDataNodeCreatorFunc,
-		importJobLock:       lock.NewKeyLock[int64](),
-		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
-		metricsRequest:      metricsinfo.NewMetricsRequest(),
+		ctx:                       ctx,
+		quitCh:                    make(chan struct{}),
+		factory:                   factory,
+		flushCh:                   make(chan UniqueID, 1024),
+		notifyIndexChan:           make(chan UniqueID, 1024),
+		queryViewLoadInfoNotifier: noopQueryViewLoadInfoNotifier{},
+		dataNodeCreator:           defaultDataNodeCreatorFunc,
+		importJobLock:             lock.NewKeyLock[int64](),
+		metricsCacheManager:       metricsinfo.NewMetricsCacheManager(),
+		metricsRequest:            metricsinfo.NewMetricsRequest(),
 	}
 
 	for _, opt := range opts {
@@ -492,6 +498,7 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 		scanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
+		dataViewGC:       s.dataViewReferences,
 	})
 }
 
@@ -636,22 +643,57 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	reloadEtcdFn := func() error {
 		var err error
 		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
+		dataViewStore := &dataViewSegmentStore{}
+		type dataViewRecoveryResult struct {
+			manager DataViewManager
+			err     error
+		}
+		dataViewRecoveryCh := make(chan dataViewRecoveryResult, 1)
+		go func() {
+			manager, err := dataview.RecoverManager(s.ctx, catalog, dataViewStore)
+			dataViewRecoveryCh <- dataViewRecoveryResult{manager: manager, err: err}
+		}()
 		s.meta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
+		dataViewRecovery := <-dataViewRecoveryCh
 		if err != nil {
 			return err
 		}
-
-		// Load collection information asynchronously
-		// HINT: please make sure this is the last step in the `reloadEtcdFn` function !!!
-		go func() {
-			_ = retry.Do(s.ctx, func() error {
-				return s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
-			}, retry.Sleep(time.Second), retry.Attempts(connMetaMaxRetryTime))
-		}()
+		s.meta.queryViewLoadInfoNotifier = s.queryViewLoadInfoNotifier
+		dataViewStore.meta = s.meta
+		if dataViewRecovery.err != nil {
+			return dataViewRecovery.err
+		}
+		s.dataViewManager = dataViewRecovery.manager
+		s.meta.dataViewManager = s.dataViewManager
+		if err := s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker); err != nil {
+			return err
+		}
+		s.dataViewReferences, err = recoverDataViewReferenceManager(
+			s.ctx,
+			catalog,
+			s.dataViewManager,
+			func(collectionID int64) bool { return s.meta.GetCollection(collectionID) != nil },
+		)
+		if err != nil {
+			return err
+		}
+		// DataView repair must see the current collection/partition cache so
+		// DDL trim intent from RootCoord is applied before reconciling segments.
+		repairCollectionIDs := make([]int64, 0, len(s.meta.recoveredCollectionIDs))
+		for _, collectionID := range s.meta.recoveredCollectionIDs {
+			if !s.dataViewReferences.IsTerminal(collectionID) {
+				repairCollectionIDs = append(repairCollectionIDs, collectionID)
+			}
+		}
+		if err := s.dataViewManager.RepairCollections(s.ctx, repairCollectionIDs); err != nil {
+			return err
+		}
 		return nil
 	}
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
 }
+
+var _ qviews.DataViewReferenceManager = (*Server)(nil)
 
 func (s *Server) initAnalyzeInspector() {
 	if s.analyzeInspector == nil {

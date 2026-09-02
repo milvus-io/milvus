@@ -12,14 +12,22 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
+
+var partitionReady = func() <-chan struct{} {
+	ready := make(chan struct{})
+	close(ready)
+	return ready
+}()
 
 // newPartitionSegmentManager creates a new partition segment assign manager.
 func newPartitionSegmentManager(
 	ctx context.Context,
 	logger *mlog.Logger,
 	wal *syncutil.Future[wal.WAL],
+	scheduler nodescheduler.Scheduler,
 	pchannel types.PChannelInfo,
 	vchannel string,
 	collectionID int64,
@@ -36,6 +44,7 @@ func newPartitionSegmentManager(
 	}
 	m := &partitionManager{
 		ctx:                  ctx,
+		scheduler:            scheduler,
 		txnManager:           txnManager,
 		wal:                  wal,
 		pchannel:             pchannel,
@@ -47,7 +56,7 @@ func newPartitionSegmentManager(
 		fencedAssignTimeTick: fencedAssignTimeTick,
 		metrics:              metrics,
 	}
-	m.SetLogger(logger.With(mlog.FieldVChannel(vchannel), mlog.FieldCollectionID(collectionID), mlog.FieldPartitionID(paritionID)))
+	m.SetLogger(logger)
 	return m
 }
 
@@ -56,6 +65,7 @@ type partitionManager struct {
 	mlog.Binder
 
 	ctx                  context.Context
+	scheduler            nodescheduler.Scheduler
 	txnManager           TxnManager // the txn manager is used to manage the transaction of the segment.
 	wal                  *syncutil.Future[wal.WAL]
 	pchannel             types.PChannelInfo
@@ -77,6 +87,9 @@ func (m *partitionManager) AddSegment(s *segmentAllocManager) {
 	m.onAllocating = nil
 	if s.CreateSegmentTimeTick() <= m.fencedAssignTimeTick {
 		panic("critical bug: create segment time tick is less than fenced assign time tick")
+	}
+	if m.segments == nil {
+		m.segments = make(map[int64]*segmentAllocManager)
 	}
 	m.segments[s.GetSegmentID()] = s
 	m.metrics.ObserveCreateSegment()
@@ -105,9 +118,7 @@ func (m *partitionManager) WaitPendingGrowingSegmentReady() <-chan struct{} {
 	if m.onAllocating != nil {
 		return m.onAllocating
 	}
-	ready := make(chan struct{})
-	close(ready)
-	return ready
+	return partitionReady
 }
 
 // FlushAndDropPartition flushes all segments in the partition.
@@ -129,7 +140,7 @@ func (m *partitionManager) FlushAndDropPartition(policy policy.SealPolicy) []int
 		)
 		segmentIDs = append(segmentIDs, segment.GetSegmentID())
 	}
-	m.segments = make(map[int64]*segmentAllocManager)
+	m.segments = nil
 	return segmentIDs
 }
 
@@ -151,7 +162,7 @@ func (m *partitionManager) FlushAndFenceSegmentUntil(timeTick uint64) []int64 {
 		)
 		segmentIDs = append(segmentIDs, segment.GetSegmentID())
 	}
-	m.segments = make(map[int64]*segmentAllocManager)
+	m.segments = nil
 
 	// fence the assign operation until the incoming time tick or latest assigned timetick.
 	// The new incoming assignment request will be fenced.

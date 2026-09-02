@@ -52,6 +52,7 @@ linters:
         no-zap-outside-mlog:
           files:
             - "$all"
+            - "!**/*_test.go"
             - "!pkg/mlog/*.go"
             - "!pkg/mlog/**/*.go"
             - "!**/pkg/mlog/*.go"

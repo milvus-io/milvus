@@ -9,6 +9,7 @@ import "messages.proto";
 import "common.proto";
 import "milvus.proto";
 import "schema.proto";
+import "view.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/any.proto";
 import "google/protobuf/field_mask.proto";
@@ -247,7 +248,6 @@ message AssignmentDiscoverResponse {
     oneof response {
         FullStreamingNodeAssignmentWithVersion full_assignment =
             1;  // all assignment info.
-        // TODO: may be support partial assignment info in future.
         CloseAssignmentDiscoverResponse close = 2;
     }
 }
@@ -279,7 +279,37 @@ message StreamingNodeInfo {
 // StreamingNodeAssignment is the assignment info of a streaming node.
 message StreamingNodeAssignment {
     StreamingNodeInfo node         = 1;
-    repeated PChannelInfo channels = 2;
+    repeated PChannelInfo channels = 2;  // Primary pchannels (WAL owner, read-write). Unchanged for backward compatibility.
+    // Shard-to-replica mapping for loaded collections on this SN.
+    ShardAssignmentInfo shard_assignment = 3;
+    // Secondary (read-only) pchannel replicas on this SN.
+    // These pchannels subscribe to the WAL but do not own it.
+    // Primary pchannels remain in the channels field above.
+    repeated PChannelInfo secondary_channels = 4;
+}
+
+//
+// ======================== Shard Assignment ========================
+//
+
+// ShardAssignmentInfo carries pchannel-scoped shard-to-replica mappings for a single StreamingNode.
+// Published as part of channel assignment full updates.
+message ShardAssignmentInfo {
+    repeated PChannelShardAssignment pchannel_assignments = 1;
+}
+
+// PChannelShardAssignment carries shard replicas on one pchannel of a StreamingNode.
+// The pchannel must appear in the same StreamingNodeAssignment's channels or secondary_channels.
+message PChannelShardAssignment {
+    string pchannel = 1;
+    repeated ShardAssignmentEntry entries = 2;
+}
+
+// ShardAssignmentEntry identifies a single shard replica on this SN.
+message ShardAssignmentEntry {
+    int64 collection_id = 1;  // Collection this shard belongs to.
+    int32 shard_index = 2;    // Shard index within the collection (0-based).
+    int64 replica_id = 3;     // Replica this shard belongs to.
 }
 
 // DeliverPolicy is the policy to deliver message.
@@ -384,6 +414,11 @@ service StreamingNodeHandlerService {
     // log node, the RPC will return error CHANNEL_NOT_EXIST. If channel is
     // moving away to other log node, the RPC will return error CHANNEL_FENCED.
     rpc Consume(stream ConsumeRequest) returns (stream ConsumeResponse) {};
+
+    // SubscribeTransform is a bi-directional streaming RPC to subscribe
+    // vchannel-level transform effects. Multiple vchannel subscriptions can be
+    // multiplexed on one stream by subscription_id.
+    rpc SubscribeTransform(stream TransformRequest) returns (stream TransformResponse) {};
 }
 
 // GetReplicateCheckpointRequest is the request of GetReplicateCheckpoint service.
@@ -572,6 +607,144 @@ message ConsumeMessageReponse {
 
 message CloseConsumerResponse {}
 
+// CreateTransformStreamRequest is passed in SubscribeTransform stream metadata.
+message CreateTransformStreamRequest {
+    PChannelInfo pchannel = 1;
+}
+
+// TransformRequest is the request of the SubscribeTransform RPC.
+message TransformRequest {
+    oneof request {
+        CreateTransformSubscriptionRequest create = 1;
+        CloseTransformSubscriptionRequest close_subscription = 2;
+        CloseTransformStreamRequest close_stream = 3;
+    }
+}
+
+// CreateTransformSubscriptionRequest creates a remote vchannel-level transform
+// scanner on a SubscribeTransform stream.
+message CreateTransformSubscriptionRequest {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+
+    // Exclusive. Server sends TransformLog entries with time_tick >
+    // start_after_time_tick.
+    uint64 start_after_time_tick = 3;
+
+    // Inclusive. When non-zero, server stops after consuming entries with
+    // time_tick <= end_time_tick.
+    uint64 end_time_tick = 4;
+}
+
+// CloseTransformSubscriptionRequest closes one vchannel subscription on a
+// SubscribeTransform stream.
+message CloseTransformSubscriptionRequest {
+    int64 subscription_id = 1;
+}
+
+// CloseTransformStreamRequest gracefully closes the SubscribeTransform stream.
+message CloseTransformStreamRequest {}
+
+// TransformResponse is the response of the SubscribeTransform RPC.
+message TransformResponse {
+    oneof response {
+        CreateTransformSubscriptionResponse create = 1;
+        TransformMessageBatch message_batch = 2;
+        TransformSubscriptionSyncUp sync_up = 3;
+        TransformSubscriptionError subscription_error = 4;
+        CloseTransformSubscriptionResponse close_subscription = 5;
+        CloseTransformStreamResponse close_stream = 6;
+    }
+}
+
+// CreateTransformSubscriptionResponse acknowledges creation of one vchannel
+// transform scanner.
+message CreateTransformSubscriptionResponse {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+    uint64 start_after_time_tick = 3;
+    uint64 end_time_tick = 5;
+
+    // Current SN TransformLog truncation cursor.
+    uint64 truncate_time_tick = 4;
+}
+
+// CloseTransformSubscriptionResponse acknowledges closing one vchannel
+// subscription on a SubscribeTransform stream.
+message CloseTransformSubscriptionResponse {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+}
+
+// TransformSubscriptionSyncUp is a transform frontier event. After receiving
+// SyncUp(time_tick), all TransformLog entries with time_tick <= SyncUp.time_tick
+// have been delivered to this subscription.
+message TransformSubscriptionSyncUp {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+    uint64 time_tick = 3;
+}
+
+// TransformSubscriptionError carries a StreamingError for one subscription on a
+// multiplexed SubscribeTransform stream.
+message TransformSubscriptionError {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+    StreamingError error = 3;
+}
+
+// CloseTransformStreamResponse acknowledges graceful stream close.
+message CloseTransformStreamResponse {}
+
+// TransformMessageBatch is an at-least-once delivery unit for transform
+// entries.
+message TransformMessageBatch {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+
+    // Entries are ordered by TransformLogEntry.time_tick.
+    repeated TransformLogEntry entries = 3;
+}
+
+message TransformDeleteBlock {
+    int64 partition_id = 1;
+    schema.IDs primary_keys = 2;
+}
+
+message TransformDeleteEntry {
+    repeated TransformDeleteBlock blocks = 1;
+}
+
+// TransformLogEntry is the durable and subscription replay unit.
+message TransformLogEntry {
+    // Source WAL message TimeTick, also the MVCC TimeTick.
+    uint64 time_tick = 1;
+
+    oneof entry {
+        TransformDeleteEntry delete = 2;
+    }
+}
+
+message TransformLogChunk {
+    uint64 chunk_id = 1;
+    repeated TransformLogEntry entries = 2;
+}
+
+message VChannelTransformLogMeta {
+    // TransformLog durable frontier published in recovery catalog.
+    uint64 checkpoint_time_tick = 1;
+
+    // Entries with time_tick <= truncate_time_tick may be removed.
+    uint64 truncate_time_tick = 2;
+
+    // Retained dense chunk id range: [first_chunk_id, next_chunk_id).
+    uint64 first_chunk_id = 3;
+    uint64 next_chunk_id = 4;
+
+    // L0 materializer cursor.
+    uint64 materialized_time_tick = 5;
+}
+
 //
 // StreamingNodeManagerService
 //
@@ -603,6 +776,10 @@ service StreamingNodeManagerService {
     // collect balance info and health check.
     rpc CollectStatus(StreamingNodeManagerCollectStatusRequest)
         returns (StreamingNodeManagerCollectStatusResponse) {};
+
+    // ValidateRuntime validates runtime-dependent artifacts on a streaming node.
+    rpc ValidateRuntime(StreamingNodeManagerValidateRuntimeRequest)
+        returns (StreamingNodeManagerValidateRuntimeResponse) {};
 }
 
 // StreamingManagerAssignRequest is the request message of Assign RPC.
@@ -644,6 +821,27 @@ message StreamingNodeManagerCollectStatusResponse {
     StreamingNodeMetrics metrics = 1;
 }
 
+message StreamingNodeRuntimeAnalyzerInfo {
+    string params = 1;
+    string field = 2;
+    string name = 3;
+}
+
+message StreamingNodeRuntimeAnalyzerValidation {
+    repeated StreamingNodeRuntimeAnalyzerInfo analyzer_infos = 1;
+}
+
+message StreamingNodeManagerValidateRuntimeRequest {
+    oneof validation {
+        StreamingNodeRuntimeAnalyzerValidation analyzer = 1;
+    }
+}
+
+message StreamingNodeManagerValidateRuntimeResponse {
+    common.Status status = 1;
+    repeated int64 resource_ids = 2;
+}
+
 ///
 /// VChannelMeta 
 ///
@@ -651,10 +849,15 @@ message StreamingNodeManagerCollectStatusResponse {
 // We need to add vchannel meta in wal meta, so the wal can recover the information of it.
 // The vchannel meta is also used to store the vchannel operation result, such as shard-splitting.
 message VChannelMeta {
+    reserved 5;
+    reserved "load_config";
+
     string vchannel = 1; // vchannel name.
     VChannelState state = 2; // vchannel state.
     CollectionInfoOfVChannel collection_info = 3; // if the channel is belong to a collection, the collection info will be setup.
     uint64 checkpoint_time_tick = 4; // The timetick of checkpoint, the meta already see the message at this timetick.
+    uint64 tombstone_time_tick = 6; // The timetick this retained vchannel meta starts filtering replay.
+    view.DataVersion segment_data_version_summary = 7; // The greatest sealed data version retained after segment assignment cleanup.
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.
@@ -674,6 +877,8 @@ message CollectionSchemaOfVChannel {
 // PartitionInfoOfVChannel is the partition info in vchannel.
 message PartitionInfoOfVChannel {
     int64 partition_id = 1; // partition id.
+    PartitionState state = 2; // partition recovery state.
+    uint64 tombstone_time_tick = 3; // The timetick this retained partition meta starts filtering replay.
 }
 
 // VChannelState is the state of vchannel
@@ -681,7 +886,16 @@ enum VChannelState {
     VCHANNEL_STATE_UNKNOWN = 0;  // should never used.
     VCHANNEL_STATE_NORMAL  = 1;  // vchannel is normal.
     VCHANNEL_STATE_DROPPED = 2;  // vchannel is dropped.
-    // VCHANNEL_STATE_SPLITTED = 3; // TODO: vchannel is splitted to other vchannels, used to support shard-splitting.
+    VCHANNEL_STATE_TOMBSTONED = 3; // vchannel data has caught up and this retained meta is a replay filter.
+    // VCHANNEL_STATE_SPLITTED = 4; // TODO: vchannel is splitted to other vchannels, used to support shard-splitting.
+}
+
+// PartitionState is the recovery state of a partition in vchannel meta.
+enum PartitionState {
+    PARTITION_STATE_UNKNOWN = 0; // should never used.
+    PARTITION_STATE_NORMAL = 1; // partition is normal.
+    PARTITION_STATE_DROPPED = 2; // partition is dropped but retained for data replay.
+    PARTITION_STATE_TOMBSTONED = 3; // partition data has caught up and this retained meta is a replay filter.
 }
 
 // VChannelSchemaState is the state of vchannel schema.
@@ -708,12 +922,31 @@ message SegmentAssignmentMeta {
     SegmentAssignmentStat stat   = 6;
     int64 storage_version        = 7; // only available if level is L1 or Legacy.
     uint64 checkpoint_time_tick  = 8; // The timetick of checkpoint, the meta already see the message at this timetick.
+    L1SegmentPersistedStorage persisted_storage = 9;
+    view.DataVersion sealed_at_data_version = 10;
+    uint64 data_checkpoint_time_tick = 11; // The timetick of data checkpoint, the segment data already durable at this timetick.
+    uint64 tombstone_time_tick = 12; // The timetick this retained segment meta starts filtering replay.
+}
+
+message L1SegmentPersistedStorage {
+    string manifest_path = 1;
+    repeated L1SegmentBinLogs binlogs = 2;
+    data.FieldBinlog merged_stats_binlog = 3;
+}
+
+message L1SegmentBinLogs {
+    repeated data.FieldBinlog field_binlog = 1;
+    repeated data.FieldBinlog stats_binlog = 2;
+    repeated data.FieldBinlog bm25_binlog = 3;
+    uint64 from_time_tick = 4;
+    uint64 to_time_tick = 5;
 }
 
 enum SegmentAssignmentState {
     SEGMENT_ASSIGNMENT_STATE_UNKNOWN = 0;  // should never used.
     SEGMENT_ASSIGNMENT_STATE_GROWING = 1;
     SEGMENT_ASSIGNMENT_STATE_FLUSHED = 2;
+    SEGMENT_ASSIGNMENT_STATE_TOMBSTONED = 3;
 }
 
 // SegmentAssignmentStat is the stat of segment assignment.
@@ -744,6 +977,12 @@ message WALCheckpoint {
     common.ReplicateCheckpoint replicate_checkpoint = 5; // if the wal is replicated from remote cluster, the checkpoint is not null,
     // Used for Alter WAL operations to track WAL modification states
     AlterWALState alter_wal_state = 6;
+    WALConsumeCheckpoint data_checkpoint = 7;
+}
+
+message WALConsumeCheckpoint {
+    common.MessageID message_id = 1;
+    uint64 time_tick = 2;
 }
 
 enum AlterWALStage{

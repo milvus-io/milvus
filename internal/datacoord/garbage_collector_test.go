@@ -54,10 +54,12 @@ import (
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	balancerapi "github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -65,6 +67,152 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type fakeDataViewGarbageCollector struct {
+	calls []struct {
+		collectionID int64
+		retainLatest int
+	}
+}
+
+func (c *fakeDataViewGarbageCollector) GarbageCollect(_ context.Context, collectionID int64, retainLatest int) error {
+	c.calls = append(c.calls, struct {
+		collectionID int64
+		retainLatest int
+	}{collectionID: collectionID, retainLatest: retainLatest})
+	return nil
+}
+
+type fakeGCDataViewManager struct {
+	calls              []fakeGCDataViewCall
+	createEvents       []CreateCollectionDataViewEvent
+	droppedCollections []int64
+	flushEvents        []FlushDataViewEvent
+	flushVersion       *viewpb.DataVersion
+	l0CompactEvents    []L0CompactDataViewEvent
+	snapshotRequested  []int64
+	snapshotViews      []*viewpb.DataViewOfCollection
+	segmentReferenced  bool
+	segmentRefErr      error
+	importErr          error
+}
+
+type fakeGCDataViewCall struct {
+	collectionID int64
+	protected    []*viewpb.DataVersion
+	retainLatest int
+}
+
+func (m *fakeGCDataViewManager) OnCreateCollection(ctx context.Context, event CreateCollectionDataViewEvent) (*viewpb.DataVersion, error) {
+	m.createEvents = append(m.createEvents, event)
+	return nil, nil
+}
+
+func (m *fakeGCDataViewManager) OnFlush(ctx context.Context, event FlushDataViewEvent) (*viewpb.DataVersion, error) {
+	m.flushEvents = append(m.flushEvents, event)
+	return m.flushVersion, nil
+}
+
+func (m *fakeGCDataViewManager) OnImport(ctx context.Context, event ImportDataViewEvent) (*viewpb.DataVersion, error) {
+	if m.importErr != nil {
+		return nil, m.importErr
+	}
+	return nil, nil
+}
+
+func (m *fakeGCDataViewManager) OnCopySegmentComplete(ctx context.Context, event CopySegmentCompleteDataViewEvent) (*viewpb.DataVersion, error) {
+	return nil, nil
+}
+
+func (m *fakeGCDataViewManager) OnCompact(ctx context.Context, event CompactDataViewEvent) (*viewpb.DataVersion, error) {
+	return nil, nil
+}
+
+func (m *fakeGCDataViewManager) OnL0Compact(ctx context.Context, event L0CompactDataViewEvent) (*viewpb.DataVersion, error) {
+	m.l0CompactEvents = append(m.l0CompactEvents, event)
+	return nil, nil
+}
+
+func (m *fakeGCDataViewManager) OnExternalRefresh(ctx context.Context, event ExternalRefreshDataViewEvent) (*viewpb.DataVersion, error) {
+	return nil, nil
+}
+
+func (m *fakeGCDataViewManager) OnDropPartition(ctx context.Context, event DropPartitionDataViewEvent) (*viewpb.DataVersion, error) {
+	return nil, nil
+}
+
+func (m *fakeGCDataViewManager) OnTruncate(ctx context.Context, event TruncateDataViewEvent) (*viewpb.DataVersion, error) {
+	return nil, nil
+}
+
+func (m *fakeGCDataViewManager) OnDropCollection(ctx context.Context, collectionID int64) (*viewpb.DataVersion, error) {
+	m.droppedCollections = append(m.droppedCollections, collectionID)
+	return nil, nil
+}
+
+func (m *fakeGCDataViewManager) RepairCollection(ctx context.Context, collectionID int64) error {
+	return nil
+}
+
+func (m *fakeGCDataViewManager) RepairCollections(ctx context.Context, collectionIDs []int64) error {
+	return nil
+}
+
+func (m *fakeGCDataViewManager) LatestVisibleDataView(ctx context.Context, collectionID int64) (*viewpb.DataViewOfCollection, error) {
+	return nil, nil
+}
+
+func (m *fakeGCDataViewManager) DataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) (*viewpb.DataViewOfCollection, error) {
+	return nil, nil
+}
+
+func (m *fakeGCDataViewManager) Snapshot(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewOfCollection, error) {
+	m.snapshotRequested = append([]int64(nil), collectionIDs...)
+	return m.snapshotViews, nil
+}
+
+func (m *fakeGCDataViewManager) DataViewSnapshot(ctx context.Context) *balancerapi.DataViewSnapshot {
+	return balancerapi.NewDataViewSnapshot(0, m.snapshotViews, nil)
+}
+
+func (m *fakeGCDataViewManager) ShardTimeTicks(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewShardTimeTick, error) {
+	return nil, nil
+}
+
+func (m *fakeGCDataViewManager) IsSegmentReferenced(ctx context.Context, collectionID int64, segmentID int64) (bool, error) {
+	return m.segmentReferenced, m.segmentRefErr
+}
+
+func (m *fakeGCDataViewManager) GarbageCollect(ctx context.Context, collectionID int64, protected []*viewpb.DataVersion, retainLatest int) error {
+	m.calls = append(m.calls, fakeGCDataViewCall{
+		collectionID: collectionID,
+		protected:    protected,
+		retainLatest: retainLatest,
+	})
+	return nil
+}
+
+func TestGarbageCollector_recycleDataViews(t *testing.T) {
+	manager := &fakeGCDataViewManager{}
+	m := &meta{
+		collections:     typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		dataViewManager: manager,
+	}
+	m.collections.Insert(1, &collectionInfo{ID: 1})
+	m.collections.Insert(2, &collectionInfo{ID: 2})
+	guardedGC := &fakeDataViewGarbageCollector{}
+	gc := newGarbageCollector(m, newMockHandler(), GcOption{dataViewGC: guardedGC})
+
+	gc.recycleDataViews(context.Background(), nil)
+
+	require.Empty(t, manager.calls, "normal GC must not bypass the collection reference guard")
+	require.Len(t, guardedGC.calls, 2)
+	byCollection := make(map[int64]int, len(guardedGC.calls))
+	for _, call := range guardedGC.calls {
+		byCollection[call.collectionID] = call.retainLatest
+	}
+	require.Equal(t, map[int64]int{1: 1, 2: 1}, byCollection)
+}
 
 func Test_garbageCollector_basic(t *testing.T) {
 	bucketName := `datacoord-ut` + strings.ToLower(funcutil.RandomString(8))
@@ -2612,6 +2760,47 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T)
 	assert.True(t, dropSegmentCalled)
 	if droppedSegment != nil {
 		assert.Equal(t, int64(1002), droppedSegment.ID)
+	}
+}
+
+func TestGarbageCollector_recycleDroppedSegments_DataViewReference(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		manager *fakeGCDataViewManager
+	}{
+		{
+			name:    "referenced",
+			manager: &fakeGCDataViewManager{segmentReferenced: true},
+		},
+		{
+			name:    "check failure",
+			manager: &fakeGCDataViewManager{segmentRefErr: errors.New("mock dataview reference error")},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			m, err := newMemoryMeta(t)
+			require.NoError(t, err)
+			m.dataViewManager = tc.manager
+			segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:            1001,
+				CollectionID:  100,
+				PartitionID:   10,
+				State:         commonpb.SegmentState_Dropped,
+				DroppedAt:     uint64(time.Now().Add(-time.Hour).UnixNano()),
+				InsertChannel: "ch1",
+			}}
+			require.NoError(t, m.AddSegment(ctx, segment))
+			gc := newGarbageCollector(m, newMockHandler(), GcOption{
+				cli:           storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-dataview-ref")),
+				enabled:       true,
+				dropTolerance: 0,
+			})
+
+			gc.recycleDroppedSegments(ctx, nil)
+
+			require.NotNil(t, m.GetSegment(ctx, segment.GetID()))
+		})
 	}
 }
 
