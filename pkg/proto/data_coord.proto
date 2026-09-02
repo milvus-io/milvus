@@ -1845,6 +1845,14 @@ message SegmentDescription {
   // Must be preserved across snapshot/restore so temporal protections
   // (GC, TTL, MVCC) are not lost on the restored segments.
   uint64 commit_timestamp = 18;
+  // manifest_has_index mirrors SegmentInfo.manifest_has_index: the segment's
+  // manifest has carried at least one index entry. It is captured from the
+  // same record as manifest_path, and the marker is set in the same catalog
+  // transaction as the first entry-carrying revision, so false proves the
+  // captured revision holds no index entries and restore can skip reading the
+  // manifest for them. A snapshot written before this field existed reads
+  // false and is equally safe: its manifest predates index publication.
+  bool manifest_has_index = 19;
 }
 
 message CollectionDescription {
