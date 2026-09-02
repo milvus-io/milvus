@@ -215,6 +215,38 @@ func recordPreferredNodeSelection(status string) {
 	).Inc()
 }
 
+const (
+	queryTrafficRoutingRuleNameDisabled       = "__disabled"
+	queryTrafficRoutingRuleNameError          = "__error"
+	queryTrafficRoutingRuleNameNoPolicy       = "__no_policy"
+	queryTrafficRoutingRuleNameNoMatchingRule = "__no_matching_rule"
+	queryTrafficRoutingRuleNameNoCandidate    = "__no_candidate"
+)
+
+func recordQueryTrafficRoutingDecision(routeResult queryTrafficRouteResult, routeErr error) {
+	if routeErr != nil {
+		metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(queryTrafficRoutingRuleNameError).Inc()
+		return
+	}
+	if !routeResult.enabled {
+		metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(queryTrafficRoutingRuleNameDisabled).Inc()
+		return
+	}
+
+	ruleName := routeResult.ruleName
+	if ruleName == "" {
+		switch routeResult.fallbackReason {
+		case "no_policy":
+			ruleName = queryTrafficRoutingRuleNameNoPolicy
+		case "no_candidate":
+			ruleName = queryTrafficRoutingRuleNameNoCandidate
+		default:
+			ruleName = queryTrafficRoutingRuleNameNoMatchingRule
+		}
+	}
+	metrics.ProxyQueryTrafficRoutingDecisionCount.WithLabelValues(ruleName).Inc()
+}
+
 func preferredNodeID(workload CollectionWorkLoad, channel string) int64 {
 	if workload.PreferredNodes == nil {
 		return 0
@@ -334,6 +366,7 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 			log.Warn(ctx, "failed to apply query traffic routing, fallback to original candidates",
 				mlog.Err(routeErr))
 		}
+		recordQueryTrafficRoutingDecision(routeResult, routeErr)
 		if routeResult.routed {
 			targetNodeID, err = selectWeightedNode(ctx, balancer, routeResult.weightedNodes, workload.Nq)
 		} else {
