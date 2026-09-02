@@ -23,12 +23,11 @@ namespace milvus::index {
 using stdclock = std::chrono::high_resolution_clock;
 class TextMatchIndex : public InvertedIndexTantivy<std::string> {
  public:
-    // for growing segment.
-    // In-memory writer. enable_background_merge must be true only for a
-    // long-lived growing segment (periodic commits would otherwise grow the
-    // segment count unbounded); a sealed interim index passes false so that
-    // finish()'s explicit merge-all is the only merge and cannot race a
-    // background policy merge.
+    // In-memory writer used by both growing segments and sealed interim index
+    // builds. Growing segments enable background merge because periodic
+    // commits would otherwise grow the segment count unbounded; sealed builds
+    // use INT64_MAX as the commit interval and disable background merge to
+    // avoid merge write amplification.
     explicit TextMatchIndex(int64_t commit_interval_in_ms,
                             const char* unique_id,
                             const char* analyzer_name,
@@ -74,9 +73,14 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
                     const bool* valids,
                     int64_t offset_begin);
 
+    // `offset_begin` is the logical offset of the batch's first row, the same
+    // doc-id space AddTextsGrowing writes into. A growing segment that already
+    // holds rows must pass the offset its caller reserved, or the batch lands
+    // on top of doc ids the index already owns.
     void
     BuildIndexFromFieldData(const std::vector<FieldDataPtr>& field_datas,
-                            bool nullable);
+                            bool nullable,
+                            int64_t offset_begin);
 
     void
     Finish();

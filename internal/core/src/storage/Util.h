@@ -55,9 +55,19 @@
 #include "storage/PayloadReader.h"
 #include "storage/PayloadStream.h"
 #include "storage/ThreadPools.h"
+#include "storage/StorageV2FSCache.h"
 #include "storage/Types.h"
 
 namespace milvus::storage {
+
+// Controls how parent-valid external dense-vector rows with a mixture of
+// valid and null child elements are normalized. All-null child ranges are
+// always normalized to a row-level null when the field is nullable.
+void
+SetExternalVectorPartialNullAsRowNull(bool enabled);
+
+bool
+GetExternalVectorPartialNullAsRowNull();
 
 void
 ReadMediumType(BinlogReaderPtr reader);
@@ -394,6 +404,29 @@ ReleaseArrowUnused();
 ChunkManagerPtr
 CreateChunkManager(const StorageConfig& storage_config);
 
+// Build a legacy chunk manager (LocalChunkManager / the AWS-SDK based
+// MinioChunkManager family) for this storage config, bypassing the
+// ArrowFileSystem switch. Used both as the fallback inside CreateChunkManager
+// and as the remote control-plane delegate of ArrowFileSystemChunkManager.
+ChunkManagerPtr
+CreateLegacyChunkManager(const StorageConfig& storage_config);
+
+// Process-wide switch selecting the remote ChunkManager backend built by
+// CreateChunkManager: legacy AWS-SDK based managers (default) vs the
+// milvus-storage ArrowFileSystem backed ArrowFileSystemChunkManager.
+// Delivered from Go via SetArrowFileSystemChunkManagerEnabled (storage_c.h),
+// sourced from `common.storage.useArrowFileSystemChunkManager`.
+void
+SetUseArrowFileSystemChunkManager(bool use);
+
+bool
+UseArrowFileSystemChunkManager();
+
+// Translate a segcore StorageConfig into the StorageV2FSCache key used to
+// build/lookup the shared milvus-storage ArrowFileSystem.
+StorageV2FSCache::Key
+ToStorageV2FSCacheKey(const StorageConfig& storage_config);
+
 milvus_storage::ArrowFileSystemPtr
 InitArrowFileSystem(milvus::storage::StorageConfig storage_config);
 
@@ -404,6 +437,17 @@ CreateFieldData(
     bool nullable = false,
     int64_t dim = 1,
     int64_t total_num_rows = 0,
+    std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
+
+// Creates field data whose rows are initialized from a schema default value.
+// Initialization completes before the FieldData is published and does not
+// acquire its mutation lock.
+FieldDataPtr
+CreateFieldDataFromDefaultValue(
+    const DataType& type,
+    bool nullable,
+    int64_t element_count,
+    const std::optional<DefaultValueType>& default_value,
     std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 
 int64_t

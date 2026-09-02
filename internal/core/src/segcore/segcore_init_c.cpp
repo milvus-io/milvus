@@ -227,6 +227,13 @@ SegcoreSetIndexBuildRatio(const float value) {
 }
 
 extern "C" void
+SegcoreSetGrowingIndexBuildThreadRate(const float value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_growing_index_build_thread_rate(value);
+}
+
+extern "C" void
 SegcoreSetKnowhereBuildThreadPoolNum(const uint32_t num_threads) {
     milvus::config::KnowhereInitBuildThreadPool(num_threads);
 }

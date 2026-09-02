@@ -844,6 +844,44 @@ message CompactionPlan {
   repeated schema.FunctionSchema functions = 31;
 }
 
+// ManifestColumnGroupFile is one loon/parquet file belonging to a column
+// group, in the serializable form the datanode ships to DataCoord so DataCoord
+// can re-run the StorageV3 manifest transaction on the current base version.
+// Mirrors LoonColumnGroupFile in milvus-storage's ffi_c.h.
+message ManifestColumnGroupFile {
+  string path = 1;
+  int64 start_index = 2;
+  int64 end_index = 3;
+  map<string, string> properties = 4;
+}
+
+// ManifestColumnGroup is a column group the datanode wrote and wants DataCoord
+// to register into the segment's manifest. Mirrors LoonColumnGroup.
+message ManifestColumnGroup {
+  repeated string columns = 1;
+  string format = 2;
+  repeated ManifestColumnGroupFile files = 3;
+}
+
+// ManifestStatEntry is one manifest stat blob (e.g. BM25) the datanode wrote,
+// carried as serializable input to the DataCoord-side manifest transaction.
+message ManifestStatEntry {
+  string key = 1;
+  repeated string files = 2;
+  map<string, string> metadata = 3;
+}
+
+// SegmentManifestDelta is the serializable input to a StorageV3 manifest
+// transaction. When present on a CompactionSegment, DataCoord (not the
+// datanode) runs the loon transaction: it re-applies these column groups and
+// stats onto the segment's CURRENT manifest version, enabling a true rebase
+// against concurrent commits (e.g. L0 deltalog adds) instead of the datanode
+// pinning a possibly-stale base. See internal/datacoord/segment_manifest_commit.go.
+message SegmentManifestDelta {
+  repeated ManifestColumnGroup column_groups = 1;
+  repeated ManifestStatEntry stats = 2;
+}
+
 message CompactionSegment {
   int64 planID = 1; // deprecated after 2.3.4
   int64 segmentID = 2;
@@ -885,6 +923,12 @@ message CompactionSegment {
   // For V3 outputs whose stats blob lives in the manifest, this is the only
   // authoritative source for stats_binlog_size.
   Statistics stats = 16;
+  // manifest_delta carries the serializable input to the StorageV3 manifest
+  // transaction for an in-place schema-bump materialization. When set,
+  // `manifest` is left empty and DataCoord runs the transaction itself
+  // (ManifestMutationCommitUpdates), rebasing the column-group / stats adds
+  // onto the segment's current manifest instead of a datanode-pinned base.
+  SegmentManifestDelta manifest_delta = 17;
 }
 
 message CompactionPlanResult {
@@ -1627,6 +1671,23 @@ message ExternalCollectionRefreshJob {
   int64 end_time = 9;            // Job end timestamp (Unix ms, 0 if not completed)
   int64 progress = 10;           // Aggregated progress percentage (0-100)
   repeated int64 task_ids = 11;  // Task IDs belonging to this job
+  // Timestamp (Unix ms) at which the job entered the index wait, written in the
+  // same transition that applies its segment results - ordered after the
+  // segment write under the job lock, not atomic with it. Only written when
+  // dataCoord.externalCollection.refreshWaitForIndex is on.
+  //
+  // It is both the sub-state marker ("applied, now waiting for indexes") and
+  // the apply-once guard: a job carrying it has already committed its segments
+  // and must not apply again. The converse does not hold - a crash between the
+  // two writes leaves committed segments with no marker, and the apply is
+  // replay-safe for exactly that reason. 0 when unset.
+  //
+  // Callers of DescribeRefresh / ListRefreshJobs can read it directly, and it
+  // is the field that resolves the one ambiguity this feature introduces: a
+  // FAILED job with a non-zero value did apply its data - the refreshed
+  // segments are the collection's contents and are being served, and only the
+  // index wait ran out of budget. A failed job with 0 applied nothing.
+  int64 index_wait_started_time = 13;
 }
 
 // ExternalCollectionRefreshTask - Task level abstraction for scheduler and worker execution

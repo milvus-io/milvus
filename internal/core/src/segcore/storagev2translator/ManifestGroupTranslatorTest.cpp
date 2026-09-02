@@ -240,7 +240,12 @@ class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
             milvus::proto::common::LoadPriority::LOW,
             /*cache_warmup_policy=*/
             CacheWarmupPolicy::CacheWarmupPolicy_Sync,
-            /*support_eviction=*/true);
+            /*support_eviction=*/true,
+            /*cache_key_suffix=*/"",
+            /*fallback_bytes_per_row=*/0,
+            /*shard=*/"",
+            /*column_size_estimate=*/std::nullopt,
+            MmapChunkWritebackMode::Disabled);
     }
 
     SchemaPtr schema_;

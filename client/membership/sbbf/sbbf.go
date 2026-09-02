@@ -293,7 +293,7 @@ func Parse(blob []byte) (*Filter, error) {
 		return nil, errors.Errorf("bloom filter blob too short: %d bytes, need at least %d", len(blob), HeaderSize)
 	}
 	if string(blob[0:4]) != Magic {
-		return nil, errors.Errorf("bloom filter blob has invalid magic %q, expected %q", blob[0:4], Magic)
+		return nil, errors.Errorf("bloom filter blob has invalid magic, expected %q", Magic)
 	}
 	if v := binary.LittleEndian.Uint16(blob[4:6]); v != Version {
 		return nil, errors.Errorf("unsupported bloom filter version %d, expected %d", v, Version)

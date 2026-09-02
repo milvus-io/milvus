@@ -2928,6 +2928,9 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 
 	dynamicCol := make([][]byte, 0, rowsLen)
 	fieldLen := make(map[string]int)
+	// Escape hatch for clients that relied on the previous value handling.
+	// Read once per request rather than per row, like checkAndSetData does.
+	compatibilityMode := paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool()
 
 	for _, row := range rows {
 		// collection schema name need not be same, since receiver could have other names
@@ -3046,7 +3049,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			// distinct keys into one. Check the bytes that actually land.
 			// Gated like the per-value checks above: compatibilityMode restores
 			// the previous handling, which stored the wrapper unexamined.
-			if !paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool() {
+			if !compatibilityMode {
 				if err := checkEngineCompatible(common.MetaFieldName, string(bs)); err != nil {
 					return nil, err
 				}

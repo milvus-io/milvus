@@ -59,9 +59,9 @@ const (
 
 	// DefaultMaxMembershipFilterPlanSize is the aggregate serialized size budget for
 	// membership-filter-bearing plans in one Search, HybridSearch, Query, or
-	// complex Delete request. It is
-	// deliberately below the default 256 MiB proxy gRPC client send limit so
-	// placeholders and the rest of the internal request retain ample headroom.
+	// complex Delete request. It is deliberately below the default 256 MiB proxy
+	// gRPC client send limit so placeholders and the rest of the internal request
+	// retain ample headroom.
 	DefaultMaxMembershipFilterPlanSize = 128 * 1024 * 1024
 
 	DefaultMaxDegree                     = 56
@@ -268,6 +268,7 @@ type commonConfig struct {
 
 	StorageType                   ParamItem `refreshable:"false"`
 	ManifestTransactionRetryLimit ParamItem `refreshable:"true"`
+	UseArrowFSChunkManager        ParamItem `refreshable:"false"`
 	SimdType                      ParamItem `refreshable:"false"`
 
 	DiskWriteMode         ParamItem `refreshable:"true"`
@@ -319,11 +320,12 @@ type commonConfig struct {
 	UseLoonFFI                           ParamItem `refreshable:"true"`
 	EnableGrowingSourceFlush             ParamItem `refreshable:"false"`
 
-	StoragePathPrefix        ParamItem `refreshable:"false"`
-	StorageZstdConcurrency   ParamItem `refreshable:"false"`
-	StorageReadRetryAttempts ParamItem `refreshable:"true"`
-	StorageIopsInitialRate   ParamItem `refreshable:"false"`
-	StorageIopsMaxRate       ParamItem `refreshable:"false"`
+	StoragePathPrefix               ParamItem `refreshable:"false"`
+	StorageZstdConcurrency          ParamItem `refreshable:"false"`
+	StorageReadRetryAttempts        ParamItem `refreshable:"true"`
+	StorageIopsInitialRate          ParamItem `refreshable:"false"`
+	StorageIopsMaxRate              ParamItem `refreshable:"false"`
+	ExternalVectorPartialNullPolicy ParamItem `refreshable:"false"`
 
 	TraceLogMode              ParamItem `refreshable:"true"`
 	BloomFilterEnabled        ParamItem `refreshable:"false"`
@@ -355,6 +357,7 @@ type commonConfig struct {
 	PreferIPv6LocalIP ParamItem `refreshable:"false"`
 
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
+	NodeSchedulerMaxConcurrencyRatio  ParamItem `refreshable:"true"`
 
 	EnabledOptimizeExpr               ParamItem `refreshable:"true"`
 	EnableDriverPrefetch              ParamItem `refreshable:"true"`
@@ -703,6 +706,18 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.ManifestTransactionRetryLimit.Init(base.mgr)
+
+	p.UseArrowFSChunkManager = ParamItem{
+		Key:          "common.storage.useArrowFileSystemChunkManager",
+		Version:      "3.0.1",
+		DefaultValue: "false",
+		Doc: "Whether segcore routes chunk manager IO (segment load, index build/load) " +
+			"through the milvus-storage Arrow FileSystem, unified with storage v2. " +
+			"Applies to both remote and local storage types; when false, the legacy chunk managers are used. " +
+			"Not effective for cloudProvider=gcpnative, which always uses the legacy implementation.",
+		Export: true,
+	}
+	p.UseArrowFSChunkManager.Init(base.mgr)
 
 	p.HighPriorityThreadCoreCoefficient = ParamItem{
 		Key:          "common.threadCoreCoefficient.highPriority",
@@ -1244,6 +1259,17 @@ The default value is 1, which is enough for most cases.`,
 	}
 	p.StorageReadRetryAttempts.Init(base.mgr)
 
+	p.ExternalVectorPartialNullPolicy = ParamItem{
+		Key:          "common.storage.externalVector.partialNullPolicy",
+		Version:      "3.0.1",
+		DefaultValue: "error",
+		Doc: `Policy for parent-valid external dense-vector rows containing a mix of valid and null child elements.
+Options: error, null. error rejects the row as malformed input; null promotes the whole row to a row-level null when the field is nullable.
+Rows whose child elements are all null are always promoted to row-level null for nullable fields, regardless of this setting.`,
+		Export: true,
+	}
+	p.ExternalVectorPartialNullPolicy.Init(base.mgr)
+
 	p.StorageIopsInitialRate = ParamItem{
 		Key:          "common.storage.iops.initialRate",
 		Version:      "3.0.1",
@@ -1478,6 +1504,15 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Export:       true,
 	}
 	p.SyncTaskPoolReleaseTimeoutSeconds.Init(base.mgr)
+
+	p.NodeSchedulerMaxConcurrencyRatio = ParamItem{
+		Key:          "common.nodeScheduler.maxConcurrencyRatio",
+		Version:      "3.0",
+		DefaultValue: "2",
+		Doc:          "Maximum number of tasks executed concurrently by the process-level node scheduler, expressed as a ratio of CPU cores. Must be greater than zero; 2 by default.",
+		Export:       true,
+	}
+	p.NodeSchedulerMaxConcurrencyRatio.Init(base.mgr)
 
 	p.EnabledOptimizeExpr = ParamItem{
 		Key:          "common.enabledOptimizeExpr",
@@ -2328,7 +2363,7 @@ type proxyConfig struct {
 	MaxFieldNum                    ParamItem `refreshable:"true"`
 	MaxVectorFieldNum              ParamItem `refreshable:"true"`
 	MaxShardNum                    ParamItem `refreshable:"true"`
-	// Shared by bloom_match and roaring_match. There are no Bloom-named Go
+	// Shared by the Bloom and Roaring membership_match kinds. There are no Bloom-named Go
 	// fields: the old `proxy.maxBloomFilterSize` / `proxy.maxBloomFilterPlanSize`
 	// YAML keys stay accepted through FallbackKeys in init(), which is where
 	// deployment compatibility actually matters.
@@ -2510,8 +2545,14 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.MaxShardNum.Init(base.mgr)
 
 	p.MaxMembershipFilterSize = ParamItem{
-		Key:          "proxy.maxMembershipFilterSize",
-		FallbackKeys: []string{"proxy.maxBloomFilterSize"},
+		Key: "proxy.maxMembershipFilterSize",
+		FallbackKeys: []string{
+			// The bloom key was the released predecessor. The roaring key existed
+			// on development branches before the two per-blob limits were unified;
+			// accepting it is harmless and preserves those deployments too.
+			"proxy.maxBloomFilterSize",
+			"proxy.maxRoaringFilterSize",
+		},
 		// 64 MiB. Budgets one membership-filter body; the fixed 32-byte MBF1 or
 		// MRB1 header is allowed on top. Bloom SBBF bodies are powers of two, so
 		// any value in [64 MiB, 128 MiB) admits the same Bloom filters; 64 MiB is
@@ -2526,8 +2567,8 @@ func (p *proxyConfig) init(base *BaseTable) {
 		// and reports it in the rejection.
 		DefaultValue: "67108864",
 		Version:      "3.0.0",
-		Doc: "The maximum byte size of one client pre-built bloom_match or roaring_match " +
-			"filter body accepted by the proxy (the fixed 32-byte MBF1/MRB1 header is allowed " +
+		Doc: "The maximum byte size of one client pre-built membership_match filter body accepted " +
+			"by the proxy (the fixed 32-byte MBF1/MRB1 header is allowed " +
 			"on top). The blob is embedded into the query plan and fanned out to every QueryNode, " +
 			"so this bounds per-membership-filter memory/network amplification. Must not exceed the format " +
 			"cap (128 MiB). Bloom SBBF bodies are powers of two, so the default admits bodies " +
@@ -3863,25 +3904,26 @@ type queryNodeConfig struct {
 	StatsPublishInterval ParamItem `refreshable:"true"`
 
 	// segcore
-	KnowhereFetchThreadPoolSize    ParamItem `refreshable:"true"`
-	KnowhereThreadPoolSize         ParamItem `refreshable:"true"`
-	ChunkRows                      ParamItem `refreshable:"false"`
-	FmindexCostRatio               ParamItem `refreshable:"false"`
-	EnableInterminSegmentIndex     ParamItem `refreshable:"false"`
-	InterimIndexNlist              ParamItem `refreshable:"false"`
-	InterimIndexNProbe             ParamItem `refreshable:"false"`
-	InterimIndexSubDim             ParamItem `refreshable:"false"`
-	InterimIndexRefineRatio        ParamItem `refreshable:"false"`
-	InterimIndexBuildRatio         ParamItem `refreshable:"false"`
-	InterimIndexRefineQuantType    ParamItem `refreshable:"false"`
-	InterimIndexRefineWithQuant    ParamItem `refreshable:"false"`
-	DenseVectorInterminIndexType   ParamItem `refreshable:"false"`
-	InterimIndexMemExpandRate      ParamItem `refreshable:"false"`
-	InterimIndexBuildParallelRate  ParamItem `refreshable:"false"`
-	InterimIndexTargetIndexVersion ParamItem `refreshable:"false"`
-	MultipleChunkedEnable          ParamItem `refreshable:"false"` // Deprecated
-	EnableGeometryCache            ParamItem `refreshable:"false"`
-	EnableGISSplitFusion           ParamItem `refreshable:"false"`
+	KnowhereFetchThreadPoolSize        ParamItem `refreshable:"true"`
+	KnowhereThreadPoolSize             ParamItem `refreshable:"true"`
+	ChunkRows                          ParamItem `refreshable:"false"`
+	FmindexCostRatio                   ParamItem `refreshable:"false"`
+	EnableInterminSegmentIndex         ParamItem `refreshable:"false"`
+	InterimIndexNlist                  ParamItem `refreshable:"false"`
+	InterimIndexNProbe                 ParamItem `refreshable:"false"`
+	InterimIndexSubDim                 ParamItem `refreshable:"false"`
+	InterimIndexRefineRatio            ParamItem `refreshable:"false"`
+	InterimIndexBuildRatio             ParamItem `refreshable:"false"`
+	InterimIndexRefineQuantType        ParamItem `refreshable:"false"`
+	InterimIndexRefineWithQuant        ParamItem `refreshable:"false"`
+	DenseVectorInterminIndexType       ParamItem `refreshable:"false"`
+	InterimIndexMemExpandRate          ParamItem `refreshable:"false"`
+	InterimIndexBuildParallelRate      ParamItem `refreshable:"false"`
+	InterimIndexGrowingBuildThreadRate ParamItem `refreshable:"true"`
+	InterimIndexTargetIndexVersion     ParamItem `refreshable:"false"`
+	MultipleChunkedEnable              ParamItem `refreshable:"false"` // Deprecated
+	EnableGeometryCache                ParamItem `refreshable:"false"`
+	EnableGISSplitFusion               ParamItem `refreshable:"false"`
 
 	TieredWarmupScalarField         ParamItem `refreshable:"true"`
 	TieredWarmupScalarIndex         ParamItem `refreshable:"true"`
@@ -3932,6 +3974,7 @@ type queryNodeConfig struct {
 	MmapScalarField                     ParamItem `refreshable:"false"`
 	MmapScalarIndex                     ParamItem `refreshable:"false"`
 	MmapPopulate                        ParamItem `refreshable:"false"`
+	MmapWriteback                       ParamItem `refreshable:"false"`
 	MmapJSONStats                       ParamItem `refreshable:"false"`
 	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
@@ -4556,7 +4599,7 @@ If set to 0, time based eviction is disabled.`,
 			}
 			return v
 		},
-		Doc:    `FM-index count-first guard threshold. An FMINDEX-accelerated LIKE prefix/infix/suffix runs through the index only when occ * sa_sample_rate < fmindexCostRatio * total_tokens; otherwise it falls back to the raw-data scan (both paths are exact, this only picks the cheaper one). Normalized by tokens (bytes), not rows, so it is row-length invariant. Must be in (0, 1]; larger favors the index. Default 0.001 is the conservative crossover measured in benchmarks.`,
+		Doc:    `FM-index count-first guard threshold. An FMINDEX-accelerated LIKE (prefix/infix/suffix and general LIKE with interior wildcards) runs through the index only when occ * sa_sample_rate < fmindexCostRatio * total_tokens; otherwise it falls back to the raw-data scan (all paths are exact, this only picks the cheaper one). For the anchored forms the index answer is exact; for general LIKE it is candidate generation followed by an exact recheck of the candidate rows on the original VARCHAR data. The bound prices only FM locate, not the recheck bytes, so it stays row-length invariant only for the anchored forms; very long rows with unselective fragments may be routed to a path slower than the scan. Must be in (0, 1]; larger favors the index. Default 0.001 is the conservative crossover measured in benchmarks.`,
 		Export: true,
 	}
 	p.FmindexCostRatio.Init(base.mgr)
@@ -4635,6 +4678,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.InterimIndexBuildParallelRate.Init(base.mgr)
+
+	p.InterimIndexGrowingBuildThreadRate = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.growingBuildThreadRate",
+		Version:      "3.0.1",
+		DefaultValue: "0",
+		Doc:          "The ratio of the interim index build thread pool that one growing segment index build may use, resolved as round(rate * pool size) and clamped to [1, pool size]. 0 means single threaded",
+		Export:       true,
+	}
+	p.InterimIndexGrowingBuildThreadRate.Init(base.mgr)
 
 	p.InterimIndexTargetIndexVersion = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.targetIndexVersion",
@@ -4856,6 +4908,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       false,
 	}
 	p.MmapPopulate.Init(base.mgr)
+
+	p.MmapWriteback = ParamItem{
+		Key:          "queryNode.mmap.writeback",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Enable fdatasync after writing each mmap field data file with buffered I/O.",
+		Export:       false,
+	}
+	p.MmapWriteback.Init(base.mgr)
 
 	p.MmapJSONStats = ParamItem{
 		Key:          "queryNode.mmap.jsonShredding",
@@ -5780,6 +5841,7 @@ type dataCoordConfig struct {
 	ExternalCollectionDropRatioWarn    ParamItem `refreshable:"true"` // warn if dropping more than this ratio of segments (0-1)
 	ExternalCollectionPreAllocSegments ParamItem `refreshable:"true"`
 	ExternalCollectionFilesPerTask     ParamItem `refreshable:"true"`
+	RefreshWaitForIndex                ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -7263,6 +7325,36 @@ raise this for files written with small row groups, many columns, or untruncated
 		PanicIfEmpty: false,
 	}
 	p.ExternalCollectionFilesPerTask.Init(base.mgr)
+
+	p.RefreshWaitForIndex = ParamItem{
+		Key:     "dataCoord.externalCollection.refreshWaitForIndex",
+		Version: "3.0.0",
+		Doc: `Hold an external-collection refresh in progress until the collection's segments are indexed.
+Off, a refresh reports Finished as soon as its data lands, so a client that queries on completion meets segments
+whose indexes do not exist yet - correct, but brute-force scanned. On, the refresh applies its segments and
+publishes the refreshed external source/spec exactly as before, then keeps reporting InProgress (progress 90-99
+tracks the indexed fraction) until every segment is indexed. What waits is the job's completion signal, not the
+data: the segments are applied and served either way. Deployments that load collections on demand per query
+enable this - their queries key on refresh completion and have no warm replica to hide the unindexed window
+behind. Because the job stays in progress for the whole wait, a new refresh of the same collection is refused
+until it ends, exactly as during an ingest - a caller that refreshes on a fixed schedule shorter than its index
+builds will start seeing "refresh job already in progress". Turning this off while jobs are waiting releases
+them: each finishes as soon as it is next inspected, without waiting for its indexes. The wait is bounded by
+dataCoord.externalCollectionJobTimeout, measured from the job's START like any
+other refresh - so the time the ingest already spent counts against it, and a long ingest leaves the wait
+correspondingly less. A job that exceeds it is marked Failed; raise that parameter if refreshes are large enough
+for the wait to run out. Two things to know about a Failed refresh here: it does NOT roll back - its segments are
+already the collection's contents and are being served, so re-run the refresh to try again - and a segment whose
+index build failed terminally never becomes indexed (nothing retries such a build), so a refresh that hits one
+waits out the full budget before failing.
+Because of that, a Failed job does NOT mean "nothing happened", and the two cases are distinguishable: a job that
+timed out during the index wait carries a non-zero index_wait_started_time and says so in its fail reason - its data
+is applied and serving, index building continues on its own, and re-running the refresh waits again without
+re-ingesting. A job that timed out before applying carries 0 and left the collection untouched.`,
+		DefaultValue: "false",
+		PanicIfEmpty: false,
+	}
+	p.RefreshWaitForIndex.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",

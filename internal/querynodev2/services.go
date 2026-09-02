@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
@@ -832,10 +831,6 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	log.Info(ctx, "load segments done...",
 		mlog.Int64s("segments", lo.Map(loaded, func(s segments.Segment, _ int) int64 { return s.ID() })))
-
-	// Publish filesystem metrics after load task completion
-	// Use default filesystem (empty path) for load tasks
-	storagev2.PublishDefaultFilesystemMetrics()
 
 	return merr.Success(), nil
 }

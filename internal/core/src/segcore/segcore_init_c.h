@@ -66,6 +66,9 @@ SegcoreSetRefineRatio(const float);
 void
 SegcoreSetIndexBuildRatio(const float);
 
+void
+SegcoreSetGrowingIndexBuildThreadRate(const float);
+
 CStatus
 SegcoreSetDenseVectorInterminIndexRefineQuantType(const char*);
 

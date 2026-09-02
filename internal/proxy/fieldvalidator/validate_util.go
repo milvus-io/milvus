@@ -1,4 +1,4 @@
-package proxy
+package fieldvalidator
 
 import (
 	"context"
@@ -20,40 +20,40 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-type validateUtil struct {
+type ValidateUtil struct {
 	checkNAN      bool
 	checkMaxLen   bool
 	checkOverflow bool
 	checkMaxCap   bool
 }
 
-type validateOption func(*validateUtil)
+type ValidateOption func(*ValidateUtil)
 
-func withNANCheck() validateOption {
-	return func(v *validateUtil) {
+func WithNANCheck() ValidateOption {
+	return func(v *ValidateUtil) {
 		v.checkNAN = true
 	}
 }
 
-func withMaxLenCheck() validateOption {
-	return func(v *validateUtil) {
+func WithMaxLenCheck() ValidateOption {
+	return func(v *ValidateUtil) {
 		v.checkMaxLen = true
 	}
 }
 
-func withOverflowCheck() validateOption {
-	return func(v *validateUtil) {
+func WithOverflowCheck() ValidateOption {
+	return func(v *ValidateUtil) {
 		v.checkOverflow = true
 	}
 }
 
-func withMaxCapCheck() validateOption {
-	return func(v *validateUtil) {
+func WithMaxCapCheck() ValidateOption {
+	return func(v *ValidateUtil) {
 		v.checkMaxCap = true
 	}
 }
 
-func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
+func ValidateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
 	if *fieldData == nil || (*fieldData).GetScalars() == nil || (*fieldData).GetScalars().Data == nil {
 		return nil
 	}
@@ -99,13 +99,13 @@ func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
 	return nil
 }
 
-func (v *validateUtil) apply(opts ...validateOption) {
+func (v *ValidateUtil) apply(opts ...ValidateOption) {
 	for _, opt := range opts {
 		opt(v)
 	}
 }
 
-func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.SchemaHelper, numRows uint64) error {
+func (v *ValidateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.SchemaHelper, numRows uint64) error {
 	if helper == nil {
 		return merr.WrapErrServiceInternal("nil schema helper provided for Validation")
 	}
@@ -198,14 +198,14 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 		return err
 	}
 
-	if err := v.checkAligned(data, helper, numRows); err != nil {
+	if err := v.CheckAligned(data, helper, numRows); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil.SchemaHelper, numRows uint64) error {
+func (v *ValidateUtil) CheckAligned(data []*schemapb.FieldData, schema *typeutil.SchemaHelper, numRows uint64) error {
 	errNumRowsMismatch := func(fieldName string, fieldNumRows uint64) error {
 		msg := fmt.Sprintf("the num_rows (%d) of field (%s) is not equal to passed num_rows (%d)", fieldNumRows, fieldName, numRows)
 		return merr.WrapErrParameterInvalid(numRows, fieldNumRows, msg)
@@ -217,7 +217,7 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 	getExpectedVectorRows := func(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) uint64 {
 		validData := typeutil.GetFieldDataValidData(field)
 		if fieldSchema.GetNullable() && len(validData) > 0 {
-			return uint64(getValidNumber(validData))
+			return uint64(GetValidNumber(validData))
 		}
 		return numRows
 	}
@@ -458,7 +458,7 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 //     will fill default_value when passed num_rows not equal to expected num_rows,
 //
 // after fillWithValue, only nullable field will has valid_data, the length of all data will be passed num_rows
-func (v *validateUtil) fillWithValue(data []*schemapb.FieldData, schema *typeutil.SchemaHelper, numRows int) error {
+func (v *ValidateUtil) fillWithValue(data []*schemapb.FieldData, schema *typeutil.SchemaHelper, numRows int) error {
 	for _, field := range data {
 		fieldSchema, err := schema.GetFieldFromName(field.GetFieldName())
 		if err != nil {
@@ -595,7 +595,7 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 }
 
 func fillVectorArrayNullValueImpl(array []*schemapb.VectorField, validData []bool, dim int64, elementType schemapb.DataType) ([]*schemapb.VectorField, error) {
-	n := getValidNumber(validData)
+	n := GetValidNumber(validData)
 	if len(array) != n {
 		return nil, merr.WrapErrParameterInvalid(n, len(array), "the length of field is wrong")
 	}
@@ -791,7 +791,7 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 }
 
 func fillWithNullValueImpl[T any](array []T, validData []bool) ([]T, error) {
-	n := getValidNumber(validData)
+	n := GetValidNumber(validData)
 	if len(array) != n {
 		return nil, merr.WrapErrParameterInvalid(n, len(array), "the length of field is wrong")
 	}
@@ -810,7 +810,7 @@ func fillWithNullValueImpl[T any](array []T, validData []bool) ([]T, error) {
 }
 
 func fillWithDefaultValueImpl[T any](array []T, value T, validData []bool) ([]T, error) {
-	n := getValidNumber(validData)
+	n := GetValidNumber(validData)
 	if len(array) != n {
 		return nil, merr.WrapErrParameterInvalid(n, len(array), "the length of field is wrong")
 	}
@@ -830,7 +830,7 @@ func fillWithDefaultValueImpl[T any](array []T, value T, validData []bool) ([]T,
 	return res, nil
 }
 
-func getValidNumber(validData []bool) int {
+func GetValidNumber(validData []bool) int {
 	res := 0
 	for _, v := range validData {
 		if v {
@@ -840,7 +840,7 @@ func getValidNumber(validData []bool) int {
 	return res
 }
 
-func (v *validateUtil) checkFloatVectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkFloatVectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	floatArray := field.GetVectors().GetFloatVector().GetData()
 	if floatArray == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("float vector field '%v' is illegal, array type mismatch", field.GetFieldName())
@@ -854,7 +854,7 @@ func (v *validateUtil) checkFloatVectorFieldData(field *schemapb.FieldData, fiel
 	return nil
 }
 
-func (v *validateUtil) checkFloat16VectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkFloat16VectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	float16VecArray := field.GetVectors().GetFloat16Vector()
 	if float16VecArray == nil {
 		if !fieldSchema.GetNullable() {
@@ -869,7 +869,7 @@ func (v *validateUtil) checkFloat16VectorFieldData(field *schemapb.FieldData, fi
 	return nil
 }
 
-func (v *validateUtil) checkBFloat16VectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkBFloat16VectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	bfloat16VecArray := field.GetVectors().GetBfloat16Vector()
 	if bfloat16VecArray == nil {
 		if !fieldSchema.GetNullable() {
@@ -884,7 +884,7 @@ func (v *validateUtil) checkBFloat16VectorFieldData(field *schemapb.FieldData, f
 	return nil
 }
 
-func (v *validateUtil) checkBinaryVectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkBinaryVectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	bVecArray := field.GetVectors().GetBinaryVector()
 	if bVecArray == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("binary vector field '%v' is illegal, array type mismatch", field.GetFieldName())
@@ -893,7 +893,7 @@ func (v *validateUtil) checkBinaryVectorFieldData(field *schemapb.FieldData, fie
 	return nil
 }
 
-func (v *validateUtil) checkSparseFloatVectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkSparseFloatVectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	if field.GetVectors() == nil || field.GetVectors().GetSparseFloatVector() == nil {
 		if !fieldSchema.GetNullable() {
 			msg := fmt.Sprintf("sparse float vector field '%v' is illegal, array type mismatch", field.GetFieldName())
@@ -905,7 +905,7 @@ func (v *validateUtil) checkSparseFloatVectorFieldData(field *schemapb.FieldData
 	return typeutil.ValidateSparseFloatRows(sparseRows...)
 }
 
-func (v *validateUtil) checkInt8VectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkInt8VectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	int8VecArray := field.GetVectors().GetInt8Vector()
 	if int8VecArray == nil {
 		if !fieldSchema.GetNullable() {
@@ -917,7 +917,7 @@ func (v *validateUtil) checkInt8VectorFieldData(field *schemapb.FieldData, field
 	return nil
 }
 
-func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	strArr := field.GetScalars().GetStringData().GetData()
 	if strArr == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("varchar field '%v' is illegal, array type mismatch", field.GetFieldName())
@@ -944,7 +944,7 @@ func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 	return nil
 }
 
-func (v *validateUtil) checkTextFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkTextFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	strArr := field.GetScalars().GetStringData().GetData()
 	if strArr == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("text field '%v' is illegal", field.GetFieldName())
@@ -955,7 +955,7 @@ func (v *validateUtil) checkTextFieldData(field *schemapb.FieldData, fieldSchema
 	return nil
 }
 
-func (v *validateUtil) checkGeometryFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkGeometryFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	geometryArray := field.GetScalars().GetGeometryWktData().GetData()
 	validData := typeutil.GetFieldDataValidData(field)
 	wkbArray := make([][]byte, len(geometryArray))
@@ -989,7 +989,7 @@ func (v *validateUtil) checkGeometryFieldData(field *schemapb.FieldData, fieldSc
 	return nil
 }
 
-func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	jsonArray := field.GetScalars().GetJsonData().GetData()
 	if jsonArray == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("json field '%v' is illegal, array type mismatch", field.GetFieldName())
@@ -997,15 +997,21 @@ func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema
 	}
 
 	if v.checkMaxLen {
+		// Resolved once per field rather than once per row: the GetAsX scalar
+		// getters go through config.Manager.GetCachedValue, which read-locks the config
+		// manager's cache before the map lookup, and this loop runs for every
+		// row of every insert that carries a JSON or dynamic field.
+		// checkVarCharFieldData likewise resolves its limit before its row loop
+		// (from the schema's type params rather than from config).
+		maxLength := paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64()
 		for _, s := range jsonArray {
-			if int64(len(s)) > paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64() {
+			if int64(len(s)) > maxLength {
 				if field.GetIsDynamic() {
-					msg := fmt.Sprintf("the length (%d) of dynamic field exceeds max length (%d)", len(s),
-						paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64())
+					msg := fmt.Sprintf("the length (%d) of dynamic field exceeds max length (%d)", len(s), maxLength)
 					return merr.WrapErrParameterInvalid("valid length dynamic field", "length exceeds max length", msg)
 				}
 				msg := fmt.Sprintf("the length (%d) of json field (%s) exceeds max length (%d)", len(s),
-					field.GetFieldName(), paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64())
+					field.GetFieldName(), maxLength)
 				return merr.WrapErrParameterInvalid("valid length json string", "length exceeds max length", msg)
 			}
 		}
@@ -1013,7 +1019,7 @@ func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema
 	return nil
 }
 
-func (v *validateUtil) checkIntegerFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkIntegerFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	data := field.GetScalars().GetIntData().GetData()
 	if data == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
@@ -1032,7 +1038,7 @@ func (v *validateUtil) checkIntegerFieldData(field *schemapb.FieldData, fieldSch
 	return nil
 }
 
-func (v *validateUtil) checkLongFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkLongFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	data := field.GetScalars().GetLongData().GetData()
 	if data == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
@@ -1042,7 +1048,7 @@ func (v *validateUtil) checkLongFieldData(field *schemapb.FieldData, fieldSchema
 	return nil
 }
 
-func (v *validateUtil) checkFloatFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkFloatFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	data := field.GetScalars().GetFloatData().GetData()
 	if data == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
@@ -1056,7 +1062,7 @@ func (v *validateUtil) checkFloatFieldData(field *schemapb.FieldData, fieldSchem
 	return nil
 }
 
-func (v *validateUtil) checkDoubleFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkDoubleFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	data := field.GetScalars().GetDoubleData().GetData()
 	if data == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
@@ -1070,7 +1076,7 @@ func (v *validateUtil) checkDoubleFieldData(field *schemapb.FieldData, fieldSche
 	return nil
 }
 
-func (v *validateUtil) checkArrayElement(array *schemapb.ArrayArray, field *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkArrayElement(array *schemapb.ArrayArray, field *schemapb.FieldSchema) error {
 	switch field.GetElementType() {
 	case schemapb.DataType_Bool:
 		for _, row := range array.GetData() {
@@ -1191,7 +1197,7 @@ func normalizeNestedArrayElementType(
 	return nil
 }
 
-func (v *validateUtil) checkNestedArrayValue(
+func (v *ValidateUtil) checkNestedArrayValue(
 	row *schemapb.ScalarField,
 	arrayType *schemapb.TypeSchema,
 	fieldName string,
@@ -1270,7 +1276,7 @@ func (v *validateUtil) checkNestedArrayValue(
 	return v.checkArrayElement(leafArray, leafField)
 }
 
-func (v *validateUtil) checkNestedArrayFieldData(
+func (v *ValidateUtil) checkNestedArrayFieldData(
 	data *schemapb.ArrayArray,
 	fieldSchema *schemapb.FieldSchema,
 ) error {
@@ -1288,7 +1294,7 @@ func (v *validateUtil) checkNestedArrayFieldData(
 	return nil
 }
 
-func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	data := field.GetScalars().GetArrayData()
 	if data == nil {
 		elementTypeStr := fieldSchema.GetElementType().String()
@@ -1311,7 +1317,7 @@ func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchem
 	return v.checkArrayElement(data, fieldSchema)
 }
 
-func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *ValidateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	data := field.GetVectors().GetVectorArray()
 	if data == nil {
 		elementTypeStr := fieldSchema.GetElementType().String()
@@ -1457,7 +1463,7 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 
 // checkTimestamptzFieldData validates the input string data for a Timestamptz field,
 // converts it into UTC Unix Microseconds (int64), and replaces the data in place.
-func (v *validateUtil) checkTimestamptzFieldData(field *schemapb.FieldData, timezone string) error {
+func (v *ValidateUtil) checkTimestamptzFieldData(field *schemapb.FieldData, timezone string) error {
 	// 1. Structural Check: Data must be present and must be a string array
 	scalarField := field.GetScalars()
 	if scalarField == nil || scalarField.GetStringData() == nil {
@@ -1543,8 +1549,8 @@ func verifyOverflowByRange(arr []int32, lb int64, ub int64) error {
 	return nil
 }
 
-func newValidateUtil(opts ...validateOption) *validateUtil {
-	v := &validateUtil{
+func NewValidateUtil(opts ...ValidateOption) *ValidateUtil {
+	v := &ValidateUtil{
 		checkNAN:      true,
 		checkMaxLen:   false,
 		checkOverflow: false,

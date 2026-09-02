@@ -738,6 +738,8 @@ func (s *Server) startServerLoop() {
 	}
 
 	s.garbageCollector.start()
+
+	s.meta.statsTaskMeta.StartCleanupDeprecatedSortTasks(s.serverLoopCtx, &s.serverLoopWg)
 }
 
 func (s *Server) startCollectMetaMetrics(ctx context.Context) {

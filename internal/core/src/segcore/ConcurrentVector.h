@@ -46,13 +46,19 @@ namespace milvus::segcore {
 // Backed by fixed-size per-chunk buffers held in a std::deque so that, once a
 // chunk is appended, its buffer never moves. A raw pointer returned by
 // get_chunk_data() therefore stays valid across concurrent inserts (which only
-// append — never relocate existing chunks). This replaces a single resizable
-// FixedVector<bool> whose reallocation on insert could dangle a validity
-// pointer that a concurrent query had cached.
+// ever add chunks at the back, never relocate existing ones). This replaces a
+// resizable FixedVector<bool> whose reallocation on insert could dangle a
+// validity pointer that a concurrent query had cached.
 //
 // Contract: a get_chunk_data() borrow may only be read within its own chunk
 // ([offset, chunk end)). All current readers apply validity per chunk (see
 // ApplyFieldValidData and InsertRecord::get_span_base), so this holds.
+//
+// The borrow is a raw pointer, not a lock: a reader dereferences it after
+// releasing the shared lock. A caller that rewrites an already-addressable
+// range must therefore guarantee that no reader can hold a borrow into that
+// range. set_data_raw enforces the separate "no gaps" invariant, but cannot
+// enforce this external quiescence requirement.
 class ThreadSafeValidData {
  public:
     explicit ThreadSafeValidData(int64_t size_per_chunk)
@@ -62,37 +68,34 @@ class ThreadSafeValidData {
                    size_per_chunk_);
     }
 
+    // Both writers place validity at the logical offset the caller reserved,
+    // rather than appending at the current length. The two agree only as long
+    // as batches arrive in reserved order; writing at the reserved offset
+    // states the contract in the code instead of relying on it silently.
+    //
+    // No gaps: length_ advances to the end of the write, and is_valid() admits
+    // every offset below it, so a write starting past the current length would
+    // publish a range nobody ever wrote -- validity bits read back as garbage
+    // rather than as null. Rewriting an already written range is permitted for
+    // idempotent retries, subject to the external quiescence requirement in
+    // the class contract above.
     void
-    set_data_raw(const std::vector<FieldDataPtr>& datas) {
+    set_data_raw(size_t element_offset,
+                 const std::vector<FieldDataPtr>& datas) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
+        check_no_gap(element_offset);
+        auto write_offset = element_offset;
         for (auto& field_data : datas) {
             auto num_row = field_data->get_num_rows();
-            reserve_to(length_ + num_row);
-            write_bits(length_, num_row, [&field_data](size_t i) {
+            reserve_to(write_offset + num_row);
+            write_bits(write_offset, num_row, [&field_data](size_t i) {
                 return field_data->is_valid(i);
             });
-            length_ += num_row;
+            write_offset += num_row;
         }
+        length_ = std::max(length_, write_offset);
     }
 
-    void
-    set_data_raw(size_t num_rows,
-                 const DataArray* data,
-                 const FieldMeta& field_meta) {
-        std::unique_lock<std::shared_mutex> lck(mutex_);
-        if (field_meta.is_nullable()) {
-            check_source_span(num_rows, data, field_meta);
-            reserve_to(length_ + num_rows);
-            write_from(
-                length_, num_rows, GetFieldDataRowValidData(*data).data());
-            length_ += num_rows;
-        }
-    }
-
-    // Write validity at the logical offset the caller reserved, rather than
-    // appending at the current length. The two agree only as long as inserts
-    // arrive in reserved order; writing at the reserved offset states the
-    // contract in the code instead of relying on it silently.
     void
     set_data_raw(size_t element_offset,
                  size_t num_rows,
@@ -100,22 +103,11 @@ class ThreadSafeValidData {
                  const FieldMeta& field_meta) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
         if (field_meta.is_nullable()) {
-            // This is the overload the ingest path uses (SegmentGrowingImpl's
-            // Insert and fill_empty_field backfill), so the source-span check
-            // has to live here too, not only on the appending overload above.
+            // This overload copies a contiguous validity buffer, so validate
+            // its source span before reading it.
             check_source_span(num_rows, data, field_meta);
             const auto end = element_offset + num_rows;
-            // No gaps. length_ advances to `end`, and is_valid() admits every
-            // offset below it, so a write that starts past the current length
-            // would publish a range nobody ever wrote -- validity bits read
-            // back as garbage rather than as null. Overwriting an already
-            // written range IS allowed: that is what makes a Reopen backfill
-            // retry idempotent.
-            AssertInfo(element_offset <= length_,
-                       "validity write leaves a gap: element_offset={}, "
-                       "length={}",
-                       element_offset,
-                       length_);
+            check_no_gap(element_offset);
             reserve_to(end);
             write_from(element_offset,
                        num_rows,
@@ -224,6 +216,17 @@ class ThreadSafeValidData {
                    field_meta.get_id().get(),
                    valid_size,
                    num_rows);
+    }
+
+    // Reject a write that would leave [length_, element_offset) unwritten.
+    // Caller holds the lock.
+    void
+    check_no_gap(size_t element_offset) const {
+        AssertInfo(element_offset <= length_,
+                   "validity write leaves a gap: element_offset={}, "
+                   "length={}",
+                   element_offset,
+                   length_);
     }
 
     // Ensure enough chunks exist to hold `n` elements. Caller holds the lock.
@@ -510,8 +513,9 @@ class ConcurrentVectorImpl : public VectorBase {
                 // Build valid_data array for offset mapping
                 std::unique_ptr<bool[]> valid_data(new bool[element_count]);
                 // One lock acquisition for the batch. The caller has already
-                // written this range's validity (SegmentGrowingImpl::Insert
-                // and fill_empty_field both do so before touching the column),
+                // written this range's validity at this same element_offset
+                // (SegmentGrowingImpl::Insert, load_field_data_common and
+                // fill_empty_field all do so before touching the column),
                 // which is what makes reading it back here well-defined.
                 valid_data_ptr_->bulk_is_valid_range(
                     element_offset, element_count, valid_data.get());

@@ -176,3 +176,9 @@ const std::string EVICTABLE_VECTOR_FIELD_KEY = "evictable.vectorField";
 constexpr int32_t kHybridIndexConfigVersion = 3;
 // The last version before hybrid index config support was added
 constexpr int32_t kLastVersionWithoutHybridIndexConfig = 2;
+// Version 4 additionally allows nested (struct sub-field) HYBRID indexes to
+// select STL_SORT for high-cardinality data instead of INVERTED. Below this
+// version, nested HYBRID indexes always keep INVERTED at high cardinality:
+// an older reader's ScalarIndexSort predates nested-index support and cannot
+// load a nested STL_SORT physical index.
+constexpr int32_t kNestedHybridStlSortMinVersion = 4;
