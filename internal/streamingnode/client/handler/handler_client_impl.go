@@ -28,7 +28,6 @@ import (
 
 var (
 	errWaitNextBackoff                   = errors.New("wait for next backoff")
-	_                  producer.Producer = wal.WAL(nil)
 	_                  consumer.Consumer = wal.Scanner(nil)
 )
 
