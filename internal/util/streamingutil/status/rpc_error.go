@@ -8,7 +8,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
@@ -96,11 +95,7 @@ func (s *StreamingClientStatus) TryIntoStreamingError() *StreamingError {
 	}
 	for _, detail := range s.Details() {
 		if detail, ok := detail.(*streamingpb.StreamingError); ok {
-			cloned, ok := proto.Clone(detail).(*streamingpb.StreamingError)
-			if !ok {
-				return New(detail.Code, "%s", detail.Cause)
-			}
-			return (*StreamingError)(cloned)
+			return NewFromPBError(detail)
 		}
 	}
 	return nil

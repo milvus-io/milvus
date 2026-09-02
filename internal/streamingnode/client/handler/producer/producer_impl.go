@@ -317,7 +317,13 @@ func (p *producerImpl) recvLoop() (err error) {
 					},
 				}
 			case *streamingpb.ProduceMessageResponse_Error:
-				statusErr := status.New(produceResp.Error.Code, produceResp.Error.Cause)
+				// The whole pb error is carried over, not just (code, cause):
+				// SHARD_FENCED attaches T_switch in FencedTimeTick, and the
+				// coordinator reads it back off a re-fence to recover a value it
+				// lost. This is the response-body path, which only a CLUSTER
+				// deployment takes -- a pchannel hosted in-process short-circuits
+				// to the local WAL and returns the *StreamingError itself.
+				statusErr := status.NewFromPBError(produceResp.Error)
 				if statusErr.IsRateLimitRejected() {
 					p.NotifyRateLimitStateChange(ratelimit.RateLimitState{
 						State: streamingpb.WALRateLimitState_WAL_RATE_LIMIT_STATE_REJECT,

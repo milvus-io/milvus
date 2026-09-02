@@ -5,6 +5,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/redact"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -27,6 +28,29 @@ func (e *StreamingError) Error() string {
 // AsPBError convert StreamingError to streamingpb.StreamingError.
 func (e *StreamingError) AsPBError() *streamingpb.StreamingError {
 	return (*streamingpb.StreamingError)(e)
+}
+
+// NewFromPBError converts a streamingpb.StreamingError back into a
+// *StreamingError, carrying the WHOLE message rather than (code, cause).
+//
+// Rebuilding the error field by field is the mistake this exists to prevent:
+// some codes attach a payload the caller acts on -- SHARD_FENCED carries
+// T_switch in FencedTimeTick -- and dropping it silently zeroes a value the
+// caller then reads as "no fence time tick recorded". It only shows up across a
+// process boundary, because an in-process append hands back the *StreamingError
+// itself and keeps the payload, so a same-process test cannot see the loss.
+//
+// The message is cloned: the pb it comes from belongs to a response the
+// transport may reuse or mutate after this returns.
+func NewFromPBError(pb *streamingpb.StreamingError) *StreamingError {
+	if pb == nil {
+		return nil
+	}
+	cloned, ok := proto.Clone(pb).(*streamingpb.StreamingError)
+	if !ok {
+		return New(pb.GetCode(), "%s", pb.GetCause())
+	}
+	return (*StreamingError)(cloned)
 }
 
 // IsWrongStreamingNode returns true if the error is caused by wrong streamingnode.
