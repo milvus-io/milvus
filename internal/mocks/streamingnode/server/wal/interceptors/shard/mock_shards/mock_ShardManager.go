@@ -356,62 +356,6 @@ func (_c *MockShardManager_CheckIfCollectionExists_Call) RunAndReturn(run func(i
 	return _c
 }
 
-// CheckIfCollectionSchemaVersionMatch provides a mock function with given fields: header
-func (_m *MockShardManager) CheckIfCollectionSchemaVersionMatch(header *message.InsertMessageHeader) (int32, error) {
-	ret := _m.Called(header)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CheckIfCollectionSchemaVersionMatch")
-	}
-
-	var r0 int32
-	var r1 error
-	if rf, ok := ret.Get(0).(func(*message.InsertMessageHeader) (int32, error)); ok {
-		return rf(header)
-	}
-	if rf, ok := ret.Get(0).(func(*message.InsertMessageHeader) int32); ok {
-		r0 = rf(header)
-	} else {
-		r0 = ret.Get(0).(int32)
-	}
-
-	if rf, ok := ret.Get(1).(func(*message.InsertMessageHeader) error); ok {
-		r1 = rf(header)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockShardManager_CheckIfCollectionSchemaVersionMatch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfCollectionSchemaVersionMatch'
-type MockShardManager_CheckIfCollectionSchemaVersionMatch_Call struct {
-	*mock.Call
-}
-
-// CheckIfCollectionSchemaVersionMatch is a helper method to define mock.On call
-//   - header *message.InsertMessageHeader
-func (_e *MockShardManager_Expecter) CheckIfCollectionSchemaVersionMatch(header interface{}) *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call {
-	return &MockShardManager_CheckIfCollectionSchemaVersionMatch_Call{Call: _e.mock.On("CheckIfCollectionSchemaVersionMatch", header)}
-}
-
-func (_c *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call) Run(run func(header *message.InsertMessageHeader)) *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*message.InsertMessageHeader))
-	})
-	return _c
-}
-
-func (_c *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call) Return(_a0 int32, _a1 error) *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call) RunAndReturn(run func(*message.InsertMessageHeader) (int32, error)) *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // CheckIfPartitionCanBeCreated provides a mock function with given fields: uniquePartitionKey
 func (_m *MockShardManager) CheckIfPartitionCanBeCreated(uniquePartitionKey shards.PartitionUniqueKey) error {
 	ret := _m.Called(uniquePartitionKey)
@@ -594,6 +538,63 @@ func (_c *MockShardManager_CheckIfSegmentCanBeFlushed_Call) Return(_a0 error) *M
 }
 
 func (_c *MockShardManager_CheckIfSegmentCanBeFlushed_Call) RunAndReturn(run func(shards.PartitionUniqueKey, int64) error) *MockShardManager_CheckIfSegmentCanBeFlushed_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CheckWritableAndSchemaVersion provides a mock function with given fields: vchannel, header
+func (_m *MockShardManager) CheckWritableAndSchemaVersion(vchannel string, header *message.InsertMessageHeader) (int32, error) {
+	ret := _m.Called(vchannel, header)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckWritableAndSchemaVersion")
+	}
+
+	var r0 int32
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, *message.InsertMessageHeader) (int32, error)); ok {
+		return rf(vchannel, header)
+	}
+	if rf, ok := ret.Get(0).(func(string, *message.InsertMessageHeader) int32); ok {
+		r0 = rf(vchannel, header)
+	} else {
+		r0 = ret.Get(0).(int32)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, *message.InsertMessageHeader) error); ok {
+		r1 = rf(vchannel, header)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockShardManager_CheckWritableAndSchemaVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckWritableAndSchemaVersion'
+type MockShardManager_CheckWritableAndSchemaVersion_Call struct {
+	*mock.Call
+}
+
+// CheckWritableAndSchemaVersion is a helper method to define mock.On call
+//   - vchannel string
+//   - header *message.InsertMessageHeader
+func (_e *MockShardManager_Expecter) CheckWritableAndSchemaVersion(vchannel interface{}, header interface{}) *MockShardManager_CheckWritableAndSchemaVersion_Call {
+	return &MockShardManager_CheckWritableAndSchemaVersion_Call{Call: _e.mock.On("CheckWritableAndSchemaVersion", vchannel, header)}
+}
+
+func (_c *MockShardManager_CheckWritableAndSchemaVersion_Call) Run(run func(vchannel string, header *message.InsertMessageHeader)) *MockShardManager_CheckWritableAndSchemaVersion_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*message.InsertMessageHeader))
+	})
+	return _c
+}
+
+func (_c *MockShardManager_CheckWritableAndSchemaVersion_Call) Return(_a0 int32, _a1 error) *MockShardManager_CheckWritableAndSchemaVersion_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockShardManager_CheckWritableAndSchemaVersion_Call) RunAndReturn(run func(string, *message.InsertMessageHeader) (int32, error)) *MockShardManager_CheckWritableAndSchemaVersion_Call {
 	_c.Call.Return(run)
 	return _c
 }
