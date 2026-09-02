@@ -1031,6 +1031,58 @@ RedactMembershipFilterBlobs(google::protobuf::Message* message,
     }
 }
 
+using BloomBlobOwners = std::unordered_map<
+    const std::string*, std::shared_ptr<const std::string>>;
+
+// Move Bloom bodies out of a uniquely owned protobuf tree before parsing. The
+// string object's address remains stable and is used only as a temporary key;
+// logical expressions take shared ownership of the moved string. This keeps a
+// single Bloom body without retaining unrelated plan/scorer protobuf fields.
+static void
+ExtractBloomFilterBlobs(google::protobuf::Message* message,
+                        BloomBlobOwners* owners) {
+    if (message->GetDescriptor() ==
+        proto::plan::BloomFilterExpr::descriptor()) {
+        auto* bloom = static_cast<proto::plan::BloomFilterExpr*>(message);
+        auto* source_blob = bloom->mutable_filter_blob();
+        const auto inserted =
+            owners
+                ->emplace(source_blob,
+                          std::make_shared<const std::string>(
+                              std::move(*source_blob)))
+                .second;
+        AssertInfo(inserted, "duplicate Bloom blob protobuf address");
+    }
+
+    const auto* descriptor = message->GetDescriptor();
+    const auto* reflection = message->GetReflection();
+    for (int i = 0; i < descriptor->field_count(); ++i) {
+        const auto* field = descriptor->field(i);
+        if (field->cpp_type() !=
+            google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+            continue;
+        }
+        if (field->is_repeated()) {
+            const auto size = reflection->FieldSize(*message, field);
+            for (int j = 0; j < size; ++j) {
+                ExtractBloomFilterBlobs(
+                    reflection->MutableRepeatedMessage(message, field, j),
+                    owners);
+            }
+        } else if (reflection->HasField(*message, field)) {
+            ExtractBloomFilterBlobs(
+                reflection->MutableMessage(message, field), owners);
+        }
+    }
+}
+
+static BloomBlobOwners
+ExtractBloomFilterBlobs(google::protobuf::Message* root) {
+    BloomBlobOwners owners;
+    ExtractBloomFilterBlobs(root, &owners);
+    return owners;
+}
+
 std::string
 PlanProtoDebugString(const proto::plan::PlanNode& plan_node_proto) {
     const auto size = plan_node_proto.ByteSizeLong();
@@ -1067,6 +1119,11 @@ LogPlanProtoDebug(const char* what,
 std::unique_ptr<Plan>
 ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
     LogPlanProtoDebug("search", plan_node_proto);
+    return CreatePlanImpl(plan_node_proto);
+}
+
+std::unique_ptr<Plan>
+ProtoParser::CreatePlanImpl(const proto::plan::PlanNode& plan_node_proto) {
     auto plan = std::make_unique<Plan>(schema);
     plan->plan_node_ = PlanNodeFromProto(plan_node_proto);
     plan->tag2field_["$0"] = plan->plan_node_->search_info_.field_id_;
@@ -1086,9 +1143,25 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
     return plan;
 }
 
+std::unique_ptr<Plan>
+ProtoParser::CreatePlan(
+    std::unique_ptr<proto::plan::PlanNode> plan_node_proto) {
+    AssertInfo(plan_node_proto != nullptr, "plan node owner must not be null");
+    LogPlanProtoDebug("search", *plan_node_proto);
+    auto bloom_blob_owners = ExtractBloomFilterBlobs(plan_node_proto.get());
+    return ProtoParser(schema, std::move(bloom_blob_owners))
+        .CreatePlanImpl(*plan_node_proto);
+}
+
 std::unique_ptr<RetrievePlan>
 ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
     LogPlanProtoDebug("retrieve", plan_node_proto);
+    return CreateRetrievePlanImpl(plan_node_proto);
+}
+
+std::unique_ptr<RetrievePlan>
+ProtoParser::CreateRetrievePlanImpl(
+    const proto::plan::PlanNode& plan_node_proto) {
     auto retrieve_plan = std::make_unique<RetrievePlan>(schema);
     retrieve_plan->plan_node_ = RetrievePlanNodeFromProto(plan_node_proto);
     retrieve_plan->access_entries_ = CollectAccessFieldIDs(plan_node_proto);
@@ -1100,6 +1173,16 @@ ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
         retrieve_plan->target_dynamic_fields_.push_back(dynamic_field);
     }
     return retrieve_plan;
+}
+
+std::unique_ptr<RetrievePlan>
+ProtoParser::CreateRetrievePlan(
+    std::unique_ptr<proto::plan::PlanNode> plan_node_proto) {
+    AssertInfo(plan_node_proto != nullptr, "plan node owner must not be null");
+    LogPlanProtoDebug("retrieve", *plan_node_proto);
+    auto bloom_blob_owners = ExtractBloomFilterBlobs(plan_node_proto.get());
+    return ProtoParser(schema, std::move(bloom_blob_owners))
+        .CreateRetrievePlanImpl(*plan_node_proto);
 }
 
 expr::TypedExprPtr
@@ -1253,8 +1336,17 @@ ProtoParser::ParseBloomFilterExprs(
                       "data type: {}",
                       data_type);
     }
+    std::shared_ptr<const std::string> filter_blob;
+    if (const auto it =
+            bloom_blob_owners_.find(std::addressof(expr_pb.filter_blob()));
+        it != bloom_blob_owners_.end()) {
+        filter_blob = it->second;
+    } else {
+        filter_blob =
+            std::make_shared<const std::string>(expr_pb.filter_blob());
+    }
     return std::make_shared<expr::BloomFilterExpr>(
-        expr::ColumnInfo(column_info), expr_pb.filter_blob());
+        expr::ColumnInfo(column_info), std::move(filter_blob));
 }
 
 expr::TypedExprPtr
@@ -1585,6 +1677,15 @@ ProtoParser::ParseScorer(const proto::plan::ScoreFunction& function) {
         default:
             ThrowInfo(UnexpectedError, "unknown function type");
     }
+}
+
+std::shared_ptr<rescores::Scorer>
+ProtoParser::ParseScorer(
+    std::unique_ptr<proto::plan::ScoreFunction> function) {
+    AssertInfo(function != nullptr, "score function owner must not be null");
+    auto bloom_blob_owners = ExtractBloomFilterBlobs(function.get());
+    return ProtoParser(schema, std::move(bloom_blob_owners))
+        .ParseScorer(*function);
 }
 
 std::shared_ptr<plan::PlanNode>
