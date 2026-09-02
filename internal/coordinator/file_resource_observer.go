@@ -156,8 +156,7 @@ func (m *FileResourceObserver) IsEmpty() bool {
 	if m.meta == nil {
 		return true
 	}
-	resources, _ := m.meta.ListFileResource(m.ctx)
-	return len(resources) == 0
+	return !m.meta.HasFileResource(m.ctx)
 }
 
 // if node sync at least once, it will be a valid node.
