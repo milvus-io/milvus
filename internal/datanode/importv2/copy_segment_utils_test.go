@@ -3307,6 +3307,78 @@ func TestRepublishCopiedManifestIndexes_NoTargetDefinitionsOnlyRetractsInherited
 	assert.Empty(t, gotIndexes, "no target definitions must mean no copied index publication")
 }
 
+// CopySegmentTask is the DataNode worker used by snapshot restore. Exercise its
+// final manifest state against the real local FFI rather than only inspecting
+// the ManifestUpdates passed to a mock: off must remove inherited source
+// entries and leave the target index-free; on must replace them with the
+// target collection's identity and copied build.
+func TestRepublishCopiedManifestIndexes_WritePlacementMatrix(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		enabled bool
+	}{
+		{name: "manifest writes disabled", enabled: false},
+		{name: "manifest writes enabled", enabled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+			basePath := "files/copy_manifest_write_matrix/" + strings.ReplaceAll(tc.name, " ", "_")
+			sourceIndexPath := "files/index_v1/1/2/3/6001/1"
+			relativePath, err := packed.ManifestIndexRelativePath(basePath, sourceIndexPath)
+			require.NoError(t, err)
+			copiedManifest, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg,
+				&packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{{
+					ColumnName:            "vector",
+					IndexName:             "source_idx",
+					IndexType:             "HNSW",
+					Path:                  relativePath,
+					FieldID:               101,
+					IndexID:               5001,
+					BuildID:               6001,
+					IndexVersion:          1,
+					NumRows:               4096,
+					IndexFileKeys:         []string{"source.bin"},
+					IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				}}})
+			require.NoError(t, err)
+
+			target := &datapb.CopySegmentTarget{
+				CollectionId:      100,
+				PartitionId:       200,
+				SegmentId:         300,
+				NumRows:           4096,
+				InheritedIndexIds: []int64{5001},
+			}
+			if tc.enabled {
+				target.TargetIndexes = map[string]*datapb.CopySegmentTargetIndex{
+					"vec_idx": {IndexId: 777, FieldId: 101, ColumnName: "vector", IndexType: "HNSW"},
+				}
+			}
+			indexInfos := map[int64]*datapb.VectorScalarIndexInfo{
+				888: {
+					IndexName:      "vec_idx",
+					BuildId:        888,
+					Version:        2,
+					IndexFilePaths: []string{"files/index_v1/100/200/300/888/2/target.bin"},
+				},
+			}
+
+			republished, err := republishCopiedManifestIndexes(copiedManifest, target, cfg, indexInfos)
+			require.NoError(t, err)
+			entries, err := packed.GetManifestIndexInfos(republished, cfg)
+			require.NoError(t, err)
+			if tc.enabled {
+				require.Len(t, entries, 1)
+				assert.Equal(t, int64(777), entries[0].IndexID)
+				assert.Equal(t, int64(888), entries[0].BuildID)
+				assert.Equal(t, "vec_idx", entries[0].IndexName)
+			} else {
+				assert.Empty(t, entries)
+			}
+		})
+	}
+}
+
 func TestExcludeUnpinnedManifestRevisions(t *testing.T) {
 	base := "files/insert_log/1/2/3"
 	pinned := base + "/_metadata/manifest-4.avro"

@@ -1598,6 +1598,101 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CleanManifestReadBackPubl
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, updatedTask.GetState())
 }
 
+// Snapshot restore installs index definitions first and then restores segment
+// data through CopySegmentTask, so this is the copy/restore DataCoord-side
+// placement matrix. The fake manifest store represents the exact pointer the
+// DataNode returned; the real in-memory catalog proves where the corresponding
+// SegmentIndex record was persisted.
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix() {
+	const (
+		collectionID = int64(100)
+		partitionID  = int64(10)
+		segmentID    = int64(2001)
+		indexID      = int64(300)
+		buildID      = int64(9001)
+	)
+
+	for _, tc := range []struct {
+		name    string
+		enabled bool
+	}{
+		{name: "manifest writes disabled", enabled: false},
+		{name: "manifest writes enabled", enabled: true},
+	} {
+		s.Run(tc.name, func() {
+			withSegmentIndexManifestWrites(s.T(), tc.enabled)
+			store := newFakeManifestStore(s.T())
+			ctx := context.Background()
+			catalog := kvdatacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+			m := bootMetaForRestart(s.T(), catalog, collectionID)
+			s.Require().NoError(m.indexMeta.CreateIndex(ctx, &model.Index{
+				CollectionID: collectionID,
+				FieldID:      101,
+				IndexID:      indexID,
+				IndexName:    "vec_idx",
+			}))
+			s.Require().NoError(m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+				ID:             segmentID,
+				CollectionID:   collectionID,
+				PartitionID:    partitionID,
+				State:          commonpb.SegmentState_Importing,
+				IsImporting:    true,
+				NumOfRows:      100,
+				InsertChannel:  "ch1",
+				StorageVersion: storage.StorageV3,
+			})))
+
+			task := createTestCopyTask(collectionID, segmentID).(*copySegmentTask)
+			copyMeta, err := NewCopySegmentMeta(ctx, catalog, m, nil, nil)
+			s.Require().NoError(err)
+			s.Require().NoError(copyMeta.AddTask(ctx, task))
+
+			manifestPath := packed.MarshalManifestPath("files/insert_log/100/10/2001", 3)
+			if tc.enabled {
+				store.revisions[manifestPath] = []packed.ManifestIndexInfo{{
+					IndexID: indexID, BuildID: buildID, IndexName: "vec_idx",
+				}}
+			}
+			resp := &datapb.QueryCopySegmentResponse{
+				TaskID: task.GetTaskId(),
+				State:  datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+				SegmentResults: []*datapb.CopySegmentResult{{
+					SegmentId:    segmentID,
+					ImportedRows: 100,
+					Binlogs:      makeTestCopySegmentBinlogs(),
+					ManifestPath: manifestPath,
+					IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{
+						buildID: {
+							FieldId:        101,
+							BuildId:        buildID,
+							IndexName:      "vec_idx",
+							IndexFilePaths: []string{"index.bin"},
+						},
+					},
+				}},
+			}
+
+			s.Require().NoError(SyncCopySegmentTask(task, resp, copyMeta, m))
+
+			manifestEntries, err := packed.GetManifestIndexInfos(manifestPath, nil)
+			s.Require().NoError(err)
+			persisted, err := catalog.ListSegmentIndexes(ctx, collectionID)
+			s.Require().NoError(err)
+			if tc.enabled {
+				s.Require().Len(manifestEntries, 1)
+				s.EqualValues(buildID, manifestEntries[0].BuildID)
+				s.Empty(persisted, "manifest-resident copied index must not remain in etcd")
+			} else {
+				s.Empty(manifestEntries, "disabled switch must leave the copied target manifest index-free")
+				s.Require().Len(persisted, 1)
+				s.EqualValues(buildID, persisted[0].BuildID)
+				s.Equal(commonpb.IndexState_Finished, persisted[0].IndexState)
+			}
+			s.Equal(tc.enabled, m.GetSegment(ctx, segmentID).GetManifestHasIndex())
+		})
+	}
+}
+
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnFailure() {
 	collectionID := int64(1)
 	segmentID := int64(103)

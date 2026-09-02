@@ -37,6 +37,7 @@ import (
 // the flag survives a restart. Without the durable half, a backfill scan would
 // have to re-read every segment's manifest to learn the same thing.
 func TestManifestPublishedFlagSurvivesRestart(t *testing.T) {
+	withSegmentIndexManifestWrites(t, true)
 	newFakeManifestStore(t)
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	m := bootMetaForRestart(t, catalog, restartCollID)
