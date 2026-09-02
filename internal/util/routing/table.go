@@ -242,6 +242,36 @@ func (t *Table) RoutesByPrimaryKey() bool {
 	return t.routingField == "" || t.routingField == t.pkField
 }
 
+// LegacyShards returns the residue assignment of a collection that has NEVER
+// been split: modulus len(vchannels), and shard i owning residue i.
+//
+// That assignment is what hash % len(vchannels) already does, so it is the shape
+// an existing collection is in before anything writes residues for it. It is
+// exported because the alternative is every caller that needs to plan a first
+// split re-deriving the convention, and a caller that enumerates its shards from
+// a map rather than from the vchannel list produces a PERMUTATION of it -- which
+// tiles the key space just as exactly and is therefore invisible to every check
+// this package makes downstream. One implementation, in the order the vchannel
+// list defines.
+func LegacyShards(vchannels []string) (uint64, []Shard, error) {
+	if len(vchannels) == 0 {
+		return 0, nil, merr.WrapErrServiceInternal("a collection with no vchannel has no residue assignment")
+	}
+	seen := make(map[string]struct{}, len(vchannels))
+	shards := make([]Shard, 0, len(vchannels))
+	for i, vchannel := range vchannels {
+		if vchannel == "" {
+			return 0, nil, merr.WrapErrServiceInternalMsg("vchannel %d carries no name", i)
+		}
+		if _, dup := seen[vchannel]; dup {
+			return 0, nil, merr.WrapErrServiceInternalMsg("vchannel %q is listed twice", vchannel)
+		}
+		seen[vchannel] = struct{}{}
+		shards = append(shards, Shard{Vchannel: vchannel, Buckets: []uint64{uint64(i)}})
+	}
+	return uint64(len(vchannels)), shards, nil
+}
+
 // ShardsFromMeta converts the per-shard routing meta of a DescribeCollection
 // response into Derive's input, keeping only the shards that currently accept
 // writes.
@@ -261,6 +291,19 @@ func ShardsFromMeta(vchannels []string, infos []*schemapb.CollectionShardInfo) (
 	}
 	shards := make([]Shard, 0, len(vchannels))
 	for i, vchannel := range vchannels {
+		// The two arrays are parallel by convention, and nothing downstream can
+		// catch a violation: a PERMUTED infos still tiles [0, M) exactly, so
+		// Derive, DeriveHash and DeriveHashPartial all accept it and every
+		// residue ends up bound to a shard that does not own it -- inserts land
+		// on the wrong shard, deletes match nothing, and no error is raised
+		// anywhere. The name is the only thing that can detect it, so check it
+		// wherever the producer set it. An empty name is tolerated: it is the
+		// persisted shape of a collection created before the field existed.
+		if name := infos[i].GetVchannelName(); name != "" && name != vchannel {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"routing shard info %d names vchannel %q but the vchannel list has %q at that position",
+				i, name, vchannel)
+		}
 		switch state := infos[i].GetState(); state {
 		case schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardCreating:
 			// A Creating shard is admitted because a split's targets are
