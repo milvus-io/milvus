@@ -27,8 +27,7 @@ namespace exec {
 void
 PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
     tracer::AutoSpan span("PhyNullExpr::Eval", tracer::GetRootSpan(), true);
-    span.GetSpan()->SetAttribute("data_type",
-                                 static_cast<int>(expr_->column_.data_type_));
+    span.SetAttribute("data_type", static_cast<int>(expr_->column_.data_type_));
 
     auto input = context.get_offset_input();
     switch (expr_->column_.data_type_) {
