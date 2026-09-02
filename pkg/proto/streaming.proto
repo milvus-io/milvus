@@ -31,6 +31,7 @@ message PChannelInfo {
                       // recovered or moved to another streamingnode, the term
                       // will increase by meta server.
     PChannelAccessMode access_mode = 3;  // access mode of the channel.
+    RecoveryStorageVersion required_recovery_storage_version = 4;
 }
 
 // PChannelAssignmentLog is the log of meta information of a pchannel, should
@@ -571,6 +572,44 @@ message ConsumeMessageReponse {
 }
 
 message CloseConsumerResponse {}
+message TransformDeleteBlock {
+    int64 partition_id = 1;
+    schema.IDs primary_keys = 2;
+}
+
+message TransformDeleteEntry {
+    repeated TransformDeleteBlock blocks = 1;
+}
+
+// TransformLogEntry is the durable recovery unit written from WAL Deletes.
+// It is kept as the record payload of VChannelSummaryTransformRecord.
+message TransformLogEntry {
+    uint64 time_tick = 1;
+
+    oneof entry {
+        TransformDeleteEntry delete = 2;
+    }
+}
+
+// Deprecated: TransformLogChunk was the per-vchannel transform log chunk object
+// persisted before WALSummary. The definition is kept only to read legacy chunk
+// objects during migration; new code never writes it.
+message TransformLogChunk {
+    uint64 chunk_id = 1;
+    repeated TransformLogEntry entries = 2;
+}
+
+// Deprecated: VChannelTransformLogMeta was the per-vchannel transform log
+// recovery meta persisted in the streaming catalog before WALSummary. The
+// definition is kept only to read legacy catalog data during migration; new
+// code never writes it.
+message VChannelTransformLogMeta {
+    uint64 checkpoint_time_tick = 1;
+    uint64 truncate_time_tick = 2;
+    uint64 first_chunk_id = 3;
+    uint64 next_chunk_id = 4;
+    uint64 materialized_time_tick = 5;
+}
 //
 // WALSummary
 //
@@ -650,9 +689,9 @@ message VChannelSummaryChunkIndex {
     // Optional: written only for vchannels that carry idempotency keys.
     VChannelSummarySectionRef idempotency = 4;
     VChannelSummarySectionRef inserts     = 5;
-    // 6 is reserved for the transform log's section, which lands with its own
-    // consumer.
-    reserved 6;
+    VChannelSummarySectionRef transform = 6;
+    // Retention of transforms must not wait for later inserts in this chunk.
+    uint64 transform_end_timetick = 7;
 }
 
 // VChannelSummarySectionRef is one section's location inside a chunk object.
@@ -660,6 +699,21 @@ message VChannelSummarySectionRef {
     uint64 offset       = 1;
     uint64 length       = 2;
     uint64 record_count = 3;
+}
+
+// VChannelSummaryTransformSection records the transform consumer's view of the
+// WAL: ordered delete entries, one per Delete or committed Txn containing
+// Delete, addressed by source WAL timetick. It replaces the legacy
+// TransformLogChunk objects.
+message VChannelSummaryTransformSection {
+    repeated VChannelSummaryTransformRecord records = 1;
+}
+
+// VChannelSummaryTransformRecord is one ordered delete entry of the transform
+// section.
+message VChannelSummaryTransformRecord {
+    uint64 time_tick = 1;
+    TransformDeleteEntry delete = 2;
 }
 
 // VChannelSummaryIdempotencySection is the idempotency overlay: which client key
@@ -794,6 +848,7 @@ message VChannelMeta {
     VChannelState state = 2; // vchannel state.
     CollectionInfoOfVChannel collection_info = 3; // if the channel is belong to a collection, the collection info will be setup.
     uint64 checkpoint_time_tick = 4; // The timetick of checkpoint, the meta already see the message at this timetick.
+    uint64 transform_materialized_time_tick = 5; // The L0 materialization frontier of the transform consumer. Delete entries through this timetick have been emitted as L0 output.
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.
@@ -955,4 +1010,10 @@ message ReplicatePChannelMeta {
     common.MilvusCluster target_cluster = 3;
     common.ReplicateCheckpoint initialized_checkpoint = 4;
     bool skip_get_replicate_checkpoint  = 5;
+}
+
+// RecoveryStorageVersion is the minimum supported recovery format.
+enum RecoveryStorageVersion {
+    RECOVERY_STORAGE_VERSION_LEGACY = 0;
+    RECOVERY_STORAGE_VERSION_V2 = 2;
 }

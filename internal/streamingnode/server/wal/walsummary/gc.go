@@ -110,12 +110,9 @@ func (m *Manager) GCOnce(ctx context.Context) error {
 // computeRetention returns the chunk refs, oldest first, that may be released
 // to bring the retained bytes back under the budget.
 //
-// Release is bounded by bytes alone: no consumer of the summary reports a
-// position it still needs. The idempotency view does not need to -- a record
-// released early costs a dedup opportunity, which degrades to the behavior
-// without the feature. A consumer that cannot afford that (a delete log, whose
-// records must survive until materialized) has to introduce its own floor here
-// along with the frontier that feeds it.
+// Idempotency records may expire at the byte or chunk-count budget. Transform
+// records must remain until their materialization or cleanup frontier is durable,
+// so the oldest chunk with an unconsumed transform stops retention release.
 func (m *Manager) computeRetention() []*streamingpb.PChannelSummaryChunkRef {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -133,6 +130,9 @@ func (m *Manager) computeRetention() []*streamingpb.PChannelSummaryChunkRef {
 	}
 	released := make([]*streamingpb.PChannelSummaryChunkRef, 0)
 	for _, chunk := range chunks {
+		if !m.chunkReleasedLocked(chunk) {
+			break
+		}
 		released = append(released, &streamingpb.PChannelSummaryChunkRef{
 			Generation: chunk.GetGeneration(),
 			Term:       chunk.GetTerm(),
@@ -299,4 +299,27 @@ func (m *Manager) sweepRetiredTerms(ctx context.Context, released []*streamingpb
 		return false, err
 	}
 	return true, nil
+}
+
+func (m *Manager) chunkReleasedLocked(chunk *streamingpb.PChannelSummaryChunkIndexEntry) bool {
+	for _, index := range chunk.GetVchannels() {
+		if index.GetTransform() == nil {
+			continue
+		}
+		floor := m.gcFrontiers[index.GetVchannel()]
+		if floor == 0 {
+			// No GC position yet: nothing of this vchannel may be released.
+			return false
+		}
+		end := index.GetTransformEndTimetick()
+		if end == 0 {
+			// Legacy transform-only chunks use their whole vchannel span.
+			end = index.GetEndTimetick()
+		}
+		if end > floor {
+			// The chunk still holds records past the GC position.
+			return false
+		}
+	}
+	return true
 }

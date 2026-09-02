@@ -198,3 +198,20 @@ func (m *Manager) Manifest() *streamingpb.PChannelSummaryManifest {
 	defer m.mu.Unlock()
 	return m.manifest
 }
+
+// RestoreTransformGCTimeTicks seeds retention from durable VChannel metadata.
+// Missing metadata does not prove cleanup: unknown channels remain pinned.
+func (m *Manager) RestoreTransformGCTimeTicks(vchannels map[string]*streamingpb.VChannelMeta) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for vchannel, meta := range vchannels {
+		frontier := meta.GetTransformMaterializedTimeTick()
+		switch meta.GetState() {
+		case streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED:
+			frontier = DroppedVChannelTimeTick
+		}
+		if frontier > m.gcFrontiers[vchannel] {
+			m.gcFrontiers[vchannel] = frontier
+		}
+	}
+}
