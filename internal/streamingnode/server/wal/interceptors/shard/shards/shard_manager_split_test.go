@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
@@ -232,4 +233,40 @@ func newTestCreateVChannelImmutableMessageNoSchema(vchannel string, collectionID
 		WithTimeTick(timetick).
 		WithLastConfirmedUseMessageID()
 	return message.MustAsImmutableCreateVChannelMessageV2(msg.IntoImmutableMessage(rmq.NewRmqID(4)))
+}
+
+// A retired source must keep answering "fenced", because that is the only signal
+// the proxy acts on: invalidate the routing cache, refetch, re-resolve, retry.
+// Answering terminally instead fails a write that one refresh would complete.
+func TestShardManagerRetiredSourceStillAnswersFenced(t *testing.T) {
+	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, 0)
+
+	// fence, then retire.
+	m.SplitShard(newTestSplitShardImmutableMessage("v1", 1, 4000))
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
+	assert.Equal(t, uint64(4000), m.GetSplitTimeTick(1, "v1"))
+
+	dropMsg, err := message.NewDropVChannelMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.DropVChannelMessageHeader{CollectionId: 1}).
+		WithBody(&message.DropVChannelMessageBody{}).
+		BuildMutable()
+	require.NoError(t, err)
+	m.DropVChannel(message.MustAsImmutableDropVChannelMessageV2(
+		dropMsg.WithTimeTick(5000).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(2))))
+	// the registration is gone...
+	assert.ErrorIs(t, m.CheckIfCollectionExists(1), ErrCollectionNotFound)
+	// ...but the name is still fenced, and T_switch still recoverable.
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
+	assert.Equal(t, uint64(4000), m.GetSplitTimeTick(1, "v1"))
+
+	// a vchannel this pchannel never held stays terminal: no refresh sends the
+	// write anywhere.
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v-never"), ErrCollectionNotFound)
+
+	// a successor landing on the freed slot is writable, and does not inherit
+	// the predecessor's fence.
+	m.CreateVChannel(newTestCreateVChannelImmutableMessage("v1-successor", 1, []int64{2}, 6000))
+	assert.NoError(t, m.CheckIfVChannelCanBeWritten(1, "v1-successor"))
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
 }

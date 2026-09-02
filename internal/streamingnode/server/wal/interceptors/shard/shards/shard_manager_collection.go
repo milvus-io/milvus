@@ -78,7 +78,9 @@ func (m *shardManagerImpl) GetSplitTimeTick(collectionID int64, vchannel string)
 	if info, ok := m.collections[collectionID]; ok && info.VChannel == vchannel {
 		return info.SplitTimeTick
 	}
-	return 0
+	// The registration may be gone -- retired, or displaced by a successor on
+	// this pchannel -- while a re-sent fence still needs T_switch back.
+	return m.fencedVChannels[vchannel]
 }
 
 // CheckIfVChannelCanBeCreated checks if the named vchannel can be registered on
@@ -137,15 +139,39 @@ func (m *shardManagerImpl) CheckIfVChannelCanBeDropped(collectionID int64, vchan
 }
 
 // checkIfVChannelCanBeWritten checks if the given vchannel of the collection still accepts new DML.
+//
+// Three answers, and which one is given decides whether the client's write
+// survives:
+//
+//   - nil -- this pchannel holds the vchannel and it is live.
+//   - ErrVChannelFenced -- the vchannel was fenced by a split. The write belongs
+//     to a shard that exists; the caller's route is one routing commit behind.
+//     It becomes SHARD_FENCED, and the proxy refreshes and retries.
+//   - ErrCollectionNotFound -- this pchannel has never held the vchannel. No
+//     refresh sends the write anywhere, so it is terminal.
+//
+// The fenced answer is decided by NAME, not by the registration, because the
+// registration is keyed by collection and a retired source loses it -- to
+// DropVChannel, or to a successor winning this pchannel's single slot after a
+// recovery collision. Both leave a stale route pointing at a vchannel that was
+// really fenced, and answering those terminally turns a transparent split into a
+// write failure the client sees.
+//
+// A different vchannel in the registration is NOT enough on its own: a newcomer
+// whose registration was refused while a live incumbent holds the slot is a
+// wrong route, not a successor, and must stay terminal.
 func (m *shardManagerImpl) checkIfVChannelCanBeWritten(collectionID int64, vchannel string) error {
 	collectionInfo, ok := m.collections[collectionID]
-	if !ok || collectionInfo.VChannel != vchannel {
-		return ErrCollectionNotFound
+	if ok && collectionInfo.VChannel == vchannel {
+		if collectionInfo.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED {
+			return ErrVChannelFenced
+		}
+		return nil
 	}
-	if collectionInfo.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED {
+	if _, fenced := m.fencedVChannels[vchannel]; fenced {
 		return ErrVChannelFenced
 	}
-	return nil
+	return ErrCollectionNotFound
 }
 
 // SplitShard marks the vchannel as splitted (fenced) when a SplitShard message
@@ -182,6 +208,10 @@ func (m *shardManagerImpl) SplitShard(msg message.ImmutableSplitShardMessageV2) 
 	// record T_switch so an already-fenced re-fence can return it; the split
 	// coordinator recovers T_switch from here after a crash that lost it.
 	collectionInfo.SplitTimeTick = msg.TimeTick()
+	// Remembered by NAME as well, because the registration above is keyed by
+	// collection and does not survive the source being retired or displaced --
+	// while a stale route to it does.
+	m.fencedVChannels[msg.VChannel()] = msg.TimeTick()
 	logger.Info(context.TODO(), "vchannel is fenced by shard split",
 		mlog.Int64("collectionID", collectionID),
 		mlog.Int64("splitTaskID", msg.Header().GetSplitTaskId()),
@@ -344,6 +374,9 @@ func (m *shardManagerImpl) DropVChannel(msg message.ImmutableDropVChannelMessage
 	}
 
 	delete(m.collections, collectionID)
+	// The tombstone in fencedVChannels is deliberately NOT removed: a proxy may
+	// still hold a route to this vchannel, and it must be told to refresh rather
+	// than handed a terminal error.
 	partitionIDs := make([]int64, 0, len(collectionInfo.PartitionIDs))
 	segmentIDs := make([]int64, 0, len(collectionInfo.PartitionIDs))
 	for partitionID := range collectionInfo.PartitionIDs {

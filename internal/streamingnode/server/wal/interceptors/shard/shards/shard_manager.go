@@ -68,6 +68,7 @@ type ShardManagerRecoverParam struct {
 func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 	// recover the collection infos
 	collections := newCollectionInfos(param.InitialRecoverSnapshot)
+	fenced := newFencedVChannels(param.InitialRecoverSnapshot)
 	// recover the segment assignment infos
 	partitionToSegmentManagers, segmentBelongs := newSegmentAllocManagersFromRecovery(param.ChannelInfo, param.InitialRecoverSnapshot, collections)
 
@@ -112,6 +113,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 		pchannel:          param.ChannelInfo,
 		partitionManagers: managers,
 		collections:       collections,
+		fencedVChannels:   fenced,
 		txnManager:        param.TxnManager,
 		metrics:           metrics,
 	}
@@ -177,6 +179,22 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 		}
 	}
 	return partitionToSegmentManagers, growingBelongs
+}
+
+// newFencedVChannels recovers the fence tombstones from the recovery snapshot.
+//
+// Every vchannel the snapshot reports as SPLITTED is remembered by name, whether
+// or not it keeps this pchannel's single collection registration -- the one that
+// loses a collision to a live successor is precisely the one a stale proxy route
+// still points at.
+func newFencedVChannels(recoverInfos *recovery.RecoverySnapshot) map[string]uint64 {
+	fenced := make(map[string]uint64)
+	for _, vchannelInfo := range recoverInfos.VChannels {
+		if vchannelInfo.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED {
+			fenced[vchannelInfo.GetVchannel()] = vchannelInfo.GetSplitTimeTick()
+		}
+	}
+	return fenced
 }
 
 // newCollectionInfos creates a new collection info map from the recovery snapshot.
@@ -260,8 +278,20 @@ type shardManagerImpl struct {
 	pchannel          types.PChannelInfo
 	partitionManagers map[PartitionUniqueKey]*partitionManager // map partitionID to partition manager
 	collections       map[int64]*CollectionInfo                // map collectionID to collectionInfo
-	metrics           *metricsutil.SegmentAssignMetrics
-	txnManager        TxnManager
+	// fencedVChannels remembers, by name, every vchannel this pchannel has
+	// fenced by shard split, together with its T_switch. It OUTLIVES the entry
+	// in collections: a retired source loses its registration to DropVChannel,
+	// or to a successor taking this pchannel's single slot, and a write that
+	// still routes to it has to be answered SHARD_FENCED so the proxy refreshes
+	// -- an unrecoverable error instead fails a write that one refresh would
+	// have completed.
+	//
+	// Best effort across a restart: a vchannel already dropped before the
+	// restart leaves nothing in the snapshot to seed from, and a write to it
+	// falls back to the unknown-route answer.
+	fencedVChannels map[string]uint64
+	metrics         *metricsutil.SegmentAssignMetrics
+	txnManager      TxnManager
 }
 
 type CollectionInfo struct {
