@@ -268,8 +268,7 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 	// at the proxy, instead of fanning out a GenericValue kBytesVal that
 	// segcore's plan parser cannot evaluate.
 	if IsBytes(value) {
-		return nil, merr.WrapErrParameterInvalidMsg(
-			"a bytes template value can only be used as the bloom_match filter argument")
+		return nil, bytesTemplateValueError()
 	}
 	if typeutil.IsJSONType(dataType) {
 		return value, nil
@@ -302,6 +301,11 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 	}
 
 	return nil, merr.WrapErrQueryPlanMsg("cannot cast value to %s, value: %s", dataType.String(), value)
+}
+
+func bytesTemplateValueError() error {
+	return merr.WrapErrParameterInvalidMsg(
+		"a bytes template value can only be used as the bloom_match filter argument")
 }
 
 func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, arithExprDataType schemapb.DataType, columnInfo *planpb.ColumnInfo, operandExpr, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
