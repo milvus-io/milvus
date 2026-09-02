@@ -177,7 +177,7 @@ func StatusWithErrorCode(err error, code commonpb.ErrorCode) *commonpb.Status {
 
 func oldCode(code int32) commonpb.ErrorCode {
 	switch code {
-	case ErrServiceNotReady.code(), ErrCollectionSchemaVersionNotReady.code():
+	case ErrServiceNotReady.code(), ErrCollectionSchemaVersionNotReady.code(), ErrCollectionRoutingStale.code():
 		return commonpb.ErrorCode_NotReadyServe
 
 	case ErrCollectionNotFound.code():
@@ -679,6 +679,17 @@ func WrapErrCollectionSchemaMisMatch(collection any, msg ...string) error {
 	err := wrapFields(ErrCollectionSchemaMismatch, value("collection", collection))
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+// WrapErrCollectionRoutingStale wraps ErrCollectionRoutingStale with the shard
+// the caller could not place a key on.
+func WrapErrCollectionRoutingStale(vchannel string, msgAndArgs ...any) error {
+	err := wrapFields(ErrCollectionRoutingStale, value("vchannel", vchannel))
+	if len(msgAndArgs) > 0 {
+		msg := msgAndArgs[0].(string)
+		err = errors.Wrapf(err, msg, msgAndArgs[1:]...)
 	}
 	return err
 }

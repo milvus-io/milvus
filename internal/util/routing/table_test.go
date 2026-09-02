@@ -269,3 +269,71 @@ func TestRoutesByPrimaryKey(t *testing.T) {
 		})
 	}
 }
+
+// The legacy rule is "shard i owns residue i at modulus len(channels)", so a
+// shorter shard list means some vchannel was declared non-writable while the
+// collection reports no modulus. Real meta cannot be in that shape -- retiring a
+// shard is what writes residues in the first place -- and deriving anyway would
+// route the excluded shard's residue straight back to it.
+func TestDeriveRefusesAShortShardListWithoutAModulus(t *testing.T) {
+	_, err := Derive(0, []string{"v0", "v1", "v2"}, []Shard{{Vchannel: "v0"}, {Vchannel: "v1"}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "only 2 of 3")
+
+	// No shard info at all is the ordinary never-split case and stays legal.
+	table, err := Derive(0, []string{"v0", "v1", "v2"}, nil)
+	require.NoError(t, err)
+	assert.False(t, table.IsExplicit())
+}
+
+// The vchannel list only ever grows: a split retires its source but keeps the
+// name. NumShards has to answer with the shards that actually own keys, or every
+// caller sizing anything by it drifts upward with each split.
+func TestNumShardsCountsTheShardsThatOwnResidues(t *testing.T) {
+	// Four vchannels, two of them retired by an earlier split.
+	vchannels := []string{"v0", "v1", "v2", "v3"}
+	infos := []*schemapb.CollectionShardInfo{
+		{VchannelName: "v0", State: schemapb.ShardState_ShardDropped},
+		{VchannelName: "v1", State: schemapb.ShardState_ShardSplitting},
+		{VchannelName: "v2", State: schemapb.ShardState_ShardNormal, Routing: &schemapb.CollectionShardInfo_HashRouting{
+			HashRouting: &schemapb.HashRouting{Buckets: []uint64{0}},
+		}},
+		{VchannelName: "v3", State: schemapb.ShardState_ShardNormal, Routing: &schemapb.CollectionShardInfo_HashRouting{
+			HashRouting: &schemapb.HashRouting{Buckets: []uint64{1}},
+		}},
+	}
+	shards, err := ShardsFromMeta(vchannels, infos)
+	require.NoError(t, err)
+	require.Len(t, shards, 2)
+
+	table, err := Derive(2, vchannels, shards)
+	require.NoError(t, err)
+	assert.Equal(t, 2, table.NumShards(), "the two retired vchannels own no key")
+
+	// A collection that has never split has no residues, and there the channel
+	// count IS the shard count.
+	legacy, err := Derive(0, vchannels, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 4, legacy.NumShards())
+}
+
+// A Creating shard is admitted so a split's targets are write-routable from the
+// routing commit onward. That rests on the commit publishing the entry WITH its
+// residues; one published without them takes the whole collection down rather
+// than only that shard, so the refusal has to name it.
+func TestShardsFromMetaOnACreatingShardWithoutResidues(t *testing.T) {
+	vchannels := []string{"v0", "v1"}
+	infos := []*schemapb.CollectionShardInfo{
+		{VchannelName: "v0", State: schemapb.ShardState_ShardNormal, Routing: &schemapb.CollectionShardInfo_HashRouting{
+			HashRouting: &schemapb.HashRouting{Buckets: []uint64{0, 1}},
+		}},
+		{VchannelName: "v1", State: schemapb.ShardState_ShardCreating},
+	}
+	shards, err := ShardsFromMeta(vchannels, infos)
+	require.NoError(t, err, "ShardsFromMeta admits it; Derive is where it is caught")
+
+	_, err = Derive(2, vchannels, shards)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"v1"`)
+	assert.Contains(t, err.Error(), "owns no residue")
+}
