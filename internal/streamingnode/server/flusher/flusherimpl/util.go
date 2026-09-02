@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
@@ -36,7 +37,19 @@ func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []str
 			continue
 		}
 		if errors.Is(err, errChannelLifetimeUnrecoverable) {
-			impl.logger.Warn(ctx, "channel has been dropped, skip to recover flusher for vchannel", mlog.FieldVChannel(vchannel[i]))
+			// Two different situations share this answer, and only one of them
+			// is benign. A vchannel datacoord has genuinely dropped is expected.
+			// A vchannel datacoord does not know YET is not: a split target
+			// whose genesis landed and whose recovery snapshot persisted, but
+			// whose start position the coordinator has not recorded, gets the
+			// same ErrChannelNotAvailable -- and skipping it leaves a vchannel
+			// the shard manager accepts writes for and the flusher silently
+			// drops, until the next restart after the coordinator catches up.
+			// Nothing here can tell the two apart, so it is logged where it can
+			// be noticed rather than at the level of an expected event.
+			impl.logger.Error(ctx, "datacoord has no recovery info for a vchannel in the recovery snapshot; "+
+				"if this vchannel is not dropped its writes will not be flushed until the next restart",
+				mlog.FieldVChannel(vchannel[i]))
 			continue
 		}
 		return nil, nil, errors.Wrapf(err, "when get recovery info of vchannel %s", vchannel[i])
@@ -44,7 +57,13 @@ func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []str
 
 	var checkpoint message.MessageID
 	walName := impl.wal.Get().WALName()
-	for _, info := range recoveryInfos {
+	for v, info := range recoveryInfos {
+		// MustGet... panics on an empty msg id, and an empty one is legitimate
+		// for exactly one backend, so test the condition the dispatcher tests
+		// rather than trusting datacoord to have filled it in.
+		if !msgdispatcher.SeekablePosition(info.GetInfo().GetSeekPosition()) {
+			return nil, nil, errors.Errorf("vchannel %s has an unseekable recovery position", v)
+		}
 		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytesWithWALName(walName, info.GetInfo().GetSeekPosition().GetMsgID())
 		if checkpoint == nil || messageID.LT(checkpoint) {
 			checkpoint = messageID
