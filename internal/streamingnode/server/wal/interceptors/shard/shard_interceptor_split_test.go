@@ -81,16 +81,51 @@ func newTestCreateVChannelMutableMessage(vchannel string, collectionID int64) me
 			Routing:              &schemapb.HashRouting{Buckets: []uint64{0}},
 			RoutingModulus:       2,
 		}).
+		WithBody(&message.CreateCollectionRequest{
+			// A genesis without a schema is refused by the interceptor, so the
+			// ordinary fixture carries the minimal one.
+			CollectionSchema: &schemapb.CollectionSchema{Name: "test"},
+		}).
+		MustBuildMutable().
+		WithTimeTick(100).
+		WithLastConfirmedUseMessageID()
+}
+
+// The shard manager would register a nil schema and the recovery storage an
+// empty non-nil one, so the vchannel would behave differently before and after a
+// restart. The interceptor is the only point that can enforce this against any
+// coordinator version, and CreateCollection has had the same guard all along.
+func TestShardInterceptorRefusesCreateVChannelWithoutSchema(t *testing.T) {
+	i, _ := newTestShardInterceptor(t)
+
+	msg := message.NewCreateVChannelMessageBuilderV2().
+		WithVChannel("v2").
+		WithHeader(&message.CreateVChannelMessageHeader{
+			CollectionId:   7,
+			PartitionIds:   []int64{2},
+			Routing:        &schemapb.HashRouting{Buckets: []uint64{0}},
+			RoutingModulus: 2,
+		}).
 		WithBody(&message.CreateCollectionRequest{}).
 		MustBuildMutable().
 		WithTimeTick(100).
 		WithLastConfirmedUseMessageID()
+
+	msgID, err := i.DoAppend(context.Background(), msg,
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			assert.Fail(t, "a genesis without a schema must not be appended")
+			return nil, nil
+		})
+	assert.Nil(t, msgID)
+	assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
 }
 
 func TestShardInterceptorCreateVChannelMessage(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
 	shardManager.EXPECT().CheckIfVChannelCanBeCreated(int64(7), "v2").Return(nil).Once()
 	shardManager.EXPECT().CreateVChannel(mock.Anything).Once()
+	// the genesis registered, so the function-runner key is allocated.
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(7), "v2").Return(nil).Once()
 
 	appended := false
 	msgID, err := i.DoAppend(context.Background(), newTestCreateVChannelMutableMessage("v2", 7),
@@ -120,6 +155,7 @@ func TestShardInterceptorCreateVChannelMessageOnExistingCollection(t *testing.T)
 	// appended and applied (idempotent), only a warning is logged.
 	shardManager.EXPECT().CheckIfVChannelCanBeCreated(int64(7), "v2").Return(shards.ErrCollectionExists).Once()
 	shardManager.EXPECT().CreateVChannel(mock.Anything).Once()
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(7), "v2").Return(nil).Once()
 
 	appended := false
 	_, err := i.DoAppend(context.Background(), newTestCreateVChannelMutableMessage("v2", 7),
@@ -316,6 +352,7 @@ func TestShardInterceptorCreateVChannelAllocatesFunctionRunners(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
 	shardManager.EXPECT().CheckIfVChannelCanBeCreated(collectionID, vchannel).Return(nil).Once()
 	shardManager.EXPECT().CreateVChannel(mock.Anything).Once()
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(collectionID, vchannel).Return(nil).Once()
 
 	_, err := i.DoAppend(context.Background(),
 		newTestCreateVChannelMutableMessageWithSchema(vchannel, collectionID, schema),
