@@ -139,11 +139,15 @@ func DeriveHashPartial(modulus uint64, shards []HashShard) (*ResidueTable, error
 // routing routes through the same lookup as one that does — there is no second
 // code path that could drift from it.
 func deriveCompat(channels []string) (*ResidueTable, error) {
-	shards := make([]HashShard, 0, len(channels))
-	for i, ch := range channels {
-		shards = append(shards, HashShard{Vchannel: ch, Buckets: []uint64{uint64(i)}})
+	modulus, shards, err := LegacyShards(channels)
+	if err != nil {
+		return nil, err
 	}
-	return DeriveHash(uint64(len(channels)), shards)
+	hashShards := make([]HashShard, 0, len(shards))
+	for _, s := range shards {
+		hashShards = append(hashShards, HashShard(s))
+	}
+	return DeriveHash(modulus, hashShards)
 }
 
 // NumSlots returns the routing modulus M.

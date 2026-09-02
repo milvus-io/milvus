@@ -337,3 +337,90 @@ func TestShardsFromMetaOnACreatingShardWithoutResidues(t *testing.T) {
 	assert.Contains(t, err.Error(), `"v1"`)
 	assert.Contains(t, err.Error(), "owns no residue")
 }
+
+// A permuted infos array is the one malformed shape every check downstream
+// accepts: the residues still tile [0, M) exactly, so Derive, DeriveHash and
+// DeriveHashPartial are all satisfied while every residue ends up bound to a
+// shard that does not own it. Inserts land on the wrong shard, deletes match
+// nothing, and nothing raises an error. The name is the only signal.
+func TestShardsFromMetaRefusesInfosOutOfOrder(t *testing.T) {
+	vchannels := []string{"v0", "v1"}
+	shardInfo := func(name string, residue uint64) *schemapb.CollectionShardInfo {
+		return &schemapb.CollectionShardInfo{
+			VchannelName: name,
+			State:        schemapb.ShardState_ShardNormal,
+			Routing: &schemapb.CollectionShardInfo_HashRouting{
+				HashRouting: &schemapb.HashRouting{Buckets: []uint64{residue}},
+			},
+		}
+	}
+
+	// In order: accepted, and the residues land where the names say.
+	shards, err := ShardsFromMeta(vchannels, []*schemapb.CollectionShardInfo{
+		shardInfo("v0", 0), shardInfo("v1", 1),
+	})
+	require.NoError(t, err)
+	require.Len(t, shards, 2)
+	assert.Equal(t, []uint64{0}, shards[0].Buckets)
+
+	// Swapped: same length, still disjoint, still covering. Refused only because
+	// the names disagree with the positions.
+	_, err = ShardsFromMeta(vchannels, []*schemapb.CollectionShardInfo{
+		shardInfo("v1", 1), shardInfo("v0", 0),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "names vchannel")
+
+	// A permutation that moves a retired entry onto a live vchannel is caught by
+	// the same check, before the state is even read.
+	_, err = ShardsFromMeta(vchannels, []*schemapb.CollectionShardInfo{
+		{VchannelName: "v1", State: schemapb.ShardState_ShardDropped},
+		shardInfo("v0", 0),
+	})
+	require.Error(t, err)
+
+	// A collection persisted before the field existed carries no name, and must
+	// keep working on positional alignment alone.
+	shards, err = ShardsFromMeta(vchannels, []*schemapb.CollectionShardInfo{
+		{State: schemapb.ShardState_ShardNormal, Routing: &schemapb.CollectionShardInfo_HashRouting{
+			HashRouting: &schemapb.HashRouting{Buckets: []uint64{0}},
+		}},
+		{State: schemapb.ShardState_ShardNormal, Routing: &schemapb.CollectionShardInfo_HashRouting{
+			HashRouting: &schemapb.HashRouting{Buckets: []uint64{1}},
+		}},
+	})
+	require.NoError(t, err)
+	assert.Len(t, shards, 2)
+}
+
+// The never-split convention has exactly one implementation, and it is keyed on
+// the vchannel list's order -- a caller enumerating from a map would produce a
+// permutation of it that nothing downstream can detect.
+func TestLegacyShardsIsTheOneImplementationOfTheConvention(t *testing.T) {
+	vchannels := []string{"v0", "v1", "v2"}
+	modulus, shards, err := LegacyShards(vchannels)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(3), modulus)
+	require.Len(t, shards, 3)
+	for i, s := range shards {
+		assert.Equal(t, vchannels[i], s.Vchannel)
+		assert.Equal(t, []uint64{uint64(i)}, s.Buckets)
+	}
+
+	// It agrees with what Derive builds for the same collection, which is the
+	// property that makes it safe to plan a first split from.
+	table, err := Derive(0, vchannels, nil)
+	require.NoError(t, err)
+	for _, s := range shards {
+		got, err := table.Route(s.Buckets[0])
+		require.NoError(t, err)
+		assert.Equal(t, s.Vchannel, got)
+	}
+
+	_, _, err = LegacyShards(nil)
+	assert.Error(t, err)
+	_, _, err = LegacyShards([]string{"v0", ""})
+	assert.Error(t, err)
+	_, _, err = LegacyShards([]string{"v0", "v0"})
+	assert.Error(t, err)
+}
