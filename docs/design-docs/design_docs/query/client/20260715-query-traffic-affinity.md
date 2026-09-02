@@ -384,4 +384,20 @@ and downstream request distribution:
 4. selected candidate count;
 5. selected node ID.
 
+Metric:
+
+```text
+milvus_proxy_query_traffic_routing_decision_count{rule_name}
+```
+
+`rule_name` is the matched rule name. Special cases use reserved `__` values:
+
+```text
+__disabled
+__error
+__no_policy
+__no_matching_rule
+__no_candidate
+```
+
 Arbitrary Session label keys and values must not be used as metric labels.
