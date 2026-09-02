@@ -92,6 +92,14 @@ type SegmentCatalogMutation struct {
 	// the record is re-read and projected under indexMeta's per-buildID lock,
 	// so the persisted value cannot be built from a stale read.
 	SegmentIndex *SegmentIndexMutation
+
+	// setManifestHasIndex is filled by the commit framework, never by callers
+	// (both entry points overwrite it): it records that the revision this
+	// commit publishes carries at least one index entry, and
+	// applySegmentCatalogTypedFields folds it into the sticky
+	// SegmentInfo.manifest_has_index marker in the same catalog transaction,
+	// which is what lets reload trust a false marker as proof of no entry.
+	setManifestHasIndex bool
 }
 
 // SegmentIndexMutationType selects which change a SegmentIndexMutation makes
@@ -152,6 +160,9 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	if err := validateExpectedManifestUsage(commit); err != nil {
 		return err
 	}
+	// Framework-owned, overwritten regardless of what the caller set: the
+	// marker must reflect the revision actually being published.
+	commit.CatalogMutation.setManifestHasIndex = manifestMutationAddsIndexEntry(commit.Mutation)
 
 	// KeyLock.Lock is synchronous: a caller blocks here only when another
 	// transaction for this segment is in flight. There is no asynchronous
@@ -401,6 +412,17 @@ func commitPublishesIndexEntry(commit SegmentManifestCommit, buildID int64) bool
 	return false
 }
 
+// manifestMutationAddsIndexEntry reports whether the revision this mutation
+// publishes carries an index entry, which is what makes the commit set the
+// segment's sticky manifest_has_index marker. Like commitPublishesIndexEntry
+// it reads the mutation, not the caller's intent, and a Noop publishes a
+// revision this framework did not build and cannot vouch for, so it never
+// sets the marker.
+func manifestMutationAddsIndexEntry(mutation ManifestMutation) bool {
+	return mutation.Type == ManifestMutationCommitUpdates &&
+		mutation.Updates != nil && len(mutation.Updates.Indexes) > 0
+}
+
 // getSegmentManifestLocks also supports focused unit tests that construct a
 // lightweight meta directly instead of calling newMeta.
 func (m *meta) getSegmentManifestLocks() *lock.KeyLock[int64] {
@@ -570,6 +592,12 @@ func applySegmentCatalogTypedFields(segment *SegmentInfo, mutation SegmentCatalo
 	if mutation.IsImporting != nil {
 		segment.IsImporting = *mutation.IsImporting
 	}
+	if mutation.setManifestHasIndex {
+		// Sticky, set-only: retraction never clears it. A wrong false would
+		// make reload skip a manifest that still carries entries and silently
+		// drop indexes; a stale true only costs one extra manifest read.
+		segment.ManifestHasIndex = true
+	}
 }
 
 // preparedSegmentManifest pairs a commit with the immutable manifest revision that
@@ -676,6 +704,8 @@ func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentMani
 			return merr.WrapErrServiceInternalMsg("duplicate segment ID %d in batch manifest commit", commit.SegmentID)
 		}
 		idSet[commit.SegmentID] = struct{}{}
+		// Framework-owned, same rule as the single-segment path.
+		commits[i].CatalogMutation.setManifestHasIndex = manifestMutationAddsIndexEntry(commit.Mutation)
 	}
 
 	if len(commits) == 0 {

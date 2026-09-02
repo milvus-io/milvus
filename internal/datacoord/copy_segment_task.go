@@ -982,6 +982,13 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			if manifestPath := result.GetManifestPath(); manifestPath != "" {
 				operators = append(operators, UpdateManifest(result.GetSegmentId(), manifestPath))
 				publishedBuilds, err = verifyCopiedManifestIndexOwnership(ctx, result, task, meta)
+				// The adopted manifest carries index entries, so the sticky
+				// manifest_has_index marker must land in the same transaction
+				// as the pointer: this is the one manifest publication that
+				// bypasses CommitSegmentManifest's framework-filled marker.
+				if err == nil && len(publishedBuilds) > 0 {
+					operators = append(operators, UpdateManifestHasIndex(result.GetSegmentId()))
+				}
 			}
 			if err == nil {
 				err = meta.UpdateSegmentsInfo(ctx, operators...)
@@ -1295,6 +1302,34 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 		manifestPublished := storageV3 && published
 		if !manifestPublished {
 			backfillPending = storageV3
+		}
+		if storageV3 && !manifestPublished && writeSegmentIndexToManifest() {
+			// With manifest publication on, the AddSegmentIndex below skips
+			// the etcd write for this manifest-backed segment, so a record
+			// whose entry the manifest does not carry would be memory-only
+			// and silently vanish on the next restart. The entry can only be
+			// missing because the DataNode that ran the copy predates
+			// manifest index republication (a current worker writes every
+			// target entry it has a definition for, and definition-less
+			// indexes were already skipped above). Fail the task rather than
+			// install an index that cannot survive.
+			err := merr.WrapErrServiceInternalMsg(
+				"copied manifest of segment %d carries no entry for index %q (buildID %d) while segment index records are manifest-resident; "+
+					"the DataNode that ran the copy likely predates manifest index republication - upgrade it and retry the restore",
+				result.GetSegmentId(), indexInfo.GetIndexName(), indexInfo.GetBuildId())
+			if updateErr := copyMeta.UpdateTask(ctx, task.GetTaskId(),
+				UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
+				UpdateCopyTaskReason(err.Error())); updateErr != nil {
+				mlog.Warn(ctx, "failed to update task state to Failed",
+					mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
+			}
+			if updateErr := copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
+				UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+				UpdateCopyJobReason(err.Error())); updateErr != nil {
+				mlog.Warn(ctx, "failed to update job state to Failed",
+					mlog.FieldJobID(task.GetJobId()), mlog.Err(updateErr))
+			}
+			return err
 		}
 
 		now := time.Now().Unix()

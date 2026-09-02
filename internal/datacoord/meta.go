@@ -1884,6 +1884,29 @@ func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
 	}
 }
 
+// UpdateManifestHasIndex sets the segment's sticky manifest_has_index marker,
+// for callers that adopt a manifest carrying index entries outside
+// CommitSegmentManifest (the copy sync path adopting a worker-republished
+// manifest). It must ride in the same UpdateSegmentsInfo transaction as the
+// UpdateManifest that publishes the pointer, so the marker can never lag the
+// entries it vouches for. Set-only and idempotent: there is no clearing
+// counterpart, a wrong false would make reload silently drop indexes.
+func UpdateManifestHasIndex(segmentID int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			mlog.Warn(modPack.meta.ctx, "meta update: set manifest has index failed - segment not found",
+				mlog.Int64("segmentID", segmentID))
+			return false
+		}
+		if segment.ManifestHasIndex {
+			return false
+		}
+		segment.ManifestHasIndex = true
+		return true
+	}
+}
+
 func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
