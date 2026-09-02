@@ -300,10 +300,23 @@ record goes to etcd and no manifest index entry is produced at all
 (`publishIndexToManifest` declines before touching a manifest, and the copy
 path ships the worker no target index definitions, so it retracts inherited
 entries and writes none); on publishes the record into the segment manifest
-and skips the `SegmentIndex` catalog writes - `CreateSegmentIndex`,
-`AlterSegmentIndexes`, and the upsert action staged into a manifest commit -
-while leaving DataCoord's in-memory index state untouched. Where durable state
-lives is what the switch controls; what DataCoord itself observes is not.
+and gates the `SegmentIndex` catalog writes, while leaving DataCoord's
+in-memory index state untouched. Where durable state lives is what the switch
+controls; what DataCoord itself observes is not.
+
+Gating is not uniformly a skip, because a build can straddle the off-to-on
+flip: a build started while the switch was off leaves an in-progress etcd row,
+and after the flip that row's build completes into the manifest instead. If
+the gate merely skipped the etcd write, the stale row would survive forever -
+boot-time etcd-wins dedup would resurrect its non-terminal state over the
+manifest's finished entry and the inspector would re-dispatch the same buildID
+after every restart, with no GC path for the row. So each gated site does what
+its situation requires: `CreateSegmentIndex` is skipped outright (every caller
+allocates a fresh buildID, so no row can pre-exist); a gated record in
+`AlterSegmentIndexes` instead gets its row deleted via `DropSegmentIndex` (a
+no-op when none was written); and the upsert action staged into a manifest
+commit becomes a `DropSegmentIndex` action in the very transaction that
+publishes the entry, so the row can never outlive the record superseding it.
 
 The suppression is decided **per segment, not globally**: it requires both the
 switch to be on and the segment to be manifest-backed (StorageV3 with a
