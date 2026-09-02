@@ -129,18 +129,9 @@ func (m *FileResourceObserver) syncLoop() {
 func (m *FileResourceObserver) Start() {
 	if m.qnMode == fileresource.SyncMode || m.dnMode == fileresource.SyncMode || m.proxyMode == fileresource.SyncMode {
 		m.startonce.Do(func() {
-			resources, _ := m.meta.ListFileResource(m.ctx)
-			if len(resources) == 0 {
-				// Node registrations can enqueue a notification before the observer
-				// starts. Drop that startup notification when there is nothing to sync.
-				select {
-				case <-m.notifyCh:
-				default:
-				}
-			}
 			m.wg.Add(1)
 			go m.syncLoop()
-			if len(resources) > 0 {
+			if !m.IsEmpty() {
 				m.Notify()
 			}
 		})
@@ -159,6 +150,14 @@ func (m *FileResourceObserver) Notify() {
 	case m.notifyCh <- struct{}{}:
 	default:
 	}
+}
+
+func (m *FileResourceObserver) IsEmpty() bool {
+	if m.meta == nil {
+		return true
+	}
+	resources, _ := m.meta.ListFileResource(m.ctx)
+	return len(resources) == 0
 }
 
 // if node sync at least once, it will be a valid node.

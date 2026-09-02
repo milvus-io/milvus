@@ -88,11 +88,13 @@ func (s *FileResourceObserverSuite) TestStartStop() {
 		// A non-zero version with no current resources represents a restart after
 		// all resources were removed. Startup should not issue an empty sync RPC.
 		mockMeta := mockrootcoord.NewIMetaTable(s.T())
-		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(2)).Once()
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(2)).Twice()
 		observer.meta = mockMeta
 
-		// Simulate a node registration notification queued during coordinator startup.
-		observer.Notify()
+		// Simulate a node registration notification during coordinator startup.
+		if !observer.IsEmpty() {
+			observer.Notify()
+		}
 		observer.Start()
 		// Start should be idempotent
 		observer.Start()
@@ -100,6 +102,39 @@ func (s *FileResourceObserverSuite) TestStartStop() {
 
 		observer.Stop()
 		// Stop should be idempotent
+		observer.Stop()
+	})
+
+	s.Run("start_preserves_pending_mutation_retry", func() {
+		qnManager := qcsession.NewNodeManager()
+		qnManager.Add(qcsession.NewNodeInfo(qcsession.ImmutableNodeInfo{NodeID: 1}))
+		mockCluster := qcsession.NewMockCluster(s.T())
+		mockCluster.EXPECT().SyncFileResource(mock.Anything, int64(1), mock.MatchedBy(func(req *internalpb.SyncFileResourceRequest) bool {
+			return len(req.GetResources()) == 0 && req.GetVersion() == 2
+		})).Return(merr.Success(), nil).Once()
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			notifyCh:     make(chan struct{}, 1),
+			closeCh:      make(chan struct{}),
+			qnMode:       fileresource.SyncMode,
+			dnMode:       fileresource.CloseMode,
+			qnManager:    qnManager,
+			cluster:      mockCluster,
+		}
+
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(2)).Twice()
+		observer.meta = mockMeta
+
+		// Mutation retries use the unconditional notification path and must not be
+		// discarded just because the observer starts with an empty resource list.
+		observer.Notify()
+		observer.Start()
+		s.Eventually(func() bool {
+			info, ok := observer.distribution.Get(1)
+			return ok && info.Version == 2
+		}, time.Second, 10*time.Millisecond)
 		observer.Stop()
 	})
 
@@ -162,6 +197,18 @@ func (s *FileResourceObserverSuite) TestNotify() {
 	// Second notify should not block (channel already has a message)
 	observer.Notify()
 	s.Len(observer.notifyCh, 1)
+}
+
+func (s *FileResourceObserverSuite) TestIsEmpty() {
+	observer := &FileResourceObserver{ctx: s.ctx}
+	s.True(observer.IsEmpty())
+
+	mockMeta := mockrootcoord.NewIMetaTable(s.T())
+	mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(1)).Once()
+	mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{Name: "test"}}, uint64(2)).Once()
+	observer.meta = mockMeta
+	s.True(observer.IsEmpty())
+	s.False(observer.IsEmpty())
 }
 
 func (s *FileResourceObserverSuite) TestCheckNodeSynced() {
@@ -733,7 +780,6 @@ func (s *FileResourceObserverSuite) TestRetryNotify() {
 		notifyCh:     make(chan struct{}, 1),
 		closeCh:      make(chan struct{}),
 	}
-
 	// Clear channel first
 	select {
 	case <-observer.notifyCh:
