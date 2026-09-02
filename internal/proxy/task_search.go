@@ -551,6 +551,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
 	t.hybridSubSearchInfos = make([]hybridSubSearchInfo, len(t.request.GetSubReqs()))
+	filterSharingCandidates := make([]filterSharingCandidate, len(t.request.GetSubReqs()))
 	t.hybridElementLevel = false
 	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
@@ -699,11 +700,18 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.request.GetDbName(), t.collectionName, metrics.HybridSearchLabel, strconv.FormatInt(internalSubReq.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(internalSubReq.PlaceholderGroup, int(internalSubReq.GetNq()))))
 		}
 		internalSubReq.PlaceholderGroup = convertedPlaceholder
+		filterSharingCandidates[index] = filterSharingCandidateOf(
+			subReq.GetDsl(), subReq.GetExprTemplateValues(), plan, queryInfo)
 		t.SubReqs[index] = internalSubReq
 		t.queryInfos[index] = queryInfo
 		log.Debug(ctx, "proxy init search request",
 			mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if a large term is passed; membership blobs are redacted.
+	}
+
+	// Every plan is built, so predicates can now be compared against each other.
+	for index, group := range assignFilterSharingGroups(filterSharingCandidates) {
+		t.SubReqs[index].FilterSharingGroup = group
 	}
 
 	t.hybridElementLevel = inferElementLevelHybrid(t.hybridSubSearchInfos)
