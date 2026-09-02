@@ -379,13 +379,14 @@ func setupManifestReloadMeta(t *testing.T) *meta {
 	m, err := newMemoryMeta(t)
 	require.NoError(t, err)
 	require.NoError(t, m.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
-		ID:             segID,
-		CollectionID:   collID,
-		PartitionID:    partID,
-		State:          commonpb.SegmentState_Flushed,
-		NumOfRows:      100,
-		StorageVersion: storage.StorageV3,
-		ManifestPath:   packed.MarshalManifestPath("/tmp/test-reload/insert_log/100/10/5001", 3),
+		ID:               segID,
+		CollectionID:     collID,
+		PartitionID:      partID,
+		State:            commonpb.SegmentState_Flushed,
+		NumOfRows:        100,
+		StorageVersion:   storage.StorageV3,
+		ManifestPath:     packed.MarshalManifestPath("/tmp/test-reload/insert_log/100/10/5001", 3),
+		ManifestHasIndex: true,
 	})))
 	// Index definitions stay in etcd regardless of the switch: a manifest
 	// cannot record "the user asked for an HNSW index on this field".

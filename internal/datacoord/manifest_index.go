@@ -337,10 +337,19 @@ func (m *meta) initManifestIndexBackfillPending(ctx context.Context) {
 		mlog.Int("segmentsPendingBackfill", pending))
 }
 
-// reloadSegmentIndexesFromManifests rebuilds the finished-index half of
-// indexMeta from the segment manifests, for the deployment where
-// dataCoord.index.writeSegmentIndexToManifest is on and a manifest is
-// therefore the only durable record of a completed artifact.
+// reloadSegmentIndexesFromManifests rebuilds the manifest-resident half of
+// the finished-index records: every segment whose durable manifest_has_index
+// marker says its manifest has carried an index entry gets its manifest read
+// and the entries etcd does not already have installed.
+//
+// It runs unconditionally, gated per segment by the marker rather than by
+// dataCoord.index.writeSegmentIndexToManifest - recovery is driven by where
+// the records durably are, not by where the current configuration would put
+// them, which is what makes the switch safe to flip in both directions. The
+// marker is written in the same catalog transaction as the first index entry
+// and never cleared, so a false marker proves the manifest never carried an
+// entry (zero object reads on an all-etcd cluster) while a stale true costs
+// exactly one extra manifest read here.
 //
 // etcd wins on conflict, matching every other manifest-index consumer: a
 // buildID already loaded from the catalog is left untouched, so records
@@ -349,10 +358,11 @@ func (m *meta) initManifestIndexBackfillPending(ctx context.Context) {
 // segment's records always stay in etcd, so nothing of theirs needs
 // recovering here.
 //
-// A manifest that cannot be read FAILS STARTUP. This is deliberately the same
-// fail-closed contract the etcd path has - a ListSegmentIndexes error aborts
-// newIndexMeta and therefore newMeta - and the switch is precisely what makes
-// the two paths equivalent in authority. Skipping an unreadable manifest would
+// A marked manifest that cannot be read FAILS STARTUP. This is deliberately
+// the same fail-closed contract the etcd path has - a ListSegmentIndexes
+// error aborts newIndexMeta and therefore newMeta - and the marker is
+// precisely what scopes it: only segments proven to carry entries can abort
+// boot. Skipping an unreadable manifest would
 // leave meta silently incomplete, and a silently incomplete indexMeta is not
 // merely "that segment looks unindexed": garbage collection treats an absent
 // SegmentIndex as proof the artifact is garbage. recycleUnusedIndexFilesV0's
@@ -366,6 +376,13 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) error {
 	scanned := 0
 	segments := m.SelectSegments(ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		if !isSegmentHealthy(segment) || segment.GetStorageVersion() < storage.StorageV3 {
+			return false
+		}
+		if !segment.GetManifestHasIndex() {
+			// The sticky marker is written with the first index entry in the
+			// same catalog transaction, so false proves the manifest never
+			// carried one - no read needed, and no boot-time failure surface
+			// for a manifest that cannot contribute records anyway.
 			return false
 		}
 		if segment.GetLevel() == datapb.SegmentLevel_L0 {

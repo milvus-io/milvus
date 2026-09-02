@@ -3036,12 +3036,13 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_ManifestUnreadable(t *test
 		require.NoError(t, err)
 		basePath := "/tmp/test-gc-manifest-unreadable/insert_log/100/10/3001"
 		require.NoError(t, m.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
-			ID:             3001,
-			CollectionID:   100,
-			PartitionID:    10,
-			State:          commonpb.SegmentState_Dropped,
-			StorageVersion: storage.StorageV3,
-			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+			ID:               3001,
+			CollectionID:     100,
+			PartitionID:      10,
+			State:            commonpb.SegmentState_Dropped,
+			StorageVersion:   storage.StorageV3,
+			ManifestPath:     packed.MarshalManifestPath(basePath, 1),
+			ManifestHasIndex: true,
 		})))
 		return newGarbageCollector(m, newMockHandler(), GcOption{
 			cli: storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test")),
@@ -5103,12 +5104,13 @@ func setupV3SegIndexGC(t *testing.T) (*meta, string, string) {
 	m, err := newMemoryMeta(t)
 	require.NoError(t, err)
 	require.NoError(t, m.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
-		ID:             segID,
-		CollectionID:   collID,
-		PartitionID:    partID,
-		State:          commonpb.SegmentState_Flushed,
-		StorageVersion: storage.StorageV3,
-		ManifestPath:   packed.MarshalManifestPath(basePath, 3),
+		ID:               segID,
+		CollectionID:     collID,
+		PartitionID:      partID,
+		State:            commonpb.SegmentState_Flushed,
+		StorageVersion:   storage.StorageV3,
+		ManifestPath:     packed.MarshalManifestPath(basePath, 3),
+		ManifestHasIndex: true,
 	})))
 	require.NoError(t, m.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 		CollectionID:          collID,
@@ -5257,13 +5259,14 @@ func TestGarbageCollector_DroppedSegmentIndexFilesComeFromManifestAfterReload(t 
 	m, err := newMemoryMeta(t)
 	require.NoError(t, err)
 	require.NoError(t, m.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
-		ID:             segmentID,
-		CollectionID:   100,
-		PartitionID:    10,
-		State:          commonpb.SegmentState_Dropped,
-		NumOfRows:      100,
-		StorageVersion: storage.StorageV3,
-		ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+		ID:               segmentID,
+		CollectionID:     100,
+		PartitionID:      10,
+		State:            commonpb.SegmentState_Dropped,
+		NumOfRows:        100,
+		StorageVersion:   storage.StorageV3,
+		ManifestPath:     packed.MarshalManifestPath(basePath, 1),
+		ManifestHasIndex: true,
 	})))
 
 	infos := mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{{
@@ -5314,13 +5317,14 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_UnionsRecordsAndManifest(t
 	m, err := newMemoryMeta(t)
 	require.NoError(t, err)
 	require.NoError(t, m.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
-		ID:             segmentID,
-		CollectionID:   collID,
-		PartitionID:    partID,
-		State:          commonpb.SegmentState_Dropped,
-		NumOfRows:      100,
-		StorageVersion: storage.StorageV3,
-		ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+		ID:               segmentID,
+		CollectionID:     collID,
+		PartitionID:      partID,
+		State:            commonpb.SegmentState_Dropped,
+		NumOfRows:        100,
+		StorageVersion:   storage.StorageV3,
+		ManifestPath:     packed.MarshalManifestPath(basePath, 1),
+		ManifestHasIndex: true,
 	})))
 	require.NoError(t, m.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 		CollectionID:          collID,
@@ -5375,13 +5379,14 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_InvalidManifestEntryBlocks
 	m, err := newMemoryMeta(t)
 	require.NoError(t, err)
 	require.NoError(t, m.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
-		ID:             segmentID,
-		CollectionID:   100,
-		PartitionID:    10,
-		State:          commonpb.SegmentState_Dropped,
-		NumOfRows:      100,
-		StorageVersion: storage.StorageV3,
-		ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+		ID:               segmentID,
+		CollectionID:     100,
+		PartitionID:      10,
+		State:            commonpb.SegmentState_Dropped,
+		NumOfRows:        100,
+		StorageVersion:   storage.StorageV3,
+		ManifestPath:     packed.MarshalManifestPath(basePath, 1),
+		ManifestHasIndex: true,
 	})))
 
 	// A path-escaping file key fails manifestIndexFilePathInfo validation.
