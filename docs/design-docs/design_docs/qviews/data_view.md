@@ -319,7 +319,8 @@ Version choice during reconciliation, in priority order:
 
 | Reconciliation Diff | Version Transition |
 |---|---|
-| New import or flush segments appear | `(S, C) -> (S+1, 0)` |
+| New flush segments appear | `(S, C) -> (S+1, 0)` |
+| New import segments appear | `(S, C) -> (S, C+1)` |
 | Compact handoff appears | `(S, C) -> (S, C+1)` |
 | Only delete frontier differs | unchanged; refresh the latest DataView-derived timetick |
 | No membership or delete frontier diff | unchanged |
@@ -471,8 +472,12 @@ index build finish, and 2PC import must also clear `is_importing`.
 When imported segments become loadable, they join DataView and advance:
 
 ```
-(S, C) -> (S+1, 0)
+(S, C) -> (S, C+1)
 ```
+
+Import joins sealed segments as a membership rewrite at the commit fence; it
+advances `CompactVersion` and leaves `StreamingVersion` untouched (same class
+as compact handoff). `OnFlush` still advances `StreamingVersion`.
 
 L0 import output follows the L0 rules and does not join membership.
 

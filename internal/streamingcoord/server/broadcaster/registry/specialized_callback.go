@@ -76,6 +76,7 @@ var (
 	RegisterRefreshExternalCollectionV2AckCallback = registerMessageAckCallback[*message.RefreshExternalCollectionMessageHeader, *message.RefreshExternalCollectionMessageBody]
 
 	// Import 2PC
+	RegisterCommitImportV2AckCallback = registerMessageAckCallback[*message.CommitImportMessageHeader, *message.CommitImportMessageBody]
 	RegisterRollbackImportV2AckCallback = registerMessageAckCallback[*message.RollbackImportMessageHeader, *message.RollbackImportMessageBody]
 )
 
@@ -145,6 +146,7 @@ func resetMessageAckCallbacks() {
 		message.MessageTypeRefreshExternalCollectionV2: syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Import 2PC
+		message.MessageTypeCommitImportV2:  syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeRollbackImportV2: syncutil.NewFuture[messageInnerAckCallback](),
 	}
 }

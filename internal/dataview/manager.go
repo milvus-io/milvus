@@ -353,7 +353,7 @@ func (m *dataViewManager) OnImport(ctx context.Context, event ImportDataViewEven
 	return m.applyMembershipMutation(ctx, dataViewMembershipMutation{
 		collectionID:  event.CollectionID,
 		addSegmentIDs: event.SegmentIDs,
-		advance:       dataViewAdvanceStreaming,
+		advance:       dataViewAdvanceCompact,
 	})
 }
 

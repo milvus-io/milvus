@@ -152,6 +152,29 @@ func TestTransformBarrierMessagesAdvanceTransformingMVCC(t *testing.T) {
 	assert.Equal(t, VChannelMVCC{GrowingTimetick: 120, TransformingTimetick: 130, Confirmed: true}, mvcc)
 }
 
+func TestCommitImportAdvancesQueryPlanMVCC(t *testing.T) {
+	cm := NewMVCCManager(100)
+	cm.ApplyRecoveryBarrier("vc1", 120)
+
+	// CommitImport behaves like a flush barrier: it must advance the
+	// transforming frontier (QueryNode filters sealed rows by it) and leave
+	// the growing frontier untouched (imported rows never enter growing
+	// segments; moving it would stall WaitMVCCVisible on insert-less
+	// vchannels).
+	cm.UpdateMVCC(createTestMessage(t, 130, "vc1", message.MessageTypeCommitImport, false, true))
+	mvcc := cm.GetMVCCOfVChannel("vc1")
+	assert.Equal(t, VChannelMVCC{GrowingTimetick: 120, TransformingTimetick: 130, Confirmed: false}, mvcc)
+
+	cm.UpdateMVCC(createTestMessage(t, 130, "", message.MessageTypeTimeTick, false, true))
+	mvcc = cm.GetMVCCOfVChannel("vc1")
+	assert.Equal(t, VChannelMVCC{GrowingTimetick: 120, TransformingTimetick: 130, Confirmed: true}, mvcc)
+
+	// A later CommitImport with a smaller timetick must be a no-op.
+	cm.UpdateMVCC(createTestMessage(t, 129, "vc1", message.MessageTypeCommitImport, false, true))
+	mvcc = cm.GetMVCCOfVChannel("vc1")
+	assert.Equal(t, VChannelMVCC{GrowingTimetick: 120, TransformingTimetick: 130, Confirmed: true}, mvcc)
+}
+
 func createTestMessage(
 	t *testing.T,
 	tt uint64,

@@ -25,15 +25,11 @@ import (
 var RegisterDropCollectionV1AckOnceCallback = registerMessageAckOnceCallback[*message.DropCollectionMessageHeader, *message.DropCollectionRequest]
 var RegisterTruncateCollectionV2AckOnceCallback = registerMessageAckOnceCallback[*message.TruncateCollectionMessageHeader, *message.TruncateCollectionMessageBody]
 
-// Import
-var RegisterCommitImportV2AckOnceCallback = registerMessageAckOnceCallback[*message.CommitImportMessageHeader, *message.CommitImportMessageBody]
-
 func resetMessageAckOnceCallbacks() {
 	messageAckOnceCallbacksMu.Lock()
 	defer messageAckOnceCallbacksMu.Unlock()
 	messageAckOnceCallbacks = map[message.MessageTypeWithVersion]*syncutil.Future[messageInnerAckOnceCallback]{
 		message.MessageTypeDropCollectionV1:     syncutil.NewFuture[messageInnerAckOnceCallback](),
 		message.MessageTypeTruncateCollectionV2: syncutil.NewFuture[messageInnerAckOnceCallback](),
-		message.MessageTypeCommitImportV2:       syncutil.NewFuture[messageInnerAckOnceCallback](),
 	}
 }

@@ -48,7 +48,8 @@ func ClassifyTransformLogMessage(msg message.ImmutableMessage) TransformLogKind 
 		message.MessageTypeDropPartition,
 		message.MessageTypeDropCollection,
 		message.MessageTypeTruncateCollection,
-		message.MessageTypeAlterWAL:
+		message.MessageTypeAlterWAL,
+		message.MessageTypeCommitImport:
 		return TransformLogKindBarrier
 	case message.MessageTypeAlterCollection:
 		alter := message.MustAsImmutableAlterCollectionMessageV2(msg)

@@ -17,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -206,9 +205,9 @@ func TestFastAckResolvesCallbackOutsideTaskLock(t *testing.T) {
 
 	metrics := newBroadcasterMetrics()
 	ackScheduler := newAckCallbackScheduler(mlog.With())
-	commitMsg := message.NewCommitImportMessageBuilderV2().
-		WithHeader(&message.CommitImportMessageHeader{CollectionId: 10, JobId: 20}).
-		WithBody(&messagespb.CommitImportMessageBody{}).
+	commitMsg := message.NewDropCollectionMessageBuilderV1().
+		WithHeader(&message.DropCollectionMessageHeader{}).
+		WithBody(&msgpb.DropCollectionRequest{}).
 		WithBroadcast([]string{"v1"}).
 		MustBuildBroadcast().
 		WithBroadcastID(104)
@@ -235,7 +234,7 @@ func TestFastAckResolvesCallbackOutsideTaskLock(t *testing.T) {
 	}
 
 	var callbackCalls atomic.Int32
-	registry.RegisterCommitImportV2AckOnceCallback(func(ctx context.Context, result message.AckResultCommitImportMessageV2) error {
+	registry.RegisterDropCollectionV1AckOnceCallback(func(ctx context.Context, result message.AckResultDropCollectionMessageV1) error {
 		callbackCalls.Add(1)
 		return nil
 	})
