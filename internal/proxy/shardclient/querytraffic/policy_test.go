@@ -61,6 +61,53 @@ func TestCompileMatcherRejectsPartialSourceReference(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestMatcherAnyMatchesEverything(t *testing.T) {
+	m, err := CompileMatcher(MatcherConfig{Any: true})
+	require.NoError(t, err)
+
+	require.True(t, m.Match(Labels{}, Labels{}))
+	require.True(t, m.Match(Labels{"AZ": "az1"}, Labels{"AZ": "az2", "RESOURCE_GROUP": "rg1"}))
+	require.True(t, m.Match(Labels{"AZ": "az1"}, Labels{}))
+}
+
+func TestCompileMatcherRejectsAnyWithOtherFields(t *testing.T) {
+	_, err := CompileMatcher(MatcherConfig{
+		Any:    true,
+		Exists: []string{"AZ"},
+	})
+	require.Error(t, err)
+
+	_, err = CompileMatcher(MatcherConfig{
+		Any: true,
+		Eq:  map[string]string{"AZ": "az1"},
+	})
+	require.Error(t, err)
+}
+
+func TestMatcherNilAndEmptyMatchEverything(t *testing.T) {
+	var nilMatcher *Matcher
+	require.True(t, nilMatcher.Match(Labels{}, Labels{}))
+
+	empty, err := CompileMatcher(MatcherConfig{})
+	require.NoError(t, err)
+	require.True(t, empty.Match(Labels{"AZ": "az1"}, Labels{"RESOURCE_GROUP": "rg1"}))
+}
+
+func TestMatcherNeAndNotInAllowMissingKey(t *testing.T) {
+	m, err := CompileMatcher(MatcherConfig{
+		Ne:    map[string]string{"RESOURCE_GROUP": "rg-old"},
+		NotIn: map[string][]string{"CANARY": {"disabled"}},
+	})
+	require.NoError(t, err)
+
+	// an absent key is not equal to any value and is not in any list
+	require.True(t, m.Match(Labels{}, Labels{"AZ": "az1"}))
+
+	// a key equal to the ne value fails, a key in the not_in list fails
+	require.False(t, m.Match(Labels{}, Labels{"RESOURCE_GROUP": "rg-old"}))
+	require.False(t, m.Match(Labels{}, Labels{"CANARY": "disabled"}))
+}
+
 func TestPolicyRoutesByRuleOrderAndFallback(t *testing.T) {
 	policy, err := Compile(PolicyConfig{
 		Rules: []RuleConfig{

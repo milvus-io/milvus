@@ -345,6 +345,13 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 			return NodeInfo{}, false, err
 		}
 
+		// Preferred node hint takes precedence over query traffic routing.
+		// The hint comes from the meta cache (e.g. shard leader pinned by the
+		// request path) and is a stronger, per-request constraint: routing
+		// policies express cross-node affinity for the candidate set, while
+		// the preferred node already identifies a specific serving node.
+		// When the hint is set and serviceable, it wins; query traffic
+		// routing only applies to requests without a usable hint.
 		if preferredNode, ok := serviceableNodes[workload.PreferredNodeID]; ok {
 			recordPreferredNodeSelection(metrics.PreferredNodeHitLabel)
 			return preferredNode, false, nil

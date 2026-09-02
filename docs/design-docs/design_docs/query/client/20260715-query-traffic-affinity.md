@@ -33,6 +33,12 @@ formed and unavailable nodes have been excluded.
 It only filters or selects a candidate group. The existing load balancer still
 chooses the final QueryNode inside that group.
 
+A request-level preferred node hint, when present and serviceable, is
+returned before the routing policy is applied: the hint is a stronger,
+per-request constraint (for example a shard leader pinned by the request
+path), while routing policies express affinity for the candidate set. Routing
+only applies to requests without a usable hint.
+
 ```text
 query candidates
         │
@@ -93,6 +99,10 @@ The policy supports these label matchers:
 | `not_match: {K: "regex"}` | key value does not match the regular expression |
 
 Multiple matcher fields in the same matcher are combined with AND.
+
+`any: true` is a catch-all matcher: it matches every label set. It must be
+used alone (for example as the last fallback rule); combining it with other
+matcher fields is rejected as an invalid config.
 
 Destination matchers may reference source labels:
 
