@@ -5957,7 +5957,7 @@ func TestSearchTaskHybridSearchSubRequestFunctionScore(t *testing.T) {
 	secondPlan := &planpb.PlanNode{}
 	require.NoError(t, proto.Unmarshal(task.SubReqs[1].GetSerializedExprPlan(), secondPlan))
 	require.Len(t, secondPlan.GetScorers(), 1)
-	assert.Equal(t, float64(2), secondPlan.GetScorers()[0].GetWeight())
+	assert.Equal(t, float32(2), secondPlan.GetScorers()[0].GetWeight())
 }
 
 func TestSearchTask_AddHighlightTask(t *testing.T) {
