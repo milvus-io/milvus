@@ -106,6 +106,18 @@ func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
 		}
 		mvcc.TransformingTimetick = tt
 		mvcc.GrowingTimetick = max(mvcc.GrowingTimetick, mvcc.TransformingTimetick)
+	case message.MessageTypeCommitImport:
+		// Import commit behaves like a flush barrier: it publishes sealed
+		// segments to the query view at its commit fence, so it advances the
+		// transforming frontier only. Growing MVCC must NOT move — imported
+		// rows live in sealed segments served by QueryNode (which filters by
+		// the transforming frontier), and advancing the growing frontier would
+		// stall streamingnode WaitMVCCVisible on vchannels with no insert
+		// traffic.
+		if tt <= mvcc.TransformingTimetick {
+			return
+		}
+		mvcc.TransformingTimetick = tt
 	case message.MessageTypeFlush,
 		message.MessageTypeManualFlush,
 		message.MessageTypeDropPartition,

@@ -56,6 +56,11 @@ func TestClassifyTransformLogMessage(t *testing.T) {
 			kind: TransformLogKindBarrier,
 		},
 		{
+			name: "commit import",
+			msg:  newTransformLogTestCommitImportMessage(t, 45),
+			kind: TransformLogKindBarrier,
+		},
+		{
 			name: "insert",
 			msg:  newTransformLogTxnInsertMessage(t, 50),
 			kind: TransformLogKindNone,
@@ -150,6 +155,18 @@ func newTransformLogTestRecoveryBarrierMessage(t *testing.T, timetick uint64) me
 		WithHeader(&message.RecoveryBarrierMessageHeader{}).
 		WithBody(&message.RecoveryBarrierMessageBody{}).
 		WithAllVChannel().
+		MustBuildMutable()
+	return mutable.WithTimeTick(timetick).
+		WithLastConfirmed(walimplstest.NewTestMessageID(int64(timetick))).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(int64(timetick + 1)))
+}
+
+func newTransformLogTestCommitImportMessage(t *testing.T, timetick uint64) message.ImmutableMessage {
+	t.Helper()
+	mutable := message.NewCommitImportMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.CommitImportMessageHeader{CollectionId: 1, JobId: 1}).
+		WithBody(&message.CommitImportMessageBody{}).
 		MustBuildMutable()
 	return mutable.WithTimeTick(timetick).
 		WithLastConfirmed(walimplstest.NewTestMessageID(int64(timetick))).
