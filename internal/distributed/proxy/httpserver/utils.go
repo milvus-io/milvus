@@ -4478,12 +4478,21 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 
 	request, ok := req.(proto.Message)
 	if !ok {
-		return nil, merr.WrapErrParameterInvalidMsg("wrong req format when check limiter")
+		return nil, merr.WrapErrAsSysError(merr.WrapErrParameterInvalidMsg("wrong req format when check limiter"))
 	}
 
 	metaCache := getProxyMetaCache(pxy)
 	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, metaCache(), request)
 	if err != nil {
+		// A caller lookup failure (input-classified at the proxy meta boundary)
+		// cannot be a limit rejection — proceed and let the handler surface the
+		// real error, mirroring the gRPC rate_limit_interceptor. Anything else
+		// (meta cache not ready, transient fetch failures) must not fail open
+		// into unmetered traffic: hand it back as the server error it is.
+		if merr.GetErrorType(err) == merr.InputError {
+			mlog.RatedWarn(ctx, 1, "httpV1/V2 server fail to resolve request for limiter, proceed without rate check", mlog.Err(err))
+			return nil, nil
+		}
 		return nil, err
 	}
 	err = limiter.Check(dbID, collectionIDToPartIDs, rt, n)

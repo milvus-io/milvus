@@ -437,21 +437,34 @@ type (
 func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 	return func(gCtx *gin.Context) {
 		req := newReq()
+		// Receive phase: read the raw body first and cache it (ShouldBindBodyWith
+		// below reuses gin.BodyBytesKey), then mark the body as received BEFORE
+		// decoding. A timeout during the CPU-heavy JSON decode of an already
+		// received body is then attributed to server-side processing (500),
+		// not a slow-client 408 that a gateway would auto-retry into the same decode.
+		if body, readErr := io.ReadAll(gCtx.Request.Body); readErr == nil {
+			gCtx.Set(gin.BodyBytesKey, body)
+			// mark received only on a successful read: a read failure is itself a
+			// receive-phase (client-side) problem and must stay a 408, not 500.
+			if rec, ok := gCtx.Writer.(*timeoutResponseRecorder); ok {
+				rec.bodyReceived.Store(true)
+			}
+		}
 		if err := gCtx.ShouldBindBodyWith(req, binding.JSON); err != nil {
 			mlog.Warn(context.TODO(), "high level restful api, read parameters from request body fail", mlog.Err(err),
 				mlog.Any("url", gCtx.Request.URL.Path))
 			if _, ok := err.(validator.ValidationErrors); ok {
-				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
+				HTTPAbortReturn(gCtx, projectedStatus(merr.ErrMissingRequiredParameters), gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
 					HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error() + ", error: " + err.Error(),
 				})
 			} else if err == io.EOF {
-				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
+				HTTPAbortReturn(gCtx, projectedStatus(merr.ErrIncorrectParameterFormat), gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 					HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", the request body should be nil, however {} is valid",
 				})
 			} else {
-				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
+				HTTPAbortReturn(gCtx, projectedStatus(merr.ErrIncorrectParameterFormat), gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 					HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
 				})
@@ -745,8 +758,18 @@ func (h *HandlersV2) wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Cont
 		_, err := CheckLimiter(ctx, req, pxy)
 		if err != nil {
 			mlog.Warn(context.TODO(), "high level restful api, fail to check limiter", mlog.Err(err), mlog.String("method", fullMethod))
+			if !isRateLimitClass(err) {
+				// Limiter infrastructure failure, not a quota decision — surface
+				// the real server error instead of masquerading as 429/1807.
+				hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(err), nil, ginCtx.FullPath(), hookutil.ActionAuthorize)
+				HTTPAbortReturn(ginCtx, projectedStatus(err), gin.H{
+					HTTPReturnCode:    merr.Code(err),
+					HTTPReturnMessage: err.Error(),
+				})
+				return nil, RestRequestInterceptorErr
+			}
 			hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(merr.ErrHTTPRateLimit), nil, ginCtx.FullPath(), hookutil.ActionAuthorize)
-			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{
+			HTTPAbortReturn(ginCtx, projectedStatus(merr.ErrHTTPRateLimit), gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
 				HTTPReturnMessage: merr.ErrHTTPRateLimit.Error() + ", error: " + err.Error(),
 			})
@@ -782,10 +805,14 @@ func (h *HandlersV2) wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Cont
 	if err != nil {
 		// Expose the exact classification (incl. boundary InputError marks) to
 		// the REST access log; key must match accesslog/info.ContextErrorType.
-		ginCtx.Set("error_type", merr.GetErrorType(err).String())
+		recordErrorType(ginCtx, err)
 		mlog.Warn(ctx, "high level restful api, grpc call failed", mlog.Err(err))
 		if !ignoreErr {
-			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			// Replay-safety identity is the ROUTE the client called (same key space
+			// as the timeout middleware), not this RPC step: a composite handler like
+			// createCollection must not advertise a retriable status for its load
+			// step when replaying means re-running the whole composite.
+			HTTPAbortReturn(ginCtx, projectedStatusForRequest(ginCtx, err, routeToMethod[ginCtx.FullPath()]), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		}
 	}
 	return response, err
@@ -958,8 +985,9 @@ func (h *HandlersV2) getCollectionLoadState(ctx context.Context, c *gin.Context,
 	}
 	switch resp.(*milvuspb.GetLoadStateResponse).State {
 	case commonpb.LoadState_LoadStateNotExist:
-		err = merr.WrapErrCollectionNotFound(req.CollectionName)
-		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		err = merr.WrapErrAsInputError(merr.WrapErrCollectionNotFound(req.CollectionName))
+		recordErrorType(c, err)
+		HTTPReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return resp, err
 	case commonpb.LoadState_LoadStateNotLoad:
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
@@ -1123,7 +1151,7 @@ func (h *HandlersV2) addCollectionFunction(ctx context.Context, c *gin.Context, 
 	}
 	fSchema, err := genFunctionSchema(ctx, &httpReq.Function)
 	if err != nil {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(merr.ErrParameterInvalid), gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 			HTTPReturnMessage: err.Error(),
 		})
@@ -1150,7 +1178,7 @@ func (h *HandlersV2) alterCollectionFunction(ctx context.Context, c *gin.Context
 	}
 	fSchema, err := genFunctionSchema(ctx, &httpReq.Function)
 	if err != nil {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(merr.ErrParameterInvalid), gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 			HTTPReturnMessage: err.Error(),
 		})
@@ -1202,7 +1230,7 @@ func (h *HandlersV2) addCollectionFunctionField(ctx context.Context, c *gin.Cont
 			err := merr.WrapErrParameterInvalidMsg(
 				"indexParams.fieldName %q must match outputField.fieldName %q",
 				httpReq.IndexParam.FieldName, httpReq.OutputField.FieldName)
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(merr.ErrParameterInvalid), gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 				HTTPReturnMessage: err.Error(),
 			})
@@ -1211,7 +1239,7 @@ func (h *HandlersV2) addCollectionFunctionField(ctx context.Context, c *gin.Cont
 		var err error
 		extraParams, err = convertToExtraParams(*httpReq.IndexParam)
 		if err != nil {
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(merr.ErrParameterInvalid), gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 				HTTPReturnMessage: err.Error(),
 			})
@@ -1221,7 +1249,7 @@ func (h *HandlersV2) addCollectionFunctionField(ctx context.Context, c *gin.Cont
 	}
 	fSchema, err := genFunctionSchema(ctx, &httpReq.Function)
 	if err != nil {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(merr.ErrParameterInvalid), gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 			HTTPReturnMessage: err.Error(),
 		})
@@ -1229,7 +1257,7 @@ func (h *HandlersV2) addCollectionFunctionField(ctx context.Context, c *gin.Cont
 	}
 	fieldSchema, err := httpReq.OutputField.GetProto(ctx)
 	if err != nil {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(merr.ErrParameterInvalid), gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 			HTTPReturnMessage: err.Error(),
 		})
@@ -1369,7 +1397,7 @@ func (h *HandlersV2) flush(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	if err == nil {
 		err = h.waitForFlush(ctx, dbName, httpReq.CollectionName, resp.(*milvuspb.FlushResponse))
 		if err != nil {
-			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			HTTPReturn(c, projectedStatusForRequest(c, err, routeToMethod[c.FullPath()]), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return resp, err
 		}
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
@@ -1437,13 +1465,13 @@ func (h *HandlersV2) addCollectionField(ctx context.Context, c *gin.Context, any
 
 	if httpReq.Schema.IsStructArrayField() {
 		err := merr.WrapErrParameterInvalidMsg("StructArray field must be added through /v2/vectordb/collections/struct_fields/add")
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
 
 	schemaProto, err := httpReq.Schema.GetProto(ctx)
 	if err != nil {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
 
@@ -1482,12 +1510,12 @@ func (h *HandlersV2) dropCollectionField(ctx context.Context, c *gin.Context, an
 	hasFieldID := httpReq.FieldID != nil
 	if hasFieldName == hasFieldID {
 		err := merr.WrapErrParameterInvalidMsg("exactly one of fieldName or fieldId is required")
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
 	if hasFieldID && *httpReq.FieldID <= 0 {
 		err := merr.WrapErrParameterInvalidMsg("fieldId must be greater than 0")
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
 
@@ -1523,7 +1551,7 @@ func (h *HandlersV2) addCollectionStructField(ctx context.Context, c *gin.Contex
 
 	schemaProto, err := httpReq.Schema.GetStructArrayProto(ctx)
 	if err != nil {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
 
@@ -1567,7 +1595,7 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, query with consistency_level invalid", mlog.Err(err))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:" + err.Error(),
 		})
@@ -1576,7 +1604,7 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	templateValues, err := generateExpressionTemplate(httpReq.ExprParams)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
 		})
@@ -1609,10 +1637,11 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, fail to deal with query result", mlog.Any("response", resp), mlog.Err(err))
-			HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturn(c, projectedStatus(merr.ErrInvalidSearchResult), gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 				HTTPReturnMessage: resultErrMessage(err),
 			})
+			return merr.Status(merr.ErrInvalidSearchResult), err
 		} else {
 			scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, isValid := proxy.GetStorageCost(queryResp.GetStatus())
 			if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
@@ -1645,7 +1674,8 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 	body, _ := c.Get(gin.BodyBytesKey)
 	filter, idTemplateValues, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 	if err != nil {
-		HTTPReturn(c, http.StatusOK, gin.H{
+		recordErrorType(c, err)
+		HTTPReturn(c, projectedStatus(err), gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
 			HTTPReturnMessage: merr.ErrCheckPrimaryKey.Error() + ", error: " + err.Error(),
 		})
@@ -1662,7 +1692,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, query with consistency_level invalid", mlog.Err(err))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:" + err.Error(),
 		})
@@ -1678,10 +1708,11 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, fail to deal with get result", mlog.Any("response", resp), mlog.Err(err))
-			HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturn(c, projectedStatus(merr.ErrInvalidSearchResult), gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 				HTTPReturnMessage: resultErrMessage(err),
 			})
+			return merr.Status(merr.ErrInvalidSearchResult), err
 		} else {
 			scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, isValid := proxy.GetStorageCost(queryResp.GetStatus())
 			if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
@@ -1720,7 +1751,7 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 	templateValues, err := generateExpressionTemplate(httpReq.ExprParams)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
 		})
@@ -1732,7 +1763,8 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 		body, _ := c.Get(gin.BodyBytesKey)
 		filter, idTemplateValues, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 		if err != nil {
-			HTTPReturn(c, http.StatusOK, gin.H{
+			recordErrorType(c, err)
+			HTTPReturn(c, projectedStatus(err), gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
 				HTTPReturnMessage: merr.ErrCheckPrimaryKey.Error() + ", error: " + err.Error(),
 			})
@@ -1773,7 +1805,7 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, false)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, fail to deal with insert data", mlog.Err(err), mlog.String("body", string(body.([]byte))))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(merr.ErrInvalidInsertData), gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
 		})
@@ -1784,7 +1816,7 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, collSchema, true, false)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, fail to deal with insert data", mlog.Any("data", httpReq.Data), mlog.Err(err))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(merr.ErrInvalidInsertData), gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
 		})
@@ -1819,10 +1851,11 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 				HTTPReturnCost: cost,
 			})
 		default:
-			HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturn(c, projectedStatus(merr.ErrCheckPrimaryKey), gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
 				HTTPReturnMessage: merr.ErrCheckPrimaryKey.Error() + ", error: unsupported primary key data type",
 			})
+			return resp, merr.ErrCheckPrimaryKey
 		}
 	}
 	return resp, err
@@ -1839,7 +1872,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 	fieldOps, err := buildFieldPartialUpdateOps(httpReq.FieldOps)
 	if err != nil {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
 		})
@@ -1857,7 +1890,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, httpReq.PartialUpdate)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, fail to deal with upsert data", mlog.Any("body", body), mlog.Err(err))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(merr.ErrInvalidInsertData), gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
 		})
@@ -1868,7 +1901,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, collSchema, false, httpReq.PartialUpdate)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, fail to deal with upsert data", mlog.Any("data", httpReq.Data), mlog.Err(err))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(merr.ErrInvalidInsertData), gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
 		})
@@ -1937,10 +1970,11 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 				})
 			}
 		default:
-			HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturn(c, projectedStatus(merr.ErrCheckPrimaryKey), gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
 				HTTPReturnMessage: merr.ErrCheckPrimaryKey.Error() + ", error: unsupported primary key data type",
 			})
+			return resp, merr.ErrCheckPrimaryKey
 		}
 	}
 	return resp, err
@@ -2072,7 +2106,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, search with consistency_level invalid", mlog.Err(err))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:" + err.Error(),
 		})
@@ -2092,7 +2126,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 
 	// Primary keys and query vectors are mutually exclusive
 	if hasIDs && hasData {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(merr.ErrParameterInvalid), gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 			HTTPReturnMessage: "primary keys (ids) and query vectors (data) are mutually exclusive. Please provide either 'ids' or 'data', not both",
 		})
@@ -2101,7 +2135,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 
 	// At least one of ids or data must be provided
 	if !hasIDs && !hasData {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(merr.ErrMissingRequiredParameters), gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
 			HTTPReturnMessage: "either 'ids' (for primary key search) or 'data' (for vector search) must be provided",
 		})
@@ -2111,22 +2145,22 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if httpReq.SearchAggregation != nil {
 		if hasIDs {
 			err := merr.WrapErrParameterInvalidMsg("ids and searchAggregation cannot be used simultaneously")
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
 		if httpReq.Offset != 0 {
 			err := merr.WrapErrParameterInvalidMsg("offset is not supported with searchAggregation")
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
 		if searchParamsContainAny(httpReq.SearchParams, proxy.OffsetKey) {
 			err := merr.WrapErrParameterInvalidMsg("searchParams.offset is not supported with searchAggregation")
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
 		if httpReq.GroupByField != "" || httpReq.GroupSize != nil || httpReq.StrictGroupSize != nil {
 			err := merr.WrapErrParameterInvalidMsg("groupingField/groupSize/strictGroupSize and searchAggregation cannot be used simultaneously")
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
 		if searchParamsContainAny(httpReq.SearchParams,
@@ -2134,18 +2168,18 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			// wording kept compatible: the group_by_field(s) sentence is what
 			// clients and the REST e2e suite already pin on
 			err := merr.WrapErrParameterInvalidMsg("searchParams.group_by_field(s) and searchAggregation cannot be used simultaneously, and neither can group_size/strict_group_size")
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
 		if len(httpReq.OrderByFields) > 0 {
 			err := merr.WrapErrParameterInvalidMsg("orderByFields and searchAggregation cannot be used simultaneously")
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
 		req.SearchAggregation, err = convertSearchAggregationReq(httpReq.SearchAggregation)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, convert SearchAggregation failed", mlog.Err(err))
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
 	}
@@ -2154,7 +2188,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	// dedicated field (first key wins on the proxy side), so reject the ambiguity.
 	if len(httpReq.OrderByFields) > 0 && searchParamsContainAny(httpReq.SearchParams, proxy.OrderByFieldsKey) {
 		err := merr.WrapErrParameterInvalidMsg("ambiguous order by: use either orderByFields or searchParams.order_by_fields, not both")
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
 
@@ -2168,7 +2202,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			proxy.GroupByFieldKey, proxy.GroupByFieldsKey, proxy.GroupSizeKey, proxy.StrictGroupSize) {
 		err := merr.WrapErrParameterInvalidMsg(
 			"ambiguous grouping: use either the top-level groupingField/groupSize/strictGroupSize or the searchParams group keys, not both")
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
 
@@ -2183,7 +2217,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		searchParamsRootContainAny(httpReq.SearchParams, proxy.GroupSizeKey, proxy.StrictGroupSize) {
 		err := merr.WrapErrParameterInvalidMsg(
 			"searchParams group_size/strict_group_size require a group field")
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
 
@@ -2199,7 +2233,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 				if _, present := nested[key]; present {
 					err := merr.WrapErrParameterInvalidMsg(
 						"searchParams.params cannot carry %s; use the top-level grouping fields or searchParams.%s", key, key)
-					HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+					HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 					return nil, err
 				}
 			}
@@ -2209,7 +2243,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	searchParams, err := generateSearchParams(httpReq.SearchParams)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, generate SearchParams failed", mlog.Err(err))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
 		})
@@ -2219,7 +2253,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	searchParams, err = appendGroupParams(searchParams, httpReq.GroupByField, httpReq.GroupSize, httpReq.StrictGroupSize)
 	if err != nil {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
 	if len(httpReq.OrderByFields) > 0 {
@@ -2227,13 +2261,13 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 	if len(httpReq.FunctionScore.Functions) != 0 {
 		if req.FunctionScore, err = genFunctionScore(ctx, &httpReq.FunctionScore); err != nil {
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid), HTTPReturnMessage: err.Error()})
+			HTTPAbortReturn(c, projectedStatus(merr.ErrParameterInvalid), gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
 	}
 	if len(httpReq.FunctionChains) != 0 {
 		if req.FunctionChains, err = genFunctionChains(httpReq.FunctionChains); err != nil {
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid), HTTPReturnMessage: err.Error()})
+			HTTPAbortReturn(c, projectedStatus(merr.ErrParameterInvalid), gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
 	}
@@ -2242,7 +2276,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		// Search by primary keys
 		primaryField, ok := getPrimaryField(collSchema)
 		if !ok {
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(merr.ErrParameterInvalid), gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 				HTTPReturnMessage: "collection has no primary key field",
 			})
@@ -2253,7 +2287,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		ids, err := convertIDsToSchemapbIDs(httpReq.Ids, primaryField)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, convert ids to schemapb.IDs failed", mlog.Err(err))
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(merr.ErrParameterInvalid), gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 				HTTPReturnMessage: merr.ErrParameterInvalid.Error() + ", error: " + err.Error(),
 			})
@@ -2275,7 +2309,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		placeholderGroup, err := generatePlaceholderGroup(ctx, string(body.([]byte)), collSchema, httpReq.AnnsField)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, search with vector invalid", mlog.Err(err))
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(merr.ErrIncorrectParameterFormat), gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 				HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
 			})
@@ -2290,7 +2324,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	templateValues, err := generateExpressionTemplate(httpReq.ExprParams)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
 		})
@@ -2309,10 +2343,11 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			outputData, err := buildSearchAggregationResp(searchResp.Results, allowJS, collSchema)
 			if err != nil {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search aggregation result", mlog.Any("result", searchResp.Results), mlog.Err(err))
-				HTTPReturn(c, http.StatusOK, gin.H{
+				HTTPReturn(c, projectedStatus(merr.ErrInvalidSearchResult), gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 					HTTPReturnMessage: resultErrMessage(err),
 				})
+				return merr.Status(merr.ErrInvalidSearchResult), err
 			} else {
 				respBody := gin.H{
 					HTTPReturnCode:     merr.Code(nil),
@@ -2337,10 +2372,11 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
 			if err != nil {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
-				HTTPReturn(c, http.StatusOK, gin.H{
+				HTTPReturn(c, projectedStatus(merr.ErrInvalidSearchResult), gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 					HTTPReturnMessage: resultErrMessage(err),
 				})
+				return merr.Status(merr.ErrInvalidSearchResult), err
 			} else {
 				if len(searchResp.Results.Recalls) > 0 {
 					if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
@@ -2402,7 +2438,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, search with consistency_level invalid", mlog.Err(err))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:" + err.Error(),
 		})
@@ -2412,18 +2448,18 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 
 	if httpReq.SearchAggregation != nil {
 		err := merr.WrapErrParameterInvalidMsg("searchAggregation is not supported for hybrid search")
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
 	if len(httpReq.FunctionChains) != 0 {
 		err := merr.WrapErrParameterInvalidMsg("functionChains is not supported for hybrid search yet")
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
 	for _, subReq := range httpReq.Search {
 		if subReq.SearchAggregation != nil {
 			err := merr.WrapErrParameterInvalidMsg("searchAggregation is not supported for hybrid search")
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
 	}
@@ -2439,7 +2475,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		searchParams, err := generateSearchParams(subReq.SearchParams)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, generate SearchParams failed", mlog.Err(err))
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
 			})
@@ -2451,7 +2487,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		placeholderGroup, err := generatePlaceholderGroup(ctx, searchArray[i].Raw, collSchema, subReq.AnnsField)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, search with vector invalid", mlog.Err(err))
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(merr.ErrIncorrectParameterFormat), gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 				HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
 			})
@@ -2472,7 +2508,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		subTemplateValues, err := generateExpressionTemplate(subReq.ExprParams)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
 			})
@@ -2493,12 +2529,12 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	}
 	req.RankParams, err = appendGroupParams(req.RankParams, httpReq.GroupByField, httpReq.GroupSize, httpReq.StrictGroupSize)
 	if err != nil {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
 	if len(httpReq.FunctionScore.Functions) != 0 {
 		if req.FunctionScore, err = genFunctionScore(ctx, &httpReq.FunctionScore); err != nil {
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid), HTTPReturnMessage: err.Error()})
+			HTTPAbortReturn(c, projectedStatus(merr.ErrParameterInvalid), gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
 	}
@@ -2516,10 +2552,11 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
 			if err != nil {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
-				HTTPReturn(c, http.StatusOK, gin.H{
+				HTTPReturn(c, projectedStatus(merr.ErrInvalidSearchResult), gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 					HTTPReturnMessage: resultErrMessage(err),
 				})
+				return merr.Status(merr.ErrInvalidSearchResult), err
 			} else {
 				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
 					HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost, HTTPReturnTopks: searchResp.Results.Topks, HTTPReturnScannedRemoteBytes: scannedRemoteBytes, HTTPReturnScannedTotalBytes: scannedTotalBytes, HTTPReturnCacheHitRatio: cacheHitRatio})
@@ -2622,7 +2659,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		err := merr.WrapErrParameterInvalid("schema.externalSource/schema.externalSpec", "top-level externalSource/externalSpec",
 			"externalSource and externalSpec must be set under schema when creating an external collection")
 		mlog.Warn(ctx, "high level restful api, create external collection with top-level external config fail", mlog.Err(err), requestLogField)
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
 		})
@@ -2639,7 +2676,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			err := merr.WrapErrParameterInvalid("schema.fields", "empty schema fields",
 				"external collection is not supported by quick create; provide schema.fields with externalField")
 			mlog.Warn(ctx, "high level restful api, quickly create external collection fail", mlog.Err(err), requestLogField)
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
 			})
@@ -2649,7 +2686,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			err := merr.WrapErrParameterInvalid("schema", "functions",
 				"functions are not supported for quickly create collection")
 			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
 			})
@@ -2671,7 +2708,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			err := merr.WrapErrParameterInvalid("FloatVector, BinaryVector, Float16Vector, BFloat16Vector, SparseFloatVector", httpReq.VectorFieldType,
 				"vectorFieldType can only be [FloatVector, BinaryVector, Float16Vector, BFloat16Vector, SparseFloatVector], default: FloatVector")
 			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
 			})
@@ -2682,7 +2719,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			err := merr.WrapErrParameterInvalid(int32(0), httpReq.Dimension,
 				"dimension should not be specified for SparseFloatVector quick create")
 			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
 			})
@@ -2693,7 +2730,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			err := merr.WrapErrParameterInvalid("collectionName & dimension", "collectionName",
 				"dimension is required for quickly create collection(default metric type: "+DefaultMetricType+")")
 			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
 			})
@@ -2704,7 +2741,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		}
 		if err := validateMetricTypeForQuickCreate(quickCreateVectorDataType, httpReq.MetricType); err != nil {
 			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
 			})
@@ -2726,7 +2763,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			err := merr.WrapErrParameterInvalid("Int64, Varchar", httpReq.IDType,
 				"idType can only be [Int64, VarChar], default: Int64")
 			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
 			})
@@ -2742,8 +2779,9 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		if enStr, ok := httpReq.Params["enableDynamicField"]; ok {
 			enableDynamic, err = strconv.ParseBool(fmt.Sprintf("%v", enStr))
 			if err != nil {
+				err = merr.WrapErrParameterInvalidMsg("parse enableDynamicField failed, err: %v", err)
 				mlog.Warn(ctx, "high level restful api, parse enableDynamicField fail", mlog.Err(err), requestLogField)
-				HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPAbortReturn(c, projectedStatus(err), gin.H{
 					HTTPReturnCode:    merr.Code(err),
 					HTTPReturnMessage: "parse enableDynamicField fail, err:" + err.Error(),
 				})
@@ -2800,7 +2838,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		for _, function := range httpReq.Schema.Functions {
 			f, err := genFunctionSchema(ctx, &function)
 			if err != nil {
-				HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPAbortReturn(c, projectedStatus(merr.ErrParameterInvalid), gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 					HTTPReturnMessage: err.Error(),
 				})
@@ -2815,7 +2853,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			fieldDataType, ok := schemapb.DataType_value[field.DataType]
 			if !ok {
 				mlog.Warn(ctx, "field's data type is invalid(case sensitive).", mlog.Any("fieldDataType", field.DataType), mlog.Any("field", field))
-				HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPAbortReturn(c, projectedStatus(merr.ErrParameterInvalid), gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 					HTTPReturnMessage: merr.ErrParameterInvalid.Error() + ", data type " + field.DataType + " is invalid(case sensitive).",
 				})
@@ -2836,7 +2874,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			fieldSchema.DefaultValue, err = convertDefaultValue(field.DefaultValue, dataType)
 			if err != nil {
 				mlog.Warn(ctx, "convert defaultValue fail", mlog.Any("defaultValue", field.DefaultValue))
-				HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPAbortReturn(c, projectedStatus(err), gin.H{
 					HTTPReturnCode:    merr.Code(err),
 					HTTPReturnMessage: "convert defaultValue fail, err:" + err.Error(),
 				})
@@ -2845,7 +2883,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			if dataType == schemapb.DataType_Array {
 				if _, ok := schemapb.DataType_value[field.ElementDataType]; !ok {
 					mlog.Warn(ctx, "element's data type is invalid(case sensitive).", mlog.Any("elementDataType", field.ElementDataType), mlog.Any("field", field))
-					HTTPAbortReturn(c, http.StatusOK, gin.H{
+					HTTPAbortReturn(c, projectedStatus(merr.ErrParameterInvalid), gin.H{
 						HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 						HTTPReturnMessage: merr.ErrParameterInvalid.Error() + ", element data type " + field.ElementDataType + " is invalid(case sensitive).",
 					})
@@ -2881,7 +2919,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			if _, dup := fieldNames[structField.FieldName]; dup {
 				err := merr.WrapErrParameterInvalidMsg("duplicated field name: %s", structField.FieldName)
 				mlog.Warn(ctx, "high level restful api, create collection fail", mlog.Err(err), requestLogField)
-				HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPAbortReturn(c, projectedStatus(err), gin.H{
 					HTTPReturnCode:    merr.Code(err),
 					HTTPReturnMessage: err.Error(),
 				})
@@ -2891,7 +2929,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			if err != nil {
 				mlog.Warn(ctx, "high level restful api, convert struct array field fail",
 					mlog.String("structField", structField.FieldName), mlog.Err(err))
-				HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPAbortReturn(c, projectedStatus(err), gin.H{
 					HTTPReturnCode:    merr.Code(err),
 					HTTPReturnMessage: err.Error(),
 				})
@@ -2908,7 +2946,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	}
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, marshal collection schema fail", mlog.Err(err), requestLogField)
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(merr.ErrMarshalCollectionSchema), gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrMarshalCollectionSchema),
 			HTTPReturnMessage: merr.ErrMarshalCollectionSchema.Error() + ", error: " + err.Error(),
 		})
@@ -2927,7 +2965,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	consistencyLevel, err := consistencyLevelForCreateCollection(httpReq)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, create collection fail", mlog.Err(err), requestLogField)
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPAbortReturn(c, projectedStatus(err), gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
 		})
@@ -2946,7 +2984,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		}
 		if ttlPropertySet {
 			err := merr.WrapErrParameterInvalidMsg("collection TTL is specified multiple times")
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
 			})
@@ -2958,7 +2996,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	if _, ok := httpReq.Params["ttlSeconds"]; ok {
 		if ttlPropertySet {
 			err := merr.WrapErrParameterInvalidMsg("collection TTL is specified multiple times")
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
 			})
@@ -3028,7 +3066,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		}
 		for _, indexParam := range httpReq.IndexParams {
 			if _, ok := fieldNames[indexParam.FieldName]; !ok {
-				HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPAbortReturn(c, projectedStatus(merr.ErrMissingRequiredParameters), gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
 					HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error() + ", error: `" + indexParam.FieldName + "` hasn't defined in schema",
 				})
@@ -3045,7 +3083,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			if err != nil {
 				// will not happen
 				mlog.Warn(ctx, "high level restful api, convertToExtraParams fail", mlog.Err(err), requestLogField)
-				HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPAbortReturn(c, projectedStatus(err), gin.H{
 					HTTPReturnCode:    merr.Code(err),
 					HTTPReturnMessage: err.Error(),
 				})
@@ -3769,7 +3807,7 @@ func (h *HandlersV2) createIndex(ctx context.Context, c *gin.Context, anyReq any
 		if err != nil {
 			// will not happen
 			mlog.Warn(ctx, "high level restful api, convertToExtraParams fail", mlog.Err(err), mlog.Any("request", anyReq))
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPAbortReturn(c, projectedStatus(err), gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
 			})
@@ -4199,7 +4237,7 @@ func (h *HandlersV2) getExportSnapshotState(ctx context.Context, c *gin.Context,
 	jobID, err := strconv.ParseInt(httpReq.GetJobID(), 10, 64)
 	if err != nil {
 		paramErr := merr.WrapErrParameterInvalid("int64 jobId", httpReq.GetJobID(), err.Error())
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
+		HTTPAbortReturn(c, projectedStatus(paramErr), gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
 		return nil, paramErr
 	}
 	req := &milvuspb.GetExportSnapshotStateRequest{
@@ -4241,7 +4279,7 @@ func (h *HandlersV2) getRestoreSnapshotState(ctx context.Context, c *gin.Context
 	jobID, err := strconv.ParseInt(httpReq.GetJobID(), 10, 64)
 	if err != nil {
 		paramErr := merr.WrapErrParameterInvalid("int64 jobId", httpReq.GetJobID(), err.Error())
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
+		HTTPAbortReturn(c, projectedStatus(paramErr), gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
 		return nil, paramErr
 	}
 	req := &milvuspb.GetRestoreSnapshotStateRequest{
@@ -4313,7 +4351,7 @@ func (h *HandlersV2) commitImportJob(ctx context.Context, c *gin.Context, anyReq
 	jobID, err := strconv.ParseInt(jobIDGetter.GetJobID(), 10, 64)
 	if err != nil {
 		paramErr := merr.WrapErrParameterInvalid("int64 jobId", jobIDGetter.GetJobID(), err.Error())
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
+		HTTPAbortReturn(c, projectedStatus(paramErr), gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
 		return nil, paramErr
 	}
 	if err := h.checkImportJobAuth(ctx, c, dbName, jobIDGetter.GetJobID()); err != nil {
@@ -4360,7 +4398,7 @@ func (h *HandlersV2) abortImportJob(ctx context.Context, c *gin.Context, anyReq 
 	jobID, err := strconv.ParseInt(jobIDGetter.GetJobID(), 10, 64)
 	if err != nil {
 		paramErr := merr.WrapErrParameterInvalid("int64 jobId", jobIDGetter.GetJobID(), err.Error())
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
+		HTTPAbortReturn(c, projectedStatus(paramErr), gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
 		return nil, paramErr
 	}
 	if err := h.checkImportJobAuth(ctx, c, dbName, jobIDGetter.GetJobID()); err != nil {

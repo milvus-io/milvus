@@ -2313,8 +2313,8 @@ func TestCreateCollection(t *testing.T) {
 		path: path,
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "Varchar",` +
 			`"params": {"max_length": 256, "enableDynamicField": 100, "shardsNum": 2, "consistencyLevel": "unknown", "ttlSeconds": 3600}}`),
-		errMsg:  "parse enableDynamicField fail, err:strconv.ParseBool: parsing \"100\": invalid syntax",
-		errCode: 65535,
+		errMsg:  "parse enableDynamicField fail, err:parse enableDynamicField failed, err: strconv.ParseBool: parsing \"100\": invalid syntax: invalid parameter",
+		errCode: 1100,
 	})
 
 	for _, testcase := range postTestCases {
