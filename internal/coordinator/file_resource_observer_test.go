@@ -88,7 +88,7 @@ func (s *FileResourceObserverSuite) TestStartStop() {
 		// A non-zero version with no current resources represents a restart after
 		// all resources were removed. Startup should not issue an empty sync RPC.
 		mockMeta := mockrootcoord.NewIMetaTable(s.T())
-		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(2)).Twice()
+		mockMeta.EXPECT().HasFileResource(mock.Anything).Return(false).Twice()
 		observer.meta = mockMeta
 
 		// Simulate a node registration notification during coordinator startup.
@@ -124,7 +124,8 @@ func (s *FileResourceObserverSuite) TestStartStop() {
 		}
 
 		mockMeta := mockrootcoord.NewIMetaTable(s.T())
-		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(2)).Twice()
+		mockMeta.EXPECT().HasFileResource(mock.Anything).Return(false).Once()
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(2)).Once()
 		observer.meta = mockMeta
 
 		// Mutation retries use the unconditional notification path and must not be
@@ -156,7 +157,8 @@ func (s *FileResourceObserverSuite) TestStartStop() {
 
 		resources := []*internalpb.FileResourceInfo{{Name: "test"}}
 		mockMeta := mockrootcoord.NewIMetaTable(s.T())
-		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(resources, uint64(1)).Twice()
+		mockMeta.EXPECT().HasFileResource(mock.Anything).Return(true).Once()
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(resources, uint64(1)).Once()
 		observer.meta = mockMeta
 
 		observer.Start()
@@ -204,8 +206,8 @@ func (s *FileResourceObserverSuite) TestIsEmpty() {
 	s.True(observer.IsEmpty())
 
 	mockMeta := mockrootcoord.NewIMetaTable(s.T())
-	mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(1)).Once()
-	mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{Name: "test"}}, uint64(2)).Once()
+	mockMeta.EXPECT().HasFileResource(mock.Anything).Return(false).Once()
+	mockMeta.EXPECT().HasFileResource(mock.Anything).Return(true).Once()
 	observer.meta = mockMeta
 	s.True(observer.IsEmpty())
 	s.False(observer.IsEmpty())
