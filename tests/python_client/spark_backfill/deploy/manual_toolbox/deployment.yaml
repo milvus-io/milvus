@@ -33,7 +33,8 @@ spec:
             - /opt/toolbox-scripts/build-connector.sh
           env:
             - name: CONNECTOR_COMMIT
-              value: dfcec3d564e78be771b6d41fc04632db77d8d507
+              # Resolve the latest main commit whenever a new Pod builds.
+              value: main
           resources:
             requests:
               cpu: "4"
@@ -50,7 +51,7 @@ spec:
             - name: artifacts
               mountPath: /artifacts
             - name: conan-cache
-              mountPath: /root/.conan
+              mountPath: /root/.conan2
             - name: sdkman-cache
               mountPath: /root/.sdkman
             - name: root-cache

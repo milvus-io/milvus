@@ -42,7 +42,9 @@ spark-submit --master local[2]
 
 ## 2. Validated versions
 
-Do not upgrade any item casually. After an upgrade, repeat the complete acceptance procedure in this document.
+The Connector intentionally resolves `main` for each Pod build. Do not upgrade
+the other items casually. After an upgrade, repeat the complete acceptance
+procedure in this document.
 
 | Item | Pinned version |
 | --- | --- |
@@ -50,20 +52,22 @@ Do not upgrade any item casually. After an upgrade, repeat the complete acceptan
 | Spark | `4.0.1` |
 | Scala | `2.13.16` |
 | Java | `21.0.8` |
-| Connector commit | `dfcec3d564e78be771b6d41fc04632db77d8d507` |
+| Connector ref | `main` (resolved when each Pod builds) |
+| Conan | `2.25.1` |
 | Rust | `1.96.0` |
 | Hadoop AWS package | `org.apache.hadoop:hadoop-aws:3.4.1` |
 | OS/architecture | Linux AMD64 |
 
 Spark comes from the official Apache Scala 2.13 image and is not installed through SDKMAN. SDKMAN installs only Scala `2.13.16` and SBT `1.11.1`, which are needed to build the Connector.
 
-Validated artifact SHA256 values:
+The build records commit-specific artifact SHA256 values in:
 
 ```text
-9218e0fe462e7f0b24d4579878d1b3171d60c64975bbc672777704a670c5461b  spark-connector-assembly.jar
-1f69303f1dce46897cc5138781ade1663c03dee7019bcbdeec184766be237404  libmilvus-storage.so
-8ac8dbab9d36635d546b138a4e75d0ce440109d52a1c9b847e1a4620db4017cf  libmilvus-storage-jni.so
+/opt/spark-milvus/evidence/sha256sums.txt
 ```
+
+Capture the values after a successful build and compare them when reproducing
+the same resolved commit and toolchain.
 
 ## 3. File responsibilities
 
@@ -176,7 +180,7 @@ The source build needs access to:
 - A pip package index.
 - The Rust toolchain and crate registry.
 
-The current script contains compatibility workarounds for bzip2, Boost, Thrift, and Arrow source downloads. Do not remove them without repeating the full build validation.
+The current script uses Conan `2.25.1` and the Milvus `default-conan-local2` remote, matching the checked-out `milvus-storage` revision's CI configuration.
 
 ## 5. Deploy
 
@@ -410,7 +414,7 @@ These directories are `emptyDir` volumes:
 ```text
 /build
 /artifacts
-/root/.conan
+/root/.conan2
 /root/.sdkman
 /root/.cache
 /root/.sbt
@@ -463,7 +467,7 @@ Use for short-term iterative development.
 Persist at least:
 
 ```text
-/root/.conan
+/root/.conan2
 /root/.cache
 /root/.sbt
 /root/.ivy2
