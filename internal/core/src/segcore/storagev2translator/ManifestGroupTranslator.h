@@ -80,6 +80,10 @@ class ManifestGroupTranslator
      * @param mmap_dir_path Directory path for memory mapping
      * @param num_fields Total number of fields in the column group
      * @param load_priority Priority level for loading operations
+     * @param cache_warmup_policy Warmup policy resolved by the load planner
+     * @param support_eviction Whether the planned cache slot is evictable
+     * @param column_size_estimate Complete physical-group size matrix shared
+     *        by projected load tasks
      */
     ManifestGroupTranslator(
         int64_t segment_id,
@@ -94,8 +98,7 @@ class ManifestGroupTranslator
         const std::string& mmap_dir_path,
         int64_t num_fields,
         milvus::proto::common::LoadPriority load_priority,
-        bool eager_load,
-        const std::string& warmup_policy,
+        CacheWarmupPolicy cache_warmup_policy,
         bool support_eviction,
         const std::string& cache_key_suffix = "",
         int64_t fallback_bytes_per_row = 0,

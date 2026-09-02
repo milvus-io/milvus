@@ -123,10 +123,13 @@ QueryNode defaults only have runtime eviction effect when
 disabled globally, `evictable` is still persisted but no
 policy-based eviction occurs.
 
-The four QueryNode defaults are refreshable. A refreshed value is resolved when
-a new cache slot is created; cache slots that already exist keep the
-`support_eviction` value captured at their creation time. Field/index and
-collection metadata continue to take precedence over these local defaults.
+The four QueryNode defaults are refreshable. Storage V3 field-data loading
+captures the warmup and evictable defaults once when a load/reopen planning pass
+creates its cache-slot tasks. Every task carries its resolved policy through
+size estimation and translator construction. Existing cache slots and tasks
+that are already planned or in flight keep that snapshot; a later planning pass
+observes refreshed defaults. Field/index and collection metadata continue to
+take precedence over these local defaults.
 
 ### Metadata Validation
 
@@ -147,16 +150,20 @@ DataCoord validates index properties:
 
 ### Load Propagation
 
-QueryCoord propagates collection-level defaults into load info before dispatch:
+QueryCoord keeps collection properties and index user parameters as metadata on
+the worker-bound request; it does not materialize collection defaults into each
+field or index. The target QueryNode conditionally creates a private shallow
+clone of that request and materializes only the representation required by the
+loaders: inherited field warmup values are added to missing field type params,
+and effective index warmup/evictable overrides are added to index params. The
+large binlog, manifest, and index-file-path payloads remain shared. Field-data
+evictable settings remain schema metadata for segcore to resolve.
 
-- Scalar/vector field defaults are applied to field type params when the field
-  does not already have `evictable`.
-- Scalar/vector index defaults are applied to index params when the index does
-  not already have `evictable`.
-- Struct-array nested fields inherit by `nested field > struct field >
-  collection default`.
+QueryNode-local defaults are deliberately not written onto the request. Segcore
+resolves them at its local planning boundary, so different workers can use
+their own defaults without mutating or forwarding a worker-private request.
 
-QueryNode parses the final properties:
+QueryNode and segcore then resolve the effective properties:
 
 - Field data uses field `evictable` or scalar/vector field defaults.
 - Index data uses index `evictable` or scalar/vector index defaults.
@@ -170,9 +177,17 @@ evictable only when every child field in that group is evictable.
 Storage V3 keeps the existing load/reopen planner boundaries, then partitions
 each planned entry by the fields' effective `(warmup, evictable)` values.
 Fields with the same pair share one projected reader and cache slot; fields
-with different pairs use independent projections, size estimates, and cache
-keys. `mmap` does not participate in this partitioning and keeps its existing
-entry-level behavior.
+with different pairs use independent projections and cache keys. For each
+physical column group, the planner fetches one complete physical-column size
+matrix and shares that immutable estimate across all projected tasks; each
+translator selects the columns in its own projection. `mmap` does not
+participate in this partitioning and keeps its existing entry-level behavior.
+
+The planner also stores the resolved `(warmup, evictable)` policy in every
+column-group load task. Translator construction consumes that stored policy
+directly and never re-reads refreshable defaults after size I/O, preventing a
+configuration refresh from changing the slot policy after the projection has
+already been chosen.
 
 #### StructArray Semantics
 
@@ -194,7 +209,7 @@ nested field property > struct field property > collection property > QueryNode 
 - Without a StructArray-level value, each nested field inherits the collection
   default for its own type: `Array` uses `evictable.scalarField`, while
   `ArrayOfVector` uses `evictable.vectorField`.
-- QueryCoord does not materialize `evictable.scalarField` onto the StructArray
+- QueryNode does not materialize `evictable.scalarField` onto the StructArray
   container itself.
 
 Segcore flattens the nested fields into its field schema. For Storage V2, the
@@ -251,6 +266,8 @@ The implementation includes tests for:
   conservative physical-group aggregation.
 - QueryNode parsing, resource estimates, and CGo request construction.
 - C++ load structs and translator propagation into `support_eviction`.
+- Storage V3 full-group size-estimate sharing across projected tasks and
+  propagation of the planner-resolved policy into translator metadata.
 - Go client generic property and extra-parameter helpers.
 
 Validation commands used by the implementation PR:

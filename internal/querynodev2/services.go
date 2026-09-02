@@ -80,8 +80,9 @@ const legacyLoadScopeIndex = querypb.LoadScope(2)
 // load request and resolves cache policy overrides at the worker boundary.
 // Collection defaults and index user params stay as metadata on the wire;
 // QueryNode materializes them only on its private clone. QueryNode-local
-// defaults remain unset so each cache slot can resolve the latest local
-// configuration when it is created.
+// defaults remain unset for segcore to resolve locally. Storage V3 field-data
+// loading snapshots them when it plans cache-slot tasks; other loaders resolve
+// them at their own slot-construction boundary.
 func materializeLoadSegmentsCachePolicyOverrides(req *querypb.LoadSegmentsRequest) *querypb.LoadSegmentsRequest {
 	schema := req.GetSchema()
 	if schema == nil {
@@ -778,8 +779,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	// Propagate collection-level settings to fields and indexes on a clone so
 	// neither the coordinator request nor another worker is affected. Leave
-	// QueryNode-local defaults unset for segcore to resolve when it creates each
-	// cache slot. Both full load and Reopen consume the cloned request below.
+	// QueryNode-local defaults unset for segcore to resolve locally. Storage V3
+	// snapshots field-data defaults while planning cache-slot tasks. Both full
+	// load and Reopen consume the cloned request below.
 	req = materializeLoadSegmentsCachePolicyOverrides(req)
 
 	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),

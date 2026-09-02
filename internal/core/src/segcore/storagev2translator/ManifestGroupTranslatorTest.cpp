@@ -238,8 +238,8 @@ class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
             mmap_dir_,
             field_metas.size(),
             milvus::proto::common::LoadPriority::LOW,
-            /*eager_load=*/true,
-            /*warmup_policy=*/"",
+            /*cache_warmup_policy=*/
+            CacheWarmupPolicy::CacheWarmupPolicy_Sync,
             /*support_eviction=*/true);
     }
 
@@ -391,11 +391,36 @@ TEST_P(ManifestGroupTranslatorTest, TestSupportEviction) {
         mmap_dir_,
         field_metas.size(),
         milvus::proto::common::LoadPriority::LOW,
-        /*eager_load=*/true,
-        /*warmup_policy=*/"",
+        /*cache_warmup_policy=*/
+        CacheWarmupPolicy::CacheWarmupPolicy_Sync,
         /*support_eviction=*/false);
 
     EXPECT_FALSE(translator->meta()->support_eviction);
+}
+
+TEST_P(ManifestGroupTranslatorTest, TestResolvedWarmupPolicyIsPreserved) {
+    auto chunk_reader = test_data_->CreateChunkReader(/*cg_index=*/0);
+    auto field_metas = test_data_->GetFieldMetas(/*cg_index=*/0);
+    const auto& columns = test_data_->GetColumnGroups()->at(0)->columns;
+
+    auto translator = std::make_unique<ManifestGroupTranslator>(
+        segment_id_,
+        GroupChunkType::DEFAULT,
+        /*column_group_index=*/0,
+        std::move(chunk_reader),
+        field_metas,
+        columns,
+        columns,
+        GetParam(),
+        /*mmap_populate=*/true,
+        mmap_dir_,
+        field_metas.size(),
+        milvus::proto::common::LoadPriority::LOW,
+        CacheWarmupPolicy::CacheWarmupPolicy_Async,
+        /*support_eviction=*/true);
+
+    EXPECT_EQ(translator->meta()->cache_warmup_policy,
+              CacheWarmupPolicy::CacheWarmupPolicy_Async);
 }
 
 // Test the vector column group (cg 1): similar checks, single vector field.
@@ -520,8 +545,8 @@ TEST_P(ManifestGroupTranslatorTest,
         mmap_dir_,
         field_metas.size(),
         milvus::proto::common::LoadPriority::LOW,
-        /*eager_load=*/true,
-        /*warmup_policy=*/"",
+        /*cache_warmup_policy=*/
+        CacheWarmupPolicy::CacheWarmupPolicy_Sync,
         /*support_eviction=*/true);
 
     auto meta = static_cast<GroupCTMeta*>(translator->meta());
@@ -575,8 +600,8 @@ TEST_P(ManifestGroupTranslatorTest,
         mmap_dir_,
         field_metas.size(),
         milvus::proto::common::LoadPriority::LOW,
-        /*eager_load=*/true,
-        /*warmup_policy=*/"",
+        /*cache_warmup_policy=*/
+        CacheWarmupPolicy::CacheWarmupPolicy_Sync,
         /*support_eviction=*/true);
 
     auto meta = static_cast<GroupCTMeta*>(translator->meta());
@@ -623,8 +648,8 @@ TEST_P(ManifestGroupTranslatorTest, TestPrecomputedColumnEstimatesAreReused) {
             mmap_dir_,
             /*num_fields=*/1,
             milvus::proto::common::LoadPriority::LOW,
-            /*eager_load=*/false,
-            /*warmup_policy=*/"",
+            /*cache_warmup_policy=*/
+            CacheWarmupPolicy::CacheWarmupPolicy_Disable,
             /*support_eviction=*/true,
             projected_column,
             /*fallback_bytes_per_row=*/0,
@@ -689,8 +714,8 @@ TEST_P(ManifestGroupTranslatorTest,
         mmap_dir_,
         projected_field_metas.size(),
         milvus::proto::common::LoadPriority::LOW,
-        /*eager_load=*/true,
-        /*warmup_policy=*/"",
+        /*cache_warmup_policy=*/
+        CacheWarmupPolicy::CacheWarmupPolicy_Sync,
         /*support_eviction=*/true,
         projected_column);
 
@@ -763,8 +788,8 @@ TEST_P(ManifestGroupTranslatorTest,
         mmap_dir_,
         projected_field_metas.size(),
         milvus::proto::common::LoadPriority::LOW,
-        /*eager_load=*/false,
-        /*warmup_policy=*/"",
+        /*cache_warmup_policy=*/
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable,
         /*support_eviction=*/true,
         projected_column + "_fallback",
         kFallbackBytesPerRow);
@@ -813,8 +838,8 @@ TEST_P(ManifestGroupTranslatorTest,
         mmap_dir_,
         projected_field_metas.size(),
         milvus::proto::common::LoadPriority::LOW,
-        /*eager_load=*/false,
-        /*warmup_policy=*/"",
+        /*cache_warmup_policy=*/
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable,
         /*support_eviction=*/true,
         projected_column + "_zero_estimate");
 
@@ -853,8 +878,8 @@ TEST_P(ManifestGroupTranslatorTest,
         mmap_dir_,
         field_metas.size(),
         milvus::proto::common::LoadPriority::LOW,
-        /*eager_load=*/true,
-        /*warmup_policy=*/"",
+        /*cache_warmup_policy=*/
+        CacheWarmupPolicy::CacheWarmupPolicy_Sync,
         /*support_eviction=*/true);
 
     auto meta = static_cast<GroupCTMeta*>(translator->meta());
@@ -936,8 +961,8 @@ TEST_P(ManifestGroupTranslatorTest,
         mmap_dir_,
         projected_field_metas.size(),
         milvus::proto::common::LoadPriority::LOW,
-        /*eager_load=*/false,
-        /*warmup_policy=*/"",
+        /*cache_warmup_policy=*/
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable,
         /*support_eviction=*/true,
         projected_column + "_mixed_zero_estimate");
 
@@ -1004,8 +1029,8 @@ TEST_P(ManifestGroupTranslatorTest,
         mmap_dir_,
         projected_field_metas.size(),
         milvus::proto::common::LoadPriority::LOW,
-        /*eager_load=*/false,
-        /*warmup_policy=*/"",
+        /*cache_warmup_policy=*/
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable,
         /*support_eviction=*/true,
         projected_column + "_fallback_unavailable",
         kFallbackBytesPerRow);
@@ -1062,8 +1087,8 @@ TEST_P(ManifestGroupTranslatorTest,
         mmap_dir_,
         projected_field_metas.size(),
         milvus::proto::common::LoadPriority::LOW,
-        /*eager_load=*/false,
-        /*warmup_policy=*/"",
+        /*cache_warmup_policy=*/
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable,
         /*support_eviction=*/true,
         projected_column + "_total_fallback");
 
@@ -1116,8 +1141,8 @@ TEST_P(ManifestGroupTranslatorTest,
         mmap_dir_,
         projected_field_metas.size(),
         milvus::proto::common::LoadPriority::LOW,
-        /*eager_load=*/false,
-        /*warmup_policy=*/"",
+        /*cache_warmup_policy=*/
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable,
         /*support_eviction=*/true,
         projected_column + "_last_resort");
 

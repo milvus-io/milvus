@@ -1990,6 +1990,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const SegmentLoadInfo& segment_load_info,
         const SchemaPtr& schema_snapshot,
         bool eager_load,
+        CacheWarmupPolicy cache_warmup_policy,
+        bool support_eviction,
         milvus::OpContext* op_ctx,
         bool is_replace,
         StagedStateCommitter& committer,
@@ -2311,24 +2313,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                    "segment {}",
                    get_segment_id());
 
-        auto estimate_columns = std::make_shared<std::vector<std::string>>();
-        estimate_columns->reserve(field_ids.size());
-        for (const auto& field_id : field_ids) {
-            estimate_columns->push_back(
-                schema_snapshot->get_storage_column_name(field_id));
-        }
-        auto estimate_reader_result =
-            runtime->reader->get_chunk_reader(index, estimate_columns);
-        AssertInfo(estimate_reader_result.ok(),
-                   "get estimate chunk reader failed, segment {}, column "
-                   "group index {}, status msg: {}",
-                   get_segment_id(),
-                   index,
-                   estimate_reader_result.status().ToString());
-        auto estimate_reader = std::move(estimate_reader_result).ValueOrDie();
-        auto size_estimate =
-            storagev2translator::FetchColumnSizeEstimates(*estimate_reader);
-
         auto staged = ClonePublishedState(current);
         staged->schema = schema_snapshot;
         staged->load_info =
@@ -2338,17 +2322,17 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         NormalizePublishedState(*staged);
 
         StagedStateCommitter committer(*this, runtime.get(), staged.get());
-        LoadColumnGroup(column_groups,
-                        properties,
-                        index,
-                        field_ids,
-                        segment_load_info,
-                        schema_snapshot,
-                        eager_load,
-                        nullptr,
-                        false,
-                        committer,
-                        std::move(size_estimate));
+        std::vector<std::pair<int, std::vector<FieldId>>> cg_field_ids{
+            {index, field_ids}};
+        LoadColumnGroups(column_groups,
+                         properties,
+                         cg_field_ids,
+                         segment_load_info,
+                         schema_snapshot,
+                         eager_load,
+                         nullptr,
+                         false,
+                         committer);
 
         auto it = runtime->fields.find(field_ids.front());
         AssertInfo(it != runtime->fields.end(), "test field was not loaded");

@@ -88,8 +88,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     const std::string& mmap_dir_path,
     int64_t num_fields,
     milvus::proto::common::LoadPriority load_priority,
-    bool eager_load,
-    const std::string& warmup_policy,
+    CacheWarmupPolicy cache_warmup_policy,
     bool support_eviction,
     const std::string& cache_key_suffix,
     int64_t fallback_bytes_per_row,
@@ -122,20 +121,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                     return false;
                 }(),
                 /* is_index */ false),
-            // Use getCacheWarmupPolicy to resolve: user setting > global config
-            milvus::segcore::getCacheWarmupPolicy(
-                warmup_policy,
-                /* is_vector */
-                [&]() {
-                    for (const auto& [fid, field_meta] : field_metas_) {
-                        if (IsVectorDataType(field_meta.get_data_type())) {
-                            return true;
-                        }
-                    }
-                    return false;
-                }(),
-                /* is_index */ false,
-                /* in_load_list*/ eager_load),
+            cache_warmup_policy,
             support_eviction,
             std::move(shard)),
       use_mmap_(use_mmap),

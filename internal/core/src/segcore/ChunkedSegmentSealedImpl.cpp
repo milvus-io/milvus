@@ -52,6 +52,7 @@
 #include "bitset/bitset.h"
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Manager.h"
+#include "cachinglayer/TieredStorageConfig.h"
 #include "cachinglayer/Translator.h"
 #include "common/Array.h"
 #include "common/ArrayOffsets.h"
@@ -164,13 +165,13 @@ FormatFieldIds(const std::vector<FieldId>& field_ids) {
 }
 
 static storagev2translator::ColumnSizeEstimateResult
-FetchColumnGroupSizeEstimate(
-    milvus_storage::api::Reader& reader,
-    int cg_index,
-    const std::shared_ptr<std::vector<std::string>>& needed_columns,
-    int64_t segment_id) {
-    auto chunk_reader_result =
-        reader.get_chunk_reader(cg_index, needed_columns);
+FetchColumnGroupSizeEstimate(milvus_storage::api::Reader& reader,
+                             int cg_index,
+                             int64_t segment_id) {
+    // Column-size metadata always describes the complete physical group,
+    // independent of the reader projection. Use the reader's default projection
+    // and share the resulting immutable matrix across projected load tasks.
+    auto chunk_reader_result = reader.get_chunk_reader(cg_index);
     AssertInfo(chunk_reader_result.ok(),
                "get estimate chunk reader failed, segment {}, column group "
                "index {}, status msg: {}",
@@ -181,25 +182,7 @@ FetchColumnGroupSizeEstimate(
     return storagev2translator::FetchColumnSizeEstimates(*chunk_reader);
 }
 
-static std::shared_ptr<std::vector<std::string>>
-GetStorageColumnNames(const SchemaPtr& schema_snapshot,
-                      const std::vector<FieldId>& field_ids) {
-    auto columns = std::make_shared<std::vector<std::string>>();
-    columns->reserve(field_ids.size());
-    for (const auto& field_id : field_ids) {
-        columns->push_back(schema_snapshot->get_storage_column_name(field_id));
-    }
-    return columns;
-}
-
 namespace {
-
-struct ColumnGroupLoadTask {
-    int cg_index;
-    std::vector<FieldId> field_ids;
-    bool eager_load;
-    storagev2translator::ColumnSizeEstimateResult size_estimate;
-};
 
 struct FieldDataCachePolicy {
     CacheWarmupPolicy warmup_policy;
@@ -209,9 +192,24 @@ struct FieldDataCachePolicy {
     operator==(const FieldDataCachePolicy&) const = default;
 };
 
+struct FieldDataPolicyDefaults {
+    CacheWarmupPolicy scalar_warmup_policy;
+    CacheWarmupPolicy vector_warmup_policy;
+    bool scalar_support_eviction;
+    bool vector_support_eviction;
+};
+
 struct FieldDataPolicyGroup {
     FieldDataCachePolicy policy;
     std::vector<FieldId> field_ids;
+};
+
+struct ColumnGroupLoadTask {
+    int cg_index;
+    std::vector<FieldId> field_ids;
+    FieldDataCachePolicy policy;
+    bool eager_load;
+    storagev2translator::ColumnSizeEstimateResult size_estimate;
 };
 
 // Three warmup policies multiplied by the two eviction states.
@@ -292,35 +290,91 @@ all_fields_evictable_enabled(const SchemaPtr& schema,
     });
 }
 
+// Capture the refreshable field-data defaults once for one load-planning pass.
+// Metadata overrides are resolved separately for each field against this
+// snapshot, so a config refresh cannot change a task after it is grouped.
+static FieldDataPolicyDefaults
+capture_field_data_policy_defaults() {
+    const auto warmup_policies =
+        TieredStorageConfig::GetInstance().GetSnapshot().warmup_policies;
+    const auto& segcore_config = SegcoreConfig::default_config();
+    return {
+        warmup_policies.scalarFieldCacheWarmupPolicy,
+        warmup_policies.vectorFieldCacheWarmupPolicy,
+        segcore_config.get_evictable_default(/*is_vector=*/false,
+                                             /*is_index=*/false),
+        segcore_config.get_evictable_default(/*is_vector=*/true,
+                                             /*is_index=*/false),
+    };
+}
+
+// Resolve one field against a load-planning snapshot. The returned value is
+// suitable for both grouping and final cache-slot construction.
+template <typename WarmupResolver>
+static FieldDataCachePolicy
+resolve_field_data_cache_policy(const SchemaPtr& schema,
+                                FieldId field_id,
+                                bool in_load_list,
+                                const WarmupResolver& resolve_warmup,
+                                const FieldDataPolicyDefaults& defaults) {
+    const auto& field_meta = schema->operator[](field_id);
+    const bool is_vector = IsVectorDataType(field_meta.get_data_type());
+    const auto warmup_setting = resolve_warmup(field_id);
+
+    CacheWarmupPolicy warmup_policy;
+    if (!in_load_list) {
+        warmup_policy = CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    } else if (!warmup_setting.empty()) {
+        warmup_policy = getCacheWarmupPolicy(warmup_setting,
+                                             is_vector,
+                                             /*is_index=*/false,
+                                             /*in_load_list=*/true);
+    } else {
+        warmup_policy = is_vector ? defaults.vector_warmup_policy
+                                  : defaults.scalar_warmup_policy;
+    }
+
+    const auto [has_evictable_setting, evictable_enabled] =
+        schema->EvictableEnabled(field_id, is_vector, /*is_index=*/false);
+    const bool support_eviction =
+        has_evictable_setting ? evictable_enabled
+                              : (is_vector ? defaults.vector_support_eviction
+                                           : defaults.scalar_support_eviction);
+    return {warmup_policy, support_eviction};
+}
+
+// Add a resolved field to the matching policy group without consulting live
+// configuration again.
+static void
+append_field_to_policy_group(std::vector<FieldDataPolicyGroup>& groups,
+                             FieldId field_id,
+                             FieldDataCachePolicy policy) {
+    auto group =
+        std::find_if(groups.begin(), groups.end(), [&](const auto& candidate) {
+            return candidate.policy == policy;
+        });
+    if (group == groups.end()) {
+        groups.push_back({policy, {field_id}});
+    } else {
+        group->field_ids.push_back(field_id);
+    }
+}
+
 // Resolve the effective runtime policy for every field before grouping fields
 // that may share one projected manifest cache entry.
 template <typename WarmupResolver>
 static std::vector<FieldDataPolicyGroup>
 partition_fields_by_cache_policy(const SchemaPtr& schema,
                                  const std::vector<FieldId>& field_ids,
-                                 bool eager_load,
-                                 const WarmupResolver& resolve_warmup) {
+                                 bool in_load_list,
+                                 const WarmupResolver& resolve_warmup,
+                                 const FieldDataPolicyDefaults& defaults) {
     std::vector<FieldDataPolicyGroup> groups;
     groups.reserve(std::min(field_ids.size(), kMaxFieldDataPolicyGroups));
     for (const auto field_id : field_ids) {
-        const auto& field_meta = schema->operator[](field_id);
-        const auto warmup_policy =
-            getCacheWarmupPolicy(resolve_warmup(field_id),
-                                 IsVectorDataType(field_meta.get_data_type()),
-                                 /*is_index=*/false,
-                                 /*in_load_list=*/eager_load);
-        const FieldDataCachePolicy policy{
-            warmup_policy,
-            field_evictable_enabled(schema, field_id, /*is_index=*/false)};
-        auto group = std::find_if(
-            groups.begin(), groups.end(), [&](const auto& candidate) {
-                return candidate.policy == policy;
-            });
-        if (group == groups.end()) {
-            groups.push_back({policy, {field_id}});
-        } else {
-            group->field_ids.push_back(field_id);
-        }
+        const auto policy = resolve_field_data_cache_policy(
+            schema, field_id, in_load_list, resolve_warmup, defaults);
+        append_field_to_policy_group(groups, field_id, policy);
     }
     return groups;
 }
@@ -2167,6 +2221,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
             return resolve_field_data_warmup_policy(
                 field_id, segment_load_info, schema_snapshot);
         };
+    const auto policy_defaults = capture_field_data_policy_defaults();
     std::vector<ColumnGroupLoadTask> tasks;
     size_t max_tasks = 0;
     for (const auto& [_, field_ids] : cg_field_ids) {
@@ -2180,47 +2235,58 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
 
         std::vector<FieldId> eager_fields;
         std::vector<FieldId> lazy_fields;
+        std::vector<FieldDataPolicyGroup> eager_policy_groups;
+        eager_policy_groups.reserve(
+            std::min(all_fields.size(), kMaxFieldDataPolicyGroups));
+        std::vector<std::pair<FieldId, FieldDataCachePolicy>>
+            lazy_field_policies;
+        lazy_field_policies.reserve(all_fields.size());
 
         for (const auto& field_id : all_fields) {
-            const auto& field_meta = (*schema_snapshot)[field_id];
-            bool field_is_vector = IsVectorDataType(field_meta.get_data_type());
+            const auto policy =
+                resolve_field_data_cache_policy(schema_snapshot,
+                                                field_id,
+                                                /*in_load_list=*/true,
+                                                resolve_warmup,
+                                                policy_defaults);
             const auto pk_field_id = schema_snapshot->get_primary_field_id();
-            if (pk_field_id.has_value() &&
+            const bool force_eager =
+                pk_field_id.has_value() &&
                 pk_field_id.value().get() == field_id.get() &&
-                schema_snapshot->IsExternalDataField(field_id)) {
+                schema_snapshot->IsExternalDataField(field_id);
+            if (force_eager ||
+                policy.warmup_policy !=
+                    CacheWarmupPolicy::CacheWarmupPolicy_Disable) {
                 eager_fields.push_back(field_id);
-                continue;
-            }
-            auto warmup_str = resolve_field_data_warmup_policy(
-                field_id, segment_load_info, schema_snapshot);
-            auto resolved = getCacheWarmupPolicy(warmup_str,
-                                                 field_is_vector,
-                                                 /*is_index=*/false,
-                                                 /*in_load_list=*/true);
-            if (resolved != CacheWarmupPolicy::CacheWarmupPolicy_Disable) {
-                eager_fields.push_back(field_id);
+                append_field_to_policy_group(
+                    eager_policy_groups, field_id, policy);
             } else {
                 lazy_fields.push_back(field_id);
+                lazy_field_policies.emplace_back(field_id, policy);
             }
         }
 
-        if (!eager_fields.empty()) {
-            auto policy_groups = partition_fields_by_cache_policy(
-                schema_snapshot, eager_fields, true, resolve_warmup);
-            for (auto& group : policy_groups) {
-                tasks.push_back(
-                    {cg_index, std::move(group.field_ids), true, {}});
-            }
+        for (auto& group : eager_policy_groups) {
+            tasks.push_back({cg_index,
+                             std::move(group.field_ids),
+                             group.policy,
+                             /*eager_load=*/true,
+                             {}});
         }
-        for (const auto& fid : lazy_fields) {
-            tasks.push_back({cg_index, {fid}, false, {}});
+        for (const auto& [field_id, policy] : lazy_field_policies) {
+            tasks.push_back({cg_index,
+                             {field_id},
+                             policy,
+                             /*eager_load=*/false,
+                             {}});
         }
 
-        for (size_t i = task_start; i < tasks.size(); ++i) {
-            auto estimate_columns =
-                GetStorageColumnNames(schema_snapshot, tasks[i].field_ids);
-            tasks[i].size_estimate = FetchColumnGroupSizeEstimate(
-                *reader, cg_index, estimate_columns, get_segment_id());
+        if (task_start < tasks.size()) {
+            const auto size_estimate = FetchColumnGroupSizeEstimate(
+                *reader, cg_index, get_segment_id());
+            for (size_t i = task_start; i < tasks.size(); ++i) {
+                tasks[i].size_estimate = size_estimate;
+            }
         }
         LOG_INFO(
             "[LoadColumnGroups] segment {} cg {} fields={} eager_fields={} "
@@ -2252,6 +2318,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
                                    &segment_load_info,
                                    schema_snapshot,
                                    eager_load = task.eager_load,
+                                   policy = task.policy,
                                    size_estimate =
                                        std::move(task.size_estimate),
                                    op_ctx,
@@ -2268,6 +2335,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
                             segment_load_info,
                             schema_snapshot,
                             eager_load,
+                            policy.warmup_policy,
+                            policy.support_eviction,
                             op_ctx,
                             is_replace,
                             committer,
@@ -8215,6 +8284,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
             return resolve_field_data_warmup_policy(
                 field_id, segment_load_info, schema_snapshot);
         };
+    const auto policy_defaults = capture_field_data_policy_defaults();
     std::vector<ColumnGroupLoadTask> tasks;
     size_t max_tasks = 0;
     for (const auto& [_, field_ids] : cg_field_ids) {
@@ -8222,17 +8292,22 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     }
     tasks.reserve(max_tasks);
     for (const auto& [cg_index, field_ids] : cg_field_ids) {
-        auto policy_groups = partition_fields_by_cache_policy(
-            schema_snapshot, field_ids, eager_load, resolve_warmup);
+        auto policy_groups = partition_fields_by_cache_policy(schema_snapshot,
+                                                              field_ids,
+                                                              eager_load,
+                                                              resolve_warmup,
+                                                              policy_defaults);
+        if (policy_groups.empty()) {
+            continue;
+        }
+        const auto size_estimate =
+            FetchColumnGroupSizeEstimate(*reader, cg_index, get_segment_id());
         for (auto& group : policy_groups) {
-            auto estimate_columns =
-                GetStorageColumnNames(schema_snapshot, group.field_ids);
-            auto size_estimate = FetchColumnGroupSizeEstimate(
-                *reader, cg_index, estimate_columns, get_segment_id());
             tasks.push_back({cg_index,
                              std::move(group.field_ids),
+                             group.policy,
                              eager_load,
-                             std::move(size_estimate)});
+                             size_estimate});
         }
     }
     LOG_INFO(
@@ -8257,6 +8332,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
                                    &segment_load_info,
                                    schema_snapshot,
                                    eager_load = task.eager_load,
+                                   policy = task.policy,
                                    op_ctx,
                                    is_replace,
                                    &committer]() mutable {
@@ -8271,6 +8347,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
                             segment_load_info,
                             schema_snapshot,
                             eager_load,
+                            policy.warmup_policy,
+                            policy.support_eviction,
                             op_ctx,
                             is_replace,
                             committer,
@@ -8358,6 +8436,11 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     bool global_use_mmap = is_vector ? mmap_config.GetVectorFieldEnableMmap()
                                      : mmap_config.GetScalarFieldEnableMmap();
     auto use_mmap = has_mmap_setting ? mmap_enabled : global_use_mmap;
+    const auto cache_warmup_policy =
+        getCacheWarmupPolicy(aggregated_warmup_policy,
+                             is_vector,
+                             /*is_index=*/false,
+                             /*in_load_list=*/eager_load);
 
     // The set of columns this entry projects is exactly the field_ids the
     // diff handed us. For lazy entries, SegmentLoadInfo::ComputeDiffColumnGroups
@@ -8398,10 +8481,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             .GetChunkManager()
             ->GetRootPath();
 
-    // Determine warmup policy: use per-field settings if any,
-    // otherwise pass empty string to fall back to global config
-    std::string warmup_policy = aggregated_warmup_policy;
-
     // Multiple projected entries can share one physical column-group index.
     // Preserve the legacy key for an eager full-group entry, and identify any
     // lazy or partial projection by its stable field set.
@@ -8426,8 +8505,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             mmap_dir_path,
             milvus_field_ids.size(),
             segment_load_info.GetPriority(),
-            eager_load,
-            warmup_policy,
+            cache_warmup_policy,
             support_eviction,
             cache_key_suffix,
             segment_load_info.GetEstimatedBytesPerRow(),
@@ -8480,6 +8558,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     const SegmentLoadInfo& segment_load_info,
     const SchemaPtr& schema_snapshot,
     bool eager_load,
+    CacheWarmupPolicy cache_warmup_policy,
+    bool support_eviction,
     milvus::OpContext* op_ctx,
     bool is_replace,
     StagedStateCommitter& committer,
@@ -8497,13 +8577,10 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     }
 
     auto field_metas = schema_snapshot->get_field_metas(milvus_field_ids);
-    auto aggregated_warmup_policy = resolve_field_data_group_warmup_policy(
-        field_metas, segment_load_info, schema_snapshot);
 
     bool is_vector = false;
     bool has_mmap_setting = false;
     bool mmap_enabled = false;
-    bool support_eviction = true;
     for (auto& [field_id, field_meta] : field_metas) {
         if (IsVectorDataType(field_meta.get_data_type())) {
             is_vector = true;
@@ -8512,9 +8589,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             schema_snapshot->MmapEnabled(field_id);
         has_mmap_setting = has_mmap_setting || field_has_setting;
         mmap_enabled = mmap_enabled || field_mmap_enabled;
-        support_eviction = support_eviction &&
-                           field_evictable_enabled(
-                               schema_snapshot, field_id, /*is_index=*/false);
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
@@ -8555,8 +8629,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             .GetChunkManager()
             ->GetRootPath();
 
-    std::string warmup_policy = aggregated_warmup_policy;
-
     std::string cache_key_suffix;
     if (!eager_load ||
         milvus_field_ids.size() != column_group->columns.size()) {
@@ -8578,8 +8650,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             mmap_dir_path,
             milvus_field_ids.size(),
             segment_load_info.GetPriority(),
-            eager_load,
-            warmup_policy,
+            cache_warmup_policy,
             support_eviction,
             cache_key_suffix,
             segment_load_info.GetEstimatedBytesPerRow(),
