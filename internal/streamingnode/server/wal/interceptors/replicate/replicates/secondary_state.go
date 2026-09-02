@@ -21,7 +21,8 @@ func newSecondaryState(sourceClusterID string, sourcePChannel string) *secondary
 // recoverSecondaryState recovers the secondary state from the recover param.
 func recoverSecondaryState(param *ReplicateManagerRecoverParam) (*secondaryState, error) {
 	txnHelper := newReplicateTxnHelper()
-	sourceClusterID := param.InitialRecoverSnapshot.Checkpoint.ReplicateCheckpoint.ClusterID
+	checkpoint := utility.NewReplicateCheckpointFromProto(param.InitialRecoverSnapshot.PChannelControl.GetReplicateCheckpoint())
+	sourceClusterID := checkpoint.ClusterID
 	// recover the txn helper.
 	uncommittedTxnBuilders := param.InitialRecoverSnapshot.TxnBuffer.GetUncommittedMessageBuilder()
 	for _, builder := range uncommittedTxnBuilders {
@@ -44,7 +45,7 @@ func recoverSecondaryState(param *ReplicateManagerRecoverParam) (*secondaryState
 		}
 	}
 	return &secondaryState{
-		checkpoint:         param.InitialRecoverSnapshot.Checkpoint.ReplicateCheckpoint,
+		checkpoint:         checkpoint,
 		replicateTxnHelper: txnHelper,
 	}, nil
 }

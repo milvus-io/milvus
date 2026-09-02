@@ -39,48 +39,42 @@ func TestNewWALCheckpointFromProto(t *testing.T) {
 	assert.Equal(t, timeTick, checkpoint3.TimeTick)
 	assert.Equal(t, recoveryMagic, checkpoint3.Magic)
 
+	// The control fields advance atomically with the checkpoint: they round
+	// trip through the proto and survive Clone.
 	protoCheckpoint.ReplicateConfig = &commonpb.ReplicateConfiguration{}
 	protoCheckpoint.ReplicateCheckpoint = &commonpb.ReplicateCheckpoint{
 		ClusterId: "by-dev",
 		Pchannel:  "p1",
-		MessageId: nil,
-		TimeTick:  0,
+		MessageId: rmq.NewRmqID(2).IntoProto(),
+		TimeTick:  123456,
 	}
-	newCheckpoint := NewWALCheckpointFromProto(protoCheckpoint)
-	assert.Equal(t, "by-dev", newCheckpoint.ReplicateCheckpoint.ClusterID)
-	assert.Equal(t, "p1", newCheckpoint.ReplicateCheckpoint.PChannel)
-	assert.Equal(t, uint64(0), newCheckpoint.ReplicateCheckpoint.TimeTick)
-	assert.Nil(t, newCheckpoint.ReplicateCheckpoint.MessageID)
-	assert.NotNil(t, newCheckpoint.ReplicateConfig)
+	withControl := NewWALCheckpointFromProto(protoCheckpoint)
+	assert.True(t, messageID.EQ(withControl.MessageID))
+	assert.NotNil(t, withControl.ReplicateConfig)
+	assert.Equal(t, "by-dev", withControl.ReplicateCheckpoint.GetClusterId())
+	assert.Equal(t, uint64(123456), withControl.ReplicateCheckpoint.GetTimeTick())
 
-	protoCheckpoint.ReplicateCheckpoint.MessageId = rmq.NewRmqID(2).IntoProto()
-	protoCheckpoint.ReplicateCheckpoint.TimeTick = 123456
+	roundtrip := NewWALCheckpointFromProto(withControl.IntoProto())
+	assert.Equal(t, "by-dev", roundtrip.ReplicateCheckpoint.GetClusterId())
+	assert.Equal(t, rmq.NewRmqID(2).IntoProto(), roundtrip.ReplicateCheckpoint.GetMessageId())
+	assert.Equal(t, uint64(123456), roundtrip.ReplicateCheckpoint.GetTimeTick())
 
-	newCheckpoint = NewWALCheckpointFromProto(protoCheckpoint)
-	assert.Equal(t, "by-dev", newCheckpoint.ReplicateCheckpoint.ClusterID)
-	assert.Equal(t, "p1", newCheckpoint.ReplicateCheckpoint.PChannel)
-	assert.Equal(t, uint64(123456), newCheckpoint.ReplicateCheckpoint.TimeTick)
-	assert.True(t, rmq.NewRmqID(2).EQ(newCheckpoint.ReplicateCheckpoint.MessageID))
-	assert.NotNil(t, newCheckpoint.ReplicateConfig)
+	cloned := withControl.Clone()
+	assert.Equal(t, "by-dev", cloned.ReplicateCheckpoint.GetClusterId())
 
-	proto = newCheckpoint.IntoProto()
-	checkpoint2 = NewWALCheckpointFromProto(proto)
-	assert.True(t, messageID.EQ(checkpoint2.MessageID))
-	assert.Equal(t, timeTick, checkpoint2.TimeTick)
-	assert.Equal(t, recoveryMagic, checkpoint2.Magic)
-	assert.Equal(t, "by-dev", checkpoint2.ReplicateCheckpoint.ClusterID)
-	assert.Equal(t, "p1", checkpoint2.ReplicateCheckpoint.PChannel)
-	assert.Equal(t, uint64(123456), checkpoint2.ReplicateCheckpoint.TimeTick)
-	assert.True(t, rmq.NewRmqID(2).EQ(checkpoint2.ReplicateCheckpoint.MessageID))
-	assert.NotNil(t, checkpoint2.ReplicateConfig)
+	// PChannelControlFromCheckpoint decodes the embedded control state with the
+	// checkpoint position as its frontier.
+	control := PChannelControlFromCheckpoint(withControl)
+	assert.Equal(t, timeTick, control.GetCheckpointTimeTick())
+	assert.Equal(t, "by-dev", control.GetReplicateCheckpoint().GetClusterId())
+	assert.Equal(t, "p1", control.GetReplicateCheckpoint().GetPchannel())
+	assert.NotNil(t, control.GetReplicateConfig())
 
-	checkpoint2 = newCheckpoint.Clone()
-	assert.True(t, messageID.EQ(checkpoint2.MessageID))
-	assert.Equal(t, timeTick, checkpoint2.TimeTick)
-	assert.Equal(t, recoveryMagic, checkpoint2.Magic)
-	assert.Equal(t, "by-dev", checkpoint2.ReplicateCheckpoint.ClusterID)
-	assert.Equal(t, "p1", checkpoint2.ReplicateCheckpoint.PChannel)
-	assert.Equal(t, uint64(123456), checkpoint2.ReplicateCheckpoint.TimeTick)
-	assert.True(t, rmq.NewRmqID(2).EQ(checkpoint2.ReplicateCheckpoint.MessageID))
-	assert.NotNil(t, checkpoint2.ReplicateConfig)
+	// ApplyControl freezes control state into a checkpoint.
+	applyTarget := withControl.Clone()
+	applyTarget.AlterWalState = nil
+	applyTarget.ReplicateCheckpoint = nil
+	applyTarget.ApplyControl(control)
+	assert.Equal(t, uint64(123456), applyTarget.ReplicateCheckpoint.GetTimeTick())
+	assert.Equal(t, rmq.NewRmqID(2).IntoProto(), applyTarget.ReplicateCheckpoint.GetMessageId())
 }

@@ -29,13 +29,19 @@ type recoveryStreamBuilderImpl struct {
 
 // Build builds a recovery stream.
 func (b *recoveryStreamBuilderImpl) Build(param recovery.BuildRecoveryStreamParam) recovery.RecoveryStream {
-	scanner := newRecoveryScannerAdaptor(b.roWALImpls, param.StartCheckpoint, b.scanMetrics.NewScannerMetrics())
+	scanner := newRecoveryScannerAdaptor(
+		b.roWALImpls,
+		param.StartCheckpoint,
+		b.scanMetrics.NewScannerMetrics(),
+		param.UseWriteAheadBuffer,
+	)
 	recoveryStream := &recoveryStreamImpl{
 		notifier:  syncutil.NewAsyncTaskNotifier[error](),
 		param:     param,
 		scanner:   scanner,
 		ch:        make(chan message.ImmutableMessage),
 		txnBuffer: nil,
+		onFatal:   b.markUnavailable,
 	}
 	go recoveryStream.execute()
 	return recoveryStream
@@ -52,6 +58,7 @@ type recoveryStreamImpl struct {
 	param     recovery.BuildRecoveryStreamParam
 	ch        chan message.ImmutableMessage
 	txnBuffer *utility.TxnBuffer
+	onFatal   func(error)
 }
 
 // Chan returns the channel of the recovery stream.
@@ -118,7 +125,11 @@ func (r *recoveryStreamImpl) execute() (err error) {
 			pendingMessage = nil
 		case msg, ok := <-upstream:
 			if !ok {
-				return r.scanner.Error()
+				err := r.scanner.Error()
+				if err != nil && r.notifier.Context().Err() == nil {
+					r.onFatal(err)
+				}
+				return err
 			}
 			pendingMessage = msg
 		}
