@@ -63,9 +63,9 @@ chmod +x "$fake_bin/test-command"
 (
     cd "$repo_root"
     PATH="$fake_bin:$PATH" RUN_LOG="$run_log" \
-        bash scripts/run_intergration_test.sh --package ./cmek "$fake_bin/test-command"
-    PATH="$fake_bin:$PATH" RUN_LOG="$run_log" MILVUS_INTEGRATION_COVERAGE_FILE="$repo_root/it_coverage_base.txt" \
         bash scripts/run_intergration_test.sh --exclude-package ./cmek "$fake_bin/test-command"
+    PATH="$fake_bin:$PATH" RUN_LOG="$run_log" MILVUS_INTEGRATION_COVERAGE_APPEND=true \
+        bash scripts/run_intergration_test.sh --package ./cmek "$fake_bin/test-command"
 )
 
 test "$(grep -c '^example.test/cmek$' "$run_log")" -eq 1
@@ -73,9 +73,18 @@ grep -qx 'example.test/root' "$run_log"
 grep -qx 'example.test/cmek/inspector' "$run_log"
 
 coverage_file="$repo_root/it_coverage.txt"
-base_coverage_file="$repo_root/it_coverage_base.txt"
 test "$(grep -c '^mode: atomic$' "$coverage_file")" -eq 1
-test "$(grep -c '^mode: atomic$' "$base_coverage_file")" -eq 1
 grep -q '^example.test/cmek/file.go:' "$coverage_file"
-grep -q '^example.test/root/file.go:' "$base_coverage_file"
-grep -q '^example.test/cmek/inspector/file.go:' "$base_coverage_file"
+grep -q '^example.test/root/file.go:' "$coverage_file"
+grep -q '^example.test/cmek/inspector/file.go:' "$coverage_file"
+
+(
+    cd "$repo_root"
+    PATH="$fake_bin:$PATH" RUN_LOG="$run_log" \
+        bash scripts/run_intergration_test.sh --package ./cmek "$fake_bin/test-command"
+)
+
+test "$(grep -c '^mode: atomic$' "$coverage_file")" -eq 1
+grep -q '^example.test/cmek/file.go:' "$coverage_file"
+! grep -q '^example.test/root/file.go:' "$coverage_file"
+! grep -q '^example.test/cmek/inspector/file.go:' "$coverage_file"

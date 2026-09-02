@@ -25,7 +25,9 @@ source $BASEDIR/setenv.sh
 
 set -e
 
-echo "mode: atomic" > "$FILE_COVERAGE_INFO"
+if [ "${MILVUS_INTEGRATION_COVERAGE_APPEND:-false}" != "true" ] || [ ! -s "$FILE_COVERAGE_INFO" ]; then
+    echo "mode: atomic" > "$FILE_COVERAGE_INFO"
+fi
 echo "MILVUS_WORK_DIR: $MILVUS_WORK_DIR"
 export MILVUS_INTEGRATION_CASE_TIMEOUT="${MILVUS_INTEGRATION_CASE_TIMEOUT:-20m}"
 
