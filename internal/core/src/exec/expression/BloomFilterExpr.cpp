@@ -438,19 +438,22 @@ PhyBloomFilterExpr::ExecVisitorImplJson(EvalCtx& context) {
             // false, which is the correct answer — no value of that type was
             // ever a member.
             const auto& json = data[offset];
-            auto str = json.template at<std::string_view>(pointer);
-            if (!str.error()) {
-                res[i] =
-                    filter.TestBytes(str.value().data(), str.value().size());
-                continue;
-            }
-            auto num = json.at_numeric(pointer);
-            if (num.error()) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (auto n = num.value(); n.is_int64()) {
-                res[i] = filter.TestInt64(n.get_int64());
+            const auto value = json.at_string_or_int64(pointer);
+            switch (value.kind) {
+                case JsonStringOrInt64::Kind::String:
+                    res[i] = filter.TestBytes(value.string_value.data(),
+                                              value.string_value.size());
+                    break;
+                case JsonStringOrInt64::Kind::Int64:
+                    res[i] = filter.TestInt64(value.int64_value);
+                    break;
+                case JsonStringOrInt64::Kind::OtherNumber:
+                    // A numeric value outside the int64 domain is a definite
+                    // non-member, but it is still a valid JSON scalar.
+                    break;
+                case JsonStringOrInt64::Kind::NoProbeValue:
+                    res[i] = valid_res[i] = false;
+                    break;
             }
         }
         processed_cursor += size;
