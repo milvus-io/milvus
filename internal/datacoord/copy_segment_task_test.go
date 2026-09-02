@@ -1019,7 +1019,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_EmptyResult() {
 		IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{},
 	}
 	task := createTestCopyTask(1, 100)
-	err := syncVectorScalarIndexes(context.Background(), result, task, &meta{}, nil)
+	err := syncVectorScalarIndexes(context.Background(), result, task, &meta{}, nil, nil)
 	s.NoError(err)
 }
 
@@ -1054,7 +1054,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_SingleIndex() {
 	}
 	task := createTestCopyTask(collectionID, segmentID)
 
-	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil)
+	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil, nil)
 	s.NoError(err)
 
 	// Verify the segment index was added with target indexID and Finished state
@@ -1100,7 +1100,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_PreservesIndexStorePa
 	}
 	task := createTestCopyTask(collectionID, segmentID)
 
-	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil)
+	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil, nil)
 	s.NoError(err)
 
 	segIdxV0, ok := im.segmentBuildInfo.Get(2001)
@@ -1158,7 +1158,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_MultipleIndexesPerFie
 	}
 	task := createTestCopyTask(collectionID, segmentID)
 
-	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil)
+	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil, nil)
 	s.NoError(err)
 
 	// All three indexes should be synced with correct target indexIDs
@@ -1170,12 +1170,14 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_MultipleIndexesPerFie
 	}
 }
 
-// A copy target whose worker wrote the target's own index entries into the
-// target manifest yields records that are already published, so the backfill
-// migration must not queue them. Anything without a manifest revision to point
-// at - a StorageV1/V2 target, or a result carrying no manifest pointer - has no
-// entry and must stay unpublished.
-func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_ManifestPublishedFollowsTarget() {
+// Publication follows the manifest READ-BACK, not the manifest pointer. A copy
+// target whose worker re-derived the target's own entries yields records that
+// are already published, so the backfill migration must not queue them; a
+// target whose manifest carries no entry for the build - a StorageV1/V2 target,
+// a result with no pointer, or an old DataNode that returned a pointer without
+// running the republication - must stay unpublished and, when a backfill could
+// still fix it, flagged.
+func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_ManifestPublishedFollowsReadBack() {
 	collectionID := int64(1)
 
 	cases := []struct {
@@ -1183,14 +1185,19 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_ManifestPublishedFoll
 		segmentID      int64
 		storageVersion int64
 		manifestPath   string
-		published      bool
+		// whether the read-back reported an entry for this segment's build
+		inManifest bool
+		published  bool
 		// Only a StorageV3 segment is a backfill candidate at all, so a legacy
 		// target stays unflagged even though its record is unpublished.
 		hinted bool
 	}{
-		{"v3 target with manifest", 100, storage.StorageV3, "files/manifest/100/1", true, false},
-		{"v3 target without manifest pointer", 101, storage.StorageV3, "", false, true},
-		{"legacy storage target", 102, storage.StorageV2, "files/manifest/102/1", false, false},
+		{"v3 target with a republished entry", 100, storage.StorageV3, "files/manifest/100/1", true, true, false},
+		// The old-DataNode shape: a pointer, but an index section the copy never
+		// rewrote. Trusting the pointer here would exempt the record forever.
+		{"v3 target whose manifest carries no entry", 103, storage.StorageV3, "files/manifest/103/1", false, false, true},
+		{"v3 target without manifest pointer", 101, storage.StorageV3, "", false, false, true},
+		{"legacy storage target", 102, storage.StorageV2, "files/manifest/102/1", true, false, false},
 	}
 
 	for _, tc := range cases {
@@ -1204,10 +1211,15 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_ManifestPublishedFoll
 				ID:             tc.segmentID,
 				CollectionID:   collectionID,
 				NumOfRows:      100,
+				State:          commonpb.SegmentState_Flushed,
 				StorageVersion: tc.storageVersion,
 			}))
 
 			buildID := 6000 + tc.segmentID
+			var publishedBuilds map[int64]struct{}
+			if tc.inManifest {
+				publishedBuilds = map[int64]struct{}{buildID: {}}
+			}
 			result := &datapb.CopySegmentResult{
 				SegmentId:    tc.segmentID,
 				ManifestPath: tc.manifestPath,
@@ -1222,7 +1234,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_ManifestPublishedFoll
 			}
 			task := createTestCopyTask(collectionID, tc.segmentID)
 
-			s.NoError(syncVectorScalarIndexes(context.Background(), result, task, m, nil))
+			s.NoError(syncVectorScalarIndexes(context.Background(), result, task, m, nil, publishedBuilds))
 
 			segIdx, ok := im.segmentBuildInfo.Get(buildID)
 			s.Require().True(ok)
@@ -1230,6 +1242,52 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_ManifestPublishedFoll
 			s.Equal(tc.hinted, m.GetSegment(context.Background(), tc.segmentID).NeedsManifestIndexBackfill())
 		})
 	}
+}
+
+// An AddSegmentIndex failure returns from the middle of the per-index loop. The
+// unpublished records already installed by the earlier iterations are real work
+// for the backfill, so the segment must still carry the hint - otherwise the
+// inspector, which only visits flagged segments, skips it until a restart
+// reseeds the hint from the records.
+func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_HintsSegmentOnMidLoopFailure() {
+	collectionID := int64(1)
+	segmentID := int64(104)
+
+	errCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	errCatalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).
+		Return(errors.New("catalog error"))
+
+	im := createTestIndexMeta(s.T(), collectionID, map[int64]*model.Index{
+		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
+	}, errCatalog)
+	m := &meta{indexMeta: im, segments: NewSegmentsInfo()}
+	m.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		CollectionID:   collectionID,
+		NumOfRows:      100,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+	}))
+
+	result := &datapb.CopySegmentResult{
+		SegmentId:    segmentID,
+		ManifestPath: "files/manifest/104/1",
+		IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{
+			7001: {FieldId: 101, BuildId: 7001, IndexName: "vec_idx", IndexFilePaths: []string{"HNSW"}},
+		},
+	}
+	task := createTestCopyTask(collectionID, segmentID)
+
+	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyCatalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyMeta, cmErr := NewCopySegmentMeta(context.TODO(), copyCatalog, nil, nil, nil)
+	s.Require().NoError(cmErr)
+
+	s.Error(syncVectorScalarIndexes(context.Background(), result, task, m, copyMeta, nil))
+	s.True(m.GetSegment(context.Background(), segmentID).NeedsManifestIndexBackfill())
 }
 
 func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_IndexNameNotFound() {
@@ -1256,7 +1314,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_IndexNameNotFound() {
 	}
 	task := createTestCopyTask(collectionID, segmentID)
 
-	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil)
+	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil, nil)
 	s.NoError(err)
 
 	// Should not be added
@@ -1296,7 +1354,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_AddSegmentIndexError(
 	copyMeta, cmErr := NewCopySegmentMeta(context.TODO(), copyCatalog, nil, nil, nil)
 	s.NoError(cmErr)
 
-	syncErr := syncVectorScalarIndexes(context.Background(), result, task, m, copyMeta)
+	syncErr := syncVectorScalarIndexes(context.Background(), result, task, m, copyMeta, nil)
 	s.Error(syncErr)
 	s.Contains(syncErr.Error(), "catalog error")
 }

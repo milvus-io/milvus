@@ -192,16 +192,48 @@ func manifestIndexParams(manifestIndex packed.ManifestIndexInfo) []*commonpb.Key
 // a finished artifact that is not yet recorded in its segment's manifest, i.e.
 // whether it is work for the manifest index backfill.
 //
-// The predicate deliberately matches the one publishIndexToManifest applies
-// when it decides to publish at all: a fake-finished build (a segment too small
-// to train an index) uploads no files, has no artifact, and therefore has
-// nothing to record in a manifest - it must not hold a segment pending forever.
+// Only !ManifestPublished says "this needs backfilling". The other three terms
+// exclude records nothing can ever publish, which would otherwise hold their
+// segment pending forever and make pending == 0 - the signal that the migration
+// is complete - unreachable.
+//
+// The last term is the non-obvious one, because Finished does not imply "an
+// artifact exists". A segment below MinSegmentNumRowsToEnableIndex (or a
+// no-train index type) never has a job dispatched: DataCoord marks the record
+// Finished directly ("fake finished index success"), so no worker ran and no
+// files were uploaded. publishIndexToManifest applies this exact check before
+// deciding to publish at all, and the writer-side validator would reject an
+// entry with no file keys even if a backfill did attempt one.
 func segmentIndexNeedsManifestBackfill(segIdx *model.SegmentIndex) bool {
 	return segIdx != nil &&
+		// The one positive signal: no entry in the published revision yet.
 		!segIdx.ManifestPublished &&
+		// Being retired; GC removes it rather than publishing it.
 		!segIdx.IsDeleted &&
+		// Still building or failed: it has no result to record yet.
 		segIdx.IndexState == commonpb.IndexState_Finished &&
+		// Fake-finished: Finished, but no files were ever uploaded.
 		len(segIdx.IndexFileKeys) > 0
+}
+
+// manifestIndexBackfillEligible reports whether a segment's SHAPE is one the
+// backfill inspector can ever act on, mirroring its candidate filter (healthy,
+// StorageV3, not L0). It deliberately says nothing about the segment's index
+// records - that is the hint itself.
+//
+// Every writer of the hint applies it, so the hint never claims work that no
+// consumer will pick up. Without it an upgraded StorageV1/V2 cluster flags
+// every indexed segment - each one a ShadowClone, and all of them counted in
+// the boot log's segmentsPendingBackfill - for a backfill that skips them all,
+// making the "pending == 0 means migration complete" signal unreachable.
+//
+// The manifest-path leg of the inspector's filter is intentionally NOT applied:
+// an empty path on a visible V3 segment is an invariant violation the inspector
+// logs loudly, and silently dropping the hint here would hide it.
+func manifestIndexBackfillEligible(segment *SegmentInfo) bool {
+	return isSegmentHealthy(segment) &&
+		segment.GetStorageVersion() >= storage.StorageV3 &&
+		segment.GetLevel() != datapb.SegmentLevel_L0
 }
 
 // markManifestIndexBackfillPending sets the backfill hint on a segment. It is
@@ -217,7 +249,7 @@ func (m *meta) markManifestIndexBackfillPending(segmentID UniqueID) {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
 	segment := m.segments.GetSegment(segmentID)
-	if segment == nil || segment.NeedsManifestIndexBackfill() {
+	if segment == nil || segment.NeedsManifestIndexBackfill() || !manifestIndexBackfillEligible(segment) {
 		return
 	}
 	// ShadowClone, not Clone: only the process-local hint changes, so copying the
@@ -239,7 +271,7 @@ func (m *meta) refreshManifestIndexBackfillPending(segmentID UniqueID) {
 	if segment == nil {
 		return
 	}
-	pending := m.segmentHasUnpublishedIndex(segmentID)
+	pending := manifestIndexBackfillEligible(segment) && m.segmentHasUnpublishedIndex(segmentID)
 	if pending == segment.NeedsManifestIndexBackfill() {
 		return
 	}
@@ -292,7 +324,7 @@ func (m *meta) initManifestIndexBackfillPending(ctx context.Context) {
 	m.segMu.Lock()
 	for segmentID := range candidates {
 		segment := m.segments.GetSegment(segmentID)
-		if segment == nil || segment.NeedsManifestIndexBackfill() {
+		if segment == nil || segment.NeedsManifestIndexBackfill() || !manifestIndexBackfillEligible(segment) {
 			continue
 		}
 		m.segments.SetSegment(segmentID, segment.ShadowClone(func(cloned *SegmentInfo) {

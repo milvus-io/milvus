@@ -236,6 +236,60 @@ func TestManifestIndexBackfillHintSeededAtBoot(t *testing.T) {
 	assert.False(t, m.GetSegment(ctx, unpublishedSegID).NeedsManifestIndexBackfill())
 }
 
+// The hint is a worklist for the backfill inspector, whose candidate filter is
+// healthy + StorageV3 + not-L0. Flagging a segment outside that shape - every
+// indexed segment of an upgraded StorageV1/V2 cluster, for instance - is work
+// no consumer will ever pick up, and it makes the pending count (the signal
+// that the migration is done) permanently non-zero.
+func TestManifestIndexBackfillHintSkipsIneligibleSegments(t *testing.T) {
+	ctx := context.TODO()
+
+	cases := []struct {
+		name    string
+		segment *datapb.SegmentInfo
+	}{
+		{"legacy storage version", &datapb.SegmentInfo{
+			ID: unpublishedSegID, CollectionID: 100, PartitionID: 10,
+			State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV2,
+		}},
+		{"dropped segment", &datapb.SegmentInfo{
+			ID: unpublishedSegID, CollectionID: 100, PartitionID: 10,
+			State: commonpb.SegmentState_Dropped, StorageVersion: storage.StorageV3,
+		}},
+		{"L0 segment", &datapb.SegmentInfo{
+			ID: unpublishedSegID, CollectionID: 100, PartitionID: 10,
+			State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
+			Level: datapb.SegmentLevel_L0,
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := newMemoryMeta(t)
+			require.NoError(t, err)
+			require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(tc.segment)))
+			require.NoError(t, m.indexMeta.CreateIndex(ctx, &model.Index{
+				CollectionID: 100, FieldID: 101, IndexID: unpublishedIndexID, IndexName: "idx",
+			}))
+			seedIssuedIndexTask(t, m)
+			require.NoError(t, m.indexMeta.FinishTask(finishIndexTaskResult()))
+
+			// The record itself is real backfill work; only the segment's shape
+			// makes it unreachable.
+			require.True(t, m.segmentHasUnpublishedIndex(unpublishedSegID))
+
+			m.markManifestIndexBackfillPending(unpublishedSegID)
+			assert.False(t, m.GetSegment(ctx, unpublishedSegID).NeedsManifestIndexBackfill())
+
+			m.initManifestIndexBackfillPending(ctx)
+			assert.False(t, m.GetSegment(ctx, unpublishedSegID).NeedsManifestIndexBackfill())
+
+			m.refreshManifestIndexBackfillPending(unpublishedSegID)
+			assert.False(t, m.GetSegment(ctx, unpublishedSegID).NeedsManifestIndexBackfill())
+		})
+	}
+}
+
 // The hint rides on the process-local half of SegmentInfo, so both clone forms
 // must carry it; a clone that drops it would silently exempt the segment.
 func TestManifestIndexBackfillHintClones(t *testing.T) {
