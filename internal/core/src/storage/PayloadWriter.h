@@ -36,8 +36,7 @@ class PayloadWriter {
     explicit PayloadWriter(const DataType column_type,
                            int dim,
                            DataType element_type,
-                           bool nullable,
-                           bool element_nullable);
+                           bool nullable = false);
     ~PayloadWriter() = default;
 
     void

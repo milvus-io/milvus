@@ -55,20 +55,11 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
     bool nullable = (extras.find(NULLABLE) != extras.end())
                         ? std::any_cast<bool>(extras[NULLABLE])
                         : false;
-    bool element_nullable =
-        (extras.find(ELEMENT_NULLABLE) != extras.end())
-            ? std::any_cast<bool>(extras[ELEMENT_NULLABLE])
-            : false;
     auto descriptor_fix_part = descriptor_event.event_data.fix_part;
     FieldDataMeta data_meta{descriptor_fix_part.collection_id,
                             descriptor_fix_part.partition_id,
                             descriptor_fix_part.segment_id,
                             descriptor_fix_part.field_id};
-    data_meta.field_schema.set_fieldid(descriptor_fix_part.field_id);
-    data_meta.field_schema.set_data_type(
-        static_cast<proto::schema::DataType>(data_type));
-    data_meta.field_schema.set_nullable(nullable);
-    data_meta.field_schema.set_element_nullable(element_nullable);
 
     auto edek = descriptor_event.GetEdekFromExtra();
     if (edek.length() > 0) {
@@ -121,14 +112,12 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
     auto event_data_length = header.event_length_ - GetEventHeaderSize(header);
     switch (header.event_type_) {
         case EventType::InsertEvent: {
-            auto insert_event_data =
-                InsertEventData(reader,
-                                event_data_length,
-                                data_type,
-                                nullable,
-                                element_nullable,
-                                is_field_data,
-                                std::move(array_type));
+            auto insert_event_data = InsertEventData(reader,
+                                                     event_data_length,
+                                                     data_type,
+                                                     nullable,
+                                                     is_field_data,
+                                                     std::move(array_type));
 
             std::unique_ptr<InsertData> insert_data;
             insert_data =

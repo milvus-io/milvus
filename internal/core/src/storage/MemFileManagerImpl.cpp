@@ -173,12 +173,6 @@ MemFileManagerImpl::CacheRawDataToMemory(const Config& config) {
     auto storage_version =
         index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
             .value_or(0);
-    if (field_meta_.field_schema.element_nullable() &&
-        storage_version < STORAGE_V2) {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "Storage V1 does not support element-nullable field {}",
-                  field_meta_.field_id);
-    }
     if (storage_version == STORAGE_V2 || storage_version == STORAGE_V3) {
         return cache_raw_data_to_memory_storage_v2(config);
     }
@@ -274,14 +268,14 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
     for (auto& files : remote_files) {
         SortByPath(files);
     }
-    auto field_datas = GetFieldDatasFromStorageV2(remote_files,
-                                                  field_meta_.field_id,
-                                                  data_type.value(),
-                                                  element_type.value(),
-                                                  field_meta_.field_schema
-                                                      .element_nullable(),
-                                                  dim,
-                                                  fs_);
+    auto field_datas =
+        GetFieldDatasFromStorageV2(remote_files,
+                                   field_meta_.field_id,
+                                   data_type.value(),
+                                   element_type.value(),
+                                   field_meta_.field_schema.element_nullable(),
+                                   dim,
+                                   fs_);
     // field data list could differ for storage v2 group list
     return field_datas;
 }

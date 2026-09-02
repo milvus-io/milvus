@@ -200,9 +200,6 @@ DescriptorEventData::DescriptorEventData(BinlogReaderPtr reader) {
     if (json.contains(NULLABLE)) {
         extras[NULLABLE] = static_cast<bool>(json[NULLABLE]);
     }
-    if (json.contains(ELEMENT_NULLABLE)) {
-        extras[ELEMENT_NULLABLE] = static_cast<bool>(json[ELEMENT_NULLABLE]);
-    }
 
     if (json.contains(EDEK)) {
         extras[EDEK] = static_cast<std::string>(json[EDEK]);
@@ -218,7 +215,7 @@ DescriptorEventData::Serialize() {
     auto fix_part_data = fix_part.Serialize();
     nlohmann::json extras_json;
     for (const auto& v : extras) {
-        if (v.first == NULLABLE || v.first == ELEMENT_NULLABLE) {
+        if (v.first == NULLABLE) {
             extras_json.emplace(v.first, std::any_cast<bool>(v.second));
         } else if (v.first == EZID) {
             extras_json.emplace(v.first, std::any_cast<int64_t>(v.second));
@@ -256,23 +253,6 @@ BaseEventData::BaseEventData(
     DataType data_type,
     bool nullable,
     bool is_field_data,
-    std::optional<proto::schema::TypeSchema> array_type)
-    : BaseEventData(reader,
-                    event_length,
-                    data_type,
-                    nullable,
-                    false,
-                    is_field_data,
-                    std::move(array_type)) {
-}
-
-BaseEventData::BaseEventData(
-    BinlogReaderPtr reader,
-    int event_length,
-    DataType data_type,
-    bool nullable,
-    bool element_nullable,
-    bool is_field_data,
     std::optional<proto::schema::TypeSchema> array_type) {
     auto ast = reader->ReadSingleValue<Timestamp>(start_timestamp);
     AssertInfo(ast.ok(), "read start timestamp failed");
@@ -287,7 +267,6 @@ BaseEventData::BaseEventData(
                                                      payload_length,
                                                      data_type,
                                                      nullable,
-                                                     element_nullable,
                                                      is_field_data,
                                                      std::move(array_type));
 }
@@ -323,12 +302,11 @@ BaseEventData::Serialize() {
             AssertInfo(vector_array_field != nullptr,
                        "Failed to cast to FieldData<VectorArray>");
             auto element_type = vector_array_field->get_element_type();
-            payload_writer = std::make_unique<PayloadWriter>(
-                data_type,
-                field_data->get_dim(),
-                element_type,
-                field_data->IsNullable(),
-                vector_array_field->is_element_nullable());
+            payload_writer =
+                std::make_unique<PayloadWriter>(data_type,
+                                                field_data->get_dim(),
+                                                element_type,
+                                                field_data->IsNullable());
         } else if (IsVectorDataType(data_type) &&
                    !IsSparseFloatVectorDataType(data_type)) {
             payload_writer = std::make_unique<PayloadWriter>(

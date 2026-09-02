@@ -48,8 +48,7 @@ PayloadWriter::PayloadWriter(const DataType column_type, int dim, bool nullable)
 PayloadWriter::PayloadWriter(const DataType column_type,
                              int dim,
                              DataType element_type,
-                             bool nullable,
-                             bool element_nullable)
+                             bool nullable)
     : column_type_(column_type),
       nullable_(nullable),
       element_type_(element_type) {
@@ -58,10 +57,8 @@ PayloadWriter::PayloadWriter(const DataType column_type,
     AssertInfo(element_type != DataType::NONE,
                "element_type must be specified for VECTOR_ARRAY");
     dimension_ = dim;
-    builder_ = CreateArrowBuilder(
-        column_type, element_type, dim, nullable_, element_nullable);
-    schema_ = CreateArrowSchema(
-        column_type, dim, element_type, nullable_, element_nullable);
+    builder_ = CreateArrowBuilder(column_type, element_type, dim, nullable_);
+    schema_ = CreateArrowSchema(column_type, dim, element_type, nullable_);
 }
 
 void

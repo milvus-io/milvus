@@ -539,20 +539,10 @@ ConvertFieldDataToArrowDataWrapper(const FieldDataPtr& field_data) {
 
     storage::BinlogReaderPtr reader = std::make_shared<storage::BinlogReader>(
         file_data, event_data_bytes.size());
-    bool element_nullable = false;
-    if (auto array_field =
-            std::dynamic_pointer_cast<FieldData<Array>>(field_data)) {
-        element_nullable = array_field->is_element_nullable();
-    } else if (auto vector_array_field =
-                   std::dynamic_pointer_cast<FieldData<VectorArray>>(
-                       field_data)) {
-        element_nullable = vector_array_field->is_element_nullable();
-    }
     event_data = storage::BaseEventData(reader,
                                         event_data_bytes.size(),
                                         field_data->get_data_type(),
                                         field_data->IsNullable(),
-                                        element_nullable,
                                         false);
     return std::make_shared<ArrowDataWrapper>(
         event_data.payload_reader->get_reader(),

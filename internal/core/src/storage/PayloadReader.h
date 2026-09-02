@@ -41,15 +41,6 @@ class PayloadReader {
         bool is_field_data = true,
         std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 
-    explicit PayloadReader(const uint8_t* data,
-                           int length,
-                           DataType data_type,
-                           bool nullable,
-                           bool element_nullable,
-                           bool is_field_data,
-                           std::optional<proto::schema::TypeSchema> array_type =
-                               std::nullopt);
-
     ~PayloadReader() = default;
 
     void
@@ -128,7 +119,6 @@ class PayloadReader {
     DataType column_type_;
     int dim_;
     bool nullable_;
-    bool element_nullable_ = false;
     FieldDataPtr field_data_;
 
     std::shared_ptr<parquet::arrow::FileReader> arrow_reader_;
