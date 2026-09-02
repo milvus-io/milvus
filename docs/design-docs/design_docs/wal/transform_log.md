@@ -5,10 +5,10 @@
 - Independent Approver: @weiliu1031
 - Design Review: 2026-07-29
 
-**Status:** Future integration, outside the current recovery-storage PR.
-This is the agreed subscription contract. L0 materialization is implemented
-separately in [L0 Materializer](l0_materializer.md); the former
-`vchannel/transformlog` package has been removed.
+**Status:** Remote transport and resumable clients are implemented in the
+view-resource preparation workspace. The local Summary subscription implementation
+belongs to `40451-sn_query_extract`; it is not duplicated here. The two workspaces
+integrate through the interfaces in `internal/streamingnode/server/wal/transform_log.go`.
 
 TransformLog is a read-only subscription adaptor over
 [WALSummary](summary.md#54-transform-read-contract). It owns no record storage,
@@ -141,3 +141,44 @@ and [WAL input view](streamingnode_vchannel_wal_view.md) for snapshot handoff.
 5. Historical/live handoff and storage transitions lose no records.
 6. Subscription cursors do not advance L0 materialization or authorize GC.
 7. L0 materialization does not depend on this adaptor or on external subscribers.
+
+## 8. Workspace Integration Boundary
+
+The shared `TransformLogStreamManager`, `TransformLogStream`, subscription options,
+handler and sentinel errors match `40451-sn_query_extract` at `be4b5bdaa0`.
+The local workspace exposes its manager from a WAL through `wal.TransformLogProvider`:
+
+```go
+type TransformLogProvider interface {
+    TransformLog() TransformLogAccesser
+}
+```
+
+The remote workspace implements `StreamingNodeHandlerService.SubscribeTransform`,
+assignment-aware remote stream creation, typed subscription-error transport and
+resumption from the last handler-accepted Entry/SyncUp. It exposes
+`streaming.TransformLogStreamManager()` for the QueryNode resource-preparation
+consumer. Even co-located clients use this remote transport; there is no second
+local reader in this workspace.
+
+The local workspace owns the provider implementation, Summary reads, bounded
+replay, coverage proofs, VChannel validation, WAL shutdown, recovery and retention.
+Each acquired stream has its own lifetime: closing it must not close the SN's
+shared bootstrap stream or block WAL observation. Subscription IDs must identify
+independent subscriptions within that stream. Caller cancellation must unblock
+pending reads and close their handlers. A WAL without the provider fails stream
+creation explicitly, before the remote client considers the assignment usable.
+
+The remote service adds a readiness header after acquiring the local stream.
+Subscription errors preserve invalid-option, truncated-history and unavailable-
+VChannel reasons. Disconnects resume subscriptions; these terminal semantic errors
+are surfaced to the consumer. An empty bounded interval is permitted by the shared
+interface; the provider still owns proof that its end is readable.
+
+Remote/QN retention remains a local-provider prerequisite. The agreed first policy
+is conservative retention of active VChannel history across disconnections and
+recovery, until QueryView/DataView requirements are wired. SN retained-segment
+`SetQueryRetention` alone does not prove that remote/QN history is safe to release.
+This remote-only change does not modify Summary GC or install retention pins.
+Tests mock the local interfaces and run the production gRPC service, client,
+resumption and QN buffer; they do not claim local-provider or retention validation.

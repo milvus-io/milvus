@@ -6,6 +6,7 @@ import (
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service/handler/consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service/handler/producer"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/service/handler/transformlog"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -77,4 +78,12 @@ func (hs *handlerServiceImpl) Consume(streamServer streamingpb.StreamingNodeHand
 		return err
 	}
 	return c.Execute()
+}
+
+func (hs *handlerServiceImpl) SubscribeTransform(stream streamingpb.StreamingNodeHandlerService_SubscribeTransformServer) error {
+	server, err := transformlog.CreateSubscribeServer(hs.walManager, stream)
+	if err != nil {
+		return err
+	}
+	return server.Execute()
 }

@@ -13,7 +13,7 @@ var _ ManagerService = (*managerServiceImpl)(nil)
 // NewManagerService create a streamingnode manager service.
 func NewManagerService(m walmanager.Manager) ManagerService {
 	return &managerServiceImpl{
-		m,
+		walManager: m,
 	}
 }
 
@@ -25,6 +25,7 @@ type ManagerService interface {
 // managerServiceImpl is just a rpc level to handle incoming grpc.
 // all manager logic should be done in wal.Manager.
 type managerServiceImpl struct {
+	streamingpb.UnimplementedStreamingNodeManagerServiceServer
 	walManager walmanager.Manager
 }
 

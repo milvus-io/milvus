@@ -709,6 +709,7 @@ message TransformSubscriptionError {
     int64 subscription_id = 1;
     string vchannel = 2;
     StreamingError error = 3;
+    TransformSubscriptionErrorReason reason = 4;
 }
 
 // CloseTransformStreamResponse acknowledges graceful stream close.
@@ -1155,4 +1156,11 @@ message ReplicatePChannelMeta {
     common.MilvusCluster target_cluster = 3;
     common.ReplicateCheckpoint initialized_checkpoint = 4;
     bool skip_get_replicate_checkpoint  = 5;
+}
+
+enum TransformSubscriptionErrorReason {
+    TRANSFORM_SUBSCRIPTION_ERROR_REASON_UNKNOWN = 0;
+    TRANSFORM_SUBSCRIPTION_ERROR_REASON_INVALID_OPTION = 1;
+    TRANSFORM_SUBSCRIPTION_ERROR_REASON_TRUNCATED = 2;
+    TRANSFORM_SUBSCRIPTION_ERROR_REASON_UNAVAILABLE = 3;
 }
