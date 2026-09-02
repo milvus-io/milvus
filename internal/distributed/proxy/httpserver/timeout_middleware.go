@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -71,6 +72,12 @@ type timeoutResponseRecorder struct {
 	status      int
 	size        int
 	closeNotify chan bool
+	// bodyReceived flips once wrapperPost finishes reading the request body; the
+	// timer branch reads it to tell a slow-upload 408 from a server-side 500.
+	// It lives here because the recorder is the per-request object both sides
+	// already share (via handlerCtx.Writer) — no extra allocation or context-key
+	// traffic on the hot path.
+	bodyReceived atomic.Bool
 }
 
 func newTimeoutResponseRecorder(buf *bytes.Buffer) *timeoutResponseRecorder {
@@ -222,6 +229,9 @@ var timeoutContextKeysToPropagate = []string{
 	ContextRequest,
 	ContextResponse,
 	"traceID",
+	// key must match accesslog/info.ContextErrorType; without it the access
+	// log falls back to the numeric body code and misses boundary relabels.
+	"error_type",
 }
 
 func propagateTimeoutContextKeys(dst *gin.Context, src *gin.Context) {
@@ -243,7 +253,7 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 		if requestTimeout != "" {
 			timeoutSecond, err := strconv.ParseInt(requestTimeout, 10, 64)
 			if err != nil {
-				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
+				HTTPAbortReturn(gCtx, projectedStatus(merr.ErrParameterInvalid), gin.H{
 					mhttp.HTTPReturnCode: merr.Code(merr.ErrParameterInvalid),
 					mhttp.HTTPReturnMessage: merr.WrapErrParameterInvalidMsg(
 						"%s parse failed, err: %s",
@@ -318,7 +328,7 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			if traceID, ok := getTraceID(gCtx); ok {
 				setTraceIDHeaderTo(realWriter.Header(), traceID)
 			}
-			realWriter.WriteHeader(http.StatusRequestTimeout)
+			realWriter.WriteHeader(middlewareTimeoutStatus(recorder.bodyReceived.Load()))
 			body, _ := json.Marshal(gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
 			realWriter.Write(body)
 		}
