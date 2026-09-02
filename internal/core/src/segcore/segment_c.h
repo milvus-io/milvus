@@ -128,7 +128,7 @@ AsyncSegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment);
  * @param load_info_length length of load_info_blob in bytes
  * @param schema_blob serialized CollectionSchema protobuf message; must not be null
  * @param schema_length length of schema_blob in bytes; must be positive
- * @param schema_version schema version assigned to the parsed schema
+ * @param schema_version collection-local runtime schema revision
  * @return CFuture* that resolves when reopen completes (result pointer is nullptr)
  */
 CFuture*

@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -417,6 +418,7 @@ class SegmentLoadInfo {
      */
     explicit SegmentLoadInfo(const ProtoType& info, SchemaPtr schema)
         : info_(info), schema_(std::move(schema)) {
+        InitLoadPolicy();
         BuildCache();
     }
 
@@ -426,6 +428,7 @@ class SegmentLoadInfo {
      */
     explicit SegmentLoadInfo(ProtoType&& info, SchemaPtr schema)
         : info_(std::move(info)), schema_(std::move(schema)) {
+        InitLoadPolicy();
         BuildCache();
     }
 
@@ -437,6 +440,8 @@ class SegmentLoadInfo {
     SegmentLoadInfo(const SegmentLoadInfo& other)
         : info_(other.info_),
           schema_(other.schema_),
+          load_policy_(other.load_policy_),
+          load_fields_(other.load_fields_),
           converted_field_index_cache_(other.converted_field_index_cache_),
           field_index_id_cache_(other.field_index_id_cache_),
           json_index_path_cache_(other.json_index_path_cache_),
@@ -453,6 +458,8 @@ class SegmentLoadInfo {
     SegmentLoadInfo(SegmentLoadInfo&& other) noexcept
         : info_(std::move(other.info_)),
           schema_(std::move(other.schema_)),
+          load_policy_(std::move(other.load_policy_)),
+          load_fields_(std::move(other.load_fields_)),
           converted_field_index_cache_(
               std::move(other.converted_field_index_cache_)),
           field_index_id_cache_(std::move(other.field_index_id_cache_)),
@@ -475,6 +482,8 @@ class SegmentLoadInfo {
         if (this != &other) {
             info_ = other.info_;
             schema_ = other.schema_;
+            load_policy_ = other.load_policy_;
+            load_fields_ = other.load_fields_;
             converted_field_index_cache_ = other.converted_field_index_cache_;
             field_index_id_cache_ = other.field_index_id_cache_;
             json_index_path_cache_ = other.json_index_path_cache_;
@@ -495,6 +504,8 @@ class SegmentLoadInfo {
         if (this != &other) {
             info_ = std::move(other.info_);
             schema_ = std::move(other.schema_);
+            load_policy_ = std::move(other.load_policy_);
+            load_fields_ = std::move(other.load_fields_);
             converted_field_index_cache_ =
                 std::move(other.converted_field_index_cache_);
             field_index_id_cache_ = std::move(other.field_index_id_cache_);
@@ -517,6 +528,7 @@ class SegmentLoadInfo {
     Set(const ProtoType& info, SchemaPtr schema) {
         info_ = info;
         schema_ = std::move(schema);
+        InitLoadPolicy();
         BuildCache();
     }
 
@@ -527,6 +539,7 @@ class SegmentLoadInfo {
     Set(ProtoType&& info, SchemaPtr schema) {
         info_ = std::move(info);
         schema_ = std::move(schema);
+        InitLoadPolicy();
         BuildCache();
     }
 
@@ -607,6 +620,57 @@ class SegmentLoadInfo {
         return field_id.get() < START_USER_FIELDID ||
                schema_->get_fields().find(field_id) !=
                    schema_->get_fields().end();
+    }
+
+    [[nodiscard]] bool
+    ShouldLoadField(FieldId field_id) const {
+        if (!schema_->ShouldLoadField(field_id)) {
+            return false;
+        }
+        if (load_fields_.empty()) {
+            return true;
+        }
+        return load_fields_.contains(field_id);
+    }
+
+    [[nodiscard]] std::pair<bool, bool>
+    MmapEnabled(FieldId field_id) const {
+        if (auto it = load_policy_.mmap_fields.find(field_id);
+            it != load_policy_.mmap_fields.end()) {
+            return {true, it->second};
+        }
+        if (load_policy_.collection_mmap.has_value()) {
+            return {true, *load_policy_.collection_mmap};
+        }
+        if (load_policy_.supplied) {
+            return {false, false};
+        }
+        return schema_->MmapEnabled(field_id);
+    }
+
+    [[nodiscard]] std::pair<bool, std::string>
+    WarmupPolicy(FieldId field_id, bool is_vector, bool is_index) const {
+        if (auto it = load_policy_.warmup_fields.find(field_id);
+            it != load_policy_.warmup_fields.end()) {
+            return {true, it->second};
+        }
+        return CollectionWarmupPolicy(is_vector, is_index);
+    }
+
+    [[nodiscard]] std::pair<bool, std::string>
+    CollectionWarmupPolicy(bool is_vector, bool is_index) const {
+        const auto& policy =
+            is_vector ? (is_index ? load_policy_.warmup_vector_index
+                                  : load_policy_.warmup_vector_field)
+                      : (is_index ? load_policy_.warmup_scalar_index
+                                  : load_policy_.warmup_scalar_field);
+        if (policy.has_value()) {
+            return {true, *policy};
+        }
+        if (load_policy_.supplied) {
+            return {false, ""};
+        }
+        return schema_->CollectionWarmupPolicy(is_vector, is_index);
     }
 
     [[nodiscard]] int64_t
@@ -1059,6 +1123,7 @@ class SegmentLoadInfo {
         compact.set_use_take_for_output(info_.use_take_for_output());
         compact.set_estimated_bytes_per_row(info_.estimated_bytes_per_row());
         compact.set_commit_timestamp(info_.commit_timestamp());
+        *compact.mutable_load_fields() = info_.load_fields();
         info_.Swap(&compact);
         field_binlog_cache_.clear();
         decltype(converted_field_index_cache_)().swap(
@@ -1111,6 +1176,67 @@ class SegmentLoadInfo {
         FieldId field_id) const;
 
  private:
+    struct LoadPolicy {
+        bool supplied = false;
+        std::optional<bool> collection_mmap;
+        std::unordered_map<FieldId, bool> mmap_fields;
+        std::unordered_map<FieldId, std::string> warmup_fields;
+        std::optional<std::string> warmup_vector_index;
+        std::optional<std::string> warmup_scalar_index;
+        std::optional<std::string> warmup_scalar_field;
+        std::optional<std::string> warmup_vector_field;
+    };
+
+    void
+    InitLoadPolicy() {
+        load_policy_ = {};
+        if (!info_.has_load_schema()) {
+            return;
+        }
+        load_policy_.supplied = true;
+
+        const auto& load_schema = info_.load_schema();
+        auto [has_collection_mmap, collection_mmap] =
+            GetBoolFromRepeatedKVs(load_schema.properties(), MMAP_ENABLED_KEY);
+        if (has_collection_mmap) {
+            load_policy_.collection_mmap = collection_mmap;
+        }
+        load_policy_.warmup_vector_index = GetStringFromRepeatedKVs(
+            load_schema.properties(), WARMUP_VECTOR_INDEX_KEY);
+        load_policy_.warmup_scalar_index = GetStringFromRepeatedKVs(
+            load_schema.properties(), WARMUP_SCALAR_INDEX_KEY);
+        load_policy_.warmup_scalar_field = GetStringFromRepeatedKVs(
+            load_schema.properties(), WARMUP_SCALAR_FIELD_KEY);
+        load_policy_.warmup_vector_field = GetStringFromRepeatedKVs(
+            load_schema.properties(), WARMUP_VECTOR_FIELD_KEY);
+
+        auto collect_field_policy = [this](const auto& field) {
+            const auto field_id = FieldId(field.fieldid());
+            auto [has_mmap, mmap_enabled] =
+                GetBoolFromRepeatedKVs(field.type_params(), MMAP_ENABLED_KEY);
+            if (has_mmap) {
+                load_policy_.mmap_fields.emplace(field_id, mmap_enabled);
+            }
+            if (auto warmup =
+                    GetStringFromRepeatedKVs(field.type_params(), WARMUP_KEY)) {
+                load_policy_.warmup_fields.emplace(field_id,
+                                                   std::move(*warmup));
+            }
+        };
+        for (const auto& field : load_schema.fields()) {
+            collect_field_policy(field);
+        }
+        for (const auto& struct_field : load_schema.struct_array_fields()) {
+            collect_field_policy(struct_field);
+            for (const auto& field : struct_field.fields()) {
+                collect_field_policy(field);
+            }
+        }
+        // SegmentLoadInfo retains only the effective policy, not another full
+        // schema copy per segment.
+        info_.clear_load_schema();
+    }
+
     void
     PruneRuntimeStateNotInSchema() {
         auto prune_map = [this](auto& values) {
@@ -1154,6 +1280,12 @@ class SegmentLoadInfo {
     void
     BuildCache() {
         BuildFieldBinlogCache();
+
+        load_fields_.clear();
+        load_fields_.reserve(info_.load_fields_size());
+        for (auto field_id : info_.load_fields()) {
+            load_fields_.insert(FieldId(field_id));
+        }
 
         // Convert index infos to LoadIndexInfo and build per-field cache
         converted_field_index_cache_.clear();
@@ -1241,6 +1373,8 @@ class SegmentLoadInfo {
     ProtoType info_;
 
     SchemaPtr schema_;
+    LoadPolicy load_policy_;
+    std::unordered_set<FieldId> load_fields_;
 
     // Cache for quick field -> converted LoadIndexInfo lookup
     std::unordered_map<FieldId, std::vector<LoadIndexInfo>>

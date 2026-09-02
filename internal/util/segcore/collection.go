@@ -25,9 +25,9 @@ import (
 // CreateCCollectionRequest is a request to create a CCollection.
 type CreateCCollectionRequest struct {
 	CollectionID  int64
+	SchemaVersion uint64
 	Schema        *schemapb.CollectionSchema
 	IndexMeta     *segcorepb.CollectionIndexMeta
-	LoadFieldList []int64
 }
 
 // CreateCCollection creates a CCollection from a CreateCCollectionRequest.
@@ -44,20 +44,21 @@ func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 		}
 	}
 	var ptr C.CCollection
-	status := C.NewCollection(unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), &ptr)
+	var status C.CStatus
+	runtimeVersion := req.SchemaVersion
+	if runtimeVersion == 0 && req.Schema != nil {
+		runtimeVersion = uint64(req.Schema.GetVersion())
+	}
+	if req.CollectionID > 0 {
+		status = C.NewCollectionWithId(C.int64_t(req.CollectionID), C.uint64_t(runtimeVersion), unsafe.Pointer(&schemaBlob[0]), C.int64_t(len(schemaBlob)), &ptr)
+	} else {
+		status = C.NewCollection(unsafe.Pointer(&schemaBlob[0]), C.int64_t(len(schemaBlob)), &ptr)
+	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}
 	if indexMetaBlob != nil {
 		status = C.SetIndexMeta(ptr, unsafe.Pointer(&indexMetaBlob[0]), (C.int64_t)(len(indexMetaBlob)))
-		if err := ConsumeCStatusIntoError(&status); err != nil {
-			C.DeleteCollection(ptr)
-			return nil, err
-		}
-	}
-	if req.LoadFieldList != nil {
-		status = C.UpdateLoadFields(ptr, (*C.int64_t)(unsafe.Pointer(&req.LoadFieldList[0])),
-			C.int64_t(len(req.LoadFieldList)))
 		if err := ConsumeCStatusIntoError(&status); err != nil {
 			C.DeleteCollection(ptr)
 			return nil, err
@@ -116,7 +117,7 @@ func (c *CCollection) UpdateIndexMeta(meta *segcorepb.CollectionIndexMeta) error
 	return nil
 }
 
-func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint64) error {
+func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, runtimeVersion uint64) error {
 	if sch == nil {
 		return merr.WrapErrServiceInternal("update collection schema with nil")
 	}
@@ -126,7 +127,7 @@ func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint6
 		return err
 	}
 
-	status := C.UpdateSchema(c.ptr, unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), (C.uint64_t)(version))
+	status := C.UpdateSchema(c.ptr, unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), C.uint64_t(runtimeVersion))
 	return ConsumeCStatusIntoError(&status)
 }
 

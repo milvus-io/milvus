@@ -667,6 +667,9 @@ class SegmentInternalInterface : public SegmentInterface {
 
     void
     SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) override {
+        // Growing segments keep load metadata for flush, but sealed-only
+        // mmap/warmup policy must not retain a schema-sized carrier here.
+        load_info.clear_load_schema();
         load_info_ = std::move(load_info);
     }
 

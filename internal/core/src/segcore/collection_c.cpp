@@ -38,16 +38,17 @@ NewCollection(const void* schema_proto_blob,
 }
 
 CStatus
-UpdateSchema(CCollection collection,
-             const void* proto_blob,
-             const int64_t length,
-             const uint64_t version) {
+NewCollectionWithId(const int64_t collection_id,
+                    const uint64_t runtime_version,
+                    const void* schema_proto_blob,
+                    const int64_t length,
+                    CCollection* newCollection) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
-        auto col = static_cast<milvus::segcore::Collection*>(collection);
-
-        col->parse_schema(proto_blob, length, version);
+        auto collection = std::make_unique<milvus::segcore::Collection>(
+            collection_id, runtime_version, schema_proto_blob, length);
+        *newCollection = collection.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
@@ -55,14 +56,16 @@ UpdateSchema(CCollection collection,
 }
 
 CStatus
-UpdateLoadFields(CCollection collection,
-                 const int64_t* field_ids,
-                 const int64_t length) {
+UpdateSchema(CCollection collection,
+             const void* proto_blob,
+             const int64_t length,
+             const uint64_t runtime_version) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto col = static_cast<milvus::segcore::Collection*>(collection);
 
-        col->get_schema()->UpdateLoadFields(
-            std::vector<int64_t>(field_ids, field_ids + length));
+        col->parse_schema(proto_blob, length, runtime_version);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

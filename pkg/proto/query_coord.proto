@@ -352,6 +352,10 @@ message LoadMetaInfo {
     repeated int64 load_fields = 7;
     repeated common.KeyValuePair db_properties = 8;
     uint64 schema_barrier_ts = 9; // Wire-compatible rename of legacy schema_version; timestamp barrier used to fence stale load results.
+    // Immutable logical schema before QueryCoord applies mmap/warmup load
+    // policy. New QueryNodes use this for the process-wide schema cache while
+    // the request-level schema remains compatible with older QueryNodes.
+    schema.CollectionSchema logical_schema = 10;
 }
 
 message WatchDmChannelsRequest {

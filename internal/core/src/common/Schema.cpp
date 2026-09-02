@@ -182,6 +182,7 @@ Schema::operator=(const Schema& other) {
 std::shared_ptr<Schema>
 Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(schema_proto.version());
     // schema->set_auto_id(schema_proto.autoid());
 
     // NOTE: only two system

@@ -158,6 +158,62 @@ class SegmentLoadInfoTest : public ::testing::Test {
     proto::segcore::SegmentLoadInfo proto_;
 };
 
+TEST_F(SegmentLoadInfoTest, KeepsLoadPolicySeparateFromLogicalSchema) {
+    proto_.add_load_fields(100);
+    auto* load_schema = proto_.mutable_load_schema();
+    auto* collection_mmap = load_schema->add_properties();
+    collection_mmap->set_key(MMAP_ENABLED_KEY);
+    collection_mmap->set_value("true");
+    auto* vector_index_warmup = load_schema->add_properties();
+    vector_index_warmup->set_key(WARMUP_VECTOR_INDEX_KEY);
+    vector_index_warmup->set_value("sync");
+
+    auto* field = load_schema->add_fields();
+    field->set_fieldid(100);
+    auto* field_mmap = field->add_type_params();
+    field_mmap->set_key(MMAP_ENABLED_KEY);
+    field_mmap->set_value("false");
+    auto* field_warmup = field->add_type_params();
+    field_warmup->set_key(WARMUP_KEY);
+    field_warmup->set_value("disable");
+
+    SegmentLoadInfo info(proto_, schema_);
+    EXPECT_TRUE(info.ShouldLoadField(FieldId(100)));
+    EXPECT_FALSE(info.ShouldLoadField(FieldId(101)));
+    EXPECT_EQ(info.MmapEnabled(FieldId(100)), std::make_pair(true, false));
+    EXPECT_EQ(info.MmapEnabled(FieldId(101)), std::make_pair(true, true));
+    EXPECT_EQ(info.WarmupPolicy(FieldId(100), false, false),
+              std::make_pair(true, std::string("disable")));
+    EXPECT_EQ(info.CollectionWarmupPolicy(true, true),
+              std::make_pair(true, std::string("sync")));
+
+    // The stored proto is compact, but copying the runtime wrapper must retain
+    // the parsed policy used by the first sealed Load().
+    EXPECT_FALSE(info.GetProto().has_load_schema());
+    SegmentLoadInfo copied(info);
+    EXPECT_TRUE(copied.ShouldLoadField(FieldId(100)));
+    EXPECT_FALSE(copied.ShouldLoadField(FieldId(101)));
+    EXPECT_EQ(copied.MmapEnabled(FieldId(100)), std::make_pair(true, false));
+    EXPECT_EQ(copied.MmapEnabled(FieldId(101)), std::make_pair(true, true));
+    EXPECT_EQ(copied.WarmupPolicy(FieldId(100), false, false),
+              std::make_pair(true, std::string("disable")));
+}
+
+TEST_F(SegmentLoadInfoTest, ExplicitLoadSchemaDoesNotUseCachedPolicy) {
+    auto schema_proto = schema_->ToProto();
+    schema_proto.set_name("cached_policy");
+    auto* collection_mmap = schema_proto.add_properties();
+    collection_mmap->set_key(MMAP_ENABLED_KEY);
+    collection_mmap->set_value("true");
+    auto schema = Schema::ParseFrom(schema_proto);
+
+    proto_.mutable_load_schema();
+    SegmentLoadInfo info(proto_, schema);
+    EXPECT_EQ(info.MmapEnabled(FieldId(100)), std::make_pair(false, false));
+    EXPECT_EQ(info.CollectionWarmupPolicy(true, true),
+              std::make_pair(false, std::string{}));
+}
+
 TEST_F(SegmentLoadInfoTest, EmptyProtoConstructor) {
     proto::segcore::SegmentLoadInfo empty_proto;
     SegmentLoadInfo info(empty_proto, schema_);
