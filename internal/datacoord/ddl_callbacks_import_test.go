@@ -995,7 +995,12 @@ func TestCommitImportCallback_MakesSegmentsVisibleAndCompletes(t *testing.T) {
 	callbacks := &DDLCallbacks{Server: server}
 
 	// Patch segment collection so the callback does not need a real import task graph.
-	getSegIDsMock := mockey.Mock((*Server).getImportSegmentIDs).Return(segIDs).Build()
+	getSegIDsMock := mockey.Mock((*Server).getImportSegmentIDsByVchannel).To(func(ctx context.Context, jobID int64, vchannel string) []int64 {
+		if vchannel == "vchan-0" {
+			return segIDs
+		}
+		return nil
+	}).Build()
 	defer getSegIDsMock.UnPatch()
 
 	job := &importJob{
@@ -1024,6 +1029,178 @@ func TestCommitImportCallback_MakesSegmentsVisibleAndCompletes(t *testing.T) {
 	}
 
 	updatedJob := importMeta.GetJob(ctx, 1)
+	assert.NotNil(t, updatedJob)
+	assert.Equal(t, internalpb.ImportJobState_Completed, updatedJob.GetState())
+}
+
+// TestCommitImportCallback_PerVchannelCommitTimestamp pins that each business
+// vchannel's segments get their own append timetick as commit timestamp: the
+// global max (which may come from the control channel) must never be used, or
+// segments on lower-timetick vchannels would be masked by MVCC forever.
+func TestCommitImportCallback_PerVchannelCommitTimestamp(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+
+	type vchanSegs struct {
+		segIDs []int64
+		tt     uint64
+	}
+	vchannels := map[string]vchanSegs{
+		"vchan-0": {segIDs: []int64{10, 20}, tt: 500},
+		"vchan-1": {segIDs: []int64{30}, tt: 300},
+	}
+	segments := NewSegmentsInfo()
+	for vchannel, v := range vchannels {
+		for _, segID := range v.segIDs {
+			segments.SetSegment(segID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID,
+				CollectionID:  100,
+				PartitionID:   10,
+				InsertChannel: vchannel,
+				State:         commonpb.SegmentState_Flushed,
+				IsImporting:   true,
+				Binlogs: []*datapb.FieldBinlog{{
+					FieldID: 100,
+					Binlogs: []*datapb.Binlog{{
+						LogID:       segID,
+						TimestampTo: 100,
+					}},
+				}},
+			}})
+		}
+	}
+
+	server := &Server{
+		importMeta:      importMeta,
+		meta:            &meta{catalog: &datacoordkv.Catalog{MetaKv: NewMetaMemoryKV()}, segments: segments},
+		dataViewManager: &fakeGCDataViewManager{},
+	}
+	callbacks := &DDLCallbacks{Server: server}
+
+	getSegIDsMock := mockey.Mock((*Server).getImportSegmentIDsByVchannel).To(func(ctx context.Context, jobID int64, vchannel string) []int64 {
+		return vchannels[vchannel].segIDs
+	}).Build()
+	defer getSegIDsMock.UnPatch()
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        1,
+			CollectionID: 100,
+			State:        internalpb.ImportJobState_Uncommitted,
+			AutoCommit:   false,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	require.NoError(t, importMeta.AddJob(ctx, job))
+
+	result := buildCommitImportBroadcastResult(1)
+	result.Results["vchan-0"] = &message.AppendResult{TimeTick: 500}
+	result.Results["vchan-1"] = &message.AppendResult{TimeTick: 300}
+	// The control channel carries the largest timetick of all: it must never
+	// become a segment commit timestamp.
+	result.Results["by-dev_rootcoord-dml_0_vcchan"] = &message.AppendResult{TimeTick: 900}
+
+	err := callbacks.commitImportV2AckCallback(ctx, result)
+	assert.NoError(t, err)
+
+	for vchannel, v := range vchannels {
+		for _, segID := range v.segIDs {
+			seg := server.meta.GetSegment(ctx, segID)
+			require.NotNil(t, seg)
+			assert.Equalf(t, v.tt, seg.GetCommitTimestamp(),
+				"segment %d on %s must use its own vchannel timetick", segID, vchannel)
+			assert.EqualValues(t, v.tt, seg.GetDeleteApplyStartAfterTimetick())
+			assert.False(t, seg.GetIsImporting())
+		}
+	}
+
+	updatedJob := importMeta.GetJob(ctx, 1)
+	assert.NotNil(t, updatedJob)
+	assert.Equal(t, internalpb.ImportJobState_Completed, updatedJob.GetState())
+}
+
+// TestCommitImportCallback_OnImportFailureRetries pins that a DataView
+// publication failure surfaces the error (keeping the full callback alive for
+// retry) and does NOT transition the job to Completed.
+func TestCommitImportCallback_OnImportFailureRetries(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+
+	segIDs := []int64{10, 20}
+	segments := NewSegmentsInfo()
+	for _, segID := range segIDs {
+		segments.SetSegment(segID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            segID,
+			CollectionID:  100,
+			PartitionID:   10,
+			InsertChannel: "vchan-0",
+			State:         commonpb.SegmentState_Flushed,
+			IsImporting:   true,
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{{
+					LogID:       segID,
+					TimestampTo: 100,
+				}},
+			}},
+		}})
+	}
+
+	server := &Server{
+		importMeta:      importMeta,
+		meta:            &meta{catalog: &datacoordkv.Catalog{MetaKv: NewMetaMemoryKV()}, segments: segments},
+		dataViewManager: &fakeGCDataViewManager{},
+	}
+	callbacks := &DDLCallbacks{Server: server}
+
+	getSegIDsMock := mockey.Mock((*Server).getImportSegmentIDsByVchannel).To(func(ctx context.Context, jobID int64, vchannel string) []int64 {
+		if vchannel == "vchan-0" {
+			return segIDs
+		}
+		return nil
+	}).Build()
+	defer getSegIDsMock.UnPatch()
+
+	onImportErr := errors.New("dataview persistence failed")
+	onImportMock := mockey.Mock((*fakeGCDataViewManager).OnImport).Return(nil, onImportErr).Build()
+	defer onImportMock.UnPatch()
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        1,
+			CollectionID: 100,
+			State:        internalpb.ImportJobState_Uncommitted,
+			AutoCommit:   false,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	require.NoError(t, importMeta.AddJob(ctx, job))
+
+	result := buildCommitImportBroadcastResult(1)
+	result.Results["vchan-0"] = &message.AppendResult{TimeTick: 500}
+
+	// First attempt: OnImport fails -> the callback returns the error, the job
+	// stays Uncommitted (the full broadcast callback will retry).
+	err := callbacks.commitImportV2AckCallback(ctx, result)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, onImportErr) || errors.Is(err, merr.ErrImportSysFailed))
+
+	updatedJob := importMeta.GetJob(ctx, 1)
+	assert.NotNil(t, updatedJob)
+	assert.Equal(t, internalpb.ImportJobState_Uncommitted, updatedJob.GetState())
+
+	// Second attempt: OnImport succeeds -> segments committed and job Completed.
+	onImportMock.UnPatch()
+	err = callbacks.commitImportV2AckCallback(ctx, result)
+	assert.NoError(t, err)
+
+	for _, segID := range segIDs {
+		seg := server.meta.GetSegment(ctx, segID)
+		require.NotNil(t, seg)
+		assert.EqualValues(t, 500, seg.GetCommitTimestamp())
+		assert.False(t, seg.GetIsImporting())
+	}
+	updatedJob = importMeta.GetJob(ctx, 1)
 	assert.NotNil(t, updatedJob)
 	assert.Equal(t, internalpb.ImportJobState_Completed, updatedJob.GetState())
 }

@@ -3517,10 +3517,10 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	return merr.Success(), nil
 }
 
-// getImportSegmentIDs returns all segment IDs (including sorted segments) belonging to
-// the given import job, across all vchannels.
+// getImportSegmentIDsByVchannel returns all segment IDs (including sorted segments)
+// belonging to the given import job that are assigned to the given vchannel.
 // This must be called WITHOUT holding importMeta's mutex (the callback never holds it).
-func (s *Server) getImportSegmentIDs(ctx context.Context, jobID int64) []int64 {
+func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64, vchannel string) []int64 {
 	tasks := s.importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	var segIDs []int64
 	for _, task := range tasks {
@@ -3535,6 +3535,9 @@ func (s *Server) getImportSegmentIDs(ctx context.Context, jobID int64) []int64 {
 		for _, segID := range candidates {
 			seg := s.meta.GetSegment(ctx, segID)
 			if seg == nil {
+				continue
+			}
+			if seg.GetInsertChannel() != vchannel {
 				continue
 			}
 			segIDs = append(segIDs, segID)

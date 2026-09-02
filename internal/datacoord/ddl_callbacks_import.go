@@ -317,31 +317,50 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 		return merr.WrapErrImportSysFailedMsg("job %d is in state %s, waiting for Uncommitted", jobID, job.GetState())
 	}
 
-	// Make all segments of the job visible in one shot: set the commit timestamp,
-	// clear is_importing, and publish the DataView, then transition to Completed.
-	commitTs := result.GetMaxTimeTick()
-	segIDs := c.getImportSegmentIDs(ctx, jobID)
+	// Make all segments of the job visible in one shot. Each business vchannel
+	// receives its own append timetick for the CommitImport broadcast; MVCC only
+	// advances that vchannel's TransformingTimetick to its own timetick, so the
+	// commit timestamp must be derived per vchannel — never from the global max
+	// (which may come from the control channel and would permanently mask the
+	// imported rows on lower-timetick vchannels).
 	collectionID := job.GetCollectionID()
-	if len(segIDs) > 0 {
-		ops := make([]UpdateOperator, 0, len(segIDs)*2)
+	var allSegIDs []int64
+	ops := make([]UpdateOperator, 0)
+	for vchannel, appendResult := range result.Results {
+		if funcutil.IsControlChannel(vchannel) {
+			// The control channel carries no data segments; its timetick must
+			// not be used as a segment commit timestamp.
+			continue
+		}
+		segIDs := c.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
+		if len(segIDs) == 0 {
+			continue
+		}
+		allSegIDs = append(allSegIDs, segIDs...)
+		commitTs := appendResult.TimeTick
 		for _, segID := range segIDs {
 			ops = append(ops,
 				UpdateCommitTimestamp(segID, commitTs),
 				UpdateIsImporting(segID, false),
 			)
 		}
+	}
+	if len(ops) > 0 {
 		if err := c.meta.UpdateSegmentsInfo(ctx, ops...); err != nil {
 			return err
 		}
-		if c.dataViewManager != nil && collectionID != 0 {
-			if _, err := c.dataViewManager.OnImport(ctx, ImportDataViewEvent{
-				CollectionID: collectionID,
-				SegmentIDs:   segIDs,
-			}); err != nil {
-				mlog.Warn(ctx, "failed to publish DataView after import commit",
-					mlog.FieldJobID(jobID),
-					mlog.Err(err))
-			}
+	}
+	if c.dataViewManager != nil && collectionID != 0 && len(allSegIDs) > 0 {
+		if _, err := c.dataViewManager.OnImport(ctx, ImportDataViewEvent{
+			CollectionID: collectionID,
+			SegmentIDs:   allSegIDs,
+		}); err != nil {
+			mlog.Warn(ctx, "failed to publish DataView after import commit",
+				mlog.FieldJobID(jobID),
+				mlog.Err(err))
+			// The full callback retries indefinitely, so surface the failure and
+			// only transition to Completed once the DataView has been persisted.
+			return err
 		}
 	}
 

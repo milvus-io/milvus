@@ -1217,6 +1217,42 @@ func TestDataViewManagerRecoverAddsNeverPublishedStreamingSegment(t *testing.T) 
 	require.Equal(t, []int64{100, 101}, visible.GetShards()[0].GetPartitions()[0].GetSegmentIds())
 }
 
+// TestDataViewManagerRecoverImportAdvancesCompactVersion pins that an imported
+// segment (non-zero CommitTimestamp) is recovered as a compact advance — the
+// same DataVersion semantics as the normal OnImport path — instead of being
+// misclassified as a streaming addition.
+func TestDataViewManagerRecoverImportAdvancesCompactVersion(t *testing.T) {
+	ctx := context.Background()
+	manager, catalog, store := newTestDataViewManager()
+	store.segments[100] = newDataViewTestSegment(1, 10, 100, "ch-1", 1000)
+	importSeg := newDataViewTestSegment(1, 10, 101, "ch-1", 1100)
+	importSeg.CommitTimestamp = 1200
+	store.segments[101] = importSeg
+	catalog.views = append(catalog.views, &viewpb.DataViewOfCollection{
+		CollectionId: 1,
+		DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 0},
+		Shards: []*viewpb.DataViewOfShard{
+			{
+				Vchannel: "ch-1",
+				Partitions: []*viewpb.DataViewOfPartition{
+					{PartitionId: 10, SegmentIds: []int64{100}},
+				},
+			},
+		},
+	})
+
+	require.NoError(t, manager.RepairCollection(ctx, 1))
+	require.Len(t, catalog.views, 2)
+	require.Equal(t, int64(1), catalog.views[1].GetDataVersion().GetStreamingVersion())
+	require.Equal(t, int64(1), catalog.views[1].GetDataVersion().GetCompactVersion())
+	require.Equal(t, []int64{100, 101}, catalog.views[1].GetShards()[0].GetPartitions()[0].GetSegmentIds())
+
+	visible, err := manager.LatestVisibleDataView(ctx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, visible)
+	require.Equal(t, []int64{100, 101}, visible.GetShards()[0].GetPartitions()[0].GetSegmentIds())
+}
+
 func TestDataViewManagerRecoverStreamingAdvanceWinsOverCompactHandoff(t *testing.T) {
 	ctx := context.Background()
 	manager, catalog, store := newTestDataViewManager()
