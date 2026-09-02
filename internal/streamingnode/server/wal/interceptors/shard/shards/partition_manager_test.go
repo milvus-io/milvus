@@ -78,6 +78,7 @@ func TestPartitionManager(t *testing.T) {
 		&mockedTxnManager{},
 		100,
 		metricsutil.NewSegmentAssignMetrics(channel.Name),
+		nil,
 	)
 	createSegmentDone := make(chan struct{}, 1)
 	flushSegmentDone := make(chan struct{}, 1)

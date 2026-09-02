@@ -93,6 +93,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 				param.TxnManager,
 				param.InitialRecoverSnapshot.Checkpoint.TimeTick, // use the checkpoint time tick to fence directly.
 				metrics,
+				collectionInfo.SchemaInfo(),
 			)
 			segmentTotal += len(segmentManagers)
 		}
@@ -117,6 +118,12 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 		stat := m.partitionManagers[belong.PartitionUniqueKey()].segments[belong.SegmentID].GetStatFromRecovery()
 		if info := m.collections[belong.CollectionID]; info != nil {
 			stat.RuntimeFlushSize = info.RuntimeFlushSize(stat.Modified)
+			// SealSize is not persisted; reconstruct it from the schema so the
+			// main-column budget is compared against main-column bytes after
+			// recovery (no-op for wholeRow and sparse-only schemas).
+			if typeutil.IsMainIndexSizeMetric(paramtable.Get().DataCoordCfg.SizeMetric.GetValue()) {
+				utils.BackfillSealSizeFromSchema(stat, info.SchemaInfo())
+			}
 		}
 		stats = append(stats, stat)
 	}
@@ -239,6 +246,14 @@ func (c *CollectionInfo) setSchema(schema *streamingpb.CollectionSchemaOfVChanne
 	if err == nil {
 		c.primaryKey = &descriptor
 	}
+}
+
+// SchemaInfo returns the current collection schema, or nil when not set.
+func (c *CollectionInfo) SchemaInfo() *schemapb.CollectionSchema {
+	if c == nil || c.Schema == nil {
+		return nil
+	}
+	return c.Schema.GetSchema()
 }
 
 func primaryKeyDescriptorFromSchema(schema *schemapb.CollectionSchema) (PrimaryKeyDescriptor, error) {

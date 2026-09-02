@@ -5639,6 +5639,8 @@ type dataCoordConfig struct {
 	DiskSegmentMaxSize             ParamItem `refreshable:"true"`
 	SegmentSealProportion          ParamItem `refreshable:"false"`
 	SegmentSealProportionJitter    ParamItem `refreshable:"true"`
+	SizeMetric                     ParamItem `refreshable:"false"`
+	MaxFullSegmentSize             ParamItem `refreshable:"false"`
 	SegAssignmentExpiration        ParamItem `refreshable:"false"`
 	AllocLatestExpireAttempt       ParamItem `refreshable:"true"`
 	SegmentMaxLifetime             ParamItem `refreshable:"false"`
@@ -5919,6 +5921,24 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.SegmentSealProportionJitter.Init(base.mgr)
+
+	p.SizeMetric = ParamItem{
+		Key:          "dataCoord.segment.sizeMetric",
+		Version:      "2.7.0",
+		DefaultValue: "wholeRow",
+		Doc:          `The metric used to interpret the segment size budget. "wholeRow" (default) constrains the whole-row binary size (current behavior); "mainIndex" constrains the main index column (the vector field with the largest index memory footprint) instead. Only affects segments created after the change.`,
+		Export:       true,
+	}
+	p.SizeMetric.Init(base.mgr)
+
+	p.MaxFullSegmentSize = ParamItem{
+		Key:          "dataCoord.segment.maxFullSegmentSize",
+		Version:      "2.7.0",
+		DefaultValue: "-1",
+		Doc:          `Optional hard ceiling on a segment's actual whole-row bytes, unit: MB. -1 (default) disables the ceiling. A positive value caps the final segment so a single QueryNode can load it even on extreme schemas; only consulted when dataCoord.segment.sizeMetric="mainIndex".`,
+		Export:       true,
+	}
+	p.MaxFullSegmentSize.Init(base.mgr)
 
 	p.SegAssignmentExpiration = ParamItem{
 		Key:          "dataCoord.segment.assignmentExpiration",

@@ -759,6 +759,8 @@ dataCoord:
     diskSegmentMaxSize: 2048 # Maximum size of a segment in MB for collection which has Disk index
     sealProportion: 0.12 # The minimum proportion to datacoord.segment.maxSize to seal a segment. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     sealProportionJitter: 0.1 # segment seal proportion jitter ratio, default value 0.1(10%), if seal proportion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%
+    sizeMetric: wholeRow # The metric used to interpret the segment size budget. "wholeRow" (default) constrains the whole-row binary size; "mainIndex" constrains the main index column (the vector field with the largest index memory footprint) instead. Only affects segments created after the change.
+    maxFullSegmentSize: -1 # Optional hard ceiling on a segment's actual whole-row bytes, unit: MB. -1 (default) disables the ceiling; a positive value caps the final segment so a single QueryNode can load it even on extreme schemas. Only consulted when sizeMetric="mainIndex".
     assignmentExpiration: 2000 # Expiration time of the segment assignment, unit: ms
     allocLatestExpireAttempt: 200 # The time attempting to alloc latest lastExpire from rootCoord after restart
     maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60

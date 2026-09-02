@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type CollectionSchemaInfo struct {
@@ -103,6 +104,7 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 			m.txnManager,
 			timetick,
 			m.metrics,
+			collectionInfo.SchemaInfo(),
 		)
 	}
 	logger.Info(context.TODO(), "collection created in segment assignment service", mlog.Int64s("partitionIDs", partitionIDs))
@@ -189,6 +191,13 @@ func (m *shardManagerImpl) AlterCollection(msg message.MutableAlterCollectionMes
 			CheckpointTimeTick: timetick,
 			State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
 		})
+		// Propagate the new schema to the partition managers so newly allocated
+		// segments are sized against the updated schema.
+		for uniqueKey, pm := range m.partitionManagers {
+			if uniqueKey.CollectionID == collectionID {
+				pm.schema = schema
+			}
+		}
 		logger.Info(context.TODO(), "updated collection schema in shard manager",
 			mlog.Int64("collectionID", collectionID),
 			mlog.Int32("schemaVersion", schema.GetVersion()),
@@ -253,6 +262,32 @@ func (m *shardManagerImpl) GetCollectionSchema(collectionID int64, schemaVersion
 	}
 
 	return proto.Clone(collectionInfo.Schema.GetSchema()).(*schemapb.CollectionSchema), nil
+}
+
+// GetMainIndexSizeInfo returns the per-row main-index-column size and whether
+// the collection has variable-size vector fields, computed from the live schema
+// WITHOUT cloning. The write path's seal-size estimation needs only these two
+// scalars on the hot insert path, so this avoids a full schema clone per message.
+func (m *shardManagerImpl) GetMainIndexSizeInfo(collectionID int64, schemaVersion int32) (int, bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	collectionInfo, ok := m.collections[collectionID]
+	if !ok {
+		return 0, false, ErrCollectionNotFound
+	}
+	if collectionInfo.Schema == nil || collectionInfo.Schema.GetSchema() == nil {
+		return 0, false, ErrCollectionSchemaNotFound
+	}
+	collectionSchemaVersion := collectionInfo.SchemaVersion()
+	if schemaVersion != latestCollectionSchemaVersion && collectionSchemaVersion != schemaVersion {
+		return 0, false, ErrCollectionSchemaVersionNotMatch
+	}
+	perRecord, err := typeutil.EstimateMainIndexSizePerRecord(collectionInfo.Schema.GetSchema())
+	if err != nil {
+		return 0, false, err
+	}
+	return perRecord, typeutil.HasVariableSizeVectorField(collectionInfo.Schema.GetSchema()), nil
 }
 
 // GetPrimaryKeyDescriptor returns immutable PK schema data without cloning the
