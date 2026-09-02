@@ -33,10 +33,11 @@ type ShardManager interface {
 	// no shard split has fenced it, so a live shard is never torn down.
 	CheckIfVChannelCanBeDropped(collectionID int64, vchannel string) error
 
-	// GetSplitTimeTick returns T_switch (the time tick the named vchannel was
-	// fenced at by shard split), or 0 if the vchannel is unknown or not fenced.
-	// It is read on an already-fenced re-fence to recover T_switch.
-	GetSplitTimeTick(collectionID int64, vchannel string) uint64
+	// GetSplitFence returns the fence recorded for the named vchannel: T_switch
+	// and the split task that placed it. Zero values when the vchannel is
+	// unknown or not fenced. The task id is what lets a caller tell its own
+	// retry from a concurrent task's fence.
+	GetSplitFence(collectionID int64, vchannel string) SplitFence
 
 	// SplitShard marks the vchannel of the collection as splitted (fenced)
 	// when a SplitShard message is written into the wal. After it is called,

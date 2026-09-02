@@ -188,11 +188,14 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 // or not it keeps this pchannel's single collection registration -- the one that
 // loses a collision to a live successor is precisely the one a stale proxy route
 // still points at.
-func newFencedVChannels(recoverInfos *recovery.RecoverySnapshot) map[string]uint64 {
-	fenced := make(map[string]uint64)
+func newFencedVChannels(recoverInfos *recovery.RecoverySnapshot) map[string]SplitFence {
+	fenced := make(map[string]SplitFence)
 	for _, vchannelInfo := range recoverInfos.VChannels {
 		if vchannelInfo.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED {
-			fenced[vchannelInfo.GetVchannel()] = vchannelInfo.GetSplitTimeTick()
+			fenced[vchannelInfo.GetVchannel()] = SplitFence{
+				TimeTick: vchannelInfo.GetSplitTimeTick(),
+				TaskID:   vchannelInfo.GetSplitTaskId(),
+			}
 		}
 	}
 	return fenced
@@ -219,6 +222,7 @@ func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*Coll
 			PartitionIDs:  currentPartition,
 			State:         vchannelInfo.State,
 			SplitTimeTick: vchannelInfo.GetSplitTimeTick(),
+			SplitTaskID:   vchannelInfo.GetSplitTaskId(),
 		}
 		collectionInfo.setSchema(latestSchema)
 		collectionID := vchannelInfo.CollectionInfo.CollectionId
@@ -290,7 +294,7 @@ type shardManagerImpl struct {
 	// Best effort across a restart: a vchannel already dropped before the
 	// restart leaves nothing in the snapshot to seed from, and a write to it
 	// falls back to the unknown-route answer.
-	fencedVChannels map[string]uint64
+	fencedVChannels map[string]SplitFence
 	metrics         *metricsutil.SegmentAssignMetrics
 	txnManager      TxnManager
 }
@@ -308,6 +312,16 @@ type CollectionInfo struct {
 	// set when State becomes SPLITTED. It is returned on an already-fenced
 	// re-fence so the split coordinator can recover T_switch after a crash.
 	SplitTimeTick uint64
+	// SplitTaskID is the split task that placed the fence, recorded with
+	// SplitTimeTick and returned on a re-fence.
+	SplitTaskID int64
+}
+
+// SplitFence is what a fenced vchannel is remembered by after its registration
+// is gone: when it was fenced, and by which task.
+type SplitFence struct {
+	TimeTick uint64
+	TaskID   int64
 }
 
 // PrimaryKeyDescriptor is the immutable PK information needed by WAL write

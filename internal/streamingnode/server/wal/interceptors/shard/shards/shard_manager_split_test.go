@@ -92,21 +92,21 @@ func TestShardManagerSplitShard(t *testing.T) {
 	// ignored the name would fence whatever vchannel happens to hold the slot.
 	m.SplitShard(newTestSplitShardImmutableMessage("v1-successor", 1, 2000))
 	assert.NoError(t, m.CheckIfVChannelCanBeWritten(1, "v1"))
-	assert.Zero(t, m.GetSplitTimeTick(1, "v1"))
+	assert.Zero(t, m.GetSplitFence(1, "v1").TimeTick)
 
 	// an unfenced or unknown collection has no T_switch.
-	assert.Zero(t, m.GetSplitTimeTick(1, "v1"))
-	assert.Zero(t, m.GetSplitTimeTick(999, "v999"))
+	assert.Zero(t, m.GetSplitFence(1, "v1").TimeTick)
+	assert.Zero(t, m.GetSplitFence(999, "v999").TimeTick)
 
 	// the split message fences the vchannel and records T_switch.
 	m.SplitShard(newTestSplitShardImmutableMessage("v1", 1, 2000))
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
-	assert.Equal(t, uint64(2000), m.GetSplitTimeTick(1, "v1"))
+	assert.Equal(t, uint64(2000), m.GetSplitFence(1, "v1").TimeTick)
 
 	// the fence is idempotent and T_switch stays at the first fence.
 	m.SplitShard(newTestSplitShardImmutableMessage("v1", 1, 3000))
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
-	assert.Equal(t, uint64(2000), m.GetSplitTimeTick(1, "v1"))
+	assert.Equal(t, uint64(2000), m.GetSplitFence(1, "v1").TimeTick)
 }
 
 func TestShardManagerRecoverSplittedVChannel(t *testing.T) {
@@ -114,7 +114,7 @@ func TestShardManagerRecoverSplittedVChannel(t *testing.T) {
 	// T_switch, so an already-fenced re-fence can return it after a crash.
 	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, 2000)
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
-	assert.Equal(t, uint64(2000), m.GetSplitTimeTick(1, "v1"))
+	assert.Equal(t, uint64(2000), m.GetSplitFence(1, "v1").TimeTick)
 }
 
 func newTestCreateVChannelImmutableMessage(vchannel string, collectionID int64, partitionIDs []int64, timetick uint64) message.ImmutableCreateVChannelMessageV2 {
@@ -244,7 +244,7 @@ func TestShardManagerRetiredSourceStillAnswersFenced(t *testing.T) {
 	// fence, then retire.
 	m.SplitShard(newTestSplitShardImmutableMessage("v1", 1, 4000))
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
-	assert.Equal(t, uint64(4000), m.GetSplitTimeTick(1, "v1"))
+	assert.Equal(t, uint64(4000), m.GetSplitFence(1, "v1").TimeTick)
 
 	dropMsg, err := message.NewDropVChannelMessageBuilderV2().
 		WithVChannel("v1").
@@ -258,7 +258,7 @@ func TestShardManagerRetiredSourceStillAnswersFenced(t *testing.T) {
 	assert.ErrorIs(t, m.CheckIfCollectionExists(1), ErrCollectionNotFound)
 	// ...but the name is still fenced, and T_switch still recoverable.
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrVChannelFenced)
-	assert.Equal(t, uint64(4000), m.GetSplitTimeTick(1, "v1"))
+	assert.Equal(t, uint64(4000), m.GetSplitFence(1, "v1").TimeTick)
 
 	// a vchannel this pchannel never held stays terminal: no refresh sends the
 	// write anywhere.
