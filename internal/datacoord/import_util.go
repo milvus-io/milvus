@@ -346,11 +346,14 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		return stat.GetTotalRows()
 	})
 
-	// Pre-allocate IDs for autoIDs and logIDs.
-	fieldsNum := len(job.GetSchema().GetFields()) + 2 // userFields + tsField + rowIDField
-	binlogNum := fieldsNum + 2                        // binlogs + statslog + BM25Statslog
-	expansionFactor := paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.GetAsInt64()
-	preAllocIDNum := (totalRows + 1) * int64(binlogNum) * expansionFactor
+	// Pre-allocate IDs for the task-level IDRange. New-mechanism jobs (backup, L0,
+	// and ordinary imports whose files all carry per-file PK/RowID ranges) consume
+	// this range only for binlog logIDs; legacy jobs without per-file ranges may
+	// also consume it per row for PK/RowID. The row-proportional estimate is an
+	// upper bound for both, and it is clamped to MaxUint32 so common.AllocAutoID
+	// never wraps.
+	isL0Import := importutilv2.IsL0Import(job.GetOptions())
+	preAllocIDNum := estimateLogIDBudget(job, totalRows)
 
 	idBegin, idEnd, err := common.AllocAutoID(func(n uint32) (int64, int64, error) {
 		ids, ide, e := alloc.AllocN(int64(n))
@@ -362,7 +365,6 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 
 	mlog.Info(context.TODO(), "pre-allocate ids and ts for import task", WrapTaskLog(task,
 		mlog.Int64("totalRows", totalRows),
-		mlog.Int("fieldsNum", fieldsNum),
 		mlog.Int64("idBegin", idBegin),
 		mlog.Int64("idEnd", idEnd),
 		mlog.Uint64("ts", ts))...,
@@ -389,7 +391,6 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		}
 	}
 
-	isL0Import := importutilv2.IsL0Import(job.GetOptions())
 	storageVersion := importStorageVersion(isL0Import)
 	useLoonFFI := importUseLoonFFI(isL0Import)
 
@@ -414,6 +415,41 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	}
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
 	return req, nil
+}
+
+// estimateLogIDBudget returns the number of IDs to pre-allocate for a task-level
+// IDRange. New-mechanism jobs (restore, L0, and ordinary imports whose files all
+// carry a per-file PK/RowID range) consume this range only for binlog logIDs;
+// legacy jobs without per-file ranges may also consume it for PK/RowID.
+//
+// A row belongs to exactly one (vchannel, partition) bucket, so the number of
+// non-empty sync batches is at most totalRows. Each sync batch writes at most
+// binlogNum log files, so (totalRows+1)*binlogNum is a strict upper bound on the
+// logID consumption; the expansion factor is kept as headroom. The result is
+// clamped to math.MaxUint32 so common.AllocAutoID's uint32 parameter never wraps.
+func estimateLogIDBudget(job ImportJob, totalRows int64) int64 {
+	if totalRows < 0 {
+		totalRows = 0
+	}
+
+	fieldsNum := len(job.GetSchema().GetFields()) + 2 // userFields + tsField + rowIDField
+	binlogNum := int64(fieldsNum + 2)                 // binlogs + statslog + BM25Statslog
+	if binlogNum < 1 {
+		binlogNum = 1
+	}
+	expansionFactor := paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.GetAsInt64()
+	if expansionFactor < 1 {
+		expansionFactor = 1
+	}
+
+	factor := binlogNum * expansionFactor
+	if factor <= 0 {
+		factor = 1
+	}
+	if totalRows+1 > int64(math.MaxUint32)/factor {
+		return int64(math.MaxUint32)
+	}
+	return (totalRows + 1) * factor
 }
 
 func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats, segmentMaxSize int) [][]*datapb.ImportFileStats {

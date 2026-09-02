@@ -4063,25 +4063,16 @@ class TestCreateImportJobNegative(TestBase):
         }
         rsp = self.collection_client.collection_create(payload)
 
-        # create import job
+        # create import job with a non-existent file: rejected synchronously now
         payload = {
             "collectionName": name,
             "files": [["invalid_file.json"]],
         }
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp["data"]["jobId"]
-        # The job transitions Pending -> Importing -> Failed asynchronously once the
-        # importer tries to read the non-existent file. Poll until a terminal state
-        # instead of asserting after a fixed sleep, which races the scheduler under load.
-        state = None
-        t0 = time.time()
-        while time.time() - t0 < IMPORT_TIMEOUT:
-            rsp = self.import_job_client.get_import_job_progress(job_id)
-            state = rsp["data"]["state"]
-            if state in ("Failed", "Completed"):
-                break
-            time.sleep(1)
-        assert state == "Failed", f"expected import job to fail, got state={state}: {rsp}"
+        assert rsp["code"] != 0, rsp
+        readable_rsp = str(rsp).lower()
+        assert any(keyword in readable_rsp for keyword in ("key not found", "not exist", "not found", "no such")), rsp
+        assert "jobId" not in str(rsp), rsp
 
     def test_import_job_with_non_exist_binlog_files(self):
         # create collection

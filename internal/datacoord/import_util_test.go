@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"path"
 	"strings"
@@ -1422,11 +1423,40 @@ func TestImportUtil_AssembleRequestCarriesPKRange(t *testing.T) {
 	assert.Greater(t, importReq.GetIDRange().GetEnd(), importReq.GetIDRange().GetBegin())
 }
 
-// The estimate path reserves a capped range rather than refusing an oversized
-// bound, so this guard is what catches a file that really does hold more rows
-// than its reservation. It must fire before any segment is written, and it must
-// carry the sentinel so CreateTaskOnWorker fails the job instead of retrying a
-// number that will never change.
+func TestImportUtil_EstimateLogIDBudget(t *testing.T) {
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.Key, "10")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.Key)
+
+	fields := make([]*schemapb.FieldSchema, 9)
+	for i := range fields {
+		fields[i] = &schemapb.FieldSchema{FieldID: int64(100 + i), DataType: schemapb.DataType_Int64}
+	}
+	job := &importJob{ImportJob: &datapb.ImportJob{Schema: &schemapb.CollectionSchema{Fields: fields}}}
+
+	// The logID budget is deliberately row-based again: each row belongs to exactly
+	// one (vchannel, partition) bucket, so the number of non-empty sync batches is
+	// at most totalRows, and each sync batch writes at most binlogNum logs.
+	// (totalRows+1)*binlogNum*expansionFactor is therefore a strict upper bound;
+	// when it exceeds math.MaxUint32 we keep MaxUint32 instead of letting
+	// common.AllocAutoID's uint32 conversion wrap.
+	const (
+		totalRows       int64 = 78_201_209
+		binlogNum       int64 = 9 + 4 // len(fields)+2(user+rowID)+2(stats+bm25)
+		expansionFactor int64 = 10
+	)
+
+	got := estimateLogIDBudget(job, totalRows)
+	old := (totalRows + 1) * binlogNum * expansionFactor
+	assert.Greater(t, old, int64(math.MaxUint32), "sanity: this case must exercise the clamp")
+	assert.Equal(t, int64(math.MaxUint32), got, "oversized row-based budget must be clamped, not wrapped")
+
+	small := estimateLogIDBudget(job, 100)
+	assert.Equal(t, int64(101)*binlogNum*expansionFactor, small)
+
+	empty := estimateLogIDBudget(job, 0)
+	assert.Equal(t, int64(1)*binlogNum*expansionFactor, empty)
+}
+
 func TestImportUtil_AssembleRefusesAnUnderSizedPKRange(t *testing.T) {
 	var job ImportJob = &importJob{
 		ImportJob: &datapb.ImportJob{JobID: 0, CollectionID: 1, PartitionIDs: []int64{2}, Vchannels: []string{"v0"}},
