@@ -255,27 +255,30 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 
 	collectionID := header.GetCollectionId()
 	schemaVersion := header.GetSchemaVersion()
-	if err := impl.shardManager.CheckIfVChannelCanBeWritten(collectionID, msg.VChannel()); err != nil {
+	// Both admission questions -- may this vchannel be written, and does the
+	// header's schema version match -- under one read lock. They were already
+	// consistent with each other (the vchannel-exclusive lock upstream keeps the
+	// fence from flipping between them); this only stops paying for the second
+	// acquisition on the hot path.
+	correctSchemaVersion, err := impl.shardManager.CheckWritableAndSchemaVersion(msg.VChannel(), header)
+	if err != nil {
 		if errors.Is(err, shards.ErrVChannelFenced) {
 			// the vchannel is fenced by shard split, the client should refresh
 			// the routing table and write to the new shards. T_switch is not
 			// carried here: the DML client refreshes routing, it never reads it.
 			return nil, status.NewShardFenced(msg.VChannel(), 0, 0)
 		}
-		// This pchannel has never held the vchannel, so no routing refresh sends
-		// the write anywhere -- terminal, unlike the fence above. It must still
-		// be a rejection rather than a pass: every check after this one is keyed
-		// by collection (schema version) or by (collection, partition) (segment
-		// assignment), so a message let through would be appended carrying
-		// vchannel X while its segment belongs to vchannel Y. The flusher finds
-		// no data sync service for X and drops the batch, recovery counts the
-		// rows against Y's segment, and the client is told the append succeeded.
-		return nil, status.NewUnrecoverableError("vchannel %s of collection %d cannot be written: %s", msg.VChannel(), collectionID, err.Error())
-	}
-	correctSchemaVersion, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(header)
-	if err != nil {
 		if errors.Is(err, shards.ErrCollectionNotFound) {
-			return nil, status.NewUnrecoverableError("collection %d not found", collectionID)
+			// This pchannel has never held the vchannel, so no routing refresh
+			// sends the write anywhere -- terminal, unlike the fence above. It
+			// must still be a rejection rather than a pass: every check after
+			// this one is keyed by collection (schema version) or by
+			// (collection, partition) (segment assignment), so a message let
+			// through would be appended carrying vchannel X while its segment
+			// belongs to vchannel Y. The flusher finds no data sync service for
+			// X and drops the batch, recovery counts the rows against Y's
+			// segment, and the client is told the append succeeded.
+			return nil, status.NewUnrecoverableError("vchannel %s of collection %d cannot be written: %s", msg.VChannel(), collectionID, err.Error())
 		}
 		if errors.Is(err, shards.ErrCollectionSchemaNotFound) {
 			return nil, status.NewUnrecoverableError("collection %d schema not provided by create collection message", collectionID)
@@ -290,7 +293,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			return nil, status.NewSchemaVersionMismatch("schema version mismatch, input schema version: %d, collection schema version: %d",
 				schemaVersion, correctSchemaVersion)
 		}
-		impl.shardManager.Logger().Error(ctx, "unexpected error from CheckIfCollectionSchemaVersionMatch",
+		impl.shardManager.Logger().Error(ctx, "unexpected error from CheckWritableAndSchemaVersion",
 			mlog.FieldCollectionID(collectionID),
 			mlog.Bool("schemaVersionProvided", header.SchemaVersion != nil),
 			mlog.Int32("schemaVersion", schemaVersion),
@@ -380,10 +383,9 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 		// rows against Y's segment, and the client is told the append succeeded.
 		return nil, status.NewUnrecoverableError("vchannel %s of collection %d cannot be written: %s", msg.VChannel(), header.GetCollectionId(), err.Error())
 	}
-	if err := impl.shardManager.CheckIfCollectionExists(header.GetCollectionId()); err != nil {
-		// The collection can not be deleted at current shard, ignored
-		return nil, status.NewUnrecoverableError(err.Error())
-	}
+	// No separate existence check: the admission above already answers
+	// ErrCollectionNotFound when this pchannel holds no entry for the
+	// collection, so a second lock acquisition would ask the same question.
 
 	impl.shardManager.ApplyDelete(deleteMessage)
 	return appendOp(ctx, msg)

@@ -460,6 +460,26 @@ func (m *shardManagerImpl) AlterCollection(msg message.MutableAlterCollectionMes
 	return segmentIDs, nil
 }
 
+// CheckWritableAndSchemaVersion answers both of the insert path's admission
+// questions under one read lock. The writable check runs first, so a collection
+// this pchannel does not hold is reported as such rather than as a schema
+// mismatch.
+func (m *shardManagerImpl) CheckWritableAndSchemaVersion(vchannel string, header *message.InsertMessageHeader) (int32, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if err := m.checkIfVChannelCanBeWritten(header.GetCollectionId(), vchannel); err != nil {
+		return -1, err
+	}
+	return m.checkIfCollectionSchemaVersionMatch(header)
+}
+
+// CheckIfCollectionSchemaVersionMatch answers the schema-version half alone.
+//
+// Not on the ShardManager interface: the write path always asks it together with
+// the writable check, and asking separately is what cost the second lock
+// acquisition. It stays exported so the schema-version rule -- which has more
+// cases than the writable one -- can be tested on its own.
 func (m *shardManagerImpl) CheckIfCollectionSchemaVersionMatch(header *message.InsertMessageHeader) (int32, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
