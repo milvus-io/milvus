@@ -1,0 +1,808 @@
+# MEP: Shared Filter Execution for Hybrid Search
+
+- **Created:** 2026-09-02
+- **Author(s):** @zhengbuqian
+- **Approver(s):** @czs007
+- **Status:** Draft — P0 implemented, untested
+- **Component:** QueryNode (Delegator, SearchTask), Segcore
+- **Related Issues:** TBD
+- **Released:** TBD
+
+## Summary
+
+A hybrid search (`HybridSearch`, internally a `SearchRequest` with N `SubSearchRequest`s) executes each
+sub-request as a fully independent search: an independent plan, an independent worker RPC, and an
+independent segcore call per segment. When two or more sub-requests carry an **identical filter
+predicate**, the same filter bitset is therefore computed once per sub-request per segment, and the
+same MVCC/delete mask is applied just as many times. A dense path plus a BM25 path over the same
+filtered rows — the ordinary shape of a hybrid search — is exactly this case.
+
+This design makes sub-requests that share a predicate execute the shared portion of the plan **once
+per segment**. The shared portion is exactly the source subtree of `VectorSearchNode`
+(`FilterBitsNode → MvccNode → [ElementFilterBitsNode]`); the per-branch portion begins at
+`VectorSearchNode`. Grouping is decided deterministically at the shard delegator, carried to the
+worker as one RPC, and executed in segcore as one prefix call per segment followed by N concurrent
+per-branch vector searches against its result.
+
+Sub-request plans are **not** merged. Each branch keeps its own complete `query::Plan`. Only execution
+is shared. This keeps `plan.proto` and the proxy untouched and lets the existing per-branch reduce
+pipeline be reused verbatim.
+
+## Non-Goals
+
+- **Sharing across sub-requests whose predicates merely share a prefix**, i.e. the shape
+  `[0] == [1] == C` and `[2] == (C) && extra`. Exploiting that needs expression-level common subtree
+  extraction and delta bitsets; it is deferred (see Delivery Phases).
+- **Sharing across separate top-level requests.** That is the cross-request caching problem, already
+  served by `ExprResCacheManager`; see Rejected Alternatives for why it does not address this one.
+- **Changing the reduce or rank-fusion path.** Each branch continues to reduce to its own top-k and the
+  proxy continues to fuse afterwards.
+- **The iterative-filter execution path.** It has no `FilterBitsNode`; the filter is applied row-by-row
+  after the vector search. Requests on that path fall back to today's behavior.
+
+## Public Interfaces
+
+### Proto changes
+
+`pkg/proto/query_coord.proto`:
+
+```protobuf
+message SearchRequest {
+    internal.SearchRequest req = 1;
+    repeated string dml_channels = 2;
+    repeated int64 segmentIDs = 3;
+    bool from_shard_leader = 4;
+    DataScope scope = 5;
+    int32 total_channel_num = 6;
+    bool filter_only = 7;
+    bool enable_expr_cache = 8;
+
+    // Additional branches that share the filter predicate carried in `req`
+    // and must be executed together with it in one per-segment segcore call.
+    // Branch 0 always lives in `req` itself, fully populated exactly as it is
+    // today. Empty means an ordinary single-branch search.
+    repeated internal.SubSearchRequest extra_filter_sharing_reqs = 9;
+}
+```
+
+No change to `pkg/proto/plan.proto`.
+
+#### Why branch 0 stays in `req`
+
+`internal.SearchRequest` does double duty: it is both the request envelope (`collectionID`,
+`mvcc_timestamp`, `guarantee_timestamp`, `timeout_timestamp`, `consistency_level`,
+`collection_ttl_timestamps`, `entity_ttl_physical_time`, `output_fields_id`, `username`, `base`) **and**
+the payload of one branch (`serialized_expr_plan`, `placeholder_group`, `dsl`, `dsl_type`,
+`partitionIDs`, `nq`, `topk`, `metricType`, `ignoreGrowing`, `offset`, `group_by_field_id`, `group_size`,
+`field_id`, `analyzer_name`, `search_type`). The two halves are not interchangeable, so a `oneof` between
+`req` and the branch list is not possible — it would discard the envelope.
+
+Two shapes were considered for resolving the double duty:
+
+1. **Always-populated branch list** — move every per-branch field out of `req` into a `repeated`
+   field that holds exactly one entry for an ordinary search. One source of truth, and grouped mode stops
+   being a special case. Rejected: it redirects roughly sixty `req.Req.<per-branch field>` read sites
+   across `SearchTask`, `services.go`/`handlers.go`, `optimizers`, and `segcore.NewSearchRequest`, all on
+   the regular non-hybrid path, for a purely structural benefit.
+2. **Additive: branch 0 in `req`, extras in the repeated field** — chosen. `len(extra) == 0` is not
+   "the non-grouped mode", it is the degenerate case of the same rule, so the regular path needs no new
+   conditional at all. There is no redundancy between `req` and the list, hence no drift hazard.
+
+The cost of the chosen shape is asymmetry: branch 0 is addressed differently from branches 1..N-1, and
+every piece of grouped-aware code must reconstruct the full branch list as `[req] + extra`. That is
+accepted deliberately in exchange for zero intrusion into the regular search path.
+
+Note that grouping is entirely internal to `sd.Search`: it still returns one `internalpb.SearchResults`
+per sub-request, so `searchChannel` and everything above it (`handlers.go:370,412-413,433-434`, which
+read the *top-level* hybrid request's nq/topk anyway) are unaffected by this change.
+
+#### Results
+
+**Results reuse the existing `internalpb.SubSearchResults`** (`pkg/proto/internal.proto:175`), which
+already carries a `req_index` field for exactly this purpose. Today the delegator splits sub-requests
+before the worker RPC, so workers never populate `SubResults`; in this design a grouped worker response
+fills one `SubSearchResults` per branch — **including branch 0** — and the delegator demultiplexes on
+`req_index`.
+
+The response is symmetric (all N branches in `SubResults`) even though the request is asymmetric. Each
+side is shaped by its own constraint: the request must not disturb existing readers of `req`, while a
+grouped response has no existing readers at all, so it can take the clean form.
+
+### New cgo API
+
+`internal/core/src/segcore/segment_c.h`:
+
+The interface is **two-phase**: one call evaluates the shared prefix and hands back an opaque handle, and
+one call per branch performs that branch's vector search against it.
+
+```c
+/** Opaque owner of one segment's shared prefix output: the post-MVCC bitset
+ *  plus the derived QueryContext state the prefix produced. */
+typedef void* CSharedFilterBitsetResult;
+
+/**
+ * Evaluate the shared prefix (VectorSearchNode's source subtree) of `c_plan`
+ * on `c_segment`. Any branch's plan may be passed; they are equivalent by the
+ * grouping precondition. No placeholder group is needed.
+ */
+CFuture*  // Future<CSharedFilterBitsetResult>
+AsyncComputeFilterBitset(CTraceContext c_trace,
+                       CSegmentInterface c_segment,
+                       CSearchPlan c_plan,
+                       uint64_t timestamp,
+                       int32_t consistency_level,
+                       uint64_t collection_ttl,
+                       uint64_t entity_ttl_physical_time_us);
+
+void DeleteSharedFilterBitsetResult(CSharedFilterBitsetResult c_bits);
+
+/**
+ * Run one branch's VectorSearchNode (and everything above it) against a
+ * previously computed shared prefix, skipping FilterBitsNode / MvccNode.
+ * Returns exactly what AsyncSearch returns: a single leaked SearchResult*.
+ */
+CFuture*  // Future<CSearchResult>
+AsyncSearchWithBitset(CTraceContext c_trace,
+                    CSegmentInterface c_segment,
+                    CSearchPlan c_plan,
+                    CPlaceholderGroup c_placeholder_group,
+                    CSharedFilterBitsetResult c_bits,
+                    uint64_t timestamp,
+                    int32_t consistency_level,
+                    uint64_t collection_ttl,
+                    uint64_t entity_ttl_physical_time_us);
+```
+
+`AsyncComputeFilterBitset` forwards `enable_expr_cache` unchanged. Whether this bitset comes from
+actually evaluating the filter or from `ExprResCacheManager` is orthogonal to sharing it across
+branches, so a cached bitset is reused here exactly as it would be in an ordinary search.
+
+Neither call takes `filter_only`. That flag selects a different *output shape* — run the filter and
+return only a per-segment matched-row count, discarding the bitset — and it is already served by the
+existing `AsyncSearch` path. Two-stage search's stage 1 keeps using it, and on a grouped request it
+runs **once for the whole group** rather than once per sub-request, because every branch carries the
+same predicate. See D2.
+
+**Why two phases rather than one `AsyncSearchGrouped` returning N results.** Two independent reasons,
+each sufficient on its own:
+
+1. **Branch parallelism without a self-submission deadlock.** Branches must run concurrently (D7). A
+   single grouped call would have to fan its branches out from inside C++, and the only natural target is
+   `getSearchCPUExecutor` (`internal/core/src/futures/Executor.cpp`, `CPU_NUM` threads) — the very pool
+   the grouped job is already running on. A job that submits to its own bounded pool and then blocks
+   deadlocks once every thread holds such a waiter. Avoiding it would mean introducing and sizing a
+   second executor. Splitting the call instead puts the fan-out back in Go, where
+   `searchSegmentsAttempt` already runs an `errgroup`.
+2. **Unchanged result ownership.** `AsyncSearchWithBitset` returns a single leaked `SearchResult*`, exactly
+   like `AsyncSearch` today; Go wraps it and releases it through the existing `DeleteSearchResults`. No
+   result-array type, no new destructor semantics, and no partial-release question when construction
+   fails midway through a batch.
+
+The handle's lifetime is a single Go function scope guarded by one `defer`, covering one segment and one
+group. It is a local resource, not the process-wide registry rejected under Rejected Alternatives: no
+map, no refcounting, no cross-request sharing, and the `defer` survives panics and cancellation.
+
+Cost: N+1 cgo calls per segment instead of 1, and the read lease plus schema validation are taken N times
+rather than once. Both are negligible against one filter evaluation plus one ANN search, and the lease
+count is no worse than today, where each of the N sub-requests takes its own.
+
+### New configuration parameter
+
+```yaml
+queryNode:
+  hybridSearch:
+    sharedFilter:
+      enabled: false   # default off; flip on per-cluster during rollout
+```
+
+`ParamItem` in `pkg/util/paramtable/component_param.go`, `refreshable: true`. The switch is read at the
+delegator grouping site, so turning it off restores today's behavior exactly, with no partially-applied
+state.
+
+### New metrics
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `milvus_querynode_hybrid_shared_filter_fallback_total` | Counter | node_id, collection_id, reason | A sub-request that could not join a group, by why. `reason` ∈ {`no_matching_peer`, `no_predicate`, `iterative_filter`, `plan_unmarshal_failed`}. |
+
+The existing segcore histograms are the primary effect measurement and need no change:
+`internal_core_search_latency_scalar` (`FilterBitsNode.cpp:230,295`) should drop roughly in proportion
+to the sharing factor, while `internal_core_search_latency_vector` (`VectorSearchNode.cpp:211`) stays
+flat.
+
+## Design Details
+
+### Architecture
+
+The enabling structural fact is that a vector search plan is a **linear chain with exactly one fork
+point**:
+
+```
+FilterBitsNode(doc_expr) → MvccNode → [ElementFilterBitsNode] → VectorSearchNode → [SearchGroupByNode]
+└──────────────── shared prefix ─────────────────────────────┘ └──────── per branch ────────┘
+```
+
+The boundary is not a new concept that has to be invented: it is exactly what
+`ProtoParser::ExtractFilterOnlyPlan` (`internal/core/src/query/PlanProto.cpp:1609`) already returns —
+the `sources()[0]` of `VectorSearchNode`. Two-stage search already uses it to run just the filter and
+discard everything else (`ExecPlanNodeVisitor.cpp:394-465`). This design runs the same subtree and
+feeds the result back into N vector searches instead of discarding it.
+
+Because the boundary is defined structurally rather than by expression type, element-level hybrid
+search comes along for free: when `ElementFilterBitsNode` is present it sits below `VectorSearchNode`
+and is therefore inside the shared prefix.
+
+Data flow end to end:
+
+```
+proxy         unchanged: N sub-requests, each with its own complete plan
+  │
+delegator     group sub-requests by predicate bytes; each group of size >= 2
+  │           becomes ONE querypb.SearchRequest: branch 0 in `req`, rest in extra_filter_sharing_reqs
+  │
+  ▼           (1 worker RPC instead of N)
+worker        one SearchTask holding N branches = [req] + extra_filter_sharing_reqs
+  │
+  ▼           per segment: 1 prefix call, then N branch calls run concurrently
+segcore       AsyncComputeFilterBitset  ->  shared prefix handle (bitset + state)
+              AsyncSearchWithBitset x N, each against that handle
+  │
+  ▼           N SearchResult per segment
+worker        transpose to [branch][segment]; run the existing reduce per branch
+  │           emit SubResults[branch] with req_index
+  ▼
+delegator     demux on req_index; ReduceSearchOnQueryNode per branch (unchanged)
+  │
+proxy         per-branch reduce + rank fusion (unchanged)
+```
+
+### 1. Delegator: grouping
+
+The delegator is the only correct place for this decision:
+
+- **Not the proxy** — it does not know the segment distribution, does not own the MVCC pin, and would
+  have to guess whether sharing is even possible.
+- **Not the worker scheduler** — that would mean relying on two independent RPCs landing in the same
+  scheduling window. It usually would, but "usually" is not a design. The existing `SearchTask.Merge`
+  is also a merge along the **NQ axis** (same plan, concatenated placeholder groups, one reduce, then
+  sliced back apart). Sharing a filter across different vector fields is an orthogonal axis; overloading
+  one mechanism with both would be fragile.
+- **The delegator** — it is the first component that sees all sub-requests at once, and
+  `PinReadableSegments` (`delegator.go:617`) has already fixed a single segment snapshot and a single
+  MVCC timestamp for all of them before the fan-out.
+
+In the `IsAdvanced` branch (`delegator.go:624`):
+
+```go
+groups := groupSubReqsBySharedFilter(req.GetReq().GetSubReqs())
+// len(group) == 1 -> existing single-branch path, unchanged
+// len(group) >= 2 -> grouped path
+```
+
+**What sharing actually requires.** The bitset for a segment is a pure function of
+`(segment, predicate, mvcc_timestamp, TTL context)`. Nothing else enters into it — in particular
+`PartitionIDs` and `IgnoreGrowing` do **not**. They only decide *which* segments are searched. So for any
+segment that two branches both search, their bitsets are identical by construction, whatever those two
+fields say.
+
+`IgnoreGrowing` nonetheless appears in the grouping key below, and it is worth being precise about why:
+a group is packaged as **one RPC carrying one segment list**. That packaging cannot express two branches
+disagreeing on the segment set. The constraint comes from the chosen packaging, not from the semantics
+of sharing — which is what makes the P1 refinement below possible.
+
+**Grouping key:**
+
+| Field | Why it is in the key | Can it actually differ? |
+|---|---|---|
+| `vector_anns.predicates` (serialized bytes) | Determines the bitset | Yes — the real discriminator |
+| `iterative_filter_execution == false` | The iterative path has no `FilterBitsNode` to share | Yes |
+| `IgnoreGrowing` | Changes the growing-segment set, so the group's single segment list would be wrong | **Yes** — settable per sub-request |
+
+
+`IgnoreGrowing` is settable per sub-request: `task_search.go:623-628` ORs the request-level flag with
+`isIgnoreGrowing(subReq.GetSearchParams())`. It is the only field in the table that can genuinely split
+a group that would otherwise share a predicate. It stays in the key because it is a **correctness**
+constraint, not an optimization one: if one branch wants growing segments and another does not,
+executing them under one flag gives one of them the wrong row set. Expected to be rare — it requires a
+caller to set it on some sub-requests but not others — but that expectation is **not measured**.
+
+**`PartitionIDs` is deliberately not in the key.** It cannot differ once the predicates match, and it
+has no effect on this path anyway:
+
+1. Outside partition-key mode every sub-request gets the same `t.GetPartitionIDs()`
+   (`internal/proxy/task_search.go`).
+2. In partition-key mode it is derived from the plan's partition-key predicate by
+   `tryParsePartitionIDsFromPlan`, so byte-identical predicates yield identical partition IDs.
+3. The top-level `t.PartitionIDs` is the **union** across sub-requests
+   (`t.partitionIDsSet.Collect()`, `task_search.go:740`), and that union is what
+   `PinReadableSegments` pins (`delegator.go:617`). On the worker, `validate()`
+   (`internal/querynodev2/segments/validate.go:25`) accepts a `partitionIDs` parameter but never
+   references it — segment selection is driven entirely by the `segmentIDs` the delegator already
+   computed.
+
+Including it would also have forced a set comparison rather than a slice one, since `getPartitionIDs`
+returns a map-backed set's `Collect()` and its order varies between calls. Dropping it removes both the
+field and that trap.
+
+> Pre-existing observation, not introduced here: (2) + (3) mean that in partition-key mode every
+> sub-request effectively searches the union of the branches' partitions rather than its own narrower
+> set. This is correct — the partition-key predicate is in the expression, so segcore filters the rows —
+> but the per-sub-request segment-skipping optimization does not currently take effect. Worth a separate
+> look; it is out of scope for this MEP.
+
+**P1 refinement — group per data scope.** Since `IgnoreGrowing` only affects growing segments, and the
+sealed set is by definition identical across all branches, the sealed side can be grouped
+*unconditionally*. `organizeSubTask` already emits sealed (`DataScope_Historical`) and growing
+(`DataScope_Streaming`) as separate sub-tasks (`delegator.go:1033-1039`), so pushing the grouping
+decision down to scope granularity is structurally natural. Since the sealed side carries nearly all of
+the segments and therefore nearly all of the filter cost, this recovers essentially the full benefit for
+branches that disagree on `IgnoreGrowing`. Deferred to P1 because it makes the delegator's grouping logic
+noticeably more involved, and the case it serves is expected to be rare.
+
+**Fields that may differ freely:** `field_id`, `metricType`, `topk`, `offset`, `group_by_field_id`,
+`group_size`, `analyzer_name`, `placeholder_group`, `nq`, `search_type`.
+
+Request-level fields (MVCC timestamp, collection TTL, entity TTL, consistency level, namespace) are
+identical across sub-requests by construction. `namespace` deserves an explicit note: it is folded into
+the predicate by `MergeExprWithNamespace` during plan parsing, so it is already covered by the byte
+comparison.
+
+Byte equality of the serialized predicate is a conservative test — it may miss semantically equivalent
+predicates that serialize differently — but it is sound and free. Both sub-requests are produced by the
+proxy from the same user-supplied `Dsl` through the same `tryGeneratePlan`, so when the caller passes the
+same filter to both, the bytes match.
+
+**Extracting the predicate:** unmarshal `planpb.PlanNode`, take `GetVectorAnns().GetPredicates()`, and
+compare its serialized form. `exprutil.ParseExprFromPlan` (already used by `segment_pruner.go`) provides
+the accessor. To keep the delegator cheap, hash once per sub-request and compare hashes, then verify
+full bytes within a hash bucket.
+
+**Building the grouped request.** The existing flattening loop (`delegator.go:627-660`) already
+hand-copies every field of a sub-request into a standalone `internalpb.SearchRequest`; for a group it
+runs unchanged for the group's **first** member and the remaining members are attached verbatim as
+`extra_filter_sharing_reqs`. `sd.modifySearchRequest` (which builds the per-worker request) needs one
+added line to carry the new field through; the inner `req` already round-trips via
+`shallowcopy.ShallowCopySearchRequest`.
+
+Group ordering must be stable so that `req_index` in the response maps back to the caller's original
+`SubReqs` position. Carry the original index alongside each group member rather than relying on the
+group's internal order.
+
+### 2. Worker: `SearchTask` with a branch dimension
+
+`internal/querynodev2/tasks/search_task.go`. The governing principle is that the branch dimension
+affects **execution only, never reduce**:
+
+```go
+type SearchTask struct {
+    ...
+    branches []*segcore.SearchRequest  // len == 1 reproduces today's behavior exactly
+}
+```
+
+`Execute()`:
+
+0. Reconstruct the branch list as `[req] + extra_filter_sharing_reqs`. Branch 0 is `req` itself, so
+   `len(extra) == 0` yields a one-element list and every step below degenerates to today's code path.
+1. Build one `segcore.SearchRequest` per branch via `collection.NewSearchRequest` — each parses its own
+   plan and placeholder group, as today. `NewSearchRequest` takes a `*querypb.SearchRequest`, so the
+   extra branches need a small adapter that projects a `SubSearchRequest` plus the shared envelope into
+   the shape it expects.
+2. One `segments.SearchHistoricalGrouped` / `SearchStreamingGrouped` call. Inside
+   `searchSegmentsAttempt` (`internal/querynodev2/segments/search.go:77`), the per-segment
+   `s.Search(ctx, req)` becomes `s.SearchGrouped(ctx, reqs)`, returning `[]*SearchResult` of length
+   `len(branches)`. `SearchGrouped` computes the shared prefix once and then fans the branches out
+   **concurrently** over an `errgroup`, mirroring the segment-level fan-out one level up:
+
+   ```go
+   func (s *LocalSegment) SearchGrouped(ctx context.Context, reqs []*segcore.SearchRequest) ([]*segcore.SearchResult, error) {
+       bits, err := s.csegment.ComputeFilterBitset(ctx, reqs[0])
+       if err != nil { return nil, err }
+       defer bits.Release()
+
+       out := make([]*segcore.SearchResult, len(reqs))
+       g, gctx := errgroup.WithContext(ctx)
+       for i := range reqs {
+           i := i
+           g.Go(func() error {
+               r, err := s.csegment.SearchWithBitset(gctx, reqs[i], bits)
+               out[i] = r
+               return err
+           })
+       }
+       return out, g.Wait()
+   }
+   ```
+
+   `len(reqs) == 1` still takes this path; it costs one extra cgo call versus `Search` and keeps a single
+   code path. Whether to special-case N==1 back to plain `Search` is a micro-optimization to settle with
+   a benchmark, not a design question.
+3. Transpose `[segment][branch]` into `[branch][segment]`.
+4. **Run the existing reduce pipeline once per branch, unchanged.** `PrepareSearchResultsForExport` →
+   `exportSearchResultsAsArrow` → `buildReduceLayout` → `executeGoReduce` →
+   `materializeAndAssignResult` all take `(plan, placeholderGroup, results, originNqs, originTopks)`,
+   and every branch has its own. This is an added loop, not a rewrite.
+5. Emit `resp.SubResults[branch]` with `req_index` set to the sub-request's index in the original
+   `SubReqs` list.
+
+`MergeWith` returns `false` unconditionally for a grouped task. The NQ-axis merge and the
+filter-sharing group are two different merge semantics and must not interact.
+
+### 3. Segcore: the two phases
+
+**Phase 1 — `SegmentInternalInterface::ComputeFilterBitset(plan, ...)`**
+
+```
+1. prefix = ExtractFilterOnlyPlan(plan->plan_node_)
+   If nullptr (no filter subtree, or an iterative-filter plan), return a null handle;
+   Go falls back to N independent Search() calls.
+
+2. Build a QueryContext, execute PlanFragment(prefix).
+   -> RowVector{bitset, valid}
+
+3. Package the RowVector together with the derived QueryContext state (see 3.1)
+   into a SharedFilterBitsetResult and hand ownership to Go.
+```
+
+**Phase 2 — `SegmentInternalInterface::SearchWithBitset(plan, phg, bitset_result, ...)`**, run once per
+branch, concurrently:
+
+```
+1. Check the O(1) invariants: bitset_result->segment_id == this segment, and
+   bitset_result->active_count == the branch's active_count. On a count
+   mismatch, skip steps 2-3 and evaluate this branch's own filter instead.
+
+2. Build QueryContext_i with this plan's search_info_ and this branch's placeholder_group_.
+   Install the derived state carried by the result (see 3.1).
+   set_precomputed_bitset(bitset_result->bitset)   // shared, read-only
+
+3. Execute PlanFragment(rebind(plan->plan_node_)), where rebind replaces
+   VectorSearchNode's source with a PrecomputedBitsetNode.
+
+4. Return QueryContext_i->get_search_result() as a single leaked SearchResult*.
+```
+
+Phase 2 deliberately does **not** re-verify that the branch's filter subtree matches the one the bitset
+came from. Such a check means rendering the expression tree with `ToString()` once per branch per
+segment; for the multi-kilobyte predicates this design targets that is pure overhead in the correct
+case, and predicate equality is already established by the delegator's byte comparison.
+
+The active-count check should never fire: both phases pass the same MVCC timestamp, and
+`get_active_count` is an upper bound on it, so rows inserted between the phases carry larger timestamps
+and fall outside. It exists because if it ever did fire, the bitset would cover fewer rows than the
+branch is about to search and the excess would go unfiltered. That is why a mismatch **degrades rather
+than throws**: the branch evaluates its own filter, costing the sharing but never the query.
+
+
+Concurrency safety across the N phase-2 calls: each has its own `QueryContext` and its own
+`SearchResult`; the only shared object is the bitset result, which is read-only after phase 1 (see 3.3).
+
+#### 3.1 Derived query state carry-over
+
+This is the subtlest part of the design and the most likely source of bugs. Evaluating the filter
+subtree writes **side-effect state onto the `QueryContext`**, not just the returned bitset. Running it
+once means only the producing `QueryContext` receives that state; it must be explicitly propagated to
+the other branches.
+
+Known writers today:
+
+| Writer | State written |
+|---|---|
+| `PhyMvccNode` (`MvccNode.cpp:94`) | `set_all_rows_visible(true)` |
+| `PhyElementFilterBitsNode` (`ElementFilterBitsNode.cpp:102-134`) | `set_array_offsets`, `set_active_element_count`, `set_struct_name`, `set_bitset_is_element_level(true)` |
+
+`PhyVectorSearchNode::GetOutput` reads `get_all_rows_visible()` and `bitset_is_element_level()` to pick
+between the empty-`BitsetView` fast path and the normal path (`VectorSearchNode.cpp:128-146`). Dropping
+either would silently change which rows are searched.
+
+`SharedFilterBitsetResult` therefore carries this state alongside the bitset, with `CaptureFrom` /
+`ApplyTo` as the only way it moves. Keeping it on the same struct rather than in a parallel type means
+there is exactly one thing to hand between the phases, and adding a new side effect to a filter-subtree
+operator forces a visible edit to that struct rather than a silently missing copy.
+
+#### 3.2 New plan node and operator
+
+```cpp
+// internal/core/src/plan/PlanNode.h
+class PrecomputedBitsetNode : public PlanNode {
+    // No sources; carries no data. The bitset lives on the QueryContext so the
+    // plan tree stays stateless and shareable across branches.
+};
+
+// internal/core/src/exec/operator/PrecomputedBitsetNode.{h,cpp}
+class PhyPrecomputedBitsetNode : public Operator {
+    RowVectorPtr GetOutput() override {
+        if (finished_) return nullptr;
+        finished_ = true;
+        return query_context_->get_precomputed_bits();
+    }
+    bool IsFinished() override { return finished_; }
+};
+```
+
+Register a `dynamic_pointer_cast<const plan::PrecomputedBitsetNode>` branch in the operator factory
+(`internal/core/src/exec/Driver.cpp:81-147`). `MvccNode` already demonstrates the source-operator shape
+via `is_source_node_ = sources().empty()`.
+
+`rebind` replaces `VectorSearchNode`'s `sources_[0]` with a `PrecomputedBitsetNode`. The replacement point
+is exactly the extraction point of `ExtractFilterOnlyPlan`, so the two operations are symmetric by
+construction.
+
+#### 3.3 Bitset sharing safety
+
+`PhyVectorSearchNode::GetOutput` (`VectorSearchNode.cpp:120-215`) only **reads** the bitset on the
+row-level path: it constructs a `BitsetView` over `col_input->GetRawData()` and hands it to
+`vector_search`. The element-level path calls `RowBitsetToElementBitset`, which allocates a new bitmap
+rather than mutating the input.
+
+Do not rely on that invariant holding forever. Hand each branch a `shared_ptr<const RowVector>`, and let
+the element-level branch build its own derived bitmap as it does today. One extra memcpy in the
+element-level path buys immunity to an entire class of future use-after-write bugs.
+
+#### 3.4 Per-branch concerns
+
+Walking `AsyncSearch` (`internal/core/src/segcore/segment_c.cpp:485-530`), these steps are per-call today
+and must become **per-branch**, not "branch 0 only":
+
+- `CheckExternalFieldsInLoadedManifest(plan->schema_, segment, plan->access_entries_, ...)` — each plan
+  has its own `access_entries_`.
+- `FieldAccessible(target_vector_field_id)` — if one branch's vector field is inaccessible, **that
+  branch** returns an empty `SearchResult` while the others proceed normally.
+- Distance-sign flipping under `!PositivelyRelated(metric_type)` — IP and BM25 differ here; sharing this
+  across branches would corrupt scores.
+
+Genuinely shareable:
+
+- `LazyCheckSchema` and `ValidateSegmentSchemaCompatibility` — once per call.
+- `read_lease_` is a `std::shared_ptr<segcore::SegmentReadLease>` (`internal/core/src/common/QueryResult.h:262`),
+  so all N results can hold the same lease.
+
+**Storage cost attribution.** `op_context.storage_usage` accumulates the prefix's I/O plus each branch's.
+Attribute the prefix to branch 0 and each branch's own I/O to itself, and say so in a comment — otherwise
+a future reader doing cost attribution will silently get skewed numbers.
+
+**Failure isolation.** First version: any branch throwing fails the entire grouped call. Per-branch
+status would drag in error propagation, partial `SubResults`, and delegator-side partial handling for a
+benefit that does not justify it.
+
+## Correctness Guarantees
+
+1. **Identical segment set.** All sub-requests of one hybrid search already execute over the same pinned
+   snapshot and the same MVCC timestamp (`delegator.go:617`), and `organizeSubTask` derives the
+   segment→worker assignment from that same snapshot. Grouping does not change which segments are
+   searched.
+2. **Identical bitset by construction.** Byte-identical predicate + identical segment + identical MVCC
+   timestamp + identical TTL context ⇒ the prefix is a pure function of inputs that are equal. The
+   `ToString()` re-check in segcore enforces this at the point of use.
+3. **Results are bit-for-bit identical to the unshared path.** Because the candidate set is identical, so
+   is each branch's top-k. This makes verification unusually strong: it is an equality assertion, not a
+   similarity check. See Test Plan.
+4. **Safe degradation.** Every rejection path — predicate mismatch, missing filter subtree, iterative
+   filter, config disabled — falls back to the existing per-sub-request execution. There is no
+   intermediate state where partial sharing could produce a partially-correct result.
+
+### A pre-existing race, noted but out of scope
+
+`PruneSegments` mutates the shared `sealed []SnapshotItem` in place (`internal/querynodev2/delegator/segment_pruner.go:161-165`,
+`sealedSegments[idx] = item`) while running inside each sub-request's goroutine. It is a data race today,
+masked only by `queryNode.enableSegmentPrune` defaulting to `false`. Grouping incidentally removes it
+*within* a group (one prune per group), but a request containing both a grouped and a singleton group
+still races. It is **not addressed by this MEP** (see D9); fixing it means either moving pruning above the
+fan-out or giving each sub-request its own copy of the snapshot.
+
+## Test Plan
+
+**Differential correctness (the primary gate).** Run a corpus of hybrid searches twice against the same
+data — once with `sharedFilter.enabled=false`, once with `true` — and assert the serialized
+`SearchResults` are **byte-identical**. Cover: 2-way and 3-way; dense+sparse and dense+BM25; identical
+predicates and deliberately mismatched predicates (must fall back); element-level; group-by;
+`ignore_growing` set on one branch only; empty filter; filter matching zero rows; filter matching all rows
+(exercises the `all_rows_visible` fast path and the `SharedPrefixState` propagation).
+
+**Segcore unit tests.** `ComputeFilterBitset` + `SearchWithBitset` with N=1 (must equal `Search`), N=2 identical predicates, N=2
+mismatched predicates (fallback), a plan with no filter subtree (fallback), and one branch whose vector
+field is inaccessible (that branch empty, others correct).
+
+**Fault injection.** Cancellation mid-prefix; cancellation mid-branch; one branch throwing; segment
+released between prefix and branch execution.
+
+**Concurrency.** Run the grouped path under the Go race detector: the N phase-2 calls share one
+`CSharedFilterBitsetResult`, so the detector must see no write to it after phase 1 returns. Also cover the
+`errgroup` error path — one branch failing while siblings are still in flight must release every result
+that did come back, and must release the prefix handle exactly once.
+
+**Performance.** On a workload of dense + BM25 hybrid searches sharing one filter, confirm
+`internal_core_search_latency_scalar` drops
+roughly by the sharing factor while `internal_core_search_latency_vector` is unchanged, and measure the
+resulting end-to-end latency change. Report the scalar/vector ratio *before* the change so the expected
+ceiling is known in advance rather than rationalized afterwards. Separately, watch
+`getSearchCPUExecutor` queueing: the branch-level `errgroup` nests inside the segment-level one, so
+in-flight cgo calls go from about `S` to about `S x N` (see D7).
+
+## Rollout
+
+1. Land behind `queryNode.hybridSearch.sharedFilter.enabled=false`.
+2. Enable on one canary QueryNode; verify the differential-correctness corpus and the group-size
+   histogram (expect mode 2 for this workload).
+3. Enable cluster-wide; watch `internal_core_search_latency_scalar` and the fallback counter by reason.
+
+## Delivery Phases
+
+| Phase | Scope |
+|---|---|
+| P0 | 2 branches, row-level, non-iterative, byte-identical predicates — the dense + BM25 pairing that motivates this design |
+| P1 | Element-level; 3+ branches; per-scope grouping so `IgnoreGrowing` no longer splits a group. Structurally already supported; mostly test surface |
+| P2 | Common-prefix sharing (`(C) && extra`) via expression-level subtree extraction and delta bitsets |
+
+P2 is a materially different problem — it needs a common-subexpression analysis over the predicate tree
+and a way to apply the residual conjunct to an already-computed bitset. It should be a separate MEP.
+
+## Design Decisions
+
+Recorded because each was a real fork in the road.
+
+### D1. Every branch gets the per-branch request rewrites, not just branch 0
+
+`sd.search` rewrites `req.Req` in two places — the AutoIndex query hook, and the
+managed-function preparation that turns a BM25 branch's VARCHAR placeholder into
+an IDF sparse vector — and both now run for every branch. Missing the second one
+makes a BM25 branch reach segcore with the client's raw text, which segcore
+rejects outright.
+
+### D2. Two-stage search composes with grouping rather than being excluded by it
+
+Stage 1 is a filter-only pass over the same subtree this design shares, so a
+grouped request runs it once for the whole group and stage 2 reads the bitset
+back from the expression result cache. A group qualifies if any branch does,
+since the shared stage-1 pass makes an extra branch free.
+
+### D3. `enable_expr_cache` is forwarded; `filter_only` is not a parameter here
+
+Whether a bitset is evaluated or read from `ExprResCacheManager` is orthogonal
+to sharing it, so phase 1 forwards the flag. `filter_only` selects a different
+*output shape* — a matched-row count with the bitset discarded — which the
+existing `AsyncSearch` path already serves.
+
+### D4. Two cgo phases, not one grouped call returning N results
+
+`AsyncSearchWithBitset` returns a single leaked `SearchResult*` exactly as
+`AsyncSearch` does, so result ownership is unchanged. It also keeps the branch
+fan-out in Go: fanning out from inside C++ would mean a job on
+`getSearchCPUExecutor` submitting to that same bounded pool and blocking on it,
+which deadlocks once every thread holds such a waiter.
+
+### D5. Any branch failing fails the whole grouped call
+
+This matches existing behavior — a hybrid search already fails wholesale when
+one sub-request fails. One distinction must survive: an inaccessible vector
+field is **not** a failure, and that branch returns empty while its siblings
+proceed.
+
+### D6. A grouped task reports the sum of its branches' NQ
+
+`SearchTask.NQ()` feeds the scheduler counter the proxy uses for load
+estimation, so a group must report what it actually processes. Execution
+concurrency is bounded by task count rather than NQ, and grouping reduces the
+task count, so pool pressure goes down rather than up.
+
+### D7. Branch vector searches run concurrently
+
+Sequential branches would trade the saved filter evaluation for the overlap they
+used to have, taking per-segment wall clock from `F + max(A_i)` to `F + ΣA_i`.
+This adds no synchronization point: the delegator already joined all
+sub-requests before responding.
+
+### D8. Phase 2 does not re-verify the filter subtree, and degrades rather than throws
+
+Comparing the subtree's `ToString()` would render a multi-kilobyte expression
+once per branch per segment, pure overhead in the correct case, while predicate
+equality is already established by the delegator's byte comparison. The O(1)
+checks that remain guard the mistakes that would corrupt results. The active
+count cannot actually differ — both phases derive it from the same MVCC
+timestamp — but the check is kept because a mismatch would be memory-unsafe
+rather than merely wrong: the scan is bounded by the branch's own active
+count while the bitset is viewed at its own size, so a larger count would read
+past the end of the buffer. On a mismatch the branch evaluates its own filter
+instead, costing the sharing rather than failing the search.
+
+### D9. The `PruneSegments` data race is out of scope
+
+It mutates the shared `sealed` snapshot from each sub-request's goroutine, is
+pre-existing, and is masked by `queryNode.enableSegmentPrune` defaulting to
+false. Grouping only narrows it; fixed separately.
+
+## Rejected Alternatives
+
+### Merge sub-requests into a single plan with `repeated VectorANNS`
+
+Superficially the "proper" modeling, but strictly more expensive. `planpb.PlanNode` carries
+`output_field_ids`, `dynamic_fields`, `scorers`, `plan_options`, `score_option`, and
+`querynode_function_chains`, all of which may differ per sub-request; merging forces a merge policy for
+each. The proxy's `tryGeneratePlan` would also have to learn to emit a multi-ANNS plan. In exchange the
+execution layer saves nothing — it still has to run one vector search per branch. Keeping N independent
+plans and sharing only execution is a strictly smaller interface change.
+
+### Reuse `ExprResCacheManager` with request-scoped admission
+
+`ExprResCacheManager` (`internal/core/src/exec/expression/ExprCache.h`) already caches whole
+`FilterBitsNode` bitsets keyed by `{segment_id, FilterBitsNode::ToString()}`, and two-stage search
+already uses it to carry a bitset from stage 1 to stage 2. Reusing it here fails on four counts:
+
+1. **Zero cross-request hit rate for the workloads this targets.** When each query carries a distinct
+   literal (a different phrase, a different term list), the whole-filter signature is unique per query.
+   The entry is written once, read once, and then dead until evicted.
+2. **The admission control exists precisely to reject this shape.** `admissionThreshold=2` rejects the
+   first `Put` (`ExprCache.cpp:336`) specifically so one-shot expressions do not consume slots and issue
+   pointless writes. Making the optimization work means disabling that defense.
+3. **Per-entry costs are designed to be amortized over many reads.** Memory mode clones the full
+   `TargetBitmap` and applies Roaring compression on write, decompressing on read. Disk mode — the
+   default — `pwrite`s the bitset to a per-segment slot file and `pread`s it back. Paying either for a
+   single read inside one request is likely slower than recomputing.
+4. **No single-flight.** Both `PhyFilterBitsNode::GetOutput` (`FilterBitsNode.cpp:143-220`) and
+   `ExprCacheHelper::GetOrCompute` are plain get→compute→put. Sub-requests are dispatched concurrently
+   and reach the same segment at the same time, so both would miss, both would compute, and both would
+   write. The optimization would not even trigger.
+
+Making it work would additionally require refcounted eviction so entries do not outlive the request. The
+lifetime here is fully determined — who reuses the value (the sibling branches), how many times (N-1),
+and when it is dead (end of request). A cache expresses "unknown reuse, unknown lifetime"; this is the
+wrong primitive for a fully determined one.
+
+The *leaf-level* sub-expression cache is orthogonal and complementary: stable conjuncts that repeat
+across requests are cacheable at their own `ToString()` granularity, addressing a different part of the
+predicate. This design neither helps nor hinders it.
+
+### A request-scoped shared-bitset registry in segcore
+
+A `scope_id → {segment_id → shared_future<bitset>}` map with an explicit `ReleaseScope` cgo call from Go.
+This works and gives single-flight for free, but it is still a process-global map that needs refcounting
+and a release path that must be leak-proof across every error, timeout, and cancellation branch — including
+the case where one branch fails while another is still running. Merging into one call makes the bitset a
+local value with no lifetime question at all.
+
+### Group in the worker scheduler via `SearchTask.MergeWith`
+
+No RPC or proto change, but it depends on two independent RPCs landing in the same scheduling window —
+timing-dependent and non-deterministic. It also overloads the NQ-axis merge with an orthogonal
+row-sharing semantic.
+
+## Implementation Map (P0)
+
+Where each piece of this design lives, for review navigation.
+
+| Design element | Code |
+|---|---|
+| Proto field | `pkg/proto/query_coord.proto` — `SearchRequest.extra_filter_sharing_reqs` |
+| Grouping, request build, result demux, per-branch param optimization | `internal/querynodev2/delegator/shared_filter.go` |
+| Grouped fan-out; two-stage guard; field forwarding | `internal/querynodev2/delegator/delegator.go` |
+| Branch expansion, per-branch reduce, `SubResults` assembly | `internal/querynodev2/tasks/search_task.go` — `executeSharedFilter`, `branchTask`, `reduceSegmentResults` |
+| Per-segment prefix + concurrent branch fan-out | `internal/querynodev2/segments/segment.go` — `LocalSegment.SearchGrouped` |
+| Branch-major segment fan-out | `internal/querynodev2/segments/search.go` — `searchSegmentsGrouped*`, `SearchHistoricalGrouped`, `SearchStreamingGrouped` |
+| cgo wrappers | `internal/util/segcore/segment.go`, `responses.go` — `ComputeFilterBitset`, `SearchWithBitset`, `SharedFilterBitsetResult` |
+| cgo entry points | `internal/core/src/segcore/segment_c.{h,cpp}` — `AsyncComputeFilterBitset`, `AsyncSearchWithBitset`, `DeleteSharedFilterBitsetResult` |
+| Two phases | `internal/core/src/segcore/SegmentInterface.{h,cpp}` — `ComputeFilterBitset`, `SearchWithBitset` |
+| Two execution phases | `internal/core/src/query/ExecPlanNodeVisitor.{h,cpp}` — `get_shared_filter_bitset_result`, `SetPrecomputedBitset` |
+| Shared bitset payload + derived state | `internal/core/src/query/SharedFilterBitsetResult.{h,cpp}` |
+| Precomputed bitset on the context | `internal/core/src/exec/QueryContext.h` — `set_precomputed_bitset` |
+| Plan rebinding | `internal/core/src/query/PlanProto.cpp` — `ProtoParser::RebindToPrecomputedBitset` |
+| Grouped two-stage search | `internal/querynodev2/delegator/shared_filter.go` — `shouldUseTwoStageSearchForGroup`; `delegator_twostage.go` |
+| Source operator | `internal/core/src/plan/PlanNode.h` — `PrecomputedBitsetNode`; `internal/core/src/exec/operator/PrecomputedBitsetNode.{h,cpp}` |
+| Config | `queryNode.hybridSearch.sharedFilter.enabled` (default `false`) |
+| Metrics | `milvus_querynode_hybrid_shared_filter_fallback_total{reason}` |
+
+Not yet done: the entire Test Plan. No test of any kind has been written or run against this
+code beyond compilation, so nothing here is verified behaviorally.
+
+## References
+
+- `internal/proxy/task_search.go:551-702` — per-sub-request plan construction
+- `internal/querynodev2/delegator/delegator.go:617-682` — snapshot pin and advanced fan-out
+- `internal/querynodev2/tasks/search_task.go:402-440` — `SearchTask.Merge` and why hybrid never merges
+- `internal/core/src/query/PlanProto.cpp:702-765` — vector plan chain construction
+- `internal/core/src/query/PlanProto.cpp:1609` — `ExtractFilterOnlyPlan`
+- `internal/core/src/query/ExecPlanNodeVisitor.cpp:394-465` — `filter_only_` execution mode
+- `internal/core/src/exec/operator/VectorSearchNode.cpp:120-215` — bitset consumption
+- `internal/core/src/exec/operator/MvccNode.cpp` — MVCC/delete mask and `all_rows_visible`
+- `internal/core/src/exec/operator/ElementFilterBitsNode.cpp:102-134` — element-level context state
+- `internal/querynodev2/delegator/delegator_twostage.go` — prior art for filter/search stage separation
+- `docs/design-docs/design_docs/20260602-expression-result-cache.md` — `ExprResCacheManager`
