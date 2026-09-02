@@ -10,18 +10,47 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <cstdint>
+#include <cstring>
 #include <memory>
 #include <string>
 
+#include "common/BloomFilterEnvelope.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
+#include "plan/PlanNode.h"
 #include "query/Plan.h"
 #include "query/PlanProto.h"
 
 namespace {
+
+void
+PutU16(std::string& out, size_t offset, uint16_t value) {
+    out[offset] = static_cast<char>(value & 0xff);
+    out[offset + 1] = static_cast<char>((value >> 8) & 0xff);
+}
+
+void
+PutU32(std::string& out, size_t offset, uint32_t value) {
+    for (int i = 0; i < 4; ++i) {
+        out[offset + i] = static_cast<char>((value >> (8 * i)) & 0xff);
+    }
+}
+
+std::string
+BuildEmptyMbf1() {
+    std::string blob(milvus::bloom_envelope::kHeaderSize +
+                         milvus::bloom_envelope::kBytesPerBlock,
+                     '\0');
+    std::memcpy(blob.data(), "MBF1", 4);
+    PutU16(blob, 4, milvus::bloom_envelope::kVersion);
+    PutU16(blob, 6, milvus::bloom_envelope::kAlgoParquetSbbfXxh64);
+    PutU32(blob, 24, 1);
+    return blob;
+}
 
 milvus::SchemaPtr
 BuildSchema() {
@@ -55,6 +84,23 @@ BuildSearchPlanNode(float search_topk_ratio,
     return plan_node;
 }
 
+std::shared_ptr<milvus::plan::FilterBitsNode>
+FindFilterBitsNode(const std::shared_ptr<milvus::plan::PlanNode>& node) {
+    if (node == nullptr) {
+        return nullptr;
+    }
+    if (auto filter =
+            std::dynamic_pointer_cast<milvus::plan::FilterBitsNode>(node)) {
+        return filter;
+    }
+    for (const auto& source : node->sources()) {
+        if (auto filter = FindFilterBitsNode(source)) {
+            return filter;
+        }
+    }
+    return nullptr;
+}
+
 }  // namespace
 
 TEST(PlanProto, NotSetUnsupported) {
@@ -65,6 +111,130 @@ TEST(PlanProto, NotSetUnsupported) {
     proto::plan::Expr expr_pb;
     ProtoParser parser(schema);
     ASSERT_ANY_THROW(parser.ParseExprs(expr_pb));
+}
+
+TEST(PlanProto, BloomBlobMovesFromOwnedSearchPlanNode) {
+    using namespace milvus;
+    namespace planpb = milvus::proto::plan;
+
+    auto schema = BuildSchema();
+    const auto vector_field_id = schema->get_field_id(FieldName("fakevec"));
+    const auto scalar_field_id = schema->get_field_id(FieldName("age"));
+    auto plan_node = std::make_unique<planpb::PlanNode>(
+        BuildSearchPlanNode(1.0F, 1.0F, vector_field_id));
+    auto* bloom = plan_node->mutable_vector_anns()
+                      ->mutable_predicates()
+                      ->mutable_bloom_filter_expr();
+    bloom->mutable_column_info()->set_field_id(scalar_field_id.get());
+    bloom->mutable_column_info()->set_data_type(
+        proto::schema::DataType::Int64);
+    const auto expected_blob = BuildEmptyMbf1();
+    bloom->set_filter_blob(expected_blob);
+
+    const auto protobuf_blob_object = reinterpret_cast<uintptr_t>(
+        std::addressof(bloom->filter_blob()));
+    const auto* protobuf_blob_data = bloom->filter_blob().data();
+    auto parsed_plan =
+        query::ProtoParser(schema).CreatePlan(std::move(plan_node));
+    auto filter_node = FindFilterBitsNode(parsed_plan->plan_node_->plannodes_);
+    ASSERT_NE(filter_node, nullptr);
+    auto bloom_expr =
+        std::dynamic_pointer_cast<const expr::BloomFilterExpr>(
+            filter_node->filter());
+    ASSERT_NE(bloom_expr, nullptr);
+    EXPECT_NE(reinterpret_cast<uintptr_t>(bloom_expr->filter_blob_.get()),
+              protobuf_blob_object);
+    EXPECT_EQ(bloom_expr->filter_blob_->data(), protobuf_blob_data);
+    std::weak_ptr<const std::string> weak_blob = bloom_expr->filter_blob_;
+
+    EXPECT_EQ(plan_node, nullptr);
+    EXPECT_FALSE(weak_blob.expired());
+    EXPECT_EQ(*bloom_expr->filter_blob_, expected_blob);
+
+    parsed_plan.reset();
+    filter_node.reset();
+    bloom_expr.reset();
+    EXPECT_TRUE(weak_blob.expired());
+}
+
+TEST(PlanProto, BloomBlobMovesFromOwnedRetrievePlanNode) {
+    using namespace milvus;
+    namespace planpb = milvus::proto::plan;
+
+    auto schema = BuildSchema();
+    const auto scalar_field_id = schema->get_field_id(FieldName("age"));
+    auto plan_node = std::make_unique<planpb::PlanNode>();
+    auto* bloom = plan_node->mutable_query()
+                      ->mutable_predicates()
+                      ->mutable_bloom_filter_expr();
+    bloom->mutable_column_info()->set_field_id(scalar_field_id.get());
+    bloom->mutable_column_info()->set_data_type(
+        proto::schema::DataType::Int64);
+    const auto expected_blob = BuildEmptyMbf1();
+    bloom->set_filter_blob(expected_blob);
+
+    const auto protobuf_blob_object = reinterpret_cast<uintptr_t>(
+        std::addressof(bloom->filter_blob()));
+    const auto* protobuf_blob_data = bloom->filter_blob().data();
+    auto parsed_plan =
+        query::ProtoParser(schema).CreateRetrievePlan(std::move(plan_node));
+    auto filter_node = FindFilterBitsNode(parsed_plan->plan_node_->plannodes_);
+    ASSERT_NE(filter_node, nullptr);
+    auto bloom_expr =
+        std::dynamic_pointer_cast<const expr::BloomFilterExpr>(
+            filter_node->filter());
+    ASSERT_NE(bloom_expr, nullptr);
+    EXPECT_NE(reinterpret_cast<uintptr_t>(bloom_expr->filter_blob_.get()),
+              protobuf_blob_object);
+    EXPECT_EQ(bloom_expr->filter_blob_->data(), protobuf_blob_data);
+    std::weak_ptr<const std::string> weak_blob = bloom_expr->filter_blob_;
+
+    EXPECT_EQ(plan_node, nullptr);
+    EXPECT_FALSE(weak_blob.expired());
+    EXPECT_EQ(*bloom_expr->filter_blob_, expected_blob);
+
+    parsed_plan.reset();
+    filter_node.reset();
+    bloom_expr.reset();
+    EXPECT_TRUE(weak_blob.expired());
+}
+
+TEST(PlanProto, BloomBlobMovesFromOwnedScoreFunction) {
+    using namespace milvus;
+    namespace planpb = milvus::proto::plan;
+
+    auto schema = BuildSchema();
+    const auto scalar_field_id = schema->get_field_id(FieldName("age"));
+    auto function = std::make_unique<planpb::ScoreFunction>();
+    function->set_type(planpb::FunctionTypeWeight);
+    function->set_weight(2.0F);
+    auto* bloom = function->mutable_filter()->mutable_bloom_filter_expr();
+    bloom->mutable_column_info()->set_field_id(scalar_field_id.get());
+    bloom->mutable_column_info()->set_data_type(
+        proto::schema::DataType::Int64);
+    const auto expected_blob = BuildEmptyMbf1();
+    bloom->set_filter_blob(expected_blob);
+
+    const auto protobuf_blob_object = reinterpret_cast<uintptr_t>(
+        std::addressof(bloom->filter_blob()));
+    const auto* protobuf_blob_data = bloom->filter_blob().data();
+    auto scorer =
+        query::ProtoParser(schema).ParseScorer(std::move(function));
+    auto bloom_expr =
+        std::dynamic_pointer_cast<const expr::BloomFilterExpr>(scorer->filter());
+    ASSERT_NE(bloom_expr, nullptr);
+    EXPECT_NE(reinterpret_cast<uintptr_t>(bloom_expr->filter_blob_.get()),
+              protobuf_blob_object);
+    EXPECT_EQ(bloom_expr->filter_blob_->data(), protobuf_blob_data);
+    std::weak_ptr<const std::string> weak_blob = bloom_expr->filter_blob_;
+
+    EXPECT_EQ(function, nullptr);
+    EXPECT_FALSE(weak_blob.expired());
+    EXPECT_EQ(*bloom_expr->filter_blob_, expected_blob);
+
+    scorer.reset();
+    bloom_expr.reset();
+    EXPECT_TRUE(weak_blob.expired());
 }
 
 TEST(PlanProto, RejectsGlobalRefineRatiosBelowOne) {

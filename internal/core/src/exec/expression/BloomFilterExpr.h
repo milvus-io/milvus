@@ -236,8 +236,8 @@ class PhyBloomFilterExpr : public SegmentExpr {
           expr_(expr),
           // Envelope parsed and validated exactly once per physical expr;
           // throws SegcoreError{ExprInvalid} on malformed blobs. The view
-          // aliases expr_->filter_blob_ (see lifetime note on the view).
-          filter_(SplitBlockBloomFilterView::Parse(expr->filter_blob_)) {
+          // aliases *expr_->filter_blob_ (see lifetime note on the view).
+          filter_(SplitBlockBloomFilterView::Parse(*expr->filter_blob_)) {
         switch (expr_->column_.data_type_) {
             case DataType::INT8:
             case DataType::INT16:
