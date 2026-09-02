@@ -242,9 +242,13 @@ func TestRoutingOnANilTableIsRejected(t *testing.T) {
 		t.Helper()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no routing table")
-		// System, not input: the caller could not derive the table, so the write
-		// is retriable once the meta it refused is readable again.
+		// System, not input -- and deliberately NOT retriable: the table is nil
+		// because Derive refused malformed meta, and refetching the same meta
+		// produces the same refusal. Retrying would spin. The retriable case is
+		// the one below, where the meta is fine and only the caller's snapshot
+		// is behind.
 		assert.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+		assert.False(t, merr.IsRetryableErr(err))
 	}
 
 	_, _, err := table.RouteInsert(pks, channels)
@@ -361,10 +365,11 @@ func TestRouteInsertWithNoRows(t *testing.T) {
 	assert.Empty(t, hashValues)
 }
 
-func TestRouteOnAnUnsupportedIDType(t *testing.T) {
-	// An id field neither int64 nor varchar has no hash, matching
-	// typeutil.HashPK2Channels. Both paths return nothing rather than placing
-	// rows arbitrarily.
+// An IDs with no id field at all is zero rows, not unhashable rows: the delete
+// path reaches here with an empty batch off a query stream, and typeutil's
+// GetSizeOfIDs reads it the same way. Placing nothing without an error is
+// correct here, and is the one shape where it is.
+func TestRouteOnAnIDSetWithNoRows(t *testing.T) {
 	table, channels := doubledTable(t)
 	empty := &schemapb.IDs{}
 
@@ -515,4 +520,32 @@ func TestDeriveRejectsMoreChannelsThanTheModulusCap(t *testing.T) {
 	_, err := Derive(0, channels, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "exceeds the cap")
+}
+
+// The other half of the classification above.
+//
+// A table derived from one DescribeCollection snapshot, used against a channel
+// set from another, is what a routing commit looks like from a concurrent
+// writer: the owning shard is real and correct, it just is not in the list this
+// caller resolved. Refetching the meta fixes it, so the error must carry the
+// retriable bit -- every retry consumer keys on it, and a terminal answer turns
+// a refresh-and-retry into a hard write failure for the client.
+func TestRoutingToAShardOutsideTheChannelSetIsRetriable(t *testing.T) {
+	table, channels := doubledTable(t)
+	require.True(t, table.IsExplicit())
+
+	// Drop the shard some key owns from the caller's channel set.
+	narrowed := channels[:1]
+
+	_, _, err := table.RouteInsert(pkIDs(1, 2, 3, 4, 5, 6, 7, 8), narrowed)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrCollectionRoutingStale)
+	assert.True(t, merr.IsRetryableErr(err),
+		"a caller whose snapshot is behind must refresh and retry, not fail the write")
+	assert.True(t, merr.Status(err).GetRetriable(), "the bit has to survive onto the wire")
+
+	_, err = table.RouteDelete(pkIDs(1, 2, 3, 4, 5, 6, 7, 8), narrowed)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrCollectionRoutingStale)
+	assert.True(t, merr.IsRetryableErr(err))
 }
