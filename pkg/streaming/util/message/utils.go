@@ -6,13 +6,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// AsImmutableTxnMessage converts an ImmutableMessage to ImmutableTxnMessage
+// AsImmutableTxnMessage converts an ImmutableMessage to ImmutableTxnMessage.
+// A transaction remains one atomic message; child messages do not carry
+// independent reference-counted lifetimes.
 var AsImmutableTxnMessage = func(msg ImmutableMessage) ImmutableTxnMessage {
-	underlying, ok := msg.(*immutableTxnMessageImpl)
-	if !ok {
-		return nil
-	}
-	return underlying
+	txn, _ := msg.(ImmutableTxnMessage)
+	return txn
 }
 
 // NewMessageTypeWithVersion creates a new MessageTypeWithVersion.
