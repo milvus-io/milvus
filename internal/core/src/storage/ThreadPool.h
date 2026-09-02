@@ -16,30 +16,24 @@
 
 #pragma once
 
-#include <stddef.h>
 #include <stdint.h>
 #include <algorithm>
 #include <atomic>
-#include <cassert>
 #include <chrono>
 #include <cmath>
-#include <condition_variable>
 #include <functional>
 #include <future>
-#include <list>
 #include <memory>
-#include <mutex>
-#include <ostream>
 #include <string>
 #include <thread>
 #include <utility>
 
+#include <folly/executors/CPUThreadPoolExecutor.h>
+#include <folly/executors/thread_factory/NamedThreadFactory.h>
 #include <prometheus/counter.h>
 #include <prometheus/gauge.h>
 #include <prometheus/histogram.h>
 
-#include "SafeQueue.h"
-#include "glog/logging.h"
 #include "log/Log.h"
 
 namespace milvus {
@@ -92,22 +86,8 @@ ComputeThreadPoolMaxThreads(float thread_core_coefficient) {
 
 class ThreadPool {
  public:
-    explicit ThreadPool(const float thread_core_coefficient, std::string name)
-        : shutdown_(false), name_(std::move(name)) {
-        idle_threads_size_ = 0;
-        current_threads_size_ = 0;
-        min_threads_size_ = 1;
-        max_threads_size_.store(
-            ComputeThreadPoolMaxThreads(thread_core_coefficient));
-        LOG_INFO("Init thread pool:{}", name_)
-            << " with min worker num:" << min_threads_size_
-            << " and max worker num:" << max_threads_size_.load();
-        Init();
-    }
-
-    ~ThreadPool() {
-        ShutDown();
-    }
+    explicit ThreadPool(const float thread_core_coefficient, std::string name);
+    ~ThreadPool();
 
     ThreadPool(const ThreadPool&) = delete;
     ThreadPool(ThreadPool&&) = delete;
@@ -116,38 +96,23 @@ class ThreadPool {
     ThreadPool&
     operator=(ThreadPool&&) = delete;
 
-    void
-    Init();
-
-    void
-    ShutDown();
-
-    size_t
-    GetThreadNum() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return current_threads_size_;
-    }
-
-    size_t
-    GetMaxThreadNum() {
-        return max_threads_size_.load();
-    }
-
     template <typename F, typename... Args>
     auto
     Submit(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
-        std::function<decltype(f(args...))()> func =
-            std::bind(std::forward<F>(f), std::forward<Args>(args)...);
-        auto task_ptr =
-            std::make_shared<std::packaged_task<decltype(f(args...))()>>(func);
+        using ReturnType = decltype(f(args...));
+        auto task = std::make_shared<std::packaged_task<ReturnType()>>(
+            std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+        auto future = task->get_future();
 
         auto enqueue_time = std::chrono::steady_clock::now();
         auto* queue_metric = metric_queue_duration_;
         auto* execute_metric = metric_execute_duration_;
-        std::function<void()> wrap_func = [task_ptr,
+        auto* completed_metric = metric_completed_;
+        std::function<void()> wrap_func = [task,
                                            enqueue_time,
                                            queue_metric,
-                                           execute_metric]() {
+                                           execute_metric,
+                                           completed_metric]() {
             auto execute_start = std::chrono::steady_clock::now();
             if (queue_metric) {
                 queue_metric->Observe(
@@ -161,9 +126,12 @@ class ThreadPool {
                             std::chrono::steady_clock::now() - execute_start)
                             .count());
                 }
+                if (completed_metric) {
+                    completed_metric->Increment();
+                }
             };
             try {
-                (*task_ptr)();
+                (*task)();
             } catch (...) {
                 observe_execute();
                 throw;
@@ -171,66 +139,49 @@ class ThreadPool {
             observe_execute();
         };
 
-        auto future = task_ptr->get_future();
-
-        std::unique_lock<std::mutex> lock(mutex_);
-        work_queue_.enqueue(std::move(wrap_func));
-
-        if (idle_threads_size_ > 0) {
-            condition_lock_.notify_one();
+        if (metric_submitted_) {
+            metric_submitted_->Increment();
         }
-        if (work_queue_.size() > static_cast<size_t>(idle_threads_size_) &&
-            current_threads_size_ < max_threads_size_.load()) {
-            // Dynamic increase thread number
-            try {
-                if (worker_spawn_hook_for_test_) {
-                    worker_spawn_hook_for_test_();
-                }
-                threads_.emplace_back(&ThreadPool::Worker, this);
-                current_threads_size_++;
-            } catch (const std::exception& e) {
-                LOG_WARN(
-                    "Failed to expand thread pool {}: {}", name_, e.what());
-            } catch (...) {
-                LOG_WARN("Failed to expand thread pool {}", name_);
-            }
-        }
-        lock.unlock();
-
+        // Deterministic test seam: simulates a worker-spawn failure. A failure
+        // here must not fail the queued task -- the task is still handed to the
+        // underlying executor and will run once a worker is available.
         try {
-            if (metric_submitted_) {
-                metric_submitted_->Increment();
-            }
-            if (metric_queue_depth_) {
-                metric_queue_depth_->Set(work_queue_.size());
+            if (worker_spawn_hook_for_test_) {
+                worker_spawn_hook_for_test_();
             }
         } catch (const std::exception& e) {
-            LOG_WARN("Failed to update thread pool {} submit metrics: {}",
+            LOG_WARN("Worker spawn hook failed for thread pool {}: {}",
                      name_,
                      e.what());
         } catch (...) {
-            LOG_WARN("Failed to update thread pool {} submit metrics", name_);
+            LOG_WARN("Worker spawn hook failed for thread pool {}", name_);
+        }
+        try {
+            executor_->add(std::move(wrap_func));
+        } catch (const std::exception& e) {
+            LOG_WARN("Failed to submit task to thread pool {}: {}", name_, e.what());
+        } catch (...) {
+            LOG_WARN("Failed to submit task to thread pool {}", name_);
         }
 
         return future;
     }
 
-    void
-    Worker();
+    // folly::ThreadPoolExecutor::numActiveThreads() reports the number of
+    // currently alive worker threads (including idle ones), which matches the
+    // previous hand-rolled pool's current_threads_size_ semantics rather than a
+    // busy-thread count.
+    size_t
+    GetThreadNum();
+
+    size_t
+    GetMaxThreadNum();
 
     void
-    FinishThreads();
+    Resize(int new_size);
 
     void
-    Resize(int new_size) {
-        //no need to hold mutex here as we don't require
-        //max_threads_size to take effect instantly, just guaranteed atomic
-        new_size = ClampThreadPoolMaxThreads(new_size);
-        max_threads_size_.store(new_size);
-        if (metric_capacity_) {
-            metric_capacity_->Set(new_size);
-        }
-    }
+    ShutDown();
 
     void
     SetMetrics(prometheus::Gauge* capacity,
@@ -240,43 +191,20 @@ class ThreadPool {
                prometheus::Counter* submitted,
                prometheus::Counter* completed,
                prometheus::Histogram* queue_duration,
-               prometheus::Histogram* execute_duration) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        metric_capacity_ = capacity;
-        metric_active_ = active;
-        metric_idle_ = idle;
-        metric_queue_depth_ = queue_depth;
-        metric_submitted_ = submitted;
-        metric_completed_ = completed;
-        metric_queue_duration_ = queue_duration;
-        metric_execute_duration_ = execute_duration;
-        if (metric_capacity_) {
-            metric_capacity_->Set(max_threads_size_.load());
-        }
-        if (metric_active_) {
-            metric_active_->Set(current_threads_size_ - idle_threads_size_);
-        }
-        if (metric_idle_) {
-            metric_idle_->Set(idle_threads_size_);
-        }
-        if (metric_queue_depth_) {
-            metric_queue_depth_->Set(work_queue_.size());
-        }
-    }
+               prometheus::Histogram* execute_duration);
 
- public:
-    int min_threads_size_;
-    int idle_threads_size_;
-    int current_threads_size_;
-    std::atomic<int> max_threads_size_;
-    bool shutdown_;
-    static constexpr size_t WAIT_SECONDS = 2;
-    SafeQueue<std::function<void()>> work_queue_;
-    std::list<std::thread> threads_;
-    SafeQueue<std::thread::id> need_finish_threads_;
-    std::mutex mutex_;
-    std::condition_variable condition_lock_;
+ private:
+    friend class ThreadPoolTest_WorkerSpawnFailureDoesNotFailQueuedTask_Test;
+
+    void
+    MetricsSamplerLoop();
+
+    std::unique_ptr<folly::CPUThreadPoolExecutor> executor_;
     std::string name_;
+    std::atomic<int> max_threads_size_;
+
+    std::thread metrics_sampler_thread_;
+    std::atomic<bool> metrics_sampler_stop_{false};
 
     // Prometheus metrics (set via SetMetrics, nullptr if not wired)
     prometheus::Gauge* metric_capacity_{nullptr};
@@ -287,9 +215,6 @@ class ThreadPool {
     prometheus::Counter* metric_completed_{nullptr};
     prometheus::Histogram* metric_queue_duration_{nullptr};
     prometheus::Histogram* metric_execute_duration_{nullptr};
-
- private:
-    friend class ThreadPoolTest_WorkerSpawnFailureDoesNotFailQueuedTask_Test;
 
     // Deterministic test seam for worker-spawn failure coverage.
     std::function<void()> worker_spawn_hook_for_test_;

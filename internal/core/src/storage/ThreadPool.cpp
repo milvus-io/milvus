@@ -16,10 +16,12 @@
 
 #include "ThreadPool.h"
 
+#include <gflags/gflags.h>
+
 #include <chrono>
+#include <mutex>
 
 #include "log/Log.h"
-#include "storage/SafeQueue.h"
 
 namespace milvus {
 
@@ -66,111 +68,132 @@ SetThreadPoolMaxThreadsSize(const int size) {
     LOG_INFO("set thread pool max threads size: {}", size);
 }
 
+namespace {
+
+// The hand-rolled pool used to shrink idle workers back to the minimum after
+// WAIT_SECONDS(2). folly's CPUThreadPoolExecutor keeps idle threads alive for
+// its global "threadtimeout_ms" (default 60s). Restore the old 2s idle timeout
+// so idle workers are reclaimed promptly like before.
 void
-ThreadPool::Init() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (int i = 0; i < min_threads_size_; i++) {
-        threads_.emplace_back(&ThreadPool::Worker, this);
-        current_threads_size_++;
+ConfigureFollyThreadTimeout() {
+    static std::once_flag flag;
+    std::call_once(flag, []() {
+        gflags::SetCommandLineOption("threadtimeout_ms", "2000");
+    });
+}
+
+}  // namespace
+
+ThreadPool::ThreadPool(const float thread_core_coefficient, std::string name)
+    : name_(std::move(name)) {
+    int max_threads = ComputeThreadPoolMaxThreads(thread_core_coefficient);
+    max_threads_size_.store(max_threads);
+
+    LOG_INFO("Init thread pool:{}", name_)
+        << " with min worker num:" << 1
+        << " and max worker num:" << max_threads;
+
+    ConfigureFollyThreadTimeout();
+
+    // folly::CPUThreadPoolExecutor(std::pair{a, b}) uses `a` as maxThreads_
+    // (via setNumThreads(a)) and `b` as minThreads_. Therefore an elastic pool
+    // that scales between 1 and max_threads workers is {max_threads, 1}, NOT
+    // {1, max_threads} which would pin the pool to a single worker.
+    executor_ = std::make_unique<folly::CPUThreadPoolExecutor>(
+        std::pair<size_t, size_t>{static_cast<size_t>(max_threads), 1},
+        std::make_shared<folly::NamedThreadFactory>(name_));
+}
+
+ThreadPool::~ThreadPool() {
+    ShutDown();
+}
+
+size_t
+ThreadPool::GetThreadNum() {
+    // folly's numActiveThreads() tracks alive (spawned) workers, which matches
+    // the previous custom pool's current_threads_size_ semantics rather than a
+    // busy-thread count.
+    return executor_ ? executor_->numActiveThreads() : 0;
+}
+
+size_t
+ThreadPool::GetMaxThreadNum() {
+    return max_threads_size_.load();
+}
+
+void
+ThreadPool::Resize(int new_size) {
+    new_size = ClampThreadPoolMaxThreads(new_size);
+    max_threads_size_.store(new_size);
+    if (executor_) {
+        executor_->setNumThreads(static_cast<size_t>(new_size));
+    }
+    if (metric_capacity_) {
+        metric_capacity_->Set(new_size);
     }
 }
 
 void
 ThreadPool::ShutDown() {
+    if (!executor_) {
+        return;
+    }
     LOG_INFO("Start shutting down {}", name_);
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        shutdown_ = true;
+    metrics_sampler_stop_.store(true);
+    if (metrics_sampler_thread_.joinable()) {
+        metrics_sampler_thread_.join();
     }
-    condition_lock_.notify_all();
-    for (auto& thread : threads_) {
-        if (thread.joinable()) {
-            thread.join();
-        }
-    }
+    executor_->join();
+    executor_.reset();
     LOG_INFO("Finish shutting down {}", name_);
 }
 
 void
-ThreadPool::FinishThreads() {
-    while (!need_finish_threads_.empty()) {
-        std::thread::id id;
-        auto dequeue = need_finish_threads_.dequeue(id);
-        if (dequeue) {
-            auto iter = std::find_if(
-                threads_.begin(), threads_.end(), [id](const std::thread& t) {
-                    return t.get_id() == id;
-                });
-            assert(iter != threads_.end());
-            if (iter->joinable()) {
-                iter->join();
-            }
-            threads_.erase(iter);
-        }
+ThreadPool::SetMetrics(prometheus::Gauge* capacity,
+                       prometheus::Gauge* active,
+                       prometheus::Gauge* idle,
+                       prometheus::Gauge* queue_depth,
+                       prometheus::Counter* submitted,
+                       prometheus::Counter* completed,
+                       prometheus::Histogram* queue_duration,
+                       prometheus::Histogram* execute_duration) {
+    metric_capacity_ = capacity;
+    metric_active_ = active;
+    metric_idle_ = idle;
+    metric_queue_depth_ = queue_depth;
+    metric_submitted_ = submitted;
+    metric_completed_ = completed;
+    metric_queue_duration_ = queue_duration;
+    metric_execute_duration_ = execute_duration;
+    if (metric_capacity_) {
+        metric_capacity_->Set(max_threads_size_.load());
+    }
+    if (!metrics_sampler_thread_.joinable()) {
+        metrics_sampler_stop_.store(false);
+        metrics_sampler_thread_ =
+            std::thread(&ThreadPool::MetricsSamplerLoop, this);
     }
 }
 
 void
-ThreadPool::Worker() {
-    std::function<void()> func;
-    bool dequeue;
-    SetThreadName(name_);
-    while (!shutdown_) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        idle_threads_size_++;
-        if (metric_idle_) {
-            metric_idle_->Set(idle_threads_size_);
+ThreadPool::MetricsSamplerLoop() {
+    while (!metrics_sampler_stop_.load(std::memory_order_relaxed)) {
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        if (metrics_sampler_stop_.load(std::memory_order_relaxed) ||
+            !executor_) {
+            break;
         }
+        auto stats = executor_->getPoolStats();
         if (metric_active_) {
-            metric_active_->Set(current_threads_size_ - idle_threads_size_);
+            metric_active_->Set(stats.activeThreadCount);
         }
-        auto is_timeout = !condition_lock_.wait_for(
-            lock, std::chrono::seconds(WAIT_SECONDS), [this]() {
-                return shutdown_ || !work_queue_.empty();
-            });
-        idle_threads_size_--;
         if (metric_idle_) {
-            metric_idle_->Set(idle_threads_size_);
+            metric_idle_->Set(stats.idleThreadCount);
         }
-        if (metric_active_) {
-            metric_active_->Set(current_threads_size_ - idle_threads_size_);
-        }
-        if (work_queue_.empty()) {
-            // Dynamic reduce thread number
-            if (shutdown_) {
-                current_threads_size_--;
-                if (metric_active_) {
-                    metric_active_->Set(current_threads_size_ -
-                                        idle_threads_size_);
-                }
-                return;
-            }
-            if (is_timeout) {
-                FinishThreads();
-                if (current_threads_size_ > min_threads_size_) {
-                    need_finish_threads_.enqueue(std::this_thread::get_id());
-                    current_threads_size_--;
-                    if (metric_active_) {
-                        metric_active_->Set(current_threads_size_ -
-                                            idle_threads_size_);
-                    }
-                    return;
-                }
-                continue;
-            }
-        }
-        dequeue = work_queue_.dequeue(func);
         if (metric_queue_depth_) {
-            metric_queue_depth_->Set(work_queue_.size());
-        }
-        lock.unlock();
-        if (dequeue) {
-            func();
-            func = nullptr;
-            if (metric_completed_) {
-                metric_completed_->Increment();
-            }
+            metric_queue_depth_->Set(stats.pendingTaskCount);
         }
     }
 }
-};  // namespace milvus
+
+}  // namespace milvus
