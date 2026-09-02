@@ -423,6 +423,8 @@ func (sd *shardDelegator) modifySearchRequest(req *querypb.SearchRequest, scope 
 		TotalChannelNum: req.TotalChannelNum,
 		FilterOnly:      req.FilterOnly,
 		EnableExprCache: req.EnableExprCache,
+		// Shared read-only across per-worker requests, like Req's shallow copy.
+		ExtraFilterSharingReqs: req.ExtraFilterSharingReqs,
 	}
 	return nodeReq
 }
@@ -502,7 +504,18 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	if err != nil {
 		return nil, err
 	}
+	// prepareSearchFunction only rewrites req.Req, i.e. branch 0. The extra
+	// branches of a shared-filter group need the same treatment or a BM25
+	// branch reaches segcore with the client's raw VARCHAR placeholder.
+	if err := sd.prepareSharedFilterBranchFunctions(ctx, req); err != nil {
+		return nil, err
+	}
 	if skipSearch {
+		if len(req.GetExtraFilterSharingReqs()) > 0 {
+			// "only this branch returns nothing" cannot be expressed inside a
+			// group; let the caller retry the branches separately.
+			return nil, errSharedFilterUngroupable
+		}
 		mlog.Warn(ctx, "search bm25 from empty data, skip search", mlog.String("channel", sd.vchannelName), mlog.Float64("avgdl", avgdl))
 		return []*internalpb.SearchResults{}, nil
 	}
@@ -524,7 +537,13 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		mlog.Int("effectiveSegmentNum", effectiveSegmentNum),
 	)
 
-	if optimizers.ShouldUseTwoStageSearch(req, effectiveSegmentNum) {
+	// Two-stage search and shared-filter grouping are orthogonal, and they
+	// compose in the right direction: stage 1 is a filter-only pass, so a
+	// grouped request runs it once for the whole group rather than once per
+	// sub-request, and stage 2 picks the bitset back up from the expression
+	// result cache. A group qualifies if any of its branches does -- the
+	// filter pass is shared, so the marginal cost of including a branch is nil.
+	if shouldUseTwoStageSearchForGroup(req, effectiveSegmentNum) {
 		results, fallback, err := sd.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		if err != nil {
 			return nil, err
@@ -540,6 +559,11 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	req, err = optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, sd.getVectorFieldDim)
 	if err != nil {
 		mlog.Warn(ctx, "failed to optimize search params", mlog.Err(err))
+		return nil, err
+	}
+	// OptimizeSearchParams only touches req.Req, i.e. branch 0.
+	if err := sd.optimizeSharedFilterBranches(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, sd.getVectorFieldDim); err != nil {
+		mlog.Warn(ctx, "failed to optimize shared-filter branch search params", mlog.Err(err))
 		return nil, err
 	}
 	return sd.executeSearchSubTasks(ctx, req, sealed, growing, sealedRowCount)
@@ -622,79 +646,56 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	defer sd.distribution.Unpin(version)
 
 	if req.GetReq().GetIsAdvanced() {
-		futures := make([]*conc.Future[*internalpb.SearchResults], len(req.GetReq().GetSubReqs()))
-		for index, subReq := range req.GetReq().GetSubReqs() {
-			newRequest := &internalpb.SearchRequest{
-				Base:                    req.GetReq().GetBase(),
-				ReqID:                   req.GetReq().GetReqID(),
-				DbID:                    req.GetReq().GetDbID(),
-				CollectionID:            req.GetReq().GetCollectionID(),
-				PartitionIDs:            subReq.GetPartitionIDs(),
-				Dsl:                     subReq.GetDsl(),
-				PlaceholderGroup:        subReq.GetPlaceholderGroup(),
-				DslType:                 subReq.GetDslType(),
-				SerializedExprPlan:      subReq.GetSerializedExprPlan(),
-				OutputFieldsId:          req.GetReq().GetOutputFieldsId(),
-				MvccTimestamp:           req.GetReq().GetMvccTimestamp(),
-				GuaranteeTimestamp:      req.GetReq().GetGuaranteeTimestamp(),
-				TimeoutTimestamp:        req.GetReq().GetTimeoutTimestamp(),
-				Nq:                      subReq.GetNq(),
-				Topk:                    subReq.GetTopk(),
-				MetricType:              subReq.GetMetricType(),
-				IgnoreGrowing:           subReq.GetIgnoreGrowing(),
-				Username:                req.GetReq().GetUsername(),
-				IsAdvanced:              false,
-				GroupByFieldId:          subReq.GetGroupByFieldId(),
-				GroupSize:               subReq.GetGroupSize(),
-				FieldId:                 subReq.GetFieldId(),
-				GroupByFieldIds:         req.GetReq().GetGroupByFieldIds(),
-				IsTopkReduce:            req.GetReq().GetIsTopkReduce(),
-				IsIterator:              req.GetReq().GetIsIterator(),
-				CollectionTtlTimestamps: req.GetReq().GetCollectionTtlTimestamps(),
-				EntityTtlPhysicalTime:   req.GetReq().GetEntityTtlPhysicalTime(),
-				AnalyzerName:            subReq.GetAnalyzerName(),
-				PkFilter:                common.PkFilterNoPkFilter, // hybrid search sub-requests rarely have PK predicates, skip unmarshal
-				SearchType:              subReq.GetSearchType(),
-			}
-			future := conc.Go(func() (*internalpb.SearchResults, error) {
-				searchReq := &querypb.SearchRequest{
-					Req:             newRequest,
-					DmlChannels:     req.GetDmlChannels(),
-					TotalChannelNum: req.GetTotalChannelNum(),
+		subReqs := req.GetReq().GetSubReqs()
+		// Sub-requests carrying an identical filter predicate travel as one
+		// request and evaluate that filter once per segment. A sub-request
+		// that cannot share ends up alone in its group, which is exactly
+		// today's behavior.
+		groups := groupSubReqsBySharedFilter(ctx, sd.collectionID, subReqs)
+
+		futures := make([]*conc.Future[[]*internalpb.SearchResults], len(groups))
+		for groupIdx := range groups {
+			group := groups[groupIdx]
+			future := conc.Go(func() ([]*internalpb.SearchResults, error) {
+				reduced, err := sd.searchSharedFilterGroup(ctx, req, subReqs, group, tSafe, sealed, growing, sealedRowCount)
+				if errors.Is(err, errSharedFilterUngroupable) {
+					// A branch has to be skipped entirely (BM25 field with no
+					// data), which a group cannot express. Redo the group one
+					// branch at a time -- exactly today's ungrouped behavior.
+					mlog.Debug(ctx, "shared-filter group not executable as a group, retrying per branch",
+						mlog.Int("branches", len(group)))
+					reduced = make([]*internalpb.SearchResults, len(group))
+					for branchIdx, subReqIdx := range group {
+						single, singleErr := sd.searchSharedFilterGroup(ctx, req, subReqs,
+							[]int{subReqIdx}, tSafe, sealed, growing, sealedRowCount)
+						if singleErr != nil {
+							return nil, singleErr
+						}
+						reduced[branchIdx] = single[0]
+					}
+					return reduced, nil
 				}
-				searchReq.Req.GuaranteeTimestamp = req.GetReq().GetGuaranteeTimestamp()
-				searchReq.Req.TimeoutTimestamp = req.GetReq().GetTimeoutTimestamp()
-				if searchReq.GetReq().GetMvccTimestamp() == 0 {
-					searchReq.GetReq().MvccTimestamp = tSafe
-				}
-				searchReq.Req.CollectionTtlTimestamps = req.GetReq().GetCollectionTtlTimestamps()
-				results, err := sd.search(ctx, searchReq, sealed, growing, sealedRowCount)
-				if err != nil {
-					return nil, err
-				}
-				return segments.ReduceSearchOnQueryNode(ctx,
-					results,
-					reduce.NewReduceSearchResultInfo(searchReq.GetReq().GetNq(),
-						searchReq.GetReq().GetTopk()).WithMetricType(searchReq.GetReq().GetMetricType()).
-						WithGroupSize(searchReq.GetReq().GetGroupSize()).
-						WithGroupByFieldIdsFromProto(searchReq.GetReq().GetGroupByFieldId(), searchReq.GetReq().GetGroupByFieldIds()))
+				return reduced, err
 			})
-			futures[index] = future
+			futures[groupIdx] = future
 		}
 
 		err = conc.AwaitAll(futures...)
 		if err != nil {
 			return nil, err
 		}
-		results := make([]*internalpb.SearchResults, len(futures))
-		for i, future := range futures {
-			result := future.Value()
-			if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				mlog.Debug(ctx, "delegator hybrid search failed",
-					mlog.String("reason", result.GetStatus().GetReason()))
-				return nil, merr.Error(result.GetStatus())
+		results := make([]*internalpb.SearchResults, len(subReqs))
+		for groupIdx, future := range futures {
+			groupResults := future.Value()
+			for branchIdx, subReqIdx := range groups[groupIdx] {
+				result := groupResults[branchIdx]
+				if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+					mlog.Debug(ctx, "delegator hybrid search failed",
+						mlog.String("reason", result.GetStatus().GetReason()))
+					return nil, merr.Error(result.GetStatus())
+				}
+				results[subReqIdx] = result
 			}
-			results[i] = result
 		}
 		return results, nil
 	}
@@ -705,6 +706,49 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		return nil, err
 	}
 	return results, nil
+}
+
+// searchSharedFilterGroup executes one group (which may be a single branch)
+// and reduces each branch's shard-local results.
+func (sd *shardDelegator) searchSharedFilterGroup(
+	ctx context.Context,
+	req *querypb.SearchRequest,
+	subReqs []*internalpb.SubSearchRequest,
+	group []int,
+	tSafe uint64,
+	sealed []SnapshotItem,
+	growing []SegmentEntry,
+	sealedRowCount map[int64]int64,
+) ([]*internalpb.SearchResults, error) {
+	searchReq := buildSharedFilterSearchRequest(req, subReqs, group, tSafe)
+	results, err := sd.search(ctx, searchReq, sealed, growing, sealedRowCount)
+	if err != nil {
+		return nil, err
+	}
+
+	perBranch := [][]*internalpb.SearchResults{results}
+	if len(group) > 1 {
+		perBranch, err = demuxSharedFilterResults(results, len(group))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	reduced := make([]*internalpb.SearchResults, len(group))
+	for branchIdx, subReqIdx := range group {
+		subReq := subReqs[subReqIdx]
+		branchResult, err := segments.ReduceSearchOnQueryNode(ctx,
+			perBranch[branchIdx],
+			reduce.NewReduceSearchResultInfo(subReq.GetNq(), subReq.GetTopk()).
+				WithMetricType(subReq.GetMetricType()).
+				WithGroupSize(subReq.GetGroupSize()).
+				WithGroupByFieldIdsFromProto(subReq.GetGroupByFieldId(), req.GetReq().GetGroupByFieldIds()))
+		if err != nil {
+			return nil, err
+		}
+		reduced[branchIdx] = branchResult
+	}
+	return reduced, nil
 }
 
 func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {

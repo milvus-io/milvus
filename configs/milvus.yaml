@@ -714,6 +714,9 @@ queryNode:
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
   forwardBatchSize: 4194304 # the batch size delegator uses for forwarding stream delete in loading procedure
   delegatorPostLoadConcurrencyFactor: 1 # delegator post-load concurrency factor after worker LoadSegments returns. Concurrency is hardware.GetCPUNum * factor
+  hybridSearch:
+    sharedFilter:
+      enabled: false # Evaluate the filter once per segment for hybrid search sub-requests that carry an identical filter predicate, instead of once per sub-request. Sub-requests whose predicates differ, or that use iterative filtering, are unaffected.
   exprCache:
     enabled: false # enable expression result cache
     mode: disk # cache mode: 'disk' (sealed segments only, pread/pwrite + fixed slots) or 'memory' (sealed and growing segments, malloc + Clock + compression)
