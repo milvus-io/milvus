@@ -946,7 +946,7 @@ func TestCommitSegmentManifestRejectsMalformedSegmentIndexMutation(t *testing.T)
 // migration's end state. The commit must then carry the segment record alone,
 // while indexMeta's in-memory view still completes the task.
 func TestCommitSegmentManifestSkipsIndexCatalogWriteWhenGated(t *testing.T) {
-	withSegmentIndexEtcdWrites(t, false)
+	withSegmentIndexManifestWrites(t, true)
 
 	const (
 		collectionID = int64(1)
@@ -1042,7 +1042,7 @@ func TestCommitSegmentManifestSkipsIndexCatalogWriteWhenGated(t *testing.T) {
 // write side, let the commit park on the deferred gauge, and check that segMu
 // is free and publication already completed.
 func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
-	withSegmentIndexEtcdWrites(t, false)
+	withSegmentIndexManifestWrites(t, true)
 	newFakeManifestStore(t)
 	ctx := context.TODO()
 

@@ -339,15 +339,15 @@ func (m *meta) initManifestIndexBackfillPending(ctx context.Context) {
 
 // reloadSegmentIndexesFromManifests rebuilds the finished-index half of
 // indexMeta from the segment manifests, for the deployment where
-// dataCoord.index.writeSegmentIndexToEtcd is off and a manifest is therefore
-// the only durable record of a completed artifact.
+// dataCoord.index.writeSegmentIndexToManifest is on and a manifest is
+// therefore the only durable record of a completed artifact.
 //
 // etcd wins on conflict, matching every other manifest-index consumer: a
 // buildID already loaded from the catalog is left untouched, so records
-// written while the switch was on are never overwritten by a manifest
-// projection of the same build. Only StorageV3 segments carry index entries,
-// so an index on a StorageV1/V2 segment is not recoverable here - that is the
-// documented cost of turning the switch off.
+// written to etcd are never overwritten by a manifest projection of the same
+// build. Only StorageV3 segments carry index entries; a StorageV1/V2
+// segment's records always stay in etcd, so nothing of theirs needs
+// recovering here.
 //
 // A manifest that cannot be read FAILS STARTUP. This is deliberately the same
 // fail-closed contract the etcd path has - a ListSegmentIndexes error aborts

@@ -371,10 +371,12 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	mt.indexMeta.manifestBackedSegment = mt.isManifestBackedSegment
 	mt.indexMeta.onSegmentIndexRemoved = mt.refreshManifestIndexBackfillPending
 
-	// Runs only when SegmentIndex records are not persisted, where a manifest is
-	// the sole durable record of a finished artifact. Keeping it behind the
-	// switch also keeps the default startup free of a per-segment manifest read.
-	if !writeSegmentIndexToEtcd() {
+	// Runs only when index records are published to manifests, where a manifest
+	// is the sole durable record of a finished artifact. Transitional: this
+	// becomes unconditional (driven by the per-segment manifestHasIndex marker)
+	// once the marker exists, so records published while the switch was on stay
+	// visible after it is turned back off.
+	if writeSegmentIndexToManifest() {
 		if err := mt.reloadSegmentIndexesFromManifests(ctx); err != nil {
 			return nil, err
 		}

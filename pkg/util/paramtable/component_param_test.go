@@ -1326,6 +1326,25 @@ func TestFallbackParam(t *testing.T) {
 	assert.Equal(t, "foo", params.CommonCfg.ClusterPrefix.GetValue())
 }
 
+func TestWriteSegmentIndexToManifest(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+
+	// Off by default: manifest publication is opt-in, and the legacy
+	// etcd-only path must be what a cluster gets without configuration.
+	assert.False(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+
+	params.Save(params.DataCoordCfg.WriteSegmentIndexToManifest.Key, "true")
+	assert.True(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+
+	// A value that does not parse as a boolean reads as false, i.e. the
+	// legacy behavior. Under the old etcd-write polarity this silently
+	// entered the one-way off state; with publication opt-in the failure is
+	// merely "the operator thinks it is on", with no durability consequence.
+	params.Save(params.DataCoordCfg.WriteSegmentIndexToManifest.Key, "yes")
+	assert.False(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+}
+
 func TestSegmentIndexManifestLoadConcurrency(t *testing.T) {
 	params := ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))

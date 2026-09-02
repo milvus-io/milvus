@@ -156,6 +156,11 @@ func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
 		return err
 	}
 	if !published {
+		// With writeSegmentIndexToManifest on, FinishTask's etcd write is
+		// skipped for a manifest-backed segment (skipSegmentIndexEtcdWrite), so
+		// a decline above - a failed build, a dropped index definition, an
+		// unhealthy segment - leaves the record memory-only: it is lost on
+		// restart and the build is simply reissued or dies with its segment.
 		if err := it.meta.indexMeta.FinishTask(result); err != nil {
 			return err
 		}
@@ -181,6 +186,12 @@ func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
 // was issued against.
 func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo) (bool, error) {
 	ctx := it.meta.ctx
+	// Manifest publication is opt-in and exclusive with the etcd record: off
+	// (the default) is the pure legacy path and must produce no manifest index
+	// entry at all, so the decline happens before any other inspection.
+	if !writeSegmentIndexToManifest() {
+		return false, nil
+	}
 	if result.GetState() != commonpb.IndexState_Finished {
 		return false, nil
 	}
@@ -229,7 +240,7 @@ func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo)
 	// Backstop: never commit an entry the fail-closed readers would refuse.
 	// GC's retraction resolve and the startup reload both gate on
 	// manifestIndexFilePathInfo, so an entry it rejects could never be retired
-	// and, with SegmentIndex etcd writes off, would abort every restart. Fail
+	// and, with the record manifest-resident, would abort every restart. Fail
 	// this publish attempt - do NOT fall back to legacy - so the retry
 	// surfaces the metadata bug instead of papering over it.
 	if err := validateManifestIndexPublishable(it.SegmentID, manifestIndex); err != nil {

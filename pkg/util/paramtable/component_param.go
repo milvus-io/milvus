@@ -5720,7 +5720,7 @@ type dataCoordConfig struct {
 	// Index related configuration
 	IndexMemSizeEstimateMultiplier      ParamItem `refreshable:"true"`
 	IndexStorePathVersion               ParamItem `refreshable:"true"`
-	WriteSegmentIndexToEtcd             ParamItem `refreshable:"false"`
+	WriteSegmentIndexToManifest         ParamItem `refreshable:"false"`
 	SegmentIndexManifestLoadConcurrency ParamItem `refreshable:"false"`
 	HybridIndexLowCardinalityIndexType  ParamItem `refreshable:"true"`
 	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
@@ -6497,19 +6497,19 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 	}
 	p.IndexStorePathVersion.Init(base.mgr)
 
-	p.WriteSegmentIndexToEtcd = ParamItem{
-		Key:          "dataCoord.index.writeSegmentIndexToEtcd",
+	p.WriteSegmentIndexToManifest = ParamItem{
+		Key:          "dataCoord.index.writeSegmentIndexToManifest",
 		Version:      "3.0.0",
-		DefaultValue: "true",
-		Doc: `Whether a segment's index-build record is persisted to etcd. The end state of the StorageV3 migration is that a segment manifest is the only place a finished index artifact is recorded, and this switch is the seam that gets there: turning it off stops the SegmentIndex etcd writes for segments whose indexes a manifest can carry, while leaving DataCoord's in-memory index state untouched, and makes reload rebuild that state from the segment manifests.
-It applies per segment, not globally: only a StorageV3 segment with a manifest records its indexes there, so a StorageV1/V2 segment keeps persisting its index records regardless of this setting - skipping that write would destroy the only copy rather than defer to another one.
-A SegmentIndex is also the build task record - its state machine, assigned node and failure reason have no manifest home - so an in-flight or failed build on a manifest-backed segment is lost across a restart and is simply reissued. Removals are never skipped, so an index collected by GC cannot come back.
-Existing etcd records are still read on reload and take precedence over the manifest, so turning this off does not strand metadata written while it was on.
-Turning it off commits the migration: off is one-way, and switching back on is forbidden. Reload scans manifests only while the switch is off, so after an off -> on restart every index finished during the off window is invisible to DataCoord, and garbage collection then deletes its files as orphans. The only safe moment to return to on is before any index has finished with the switch off; after that, going back means rebuilding every index published while it was off.
-The value must be exactly true or false. A value that does not parse as a boolean, such as yes, is silently read as false and enters the one-way off state unintentionally.`,
+		DefaultValue: "false",
+		Doc: `Whether a finished index build on a StorageV3 segment is recorded in the segment manifest instead of etcd. The two stores are exclusive, never dual-written: off (the default) is the legacy behavior - every SegmentIndex record goes to etcd and no manifest index entry is ever produced; on publishes the record into the segment manifest and skips the SegmentIndex etcd write entirely.
+It applies per segment, not globally: only a StorageV3 segment with a manifest can record its indexes there, so a StorageV1/V2 segment keeps persisting its index records to etcd regardless of this setting - skipping that write would destroy the only copy rather than defer to another one.
+A SegmentIndex is also the build task record - its state machine, assigned node and failure reason have no manifest home - so with the switch on, an in-flight or failed build on a manifest-backed segment is lost across a restart and is simply reissued. Removals are never skipped, so an index collected by GC cannot come back.
+The switch can be flipped in either direction. Each commit that publishes an index entry also marks the segment (manifestHasIndex) in the same transaction, and reload is driven by that durable marker, not by this setting: it always loads every etcd record first, then reads the manifest of each marked segment and adds the entries etcd does not already have. Records written under either setting therefore stay visible after any flip.
+What is one-way is the binary version, not the config: while this stays false no manifest index entry exists and downgrading the DataCoord binary is free, but once it has been on and a build completed, rolling back to a binary without marker-driven reload makes those manifest-only indexes invisible and garbage collection then deletes their files.
+The value must be exactly true or false. A value that does not parse as a boolean, such as yes, is silently read as false, i.e. the legacy etcd behavior.`,
 		Export: true,
 	}
-	p.WriteSegmentIndexToEtcd.Init(base.mgr)
+	p.WriteSegmentIndexToManifest.Init(base.mgr)
 
 	p.SegmentIndexManifestLoadConcurrency = ParamItem{
 		Key:          "dataCoord.index.segmentIndexManifestLoadConcurrency",
@@ -6527,7 +6527,7 @@ The value must be exactly true or false. A value that does not parse as a boolea
 			}
 			return strconv.Itoa(concurrency)
 		},
-		Doc: `Concurrency of the startup scan that rebuilds SegmentIndex records from segment manifests when dataCoord.index.writeSegmentIndexToEtcd is off.
+		Doc: `Concurrency of the startup scan that rebuilds SegmentIndex records from the manifests of segments marked manifestHasIndex. The scan runs unconditionally - a cluster with no marked segments reads nothing - so this only matters once dataCoord.index.writeSegmentIndexToManifest has published entries.
 This is object-storage IO, not metastore IO, which is why it is not metastore.readConcurrency: that setting is shared with the querycoord and rootcoord catalogs and defaults to 32, so one manifest read per segment would serialize a large cluster's boot into hours - and the scan is fail-closed inside newMeta, so that time is downtime.
 Each slot holds one cgo call into the manifest reader for the duration of an object-storage GET, which pins an OS thread. Raising it trades threads and object-storage request rate for boot time; lower it if the object store throttles.`,
 		Export: true,

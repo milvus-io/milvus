@@ -1149,6 +1149,14 @@ func snapshotHasIndex(snapshotData *snapshotstorage.SnapshotData, indexID int64)
 // worker knows the name it copied and nothing else about the target, so the
 // mapping is resolved here and shipped with the request.
 func buildCopySegmentTargetIndexes(m *meta, collectionID int64) map[string]*datapb.CopySegmentTargetIndex {
+	// Strict exclusivity with the etcd record: with manifest publication off,
+	// the copied segment's index records go to etcd (syncVectorScalarIndexes)
+	// and its manifest must gain no index entry. An empty map makes the worker
+	// miss every definition lookup, so it retracts the inherited entries and
+	// writes none of its own.
+	if !writeSegmentIndexToManifest() {
+		return nil
+	}
 	if m == nil || m.indexMeta == nil {
 		return nil
 	}
