@@ -126,3 +126,21 @@ func TestCauseWithFormatVerbSurvivesTheWire(t *testing.T) {
 	assert.Contains(t, roundTrip.Cause, "%s")
 	assert.NotContains(t, roundTrip.Cause, "%!s(MISSING)")
 }
+
+// TestNewFromPBErrorCarriesTheWholeMessage guards the helper both conversion
+// paths now share: the streaming response body and the gRPC status details.
+func TestNewFromPBErrorCarriesTheWholeMessage(t *testing.T) {
+	assert.Nil(t, NewFromPBError(nil))
+
+	original := NewShardFenced("by-dev-rootcoord-dml_0_100v0", 447856455348518913)
+	pb := original.AsPBError()
+	converted := NewFromPBError(pb)
+	require.NotNil(t, converted)
+	assert.Equal(t, original.Code, converted.Code)
+	assert.Equal(t, original.Cause, converted.Cause)
+	assert.Equal(t, original.FencedTimeTick, converted.FencedTimeTick)
+
+	// Cloned, not aliased: the transport may reuse the response message.
+	pb.FencedTimeTick = 0
+	assert.Equal(t, uint64(447856455348518913), converted.FencedTimeTick)
+}
