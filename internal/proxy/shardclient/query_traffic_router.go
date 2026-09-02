@@ -141,26 +141,22 @@ func (paramtableQueryTrafficConfig) Rules() string {
 }
 
 type sessionQueryTrafficLabelProvider struct {
-	session      *sessionutil.Session
-	sourceLabels querytraffic.Labels
+	session *sessionutil.Session
 }
 
 func NewSessionQueryTrafficLabelProvider(session *sessionutil.Session) QueryTrafficLabelProvider {
-	var sourceLabels querytraffic.Labels
-	if session != nil {
-		sourceLabels = cloneQueryTrafficLabels(session.GetServerLabel())
-	}
 	return &sessionQueryTrafficLabelProvider{
-		session:      session,
-		sourceLabels: sourceLabels,
+		session: session,
 	}
 }
 
 func (p *sessionQueryTrafficLabelProvider) GetSourceLabels(ctx context.Context) (querytraffic.Labels, error) {
-	if p == nil {
+	if p == nil || p.session == nil {
 		return nil, nil
 	}
-	return cloneQueryTrafficLabels(p.sourceLabels), nil
+	// Read labels from the live session view instead of caching them at
+	// construction time, so a later session label update is observed.
+	return cloneQueryTrafficLabels(p.session.GetServerLabel()), nil
 }
 
 func (p *sessionQueryTrafficLabelProvider) GetNodeLabels(ctx context.Context, nodeIDs []int64) (map[int64]querytraffic.Labels, error) {
@@ -171,7 +167,13 @@ func (p *sessionQueryTrafficLabelProvider) GetNodeLabels(ctx context.Context, no
 	if err != nil {
 		return nil, err
 	}
+	return collectQueryTrafficNodeLabels(sessions, nodeIDs), nil
+}
 
+// collectQueryTrafficNodeLabels filters the discovered sessions down to the
+// requested node ids and clones their server labels. It is a pure function so
+// the filtering semantics can be unit-tested without an etcd dependency.
+func collectQueryTrafficNodeLabels(sessions map[string]*sessionutil.Session, nodeIDs []int64) map[int64]querytraffic.Labels {
 	nodeIDSet := typeutil.NewUniqueSet(nodeIDs...)
 	nodeLabels := make(map[int64]querytraffic.Labels, len(nodeIDs))
 	for _, session := range sessions {
@@ -180,7 +182,7 @@ func (p *sessionQueryTrafficLabelProvider) GetNodeLabels(ctx context.Context, no
 		}
 		nodeLabels[session.ServerID] = cloneQueryTrafficLabels(session.GetServerLabel())
 	}
-	return nodeLabels, nil
+	return nodeLabels
 }
 
 func cloneQueryTrafficLabels(labels map[string]string) querytraffic.Labels {

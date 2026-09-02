@@ -24,6 +24,10 @@ import (
 )
 
 type Matcher struct {
+	// any marks a matcher compiled from `any: true`, which matches every
+	// label set. `any: true` must be used alone (CompileMatcher rejects a
+	// combination with other fields), so Match short-circuits on it.
+	any       bool
 	exists    []string
 	notExists []string
 	eq        map[string]labelValue
@@ -39,8 +43,23 @@ type labelValue struct {
 	sourceKey string
 }
 
+func hasMatcherConditions(cfg MatcherConfig) bool {
+	return len(cfg.Exists) > 0 ||
+		len(cfg.NotExists) > 0 ||
+		len(cfg.Eq) > 0 ||
+		len(cfg.Ne) > 0 ||
+		len(cfg.In) > 0 ||
+		len(cfg.NotIn) > 0 ||
+		len(cfg.Match) > 0 ||
+		len(cfg.NotMatch) > 0
+}
+
 func CompileMatcher(cfg MatcherConfig) (*Matcher, error) {
+	if cfg.Any && hasMatcherConditions(cfg) {
+		return nil, merr.WrapErrParameterInvalidMsg("any: true must be used alone; combining it with other matcher fields is not supported")
+	}
 	m := &Matcher{
+		any:       cfg.Any,
 		exists:    append([]string(nil), cfg.Exists...),
 		notExists: append([]string(nil), cfg.NotExists...),
 	}
@@ -65,7 +84,7 @@ func CompileMatcher(cfg MatcherConfig) (*Matcher, error) {
 }
 
 func (m *Matcher) Match(source Labels, target Labels) bool {
-	if m == nil {
+	if m == nil || m.any {
 		return true
 	}
 	for _, key := range m.exists {
@@ -85,6 +104,9 @@ func (m *Matcher) Match(source Labels, target Labels) bool {
 			return false
 		}
 	}
+	// ne matches when the target label either is absent or differs from the
+	// expected value: an absent key is not equal to any value. Use not_exists
+	// when the intent is to require the key to be missing.
 	for key, expected := range m.ne {
 		actual, ok := target[key]
 		resolved, resolvedOK := expected.resolve(source)
@@ -101,6 +123,8 @@ func (m *Matcher) Match(source Labels, target Labels) bool {
 			return false
 		}
 	}
+	// not_in matches when the target label is absent (nothing to exclude) or
+	// its value is not in the list.
 	for key, values := range m.notIn {
 		actual, ok := target[key]
 		if !ok {
