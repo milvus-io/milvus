@@ -173,6 +173,18 @@ func Derive(modulus uint64, channels []string, shards []Shard, opts ...Option) (
 		return nil, merr.WrapErrServiceInternalMsg(
 			"collection reports routing modulus %d but no shard carries a residue", modulus)
 	case modulus == 0:
+		// The legacy rule is "shard i owns residue i at modulus len(channels)",
+		// so a shorter shard list means the caller declared some vchannel
+		// non-writable while the collection reports no modulus -- meta that
+		// cannot be produced by a real split, since retiring a shard is what
+		// writes residues in the first place. Deriving anyway would route the
+		// excluded shard's residue straight back to it. A caller with no shard
+		// info at all is the ordinary never-split case and is left alone.
+		if len(shards) != 0 && len(shards) != len(channels) {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"collection reports no routing modulus but only %d of %d vchannels own keys",
+				len(shards), len(channels))
+		}
 		residues, err := deriveCompat(channels)
 		if err != nil {
 			return nil, err
@@ -204,7 +216,20 @@ func (t *Table) NumShards() int {
 	if t == nil {
 		return 0
 	}
-	return len(t.channels)
+	if !t.explicit {
+		return len(t.channels)
+	}
+	// The vchannel list only ever grows: a split retires its source but keeps
+	// the name, so len(channels) counts shards that own no key. Count the ones
+	// that actually own residues instead -- that is the number a caller asking
+	// "how many shards does this collection route over" means.
+	owners := make(map[string]struct{}, len(t.channels))
+	for _, vchannel := range t.residues.slots {
+		if vchannel != "" {
+			owners[vchannel] = struct{}{}
+		}
+	}
+	return len(owners)
 }
 
 // RoutesByPrimaryKey reports whether hashing a row's primary key yields its
@@ -238,6 +263,13 @@ func ShardsFromMeta(vchannels []string, infos []*schemapb.CollectionShardInfo) (
 	for i, vchannel := range vchannels {
 		switch state := infos[i].GetState(); state {
 		case schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardCreating:
+			// A Creating shard is admitted because a split's targets are
+			// write-routable from the routing commit onward, before they are
+			// serviceable for reads. That relies on an invariant the commit
+			// owns: a Creating entry is published WITH its residues, in the same
+			// transaction. One published without them makes Derive refuse the
+			// whole table -- loudly, and for the entire collection, not only for
+			// the shard at fault.
 			shards = append(shards, Shard{
 				Vchannel: vchannel,
 				Buckets:  infos[i].GetHashRouting().GetBuckets(),
@@ -282,6 +314,21 @@ func HashPrimaryKeys(pks *schemapb.IDs) ([]uint64, error) {
 		for _, pk := range data {
 			out = append(out, uint64(typeutil.HashString2Uint32(pk)))
 		}
+	case nil:
+		// No id field at all is ZERO ROWS, not unhashable rows -- GetSizeOfIDs
+		// says the same -- and the delete path does reach here with an empty
+		// batch off a query stream. Placing nothing is the right answer.
+	default:
+		// An id field this build does not know, on the other hand, carries rows
+		// it cannot hash. Falling through would hand the caller an empty routing
+		// result and no error: the "successful write of rows no shard received"
+		// the IntId branch above refuses to produce.
+		//
+		// Untestable from outside milvus-proto -- the oneof interface has an
+		// unexported method, so no test can fabricate a variant this build does
+		// not know. It guards the day one is added there.
+		return nil, merr.WrapErrServiceInternalMsg(
+			"primary keys carry an id field this build cannot hash (%T)", pks.GetIdField())
 	}
 	return out, nil
 }
@@ -359,22 +406,33 @@ func (t *Table) RouteInsertHashes(hashes []uint64, channels []string) (map[strin
 		return nil, nil, err
 	}
 
-	offsets := make(map[string][]int, len(channels))
 	var hashValues []uint32
 	if len(hashes) > 0 {
 		hashValues = make([]uint32, 0, len(hashes))
 	}
+	// Accumulate by POSITION, not by name. The owning vchannel's position is
+	// already resolved for hashValues, so indexing a slice keeps the per-row
+	// cost at the one map lookup owner() needs -- building the map inline costs
+	// three more on every row.
 	avgCapacity := (len(hashes) / len(channels)) + 1
+	byPosition := make([][]int, len(channels))
 	for i, hash := range hashes {
-		vchannel, position, err := t.owner(hash, index)
+		_, position, err := t.owner(hash, index)
 		if err != nil {
 			return nil, nil, err
 		}
-		if _, ok := offsets[vchannel]; !ok {
-			offsets[vchannel] = make([]int, 0, avgCapacity)
+		if byPosition[position] == nil {
+			byPosition[position] = make([]int, 0, avgCapacity)
 		}
-		offsets[vchannel] = append(offsets[vchannel], i)
+		byPosition[position] = append(byPosition[position], i)
 		hashValues = append(hashValues, position)
+	}
+
+	offsets := make(map[string][]int, len(channels))
+	for position, rows := range byPosition {
+		if len(rows) > 0 {
+			offsets[channels[position]] = rows
+		}
 	}
 	return offsets, hashValues, nil
 }
@@ -432,8 +490,13 @@ func (t *Table) owner(hash uint64, index map[string]uint32) (string, uint32, err
 	}
 	position, ok := index[vchannel]
 	if !ok {
-		return "", 0, merr.WrapErrServiceInternalMsg(
-			"shard %q owns the key but is not in the request's channel set", vchannel)
+		// Not malformed meta: the table and the request's channel set came from
+		// two different DescribeCollection snapshots, which is a real state
+		// while a split commits its routing. It must stay RETRIABLE -- every
+		// retry consumer keys on that bit, and a non-retriable answer here turns
+		// a refresh-and-retry into a hard write failure for the client.
+		return "", 0, merr.WrapErrCollectionRoutingStale(vchannel,
+			"shard owns the key but is not in the request's channel set")
 	}
 	return vchannel, position, nil
 }

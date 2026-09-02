@@ -96,6 +96,13 @@ func DeriveHashPartial(modulus uint64, shards []HashShard) (*ResidueTable, error
 
 	slots := make([]string, modulus)
 	for _, s := range shards {
+		if s.Vchannel == "" {
+			// The empty name is the marker for "this residue is unowned", so a
+			// shard carrying it would be indistinguishable from a gap: its
+			// residues would read back as unowned and every other shard's claim
+			// on them would go unchecked.
+			return nil, merr.WrapErrServiceInternal("a routing shard carries no vchannel name")
+		}
 		if len(s.Buckets) == 0 {
 			// A shard owning no residue can never be written to and can never be
 			// split, but still counts as a shard everywhere else — it is a silent

@@ -409,3 +409,22 @@ func TestRepeatedSplitsPreserveOwnership(t *testing.T) {
 		before = after
 	}
 }
+
+// The empty name is the marker for "this residue is unowned", so a shard
+// carrying it would be indistinguishable from a gap: its residues would read
+// back as unowned and every other shard's claim on them would go unchecked.
+func TestDeriveHashRejectsAShardWithoutAName(t *testing.T) {
+	_, err := DeriveHashPartial(2, []HashShard{
+		{Vchannel: "", Buckets: []uint64{0}},
+		{Vchannel: "b", Buckets: []uint64{1}},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no vchannel name")
+
+	_, err = DeriveHash(2, []HashShard{
+		{Vchannel: "", Buckets: []uint64{0}},
+		{Vchannel: "b", Buckets: []uint64{1}},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no vchannel name")
+}
