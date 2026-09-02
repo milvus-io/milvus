@@ -619,6 +619,14 @@ const (
 // publishIndexToManifest does.
 func seedRestartFixture(t *testing.T, m *meta) {
 	t.Helper()
+	seedRestartTask(t, m)
+	publishRestartTask(t, m)
+}
+
+// seedRestartTask creates the segment, its index definition and its
+// in-progress index task, without finishing or publishing it.
+func seedRestartTask(t *testing.T, m *meta) {
+	t.Helper()
 	ctx := context.TODO()
 	basePath := "/tmp/test-restart/insert_log/300/30/8001"
 
@@ -650,6 +658,13 @@ func seedRestartFixture(t *testing.T, m *meta) {
 		IndexState:            commonpb.IndexState_InProgress,
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
 	}))
+}
+
+// publishRestartTask finishes the seeded task and publishes it the way
+// publishIndexToManifest does.
+func publishRestartTask(t *testing.T, m *meta) {
+	t.Helper()
+	ctx := context.TODO()
 
 	result := &workerpb.IndexTaskInfo{
 		BuildID:               restartBuildID,
@@ -743,6 +758,57 @@ func TestSegmentIndexPersistedToEtcdWhenManifestWritesOff(t *testing.T) {
 	require.Len(t, persisted, 1)
 	assert.EqualValues(t, restartBuildID, persisted[0].BuildID)
 	assert.Equal(t, commonpb.IndexState_Finished, persisted[0].IndexState)
+}
+
+// Regression test for the off-to-on transition with an in-flight build.
+//
+// A build started while the switch was off leaves an InProgress row in etcd.
+// After flipping the switch on and restarting, that row reloads and the
+// inspector re-dispatches the same buildID; when the build finishes, the
+// record goes to the manifest and the etcd write is gated. If the gate merely
+// skipped the write, the InProgress row would survive forever: every later
+// boot's etcd-wins dedup would resurrect it over the manifest's Finished
+// entry and re-dispatch the build again - an unbounded per-restart rebuild
+// loop with no GC path for the row. The gate must instead retire the row in
+// the same transaction that publishes the manifest entry.
+func TestOffEraEtcdRowRetiredOnManifestPublication(t *testing.T) {
+	withSegmentIndexManifestWrites(t, false)
+	newFakeManifestStore(t)
+	ctx := context.TODO()
+
+	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	m := bootMetaForRestart(t, catalog, restartCollID)
+	seedRestartTask(t, m)
+
+	// The off-era row is in etcd, in progress.
+	persisted, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+	require.NoError(t, err)
+	require.Len(t, persisted, 1)
+	require.Equal(t, commonpb.IndexState_InProgress, persisted[0].IndexState)
+
+	// The operator flips the switch on and restarts DataCoord. The in-flight
+	// row reloads from etcd; the inspector will re-dispatch the same buildID.
+	withSegmentIndexManifestWrites(t, true)
+	restarted := bootMetaForRestart(t, catalog, restartCollID)
+	segIdx, ok := restarted.indexMeta.GetIndexJob(restartBuildID)
+	require.True(t, ok)
+	require.Equal(t, commonpb.IndexState_InProgress, segIdx.IndexState)
+
+	// The build finishes and publishes to the manifest.
+	publishRestartTask(t, restarted)
+
+	// The publishing transaction must have retired the off-era row.
+	persisted, err = catalog.ListSegmentIndexes(ctx, restartCollID)
+	require.NoError(t, err)
+	require.Empty(t, persisted, "the off-era etcd row must not outlive the manifest entry that supersedes it")
+
+	// And the next restart therefore sees the Finished manifest record, not a
+	// resurrected InProgress row - the loop is closed.
+	again := bootMetaForRestart(t, catalog, restartCollID)
+	recovered, ok := again.indexMeta.GetIndexJob(restartBuildID)
+	require.True(t, ok)
+	assert.Equal(t, commonpb.IndexState_Finished, recovered.IndexState)
+	assert.Equal(t, []string{"0", "1"}, recovered.IndexFileKeys)
 }
 
 // Regression test for an ABBA deadlock between the manifest commit and every

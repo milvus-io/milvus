@@ -327,9 +327,12 @@ func (m *indexMeta) alterSegmentIndexes(segIdxes []*model.SegmentIndex) error {
 	// manifest-backed segment with a StorageV1/V2 one, and only the former may
 	// be left out of etcd.
 	persist := make([]*model.SegmentIndex, 0, len(segIdxes))
+	retire := make([]*model.SegmentIndex, 0)
 	for _, segIdx := range segIdxes {
 		if !m.skipSegmentIndexEtcdWrite(segIdx.SegmentID) {
 			persist = append(persist, segIdx)
+		} else {
+			retire = append(retire, segIdx)
 		}
 	}
 	if len(persist) > 0 {
@@ -337,6 +340,19 @@ func (m *indexMeta) alterSegmentIndexes(segIdxes []*model.SegmentIndex) error {
 		if err != nil {
 			mlog.Error(context.TODO(), "failed to alter segments index in meta store", mlog.Int("segment indexes num", len(persist)),
 				mlog.Err(err))
+			return err
+		}
+	}
+	// A gated record is not merely left out of etcd: a row for its buildID may
+	// already exist there, written before writeSegmentIndexToManifest flipped
+	// on. Left in place, boot-time etcd-wins dedup would keep resurrecting it
+	// over the manifest projection - a non-terminal row re-dispatches the same
+	// build after every restart. Retire it here; removing a never-written key
+	// is a harmless no-op.
+	for _, segIdx := range retire {
+		if err := m.catalog.DropSegmentIndex(m.ctx, segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.BuildID); err != nil {
+			mlog.Error(context.TODO(), "failed to retire segment index etcd row for manifest-backed segment",
+				mlog.Int64("segmentID", segIdx.SegmentID), mlog.Int64("buildID", segIdx.BuildID), mlog.Err(err))
 			return err
 		}
 	}
@@ -690,6 +706,9 @@ func (m *indexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.Segment
 	if segIndex.IndexState == commonpb.IndexState_IndexStateNone {
 		segIndex.IndexState = commonpb.IndexState_Unissued
 	}
+	// A pure skip is safe here, unlike alterSegmentIndexes/the staged upsert:
+	// every caller allocates a fresh buildID, so no etcd row can pre-exist
+	// under this record's key and there is nothing to retire.
 	if !m.skipSegmentIndexEtcdWrite(segIndex.SegmentID) {
 		if err := m.catalog.CreateSegmentIndex(ctx, segIndex); err != nil {
 			mlog.Warn(ctx, "meta update: adding segment index failed",
@@ -1427,10 +1446,19 @@ func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation, manifest
 		finished.ManifestPublished = true
 	}
 	if !skipStagedSegmentIndexEtcdWrite(manifestBacked) {
-		// When it is skipped, the manifest revision this commit publishes is
-		// the sole record of the finished artifact - the migration's end state
-		// - and the commit carries the segment record alone.
 		action := metastore.UpdateSegmentIndex(finished)
+		staged.action = &action
+	} else {
+		// The manifest revision this commit publishes is the sole record of
+		// the finished artifact - the migration's end state. But a row for
+		// this buildID may already sit in etcd, written before
+		// writeSegmentIndexToManifest flipped on; left in place, boot-time
+		// etcd-wins dedup would resurrect its non-terminal state over the
+		// manifest's Finished entry and re-dispatch the same build after every
+		// restart. Delete it in the transaction that publishes the entry, so
+		// the row can never outlive the record that supersedes it. Deleting a
+		// never-written key is a harmless no-op.
+		action := metastore.DropSegmentIndex(finished)
 		staged.action = &action
 	}
 	staged.install = func() func() {

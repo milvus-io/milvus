@@ -943,9 +943,12 @@ func TestCommitSegmentManifestRejectsMalformedSegmentIndexMutation(t *testing.T)
 
 // With SegmentIndex etcd writes off, the manifest revision this commit
 // publishes is the sole record of the finished artifact - which is the
-// migration's end state. The commit must then carry the segment record alone,
-// while indexMeta's in-memory view still completes the task.
-func TestCommitSegmentManifestSkipsIndexCatalogWriteWhenGated(t *testing.T) {
+// migration's end state. The commit must then carry no SegmentIndex upsert,
+// but it must carry a SegmentIndex *delete*: a row for this buildID may
+// pre-date the switch flipping on, and leaving it would let the next boot's
+// etcd-wins dedup resurrect a non-terminal state over the manifest's Finished
+// entry. indexMeta's in-memory view still completes the task.
+func TestCommitSegmentManifestRetiresIndexEtcdRowWhenGated(t *testing.T) {
 	withSegmentIndexManifestWrites(t, true)
 
 	const (
@@ -982,12 +985,21 @@ func TestCommitSegmentManifestSkipsIndexCatalogWriteWhenGated(t *testing.T) {
 	defer commit.UnPatch()
 
 	var actionCount int
+	var indexDeletes int
 	update := mockey.Mock((*datacoord.Catalog).Update).To(
 		func(_ *datacoord.Catalog, _ context.Context, actions ...metastore.UpdateAction) error {
 			actionCount = len(actions)
 			for _, action := range actions {
-				if _, ok := action.Entry.(metastore.SegmentIndexEntry); ok {
-					t.Fatal("segment index must not be staged while etcd writes are gated")
+				entry, ok := action.Entry.(metastore.SegmentIndexEntry)
+				if !ok {
+					continue
+				}
+				switch action.Type {
+				case metastore.ActionDelete:
+					indexDeletes++
+					assert.Equal(t, buildID, entry.SegmentIndex.BuildID)
+				default:
+					t.Fatal("segment index must not be upserted while etcd writes are gated")
 				}
 			}
 			return nil
@@ -1016,7 +1028,8 @@ func TestCommitSegmentManifestSkipsIndexCatalogWriteWhenGated(t *testing.T) {
 		},
 	}))
 
-	assert.Equal(t, 1, actionCount, "only the segment record is written")
+	assert.Equal(t, 2, actionCount, "the segment record plus the retiring index delete")
+	assert.Equal(t, 1, indexDeletes, "any pre-switch etcd row must be retired in the same transaction")
 	assert.Equal(t, newManifest, meta.GetSegment(context.Background(), segmentID).GetManifestPath())
 	// The in-memory task still completes: the switch is durability-only.
 	published, ok := meta.indexMeta.GetIndexJob(buildID)

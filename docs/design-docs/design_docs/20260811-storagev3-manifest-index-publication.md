@@ -16,8 +16,11 @@ advances `SegmentInfo.manifest_path` and persists the index task metadata.
 Publication is opt-in and exclusive with the etcd `SegmentIndex` row, behind
 `dataCoord.index.writeSegmentIndexToManifest` (default off). Off is the pure
 legacy path: every record goes to etcd and no manifest index entry is produced
-at all. On records the index in the manifest and skips the `SegmentIndex` etcd
-write for the manifest-backed segment; the commit also sets the segment's
+at all. On records the index in the manifest and, rather than writing the
+`SegmentIndex` etcd row for the manifest-backed segment, deletes any row the
+same build left behind before the switch was turned on (in the transaction
+that publishes the entry - see the framework doc for why a plain skip would
+make an off-era in-flight row rebuild forever); the commit also sets the segment's
 sticky `manifest_has_index` marker in the same transaction, which is what
 drives recovery (see the framework doc's "Retiring the etcd SegmentIndex
 Record"). There is no dual-write mode.

@@ -2719,7 +2719,11 @@ func TestSegmentIndexEtcdWritesGatedByParam(t *testing.T) {
 	require.True(t, ok, "memory state must advance even with etcd writes off")
 	assert.Equal(t, commonpb.IndexState_Unissued, segIdx.IndexState)
 
-	// AlterSegmentIndexes is not expected either.
+	// AlterSegmentIndexes is not expected either, but a state transition on a
+	// gated record retires any etcd row its buildID may have from before the
+	// switch flipped on (a no-op delete when, as here, none was written).
+	catalog.EXPECT().DropSegmentIndex(mock.Anything, int64(100), int64(10), int64(6001), int64(6100)).
+		Return(nil).Once()
 	require.NoError(t, m.BuildIndex(6100))
 	segIdx, ok = m.segmentBuildInfo.Get(6100)
 	require.True(t, ok)
@@ -2746,8 +2750,8 @@ func TestSegmentIndexEtcdWritesGatedByParam(t *testing.T) {
 }
 
 // A batch can mix a manifest-backed segment with one that is not; only the
-// former may be dropped from the catalog write, and the in-memory update must
-// still cover both.
+// former may be dropped from the catalog write - retiring any pre-switch etcd
+// row it may have - and the in-memory update must still cover both.
 func TestSegmentIndexEtcdWritesGatedPerRecord(t *testing.T) {
 	withSegmentIndexManifestWrites(t, true)
 
@@ -2758,6 +2762,8 @@ func TestSegmentIndexEtcdWritesGatedPerRecord(t *testing.T) {
 			persisted = segIdxes
 			return nil
 		}).Once()
+	catalog.EXPECT().DropSegmentIndex(mock.Anything, int64(100), int64(10), int64(7001), int64(7100)).
+		Return(nil).Once()
 
 	m := &indexMeta{
 		ctx:                   context.TODO(),
