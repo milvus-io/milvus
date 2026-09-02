@@ -65,10 +65,10 @@ func (lbe *LogicalBinaryExpr) Eval(evalCtx *EvalCtx) *bitset.BitSet {
 
 	// 3. set true for possible nil expr
 	if leftRes == nil {
-		leftRes = evalCtx.allTrueBitSet
+		leftRes = evalCtx.allTrueBitSet.Clone()
 	}
 	if rightRes == nil {
-		rightRes = evalCtx.allTrueBitSet
+		rightRes = evalCtx.allTrueBitSet.Clone()
 	}
 
 	// 4. and/or left/right results
@@ -161,7 +161,7 @@ func (ure *UnaryRangeExpr) Eval(
 				localBst.Set(idx)
 			}
 		default:
-			return evalCtx.allTrueBitSet
+			return evalCtx.allTrueBitSet.Clone()
 		}
 	}
 	return localBst
