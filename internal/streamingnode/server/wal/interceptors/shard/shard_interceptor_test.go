@@ -85,7 +85,7 @@ func TestShardInterceptorPassesOmittedSchemaVersionToChecker(t *testing.T) {
 	insertHdrMatcher := mock.MatchedBy(func(h *message.InsertMessageHeader) bool {
 		return h != nil && h.GetCollectionId() == int64(1) && h.SchemaVersion == nil
 	})
-	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(insertHdrMatcher).Return(int32(5), shards.ErrCollectionSchemaVersionNotMatch)
+	shardManager.EXPECT().CheckWritableAndSchemaVersion(mock.Anything, insertHdrMatcher).Return(int32(5), shards.ErrCollectionSchemaVersionNotMatch)
 
 	msgID, err := i.DoAppend(context.Background(), msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 		return rmq.NewRmqID(1), nil
@@ -124,7 +124,7 @@ func TestShardInterceptorReportsExplicitZeroSchemaVersionInMismatchError(t *test
 	insertHdrMatcher := mock.MatchedBy(func(h *message.InsertMessageHeader) bool {
 		return h != nil && h.GetCollectionId() == int64(1) && h.SchemaVersion != nil && h.GetSchemaVersion() == 0
 	})
-	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(insertHdrMatcher).Return(int32(5), shards.ErrCollectionSchemaVersionNotMatch)
+	shardManager.EXPECT().CheckWritableAndSchemaVersion(mock.Anything, insertHdrMatcher).Return(int32(5), shards.ErrCollectionSchemaVersionNotMatch)
 
 	msgID, err := i.DoAppend(context.Background(), msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 		return rmq.NewRmqID(1), nil
@@ -350,7 +350,6 @@ func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
 		WithBody(&msgpb.DeleteRequest{}).
 		MustBuildMutable().WithTimeTick(1)
 
-	shardManager.EXPECT().CheckIfCollectionExists(int64(1)).Return(nil)
 	shardManager.EXPECT().ApplyDelete(mock.MatchedBy(func(deleteMsg message.MutableDeleteMessageV1) bool {
 		return deleteMsg.Header().GetCollectionId() == int64(1) && deleteMsg.Header().GetRows() == uint64(10)
 	})).Return(nil)
@@ -392,7 +391,7 @@ func TestShardInterceptorPassesExplicitNonZeroSchemaVersion(t *testing.T) {
 	insertHdrMatcher := mock.MatchedBy(func(h *message.InsertMessageHeader) bool {
 		return h != nil && h.GetCollectionId() == int64(1) && h.SchemaVersion != nil && h.GetSchemaVersion() == 3
 	})
-	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(insertHdrMatcher).Return(int32(3), nil)
+	shardManager.EXPECT().CheckWritableAndSchemaVersion(mock.Anything, insertHdrMatcher).Return(int32(3), nil)
 	shardManager.EXPECT().AssignSegment(mock.Anything).Return(&shards.AssignSegmentResult{SegmentID: 1, Acknowledge: atomic.NewInt32(1)}, nil)
 
 	msgID, err := i.DoAppend(context.Background(), msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
@@ -433,7 +432,7 @@ func TestShardInterceptorPassesExplicitZeroSchemaVersion(t *testing.T) {
 	insertHdrMatcher := mock.MatchedBy(func(h *message.InsertMessageHeader) bool {
 		return h != nil && h.GetCollectionId() == int64(1) && h.SchemaVersion != nil && h.GetSchemaVersion() == 0
 	})
-	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(insertHdrMatcher).Return(int32(0), nil)
+	shardManager.EXPECT().CheckWritableAndSchemaVersion(mock.Anything, insertHdrMatcher).Return(int32(0), nil)
 	shardManager.EXPECT().AssignSegment(mock.Anything).Return(&shards.AssignSegmentResult{SegmentID: 1, Acknowledge: atomic.NewInt32(1)}, nil)
 
 	msgID, err := i.DoAppend(context.Background(), msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
@@ -466,7 +465,7 @@ func TestShardInterceptorRejectsMissingWALFunctionSnapshot(t *testing.T) {
 
 	// The insert path fence-checks the vchannel before anything else.
 	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything, mock.Anything).Return(nil).Maybe()
-	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(int32(1), nil)
+	shardManager.EXPECT().CheckWritableAndSchemaVersion(mock.Anything, mock.Anything).Return(int32(1), nil)
 	msgID, err := i.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
 		return rmq.NewRmqID(1), nil
 	})
@@ -496,7 +495,7 @@ func TestShardInterceptorAllowsLegacyInsertWithoutCollectionSchema(t *testing.T)
 		MustBuildMutable().WithTimeTick(1)
 
 	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything, mock.Anything).Return(nil).Maybe()
-	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(int32(0), nil)
+	shardManager.EXPECT().CheckWritableAndSchemaVersion(mock.Anything, mock.Anything).Return(int32(0), nil)
 	shardManager.EXPECT().AssignSegment(mock.Anything).Return(&shards.AssignSegmentResult{SegmentID: 1, Acknowledge: atomic.NewInt32(1)}, nil)
 	msgID, err := i.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
 		return rmq.NewRmqID(1), nil
@@ -693,39 +692,39 @@ func TestShardInterceptor(t *testing.T) {
 		return h != nil && h.GetCollectionId() == int64(1) && h.SchemaVersion == nil
 	})
 
-	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(insertHdrMatcher).Return(int32(0), nil).Once()
+	shardManager.EXPECT().CheckWritableAndSchemaVersion(mock.Anything, insertHdrMatcher).Return(int32(0), nil).Once()
 	shardManager.EXPECT().AssignSegment(mock.Anything).Return(&shards.AssignSegmentResult{SegmentID: 1, Acknowledge: atomic.NewInt32(1)}, nil).Once()
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.NoError(t, err)
 	assert.NotNil(t, msgID)
 
-	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(insertHdrMatcher).Return(int32(0), nil).Once()
+	shardManager.EXPECT().CheckWritableAndSchemaVersion(mock.Anything, insertHdrMatcher).Return(int32(0), nil).Once()
 	shardManager.EXPECT().AssignSegment(mock.Anything).Return(nil, mockErr).Once()
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.Error(t, err)
 	assert.Nil(t, msgID)
 
 	// ErrCollectionNotFound from schema version check must surface as an unrecoverable insert error.
-	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(insertHdrMatcher).Return(int32(-1), shards.ErrCollectionNotFound).Once()
+	shardManager.EXPECT().CheckWritableAndSchemaVersion(mock.Anything, insertHdrMatcher).Return(int32(-1), shards.ErrCollectionNotFound).Once()
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.Error(t, err)
 	assert.Nil(t, msgID)
 
 	// ErrCollectionSchemaNotFound must also become an unrecoverable insert error.
-	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(insertHdrMatcher).Return(int32(-1), shards.ErrCollectionSchemaNotFound).Once()
+	shardManager.EXPECT().CheckWritableAndSchemaVersion(mock.Anything, insertHdrMatcher).Return(int32(-1), shards.ErrCollectionSchemaNotFound).Once()
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.Error(t, err)
 	assert.Nil(t, msgID)
 
 	// ErrCollectionSchemaVersionNotMatch must surface as a schema-version-mismatch error
 	// so the proxy can refresh its cache and retry.
-	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(insertHdrMatcher).Return(int32(5), shards.ErrCollectionSchemaVersionNotMatch).Once()
+	shardManager.EXPECT().CheckWritableAndSchemaVersion(mock.Anything, insertHdrMatcher).Return(int32(5), shards.ErrCollectionSchemaVersionNotMatch).Once()
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.Error(t, err)
 	assert.Nil(t, msgID)
 
 	// Unexpected error from the schema version check must stop producer retry.
-	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(insertHdrMatcher).Return(int32(-1), mockErr).Once()
+	shardManager.EXPECT().CheckWritableAndSchemaVersion(mock.Anything, insertHdrMatcher).Return(int32(-1), mockErr).Once()
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.Error(t, err)
 	assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
@@ -739,18 +738,20 @@ func TestShardInterceptor(t *testing.T) {
 		WithBody(&msgpb.DeleteRequest{}).
 		MustBuildMutable().WithTimeTick(1)
 
-	shardManager.EXPECT().CheckIfCollectionExists(mock.Anything).Unset()
-	shardManager.EXPECT().CheckIfCollectionExists(mock.Anything).Return(nil)
 	shardManager.EXPECT().ApplyDelete(mock.Anything).Return(nil)
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.NoError(t, err)
 	assert.NotNil(t, msgID)
 
-	shardManager.EXPECT().CheckIfCollectionExists(mock.Anything).Unset()
-	shardManager.EXPECT().CheckIfCollectionExists(mock.Anything).Return(mockErr)
+	// A delete to a vchannel this pchannel does not hold is refused by the same
+	// admission check the insert path uses; there is no second existence check.
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything, mock.Anything).Unset()
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything, mock.Anything).Return(shards.ErrCollectionNotFound)
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.Error(t, err)
 	assert.Nil(t, msgID)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything, mock.Anything).Unset()
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	msg = message.NewSchemaChangeMessageBuilderV2().
 		WithVChannel(vchannel).

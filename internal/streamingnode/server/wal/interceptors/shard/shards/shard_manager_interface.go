@@ -91,8 +91,15 @@ type ShardManager interface {
 	// Returns the IDs of flushed segments (non-empty only for schema changes).
 	AlterCollection(msg message.MutableAlterCollectionMessageV2) ([]int64, error)
 
-	// CheckIfCollectionSchemaVersionMatch validates insert header schema version against in-memory collection state.
-	CheckIfCollectionSchemaVersionMatch(header *message.InsertMessageHeader) (int32, error)
+	// CheckWritableAndSchemaVersion answers both questions the insert path asks
+	// -- may this vchannel be written, and does the header's schema version
+	// match -- under ONE read lock instead of two.
+	//
+	// The two are asked together on every insert, and taking the lock twice
+	// buys nothing: the vchannel-exclusive lock upstream keeps the fence from
+	// flipping between them, so the pair was already consistent. This just
+	// stops paying for a second acquisition on the hot path.
+	CheckWritableAndSchemaVersion(vchannel string, header *message.InsertMessageHeader) (int32, error)
 
 	Close()
 }

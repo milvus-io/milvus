@@ -216,7 +216,8 @@ func TestShardInterceptorSplitShardMessageFlushFailure(t *testing.T) {
 
 func TestShardInterceptorInsertOnFencedVChannel(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
-	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v1").Return(shards.ErrVChannelFenced).Once()
+	shardManager.EXPECT().CheckWritableAndSchemaVersion("v1", mock.Anything).
+		Return(int32(-1), shards.ErrVChannelFenced).Once()
 
 	msg := message.NewInsertMessageBuilderV1().
 		WithVChannel("v1").
@@ -269,7 +270,8 @@ func TestShardInterceptorDeleteOnFencedVChannel(t *testing.T) {
 // append succeeded. Silent loss, so it has to be a rejection.
 func TestShardInterceptorInsertOnAVChannelTheManagerDoesNotHold(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
-	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v1").Return(shards.ErrCollectionNotFound).Once()
+	shardManager.EXPECT().CheckWritableAndSchemaVersion("v1", mock.Anything).
+		Return(int32(-1), shards.ErrCollectionNotFound).Once()
 
 	msg := message.NewInsertMessageBuilderV1().
 		WithVChannel("v1").
