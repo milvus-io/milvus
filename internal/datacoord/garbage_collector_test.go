@@ -5250,7 +5250,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes_NonManifestKeepsLegacyOrder(t 
 // BUILD_ROOTED bytes are still swept as V0 orphans, but a COLLECTION_ROOTED
 // artifact leaks permanently because recycleUnusedIndexFilesV1 is record-driven.
 func TestGarbageCollector_DroppedSegmentIndexFilesComeFromManifestAfterReload(t *testing.T) {
-	withSegmentIndexEtcdWrites(t, false)
+	withSegmentIndexManifestWrites(t, true)
 
 	const segmentID = int64(3101)
 	basePath := "/tmp/test-gc-dropped-reload/insert_log/100/10/3101"

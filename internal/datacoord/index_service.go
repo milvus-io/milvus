@@ -1069,8 +1069,8 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 	// read: a manifest index entry is never published without the matching
 	// record being installed in memory in the same commit (see
 	// CommitSegmentManifest), a copy target gets its records from
-	// syncVectorScalarIndexes, and with the etcd write switch off reload
-	// rebuilds them from the manifests at startup. An empty record set here
+	// syncVectorScalarIndexes, and reload rebuilds manifest-resident records
+	// from the manifests at startup. An empty record set here
 	// therefore means the segment has no index artifact, not that its record
 	// is elsewhere. This is a load-path RPC driven by QueryCoord's index
 	// checker, so a per-segment object read would be paid on every round by

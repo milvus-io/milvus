@@ -2690,12 +2690,13 @@ func TestIndexMeta_GetDeletedIndexesWithV1Path(t *testing.T) {
 	assert.Equal(t, int64(2000), result[0].BuildID)
 }
 
-// The switch controls durability only. With it off no SegmentIndex ever
+// The switch controls where durable state lives, not what DataCoord observes.
+// With manifest writes on, no SegmentIndex on a manifest-backed segment ever
 // reaches the catalog - the mock fails the test on any unexpected call - while
 // DataCoord's own in-memory view advances exactly as before, which is what
 // keeps every consumer working within a process lifetime.
 func TestSegmentIndexEtcdWritesGatedByParam(t *testing.T) {
-	withSegmentIndexEtcdWrites(t, false)
+	withSegmentIndexManifestWrites(t, true)
 
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	m := &indexMeta{
@@ -2748,7 +2749,7 @@ func TestSegmentIndexEtcdWritesGatedByParam(t *testing.T) {
 // former may be dropped from the catalog write, and the in-memory update must
 // still cover both.
 func TestSegmentIndexEtcdWritesGatedPerRecord(t *testing.T) {
-	withSegmentIndexEtcdWrites(t, false)
+	withSegmentIndexManifestWrites(t, true)
 
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	var persisted []*model.SegmentIndex
@@ -2780,11 +2781,12 @@ func TestSegmentIndexEtcdWritesGatedPerRecord(t *testing.T) {
 	assert.True(t, ok)
 }
 
-// Default-on must keep the pre-existing behavior: every transition persists.
+// Default-off must keep the pre-existing behavior: every transition persists
+// to etcd and no manifest entry is produced.
 func TestSegmentIndexEtcdWritesEnabledByDefault(t *testing.T) {
-	assert.True(t, paramtable.Get().DataCoordCfg.WriteSegmentIndexToEtcd.GetAsBool())
+	assert.False(t, paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
 
-	withSegmentIndexEtcdWrites(t, true)
+	withSegmentIndexManifestWrites(t, false)
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()

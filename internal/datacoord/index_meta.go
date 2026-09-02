@@ -106,7 +106,7 @@ type indexMeta struct {
 }
 
 func (m *indexMeta) skipSegmentIndexEtcdWrite(segmentID UniqueID) bool {
-	if writeSegmentIndexToEtcd() {
+	if !writeSegmentIndexToManifest() {
 		return false
 	}
 	if m.manifestBackedSegment == nil {
@@ -118,7 +118,7 @@ func (m *indexMeta) skipSegmentIndexEtcdWrite(segmentID UniqueID) bool {
 // skipStagedSegmentIndexEtcdWrite is the segMu-free form for a caller that
 // already knows whether the segment is manifest-backed.
 func skipStagedSegmentIndexEtcdWrite(manifestBacked bool) bool {
-	return !writeSegmentIndexToEtcd() && manifestBacked
+	return writeSegmentIndexToManifest() && manifestBacked
 }
 
 func newIndexTaskStats(s *model.SegmentIndex) *metricsinfo.IndexTaskStats {
@@ -310,13 +310,16 @@ func (m *indexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 	m.segmentBuildInfo.Add(segIdx)
 }
 
-// writeSegmentIndexToEtcd reports whether SegmentIndex records are persisted.
-// When it is off, every catalog write below is skipped while the in-memory
-// update that follows it still runs: the switch controls durability only, not
-// what DataCoord itself observes. Reload then rebuilds the finished records
-// from segment manifests (see meta.reloadSegmentIndexesFromManifests).
-func writeSegmentIndexToEtcd() bool {
-	return paramtable.Get().DataCoordCfg.WriteSegmentIndexToEtcd.GetAsBool()
+// writeSegmentIndexToManifest reports whether a manifest-backed segment's
+// index records go to the segment manifest instead of etcd. The two stores are
+// exclusive: when this is on, every SegmentIndex catalog write below is
+// skipped for such a segment while the in-memory update that follows it still
+// runs - the switch controls where durable state lives, not what DataCoord
+// itself observes. Reload rebuilds the finished records from the manifests of
+// segments marked manifestHasIndex (see meta.reloadSegmentIndexesFromManifests)
+// regardless of this setting.
+func writeSegmentIndexToManifest() bool {
+	return paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool()
 }
 
 func (m *indexMeta) alterSegmentIndexes(segIdxes []*model.SegmentIndex) error {
@@ -1252,11 +1255,11 @@ func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) er
 		return nil
 	}
 
-	// Deliberately not gated by writeSegmentIndexToEtcd: the switch stops
-	// DataCoord adding durable index state, it never stops it removing state.
-	// A record written while the switch was on must still be deleted, or reload
-	// would resurrect an index this cycle just collected. Removing a key that
-	// was never written is a harmless no-op.
+	// Deliberately not gated by writeSegmentIndexToManifest: the switch stops
+	// DataCoord adding SegmentIndex rows to etcd, it never stops it removing
+	// them. A row written while records still went to etcd must still be
+	// deleted, or reload would resurrect an index this cycle just collected.
+	// Removing a key that was never written is a harmless no-op.
 	err := m.catalog.DropSegmentIndex(ctx, segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, buildID)
 	if err != nil {
 		return err

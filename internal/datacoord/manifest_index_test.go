@@ -352,12 +352,14 @@ func TestServerGetIndexInfosReadsNoManifest(t *testing.T) {
 	})
 }
 
-// withSegmentIndexEtcdWrites flips dataCoord.index.writeSegmentIndexToEtcd for
-// one test and restores it afterwards.
-func withSegmentIndexEtcdWrites(t *testing.T, enabled bool) {
+// withSegmentIndexManifestWrites flips
+// dataCoord.index.writeSegmentIndexToManifest for one test and restores it
+// afterwards. enabled=true publishes index records to segment manifests and
+// skips their etcd writes; enabled=false is the legacy etcd-only behavior.
+func withSegmentIndexManifestWrites(t *testing.T, enabled bool) {
 	t.Helper()
-	key := paramtable.Get().DataCoordCfg.WriteSegmentIndexToEtcd.Key
-	previous := paramtable.Get().DataCoordCfg.WriteSegmentIndexToEtcd.GetValue()
+	key := paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.Key
+	previous := paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.GetValue()
 	paramtable.Get().Save(key, strconv.FormatBool(enabled))
 	t.Cleanup(func() { paramtable.Get().Save(key, previous) })
 }
@@ -420,7 +422,7 @@ func mockReloadManifestEntry(t *testing.T, buildID int64) {
 // manifest and the consumers that decide "is this segment indexed" - which
 // have no manifest fallback of their own - work off that rebuilt state.
 func TestReloadSegmentIndexesFromManifests(t *testing.T) {
-	withSegmentIndexEtcdWrites(t, false)
+	withSegmentIndexManifestWrites(t, true)
 	m := setupManifestReloadMeta(t)
 	mockReloadManifestEntry(t, 5100)
 
@@ -451,7 +453,7 @@ func TestReloadSegmentIndexesFromManifests(t *testing.T) {
 // a record loaded from the catalog must not be replaced by a manifest
 // projection of the same build, which lacks the task history.
 func TestReloadSegmentIndexesFromManifests_EtcdRecordWins(t *testing.T) {
-	withSegmentIndexEtcdWrites(t, false)
+	withSegmentIndexManifestWrites(t, true)
 	m := setupManifestReloadMeta(t)
 	mockReloadManifestEntry(t, 5100)
 
@@ -492,7 +494,7 @@ func TestReloadSegmentIndexesFromManifests_EtcdRecordWins(t *testing.T) {
 // files: recycleUnusedIndexFilesV0 reads an absent SegmentIndex as proof the
 // buildID is garbage and removes its whole prefix with no time tolerance.
 func TestReloadSegmentIndexesFromManifests_UnreadableManifestFailsStartup(t *testing.T) {
-	withSegmentIndexEtcdWrites(t, false)
+	withSegmentIndexManifestWrites(t, true)
 	m := setupManifestReloadMeta(t)
 	infos := mockey.Mock(packed.GetManifestIndexInfos).
 		Return(nil, merr.WrapErrIoFailedReason("throttled")).Build()
@@ -507,7 +509,7 @@ func TestReloadSegmentIndexesFromManifests_UnreadableManifestFailsStartup(t *tes
 // a hole in it, matching the etcd path: a ListSegmentIndexes error aborts
 // newIndexMeta and therefore newMeta.
 func TestUnreadableManifestAbortsMetaBoot(t *testing.T) {
-	withSegmentIndexEtcdWrites(t, false)
+	withSegmentIndexManifestWrites(t, true)
 	store := newFakeManifestStore(t)
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	m := bootMetaForRestart(t, catalog, restartCollID)
@@ -687,7 +689,7 @@ func seedRestartFixture(t *testing.T, m *meta) {
 // the manifest-driven reload exists - the consumers asserted below have no
 // manifest fallback of their own.
 func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
-	withSegmentIndexEtcdWrites(t, false)
+	withSegmentIndexManifestWrites(t, true)
 	newFakeManifestStore(t)
 	ctx := context.TODO()
 
@@ -723,10 +725,11 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	assert.True(t, ok, "the index inspector must not reissue a build for it")
 }
 
-// The control: with the switch on, the same flow persists the record, so the
-// test above is discriminating rather than trivially green.
-func TestSegmentIndexPersistedToEtcdWhenSwitchOn(t *testing.T) {
-	withSegmentIndexEtcdWrites(t, true)
+// The control: with manifest writes off (the default), the same flow persists
+// the record to etcd, so the test above is discriminating rather than
+// trivially green.
+func TestSegmentIndexPersistedToEtcdWhenManifestWritesOff(t *testing.T) {
+	withSegmentIndexManifestWrites(t, false)
 	newFakeManifestStore(t)
 	ctx := context.TODO()
 
@@ -758,7 +761,7 @@ func TestSegmentIndexPersistedToEtcdWhenSwitchOn(t *testing.T) {
 // keyLock, the commit must NOT be holding segMu. Hold the key lock, let the
 // commit park on it, and check segMu is still free.
 func TestCommitSegmentManifestTakesKeyLockBeforeSegMu(t *testing.T) {
-	withSegmentIndexEtcdWrites(t, false)
+	withSegmentIndexManifestWrites(t, true)
 	newFakeManifestStore(t)
 	ctx := context.TODO()
 
@@ -845,7 +848,7 @@ func TestCommitSegmentManifestTakesKeyLockBeforeSegMu(t *testing.T) {
 // This is the crash window the files-first drop ordering creates: bytes
 // deleted (or their deletion failed), record not yet retracted, restart.
 func TestReloadRecoversDroppedIndexEntriesSoGCCanRetract(t *testing.T) {
-	withSegmentIndexEtcdWrites(t, false)
+	withSegmentIndexManifestWrites(t, true)
 	m := setupManifestReloadMeta(t)
 	mockReloadManifestEntry(t, 5100)
 
@@ -873,7 +876,7 @@ func TestReloadRecoversDroppedIndexEntriesSoGCCanRetract(t *testing.T) {
 // boot is where it has to be caught: resolveManifestIndexRetraction rejects the
 // same entry on every GC cycle forever while only logging a warning.
 func TestReloadRejectsUnusableManifestIndexEntry(t *testing.T) {
-	withSegmentIndexEtcdWrites(t, false)
+	withSegmentIndexManifestWrites(t, true)
 	m := setupManifestReloadMeta(t)
 	infos := mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{{
 		IndexID:               500,
@@ -905,7 +908,7 @@ func TestReloadRejectsUnusableManifestIndexEntry(t *testing.T) {
 // COLLECTION_ROOTED artifact leaks permanently - recycleUnusedIndexFilesV1 is
 // driven by metadata that no longer exists.
 func TestDroppedSegmentKeepsSegmentIndexEtcdWrite(t *testing.T) {
-	withSegmentIndexEtcdWrites(t, false)
+	withSegmentIndexManifestWrites(t, true)
 	m := setupManifestReloadMeta(t)
 	m.indexMeta.manifestBackedSegment = m.isManifestBackedSegment
 	require.True(t, m.isManifestBackedSegment(5001), "the healthy V3 segment is manifest-backed")
@@ -975,7 +978,7 @@ func seedUnpublishedBuild(t *testing.T, m *meta, indexName string) {
 // decline, and setJobInfo must record the result the legacy way so the record
 // goes terminal and dies with the ordinary dropped-index GC path.
 func TestPublishIndexToManifestDeclinesDroppedIndexDefinition(t *testing.T) {
-	withSegmentIndexEtcdWrites(t, true)
+	withSegmentIndexManifestWrites(t, true)
 	store := newFakeManifestStore(t)
 	ctx := context.TODO()
 
@@ -1018,7 +1021,7 @@ func TestPublishIndexToManifestDeclinesDroppedIndexDefinition(t *testing.T) {
 // empty IndexName - must fail the publish attempt with an error rather than
 // commit, and rather than silently falling back to the legacy path.
 func TestPublishIndexToManifestRejectsUnusableEntry(t *testing.T) {
-	withSegmentIndexEtcdWrites(t, true)
+	withSegmentIndexManifestWrites(t, true)
 	store := newFakeManifestStore(t)
 
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
