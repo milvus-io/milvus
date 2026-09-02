@@ -138,8 +138,28 @@ func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, msg message.
 // ids are embedded in the message header), so the source shard's data up to
 // T_switch is flushed and reported to datacoord; the redistribution drain waits
 // for that before declaring the source shard drained.
+//
+// Sealing alone is not enough, and the gap is the L0 delete buffer. The header
+// names L1 segments, so SealSegments moves those out and the sealed policy syncs
+// them promptly. Deletes, however, sit under an L0 segment id that is registered
+// growing and never appears in FlushedSegmentIds, so nothing here would push it:
+// it would wait for the stale policy (syncPeriod, 600s by default) or for the
+// buffer to fill. GetCheckpoint takes the EARLIEST position across all buffers,
+// so that un-synced L0 buffer pins the source channel checkpoint before the
+// fence, and the drain gate -- channelCheckpoint(source) >= T_switch -- stalls
+// for the whole stale period on a source that had deletes and no DML after the
+// fence. Setting the flush timestamp, exactly as HandleManualFlush does, lets
+// the flush-ts policy push the L0 buffer out instead; the source keeps receiving
+// pchannel-level time ticks after the fence, so the policy does fire.
 func (impl *msgHandlerImpl) HandleSplitShard(ctx context.Context, msg message.ImmutableSplitShardMessageV2) error {
-	return impl.wbMgr.SealSegments(ctx, msg.VChannel(), msg.Header().FlushedSegmentIds)
+	vchannel := msg.VChannel()
+	if err := impl.wbMgr.SealSegments(ctx, vchannel, msg.Header().FlushedSegmentIds); err != nil {
+		return errors.Wrap(err, "failed to seal segments")
+	}
+	if err := impl.wbMgr.FlushChannel(ctx, vchannel, msg.TimeTick()); err != nil {
+		return errors.Wrap(err, "failed to flush channel")
+	}
+	return nil
 }
 
 func (impl *msgHandlerImpl) HandleAlterCollection(ctx context.Context, putCollectionMsg message.ImmutableAlterCollectionMessageV2) error {
