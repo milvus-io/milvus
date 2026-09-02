@@ -101,20 +101,20 @@ func TestWALIdempotencyAppend(t *testing.T) {
 	rwWAL.Close()
 }
 
-// TestRecoveryDoesNotStartWALSummary ensures the legacy recovery path leaves
-// summary object storage untouched, even when in-memory idempotency is enabled.
-func TestRecoveryDoesNotStartWALSummary(t *testing.T) {
+// TestRecoveryStartsWALSummary verifies async recovery publishes summary
+// state and reopens it under a fresh assignment term.
+func TestRecoveryStartsWALSummary(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 	params.Save(params.EtcdCfg.RootPath.Key, fmt.Sprintf("idempotency-chunk-%d", time.Now().UnixNano()))
 	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "true")
 	// Seal on the first record rather than at the 16MiB default.
-	params.Save(params.StreamingCfg.IdempotencyChunkMaxBytes.Key, "1")
+	params.Save(params.StreamingCfg.FlushL0MaxSize.Key, "1")
 	message.RegisterDefaultWALName(message.WALNameTest)
 	defer func() {
 		params.Reset(params.EtcdCfg.RootPath.Key)
 		params.Reset(params.StreamingCfg.IdempotencyEnabled.Key)
-		params.Reset(params.StreamingCfg.IdempotencyChunkMaxBytes.Key)
+		params.Reset(params.StreamingCfg.FlushL0MaxSize.Key)
 	}()
 
 	chunkManager := initIdempotencyResourceForTest(t)
@@ -144,13 +144,14 @@ func TestRecoveryDoesNotStartWALSummary(t *testing.T) {
 	require.NoError(t, err)
 	rwWAL.Close()
 
+	channel.Term++
 	recoveredWAL, err := opener.Open(ctx, &wal.OpenOption{Channel: channel, DisableFlusher: true})
 	require.NoError(t, err)
 	recoveredWAL.Close()
 	prefix := chunkManager.RootPath() + "/"
 	keys, _, err := storage.ListAllChunkWithPrefix(ctx, chunkManager, prefix, true)
 	require.NoError(t, err)
-	require.Empty(t, keys, "legacy recovery must not publish summary objects")
+	require.NotEmpty(t, keys, "async recovery publishes summary state")
 }
 
 func initIdempotencyResourceForTest(t *testing.T) storage.ChunkManager {

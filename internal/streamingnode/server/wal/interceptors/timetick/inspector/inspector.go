@@ -32,6 +32,9 @@ type TimeTickSyncInspector interface {
 	// RegisterSyncOperator registers a sync operator.
 	RegisterSyncOperator(operator TimeTickSyncOperator)
 
+	// GetOperator gets the operator by pchannel info.
+	GetOperator(types.PChannelInfo) (TimeTickSyncOperator, bool)
+
 	// MustGetOperator gets the operator by pchannel info, otherwise panic.
 	MustGetOperator(types.PChannelInfo) TimeTickSyncOperator
 
