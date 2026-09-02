@@ -5911,10 +5911,12 @@ func TestSearchTaskHybridSearchSubRequestFunctionScore(t *testing.T) {
 	require.NoError(t, err)
 
 	subRequestFunctionScore := &schemapb.FunctionScore{
+		Params: []*commonpb.KeyValuePair{{Key: "boost_mode", Value: "sum"}},
 		Functions: []*schemapb.FunctionSchema{{
 			Type: schemapb.FunctionType_Rerank,
 			Params: []*commonpb.KeyValuePair{
 				{Key: "reranker", Value: "boost"},
+				{Key: "filter", Value: "pk == 7"},
 				{Key: "weight", Value: "2.0"},
 			},
 		}},
@@ -5932,23 +5934,33 @@ func TestSearchTaskHybridSearchSubRequestFunctionScore(t *testing.T) {
 	boostSubRequest := proto.Clone(subRequest).(*milvuspb.SearchRequest)
 	boostSubRequest.FunctionScore = subRequestFunctionScore
 
-	searchRequest, subReqFunctionScores := convertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
-		CollectionName: "test_hybrid_sub_request_function_score",
-		RankParams:     []*commonpb.KeyValuePair{{Key: LimitKey, Value: "10"}},
-		Requests:       []*milvuspb.SearchRequest{subRequest, boostSubRequest},
-	})
+	newTask := func(requests ...*milvuspb.SearchRequest) *searchTask {
+		searchRequest, hybridSubRequests := convertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
+			CollectionName: "test_hybrid_sub_request_function_score",
+			RankParams:     []*commonpb.KeyValuePair{{Key: LimitKey, Value: "10"}},
+			Requests:       requests,
+			FunctionScore: &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{{
+				Type: schemapb.FunctionType_Rerank,
+				Params: []*commonpb.KeyValuePair{
+					{Key: "reranker", Value: "weighted"},
+					{Key: "weights", Value: "[0.5, 0.5]"},
+				},
+			}}},
+		})
 
-	task := &searchTask{
-		ctx:                    ctx,
-		collectionName:         searchRequest.GetCollectionName(),
-		SearchRequest:          &internalpb.SearchRequest{CollectionID: 1, PartitionIDs: []int64{1}, OutputFieldsId: []int64{100}},
-		request:                searchRequest,
-		subReqFunctionScores:   subReqFunctionScores,
-		schema:                 mustNewSchemaInfo(schema),
-		translatedOutputFields: []string{"pk"},
-		tr:                     timerecord.NewTimeRecorder("test"),
+		return &searchTask{
+			ctx:                    ctx,
+			collectionName:         searchRequest.GetCollectionName(),
+			SearchRequest:          &internalpb.SearchRequest{CollectionID: 1, PartitionIDs: []int64{1}, OutputFieldsId: []int64{100}},
+			request:                searchRequest,
+			hybridSubRequests:      hybridSubRequests,
+			schema:                 mustNewSchemaInfo(schema),
+			translatedOutputFields: []string{"pk"},
+			tr:                     timerecord.NewTimeRecorder("test"),
+		}
 	}
 
+	task := newTask(subRequest, boostSubRequest)
 	require.NoError(t, task.initAdvancedSearchRequest(ctx))
 	require.Len(t, task.SubReqs, 2)
 	firstPlan := &planpb.PlanNode{}
@@ -5958,6 +5970,33 @@ func TestSearchTaskHybridSearchSubRequestFunctionScore(t *testing.T) {
 	require.NoError(t, proto.Unmarshal(task.SubReqs[1].GetSerializedExprPlan(), secondPlan))
 	require.Len(t, secondPlan.GetScorers(), 1)
 	assert.Equal(t, float32(2), secondPlan.GetScorers()[0].GetWeight())
+	assert.NotNil(t, secondPlan.GetScorers()[0].GetFilter())
+	assert.Equal(t, planpb.BoostMode_BoostModeSum, secondPlan.GetScoreOption().GetBoostMode())
+
+	for _, rerankerName := range []string{"decay", "weighted", "rrf", "model"} {
+		t.Run("rejects_"+rerankerName, func(t *testing.T) {
+			invalidSubRequest := proto.Clone(subRequest).(*milvuspb.SearchRequest)
+			invalidSubRequest.FunctionScore = &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{{
+				Type:   schemapb.FunctionType_Rerank,
+				Params: []*commonpb.KeyValuePair{{Key: "reranker", Value: rerankerName}},
+			}}}
+
+			err := newTask(invalidSubRequest).initAdvancedSearchRequest(ctx)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "only supports boost rerankers")
+		})
+	}
+
+	t.Run("rejects_empty_function_score", func(t *testing.T) {
+		invalidSubRequest := proto.Clone(subRequest).(*milvuspb.SearchRequest)
+		invalidSubRequest.FunctionScore = &schemapb.FunctionScore{}
+
+		err := newTask(invalidSubRequest).initAdvancedSearchRequest(ctx)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "must contain at least one boost reranker")
+	})
 }
 
 func TestSearchTask_AddHighlightTask(t *testing.T) {
