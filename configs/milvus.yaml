@@ -944,6 +944,7 @@ dataNode:
     levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.
     useMergeSort: true # Whether to enable mergeSort mode when performing mixCompaction.
     maxSegmentMergeSort: 30 # The maximum number of segments to be merged in mergeSort mode.
+    sortReadBufferSize: 2g # Read buffer of the record reader a sort compaction opens on its input segment. A larger buffer lets the packed reader prefetch column chunks in parallel instead of reading them serially; the buffer is transient read memory held while the sort streams its input.
     lobHoleRatioThreshold: 0.3 # The hole ratio threshold for TEXT column compaction. If hole_ratio >= threshold, rewrite LOB files; otherwise reuse existing LOB files.
   text:
     inlineThreshold: 65536 # TEXT values smaller than this threshold (in bytes) are stored inline instead of in LOB files.

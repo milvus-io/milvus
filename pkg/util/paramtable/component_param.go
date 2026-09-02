@@ -7463,10 +7463,11 @@ type dataNodeConfig struct {
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
 	L0CompactionMaxBatchSize ParamItem `refreshable:"true"`
-	UseMergeSort             ParamItem `refreshable:"true"`
-	MaxSegmentMergeSort      ParamItem `refreshable:"true"`
-	MaxCompactionConcurrency ParamItem `refreshable:"true"`
-	LOBHoleRatioThreshold    ParamItem `refreshable:"true"`
+	UseMergeSort                 ParamItem `refreshable:"true"`
+	MaxSegmentMergeSort          ParamItem `refreshable:"true"`
+	MaxCompactionConcurrency     ParamItem `refreshable:"true"`
+	CompactionSortReadBufferSize ParamItem `refreshable:"true"`
+	LOBHoleRatioThreshold        ParamItem `refreshable:"true"`
 
 	// TEXT column compaction configurations
 	TextInlineThreshold     ParamItem `refreshable:"true"`
@@ -7966,6 +7967,15 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export:       false,
 	}
 	p.MaxCompactionConcurrency.Init(base.mgr)
+
+	p.CompactionSortReadBufferSize = ParamItem{
+		Key:          "dataNode.compaction.sortReadBufferSize",
+		Version:      "3.0.1",
+		Doc:          "Read buffer of the record reader a sort compaction opens on its input segment. A larger buffer lets the packed reader prefetch column chunks in parallel instead of reading them serially; the buffer is transient read memory held while the sort streams its input.",
+		DefaultValue: "2g",
+		Export:       true,
+	}
+	p.CompactionSortReadBufferSize.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataNode.gracefulStopTimeout",
