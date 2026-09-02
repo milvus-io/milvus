@@ -1152,49 +1152,49 @@ func (_c *MockShardManager_FlushSegment_Call) RunAndReturn(run func(message.Immu
 	return _c
 }
 
-// GetSplitTimeTick provides a mock function with given fields: collectionID, vchannel
-func (_m *MockShardManager) GetSplitTimeTick(collectionID int64, vchannel string) uint64 {
+// GetSplitFence provides a mock function with given fields: collectionID, vchannel
+func (_m *MockShardManager) GetSplitFence(collectionID int64, vchannel string) shards.SplitFence {
 	ret := _m.Called(collectionID, vchannel)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetSplitTimeTick")
+		panic("no return value specified for GetSplitFence")
 	}
 
-	var r0 uint64
-	if rf, ok := ret.Get(0).(func(int64, string) uint64); ok {
+	var r0 shards.SplitFence
+	if rf, ok := ret.Get(0).(func(int64, string) shards.SplitFence); ok {
 		r0 = rf(collectionID, vchannel)
 	} else {
-		r0 = ret.Get(0).(uint64)
+		r0 = ret.Get(0).(shards.SplitFence)
 	}
 
 	return r0
 }
 
-// MockShardManager_GetSplitTimeTick_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSplitTimeTick'
-type MockShardManager_GetSplitTimeTick_Call struct {
+// MockShardManager_GetSplitFence_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSplitFence'
+type MockShardManager_GetSplitFence_Call struct {
 	*mock.Call
 }
 
-// GetSplitTimeTick is a helper method to define mock.On call
+// GetSplitFence is a helper method to define mock.On call
 //   - collectionID int64
 //   - vchannel string
-func (_e *MockShardManager_Expecter) GetSplitTimeTick(collectionID interface{}, vchannel interface{}) *MockShardManager_GetSplitTimeTick_Call {
-	return &MockShardManager_GetSplitTimeTick_Call{Call: _e.mock.On("GetSplitTimeTick", collectionID, vchannel)}
+func (_e *MockShardManager_Expecter) GetSplitFence(collectionID interface{}, vchannel interface{}) *MockShardManager_GetSplitFence_Call {
+	return &MockShardManager_GetSplitFence_Call{Call: _e.mock.On("GetSplitFence", collectionID, vchannel)}
 }
 
-func (_c *MockShardManager_GetSplitTimeTick_Call) Run(run func(collectionID int64, vchannel string)) *MockShardManager_GetSplitTimeTick_Call {
+func (_c *MockShardManager_GetSplitFence_Call) Run(run func(collectionID int64, vchannel string)) *MockShardManager_GetSplitFence_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(int64), args[1].(string))
 	})
 	return _c
 }
 
-func (_c *MockShardManager_GetSplitTimeTick_Call) Return(_a0 uint64) *MockShardManager_GetSplitTimeTick_Call {
+func (_c *MockShardManager_GetSplitFence_Call) Return(_a0 shards.SplitFence) *MockShardManager_GetSplitFence_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockShardManager_GetSplitTimeTick_Call) RunAndReturn(run func(int64, string) uint64) *MockShardManager_GetSplitTimeTick_Call {
+func (_c *MockShardManager_GetSplitFence_Call) RunAndReturn(run func(int64, string) shards.SplitFence) *MockShardManager_GetSplitFence_Call {
 	_c.Call.Return(run)
 	return _c
 }

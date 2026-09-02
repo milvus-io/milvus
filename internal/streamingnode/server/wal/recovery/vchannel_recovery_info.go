@@ -239,6 +239,9 @@ func (info *vchannelRecoveryInfo) ObserveSplitShard(msg message.ImmutableSplitSh
 	// CheckpointTimeTick which keeps advancing; it is read back on an
 	// already-fenced re-fence so the split coordinator recovers T_switch.
 	info.meta.SplitTimeTick = msg.TimeTick()
+	// The task that placed the fence, so a re-fence can tell the same task's
+	// retry from a concurrent task landing on a source it does not own.
+	info.meta.SplitTaskId = msg.Header().GetSplitTaskId()
 	info.dirty = true
 }
 

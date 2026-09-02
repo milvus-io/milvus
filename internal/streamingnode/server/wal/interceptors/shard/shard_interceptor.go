@@ -260,7 +260,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			// the vchannel is fenced by shard split, the client should refresh
 			// the routing table and write to the new shards. T_switch is not
 			// carried here: the DML client refreshes routing, it never reads it.
-			return nil, status.NewShardFenced(msg.VChannel(), 0)
+			return nil, status.NewShardFenced(msg.VChannel(), 0, 0)
 		}
 		// This pchannel has never held the vchannel, so no routing refresh sends
 		// the write anywhere -- terminal, unlike the fence above. It must still
@@ -368,7 +368,7 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 			// the vchannel is fenced by shard split, the client should refresh
 			// the routing table and write to the new shards. T_switch is not
 			// carried here: the DML client refreshes routing, it never reads it.
-			return nil, status.NewShardFenced(msg.VChannel(), 0)
+			return nil, status.NewShardFenced(msg.VChannel(), 0, 0)
 		}
 		// This pchannel has never held the vchannel, so no routing refresh sends
 		// the write anywhere -- terminal, unlike the fence above. It must still
@@ -402,7 +402,8 @@ func (impl *shardInterceptor) handleSplitShardMessage(ctx context.Context, msg m
 			// idempotent: the vchannel is already fenced by a previous split
 			// message; carry the recorded T_switch back on the error so the
 			// split coordinator recovers it after a crash that lost it.
-			return nil, status.NewShardFenced(msg.VChannel(), impl.shardManager.GetSplitTimeTick(collectionID, msg.VChannel()))
+			fence := impl.shardManager.GetSplitFence(collectionID, msg.VChannel())
+			return nil, status.NewShardFenced(msg.VChannel(), fence.TimeTick, fence.TaskID)
 		}
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
