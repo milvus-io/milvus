@@ -88,6 +88,7 @@ func newScannerAdaptor(
 	name string,
 	l walimpls.ROWALImpls,
 	readOption wal.ReadOption,
+	roOpener roWALOpener,
 	scanMetrics *metricsutil.ScannerMetrics,
 	cleanup func(),
 	recovery bool,
@@ -106,6 +107,7 @@ func newScannerAdaptor(
 		recovery:        recovery,
 		innerWAL:        l,
 		readOption:      readOption,
+		roOpener:        roOpener,
 		filterFunc:      options.GetFilterFunc(readOption.MessageFilter),
 		reorderBuffer:   utility.NewReOrderBuffer(),
 		pendingQueue:    utility.NewPendingQueue(),
@@ -126,6 +128,7 @@ type scannerAdaptorImpl struct {
 	logger        *mlog.Logger
 	innerWAL      walimpls.ROWALImpls
 	readOption    wal.ReadOption
+	roOpener      roWALOpener
 	filterFunc    func(message.ImmutableMessage) bool
 	reorderBuffer *utility.ReOrderByTimeTickBuffer // support time tick reorder.
 	pendingQueue  *utility.PendingQueue
@@ -167,21 +170,27 @@ func (s *scannerAdaptorImpl) clear() {
 }
 
 func (s *scannerAdaptorImpl) execute() {
+	var executeErr error
 	defer func() {
 		s.readOption.MesasgeHandler.Close()
-		s.Finish(nil)
+		s.Finish(executeErr)
+		if executeErr != nil {
+			s.logger.Info(context.TODO(), "scanner is closed", mlog.Err(executeErr))
+			return
+		}
 		s.logger.Info(context.TODO(), "scanner is closed")
 	}()
 	s.logger.Info(context.TODO(), "scanner start background task")
 
 	msgChan := make(chan message.ImmutableMessage)
-
-	ch := make(chan struct{})
-	defer func() { <-ch }()
+	executeCtx, cancel := context.WithCancel(s.Context())
+	defer cancel()
+	produceResult := make(chan error, 1)
 	// TODO: optimize the extra goroutine here after msgstream is removed.
 	go func() {
-		defer close(ch)
-		err := s.produceEventLoop(msgChan)
+		err := s.produceEventLoop(executeCtx, msgChan)
+		produceResult <- err
+		cancel()
 		if errors.Is(err, context.Canceled) {
 			s.logger.Info(context.TODO(), "the produce event loop of scanner is closed")
 			return
@@ -189,16 +198,27 @@ func (s *scannerAdaptorImpl) execute() {
 		s.logger.Warn(context.TODO(), "the produce event loop of scanner is closed with unexpected error", mlog.Err(err))
 	}()
 
-	err := s.consumeEventLoop(msgChan)
-	if errors.Is(err, context.Canceled) {
+	consumeErr := s.consumeEventLoop(executeCtx, msgChan)
+	cancel()
+	produceErr := <-produceResult
+
+	if errors.Is(consumeErr, context.Canceled) {
 		s.logger.Info(context.TODO(), "the consuming event loop of scanner is closed")
-		return
+	} else if consumeErr != nil {
+		s.logger.Warn(context.TODO(), "the consuming event loop of scanner is closed with unexpected error", mlog.Err(consumeErr))
 	}
-	s.logger.Warn(context.TODO(), "the consuming event loop of scanner is closed with unexpected error", mlog.Err(err))
+
+	executeErr = consumeErr
+	if produceErr != nil && !errors.Is(produceErr, context.Canceled) {
+		executeErr = produceErr
+	}
+	if s.Context().Err() != nil && errors.Is(executeErr, context.Canceled) {
+		executeErr = nil
+	}
 }
 
 // produceEventLoop produces the message from the wal and write ahead buffer.
-func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMessage) error {
+func (s *scannerAdaptorImpl) produceEventLoop(ctx context.Context, msgChan chan<- message.ImmutableMessage) error {
 	var wb wab.ROWriteAheadBuffer
 	var err error
 	if s.Channel().AccessMode == types.AccessModeRW && !s.recovery {
@@ -213,7 +233,28 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 		wb = resource.Resource().TimeTickInspector().MustGetOperator(s.Channel()).WriteAheadBuffer()
 	}
 
-	scanner := newSwithableScanner(s.Name(), s.logger, s.innerWAL, wb, s.readOption.DeliverPolicy, msgChan)
+	roOpener := s.roOpener
+	if s.recovery {
+		// AlterWAL recovery must keep scanning the current WAL past the AlterWAL
+		// marker until a following TimeTick releases the marker from the reorder
+		// buffer. Switching to the target WAL here would wait for a WAL that is
+		// created only after the flusher checkpoint reaches the marker, causing a
+		// circular wait.
+		roOpener = nil
+	}
+
+	scanner := newSwithableScanner(
+		s.Name(),
+		s.logger,
+		s.innerWAL,
+		wb,
+		s.readOption.DeliverPolicy,
+		msgChan,
+		roOpener,
+		func(walName message.WALName) {
+			s.metrics.SetReaderWALName(walName)
+		},
+	)
 	s.logger.Info(context.TODO(), "start produce loop of scanner at model", mlog.String("model", getScannerModel(scanner)))
 	for {
 		if s.readOption.RateLimitControl != nil {
@@ -231,7 +272,7 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 				s.readOption.RateLimitControl.EnterRecoveryMode()
 			}
 		}
-		if scanner, err = scanner.Do(s.Context()); err != nil {
+		if scanner, err = scanner.Do(ctx); err != nil {
 			return err
 		}
 		m := getScannerModel(scanner)
@@ -241,8 +282,8 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 }
 
 // consumeEventLoop consumes the message from the message channel and handle it.
-func (s *scannerAdaptorImpl) consumeEventLoop(msgChan <-chan message.ImmutableMessage) error {
-	s.waitUntilStartConsumption()
+func (s *scannerAdaptorImpl) consumeEventLoop(ctx context.Context, msgChan <-chan message.ImmutableMessage) error {
+	s.waitUntilStartConsumption(ctx)
 	for {
 		var upstream <-chan message.ImmutableMessage
 		if s.pendingQueue.Len() > 16 {
@@ -253,7 +294,7 @@ func (s *scannerAdaptorImpl) consumeEventLoop(msgChan <-chan message.ImmutableMe
 		}
 		// generate the event channel and do the event loop.
 		handleResult := s.readOption.MesasgeHandler.Handle(message.HandleParam{
-			Ctx:      s.Context(),
+			Ctx:      ctx,
 			Upstream: upstream,
 			Message:  s.pendingQueue.Next(),
 		})
@@ -271,7 +312,7 @@ func (s *scannerAdaptorImpl) consumeEventLoop(msgChan <-chan message.ImmutableMe
 }
 
 // waitUntilStartConsumption is used to wait until the consumption is started.
-func (s *scannerAdaptorImpl) waitUntilStartConsumption() {
+func (s *scannerAdaptorImpl) waitUntilStartConsumption(ctx context.Context) {
 	s.metrics.PauseConsumption()
 	defer s.metrics.ResumeConsumption()
 
@@ -295,7 +336,7 @@ func (s *scannerAdaptorImpl) waitUntilStartConsumption() {
 		select {
 		case <-resumeChan:
 			s.logger.Info(context.TODO(), "continue to consume messages")
-		case <-s.Context().Done():
+		case <-ctx.Done():
 			s.logger.Info(context.TODO(), "pause consumption is canceled")
 		}
 	}

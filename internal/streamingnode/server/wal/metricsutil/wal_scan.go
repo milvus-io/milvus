@@ -24,6 +24,7 @@ func NewScanMetrics(pchannel types.PChannelInfo) *ScanMetrics {
 	return &ScanMetrics{
 		constLabel:    constLabel,
 		scannerTotal:  metrics.WALScannerTotal.MustCurryWith(constLabel),
+		readerInfo:    metrics.WALConsumerReaderInfo.MustCurryWith(constLabel),
 		scannerPaused: metrics.WALScannerPauseConsumption.With(constLabel),
 		tailing: underlyingScannerMetrics{
 			messageBytes:           metrics.WALScanMessageBytes.With(tailingLabel),
@@ -49,6 +50,7 @@ func NewScanMetrics(pchannel types.PChannelInfo) *ScanMetrics {
 type ScanMetrics struct {
 	constLabel       prometheus.Labels
 	scannerTotal     *prometheus.GaugeVec
+	readerInfo       *prometheus.GaugeVec
 	scannerPaused    prometheus.Gauge
 	catchup          underlyingScannerMetrics
 	tailing          underlyingScannerMetrics
@@ -98,9 +100,18 @@ func (m *ScanMetrics) NewScannerMetrics() *ScannerMetrics {
 	}
 }
 
+// NewConsumerScannerMetrics creates scanner metrics for a vchannel consumer reader.
+func (m *ScanMetrics) NewConsumerScannerMetrics(vchannel, readerName string) *ScannerMetrics {
+	scannerMetrics := m.NewScannerMetrics()
+	scannerMetrics.readerVChannel = vchannel
+	scannerMetrics.readerName = readerName
+	return scannerMetrics
+}
+
 // Close closes the metrics.
 func (m *ScanMetrics) Close() {
 	metrics.WALScannerTotal.DeletePartialMatch(m.constLabel)
+	metrics.WALConsumerReaderInfo.DeletePartialMatch(m.constLabel)
 	metrics.WALScannerPauseConsumption.DeletePartialMatch(m.constLabel)
 	metrics.WALScanMessageBytes.DeletePartialMatch(m.constLabel)
 	metrics.WALScanPassMessageBytes.DeletePartialMatch(m.constLabel)
@@ -115,10 +126,31 @@ func (m *ScanMetrics) Close() {
 
 type ScannerMetrics struct {
 	*ScanMetrics
+	readerVChannel           string
+	readerName               string
 	scannerModel             string
 	previousTxnBufSize       int
 	previousTimeTickBufSize  int
 	previousPendingQueueSize int
+}
+
+// SetReaderWALName records the WAL backend currently used by this consumer reader.
+func (m *ScannerMetrics) SetReaderWALName(walName message.WALName) {
+	if m.readerName == "" {
+		return
+	}
+	m.deleteReaderInfo()
+	m.readerInfo.WithLabelValues(m.readerVChannel, m.readerName, walName.String()).Set(1)
+}
+
+func (m *ScannerMetrics) deleteReaderInfo() {
+	if m.readerName == "" {
+		return
+	}
+	m.readerInfo.DeletePartialMatch(prometheus.Labels{
+		metrics.WALVChannelLabelName:   m.readerVChannel,
+		metrics.WALReaderNameLabelName: m.readerName,
+	})
 }
 
 // SwitchModel switches the scanner model.
@@ -186,6 +218,7 @@ func (m *ScannerMetrics) UpdateTimeTickBufSize(size int) {
 }
 
 func (m *ScannerMetrics) Close() {
+	m.deleteReaderInfo()
 	m.UpdatePendingQueueSize(0)
 	m.UpdateTimeTickBufSize(0)
 	m.UpdateTxnBufSize(0)

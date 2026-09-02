@@ -172,8 +172,13 @@ func (o *openerAdaptorImpl) getOrCreateOpenerImpl(ctx context.Context, walName m
 		return opener, nil
 	}
 
-	// Build and cache new opener
-	builderImpl := registry.MustGetBuilder(walName)
+	// Build and cache new opener. WAL names in a consumer position
+	// may come from an untrusted wire enum, so never use the panicking lookup on
+	// this path.
+	builderImpl, ok := registry.GetBuilder(walName)
+	if !ok {
+		return nil, status.NewWALNameMismatchError("registered WAL", walName.String())
+	}
 	opener, err := builderImpl.Build()
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to build walimpls opener for %s", walName)
@@ -184,12 +189,29 @@ func (o *openerAdaptorImpl) getOrCreateOpenerImpl(ctx context.Context, walName m
 	return opener, nil
 }
 
+// openUnderlyingROWALImpls opens the requested underlying WAL implementation in read-only mode.
+func (o *openerAdaptorImpl) openUnderlyingROWALImpls(
+	ctx context.Context,
+	walName message.WALName,
+	channel types.PChannelInfo,
+) (walimpls.ROWALImpls, error) {
+	if walName == message.WALNameRocksmq && !paramtable.IsStandalone() {
+		return nil, status.NewUnrecoverableError("RocksMQ WAL is unavailable outside standalone mode")
+	}
+	openerImpl, err := o.getOrCreateOpenerImpl(ctx, walName)
+	if err != nil {
+		return nil, err
+	}
+	channel.AccessMode = types.AccessModeRO
+	return openerImpl.Open(ctx, &walimpls.OpenOption{Channel: channel})
+}
+
 // openRWWAL opens a read write wal instance for the channel.
 func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, opt *wal.OpenOption) (wal.WAL, error) {
 	id := o.idAllocator.Allocate()
 	roWAL := adaptImplsToROWAL(l, func() {
 		o.walInstances.Remove(id)
-	})
+	}, o.openUnderlyingROWALImpls)
 	resources := &walOpenResources{roWAL: roWAL}
 	defer resources.Close()
 
@@ -502,7 +524,7 @@ func (o *openerAdaptorImpl) openROWAL(l walimpls.WALImpls) (wal.WAL, error) {
 	id := o.idAllocator.Allocate()
 	wal := adaptImplsToROWAL(l, func() {
 		o.walInstances.Remove(id)
-	})
+	}, o.openUnderlyingROWALImpls)
 	o.walInstances.Insert(id, wal)
 	return wal, nil
 }

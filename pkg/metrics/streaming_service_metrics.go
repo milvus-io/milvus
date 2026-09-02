@@ -25,6 +25,8 @@ const (
 	ResourceKeyLockLabelName              = "rk_lock"
 	WALAccessModelLabelName               = "access_model"
 	WALScannerModelLabelName              = "scanner_model"
+	WALVChannelLabelName                  = "vchannel"
+	WALReaderNameLabelName                = "reader_name"
 	TimeTickSyncTypeLabelName             = "type"
 	TimeTickAckTypeLabelName              = "type"
 	WALInterceptorLabelName               = "interceptor_name"
@@ -413,6 +415,11 @@ var (
 		Help: "Total of wal scanner on current streaming node",
 	}, WALChannelLabelName, WALScannerModelLabelName)
 
+	WALConsumerReaderInfo = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "consumer_reader_info",
+		Help: "Current WAL backend used by a vchannel consumer reader",
+	}, WALChannelLabelName, WALVChannelLabelName, WALReaderNameLabelName, WALNameLabelName)
+
 	WALScannerPauseConsumption = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "scanner_pause_consumption",
 		Help: "Whether to pause consumption of wal scanner",
@@ -688,6 +695,7 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALWriteAheadBufferEarliestTimeTick)
 	registry.MustRegister(WALWriteAheadBufferLatestTimeTick)
 	registry.MustRegister(WALScannerTotal)
+	registry.MustRegister(WALConsumerReaderInfo)
 	registry.MustRegister(WALScannerPauseConsumption)
 	registry.MustRegister(WALScanMessageBytes)
 	registry.MustRegister(WALScanMessageTotal)

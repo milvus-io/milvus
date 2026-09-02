@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -58,6 +59,33 @@ func TestOpenerAdaptorFailure(t *testing.T) {
 	l, err := opener.Open(context.Background(), &wal.OpenOption{})
 	assert.ErrorIs(t, err, errExpected)
 	assert.Nil(t, l)
+}
+
+func TestGetOrCreateOpenerImplReturnsErrorForUnregisteredWAL(t *testing.T) {
+	opener := &openerAdaptorImpl{
+		openerCache: make(map[message.WALName]walimpls.OpenerImpls),
+	}
+
+	var err error
+	assert.NotPanics(t, func() {
+		_, err = opener.getOrCreateOpenerImpl(context.Background(), message.WALName(12345))
+	})
+	require.Error(t, err)
+	assert.True(t, status.AsStreamingError(err).IsWALNameMismatch())
+}
+
+func TestOpenUnderlyingRocksMQRejectsClusterMode(t *testing.T) {
+	oldRole := paramtable.GetRole()
+	paramtable.SetRole(typeutil.StreamingNodeRole)
+	defer paramtable.SetRole(oldRole)
+
+	_, err := (&openerAdaptorImpl{}).openUnderlyingROWALImpls(
+		context.Background(),
+		message.WALNameRocksmq,
+		types.PChannelInfo{Name: "test-channel"},
+	)
+	require.Error(t, err)
+	assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
 }
 
 func TestOpenRWWALCleansRecoveredShardManagerOnReplicateRecoveryFailure(t *testing.T) {
@@ -186,7 +214,7 @@ func TestHandleAlterWALFlushingStagePassesRateLimitComponent(t *testing.T) {
 		appendFunc: func(context.Context, message.MutableMessage) (message.MessageID, error) {
 			return rmq.NewRmqID(1), nil
 		},
-	}, func() {})
+	}, func() {}, nil)
 	rateLimitComponent := roWAL.WALRateLimitComponent
 
 	rs := mock_recovery.NewMockRecoveryStorage(t)

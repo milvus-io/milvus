@@ -4,13 +4,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
@@ -28,6 +26,7 @@ type roWALAdaptorImpl struct {
 	availableCancel context.CancelFunc
 	idAllocator     *typeutil.IDAllocator
 	roWALImpls      walimpls.ROWALImpls
+	roOpener        roWALOpener
 	scannerRegistry scannerRegistry
 	scanners        *typeutil.ConcurrentMap[int64, wal.Scanner]
 	cleanup         func()
@@ -85,11 +84,6 @@ func (w *roWALAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.S
 	}
 	defer w.lifetime.Done()
 
-	// Validate DeliverPolicy: if it's StartFrom or StartAfter, check that the message ID's WALName matches the current WAL name
-	if mismatchWALNameErr := w.checkReadOptWALName(opts); mismatchWALNameErr != nil {
-		return nil, mismatchWALNameErr
-	}
-
 	name, err := w.scannerRegistry.AllocateScannerName()
 	if err != nil {
 		return nil, err
@@ -100,35 +94,12 @@ func (w *roWALAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.S
 		name,
 		w.roWALImpls,
 		opts,
-		w.scanMetrics.NewScannerMetrics(),
+		w.roOpener,
+		w.scanMetrics.NewConsumerScannerMetrics(opts.VChannel, name),
 		func() { w.scanners.Remove(id) },
 		w.forceRecovery)
 	w.scanners.Insert(id, s)
 	return s, nil
-}
-
-func (w *roWALAdaptorImpl) checkReadOptWALName(opts wal.ReadOption) error {
-	if opts.DeliverPolicy != nil {
-		currentWALName := w.WALName()
-		var msgID *commonpb.MessageID
-
-		switch t := opts.DeliverPolicy.GetPolicy().(type) {
-		case *streamingpb.DeliverPolicy_StartFrom:
-			msgID = t.StartFrom
-		case *streamingpb.DeliverPolicy_StartAfter:
-			msgID = t.StartAfter
-		}
-
-		if msgID != nil {
-			msgWALName := message.WALName(msgID.WALName)
-			if msgWALName != currentWALName {
-				w.Logger().Info(context.TODO(),
-					"WAL name mismatch", mlog.String("msgIDWALName", msgWALName.String()), mlog.String("currentWALName", currentWALName.String()))
-				return status.NewWALNameMismatchError(currentWALName.String(), msgWALName.String())
-			}
-		}
-	}
-	return nil
 }
 
 // IsAvailable returns whether the wal is available.
