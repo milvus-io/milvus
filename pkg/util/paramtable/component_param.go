@@ -84,9 +84,9 @@ type ComponentParam struct {
 	baseTable *BaseTable
 
 	// versionGates drives the version-gated config items (e.g. write-before
-	// function materialization). It is created and started right after
-	// paramtable initialization; see initVersionGates.
-	versionGates *Confirmator
+	// function materialization). It is created and started by the MixCoord
+	// role after the role has been set; see StartVersionGateSwitcher.
+	versionGates *confirmator
 
 	CommonCfg       commonConfig
 	QuotaConfig     quotaConfig
@@ -193,8 +193,6 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.StreamingNodeGrpcClientCfg.Init("streamingNode", bt)
 
 	p.IntegrationTestCfg.init(bt)
-
-	p.initVersionGates()
 }
 
 // versionGateItems returns every version-gated config item of the param table.
@@ -206,21 +204,34 @@ func (p *ComponentParam) versionGateItems() []*ParamItem {
 	}
 }
 
-// initVersionGates creates and starts the cluster version confirmator for
-// every version-gated config item, right after paramtable initialization. It
-// is a no-op when remote config is skipped (e.g. tests) or there is no usable
-// etcd, and it never blocks paramtable initialization: the initial resolution
-// reads etcd, so it runs in the background. Once every gate is resolved the
-// confirmator stops itself.
-func (p *ComponentParam) initVersionGates() {
-	if p.baseTable == nil || p.baseTable.config.skipRemote {
+// startVersionGateSwitcherOnce guards the one-shot global version-gate
+// switcher: only the MixCoord role calls StartVersionGateSwitcher, but the
+// once keeps the driving logic idempotent however it is reached.
+var startVersionGateSwitcherOnce sync.Once
+
+// StartVersionGateSwitcher drives every version-gated config item of the
+// process, exactly once. It is only called by the MixCoord role (the single
+// coordinator per cluster) after the role has been set; other roles observe
+// the flipped config value through the regular config refresh. Embedded-etcd
+// deployments are single-process (service_param.go enforces "embedded etcd
+// can not be used under distributed mode"): the local process is the whole
+// cluster, so when the local version already satisfies a gate there is
+// nothing to coordinate across nodes — resolve the gate directly and skip the
+// confirmator (there is no usable etcd client anyway). Otherwise the cluster
+// confirmator is created and started; it runs in the background and stops
+// itself once every gate is resolved. It is a no-op when remote config is
+// skipped (e.g. tests) or there is no usable etcd.
+func StartVersionGateSwitcher() {
+	startVersionGateSwitcherOnce.Do(func() {
+		Get().startVersionGates()
+	})
+}
+
+// startVersionGates implements StartVersionGateSwitcher on a param table.
+func (p *ComponentParam) startVersionGates() {
+	if p == nil || p.baseTable == nil || p.baseTable.config.skipRemote {
 		return
 	}
-	// Embedded-etcd deployments are single-process (service_param.go enforces
-	// "embedded etcd can not be used under distributed mode"): the local process
-	// is the whole cluster, so when the local version already satisfies a gate
-	// there is nothing to coordinate across nodes — resolve the gate directly
-	// and skip the confirmator (there is no usable etcd client anyway).
 	if p.EtcdCfg.UseEmbedEtcd.GetAsBool() {
 		for _, item := range p.versionGateItems() {
 			if item == nil || item.VersionGateSwitcher == nil {
@@ -252,7 +263,7 @@ func (p *ComponentParam) initVersionGates() {
 	if p.baseTable.etcdClient == nil {
 		return
 	}
-	vg, err := RecoverConfirmator(p.baseTable.etcdClient,
+	vg, err := recoverConfirmator(p.baseTable.etcdClient,
 		p.EtcdCfg.MetaRootPath.GetValue(), p.EtcdCfg.RootPath.GetValue(), p.versionGateItems())
 	if err != nil {
 		mlog.Warn(context.TODO(), "recover version gate confirmator failed", mlog.Err(err))
