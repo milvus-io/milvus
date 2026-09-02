@@ -5094,6 +5094,129 @@ func buildStructArrayTestSchema() *schemapb.CollectionSchema {
 	}
 }
 
+func TestSchemaForPathReplaceOperands(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	body := []byte(`{"data":[
+		{"id":1,"my_struct":[{"sub_int":18}]},
+		{"id":2,"my_struct":[{"sub_int":21}]}
+	]}`)
+	ops := []*schemapb.FieldPartialUpdateOp{{
+		FieldName: "my_struct",
+		Op:        schemapb.FieldPartialUpdateOp_PATH_REPLACE,
+		Path:      "[1][sub_int]",
+	}}
+
+	requestSchema, err := schemaForPathReplaceOperands(body, schema, ops)
+	require.NoError(t, err)
+	require.Len(t, requestSchema.GetStructArrayFields()[0].GetFields(), 1)
+	assert.Equal(t, "sub_int", subShortName(requestSchema.GetStructArrayFields()[0].GetFields()[0]))
+	assert.Len(t, schema.GetStructArrayFields()[0].GetFields(), 2, "collection schema must not be mutated")
+
+	rows, validData, err := checkAndSetData(body, requestSchema, true)
+	require.NoError(t, err)
+	fieldsData, err := anyToColumns(rows, validData, requestSchema, false, true)
+	require.NoError(t, err)
+	var structData *schemapb.FieldData
+	for _, field := range fieldsData {
+		if field.GetFieldName() == "my_struct" {
+			structData = field
+			break
+		}
+	}
+	require.NotNil(t, structData)
+	require.Len(t, structData.GetStructArrays().GetFields(), 1)
+	assert.Equal(t, "sub_int", subShortName(requestSchema.GetStructArrayFields()[0].GetFields()[0]))
+}
+
+func TestSchemaForPathReplaceOperandsRejectsDifferentMasks(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	body := []byte(`{"data":[
+		{"id":1,"my_struct":[{"sub_int":18}]},
+		{"id":2,"my_struct":[{"sub_vec":[0.1,0.2,0.3,0.4]}]}
+	]}`)
+	ops := []*schemapb.FieldPartialUpdateOp{{FieldName: "my_struct", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: "[1]"}}
+
+	_, err := schemaForPathReplaceOperands(body, schema, ops)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not match request mask")
+}
+
+func TestSchemaForPathReplaceOperandsKeepsBracketedDynamicKeyLiteral(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	schema.EnableDynamicField = true
+	body := []byte(`{"data":[{
+		"id":1,
+		"my_struct":[{"sub_int":18}],
+		"my_struct[1][sub_int]":"literal"
+	}]}`)
+	ops := []*schemapb.FieldPartialUpdateOp{{FieldName: "my_struct", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: "[1][sub_int]"}}
+
+	requestSchema, err := schemaForPathReplaceOperands(body, schema, ops)
+	require.NoError(t, err)
+	rows, validData, err := checkAndSetData(body, requestSchema, true)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "literal", rows[0]["my_struct[1][sub_int]"])
+
+	fieldsData, err := anyToColumns(rows, validData, requestSchema, false, true)
+	require.NoError(t, err)
+	var dynamicData *schemapb.FieldData
+	for _, field := range fieldsData {
+		if field.GetIsDynamic() {
+			dynamicData = field
+			break
+		}
+	}
+	require.NotNil(t, dynamicData)
+	require.Len(t, dynamicData.GetScalars().GetJsonData().GetData(), 1)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(dynamicData.GetScalars().GetJsonData().GetData()[0], &decoded))
+	assert.Equal(t, "literal", decoded["my_struct[1][sub_int]"])
+}
+
+func TestSchemaForPathReplaceOperandsRejectsScalarArrayNull(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "c_test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Bool},
+		},
+	}
+	pathReplaceOps := []*schemapb.FieldPartialUpdateOp{{
+		FieldName: "scores",
+		Op:        schemapb.FieldPartialUpdateOp_PATH_REPLACE,
+		Path:      "[1]",
+	}}
+	paramtable.Init()
+	key := paramtable.Get().HTTPCfg.CompatibilityMode.Key
+	paramtable.Get().Save(key, "true")
+	defer paramtable.Get().Reset(key)
+
+	for _, operand := range []string{`[null]`, `"[null]"`} {
+		body := []byte(fmt.Sprintf(`{"data":[{"id":1,"scores":%s}]}`, operand))
+		_, err := schemaForPathReplaceOperands(body, schema, pathReplaceOps)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "null operand element at index 0")
+	}
+
+	// The strict raw-token check belongs only to the new PATH_REPLACE
+	// operation. It must not change compatibility-mode handling for an
+	// ordinary whole-field replacement.
+	body := []byte(`{"data":[{"id":1,"scores":[null]}]}`)
+	requestSchema, err := schemaForPathReplaceOperands(body, schema, []*schemapb.FieldPartialUpdateOp{{
+		FieldName: "scores",
+		Op:        schemapb.FieldPartialUpdateOp_REPLACE,
+	}})
+	require.NoError(t, err)
+	rows, _, err := checkAndSetData(body, requestSchema, false)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	array, ok := rows[0]["scores"].(*schemapb.ScalarField)
+	require.True(t, ok)
+	assert.Equal(t, []bool{false}, array.GetBoolData().GetData())
+}
+
 func TestStructArrayFieldSchemaGetProto(t *testing.T) {
 	ctx := context.Background()
 	good := StructArrayFieldSchema{

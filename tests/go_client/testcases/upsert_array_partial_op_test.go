@@ -35,7 +35,7 @@ import (
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
-// End-to-end tests for ARRAY_APPEND / ARRAY_REMOVE partial-update
+// End-to-end tests for Array partial-update
 // operators on Array fields. Unlike the in-process integration test,
 // these run against a live Milvus deployment through the Go SDK.
 
@@ -197,6 +197,30 @@ func TestArrayPartialOpRemove(t *testing.T) {
 	got := queryTagsByPK(ctx, t, mc, collName)
 	require.True(t, equalAsMultiset(got[0], []int64{1, 3, 1}), "row 0 got=%v", got[0])
 	require.True(t, equalAsMultiset(got[1], []int64{10, 20, 30}), "row 1 got=%v", got[1])
+}
+
+func TestArrayPartialOpPathReplacePreservesOrder(t *testing.T) {
+	t.Parallel()
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	collName := common.GenRandomString("array_partial_op_path_", 6)
+	_ = setupArrayPartialOpCollection(ctx, t, mc,
+		collName, [][]int64{{1, 2, 3}, {10, 20, 30}})
+
+	// Request order intentionally differs from primary-key order. Each
+	// singleton operand must still be applied to index 1 of the same PK.
+	_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).
+		WithColumns(
+			column.NewColumnInt64(common.DefaultInt64FieldName, []int64{1, 0}),
+			column.NewColumnInt64Array(arrayPartialOpTagsFld, [][]int64{{99}, {88}}),
+		).
+		WithPathReplace(arrayPartialOpTagsFld, "[1]"))
+	common.CheckErr(t, err, true)
+
+	got := queryTagsByPK(ctx, t, mc, collName)
+	require.Equal(t, []int64{1, 88, 3}, got[0])
+	require.Equal(t, []int64{10, 99, 30}, got[1])
 }
 
 func TestArrayPartialOpAppendExceedsCapacity(t *testing.T) {

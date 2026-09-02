@@ -20,6 +20,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
+	"sort"
 	"strconv"
 
 	"github.com/cockroachdb/errors"
@@ -65,6 +67,18 @@ const (
 // when schemas are provided, this method will use 0-th element
 // otherwise, it shall try to parse schema from row[0]
 func AnyToColumns(rows []interface{}, keepPkField bool, schemas ...*entity.Schema) ([]column.Column, error) {
+	return anyToColumns(rows, keepPkField, nil, schemas...)
+}
+
+// AnyToColumnsWithStructFieldMasks converts rows while limiting selected
+// StructArray fields to the request-wide child masks supplied by the caller.
+// It is used by positional partial updates, where omitted Struct children must
+// not be serialized as replacement values.
+func AnyToColumnsWithStructFieldMasks(rows []interface{}, keepPkField bool, structFieldMasks map[string][]string, schemas ...*entity.Schema) ([]column.Column, error) {
+	return anyToColumns(rows, keepPkField, structFieldMasks, schemas...)
+}
+
+func anyToColumns(rows []interface{}, keepPkField bool, structFieldMasks map[string][]string, schemas ...*entity.Schema) ([]column.Column, error) {
 	rowsLen := len(rows)
 	if rowsLen == 0 {
 		return []column.Column{}, errors.New("0 length column")
@@ -91,7 +105,7 @@ func AnyToColumns(rows []interface{}, keepPkField bool, schemas ...*entity.Schem
 	nameSchemas := lo.SliceToMap(sch.Fields, func(fieldSchema *entity.Field) (string, entity.Field) {
 		return fieldSchema.Name, *fieldSchema
 	})
-	columnCreators := getColumnCreators(sch)
+	columnCreators := getColumnCreators(sch, structFieldMasks)
 
 	if isDynamic {
 		dynamicCol = column.NewColumnJSONBytes("", make([][]byte, 0, rowsLen)).WithIsDynamic(true)
@@ -188,7 +202,7 @@ func AnyToColumns(rows []interface{}, keepPkField bool, schemas ...*entity.Schem
 
 type columnCreator func(int) (column.Column, error)
 
-func getColumnCreators(sch *entity.Schema) map[string]columnCreator {
+func getColumnCreators(sch *entity.Schema, structFieldMasks map[string][]string) map[string]columnCreator {
 	result := make(map[string]columnCreator)
 	for _, field := range sch.Fields {
 		// skip auto id pk field
@@ -230,9 +244,20 @@ func getColumnCreators(sch *entity.Schema) map[string]columnCreator {
 				data := make([][]byte, 0, rowsLen)
 				col = column.NewColumnJSONBytes(field.Name, data)
 			case entity.FieldTypeArray:
-				col = NewArrayColumn(field)
-				if col == nil {
-					return nil, errors.Newf("unsupported element type %s for Array", field.ElementType.String())
+				if field.ElementType == entity.FieldTypeStruct {
+					structSchema, err := selectStructSchema(field, structFieldMasks[field.Name])
+					if err != nil {
+						return nil, err
+					}
+					col, err = column.NewColumnStructArrayFromSchema(field.Name, structSchema)
+					if err != nil {
+						return nil, err
+					}
+				} else {
+					col = NewArrayColumn(field)
+					if col == nil {
+						return nil, errors.Newf("unsupported element type %s for Array", field.ElementType.String())
+					}
 				}
 			case entity.FieldTypeFloatVector:
 				data := make([][]float32, 0, rowsLen)
@@ -285,6 +310,82 @@ func getColumnCreators(sch *entity.Schema) map[string]columnCreator {
 		}
 	}
 	return result
+}
+
+func selectStructSchema(field *entity.Field, mask []string) (*entity.StructSchema, error) {
+	if field.StructSchema == nil {
+		return nil, errors.Newf("struct array field %q has no child schema", field.Name)
+	}
+	if mask == nil {
+		return field.StructSchema, nil
+	}
+	if len(mask) == 0 {
+		return nil, errors.Newf("struct array field %q child mask is empty", field.Name)
+	}
+	selected := make(map[string]struct{}, len(mask))
+	for _, name := range mask {
+		if _, duplicate := selected[name]; duplicate {
+			return nil, errors.Newf("struct array field %q child mask contains duplicate %q", field.Name, name)
+		}
+		selected[name] = struct{}{}
+	}
+	result := entity.NewStructSchema()
+	for _, child := range field.StructSchema.Fields {
+		if _, ok := selected[child.Name]; ok {
+			result.WithField(child)
+			delete(selected, child.Name)
+		}
+	}
+	if len(selected) > 0 {
+		for name := range selected {
+			return nil, errors.Newf("struct array field %q has no child %q", field.Name, name)
+		}
+	}
+	return result, nil
+}
+
+// StructArrayFieldMask returns the non-empty child-key set used by every row
+// for one StructArray field. Different masks across rows are rejected because
+// FieldData represents a request-wide set of child columns.
+func StructArrayFieldMask(rows []interface{}, fieldName string) ([]string, error) {
+	var expected []string
+	for rowIndex, inputRow := range rows {
+		candidates, err := reflectValueCandi(reflect.ValueOf(inputRow))
+		if err != nil {
+			return nil, err
+		}
+		candidate, ok := candidates[fieldName]
+		if !ok {
+			return nil, errors.Newf("row %d is missing struct array field %q", rowIndex, fieldName)
+		}
+		value := candidate.v
+		for value.IsValid() && (value.Kind() == reflect.Interface || value.Kind() == reflect.Ptr) {
+			if value.IsNil() {
+				return nil, errors.Newf("row %d struct array field %q must not be null for PATH_REPLACE", rowIndex, fieldName)
+			}
+			value = value.Elem()
+		}
+		if !value.IsValid() || value.Kind() != reflect.Map || value.Type().Key().Kind() != reflect.String {
+			return nil, errors.Newf("row %d struct array field %q must be map[string]any, got %s", rowIndex, fieldName, value.Kind())
+		}
+		mask := make([]string, 0, value.Len())
+		iter := value.MapRange()
+		for iter.Next() {
+			mask = append(mask, iter.Key().String())
+		}
+		sort.Strings(mask)
+		if len(mask) == 0 {
+			return nil, errors.Newf("row %d struct array field %q child mask must not be empty", rowIndex, fieldName)
+		}
+		if rowIndex == 0 {
+			expected = mask
+			continue
+		}
+		if !slices.Equal(expected, mask) {
+			return nil, errors.Newf("row %d struct array field %q child mask %v does not match request mask %v", rowIndex, fieldName, mask, expected)
+		}
+	}
+	return expected, nil
 }
 
 func NewArrayColumn(f *entity.Field) column.Column {

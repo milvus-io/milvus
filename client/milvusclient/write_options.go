@@ -309,18 +309,10 @@ func (opt *columnBasedDataOption) WithStructArrayColumn(colName string, structSc
 }
 
 func buildStructArrayColumn(colName string, structSchema *entity.StructSchema, rows []map[string]any) (column.Column, error) {
-	if structSchema == nil {
-		return nil, errors.New("structSchema is required for WithStructArrayColumn")
+	structCol, err := column.NewColumnStructArrayFromSchema(colName, structSchema)
+	if err != nil {
+		return nil, err
 	}
-	subColumns := make([]column.Column, 0, len(structSchema.Fields))
-	for _, sub := range structSchema.Fields {
-		subColumn, err := newStructSubColumn(sub)
-		if err != nil {
-			return nil, err
-		}
-		subColumns = append(subColumns, subColumn)
-	}
-	structCol := column.NewColumnStructArray(colName, subColumns)
 	for _, row := range rows {
 		if row == nil {
 			structCol.SetNullable(true)
@@ -336,56 +328,7 @@ func buildStructArrayColumn(colName string, structSchema *entity.StructSchema, r
 }
 
 func newStructSubColumn(field *entity.Field) (column.Column, error) {
-	switch field.DataType {
-	case entity.FieldTypeBool:
-		return column.NewColumnBoolArray(field.Name, nil), nil
-	case entity.FieldTypeInt8:
-		return column.NewColumnInt8Array(field.Name, nil), nil
-	case entity.FieldTypeInt16:
-		return column.NewColumnInt16Array(field.Name, nil), nil
-	case entity.FieldTypeInt32:
-		return column.NewColumnInt32Array(field.Name, nil), nil
-	case entity.FieldTypeInt64:
-		return column.NewColumnInt64Array(field.Name, nil), nil
-	case entity.FieldTypeFloat:
-		return column.NewColumnFloatArray(field.Name, nil), nil
-	case entity.FieldTypeDouble:
-		return column.NewColumnDoubleArray(field.Name, nil), nil
-	case entity.FieldTypeVarChar, entity.FieldTypeString:
-		return column.NewColumnVarCharArray(field.Name, nil), nil
-	case entity.FieldTypeFloatVector:
-		dim, err := field.GetDim()
-		if err != nil {
-			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
-		}
-		return column.NewColumnFloatVectorArray(field.Name, int(dim), nil), nil
-	case entity.FieldTypeFloat16Vector:
-		dim, err := field.GetDim()
-		if err != nil {
-			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
-		}
-		return column.NewColumnFloat16VectorArray(field.Name, int(dim), nil), nil
-	case entity.FieldTypeBFloat16Vector:
-		dim, err := field.GetDim()
-		if err != nil {
-			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
-		}
-		return column.NewColumnBFloat16VectorArray(field.Name, int(dim), nil), nil
-	case entity.FieldTypeBinaryVector:
-		dim, err := field.GetDim()
-		if err != nil {
-			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
-		}
-		return column.NewColumnBinaryVectorArray(field.Name, int(dim), nil), nil
-	case entity.FieldTypeInt8Vector:
-		dim, err := field.GetDim()
-		if err != nil {
-			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
-		}
-		return column.NewColumnInt8VectorArray(field.Name, int(dim), nil), nil
-	default:
-		return nil, errors.Newf("unsupported struct sub-field type %v for field %q", field.DataType, field.Name)
-	}
+	return column.NewStructArrayChildColumn(field)
 }
 
 func (opt *columnBasedDataOption) WithPartition(partitionName string) *columnBasedDataOption {
@@ -419,6 +362,20 @@ func (opt *columnBasedDataOption) WithArrayAppend(fieldName string) *columnBased
 // implicit partial_update promotion.
 func (opt *columnBasedDataOption) WithArrayRemove(fieldName string) *columnBasedDataOption {
 	return opt.WithFieldPartialOp(fieldName, schemapb.FieldPartialUpdateOp_ARRAY_REMOVE)
+}
+
+// WithPathReplace replaces one existing value selected by a request-wide
+// relative path such as "[1]" or "[1][age]".
+func (opt *columnBasedDataOption) WithPathReplace(fieldName, path string) *columnBasedDataOption {
+	if opt.partialOps == nil {
+		opt.partialOps = make(map[string]*schemapb.FieldPartialUpdateOp)
+	}
+	opt.partialOps[fieldName] = &schemapb.FieldPartialUpdateOp{
+		FieldName: fieldName,
+		Op:        schemapb.FieldPartialUpdateOp_PATH_REPLACE,
+		Path:      path,
+	}
+	return opt
 }
 
 // WithFieldPartialOp attaches an explicit FieldPartialUpdateOp to the field
@@ -553,6 +510,13 @@ func (opt *rowBasedDataOption) WithArrayAppend(fieldName string) *rowBasedDataOp
 	return opt
 }
 
+// WithPathReplace replaces one existing value selected by a request-wide
+// relative path such as "[1]" or "[1][age]".
+func (opt *rowBasedDataOption) WithPathReplace(fieldName, path string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithPathReplace(fieldName, path)
+	return opt
+}
+
 func (opt *rowBasedDataOption) WithArrayRemove(fieldName string) *rowBasedDataOption {
 	opt.columnBasedDataOption.WithArrayRemove(fieldName)
 	return opt
@@ -583,7 +547,11 @@ func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb
 }
 
 func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb.UpsertRequest, error) {
-	columns, err := row.AnyToColumns(opt.rows, opt.keepAutoIDPk, coll.Schema)
+	structFieldMasks, err := opt.pathReplaceStructFieldMasks(coll.Schema)
+	if err != nil {
+		return nil, err
+	}
+	columns, err := row.AnyToColumnsWithStructFieldMasks(opt.rows, opt.keepAutoIDPk, structFieldMasks, coll.Schema)
 	if err != nil {
 		return nil, err
 	}
@@ -606,6 +574,35 @@ func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb
 		PartialUpdate:  partialUpdate,
 		FieldOps:       fieldOps,
 	}, nil
+}
+
+func (opt *rowBasedDataOption) pathReplaceStructFieldMasks(schema *entity.Schema) (map[string][]string, error) {
+	var masks map[string][]string
+	for fieldName, op := range opt.partialOps {
+		if op.GetOp() != schemapb.FieldPartialUpdateOp_PATH_REPLACE {
+			continue
+		}
+		var field *entity.Field
+		for _, candidate := range schema.Fields {
+			if candidate.Name == fieldName {
+				field = candidate
+				break
+			}
+		}
+		// Unknown fields and non-Struct Array fields stay server-authoritative.
+		if field == nil || field.DataType != entity.FieldTypeArray || field.ElementType != entity.FieldTypeStruct {
+			continue
+		}
+		mask, err := row.StructArrayFieldMask(opt.rows, fieldName)
+		if err != nil {
+			return nil, errors.Wrapf(err, "PATH_REPLACE field %q", fieldName)
+		}
+		if masks == nil {
+			masks = make(map[string][]string)
+		}
+		masks[fieldName] = mask
+	}
+	return masks, nil
 }
 
 func (opt *rowBasedDataOption) WriteBackPKs(sch *entity.Schema, pks column.Column) error {
