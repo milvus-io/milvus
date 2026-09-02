@@ -102,6 +102,21 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 // this pchannel for DML and segment assignment exactly as create collection.
 func (impl *shardInterceptor) handleCreateVChannel(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	createVChannelMsg := message.MustAsMutableCreateVChannelMessageV2(msg)
+	body := createVChannelMsg.MustBody()
+	if body.GetCollectionSchema() == nil && len(body.GetSchema()) == 0 {
+		// The same guard CreateCollection has, for the same reason and one more.
+		// Without a schema the shard manager registers a nil one -- every
+		// versioned insert to the new target then fails with
+		// ErrCollectionSchemaNotFound -- while the recovery storage seeds an
+		// empty non-nil one from the shared parser, so the shard behaves
+		// differently before and after a restart. Refuse at the only point that
+		// can enforce it against any coordinator version.
+		return nil, status.NewUnrecoverableError("create vchannel message does not contain collection schema")
+	}
+	// Resolved through the same helper the recovery storage uses, so all three
+	// genesis consumers read the body the same way -- which is the point of
+	// CreateVChannel reusing CreateCollection's body shape.
+	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
 	header := createVChannelMsg.Header()
 	if err := impl.shardManager.CheckIfVChannelCanBeCreated(header.GetCollectionId(), msg.VChannel()); err != nil {
 		if errors.Is(err, shards.ErrVChannelConflict) {
@@ -127,6 +142,15 @@ func (impl *shardInterceptor) handleCreateVChannel(ctx context.Context, msg mess
 		return msgID, err
 	}
 	impl.shardManager.CreateVChannel(message.MustAsImmutableCreateVChannelMessageV2(msg.IntoImmutableMessage(msgID)))
+	// The apply re-checks under the write lock and may skip the registration --
+	// the append-time check above and it are not one critical section. Allocating
+	// the function-runner key anyway would leak it: Close releases by REGISTERED
+	// vchannel, and an unregistered one is never released.
+	if err := impl.shardManager.CheckIfVChannelCanBeWritten(header.GetCollectionId(), createVChannelMsg.VChannel()); err != nil {
+		impl.shardManager.Logger().Warn(ctx, "vchannel genesis appended but not registered, skipping function runner alloc",
+			mlog.FieldCollectionID(header.GetCollectionId()), mlog.FieldVChannel(createVChannelMsg.VChannel()), mlog.Err(err))
+		return msgID, nil
+	}
 	// "Exactly as create collection" has to include the WAL's function-runner
 	// lifecycle key. Without it every insert to the new target is rejected at
 	// materializeFunctionFields with "function runner schema for key
@@ -134,8 +158,7 @@ func (impl *shardInterceptor) handleCreateVChannel(ctx context.Context, msg mess
 	// function, because the key is what carries the schema snapshot the
 	// materializer resolves against. The split's targets are created live, so
 	// nothing else registers them until the WAL is next recovered.
-	impl.allocFunctionRunners(header.GetCollectionId(), createVChannelMsg.VChannel(),
-		createVChannelMsg.MustBody().GetCollectionSchema())
+	impl.allocFunctionRunners(header.GetCollectionId(), createVChannelMsg.VChannel(), schema)
 	return msgID, nil
 }
 
