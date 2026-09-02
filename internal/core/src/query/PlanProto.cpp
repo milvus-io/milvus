@@ -34,6 +34,7 @@
 #include "common/FieldMeta.h"
 #include "common/RoaringMembership.h"
 #include "common/SystemProperty.h"
+#include "common/TupleMembership.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "common/protobuf_utils.h"
@@ -1258,6 +1259,64 @@ ProtoParser::ParseBloomFilterExprs(
 }
 
 expr::TypedExprPtr
+ProtoParser::ParseTupleTermFilterExprs(
+    const proto::plan::TupleTermExpr& expr_pb) {
+    const auto num_columns = expr_pb.columns_size();
+    // The Go parser (tuple_term_filter.go) never emits fewer than two
+    // columns or a tuple whose arity disagrees with the column count -- this
+    // is the defensive re-check the arity invariant needs at this boundary
+    // (design doc: "C++ does not need to re-derive these... but do
+    // defensively validate the invariant it MUST re-check"), since a
+    // version-skewed or otherwise malformed plan reaching here is the
+    // request's fault (blame test), so ExprInvalid/Input is the right class,
+    // not a System assert.
+    if (num_columns < 2) {
+        ThrowInfo(ExprInvalid,
+                  "tuple 'in' plan is malformed: {} columns declared, need "
+                  "at least 2",
+                  num_columns);
+    }
+
+    std::vector<expr::ColumnInfo> columns;
+    columns.reserve(num_columns);
+    for (int i = 0; i < num_columns; ++i) {
+        auto& column_info = expr_pb.columns(i);
+        auto field_id = FieldId(column_info.field_id());
+        auto& field = schema->operator[](field_id);
+        auto data_type = field.get_data_type();
+        Assert(data_type == static_cast<DataType>(column_info.data_type()));
+        columns.emplace_back(column_info);
+    }
+
+    // Build the tuple-membership hash set once, here, at plan-parse time;
+    // every per-segment PhyTupleTermFilterExpr compiled from this same
+    // logical node shares the resulting TupleMembership via shared_ptr
+    // (mirrors RoaringMembership's "decode once, share" contract) rather
+    // than re-encoding the same tuple set per segment.
+    std::unordered_set<std::string> keys;
+    keys.reserve(expr_pb.tuples_size());
+    std::string key;
+    for (auto& tuple : expr_pb.tuples()) {
+        if (tuple.array_size() != num_columns) {
+            ThrowInfo(ExprInvalid,
+                      "tuple 'in' plan is malformed: a tuple has {} values "
+                      "but {} columns were declared",
+                      tuple.array_size(),
+                      num_columns);
+        }
+        key.clear();
+        for (auto& element : tuple.array()) {
+            EncodeGenericValue(element, key);
+        }
+        keys.insert(key);
+    }
+
+    auto membership = std::make_shared<const TupleMembership>(std::move(keys));
+    return std::make_shared<expr::TupleTermFilterExpr>(std::move(columns),
+                                                       std::move(membership));
+}
+
+expr::TypedExprPtr
 ProtoParser::ParseCallExprs(const proto::plan::CallExpr& expr_pb) {
     const auto param_count = expr_pb.function_parameters_size();
     std::vector<expr::TypedExprPtr> parameters;
@@ -1565,6 +1624,10 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
         }
         case ppe::kRoaringFilterExpr: {
             result = ParseRoaringFilterExprs(expr_pb.roaring_filter_expr());
+            break;
+        }
+        case ppe::kTupleTermExpr: {
+            result = ParseTupleTermFilterExprs(expr_pb.tuple_term_expr());
             break;
         }
         default: {

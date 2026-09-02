@@ -26,6 +26,7 @@
 #include "exec/expression/function/FunctionFactory.h"
 #include "common/Exception.h"
 #include "common/Schema.h"
+#include "common/TupleMembership.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "pb/plan.pb.h"
@@ -1021,6 +1022,44 @@ class BloomFilterExpr : public ITypeFilterExpr {
  public:
     const ColumnInfo column_;
     const std::string filter_blob_;
+};
+
+// TupleMembership itself lives in common/TupleMembership.h (top-level
+// `milvus` namespace, unqualified reference below resolves via enclosing-
+// namespace lookup), matching where its sibling RoaringMembership lives --
+// see the "Declared in namespace milvus (not milvus::expr)" note on
+// RoaringMembershipProbe in exec/expression/MembershipFilterExpr.h.
+
+// TupleTermFilterExpr: correlated multi-column exact membership
+// (`[a, b] in [[v1,w1], ...]`). See design doc
+// docs/design-docs/design_docs/20260901-tuple-term-membership-expression.md.
+//
+// Exact (no false positives/negatives), unlike BloomFilterExpr -- so, per the
+// design doc, it is eligible for delete expressions without the
+// PlanContainsMembershipFilterUnsafeForDelete guard that keeps approximate
+// Bloom filters out of deletes.
+class TupleTermFilterExpr : public ITypeFilterExpr {
+ public:
+    TupleTermFilterExpr(std::vector<ColumnInfo> columns,
+                        std::shared_ptr<const TupleMembership> membership)
+        : columns_(std::move(columns)), membership_(std::move(membership)) {
+    }
+
+    std::string
+    ToString() const override {
+        std::string cols;
+        for (const auto& c : columns_) {
+            cols += c.ToString() + ", ";
+        }
+        return fmt::format(
+            "TupleTermFilterExpr:[Columns: [{}], TupleCount: {}]",
+            cols,
+            membership_ ? membership_->size() : 0);
+    }
+
+ public:
+    const std::vector<ColumnInfo> columns_;
+    const std::shared_ptr<const TupleMembership> membership_;
 };
 
 }  // namespace expr
