@@ -5418,3 +5418,37 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_InvalidManifestEntryBlocks
 	gc.recycleDroppedSegment(context.TODO(), segmentID, m.GetSegment(context.TODO(), segmentID))
 	assert.NotNil(t, m.GetSegment(context.TODO(), segmentID))
 }
+
+// A dropped V3 segment whose marker is false never carried a manifest index
+// entry, so its recycling must not depend on the manifest being readable at
+// all: the etcd-record side of the sweep covers its index files, and an
+// all-etcd cluster gets no gcBlockedByManifest failure surface.
+func TestGarbageCollector_getDroppedSegmentIndexFiles_SkipsUnmarkedManifest(t *testing.T) {
+	const segmentID = int64(3401)
+	basePath := "/tmp/test-gc-dropped-unmarked/insert_log/100/10/3401"
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, m.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		CollectionID:   100,
+		PartitionID:    10,
+		State:          commonpb.SegmentState_Dropped,
+		NumOfRows:      100,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+		// ManifestHasIndex deliberately unset.
+	})))
+
+	// Every read fails; not blocking proves no read was attempted.
+	readErr := mockey.Mock(packed.GetManifestIndexInfos).
+		Return(nil, merr.WrapErrIoFailedReason("throttled")).Build()
+	defer readErr.UnPatch()
+
+	gc := newGarbageCollector(m, newMockHandler(), GcOption{
+		cli: storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test")),
+	})
+	segIndexes, indexFiles, blocked := gc.getDroppedSegmentIndexFiles(context.TODO(), segmentID)
+	assert.Equal(t, gcNotBlocked, blocked)
+	assert.Empty(t, segIndexes)
+	assert.Empty(t, indexFiles)
+}

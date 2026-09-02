@@ -1128,3 +1128,186 @@ func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
 	assert.NotEqual(t, baseManifest, publishedManifest,
 		"publication must complete before the commit waits on fieldIndexLock")
 }
+
+// The sticky manifest_has_index marker is framework-owned: a commit whose
+// revision carries an index entry sets it in the same catalog transaction as
+// the entry, in memory and in the catalog record, without the caller asking.
+func TestCommitSegmentManifestSetsManifestHasIndexMarker(t *testing.T) {
+	const (
+		collectionID = int64(1)
+		partitionID  = int64(10)
+		segmentID    = int64(230)
+		indexID      = int64(910)
+		buildID      = int64(911)
+	)
+	basePath := "/tmp/milvus/insert_log/1/10/230"
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		CollectionID:   collectionID,
+		PartitionID:    partitionID,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath(basePath, 3),
+	})))
+	require.NoError(t, meta.indexMeta.AddSegmentIndex(context.Background(), &model.SegmentIndex{
+		CollectionID:          collectionID,
+		PartitionID:           partitionID,
+		SegmentID:             segmentID,
+		IndexID:               indexID,
+		BuildID:               buildID,
+		IndexVersion:          1,
+		IndexState:            commonpb.IndexState_InProgress,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+	}))
+	mock := bumpVersionMock()
+	defer mock.UnPatch()
+
+	require.False(t, meta.GetSegment(context.Background(), segmentID).GetManifestHasIndex())
+	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID:     segmentID,
+		StorageConfig: &indexpb.StorageConfig{},
+		Mutation: ManifestMutation{
+			Type:    ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{{IndexID: indexID, BuildID: buildID}}},
+		},
+		CatalogMutation: SegmentCatalogMutation{
+			SegmentIndex: &SegmentIndexMutation{
+				Type:    SegmentIndexUpsert,
+				BuildID: buildID,
+				FinishedTask: &workerpb.IndexTaskInfo{
+					BuildID:               buildID,
+					State:                 commonpb.IndexState_Finished,
+					IndexFileKeys:         []string{"0"},
+					IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				},
+			},
+		},
+	}))
+
+	assert.True(t, meta.GetSegment(context.Background(), segmentID).GetManifestHasIndex())
+	// Durable, not just in memory: the marker is what a restart's reload
+	// trusts, so it must ride the same catalog transaction as the pointer.
+	persisted, err := meta.catalog.ListSegments(context.Background(), collectionID)
+	require.NoError(t, err)
+	require.Len(t, persisted, 1)
+	assert.True(t, persisted[0].GetManifestHasIndex())
+}
+
+// Retraction never clears the marker: a wrong false would make reload skip a
+// manifest that still carries other entries and silently drop indexes; a
+// stale true only costs one manifest read at boot.
+func TestCommitSegmentManifestRetractionKeepsManifestHasIndexMarker(t *testing.T) {
+	const (
+		collectionID = int64(1)
+		segmentID    = int64(231)
+		indexID      = int64(920)
+		buildID      = int64(921)
+	)
+	basePath := "/tmp/milvus/insert_log/1/10/231"
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:               segmentID,
+		CollectionID:     collectionID,
+		PartitionID:      10,
+		State:            commonpb.SegmentState_Flushed,
+		StorageVersion:   storage.StorageV3,
+		ManifestPath:     packed.MarshalManifestPath(basePath, 4),
+		ManifestHasIndex: true,
+	})))
+	require.NoError(t, meta.indexMeta.AddSegmentIndex(context.Background(), &model.SegmentIndex{
+		CollectionID:  collectionID,
+		PartitionID:   10,
+		SegmentID:     segmentID,
+		IndexID:       indexID,
+		BuildID:       buildID,
+		IndexVersion:  1,
+		IndexState:    commonpb.IndexState_Finished,
+		IndexFileKeys: []string{"0"},
+	}))
+	mock := bumpVersionMock()
+	defer mock.UnPatch()
+
+	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID:     segmentID,
+		StorageConfig: &indexpb.StorageConfig{},
+		Mutation: ManifestMutation{
+			Type: ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{
+				DropIndexes: []packed.DropIndexEntry{{IndexID: indexID, ExpectedBuildID: buildID}},
+			},
+		},
+		CatalogMutation: SegmentCatalogMutation{
+			SegmentIndex: &SegmentIndexMutation{Type: SegmentIndexRemove, BuildID: buildID},
+		},
+	}))
+
+	assert.True(t, meta.GetSegment(context.Background(), segmentID).GetManifestHasIndex(),
+		"retracting the last entry must not clear the sticky marker")
+}
+
+// A Noop publishes a revision this framework did not build and cannot vouch
+// for, so it never sets the marker - even when the caller tries to smuggle the
+// framework-owned field in.
+func TestCommitSegmentManifestNoopDoesNotSetManifestHasIndexMarker(t *testing.T) {
+	const segmentID = int64(232)
+	basePath := "/tmp/milvus/insert_log/1/10/232"
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		CollectionID:   1,
+		PartitionID:    10,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath(basePath, 3),
+	})))
+
+	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID: segmentID,
+		Mutation: ManifestMutation{
+			Type:         ManifestMutationNoop,
+			ManifestPath: packed.MarshalManifestPath(basePath, 4),
+		},
+		// The framework must overwrite this: it is unexported precisely so
+		// only the commit path decides it, and a Noop cannot vouch for the
+		// revision's contents.
+		CatalogMutation: SegmentCatalogMutation{setManifestHasIndex: true},
+	}))
+
+	assert.Equal(t, packed.MarshalManifestPath(basePath, 4),
+		meta.GetSegment(context.Background(), segmentID).GetManifestPath())
+	assert.False(t, meta.GetSegment(context.Background(), segmentID).GetManifestHasIndex())
+}
+
+// The batch path shares applySegmentCatalogTypedFields with the single-segment
+// commit, and the marker decision is per commit: only the segment whose
+// revision carries an index entry is marked.
+func TestCommitSegmentManifestsSetManifestHasIndexMarkerPerSegment(t *testing.T) {
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	baseA := "/tmp/milvus/insert_log/1/10/340"
+	baseB := "/tmp/milvus/insert_log/1/10/341"
+	addV3Segment(t, meta, 340, baseA, 5, commonpb.SegmentState_Flushed)
+	addV3Segment(t, meta, 341, baseB, 5, commonpb.SegmentState_Flushed)
+	mock := bumpVersionMock()
+	defer mock.UnPatch()
+
+	withIndex := SegmentManifestCommit{
+		SegmentID:     340,
+		StorageConfig: &indexpb.StorageConfig{},
+		Mutation: ManifestMutation{
+			Type:    ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{{IndexID: 1, BuildID: 2}}},
+		},
+	}
+	require.NoError(t, meta.CommitSegmentManifests(context.Background(), []SegmentManifestCommit{
+		withIndex,
+		commitUpdates(341, baseB),
+	}))
+
+	assert.True(t, meta.GetSegment(context.Background(), 340).GetManifestHasIndex())
+	assert.False(t, meta.GetSegment(context.Background(), 341).GetManifestHasIndex())
+}
