@@ -318,7 +318,7 @@ func TestShardFencedPayloadSurvivesTheProduceResponse(t *testing.T) {
 			Produce: &streamingpb.ProduceMessageResponse{
 				RequestId: requestID,
 				Response: &streamingpb.ProduceMessageResponse_Error{
-					Error: status.NewShardFenced("by-dev-rootcoord-dml_0_100v0", fencedTimeTick).AsPBError(),
+					Error: status.NewShardFenced("by-dev-rootcoord-dml_0_100v0", fencedTimeTick, 0).AsPBError(),
 				},
 			},
 		},

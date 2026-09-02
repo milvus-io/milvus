@@ -78,7 +78,7 @@ func TestStreamingError(t *testing.T) {
 	pbErr = streamingErr.AsPBError()
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT, pbErr.Code)
 
-	streamingErr = NewShardFenced("v1", 4242)
+	streamingErr = NewShardFenced("v1", 4242, 0)
 	assert.Contains(t, streamingErr.Error(), "code: STREAMING_CODE_SHARD_FENCED, cause: v1 is fenced by shard split")
 	assert.True(t, streamingErr.IsShardFenced())
 	// T_switch is carried on the error for the split coordinator to recover.

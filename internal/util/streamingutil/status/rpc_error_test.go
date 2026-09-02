@@ -94,7 +94,7 @@ func TestPartialUpdateCASErrorsGRPCMapping(t *testing.T) {
 // invisible until the coordinator and the streamingnode sit in different
 // processes, i.e. in every cluster deployment.
 func TestShardFencedSurvivesTheWire(t *testing.T) {
-	original := NewShardFenced("by-dev-rootcoord-dml_0_100v0", 447856455348518913)
+	original := NewShardFenced("by-dev-rootcoord-dml_0_100v0", 447856455348518913, 0)
 
 	st := NewGRPCStatusFromStreamingError(original)
 	// A terminal condition must not look like an unknown transport failure.
@@ -135,7 +135,7 @@ func TestNewFromPBErrorCarriesTheWholeMessage(t *testing.T) {
 	require.NotNil(t, empty)
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_UNKNOWN, empty.Code)
 
-	original := NewShardFenced("by-dev-rootcoord-dml_0_100v0", 447856455348518913)
+	original := NewShardFenced("by-dev-rootcoord-dml_0_100v0", 447856455348518913, 0)
 	pb := original.AsPBError()
 	converted := NewFromPBError(pb)
 	require.NotNil(t, converted)

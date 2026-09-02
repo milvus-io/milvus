@@ -32,8 +32,8 @@ import (
 // these three message types outright when the WAL is in a replicating topology.
 
 // ErrSourceVChannelFenced is returned by SplitShard when the source vchannel
-// has already been fenced by a previous split message. The caller treats this
-// as success -- the fence holds -- and rolls forward.
+// has already been fenced by THIS task. The caller treats it as success -- its
+// own fence holds -- and rolls forward.
 //
 // The result returned alongside it carries the recorded T_switch, read back off
 // the error (see SplitShard). The BARRIER does not need it: it is freshly
@@ -41,6 +41,16 @@ import (
 // it gates on channelCheckpoint(source) >= T_switch -- so a caller that lost
 // the persisted value recovers it here rather than proceeding with zero.
 var ErrSourceVChannelFenced = errors.New("source vchannel is already fenced by shard split")
+
+// ErrSourceVChannelFencedByAnotherTask is returned when the source vchannel is
+// already fenced by a DIFFERENT split task.
+//
+// This is not the caller's own retry and must not be rolled forward: two tasks
+// would then carve targets out of one source, each unaware of the other's. It
+// is how the exclusion between a rehash and an automatic split is enforced at
+// this layer -- the fence rejection alone cannot enforce it, because without the
+// task id the two cases are indistinguishable.
+var ErrSourceVChannelFencedByAnotherTask = errors.New("source vchannel is already fenced by another shard split task")
 
 // SplitShardParam is the parameter of SplitShard.
 type SplitShardParam struct {
@@ -144,10 +154,21 @@ func SplitShard(ctx context.Context, w WALAccesser, param SplitShardParam) (*Spl
 	splitResult, err := w.RawAppend(ctx, splitMsg)
 	if err != nil {
 		if streamErr := status.AsStreamingError(err); streamErr.IsShardFenced() {
-			// the source is already fenced by a previous split message; the
-			// streamingnode carries the recorded T_switch back on the error,
-			// so the caller still recovers T_switch even after a crash that
-			// lost the persisted value.
+			// The source is already fenced. WHO fenced it decides what happens
+			// next, and the streamingnode carries both facts back on the error.
+			if taskID := streamErr.FencedSplitTaskId; taskID != 0 && taskID != param.SplitTaskID {
+				// Another task owns this source. Rolling forward would carve two
+				// sets of targets out of one source, each task unaware of the
+				// other's -- so this aborts instead.
+				return nil, errors.Wrapf(ErrSourceVChannelFencedByAnotherTask,
+					"source %s is fenced by split task %d, this task is %d",
+					param.SourceVChannel, taskID, param.SplitTaskID)
+			}
+			// This task's own fence, replayed. The recorded T_switch comes back
+			// with it, so the caller recovers it even after a crash that lost
+			// the persisted value. A zero task id is a fence placed by a build
+			// that did not record one: treated as our own, which is what the
+			// behaviour was before the id existed.
 			return &SplitShardResult{SwitchTimeTick: streamErr.FencedTimeTick}, errors.Wrapf(ErrSourceVChannelFenced, "%s", err.Error())
 		}
 		return nil, errors.Wrap(err, "append split shard message failed")

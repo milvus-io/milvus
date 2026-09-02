@@ -8,6 +8,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -61,7 +62,7 @@ func TestSplitShardOnFencedVChannel(t *testing.T) {
 	// carries the recorded T_switch so the caller still recovers it.
 	w.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
 		return msg.MessageType() == message.MessageTypeSplitShard
-	})).Return(nil, status.NewShardFenced("v0", 2000)).Once()
+	})).Return(nil, status.NewShardFenced("v0", 2000, 0)).Once()
 
 	result, err := streaming.SplitShard(context.Background(), w, newSplitShardParam())
 	assert.ErrorIs(t, err, streaming.ErrSourceVChannelFenced)
@@ -261,4 +262,30 @@ func TestSplitShardParamValidate(t *testing.T) {
 	result, err := streaming.SplitShard(context.Background(), w, param)
 	assert.Nil(t, result)
 	assert.Error(t, err)
+}
+
+// The exclusion between a rehash and an automatic split rests on this: a fence
+// carrying ANOTHER task's id is not this task's retry, and rolling forward on it
+// would carve two sets of targets out of one source.
+func TestSplitShardAbortsOnAnotherTasksFence(t *testing.T) {
+	w := mock_streaming.NewMockWALAccesser(t)
+	w.EXPECT().RawAppend(mock.Anything, mock.Anything).
+		Return(nil, status.NewShardFenced("v0", 1900, 777)).Once()
+
+	result, err := streaming.SplitShard(context.Background(), w, newSplitShardParam())
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, streaming.ErrSourceVChannelFencedByAnotherTask)
+	assert.NotErrorIs(t, err, streaming.ErrSourceVChannelFenced)
+}
+
+// This task's own fence, replayed: rolled forward, with T_switch recovered.
+func TestSplitShardRollsForwardOnItsOwnFence(t *testing.T) {
+	w := mock_streaming.NewMockWALAccesser(t)
+	w.EXPECT().RawAppend(mock.Anything, mock.Anything).
+		Return(nil, status.NewShardFenced("v0", 1900, 100)).Once()
+
+	result, err := streaming.SplitShard(context.Background(), w, newSplitShardParam())
+	assert.ErrorIs(t, err, streaming.ErrSourceVChannelFenced)
+	require.NotNil(t, result)
+	assert.Equal(t, uint64(1900), result.SwitchTimeTick)
 }
