@@ -2992,6 +2992,8 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     query_vec_offsets.push_back(10);
     query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                        const_cast<const size_t*>(query_vec_offsets.data()));
+    query_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                       static_cast<int64_t>(query_vec_offsets.size() - 1));
 
     auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
     milvus::SearchInfo searchInfo;
