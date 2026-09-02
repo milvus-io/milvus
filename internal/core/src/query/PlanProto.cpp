@@ -1642,4 +1642,49 @@ ProtoParser::ExtractFilterOnlyPlan(
     return find_prefilter_subtree(root_node);
 }
 
+namespace {
+
+// Rebuild the chain above VectorSearchNode, replacing its source subtree with
+// a node that emits an already-computed bitset. Plan nodes are immutable, so
+// each one on the path is reconstructed.
+std::shared_ptr<plan::PlanNode>
+RebindNodeToPrecomputedBitset(const std::shared_ptr<plan::PlanNode>& node) {
+    AssertInfo(node != nullptr, "null node while rebinding search plan");
+
+    if (std::dynamic_pointer_cast<plan::VectorSearchNode>(node)) {
+        auto bitset_source = std::make_shared<plan::PrecomputedBitsetNode>(
+            milvus::plan::GetNextPlanNodeId());
+        return std::make_shared<plan::VectorSearchNode>(
+            milvus::plan::GetNextPlanNodeId(),
+            std::vector<plan::PlanNodePtr>{bitset_source});
+    }
+
+    if (std::dynamic_pointer_cast<plan::SearchGroupByNode>(node)) {
+        auto sources = node->sources();
+        AssertInfo(sources.size() == 1,
+                   "SearchGroupByNode must have exactly one source, got {}",
+                   sources.size());
+        return std::make_shared<plan::SearchGroupByNode>(
+            milvus::plan::GetNextPlanNodeId(),
+            std::vector<plan::PlanNodePtr>{
+                RebindNodeToPrecomputedBitset(sources[0])});
+    }
+
+    ThrowInfo(ErrorCode::UnexpectedError,
+              "plan node {} cannot sit above VectorSearchNode in a "
+              "shared-filter search; this plan should not have been grouped",
+              node->name());
+}
+
+}  // namespace
+
+std::shared_ptr<plan::PlanNode>
+ProtoParser::RebindToPrecomputedBitset(
+    const std::shared_ptr<plan::PlanNode>& root_node) {
+    if (!root_node) {
+        return nullptr;
+    }
+    return RebindNodeToPrecomputedBitset(root_node);
+}
+
 }  // namespace milvus::query

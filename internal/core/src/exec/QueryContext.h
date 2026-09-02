@@ -30,6 +30,7 @@
 #include "common/Exception.h"
 #include "common/ArrayOffsets.h"
 #include "common/OpContext.h"
+#include "common/Vector.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
 
@@ -328,6 +329,20 @@ class QueryContext : public Context {
         return all_rows_visible_;
     }
 
+    // ---- shared-filter hybrid search ----
+
+    // Bitset produced by a previously executed shared filter. Read-only for
+    // every consumer: it is shared unmodified across all branches.
+    void
+    set_precomputed_bitset(RowVectorPtr bitset) {
+        precomputed_bitset_ = std::move(bitset);
+    }
+
+    const RowVectorPtr&
+    get_precomputed_bitset() const {
+        return precomputed_bitset_;
+    }
+
     void
     set_enable_expr_cache(bool enable) {
         enable_expr_cache_ = enable;
@@ -388,6 +403,10 @@ class QueryContext : public Context {
 
     // MVCC fast path: set true when sealed + no-filter + no-delete + no-TTL
     bool all_rows_visible_{false};
+
+    // Bitset handed in by a prior shared-filter execution. Null for an
+    // ordinary search.
+    RowVectorPtr precomputed_bitset_{nullptr};
 
     // Expression filter cache for two-stage search
     bool enable_expr_cache_ = false;

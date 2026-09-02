@@ -22,6 +22,26 @@ func (r *SearchResult) Release() {
 	r.cSearchResult = nil
 }
 
+// SharedFilterBitsetResult owns one segment's shared filter bitset, produced
+// by ComputeFilterBitset and reused by every branch of a shared-filter hybrid
+// search on that segment. It is read-only once returned, so the concurrent
+// branch searches may all hold it.
+//
+// The owner must call Release exactly once; a defer at the point of creation
+// is the intended usage, and is what keeps this a local resource rather than a
+// cache.
+type SharedFilterBitsetResult struct {
+	cSharedFilterBitsetResult C.CSharedFilterBitsetResult
+}
+
+func (r *SharedFilterBitsetResult) Release() {
+	if r == nil || r.cSharedFilterBitsetResult == nil {
+		return
+	}
+	C.DeleteSharedFilterBitsetResult(r.cSharedFilterBitsetResult)
+	r.cSharedFilterBitsetResult = nil
+}
+
 // SearchResultMetadata is the post-search information attached to a
 // SearchResult: group-by configuration plus accumulated storage cost.
 // All fields are populated by a single CGO call (GetMetadata).

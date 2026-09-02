@@ -388,6 +388,38 @@ class MvccNode : public PlanNode {
     const std::vector<PlanNodePtr> sources_;
 };
 
+// Source node that emits a bitset computed by an earlier, separate execution
+// of the shared prefix (FilterBitsNode -> MvccNode -> [ElementFilterBitsNode]).
+// Used by shared-filter hybrid search: the prefix runs once per segment and
+// each branch's VectorSearchNode is rebound onto one of these instead of
+// re-running the filter. Carries no data itself -- the bitset lives on the
+// QueryContext so the plan tree stays stateless and shareable.
+class PrecomputedBitsetNode : public PlanNode {
+ public:
+    explicit PrecomputedBitsetNode(const PlanNodeId& id) : PlanNode(id) {
+    }
+
+    RowTypePtr
+    output_type() const override {
+        return RowType::None;
+    }
+
+    std::vector<PlanNodePtr>
+    sources() const override {
+        return {};
+    }
+
+    std::string_view
+    name() const override {
+        return "PrecomputedBitsetNode";
+    }
+
+    std::string
+    ToString() const override {
+        return "PrecomputedBitsetNode";
+    }
+};
+
 class RandomSampleNode : public PlanNode {
  public:
     RandomSampleNode(

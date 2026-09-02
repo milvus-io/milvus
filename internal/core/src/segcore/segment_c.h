@@ -171,6 +171,60 @@ GetSearchResultValidCount(CSearchResult search_result);
  * @param enable_expr_cache: If true, enable expression filter cache for two-stage search
  * @return CFuture* Future that resolves to SearchResult (with valid_count set if filter_only=true)
  */
+/**
+ * @brief Opaque owner of one segment's shared filter bitset: the post-MVCC
+ * bitset plus the derived query state produced alongside it.
+ *
+ * Produced by AsyncComputeFilterBitset, consumed (read-only, concurrently) by
+ * AsyncSearchWithBitset, released by DeleteSharedFilterBitsetResult.
+ */
+typedef void* CSharedFilterBitsetResult;
+
+/**
+ * @brief Evaluate the filter subtree of a search plan on a segment
+ *
+ * Runs FilterBitsNode -> MvccNode -> [ElementFilterBitsNode] and stops there.
+ * For hybrid search whose sub-requests share a filter predicate, this runs
+ * once per segment and every branch reuses the result.
+ *
+ * @param c_plan: any branch's plan; the caller has established they share a
+ *                predicate. No placeholder group is needed.
+ * @param enable_expr_cache: forwarded to the filter evaluation. Whether the
+ *                bitset comes from evaluation or from the expression result
+ *                cache is orthogonal to sharing it across branches.
+ * @return CFuture* Future that resolves to a CSharedFilterBitsetResult
+ */
+CFuture*  // Future<CSharedFilterBitsetResult>
+AsyncComputeFilterBitset(CTraceContext c_trace,
+                         CSegmentInterface c_segment,
+                         CSearchPlan c_plan,
+                         uint64_t timestamp,
+                         int32_t consistency_level,
+                         uint64_t collection_ttl,
+                         uint64_t entity_ttl_physical_time_us,
+                         bool enable_expr_cache);
+
+void
+DeleteSharedFilterBitsetResult(CSharedFilterBitsetResult c_bitset);
+
+/**
+ * @brief Execute one branch's vector search against a precomputed filter bitset
+ *
+ * Skips FilterBitsNode and MvccNode; runs only VectorSearchNode and above.
+ * `c_bitset` is read-only, so concurrent calls may share one.
+ * Returns exactly what AsyncSearch returns: a single CSearchResult.
+ */
+CFuture*  // Future<CSearchResultBody>
+AsyncSearchWithBitset(CTraceContext c_trace,
+                      CSegmentInterface c_segment,
+                      CSearchPlan c_plan,
+                      CPlaceholderGroup c_placeholder_group,
+                      CSharedFilterBitsetResult c_bitset,
+                      uint64_t timestamp,
+                      int32_t consistency_level,
+                      uint64_t collection_ttl,
+                      uint64_t entity_ttl_physical_time_us);
+
 CFuture*  // Future<CSearchResultBody>
 AsyncSearch(CTraceContext c_trace,
             CSegmentInterface c_segment,
