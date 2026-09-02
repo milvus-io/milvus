@@ -1846,6 +1846,9 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 	req.FieldOps = fieldOps
+	if hasNonReplaceFieldPartialUpdateOp(fieldOps) {
+		req.PartialUpdate = true
+	}
 	c.Set(ContextRequest, req)
 
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
@@ -1853,8 +1856,17 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
+	requestSchema, err := schemaForPathReplaceOperands(body.([]byte), collSchema, fieldOps)
+	if err != nil {
+		mlog.Warn(ctx, "high level restful api, fail to resolve PATH_REPLACE operand", mlog.Err(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
+			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
+		})
+		return nil, err
+	}
 	var validDataMap map[string][]bool
-	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, httpReq.PartialUpdate)
+	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), requestSchema, req.GetPartialUpdate())
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, fail to deal with upsert data", mlog.Any("body", body), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -1865,7 +1877,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 
 	req.NumRows = uint32(len(httpReq.Data))
-	req.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, collSchema, false, httpReq.PartialUpdate)
+	req.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, requestSchema, false, req.GetPartialUpdate())
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, fail to deal with upsert data", mlog.Any("data", httpReq.Data), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{

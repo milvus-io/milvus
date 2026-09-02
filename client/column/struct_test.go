@@ -31,6 +31,13 @@ type StructArraySuite struct {
 	suite.Suite
 }
 
+func (s *StructArraySuite) TestNewStructArrayChildColumnRejectsNilField() {
+	column, err := NewStructArrayChildColumn(nil)
+
+	s.Nil(column)
+	s.EqualError(err, "struct child field is required")
+}
+
 func (s *StructArraySuite) TestBasic() {
 	name := fmt.Sprintf("struct_array_%d", rand.Intn(100))
 

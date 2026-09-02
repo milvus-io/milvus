@@ -19,6 +19,7 @@ package milvusclient
 import (
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -84,6 +85,20 @@ func TestWithArrayRemoveEmitsFieldOp(t *testing.T) {
 	tagsOp := findOp(req.GetFieldOps(), "tags")
 	require.NotNil(t, tagsOp)
 	assert.Equal(t, schemapb.FieldPartialUpdateOp_ARRAY_REMOVE, tagsOp.GetOp())
+}
+
+func TestWithPathReplaceEmitsPathAndAutoEnablesPartialUpdate(t *testing.T) {
+	opt := buildPartialOpOption(func(o *columnBasedDataOption) {
+		o.WithPathReplace("tags", "[1]")
+	})
+	req, err := opt.UpsertRequest(buildPartialOpTestCollection())
+	require.NoError(t, err)
+	assert.True(t, req.GetPartialUpdate())
+
+	tagsOp := findOp(req.GetFieldOps(), "tags")
+	require.NotNil(t, tagsOp)
+	assert.Equal(t, schemapb.FieldPartialUpdateOp_PATH_REPLACE, tagsOp.GetOp())
+	assert.Equal(t, "[1]", tagsOp.GetPath())
 }
 
 func TestWithFieldPartialOpReplaceClearsPriorDirective(t *testing.T) {
@@ -163,6 +178,89 @@ func TestRowBasedUpsertEmitsFieldOps(t *testing.T) {
 	tagsOp := findOp(req.GetFieldOps(), "tags")
 	require.NotNil(t, tagsOp)
 	assert.Equal(t, schemapb.FieldPartialUpdateOp_ARRAY_APPEND, tagsOp.GetOp())
+}
+
+func TestRowBasedPathReplaceEmitsPath(t *testing.T) {
+	coll := buildPartialOpTestCollection()
+	rows := []any{
+		map[string]any{"id": int64(1), "tags": []int64{10}},
+		map[string]any{"id": int64(2), "tags": []int64{20}},
+	}
+	opt := NewRowBasedInsertOption(coll.Name, rows...).WithPathReplace("tags", "[2]")
+
+	req, err := opt.UpsertRequest(coll)
+	require.NoError(t, err)
+	op := findOp(req.GetFieldOps(), "tags")
+	require.NotNil(t, op)
+	assert.Equal(t, schemapb.FieldPartialUpdateOp_PATH_REPLACE, op.GetOp())
+	assert.Equal(t, "[2]", op.GetPath())
+}
+
+func buildStructPathReplaceCollection() (*entity.Collection, *entity.StructSchema) {
+	profileSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("age").WithDataType(entity.FieldTypeInt64)).
+		WithField(entity.NewField().WithName("city").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64)).
+		WithField(entity.NewField().WithName("score").WithDataType(entity.FieldTypeFloat))
+	schema := entity.NewSchema().
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("profile").WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).WithMaxCapacity(32).WithStructSchema(profileSchema))
+	schema.CollectionName = "struct_path_replace_test"
+	return &entity.Collection{Name: schema.CollectionName, Schema: schema}, profileSchema
+}
+
+func TestColumnBasedStructPathReplaceSerializesSelectedChildrenOnly(t *testing.T) {
+	coll, _ := buildStructPathReplaceCollection()
+	operandSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("age").WithDataType(entity.FieldTypeInt64)).
+		WithField(entity.NewField().WithName("city").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64))
+	opt := NewColumnBasedInsertOption(coll.Name).
+		WithInt64Column("id", []int64{1, 2}).
+		WithStructArrayColumn("profile", operandSchema, []map[string]any{
+			{"age": []int64{18}, "city": []string{"Hangzhou"}},
+			{"age": []int64{21}, "city": []string{"Ningbo"}},
+		}).
+		WithPathReplace("profile", "[1]")
+
+	req, err := opt.UpsertRequest(coll)
+	require.NoError(t, err)
+	profile := lo.FindOrElse(req.GetFieldsData(), nil, func(field *schemapb.FieldData) bool {
+		return field.GetFieldName() == "profile"
+	})
+	require.NotNil(t, profile)
+	children := profile.GetStructArrays().GetFields()
+	require.Len(t, children, 2)
+	assert.ElementsMatch(t, []string{"age", "city"}, []string{children[0].GetFieldName(), children[1].GetFieldName()})
+}
+
+func TestRowBasedStructPathReplaceUsesUniformChildMask(t *testing.T) {
+	coll, _ := buildStructPathReplaceCollection()
+	rows := []any{
+		map[string]any{"id": int64(1), "profile": map[string]any{"age": []int64{18}, "city": []string{"Hangzhou"}}},
+		map[string]any{"id": int64(2), "profile": map[string]any{"age": []int64{21}, "city": []string{"Ningbo"}}},
+	}
+
+	req, err := NewRowBasedInsertOption(coll.Name, rows...).WithPathReplace("profile", "[1]").UpsertRequest(coll)
+	require.NoError(t, err)
+	profile := lo.FindOrElse(req.GetFieldsData(), nil, func(field *schemapb.FieldData) bool {
+		return field.GetFieldName() == "profile"
+	})
+	require.NotNil(t, profile)
+	children := profile.GetStructArrays().GetFields()
+	require.Len(t, children, 2)
+	assert.ElementsMatch(t, []string{"age", "city"}, []string{children[0].GetFieldName(), children[1].GetFieldName()})
+}
+
+func TestRowBasedStructPathReplaceRejectsDifferentChildMasks(t *testing.T) {
+	coll, _ := buildStructPathReplaceCollection()
+	rows := []any{
+		map[string]any{"id": int64(1), "profile": map[string]any{"age": []int64{18}}},
+		map[string]any{"id": int64(2), "profile": map[string]any{"city": []string{"Ningbo"}}},
+	}
+
+	_, err := NewRowBasedInsertOption(coll.Name, rows...).WithPathReplace("profile", "[1]").UpsertRequest(coll)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not match request mask")
 }
 
 func TestMultipleFieldOpsEmittedTogether(t *testing.T) {

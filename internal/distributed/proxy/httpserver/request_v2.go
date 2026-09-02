@@ -507,6 +507,7 @@ func (req *CollectionDataReq) GetCollectionName() string { return req.Collection
 type FieldPartialUpdateOpReq struct {
 	FieldName string `json:"fieldName"`
 	Op        string `json:"op"`
+	Path      string `json:"path"`
 }
 
 func buildFieldPartialUpdateOps(fieldOps []FieldPartialUpdateOpReq) ([]*schemapb.FieldPartialUpdateOp, error) {
@@ -523,9 +524,28 @@ func buildFieldPartialUpdateOps(fieldOps []FieldPartialUpdateOpReq) ([]*schemapb
 		ops = append(ops, &schemapb.FieldPartialUpdateOp{
 			FieldName: fieldOp.FieldName,
 			Op:        op,
+			Path:      fieldOp.Path,
 		})
 	}
 	return ops, nil
+}
+
+func hasNonReplaceFieldPartialUpdateOp(fieldOps []*schemapb.FieldPartialUpdateOp) bool {
+	for _, fieldOp := range fieldOps {
+		if fieldOp.GetOp() != schemapb.FieldPartialUpdateOp_REPLACE {
+			return true
+		}
+	}
+	return false
+}
+
+func hasPathReplaceFieldPartialUpdateOp(fieldOps []*schemapb.FieldPartialUpdateOp) bool {
+	for _, fieldOp := range fieldOps {
+		if fieldOp.GetOp() == schemapb.FieldPartialUpdateOp_PATH_REPLACE {
+			return true
+		}
+	}
+	return false
 }
 
 func parseFieldPartialUpdateOp(op string) (schemapb.FieldPartialUpdateOp_OpType, error) {
@@ -536,6 +556,8 @@ func parseFieldPartialUpdateOp(op string) (schemapb.FieldPartialUpdateOp_OpType,
 		return schemapb.FieldPartialUpdateOp_ARRAY_APPEND, nil
 	case "ARRAY_REMOVE":
 		return schemapb.FieldPartialUpdateOp_ARRAY_REMOVE, nil
+	case "PATH_REPLACE":
+		return schemapb.FieldPartialUpdateOp_PATH_REPLACE, nil
 	default:
 		return schemapb.FieldPartialUpdateOp_REPLACE,
 			merr.WrapErrParameterInvalidMsg("unsupported partial update op: " + op)

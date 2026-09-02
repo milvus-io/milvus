@@ -1473,6 +1473,25 @@ func TestUpsert(t *testing.T) {
 	})
 }
 
+func TestRESTV1RejectsPathReplace(t *testing.T) {
+	body := []byte(`{
+		"collectionName": "book",
+		"data": [{"id": 1, "scores": [100]}],
+		"fieldOps": [{"fieldName": "scores", "op": "PATH_REPLACE", "path": "[1]"}]
+	}`)
+
+	testEngine := initHTTPServer(&mockProxyComponent{}, false)
+	req := httptest.NewRequest(http.MethodPost, versional(VectorUpsertPath), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+	assert.Equal(t, merr.Code(merr.ErrParameterInvalid), returnBody.Code)
+	assert.Contains(t, returnBody.Message, "PATH_REPLACE is not supported by REST v1 upsert")
+}
+
 func TestFp16Bf16VectorsV1(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(proxy.Params.HTTPCfg.AcceptTypeAllowInt64.Key, "true")
