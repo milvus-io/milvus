@@ -59,7 +59,7 @@ func testRoots(t *testing.T) (metaRoot, configRoot string) {
 // newTestConfirmator builds a confirmator against the embedded etcd server
 // using the same shared etcd client that production injects (the confirmator
 // never opens its own connection).
-func newTestConfirmator(t *testing.T, etcdCli *clientv3.Client, metaRoot, configRoot string) *Confirmator {
+func newTestConfirmator(t *testing.T, etcdCli *clientv3.Client, metaRoot, configRoot string) *confirmator {
 	t.Helper()
 	return newConfirmator(etcdCli, metaRoot, configRoot)
 }
@@ -76,7 +76,7 @@ func TestConfirmator_RegisterGate(t *testing.T) {
 
 	require.NoError(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 10*time.Millisecond)))
 	require.NoError(t, c.start(context.Background()))
-	defer c.Close()
+	defer c.close()
 
 	// one-shot: no gate can be registered after Start.
 	assert.Error(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 10*time.Millisecond)))
@@ -90,7 +90,7 @@ func TestConfirmator_FlipsAfterAllUpAndDelay(t *testing.T) {
 	c := newTestConfirmator(t, cli, metaRoot, configRoot)
 	require.NoError(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 50*time.Millisecond)))
 	require.NoError(t, c.start(context.Background()))
-	defer c.Close()
+	defer c.close()
 
 	waitConfigValue(t, cli, configRoot, testConfigKey, testConfigValue)
 }
@@ -104,7 +104,7 @@ func TestConfirmator_NoSessionsNoFlip(t *testing.T) {
 	c := newTestConfirmator(t, cli, metaRoot, configRoot)
 	require.NoError(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 50*time.Millisecond)))
 	require.NoError(t, c.start(context.Background()))
-	defer c.Close()
+	defer c.close()
 
 	assertNoFlip(t, cli, configRoot, testConfigKey)
 }
@@ -118,7 +118,7 @@ func TestConfirmator_MixedVersionsNoFlip(t *testing.T) {
 	c := newTestConfirmator(t, cli, metaRoot, configRoot)
 	require.NoError(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 30*time.Millisecond)))
 	require.NoError(t, c.start(context.Background()))
-	defer c.Close()
+	defer c.close()
 
 	assertNoFlip(t, cli, configRoot, testConfigKey)
 }
@@ -132,7 +132,7 @@ func TestConfirmator_SessionDipResetsStabilityWindow(t *testing.T) {
 	c := newTestConfirmator(t, cli, metaRoot, configRoot)
 	require.NoError(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 200*time.Millisecond)))
 	require.NoError(t, c.start(context.Background()))
-	defer c.Close()
+	defer c.close()
 
 	// A session dips below the gate version during the stability window:
 	// the window must reset and the flip must not happen.
@@ -155,10 +155,40 @@ func TestConfirmator_ExplicitEtcdValueWins(t *testing.T) {
 	c := newTestConfirmator(t, cli, metaRoot, configRoot)
 	require.NoError(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 30*time.Millisecond)))
 	require.NoError(t, c.start(context.Background()))
-	defer c.Close()
+	defer c.close()
 
 	// The explicit value must not be overwritten by the flip.
 	waitConfigValue(t, cli, configRoot, testConfigKey, "false")
+}
+
+func TestConfirmator_LocalValueChangeBeforeFlipWins(t *testing.T) {
+	// An explicit value set from a non-etcd source (file/env) while the
+	// confirmator is running — after start but before the stability window
+	// expires — must win over the flip: no etcd write occurs and the gate
+	// resolves as-is (adversarial review finding on flip).
+	cli, _ := setupEmbedEtcd(t)
+	metaRoot, configRoot := testRoots(t)
+	putAllUpSessions(t, cli, metaRoot)
+
+	// Point the process-local config at a test base table so flip's
+	// currentConfigValue re-read can observe the runtime value change.
+	oldBaseTable := params.baseTable
+	bt := NewBaseTable(SkipRemote(true))
+	params.baseTable = bt
+	defer func() { params.baseTable = oldBaseTable }()
+
+	c := newTestConfirmator(t, cli, metaRoot, configRoot)
+	require.NoError(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 300*time.Millisecond)))
+	require.NoError(t, c.start(context.Background()))
+	defer c.close()
+
+	// Operator sets the "false" escape hatch in a non-etcd source while the
+	// confirmator is running, before the stability window elapses.
+	bt.Manager().SetConfig(testConfigKey, "false")
+
+	// The gate resolves without writing the config-center key.
+	waitGateResolved(t, c)
+	assertConfigAbsent(t, cli, configRoot, testConfigKey)
 }
 
 func TestConfirmator_AlreadyFlippedAtStart(t *testing.T) {
@@ -169,7 +199,7 @@ func TestConfirmator_AlreadyFlippedAtStart(t *testing.T) {
 	c := newTestConfirmator(t, cli, metaRoot, configRoot)
 	require.NoError(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 10*time.Millisecond)))
 	require.NoError(t, c.start(context.Background()))
-	defer c.Close()
+	defer c.close()
 
 	// The gate is resolved immediately: no session watch is running.
 	c.mu.Lock()
@@ -187,7 +217,7 @@ func TestConfirmator_MultipleGatesIndependent(t *testing.T) {
 	require.NoError(t, c.registerGate(testConfigKey, gateSwitcher("2.6.23", 50*time.Millisecond)))
 	require.NoError(t, c.registerGate("function.testGate2", gateSwitcher("3.0.0", 50*time.Millisecond)))
 	require.NoError(t, c.start(context.Background()))
-	defer c.Close()
+	defer c.close()
 
 	// The 2.6.23 gate flips; the 3.0.0 gate stays pending.
 	waitConfigValue(t, cli, configRoot, testConfigKey, testConfigValue)
@@ -195,17 +225,18 @@ func TestConfirmator_MultipleGatesIndependent(t *testing.T) {
 	assertConfigAbsent(t, cli, configRoot, "function.testGate2")
 }
 
-func TestInitVersionGatesSkipRemote(t *testing.T) {
-	// initVersionGates is a no-op for a skip-remote param table (the common
+func TestStartVersionGatesSkipRemote(t *testing.T) {
+	// startVersionGates is a no-op for a skip-remote param table (the common
 	// test setup): no confirmator is created and no goroutine leaks.
 	p := &ComponentParam{}
 	p.Init(NewBaseTable(SkipRemote(true)))
+	p.startVersionGates()
 	assert.Nil(t, p.versionGates)
 }
 
-func TestInitVersionGatesEmbeddedEtcd(t *testing.T) {
+func TestStartVersionGatesEmbeddedEtcd(t *testing.T) {
 	// Embedded-etcd deployments are single-process: when the local version
-	// already satisfies the gate, initVersionGates resolves the item directly
+	// already satisfies the gate, startVersionGates resolves the item directly
 	// (localSatisfied -> TargetValue) instead of creating a confirmator.
 	t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
 	p := &ComponentParam{}
@@ -215,7 +246,7 @@ func TestInitVersionGatesEmbeddedEtcd(t *testing.T) {
 	require.NotNil(t, item.VersionGateSwitcher)
 	assert.False(t, item.VersionGateSwitcher.localSatisfied)
 
-	// Same package: flip skipRemote off so initVersionGates actually runs, and
+	// Same package: flip skipRemote off so startVersionGates actually runs, and
 	// enable embedded etcd. FunctionCfg is already initialized by Init.
 	bt.config.skipRemote = false
 	p.EtcdCfg.UseEmbedEtcd.SwapTempValue("true")
@@ -224,9 +255,9 @@ func TestInitVersionGatesEmbeddedEtcd(t *testing.T) {
 		bt.config.skipRemote = true
 	}()
 
-	p.initVersionGates()
+	p.startVersionGates()
 	// Local version (common.Version, 3.0.0-beta on master) >= 2.6.23: the gate
-	// is locally satisfied and no confirmator is created. initVersionGates
+	// is locally satisfied and no confirmator is created. startVersionGates
 	// itself evicts the value cache, so the resolution is observable directly.
 	assert.True(t, item.VersionGateSwitcher.localSatisfied)
 	assert.Nil(t, p.versionGates)
@@ -241,7 +272,7 @@ func TestInitVersionGatesEmbeddedEtcd(t *testing.T) {
 	item.VersionGateSwitcher.GateVersion = "99.0.0"
 	defer func() { item.VersionGateSwitcher.GateVersion = oldGateVersion }()
 
-	p.initVersionGates()
+	p.startVersionGates()
 	assert.False(t, item.VersionGateSwitcher.localSatisfied)
 	item.manager.EvictCachedValue(item.Key)
 	assert.Equal(t, "false", item.GetValue())
@@ -313,6 +344,23 @@ func assertConfigAbsent(t *testing.T, cli *clientv3.Client, configRoot, key stri
 	t.Helper()
 	_, ok := getConfigValue(t, cli, configRoot, key)
 	assert.False(t, ok, "config %s should not be flipped", key)
+}
+
+// waitGateResolved polls until the confirmator has marked the (single) gate as
+// resolved, e.g. superseded by an explicit value without an etcd write.
+func waitGateResolved(t *testing.T, c *confirmator) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		c.mu.Lock()
+		resolved := len(c.gates) == 1 && c.gates[0].resolved
+		c.mu.Unlock()
+		if resolved {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("gate did not resolve within timeout")
 }
 
 // embedEtcdClientPort remembers the client port of the singleton embedded etcd

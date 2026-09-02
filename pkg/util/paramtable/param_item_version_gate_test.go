@@ -139,7 +139,7 @@ func TestVersionGateSwitcher_EffectiveValue(t *testing.T) {
 
 	t.Run("embedded-etcd localSatisfied resolves sentinel to TargetValue", func(t *testing.T) {
 		// A single-process (embedded-etcd) deployment whose local version already
-		// satisfies the gate: initVersionGates marks the switcher localSatisfied,
+		// satisfies the gate: StartVersionGateSwitcher marks the switcher localSatisfied,
 		// so the sentinel resolves to TargetValue instead of PreSwitchValue.
 		// Use the initialized shared item (it has a manager). GetAsBool caches by
 		// raw value, and localSatisfied is a runtime hint invisible to the cache,

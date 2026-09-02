@@ -62,7 +62,7 @@ type VersionGateSwitcher struct {
 	TargetValue           string        // effective value after AutoSwitch takes effect
 	SwitchDelay           time.Duration // stability window to wait after cluster-wide confirmation before switching
 
-	// localSatisfied is set by ComponentParam.initVersionGates for embedded-etcd
+	// localSatisfied is set by StartVersionGateSwitcher for embedded-etcd
 	// (single-process) deployments: the local process is the entire cluster, so
 	// when the local version is already >= GateVersion there is nothing to
 	// coordinate and the gate resolves directly to TargetValue. It is a pure
