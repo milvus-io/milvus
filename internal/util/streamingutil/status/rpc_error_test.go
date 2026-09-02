@@ -130,7 +130,10 @@ func TestCauseWithFormatVerbSurvivesTheWire(t *testing.T) {
 // TestNewFromPBErrorCarriesTheWholeMessage guards the helper both conversion
 // paths now share: the streaming response body and the gRPC status details.
 func TestNewFromPBErrorCarriesTheWholeMessage(t *testing.T) {
-	assert.Nil(t, NewFromPBError(nil))
+	// Never nil: the caller dereferences the result through pointer receivers.
+	empty := NewFromPBError(nil)
+	require.NotNil(t, empty)
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_UNKNOWN, empty.Code)
 
 	original := NewShardFenced("by-dev-rootcoord-dml_0_100v0", 447856455348518913)
 	pb := original.AsPBError()
