@@ -1212,8 +1212,10 @@ message id, timetick and last-confirmed position unchanged.
   the idempotency section alone — keys and offsets, without the primary keys, which
   dominate a chunk's size — and fetch the insert section only when a duplicate actually
   hits. The layout is in place; the read path is not.
-- **A delete section.** The chunk format reserves the third section and the vchannel index
-  reserves its field number; nothing else in the design has to move.
+- **Wire the transform consumer into recovery.** The summary store now implements an
+  optional transform section (field 6) and its GC frontier. Production recovery still
+  enables only idempotency; `ManagerConfig.EnableTransform` remains off until that
+  consumer is wired. See [WALSummary](wal/summary.md).
 - **A primary-key index as a second consumer.** It reads the insert section, which already
   holds every primary key, so nothing is stored twice. It would want full history rather
   than a bounded tail, so it needs its own retention input; the current store is shaped for
