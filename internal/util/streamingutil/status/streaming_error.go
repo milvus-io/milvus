@@ -44,7 +44,12 @@ func (e *StreamingError) AsPBError() *streamingpb.StreamingError {
 // transport may reuse or mutate after this returns.
 func NewFromPBError(pb *streamingpb.StreamingError) *StreamingError {
 	if pb == nil {
-		return nil
+		// Never nil: every caller reaches this because the peer reported a
+		// failure, and the methods on *StreamingError have pointer receivers
+		// that dereference Code -- handing back nil turns an empty error body
+		// into a panic on the next line rather than an error the caller can
+		// report. A server should not send one; if one arrives, say so.
+		return New(streamingpb.StreamingCode_STREAMING_CODE_UNKNOWN, "empty streaming error message")
 	}
 	cloned, ok := proto.Clone(pb).(*streamingpb.StreamingError)
 	if !ok {
