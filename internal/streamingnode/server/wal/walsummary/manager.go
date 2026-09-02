@@ -18,6 +18,7 @@ package walsummary
 
 import (
 	"context"
+	"math"
 	"sort"
 	"sync"
 
@@ -29,8 +30,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
+
+// DroppedVChannelTimeTick releases all transform records after durable cleanup.
+const DroppedVChannelTimeTick = math.MaxUint64
 
 // Manager is the pchannel-scoped WALSummary runtime. A summary is one
 // contiguous dense span of the pchannel log kept in two forms:
@@ -50,12 +55,13 @@ import (
 // holds.
 //
 // A single manager-level lock guards every piece of state: the pending
-// records, the sealed-but-unwritten chunks, the manifest and its version
-// (used as a compare-and-swap token so the object-storage write can happen
-// outside the lock), and the per-vchannel GC positions.
+// records, the sealed-but-unwritten chunks, the manifest and its version,
+// and the per-vchannel GC positions. publishMu serializes manifest writes
+// while observation continues under mu.
 type Manager struct {
-	mu  sync.Mutex
-	cfg ManagerConfig
+	gcFrontiers map[string]uint64
+	mu          sync.Mutex
+	cfg         ManagerConfig
 
 	// pending holds the records of the current (unsealed) chunk
 	// span, in WAL order. Each record carries the built entry and the message
@@ -109,8 +115,11 @@ type Manager struct {
 
 // ManagerConfig carries the wiring of one pchannel's summary manager.
 type ManagerConfig struct {
-	PChannel string
-	Term     int64
+	// EnableTransform stages delete records for a wired TransformLog consumer.
+	// The current recovery path wires only idempotency and leaves this disabled.
+	EnableTransform bool
+	PChannel        string
+	Term            int64
 	// Store is the object storage layer of the summary store.
 	Store *Store
 	// RetentionMaxBytes is the soft budget of the retained chunk objects. GC
@@ -126,6 +135,7 @@ type ManagerConfig struct {
 // NewManager creates the summary manager of one pchannel.
 func NewManager(config ManagerConfig) *Manager {
 	return &Manager{
+		gcFrontiers:          make(map[string]uint64),
 		cfg:                  config,
 		manifest:             &streamingpb.PChannelSummaryManifest{},
 		durableFrontiers:     make(map[string]uint64),
@@ -137,9 +147,9 @@ func NewManager(config ManagerConfig) *Manager {
 // on the WAL observation path (recovery replay and the live scanner),
 // independent of the vchannel modules, and must not block.
 //
-// Only a message carrying a client idempotency key produces a record; DDL,
-// flush and barrier messages never do. The
-// record of a delete message is built here and copied into the pending
+// Keyed inserts produce idempotency records. With EnableTransform, deletes
+// also produce transform records. DDL messages invalidate idempotency keys.
+// Each record is built here and copied into the pending
 // buffer — the message handle is not retained, so its acknowledgement never
 // depends on the summary. Observation only stages: the staged span is sealed
 // and written by Persist. Messages without a per-vchannel record (all-channel
@@ -170,9 +180,13 @@ func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessa
 		return
 	}
 	idempotency, insert := idempotencyHalvesOf(msg)
+	var entry *streamingpb.TransformLogEntry
+	if m.cfg.EnableTransform && messageutil.ClassifyTransformLogMessage(msg) == messageutil.TransformLogKindDelete {
+		entry = messageutil.BuildTransformLogEntry(msg, messageutil.TransformEntryOption{})
+	}
 
 	m.mu.Lock()
-	if idempotency == nil {
+	if idempotency == nil && entry == nil {
 		// Nothing to record.
 		m.mu.Unlock()
 		return
@@ -185,19 +199,21 @@ func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessa
 		m.mu.Unlock()
 		return
 	}
-	m.stageRecordLocked(msg, idempotency, insert)
+	m.stageRecordLocked(msg, idempotency, insert, entry)
 	m.mu.Unlock()
 }
 
-// stageDeleteLocked appends one delete record to the pending span. Caller
+// stageRecordLocked appends one record to the pending span. Caller
 // holds m.mu. The entry is built here — the message payload is not retained,
 // so it must be copied before the message is released.
 func (m *Manager) stageRecordLocked(
 	msg message.ImmutableMessage,
 	idempotency *streamingpb.VChannelSummaryIdempotencyRecord,
 	insert *streamingpb.VChannelSummaryInsertRecord,
+	entry *streamingpb.TransformLogEntry,
 ) {
 	record := stagedRecord{
+		entry:       entry,
 		vchannel:    msg.VChannel(),
 		timeTick:    msg.TimeTick(),
 		idempotency: idempotency,
@@ -221,7 +237,7 @@ func stagedRecordSize(msg message.ImmutableMessage, record *stagedRecord) uint64
 	if record.insert == nil {
 		return uint64(msg.EstimateSize())
 	}
-	size := uint64(proto.Size(record.insert)) + uint64(proto.Size(record.idempotency))
+	size := uint64(proto.Size(record.insert)) + uint64(proto.Size(record.idempotency)) + uint64(proto.Size(record.entry))
 	return size
 }
 
@@ -391,7 +407,7 @@ func (m *Manager) invalidateVChannel(vchannel string, timetick uint64) {
 	// record. seal() upholds the same rule by handing the array off whole.
 	kept := make([]stagedRecord, 0, len(m.pending))
 	for i := range m.pending {
-		if m.pending[i].vchannel == vchannel && m.pending[i].timeTick <= timetick {
+		if m.pending[i].vchannel == vchannel && m.pending[i].timeTick <= timetick && m.pending[i].entry == nil {
 			m.pendingBytes -= m.pending[i].size
 			continue
 		}
@@ -530,6 +546,11 @@ func (m *Manager) writeOnce(ctx context.Context) (bool, error) {
 	for vchannel, staged := range sc.RecordsByVChannel {
 		cs := &ChunkSections{}
 		for _, record := range staged {
+			if record.entry != nil {
+				cs.Transform = append(cs.Transform, &streamingpb.VChannelSummaryTransformRecord{
+					TimeTick: record.timeTick, Delete: record.entry.GetDelete(),
+				})
+			}
 			if record.insert != nil {
 				// The two halves are appended together and never apart: the
 				// sections are paired by position, so a record contributing one
@@ -939,6 +960,7 @@ func vchannelChunkIndex(chunk *streamingpb.PChannelSummaryChunkIndexEntry, vchan
 // stagedRecord is one staged record: the built section halves plus the WAL
 // position they came from. The message itself is not retained.
 type stagedRecord struct {
+	entry    *streamingpb.TransformLogEntry
 	vchannel string
 	timeTick uint64
 
@@ -962,4 +984,55 @@ type SealedChunk struct {
 	Generation        uint64
 	RecordsByVChannel map[string][]*stagedRecord
 	MaxTimeTick       uint64
+}
+
+// ReadTransformEntries loads the durable transform backlog in (from, to].
+// Consumers call this once during recovery and observe live deletes directly.
+func (m *Manager) ReadTransformEntries(
+	ctx context.Context,
+	vchannel string,
+	from, to uint64,
+) ([]*streamingpb.TransformLogEntry, error) {
+	m.mu.Lock()
+	chunks := append([]*streamingpb.PChannelSummaryChunkIndexEntry(nil), m.manifest.GetChunks()...)
+	m.mu.Unlock()
+	out := make([]*streamingpb.TransformLogEntry, 0)
+	for _, chunk := range chunks {
+		if chunk.GetEndTimetick() <= from {
+			continue
+		}
+		if chunk.GetStartTimetick() > to {
+			break
+		}
+		index := vchannelChunkIndex(chunk, vchannel)
+		if index == nil || index.GetTransform() == nil {
+			continue
+		}
+		records, err := m.cfg.Store.ReadTransformSection(ctx, chunk.GetGeneration(), chunk.GetTerm(), vchannel, index)
+		if err != nil {
+			return nil, err
+		}
+		for _, record := range records {
+			tt := record.GetTimeTick()
+			if tt <= from || tt > to {
+				continue
+			}
+			out = append(out, &streamingpb.TransformLogEntry{
+				TimeTick: tt,
+				Entry: &streamingpb.TransformLogEntry_Delete{
+					Delete: record.GetDelete(),
+				},
+			})
+		}
+	}
+	return out, nil
+}
+
+// AdvanceGCTimeTick reports a durable transform materialization or cleanup frontier.
+func (m *Manager) AdvanceGCTimeTick(vchannel string, timetick uint64) {
+	m.mu.Lock()
+	if timetick > m.gcFrontiers[vchannel] {
+		m.gcFrontiers[vchannel] = timetick
+	}
+	m.mu.Unlock()
 }

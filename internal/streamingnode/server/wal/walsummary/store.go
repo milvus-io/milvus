@@ -249,7 +249,7 @@ func (s *Store) ReadIdempotencySectionsOfChunk(
 	key := buildChunkKey(s.chunkManager, s.pchannel, generation, term)
 	payload, err := s.chunkManager.Read(ctx, key)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to read summary chunk %s", key)
+		return nil, merr.Wrapf(err, "failed to read summary chunk %s", key)
 	}
 	_, footerStart, err := unmarshalChunkTail(payload)
 	if err != nil {
@@ -581,6 +581,7 @@ func sanitizePathPart(value string) string {
 // on read by position, which holds because a record without a key still takes
 // its slot in the idempotency section.
 type ChunkSections struct {
+	Transform []*streamingpb.VChannelSummaryTransformRecord
 	// Idempotency and Inserts are the two halves of the idempotency consumer's
 	// view, stored in separate sections and paired by position: Idempotency[i]
 	// is the client key of the write Inserts[i] describes.
@@ -598,7 +599,7 @@ type ChunkSections struct {
 // empty reports whether the vchannel contributes nothing to the chunk, in which
 // case it gets no footer entry at all.
 func (c *ChunkSections) empty() bool {
-	return c == nil || len(c.Inserts) == 0
+	return c == nil || (len(c.Inserts) == 0 && len(c.Transform) == 0)
 }
 
 // validateIdempotencyAlignment rejects a pairing that cannot be stored, before
@@ -670,6 +671,18 @@ func marshalChunk(
 			start, end = minUint64(start, insertStart), maxUint64(end, insertEnd)
 		}
 
+		if len(sections.Transform) > 0 {
+			records := sortedTransformRecords(sections.Transform)
+			section := &streamingpb.VChannelSummaryTransformSection{Records: records}
+			ref, err := appendSection(buf, section, len(records))
+			if err != nil {
+				return nil, nil, err
+			}
+			index.Transform = ref
+			transformStart, transformEnd := transformRecordTimetickRange(records)
+			index.TransformEndTimetick = transformEnd
+			start, end = minUint64(start, transformStart), maxUint64(end, transformEnd)
+		}
 		index.StartTimetick, index.EndTimetick = start, end
 		extendFooterRange(footer, index.StartTimetick, index.EndTimetick)
 		footer.Chunks = append(footer.Chunks, index)
@@ -770,6 +783,13 @@ func unmarshalChunk(
 				return nil, nil, err
 			}
 			sections.Idempotency, sections.Inserts = idempotency.Idempotency, idempotency.Inserts
+		}
+		if index.GetTransform() != nil {
+			records, err := unmarshalTransformSection(payload, footerStart, index)
+			if err != nil {
+				return nil, nil, err
+			}
+			sections.Transform = records
 		}
 		sectionsByVChannel[index.GetVchannel()] = sections
 	}
@@ -976,6 +996,16 @@ func chunkSectionsByVChannelEqual(left, right map[string]*ChunkSections) bool {
 		if !ok {
 			return false
 		}
+		leftTransforms := sortedTransformRecords(leftSections.Transform)
+		rightTransforms := sortedTransformRecords(rightSections.Transform)
+		if len(leftTransforms) != len(rightTransforms) {
+			return false
+		}
+		for i := range leftTransforms {
+			if !proto.Equal(leftTransforms[i], rightTransforms[i]) {
+				return false
+			}
+		}
 		if !idempotencySectionsEqual(leftSections, rightSections) {
 			return false
 		}
@@ -1105,4 +1135,85 @@ func (s *Store) LogStoreState(logger *mlog.Logger) {
 	logger.Info(context.TODO(), "walsummary store",
 		mlog.String("pchannel", s.pchannel),
 		mlog.Int64("term", s.term))
+}
+
+// ReadTransformSection decodes one vchannel's transform records from a chunk.
+func (s *Store) ReadTransformSection(
+	ctx context.Context,
+	generation uint64,
+	term int64,
+	vchannel string,
+	index *streamingpb.VChannelSummaryChunkIndex,
+) ([]*streamingpb.VChannelSummaryTransformRecord, error) {
+	key := buildChunkKey(s.chunkManager, s.pchannel, generation, term)
+	payload, err := s.chunkManager.Read(ctx, key)
+	if err != nil {
+		return nil, merr.Wrapf(err, "failed to read summary chunk %s", key)
+	}
+	_, footerStart, err := unmarshalChunkTail(payload)
+	if err != nil {
+		return nil, err
+	}
+	return unmarshalTransformSection(payload, footerStart, index)
+}
+
+func unmarshalTransformSection(
+	payload []byte,
+	payloadEnd uint64,
+	index *streamingpb.VChannelSummaryChunkIndex,
+) ([]*streamingpb.VChannelSummaryTransformRecord, error) {
+	vchannel := index.GetVchannel()
+	ref := index.GetTransform()
+	if ref == nil {
+		return nil, storeCorruptedf("missing transform section for vchannel %s", vchannel)
+	}
+	end := ref.GetOffset() + ref.GetLength()
+	if ref.GetOffset() < uint64(chunkHeaderSize) || end > payloadEnd || ref.GetOffset() > end {
+		return nil, storeCorruptedf("invalid transform section range for vchannel %s", vchannel)
+	}
+	section := &streamingpb.VChannelSummaryTransformSection{}
+	if err := proto.Unmarshal(payload[ref.GetOffset():end], section); err != nil {
+		return nil, markStoreCorrupted(merr.Wrapf(err, "failed to decode transform section for vchannel %s", vchannel))
+	}
+	if uint64(len(section.GetRecords())) != ref.GetRecordCount() {
+		return nil, storeCorruptedf("transform section record count mismatch for vchannel %s", vchannel)
+	}
+	records := make([]*streamingpb.VChannelSummaryTransformRecord, 0, len(section.GetRecords()))
+	for _, record := range section.GetRecords() {
+		records = append(records, cloneTransformRecord(record))
+	}
+	return sortedTransformRecords(records), nil
+}
+
+func sortedTransformRecords(records []*streamingpb.VChannelSummaryTransformRecord) []*streamingpb.VChannelSummaryTransformRecord {
+	if len(records) < 2 {
+		return records
+	}
+	sorted := make([]*streamingpb.VChannelSummaryTransformRecord, len(records))
+	copy(sorted, records)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].GetTimeTick() < sorted[j].GetTimeTick()
+	})
+	return sorted
+}
+
+func cloneTransformRecord(record *streamingpb.VChannelSummaryTransformRecord) *streamingpb.VChannelSummaryTransformRecord {
+	if record == nil {
+		return nil
+	}
+	return proto.Clone(record).(*streamingpb.VChannelSummaryTransformRecord)
+}
+
+func transformRecordTimetickRange(records []*streamingpb.VChannelSummaryTransformRecord) (uint64, uint64) {
+	var start, end uint64
+	for _, record := range records {
+		tt := record.GetTimeTick()
+		if start == 0 || tt < start {
+			start = tt
+		}
+		if tt > end {
+			end = tt
+		}
+	}
+	return start, end
 }
