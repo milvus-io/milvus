@@ -15,6 +15,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 #include "Plan.h"
 #include "PlanNode.h"
@@ -55,8 +56,15 @@ class ProtoParser {
     std::unique_ptr<Plan>
     CreatePlan(const proto::plan::PlanNode& plan_node_proto);
 
+    std::unique_ptr<Plan>
+    CreatePlan(std::unique_ptr<proto::plan::PlanNode> plan_node_proto);
+
     std::unique_ptr<RetrievePlan>
     CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto);
+
+    std::unique_ptr<RetrievePlan>
+    CreateRetrievePlan(
+        std::unique_ptr<proto::plan::PlanNode> plan_node_proto);
 
     expr::TypedExprPtr
     ParseExprs(const proto::plan::Expr& expr_pb,
@@ -65,6 +73,9 @@ class ProtoParser {
     std::shared_ptr<rescores::Scorer>
     ParseScorer(const proto::plan::ScoreFunction& function);
 
+    std::shared_ptr<rescores::Scorer>
+    ParseScorer(std::unique_ptr<proto::plan::ScoreFunction> function);
+
     // Extract only filter-related nodes (FilterBitsNode, ElementFilterBitsNode)
     // from a plan tree, avoiding VectorSearchNode, SearchGroupByNode, etc.
     // Returns MvccNode only if no pre-filter nodes are found.
@@ -72,6 +83,20 @@ class ProtoParser {
     ExtractFilterOnlyPlan(const std::shared_ptr<plan::PlanNode>& root_node);
 
  private:
+    using BloomBlobOwners = std::unordered_map<
+        const std::string*, std::shared_ptr<const std::string>>;
+
+    ProtoParser(SchemaPtr schema, BloomBlobOwners bloom_blob_owners)
+        : schema(std::move(schema)),
+          bloom_blob_owners_(std::move(bloom_blob_owners)) {
+    }
+
+    std::unique_ptr<Plan>
+    CreatePlanImpl(const proto::plan::PlanNode& plan_node_proto);
+
+    std::unique_ptr<RetrievePlan>
+    CreateRetrievePlanImpl(const proto::plan::PlanNode& plan_node_proto);
+
     expr::TypedExprPtr
     CreateAlwaysTrueExprs();
 
@@ -141,6 +166,12 @@ class ProtoParser {
 
  private:
     const SchemaPtr schema;
+    // Owner-bound entry points move each Bloom string out of their uniquely
+    // owned protobuf root. The map ties the original string object's address
+    // to its new shared owner only while the root is being parsed; logical
+    // expressions retain the shared strings they consume. Legacy const-ref
+    // entry points leave this empty and keep their safe-copy behavior.
+    const BloomBlobOwners bloom_blob_owners_;
 };
 
 }  // namespace milvus::query

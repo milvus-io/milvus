@@ -616,7 +616,7 @@ TEST(BloomFilterExprTest, ProtoParserDispatchAndTypeCheck) {
             std::dynamic_pointer_cast<const expr::BloomFilterExpr>(parsed);
         ASSERT_NE(bf_expr, nullptr);
         EXPECT_EQ(bf_expr->column_.field_id_, fid);
-        EXPECT_EQ(bf_expr->filter_blob_, blob);
+        EXPECT_EQ(*bf_expr->filter_blob_, blob);
     }
 
     // JSON parses too, and the nested path survives into the logical expr.
