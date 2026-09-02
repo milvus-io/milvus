@@ -69,17 +69,23 @@ func (m *shardManagerImpl) CheckIfVChannelCanBeWritten(collectionID int64, vchan
 	return m.checkIfVChannelCanBeWritten(collectionID, vchannel)
 }
 
-// GetSplitTimeTick returns T_switch (the time tick the named vchannel was fenced
-// at by shard split), or 0 if the vchannel is unknown or not fenced.
-func (m *shardManagerImpl) GetSplitTimeTick(collectionID int64, vchannel string) uint64 {
+// GetSplitFence returns the fence recorded for the named vchannel: T_switch and
+// the task that placed it. Zero values when the vchannel is unknown or not
+// fenced.
+//
+// The task id is what lets a caller tell ITS OWN retry from another task's
+// fence. Without it a rehash landing on a source an automatic split already
+// fenced would read the rejection as "my own fence holds", roll forward, and
+// give two tasks the same source.
+func (m *shardManagerImpl) GetSplitFence(collectionID int64, vchannel string) SplitFence {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	if info, ok := m.collections[collectionID]; ok && info.VChannel == vchannel {
-		return info.SplitTimeTick
+		return SplitFence{TimeTick: info.SplitTimeTick, TaskID: info.SplitTaskID}
 	}
 	// The registration may be gone -- retired, or displaced by a successor on
-	// this pchannel -- while a re-sent fence still needs T_switch back.
+	// this pchannel -- while a re-sent fence still needs the fence back.
 	return m.fencedVChannels[vchannel]
 }
 
@@ -208,10 +214,14 @@ func (m *shardManagerImpl) SplitShard(msg message.ImmutableSplitShardMessageV2) 
 	// record T_switch so an already-fenced re-fence can return it; the split
 	// coordinator recovers T_switch from here after a crash that lost it.
 	collectionInfo.SplitTimeTick = msg.TimeTick()
+	collectionInfo.SplitTaskID = msg.Header().GetSplitTaskId()
 	// Remembered by NAME as well, because the registration above is keyed by
 	// collection and does not survive the source being retired or displaced --
 	// while a stale route to it does.
-	m.fencedVChannels[msg.VChannel()] = msg.TimeTick()
+	m.fencedVChannels[msg.VChannel()] = SplitFence{
+		TimeTick: msg.TimeTick(),
+		TaskID:   msg.Header().GetSplitTaskId(),
+	}
 	logger.Info(context.TODO(), "vchannel is fenced by shard split",
 		mlog.Int64("collectionID", collectionID),
 		mlog.Int64("splitTaskID", msg.Header().GetSplitTaskId()),

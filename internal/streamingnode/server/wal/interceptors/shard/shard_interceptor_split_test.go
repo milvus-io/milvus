@@ -172,7 +172,8 @@ func TestShardInterceptorSplitShardMessageOnFencedVChannel(t *testing.T) {
 	// idempotent: the vchannel is already fenced by a previous split message;
 	// the recorded T_switch is carried back on the error for crash recovery.
 	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v1").Return(shards.ErrVChannelFenced).Once()
-	shardManager.EXPECT().GetSplitTimeTick(int64(1), "v1").Return(uint64(1900)).Once()
+	shardManager.EXPECT().GetSplitFence(int64(1), "v1").
+		Return(shards.SplitFence{TimeTick: 1900, TaskID: 100}).Once()
 
 	msgID, err := i.DoAppend(context.Background(), newTestSplitShardMutableMessage(),
 		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
