@@ -381,6 +381,11 @@ proxy:
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
     enablePprof: true # Whether to enable pprof middleware on the metrics port
+    # high-level restful api, reject a search/query request with HTTP 429 while the proxy's DQL task
+    # queue is full, before the request body is decoded. The scheduler rejects such a request with the same
+    # TooManyRequests error anyway, but only after the body has been decoded; admission moves the same verdict before that
+    # cost. Disabling restores the old always-decode behavior.
+    dqlAdmissionEnabled: true
     hstsMaxAge: 31536000 # Strict-Transport-Security max-age in seconds
     hstsIncludeSubDomains: false # Include subdomains in Strict-Transport-Security
     enableHSTS: false # Whether to enable setting the Strict-Transport-Security header
