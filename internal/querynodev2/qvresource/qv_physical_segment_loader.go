@@ -3,6 +3,7 @@ package qvresource
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
@@ -104,12 +105,19 @@ func (l realQVSegmentLoader) NewSegment(ctx context.Context, collection qnview.C
 	if localCollection == nil {
 		return nil, merr.WrapErrCollectionNotFound(collection.CollectionID())
 	}
+	// Query handles can outlive every view. Keep the native collection alive
+	// for the entire physical segment lifetime, including load and release.
+	if !l.collections.Ref(collection.CollectionID(), 1) {
+		return nil, merr.WrapErrCollectionNotFound(collection.CollectionID())
+	}
 	segment, err := segments.NewSegment(ctx, localCollection, l.segmentManager, segments.SegmentTypeSealed, 0, info)
 	if err != nil {
+		l.collections.Unref(collection.CollectionID(), 1)
 		return nil, err
 	}
 	return &qvLocalSegment{
 		segment:      segment,
+		collection:   localCollection,
 		collections:  l.collections,
 		collectionID: collection.CollectionID(),
 	}, nil
@@ -192,6 +200,8 @@ func (l realQVSegmentLoader) LoadPKCandidate(ctx context.Context, segment qvLoad
 }
 
 type qvLocalSegment struct {
+	releaseOnce  sync.Once
+	collection   *segments.Collection
 	segment      segments.Segment
 	collections  qvCollectionManager
 	collectionID int64
@@ -210,10 +220,7 @@ func (s *qvLocalSegment) QuerySegment() segments.Segment {
 }
 
 func (s *qvLocalSegment) Collection() *segments.Collection {
-	if s.collections == nil {
-		return nil
-	}
-	return s.collections.Get(s.collectionID)
+	return s.collection
 }
 
 func (s *qvLocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKeys, timestamps []typeutil.Timestamp) error {
@@ -221,7 +228,10 @@ func (s *qvLocalSegment) Delete(ctx context.Context, primaryKeys storage.Primary
 }
 
 func (s *qvLocalSegment) Release(ctx context.Context) error {
-	s.segment.Release(ctx)
+	s.releaseOnce.Do(func() {
+		s.segment.Release(ctx)
+		s.collections.Unref(s.collectionID, 1)
+	})
 	return nil
 }
 

@@ -4,10 +4,10 @@ package qnview
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -634,9 +634,11 @@ func TestQueryViewSegmentReadinessManager_LoadedSegmentAcquireDoesNotReleaseShar
 
 	assert.Equal(t, map[int64][]int64{10: {1000}}, <-ready2)
 	select {
-	case <-acquireCalls:
-		t.Fatal("already loaded segment should not trigger another physical acquire")
-	case <-time.After(20 * time.Millisecond):
+	case req := <-acquireCalls:
+		assert.Equal(t, key2, req.Key)
+		assert.Equal(t, view, req.View)
+	case <-time.After(time.Second):
+		t.Fatal("replacement view must own a physical reference")
 	}
 	assert.False(t, segment.released)
 }
