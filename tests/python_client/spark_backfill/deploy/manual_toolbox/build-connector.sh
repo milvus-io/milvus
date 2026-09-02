@@ -95,6 +95,19 @@ sed -i \
   -e 's#https://sourceforge.net/projects/boost/files/boost/1.83.0/boost_1_83_0.tar.bz2#https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2#' \
   /root/.conan/data/boost/1.83.0/_/_/export/conandata.yml
 
+# Avro 1.12.1 has aged out of active Apache and Tencent mirrors. Keep the
+# dependency's Conan reference, but build it from the compatible Avro 1.12.2
+# source archive served by Tencent and pin that archive's checksum.
+AVRO_RECIPE=/root/.conan/data/libavrocpp/1.12.1.1/milvus/dev/export/conandata.yml
+conan download \
+  'libavrocpp/1.12.1.1@milvus/dev' \
+  -r default-conan-local \
+  --recipe
+sed -i \
+  -e 's#https://dlcdn.apache.org/avro/avro-1.12.1/avro-src-1.12.1.tar.gz#https://mirrors.cloud.tencent.com/apache/avro/avro-1.12.2/avro-src-1.12.2.tar.gz#' \
+  -e 's#268e47c0850df04f952ea6fdfc3b12a8d0042124354bff6c0239be0b70016d2e#449722c442ec9514d8e6933f9c7ccf2e0544cb75c951c25b804ea1d8e73d12bb#' \
+  "$AVRO_RECIPE"
+
 # archive.apache.org is not reachable from this vcluster. Prefer an exact
 # Apache release tarball pre-seeded into the persistent Conan cache; otherwise
 # use the source-equivalent GitHub tag archive with its own pinned checksum.
