@@ -761,19 +761,8 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		// This is why the read is not conditional on the snapshot lacking index
 		// metadata: in the normal case the snapshot HAS the files and the source
 		// manifest HAS entries that must still be retracted. A manifest that
-		// carries no index section simply yields an empty list here, not an
-		// error.
-		//
-		// The read IS conditional on the snapshot's manifest_has_index marker.
-		// It mirrors the sticky segment marker, which is set in the same
-		// catalog transaction as the first entry-carrying revision and is
-		// captured from the same record as the manifest pointer - so a false
-		// marker proves the captured revision holds no entries and there is
-		// nothing to enumerate. Sticky means the marker can only over-read
-		// (marked segment whose entries were since retracted), never skip a
-		// manifest that has them. A snapshot from before the field existed
-		// reads false and is equally safe: its manifest predates index
-		// publication entirely.
+		// carries no index section - anything written before index publication -
+		// simply yields an empty list here, not an error.
 		//
 		// Only for a local source: the manifest is read with the target-side
 		// storage config, which cannot address a foreign bucket. An external
@@ -782,8 +771,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		// because the worker derives the drop set from the copied manifest
 		// rather than from this list.
 		var inheritedIndexIDs []int64
-		if !job.GetExternal() && source.GetStorageVersion() >= storage.StorageV3 && source.GetManifestPath() != "" &&
-			sourceSegDesc.GetManifestHasIndex() {
+		if !job.GetExternal() && source.GetStorageVersion() >= storage.StorageV3 && source.GetManifestPath() != "" {
 			manifestIndexes, err := packed.GetManifestIndexInfos(source.GetManifestPath(), storageConfig)
 			if err != nil {
 				// Proceeding without the inherited set would publish a target

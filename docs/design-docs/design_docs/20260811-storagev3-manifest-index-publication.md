@@ -179,14 +179,7 @@ vanish on restart. A verified republication also sets the target segment's
 `manifest_has_index` marker in the same transaction as its pointer.
 
 On the source side, DataCoord reads the source manifest's index entries once
-while assembling the request — but only when the snapshot's captured
-`manifest_has_index` marker is set. The marker mirrors the sticky segment
-marker and is snapshotted from the same record as the manifest pointer, so an
-unmarked segment provably has no entries and its manifest is not read at all;
-snapshots from before the field existed read false and are equally safe, since
-their manifests predate index publication. Snapshot manifest format V5
-persists this marker; V1-V4 readers default it to false. That read supplies the
-retraction list, and, for
+while assembling the request. That read supplies the retraction list, and, for
 a snapshot whose segments record indexes only in their manifests, also the
 artifact list to copy — filtered there to the index definitions the snapshot
 still carries. The retraction list is not filtered: an entry whose definition

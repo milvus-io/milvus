@@ -1081,7 +1081,7 @@ func TestSnapshotReader_ReadManifestLegacyIndexFilePathInfoDefaultsBuildRooted(t
 }
 
 // TestSnapshotManifest_CommitTimestampRoundtripV3 verifies that CommitTimestamp
-// survives a Marshal/Unmarshal cycle with the version-3 schema. This is the
+// survives a Marshal/Unmarshal cycle with the current (V3) schema. This is the
 // invariant the snapshot.go field comment promises ("preserved so that GC, TTL,
 // and MVCC protections survive snapshot/restore").
 func TestSnapshotManifest_CommitTimestampRoundtripV3(t *testing.T) {
@@ -1139,55 +1139,6 @@ func TestSnapshotManifest_LegacyV2NoCommitTimestamp(t *testing.T) {
 	require.Len(t, segments, 1)
 	assert.Equal(t, uint64(0), segments[0].GetCommitTimestamp(),
 		"V2 manifest must decode with CommitTimestamp=0 (field absent in schema)")
-}
-
-func TestSnapshotManifest_ManifestHasIndexRoundtripV5(t *testing.T) {
-	tempDir := t.TempDir()
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
-
-	segment := &datapb.SegmentDescription{
-		SegmentId:        1001,
-		PartitionId:      2001,
-		ManifestHasIndex: true,
-	}
-	entry := snapshotio.SegmentToManifestEntry(segment)
-	require.True(t, entry.ManifestHasIndex)
-
-	assert.Contains(t, snapshotio.AvroSchemaV5(), "manifest_has_index")
-	v5Schema, err := snapshotio.ManifestSchemaByVersion(5)
-	require.NoError(t, err)
-	binaryData, err := avro.Marshal(v5Schema, entry)
-	require.NoError(t, err)
-
-	manifestPath := path.Join(tempDir, "v5_manifest.avro")
-	require.NoError(t, cm.Write(context.Background(), manifestPath, binaryData))
-	segments := readManifestFileForTest(t, cm, manifestPath, 5)
-	require.Len(t, segments, 1)
-	assert.True(t, segments[0].GetManifestHasIndex())
-}
-
-func TestSnapshotManifest_LegacyV4NoManifestHasIndex(t *testing.T) {
-	tempDir := t.TempDir()
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
-
-	segment := &datapb.SegmentDescription{
-		SegmentId:        1001,
-		PartitionId:      2001,
-		ManifestHasIndex: true,
-	}
-	entry := snapshotio.SegmentToManifestEntry(segment)
-
-	assert.NotContains(t, snapshotio.AvroSchemaV4(), "manifest_has_index")
-	v4Schema, err := snapshotio.ManifestSchemaByVersion(4)
-	require.NoError(t, err)
-	binaryData, err := avro.Marshal(v4Schema, entry)
-	require.NoError(t, err)
-
-	manifestPath := path.Join(tempDir, "v4_manifest_without_marker.avro")
-	require.NoError(t, cm.Write(context.Background(), manifestPath, binaryData))
-	segments := readManifestFileForTest(t, cm, manifestPath, 4)
-	require.Len(t, segments, 1)
-	assert.False(t, segments[0].GetManifestHasIndex())
 }
 
 func TestSnapshotManifest_FieldBinlogChildFieldsAndFormatRoundtripV4(t *testing.T) {

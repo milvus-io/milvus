@@ -2325,9 +2325,8 @@ type embeddedAllocator struct{ allocator.Allocator }
 
 // assembleIndexPrecedenceFixture builds a one-segment copy request whose source
 // is a StorageV3 segment carrying the snapshot's own (etcd-derived) index
-// metadata, so a test only has to say whether the segment is marked
-// manifestHasIndex and what its manifest reports.
-func assembleIndexPrecedenceFixture(t *testing.T, manifestHasIndex bool, manifestIndexes []packed.ManifestIndexInfo) *datapb.CopySegmentRequest {
+// metadata, so a test only has to say what its manifest reports.
+func assembleIndexPrecedenceFixture(t *testing.T, manifestIndexes []packed.ManifestIndexInfo) *datapb.CopySegmentRequest {
 	t.Helper()
 
 	manifestPath := packed.MarshalManifestPath("files/insert_log/100/10/1", 3)
@@ -2336,11 +2335,10 @@ func assembleIndexPrecedenceFixture(t *testing.T, manifestHasIndex bool, manifes
 		Indexes:      []*indexpb.IndexInfo{{IndexID: 1001, FieldID: 100}},
 		Segments: []*datapb.SegmentDescription{
 			{
-				SegmentId:        1,
-				PartitionId:      10,
-				StorageVersion:   storage.StorageV3,
-				ManifestPath:     manifestPath,
-				ManifestHasIndex: manifestHasIndex,
+				SegmentId:      1,
+				PartitionId:    10,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   manifestPath,
 				IndexFiles: []*indexpb.IndexFilePathInfo{
 					{BuildID: 3001, FieldID: 100, IndexID: 1001, IndexName: "vec_idx"},
 				},
@@ -2387,12 +2385,11 @@ func assembleIndexPrecedenceFixture(t *testing.T, manifestHasIndex bool, manifes
 	return req
 }
 
-// A marked segment whose entries were all retracted since (the sticky marker
-// over-reads) yields an empty list, not an error. The segment still has
-// indexes, recorded in etcd and captured by the snapshot, so the manifest must
-// not be treated as the authority on whether they exist.
-func TestAssembleCopySegmentRequest_EmptyManifestKeepsSnapshotIndexFiles(t *testing.T) {
-	req := assembleIndexPrecedenceFixture(t, true, nil)
+// A manifest written before index publication existed carries no index section.
+// The segment still has indexes, recorded in etcd and captured by the snapshot,
+// so the manifest must not be treated as the authority on whether they exist.
+func TestAssembleCopySegmentRequest_LegacyManifestKeepsSnapshotIndexFiles(t *testing.T) {
+	req := assembleIndexPrecedenceFixture(t, nil)
 
 	indexFiles := req.GetSources()[0].GetIndexFiles()
 	require.Len(t, indexFiles, 1, "snapshot index metadata must survive an index-less manifest")
@@ -2407,7 +2404,7 @@ func TestAssembleCopySegmentRequest_EmptyManifestKeepsSnapshotIndexFiles(t *test
 // in the normal case both carry entries, and the manifest's must still be
 // retracted or the target would keep pointing at the source's artifacts.
 func TestAssembleCopySegmentRequest_ManifestEntriesRetractedAlongsideSnapshotFiles(t *testing.T) {
-	req := assembleIndexPrecedenceFixture(t, true, []packed.ManifestIndexInfo{
+	req := assembleIndexPrecedenceFixture(t, []packed.ManifestIndexInfo{
 		{IndexID: 1001, BuildID: 3001, FieldID: 100, IndexName: "vec_idx"},
 		{IndexID: 1002, BuildID: 3002, FieldID: 101, IndexName: "dropped_idx"},
 	})
@@ -2422,27 +2419,6 @@ func TestAssembleCopySegmentRequest_ManifestEntriesRetractedAlongsideSnapshotFil
 	// snapshot no longer carries - its artifact is not copied, so leaving the
 	// entry would point the target at the source's files.
 	assert.ElementsMatch(t, []int64{1001, 1002}, req.GetTargets()[0].GetInheritedIndexIds())
-}
-
-// An unmarked segment provably has no manifest index entries - the sticky
-// marker is written in the same transaction as the first entry, and the
-// snapshot captures both from the same record - so the manifest is not read at
-// all. The fixture's manifest mock is poisoned with an entry precisely to
-// prove the short-circuit: were the read to happen, the entry would surface in
-// the inherited list. Snapshots from before the marker field existed read
-// false and take this same path; their manifests predate index publication.
-func TestAssembleCopySegmentRequest_UnmarkedSegmentSkipsManifestIndexRead(t *testing.T) {
-	req := assembleIndexPrecedenceFixture(t, false, []packed.ManifestIndexInfo{
-		{IndexID: 9999, BuildID: 9998, FieldID: 100, IndexName: "poison"},
-	})
-
-	// The snapshot's own index metadata is untouched by the skip.
-	indexFiles := req.GetSources()[0].GetIndexFiles()
-	require.Len(t, indexFiles, 1)
-	assert.Equal(t, int64(3001), indexFiles[0].GetBuildID())
-
-	assert.Empty(t, req.GetTargets()[0].GetInheritedIndexIds(),
-		"an unmarked segment's manifest must not be consulted for inherited entries")
 }
 
 // Strict exclusivity on the copy path: with manifest publication off, the
