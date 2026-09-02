@@ -24,6 +24,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <initializer_list>
 #include <memory>
 #include <optional>
@@ -78,13 +79,15 @@ FieldMeta
 MakeExternalFieldMetaForTest(DataType data_type,
                              DataType element_type = DataType::NONE,
                              bool nullable = false,
-                             int64_t dim = 0) {
+                             int64_t dim = 0,
+                             bool element_nullable = false) {
     proto::schema::FieldSchema field_schema;
     field_schema.set_fieldid(1000);
     field_schema.set_name("field");
     field_schema.set_external_field("field_col");
     field_schema.set_data_type(ToProtoDataType(data_type));
     field_schema.set_nullable(nullable);
+    field_schema.set_element_nullable(element_nullable);
     if (element_type != DataType::NONE) {
         field_schema.set_element_type(ToProtoDataType(element_type));
     }
@@ -100,6 +103,56 @@ MakeExternalFieldMetaForTest(DataType data_type,
         dim_param->set_value(std::to_string(dim));
     }
     return FieldMeta::ParseFrom(field_schema);
+}
+
+template <typename Builder, typename Value, typename Verify>
+void
+VerifyExternalElementNullableArray(DataType element_type,
+                                   const Value& first,
+                                   const Value& third,
+                                   Verify verify_payload) {
+    auto value_builder = std::make_shared<Builder>();
+    arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);
+
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(value_builder->Append(first).ok());
+    ASSERT_TRUE(value_builder->AppendNull().ok());
+    ASSERT_TRUE(value_builder->Append(third).ok());
+    ASSERT_TRUE(builder.AppendNull().ok());
+
+    std::shared_ptr<arrow::Array> list_array;
+    ASSERT_TRUE(builder.Finish(&list_array).ok());
+
+    auto field_meta = MakeExternalFieldMetaForTest(
+        DataType::ARRAY, element_type, true, 0, true);
+    auto normalized = storage::NormalizeExternalArrow(list_array, field_meta);
+    ASSERT_EQ(normalized->type_id(), arrow::Type::BINARY);
+
+    auto binary = std::static_pointer_cast<arrow::BinaryArray>(normalized);
+    ASSERT_EQ(binary->length(), 2);
+    ASSERT_FALSE(binary->IsNull(0));
+    ASSERT_TRUE(binary->IsNull(1));
+
+    ScalarFieldProto proto;
+    auto serialized = binary->GetView(0);
+    ASSERT_TRUE(proto.ParseFromArray(serialized.data(), serialized.size()));
+    ASSERT_EQ(proto.valid_data_size(), 3);
+    EXPECT_TRUE(proto.valid_data(0));
+    EXPECT_FALSE(proto.valid_data(1));
+    EXPECT_TRUE(proto.valid_data(2));
+    verify_payload(proto);
+
+    auto field_data = storage::CreateFieldData(
+        DataType::ARRAY, element_type, true, true, 1, binary->length());
+    field_data->FillFieldData(
+        std::make_shared<arrow::ChunkedArray>(normalized));
+    ASSERT_EQ(field_data->get_num_rows(), 2);
+    EXPECT_TRUE(field_data->is_valid(0));
+    EXPECT_FALSE(field_data->is_valid(1));
+    auto* row = static_cast<const milvus::Array*>(field_data->RawValue(0));
+    ASSERT_NE(row, nullptr);
+    ASSERT_TRUE(row->is_element_nullable());
+    verify_payload(row->output_data());
 }
 
 template <size_t N>
@@ -139,6 +192,57 @@ AssertFixedSizeBinaryRow(const std::shared_ptr<arrow::Array>& array,
         memcmp(fsb_array->Value(row_index), expected.data(), sizeof(expected)),
         0);
 }
+
+struct ElementNullableVectorArrayCodecParam {
+    DataType element_type;
+    int64_t dim;
+    std::string name;
+};
+
+std::vector<uint8_t>
+BuildCodecVectorBytes(DataType element_type, int64_t dim, int seed) {
+    const auto byte_width = vector_bytes_per_element(element_type, dim);
+    std::vector<uint8_t> bytes(byte_width);
+    if (element_type == DataType::VECTOR_FLOAT) {
+        std::vector<float> values(dim);
+        for (int64_t i = 0; i < dim; ++i) {
+            values[i] = static_cast<float>(seed + i);
+        }
+        std::memcpy(bytes.data(), values.data(), byte_width);
+        return bytes;
+    }
+    for (size_t i = 0; i < byte_width; ++i) {
+        bytes[i] = static_cast<uint8_t>(seed + i);
+    }
+    return bytes;
+}
+
+std::string
+GetCodecVectorPayloadBytes(const VectorFieldProto& field,
+                           DataType element_type) {
+    switch (element_type) {
+        case DataType::VECTOR_FLOAT: {
+            const auto& data = field.float_vector().data();
+            return {reinterpret_cast<const char*>(data.data()),
+                    data.size() * sizeof(float)};
+        }
+        case DataType::VECTOR_BINARY:
+            return field.binary_vector();
+        case DataType::VECTOR_FLOAT16:
+            return field.float16_vector();
+        case DataType::VECTOR_BFLOAT16:
+            return field.bfloat16_vector();
+        case DataType::VECTOR_INT8:
+            return field.int8_vector();
+        default:
+            ADD_FAILURE() << "unsupported vector type "
+                          << static_cast<int>(element_type);
+            return {};
+    }
+}
+
+class ElementNullableVectorArrayCodecTest
+    : public ::testing::TestWithParam<ElementNullableVectorArrayCodecParam> {};
 
 }  // namespace
 
@@ -339,6 +443,77 @@ TEST(storage, ExternalArrayListNormalizesToBinary) {
         MakeExternalFieldMetaForTest(DataType::ARRAY, DataType::INT64);
     auto normalized = storage::NormalizeExternalArrow(list_array, field_meta);
     ASSERT_EQ(normalized->type_id(), arrow::Type::BINARY);
+}
+
+TEST(storage, ExternalElementNullableArrayPreservesDensePayloadForAllTypes) {
+    VerifyExternalElementNullableArray<arrow::BooleanBuilder>(
+        DataType::BOOL, true, false, [](const ScalarFieldProto& row) {
+            ASSERT_EQ(row.bool_data().data_size(), 3);
+            EXPECT_TRUE(row.bool_data().data(0));
+            EXPECT_FALSE(row.bool_data().data(1));
+            EXPECT_FALSE(row.bool_data().data(2));
+        });
+    VerifyExternalElementNullableArray<arrow::Int8Builder>(
+        DataType::INT8, int8_t{1}, int8_t{3}, [](const ScalarFieldProto& row) {
+            ASSERT_EQ(row.int_data().data_size(), 3);
+            EXPECT_EQ(row.int_data().data(0), 1);
+            EXPECT_EQ(row.int_data().data(1), 0);
+            EXPECT_EQ(row.int_data().data(2), 3);
+        });
+    VerifyExternalElementNullableArray<arrow::Int16Builder>(
+        DataType::INT16,
+        int16_t{10},
+        int16_t{30},
+        [](const ScalarFieldProto& row) {
+            ASSERT_EQ(row.int_data().data_size(), 3);
+            EXPECT_EQ(row.int_data().data(0), 10);
+            EXPECT_EQ(row.int_data().data(1), 0);
+            EXPECT_EQ(row.int_data().data(2), 30);
+        });
+    VerifyExternalElementNullableArray<arrow::Int32Builder>(
+        DataType::INT32,
+        int32_t{100},
+        int32_t{300},
+        [](const ScalarFieldProto& row) {
+            ASSERT_EQ(row.int_data().data_size(), 3);
+            EXPECT_EQ(row.int_data().data(0), 100);
+            EXPECT_EQ(row.int_data().data(1), 0);
+            EXPECT_EQ(row.int_data().data(2), 300);
+        });
+    VerifyExternalElementNullableArray<arrow::Int64Builder>(
+        DataType::INT64,
+        int64_t{1000},
+        int64_t{3000},
+        [](const ScalarFieldProto& row) {
+            ASSERT_EQ(row.long_data().data_size(), 3);
+            EXPECT_EQ(row.long_data().data(0), 1000);
+            EXPECT_EQ(row.long_data().data(1), 0);
+            EXPECT_EQ(row.long_data().data(2), 3000);
+        });
+    VerifyExternalElementNullableArray<arrow::FloatBuilder>(
+        DataType::FLOAT, 1.5F, 3.5F, [](const ScalarFieldProto& row) {
+            ASSERT_EQ(row.float_data().data_size(), 3);
+            EXPECT_FLOAT_EQ(row.float_data().data(0), 1.5F);
+            EXPECT_FLOAT_EQ(row.float_data().data(1), 0.0F);
+            EXPECT_FLOAT_EQ(row.float_data().data(2), 3.5F);
+        });
+    VerifyExternalElementNullableArray<arrow::DoubleBuilder>(
+        DataType::DOUBLE, 1.25, 3.25, [](const ScalarFieldProto& row) {
+            ASSERT_EQ(row.double_data().data_size(), 3);
+            EXPECT_DOUBLE_EQ(row.double_data().data(0), 1.25);
+            EXPECT_DOUBLE_EQ(row.double_data().data(1), 0.0);
+            EXPECT_DOUBLE_EQ(row.double_data().data(2), 3.25);
+        });
+    VerifyExternalElementNullableArray<arrow::StringBuilder>(
+        DataType::VARCHAR,
+        std::string("first"),
+        std::string("third"),
+        [](const ScalarFieldProto& row) {
+            ASSERT_EQ(row.string_data().data_size(), 3);
+            EXPECT_EQ(row.string_data().data(0), "first");
+            EXPECT_EQ(row.string_data().data(1), "");
+            EXPECT_EQ(row.string_data().data(2), "third");
+        });
 }
 
 TEST(storage, ExternalFloatVectorListNormalizesToFixedSizeBinary) {
@@ -624,6 +799,58 @@ TEST(storage, ExternalNullableVectorArrayPreservesNullRows) {
         storage::NormalizeExternalArrow(list_array, non_nullable_meta));
 }
 
+TEST(storage, ElementNullableVectorArrayUsesBinaryArrowChildren) {
+    constexpr int dim = 4;
+    auto nullable_builder = storage::CreateArrowBuilder(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, dim, false, true);
+    auto nullable_list_builder =
+        std::dynamic_pointer_cast<arrow::ListBuilder>(nullable_builder);
+    ASSERT_NE(nullable_list_builder, nullptr);
+    EXPECT_EQ(nullable_list_builder->value_builder()->type()->id(),
+              arrow::Type::BINARY);
+
+    auto nullable_schema = storage::CreateArrowSchema(
+        DataType::VECTOR_ARRAY, dim, DataType::VECTOR_FLOAT, false, true);
+    auto nullable_list_type = std::static_pointer_cast<arrow::ListType>(
+        nullable_schema->field(0)->type());
+    EXPECT_EQ(nullable_list_type->value_type()->id(), arrow::Type::BINARY);
+
+    auto fixed_builder = storage::CreateArrowBuilder(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, dim, false, false);
+    auto fixed_list_builder =
+        std::dynamic_pointer_cast<arrow::ListBuilder>(fixed_builder);
+    ASSERT_NE(fixed_list_builder, nullptr);
+    EXPECT_EQ(fixed_list_builder->value_builder()->type()->id(),
+              arrow::Type::FIXED_SIZE_BINARY);
+}
+
+TEST(storage, MergeFieldDataRejectsMixedElementNullability) {
+    std::vector<FieldDataPtr> arrays{
+        storage::CreateFieldData(
+            DataType::ARRAY, DataType::INT64, false, false, 1, 0),
+        storage::CreateFieldData(
+            DataType::ARRAY, DataType::INT64, false, true, 1, 0)};
+    EXPECT_ANY_THROW(storage::MergeFieldData(arrays));
+
+    std::vector<FieldDataPtr> vector_arrays{
+        storage::CreateFieldData(
+            DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, false, 4, 0),
+        storage::CreateFieldData(
+            DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, true, 4, 0)};
+    EXPECT_ANY_THROW(storage::MergeFieldData(vector_arrays));
+
+    std::vector<FieldDataPtr> compatible_vector_arrays{
+        storage::CreateFieldData(
+            DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, true, 4, 0),
+        storage::CreateFieldData(
+            DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, true, 4, 0)};
+    auto merged = std::dynamic_pointer_cast<FieldData<VectorArray>>(
+        storage::MergeFieldData(compatible_vector_arrays));
+    ASSERT_NE(merged, nullptr);
+    EXPECT_EQ(merged->get_dim(), 4);
+    EXPECT_TRUE(merged->is_element_nullable());
+}
+
 TEST(storage, InsertDataVectorArrayNullablePreservesNullRows) {
     constexpr int dim = 2;
     auto field_data = milvus::storage::CreateFieldData(
@@ -677,6 +904,257 @@ TEST(storage, InsertDataVectorArrayNullablePreservesNullRows) {
     EXPECT_EQ(vector_array_payload->value_at(1)->length(), 0);
     EXPECT_EQ(vector_array_payload->value_at(2)->length(), 2);
 }
+
+TEST(storage,
+     InsertDataVectorArrayElementNullablePreservesLogicalElementOffsets) {
+    constexpr int dim = 4;
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::VECTOR_ARRAY,
+                                         DataType::VECTOR_FLOAT,
+                                         true,
+                                         true,
+                                         dim,
+                                         0);
+
+    auto make_vector_array = [dim](std::initializer_list<bool> valid_data,
+                                   std::initializer_list<float> values) {
+        proto::schema::VectorField row;
+        row.set_dim(dim);
+        row.mutable_valid_data()->Add(valid_data.begin(), valid_data.end());
+        row.mutable_float_vector()->mutable_data()->Add(values.begin(),
+                                                        values.end());
+        return milvus::VectorArray(row, true);
+    };
+
+    std::vector<milvus::VectorArray> data;
+    data.emplace_back(
+        make_vector_array({false, true}, {7.0F, 7.0F, 7.0F, 7.0F}));
+    data.emplace_back(make_vector_array({}, {}));
+    data.emplace_back(make_vector_array(
+        {true, false, true}, {1.0F, 0.0F, 0.0F, 0.0F, 5.0F, 5.0F, 5.0F, 5.0F}));
+    uint8_t valid_data[] = {0x0D};  // rows 0,2,3 valid; row 1 null.
+    field_data->FillFieldData(data.data(), valid_data, 4, 0);
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
+                                                   [&](uint8_t*) {});
+    auto new_insert_data = storage::DeserializeFileData(
+        serialized_data_ptr, serialized_bytes.size());
+    auto vector_array_payload =
+        std::dynamic_pointer_cast<milvus::FieldData<milvus::VectorArray>>(
+            new_insert_data->GetFieldData());
+
+    ASSERT_NE(vector_array_payload, nullptr);
+    ASSERT_TRUE(vector_array_payload->IsNullable());
+    ASSERT_TRUE(vector_array_payload->is_element_nullable());
+    ASSERT_EQ(vector_array_payload->get_num_rows(), 4);
+    ASSERT_EQ(vector_array_payload->get_valid_rows(), 3);
+    EXPECT_TRUE(vector_array_payload->is_valid(0));
+    EXPECT_FALSE(vector_array_payload->is_valid(1));
+    EXPECT_TRUE(vector_array_payload->is_valid(2));
+    EXPECT_TRUE(vector_array_payload->is_valid(3));
+
+    const auto* row0 = vector_array_payload->value_at(0);
+    ASSERT_EQ(row0->length(), 2);
+    EXPECT_FALSE(row0->is_element_valid(0));
+    EXPECT_TRUE(row0->is_element_valid(1));
+    const auto* row0_data = reinterpret_cast<const float*>(row0->data());
+    for (int i = 0; i < dim; ++i) {
+        EXPECT_FLOAT_EQ(row0_data[i], 7.0F);
+    }
+
+    const auto* row3 = vector_array_payload->value_at(2);
+    ASSERT_EQ(row3->length(), 3);
+    EXPECT_TRUE(row3->is_element_valid(0));
+    EXPECT_FALSE(row3->is_element_valid(1));
+    EXPECT_TRUE(row3->is_element_valid(2));
+    const auto* row3_data = reinterpret_cast<const float*>(row3->data());
+    EXPECT_FLOAT_EQ(row3_data[0], 1.0F);
+    EXPECT_FLOAT_EQ(row3_data[dim], 5.0F);
+}
+
+TEST(storage,
+     InsertDataVectorArrayElementNullablePreservesEmptyAndAllNullFloatRows) {
+    constexpr int dim = 4;
+    auto make_row = [](std::initializer_list<bool> valid_data,
+                       std::initializer_list<float> values) {
+        proto::schema::VectorField row;
+        row.set_dim(dim);
+        row.mutable_float_vector()->mutable_data()->Add(values.begin(),
+                                                        values.end());
+        row.mutable_valid_data()->Add(valid_data.begin(), valid_data.end());
+        return milvus::VectorArray(row, true);
+    };
+
+    std::vector<milvus::VectorArray> rows;
+    rows.emplace_back(make_row({}, {}));
+    rows.emplace_back(make_row({false, false}, {}));
+    rows.emplace_back(make_row({true}, {9.0F, 10.0F, 11.0F, 12.0F}));
+
+    auto field_data = storage::CreateFieldData(storage::DataType::VECTOR_ARRAY,
+                                               DataType::VECTOR_FLOAT,
+                                               false,
+                                               true,
+                                               dim,
+                                               0);
+    field_data->FillFieldData(rows.data(), rows.size());
+
+    auto payload_reader = std::make_shared<storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_ptr(serialized.data(),
+                                              [&](uint8_t*) {});
+    auto restored =
+        storage::DeserializeFileData(serialized_ptr, serialized.size());
+    auto restored_field =
+        std::dynamic_pointer_cast<FieldData<milvus::VectorArray>>(
+            restored->GetFieldData());
+    ASSERT_NE(restored_field, nullptr);
+    ASSERT_TRUE(restored_field->is_element_nullable());
+    ASSERT_EQ(restored_field->get_num_rows(), 3);
+
+    const auto* empty_row = restored_field->value_at(0);
+    ASSERT_EQ(empty_row->length(), 0);
+    auto empty_output = empty_row->output_data();
+    EXPECT_EQ(empty_output.data_case(),
+              proto::schema::VectorField::DataCase::kFloatVector);
+    EXPECT_TRUE(empty_output.float_vector().data().empty());
+    EXPECT_TRUE(empty_output.valid_data().empty());
+
+    const auto* all_null_row = restored_field->value_at(1);
+    ASSERT_EQ(all_null_row->length(), 2);
+    EXPECT_FALSE(all_null_row->is_element_valid(0));
+    EXPECT_FALSE(all_null_row->is_element_valid(1));
+    auto all_null_output = all_null_row->output_data();
+    EXPECT_EQ(all_null_output.data_case(),
+              proto::schema::VectorField::DataCase::kFloatVector);
+    EXPECT_TRUE(all_null_output.float_vector().data().empty());
+    ASSERT_EQ(all_null_output.valid_data_size(), 2);
+    EXPECT_FALSE(all_null_output.valid_data(0));
+    EXPECT_FALSE(all_null_output.valid_data(1));
+
+    const auto* valid_row = restored_field->value_at(2);
+    ASSERT_EQ(valid_row->length(), 1);
+    EXPECT_TRUE(valid_row->is_element_valid(0));
+    const auto* valid_data = reinterpret_cast<const float*>(valid_row->data());
+    EXPECT_FLOAT_EQ(valid_data[0], 9.0F);
+    EXPECT_FLOAT_EQ(valid_data[3], 12.0F);
+}
+
+TEST_P(ElementNullableVectorArrayCodecTest,
+       InsertDataRoundTripPreservesLogicalSlotsAndCompactPayload) {
+    const auto& param = GetParam();
+    auto first = BuildCodecVectorBytes(param.element_type, param.dim, 1);
+    auto second = BuildCodecVectorBytes(param.element_type, param.dim, 33);
+    auto third = BuildCodecVectorBytes(param.element_type, param.dim, 65);
+
+    std::vector<uint8_t> row0_data(second.begin(), second.end());
+    TargetBitmap row0_valid(2, false);
+    row0_valid.set(1);
+
+    std::vector<uint8_t> row1_data(first.begin(), first.end());
+    row1_data.insert(row1_data.end(), third.begin(), third.end());
+    TargetBitmap row1_valid(3, false);
+    row1_valid.set(0);
+    row1_valid.set(2);
+
+    std::vector<milvus::VectorArray> rows;
+    rows.emplace_back(row0_data.data(),
+                      2,
+                      param.dim,
+                      param.element_type,
+                      row0_valid.view(),
+                      true);
+    rows.emplace_back(row1_data.data(),
+                      3,
+                      param.dim,
+                      param.element_type,
+                      row1_valid.view(),
+                      true);
+
+    auto field_data = storage::CreateFieldData(storage::DataType::VECTOR_ARRAY,
+                                               param.element_type,
+                                               false,
+                                               true,
+                                               param.dim,
+                                               0);
+    field_data->FillFieldData(rows.data(), rows.size());
+
+    auto payload_reader = std::make_shared<storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_ptr(serialized.data(),
+                                              [&](uint8_t*) {});
+    auto restored =
+        storage::DeserializeFileData(serialized_ptr, serialized.size());
+    auto restored_field =
+        std::dynamic_pointer_cast<FieldData<milvus::VectorArray>>(
+            restored->GetFieldData());
+    ASSERT_NE(restored_field, nullptr);
+    ASSERT_TRUE(restored_field->is_element_nullable());
+    ASSERT_EQ(restored_field->get_element_type(), param.element_type);
+    ASSERT_EQ(restored_field->get_num_rows(), 2);
+
+    const auto* restored_row0 = restored_field->value_at(0);
+    ASSERT_EQ(restored_row0->length(), 2);
+    EXPECT_FALSE(restored_row0->is_element_valid(0));
+    EXPECT_TRUE(restored_row0->is_element_valid(1));
+    EXPECT_EQ(std::string(restored_row0->data(), restored_row0->byte_size()),
+              std::string(reinterpret_cast<const char*>(row0_data.data()),
+                          row0_data.size()));
+    auto row0_output = restored_row0->output_data();
+    EXPECT_EQ(GetCodecVectorPayloadBytes(row0_output, param.element_type),
+              std::string(reinterpret_cast<const char*>(second.data()),
+                          second.size()));
+
+    const auto* restored_row1 = restored_field->value_at(1);
+    ASSERT_EQ(restored_row1->length(), 3);
+    EXPECT_TRUE(restored_row1->is_element_valid(0));
+    EXPECT_FALSE(restored_row1->is_element_valid(1));
+    EXPECT_TRUE(restored_row1->is_element_valid(2));
+    EXPECT_EQ(std::string(restored_row1->data(), restored_row1->byte_size()),
+              std::string(reinterpret_cast<const char*>(row1_data.data()),
+                          row1_data.size()));
+    auto row1_output = restored_row1->output_data();
+    std::string expected_row1(reinterpret_cast<const char*>(first.data()),
+                              first.size());
+    expected_row1.append(reinterpret_cast<const char*>(third.data()),
+                         third.size());
+    EXPECT_EQ(GetCodecVectorPayloadBytes(row1_output, param.element_type),
+              expected_row1);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    VectorTypes,
+    ElementNullableVectorArrayCodecTest,
+    ::testing::Values(
+        ElementNullableVectorArrayCodecParam{
+            DataType::VECTOR_FLOAT, 4, "FloatVector"},
+        ElementNullableVectorArrayCodecParam{
+            DataType::VECTOR_FLOAT16, 4, "Float16Vector"},
+        ElementNullableVectorArrayCodecParam{
+            DataType::VECTOR_BFLOAT16, 4, "BFloat16Vector"},
+        ElementNullableVectorArrayCodecParam{
+            DataType::VECTOR_INT8, 4, "Int8Vector"},
+        ElementNullableVectorArrayCodecParam{
+            DataType::VECTOR_BINARY, 32, "BinaryVector"}),
+    [](const ::testing::TestParamInfo<ElementNullableVectorArrayCodecParam>&
+           info) { return info.param.name; });
 
 TEST(storage, ExternalBinaryVectorListNormalizesToFixedSizeBinary) {
     auto value_builder = std::make_shared<arrow::UInt8Builder>();
@@ -2066,6 +2544,70 @@ TEST(storage, InsertDataStringArrayNullable) {
         ExpectArraysEqualForTest(expected_data[i], new_data[i]);
     }
     ASSERT_EQ(*new_payload->ValidData(), *valid_data);
+}
+
+TEST(storage, InsertDataArrayElementNullablePreservesValidity) {
+    auto make_array = [](std::initializer_list<int64_t> values,
+                         std::initializer_list<bool> valid_data) {
+        proto::schema::ScalarField row;
+        row.mutable_long_data()->mutable_data()->Add(values.begin(),
+                                                     values.end());
+        row.mutable_valid_data()->Add(valid_data.begin(), valid_data.end());
+        return milvus::Array(row, true);
+    };
+
+    std::vector<milvus::Array> data;
+    data.emplace_back(make_array({0, 7}, {false, true}));
+    data.emplace_back();  // row-null placeholder
+    data.emplace_back(make_array({}, {}));
+    data.emplace_back(make_array({1, 0, 5}, {true, false, true}));
+    uint8_t valid_data[] = {0x0D};  // rows 0,2,3 valid; row 1 null.
+
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::ARRAY, DataType::INT64, true, true, 1, 0);
+    field_data->FillFieldData(data.data(), valid_data, 4, 0);
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
+                                                   [&](uint8_t*) {});
+    auto new_insert_data = storage::DeserializeFileData(
+        serialized_data_ptr, serialized_bytes.size());
+    auto array_payload =
+        std::dynamic_pointer_cast<milvus::FieldData<milvus::Array>>(
+            new_insert_data->GetFieldData());
+
+    ASSERT_NE(array_payload, nullptr);
+    ASSERT_TRUE(array_payload->IsNullable());
+    ASSERT_TRUE(array_payload->is_element_nullable());
+    ASSERT_EQ(array_payload->get_num_rows(), 4);
+    ASSERT_EQ(array_payload->get_valid_rows(), 3);
+    EXPECT_TRUE(array_payload->is_valid(0));
+    EXPECT_FALSE(array_payload->is_valid(1));
+    EXPECT_TRUE(array_payload->is_valid(2));
+    EXPECT_TRUE(array_payload->is_valid(3));
+
+    const auto* row0 =
+        static_cast<const milvus::Array*>(array_payload->RawValue(0));
+    ASSERT_EQ(row0->length(), 2);
+    EXPECT_FALSE(row0->is_element_valid(0));
+    EXPECT_TRUE(row0->is_element_valid(1));
+    EXPECT_EQ(row0->get_data_unchecked<int64_t>(1), 7);
+
+    const auto* row3 =
+        static_cast<const milvus::Array*>(array_payload->RawValue(3));
+    ASSERT_EQ(row3->length(), 3);
+    EXPECT_TRUE(row3->is_element_valid(0));
+    EXPECT_FALSE(row3->is_element_valid(1));
+    EXPECT_TRUE(row3->is_element_valid(2));
+    EXPECT_EQ(row3->get_data_unchecked<int64_t>(0), 1);
+    EXPECT_EQ(row3->get_data_unchecked<int64_t>(2), 5);
 }
 
 TEST(storage, InsertDataJsonNullable) {

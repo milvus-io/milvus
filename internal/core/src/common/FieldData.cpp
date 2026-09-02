@@ -415,29 +415,8 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                       "FieldData");
         }
         case DataType::ARRAY: {
-            auto array_array =
-                std::dynamic_pointer_cast<arrow::BinaryArray>(array);
-            std::vector<Array> values(element_count);
-            int null_number = 0;
-            for (size_t index = 0; index < element_count; ++index) {
-                auto str = array_array->GetString(index);
-                if (str.empty()) {
-                    null_number++;
-                    continue;
-                }
-                ScalarFieldProto field_data;
-                auto success = field_data.ParseFromString(str);
-                AssertInfo(success, "parse from string failed");
-                values[index] = Array(field_data);
-            }
-            if (nullable_) {
-                return FillFieldData(values.data(),
-                                     array->null_bitmap_data(),
-                                     element_count,
-                                     array->offset());
-            }
-            AssertInfo(null_number == 0, "get empty string when not nullable");
-            return FillFieldData(values.data(), element_count);
+            ThrowInfo(NotImplemented,
+                      "ARRAY arrow data must be filled by FieldDataArrayImpl");
         }
         case DataType::VECTOR_FLOAT:
         case DataType::VECTOR_FLOAT16:
@@ -501,6 +480,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                        "Failed to cast to FieldData<VectorArray>");
             int64_t dim = vector_array_field->get_dim();
             DataType element_type = vector_array_field->get_element_type();
+            bool element_nullable = vector_array_field->is_element_nullable();
 
             AssertInfo(dim > 0, "Invalid dimension {} in VECTOR_ARRAY", dim);
             AssertInfo(element_type != DataType::NONE,
@@ -517,17 +497,43 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 case DataType::VECTOR_FLOAT16:
                 case DataType::VECTOR_BFLOAT16:
                 case DataType::VECTOR_INT8: {
-                    // All vector types use FixedSizeBinaryArray and have the same serialization logic
-                    auto binary_array =
+                    auto fixed_binary_array =
                         std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(
                             values_array);
-                    AssertInfo(binary_array != nullptr,
-                               "Expected FixedSizeBinaryArray for VectorArray "
-                               "element");
+                    auto binary_array =
+                        std::dynamic_pointer_cast<arrow::BinaryArray>(
+                            values_array);
+                    AssertInfo(
+                        fixed_binary_array != nullptr ||
+                            (element_nullable && binary_array != nullptr),
+                        "VECTOR_ARRAY child values must be FixedSizeBinary, "
+                        "or Binary when element nullable, got {}",
+                        values_array->type()->ToString());
 
-                    // Calculate bytes per vector using the unified function
                     auto bytes_per_vec =
                         milvus::vector_bytes_per_element(element_type, dim);
+                    if (fixed_binary_array != nullptr) {
+                        AssertInfo(
+                            fixed_binary_array->byte_width() == bytes_per_vec,
+                            "VECTOR_ARRAY child byte width mismatch, expected "
+                            "{}, got {}",
+                            bytes_per_vec,
+                            fixed_binary_array->byte_width());
+                    }
+
+                    auto get_child_data = [&](int64_t child_index) {
+                        if (fixed_binary_array != nullptr) {
+                            return fixed_binary_array->GetValue(child_index);
+                        }
+                        auto value = binary_array->GetView(child_index);
+                        AssertInfo(value.size() == bytes_per_vec,
+                                   "VECTOR_ARRAY child {} byte width mismatch, "
+                                   "expected {}, got {}",
+                                   child_index,
+                                   bytes_per_vec,
+                                   value.size());
+                        return reinterpret_cast<const uint8_t*>(value.data());
+                    };
 
                     for (size_t index = 0; index < element_count; ++index) {
                         if (nullable_ && list_array->IsNull(index)) {
@@ -538,25 +544,57 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                             list_array->value_offset(index + 1);
                         int64_t num_vectors = end_offset - start_offset;
 
-                        auto data_size = num_vectors * bytes_per_vec;
+                        TargetBitmap element_valid_data;
+                        auto physical_count = num_vectors;
+                        if (element_nullable) {
+                            element_valid_data =
+                                TargetBitmap(num_vectors, true);
+                            for (int64_t i = 0; i < num_vectors; ++i) {
+                                if (values_array->IsNull(start_offset + i)) {
+                                    element_valid_data.reset(i);
+                                }
+                            }
+                            physical_count = static_cast<int64_t>(
+                                element_valid_data.count());
+                        }
+                        auto data_size = physical_count * bytes_per_vec;
                         auto data_ptr =
                             data_size > 0
                                 ? std::make_unique<uint8_t[]>(data_size)
                                 : nullptr;
 
-                        for (int64_t i = 0; i < num_vectors; i++) {
+                        int64_t physical_index = 0;
+                        for (int64_t i = 0; i < num_vectors; ++i) {
+                            auto child_index = start_offset + i;
+                            if (values_array->IsNull(child_index)) {
+                                AssertInfo(element_nullable,
+                                           "VECTOR_ARRAY child value is null "
+                                           "but field is not element "
+                                           "nullable");
+                                continue;
+                            }
                             const uint8_t* binary_data =
-                                binary_array->GetValue(start_offset + i);
-                            uint8_t* dest = data_ptr.get() + i * bytes_per_vec;
+                                get_child_data(child_index);
+                            uint8_t* dest =
+                                data_ptr.get() + physical_index * bytes_per_vec;
                             milvus::fastmem::FastMemcpy(
                                 dest, binary_data, bytes_per_vec);
+                            ++physical_index;
                         }
+                        AssertInfo(physical_index == physical_count,
+                                   "VECTOR_ARRAY compact payload count "
+                                   "mismatch, expected {}, got {}",
+                                   physical_count,
+                                   physical_index);
 
                         values.emplace_back(
                             static_cast<const void*>(data_ptr.get()),
                             num_vectors,
                             dim,
-                            element_type);
+                            element_type,
+                            element_nullable ? element_valid_data.view()
+                                             : TargetBitmapView(),
+                            element_nullable);
                     }
                     break;
                 }
@@ -580,6 +618,44 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                       GetDataTypeName(data_type_));
         }
     }
+}
+
+void
+FieldDataArrayImpl::FillFieldData(const std::shared_ptr<arrow::Array> array) {
+    AssertInfo(array != nullptr, "null arrow array");
+    auto element_count = array->length();
+    if (element_count == 0) {
+        return;
+    }
+    this->null_count_ += array->null_count();
+
+    auto array_array = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+    AssertInfo(array_array != nullptr,
+               "ARRAY field data expects arrow::BinaryArray, got {}",
+               array->type()->ToString());
+
+    std::vector<Array> values(element_count);
+    int null_number = 0;
+    for (size_t index = 0; index < element_count; ++index) {
+        if (array_array->IsNull(index)) {
+            ++null_number;
+            continue;
+        }
+
+        auto str = array_array->GetView(index);
+        ScalarFieldProto field_data;
+        auto success = field_data.ParseFromArray(str.data(), str.size());
+        AssertInfo(success, "parse array from string failed");
+        values[index] = Array(field_data, element_nullable_);
+    }
+    if (this->nullable_) {
+        return Base::FillFieldData(values.data(),
+                                   array->null_bitmap_data(),
+                                   element_count,
+                                   array->offset());
+    }
+    AssertInfo(null_number == 0, "get null array when not nullable");
+    return Base::FillFieldData(values.data(), element_count);
 }
 
 // scalar data

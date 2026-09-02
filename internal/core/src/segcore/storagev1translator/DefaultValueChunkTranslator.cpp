@@ -242,11 +242,12 @@ DefaultValueChunkTranslator::build_buffer_for_rows(
         AssertInfo(field_meta_.is_nullable(),
                    "only nullable vector array fields can be "
                    "dynamically added");
-        builder =
-            milvus::storage::CreateArrowBuilder(data_type,
-                                                field_meta_.get_element_type(),
-                                                field_meta_.get_dim(),
-                                                true);
+        builder = milvus::storage::CreateArrowBuilder(
+            data_type,
+            field_meta_.get_element_type(),
+            field_meta_.get_dim(),
+            true,
+            field_meta_.is_element_nullable());
     } else if (IsVectorDataType(data_type)) {
         AssertInfo(field_meta_.is_nullable(),
                    "only nullable vector fields can be dynamically added");

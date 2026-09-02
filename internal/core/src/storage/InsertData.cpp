@@ -79,6 +79,16 @@ InsertData::serialize_to_remote_file() {
     }
     des_event_data.extras[ORIGIN_SIZE_KEY] = std::to_string(field_data->Size());
     des_event_data.extras[NULLABLE] = field_data->IsNullable();
+    bool element_nullable = false;
+    if (auto array_field =
+            std::dynamic_pointer_cast<FieldData<Array>>(field_data)) {
+        element_nullable = array_field->is_element_nullable();
+    } else if (auto vector_array_field =
+                   std::dynamic_pointer_cast<FieldData<VectorArray>>(
+                       field_data)) {
+        element_nullable = vector_array_field->is_element_nullable();
+    }
+    des_event_data.extras[ELEMENT_NULLABLE] = element_nullable;
 
     auto& des_event_header = descriptor_event.event_header;
     // TODO :: set timestamp

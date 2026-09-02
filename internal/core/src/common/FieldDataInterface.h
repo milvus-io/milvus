@@ -888,19 +888,29 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
 };
 
 class FieldDataArrayImpl : public FieldDataImpl<Array, true> {
+    using Base = FieldDataImpl<Array, true>;
+
  public:
     explicit FieldDataArrayImpl(DataType data_type,
                                 bool nullable,
+                                bool element_nullable,
                                 int64_t total_num_rows = 0)
-        : FieldDataImpl<Array, true>(1, data_type, nullable, total_num_rows) {
+        : Base(1, data_type, nullable, total_num_rows),
+          element_nullable_(element_nullable) {
     }
+
+    using Base::FillFieldData;
+
+    void
+    FillFieldData(const std::shared_ptr<arrow::Array> array) override;
 
     explicit FieldDataArrayImpl(DataType data_type,
                                 bool nullable,
+                                bool element_nullable,
                                 int64_t total_num_rows,
                                 const std::optional<Array>& default_value)
-        : FieldDataImpl<Array, true>(
-              1, data_type, nullable, total_num_rows, default_value) {
+        : Base(1, data_type, nullable, total_num_rows, default_value),
+          element_nullable_(element_nullable) {
     }
 
     int64_t
@@ -908,6 +918,9 @@ class FieldDataArrayImpl : public FieldDataImpl<Array, true> {
         int64_t data_size = 0;
         for (size_t offset = 0; offset < length(); ++offset) {
             data_size += data_[offset].byte_size();
+            if (element_nullable_) {
+                data_size += data_[offset].get_element_valid_data_byte_size();
+            }
         }
         return data_size;
     }
@@ -918,8 +931,20 @@ class FieldDataArrayImpl : public FieldDataImpl<Array, true> {
                    "field data subscript out of range");
         AssertInfo(offset < length(),
                    "subscript position don't has valid value");
-        return data_[offset].byte_size();
+        auto data_size = data_[offset].byte_size();
+        if (element_nullable_) {
+            data_size += data_[offset].get_element_valid_data_byte_size();
+        }
+        return data_size;
     }
+
+    bool
+    is_element_nullable() const {
+        return element_nullable_;
+    }
+
+ private:
+    bool element_nullable_ = false;
 };
 
 // is_type_entire_row set be true as each element in data_ is a VectorArray
@@ -929,8 +954,10 @@ class FieldDataVectorArrayImpl : public FieldDataImpl<VectorArray, true> {
  public:
     explicit FieldDataVectorArrayImpl(DataType data_type,
                                       bool nullable,
+                                      bool element_nullable,
                                       int64_t total_num_rows = 0)
-        : Base(1, data_type, nullable, total_num_rows) {
+        : Base(1, data_type, nullable, total_num_rows),
+          element_nullable_(element_nullable) {
     }
 
     using Base::FillFieldData;
@@ -984,6 +1011,9 @@ class FieldDataVectorArrayImpl : public FieldDataImpl<VectorArray, true> {
         int64_t data_size = 0;
         for (size_t offset = 0; offset < count; ++offset) {
             data_size += data_[offset].byte_size();
+            if (element_nullable_) {
+                data_size += data_[offset].get_element_valid_data_byte_size();
+            }
         }
         return data_size;
     }
@@ -994,7 +1024,11 @@ class FieldDataVectorArrayImpl : public FieldDataImpl<VectorArray, true> {
         AssertInfo(offset < get_num_rows(),
                    "field data subscript out of range");
         AssertInfo(offset < count, "subscript position don't has valid value");
-        return data_[offset].byte_size();
+        auto data_size = data_[offset].byte_size();
+        if (element_nullable_) {
+            data_size += data_[offset].get_element_valid_data_byte_size();
+        }
+        return data_size;
     }
 
     int64_t
@@ -1019,6 +1053,11 @@ class FieldDataVectorArrayImpl : public FieldDataImpl<VectorArray, true> {
         return (this->valid_data_[offset >> 3] >> (offset & 0x07)) & 1;
     }
 
+    bool
+    is_element_nullable() const {
+        return element_nullable_;
+    }
+
  private:
     void
     resize_nullable_field_data(int64_t num_rows, int64_t valid_count) {
@@ -1031,6 +1070,8 @@ class FieldDataVectorArrayImpl : public FieldDataImpl<VectorArray, true> {
             this->data_.resize(valid_count);
         }
     }
+
+    bool element_nullable_ = false;
 };
 
 }  // namespace milvus

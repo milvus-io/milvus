@@ -372,6 +372,11 @@ class Array {
         return size_;
     }
 
+    size_t
+    get_element_valid_data_byte_size() const {
+        return element_valid_data_.size_in_bytes();
+    }
+
     DataType
     get_element_type() const {
         return element_type_;

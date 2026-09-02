@@ -497,6 +497,43 @@ TEST_F(DiskAnnFileManagerTest, V3PackedIndexPathMismatch) {
     EXPECT_EQ(v3_path, expected_path);
 }
 
+TEST_F(DiskAnnFileManagerTest,
+       StorageV1RejectsElementNullableArrayFieldsBeforeReadingFiles) {
+    for (const auto [field_type, element_type] :
+         {std::pair{proto::schema::DataType::Array,
+                    proto::schema::DataType::Int32},
+          std::pair{proto::schema::DataType::ArrayOfVector,
+                    proto::schema::DataType::FloatVector}}) {
+        FieldDataMeta field_data_meta = {1, 2, 3, 100};
+        field_data_meta.field_schema.set_fieldid(field_data_meta.field_id);
+        field_data_meta.field_schema.set_data_type(field_type);
+        field_data_meta.field_schema.set_element_type(element_type);
+        field_data_meta.field_schema.set_element_nullable(true);
+
+        IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+        storage::FileManagerContext context(
+            field_data_meta, index_meta, cm_, fs_);
+        milvus::Config config;
+        config[STORAGE_VERSION_KEY] = STORAGE_V1;
+
+        MemFileManagerImpl memory_manager(context);
+        try {
+            (void)memory_manager.CacheRawDataToMemory(config);
+            FAIL() << "Storage V1 memory path accepted element-nullable field";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::Unsupported);
+        }
+
+        DiskFileManagerImpl disk_manager(context);
+        try {
+            (void)disk_manager.CacheRawDataToDisk<float>(config);
+            FAIL() << "Storage V1 disk path accepted element-nullable field";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::Unsupported);
+        }
+    }
+}
+
 int
 test_worker(const string& s) {
     std::cout << s << std::endl;

@@ -93,6 +93,13 @@ CreateArrowBuilder(DataType data_type,
                    int dim,
                    bool nullable = false);
 
+std::shared_ptr<arrow::ArrayBuilder>
+CreateArrowBuilder(DataType data_type,
+                   DataType element_type,
+                   int dim,
+                   bool nullable,
+                   bool element_nullable);
+
 /// \brief Utility function to create arrow:Scalar from FieldMeta.default_value
 ///
 /// Construct a arrow::Scalar based on input field meta
@@ -117,6 +124,13 @@ CreateArrowSchema(DataType data_type,
                   int dim,
                   DataType element_type,
                   bool nullable = false);
+
+std::shared_ptr<arrow::Schema>
+CreateArrowSchema(DataType data_type,
+                  int dim,
+                  DataType element_type,
+                  bool nullable,
+                  bool element_nullable);
 
 int
 GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
@@ -327,6 +341,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
                            DataType data_type,
                            DataType element_type,
+                           bool element_nullable,
                            int64_t dim,
                            milvus_storage::ArrowFileSystemPtr fs);
 
@@ -426,6 +441,25 @@ CreateFieldDataFromDefaultValue(
     const std::optional<DefaultValueType>& default_value,
     std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 
+FieldDataPtr
+CreateFieldDataFromDefaultValue(
+    const DataType& type,
+    bool nullable,
+    bool element_nullable,
+    int64_t element_count,
+    const std::optional<DefaultValueType>& default_value,
+    std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
+
+FieldDataPtr
+CreateFieldData(
+    const DataType& type,
+    const DataType& element_type,
+    bool nullable,
+    bool element_nullable,
+    int64_t dim,
+    int64_t total_num_rows,
+    std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
+
 int64_t
 GetByteSizeOfFieldDatas(const std::vector<FieldDataPtr>& field_datas);
 
@@ -505,10 +539,20 @@ ConvertFieldDataToArrowDataWrapper(const FieldDataPtr& field_data) {
 
     storage::BinlogReaderPtr reader = std::make_shared<storage::BinlogReader>(
         file_data, event_data_bytes.size());
+    bool element_nullable = false;
+    if (auto array_field =
+            std::dynamic_pointer_cast<FieldData<Array>>(field_data)) {
+        element_nullable = array_field->is_element_nullable();
+    } else if (auto vector_array_field =
+                   std::dynamic_pointer_cast<FieldData<VectorArray>>(
+                       field_data)) {
+        element_nullable = vector_array_field->is_element_nullable();
+    }
     event_data = storage::BaseEventData(reader,
                                         event_data_bytes.size(),
                                         field_data->get_data_type(),
                                         field_data->IsNullable(),
+                                        element_nullable,
                                         false);
     return std::make_shared<ArrowDataWrapper>(
         event_data.payload_reader->get_reader(),
