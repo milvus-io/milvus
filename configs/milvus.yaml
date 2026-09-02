@@ -196,6 +196,7 @@ woodpecker:
       maxRetries: 3 # Maximum number of retries for segment append operations.
       maxBatchEntries: 1000 # Client-side group commit: max consecutive appends coalesced into one AddEntries request. Opportunistic (only batches already-queued ops, adds no latency at low load). Set to 1 to disable batching.
       maxBatchBytes: 2000000 # Max total payload (bytes) of a coalesced batch, default 2MB. A batch closes once it reaches maxBatchEntries or its payload reaches maxBatchBytes; the first entry is always taken, so a batch may exceed the byte cap by one entry. Set to 0 to remove the byte limit (bounded by maxBatchEntries only). Ignored when maxBatchEntries <= 1.
+      maxSingleMessageSize: 10485760 # Maximum size of a single WAL entry in bytes, default 10MB. A row whose encoded size exceeds this limit is rejected on the client before it is queued for append, instead of being retried indefinitely against the WAL backend. Unlike other segmentAppend settings, this is a Milvus-side check only (Woodpecker itself has no per-entry size limit); it is re-read on every check, so it takes effect without a restart.
     segmentRollingPolicy:
       maxSize: 256M # Maximum size of a segment.
       maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.

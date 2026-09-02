@@ -731,6 +731,7 @@ type WoodpeckerConfig struct {
 	AppendMaxRetries          ParamItem `refreshable:"true"`
 	AppendMaxBatchEntries     ParamItem `refreshable:"false"`
 	AppendMaxBatchBytes       ParamItem `refreshable:"false"`
+	MaxMessageSize            ParamItem `refreshable:"true"`
 	SegmentRollingMaxSize     ParamItem `refreshable:"true"`
 	SegmentRollingMaxTime     ParamItem `refreshable:"true"`
 	SegmentRollingMaxBlocks   ParamItem `refreshable:"true"`
@@ -829,6 +830,15 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.AppendMaxBatchBytes.Init(base.mgr)
+
+	p.MaxMessageSize = ParamItem{
+		Key:          "woodpecker.client.segmentAppend.maxSingleMessageSize",
+		Version:      "2.6.21",
+		DefaultValue: strconv.Itoa(10 * 1024 * 1024),
+		Doc:          "Maximum size of a single WAL entry in bytes, default 10MB. A row whose encoded size exceeds this limit is rejected on the client before it is queued for append, instead of being retried indefinitely against the WAL backend. Unlike other segmentAppend settings, this is a Milvus-side check only (Woodpecker itself has no per-entry size limit); it is re-read on every check, so it takes effect without a restart.",
+		Export:       true,
+	}
+	p.MaxMessageSize.Init(base.mgr)
 
 	p.SegmentRollingMaxSize = ParamItem{
 		Key:          "woodpecker.client.segmentRollingPolicy.maxSize",
