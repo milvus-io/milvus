@@ -9,7 +9,6 @@ export CARGO_HOME=/root/.cache/cargo
 export RUSTUP_HOME=/root/.cache/rustup
 export PATH="$CARGO_HOME/bin:$PATH"
 export SBT_OPTS="-Xmx4g -Xms2g"
-export CONAN_REVISIONS_ENABLED=1
 RUST_TOOLCHAIN_VERSION=1.96.0
 
 CONNECTOR_REPOSITORY="${CONNECTOR_REPOSITORY:-https://github.com/zilliztech/spark-milvus.git}"
@@ -38,8 +37,10 @@ apt-get "${APT_NETWORK_OPTIONS[@]}" install -y --no-install-recommends \
   gcc \
   git \
   jq \
+  libaio-dev \
   libtool \
   make \
+  patchelf \
   python3-pip \
   unzip \
   wget \
@@ -52,19 +53,17 @@ ln -sf /usr/bin/automake-1.16 /usr/bin/automake-1.15
 curl -fsSL "https://cmake.org/files/v3.27/cmake-3.27.5-linux-$(uname -m).tar.gz" \
   | tar --strip-components=1 -xz -C /usr/local
 
-python3 -m pip install --break-system-packages conan==1.64.1 \
-  || python3 -m pip install conan==1.64.1
-conan profile new default --detect || true
-conan profile update settings.compiler.libcxx=libstdc++11 default
-conan remote add default-conan-local \
-  https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local \
-  --insert || true
+python3 -m pip install --break-system-packages conan==2.25.1 \
+  || python3 -m pip install conan==2.25.1
+conan profile detect --force
+conan remote add default-conan-local2 \
+  https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local2 \
+  || true
+conan remote list
 
 # The pinned milvus-storage revision builds its Rust DataFusion bridge as part
-# of the JNI library. Rust 1.97 changes the layout of TryFromIntError and
-# breaks the lockfile's ethnum 1.5.2, so use the last compatible stable release
-# while keeping the upstream Cargo.lock unchanged. Keep the toolchain/registry
-# under the existing restart-persistent root cache volume.
+# of the JNI library. Keep the toolchain/registry under the restart-persistent
+# root cache volume so an init-container retry can reuse downloads.
 if [[ ! -x "$CARGO_HOME/bin/rustup" ]]; then
   curl -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh
   sh /tmp/rustup-init.sh \
@@ -78,79 +77,6 @@ rustup toolchain install "$RUST_TOOLCHAIN_VERSION" --profile minimal --no-self-u
 rustup default "$RUST_TOOLCHAIN_VERSION"
 rustc --version
 cargo --version
-
-# The public sourceware endpoint used by the upstream bzip2 Conan recipe
-# returns HTTP 403 from this vcluster. Preload the recipe and point it at a
-# byte-identical mirror before the full dependency installation begins.
-conan download bzip2/1.0.8@ -r default-conan-local --recipe
-sed -i \
-  's#https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz#https://fossies.org/linux/misc/bzip2-1.0.8.tar.gz#' \
-  /root/.conan/data/bzip2/1.0.8/_/_/export/conandata.yml
-
-# Boost's retired JFrog endpoint serves non-archive content and SourceForge is
-# not reliable from this cluster. Use Boost's official archive host instead.
-conan download boost/1.83.0@ -r default-conan-local --recipe
-sed -i \
-  -e 's#https://boostorg.jfrog.io/artifactory/main/release/1.83.0/source/boost_1_83_0.tar.bz2#https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2#' \
-  -e 's#https://sourceforge.net/projects/boost/files/boost/1.83.0/boost_1_83_0.tar.bz2#https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2#' \
-  /root/.conan/data/boost/1.83.0/_/_/export/conandata.yml
-
-# Avro 1.12.1 has aged out of active Apache and Tencent mirrors. Keep the
-# dependency's Conan reference, but build it from the compatible Avro 1.12.2
-# source archive served by Tencent and pin that archive's checksum.
-AVRO_RECIPE=/root/.conan/data/libavrocpp/1.12.1.1/milvus/dev/export/conandata.yml
-conan download \
-  'libavrocpp/1.12.1.1@milvus/dev' \
-  -r default-conan-local \
-  --recipe
-sed -i \
-  -e 's#https://dlcdn.apache.org/avro/avro-1.12.1/avro-src-1.12.1.tar.gz#https://mirrors.cloud.tencent.com/apache/avro/avro-1.12.2/avro-src-1.12.2.tar.gz#' \
-  -e 's#268e47c0850df04f952ea6fdfc3b12a8d0042124354bff6c0239be0b70016d2e#449722c442ec9514d8e6933f9c7ccf2e0544cb75c951c25b804ea1d8e73d12bb#' \
-  "$AVRO_RECIPE"
-
-# archive.apache.org is not reachable from this vcluster. Prefer an exact
-# Apache release tarball pre-seeded into the persistent Conan cache; otherwise
-# use the source-equivalent GitHub tag archive with its own pinned checksum.
-THRIFT_RECIPE=/root/.conan/data/thrift/0.17.0/_/_/export/conandata.yml
-THRIFT_SOURCE_CACHE=/root/.conan/source-cache/thrift-0.17.0.tar.gz
-conan download thrift/0.17.0@ -r default-conan-local --recipe
-if [[ -f "$THRIFT_SOURCE_CACHE" ]]; then
-  echo "b272c1788bb165d99521a2599b31b97fa69e5931d099015d91ae107a0b0cc58f  $THRIFT_SOURCE_CACHE" \
-    | sha256sum -c -
-  sed -i \
-    "s#http://archive.apache.org/dist/thrift/0.17.0/thrift-0.17.0.tar.gz#file://$THRIFT_SOURCE_CACHE#" \
-    "$THRIFT_RECIPE"
-else
-  sed -i \
-    -e 's#http://archive.apache.org/dist/thrift/0.17.0/thrift-0.17.0.tar.gz#https://github.com/apache/thrift/archive/refs/tags/v0.17.0.tar.gz#' \
-    -e 's#b272c1788bb165d99521a2599b31b97fa69e5931d099015d91ae107a0b0cc58f#f5888bcd3b8de40c2c2ab86896867ad9b18510deb412cba3e5da76fb4c604c29#' \
-    "$THRIFT_RECIPE"
-fi
-
-# Arrow's Apache mirror selector redirects this vcluster to the same
-# unreachable archive.apache.org endpoint. Preserve the pinned Conan recipe
-# revision and seed Conan's checksum-addressed download cache with the official
-# GitHub release asset, which is byte-identical to the Apache archive.
-CONAN_DOWNLOAD_CACHE=/root/.conan/download-cache
-ARROW_DOWNLOAD_CACHE_KEY=80718851411e770d39c1871c3f87561896a45a3646a334b9bf43ce3355f568da
-ARROW_DOWNLOAD_CACHE_FILE="$CONAN_DOWNLOAD_CACHE/$ARROW_DOWNLOAD_CACHE_KEY"
-mkdir -p "$CONAN_DOWNLOAD_CACHE"
-printf '%s\n' "tools.files.download:download_cache=$CONAN_DOWNLOAD_CACHE" \
-  > /root/.conan/global.conf
-if [[ ! -f "$ARROW_DOWNLOAD_CACHE_FILE" ]]; then
-  curl -fsSL \
-    https://github.com/apache/arrow/releases/download/apache-arrow-17.0.0/apache-arrow-17.0.0.tar.gz \
-    -o "$ARROW_DOWNLOAD_CACHE_FILE.tmp"
-  echo "9d280d8042e7cf526f8c28d170d93bfab65e50f94569f6a790982a878d8d898d  $ARROW_DOWNLOAD_CACHE_FILE.tmp" \
-    | sha256sum -c -
-  mv "$ARROW_DOWNLOAD_CACHE_FILE.tmp" "$ARROW_DOWNLOAD_CACHE_FILE"
-fi
-echo "9d280d8042e7cf526f8c28d170d93bfab65e50f94569f6a790982a878d8d898d  $ARROW_DOWNLOAD_CACHE_FILE" \
-  | sha256sum -c -
-conan download \
-  'arrow/17.0.0@milvus/dev-2.6#7af258a853e20887f9969f713110aac8' \
-  -r default-conan-local \
-  --recipe
 
 if [[ ! -s "$SDKMAN_DIR/bin/sdkman-init.sh" ]]; then
   curl -fsSL https://get.sdkman.io -o /tmp/sdkman-install.sh
@@ -174,14 +100,10 @@ fi
 cd "$SOURCE_DIR"
 git submodule update --init --recursive
 
-# The fixed Connector/submodule revisions already pin dependency recipes.
-# Avoid refreshing them after the vcluster-specific Thrift source override and
-# exact Arrow recipe preload above. Once the pinned Arrow package is present in
-# Conan cache, do not force a full Arrow rebuild on every init restart.
-sed -i \
-  -e 's/ --build=arrow//' \
-  -e 's/ --update$//' \
-  milvus-storage/cpp/Makefile
+# The resolved Connector commit and its submodules pin dependency recipes.
+# Prefer the pinned Arrow binary from the Conan 2 remote instead of forcing a
+# full Arrow source build on every init-container run.
+sed -i -e 's/ --build=arrow//' milvus-storage/cpp/Makefile
 
 make check-deps
 make build-milvus-storage copy-native-libs
@@ -214,26 +136,15 @@ cp "$CONNECTOR_JAR" "$ARTIFACT_DIR/jars/spark-connector-assembly.jar"
 cp "$NATIVE_DIR/libmilvus-storage.so" "$ARTIFACT_DIR/native/"
 cp "$NATIVE_DIR/libmilvus-storage-jni.so" "$ARTIFACT_DIR/native/"
 
-# Resolve the complete non-system shared-library closure while the Conan cache
-# is still mounted. The two top-level JNI libraries have transitive AWS CRT,
-# Arrow, Boost, Folly, and gflags dependencies that are absent from the clean
-# Spark runtime image.
-mapfile -t CONAN_LIBRARY_DIRS < <(
-  find /root/.conan/data -type d -path '*/package/*/lib' -print | sort -u
-)
-CONAN_LIBRARY_PATH="$(IFS=:; echo "${CONAN_LIBRARY_DIRS[*]}")"
-export LD_LIBRARY_PATH="$ARTIFACT_DIR/native:$CONAN_LIBRARY_PATH"
-mapfile -t CONAN_RUNTIME_LIBRARIES < <(
-  for library in "$ARTIFACT_DIR/native/libmilvus-storage.so" \
-    "$ARTIFACT_DIR/native/libmilvus-storage-jni.so"; do
-    ldd "$library"
-  done \
-    | awk '$2 == "=>" && $3 ~ /^\/root\/\.conan\// { print $3 }' \
-    | sort -u
-)
-for library in "${CONAN_RUNTIME_LIBRARIES[@]}"; do
-  cp -L "$library" "$ARTIFACT_DIR/native/$(basename "$library")"
-done
+# Conan 2's milvus-storage recipe collects the non-system shared-library
+# closure in build/Release/libs for clean runtime images.
+CONAN_RUNTIME_DIR="$SOURCE_DIR/milvus-storage/cpp/build/Release/libs"
+test -d "$CONAN_RUNTIME_DIR"
+cp -a "$CONAN_RUNTIME_DIR"/. "$ARTIFACT_DIR/native/"
+
+"$SOURCE_DIR/milvus-storage/java/patch_native_runpath.sh" "$ARTIFACT_DIR/native"
+"$SOURCE_DIR/milvus-storage/java/verify_native_dependencies.sh" \
+  "$ARTIFACT_DIR/native/libmilvus-storage-jni.so"
 
 python3 -m pip install --break-system-packages \
   --target "$ARTIFACT_DIR/python" \
