@@ -83,7 +83,9 @@ func (sd *shardDelegator) executeFilterStage(
 // Stage 2: Optimize search params using actual filter stats, execute normal search (filter re-executed)
 // Note: Filter bitsets are cached via the process-level ExprResCacheManager
 // (Stage 1 writes, Stage 2 reads). Cross-query reuse comes for free when the
-// same predicate runs on the same sealed segment.
+// same predicate runs on the same sealed segment. For a shared-filter group
+// stage 1 runs once for the whole group rather than once per sub-request,
+// because every branch carries the same predicate.
 // twoStageSearch returns (results, fallback, error). When fallback is true,
 // the caller should continue with the normal single-stage search path;
 // results will be nil in that case.
@@ -136,6 +138,11 @@ func (sd *shardDelegator) twoStageSearch(
 	optimizedReq, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, sd.getVectorFieldDim)
 	if err != nil {
 		log.Warn(ctx, "Two-stage search: failed to optimize search params", mlog.Err(err))
+		return nil, false, err
+	}
+	// OptimizeSearchParams only rewrites req.Req, i.e. branch 0.
+	if err := sd.optimizeSharedFilterBranches(ctx, optimizedReq, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, sd.getVectorFieldDim); err != nil {
+		log.Warn(ctx, "Two-stage search: failed to optimize shared-filter branch params", mlog.Err(err))
 		return nil, false, err
 	}
 

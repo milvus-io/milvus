@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -148,6 +149,23 @@ func (t *SearchTask) Execute() error {
 	}
 	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "SearchTask")
 
+	// A filter-only pass (two-stage search stage 1) needs no branch handling:
+	// every branch of a group carries the same predicate, so branch 0's single
+	// pass already produces the group's per-segment valid counts. Running it
+	// once for the whole group instead of once per sub-request is exactly the
+	// saving this feature exists for, applied to stage 1.
+	if t.req.GetFilterOnly() {
+		return t.executeSingle(tr)
+	}
+	// Shared-filter hybrid search: sub-requests that agree on their filter
+	// predicate arrive as one task and evaluate that filter once per segment.
+	if len(t.req.GetExtraFilterSharingReqs()) > 0 {
+		return t.executeSharedFilter(tr)
+	}
+	return t.executeSingle(tr)
+}
+
+func (t *SearchTask) executeSingle(tr *timerecord.TimeRecorder) error {
 	req := t.req
 	err := t.combinePlaceHolderGroups()
 	if err != nil {
@@ -220,6 +238,19 @@ func (t *SearchTask) Execute() error {
 		return nil
 	}
 
+	return t.reduceSegmentResults(searchReq, results, searchedSegments, tr)
+}
+
+// reduceSegmentResults turns one branch's per-segment results into this task's
+// internalpb.SearchResults. It is the second half of executeSingle, factored
+// out so the shared-filter path can run it once per branch unchanged.
+func (t *SearchTask) reduceSegmentResults(
+	searchReq *segcore.SearchRequest,
+	results []*segcore.SearchResult,
+	searchedSegments []segments.Segment,
+	tr *timerecord.TimeRecorder,
+) error {
+	req := t.req
 	// plan.MetricType is accurate, though req.MetricType may be empty
 	metricType := searchReq.Plan().GetMetricType()
 
@@ -388,6 +419,196 @@ func (t *SearchTask) Execute() error {
 	return nil
 }
 
+// executeSharedFilter runs a group of sub-requests that share one filter
+// predicate. The filter is evaluated once per segment and every branch's
+// vector search runs against that single bitset.
+//
+// Branch 0 is `t.req` itself, exactly as an ordinary search would carry it;
+// branches 1..N-1 ride in ExtraFilterSharingReqs. ReqIndex on the emitted
+// sub-results is the branch's position within the group -- the delegator owns
+// the mapping back to the caller's original sub-request order.
+func (t *SearchTask) executeSharedFilter(tr *timerecord.TimeRecorder) error {
+	branchReqs := buildSharedFilterBranches(t.req)
+
+	searchReqs := make([]*segcore.SearchRequest, 0, len(branchReqs))
+	defer func() {
+		for _, searchReq := range searchReqs {
+			searchReq.Delete()
+		}
+	}()
+	for _, branchReq := range branchReqs {
+		searchReq, err := t.collection.NewSearchRequest(branchReq, branchReq.GetReq().GetPlaceholderGroup())
+		if err != nil {
+			return err
+		}
+		searchReqs = append(searchReqs, searchReq)
+	}
+
+	var (
+		grouped          [][]*segments.SearchResult
+		searchedSegments []segments.Segment
+		err              error
+	)
+	switch t.req.GetScope() {
+	case querypb.DataScope_Historical:
+		grouped, searchedSegments, err = segments.SearchHistoricalGrouped(
+			t.ctx,
+			t.segmentManager,
+			searchReqs,
+			t.req.GetReq().GetCollectionID(),
+			t.req.GetReq().GetPartitionIDs(),
+			t.req.GetSegmentIDs(),
+		)
+	case querypb.DataScope_Streaming:
+		grouped, searchedSegments, err = segments.SearchStreamingGrouped(
+			t.ctx,
+			t.segmentManager,
+			searchReqs,
+			t.req.GetReq().GetCollectionID(),
+			t.req.GetReq().GetPartitionIDs(),
+			t.req.GetSegmentIDs(),
+		)
+	default:
+		return merr.WrapErrServiceInternalMsg("unexpected data scope %s for shared-filter search", t.req.GetScope())
+	}
+	defer t.segmentManager.Segment.Unpin(searchedSegments)
+	defer func() {
+		for _, perBranch := range grouped {
+			segments.DeleteSearchResults(perBranch)
+		}
+	}()
+	if err != nil {
+		return err
+	}
+
+	subResults := make([]*internalpb.SubSearchResults, len(branchReqs))
+	var costAggregation *internalpb.CostAggregation
+	channelsMvcc := make(map[string]uint64)
+	for i, branchReq := range branchReqs {
+		branch := t.branchTask(branchReq)
+		if err := branch.reduceSegmentResults(searchReqs[i], grouped[i], searchedSegments, tr); err != nil {
+			return err
+		}
+		branchResult := branch.result
+		subResults[i] = &internalpb.SubSearchResults{
+			MetricType:     branchResult.GetMetricType(),
+			NumQueries:     branchResult.GetNumQueries(),
+			TopK:           branchResult.GetTopK(),
+			SlicedBlob:     branchResult.GetSlicedBlob(),
+			ResultData:     branchResult.GetResultData(),
+			SlicedNumCount: branchResult.GetSlicedNumCount(),
+			SlicedOffset:   branchResult.GetSlicedOffset(),
+			ReqIndex:       int64(i),
+		}
+		// Costs are per-branch but the response is per-group; the branches
+		// searched the same segments, so summing service time and keeping one
+		// copy of the data size matches what N separate responses reported.
+		if costAggregation == nil {
+			costAggregation = branchResult.GetCostAggregation()
+		} else if branchCost := branchResult.GetCostAggregation(); branchCost != nil {
+			costAggregation.ServiceTime += branchCost.GetServiceTime()
+		}
+		for ch, ts := range branchResult.GetChannelsMvcc() {
+			channelsMvcc[ch] = ts
+		}
+	}
+
+	if costAggregation == nil {
+		costAggregation = &internalpb.CostAggregation{}
+	}
+	t.result = &internalpb.SearchResults{
+		Status:          merr.Success(),
+		Base:            &commonpb.MsgBase{SourceID: t.GetNodeID()},
+		IsAdvanced:      true,
+		SubResults:      subResults,
+		ChannelsMvcc:    channelsMvcc,
+		CostAggregation: costAggregation,
+	}
+	return nil
+}
+
+// buildSharedFilterBranches expands a grouped request back into one flat
+// request per branch. Branch 0 is the request itself; the rest project a
+// SubSearchRequest onto the shared envelope.
+//
+// The field set here must mirror buildSharedFilterSearchRequest in the
+// delegator exactly, or branch 0 and its siblings would be built differently
+// from the same sub-request. That is why Offset, ConsistencyLevel and
+// IsRecallEvaluation are absent: the delegator's flattening does not carry
+// them either, so copying them here would make the extras diverge from
+// branch 0.
+func buildSharedFilterBranches(req *querypb.SearchRequest) []*querypb.SearchRequest {
+	extras := req.GetExtraFilterSharingReqs()
+	branches := make([]*querypb.SearchRequest, 0, len(extras)+1)
+	branches = append(branches, req)
+
+	for _, sub := range extras {
+		base := req.GetReq()
+		branchReq := &internalpb.SearchRequest{
+			Base:                    base.GetBase(),
+			ReqID:                   base.GetReqID(),
+			DbID:                    base.GetDbID(),
+			CollectionID:            base.GetCollectionID(),
+			PartitionIDs:            sub.GetPartitionIDs(),
+			Dsl:                     sub.GetDsl(),
+			PlaceholderGroup:        sub.GetPlaceholderGroup(),
+			DslType:                 sub.GetDslType(),
+			SerializedExprPlan:      sub.GetSerializedExprPlan(),
+			OutputFieldsId:          base.GetOutputFieldsId(),
+			MvccTimestamp:           base.GetMvccTimestamp(),
+			GuaranteeTimestamp:      base.GetGuaranteeTimestamp(),
+			TimeoutTimestamp:        base.GetTimeoutTimestamp(),
+			Nq:                      sub.GetNq(),
+			Topk:                    sub.GetTopk(),
+			MetricType:              sub.GetMetricType(),
+			IgnoreGrowing:           sub.GetIgnoreGrowing(),
+			Username:                base.GetUsername(),
+			IsAdvanced:              false,
+			GroupByFieldId:          sub.GetGroupByFieldId(),
+			GroupSize:               sub.GetGroupSize(),
+			FieldId:                 sub.GetFieldId(),
+			GroupByFieldIds:         base.GetGroupByFieldIds(),
+			IsTopkReduce:            base.GetIsTopkReduce(),
+			IsIterator:              base.GetIsIterator(),
+			AnalyzerName:            sub.GetAnalyzerName(),
+			CollectionTtlTimestamps: base.GetCollectionTtlTimestamps(),
+			EntityTtlPhysicalTime:   base.GetEntityTtlPhysicalTime(),
+			PkFilter:                common.PkFilterNoPkFilter,
+			SearchType:              sub.GetSearchType(),
+		}
+		branches = append(branches, &querypb.SearchRequest{
+			Req:             branchReq,
+			DmlChannels:     req.GetDmlChannels(),
+			SegmentIDs:      req.GetSegmentIDs(),
+			FromShardLeader: req.GetFromShardLeader(),
+			Scope:           req.GetScope(),
+			TotalChannelNum: req.GetTotalChannelNum(),
+		})
+	}
+	return branches
+}
+
+// branchTask is a view of this task scoped to a single branch: same segments,
+// same lifetime, but that branch's plan, nq and topk. It exists so the
+// per-branch reduce can run the ordinary single-branch code unchanged.
+func (t *SearchTask) branchTask(branchReq *querypb.SearchRequest) *SearchTask {
+	return &SearchTask{
+		ctx:              t.ctx,
+		collection:       t.collection,
+		segmentManager:   t.segmentManager,
+		req:              branchReq,
+		groupSize:        branchReq.GetReq().GetGroupSize(),
+		topk:             branchReq.GetReq().GetTopk(),
+		nq:               branchReq.GetReq().GetNq(),
+		placeholderGroup: branchReq.GetReq().GetPlaceholderGroup(),
+		originTopks:      []int64{branchReq.GetReq().GetTopk()},
+		originNqs:        []int64{branchReq.GetReq().GetNq()},
+		notifier:         make(chan error, 1),
+		tr:               t.tr,
+		serverID:         t.serverID,
+	}
+}
+
 func emptySearchResultData(nq, topK int64) *schemapb.SearchResultData {
 	return &schemapb.SearchResultData{
 		NumQueries: nq,
@@ -412,6 +633,13 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 	maxTopk := funcutil.Max(topk, otherTopk)
 	after := (nq + otherNq) * maxTopk
 	ratio := float64(after) / float64(pre)
+
+	// A shared-filter group is a merge along a different axis (same rows,
+	// different vector fields) than this one (same plan, concatenated
+	// placeholder groups). The two must not compose.
+	if len(t.req.GetExtraFilterSharingReqs()) > 0 || len(other.req.GetExtraFilterSharingReqs()) > 0 {
+		return false
+	}
 
 	// Check mergeable
 	if t.req.GetFilterOnly() != other.req.GetFilterOnly() ||
@@ -468,17 +696,28 @@ func (t *SearchTask) SearchResult() *internalpb.SearchResults {
 }
 
 func (t *SearchTask) NQ() int64 {
-	return t.nq
+	// A shared-filter group processes every branch's queries in one task; the
+	// scheduler counter feeds the proxy's load estimate, so report the sum.
+	nq := t.nq
+	for _, sub := range t.req.GetExtraFilterSharingReqs() {
+		nq += sub.GetNq()
+	}
+	return nq
 }
 
 func (t *SearchTask) MinNQ() int64 {
-	if len(t.originNqs) == 0 {
-		return t.nq
+	minNQ := t.nq
+	if len(t.originNqs) > 0 {
+		minNQ = t.originNqs[0]
+		for _, nq := range t.originNqs[1:] {
+			if nq < minNQ {
+				minNQ = nq
+			}
+		}
 	}
-	minNQ := t.originNqs[0]
-	for _, nq := range t.originNqs[1:] {
-		if nq < minNQ {
-			minNQ = nq
+	for _, sub := range t.req.GetExtraFilterSharingReqs() {
+		if sub.GetNq() < minNQ {
+			minNQ = sub.GetNq()
 		}
 	}
 	return minNQ
