@@ -945,20 +945,21 @@ TEST_F(BloomFilterExprEvalTest, VarcharGrowingAndSealed) {
 namespace {
 
 enum class JsonVariant : int {
-    kIntMember = 0,   // {"uid": 5}          member of the int blob
-    kIntOther,        // {"uid": 7}          valid non-member
-    kDoubleIntegral,  // {"uid": 5.0}        strictly typed: NOT a member
-    kDoubleFraction,  // {"uid": 5.5}        definite non-member, valid
-    kStrAlice,        // {"uid": "alice"}    string probe
-    kStrFive,         // {"uid": "5"}        string, must not alias int64 5
-    kBool,            // {"uid": true}       no probe value
-    kNull,            // {"uid": null}       no probe value
-    kMissing,         // {"other": 1}        no probe value
-    kObject,          // {"uid": {"a": 1}}   no probe value
-    kArray,           // {"uid": [5]}        no probe value
-    kHugeUint,        // {"uid": 2^64-1}     definite non-member, valid
-    kIntMin,          // {"uid": INT64_MIN}  int64 member probe
-    kRowNull,         // whole-row NULL
+    kIntMember = 0,    // {"uid": 5}          member of the int blob
+    kIntOther,         // {"uid": 7}          valid non-member
+    kDoubleIntegral,   // {"uid": 5.0}        strictly typed: NOT a member
+    kDoubleFraction,   // {"uid": 5.5}        definite non-member, valid
+    kStrAlice,         // {"uid": "alice"}    string probe
+    kStrEscapedAlice,  // {"uid": "a\u006cice"} decoded string probe
+    kStrFive,          // {"uid": "5"}        string, must not alias int64 5
+    kBool,             // {"uid": true}       no probe value
+    kNull,             // {"uid": null}       no probe value
+    kMissing,          // {"other": 1}        no probe value
+    kObject,           // {"uid": {"a": 1}}   no probe value
+    kArray,            // {"uid": [5]}        no probe value
+    kHugeUint,         // {"uid": 2^64-1}     definite non-member, valid
+    kIntMin,           // {"uid": INT64_MIN}  int64 member probe
+    kRowNull,          // whole-row NULL
     kVariantCount,
 };
 
@@ -982,6 +983,8 @@ JsonRowFor(JsonVariant v) {
             return R"({"uid": 5.5})";
         case JsonVariant::kStrAlice:
             return R"({"uid": "alice"})";
+        case JsonVariant::kStrEscapedAlice:
+            return R"({"uid": "a\u006cice"})";
         case JsonVariant::kStrFive:
             return R"({"uid": "5"})";
         case JsonVariant::kBool:
@@ -1025,6 +1028,7 @@ JsonReference(const SplitBlockBloomFilterView& view, JsonVariant v) {
         case JsonVariant::kDoubleFraction:
             return {true, false};
         case JsonVariant::kStrAlice:
+        case JsonVariant::kStrEscapedAlice:
             return {true, view.TestBytes("alice", 5)};
         case JsonVariant::kStrFive:
             return {true, view.TestBytes("5", 1)};
@@ -1252,11 +1256,11 @@ TEST_F(BloomFilterExprEvalTest, JsonPathOffsetInput) {
     ASSERT_TRUE(view.TestInt64(5));
 
     // Non-contiguous, out-of-order candidates spanning the whole segment,
-    // covering member/non-member/gap/whole-row-NULL variants (1777 % 14 == 13
-    // is a whole-row NULL; 1999 % 14 == 11 is the huge uint64).
+    // covering member/non-member/gap/whole-row-NULL variants (1784 % 15 == 14
+    // is a whole-row NULL; 1992 % 15 == 12 is the huge uint64).
     milvus::exec::OffsetVector offsets;
     for (auto o : std::vector<int32_t>{
-             1999, 3, 402, 57, 1500, 800, 17, 1234, 999, 6, 1777, 450}) {
+             1992, 3, 402, 57, 1500, 800, 17, 1234, 999, 6, 1784, 450}) {
         offsets.emplace_back(o);
     }
 
@@ -1281,7 +1285,7 @@ TEST_F(BloomFilterExprEvalTest, JsonPathOffsetInput) {
                 << "candidate k=" << k << " row=" << row;
         }
 
-        // Candidate 0 (row 1999, huge uint64 -> false) vs sequential row 0
+        // Candidate 0 (row 1992, huge uint64 -> false) vs sequential row 0
         // (int member 5 -> true): a first-N sequential scan provably differs,
         // so this test depends on the offset-input path.
         const auto [v0, p0] = JsonReference(view, JsonVariantAt(0));
