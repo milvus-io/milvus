@@ -2406,7 +2406,11 @@ func (kc *Catalog) SaveRLSPrincipal(ctx context.Context, principal *model.RLSPri
 		return merr.WrapErrServiceInternalMsg("RLS principal is nil")
 	}
 	key := buildRLSPrincipalKey(principal.CollectionID, principal.PrincipalName)
-	value, err := proto.Marshal(model.MarshalRLSPrincipalModel(principal))
+	info, err := model.MarshalRLSPrincipalModel(principal)
+	if err != nil {
+		return err
+	}
+	value, err := proto.Marshal(info)
 	if err != nil {
 		return merr.WrapErrSerializationFailed(err, "marshal RLS principal info")
 	}
@@ -2423,7 +2427,11 @@ func (kc *Catalog) GetRLSPrincipal(ctx context.Context, collectionID int64, prin
 	if err := proto.Unmarshal([]byte(value), info); err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "unmarshal RLS principal info")
 	}
-	return model.UnmarshalRLSPrincipalModel(info), nil
+	principal, err := model.UnmarshalRLSPrincipalModel(info)
+	if err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "decode RLS principal tags")
+	}
+	return principal, nil
 }
 
 func (kc *Catalog) DropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error {
@@ -2441,7 +2449,11 @@ func (kc *Catalog) ListRLSPrincipals(ctx context.Context, collectionID int64) ([
 		if err := proto.Unmarshal([]byte(value), info); err != nil {
 			return nil, merr.WrapErrDataIntegrity(err, "unmarshal RLS principal info")
 		}
-		principals = append(principals, model.UnmarshalRLSPrincipalModel(info))
+		principal, err := model.UnmarshalRLSPrincipalModel(info)
+		if err != nil {
+			return nil, merr.WrapErrDataIntegrity(err, "decode RLS principal tags")
+		}
+		principals = append(principals, principal)
 	}
 	sort.Slice(principals, func(i, j int) bool {
 		return principals[i].PrincipalName < principals[j].PrincipalName

@@ -160,31 +160,39 @@ type RLSPrincipal struct {
 	DBID          int64
 	CollectionID  int64
 	PrincipalName string
-	Tags          map[string]string
+	Tags          map[string]rlsutil.TagValue
 }
 
-func MarshalRLSPrincipalModel(principal *RLSPrincipal) *rootcoordpb.RLSPrincipalInfo {
+func MarshalRLSPrincipalModel(principal *RLSPrincipal) (*rootcoordpb.RLSPrincipalInfo, error) {
 	if principal == nil {
-		return nil
+		return nil, nil
+	}
+	tags, err := rlsutil.TagsToJSON(principal.Tags)
+	if err != nil {
+		return nil, err
 	}
 	return &rootcoordpb.RLSPrincipalInfo{
 		DbId:          principal.DBID,
 		CollectionId:  principal.CollectionID,
 		PrincipalName: principal.PrincipalName,
-		Tags:          cloneStringMap(principal.Tags),
-	}
+		Tags:          tags,
+	}, nil
 }
 
-func UnmarshalRLSPrincipalModel(principal *rootcoordpb.RLSPrincipalInfo) *RLSPrincipal {
+func UnmarshalRLSPrincipalModel(principal *rootcoordpb.RLSPrincipalInfo) (*RLSPrincipal, error) {
 	if principal == nil {
-		return nil
+		return nil, nil
+	}
+	tags, err := rlsutil.TagsFromJSON(principal.GetTags())
+	if err != nil {
+		return nil, err
 	}
 	return &RLSPrincipal{
 		DBID:          principal.GetDbId(),
 		CollectionID:  principal.GetCollectionId(),
 		PrincipalName: principal.GetPrincipalName(),
-		Tags:          cloneStringMap(principal.GetTags()),
-	}
+		Tags:          tags,
+	}, nil
 }
 
 func CloneRLSPrincipal(principal *RLSPrincipal) *RLSPrincipal {
@@ -195,7 +203,7 @@ func CloneRLSPrincipal(principal *RLSPrincipal) *RLSPrincipal {
 		DBID:          principal.DBID,
 		CollectionID:  principal.CollectionID,
 		PrincipalName: principal.PrincipalName,
-		Tags:          cloneStringMap(principal.Tags),
+		Tags:          cloneRLSTags(principal.Tags),
 	}
 }
 
@@ -241,11 +249,11 @@ func policyActionsFromProto(actions []milvuspb.RowPolicyAction) []rlsutil.Policy
 	return converted
 }
 
-func cloneStringMap(in map[string]string) map[string]string {
+func cloneRLSTags(in map[string]rlsutil.TagValue) map[string]rlsutil.TagValue {
 	if in == nil {
 		return nil
 	}
-	out := make(map[string]string, len(in))
+	out := make(map[string]rlsutil.TagValue, len(in))
 	for k, v := range in {
 		out[k] = v
 	}

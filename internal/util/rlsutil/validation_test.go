@@ -17,6 +17,7 @@
 package rlsutil
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -131,13 +132,43 @@ func TestValidatePayloadBounds(t *testing.T) {
 
 		_, err := ValidateAndDeduplicateTagKeys([]string{"existing-key"})
 		require.NoError(t, err)
-		err = ValidateTags(map[string]string{"new-key": "value"})
+		err = ValidateTags(map[string]TagValue{"new-key": NewStringTagValue("value")})
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
 	t.Run("quoted tag keys are rejected", func(t *testing.T) {
 		require.ErrorIs(t, ValidateTagKey("x'y"), merr.ErrParameterInvalid)
-		require.ErrorIs(t, ValidateTags(map[string]string{"x'y": "value"}), merr.ErrParameterInvalid)
+		require.ErrorIs(t, ValidateTags(map[string]TagValue{"x'y": NewStringTagValue("value")}), merr.ErrParameterInvalid)
+	})
+
+	t.Run("typed tag values", func(t *testing.T) {
+		require.NoError(t, ValidateTags(map[string]TagValue{
+			"string": NewStringTagValue("value"),
+			"int":    NewInt64TagValue(3),
+			"double": NewDoubleTagValue(0.75),
+		}))
+		require.ErrorIs(t, ValidateTags(map[string]TagValue{"double": NewDoubleTagValue(math.NaN())}), merr.ErrParameterInvalid)
+		require.ErrorIs(t, ValidateTags(map[string]TagValue{"double": NewDoubleTagValue(math.Inf(1))}), merr.ErrParameterInvalid)
+	})
+
+	t.Run("JSON tag payload", func(t *testing.T) {
+		tags, err := TagsFromJSON(`{"tenant":"acme","level":3,"score":0.75}`)
+		require.NoError(t, err)
+		require.Equal(t, NewStringTagValue("acme"), tags["tenant"])
+		require.Equal(t, NewInt64TagValue(3), tags["level"])
+		require.Equal(t, NewDoubleTagValue(0.75), tags["score"])
+		payload, err := TagsToJSON(tags)
+		require.NoError(t, err)
+		require.JSONEq(t, `{"tenant":"acme","level":3,"score":0.75}`, payload)
+		largeDoublePayload, err := TagsToJSON(map[string]TagValue{"value": NewDoubleTagValue(1e20)})
+		require.NoError(t, err)
+		largeDoubleTags, err := TagsFromJSON(largeDoublePayload)
+		require.NoError(t, err)
+		require.Equal(t, NewDoubleTagValue(1e20), largeDoubleTags["value"])
+		for _, invalid := range []string{`[]`, `{"nested":{"x":1}}`, `{"flag":true}`, `{"x":1} trailing`} {
+			_, err = TagsFromJSON(invalid)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		}
 	})
 
 	t.Run("transport identifier bounds", func(t *testing.T) {

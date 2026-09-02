@@ -68,18 +68,26 @@ func TestRLSMetadataAckCallbacks(t *testing.T) {
 		DBID:          10,
 		CollectionID:  20,
 		PrincipalName: "alice",
-		Tags:          map[string]string{"tenant": "acme"},
+		Tags: map[string]rlsutil.TagValue{
+			"tenant": rlsutil.NewStringTagValue("acme"),
+			"level":  rlsutil.NewInt64TagValue(3),
+			"score":  rlsutil.NewDoubleTagValue(0.75),
+		},
 	}
 	meta.EXPECT().ApplyAlterRLSPrincipal(mock.Anything, mock.MatchedBy(func(actual *model.RLSPrincipal) bool {
 		return actual.DBID == principal.DBID &&
 			actual.CollectionID == principal.CollectionID &&
 			actual.PrincipalName == principal.PrincipalName &&
-			actual.Tags["tenant"] == "acme"
+			actual.Tags["tenant"] == rlsutil.NewStringTagValue("acme") &&
+			actual.Tags["level"] == rlsutil.NewInt64TagValue(3) &&
+			actual.Tags["score"] == rlsutil.NewDoubleTagValue(0.75)
 	})).Return(nil).Once()
+	principalMessage, err := marshalRLSPrincipalMessage(principal)
+	require.NoError(t, err)
 	alterPrincipal := message.NewAlterRLSMetadataMessageBuilderV2().
 		WithHeader(&message.AlterRLSMetadataMessageHeader{DbId: principal.DBID, CollectionId: principal.CollectionID}).
 		WithBody(&message.AlterRLSMetadataMessageBody{
-			Metadata: &messagespb.AlterRLSMetadataMessageBody_Principal{Principal: marshalRLSPrincipalMessage(principal)},
+			Metadata: &messagespb.AlterRLSMetadataMessageBody_Principal{Principal: principalMessage},
 		}).
 		WithBroadcast([]string{"control"}).
 		MustBuildBroadcast()

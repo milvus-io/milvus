@@ -18,6 +18,7 @@ package rlsutil
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -219,7 +220,7 @@ func ValidateTagKeyWithLimit(tagKey string) error {
 }
 
 // ValidateTags validates a complete principal tag map.
-func ValidateTags(tags map[string]string) error {
+func ValidateTags(tags map[string]TagValue) error {
 	if len(tags) == 0 {
 		return merr.WrapErrParameterInvalidMsg("RLS principal tags are empty")
 	}
@@ -230,9 +231,19 @@ func ValidateTags(tags map[string]string) error {
 		if err := ValidateTagKeyWithLimit(key); err != nil {
 			return err
 		}
-		maxTagValueLength := paramtable.Get().ProxyCfg.RLSMaxTagValueLength.GetAsInt()
-		if len(value) > maxTagValueLength {
-			return merr.WrapErrParameterInvalidMsg("RLS principal tag value exceeds max length %d", maxTagValueLength)
+		switch value.Kind {
+		case TagValueKindString:
+			maxTagValueLength := paramtable.Get().ProxyCfg.RLSMaxTagValueLength.GetAsInt()
+			if len(value.StringValue) > maxTagValueLength {
+				return merr.WrapErrParameterInvalidMsg("RLS principal tag value exceeds max length %d", maxTagValueLength)
+			}
+		case TagValueKindInt64:
+		case TagValueKindDouble:
+			if math.IsNaN(value.DoubleValue) || math.IsInf(value.DoubleValue, 0) {
+				return merr.WrapErrParameterInvalidMsg("RLS principal tag %q has a non-finite double value", key)
+			}
+		default:
+			return merr.WrapErrParameterInvalidMsg("RLS principal tag %q has unsupported value type", key)
 		}
 	}
 	return nil

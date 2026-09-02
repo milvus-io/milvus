@@ -2935,23 +2935,23 @@ func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) RunAndReturn(run func(context.
 }
 
 // GetRLSPrincipalTags provides a mock function with given fields: ctx, req
-func (_m *IMetaTable) GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (map[string]string, error) {
+func (_m *IMetaTable) GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (map[string]rlsutil.TagValue, error) {
 	ret := _m.Called(ctx, req)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetRLSPrincipalTags")
 	}
 
-	var r0 map[string]string
+	var r0 map[string]rlsutil.TagValue
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.GetRLSPrincipalTagsRequest) (map[string]string, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.GetRLSPrincipalTagsRequest) (map[string]rlsutil.TagValue, error)); ok {
 		return rf(ctx, req)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.GetRLSPrincipalTagsRequest) map[string]string); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.GetRLSPrincipalTagsRequest) map[string]rlsutil.TagValue); ok {
 		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]string)
+			r0 = ret.Get(0).(map[string]rlsutil.TagValue)
 		}
 	}
 
@@ -2983,12 +2983,12 @@ func (_c *IMetaTable_GetRLSPrincipalTags_Call) Run(run func(ctx context.Context,
 	return _c
 }
 
-func (_c *IMetaTable_GetRLSPrincipalTags_Call) Return(_a0 map[string]string, _a1 error) *IMetaTable_GetRLSPrincipalTags_Call {
+func (_c *IMetaTable_GetRLSPrincipalTags_Call) Return(_a0 map[string]rlsutil.TagValue, _a1 error) *IMetaTable_GetRLSPrincipalTags_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *IMetaTable_GetRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *rlsutil.GetRLSPrincipalTagsRequest) (map[string]string, error)) *IMetaTable_GetRLSPrincipalTags_Call {
+func (_c *IMetaTable_GetRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *rlsutil.GetRLSPrincipalTagsRequest) (map[string]rlsutil.TagValue, error)) *IMetaTable_GetRLSPrincipalTags_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -4367,7 +4367,7 @@ func (_c *IMetaTable_PrepareSetRLSPrincipalTags_Call) RunAndReturn(run func(cont
 }
 
 // PrepareUpdateRLSPolicy provides a mock function with given fields: ctx, req
-func (_m *IMetaTable) PrepareUpdateRLSPolicy(ctx context.Context, req *rlsutil.UpdateRowPolicyRequest) (*model.RLSPolicy, error) {
+func (_m *IMetaTable) PrepareUpdateRLSPolicy(ctx context.Context, req *rlsutil.CreateRowPolicyRequest) (*model.RLSPolicy, error) {
 	ret := _m.Called(ctx, req)
 
 	if len(ret) == 0 {
@@ -4376,10 +4376,10 @@ func (_m *IMetaTable) PrepareUpdateRLSPolicy(ctx context.Context, req *rlsutil.U
 
 	var r0 *model.RLSPolicy
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.UpdateRowPolicyRequest) (*model.RLSPolicy, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.CreateRowPolicyRequest) (*model.RLSPolicy, error)); ok {
 		return rf(ctx, req)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.UpdateRowPolicyRequest) *model.RLSPolicy); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *rlsutil.CreateRowPolicyRequest) *model.RLSPolicy); ok {
 		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
@@ -4387,7 +4387,7 @@ func (_m *IMetaTable) PrepareUpdateRLSPolicy(ctx context.Context, req *rlsutil.U
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *rlsutil.UpdateRowPolicyRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *rlsutil.CreateRowPolicyRequest) error); ok {
 		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
@@ -4403,14 +4403,14 @@ type IMetaTable_PrepareUpdateRLSPolicy_Call struct {
 
 // PrepareUpdateRLSPolicy is a helper method to define mock.On call
 //   - ctx context.Context
-//   - req *rlsutil.UpdateRowPolicyRequest
+//   - req *rlsutil.CreateRowPolicyRequest
 func (_e *IMetaTable_Expecter) PrepareUpdateRLSPolicy(ctx interface{}, req interface{}) *IMetaTable_PrepareUpdateRLSPolicy_Call {
 	return &IMetaTable_PrepareUpdateRLSPolicy_Call{Call: _e.mock.On("PrepareUpdateRLSPolicy", ctx, req)}
 }
 
-func (_c *IMetaTable_PrepareUpdateRLSPolicy_Call) Run(run func(ctx context.Context, req *rlsutil.UpdateRowPolicyRequest)) *IMetaTable_PrepareUpdateRLSPolicy_Call {
+func (_c *IMetaTable_PrepareUpdateRLSPolicy_Call) Run(run func(ctx context.Context, req *rlsutil.CreateRowPolicyRequest)) *IMetaTable_PrepareUpdateRLSPolicy_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*rlsutil.UpdateRowPolicyRequest))
+		run(args[0].(context.Context), args[1].(*rlsutil.CreateRowPolicyRequest))
 	})
 	return _c
 }
@@ -4420,7 +4420,7 @@ func (_c *IMetaTable_PrepareUpdateRLSPolicy_Call) Return(_a0 *model.RLSPolicy, _
 	return _c
 }
 
-func (_c *IMetaTable_PrepareUpdateRLSPolicy_Call) RunAndReturn(run func(context.Context, *rlsutil.UpdateRowPolicyRequest) (*model.RLSPolicy, error)) *IMetaTable_PrepareUpdateRLSPolicy_Call {
+func (_c *IMetaTable_PrepareUpdateRLSPolicy_Call) RunAndReturn(run func(context.Context, *rlsutil.CreateRowPolicyRequest) (*model.RLSPolicy, error)) *IMetaTable_PrepareUpdateRLSPolicy_Call {
 	_c.Call.Return(run)
 	return _c
 }

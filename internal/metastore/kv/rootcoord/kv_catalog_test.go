@@ -1681,9 +1681,10 @@ func TestCatalog_RLSMetadata(t *testing.T) {
 		DBID:          10,
 		CollectionID:  20,
 		PrincipalName: "team/a user",
-		Tags: map[string]string{
-			"dept": "sales",
-			"tier": "gold",
+		Tags: map[string]rlsutil.TagValue{
+			"dept":  rlsutil.NewStringTagValue("sales"),
+			"level": rlsutil.NewInt64TagValue(3),
+			"score": rlsutil.NewDoubleTagValue(0.75),
 		},
 	}
 	require.NoError(t, catalog.SaveRLSPrincipal(ctx, principal))

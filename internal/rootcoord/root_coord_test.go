@@ -1881,7 +1881,7 @@ func TestCore_RLSAPIs(t *testing.T) {
 		DbName:         "db1",
 		CollectionName: "coll1",
 		PrincipalName:  "alice",
-		Tags:           map[string]string{"dept": "sales"},
+		Tags:           map[string]rlsutil.TagValue{"dept": rlsutil.NewStringTagValue("sales")},
 	}
 	meta.EXPECT().PrepareSetRLSPrincipalTags(mock.Anything, setTagsReq).Return(&model.RLSPrincipal{
 		DBID:          10,
@@ -1894,11 +1894,13 @@ func TestCore_RLSAPIs(t *testing.T) {
 	assert.True(t, merr.Ok(status))
 
 	getTagsReq := &rlsutil.GetRLSPrincipalTagsRequest{DbName: "db1", CollectionName: "coll1", PrincipalName: "alice"}
-	meta.EXPECT().GetRLSPrincipalTags(mock.Anything, getTagsReq).Return(map[string]string{"dept": "sales"}, nil).Once()
+	meta.EXPECT().GetRLSPrincipalTags(mock.Anything, getTagsReq).Return(map[string]rlsutil.TagValue{
+		"dept": rlsutil.NewStringTagValue("sales"),
+	}, nil).Once()
 	getTagsResp, err := c.GetRLSPrincipalTags(ctx, getTagsReq)
 	require.NoError(t, err)
 	assert.True(t, merr.Ok(getTagsResp.Status))
-	assert.Equal(t, map[string]string{"dept": "sales"}, getTagsResp.Tags)
+	assert.Equal(t, map[string]rlsutil.TagValue{"dept": rlsutil.NewStringTagValue("sales")}, getTagsResp.Tags)
 	assert.Equal(t, "alice", getTagsResp.PrincipalName)
 
 	listPrincipalsReq := &rlsutil.ListRLSPrincipalsRequest{DbName: "db1", CollectionName: "coll1"}

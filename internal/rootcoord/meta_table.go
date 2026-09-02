@@ -174,7 +174,7 @@ type IMetaTable interface {
 	PrepareDeleteRLSPrincipalTags(ctx context.Context, req *rlsutil.DeleteRLSPrincipalTagsRequest) (*model.RLSPrincipal, bool, error)
 	ApplyAlterRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error
 	ApplyDropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error
-	GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (map[string]string, error)
+	GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (map[string]rlsutil.TagValue, error)
 	ListRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrincipalsRequest) ([]string, error)
 
 	AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error
@@ -3130,8 +3130,8 @@ func validateRLSUnaryRangeExpr(expr *planpb.UnaryRangeExpr, allowedTemplateVaria
 	if err := validateRLSScalarColumn(expr.GetColumnInfo()); err != nil {
 		return err
 	}
-	if expr.GetTemplateVariableName() != "" && !typeutil.IsStringType(expr.GetColumnInfo().GetDataType()) {
-		return merr.WrapErrParameterInvalidMsg("RLS principal variables can only be compared with string fields")
+	if expr.GetTemplateVariableName() == funcutil.RLSPrincipalTemplateName && !typeutil.IsStringType(expr.GetColumnInfo().GetDataType()) {
+		return merr.WrapErrParameterInvalidMsg("RLS current principal can only be compared with string fields")
 	}
 	return nil
 }
@@ -3172,8 +3172,8 @@ func validateRLSJSONContainsExpr(expr *planpb.JSONContainsExpr, allowedTemplateV
 	default:
 		return merr.WrapErrParameterInvalidMsg("unsupported RLS array_contains operator %s", expr.GetOp().String())
 	}
-	if expr.GetTemplateVariableName() != "" && !typeutil.IsStringType(column.GetElementType()) {
-		return merr.WrapErrParameterInvalidMsg("RLS principal variables can only be compared with string array fields")
+	if expr.GetTemplateVariableName() == funcutil.RLSPrincipalTemplateName && !typeutil.IsStringType(column.GetElementType()) {
+		return merr.WrapErrParameterInvalidMsg("RLS current principal can only be compared with string array fields")
 	}
 	return nil
 }
@@ -3421,19 +3421,15 @@ func validateRLSTagKey(tagKey string) error {
 	return rlsutil.ValidateTagKey(tagKey)
 }
 
-func validateRLSTags(tags map[string]string) error {
-	return rlsutil.ValidateTags(tags)
-}
-
 func validateAndDeduplicateRLSTagKeys(tagKeys []string) ([]string, error) {
 	return rlsutil.ValidateAndDeduplicateTagKeys(tagKeys)
 }
 
-func cloneRLSTags(tags map[string]string) map[string]string {
+func cloneRLSTags(tags map[string]rlsutil.TagValue) map[string]rlsutil.TagValue {
 	if tags == nil {
 		return nil
 	}
-	cloned := make(map[string]string, len(tags))
+	cloned := make(map[string]rlsutil.TagValue, len(tags))
 	for key, value := range tags {
 		cloned[key] = value
 	}
@@ -3447,7 +3443,7 @@ func (mt *MetaTable) PrepareSetRLSPrincipalTags(ctx context.Context, req *rlsuti
 	if err := validateRLSPrincipalName(req.GetPrincipalName()); err != nil {
 		return nil, err
 	}
-	if err := validateRLSTags(req.GetTags()); err != nil {
+	if err := rlsutil.ValidateTags(req.GetTags()); err != nil {
 		return nil, err
 	}
 
@@ -3474,7 +3470,7 @@ func (mt *MetaTable) PrepareSetRLSPrincipalTags(ctx context.Context, req *rlsuti
 	if !isNew {
 		mergedTags = cloneRLSTags(existingPrincipal.Tags)
 		if mergedTags == nil {
-			mergedTags = make(map[string]string, len(req.GetTags()))
+			mergedTags = make(map[string]rlsutil.TagValue, len(req.GetTags()))
 		}
 		for key, value := range req.GetTags() {
 			mergedTags[key] = value
@@ -3493,7 +3489,7 @@ func (mt *MetaTable) PrepareSetRLSPrincipalTags(ctx context.Context, req *rlsuti
 	return principal, nil
 }
 
-func (mt *MetaTable) GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (map[string]string, error) {
+func (mt *MetaTable) GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (map[string]rlsutil.TagValue, error) {
 	if req == nil {
 		return nil, merr.WrapErrParameterInvalidMsg("get RLS principal tags request is nil")
 	}

@@ -322,7 +322,10 @@ message RLSPrincipalInfo {
   int64 db_id = 1;
   int64 collection_id = 2;
   string principal_name = 3;
-  map<string, string> tags = 4;
+  // JSON object whose values are string, int64, or double. Keeping the
+  // durable representation opaque preserves tag types and permits future
+  // extensions without changing the persisted protobuf schema.
+  string tags = 4;
 }
 
 message GetPChannelInfoRequest {
