@@ -118,7 +118,7 @@ func (b *Buffer) getOrCreateStreamLocked(ctx context.Context, pchannel string) (
 		case <-state.stream.Done():
 			if len(state.refs) == 0 {
 				delete(b.streamsByPChannel, pchannel)
-				_ = state.stream.Close()
+				state.close()
 			} else {
 				return state, nil
 			}
@@ -129,8 +129,18 @@ func (b *Buffer) getOrCreateStreamLocked(ctx context.Context, pchannel string) (
 	if b.streams == nil {
 		return nil, wal.ErrTransformLogInvalidReadOption
 	}
-	stream, err := b.streams.AcquireStream(ctx, pchannel)
+	// The buffer owns the shared stream; a view only owns its acquisition.
+	streamCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	stop := context.AfterFunc(ctx, cancel)
+	stream, err := b.streams.AcquireStream(streamCtx, pchannel)
+	stop()
 	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		cancel()
+		_ = stream.Close()
 		return nil, err
 	}
 	mlog.Debug(ctx, "querynode transform log buffer acquired pchannel stream",
@@ -139,13 +149,14 @@ func (b *Buffer) getOrCreateStreamLocked(ctx context.Context, pchannel string) (
 	state := &streamState{
 		pchannel: pchannel,
 		stream:   stream,
+		cancel:   cancel,
 		refs:     make(map[string]*vchannelBuffer),
 	}
 	b.streamsByPChannel[pchannel] = state
 	return state, nil
 }
 
-func (b *Buffer) removeLocked(vchannel string, buf *vchannelBuffer) wal.TransformLogStream {
+func (b *Buffer) removeLocked(vchannel string, buf *vchannelBuffer) *streamState {
 	if b.channels[vchannel] == buf {
 		delete(b.channels, vchannel)
 	}
@@ -153,7 +164,7 @@ func (b *Buffer) removeLocked(vchannel string, buf *vchannelBuffer) wal.Transfor
 		delete(state.refs, vchannel)
 		if len(state.refs) == 0 {
 			delete(b.streamsByPChannel, buf.pchannel)
-			return state.stream
+			return state
 		}
 	}
 	return nil
@@ -162,7 +173,13 @@ func (b *Buffer) removeLocked(vchannel string, buf *vchannelBuffer) wal.Transfor
 type streamState struct {
 	pchannel string
 	stream   wal.TransformLogStream
+	cancel   context.CancelFunc
 	refs     map[string]*vchannelBuffer
+}
+
+func (s *streamState) close() {
+	s.cancel()
+	_ = s.stream.Close()
 }
 
 type bufEventHandler struct {
@@ -539,7 +556,7 @@ func (b *vchannelBuffer) releaseGuard(startFrom uint64) {
 			_ = sub.Close()
 		}
 		if stream != nil {
-			_ = stream.Close()
+			stream.close()
 		}
 		return
 	}
