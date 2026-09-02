@@ -254,18 +254,28 @@ meta-migration:
 
 INTERATION_PATH = $(PWD)/tests/integration
 CMEK_FIXTURE_PATH = $(INSTALL_PATH)/cmek-fixtures
+INTEGRATION_BASE_COVERAGE_PATH = $(PWD)/it_coverage_base.txt
+INTEGRATION_CMEK_COVERAGE_PATH = $(PWD)/it_coverage_cmek.txt
+
+.PHONY: build-cmek-fixtures integration-test integration-test-base integration-test-cmek
+.NOTPARALLEL: integration-test
 
 build-cmek-fixtures:
 	@echo "Building CMEK fixture plugins ..."
 	@(env GO="$(GO)" bash $(PWD)/scripts/build_cmek_fixtures.sh "$(CMEK_FIXTURE_PATH)")
 
-integration-test: getdeps build-cmek-fixtures
-	@echo "Building integration tests ..."
-	@(env MILVUS_CMEK_FIXTURE_DIR="$(CMEK_FIXTURE_PATH)" bash $(PWD)/scripts/run_intergration_test.sh "$(INSTALL_PATH)/gotestsum --")
+integration-test: integration-test-base integration-test-cmek
+	@echo "Merging integration test coverage ..."
+	@(printf 'mode: atomic\n'; sed '/^mode: atomic$$/d' "$(INTEGRATION_BASE_COVERAGE_PATH)"; sed '/^mode: atomic$$/d' "$(INTEGRATION_CMEK_COVERAGE_PATH)") > "$(PWD)/it_coverage.txt"
+	@rm -f "$(INTEGRATION_BASE_COVERAGE_PATH)" "$(INTEGRATION_CMEK_COVERAGE_PATH)"
+
+integration-test-base: getdeps
+	@echo "Running integration tests excluding CMEK ..."
+	@(env MILVUS_INTEGRATION_COVERAGE_FILE="$(INTEGRATION_BASE_COVERAGE_PATH)" bash $(PWD)/scripts/run_intergration_test.sh --exclude-package ./cmek "$(INSTALL_PATH)/gotestsum --")
 
 integration-test-cmek: getdeps build-cmek-fixtures
 	@echo "Running CMEK scalar-index integration tests ..."
-	@(env MILVUS_CMEK_FIXTURE_DIR="$(CMEK_FIXTURE_PATH)" bash $(PWD)/scripts/run_intergration_test.sh --package ./cmek "$(INSTALL_PATH)/gotestsum --")
+	@(env MILVUS_CMEK_FIXTURE_DIR="$(CMEK_FIXTURE_PATH)" MILVUS_INTEGRATION_COVERAGE_FILE="$(INTEGRATION_CMEK_COVERAGE_PATH)" bash $(PWD)/scripts/run_intergration_test.sh --package ./cmek "$(INSTALL_PATH)/gotestsum --")
 
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
 BUILD_TAGS_GPU = ${BUILD_TAGS}-gpu
