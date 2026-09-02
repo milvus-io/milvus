@@ -57,18 +57,19 @@ type gate struct {
 	wasAbove bool      // whether the cluster was above GateVersion at the last check
 }
 
-// Confirmator is the one-shot cluster version confirmator. It is a
-// paramtable-level capability: it is recovered right after paramtable
-// initialization (see RecoverConfirmator), reusing the etcd client paramtable
-// created for its config etcd source, and needs no external wiring. A single
-// session watch maintains the minimum online version across all nodes; every
-// registered gate is then driven by that minimum version: once the cluster
-// stays above the gate's GateVersion for the whole SwitchDelay stability
-// window, the gate flips its config item's value to TargetValue in the config
-// center (etcd source). The flip is guarded so an explicit operator value is
-// never overwritten. When every registered gate is resolved the confirmator
-// exits; nothing keeps running afterwards. Use Close to stop it.
-type Confirmator struct {
+// confirmator is the one-shot cluster version confirmator. It is a
+// paramtable-level capability: the MixCoord role starts it via
+// StartVersionGateSwitcher (see recoverConfirmator), reusing the etcd client
+// paramtable created for its config etcd source, and needs no external
+// wiring. A single session watch maintains the minimum online version across
+// all nodes; every registered gate is then driven by that minimum version:
+// once the cluster stays above the gate's GateVersion for the whole
+// SwitchDelay stability window, the gate flips its config item's value to
+// TargetValue in the config center (etcd source). The flip is guarded so an
+// explicit operator value is never overwritten. When every registered gate is
+// resolved the confirmator exits; nothing keeps running afterwards. Use close
+// to stop it.
+type confirmator struct {
 	cli           *clientv3.Client
 	sessionPrefix string // prefix of the session keys (<metaRoot>/session)
 	configRoot    string // root of the config center keys (<configRoot>/config/<key>)
@@ -85,17 +86,17 @@ type Confirmator struct {
 // newConfirmator creates a confirmator that watches the sessions of all roles
 // under metaRoot. The etcd client is injected by the caller — the same client
 // paramtable uses for its config etcd source — so the confirmator never opens
-// a second connection and does not own the client (Close does not close it).
-// Use RecoverConfirmator to create, register and start a confirmator.
-func newConfirmator(etcdCli *clientv3.Client, metaRoot, configRoot string) *Confirmator {
-	return &Confirmator{
+// a second connection and does not own the client (close does not close it).
+// Use recoverConfirmator to create, register and start a confirmator.
+func newConfirmator(etcdCli *clientv3.Client, metaRoot, configRoot string) *confirmator {
+	return &confirmator{
 		cli:           etcdCli,
 		sessionPrefix: path.Join(metaRoot, "session"),
 		configRoot:    configRoot,
 	}
 }
 
-// RecoverConfirmator creates and starts a cluster version confirmator in one
+// recoverConfirmator creates and starts a cluster version confirmator in one
 // call: it registers a gate for every version-gated config item, then starts
 // the session watch and gate loop in the background. Gates are registered
 // before start (one-shot); items without a VersionGateSwitcher are skipped.
@@ -103,9 +104,9 @@ func newConfirmator(etcdCli *clientv3.Client, metaRoot, configRoot string) *Conf
 // confirmator; when every registered gate is already resolved (explicit config
 // or flipped by a previous run) the confirmator exits on its own after the
 // initial pass. The etcd client is injected by the caller and shared with the
-// config etcd source; the confirmator does not own it. Call Close on the
+// config etcd source; the confirmator does not own it. Call close on the
 // returned confirmator to stop it.
-func RecoverConfirmator(etcdCli *clientv3.Client, metaRoot, configRoot string, items []*ParamItem) (*Confirmator, error) {
+func recoverConfirmator(etcdCli *clientv3.Client, metaRoot, configRoot string, items []*ParamItem) (*confirmator, error) {
 	vg := newConfirmator(etcdCli, metaRoot, configRoot)
 	for _, item := range items {
 		if item == nil || item.VersionGateSwitcher == nil {
@@ -117,7 +118,7 @@ func RecoverConfirmator(etcdCli *clientv3.Client, metaRoot, configRoot string, i
 		}
 	}
 	if len(vg.gates) == 0 {
-		vg.Close()
+		vg.close()
 		return nil, nil
 	}
 	// Start in the background: the initial resolution reads etcd and must not
@@ -134,7 +135,7 @@ func RecoverConfirmator(etcdCli *clientv3.Client, metaRoot, configRoot string, i
 // registerGate registers a version-gated config item. Registration is only
 // allowed before start: the confirmator is one-shot and does not support gates
 // registered at runtime.
-func (c *Confirmator) registerGate(key string, switcher *VersionGateSwitcher) error {
+func (c *confirmator) registerGate(key string, switcher *VersionGateSwitcher) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.started {
@@ -156,7 +157,7 @@ func (c *Confirmator) registerGate(key string, switcher *VersionGateSwitcher) er
 // resolved immediately; for the remaining gates a single session watch and one
 // gate-processing loop are started in the background. start returns after the
 // initial pass. When all gates are resolved the confirmator stops itself.
-func (c *Confirmator) start(ctx context.Context) error {
+func (c *confirmator) start(ctx context.Context) error {
 	c.mu.Lock()
 	if c.started {
 		c.mu.Unlock()
@@ -198,7 +199,7 @@ func (c *Confirmator) start(ctx context.Context) error {
 // gate-processing loop, waiting for them to exit. The etcd client is injected
 // by the caller and shared with the config etcd source, so it is not closed
 // here.
-func (c *Confirmator) Close() {
+func (c *confirmator) close() {
 	if c.cancel != nil {
 		c.cancel()
 	}
@@ -211,7 +212,7 @@ func (c *Confirmator) Close() {
 // restarts (e.g. after a compaction): the watch is only the "something changed"
 // trigger, correctness comes from the rescan. On watch failure the loop
 // rebuilds the watch from a fresh revision.
-func (c *Confirmator) watchLoop(ctx context.Context) {
+func (c *confirmator) watchLoop(ctx context.Context) {
 	defer c.wg.Done()
 	for {
 		rev, err := c.reloadSessions(ctx)
@@ -259,7 +260,7 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 // reloadSessions rescans the session prefix, recomputes the minimum online
 // version and returns the next watch revision (current revision + 1) so no
 // event committed between the scan and the watch is missed.
-func (c *Confirmator) reloadSessions(ctx context.Context) (int64, error) {
+func (c *confirmator) reloadSessions(ctx context.Context) (int64, error) {
 	min, rev, err := c.scanSessions(ctx)
 	if err != nil {
 		return 0, err
@@ -274,7 +275,7 @@ func (c *Confirmator) reloadSessions(ctx context.Context) (int64, error) {
 // revision from a fresh scan of the session prefix. Sessions with an
 // unparseable version are skipped; an empty session set yields the zero
 // version.
-func (c *Confirmator) scanSessions(ctx context.Context) (semver.Version, int64, error) {
+func (c *confirmator) scanSessions(ctx context.Context) (semver.Version, int64, error) {
 	resp, err := c.cli.Get(ctx, c.sessionPrefix, clientv3.WithPrefix())
 	if err != nil {
 		return semver.Version{}, 0, err
@@ -299,7 +300,7 @@ func (c *Confirmator) scanSessions(ctx context.Context) (semver.Version, int64, 
 // gateLoop periodically applies the per-gate SwitchDelay stability window and
 // flips the gates whose window has elapsed. It stops the confirmator once
 // every gate is resolved.
-func (c *Confirmator) gateLoop(ctx context.Context) {
+func (c *confirmator) gateLoop(ctx context.Context) {
 	defer c.wg.Done()
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
@@ -323,7 +324,7 @@ func (c *Confirmator) gateLoop(ctx context.Context) {
 // is above the gate's GateVersion and disarms it otherwise. Gates whose
 // stability window has elapsed are flipped. It returns true when every gate is
 // resolved.
-func (c *Confirmator) processGates(ctx context.Context) bool {
+func (c *confirmator) processGates(ctx context.Context) bool {
 	allDone := true
 	now := time.Now()
 	for _, g := range c.gates {
@@ -372,7 +373,7 @@ func (c *Confirmator) processGates(ctx context.Context) bool {
 // events may lag behind the flip check), then performs the flip. It returns
 // true when the gate is resolved (flipped, or superseded by an explicit config
 // value).
-func (c *Confirmator) recheckAndFlip(ctx context.Context, g *gate) bool {
+func (c *confirmator) recheckAndFlip(ctx context.Context, g *gate) bool {
 	min, _, err := c.scanSessions(ctx)
 	if err != nil {
 		mlog.Warn(ctx, "version gate: re-check sessions failed, retry later",
@@ -400,9 +401,20 @@ func (c *Confirmator) recheckAndFlip(ctx context.Context, g *gate) bool {
 // flip writes the gate's TargetValue into the config center once. The write is
 // guarded so an explicit operator value is never overwritten: the etcd-level
 // CAS only writes when the key is absent or still holds the sentinel value, so
-// a concurrently written explicit value wins. (Values from file/env sources
-// are covered by the explicit-config resolution at Start.)
-func (c *Confirmator) flip(ctx context.Context, g *gate) error {
+// a concurrently written explicit value wins. The process-local effective
+// value (file/env sources) is re-read right before the write: an explicit
+// non-sentinel value set while the confirmator is running (e.g. the false
+// escape hatch during a rolling upgrade) resolves the gate without touching
+// etcd, which would otherwise mask it forever.
+func (c *confirmator) flip(ctx context.Context, g *gate) error {
+	// The FileSource hot-reloads and the item is refreshable, so an operator
+	// may have set an explicit value (e.g. the false escape hatch) after the
+	// confirmator started; that value must win over the flip.
+	if v, ok := currentConfigValue(g.key); ok && v != g.switcher.EnableAutoSwitchValue {
+		mlog.Info(ctx, "version gate: local config value is explicit, skip flip",
+			mlog.String("key", g.key), mlog.String("value", v))
+		return nil
+	}
 	key := c.configKey(g.key)
 	resp, err := c.cli.Get(ctx, key)
 	if err != nil {
@@ -450,7 +462,7 @@ func (c *Confirmator) flip(ctx context.Context, g *gate) error {
 // gateResolvedLocked reports whether the gate needs no flipping: the effective
 // config value is no longer the sentinel (explicit operator value, or the
 // value was already flipped by a previous run). Caller must hold c.mu.
-func (c *Confirmator) gateResolvedLocked(g *gate) bool {
+func (c *confirmator) gateResolvedLocked(g *gate) bool {
 	if v, ok := currentConfigValue(g.key); ok {
 		return v != g.switcher.EnableAutoSwitchValue
 	}
@@ -469,12 +481,12 @@ func isZero(v semver.Version) bool {
 }
 
 // configKey returns the config-center etcd key of a config item.
-func (c *Confirmator) configKey(key string) string {
+func (c *confirmator) configKey(key string) string {
 	return path.Join(c.configRoot, "config", config.FormatKey(key))
 }
 
 // configValue reads the config-center etcd key of a config item.
-func (c *Confirmator) configValue(key string) (string, bool, error) {
+func (c *confirmator) configValue(key string) (string, bool, error) {
 	resp, err := c.cli.Get(context.Background(), c.configKey(key))
 	if err != nil {
 		return "", false, err
