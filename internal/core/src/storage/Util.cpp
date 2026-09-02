@@ -363,12 +363,15 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                        "valid_data is required for nullable VectorArray");
 
             if (length > 0) {
-                auto value_builder =
-                    static_cast<arrow::FixedSizeBinaryBuilder*>(
+                auto fixed_value_builder =
+                    dynamic_cast<arrow::FixedSizeBinaryBuilder*>(
                         list_builder->value_builder());
-                AssertInfo(value_builder != nullptr,
-                           "value_builder must be FixedSizeBinaryBuilder for "
-                           "VectorArray");
+                auto binary_value_builder = dynamic_cast<arrow::BinaryBuilder*>(
+                    list_builder->value_builder());
+                AssertInfo(fixed_value_builder != nullptr ||
+                               binary_value_builder != nullptr,
+                           "VectorArray child builder must be BinaryBuilder "
+                           "or FixedSizeBinaryBuilder");
 
                 DataType element_type = DataType::NONE;
                 auto append_vector_array = [&](const VectorArray& array) {
@@ -398,14 +401,51 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                                "Failed to append list: {}",
                                status.ToString());
 
-                    int num_vectors = array.physical_length();
-                    if (num_vectors > 0) {
-                        auto ast = value_builder->AppendValues(
-                            reinterpret_cast<const uint8_t*>(array.data()),
-                            num_vectors);
-                        AssertInfo(ast.ok(),
-                                   "Failed to batch append vectors: {}",
-                                   ast.ToString());
+                    auto physical_count = array.physical_length();
+                    auto bytes_per_vector = milvus::vector_bytes_per_element(
+                        array.get_element_type(), array.dim());
+                    if (array.is_element_nullable()) {
+                        AssertInfo(binary_value_builder != nullptr,
+                                   "element-nullable VectorArray requires "
+                                   "BinaryBuilder child storage");
+                        int physical_index = 0;
+                        for (int logical_index = 0;
+                             logical_index < array.length();
+                             ++logical_index) {
+                            arrow::Status ast;
+                            if (!array.is_element_valid(logical_index)) {
+                                ast = binary_value_builder->AppendNull();
+                            } else {
+                                auto data = reinterpret_cast<const uint8_t*>(
+                                                array.data()) +
+                                            physical_index * bytes_per_vector;
+                                ast = binary_value_builder->Append(
+                                    data, bytes_per_vector);
+                                ++physical_index;
+                            }
+                            AssertInfo(ast.ok(),
+                                       "Failed to append vector array element: "
+                                       "{}",
+                                       ast.ToString());
+                        }
+                        AssertInfo(
+                            physical_index == physical_count,
+                            "VECTOR_ARRAY compact payload count mismatch, "
+                            "expected {}, got {}",
+                            physical_count,
+                            physical_index);
+                    } else {
+                        AssertInfo(fixed_value_builder != nullptr,
+                                   "non-element-nullable VectorArray requires "
+                                   "FixedSizeBinaryBuilder child storage");
+                        if (physical_count > 0) {
+                            auto ast = fixed_value_builder->AppendValues(
+                                reinterpret_cast<const uint8_t*>(array.data()),
+                                physical_count);
+                            AssertInfo(ast.ok(),
+                                       "Failed to batch append vectors: {}",
+                                       ast.ToString());
+                        }
                     }
                 };
 
@@ -521,6 +561,18 @@ CreateArrowBuilder(DataType data_type,
                    DataType element_type,
                    int dim,
                    bool nullable) {
+    return CreateArrowBuilder(data_type, element_type, dim, nullable, false);
+}
+
+std::shared_ptr<arrow::ArrayBuilder>
+CreateArrowBuilder(DataType data_type,
+                   DataType element_type,
+                   int dim,
+                   bool nullable,
+                   bool element_nullable) {
+    AssertInfo(!element_nullable || data_type == DataType::VECTOR_ARRAY,
+               "element nullable Arrow builders are only valid for "
+               "VECTOR_ARRAY");
     switch (static_cast<DataType>(data_type)) {
         case DataType::VECTOR_FLOAT: {
             AssertInfo(dim > 0, "invalid dim value: {}", dim);
@@ -570,43 +622,13 @@ CreateArrowBuilder(DataType data_type,
             AssertInfo(element_type != DataType::NONE,
                        "element_type must be specified for VECTOR_ARRAY");
 
-            std::shared_ptr<arrow::ArrayBuilder> value_builder;
             switch (element_type) {
-                case DataType::VECTOR_FLOAT: {
-                    int byte_width = dim * sizeof(float);
-                    value_builder =
-                        std::make_shared<arrow::FixedSizeBinaryBuilder>(
-                            arrow::fixed_size_binary(byte_width));
+                case DataType::VECTOR_FLOAT:
+                case DataType::VECTOR_BINARY:
+                case DataType::VECTOR_FLOAT16:
+                case DataType::VECTOR_BFLOAT16:
+                case DataType::VECTOR_INT8:
                     break;
-                }
-                case DataType::VECTOR_BINARY: {
-                    int byte_width = (dim + 7) / 8;
-                    value_builder =
-                        std::make_shared<arrow::FixedSizeBinaryBuilder>(
-                            arrow::fixed_size_binary(byte_width));
-                    break;
-                }
-                case DataType::VECTOR_FLOAT16: {
-                    int byte_width = dim * 2;
-                    value_builder =
-                        std::make_shared<arrow::FixedSizeBinaryBuilder>(
-                            arrow::fixed_size_binary(byte_width));
-                    break;
-                }
-                case DataType::VECTOR_BFLOAT16: {
-                    int byte_width = dim * 2;
-                    value_builder =
-                        std::make_shared<arrow::FixedSizeBinaryBuilder>(
-                            arrow::fixed_size_binary(byte_width));
-                    break;
-                }
-                case DataType::VECTOR_INT8: {
-                    int byte_width = dim;
-                    value_builder =
-                        std::make_shared<arrow::FixedSizeBinaryBuilder>(
-                            arrow::fixed_size_binary(byte_width));
-                    break;
-                }
                 default: {
                     ThrowInfo(DataTypeInvalid,
                               "unsupported element type {} for VECTOR_ARRAY",
@@ -614,6 +636,15 @@ CreateArrowBuilder(DataType data_type,
                 }
             }
 
+            std::shared_ptr<arrow::ArrayBuilder> value_builder;
+            if (element_nullable) {
+                value_builder = std::make_shared<arrow::BinaryBuilder>();
+            } else {
+                auto byte_width =
+                    milvus::vector_bytes_per_element(element_type, dim);
+                value_builder = std::make_shared<arrow::FixedSizeBinaryBuilder>(
+                    arrow::fixed_size_binary(byte_width));
+            }
             return std::make_shared<arrow::ListBuilder>(
                 arrow::default_memory_pool(), value_builder);
         }
@@ -823,11 +854,22 @@ CreateArrowSchema(DataType data_type,
                   int dim,
                   DataType element_type,
                   bool nullable) {
+    return CreateArrowSchema(data_type, dim, element_type, nullable, false);
+}
+
+std::shared_ptr<arrow::Schema>
+CreateArrowSchema(DataType data_type,
+                  int dim,
+                  DataType element_type,
+                  bool nullable,
+                  bool element_nullable) {
     AssertInfo(data_type == DataType::VECTOR_ARRAY,
                "This overload is only for VECTOR_ARRAY type");
     AssertInfo(dim > 0, "invalid dim value");
 
-    auto value_type = GetArrowDataTypeForVectorArray(element_type, dim);
+    auto fixed_value_type = GetArrowDataTypeForVectorArray(element_type, dim);
+    auto value_type =
+        element_nullable ? arrow::list(arrow::binary()) : fixed_value_type;
     auto metadata = arrow::KeyValueMetadata::Make(
         {ELEMENT_TYPE_KEY_FOR_ARROW, DIM_KEY},
         {std::to_string(static_cast<int>(element_type)), std::to_string(dim)});
@@ -1243,6 +1285,26 @@ CreateFieldData(const DataType& type,
                 int64_t dim,
                 int64_t total_num_rows,
                 std::optional<proto::schema::TypeSchema> array_type) {
+    return CreateFieldData(type,
+                           element_type,
+                           nullable,
+                           false,
+                           dim,
+                           total_num_rows,
+                           std::move(array_type));
+}
+
+FieldDataPtr
+CreateFieldData(const DataType& type,
+                const DataType& element_type,
+                bool nullable,
+                bool element_nullable,
+                int64_t dim,
+                int64_t total_num_rows,
+                std::optional<proto::schema::TypeSchema> array_type) {
+    AssertInfo(!element_nullable || type == DataType::ARRAY ||
+                   type == DataType::VECTOR_ARRAY,
+               "element nullable is only valid for ARRAY or VECTOR_ARRAY");
     switch (type) {
         case DataType::BOOL:
             return std::make_shared<FieldData<bool>>(
@@ -1281,11 +1343,13 @@ CreateFieldData(const DataType& type,
                 type, nullable, total_num_rows);
         case DataType::ARRAY:
             if (array_type.has_value()) {
+                AssertInfo(!element_nullable,
+                           "element-nullable nested ARRAY is not supported");
                 return std::make_shared<FieldData<ArrayValue>>(
                     std::move(*array_type), nullable, total_num_rows);
             }
             return std::make_shared<FieldData<Array>>(
-                type, nullable, total_num_rows);
+                type, nullable, element_nullable, total_num_rows);
         case DataType::VECTOR_FLOAT:
             return std::make_shared<FieldData<FloatVector>>(
                 dim, type, nullable, total_num_rows);
@@ -1306,7 +1370,7 @@ CreateFieldData(const DataType& type,
                 dim, type, nullable, total_num_rows);
         case DataType::VECTOR_ARRAY:
             return std::make_shared<FieldData<VectorArray>>(
-                dim, element_type, nullable, total_num_rows);
+                dim, element_type, nullable, element_nullable, total_num_rows);
         default:
             ThrowInfo(DataTypeInvalid,
                       "CreateFieldData not support data type " +
@@ -1331,7 +1395,25 @@ CreateFieldDataFromDefaultValue(
     int64_t element_count,
     const std::optional<DefaultValueType>& default_value,
     std::optional<proto::schema::TypeSchema> array_type) {
+    return CreateFieldDataFromDefaultValue(type,
+                                           nullable,
+                                           false,
+                                           element_count,
+                                           default_value,
+                                           std::move(array_type));
+}
+
+FieldDataPtr
+CreateFieldDataFromDefaultValue(
+    const DataType& type,
+    bool nullable,
+    bool element_nullable,
+    int64_t element_count,
+    const std::optional<DefaultValueType>& default_value,
+    std::optional<proto::schema::TypeSchema> array_type) {
     AssertInfo(nullable, "default value field data must be nullable");
+    AssertInfo(!element_nullable || type == DataType::ARRAY,
+               "element nullable default field data is only valid for ARRAY");
 
     switch (type) {
         case DataType::BOOL:
@@ -1424,14 +1506,19 @@ CreateFieldDataFromDefaultValue(
             AssertInfo(!default_value.has_value(),
                        "ARRAY default values are not supported");
             if (array_type.has_value()) {
+                AssertInfo(!element_nullable,
+                           "element-nullable nested ARRAY is not supported");
                 return std::make_shared<FieldData<ArrayValue>>(
                     std::move(*array_type),
                     nullable,
                     element_count,
                     default_value);
             }
-            return std::make_shared<FieldData<Array>>(
-                type, nullable, element_count, std::optional<Array>{});
+            return std::make_shared<FieldData<Array>>(type,
+                                                      nullable,
+                                                      element_nullable,
+                                                      element_count,
+                                                      std::optional<Array>{});
         default:
             ThrowInfo(DataTypeInvalid,
                       "CreateFieldDataFromDefaultValue not support data type " +
@@ -1475,11 +1562,41 @@ MergeFieldData(std::vector<FieldDataPtr>& data_array) {
     }
 
     auto element_type = DataType::NONE;
+    auto element_nullable = false;
+    auto dim = int64_t{1};
+    auto array_data = dynamic_cast<FieldData<Array>*>(data_array[0].get());
+    if (array_data) {
+        element_nullable = array_data->is_element_nullable();
+        for (const auto& data : data_array) {
+            auto current = dynamic_cast<FieldData<Array>*>(data.get());
+            AssertInfo(current != nullptr,
+                       "cannot merge flat ARRAY and nested ARRAY field data");
+            AssertInfo(current->is_element_nullable() == element_nullable,
+                       "cannot merge ARRAY field data with different element "
+                       "nullability");
+        }
+    }
     std::optional<proto::schema::TypeSchema> array_type;
     auto vector_array_data =
         dynamic_cast<FieldData<VectorArray>*>(data_array[0].get());
     if (vector_array_data) {
         element_type = vector_array_data->get_element_type();
+        element_nullable = vector_array_data->is_element_nullable();
+        dim = vector_array_data->get_dim();
+        for (const auto& data : data_array) {
+            auto current = dynamic_cast<FieldData<VectorArray>*>(data.get());
+            AssertInfo(current != nullptr,
+                       "cannot merge VECTOR_ARRAY with other field data");
+            AssertInfo(current->get_element_type() == element_type,
+                       "cannot merge VECTOR_ARRAY field data with different "
+                       "element types");
+            AssertInfo(current->get_dim() == dim,
+                       "cannot merge VECTOR_ARRAY field data with different "
+                       "dimensions");
+            AssertInfo(current->is_element_nullable() == element_nullable,
+                       "cannot merge VECTOR_ARRAY field data with different "
+                       "element nullability");
+        }
     }
     auto nested_array_data =
         dynamic_cast<FieldData<ArrayValue>*>(data_array[0].get());
@@ -1490,7 +1607,8 @@ MergeFieldData(std::vector<FieldDataPtr>& data_array) {
     auto merged_data = storage::CreateFieldData(data_array[0]->get_data_type(),
                                                 element_type,
                                                 data_array[0]->IsNullable(),
-                                                1,
+                                                element_nullable,
+                                                dim,
                                                 0,
                                                 std::move(array_type));
     merged_data->Reserve(total_length);
@@ -1537,6 +1655,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
                            DataType data_type,
                            DataType element_type,
+                           bool element_nullable,
                            int64_t dim,
                            milvus_storage::ArrowFileSystemPtr fs) {
     AssertInfo(remote_files.size() > 0, "[StorageV2] remote files size is 0");
@@ -1680,6 +1799,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                     storage::CreateFieldData(data_type,
                                              element_type,
                                              field_schema->nullable(),
+                                             element_nullable,
                                              dim,
                                              num_rows);
                 for (const auto& chunked_array : chunked_arrays) {
@@ -1762,6 +1882,7 @@ IterateFieldDataFromManifest(
     std::vector<std::string> needed_columns = {column_name};
 
     bool nullable = field_meta.field_schema.nullable();
+    bool element_nullable = field_meta.field_schema.element_nullable();
     std::shared_ptr<const FieldMeta> normalize_field_meta;
     if (is_external) {
         auto schema = field_meta.field_schema;
@@ -1784,7 +1905,8 @@ IterateFieldDataFromManifest(
                 arrow_schema = CreateArrowSchema(data_type.value(),
                                                  static_cast<int>(dim),
                                                  element_type.value(),
-                                                 nullable);
+                                                 nullable,
+                                                 element_nullable);
             } else if (IsSparseFloatVectorDataType(data_type.value())) {
                 arrow_schema = CreateArrowSchema(data_type.value(), nullable);
             } else {
@@ -1969,6 +2091,7 @@ IterateFieldDataFromManifest(
                                           element_type_v,
                                           dim,
                                           nullable,
+                                          element_nullable,
                                           normalize_field_meta,
                                           num_rows]() -> FieldDataPtr {
             auto raw_column = batch->GetColumnByName(column_name);
@@ -1983,8 +2106,12 @@ IterateFieldDataFromManifest(
             }
             auto chunked_array =
                 std::make_shared<arrow::ChunkedArray>(raw_column);
-            auto field_data = CreateFieldData(
-                data_type_v, element_type_v, nullable, dim, num_rows);
+            auto field_data = CreateFieldData(data_type_v,
+                                              element_type_v,
+                                              nullable,
+                                              element_nullable,
+                                              dim,
+                                              num_rows);
             field_data->FillFieldData(chunked_array);
             return field_data;
         });
@@ -2266,6 +2393,7 @@ CacheRawDataAndFillMissing(const MemFileManagerImplPtr& file_manager,
         auto field_data = storage::CreateFieldDataFromDefaultValue(
             static_cast<DataType>(field_schema.data_type()),
             true,
+            field_schema.element_nullable(),
             lack_binlog_rows,
             default_value);
         field_datas.insert(field_datas.begin(), field_data);
@@ -3168,9 +3296,17 @@ ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
             } else {
                 auto start = list_arr->value_offset(i);
                 auto end = list_arr->value_offset(i + 1);
-                ValidateNoNullValuesInRange(
-                    list_arr->values(), start, end, "array list");
+                if (!field_meta.is_element_nullable()) {
+                    ValidateNoNullValuesInRange(
+                        list_arr->values(), start, end, "array list");
+                }
                 auto proto = ArrowListToScalarFieldProto(list_arr, i);
+                if (field_meta.is_element_nullable()) {
+                    proto.mutable_valid_data()->Reserve(end - start);
+                    for (int64_t j = start; j < end; ++j) {
+                        proto.add_valid_data(list_arr->values()->IsValid(j));
+                    }
+                }
                 std::string serialized;
                 proto.SerializeToString(&serialized);
                 status = builder.Append(serialized);
@@ -3466,60 +3602,76 @@ ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,
         case arrow::Type::BOOL: {
             auto typed = std::static_pointer_cast<arrow::BooleanArray>(values);
             auto* d = sf.mutable_bool_data();
-            for (int64_t j = start; j < end; j++) d->add_data(typed->Value(j));
+            for (int64_t j = start; j < end; j++) {
+                d->add_data(values->IsValid(j) ? typed->Value(j) : false);
+            }
             break;
         }
         case arrow::Type::INT8: {
             auto typed = std::static_pointer_cast<arrow::Int8Array>(values);
             auto* d = sf.mutable_int_data();
             for (int64_t j = start; j < end; j++)
-                d->add_data(static_cast<int32_t>(typed->Value(j)));
+                d->add_data(values->IsValid(j)
+                                ? static_cast<int32_t>(typed->Value(j))
+                                : 0);
             break;
         }
         case arrow::Type::INT16: {
             auto typed = std::static_pointer_cast<arrow::Int16Array>(values);
             auto* d = sf.mutable_int_data();
             for (int64_t j = start; j < end; j++)
-                d->add_data(static_cast<int32_t>(typed->Value(j)));
+                d->add_data(values->IsValid(j)
+                                ? static_cast<int32_t>(typed->Value(j))
+                                : 0);
             break;
         }
         case arrow::Type::INT32: {
             auto typed = std::static_pointer_cast<arrow::Int32Array>(values);
             auto* d = sf.mutable_int_data();
-            for (int64_t j = start; j < end; j++) d->add_data(typed->Value(j));
+            for (int64_t j = start; j < end; j++) {
+                d->add_data(values->IsValid(j) ? typed->Value(j) : 0);
+            }
             break;
         }
         case arrow::Type::INT64: {
             auto typed = std::static_pointer_cast<arrow::Int64Array>(values);
             auto* d = sf.mutable_long_data();
-            for (int64_t j = start; j < end; j++) d->add_data(typed->Value(j));
+            for (int64_t j = start; j < end; j++) {
+                d->add_data(values->IsValid(j) ? typed->Value(j) : 0);
+            }
             break;
         }
         case arrow::Type::FLOAT: {
             auto typed = std::static_pointer_cast<arrow::FloatArray>(values);
             auto* d = sf.mutable_float_data();
-            for (int64_t j = start; j < end; j++) d->add_data(typed->Value(j));
+            for (int64_t j = start; j < end; j++) {
+                d->add_data(values->IsValid(j) ? typed->Value(j) : 0.0F);
+            }
             break;
         }
         case arrow::Type::DOUBLE: {
             auto typed = std::static_pointer_cast<arrow::DoubleArray>(values);
             auto* d = sf.mutable_double_data();
-            for (int64_t j = start; j < end; j++) d->add_data(typed->Value(j));
+            for (int64_t j = start; j < end; j++) {
+                d->add_data(values->IsValid(j) ? typed->Value(j) : 0.0);
+            }
             break;
         }
         case arrow::Type::STRING: {
             auto typed = std::static_pointer_cast<arrow::StringArray>(values);
             auto* d = sf.mutable_string_data();
-            for (int64_t j = start; j < end; j++)
-                d->add_data(typed->GetString(j));
+            for (int64_t j = start; j < end; j++) {
+                d->add_data(values->IsValid(j) ? typed->GetString(j) : "");
+            }
             break;
         }
         case arrow::Type::LARGE_STRING: {
             auto typed =
                 std::static_pointer_cast<arrow::LargeStringArray>(values);
             auto* d = sf.mutable_string_data();
-            for (int64_t j = start; j < end; j++)
-                d->add_data(typed->GetString(j));
+            for (int64_t j = start; j < end; j++) {
+                d->add_data(values->IsValid(j) ? typed->GetString(j) : "");
+            }
             break;
         }
         case arrow::Type::STRING_VIEW: {
@@ -3527,6 +3679,10 @@ ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,
                 std::static_pointer_cast<arrow::StringViewArray>(values);
             auto* d = sf.mutable_string_data();
             for (int64_t j = start; j < end; j++) {
+                if (values->IsNull(j)) {
+                    d->add_data("");
+                    continue;
+                }
                 auto sv = typed->GetView(j);
                 d->add_data(std::string(sv.data(), sv.size()));
             }

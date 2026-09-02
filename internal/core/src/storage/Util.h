@@ -93,6 +93,13 @@ CreateArrowBuilder(DataType data_type,
                    int dim,
                    bool nullable = false);
 
+std::shared_ptr<arrow::ArrayBuilder>
+CreateArrowBuilder(DataType data_type,
+                   DataType element_type,
+                   int dim,
+                   bool nullable,
+                   bool element_nullable);
+
 /// \brief Utility function to create arrow:Scalar from FieldMeta.default_value
 ///
 /// Construct a arrow::Scalar based on input field meta
@@ -117,6 +124,13 @@ CreateArrowSchema(DataType data_type,
                   int dim,
                   DataType element_type,
                   bool nullable = false);
+
+std::shared_ptr<arrow::Schema>
+CreateArrowSchema(DataType data_type,
+                  int dim,
+                  DataType element_type,
+                  bool nullable,
+                  bool element_nullable);
 
 int
 GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
@@ -327,6 +341,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
                            DataType data_type,
                            DataType element_type,
+                           bool element_nullable,
                            int64_t dim,
                            milvus_storage::ArrowFileSystemPtr fs);
 
@@ -424,6 +439,25 @@ CreateFieldDataFromDefaultValue(
     bool nullable,
     int64_t element_count,
     const std::optional<DefaultValueType>& default_value,
+    std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
+
+FieldDataPtr
+CreateFieldDataFromDefaultValue(
+    const DataType& type,
+    bool nullable,
+    bool element_nullable,
+    int64_t element_count,
+    const std::optional<DefaultValueType>& default_value,
+    std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
+
+FieldDataPtr
+CreateFieldData(
+    const DataType& type,
+    const DataType& element_type,
+    bool nullable,
+    bool element_nullable,
+    int64_t dim,
+    int64_t total_num_rows,
     std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 
 int64_t

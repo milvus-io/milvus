@@ -268,12 +268,14 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
     for (auto& files : remote_files) {
         SortByPath(files);
     }
-    auto field_datas = GetFieldDatasFromStorageV2(remote_files,
-                                                  field_meta_.field_id,
-                                                  data_type.value(),
-                                                  element_type.value(),
-                                                  dim,
-                                                  fs_);
+    auto field_datas =
+        GetFieldDatasFromStorageV2(remote_files,
+                                   field_meta_.field_id,
+                                   data_type.value(),
+                                   element_type.value(),
+                                   field_meta_.field_schema.element_nullable(),
+                                   dim,
+                                   fs_);
     // field data list could differ for storage v2 group list
     return field_datas;
 }
@@ -417,7 +419,7 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
         const auto& element_type = std::get<2>(tup);
 
         auto field_datas = GetFieldDatasFromStorageV2(
-            remote_files, field_id, field_type, element_type, 1, fs_);
+            remote_files, field_id, field_type, element_type, false, 1, fs_);
 
         res[field_id] = GetOptFieldIvfData(field_type, field_datas);
     }

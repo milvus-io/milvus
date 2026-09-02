@@ -1060,6 +1060,7 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
             auto field_data = storage::CreateFieldDataFromDefaultValue(
                 field_meta.get_data_type(),
                 true,
+                field_meta.is_element_nullable(),
                 lack_num,
                 field_meta.default_value(),
                 std::move(array_type));
@@ -1369,6 +1370,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
                             data_type,
                             field.second.get_element_type(),
                             field.second.is_nullable(),
+                            field.second.is_element_nullable(),
                             IsVectorDataType(data_type) &&
                                     !IsSparseFloatVectorDataType(data_type)
                                 ? field.second.get_dim()
@@ -3389,6 +3391,7 @@ SegmentGrowingImpl::LoadColumnGroup(
                     data_type,
                     field.get_element_type(),
                     field.is_nullable(),
+                    field.is_element_nullable(),
                     IsVectorDataType(data_type) &&
                             !IsSparseFloatVectorDataType(data_type)
                         ? field.get_dim()

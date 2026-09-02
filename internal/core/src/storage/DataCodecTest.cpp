@@ -78,13 +78,15 @@ FieldMeta
 MakeExternalFieldMetaForTest(DataType data_type,
                              DataType element_type = DataType::NONE,
                              bool nullable = false,
-                             int64_t dim = 0) {
+                             int64_t dim = 0,
+                             bool element_nullable = false) {
     proto::schema::FieldSchema field_schema;
     field_schema.set_fieldid(1000);
     field_schema.set_name("field");
     field_schema.set_external_field("field_col");
     field_schema.set_data_type(ToProtoDataType(data_type));
     field_schema.set_nullable(nullable);
+    field_schema.set_element_nullable(element_nullable);
     if (element_type != DataType::NONE) {
         field_schema.set_element_type(ToProtoDataType(element_type));
     }
@@ -100,6 +102,56 @@ MakeExternalFieldMetaForTest(DataType data_type,
         dim_param->set_value(std::to_string(dim));
     }
     return FieldMeta::ParseFrom(field_schema);
+}
+
+template <typename Builder, typename Value, typename Verify>
+void
+VerifyExternalElementNullableArray(DataType element_type,
+                                   const Value& first,
+                                   const Value& third,
+                                   Verify verify_payload) {
+    auto value_builder = std::make_shared<Builder>();
+    arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);
+
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(value_builder->Append(first).ok());
+    ASSERT_TRUE(value_builder->AppendNull().ok());
+    ASSERT_TRUE(value_builder->Append(third).ok());
+    ASSERT_TRUE(builder.AppendNull().ok());
+
+    std::shared_ptr<arrow::Array> list_array;
+    ASSERT_TRUE(builder.Finish(&list_array).ok());
+
+    auto field_meta = MakeExternalFieldMetaForTest(
+        DataType::ARRAY, element_type, true, 0, true);
+    auto normalized = storage::NormalizeExternalArrow(list_array, field_meta);
+    ASSERT_EQ(normalized->type_id(), arrow::Type::BINARY);
+
+    auto binary = std::static_pointer_cast<arrow::BinaryArray>(normalized);
+    ASSERT_EQ(binary->length(), 2);
+    ASSERT_FALSE(binary->IsNull(0));
+    ASSERT_TRUE(binary->IsNull(1));
+
+    ScalarFieldProto proto;
+    auto serialized = binary->GetView(0);
+    ASSERT_TRUE(proto.ParseFromArray(serialized.data(), serialized.size()));
+    ASSERT_EQ(proto.valid_data_size(), 3);
+    EXPECT_TRUE(proto.valid_data(0));
+    EXPECT_FALSE(proto.valid_data(1));
+    EXPECT_TRUE(proto.valid_data(2));
+    verify_payload(proto);
+
+    auto field_data = storage::CreateFieldData(
+        DataType::ARRAY, element_type, true, true, 1, binary->length());
+    field_data->FillFieldData(
+        std::make_shared<arrow::ChunkedArray>(normalized));
+    ASSERT_EQ(field_data->get_num_rows(), 2);
+    EXPECT_TRUE(field_data->is_valid(0));
+    EXPECT_FALSE(field_data->is_valid(1));
+    auto* row = static_cast<const milvus::Array*>(field_data->RawValue(0));
+    ASSERT_NE(row, nullptr);
+    ASSERT_TRUE(row->is_element_nullable());
+    verify_payload(row->output_data());
 }
 
 template <size_t N>
@@ -339,6 +391,77 @@ TEST(storage, ExternalArrayListNormalizesToBinary) {
         MakeExternalFieldMetaForTest(DataType::ARRAY, DataType::INT64);
     auto normalized = storage::NormalizeExternalArrow(list_array, field_meta);
     ASSERT_EQ(normalized->type_id(), arrow::Type::BINARY);
+}
+
+TEST(storage, ExternalElementNullableArrayPreservesDensePayloadForAllTypes) {
+    VerifyExternalElementNullableArray<arrow::BooleanBuilder>(
+        DataType::BOOL, true, false, [](const ScalarFieldProto& row) {
+            ASSERT_EQ(row.bool_data().data_size(), 3);
+            EXPECT_TRUE(row.bool_data().data(0));
+            EXPECT_FALSE(row.bool_data().data(1));
+            EXPECT_FALSE(row.bool_data().data(2));
+        });
+    VerifyExternalElementNullableArray<arrow::Int8Builder>(
+        DataType::INT8, int8_t{1}, int8_t{3}, [](const ScalarFieldProto& row) {
+            ASSERT_EQ(row.int_data().data_size(), 3);
+            EXPECT_EQ(row.int_data().data(0), 1);
+            EXPECT_EQ(row.int_data().data(1), 0);
+            EXPECT_EQ(row.int_data().data(2), 3);
+        });
+    VerifyExternalElementNullableArray<arrow::Int16Builder>(
+        DataType::INT16,
+        int16_t{10},
+        int16_t{30},
+        [](const ScalarFieldProto& row) {
+            ASSERT_EQ(row.int_data().data_size(), 3);
+            EXPECT_EQ(row.int_data().data(0), 10);
+            EXPECT_EQ(row.int_data().data(1), 0);
+            EXPECT_EQ(row.int_data().data(2), 30);
+        });
+    VerifyExternalElementNullableArray<arrow::Int32Builder>(
+        DataType::INT32,
+        int32_t{100},
+        int32_t{300},
+        [](const ScalarFieldProto& row) {
+            ASSERT_EQ(row.int_data().data_size(), 3);
+            EXPECT_EQ(row.int_data().data(0), 100);
+            EXPECT_EQ(row.int_data().data(1), 0);
+            EXPECT_EQ(row.int_data().data(2), 300);
+        });
+    VerifyExternalElementNullableArray<arrow::Int64Builder>(
+        DataType::INT64,
+        int64_t{1000},
+        int64_t{3000},
+        [](const ScalarFieldProto& row) {
+            ASSERT_EQ(row.long_data().data_size(), 3);
+            EXPECT_EQ(row.long_data().data(0), 1000);
+            EXPECT_EQ(row.long_data().data(1), 0);
+            EXPECT_EQ(row.long_data().data(2), 3000);
+        });
+    VerifyExternalElementNullableArray<arrow::FloatBuilder>(
+        DataType::FLOAT, 1.5F, 3.5F, [](const ScalarFieldProto& row) {
+            ASSERT_EQ(row.float_data().data_size(), 3);
+            EXPECT_FLOAT_EQ(row.float_data().data(0), 1.5F);
+            EXPECT_FLOAT_EQ(row.float_data().data(1), 0.0F);
+            EXPECT_FLOAT_EQ(row.float_data().data(2), 3.5F);
+        });
+    VerifyExternalElementNullableArray<arrow::DoubleBuilder>(
+        DataType::DOUBLE, 1.25, 3.25, [](const ScalarFieldProto& row) {
+            ASSERT_EQ(row.double_data().data_size(), 3);
+            EXPECT_DOUBLE_EQ(row.double_data().data(0), 1.25);
+            EXPECT_DOUBLE_EQ(row.double_data().data(1), 0.0);
+            EXPECT_DOUBLE_EQ(row.double_data().data(2), 3.25);
+        });
+    VerifyExternalElementNullableArray<arrow::StringBuilder>(
+        DataType::VARCHAR,
+        std::string("first"),
+        std::string("third"),
+        [](const ScalarFieldProto& row) {
+            ASSERT_EQ(row.string_data().data_size(), 3);
+            EXPECT_EQ(row.string_data().data(0), "first");
+            EXPECT_EQ(row.string_data().data(1), "");
+            EXPECT_EQ(row.string_data().data(2), "third");
+        });
 }
 
 TEST(storage, ExternalFloatVectorListNormalizesToFixedSizeBinary) {
@@ -622,6 +745,58 @@ TEST(storage, ExternalNullableVectorArrayPreservesNullRows) {
         DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, 2);
     EXPECT_ANY_THROW(
         storage::NormalizeExternalArrow(list_array, non_nullable_meta));
+}
+
+TEST(storage, ElementNullableVectorArrayUsesBinaryArrowChildren) {
+    constexpr int dim = 4;
+    auto nullable_builder = storage::CreateArrowBuilder(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, dim, false, true);
+    auto nullable_list_builder =
+        std::dynamic_pointer_cast<arrow::ListBuilder>(nullable_builder);
+    ASSERT_NE(nullable_list_builder, nullptr);
+    EXPECT_EQ(nullable_list_builder->value_builder()->type()->id(),
+              arrow::Type::BINARY);
+
+    auto nullable_schema = storage::CreateArrowSchema(
+        DataType::VECTOR_ARRAY, dim, DataType::VECTOR_FLOAT, false, true);
+    auto nullable_list_type = std::static_pointer_cast<arrow::ListType>(
+        nullable_schema->field(0)->type());
+    EXPECT_EQ(nullable_list_type->value_type()->id(), arrow::Type::BINARY);
+
+    auto fixed_builder = storage::CreateArrowBuilder(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, dim, false, false);
+    auto fixed_list_builder =
+        std::dynamic_pointer_cast<arrow::ListBuilder>(fixed_builder);
+    ASSERT_NE(fixed_list_builder, nullptr);
+    EXPECT_EQ(fixed_list_builder->value_builder()->type()->id(),
+              arrow::Type::FIXED_SIZE_BINARY);
+}
+
+TEST(storage, MergeFieldDataRejectsMixedElementNullability) {
+    std::vector<FieldDataPtr> arrays{
+        storage::CreateFieldData(
+            DataType::ARRAY, DataType::INT64, false, false, 1, 0),
+        storage::CreateFieldData(
+            DataType::ARRAY, DataType::INT64, false, true, 1, 0)};
+    EXPECT_ANY_THROW(storage::MergeFieldData(arrays));
+
+    std::vector<FieldDataPtr> vector_arrays{
+        storage::CreateFieldData(
+            DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, false, 4, 0),
+        storage::CreateFieldData(
+            DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, true, 4, 0)};
+    EXPECT_ANY_THROW(storage::MergeFieldData(vector_arrays));
+
+    std::vector<FieldDataPtr> compatible_vector_arrays{
+        storage::CreateFieldData(
+            DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, true, 4, 0),
+        storage::CreateFieldData(
+            DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, true, 4, 0)};
+    auto merged = std::dynamic_pointer_cast<FieldData<VectorArray>>(
+        storage::MergeFieldData(compatible_vector_arrays));
+    ASSERT_NE(merged, nullptr);
+    EXPECT_EQ(merged->get_dim(), 4);
+    EXPECT_TRUE(merged->is_element_nullable());
 }
 
 TEST(storage, InsertDataVectorArrayNullablePreservesNullRows) {
