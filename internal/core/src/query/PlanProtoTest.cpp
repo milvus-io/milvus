@@ -338,20 +338,18 @@ TEST(PlanProto, BloomBlobMovesFromOwnedSearchPlanNode) {
                       ->mutable_predicates()
                       ->mutable_bloom_filter_expr();
     bloom->mutable_column_info()->set_field_id(scalar_field_id.get());
-    bloom->mutable_column_info()->set_data_type(
-        proto::schema::DataType::Int64);
+    bloom->mutable_column_info()->set_data_type(proto::schema::DataType::Int64);
     bloom->set_filter_blob(BuildEmptyMbf1());
 
-    const auto protobuf_blob_object = reinterpret_cast<uintptr_t>(
-        std::addressof(bloom->filter_blob()));
+    const auto protobuf_blob_object =
+        reinterpret_cast<uintptr_t>(std::addressof(bloom->filter_blob()));
     const auto* protobuf_blob_data = bloom->filter_blob().data();
     auto parsed_plan =
         query::ProtoParser(schema).CreatePlan(std::move(plan_node));
     auto filter_node = FindFilterBitsNode(parsed_plan->plan_node_->plannodes_);
     ASSERT_NE(filter_node, nullptr);
-    auto bloom_expr =
-        std::dynamic_pointer_cast<const expr::BloomFilterExpr>(
-            filter_node->filter());
+    auto bloom_expr = std::dynamic_pointer_cast<const expr::BloomFilterExpr>(
+        filter_node->filter());
     ASSERT_NE(bloom_expr, nullptr);
     EXPECT_NE(reinterpret_cast<uintptr_t>(bloom_expr->filter_blob_.get()),
               protobuf_blob_object);
@@ -379,20 +377,18 @@ TEST(PlanProto, BloomBlobMovesFromOwnedRetrievePlanNode) {
                       ->mutable_predicates()
                       ->mutable_bloom_filter_expr();
     bloom->mutable_column_info()->set_field_id(scalar_field_id.get());
-    bloom->mutable_column_info()->set_data_type(
-        proto::schema::DataType::Int64);
+    bloom->mutable_column_info()->set_data_type(proto::schema::DataType::Int64);
     bloom->set_filter_blob(BuildEmptyMbf1());
 
-    const auto protobuf_blob_object = reinterpret_cast<uintptr_t>(
-        std::addressof(bloom->filter_blob()));
+    const auto protobuf_blob_object =
+        reinterpret_cast<uintptr_t>(std::addressof(bloom->filter_blob()));
     const auto* protobuf_blob_data = bloom->filter_blob().data();
     auto parsed_plan =
         query::ProtoParser(schema).CreateRetrievePlan(std::move(plan_node));
     auto filter_node = FindFilterBitsNode(parsed_plan->plan_node_->plannodes_);
     ASSERT_NE(filter_node, nullptr);
-    auto bloom_expr =
-        std::dynamic_pointer_cast<const expr::BloomFilterExpr>(
-            filter_node->filter());
+    auto bloom_expr = std::dynamic_pointer_cast<const expr::BloomFilterExpr>(
+        filter_node->filter());
     ASSERT_NE(bloom_expr, nullptr);
     EXPECT_NE(reinterpret_cast<uintptr_t>(bloom_expr->filter_blob_.get()),
               protobuf_blob_object);
@@ -420,17 +416,15 @@ TEST(PlanProto, BloomBlobMovesFromOwnedScoreFunction) {
     function->set_weight(2.0F);
     auto* bloom = function->mutable_filter()->mutable_bloom_filter_expr();
     bloom->mutable_column_info()->set_field_id(scalar_field_id.get());
-    bloom->mutable_column_info()->set_data_type(
-        proto::schema::DataType::Int64);
+    bloom->mutable_column_info()->set_data_type(proto::schema::DataType::Int64);
     bloom->set_filter_blob(BuildEmptyMbf1());
 
-    const auto protobuf_blob_object = reinterpret_cast<uintptr_t>(
-        std::addressof(bloom->filter_blob()));
+    const auto protobuf_blob_object =
+        reinterpret_cast<uintptr_t>(std::addressof(bloom->filter_blob()));
     const auto* protobuf_blob_data = bloom->filter_blob().data();
-    auto scorer =
-        query::ProtoParser(schema).ParseScorer(std::move(function));
-    auto bloom_expr =
-        std::dynamic_pointer_cast<const expr::BloomFilterExpr>(scorer->filter());
+    auto scorer = query::ProtoParser(schema).ParseScorer(std::move(function));
+    auto bloom_expr = std::dynamic_pointer_cast<const expr::BloomFilterExpr>(
+        scorer->filter());
     ASSERT_NE(bloom_expr, nullptr);
     EXPECT_NE(reinterpret_cast<uintptr_t>(bloom_expr->filter_blob_.get()),
               protobuf_blob_object);
