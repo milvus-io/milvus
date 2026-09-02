@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -55,65 +56,52 @@ func TestShardManager(t *testing.T) {
 		ChannelInfo: channel,
 		WAL:         f,
 		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			VChannels: map[string]*streamingpb.VChannelMeta{
-				"v1": {
-					Vchannel: "v1",
-					State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
-					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
-						CollectionId: 1,
-						Partitions: []*streamingpb.PartitionInfoOfVChannel{
-							{PartitionId: 2},
-							{PartitionId: 3},
+			WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+				VChannels: map[string]moduleapi.VChannelWritePathRecoveryState{
+					"v1": {
+						VChannel:     "v1",
+						CollectionID: 1,
+						PartitionIDs: []int64{2, 3},
+					},
+					"v2": {
+						VChannel:     "v2",
+						CollectionID: 4,
+						PartitionIDs: []int64{5, 6},
+					},
+				},
+				GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{
+					1001: {
+						VChannel:     "v1",
+						CollectionID: 1,
+						PartitionID:  2,
+						SegmentID:    1001,
+						Stat: &streamingpb.SegmentAssignmentStat{
+							MaxBinarySize:         100,
+							ModifiedBinarySize:    50,
+							CreateSegmentTimeTick: 101,
 						},
 					},
-				},
-				"v2": {
-					Vchannel: "v2",
-					State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
-					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
-						CollectionId: 4,
-						Partitions: []*streamingpb.PartitionInfoOfVChannel{
-							{PartitionId: 5},
-							{PartitionId: 6},
+					1002: {
+						VChannel:     "v1",
+						CollectionID: 1,
+						PartitionID:  3,
+						SegmentID:    1002,
+						Stat: &streamingpb.SegmentAssignmentStat{
+							MaxBinarySize:         100,
+							ModifiedBinarySize:    0,
+							CreateSegmentTimeTick: 100,
 						},
 					},
-				},
-			},
-			SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{
-				1001: {
-					CollectionId:   1,
-					PartitionId:    2,
-					SegmentId:      1001,
-					State:          streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
-					StorageVersion: 2,
-					Stat: &streamingpb.SegmentAssignmentStat{
-						MaxBinarySize:         100,
-						ModifiedBinarySize:    50,
-						CreateSegmentTimeTick: 101,
-					},
-				},
-				1002: {
-					CollectionId:   1,
-					PartitionId:    3,
-					SegmentId:      1002,
-					State:          streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
-					StorageVersion: 2,
-					Stat: &streamingpb.SegmentAssignmentStat{
-						MaxBinarySize:         100,
-						ModifiedBinarySize:    0,
-						CreateSegmentTimeTick: 100,
-					},
-				},
-				1013: {
-					CollectionId:   4,
-					PartitionId:    5,
-					SegmentId:      1013,
-					State:          streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
-					StorageVersion: 2,
-					Stat: &streamingpb.SegmentAssignmentStat{
-						MaxBinarySize:         100,
-						ModifiedBinarySize:    0,
-						CreateSegmentTimeTick: 100,
+					1013: {
+						VChannel:     "v2",
+						CollectionID: 4,
+						PartitionID:  5,
+						SegmentID:    1013,
+						Stat: &streamingpb.SegmentAssignmentStat{
+							MaxBinarySize:         100,
+							ModifiedBinarySize:    0,
+							CreateSegmentTimeTick: 100,
+						},
 					},
 				},
 			},
@@ -298,6 +286,61 @@ func TestShardManager(t *testing.T) {
 	m.Close()
 }
 
+func TestRecoverShardManagerFromWritePathRecoverySnapshot(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+	channel := types.PChannelInfo{Name: "test_write_path_recovery", Term: 1}
+	w := mock_wal.NewMockWAL(t)
+	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} { return make(chan struct{}) }).Maybe()
+	future := syncutil.NewFuture[wal.WAL]()
+	future.Set(w)
+
+	schema := &schemapb.CollectionSchema{
+		Name:    "recovered_collection",
+		Version: 7,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+	manager := RecoverShardManager(&ShardManagerRecoverParam{
+		ChannelInfo: channel,
+		WAL:         future,
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+				VChannels: map[string]moduleapi.VChannelWritePathRecoveryState{
+					"v1": {
+						VChannel:     "v1",
+						CollectionID: 1,
+						PartitionIDs: []int64{2},
+						Schema:       schema,
+					},
+				},
+				GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{
+					1001: {
+						VChannel:     "v1",
+						CollectionID: 1,
+						PartitionID:  2,
+						SegmentID:    1001,
+						Stat: &streamingpb.SegmentAssignmentStat{
+							MaxBinarySize:         100,
+							ModifiedBinarySize:    50,
+							CreateSegmentTimeTick: 101,
+						},
+					},
+				},
+			},
+			Checkpoint: &recovery.WALCheckpoint{TimeTick: 300},
+		},
+		TxnManager: &mockedTxnManager{},
+	}).(*shardManagerImpl)
+	defer manager.Close()
+
+	require.NoError(t, manager.CheckIfCollectionExists(1))
+	require.Contains(t, manager.collections[1].PartitionIDs, int64(2))
+	require.Equal(t, int32(7), manager.collections[1].SchemaVersion())
+	require.Contains(t, manager.partitionManagers[PartitionUniqueKey{CollectionID: 1, PartitionID: 2}].segments, int64(1001))
+}
+
 func TestShardManagerAssignSegmentTextUsesV3CreateSegmentWhenStorageV3Enabled(t *testing.T) {
 	paramtable.Init()
 	resource.InitForTest(t)
@@ -330,32 +373,25 @@ func TestShardManagerAssignSegmentTextUsesV3CreateSegmentWhenStorageV3Enabled(t 
 		ChannelInfo: channel,
 		WAL:         f,
 		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			VChannels: map[string]*streamingpb.VChannelMeta{
-				"v_text": {
-					Vchannel: "v_text",
-					State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
-					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
-						CollectionId: 10,
-						Partitions: []*streamingpb.PartitionInfoOfVChannel{
-							{PartitionId: 20},
-						},
-						Schemas: []*streamingpb.CollectionSchemaOfVChannel{
-							{
-								Schema: &schemapb.CollectionSchema{
-									Name:    "text_collection",
-									Version: 7,
-									Fields: []*schemapb.FieldSchema{
-										{FieldID: 100, DataType: schemapb.DataType_Int64},
-										{FieldID: 101, DataType: schemapb.DataType_Text},
-									},
-								},
+			WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+				VChannels: map[string]moduleapi.VChannelWritePathRecoveryState{
+					"v_text": {
+						VChannel:     "v_text",
+						CollectionID: 10,
+						PartitionIDs: []int64{20},
+						Schema: &schemapb.CollectionSchema{
+							Name:    "text_collection",
+							Version: 7,
+							Fields: []*schemapb.FieldSchema{
+								{FieldID: 100, DataType: schemapb.DataType_Int64},
+								{FieldID: 101, DataType: schemapb.DataType_Text},
 							},
 						},
 					},
 				},
+				GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{},
 			},
-			SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{},
-			Checkpoint:         &recovery.WALCheckpoint{TimeTick: 100},
+			Checkpoint: &recovery.WALCheckpoint{TimeTick: 100},
 		},
 		TxnManager: &mockedTxnManager{},
 	}).(*shardManagerImpl)
@@ -403,9 +439,11 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 		ChannelInfo: channel,
 		WAL:         f,
 		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			VChannels:          map[string]*streamingpb.VChannelMeta{},
-			SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{},
-			Checkpoint:         &recovery.WALCheckpoint{TimeTick: 100},
+			WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+				VChannels:       map[string]moduleapi.VChannelWritePathRecoveryState{},
+				GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{},
+			},
+			Checkpoint: &recovery.WALCheckpoint{TimeTick: 100},
 		},
 		TxnManager: &mockedTxnManager{},
 	}).(*shardManagerImpl)
@@ -761,28 +799,25 @@ func newShardManagerWithGrowingSegment(t *testing.T, collID, partID, segID int64
 		ChannelInfo: channel,
 		WAL:         f,
 		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			VChannels: map[string]*streamingpb.VChannelMeta{
-				"v_alter": {
-					Vchannel: "v_alter",
-					State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
-					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
-						CollectionId: collID,
-						Partitions: []*streamingpb.PartitionInfoOfVChannel{
-							{PartitionId: partID},
-						},
+			WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+				VChannels: map[string]moduleapi.VChannelWritePathRecoveryState{
+					"v_alter": {
+						VChannel:     "v_alter",
+						CollectionID: collID,
+						PartitionIDs: []int64{partID},
 					},
 				},
-			},
-			SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{
-				segID: {
-					CollectionId: collID,
-					PartitionId:  partID,
-					SegmentId:    segID,
-					State:        streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
-					Stat: &streamingpb.SegmentAssignmentStat{
-						MaxBinarySize:         200,
-						ModifiedBinarySize:    100,
-						CreateSegmentTimeTick: 50,
+				GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{
+					segID: {
+						VChannel:     "v_alter",
+						CollectionID: collID,
+						PartitionID:  partID,
+						SegmentID:    segID,
+						Stat: &streamingpb.SegmentAssignmentStat{
+							MaxBinarySize:         200,
+							ModifiedBinarySize:    100,
+							CreateSegmentTimeTick: 50,
+						},
 					},
 				},
 			},

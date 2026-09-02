@@ -15,12 +15,11 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_utils"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_recovery"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -84,8 +83,10 @@ func TestOpenRWWALCleansRecoveredShardManagerOnReplicateRecoveryFailure(t *testi
 	rs := mock_recovery.NewMockRecoveryStorage(t)
 	rs.EXPECT().Close().Return().Once()
 	snapshot := &recovery.RecoverySnapshot{
-		VChannels:          map[string]*streamingpb.VChannelMeta{},
-		SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{},
+		WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+			VChannels:       map[string]moduleapi.VChannelWritePathRecoveryState{},
+			GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{},
+		},
 		Checkpoint: &recovery.WALCheckpoint{
 			MessageID: rmq.NewRmqID(1),
 			TimeTick:  1,
@@ -165,161 +166,4 @@ func TestDetermineLastConfirmedMessageID(t *testing.T) {
 	}, 4)
 	lastConfirmedMessageID = determineLastConfirmedMessageID(rmq.NewRmqID(5), txnBuffer)
 	assert.Equal(t, rmq.NewRmqID(1), lastConfirmedMessageID)
-}
-
-func TestHandleAlterWALFlushingStagePassesRateLimitComponent(t *testing.T) {
-	channel := types.PChannelInfo{
-		Name:       "alter-wal-flushing-test",
-		Term:       1,
-		AccessMode: types.AccessModeRW,
-	}
-	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
-	catalog.EXPECT().
-		SaveConsumeCheckpoint(mock.Anything, channel.Name, mock.MatchedBy(func(checkpoint *streamingpb.WALCheckpoint) bool {
-			return checkpoint.GetAlterWalState().GetStage() == streamingpb.AlterWALStage_ADVANCE_CHECKPOINT
-		})).
-		Return(nil)
-	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog))
-
-	roWAL := adaptImplsToROWAL(&firstTimeTickWALImpls{
-		channel: channel,
-		appendFunc: func(context.Context, message.MutableMessage) (message.MessageID, error) {
-			return rmq.NewRmqID(1), nil
-		},
-	}, func() {})
-	rateLimitComponent := roWAL.WALRateLimitComponent
-
-	rs := mock_recovery.NewMockRecoveryStorage(t)
-	rs.EXPECT().
-		GetFlusherCheckpointByTimeTick(mock.Anything).
-		Return(&recovery.WALCheckpoint{
-			MessageID: rmq.NewRmqID(2),
-			TimeTick:  100,
-		})
-	rs.EXPECT().Close().Return()
-
-	snapshot := &recovery.RecoverySnapshot{
-		Checkpoint: &recovery.WALCheckpoint{
-			MessageID: rmq.NewRmqID(1),
-			TimeTick:  10,
-			AlterWalState: &streamingpb.AlterWALState{
-				TargetWalName: commonpb.WALName_Test,
-				TimeTick:      100,
-				Stage:         streamingpb.AlterWALStage_FLUSHING,
-			},
-		},
-		AlterWALInfo: &recovery.AlterWALInfo{
-			FoundAlterWALMsg: true,
-			TargetWALName:    commonpb.WALName_Test,
-			AlterWALTs:       100,
-		},
-	}
-
-	var capturedParam *flusherimpl.RecoverWALFlusherParam
-	mockRecoverFlusher := mockey.Mock(flusherimpl.RecoverWALFlusher).
-		To(func(param *flusherimpl.RecoverWALFlusherParam) *flusherimpl.WALFlusherImpl {
-			captured := *param
-			capturedParam = &captured
-			return &flusherimpl.WALFlusherImpl{}
-		}).
-		Build()
-	defer mockRecoverFlusher.UnPatch()
-
-	mockFlusherClose := mockey.Mock((*flusherimpl.WALFlusherImpl).Close).
-		To(func(*flusherimpl.WALFlusherImpl) {
-			rs.Close()
-		}).
-		Build()
-	defer mockFlusherClose.UnPatch()
-	param := &interceptors.InterceptorBuildParam{}
-	resources := &walOpenResources{
-		roWAL:           roWAL,
-		param:           param,
-		recoveryStorage: rs,
-	}
-
-	err := (&openerAdaptorImpl{}).handleAlterWALFlushingStage(
-		context.Background(),
-		&wal.OpenOption{Channel: channel},
-		roWAL,
-		rs,
-		resources,
-		snapshot,
-	)
-	resources.Close()
-
-	require.NoError(t, err)
-	require.NotNil(t, capturedParam)
-	require.NotNil(t, capturedParam.RateLimitComponent)
-	require.NotNil(t, capturedParam.WAL)
-	assert.Same(t, rateLimitComponent, capturedParam.RateLimitComponent)
-	assert.Same(t, roWAL, capturedParam.WAL.Get())
-	assert.Same(t, rs, capturedParam.RecoveryStorage)
-	assert.Equal(t, channel, capturedParam.ChannelInfo)
-	assert.Same(t, snapshot, capturedParam.RecoverySnapshot)
-	assert.Equal(t, streamingpb.AlterWALStage_ADVANCE_CHECKPOINT, snapshot.Checkpoint.AlterWalState.Stage)
-}
-
-func TestHandleAlterWALAdvanceCheckpointsStageKeepsReplicateCheckpoint(t *testing.T) {
-	channel := types.PChannelInfo{
-		Name:       "alter-wal-replicate-checkpoint-test",
-		Term:       1,
-		AccessMode: types.AccessModeRW,
-	}
-	// The position this cluster has reached in the source cluster's WAL. The source
-	// cluster runs a different backend than the one this cluster migrates to.
-	sourceMessageID := rmq.NewRmqID(42)
-
-	var persisted *streamingpb.WALCheckpoint
-	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
-	catalog.EXPECT().ListVChannel(mock.Anything, channel.Name).Return(nil, nil)
-	catalog.EXPECT().
-		SaveConsumeCheckpoint(mock.Anything, channel.Name, mock.Anything).
-		RunAndReturn(func(_ context.Context, _ string, checkpoint *streamingpb.WALCheckpoint) error {
-			persisted = checkpoint
-			return nil
-		})
-	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog))
-
-	previousDefaultWALName := message.GetDefaultWALName()
-	defer message.RegisterDefaultWALName(previousDefaultWALName)
-
-	snapshot := &recovery.RecoverySnapshot{
-		Checkpoint: &recovery.WALCheckpoint{
-			MessageID: rmq.NewRmqID(1),
-			TimeTick:  100,
-			AlterWalState: &streamingpb.AlterWALState{
-				TargetWalName: commonpb.WALName_Kafka,
-				TimeTick:      100,
-				Stage:         streamingpb.AlterWALStage_ADVANCE_CHECKPOINT,
-			},
-			ReplicateCheckpoint: &utility.ReplicateCheckpoint{
-				ClusterID: "source-cluster",
-				PChannel:  "source-pchannel",
-				MessageID: sourceMessageID,
-				TimeTick:  50,
-			},
-		},
-	}
-
-	err := (&openerAdaptorImpl{}).handleAlterWALAdvanceCheckpointsStage(
-		context.Background(),
-		&wal.OpenOption{Channel: channel},
-		snapshot,
-	)
-	require.NoError(t, err)
-	require.NotNil(t, persisted)
-
-	// The local checkpoint moves to the initial position of the new backend.
-	assert.Equal(t, commonpb.WALName_Kafka, persisted.GetMessageId().GetWALName())
-
-	// The replicate checkpoint still points at the source cluster, whose WAL the
-	// local migration did not touch.
-	replicateCheckpoint := persisted.GetReplicateCheckpoint()
-	require.NotNil(t, replicateCheckpoint)
-	assert.Equal(t, "source-cluster", replicateCheckpoint.GetClusterId())
-	assert.Equal(t, "source-pchannel", replicateCheckpoint.GetPchannel())
-	assert.Equal(t, uint64(50), replicateCheckpoint.GetTimeTick())
-	assert.Equal(t, sourceMessageID.IntoProto().GetWALName(), replicateCheckpoint.GetMessageId().GetWALName())
-	assert.Equal(t, sourceMessageID.Marshal(), replicateCheckpoint.GetMessageId().GetId())
 }

@@ -72,6 +72,10 @@ enum MessageType {
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;
 
+    // RecoveryBarrier is appended as the first WAL recovery write to fence the writer
+    // and establish recovered query-resource MVCC baselines.
+    RecoveryBarrier      = 701;
+
     // AlterReplicateConfig is used to alter the replicate configuration to the current cluster.
     // When the AlterReplicateConfig message is received, the replication topology is changed.
     // Maybe some cluster give up the leader role, no any other message will be received from this cluster.
@@ -155,6 +159,12 @@ message TxnMessageBody {
 
 // TimeTickMessageHeader just nothing.
 message TimeTickMessageHeader {}
+
+// RecoveryBarrierMessageHeader just nothing.
+message RecoveryBarrierMessageHeader {}
+
+// RecoveryBarrierMessageBody just nothing.
+message RecoveryBarrierMessageBody {}
 
 // InsertMessageHeader is the header of insert message.
 message InsertMessageHeader {
