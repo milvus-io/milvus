@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"math"
-	"sort"
 	"strconv"
 	"time"
 
@@ -58,7 +57,7 @@ type Handler interface {
 	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
 	GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView
 	ListLoadedSegments(ctx context.Context) ([]int64, error)
-	GenSnapshot(ctx context.Context, collectionID UniqueID) (*snapshotstorage.SnapshotData, error)
+	GenSnapshot(ctx context.Context, collectionID UniqueID, channelSeekPositions []*msgpb.MsgPosition) (*snapshotstorage.SnapshotData, error)
 	GetDeltaLogFromCompactTo(ctx context.Context, segmentID UniqueID) ([]*datapb.FieldBinlog, error)
 }
 
@@ -777,39 +776,6 @@ func (h *ServerHandler) ListLoadedSegments(ctx context.Context) ([]int64, error)
 	return h.s.listLoadedSegments(ctx)
 }
 
-// GetSnapshotSeekPositions returns every channel seek position used to create a snapshot.
-// The returned min timestamp is kept as SnapshotInfo.create_ts for compatibility.
-// Note: if channel has tt lag, the snapshot ts also has tt lag.
-func (h *ServerHandler) GetSnapshotSeekPositions(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
-	channels, err := h.s.getChannelsByCollectionID(ctx, collectionID)
-	if err != nil {
-		return nil, 0, err
-	}
-	if len(channels) == 0 {
-		return nil, 0, merr.WrapErrServiceInternal("no channel found for snapshot")
-	}
-
-	positions := make([]*msgpb.MsgPosition, 0, len(channels))
-	minTs := uint64(math.MaxUint64)
-	for _, channel := range channels {
-		seekPosition := h.GetChannelSeekPosition(channel, partitionIDs...)
-		if seekPosition == nil {
-			return nil, 0, merr.WrapErrServiceInternal("no valid channel seek position for snapshot")
-		}
-		cloned := proto.Clone(seekPosition).(*msgpb.MsgPosition)
-		cloned.ChannelName = channel.GetName()
-		if cloned.GetTimestamp() < minTs {
-			minTs = cloned.GetTimestamp()
-		}
-		positions = append(positions, cloned)
-	}
-
-	sort.Slice(positions, func(i, j int) bool {
-		return positions[i].GetChannelName() < positions[j].GetChannelName()
-	})
-	return positions, minTs, nil
-}
-
 // hasCommittedManifest reports whether a Storage V3 manifest references
 // committed files. ManifestEarliest is only the placeholder assigned to a new
 // Growing segment before its first manifest commit.
@@ -838,7 +804,7 @@ func hasCommittedManifest(info *SegmentInfo) (bool, error) {
 // Process flow:
 //  1. Retrieve collection schema and partition information
 //  2. Filter user-created partitions (exclude default and auto-created partitions)
-//  3. Generate per-channel snapshot seek positions ensuring data consistency
+//  3. Use acknowledged CreateSnapshot positions as per-channel boundaries
 //  4. Collect current index metadata for the collection
 //  5. Select segments with data that started before each channel seek timestamp
 //  6. Decompress binlog paths for segment data
@@ -849,6 +815,7 @@ func hasCommittedManifest(info *SegmentInfo) (bool, error) {
 // Parameters:
 //   - ctx: Context for cancellation and timeout
 //   - collectionID: ID of collection to snapshot
+//   - channelSeekPositions: Business-channel cuts from the acknowledged CreateSnapshot broadcast
 //
 // Returns:
 //   - snapshotstorage.SnapshotData: Complete snapshot with collection metadata and segment descriptions
@@ -880,7 +847,7 @@ func hasCommittedManifest(info *SegmentInfo) (bool, error) {
 // - Creating backup snapshots for disaster recovery
 // - Point-in-time restore for data rollback
 // - Collection cloning to different database/cluster
-func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*snapshotstorage.SnapshotData, error) {
+func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, channelSeekPositions []*msgpb.MsgPosition) (*snapshotstorage.SnapshotData, error) {
 	// get coll info
 	resp, err := h.s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
@@ -898,17 +865,19 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 		partitionMapping[name] = partitionIDs[idx]
 	}
 
-	// generate snapshot seek positions with current partition ids
-	channelSeekPositions, snapshotTs, err := h.GetSnapshotSeekPositions(ctx, collectionID, partitionIDs...)
-	if err != nil {
-		return nil, err
+	// These positions come from the consuming-acked CreateSnapshot broadcast.
+	// Recovery checkpoints may lag behind this collection's durable data.
+	if len(channelSeekPositions) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("snapshot has no business-channel boundaries")
 	}
+	snapshotTs := uint64(math.MaxUint64)
 	channelSeekTs := make(map[string]uint64, len(channelSeekPositions))
 	for _, position := range channelSeekPositions {
 		if position.GetChannelName() == "" {
 			return nil, merr.WrapErrServiceInternal("empty snapshot channel seek position")
 		}
 		channelSeekTs[position.GetChannelName()] = position.GetTimestamp()
+		snapshotTs = min(snapshotTs, position.GetTimestamp())
 	}
 
 	indexes := h.s.meta.indexMeta.GetIndexesForCollection(collectionID, "")

@@ -10,6 +10,7 @@ import "milvus.proto";
 import "schema.proto";
 import "msg.proto";
 import "index_coord.proto";
+import "view.proto";
 
 // TODO: import google/protobuf/empty.proto
 message Empty {}
@@ -485,6 +486,10 @@ message SegmentInfo {
   // verifying the final revision is empty. Recovery normalizes old sticky true
   // values once. False proves emptiness independently of the write-mode switch.
   bool manifest_has_index = 40;
+
+  // First growing-to-sealed DataView publication. Written with the flush snapshot
+  // and retained across compaction/drop so a retried commit returns the same version.
+  view.DataVersion sealed_at_data_version = 41;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
@@ -1492,6 +1497,7 @@ message ImportJob {
   uint64 data_ts = 18;
   repeated string committed_vchannels = 19;
   bool            auto_commit         = 20;
+  bool commit_by_coordinator = 21; // Commit protocol selected by the original Import WAL message.
 }
 
 enum ImportTaskStateV2 {

@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -45,11 +46,15 @@ import (
 )
 
 type recordingScheduler struct {
-	tasks []nodescheduler.Task
+	mu      sync.Mutex
+	drainMu sync.Mutex
+	tasks   []nodescheduler.Task
 }
 
 func (s *recordingScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
+	s.mu.Lock()
 	s.tasks = append(s.tasks, task)
+	s.mu.Unlock()
 	return recordingTaskHandle{}
 }
 
@@ -62,6 +67,7 @@ func (recordingTaskHandle) Wait(context.Context) error { return nil }
 func newTestManager(t *testing.T, store *Store, retentionMaxBytes uint64) *Manager {
 	t.Helper()
 	return NewManager(ManagerConfig{
+		Runtime:           moduleapi.Runtime{Scheduler: &recordingScheduler{}},
 		PChannel:          store.PChannel(),
 		Term:              store.Term(),
 		Store:             store,
@@ -109,11 +115,10 @@ func observeKeyedInsert(t *testing.T, manager *Manager, vchannel string, timetic
 	*finalized = true
 }
 
-// persist runs the one and only write trigger: what the recovery storage calls
-// from its dirty persist, before saving the checkpoint.
+// persist drains the asynchronous write task in a deterministic test scheduler.
 func persist(t *testing.T, manager *Manager) {
 	t.Helper()
-	require.NoError(t, manager.Persist(context.Background()))
+	require.NoError(t, persistSummary(context.Background(), manager))
 }
 
 // flushObserved observes one keyed insert and persists it, which is the whole
@@ -184,7 +189,7 @@ func TestObserveMessageSkipsRecordsAtOrBelowDurableFrontier(t *testing.T) {
 	var unused bool
 	flushObserved(t, manager1, "v1", 150, &unused)
 
-	manager2 := newTestManager(t, manager1.cfg.Store, 1<<30)
+	manager2 := newTestManager(t, nextTermStore(manager1.cfg.Store), 1<<30)
 	require.NoError(t, manager2.Restore(ctx))
 	assert.Equal(t, uint64(150), manager2.durableFrontiers["v1"])
 
@@ -237,19 +242,20 @@ func TestManagerRestoreProbesOrphanChunk(t *testing.T) {
 	// Simulate a crash between chunk write and manifest publish: write a chunk
 	// directly without recording it.
 	orphan := buildIdempotencySections(idempotencyWrite{timeTick: 300, key: "orphan", pk: 300})
-	_, _, err := manager.cfg.Store.WriteChunk(ctx, 2, map[string]*ChunkSections{"v1": orphan})
+	_, _, err := manager.cfg.Store.WriteChunk(ctx, 1, map[string]*ChunkSections{"v1": orphan}, TimeTickRange{Start: 101, End: 300})
 	require.NoError(t, err)
 
 	recovered := newTestManager(t, manager.cfg.Store, 1<<30)
 	require.NoError(t, recovered.Restore(ctx))
-	assert.Equal(t, uint64(3), recovered.nextGeneration)
+	assert.Equal(t, uint64(2), recovered.nextGeneration)
 	assert.Equal(t, uint64(300), recovered.LatestCoveredTimeTick())
 	require.Len(t, recovered.Manifest().GetChunks(), 2)
-	// The probed tail is sealed into a published manifest: a third recovery
-	// sees it without probing again.
+	// Publication runs independently after recovery.
+	require.NoError(t, drainSummary(ctx, recovered))
+	// A third recovery sees the published tail.
 	again := newTestManager(t, manager.cfg.Store, 1<<30)
 	require.NoError(t, again.Restore(ctx))
-	assert.Equal(t, uint64(3), again.nextGeneration)
+	assert.Equal(t, uint64(2), again.nextGeneration)
 }
 
 // TestManagerGCReleasesOldestFirstUnderBudget covers the whole retention rule:
@@ -268,7 +274,7 @@ func TestManagerGCReleasesOldestFirstUnderBudget(t *testing.T) {
 
 	// Under the budget nothing is released, however old the chunks are.
 	manager.cfg.RetentionMaxBytes = 1 << 30
-	require.NoError(t, manager.GCOnce(ctx))
+	require.NoError(t, gcSummary(ctx, manager))
 	assert.Len(t, manager.Manifest().GetChunks(), 3)
 
 	// A budget that only two of the three chunks fit under releases exactly
@@ -276,19 +282,19 @@ func TestManagerGCReleasesOldestFirstUnderBudget(t *testing.T) {
 	chunks := manager.Manifest().GetChunks()
 	twoChunks := chunks[1].GetObjectSize() + chunks[2].GetObjectSize()
 	manager.cfg.RetentionMaxBytes = twoChunks
-	require.NoError(t, manager.GCOnce(ctx))
+	require.NoError(t, gcSummary(ctx, manager))
 	remaining := manager.Manifest().GetChunks()
 	require.Len(t, remaining, 2)
 	assert.Equal(t, uint64(1), remaining[0].GetGeneration())
-	// The released object is gone, and pending_gc drained with it.
+	// The released object is gone; the coverage boundary is retained.
 	_, _, err := manager.cfg.Store.ReadChunk(ctx, 0, 1)
 	assert.Error(t, err, "chunk object must be deleted after release")
-	assert.Empty(t, manager.Manifest().GetPendingGc())
+	assert.NotNil(t, manager.Manifest().GetCoverage())
 
 	// A budget below one object releases everything: the bound is soft, and
 	// release frees whole objects.
 	manager.cfg.RetentionMaxBytes = 1
-	require.NoError(t, manager.GCOnce(ctx))
+	require.NoError(t, gcSummary(ctx, manager))
 	assert.Empty(t, manager.Manifest().GetChunks())
 }
 
@@ -303,7 +309,7 @@ func TestManagerGCDisabledWithoutBudget(t *testing.T) {
 	require.Len(t, manager.Manifest().GetChunks(), 1)
 
 	manager.cfg.RetentionMaxBytes = 0
-	require.NoError(t, manager.GCOnce(ctx))
+	require.NoError(t, gcSummary(ctx, manager))
 	assert.Len(t, manager.Manifest().GetChunks(), 1)
 }
 
@@ -370,22 +376,19 @@ func TestFlushPublishFailureRetriesSameGeneration(t *testing.T) {
 	require.NoError(t, manager.Restore(ctx))
 	finalized := false
 
-	// The term has no manifest yet, so its first chunk write publishes one
-	// first; let that through and fail the amendment that records the chunk.
+	// The queued empty manifest runs first in this test scheduler; let it
+	// through and fail the later snapshot that records the chunk.
 	cm.manifestWritesToPass.Store(1)
 	cm.failManifest.Store(true)
 	observeKeyedInsert(t, manager, "v1", 100, &finalized)
 	// Chunk write succeeds, manifest publish fails.
-	require.Error(t, manager.Persist(ctx))
-	// The amendment is not installed; the generation stays claimed and the
-	// failed chunk stays at the queue head for the retry. The error propagates
-	// to the caller, so the consume checkpoint covering this record is not
-	// saved and the WAL still holds it. The chunk object itself is durable.
-	assert.Len(t, manager.manifest.GetChunks(), 0)
+	require.Error(t, persistSummary(ctx, manager))
+	// Chunk completion advances the in-memory continuous prefix. Only the
+	// manifest task needs a retry; it must not upload another chunk.
+	assert.Len(t, manager.manifest.GetChunks(), 1)
 	assert.Equal(t, uint64(1), manager.nextGeneration)
-	manager.mu.Lock()
-	assert.NotEmpty(t, manager.pendingSealed, "the failed chunk waits for the retry")
-	manager.mu.Unlock()
+	assert.Empty(t, manager.pendingSealed)
+	assert.NotEqual(t, manager.manifestVersion, manager.publishedVersion)
 	keys, _, err := storage.ListAllChunkWithPrefix(ctx, cm, buildChunkPrefix(cm, store.PChannel()), false)
 	require.NoError(t, err)
 	require.Len(t, keys, 1, "chunk 0 is already durable")
@@ -393,7 +396,7 @@ func TestFlushPublishFailureRetriesSameGeneration(t *testing.T) {
 	// The retry succeeds: the same sealed chunk is published with the same
 	// generation — exactly one chunk object and one manifest entry.
 	cm.failManifest.Store(false)
-	require.NoError(t, manager.Persist(ctx))
+	require.NoError(t, persistSummary(ctx, manager))
 	require.Len(t, manager.manifest.GetChunks(), 1)
 	assert.Equal(t, uint64(0), manager.manifest.GetChunks()[0].GetGeneration())
 	keys, _, err = storage.ListAllChunkWithPrefix(ctx, cm, buildChunkPrefix(cm, store.PChannel()), false)
@@ -423,7 +426,7 @@ func TestFlushChunkFailureRetriesSameGeneration(t *testing.T) {
 	// queue head for the retry.
 	cm.failChunk.Store(true)
 	observeKeyedInsert(t, manager, "v1", 100, &finalizedA)
-	require.Error(t, manager.Persist(ctx))
+	require.Error(t, persistSummary(ctx, manager))
 	keys, _, err := storage.ListAllChunkWithPrefix(ctx, cm, buildChunkPrefix(cm, store.PChannel()), false)
 	require.NoError(t, err)
 	assert.Empty(t, keys, "the failed chunk write left no durable object")
@@ -435,7 +438,7 @@ func TestFlushChunkFailureRetriesSameGeneration(t *testing.T) {
 	// The retry drains the whole queue: [A] under generation 0, [B] under
 	// generation 1 — one object per batch, never a conflicting rewrite.
 	cm.failChunk.Store(false)
-	require.NoError(t, manager.Persist(ctx))
+	require.NoError(t, persistSummary(ctx, manager))
 	require.Len(t, manager.manifest.GetChunks(), 2)
 	assert.Equal(t, uint64(0), manager.manifest.GetChunks()[0].GetGeneration())
 	assert.Equal(t, uint64(1), manager.manifest.GetChunks()[1].GetGeneration())
@@ -450,8 +453,8 @@ func TestFlushChunkFailureRetriesSameGeneration(t *testing.T) {
 // The error reaches the recovery storage, which returns before saving the
 // consume checkpoint, so the records stay replayable from the WAL and the next
 // tick tries again. A store that is genuinely corrupt therefore stalls the
-// checkpoint rather than silently dropping records -- the remedy is the
-// documented one (disable idempotency, which drops the store, then re-enable).
+// checkpoint rather than silently dropping records. Repair must preserve the
+// history required by every consumer of the always-on summary store.
 func TestPersistSurfacesStoreCorruption(t *testing.T) {
 	ctx := context.Background()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
@@ -465,46 +468,31 @@ func TestPersistSurfacesStoreCorruption(t *testing.T) {
 	require.NoError(t, cm.Write(ctx, store.ChunkKey(0), []byte("conflicting payload")))
 	observeKeyedInsert(t, manager, "v1", 100, &finalized)
 
-	err := manager.Persist(ctx)
+	err := persistSummary(ctx, manager)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrStoreCorrupted), "the conflict surfaces as store corruption")
 	assert.Empty(t, manager.Manifest().GetChunks(), "nothing was recorded")
 }
 
-// TestGCOnceRemovesAllPending covers the snapshot iteration of the pending GC
-// queue: removePendingGC compacts the live slice in place, and a naive range
-// over the live slice would skip entries once the indexes shift.
-func TestGCOnceRemovesAllPending(t *testing.T) {
+// Garbage is rediscovered even after a crash loses all in-memory deletion work.
+func TestGCOnceRediscoversReleasedObjects(t *testing.T) {
 	ctx := context.Background()
 	manager, store := newTestManagerWithStore(t)
-	require.NoError(t, manager.Restore(ctx))
-
-	// Seed three chunks and three pending refs, and write the objects.
-	manager.mu.Lock()
 	for gen := uint64(0); gen < 3; gen++ {
-		manager.manifest.Chunks = append(manager.manifest.Chunks, &streamingpb.PChannelSummaryChunkIndexEntry{
-			Generation:    gen,
-			Term:          1,
-			StartTimetick: gen * 100,
-			EndTimetick:   gen*100 + 50,
-		})
-		manager.manifest.PendingGc = append(manager.manifest.PendingGc, &streamingpb.PChannelSummaryChunkRef{
-			Generation: gen,
-			Term:       1,
-		})
-	}
-	manager.mu.Unlock()
-	for gen := uint64(0); gen < 3; gen++ {
-		_, _, err := store.WriteChunk(ctx, gen, nil)
+		_, _, err := store.WriteChunk(ctx, gen, nil, testRecordCoverage(nil))
 		require.NoError(t, err)
 	}
-
-	require.NoError(t, manager.GCOnce(ctx))
-	assert.Empty(t, manager.manifest.GetPendingGc())
+	require.NoError(t, store.WriteManifest(ctx, &streamingpb.PChannelSummaryManifest{
+		Coverage: &streamingpb.SummaryCoverage{Generation: 2, Term: 1, StartTimeTick: 1, EndTimeTick: 300},
+	}))
+	require.NoError(t, manager.Restore(ctx))
+	require.NoError(t, gcSummary(ctx, manager))
 	for gen := uint64(0); gen < 3; gen++ {
-		_, _, err := store.ReadChunk(ctx, gen, 1)
-		require.Error(t, err, "chunk %d must be deleted", gen)
+		exists, err := store.chunkManager.Exist(ctx, store.ChunkKey(gen))
+		require.NoError(t, err)
+		require.False(t, exists)
 	}
+	require.Equal(t, uint64(2), manager.Manifest().GetCoverage().GetGeneration())
 }
 
 // TestConcurrentFlushAndGCRelease exercises the manifest publish paths
@@ -536,7 +524,7 @@ func TestConcurrentFlushAndGCRelease(t *testing.T) {
 			case <-stop:
 				return
 			default:
-				if err := manager.GCOnce(ctx); err != nil {
+				if err := gcSummary(ctx, manager); err != nil {
 					t.Errorf("GCOnce: %v", err)
 					return
 				}
@@ -547,7 +535,7 @@ func TestConcurrentFlushAndGCRelease(t *testing.T) {
 }
 
 // newTestDropCollectionMessage builds a DropCollection message of the given
-// vchannel: it invalidates the vchannel's idempotency window.
+// vchannel. It does not change the summary of previously executed requests.
 func newTestDropCollectionMessage(t *testing.T, vchannel string, timetick uint64) message.ImmutableMessage {
 	t.Helper()
 	mutableMsg := message.NewDropCollectionMessageBuilderV1().
@@ -578,12 +566,12 @@ func TestManagerGCReleasesOverChunkCount(t *testing.T) {
 
 	// A byte budget nothing approaches: bytes alone would never release.
 	manager.cfg.RetentionMaxBytes = 1 << 30
-	require.NoError(t, manager.GCOnce(ctx))
+	require.NoError(t, gcSummary(ctx, manager))
 	require.Len(t, manager.Manifest().GetChunks(), 5, "the byte bound alone releases nothing here")
 
 	// The count bound does, oldest first.
 	manager.cfg.MaxRetainedChunks = 2
-	require.NoError(t, manager.GCOnce(ctx))
+	require.NoError(t, gcSummary(ctx, manager))
 	chunks := manager.Manifest().GetChunks()
 	require.Len(t, chunks, 2)
 	assert.Equal(t, uint64(3), chunks[0].GetGeneration(), "release is oldest-first")
@@ -591,127 +579,95 @@ func TestManagerGCReleasesOverChunkCount(t *testing.T) {
 	// Both bounds zero disables release entirely.
 	manager.cfg.RetentionMaxBytes = 0
 	manager.cfg.MaxRetainedChunks = 0
-	require.NoError(t, manager.GCOnce(ctx))
+	require.NoError(t, gcSummary(ctx, manager))
 	assert.Len(t, manager.Manifest().GetChunks(), 2)
 }
 
-// TestInvalidationBuriesDurableRecords covers the durable half of the DDL
-// tombstone. The in-memory window is reclaimed by the interceptor, but the
-// records already sealed into chunks outlive it, and an auto-derived key is a
-// hash of the destination and the payload with no collection generation in it:
-// re-inserting the same rows after the collection is gone would hash to the
-// same key and be answered as a duplicate, into an empty collection.
-//
-// So the tombstone has to reach the manifest and be applied on read, whether
-// the records are chunked, sealed or still staged.
-func TestInvalidationBuriesDurableRecords(t *testing.T) {
-	manager, _ := newTestManagerWithStore(t)
-	ctx := context.Background()
-	require.NoError(t, manager.Restore(ctx))
-
-	var unused bool
-	flushObserved(t, manager, "v1", 100, &unused)
-	flushObserved(t, manager, "v2", 110, &unused)
-	require.Len(t, manager.Manifest().GetChunks(), 2)
-
-	sections, err := manager.ReadIdempotencyEntries(ctx, "v1", 0, 1000)
-	require.NoError(t, err)
-	require.Len(t, sections.Inserts, 1, "the durable record is readable before the DDL")
-
-	// A record staged but not yet sealed is buried too.
-	observeKeyedInsert(t, manager, "v1", 200, &unused)
-	manager.mu.Lock()
-	require.NotEmpty(t, manager.pending)
-	manager.mu.Unlock()
-
-	manager.ObserveMessage(ctx, newTestDropCollectionMessage(t, "v1", 300))
-	persist(t, manager)
-
-	sections, err = manager.ReadIdempotencyEntries(ctx, "v1", 0, 1000)
-	require.NoError(t, err)
-	assert.Empty(t, sections.Inserts, "every record at or below the tombstone is unserveable")
-	manager.mu.Lock()
-	assert.Empty(t, manager.pending, "the staged span behind the tombstone is forgotten")
-	manager.mu.Unlock()
-
-	// Another vchannel of the same pchannel is untouched.
-	sections, err = manager.ReadIdempotencyEntries(ctx, "v2", 0, 1000)
-	require.NoError(t, err)
-	assert.Len(t, sections.Inserts, 1, "the tombstone is per vchannel")
-
-	// The tombstone is durable: it reached the manifest, so a restart applies
-	// it instead of resurrecting the keys.
-	assert.Equal(t, uint64(300), manager.Manifest().GetInvalidatedVchannels()["v1"])
-	recovered := newTestManager(t, manager.cfg.Store, 1<<30)
-	require.NoError(t, recovered.Restore(ctx))
-	sections, err = recovered.ReadIdempotencyEntries(ctx, "v1", 0, 1000)
-	require.NoError(t, err)
-	assert.Empty(t, sections.Inserts, "a restart must not resurrect the buried keys")
-
-	// A write after the DDL is served again: the tombstone buries the past,
-	// not the vchannel.
-	observeKeyedInsert(t, manager, "v1", 400, &unused)
-	sections, err = manager.ReadIdempotencyEntries(ctx, "v1", 0, 1000)
-	require.NoError(t, err)
-	assert.Len(t, sections.Inserts, 1, "writes past the tombstone are served")
+// DDL must not turn a delayed retry into another write, regardless of where
+// the original request's summary currently lives.
+func TestDDLPreservesIdempotencyHistory(t *testing.T) {
+	for _, kind := range []string{"drop-collection", "truncate", "drop-partition"} {
+		for _, state := range []string{"pending", "sealed", "durable"} {
+			t.Run(kind+"/"+state, func(t *testing.T) {
+				ctx := context.Background()
+				manager, store := newTestManagerWithStore(t)
+				manager.ObserveMessage(ctx, newTestIdempotentInsertMessage(t, "v1", 100, "old-key", []int64{1}, []uint32{0}))
+				switch state {
+				case "sealed":
+					manager.RequestFlushThrough(100)
+				case "durable":
+					persist(t, manager)
+				}
+				manager.ObserveMessage(ctx, newTestSummaryDDL(t, kind, 200))
+				sections, err := manager.ReadIdempotencyEntries(ctx, "v1", 0, 1000)
+				require.NoError(t, err)
+				require.Len(t, sections.Idempotency, 1)
+				require.Equal(t, "old-key", sections.Idempotency[0].GetKey())
+				require.Equal(t, uint64(100), sections.Inserts[0].GetSourceTimetick())
+				manager.ObserveMessage(ctx, newTestIdempotentInsertMessage(t, "v1", 300, "new-key", []int64{2}, []uint32{0}))
+				persist(t, manager)
+				recovered := newTestManager(t, store, 1<<30)
+				require.NoError(t, recovered.Restore(ctx))
+				sections, err = recovered.ReadIdempotencyEntries(ctx, "v1", 0, 1000)
+				require.NoError(t, err)
+				require.Len(t, sections.Idempotency, 2)
+				require.Equal(t, "old-key", sections.Idempotency[0].GetKey())
+				require.Equal(t, "new-key", sections.Idempotency[1].GetKey())
+				sections, err = recovered.ReadIdempotencyEntries(ctx, "v1", 100, 300)
+				require.NoError(t, err)
+				require.Len(t, sections.Idempotency, 1, "the caller's read range still applies")
+			})
+		}
+	}
 }
 
-// TestInvalidationSurvivesUnwrittenSealedChunk covers the one case where the
-// manifest cannot answer whether a tombstone still has work to do: a chunk is
-// sealed but not yet written, so its records are below the tombstone and
-// invisible to the manifest. Expiring the entry there would let that chunk land
-// unfiltered and resurrect exactly the keys the DDL buried.
-func TestInvalidationSurvivesUnwrittenSealedChunk(t *testing.T) {
-	manager, _ := newTestManagerWithStore(t)
-	ctx := context.Background()
-	require.NoError(t, manager.Restore(ctx))
-
-	// Stage a record and seal it without letting the write run.
-	var unused bool
-	observeKeyedInsert(t, manager, "v1", 100, &unused)
-	manager.seal()
-	manager.mu.Lock()
-	require.NotEmpty(t, manager.pendingSealed, "the chunk must still be waiting to be written")
-	manager.mu.Unlock()
-
-	// The DDL lands while that chunk is still unwritten. The persist publishes
-	// the tombstone in the same cycle that writes the chunk, and at publish
-	// time the chunk is not in the manifest yet -- so the manifest cannot see
-	// the records the tombstone covers.
-	manager.ObserveMessage(ctx, newTestDropCollectionMessage(t, "v1", 300))
-	persist(t, manager)
-	assert.Equal(t, uint64(300), manager.Manifest().GetInvalidatedVchannels()["v1"],
-		"the tombstone must not expire while a sealed chunk can still hold records below it")
-
-	// The records the late chunk carried are still buried.
-	sections, err := manager.ReadIdempotencyEntries(ctx, "v1", 0, 1000)
-	require.NoError(t, err)
-	assert.Empty(t, sections.Inserts, "the late chunk must not resurrect the buried records")
+// DDL must not hide corruption in the retained history and silently rebuild
+// an empty dedup window.
+func TestDDLHistoryReadReportsCorruption(t *testing.T) {
+	for _, damage := range []string{"chunk", "insert-index", "key-index", "key-count"} {
+		t.Run(damage, func(t *testing.T) {
+			ctx := context.Background()
+			manager, store := newTestManagerWithStore(t)
+			manager.ObserveMessage(ctx, newTestIdempotentInsertMessage(t, "v1", 100, "key", []int64{1}, []uint32{0}))
+			persist(t, manager)
+			manager.ObserveMessage(ctx, newTestSummaryDDL(t, "truncate", 200))
+			chunk := manager.manifest.GetChunks()[0]
+			index := chunk.GetVchannels()[0]
+			switch damage {
+			case "chunk":
+				require.NoError(t, store.chunkManager.Write(ctx, store.ChunkKey(chunk.GetGeneration()), []byte("corrupt")))
+			case "insert-index":
+				index.Inserts.Offset = 0
+			case "key-index":
+				index.Idempotency.Offset = 0
+			case "key-count":
+				index.Idempotency.RecordCount++
+			}
+			_, err := manager.ReadIdempotencyEntries(ctx, "v1", 0, 1000)
+			require.ErrorIs(t, err, ErrStoreCorrupted)
+		})
+	}
 }
 
-// TestInvalidationDroppedOnceNoChunkReachesBelowIt covers the tombstone's own
-// lifetime: it describes records, so once retention has released every chunk
-// that could hold them it describes nothing and must not accumulate for the
-// life of the pchannel.
-func TestInvalidationDroppedOnceNoChunkReachesBelowIt(t *testing.T) {
-	manager, _ := newTestManagerWithStore(t)
-	ctx := context.Background()
-	require.NoError(t, manager.Restore(ctx))
-
-	var unused bool
-	flushObserved(t, manager, "v1", 100, &unused)
-	manager.ObserveMessage(ctx, newTestDropCollectionMessage(t, "v1", 300))
-	persist(t, manager)
-	require.Equal(t, uint64(300), manager.Manifest().GetInvalidatedVchannels()["v1"])
-
-	// Retention releases the chunk the tombstone was covering.
-	manager.cfg.RetentionMaxBytes = 1
-	require.NoError(t, manager.GCOnce(ctx))
-	require.Empty(t, manager.Manifest().GetChunks())
-
-	// The next publish drops the entry: nothing reaches below it any more.
-	flushObserved(t, manager, "v2", 500, &unused)
-	assert.NotContains(t, manager.Manifest().GetInvalidatedVchannels(), "v1")
+func newTestSummaryDDL(t *testing.T, kind string, timetick uint64) message.ImmutableMessage {
+	t.Helper()
+	var msg message.MutableMessage
+	switch kind {
+	case "drop-collection":
+		return newTestDropCollectionMessage(t, "v1", timetick)
+	case "truncate":
+		msg = message.NewTruncateCollectionMessageBuilderV2().WithVChannel("v1").
+			WithHeader(&message.TruncateCollectionMessageHeader{CollectionId: 1}).
+			WithBody(&message.TruncateCollectionMessageBody{}).MustBuildMutable()
+	case "drop-partition":
+		msg = message.NewDropPartitionMessageBuilderV1().WithVChannel("v1").
+			WithHeader(&message.DropPartitionMessageHeader{CollectionId: 1, PartitionId: 10}).
+			WithBody(&msgpb.DropPartitionRequest{}).MustBuildMutable()
+	default:
+		t.Fatalf("unknown DDL kind %s", kind)
+	}
+	return msg.WithTimeTick(timetick).WithLastConfirmed(walimplstest.NewTestMessageID(int64(timetick))).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(int64(timetick + 1)))
 }
 
 // newTestBarrierMessage builds a CreateCollection (barrier-class) message of
@@ -741,7 +697,9 @@ func writeIdempotencyChunk(
 	t.Helper()
 	footer, objectSize, err := store.WriteChunk(context.Background(), generation, map[string]*ChunkSections{
 		vchannel: sections,
-	})
+	}, testRecordCoverage(map[string]*ChunkSections{
+		vchannel: sections,
+	}))
 	require.NoError(t, err)
 	manager.mu.Lock()
 	recordChunk(manager.manifest, chunkIndexEntryFromFooter(footer, objectSize))
@@ -1037,7 +995,7 @@ func TestObserveMessageStagesIdempotentInserts(t *testing.T) {
 
 	sc := manager.seal()
 	require.NotNil(t, sc)
-	_, err := manager.writeOnce(ctx)
+	err := persistSummary(ctx, manager)
 	require.NoError(t, err)
 
 	got, err := manager.ReadIdempotencyEntries(ctx, vchannel, 0, math.MaxUint64)
@@ -1107,11 +1065,8 @@ func TestStagedRecordSizeChargesTheRecordNotTheMessage(t *testing.T) {
 	assert.Equal(t, uint64(keylessMsg.EstimateSize()), stagedRecordSize(keylessMsg, &stagedRecord{}))
 }
 
-// TestGCSweepsRetiredTermObjects covers the collection of what a superseded
-// term left behind. Retention retiring the last chunk any manifest holds for
-// term 1 is what proves nothing can reach term 1 any more, so the same round
-// drops the chunk term 1 wrote after term 2's takeover probe, and term 1's
-// manifest with it.
+// Retired-term orphans are discovered independently of retained references.
+// This tests local cleanup after handoff, not cross-owner GC exclusion.
 func TestGCSweepsRetiredTermObjects(t *testing.T) {
 	ctx := context.Background()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
@@ -1127,6 +1082,7 @@ func TestGCSweepsRetiredTermObjects(t *testing.T) {
 	// Term 2 takes over and seals the inheritance.
 	store2 := NewStore(cm, pchannel, 2)
 	manager2 := NewManager(ManagerConfig{
+		Runtime:           moduleapi.Runtime{Scheduler: &recordingScheduler{}},
 		PChannel:          pchannel,
 		Term:              2,
 		Store:             store2,
@@ -1139,7 +1095,7 @@ func TestGCSweepsRetiredTermObjects(t *testing.T) {
 	// Term 1, unaware it is fenced, writes one more chunk AFTER that probe. It
 	// lands at the same generation term 2 will claim, under its own term, so
 	// the two objects coexist and no manifest names term 1's.
-	_, _, err := store1.WriteChunk(ctx, 1, writeSections(map[string][]uint64{"v1": {200}}))
+	_, _, err := store1.WriteChunk(ctx, 1, writeSections(map[string][]uint64{"v1": {200}}), testRecordCoverage(writeSections(map[string][]uint64{"v1": {200}})))
 	require.NoError(t, err)
 	orphanKey := store1.ChunkKey(1)
 	exists, err := cm.Exist(ctx, orphanKey)
@@ -1150,7 +1106,7 @@ func TestGCSweepsRetiredTermObjects(t *testing.T) {
 	// term 1's last chunk, which is what makes term 1 unreachable.
 	flushObserved(t, manager2, "v1", 300, &unused)
 	require.Len(t, manager2.Manifest().GetChunks(), 2)
-	require.NoError(t, manager2.GCOnce(ctx))
+	require.NoError(t, gcSummary(ctx, manager2))
 
 	chunks := manager2.Manifest().GetChunks()
 	require.Len(t, chunks, 1)
@@ -1166,4 +1122,50 @@ func TestGCSweepsRetiredTermObjects(t *testing.T) {
 	_, found, err = store2.ReadManifest(ctx)
 	require.NoError(t, err)
 	assert.True(t, found, "this term's own manifest stays")
+}
+
+// persistSummary executes scheduled work synchronously only in this test harness.
+func persistSummary(ctx context.Context, manager *Manager) error {
+	manager.requestSeal()
+	return drainSummary(ctx, manager)
+}
+
+func gcSummary(ctx context.Context, manager *Manager) error {
+	if err := manager.GCOnce(ctx); err != nil {
+		return err
+	}
+	return drainSummary(ctx, manager)
+}
+
+func drainSummary(ctx context.Context, manager *Manager) error {
+	scheduler := manager.cfg.Runtime.Scheduler.(*recordingScheduler)
+	scheduler.drainMu.Lock()
+	defer scheduler.drainMu.Unlock()
+	for {
+		manager.mu.Lock()
+		terminal := manager.terminalErr
+		manager.mu.Unlock()
+		if terminal != nil {
+			return terminal
+		}
+		scheduler.mu.Lock()
+		tasks := append([]nodescheduler.Task(nil), scheduler.tasks...)
+		scheduler.mu.Unlock()
+		progress := false
+		for _, task := range tasks {
+			if task.(interface{ Done() bool }).Done() {
+				continue
+			}
+			if err := task.Execute(ctx); err != nil {
+				if err == nodescheduler.ErrDelay {
+					continue
+				}
+				return err
+			}
+			progress = true
+		}
+		if !progress {
+			return nil
+		}
+	}
 }

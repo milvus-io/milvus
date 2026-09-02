@@ -217,7 +217,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 		CollectionNames: []string{collectionName},
 	})
 	s.NoError(err)
-	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	segmentIDs, has := flushResp.GetFlushCollSegIDs()[collectionName]
 	s.True(has)
 	s.NotEmpty(segmentIDs.GetData())
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]

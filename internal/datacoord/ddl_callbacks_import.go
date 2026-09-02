@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -71,7 +73,7 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 		Schema:         body.GetSchema(),
 		Files: lo.Map(body.GetFiles(), func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
 			// The ImportMsg broadcast carries no ID ranges (two-phase flow): every
-			// autoID range arrives later via the ImportIDRange broadcast. The wire
+			// autoID range arrives later via the UpdateImport broadcast. The wire
 			// field is ignored here; a non-empty range means the peer runs an older
 			// version mid-upgrade, which the secondary-first ordering forbids.
 			return &internalpb.ImportFile{
@@ -82,7 +84,7 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
 		DataTimestamp: result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
 		JobID:         body.GetJobID(),
-	})
+	}, result.Message.Header().GetCommitByCoordinator())
 
 	err = merr.CheckRPCCall(importResp, err)
 	if errors.Is(err, merr.ErrCollectionNotFound) {
@@ -301,7 +303,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	}
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
-		WithHeader(&message.ImportMessageHeader{}).
+		WithHeader(&message.ImportMessageHeader{CommitByCoordinator: true}).
 		WithBody(&msgpb.ImportMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Import,
@@ -355,11 +357,13 @@ func (c *DDLCallbacks) registerImportCallbacks() {
 	registry.RegisterImportV1AckCallback(c.importV1AckCallback)
 	registry.RegisterCommitImportV2AckCallback(c.commitImportV2AckCallback)
 	registry.RegisterRollbackImportV2AckCallback(c.rollbackImportV2AckCallback)
-	registry.RegisterImportIDRangeV2AckCallback(c.importIDRangeAckCallback)
+	registry.RegisterUpdateImportV2AckCallback(c.updateImportAckCallback)
 }
 
-// commitImportV2AckCallback handles the ack callback for CommitImport WAL message.
-// It transitions the import job from Uncommitted → Committing state.
+// commitImportV2AckCallback handles the ack callback for the CommitImport WAL message.
+// For coordinator-owned jobs it makes all segments visible (commit timestamp and is_importing=false)
+// and transitions the job to Completed. Committing durably protects retries from
+// timeout/cleanup between these writes.
 // Concurrency safety is guaranteed by the broadcaster framework's resource key lock
 // (exclusive collection-level lock), so no CAS is needed here.
 func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result message.BroadcastResultCommitImportMessageV2) error {
@@ -374,16 +378,29 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 	}
 	switch job.GetState() {
 	case internalpb.ImportJobState_Uncommitted:
-		// proceed
-	case internalpb.ImportJobState_Committing, internalpb.ImportJobState_Completed:
-		mlog.Info(ctx, "CommitImport: job already committing or completed, no-op",
+		// Protect visibility updates from timeout/cleanup, including a crash
+		// after segment persistence but before the final Completed write.
+		if err := c.importMeta.UpdateJob(ctx, jobID, UpdateJobState(internalpb.ImportJobState_Committing)); err != nil {
+			return err
+		}
+		if c.importMeta.GetJob(ctx, jobID).GetState() == internalpb.ImportJobState_Failed {
+			// A concurrent timeout won before the commit phase was persisted.
+			return nil
+		}
+	case internalpb.ImportJobState_Committing:
+		// Retry the same callback after an interrupted commit.
+	case internalpb.ImportJobState_Completed:
+		if c.meta != nil {
+			c.meta.recomputeDataView(ctx, job.GetCollectionID())
+		}
+		mlog.Info(ctx, "CommitImport: job already completed, no-op",
 			mlog.FieldJobID(jobID), mlog.String("state", job.GetState().String()))
 		return nil
 	case internalpb.ImportJobState_Failed:
 		// Divergence signal: the source committed but this replica already failed, so
 		// this replica will NOT make the data visible. Left as a no-op here; surfaced
 		// at WARN for alerting.
-		mlog.Warn(ctx, "CommitImport ack landed on a Failed import job; this replica will NOT commit while the source commits — potential primary/standby divergence",
+		mlog.Warn(ctx, "CommitImport ack landed on a Failed import job; this replica will NOT commit while the source commits - potential primary/standby divergence",
 			mlog.FieldJobID(jobID), mlog.String("reason", job.GetReason()))
 		return nil
 	default:
@@ -395,16 +412,57 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 		return merr.WrapErrImportSysFailedMsg("job %d is in state %s, waiting for Uncommitted", jobID, job.GetState())
 	}
 
+	// Legacy callbacks only enter Committing. The message consumer still owns
+	// per-channel visibility and the checker observes the committed markers.
+	if !result.Message.Header().GetCommitByCoordinator() {
+		return nil
+	}
+
+	// Each business vchannel has its own WAL commit fence. Use that channel's
+	// append timetick, not the broadcast maximum (which may come from CChannel).
+	ops := make([]UpdateOperator, 0)
+	for vchannel, appendResult := range result.Results {
+		if funcutil.IsControlChannel(vchannel) {
+			// The control channel carries no data segments; its timetick must
+			// not be used as a segment commit timestamp.
+			continue
+		}
+		segIDs := c.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
+		if len(segIDs) == 0 {
+			continue
+		}
+		commitTs := appendResult.TimeTick
+		for _, segID := range segIDs {
+			ops = append(ops,
+				UpdateCommitTimestamp(segID, commitTs),
+				UpdateIsImporting(segID, false),
+			)
+		}
+	}
+	if len(ops) > 0 {
+		if err := c.meta.UpdateSegmentsInfo(ctx, ops...); err != nil {
+			return err
+		}
+	}
+
+	// Import visibility now commits in this callback rather than the legacy
+	// per-channel RPC. Preserve DataView reconciliation after SegmentMeta.
+	if c.meta != nil {
+		c.meta.recomputeDataView(ctx, job.GetCollectionID())
+	}
+
+	completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
 	if err := c.importMeta.UpdateJob(ctx, jobID,
-		UpdateJobState(internalpb.ImportJobState_Committing),
+		UpdateJobState(internalpb.ImportJobState_Completed),
+		UpdateJobCompleteTime(completeTime),
 	); err != nil {
 		return err
 	}
-
-	uncommittedDuration := job.GetTR().RecordSpan()
-	mlog.Info(ctx, "import job uncommitted stage done",
+	totalDuration := job.GetTR().ElapseSpan()
+	metrics.ImportJobLatency.WithLabelValues(metrics.TotalLabel).Observe(float64(totalDuration.Milliseconds()))
+	mlog.Info(ctx, "import job committed to Completed",
 		mlog.FieldJobID(jobID),
-		mlog.Duration("jobTimeCost/uncommitted", uncommittedDuration))
+		mlog.Duration("jobTimeCost/total", totalDuration))
 	return nil
 }
 
@@ -439,21 +497,21 @@ func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result m
 	)
 }
 
-// importIDRangeAckCallback handles the ack callback for the ImportIDRange WAL message.
+// updateImportAckCallback handles the ack callback for the UpdateImport WAL message.
 // It runs on BOTH clusters (primary: from its own broadcast; secondary: from the
 // REPLICATED broadcast task rebuilt by the secondary's broadcast manager) and applies
 // the primary-allocated per-file ID ranges to the local import job meta, so every
 // cluster derives identical autoID primary keys (and RowIDs). Concurrency safety is
 // guaranteed by the broadcaster framework's resource-key lock (exclusive collection-level
 // lock), so no CAS is needed here.
-func (c *DDLCallbacks) importIDRangeAckCallback(ctx context.Context, result message.BroadcastResultImportIDRangeMessageV2) error {
+func (c *DDLCallbacks) updateImportAckCallback(ctx context.Context, result message.BroadcastResultUpdateImportMessageV2) error {
 	header := result.Message.Header()
 	jobID := header.GetJobId()
 	body := result.Message.MustBody()
 
 	job := c.importMeta.GetJob(ctx, jobID)
 	if job == nil {
-		// No local job, and none will appear: the ImportMsg broadcast precedes ImportIDRange
+		// No local job, and none will appear: the ImportMsg broadcast precedes UpdateImport
 		// on every channel (on the primary ImportV2 does not even return until the
 		// job-creating callback finishes), so a missing job is unrecoverable. It means this
 		// cluster never created the job:
@@ -463,7 +521,7 @@ func (c *DDLCallbacks) importIDRangeAckCallback(ctx context.Context, result mess
 		// A retry cannot create the job, so give up immediately (no-op success) rather than
 		// pin the collection's exclusive resource-key lock; the import is simply invisible on
 		// this cluster.
-		mlog.Warn(ctx, "ImportIDRange ack found no local job; the import is not visible on this cluster",
+		mlog.Warn(ctx, "UpdateImport ack found no local job; the import is not visible on this cluster",
 			mlog.FieldJobID(jobID))
 		return nil
 	}
@@ -476,7 +534,7 @@ func (c *DDLCallbacks) importIDRangeAckCallback(ctx context.Context, result mess
 	switch job.GetState() {
 	case internalpb.ImportJobState_Failed, internalpb.ImportJobState_Completed,
 		internalpb.ImportJobState_Committing:
-		mlog.Info(ctx, "ImportIDRange: job already past the range gate, no-op",
+		mlog.Info(ctx, "UpdateImport: job already past the range gate, no-op",
 			mlog.FieldJobID(jobID), mlog.String("state", job.GetState().String()))
 		return nil
 	case internalpb.ImportJobState_Uncommitted:
@@ -490,13 +548,13 @@ func (c *DDLCallbacks) importIDRangeAckCallback(ctx context.Context, result mess
 			for _, r := range body.GetIdRanges() {
 				peerRows += r.GetEnd() - r.GetBegin()
 			}
-			reason := fmt.Sprintf("ImportIDRange carries %d rows but no ID range was assigned locally (cross-cluster file divergence)", peerRows)
-			mlog.Warn(ctx, "ImportIDRange arrived for a job without ID ranges; failing import",
+			reason := fmt.Sprintf("UpdateImport carries %d rows but no ID range was assigned locally (cross-cluster file divergence)", peerRows)
+			mlog.Warn(ctx, "UpdateImport arrived for a job without ID ranges; failing import",
 				mlog.FieldJobID(jobID), mlog.Int64("peerRows", peerRows))
 			return c.importMeta.UpdateJob(ctx, jobID,
 				UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(reason))
 		}
-		mlog.Info(ctx, "ImportIDRange: job already past the range gate, no-op",
+		mlog.Info(ctx, "UpdateImport: job already past the range gate, no-op",
 			mlog.FieldJobID(jobID), mlog.String("state", job.GetState().String()))
 		return nil
 	}
@@ -514,16 +572,16 @@ func (c *DDLCallbacks) importIDRangeAckCallback(ctx context.Context, result mess
 	idRanges := body.GetIdRanges()
 	files := job.GetFiles()
 	if len(idRanges) != len(files) {
-		reason := fmt.Sprintf("ImportIDRange carries %d file ranges but the job has %d files", len(idRanges), len(files))
-		mlog.Warn(ctx, "ImportIDRange file count does not match the job; failing import",
+		reason := fmt.Sprintf("UpdateImport carries %d file ranges but the job has %d files", len(idRanges), len(files))
+		mlog.Warn(ctx, "UpdateImport file count does not match the job; failing import",
 			mlog.FieldJobID(jobID), mlog.Int("fileRanges", len(idRanges)), mlog.Int("jobFiles", len(files)))
 		return c.importMeta.UpdateJob(ctx, jobID,
 			UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(reason))
 	}
 	for idx := range idRanges {
 		if idx < 0 || idx >= int64(len(files)) {
-			reason := fmt.Sprintf("ImportIDRange file index %d out of range [0,%d)", idx, len(files))
-			mlog.Warn(ctx, "ImportIDRange file index out of range; failing import",
+			reason := fmt.Sprintf("UpdateImport file index %d out of range [0,%d)", idx, len(files))
+			mlog.Warn(ctx, "UpdateImport file index out of range; failing import",
 				mlog.FieldJobID(jobID), mlog.Int64("index", idx), mlog.Int("jobFiles", len(files)))
 			return c.importMeta.UpdateJob(ctx, jobID,
 				UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(reason))
@@ -542,14 +600,14 @@ func (c *DDLCallbacks) importIDRangeAckCallback(ctx context.Context, result mess
 		for idx, applied := range idRanges {
 			existing := files[idx].GetIdRange()
 			if existing.GetBegin() != applied.GetBegin() || existing.GetEnd() != applied.GetEnd() {
-				mlog.Warn(ctx, "ImportIDRange conflicts with an already-applied range; ignoring it, first applied range wins",
+				mlog.Warn(ctx, "UpdateImport conflicts with an already-applied range; ignoring it, first applied range wins",
 					mlog.FieldJobID(jobID), mlog.Int64("index", idx),
 					mlog.Int64("existingBegin", existing.GetBegin()), mlog.Int64("existingEnd", existing.GetEnd()),
 					mlog.Int64("incomingBegin", applied.GetBegin()), mlog.Int64("incomingEnd", applied.GetEnd()))
 				return nil
 			}
 		}
-		mlog.Info(ctx, "ImportIDRange already applied, no-op (at-least-once redelivery)", mlog.FieldJobID(jobID))
+		mlog.Info(ctx, "UpdateImport already applied, no-op (at-least-once redelivery)", mlog.FieldJobID(jobID))
 		return nil
 	}
 
@@ -564,7 +622,7 @@ func (c *DDLCallbacks) importIDRangeAckCallback(ctx context.Context, result mess
 		// Transient persistence failure → return the error so the scheduler retries.
 		return err
 	}
-	mlog.Info(ctx, "ImportIDRange applied to import job",
+	mlog.Info(ctx, "UpdateImport applied to import job",
 		mlog.FieldJobID(jobID), mlog.Int("fileCount", len(ranges)), mlog.Int64("totalReservedIDs", totalReserved))
 	return nil
 }

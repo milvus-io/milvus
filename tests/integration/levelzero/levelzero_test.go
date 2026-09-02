@@ -41,13 +41,25 @@ type LevelZeroSuite struct {
 
 func (s *LevelZeroSuite) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key, "false")
-
-	s.MiniClusterSuite.SetupSuite()
 	s.dim = 768
 }
 
-func (s *LevelZeroSuite) TearDownSuite() {
+func (s *LevelZeroSuite) BeforeTest(_, testName string) {
+	// Each case starts with its own size policy before any WAL is opened.
+	deleteBuffer := &paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes
+	maxBytes := deleteBuffer.DefaultValue
+	if testName == "TestDeleteOnGrowing" {
+		maxBytes = "1"
+	}
+	s.WithMilvusConfig(deleteBuffer.Key, maxBytes)
+	s.MiniClusterSuite.SetupSuite()
+}
+
+func (s *LevelZeroSuite) TearDownTest() {
 	s.MiniClusterSuite.TearDownSuite()
+}
+
+func (s *LevelZeroSuite) TearDownSuite() {
 	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key)
 }
 

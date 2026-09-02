@@ -379,9 +379,8 @@ func (opt *columnBasedDataOption) WithPartialUpdate(partialUpdate bool) *columnB
 // request (schema-mismatch / rate-limit) reuse the key, which is exactly what
 // idempotent replay needs; do NOT reuse one key across different payloads or
 // collections: the server would answer the second insert with the first one's
-// IDs. Only Insert honors the key, and only when idempotent write is enabled
-// both globally (streaming.idempotency.enabled) and on the target collection;
-// Upsert rejects a configured option key.
+// IDs. Insert enables idempotency when a non-empty key is supplied; without a
+// key, every request is a new write. Upsert rejects a configured option key.
 func (opt *columnBasedDataOption) WithIdempotencyKey(idempotencyKey string) *columnBasedDataOption {
 	opt.idempotencyKey = idempotencyKey
 	return opt

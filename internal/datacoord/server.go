@@ -349,7 +349,7 @@ func (s *Server) initDataCoord() error {
 	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, importCheckerHooks{
 		commitImport:        s.broadcastCommitImportMessage,
 		rollbackImport:      s.broadcastRollbackImportMessage,
-		assignImportIDRange: s.broadcastImportIDRangeMessage,
+		assignImportIDRange: s.broadcastUpdateImportMessage,
 		getReplicationRole:  s.getReplicationRole,
 	})
 

@@ -7693,8 +7693,8 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 
 	// ImportEnableIDRangeMsg gates the two-phase per-file ID range path: after
 	// preimport reports the row counts, the primary assigns one range per file and
-	// broadcasts them via the new ImportIDRange V2 WAL message. It is version-gated
-	// on purpose: the ImportIDRange message is a new V2 type, so broadcasting it
+	// broadcasts them via the new UpdateImport V2 WAL message. It is version-gated
+	// on purpose: the UpdateImport message is a new V2 type, so broadcasting it
 	// while a streaming node from an older build is still online crashes that node's
 	// flusher (no case for the type -> panic on WAL replay). Until the gate flips,
 	// the config resolves to "false" and import stays on the legacy local-allocator
@@ -7705,7 +7705,7 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 		Export:       false,
 		PanicIfEmpty: false,
 		Doc: "Whether import assigns a per-file ID range after preimport and broadcasts it via " +
-			"the ImportIDRange WAL message. auto: switch on automatically once the whole cluster " +
+			"the UpdateImport WAL message. auto: switch on automatically once the whole cluster " +
 			"(including streaming nodes) has reached the gate version and the stability window " +
 			"elapses; false: always keep the legacy local-allocator path (escape hatch, and the safe " +
 			"value while older streaming nodes are still online); true: force enable and bypass the " +
@@ -8842,19 +8842,22 @@ type streamingConfig struct {
 	FlushL0MaxRowNum   ParamItem `refreshable:"true"`
 	FlushL0MaxSize     ParamItem `refreshable:"true"`
 
+	// summary store retention
+	SummaryMaxBytesPerPChannel ParamItem `refreshable:"true"`
+
 	// recovery configuration.
 	WALRecoveryPersistInterval           ParamItem `refreshable:"true"`
 	WALRecoveryMaxDirtyMessage           ParamItem `refreshable:"true"`
 	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
+	WALRecoveryTailLowWatermark          ParamItem `refreshable:"true"`
+	WALRecoveryTailSoftWatermark         ParamItem `refreshable:"true"`
+	WALRecoveryTailHighWatermark         ParamItem `refreshable:"true"`
 
 	// idempotent write configuration.
-	IdempotencyEnabled            ParamItem `refreshable:"false"`
 	IdempotencyMaxBytesPerWindow  ParamItem `refreshable:"false"`
 	IdempotencyChunkMaxBytes      ParamItem `refreshable:"false"`
 	IdempotencyMaxStagingInterval ParamItem `refreshable:"false"`
-	IdempotencyMaxRetainedBytes   ParamItem `refreshable:"false"`
-	IdempotencyMaxRetainedChunks  ParamItem `refreshable:"false"`
 
 	// wal rate limit
 	WALRateLimitDefaultBurst                     ParamItem `refreshable:"true"`
@@ -9282,6 +9285,18 @@ If the binary size of l0 segment is greater than this size, it will be flushed.`
 	}
 	p.FlushL0MaxSize.Init(base.mgr)
 
+	p.SummaryMaxBytesPerPChannel = ParamItem{
+		Key:     "streaming.summary.maxBytesPerPChannel",
+		Version: "3.0.0",
+		Doc: `The soft budget of the retained WALSummary chunk objects per pchannel, 4GB by default.
+The summary store keeps the transform records of every vchannel so the L0 materializer can read them back;
+chunks are released by the retention GC when the budget is exceeded, but never below the per-vchannel
+materialization frontiers.`,
+		DefaultValue: "4GB",
+		Export:       false,
+	}
+	p.SummaryMaxBytesPerPChannel.Init(base.mgr)
+
 	p.WALRecoveryPersistInterval = ParamItem{
 		Key:     "streaming.walRecovery.persistInterval",
 		Version: "2.6.0",
@@ -9307,13 +9322,39 @@ but not wait for the persist interval.`,
 	p.WALRecoveryGracefulCloseTimeout = ParamItem{
 		Key:     "streaming.walRecovery.gracefulCloseTimeout",
 		Version: "2.6.0",
-		Doc: `The graceful close timeout for wal recovery, 3s by default.
-When the wal is on-closing, the recovery module will try to persist the recovery info for wal to make next recovery operation more fast.
-If that persist operation exceeds this timeout, the wal recovery module will close right now.`,
+		Doc: `Deprecated. RecoveryStorage no longer persists recovery metadata during close.
+This no-op setting is retained so existing configurations remain loadable.`,
 		DefaultValue: "3s",
 		Export:       true,
 	}
 	p.WALRecoveryGracefulCloseTimeout.Init(base.mgr)
+
+	p.WALRecoveryTailLowWatermark = ParamItem{
+		Key:          "streaming.walRecovery.tail.lowWatermark",
+		Version:      "2.7.0",
+		Doc:          "RecoveryStorage releases WAL append pressure after the unpublished WAL tail falls to this logical size.",
+		DefaultValue: "4g",
+		Export:       true,
+	}
+	p.WALRecoveryTailLowWatermark.Init(base.mgr)
+
+	p.WALRecoveryTailSoftWatermark = ParamItem{
+		Key:          "streaming.walRecovery.tail.softWatermark",
+		Version:      "2.7.0",
+		Doc:          "RecoveryStorage requests VChannel persistence and slows WAL append after the unpublished WAL tail reaches this logical size.",
+		DefaultValue: "8g",
+		Export:       true,
+	}
+	p.WALRecoveryTailSoftWatermark.Init(base.mgr)
+
+	p.WALRecoveryTailHighWatermark = ParamItem{
+		Key:          "streaming.walRecovery.tail.highWatermark",
+		Version:      "2.7.0",
+		Doc:          "RecoveryStorage rejects new DML append after the unpublished WAL tail reaches this logical size.",
+		DefaultValue: "16g",
+		Export:       true,
+	}
+	p.WALRecoveryTailHighWatermark.Init(base.mgr)
 
 	p.WALRecoverySchemaExpirationTolerance = ParamItem{
 		Key:     "streaming.walRecovery.schemaExpirationTolerance",
@@ -9325,16 +9366,6 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 	}
 	p.WALRecoverySchemaExpirationTolerance.Init(base.mgr)
 
-	p.IdempotencyEnabled = ParamItem{
-		Key:          "streaming.idempotency.enabled",
-		Version:      "3.0.0",
-		Doc:          `Whether request-level idempotent write is enabled globally. Collection-level idempotent write still needs to be enabled by collection property.`,
-		DefaultValue: "false",
-		FallbackKeys: []string{"idempotency.enabled"},
-		Export:       false,
-	}
-	p.IdempotencyEnabled.Init(base.mgr)
-
 	p.IdempotencyMaxBytesPerWindow = ParamItem{
 		Key:          "streaming.idempotency.maxBytesPerWindow",
 		Version:      "3.0.0",
@@ -9344,26 +9375,6 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Export:       false,
 	}
 	p.IdempotencyMaxBytesPerWindow.Init(base.mgr)
-
-	p.IdempotencyMaxRetainedBytes = ParamItem{
-		Key:          "streaming.idempotency.maxRetainedBytes",
-		Version:      "3.0.0",
-		Doc:          `The soft budget of the retained WAL summary chunk objects per pchannel. Once the retained set is over the budget, the oldest chunks are released whole. It bounds storage, not a duration: how far back a duplicate is still recognized after a restart follows from how fast the pchannel is written, not from elapsed time. Zero disables the release entirely.`,
-		DefaultValue: "268435456",
-		FallbackKeys: []string{"idempotency.maxRetainedBytes"},
-		Export:       false,
-	}
-	p.IdempotencyMaxRetainedBytes.Init(base.mgr)
-
-	p.IdempotencyMaxRetainedChunks = ParamItem{
-		Key:          "streaming.idempotency.maxRetainedChunks",
-		Version:      "3.0.0",
-		Doc:          `Hard cap on how many WAL summary chunk objects stay retained per pchannel. It bounds what maxRetainedBytes cannot: recovery pays one object read per chunk and every publish rewrites the whole manifest, so both scale with the chunk COUNT rather than with total size. Without it a workload writing little per checkpoint persist would retain an unbounded number of tiny chunks while the byte budget stayed far from its bound. When this cap binds, the deduplication window is smaller than maxRetainedBytes asks for. Zero disables it.`,
-		DefaultValue: "256",
-		FallbackKeys: []string{"idempotency.maxRetainedChunks"},
-		Export:       false,
-	}
-	p.IdempotencyMaxRetainedChunks.Init(base.mgr)
 
 	p.OldVersionLastConfirmedWindowSize = ParamItem{
 		Key:     "streaming.walScanner.oldVersionLastConfirmedWindowSize",

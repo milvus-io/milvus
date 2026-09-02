@@ -11,10 +11,10 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -35,28 +35,23 @@ func TestRedoInterceptorWaitUntilGrowingSegmentReadyReturnsUnrecoverableForDropp
 
 	tests := []struct {
 		name       string
-		vchannels  map[string]*streamingpb.VChannelMeta
+		vchannels  map[string]moduleapi.VChannelWritePathRecoveryState
 		collection int64
 		partition  int64
 	}{
 		{
 			name:       "collection not found",
-			vchannels:  map[string]*streamingpb.VChannelMeta{},
+			vchannels:  map[string]moduleapi.VChannelWritePathRecoveryState{},
 			collection: 1,
 			partition:  2,
 		},
 		{
 			name: "partition not found",
-			vchannels: map[string]*streamingpb.VChannelMeta{
+			vchannels: map[string]moduleapi.VChannelWritePathRecoveryState{
 				"test-vchannel": {
-					Vchannel: "test-vchannel",
-					State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
-					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
-						CollectionId: 1,
-						Partitions: []*streamingpb.PartitionInfoOfVChannel{
-							{PartitionId: 2},
-						},
-					},
+					VChannel:     "test-vchannel",
+					CollectionID: 1,
+					PartitionIDs: []int64{2},
 				},
 			},
 			collection: 1,
@@ -70,9 +65,11 @@ func TestRedoInterceptorWaitUntilGrowingSegmentReadyReturnsUnrecoverableForDropp
 				ChannelInfo: types.PChannelInfo{Name: "test-channel", Term: 1},
 				WAL:         syncutil.NewFuture[wal.WAL](),
 				InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-					VChannels:          tt.vchannels,
-					SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{},
-					Checkpoint:         &recovery.WALCheckpoint{TimeTick: 100},
+					WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+						VChannels:       tt.vchannels,
+						GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{},
+					},
+					Checkpoint: &recovery.WALCheckpoint{TimeTick: 100},
 				},
 				TxnManager: &testTxnManager{},
 			})
