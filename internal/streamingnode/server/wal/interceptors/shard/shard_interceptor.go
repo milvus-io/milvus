@@ -232,11 +232,26 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 
 	collectionID := header.GetCollectionId()
 	schemaVersion := header.GetSchemaVersion()
-	if err := impl.shardManager.CheckIfVChannelCanBeWritten(collectionID, msg.VChannel()); errors.Is(err, shards.ErrVChannelFenced) {
-		// the vchannel is fenced by shard split, the client should refresh
-		// the routing table and write to the new shards. T_switch is not
-		// carried here: the DML client refreshes routing, it never reads it.
-		return nil, status.NewShardFenced(msg.VChannel(), 0)
+	if err := impl.shardManager.CheckIfVChannelCanBeWritten(collectionID, msg.VChannel()); err != nil {
+		if errors.Is(err, shards.ErrVChannelFenced) {
+			// the vchannel is fenced by shard split, the client should refresh
+			// the routing table and write to the new shards. T_switch is not
+			// carried here: the DML client refreshes routing, it never reads it.
+			return nil, status.NewShardFenced(msg.VChannel(), 0)
+		}
+		// A non-fence error means this pchannel's shard manager does not hold
+		// THIS vchannel -- the entry is missing, or it belongs to a different
+		// vchannel of the same collection. Letting it through would be silent
+		// data loss rather than a rejection: every check after this one is keyed
+		// by collection (schema version) or by (collection, partition) (segment
+		// assignment), so the message would be appended carrying vchannel X while
+		// its segment belongs to vchannel Y. The flusher then finds no data sync
+		// service for X and drops the batch, recovery counts the rows against Y's
+		// segment, and the client is told the append succeeded. A split is the
+		// first thing that puts two vchannels of one collection on one pchannel
+		// in sequence, so this is reachable exactly when a proxy holds a stale
+		// route to a retired source.
+		return nil, status.NewUnrecoverableError("vchannel %s of collection %d cannot be written: %s", msg.VChannel(), collectionID, err.Error())
 	}
 	correctSchemaVersion, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(header)
 	if err != nil {
@@ -329,11 +344,26 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	deleteMessage := message.MustAsMutableDeleteMessageV1(msg)
 	header := deleteMessage.Header()
-	if err := impl.shardManager.CheckIfVChannelCanBeWritten(header.GetCollectionId(), msg.VChannel()); errors.Is(err, shards.ErrVChannelFenced) {
-		// the vchannel is fenced by shard split, the client should refresh
-		// the routing table and write to the new shards. T_switch is not
-		// carried here: the DML client refreshes routing, it never reads it.
-		return nil, status.NewShardFenced(msg.VChannel(), 0)
+	if err := impl.shardManager.CheckIfVChannelCanBeWritten(header.GetCollectionId(), msg.VChannel()); err != nil {
+		if errors.Is(err, shards.ErrVChannelFenced) {
+			// the vchannel is fenced by shard split, the client should refresh
+			// the routing table and write to the new shards. T_switch is not
+			// carried here: the DML client refreshes routing, it never reads it.
+			return nil, status.NewShardFenced(msg.VChannel(), 0)
+		}
+		// A non-fence error means this pchannel's shard manager does not hold
+		// THIS vchannel -- the entry is missing, or it belongs to a different
+		// vchannel of the same collection. Letting it through would be silent
+		// data loss rather than a rejection: every check after this one is keyed
+		// by collection (schema version) or by (collection, partition) (segment
+		// assignment), so the message would be appended carrying vchannel X while
+		// its segment belongs to vchannel Y. The flusher then finds no data sync
+		// service for X and drops the batch, recovery counts the rows against Y's
+		// segment, and the client is told the append succeeded. A split is the
+		// first thing that puts two vchannels of one collection on one pchannel
+		// in sequence, so this is reachable exactly when a proxy holds a stale
+		// route to a retired source.
+		return nil, status.NewUnrecoverableError("vchannel %s of collection %d cannot be written: %s", msg.VChannel(), header.GetCollectionId(), err.Error())
 	}
 	if err := impl.shardManager.CheckIfCollectionExists(header.GetCollectionId()); err != nil {
 		// The collection can not be deleted at current shard, ignored
