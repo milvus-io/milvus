@@ -16,6 +16,21 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// Shard split is not supported on a cluster with replication enabled: a
+// replicated transaction never expires, and the secondary maps pchannels by
+// index position, so a topology change it cannot represent would corrupt it.
+// The three messages below are therefore marked UNREPLICABLE, which keeps them
+// out of the replicate stream -- they carry SOURCE-cluster vchannel names in
+// their headers and in CreateVChannel's body, and the receiving side rewrites
+// in-body channel names for CreateCollection only.
+//
+// That is containment, not the gate. The design (20260610-shard_split.md, §8)
+// asks for the split to be REJECTED on a replicating cluster at the DataCoord
+// trigger AND again at the StreamingNode; the second check is not implemented
+// here, because the shard interceptor does not hold the WAL's replicate state.
+// TODO: thread the replicates manager into the shard interceptor and refuse
+// these three message types outright when the WAL is in a replicating topology.
+
 // ErrSourceVChannelFenced is returned by SplitShard when the source vchannel
 // has already been fenced by a previous split message. The caller treats this
 // as success -- the fence holds -- and rolls forward.
@@ -71,6 +86,20 @@ func (p *SplitShardParam) Validate() error {
 			return merr.WrapErrParameterInvalidMsg("duplicated vchannel %s in shard split", target.GetVchannel())
 		}
 		vchannels[target.GetVchannel()] = struct{}{}
+		// The message is a PERMANENT record -- it is what a replay derives the
+		// window's fronting assignment from -- so a target without residues, or
+		// with one that is not below the modulus they are taken against, is
+		// refused here rather than written and puzzled over later.
+		if len(target.GetRouting().GetBuckets()) == 0 {
+			return merr.WrapErrParameterMissingMsg("target %s carries no residue", target.GetVchannel())
+		}
+		for _, residue := range target.GetRouting().GetBuckets() {
+			if residue >= p.RoutingModulus {
+				return merr.WrapErrParameterInvalidMsg(
+					"target %s owns residue %d, which is not below the routing modulus %d",
+					target.GetVchannel(), residue, p.RoutingModulus)
+			}
+		}
 	}
 	return nil
 }
@@ -107,6 +136,7 @@ func SplitShard(ctx context.Context, w WALAccesser, param SplitShardParam) (*Spl
 			RoutingModulus: param.RoutingModulus,
 		}).
 		WithBody(&message.SplitShardMessageBody{}).
+		WithUnreplicable().
 		BuildMutable()
 	if err != nil {
 		return nil, errors.Wrap(err, "build split shard message failed")
@@ -258,6 +288,7 @@ func InitSplitTargetVChannels(ctx context.Context, w WALAccesser, param InitSpli
 				VirtualChannelNames:  []string{vchannel},
 				PhysicalChannelNames: []string{funcutil.ToPhysicalChannel(vchannel)},
 			}).
+			WithUnreplicable().
 			BuildMutable()
 		if err != nil {
 			return nil, errors.Wrapf(err, "build create vchannel message for target %s failed", vchannel)
@@ -322,14 +353,26 @@ func (p *DropSplitVChannelParam) Validate() error {
 // streamingnode state would outlive the collection itself, with no code path
 // left to clean it.
 //
-// PRECONDITION, enforced by the caller: the source must be DRAINED, i.e.
-// channelCheckpoint(source) >= T_switch. The streamingnode side only checks that
-// the vchannel is SPLITTED; the teardown then closes the data sync service with
-// drop=false, which discards the write buffer WITHOUT syncing it, and the
-// coordinator's DropVirtualChannel marks any residual segment dropped. Appending
-// this while the source buffer still holds fence-sealed data therefore loses
-// writes from before T_switch, silently and with a successful append. The drain
-// gate that establishes the precondition lives in the split task, not here.
+// PRECONDITION, enforced by the caller: the source must be DRAINED, which the
+// design (20260610-shard_split.md, §6.3 step 2) defines as ALL THREE of
+//
+//  1. no healthy segment remains on the source vchannel;
+//  2. channelCheckpoint(source) >= T_switch; and
+//  3. no active import job lists the source vchannel in its Vchannels.
+//
+// The third is the one most easily lost, and it is not redundant: an import is
+// deliberately NOT stopped by the fence, so a job that has not yet registered
+// any segment in meta is invisible to (1) and can still be writing.
+//
+// None of this is checked here. The streamingnode side verifies only that the
+// vchannel is SPLITTED -- the shard manager cannot observe the channel
+// checkpoint at append time, since GetCheckpoint lives in the write buffer on
+// the flusher side and neither the shard manager nor the interceptor has a path
+// to it. The teardown then closes the data sync service with drop=false, which
+// discards the write buffer WITHOUT syncing it, and the coordinator's
+// DropVirtualChannel marks any residual segment dropped. Appending this while
+// the source still holds unsynced data therefore loses writes from before
+// T_switch, silently and with a successful append.
 func DropSplitVChannel(ctx context.Context, w WALAccesser, param DropSplitVChannelParam) error {
 	if err := param.Validate(); err != nil {
 		return err
@@ -342,6 +385,7 @@ func DropSplitVChannel(ctx context.Context, w WALAccesser, param DropSplitVChann
 			SplitTaskId:  param.SplitTaskID,
 		}).
 		WithBody(&message.DropVChannelMessageBody{}).
+		WithUnreplicable().
 		BuildMutable()
 	if err != nil {
 		return errors.Wrapf(err, "build drop vchannel message for %s failed", param.VChannel)
