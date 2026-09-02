@@ -776,7 +776,17 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
         // indexed predicates that can prune what it has to probe.
         if (input->name() == "PhyBloomFilterExpr" ||
             input->name() == "PhyRoaringFilterExpr") {
-            membership_expr.push_back(i);
+            // A JSON-path membership probe parses JSON and resolves a pointer
+            // per evaluated row, which is a heavy operation; bucket it with
+            // the other JSON predicates instead of the string-compare tier so
+            // it runs after cheaper predicates that can prune its rows.
+            if (input->IsSource() && input->GetColumnInfo().has_value() &&
+                IsJsonDataType(input->GetColumnInfo()->data_type_)) {
+                json_expr.push_back(i);
+                has_heavy_operation = true;
+            } else {
+                membership_expr.push_back(i);
+            }
             continue;
         }
 
