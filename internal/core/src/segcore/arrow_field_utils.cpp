@@ -24,7 +24,6 @@ namespace milvus::segcore {
 namespace {
 
 constexpr const char* kMilvusFieldIDMetadataKey = "milvus.field_id";
-constexpr const char* kMilvusDataTypeMetadataKey = "milvus.data_type";
 
 // BuildFixedWidthArray builds an Arrow Array from a fixed-width protobuf repeated field.
 template <typename BuilderType, typename DataContainer>
@@ -135,6 +134,36 @@ BuildCompactVarLenArray(const DataContainer& data,
 
 }  // namespace
 
+CStatus
+ArrowExportFailure(const arrow::Status& status) {
+    AssertInfo(!status.ok(), "ArrowExportFailure requires a failed status");
+    auto code = milvus::ErrorCode::UnexpectedError;
+    switch (status.code()) {
+        case arrow::StatusCode::OutOfMemory:
+            code = milvus::ErrorCode::MemAllocateFailed;
+            break;
+        case arrow::StatusCode::CapacityError:
+            // This is an Arrow representation limit (e.g. 32-bit binary
+            // offsets), not allocator pressure. Retrying the same batch
+            // cannot help; keep it a permanent system error.
+            code = milvus::ErrorCode::OutOfRange;
+            break;
+        case arrow::StatusCode::NotImplemented:
+            code = milvus::ErrorCode::NotImplemented;
+            break;
+        case arrow::StatusCode::Cancelled:
+            code = milvus::ErrorCode::FollyCancel;
+            break;
+        default:
+            // These arrays are assembled by Milvus. Other Arrow failures
+            // signal an internal contract violation. Storage/JSON-reader
+            // failures are classified at their source and thrown as typed
+            // SegcoreError; they must not be stringified through this path.
+            break;
+    }
+    return milvus::FailureCStatus(code, status.ToString());
+}
+
 std::shared_ptr<arrow::KeyValueMetadata>
 MilvusFieldMetadata(milvus::FieldId field_id, milvus::DataType data_type) {
     return arrow::key_value_metadata(
@@ -154,12 +183,15 @@ MilvusField(const std::string& name,
 }
 
 arrow::Result<std::shared_ptr<arrow::DataType>>
-EmptyExtraFieldArrowType(const milvus::FieldMeta& field_meta) {
+EmptyExtraFieldArrowType(const milvus::FieldMeta& field_meta,
+                         bool preserve_integer_width) {
     switch (field_meta.get_data_type()) {
         case milvus::DataType::BOOL:
             return arrow::boolean();
         case milvus::DataType::INT8:
+            return preserve_integer_width ? arrow::int8() : arrow::int32();
         case milvus::DataType::INT16:
+            return preserve_integer_width ? arrow::int16() : arrow::int32();
         case milvus::DataType::INT32:
             return arrow::int32();
         case milvus::DataType::INT64:
@@ -231,7 +263,8 @@ arrow::Result<
     std::pair<std::shared_ptr<arrow::Field>, std::shared_ptr<arrow::Array>>>
 FieldDataToArrow(const std::string& field_name,
                  const milvus::DataArray& field_data,
-                 size_t total_valid) {
+                 size_t total_valid,
+                 bool preserve_integer_width) {
     if (field_data.has_vectors()) {
         const auto& vectors = field_data.vectors();
         int64_t dim = vectors.dim();
@@ -405,6 +438,23 @@ FieldDataToArrow(const std::string& field_name,
         return std::make_pair(arrow::field(field_name, arrow::boolean()), arr);
     }
     if (scalars.has_int_data()) {
+        if (preserve_integer_width &&
+            field_data.type() == milvus::proto::schema::DataType::Int8) {
+            ARROW_ASSIGN_OR_RAISE(
+                auto arr,
+                BuildFixedWidthArray<arrow::Int8Builder>(
+                    scalars.int_data().data(), field_data, total_valid));
+            return std::make_pair(arrow::field(field_name, arrow::int8()), arr);
+        }
+        if (preserve_integer_width &&
+            field_data.type() == milvus::proto::schema::DataType::Int16) {
+            ARROW_ASSIGN_OR_RAISE(
+                auto arr,
+                BuildFixedWidthArray<arrow::Int16Builder>(
+                    scalars.int_data().data(), field_data, total_valid));
+            return std::make_pair(arrow::field(field_name, arrow::int16()),
+                                  arr);
+        }
         ARROW_ASSIGN_OR_RAISE(
             auto arr,
             BuildFixedWidthArray<arrow::Int32Builder>(

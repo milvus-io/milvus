@@ -267,12 +267,8 @@ func (s *SearchPipelineSuite) TestHybridFunctionChainRequeryInputDoesNotLeak() {
 	)
 	repr, err := chain.ProtoChainToRepr(chainPB)
 	s.Require().NoError(err)
-	task.rerankMeta = &functionChainRerankMeta{
-		inputFieldNames: []string{"intField"},
-		inputFieldIDs:   []int64{101},
-		chainPB:         chainPB,
-		repr:            repr,
-	}
+	task.rerankMeta, err = buildFunctionChainRerankMeta(chainPB, repr, task.schema)
+	s.Require().NoError(err)
 
 	intField := testutils.GenerateScalarFieldData(schemapb.DataType_Int64, "intField", 20)
 	intField.FieldId = 101

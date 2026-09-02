@@ -562,7 +562,7 @@ If the snapshot is newer but incompatible:
 The following entry points must not acquire another lease:
 
 - `PrepareSearchResultsForExport`;
-- `ExportSearchResultAsArrowRecordBatch`;
+- `ExportSearchResultAsArrowRecordBatchWithInputPlan`;
 - `FillOutputFieldsOrdered`;
 - worker tasks launched by reduce or fill.
 
