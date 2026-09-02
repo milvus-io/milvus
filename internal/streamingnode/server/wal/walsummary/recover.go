@@ -58,12 +58,9 @@ const probeLimit = 1 << 16
 // chunks -- it writes beside it and the loser's objects are orphans the
 // manifest never names.
 //
-// There is NO fencing on the consume checkpoint itself: its persistence is not
-// a compare-and-swap today (see the TODO on recoveryStorageImpl.backgroundTask),
-// so a stale owner that is still running can in principle advance it. That is a
-// pre-existing property of the recovery storage rather than something the
-// summary introduces, and closing it is follow-up work -- do not assume a fence
-// is already in place here.
+// The recovery layer claims the consume checkpoint term before calling Restore.
+// Its later snapshot commits are fenced by that term, so a superseded owner
+// cannot truncate WAL records beyond the chunks this recovery inherits.
 func (m *Manager) Restore(ctx context.Context) error {
 	manifest, needsPublish, err := m.recoverManifestOfTerm(ctx, m.cfg.Term)
 	if err != nil {
@@ -197,4 +194,21 @@ func (m *Manager) Manifest() *streamingpb.PChannelSummaryManifest {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.manifest
+}
+
+// RestoreTransformGCTimeTicks seeds retention from durable VChannel metadata.
+// Missing metadata does not prove cleanup: unknown channels remain pinned.
+func (m *Manager) RestoreTransformGCTimeTicks(vchannels map[string]*streamingpb.VChannelMeta) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for vchannel, meta := range vchannels {
+		frontier := meta.GetTransformMaterializedTimeTick()
+		switch meta.GetState() {
+		case streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED:
+			frontier = DroppedVChannelTimeTick
+		}
+		if frontier > m.gcFrontiers[vchannel] {
+			m.gcFrontiers[vchannel] = frontier
+		}
+	}
 }
