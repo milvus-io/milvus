@@ -660,11 +660,10 @@ func seedRestartTask(t *testing.T, m *meta) {
 	}))
 }
 
-// publishRestartTask finishes the seeded task and publishes it the way
-// publishIndexToManifest does.
+// publishRestartTask finishes the seeded task through the real index-task
+// result entry point, including its write-to-manifest switch decision.
 func publishRestartTask(t *testing.T, m *meta) {
 	t.Helper()
-	ctx := context.TODO()
 
 	result := &workerpb.IndexTaskInfo{
 		BuildID:               restartBuildID,
@@ -676,26 +675,8 @@ func publishRestartTask(t *testing.T, m *meta) {
 	}
 	segIdx, ok := m.indexMeta.GetIndexJob(restartBuildID)
 	require.True(t, ok)
-	finished, _, err := m.indexMeta.buildFinishedSegmentIndex(segIdx, result)
-	require.NoError(t, err)
-	entry, err := buildManifestIndexInfo(m, m.GetSegment(ctx, restartSegID), finished)
-	require.NoError(t, err)
-
-	require.NoError(t, m.CommitSegmentManifest(ctx, SegmentManifestCommit{
-		SegmentID:     restartSegID,
-		StorageConfig: &indexpb.StorageConfig{},
-		Mutation: ManifestMutation{
-			Type:    ManifestMutationCommitUpdates,
-			Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{entry}},
-		},
-		CatalogMutation: SegmentCatalogMutation{
-			SegmentIndex: &SegmentIndexMutation{
-				Type:         SegmentIndexUpsert,
-				BuildID:      restartBuildID,
-				FinishedTask: result,
-			},
-		},
-	}))
+	it := newIndexBuildTask(segIdx, 1, m, nil, nil, nil)
+	require.NoError(t, it.setJobInfo(result))
 }
 
 // End to end for the switch: with SegmentIndex etcd writes off, a finished
@@ -706,12 +687,15 @@ func publishRestartTask(t *testing.T, m *meta) {
 // manifest fallback of their own.
 func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	withSegmentIndexManifestWrites(t, true)
-	newFakeManifestStore(t)
+	store := newFakeManifestStore(t)
 	ctx := context.TODO()
 
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	m := bootMetaForRestart(t, catalog, restartCollID)
 	seedRestartFixture(t, m)
+	manifestEntries := store.revisions[m.GetSegment(ctx, restartSegID).GetManifestPath()]
+	require.Len(t, manifestEntries, 1, "the index task must publish its artifact into the manifest")
+	assert.EqualValues(t, restartBuildID, manifestEntries[0].BuildID)
 
 	// Nothing about this index reached etcd.
 	persisted, err := catalog.ListSegmentIndexes(ctx, restartCollID)
@@ -746,12 +730,13 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 // trivially green.
 func TestSegmentIndexPersistedToEtcdWhenManifestWritesOff(t *testing.T) {
 	withSegmentIndexManifestWrites(t, false)
-	newFakeManifestStore(t)
+	store := newFakeManifestStore(t)
 	ctx := context.TODO()
 
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	m := bootMetaForRestart(t, catalog, restartCollID)
 	seedRestartFixture(t, m)
+	assert.Empty(t, store.revisions, "the index task must not publish a manifest revision while the switch is off")
 
 	persisted, err := catalog.ListSegmentIndexes(ctx, restartCollID)
 	require.NoError(t, err)
