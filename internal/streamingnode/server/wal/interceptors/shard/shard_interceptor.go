@@ -239,18 +239,14 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			// carried here: the DML client refreshes routing, it never reads it.
 			return nil, status.NewShardFenced(msg.VChannel(), 0)
 		}
-		// A non-fence error means this pchannel's shard manager does not hold
-		// THIS vchannel -- the entry is missing, or it belongs to a different
-		// vchannel of the same collection. Letting it through would be silent
-		// data loss rather than a rejection: every check after this one is keyed
+		// This pchannel has never held the vchannel, so no routing refresh sends
+		// the write anywhere -- terminal, unlike the fence above. It must still
+		// be a rejection rather than a pass: every check after this one is keyed
 		// by collection (schema version) or by (collection, partition) (segment
-		// assignment), so the message would be appended carrying vchannel X while
-		// its segment belongs to vchannel Y. The flusher then finds no data sync
-		// service for X and drops the batch, recovery counts the rows against Y's
-		// segment, and the client is told the append succeeded. A split is the
-		// first thing that puts two vchannels of one collection on one pchannel
-		// in sequence, so this is reachable exactly when a proxy holds a stale
-		// route to a retired source.
+		// assignment), so a message let through would be appended carrying
+		// vchannel X while its segment belongs to vchannel Y. The flusher finds
+		// no data sync service for X and drops the batch, recovery counts the
+		// rows against Y's segment, and the client is told the append succeeded.
 		return nil, status.NewUnrecoverableError("vchannel %s of collection %d cannot be written: %s", msg.VChannel(), collectionID, err.Error())
 	}
 	correctSchemaVersion, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(header)
@@ -351,18 +347,14 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 			// carried here: the DML client refreshes routing, it never reads it.
 			return nil, status.NewShardFenced(msg.VChannel(), 0)
 		}
-		// A non-fence error means this pchannel's shard manager does not hold
-		// THIS vchannel -- the entry is missing, or it belongs to a different
-		// vchannel of the same collection. Letting it through would be silent
-		// data loss rather than a rejection: every check after this one is keyed
+		// This pchannel has never held the vchannel, so no routing refresh sends
+		// the write anywhere -- terminal, unlike the fence above. It must still
+		// be a rejection rather than a pass: every check after this one is keyed
 		// by collection (schema version) or by (collection, partition) (segment
-		// assignment), so the message would be appended carrying vchannel X while
-		// its segment belongs to vchannel Y. The flusher then finds no data sync
-		// service for X and drops the batch, recovery counts the rows against Y's
-		// segment, and the client is told the append succeeded. A split is the
-		// first thing that puts two vchannels of one collection on one pchannel
-		// in sequence, so this is reachable exactly when a proxy holds a stale
-		// route to a retired source.
+		// assignment), so a message let through would be appended carrying
+		// vchannel X while its segment belongs to vchannel Y. The flusher finds
+		// no data sync service for X and drops the batch, recovery counts the
+		// rows against Y's segment, and the client is told the append succeeded.
 		return nil, status.NewUnrecoverableError("vchannel %s of collection %d cannot be written: %s", msg.VChannel(), header.GetCollectionId(), err.Error())
 	}
 	if err := impl.shardManager.CheckIfCollectionExists(header.GetCollectionId()); err != nil {
