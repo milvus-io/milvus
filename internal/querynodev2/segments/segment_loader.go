@@ -2015,8 +2015,14 @@ func (policy fieldDataGroupMmapPolicy) resourceClasses(storageVersion int64) (me
 	}
 	if storageVersion == storage.StorageV3 {
 		// Storage V3 can split one physical group into multiple cache-policy
-		// projections, but Go currently has only the whole-group byte size.
-		// Reserve the full size in every resource class a child may use.
+		// projections, but Go admission metadata currently exposes only the
+		// whole-group byte size. The Go estimators therefore intentionally use
+		// conservative whole-group accounting: callers mark the group evictable
+		// only when every child is evictable, and this helper charges the full
+		// group size to every resource class used by any child. Mixed policies may
+		// reject an otherwise loadable segment, but this avoids under-reserving the
+		// column group's field data.
+		// TODO: Use projection accounting after per-column sizes reach SegmentLoadInfo.
 		return policy.mayUseMemory, policy.mayUseDisk
 	}
 	mmapEnabled := policy.enabled()
