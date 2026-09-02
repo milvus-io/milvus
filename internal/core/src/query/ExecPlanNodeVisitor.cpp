@@ -470,6 +470,62 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
         return;
     }
 
+    // Shared-filter hybrid search, phase 1: run only the prefix
+    // (FilterBitsNode -> MvccNode -> [ElementFilterBitsNode]) and hand back
+    // its bitset plus the QueryContext state it produced, for the branches to
+    // reuse. No placeholder group and no vector search here.
+    if (compute_filter_bitset_only_) {
+        auto result = std::make_unique<SharedFilterBitsetResult>();
+        result->active_count = active_count;
+        result->segment_id = segment->get_segment_id();
+        result->timestamp = timestamp_;
+        result->collection_ttl_timestamp = collection_ttl_timestamp_;
+        result->entity_ttl_physical_time_us = entity_ttl_physical_time_us_;
+
+        auto filter_subtree =
+            ProtoParser::ExtractFilterOnlyPlan(node.plannodes_);
+        AssertInfo(filter_subtree != nullptr,
+                   "shared-filter search requires an extractable filter "
+                   "subtree; the delegator must not group this plan");
+
+        if (active_count == 0) {
+            // Nothing visible: leave `bitset` null. Every branch
+            // short-circuits to an empty result without touching the segment.
+            shared_filter_bitset_result_ = std::move(result);
+            return;
+        }
+
+        auto plan_fragment = plan::PlanFragment(filter_subtree);
+        auto query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID,
+            segment,
+            active_count,
+            timestamp_,
+            collection_ttl_timestamp_,
+            consistency_level_,
+            node.plan_options_,
+            std::make_shared<milvus::exec::QueryConfig>(),
+            nullptr,
+            std::unordered_map<std::string,
+                               std::shared_ptr<milvus::exec::BaseConfig>>(),
+            entity_ttl_physical_time_us_);
+
+        auto op_context = milvus::OpContext(cancel_token_);
+        op_context.trace_span = trace_span_;
+        query_context->set_op_context(&op_context);
+
+        result->bitset = ExecuteTask(plan_fragment, query_context);
+        AssertInfo(result->bitset != nullptr,
+                   "shared filter produced a null bitset for segment {}",
+                   result->segment_id);
+        // Evaluating the filter writes more than the bitset onto the context;
+        // carry all of it, or branches take the wrong path in
+        // PhyVectorSearchNode.
+        result->CaptureFrom(*query_context);
+        shared_filter_bitset_result_ = std::move(result);
+        return;
+    }
+
     // PreExecute: skip all calculation
     if (active_count == 0) {
         const auto& placeholder = placeholder_group_->at(0);
@@ -478,8 +534,70 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
         return;
     }
 
-    // Construct plan fragment
-    auto plan = plan::PlanFragment(node.plannodes_);
+    // Construct plan fragment. In shared-filter phase 2 the prefix is replaced
+    // by a PrecomputedBitsetNode so only this branch's vector search runs.
+    auto plannodes = node.plannodes_;
+    // Reuse the shared bitset only while it still describes exactly the rows
+    // this branch would search.
+    //
+    // The bitset is a function of (segment, predicate, mvcc timestamp, TTL
+    // context). segment_id is checked by the caller and the predicate by the
+    // delegator's byte comparison; the rest is checked here.
+    //
+    // None of these can fire today. The hybrid fan-out is the only caller,
+    // and internal.SubSearchRequest has no timestamp or TTL fields, so every
+    // branch inherits them from the parent SearchRequest. This guards a
+    // future second caller, not a bug that exists now -- kept for two
+    // different reasons.
+    //
+    // active_count guards something memory-unsafe rather than merely wrong:
+    // the row scan is bounded by this branch's own active_count
+    // (SearchInfo::active_count_, read as plan_bound in SearchOnGrowing),
+    // while the bitset reaches the search as a BitsetView sized by the bitset
+    // itself, and BitsetView::test does not bounds-check.
+    //
+    // The timestamp and TTL compares are defence in depth for a caller that
+    // does not inherit its snapshot from a parent request the way the hybrid
+    // fan-out does. They are not redundant with active_count: on sealed
+    // segments
+    // get_active_count returns get_row_count() and ignores the timestamp, so
+    // a branch on another snapshot would pass an active-count-only check and
+    // silently search against a different delete/TTL mask.
+    //
+    // What no O(1) check here can cover: a delete applied between the phases
+    // changes the mask without changing active_count (which is derived from
+    // insert timestamps). That is ruled out by the pipeline applying a message
+    // pack before advancing tsafe, not by anything in this function.
+    const auto* shared = precomputed_bitset_result_;
+    const bool reuse_bitset =
+        shared != nullptr && shared->active_count == active_count &&
+        shared->timestamp == timestamp_ &&
+        shared->collection_ttl_timestamp == collection_ttl_timestamp_ &&
+        shared->entity_ttl_physical_time_us == entity_ttl_physical_time_us_;
+    if (shared != nullptr && !reuse_bitset) {
+        LOG_WARN(
+            "shared filter bitset snapshot does not match this branch on "
+            "segment {}: active_count {} vs {}, ts {} vs {}, collection_ttl "
+            "{} vs {}, entity_ttl_physical_time_us {} vs {}; falling back to "
+            "evaluating the filter for this branch",
+            segment->get_segment_id(),
+            shared->active_count,
+            active_count,
+            shared->timestamp,
+            timestamp_,
+            shared->collection_ttl_timestamp,
+            collection_ttl_timestamp_,
+            shared->entity_ttl_physical_time_us,
+            entity_ttl_physical_time_us_);
+    }
+    if (reuse_bitset) {
+        // No signature re-check: rendering the filter subtree's ToString()
+        // once per branch per segment is pure overhead in the correct case,
+        // and predicate equality is already established by the delegator's
+        // byte comparison.
+        plannodes = ProtoParser::RebindToPrecomputedBitset(plannodes);
+    }
+    auto plan = plan::PlanFragment(plannodes);
 
     // Set query context
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
@@ -501,6 +619,11 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     query_context->set_search_info(node.search_info_);
     query_context->set_placeholder_group(placeholder_group_);
+    if (reuse_bitset) {
+        precomputed_bitset_result_->ApplyTo(*query_context);
+        query_context->set_precomputed_bitset(
+            precomputed_bitset_result_->bitset);
+    }
     if (enable_expr_cache_) {
         query_context->set_enable_expr_cache(true);
         query_context->set_enable_sub_expr_cache_write(false);

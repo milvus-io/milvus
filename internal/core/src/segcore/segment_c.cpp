@@ -68,6 +68,7 @@
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "query/SharedFilterBitsetResult.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/TextLobSpillover.h"
 #include "segcore/SegmentSealed.h"
@@ -441,6 +442,174 @@ ValidateSegmentSchemaCompatibility(milvus::segcore::SegmentInterface* segment,
 }
 
 //////////////////////////////    public C API wrappers    //////////////////////////////
+
+CFuture*  // Future<milvus::query::SharedFilterBitsetResult>
+AsyncComputeFilterBitset(CTraceContext c_trace,
+                         CSegmentInterface c_segment,
+                         CSearchPlan c_plan,
+                         uint64_t timestamp,
+                         int32_t consistency_level,
+                         uint64_t collection_ttl,
+                         uint64_t entity_ttl_physical_time_us,
+                         bool enable_expr_cache) {
+    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+    auto plan = static_cast<milvus::query::Plan*>(c_plan);
+    auto future =
+        milvus::futures::Future<milvus::query::SharedFilterBitsetResult>::async(
+            milvus::futures::getSearchCPUExecutor(),
+            milvus::futures::ExecutePriority::HIGH,
+            [c_trace,
+             segment,
+             plan,
+             timestamp,
+             consistency_level,
+             collection_ttl,
+             entity_ttl_physical_time_us,
+             enable_expr_cache](folly::CancellationToken cancel_token) {
+                auto& trace_ctx = plan->plan_node_->search_info_.trace_ctx_;
+                trace_ctx.traceID = c_trace.traceID;
+                trace_ctx.spanID = c_trace.spanID;
+                trace_ctx.traceFlags = c_trace.traceFlags;
+
+                auto span = milvus::tracer::StartSpan("SegCoreComputeFilterBitset",
+                                                      &trace_ctx);
+                milvus::tracer::SetRootSpan(span);
+
+                milvus::OpContext op_ctx(cancel_token);
+                segment->LazyCheckSchema(plan->schema_, &op_ctx);
+                auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
+                ValidateSegmentSchemaCompatibility(segment, plan->schema_);
+                auto internal_segment =
+                    static_cast<milvus::segcore::SegmentInternalInterface*>(
+                        segment);
+                // The prefix touches only scalar predicate columns; the vector
+                // field and output entries belong to the branch searches.
+                std::vector<milvus::FieldId> skipped_manifest_fields;
+                skipped_manifest_fields.push_back(
+                    plan->plan_node_->search_info_.field_id_);
+                for (auto field_id : plan->target_entries_) {
+                    skipped_manifest_fields.push_back(field_id);
+                }
+                CheckExternalFieldsInLoadedManifest(plan->schema_,
+                                                    internal_segment,
+                                                    plan->access_entries_,
+                                                    skipped_manifest_fields);
+
+                auto bitset_result = internal_segment->ComputeFilterBitset(
+                    plan,
+                    timestamp,
+                    cancel_token,
+                    consistency_level,
+                    collection_ttl,
+                    entity_ttl_physical_time_us,
+                    enable_expr_cache,
+                    span);
+                span->End();
+                milvus::tracer::CloseRootSpan();
+                return bitset_result.release();
+            });
+
+    return static_cast<CFuture*>(static_cast<void*>(
+        static_cast<milvus::futures::IFuture*>(future.release())));
+}
+
+void
+DeleteSharedFilterBitsetResult(CSharedFilterBitsetResult c_bitset) {
+    delete static_cast<milvus::query::SharedFilterBitsetResult*>(c_bitset);
+}
+
+CFuture*  // Future<milvus::SearchResult*>
+AsyncSearchWithBitset(CTraceContext c_trace,
+                    CSegmentInterface c_segment,
+                    CSearchPlan c_plan,
+                    CPlaceholderGroup c_placeholder_group,
+                      CSharedFilterBitsetResult c_bitset,
+                    uint64_t timestamp,
+                    int32_t consistency_level,
+                    uint64_t collection_ttl,
+                    uint64_t entity_ttl_physical_time_us) {
+    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+    auto plan = static_cast<milvus::query::Plan*>(c_plan);
+    auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
+        c_placeholder_group);
+    auto bitset_result =
+        static_cast<const milvus::query::SharedFilterBitsetResult*>(c_bitset);
+    auto future = milvus::futures::Future<milvus::SearchResult>::async(
+        milvus::futures::getSearchCPUExecutor(),
+        milvus::futures::ExecutePriority::HIGH,
+        [c_trace,
+         segment,
+         plan,
+         phg_ptr,
+         bitset_result,
+         timestamp,
+         consistency_level,
+         collection_ttl,
+         entity_ttl_physical_time_us](folly::CancellationToken cancel_token) {
+            auto& trace_ctx = plan->plan_node_->search_info_.trace_ctx_;
+            trace_ctx.traceID = c_trace.traceID;
+            trace_ctx.spanID = c_trace.spanID;
+            trace_ctx.traceFlags = c_trace.traceFlags;
+
+            auto span = milvus::tracer::StartSpan("SegCoreSearchWithBitset",
+                                                  &trace_ctx);
+            milvus::tracer::SetRootSpan(span);
+            AssertInfo(phg_ptr != nullptr && !phg_ptr->empty(),
+                       "search requires non-empty placeholder group");
+            AssertInfo(bitset_result != nullptr,
+                       "AsyncSearchWithBitset requires a shared filter bitset");
+            const int64_t num_queries = milvus::query::GetNumOfQueries(phg_ptr);
+            auto target_vector_field_id =
+                plan->plan_node_->search_info_.field_id_;
+
+            milvus::OpContext op_ctx(cancel_token);
+            segment->LazyCheckSchema(plan->schema_, &op_ctx);
+            auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
+            ValidateSegmentSchemaCompatibility(segment, plan->schema_);
+            auto internal_segment =
+                static_cast<milvus::segcore::SegmentInternalInterface*>(
+                    segment);
+            CheckExternalFieldsInLoadedManifest(
+                plan->schema_, internal_segment, plan->access_entries_);
+            std::unique_ptr<milvus::SearchResult> search_result;
+            // Per-branch, never shared: one branch's vector field may be
+            // inaccessible while its siblings proceed normally.
+            if (!internal_segment->FieldAccessible(target_vector_field_id) ||
+                bitset_result->bitset == nullptr) {
+                search_result = std::make_unique<milvus::SearchResult>();
+                search_result->total_nq_ = num_queries;
+                search_result->unity_topK_ = 0;
+                search_result->total_data_cnt_ = 0;
+                search_result->segment_ = internal_segment;
+            } else {
+                search_result =
+                    internal_segment->SearchWithBitset(plan,
+                                                     phg_ptr,
+                                                     bitset_result,
+                                                     timestamp,
+                                                     cancel_token,
+                                                     consistency_level,
+                                                     collection_ttl,
+                                                     entity_ttl_physical_time_us,
+                                                     span);
+            }
+            search_result->read_lease_ = std::move(read_lease);
+            // Metric sign handling is per-branch: IP and BM25 differ.
+            if (!milvus::PositivelyRelated(
+                    plan->plan_node_->search_info_.metric_type_)) {
+                for (auto& dis : search_result->distances_) {
+                    dis *= -1;
+                }
+            }
+            span->End();
+            milvus::tracer::CloseRootSpan();
+
+            return search_result.release();
+        });
+
+    return static_cast<CFuture*>(static_cast<void*>(
+        static_cast<milvus::futures::IFuture*>(future.release())));
+}
 
 CFuture*  // Future<milvus::SearchResult*>
 AsyncSearch(CTraceContext c_trace,

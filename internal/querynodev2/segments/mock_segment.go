@@ -1981,6 +1981,65 @@ func (_c *MockSegment_Search_Call) RunAndReturn(run func(context.Context, *segco
 	return _c
 }
 
+// SearchGrouped provides a mock function with given fields: ctx, searchReqs
+func (_m *MockSegment) SearchGrouped(ctx context.Context, searchReqs []*segcore.SearchRequest) ([]*segcore.SearchResult, error) {
+	ret := _m.Called(ctx, searchReqs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SearchGrouped")
+	}
+
+	var r0 []*segcore.SearchResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, []*segcore.SearchRequest) ([]*segcore.SearchResult, error)); ok {
+		return rf(ctx, searchReqs)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, []*segcore.SearchRequest) []*segcore.SearchResult); ok {
+		r0 = rf(ctx, searchReqs)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*segcore.SearchResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, []*segcore.SearchRequest) error); ok {
+		r1 = rf(ctx, searchReqs)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockSegment_SearchGrouped_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SearchGrouped'
+type MockSegment_SearchGrouped_Call struct {
+	*mock.Call
+}
+
+// SearchGrouped is a helper method to define mock.On call
+//   - ctx context.Context
+//   - searchReqs []*segcore.SearchRequest
+func (_e *MockSegment_Expecter) SearchGrouped(ctx interface{}, searchReqs interface{}) *MockSegment_SearchGrouped_Call {
+	return &MockSegment_SearchGrouped_Call{Call: _e.mock.On("SearchGrouped", ctx, searchReqs)}
+}
+
+func (_c *MockSegment_SearchGrouped_Call) Run(run func(ctx context.Context, searchReqs []*segcore.SearchRequest)) *MockSegment_SearchGrouped_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]*segcore.SearchRequest))
+	})
+	return _c
+}
+
+func (_c *MockSegment_SearchGrouped_Call) Return(_a0 []*segcore.SearchResult, _a1 error) *MockSegment_SearchGrouped_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockSegment_SearchGrouped_Call) RunAndReturn(run func(context.Context, []*segcore.SearchRequest) ([]*segcore.SearchResult, error)) *MockSegment_SearchGrouped_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetPKCandidate provides a mock function with given fields: candidate
 func (_m *MockSegment) SetPKCandidate(candidate pkoracle.Candidate) {
 	_m.Called(candidate)
