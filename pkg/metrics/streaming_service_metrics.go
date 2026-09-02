@@ -481,6 +481,11 @@ var (
 		Help: "Current info of recovery storage on current wal",
 	}, WALChannelLabelName, WALChannelTermLabelName, WALRecoveryStorageStateLabelName)
 
+	WALRecoveryObservedTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_observed_time_tick",
+		Help: "the latest timetick observed by recovery storage",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
 	WALRecoveryInMemTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "recovery_in_mem_time_tick",
 		Help: "the final timetick tick of recovery storage seen",
@@ -489,6 +494,21 @@ var (
 	WALRecoveryPersistedTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "recovery_persisted_time_tick",
 		Help: "the final persisted timetick tick of recovery storage seen",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALRecoveryTailBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_tail_bytes",
+		Help: "Logical bytes observed after the catalog-published recovery checkpoint",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALRecoveryBlockingBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_blocking_bytes",
+		Help: "Logical bytes observed after the continuous completed recovery frontier",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALRecoveryPublishLagBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_publish_lag_bytes",
+		Help: "Logical bytes completed after the catalog-published recovery checkpoint",
 	}, WALChannelLabelName, WALChannelTermLabelName)
 
 	WALRecoveryInconsistentEventTotal = newWALCounterVec(prometheus.CounterOpts{
@@ -730,8 +750,12 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALFlusherInfo)
 	registry.MustRegister(WALFlusherTimeTick)
 	registry.MustRegister(WALRecoveryInfo)
+	registry.MustRegister(WALRecoveryObservedTimeTick)
 	registry.MustRegister(WALRecoveryInMemTimeTick)
 	registry.MustRegister(WALRecoveryPersistedTimeTick)
+	registry.MustRegister(WALRecoveryTailBytes)
+	registry.MustRegister(WALRecoveryBlockingBytes)
+	registry.MustRegister(WALRecoveryPublishLagBytes)
 	registry.MustRegister(WALRecoveryInconsistentEventTotal)
 	registry.MustRegister(WALRecoveryIsOnPersisting)
 	registry.MustRegister(WALIdempotencyWindowEntries)
