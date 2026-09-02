@@ -520,7 +520,13 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 			}
 		}
 
+		if IsBytes(operand) {
+			return bytesTemplateValueError()
+		}
 		operandExpr := toValueExpr(operand)
+		if operandExpr == nil {
+			return merr.WrapErrQueryPlanMsg("unsupported arithmetic operand")
+		}
 		lDataType, rDataType := expr.GetColumnInfo().GetDataType(), operandExpr.dataType
 		if typeutil.IsArrayType(expr.GetColumnInfo().GetDataType()) {
 			lDataType = expr.GetColumnInfo().GetElementType()
