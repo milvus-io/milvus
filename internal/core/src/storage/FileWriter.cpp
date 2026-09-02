@@ -173,6 +173,11 @@ FileWriter::~FileWriter() {
 }
 
 void
+FileWriter::SetFdatasyncOnFinish() {
+    fdatasync_on_finish_ = true;
+}
+
+void
 FileWriter::Cleanup() noexcept {
     if (fd_ != -1) {
         close(fd_);
@@ -208,6 +213,27 @@ FileWriter::PositionedWriteWithCheck(const void* data,
     } catch (...) {
         Cleanup();
         throw;
+    }
+}
+
+void
+FileWriter::SyncFileData() {
+    if (sync_file_data_hook_for_test_) {
+        sync_file_data_hook_for_test_();
+        return;
+    }
+#ifdef __APPLE__
+    auto ret = fsync(fd_);
+#else
+    auto ret = fdatasync(fd_);
+#endif
+    if (ret != 0) {
+        auto saved_errno = errno;
+        Cleanup();
+        ThrowInfo(ErrorCode::FileWriteFailed,
+                  "Failed to sync file data: {}, error: {}",
+                  filename_,
+                  strerror(saved_errno));
     }
 }
 
@@ -297,7 +323,7 @@ FileWriter::Write(const void* data, size_t nbyte) {
     // fallback to write the data directly if the task cannot be added to the pool
     if (FileWriteWorkerPool::GetInstance().AddTask(task)) {
         try {
-            future.wait();
+            std::move(future).get();
         } catch (const std::exception& e) {
             Cleanup();
             ThrowInfo(ErrorCode::FileWriteFailed,
@@ -342,17 +368,29 @@ FileWriter::FlushWithBufferedIO() {
 
 size_t
 FileWriter::Finish() {
-    // if the aligned buffer is not empty, we should flush it to the file
-    if (offset_ != 0) {
-        auto promise = std::make_shared<folly::Promise<folly::Unit>>();
-        auto future = promise->getFuture();
-        auto task = [this, promise]() {
-            try {
+    const bool needs_finish_task =
+        offset_ != 0 ||
+        (fdatasync_on_finish_ && !use_direct_io_ && file_size_ != 0);
+    if (needs_finish_task) {
+        const auto finish_file = [this]() {
+            // Keep the final flush and sync in the same worker-pool task so
+            // diskWriteNumThreads limits both operations.
+            if (offset_ != 0) {
                 if (use_direct_io_) {
                     FlushWithDirectIO();
                 } else {
                     FlushWithBufferedIO();
                 }
+            }
+            if (fdatasync_on_finish_ && !use_direct_io_) {
+                SyncFileData();
+            }
+        };
+        auto promise = std::make_shared<folly::Promise<folly::Unit>>();
+        auto future = promise->getFuture();
+        auto task = [finish_file, promise]() {
+            try {
+                finish_file();
                 promise->setValue(folly::Unit{});
             } catch (...) {
                 promise->setException(
@@ -362,20 +400,16 @@ FileWriter::Finish() {
 
         if (FileWriteWorkerPool::GetInstance().AddTask(task)) {
             try {
-                future.wait();
+                std::move(future).get();
             } catch (const std::exception& e) {
                 Cleanup();
                 ThrowInfo(ErrorCode::FileWriteFailed,
-                          "Failed to flush file: {}, error: {}",
+                          "Failed to finish file: {}, error: {}",
                           filename_,
                           e.what());
             }
         } else {
-            if (use_direct_io_) {
-                FlushWithDirectIO();
-            } else {
-                FlushWithBufferedIO();
-            }
+            finish_file();
         }
     }
 

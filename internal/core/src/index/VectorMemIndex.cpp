@@ -694,6 +694,8 @@ VectorMemIndex<T>::Build(const Config& config) {
         if (!offsets.empty()) {
             dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                          const_cast<const size_t*>(offsets.data()));
+            dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                         static_cast<int64_t>(offsets.size() - 1));
         }
         BuildWithDataset(dataset, build_config);
     } else {

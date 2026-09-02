@@ -3786,6 +3786,7 @@ type queryNodeConfig struct {
 	MmapScalarField                     ParamItem `refreshable:"false"`
 	MmapScalarIndex                     ParamItem `refreshable:"false"`
 	MmapPopulate                        ParamItem `refreshable:"false"`
+	MmapWriteback                       ParamItem `refreshable:"false"`
 	MmapJSONStats                       ParamItem `refreshable:"false"`
 	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
@@ -4658,6 +4659,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       false,
 	}
 	p.MmapPopulate.Init(base.mgr)
+
+	p.MmapWriteback = ParamItem{
+		Key:          "queryNode.mmap.writeback",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Enable fdatasync after writing each mmap field data file with buffered I/O.",
+		Export:       false,
+	}
+	p.MmapWriteback.Init(base.mgr)
 
 	p.MmapJSONStats = ParamItem{
 		Key:          "queryNode.mmap.jsonShredding",
@@ -5566,6 +5576,7 @@ type dataCoordConfig struct {
 	ImportInReplicatingCluster      ParamItem `refreshable:"true"`
 	EnableL0Import                  ParamItem `refreshable:"true"`
 	ImportPreAllocIDExpansionFactor ParamItem `refreshable:"true"`
+	ImportParquetFooterMaxSize      ParamItem `refreshable:"true"`
 	ImportFileNumPerSlot            ParamItem `refreshable:"true"`
 	ImportMemoryLimitPerSlot        ParamItem `refreshable:"true"`
 	MaxSegmentsPerCopyTask          ParamItem `refreshable:"true"`
@@ -6908,6 +6919,16 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Doc:          `The expansion factor for pre-allocating IDs during import.`,
 	}
 	p.ImportPreAllocIDExpansionFactor.Init(base.mgr)
+
+	p.ImportParquetFooterMaxSize = ParamItem{
+		Key:          "dataCoord.import.parquetFooterMaxSize",
+		Version:      "3.0.0",
+		DefaultValue: "67108864",
+		Doc: `Largest parquet footer, in bytes, that import sizing will read to obtain an exact row count.
+A file declaring a longer footer is rejected at submit. Footer size tracks row_groups * columns, so
+raise this for files written with small row groups, many columns, or untruncated string statistics.`,
+	}
+	p.ImportParquetFooterMaxSize.Init(base.mgr)
 
 	p.ImportFileNumPerSlot = ParamItem{
 		Key:          "dataCoord.import.fileNumPerSlot",
