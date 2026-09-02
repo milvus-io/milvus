@@ -222,6 +222,63 @@ func TestShardInterceptorDeleteOnFencedVChannel(t *testing.T) {
 	assert.True(t, status.AsStreamingError(err).IsShardFenced())
 }
 
+// A split is the first thing that puts two vchannels of one collection on one
+// pchannel in sequence, so a proxy holding a stale route to a retired source can
+// reach a shard manager that holds only the successor. The admission check
+// answers ErrCollectionNotFound for that; letting it through would append the
+// message carrying the retired vchannel while its segment belongs to the live
+// one -- the flusher then finds no data sync service for it and drops the batch,
+// recovery counts the rows against the other segment, and the client is told the
+// append succeeded. Silent loss, so it has to be a rejection.
+func TestShardInterceptorInsertOnAVChannelTheManagerDoesNotHold(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v1").Return(shards.ErrCollectionNotFound).Once()
+
+	msg := message.NewInsertMessageBuilderV1().
+		WithVChannel("v1").
+		WithHeader(&messagespb.InsertMessageHeader{
+			CollectionId: 1,
+			Partitions: []*messagespb.PartitionSegmentAssignment{
+				{PartitionId: 1, Rows: 1, BinarySize: 100},
+			},
+		}).
+		WithBody(&msgpb.InsertRequest{}).
+		MustBuildMutable().WithTimeTick(100)
+
+	msgID, err := i.DoAppend(context.Background(), msg,
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			assert.Fail(t, "the append must not run for a vchannel this shard manager does not hold")
+			return nil, nil
+		})
+	assert.Nil(t, msgID)
+	streamErr := status.AsStreamingError(err)
+	assert.False(t, streamErr.IsShardFenced(), "not a fence: refreshing the route does not make this vchannel writable here")
+	assert.True(t, streamErr.IsUnrecoverable())
+}
+
+func TestShardInterceptorDeleteOnAVChannelTheManagerDoesNotHold(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v1").Return(shards.ErrCollectionNotFound).Once()
+
+	msg := message.NewDeleteMessageBuilderV1().
+		WithVChannel("v1").
+		WithHeader(&messagespb.DeleteMessageHeader{
+			CollectionId: 1,
+		}).
+		WithBody(&msgpb.DeleteRequest{}).
+		MustBuildMutable().WithTimeTick(100)
+
+	msgID, err := i.DoAppend(context.Background(), msg,
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			assert.Fail(t, "the append must not run for a vchannel this shard manager does not hold")
+			return nil, nil
+		})
+	assert.Nil(t, msgID)
+	streamErr := status.AsStreamingError(err)
+	assert.False(t, streamErr.IsShardFenced())
+	assert.True(t, streamErr.IsUnrecoverable())
+}
+
 // newTestCreateVChannelMutableMessageWithSchema builds a split target's genesis
 // message carrying the collection schema, as the coordinator sends it.
 func newTestCreateVChannelMutableMessageWithSchema(vchannel string, collectionID int64, schema *schemapb.CollectionSchema) message.MutableMessage {
