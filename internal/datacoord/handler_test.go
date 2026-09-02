@@ -2403,16 +2403,15 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	schema := newTestSchema()
 	// Committed V3 manifest with empty legacy arrays must be kept.
 	manifestSeg := NewSegmentInfo(&datapb.SegmentInfo{
-		ID:               2001,
-		CollectionID:     200,
-		PartitionID:      0,
-		InsertChannel:    "ch-1",
-		State:            commonpb.SegmentState_Flushed,
-		StartPosition:    &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
-		DmlPosition:      &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 600},
-		StorageVersion:   storage.StorageV3,
-		ManifestPath:     packed.MarshalManifestPath("/data/segments/2001", 3),
-		ManifestHasIndex: true,
+		ID:             2001,
+		CollectionID:   200,
+		PartitionID:    0,
+		InsertChannel:  "ch-1",
+		State:          commonpb.SegmentState_Flushed,
+		StartPosition:  &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
+		DmlPosition:    &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 600},
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("/data/segments/2001", 3),
 	})
 	// A growing V3 segment only has an allocation placeholder and must be dropped.
 	growingSeg := NewSegmentInfo(&datapb.SegmentInfo{
@@ -2520,8 +2519,6 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	require.Len(t, snapshotData.Segments, 1)
 	assert.Equal(t, int64(2001), snapshotData.Segments[0].GetSegmentId())
 	assert.NotEmpty(t, snapshotData.Segments[0].GetManifestPath())
-	assert.True(t, snapshotData.Segments[0].GetManifestHasIndex(),
-		"snapshot must preserve the marker paired with the manifest pointer")
 
 	candidates = []*SegmentInfo{NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             2004,
