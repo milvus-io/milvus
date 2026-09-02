@@ -23,6 +23,7 @@ type httpConfig struct {
 	AcceptTypeAllowInt64  ParamItem `refreshable:"true"`
 	EnablePprof           ParamItem `refreshable:"false"`
 	RequestTimeoutMs      ParamItem `refreshable:"true"`
+	DQLAdmissionEnabled   ParamItem `refreshable:"true"`
 	ReadHeaderTimeout     ParamItem `refreshable:"false"`
 	ReadTimeout           ParamItem `refreshable:"false"`
 	WriteTimeout          ParamItem `refreshable:"false"`
@@ -89,6 +90,18 @@ func (p *httpConfig) init(base *BaseTable) {
 		Export:       false,
 	}
 	p.RequestTimeoutMs.Init(base.mgr)
+
+	p.DQLAdmissionEnabled = ParamItem{
+		Key:          "proxy.http.dqlAdmissionEnabled",
+		DefaultValue: "true",
+		Version:      "3.0.1",
+		Doc: `high-level restful api, reject a search/query request with HTTP 429 while the proxy's DQL task
+queue is full, before the request body is decoded. The scheduler rejects such a request with the same
+TooManyRequests error anyway, but only after the body has been decoded; admission moves the same verdict before that
+cost. Disabling restores the old always-decode behavior.`,
+		Export: true,
+	}
+	p.DQLAdmissionEnabled.Init(base.mgr)
 
 	p.ReadHeaderTimeout = ParamItem{
 		Key:          "proxy.http.readHeaderTimeout",
