@@ -2420,3 +2420,78 @@ func TestAssembleCopySegmentRequest_ManifestEntriesRetractedAlongsideSnapshotFil
 	// entry would point the target at the source's files.
 	assert.ElementsMatch(t, []int64{1001, 1002}, req.GetTargets()[0].GetInheritedIndexIds())
 }
+
+// Strict exclusivity on the copy path: with manifest publication off, the
+// worker must receive no target index definitions at all, so it retracts the
+// inherited entries and writes none of its own; with it on, the definitions
+// flow so the worker can republish.
+func (s *CopySegmentTaskSuite) TestBuildCopySegmentTargetIndexes_GatedBySwitch() {
+	collectionID := int64(1)
+	im := createTestIndexMeta(s.T(), collectionID, map[int64]*model.Index{
+		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
+	})
+	m := &meta{indexMeta: im, segments: NewSegmentsInfo(), collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
+
+	withSegmentIndexManifestWrites(s.T(), false)
+	s.Nil(buildCopySegmentTargetIndexes(m, collectionID),
+		"with manifest writes off the worker must get no definitions, or it would mint manifest entries the etcd records do not own")
+
+	withSegmentIndexManifestWrites(s.T(), true)
+	targets := buildCopySegmentTargetIndexes(m, collectionID)
+	s.Require().Len(targets, 1)
+	s.EqualValues(300, targets["vec_idx"].GetIndexId())
+}
+
+// With manifest publication on, a StorageV3 copy whose manifest read-back
+// carries no entry for a synced build would produce a memory-only record (the
+// etcd write is skipped for a manifest-backed segment) that silently vanishes
+// on restart. The task must hard-fail with the upgrade hint instead.
+func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_FailsWhenEntryMissingUnderManifestWrites() {
+	withSegmentIndexManifestWrites(s.T(), true)
+	collectionID := int64(1)
+	segmentID := int64(105)
+
+	im := createTestIndexMeta(s.T(), collectionID, map[int64]*model.Index{
+		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
+	})
+	m := &meta{indexMeta: im, segments: NewSegmentsInfo()}
+	m.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		CollectionID:   collectionID,
+		NumOfRows:      100,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+	}))
+
+	result := &datapb.CopySegmentResult{
+		SegmentId:    segmentID,
+		ManifestPath: "files/manifest/105/1",
+		IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{
+			8001: {FieldId: 101, BuildId: 8001, IndexName: "vec_idx", IndexFilePaths: []string{"HNSW"}},
+		},
+	}
+	task := createTestCopyTask(collectionID, segmentID)
+
+	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyCatalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyMeta, cmErr := NewCopySegmentMeta(context.TODO(), copyCatalog, nil, nil, nil)
+	s.Require().NoError(cmErr)
+
+	// publishedBuilds empty: the old-DataNode shape - a pointer whose index
+	// section the copy never rewrote.
+	err := syncVectorScalarIndexes(context.Background(), result, task, m, copyMeta, nil)
+	s.Require().Error(err)
+	s.Contains(err.Error(), "predates manifest index republication")
+	_, installed := im.segmentBuildInfo.Get(8001)
+	s.False(installed, "no memory-only record may be installed for an entry the manifest does not carry")
+
+	// The control: the same shape with manifest writes off records to etcd
+	// and merely flags the segment for backfill.
+	withSegmentIndexManifestWrites(s.T(), false)
+	s.NoError(syncVectorScalarIndexes(context.Background(), result, task, m, copyMeta, nil))
+	_, installed = im.segmentBuildInfo.Get(8001)
+	s.True(installed)
+}

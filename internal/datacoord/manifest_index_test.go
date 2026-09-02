@@ -1069,3 +1069,97 @@ func TestValidateManifestIndexPublishable(t *testing.T) {
 	pathless.Path = ""
 	require.Error(t, validateManifestIndexPublishable(5001, pathless))
 }
+
+// A false marker proves the manifest never carried an index entry, so reload
+// must not even read it: an all-etcd cluster boots with zero object-storage
+// reads, and an unreadable manifest on an unmarked segment cannot abort boot.
+func TestReloadSkipsUnmarkedSegments(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, m.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             5002,
+		CollectionID:   100,
+		PartitionID:    10,
+		State:          commonpb.SegmentState_Flushed,
+		NumOfRows:      100,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("/tmp/test-reload/insert_log/100/10/5002", 3),
+		// ManifestHasIndex deliberately unset.
+	})))
+
+	// Every read fails; reload succeeding proves no read was attempted.
+	infos := mockey.Mock(packed.GetManifestIndexInfos).
+		Return(nil, merr.WrapErrIoFailedReason("throttled")).Build()
+	defer infos.UnPatch()
+
+	require.NoError(t, m.reloadSegmentIndexesFromManifests(context.TODO()),
+		"an unmarked segment's manifest must not be read, readable or not")
+	assert.Empty(t, m.indexMeta.GetSegmentIndexes(100, 5002))
+}
+
+// With the switch off, publishIndexToManifest declines before touching
+// anything: zero manifest I/O, and setJobInfo records the result the legacy
+// way - an etcd row and no manifest entry, so the segment stays unmarked.
+func TestPublishIndexToManifestDeclinedWhenSwitchOff(t *testing.T) {
+	withSegmentIndexManifestWrites(t, false)
+	store := newFakeManifestStore(t)
+	ctx := context.TODO()
+
+	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	m := bootMetaForRestart(t, catalog, restartCollID)
+	seedUnpublishedBuild(t, m, "vec_idx")
+
+	segIdx, ok := m.indexMeta.GetIndexJob(restartBuildID)
+	require.True(t, ok)
+	it := newIndexBuildTask(segIdx, 1, m, nil, nil, nil)
+	result := &workerpb.IndexTaskInfo{
+		BuildID:               restartBuildID,
+		State:                 commonpb.IndexState_Finished,
+		IndexFileKeys:         []string{"0", "1"},
+		SerializedSize:        4096,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+	}
+
+	published, err := it.publishIndexToManifest(result)
+	require.NoError(t, err)
+	require.False(t, published)
+	require.NoError(t, it.setJobInfo(result))
+
+	assert.Empty(t, store.revisions, "off means no manifest revision, not a declined-then-retried one")
+	persisted, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+	require.NoError(t, err)
+	require.Len(t, persisted, 1, "the record must take the legacy etcd path")
+	assert.Equal(t, commonpb.IndexState_Finished, persisted[0].IndexState)
+	assert.False(t, m.GetSegment(ctx, restartSegID).GetManifestHasIndex())
+}
+
+// The reversibility claim the marker exists for: an index published to the
+// manifest while the switch was on must still be visible after the switch is
+// turned off and DataCoord restarts. Reload is driven by the durable marker,
+// not by the current configuration, so the flip cannot orphan the index (and
+// GC therefore cannot delete its files).
+func TestSegmentIndexSurvivesSwitchFlipOffAfterPublication(t *testing.T) {
+	withSegmentIndexManifestWrites(t, true)
+	newFakeManifestStore(t)
+	ctx := context.TODO()
+
+	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	m := bootMetaForRestart(t, catalog, restartCollID)
+	seedRestartFixture(t, m)
+	require.True(t, m.GetSegment(ctx, restartSegID).GetManifestHasIndex(),
+		"publication must have set the durable marker")
+
+	// The operator turns the switch back off, then DataCoord restarts.
+	key := paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.Key
+	paramtable.Get().Save(key, "false")
+
+	restarted := bootMetaForRestart(t, catalog, restartCollID)
+	recovered := restarted.indexMeta.GetSegmentIndexes(restartCollID, restartSegID)
+	require.Len(t, recovered, 1, "the manifest-resident record must survive the off flip")
+	segIdx := recovered[restartIndexID]
+	require.NotNil(t, segIdx)
+	assert.Equal(t, commonpb.IndexState_Finished, segIdx.IndexState)
+	assert.EqualValues(t, restartBuildID, segIdx.BuildID)
+	assert.True(t, restarted.GetSegment(ctx, restartSegID).GetManifestHasIndex(),
+		"the sticky marker itself must survive the restart")
+}

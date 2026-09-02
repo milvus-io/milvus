@@ -13,6 +13,15 @@ Every such manifest revision is created by DataCoord inside
 `meta.CommitSegmentManifest`, in the same segment-scoped critical section that
 advances `SegmentInfo.manifest_path` and persists the index task metadata.
 
+Publication is opt-in and exclusive with the etcd `SegmentIndex` row, behind
+`dataCoord.index.writeSegmentIndexToManifest` (default off). Off is the pure
+legacy path: every record goes to etcd and no manifest index entry is produced
+at all. On records the index in the manifest and skips the `SegmentIndex` etcd
+write for the manifest-backed segment; the commit also sets the segment's
+sticky `manifest_has_index` marker in the same transaction, which is what
+drives recovery (see the framework doc's "Retiring the etcd SegmentIndex
+Record"). There is no dual-write mode.
+
 Index workers keep their existing responsibility — build the index and upload
 its files — and keep their existing result contract. They do not open a
 manifest transaction and the worker result carries no manifest path.
@@ -156,6 +165,16 @@ key — so DataCoord resolves it when assembling the request and ships it in
 `CopySegmentTarget`: the target index definitions keyed by name, the target's
 row count, and the inherited entry IDs to retract.
 
+The target-definition map is the switch's lever on this path. With manifest
+publication off DataCoord ships an empty map, so the worker retracts the
+inherited entries and writes no target entries - the copied records go to etcd
+like any legacy build. With it on the map flows and the worker republishes;
+DataCoord then verifies the read-back and hard-fails the task if a synced
+build has no entry (a DataNode predating republication), because the gated
+etcd write would otherwise leave that record memory-only and it would silently
+vanish on restart. A verified republication also sets the target segment's
+`manifest_has_index` marker in the same transaction as its pointer.
+
 On the source side, DataCoord reads the source manifest's index entries once
 while assembling the request. That read supplies the retraction list, and, for
 a snapshot whose segments record indexes only in their manifests, also the
@@ -193,8 +212,8 @@ fallback, because neither of the two states one could recover is reachable:
   the matching record in memory in the same commit, or by the copy worker, whose
   target records `syncVectorScalarIndexes` writes from the same worker result;
   GC retracts an entry and removes its record in one catalog transaction; and
-  with the etcd write switch off, reload rebuilds the records from the manifests
-  at startup before the server serves.
+  reload rebuilds manifest-resident records from the manifests of segments
+  marked `manifest_has_index` at startup, before the server serves.
 - a finished record with no `index_file_keys` has no manifest entry either: the
   only build that records no files is a fake-finished one (a segment too small
   to train), which `publishIndexToManifest` skips.
@@ -206,7 +225,10 @@ segments it can never help.
 
 Segment index GC does read the manifest for a dropped StorageV3 segment that no
 longer has `SegmentIndex` rows - it must, since it is deciding whether artifacts
-may be deleted rather than which paths to serve. That read fails closed, with one
+may be deleted rather than which paths to serve - but only when the segment's
+`manifest_has_index` marker says the manifest can actually carry entries; an
+unmarked segment is recycled without a manifest read, so an all-etcd cluster
+has no `gcBlockedByManifest` failure surface. That read fails closed, with one
 exception: if the manifest file itself is no longer in object storage there is
 nothing left to protect, and blocking would strand the segment's metadata
 permanently, so the segment is recycled. The FFI reports every manifest read
@@ -217,7 +239,13 @@ A segment that is already dropped is skipped by both index paths, in each case
 because it will publish no further manifest revision: an index build that
 finishes against it records its result the legacy way, and GC deletes its
 artifacts without retracting the entry rather than retrying a commit that can
-never succeed.
+never succeed. With the switch on, that legacy `FinishTask` fallback's etcd
+write is itself gated for a manifest-backed segment, so the fallback record -
+and every other publish decline (a dropped index definition, a fake-finished
+build) - is memory-only: it is lost on restart and either reissued by the
+inspector or retired with its segment. Under `storePathVersion: 0` the orphan
+sweep reclaims any files such a record left behind; under version 1 a small
+leak window exists until the segment itself is collected.
 
 ## Verification
 
