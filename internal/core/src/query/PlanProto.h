@@ -58,8 +58,7 @@ class ProtoParser {
     CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto);
 
     std::unique_ptr<RetrievePlan>
-    CreateRetrievePlan(
-        std::unique_ptr<proto::plan::PlanNode> plan_node_proto);
+    CreateRetrievePlan(std::unique_ptr<proto::plan::PlanNode> plan_node_proto);
 
     expr::TypedExprPtr
     ParseExprs(const proto::plan::Expr& expr_pb,
@@ -78,8 +77,9 @@ class ProtoParser {
     ExtractFilterOnlyPlan(const std::shared_ptr<plan::PlanNode>& root_node);
 
  private:
-    using BloomBlobOwners = std::unordered_map<
-        const std::string*, std::shared_ptr<const std::string>>;
+    using BloomBlobOwners =
+        std::unordered_map<const std::string*,
+                           std::shared_ptr<const std::string>>;
 
     ProtoParser(SchemaPtr schema, BloomBlobOwners bloom_blob_owners)
         : schema(std::move(schema)),

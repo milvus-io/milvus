@@ -957,8 +957,8 @@ ProtoParser::RetrievePlanNodeFromProto(
     return plan_node;
 }
 
-using BloomBlobOwners = std::unordered_map<
-    const std::string*, std::shared_ptr<const std::string>>;
+using BloomBlobOwners =
+    std::unordered_map<const std::string*, std::shared_ptr<const std::string>>;
 
 // Move Bloom bodies out of a uniquely owned protobuf tree before parsing. The
 // string object's address remains stable and is used only as a temporary key;
@@ -971,12 +971,11 @@ ExtractBloomFilterBlobs(google::protobuf::Message* message,
         proto::plan::BloomFilterExpr::descriptor()) {
         auto* bloom = static_cast<proto::plan::BloomFilterExpr*>(message);
         auto* source_blob = bloom->mutable_filter_blob();
-        const auto inserted =
-            owners
-                ->emplace(source_blob,
-                          std::make_shared<const std::string>(
-                              std::move(*source_blob)))
-                .second;
+        const auto inserted = owners
+                                  ->emplace(source_blob,
+                                            std::make_shared<const std::string>(
+                                                std::move(*source_blob)))
+                                  .second;
         AssertInfo(inserted, "duplicate Bloom blob protobuf address");
     }
 
@@ -996,8 +995,8 @@ ExtractBloomFilterBlobs(google::protobuf::Message* message,
                     owners);
             }
         } else if (reflection->HasField(*message, field)) {
-            ExtractBloomFilterBlobs(
-                reflection->MutableMessage(message, field), owners);
+            ExtractBloomFilterBlobs(reflection->MutableMessage(message, field),
+                                    owners);
         }
     }
 }
@@ -1563,8 +1562,7 @@ ProtoParser::ParseScorer(const proto::plan::ScoreFunction& function) {
 }
 
 std::shared_ptr<rescores::Scorer>
-ProtoParser::ParseScorer(
-    std::unique_ptr<proto::plan::ScoreFunction> function) {
+ProtoParser::ParseScorer(std::unique_ptr<proto::plan::ScoreFunction> function) {
     AssertInfo(function != nullptr, "score function owner must not be null");
     auto bloom_blob_owners = ExtractBloomFilterBlobs(function.get());
     return ProtoParser(schema, std::move(bloom_blob_owners))
