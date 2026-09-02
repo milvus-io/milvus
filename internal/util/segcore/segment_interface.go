@@ -63,6 +63,18 @@ type basicSegmentMethodSet interface {
 	// If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)
 
+	// ComputeFilterBitset evaluates the filter subtree of searchReq's plan
+	// (FilterBitsNode -> MvccNode -> [ElementFilterBitsNode]) and returns the
+	// resulting bitset as an opaque handle. Used by shared-filter hybrid
+	// search: the filter runs once per segment and every branch reuses it.
+	// The caller owns the handle and must Release it.
+	ComputeFilterBitset(ctx context.Context, searchReq *SearchRequest) (*SharedFilterBitsetResult, error)
+
+	// SearchWithBitset runs one branch's vector search against a bitset produced
+	// by ComputeFilterBitset, skipping the filter and MVCC stages. The bitset is
+	// read-only, so concurrent calls may share one.
+	SearchWithBitset(ctx context.Context, searchReq *SearchRequest, bitset *SharedFilterBitsetResult) (*SearchResult, error)
+
 	// Retrieve retrieves entities from the segment.
 	Retrieve(ctx context.Context, plan *RetrievePlan) (*RetrieveResult, error)
 
