@@ -18,8 +18,13 @@ import (
 
 // ErrSourceVChannelFenced is returned by SplitShard when the source vchannel
 // has already been fenced by a previous split message. The caller treats this
-// as success — the fence holds — and rolls forward: the target vchannels are
-// created with a freshly allocated barrier, so no exact T_switch is needed.
+// as success -- the fence holds -- and rolls forward.
+//
+// The result returned alongside it carries the recorded T_switch, read back off
+// the error (see SplitShard). The BARRIER does not need it: it is freshly
+// allocated and is only ever a lower bound. The redistribution DRAIN does --
+// it gates on channelCheckpoint(source) >= T_switch -- so a caller that lost
+// the persisted value recovers it here rather than proceeding with zero.
 var ErrSourceVChannelFenced = errors.New("source vchannel is already fenced by shard split")
 
 // SplitShardParam is the parameter of SplitShard.
@@ -316,6 +321,7 @@ func (p *DropSplitVChannelParam) Validate() error {
 // first would never receive another teardown message of any kind — its
 // streamingnode state would outlive the collection itself, with no code path
 // left to clean it.
+
 func DropSplitVChannel(ctx context.Context, w WALAccesser, param DropSplitVChannelParam) error {
 	if err := param.Validate(); err != nil {
 		return err

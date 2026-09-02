@@ -252,3 +252,83 @@ func TestProducerAppendOverwritesTraceContextDuringSerialization(t *testing.T) {
 	distSpan.End()
 	producer.Close()
 }
+
+// TestShardFencedPayloadSurvivesTheProduceResponse pins the cross-process half of
+// the split coordinator's crash recovery.
+//
+// The unary path is covered by status.TestShardFencedSurvivesTheWire, but an
+// append does not take it: RawAppend goes through the Produce STREAM, and a
+// rejected append comes back in the response body as ProduceMessageResponse_Error
+// rather than as a gRPC status. Rebuilding the error from (code, cause) there
+// zeroes FencedTimeTick, and the coordinator that re-sends SplitShard after
+// losing T_switch reads 0 back — which makes the redistribution drain gate
+// (channelCheckpoint(source) >= T_switch) always true.
+//
+// Only a cluster deployment takes this path; when the pchannel is hosted in the
+// same process the append short-circuits to the local WAL and hands back the
+// *StreamingError itself, payload intact. That is why this needs its own test.
+func TestShardFencedPayloadSurvivesTheProduceResponse(t *testing.T) {
+	const fencedTimeTick = uint64(447856455348518913)
+
+	c := mock_streamingpb.NewMockStreamingNodeHandlerServiceClient(t)
+	cc := mock_streamingpb.NewMockStreamingNodeHandlerService_ProduceClient(t)
+	recvCh := make(chan *streamingpb.ProduceResponse, 10)
+	cc.EXPECT().Recv().RunAndReturn(func() (*streamingpb.ProduceResponse, error) {
+		msg, ok := <-recvCh
+		if !ok {
+			return nil, io.EOF
+		}
+		return msg, nil
+	})
+	sendCh := make(chan int64, 5)
+	cc.EXPECT().Send(mock.Anything).RunAndReturn(func(pr *streamingpb.ProduceRequest) error {
+		sendCh <- pr.GetProduce().GetRequestId()
+		return nil
+	})
+	c.EXPECT().Produce(mock.Anything, mock.Anything).Return(cc, nil)
+	cc.EXPECT().CloseSend().RunAndReturn(func() error {
+		recvCh <- &streamingpb.ProduceResponse{Response: &streamingpb.ProduceResponse_Close{}}
+		close(recvCh)
+		return nil
+	})
+
+	ctx := context.Background()
+	opts := &ProducerOptions{
+		Assignment: &types.PChannelInfoAssigned{
+			Channel: types.PChannelInfo{Name: "test", Term: 1},
+			Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+		},
+	}
+	recvCh <- &streamingpb.ProduceResponse{
+		Response: &streamingpb.ProduceResponse_Create{Create: &streamingpb.CreateProducerResponse{}},
+	}
+	producer, err := CreateProducer(ctx, opts, c)
+	require.NoError(t, err)
+	defer producer.Close()
+
+	appendDone := make(chan error, 1)
+	go func() {
+		_, err := producer.Append(ctx, message.CreateTestEmptyInsertMesage(1, nil))
+		appendDone <- err
+	}()
+
+	requestID := <-sendCh
+	recvCh <- &streamingpb.ProduceResponse{
+		Response: &streamingpb.ProduceResponse_Produce{
+			Produce: &streamingpb.ProduceMessageResponse{
+				RequestId: requestID,
+				Response: &streamingpb.ProduceMessageResponse_Error{
+					Error: status.NewShardFenced("by-dev-rootcoord-dml_0_100v0", fencedTimeTick).AsPBError(),
+				},
+			},
+		},
+	}
+
+	err = <-appendDone
+	streamErr := status.AsStreamingError(err)
+	require.NotNil(t, streamErr)
+	assert.True(t, streamErr.IsShardFenced())
+	assert.Contains(t, streamErr.Cause, "by-dev-rootcoord-dml_0_100v0")
+	assert.Equal(t, fencedTimeTick, streamErr.FencedTimeTick,
+		"T_switch must survive the produce response body; without it a coordinator that crashed after fencing cannot recover it")
+}
