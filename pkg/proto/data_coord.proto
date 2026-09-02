@@ -479,6 +479,15 @@ message SegmentInfo {
   // create_ts records the planning/create timestamp for replacement segment metadata.
   // Legacy segments keep the zero value, which means unknown.
   uint64 create_ts = 39;
+
+  // manifest_has_index records that this segment's manifest has carried at
+  // least one index entry (written in the same commit as the entry). It is
+  // sticky - set-only, never cleared by retraction - so reload can decide
+  // which manifests to read without depending on configuration: a false
+  // marker proves no entry was ever published, a stale true only costs one
+  // extra manifest read at startup. Clearing it wrongly would silently drop
+  // indexes, so no writer clears it.
+  bool manifest_has_index = 40;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
