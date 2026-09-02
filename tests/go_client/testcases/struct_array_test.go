@@ -549,6 +549,138 @@ func TestStructArraySearchVectorMultiple(t *testing.T) {
 	require.Greater(t, rs[0].ResultCount, 0)
 }
 
+// TestStructArraySearchPreservesTrailingEmptyQueries covers #52933 across all segment paths.
+func TestStructArraySearchPreservesTrailingEmptyQueries(t *testing.T) {
+	const (
+		dim                 = 8
+		indexedSealedRows   = 3000
+		unindexedSealedRows = 500
+		growingRows         = 500
+		totalRows           = indexedSealedRows + unindexedSealedRows + growingRows
+		indexName           = "clips_embedding_hnsw"
+		limit               = 10
+	)
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	collName := common.GenRandomString(hp.StructArrayPrefix+"_trailing_empty", 6)
+
+	structSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("embedding").
+			WithDataType(entity.FieldTypeFloatVector).WithDim(dim))
+	schema := entity.NewSchema().WithName(collName).
+		WithField(entity.NewField().WithName("id").
+			WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("clips").
+			WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).
+			WithMaxCapacity(1).
+			WithStructSchema(structSchema))
+	common.CheckErr(t, mc.CreateCollection(ctx,
+		client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong)), true)
+
+	insertRows := func(startID, count int) {
+		ids := make([]int64, count)
+		rows := make([]map[string]any, count)
+		for i := range count {
+			id := startID + i
+			ids[i] = int64(id)
+			rows[i] = map[string]any{"embedding": [][]float32{hp.SeedVector(int64(id), dim)}}
+		}
+		result, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).
+			WithInt64Column("id", ids).
+			WithStructArrayColumn("clips", structSchema, rows))
+		common.CheckErr(t, err, true)
+		require.EqualValues(t, count, result.InsertCount)
+	}
+	flush := func() {
+		for attempt := 0; attempt < 3; attempt++ {
+			flushTask, err := mc.Flush(ctx, client.NewFlushOption(collName))
+			if err == nil {
+				common.CheckErr(t, flushTask.Await(ctx), true)
+				return
+			}
+			if !client.IsRetryableError(err) || attempt == 2 {
+				common.CheckErr(t, err, true)
+				return
+			}
+			time.Sleep(10 * time.Second)
+		}
+	}
+
+	insertRows(0, indexedSealedRows)
+	flush()
+	insertRows(indexedSealedRows, unindexedSealedRows)
+	flush()
+
+	indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "clips[embedding]",
+		index.NewHNSWIndex(entity.MaxSimCosine, 16, 200)).WithIndexName(indexName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, indexTask.Await(ctx), true)
+	indexDesc, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(collName, indexName))
+	common.CheckErr(t, err, true)
+	require.Equal(t, common.IndexStateFinished, indexDesc.State)
+	require.EqualValues(t, indexedSealedRows+unindexedSealedRows, indexDesc.TotalRows)
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, loadTask.Await(ctx), true)
+
+	segments, err := mc.GetPersistentSegmentInfo(ctx, client.NewGetPersistentSegmentInfoOption(collName))
+	common.CheckErr(t, err, true)
+	segmentRows := make([]int64, 0, len(segments))
+	for _, segment := range segments {
+		segmentRows = append(segmentRows, segment.NumRows)
+	}
+	// The 500-row segment stays below the index-build threshold and is searched by brute force.
+	require.ElementsMatch(t, []int64{indexedSealedRows, unindexedSealedRows}, segmentRows)
+
+	insertRows(indexedSealedRows+unindexedSealedRows, growingRows)
+	require.EqualValues(t, totalRows, queryCountStar(t, ctx, mc, collName, ""))
+
+	paths := []struct {
+		name    string
+		startID int
+		count   int
+	}{
+		{name: "indexed_sealed", startID: 0, count: indexedSealedRows},
+		{name: "unindexed_sealed", startID: indexedSealedRows, count: unindexedSealedRows},
+		{name: "growing", startID: indexedSealedRows + unindexedSealedRows, count: growingRows},
+	}
+	for _, path := range paths {
+		t.Run(path.name, func(t *testing.T) {
+			queries := []entity.Vector{
+				entity.FloatVectorArray{entity.FloatVector(hp.SeedVector(int64(path.startID), dim))},
+				entity.FloatVectorArray{},
+				entity.FloatVectorArray{},
+			}
+			endID := path.startID + path.count
+			filter := fmt.Sprintf("id >= %d && id < %d", path.startID, endID)
+			results, err := mc.Search(ctx, client.NewSearchOption(collName, limit, queries).
+				WithANNSField("clips[embedding]").
+				WithFilter(filter).
+				WithOutputFields("id").
+				WithConsistencyLevel(entity.ClStrong))
+			common.CheckErr(t, err, true)
+			require.Len(t, results, len(queries))
+			require.EqualValues(t, limit, results[0].ResultCount)
+			require.Zero(t, results[1].ResultCount)
+			require.Zero(t, results[2].ResultCount)
+			for _, result := range results {
+				require.NoError(t, result.Err)
+			}
+			idCol := results[0].GetColumn("id")
+			require.NotNil(t, idCol)
+			for i := 0; i < results[0].ResultCount; i++ {
+				id, err := idCol.Get(i)
+				require.NoError(t, err)
+				require.GreaterOrEqual(t, id.(int64), int64(path.startID))
+				require.Less(t, id.(int64), int64(endID))
+			}
+		})
+	}
+}
+
 // TestStructArrayHybridSearchWithNormalVector ports
 // test_hybrid_search_struct_array_with_normal_vector.
 func TestStructArrayHybridSearchWithNormalVector(t *testing.T) {
