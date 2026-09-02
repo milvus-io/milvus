@@ -45,6 +45,7 @@
 #include "plan/PlanNodeIdGenerator.h"
 #include "prometheus/histogram.h"
 #include "query/ExecPlanNodeVisitor.h"
+#include "query/SharedFilterBitsetResult.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "segcore/ConcurrentVector.h"
@@ -141,6 +142,68 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
         local_ctx.storage_usage.scanned_cold_bytes.load();
     results.search_storage_cost_.scanned_total_bytes +=
         local_ctx.storage_usage.scanned_total_bytes.load();
+}
+
+std::unique_ptr<query::SharedFilterBitsetResult>
+SegmentInternalInterface::ComputeFilterBitset(
+    const query::Plan* plan,
+    Timestamp timestamp,
+    const folly::CancellationToken& cancel_token,
+    int32_t consistency_level,
+    Timestamp collection_ttl,
+    int64_t entity_ttl_physical_time_us,
+    bool enable_expr_cache,
+    milvus::tracer::SpanPtr trace_span) const {
+    std::shared_lock lck(mutex_);
+    milvus::tracer::AddEvent("obtained_segment_lock_mutex");
+
+    query::ExecPlanNodeVisitor visitor(*this,
+                                       timestamp,
+                                       nullptr,
+                                       cancel_token,
+                                       consistency_level,
+                                       collection_ttl,
+                                       entity_ttl_physical_time_us,
+                                       std::move(trace_span));
+    return visitor.get_shared_filter_bitset_result(*plan->plan_node_);
+}
+
+std::unique_ptr<SearchResult>
+SegmentInternalInterface::SearchWithBitset(
+    const query::Plan* plan,
+    const query::PlaceholderGroup* placeholder_group,
+    const query::SharedFilterBitsetResult* bitset_result,
+    Timestamp timestamp,
+    const folly::CancellationToken& cancel_token,
+    int32_t consistency_level,
+    Timestamp collection_ttl,
+    int64_t entity_ttl_physical_time_us,
+    milvus::tracer::SpanPtr trace_span) const {
+    AssertInfo(bitset_result != nullptr,
+               "SearchWithBitset requires a shared filter bitset");
+    AssertInfo(bitset_result->segment_id == get_segment_id(),
+               "shared filter bitset belongs to segment {} but was handed to "
+               "segment {}",
+               bitset_result->segment_id,
+               get_segment_id());
+
+    std::shared_lock lck(mutex_);
+    milvus::tracer::AddEvent("obtained_segment_lock_mutex");
+
+    check_search(plan);
+    query::ExecPlanNodeVisitor visitor(*this,
+                                       timestamp,
+                                       placeholder_group,
+                                       cancel_token,
+                                       consistency_level,
+                                       collection_ttl,
+                                       entity_ttl_physical_time_us,
+                                       std::move(trace_span));
+    visitor.SetPrecomputedBitset(bitset_result);
+    auto results = std::make_unique<SearchResult>();
+    *results = visitor.get_moved_result(*plan->plan_node_);
+    results->segment_ = (void*)this;
+    return results;
 }
 
 std::unique_ptr<SearchResult>

@@ -71,6 +71,18 @@ class ProtoParser {
     static std::shared_ptr<plan::PlanNode>
     ExtractFilterOnlyPlan(const std::shared_ptr<plan::PlanNode>& root_node);
 
+    // Rebuild `root_node` with VectorSearchNode's source subtree (the filter
+    // subtree) replaced by a PrecomputedBitsetNode, so the branch executes
+    // only its vector search against a bitset computed earlier.
+    //
+    // The replacement point is exactly the extraction point of
+    // ExtractFilterOnlyPlan, so the two are symmetric. Only the node types
+    // that can sit above VectorSearchNode on the pre-filter path are handled
+    // (VectorSearchNode itself and SearchGroupByNode); anything else means the
+    // caller grouped a plan shape that must not have been grouped, and throws.
+    static std::shared_ptr<plan::PlanNode>
+    RebindToPrecomputedBitset(const std::shared_ptr<plan::PlanNode>& root_node);
+
  private:
     expr::TypedExprPtr
     CreateAlwaysTrueExprs();

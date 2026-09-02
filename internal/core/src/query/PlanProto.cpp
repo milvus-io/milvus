@@ -1642,4 +1642,45 @@ ProtoParser::ExtractFilterOnlyPlan(
     return find_prefilter_subtree(root_node);
 }
 
+std::shared_ptr<plan::PlanNode>
+ProtoParser::RebindToPrecomputedBitset(
+    const std::shared_ptr<plan::PlanNode>& root_node) {
+    if (!root_node) {
+        return nullptr;
+    }
+
+    std::function<std::shared_ptr<plan::PlanNode>(
+        const std::shared_ptr<plan::PlanNode>&)>
+        rebind = [&](const std::shared_ptr<plan::PlanNode>& node)
+        -> std::shared_ptr<plan::PlanNode> {
+        AssertInfo(node != nullptr, "null node while rebinding search plan");
+
+        if (std::dynamic_pointer_cast<plan::VectorSearchNode>(node)) {
+            auto bits_source = std::make_shared<plan::PrecomputedBitsetNode>(
+                milvus::plan::GetNextPlanNodeId());
+            return std::make_shared<plan::VectorSearchNode>(
+                milvus::plan::GetNextPlanNodeId(),
+                std::vector<plan::PlanNodePtr>{bits_source});
+        }
+
+        if (std::dynamic_pointer_cast<plan::SearchGroupByNode>(node)) {
+            auto sources = node->sources();
+            AssertInfo(sources.size() == 1,
+                       "SearchGroupByNode must have exactly one source, got {}",
+                       sources.size());
+            return std::make_shared<plan::SearchGroupByNode>(
+                milvus::plan::GetNextPlanNodeId(),
+                std::vector<plan::PlanNodePtr>{rebind(sources[0])});
+        }
+
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "plan node {} cannot sit above VectorSearchNode in a "
+                  "shared-filter search; this plan should not have been "
+                  "grouped",
+                  node->name());
+    };
+
+    return rebind(root_node);
+}
+
 }  // namespace milvus::query

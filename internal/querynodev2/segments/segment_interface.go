@@ -120,6 +120,11 @@ type Segment interface {
 	// Search executes a search on the segment.
 	// If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 	Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error)
+	// SearchGrouped executes several searches that share one filter predicate.
+	// The shared prefix runs once and the branch vector searches run
+	// concurrently against its result. Returns one SearchResult per request,
+	// in the same order. len(searchReqs) == 1 behaves like Search.
+	SearchGrouped(ctx context.Context, searchReqs []*segcore.SearchRequest) ([]*segcore.SearchResult, error)
 	Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error)
 	RetrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error)
 
