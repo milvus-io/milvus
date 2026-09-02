@@ -15,6 +15,7 @@
 #include <arrow/c/bridge.h>
 #include <arrow/c/abi.h>
 #include <folly/CancellationToken.h>
+#include <folly/ScopeGuard.h>
 
 #include <map>
 #include <memory>
@@ -22,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/SystemProperty.h"
@@ -38,6 +40,7 @@
 
 using milvus::DataArray;
 using milvus::FieldId;
+using milvus::segcore::ArrowExportFailure;
 using milvus::segcore::EmptyExtraFieldArrowType;
 using milvus::segcore::FieldDataToArrow;
 using milvus::segcore::MergeBase;
@@ -194,9 +197,8 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                           ArrowSchema* out_schema,
                           ArrowArray* out_array,
                           void* cancellation_source) {
-    SCOPE_CGO_CALL_METRIC();
-
     try {
+        SCOPE_CGO_CALL_METRIC();
         AssertInfo(segments != nullptr, "null segments");
         AssertInfo(num_segments > 0, "num_segments must be positive");
         AssertInfo(c_plan != nullptr, "null retrieve plan");
@@ -211,6 +213,10 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                    "ArrowSchema output must be empty before export");
         AssertInfo(out_array->release == nullptr,
                    "ArrowArray output must be empty before export");
+        auto cleanup = folly::makeGuard([&] {
+            ReleaseArrowArrayIfNeeded(out_array);
+            ReleaseArrowSchemaIfNeeded(out_schema);
+        });
 
         auto cancel_token = folly::CancellationToken();
         if (cancellation_source != nullptr) {
@@ -218,6 +224,7 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                 static_cast<folly::CancellationSource*>(cancellation_source);
             cancel_token = source->getToken();
         }
+        milvus::futures::throwIfCancelled(cancel_token);
 
         auto* plan = static_cast<milvus::query::RetrievePlan*>(c_plan);
 
@@ -225,9 +232,7 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
         if (total_rows == 0 || plan->field_ids_.empty()) {
             auto empty_batch_result = BuildEmptyRetrieveBatch(plan, total_rows);
             if (!empty_batch_result.ok()) {
-                return milvus::FailureCStatus(
-                    milvus::ErrorCode::UnexpectedError,
-                    empty_batch_result.status().ToString());
+                return ArrowExportFailure(empty_batch_result.status());
             }
             batch = *empty_batch_result;
         } else {
@@ -440,9 +445,7 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
             auto batch_result =
                 BuildRetrieveFieldsBatch(plan, ordered_fields, total_rows);
             if (!batch_result.ok()) {
-                return milvus::FailureCStatus(
-                    milvus::ErrorCode::UnexpectedError,
-                    batch_result.status().ToString());
+                return ArrowExportFailure(batch_result.status());
             }
             batch = *batch_result;
         }
@@ -450,15 +453,12 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
         auto export_status =
             arrow::ExportRecordBatch(*batch, out_array, out_schema);
         if (!export_status.ok()) {
-            ReleaseArrowArrayIfNeeded(out_array);
-            ReleaseArrowSchemaIfNeeded(out_schema);
-            return milvus::FailureCStatus(milvus::ErrorCode::UnexpectedError,
-                                          export_status.ToString());
+            return ArrowExportFailure(export_status);
         }
+        cleanup.dismiss();
         return milvus::SuccessCStatus();
     } catch (folly::FutureCancellation& e) {
         return milvus::FailureCStatus(milvus::ErrorCode::FollyCancel, e.what());
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }

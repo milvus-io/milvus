@@ -21,7 +21,7 @@ legacy ranker or a top-level L2 Function Chain, but not with top-level typed
 
 A Hybrid Search Function Chain starts with the declarative `merge` operator. `merge` consumes the reduced result DataFrames from all sub-searches, deduplicates candidates, computes the initial fused `$score`, and emits one DataFrame for the remaining operators. The first release supports the existing public L2 operators `map`, `sort`, and `limit` after `merge`.
 
-This is an additive extension to [Function Chain API](20260624-function-chain-api.md). The existing document describes the first release, in which Hybrid Search rejects `function_chains`; this document supersedes that restriction. The Merge foundation, Milvus server integration, and core in-repository test coverage are implemented by this change. Public SDK delivery and complete regression coverage are tracked as follow-up work below.
+This is an additive extension to [Function Chain API](20260624-function-chain-api.md). The initial Function Chain release rejected Hybrid Search `function_chains`; this document defines the extension that supersedes that restriction. The Merge foundation, Milvus server integration, and core in-repository test coverage are implemented by this change. Public SDK delivery and complete regression coverage are tracked as follow-up work below.
 
 ## Related Designs
 
@@ -559,7 +559,7 @@ into the nested chain.
 
 The first Merge operator contributes no schema dependencies to `ChainReprInfo.RequiredInputs`. Its fixed `$id` and `$score` inputs are runtime-owned system columns and are preserved without explicit dependency declarations.
 
-Downstream expressions continue to determine required scalar fields. Proxy fetches only those fields into rerank DataFrames, plus fixed system columns required by execution:
+Downstream expressions determine required scalar fields and explicitly typed JSON/dynamic paths through the shared `DataFrameInputPlan`. Proxy fetches the unique physical roots and projects the logical path columns before Merge, plus fixed system columns required by execution:
 
 - `$id`;
 - `$score`; and
@@ -577,6 +577,93 @@ Top-level L2 required fields remain owned by Hybrid requery planning. A schema
 field needed by both nested L1 and top-level L2 is therefore materialized once
 in each scope that consumes it; the two planners must not assume that a
 temporary QueryNode DataFrame column crosses the RPC boundary.
+
+### JSON and dynamic inputs across Hybrid stages
+
+Nested L0/L1 use the same schema-aware input planning and C++ projection as
+ordinary Search. Each sub-plan keeps its own chain and type hints, including
+when multiple sub-searches use the same ANN field. Nested-only physical roots
+and paths do not become Proxy L2 dependencies.
+
+Top-level L2 uses the shared Go projector for every sub-result before Merge.
+Requery requests deduplicated physical root names (`metadata`, `$meta`), not
+logical paths. Organize aligns those roots with each sub-result's primary keys;
+Merge then preserves the projected scalar columns and their type metadata.
+Empty sub-results retain typed empty columns. A JSON root requested as output
+is assembled from the original field data, independently of its projected
+rerank inputs.
+
+Namespace partition mode disables requery, so sub-plans must fetch both the
+user output fields and L2 input roots directly. When `DynamicFields` prunes
+`$meta` to requested keys, Proxy also retains each L2 dynamic path's first key:
+for example, returning `title` while sorting by `$meta["profile"]["rank"]`
+requires both `title` and `profile` in every sub-plan. Ordinary Search and
+Hybrid Search share this retention logic. An empty `DynamicFields` continues
+to mean the complete dynamic root. The user's output-field list remains
+unchanged, and projected logical path columns are not added to final outputs.
+
+Regression coverage is in `internal/proxy/task_search_hybrid_dynamic_test.go`
+(request conversion, per-sub-plan ownership, direct/requery pipeline, duplicate
+PKs, empty query chunks, and root/output alignment) and
+`test_hybrid_search_json_dynamic_chains` in the Python client suite (real
+Hybrid RPC with nested JSON L0, dynamic L1, legacy or JSON/dynamic L2, and
+missing-type-hint errors at each stage).
+
+The Python matrix covers flushed data for the normal requery path and growing
+data for namespace-partition direct results. During local verification,
+namespace-partition flush/index preparation encountered an independent
+compaction error (`partition key field is not found`); sealed data in that mode
+remains a separate verification follow-up.
+
+Local validation on 2026-09-15 passed the new planning/pipeline cases, the
+related Proxy/QueryNode/segcore Go regressions with `dynamic,test` and
+`-gcflags="all=-N -l"`, and all eight Python Hybrid JSON/dynamic combinations
+against a freshly built isolated standalone instance. The Python cases also
+verify that missing type hints at each participating stage reject the request
+with code 1100. This does not constitute full Go-suite or mixed-version
+verification.
+
+### Additional Python regression matrix
+
+The `test_hybrid_search_dynamic_*` cases in `test_function_chain.py` also cover:
+
+- Empty first/second sub-searches, all-empty results, opposite empty branches
+  within one NQ batch, and an empty collection.
+- Two requests over the same ANN field with asymmetric weights, different query
+  vectors, reversed L0/L1 declaration order, and an unchained sibling. Exact
+  score assertions distinguish request reassignment from correct execution.
+- Disjoint and partially overlapping candidate sets, Int64/VarChar primary keys,
+  per-query deduplication, and JSON/output-field alignment after requery.
+- Missing, null, incompatible and overflowing JSON values at L0/L1; typed
+  Int64/Double/VarChar null sorting at L1/L2; valid zero/empty-string values;
+  all-null columns; and rejection of Bool sorting without numeric coercion.
+- Independent type hints for the same path in different request stages, while
+  conflicting hints within a single chain are rejected.
+- Request limit/offset fallback, explicit L2 pagination, a Limit before Sort,
+  empty pages, and nested worker-local L1 limits.
+- Group-by and rank paths sharing a JSON/dynamic root; all five Merge strategies;
+  mixed IP/L2 metrics with normalization both enabled and disabled.
+- Raw-RPC stage/cardinality/rerank-source validation, so server coverage does not
+  depend on the skipped SDK-specific Hybrid tests.
+
+The shared fixture waits for sealed rows to be actually loaded before using
+`ignore_growing`; index readiness and `LoadCollection` completion alone do not
+guarantee that handoff has finished.
+
+Two strict expected-failure cases record a discovered validation gap: on a
+completely empty collection, `organizeSubTask(..., skipEmpty=true, ...)` in the
+delegator skips worker dispatch, so invalid nested L0/L1 type hints are never
+validated. Top-level L2 validation and empty-filter requests with loaded segments
+have separate coverage. These expected failures must be removed when the server
+gap is fixed. Namespace-partition sealed preparation is separately marked as
+skipped until the compaction issue above is resolved.
+
+Local validation of this additional matrix on 2026-09-15 collected 36 cases:
+33 passed after targeted reruns, two strict expected failures captured the
+empty-collection nested-validation gap, and one namespace-partition sealed case
+was skipped for the known compaction blocker. Python lint and format checks
+also passed. The server-validation tests send raw protobufs; SDK-only tests
+retain their existing separate skip conditions.
 
 ## Validation and Error Classification
 

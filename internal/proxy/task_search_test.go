@@ -5537,6 +5537,88 @@ func TestSearchTask_InitSearchRequestWithStructArrayFields(t *testing.T) {
 	}
 }
 
+func TestSearchTask_L2DynamicInputProjection(t *testing.T) {
+	paramtable.Init()
+	policy := &paramtable.Get().CommonCfg.SearchRequeryPolicy
+	originalPolicy := policy.GetValue()
+	require.NoError(t, paramtable.Get().Save(policy.Key, "outputvector"))
+	t.Cleanup(func() { paramtable.Get().Save(policy.Key, originalPolicy) })
+
+	schema := proto.Clone(newFunctionChainJSONTestSchema().CollectionSchema).(*schemapb.CollectionSchema)
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID: 104, Name: "vec", DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+	})
+	schemaInfo := mustNewSchemaInfo(schema)
+
+	for _, tc := range []struct {
+		name            string
+		outputs         []string
+		paths           []string
+		highlight       []string
+		expected        []string
+		expectedRequery bool
+	}{
+		{name: "hidden top-level input", outputs: []string{"title"}, paths: []string{`$meta["rank"]`}, expected: []string{"title", "rank"}},
+		{name: "hidden nested input", outputs: []string{"title"}, paths: []string{`$meta["profile"]["rank"]`}, expected: []string{"title", "profile"}},
+		{name: "shared root and ordinary JSON", outputs: []string{"title"}, paths: []string{`$meta["profile"]["rank"]`, `$meta["profile"]["bonus"]`, `metadata["value"]`}, expected: []string{"title", "profile"}},
+		{name: "input already requested", outputs: []string{"rank"}, paths: []string{`$meta["rank"]`}, expected: []string{"rank"}},
+		{name: "no dynamic output", outputs: []string{"pk"}, paths: []string{`$meta["rank"]`}},
+		{name: "complete dynamic root", outputs: []string{common.MetaFieldName}, paths: []string{`$meta["rank"]`}},
+		{name: "ordinary JSON input", outputs: []string{"title"}, paths: []string{`metadata["rank"]`}, expected: []string{"title"}},
+		{name: "highlight and rerank inputs", outputs: []string{"title"}, paths: []string{`$meta["rank"]`}, highlight: []string{"content"}, expected: []string{"title", "content", "rank"}},
+		{name: "highlight without dynamic output", outputs: []string{"pk"}, paths: []string{`$meta["rank"]`}, highlight: []string{"content"}, expected: []string{"content", "rank"}},
+		{name: "requery fetches complete root", outputs: []string{"title", "vec"}, paths: []string{`$meta["rank"]`}, expectedRequery: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var ops []*schemapb.FunctionChainOp
+			for _, path := range tc.paths {
+				op := mapOp("$score", "expr", columnArg(path))
+				op.Params = map[string]*schemapb.FunctionParamValue{
+					"$input_data_types": chainDataTypesParam(schemapb.DataType_Int64),
+				}
+				ops = append(ops, op)
+			}
+			translated, userOutputs, dynamicFields, _, _, err := translateOutputFields(tc.outputs, schemaInfo, true)
+			require.NoError(t, err)
+			outputIDs, err := getOutputFieldIDs(schemaInfo, translated)
+			require.NoError(t, err)
+			task := &searchTask{
+				ctx:           context.Background(),
+				SearchRequest: &internalpb.SearchRequest{OutputFieldsId: outputIDs},
+				request: &milvuspb.SearchRequest{
+					OutputFields:   tc.outputs,
+					FunctionChains: []*schemapb.FunctionChain{l2FunctionChain(ops...)},
+					SearchParams: []*commonpb.KeyValuePair{
+						{Key: AnnsFieldKey, Value: "vec"},
+						{Key: TopKKey, Value: "3"},
+						{Key: common.MetricTypeKey, Value: metric.L2},
+					},
+				},
+				schema:                 schemaInfo,
+				translatedOutputFields: translated,
+				userOutputFields:       userOutputs,
+				userDynamicFields:      dynamicFields,
+				tr:                     timerecord.NewTimeRecorder("test"),
+				queryInfos:             []*planpb.QueryInfo{{}},
+			}
+			if len(tc.highlight) > 0 {
+				task.highlighter = &mockHighlighter{requiredFieldIDs: []int64{103}, dynamicFieldNames: tc.highlight}
+			}
+			originalDynamicFields := append([]string(nil), dynamicFields...)
+			originalUserOutputs := append([]string(nil), userOutputs...)
+			require.NoError(t, task.initSearchRequest(task.ctx))
+			assert.Equal(t, tc.expectedRequery, task.needRequery)
+			plan := &planpb.PlanNode{}
+			require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+			assert.ElementsMatch(t, tc.expected, plan.GetDynamicFields())
+			assert.Contains(t, plan.GetOutputFieldIds(), int64(103))
+			assert.ElementsMatch(t, originalDynamicFields, task.userDynamicFields)
+			assert.ElementsMatch(t, originalUserOutputs, task.userOutputFields)
+		})
+	}
+}
+
 func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
@@ -5706,6 +5788,28 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, []string{"ts"}, meta.GetInputFieldNames())
 		assert.Equal(t, []int64{101}, meta.GetInputFieldIDs())
+	})
+
+	t.Run("ordinary search rejects missing function score input field", func(t *testing.T) {
+		request := newFunctionScoreRequest()
+		request.FunctionScore.Functions[0].InputFieldNames = []string{"missing"}
+		task := newTask(request)
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `function score input field "missing" not found`)
+		assert.Nil(t, task.rerankMeta)
+	})
+
+	t.Run("advanced search rejects missing function score input field", func(t *testing.T) {
+		request := newFunctionScoreRequest()
+		request.FunctionScore.Functions[0].InputFieldNames = []string{"missing"}
+		task := newTask(request)
+
+		err := task.initAdvancedSearchRequest(ctx)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `function score input field "missing" not found`)
+		assert.Nil(t, task.rerankMeta)
 	})
 
 	t.Run("search iterator v1 rejects function score", func(t *testing.T) {
