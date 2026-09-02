@@ -3270,6 +3270,43 @@ func TestRepublishCopiedManifestIndexes_NoWork(t *testing.T) {
 	assert.Equal(t, manifestPath, republished)
 }
 
+func TestRepublishCopiedManifestIndexes_NoTargetDefinitionsOnlyRetractsInheritedIndexes(t *testing.T) {
+	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 3)
+	target := &datapb.CopySegmentTarget{
+		SegmentId: 300,
+		// DataCoord leaves TargetIndexes empty when
+		// writeSegmentIndexToManifest is disabled.
+		TargetIndexes: nil,
+	}
+	indexInfos := map[int64]*datapb.VectorScalarIndexInfo{
+		888: {
+			IndexName:      "vec_idx",
+			BuildId:        888,
+			IndexFilePaths: []string{"files/index/100/200/300/888/2/a"},
+		},
+	}
+	mockCopiedManifestIndexEntries(t, []packed.ManifestIndexInfo{{IndexID: 5001, BuildID: 6001}})
+	commitCalls := 0
+	var gotDrops []packed.DropIndexEntry
+	var gotIndexes []packed.ManifestIndexInfo
+	republished := packed.MarshalManifestPath("files/insert_log/100/200/300", 4)
+	commit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(_ string, _ int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			commitCalls++
+			gotDrops = updates.DropIndexes
+			gotIndexes = updates.Indexes
+			return republished, nil
+		}).Build()
+	defer commit.UnPatch()
+
+	got, err := republishCopiedManifestIndexes(manifestPath, target, &indexpb.StorageConfig{}, indexInfos)
+	assert.NoError(t, err)
+	assert.Equal(t, republished, got)
+	assert.Equal(t, 1, commitCalls)
+	assert.Equal(t, []packed.DropIndexEntry{{IndexID: 5001}}, gotDrops)
+	assert.Empty(t, gotIndexes, "no target definitions must mean no copied index publication")
+}
+
 func TestExcludeUnpinnedManifestRevisions(t *testing.T) {
 	base := "files/insert_log/1/2/3"
 	pinned := base + "/_metadata/manifest-4.avro"
