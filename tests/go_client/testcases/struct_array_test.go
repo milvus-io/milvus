@@ -269,6 +269,52 @@ func TestStructArrayVectorSliceAndRollbackRemainAppendable(t *testing.T) {
 	}
 }
 
+func TestStructArrayPathReplacePreservesOmittedChildren(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	const dim = 4
+	collName := createStructArrayMutationCollection(t, ctx, mc, "_path_replace", dim, false)
+	seedEmbedding := [][]float32{{0.1, 0.2, 0.3, 0.4}, {0.5, 0.6, 0.7, 0.8}}
+	fullStructSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(dim)).
+		WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeVarChar).WithMaxLength(128))
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).
+		WithInt64Column("id", []int64{0}).
+		WithFloatVectorColumn("normal_vector", dim, [][]float32{hp.RandFloatVector(dim)}).
+		WithStructArrayColumn("clips", fullStructSchema, []map[string]any{{
+			"embedding": seedEmbedding,
+			"label":     []string{"first", "second"},
+		}}))
+	common.CheckErr(t, err, true)
+	loadStructArrayMutationCollection(t, ctx, mc, collName)
+
+	labelOnlySchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeVarChar).WithMaxLength(128))
+	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).
+		WithInt64Column("id", []int64{0}).
+		WithStructArrayColumn("clips", labelOnlySchema, []map[string]any{{
+			"label": []string{"updated"},
+		}}).
+		WithPathReplace("clips", "[1]"))
+	common.CheckErr(t, err, true)
+
+	result, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter("id == 0").
+		WithOutputFields("clips").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, result.ResultCount)
+	value, err := result.GetColumn("clips").Get(0)
+	require.NoError(t, err)
+	row := value.(map[string]any)
+	require.Equal(t, []string{"first", "updated"}, row["label"])
+	require.Equal(t, []entity.FloatVector{
+		entity.FloatVector(seedEmbedding[0]),
+		entity.FloatVector(seedEmbedding[1]),
+	}, row["embedding"])
+}
+
 func TestStructArrayAppendNullFailureRemainsRecoverable(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)

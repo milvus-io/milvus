@@ -56,13 +56,17 @@ func TestBuildFieldPartialUpdateOps(t *testing.T) {
 	ops, err := buildFieldPartialUpdateOps([]FieldPartialUpdateOpReq{
 		{FieldName: "tags", Op: "ARRAY_APPEND"},
 		{FieldName: "scores", Op: "ARRAY_REMOVE"},
+		{FieldName: "profile", Op: "PATH_REPLACE", Path: "[1][age]"},
 	})
 	assert.NoError(t, err)
-	assert.Len(t, ops, 2)
+	assert.Len(t, ops, 3)
 	assert.Equal(t, "tags", ops[0].GetFieldName())
 	assert.Equal(t, schemapb.FieldPartialUpdateOp_ARRAY_APPEND, ops[0].GetOp())
 	assert.Equal(t, "scores", ops[1].GetFieldName())
 	assert.Equal(t, schemapb.FieldPartialUpdateOp_ARRAY_REMOVE, ops[1].GetOp())
+	assert.Equal(t, "profile", ops[2].GetFieldName())
+	assert.Equal(t, schemapb.FieldPartialUpdateOp_PATH_REPLACE, ops[2].GetOp())
+	assert.Equal(t, "[1][age]", ops[2].GetPath())
 }
 
 func TestBuildFieldPartialUpdateOps_RejectsUnknownOp(t *testing.T) {
@@ -71,4 +75,16 @@ func TestBuildFieldPartialUpdateOps_RejectsUnknownOp(t *testing.T) {
 	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported partial update op")
+}
+
+func TestHasNonReplaceFieldPartialUpdateOp(t *testing.T) {
+	assert.False(t, hasNonReplaceFieldPartialUpdateOp(nil))
+	assert.False(t, hasNonReplaceFieldPartialUpdateOp([]*schemapb.FieldPartialUpdateOp{{Op: schemapb.FieldPartialUpdateOp_REPLACE}}))
+	assert.True(t, hasNonReplaceFieldPartialUpdateOp([]*schemapb.FieldPartialUpdateOp{{Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE}}))
+}
+
+func TestHasPathReplaceFieldPartialUpdateOp(t *testing.T) {
+	assert.False(t, hasPathReplaceFieldPartialUpdateOp(nil))
+	assert.False(t, hasPathReplaceFieldPartialUpdateOp([]*schemapb.FieldPartialUpdateOp{{Op: schemapb.FieldPartialUpdateOp_ARRAY_APPEND}}))
+	assert.True(t, hasPathReplaceFieldPartialUpdateOp([]*schemapb.FieldPartialUpdateOp{{Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE}}))
 }

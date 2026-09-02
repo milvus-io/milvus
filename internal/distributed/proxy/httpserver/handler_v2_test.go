@@ -103,6 +103,48 @@ func captureHTTPServerLogs(t *testing.T) *mlog.TestSink {
 	})
 }
 
+func TestRESTV2PathReplaceRejectsNullOperandInCompatibilityMode(t *testing.T) {
+	compatibilityModeKey := paramtable.Get().HTTPCfg.CompatibilityMode.Key
+	paramtable.Get().Save(compatibilityModeKey, "true")
+	defer paramtable.Get().Reset(compatibilityModeKey)
+
+	schema := &schemapb.CollectionSchema{
+		Name: DefaultCollectionName,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Bool},
+		},
+	}
+	describeResponse := &milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         schema,
+		Status:         merr.Success(),
+	}
+	describePatch := mockey.Mock((*mockProxyComponent).DescribeCollection).
+		Return(describeResponse, nil).
+		Build()
+	defer describePatch.UnPatch()
+
+	body := []byte(`{
+		"collectionName": "book",
+		"data": [{"id": 1, "scores": [null]}],
+		"fieldOps": [{"fieldName": "scores", "op": "PATH_REPLACE", "path": "[1]"}]
+	}`)
+
+	// mockProxyComponent has no Upsert implementation. Reaching the write
+	// path would call its nil embedded interface and fail the test.
+	testEngine := initHTTPServerV2(&mockProxyComponent{}, false)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, UpsertAction), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+	assert.Equal(t, merr.Code(merr.ErrInvalidInsertData), returnBody.Code)
+	assert.Contains(t, returnBody.Message, `PATH_REPLACE array field "scores" has a null operand element at index 0`)
+}
+
 func sendReqAndVerify(t *testing.T, testEngine *gin.Engine, testName, method string, testcase requestBodyTestCase) {
 	t.Run(testName, func(t *testing.T) {
 		req := httptest.NewRequest(method, testcase.path, bytes.NewReader(testcase.requestBody))

@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
@@ -60,6 +61,158 @@ func TestApplyArrayRowOp_Replace(t *testing.T) {
 	got, err := ApplyArrayRowOp(base, update, schemapb.FieldPartialUpdateOp_REPLACE, schemapb.DataType_Int64, -1)
 	require.NoError(t, err)
 	assert.Equal(t, []int64{9, 8}, got.GetLongData().GetData())
+}
+
+func TestReplaceArrayRowElementPreservesOrderAndInputs(t *testing.T) {
+	base := longRow(10, 20, 30)
+	update := longRow(99)
+	got, err := ReplaceArrayRowElement(base, update, 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{10, 99, 30}, got.GetLongData().GetData())
+	assert.Equal(t, []int64{10, 20, 30}, base.GetLongData().GetData())
+	assert.Equal(t, []int64{99}, update.GetLongData().GetData())
+}
+
+func TestReplaceArrayRowElementAllSupportedTypes(t *testing.T) {
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		base        *schemapb.ScalarField
+		update      *schemapb.ScalarField
+		want        *schemapb.ScalarField
+	}{
+		{"bool", schemapb.DataType_Bool, boolRow(false, false), boolRow(true), boolRow(false, true)},
+		{"int8", schemapb.DataType_Int8, intRow(1, 2), intRow(9), intRow(1, 9)},
+		{"int16", schemapb.DataType_Int16, intRow(1, 2), intRow(9), intRow(1, 9)},
+		{"int32", schemapb.DataType_Int32, intRow(1, 2), intRow(9), intRow(1, 9)},
+		{"int64", schemapb.DataType_Int64, longRow(1, 2), longRow(9), longRow(1, 9)},
+		{"float", schemapb.DataType_Float, floatRow(1, 2), floatRow(9), floatRow(1, 9)},
+		{"double", schemapb.DataType_Double, doubleRow(1, 2), doubleRow(9), doubleRow(1, 9)},
+		{"varchar", schemapb.DataType_VarChar, stringRow("a", "b"), stringRow("z"), stringRow("a", "z")},
+		{"string", schemapb.DataType_String, stringRow("a", "b"), stringRow("z"), stringRow("a", "z")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := ReplaceArrayRowElement(test.base, test.update, 1, test.elementType)
+			require.NoError(t, err)
+			assert.True(t, proto.Equal(test.want, got))
+		})
+	}
+}
+
+func TestReplaceArrayRowElementRejectsElementValidData(t *testing.T) {
+	baseWithValidity := longRow(10, 20)
+	baseWithValidity.ValidData = []bool{true, true}
+	_, err := ReplaceArrayRowElement(baseWithValidity, longRow(30), 0, schemapb.DataType_Int64)
+	require.ErrorContains(t, err, "does not support Array element valid_data")
+
+	for _, validData := range [][]bool{{true}, {false}} {
+		updateWithValidity := longRow(30)
+		updateWithValidity.ValidData = validData
+		_, err = ReplaceArrayRowElement(longRow(10, 20), updateWithValidity, 0, schemapb.DataType_Int64)
+		require.ErrorContains(t, err, "does not support Array element valid_data")
+	}
+}
+
+func TestReplaceArrayRowElementRejectsInvalidShapeAndBounds(t *testing.T) {
+	_, err := ReplaceArrayRowElement(longRow(1), longRow(2, 3), 0, schemapb.DataType_Int64)
+	assert.Error(t, err)
+	_, err = ReplaceArrayRowElement(longRow(1), longRow(2), 1, schemapb.DataType_Int64)
+	assert.Error(t, err)
+	_, err = ReplaceArrayRowElement(boolRow(true), longRow(2), 0, schemapb.DataType_Bool)
+	assert.ErrorContains(t, err, "does not match element type")
+}
+
+func TestReplaceVectorArrayRowElement(t *testing.T) {
+	base := &schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}}}}
+	update := &schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{9, 8}}}}
+	got, err := ReplaceVectorArrayRowElement(base, update, 1, schemapb.DataType_FloatVector, 2)
+	require.NoError(t, err)
+	assert.Equal(t, []float32{1, 2, 9, 8, 5, 6}, got.GetFloatVector().GetData())
+	assert.Equal(t, []float32{1, 2, 3, 4, 5, 6}, base.GetFloatVector().GetData())
+
+	wrongType := &schemapb.VectorField{Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{9, 8}}}
+	_, err = ReplaceVectorArrayRowElement(base, wrongType, 1, schemapb.DataType_FloatVector, 2)
+	assert.ErrorContains(t, err, "does not match element type")
+}
+
+func TestReplaceVectorArrayRowElementRejectsElementValidData(t *testing.T) {
+	baseWithValidity := &schemapb.VectorField{
+		Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}},
+		ValidData: []bool{true, true},
+	}
+	update := &schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{9, 8}}}}
+	_, err := ReplaceVectorArrayRowElement(baseWithValidity, update, 0, schemapb.DataType_FloatVector, 2)
+	require.ErrorContains(t, err, "does not support ArrayOfVector element valid_data")
+
+	update.ValidData = []bool{false}
+	_, err = ReplaceVectorArrayRowElement(
+		&schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}},
+		update,
+		0,
+		schemapb.DataType_FloatVector,
+		2,
+	)
+	require.ErrorContains(t, err, "does not support ArrayOfVector element valid_data")
+}
+
+func TestReplaceVectorArrayRowElementAllSupportedTypes(t *testing.T) {
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		dim         int64
+		base        *schemapb.VectorField
+		update      *schemapb.VectorField
+		want        *schemapb.VectorField
+	}{
+		{
+			"float", schemapb.DataType_FloatVector, 2,
+			&schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{9, 8}}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 9, 8}}}},
+		},
+		{
+			"binary", schemapb.DataType_BinaryVector, 8,
+			&schemapb.VectorField{Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{9}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 9}}},
+		},
+		{
+			"float16", schemapb.DataType_Float16Vector, 2,
+			&schemapb.VectorField{Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{9, 10, 11, 12}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 9, 10, 11, 12}}},
+		},
+		{
+			"bfloat16", schemapb.DataType_BFloat16Vector, 2,
+			&schemapb.VectorField{Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{9, 10, 11, 12}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2, 3, 4, 9, 10, 11, 12}}},
+		},
+		{
+			"int8", schemapb.DataType_Int8Vector, 2,
+			&schemapb.VectorField{Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 3, 4}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{9, 8}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 9, 8}}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := ReplaceVectorArrayRowElement(test.base, test.update, 1, test.elementType, test.dim)
+			require.NoError(t, err)
+			assert.True(t, proto.Equal(test.want, got))
+		})
+	}
+}
+
+func TestUpdateArrayFieldByColumnWithPathReplace(t *testing.T) {
+	base := arrayField([]*schemapb.ScalarField{longRow(1, 2, 3), longRow(4, 5, 6)}, schemapb.DataType_Int64)
+	update := arrayField([]*schemapb.ScalarField{longRow(10), longRow(20)}, schemapb.DataType_Int64)
+	err := UpdateArrayFieldByColumnWithPathReplace(base, update, []int64{1, 0}, []int64{0, 1}, 1)
+	require.NoError(t, err)
+	rows := base.GetScalars().GetArrayData().GetData()
+	assert.Equal(t, []int64{1, 20, 3}, rows[0].GetLongData().GetData())
+	assert.Equal(t, []int64{4, 10, 6}, rows[1].GetLongData().GetData())
 }
 
 func TestApplyArrayRowOp_UnsupportedOp(t *testing.T) {

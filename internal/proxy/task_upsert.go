@@ -85,6 +85,7 @@ type upsertTask struct {
 	// query merge mutate the request payload.
 	partialUpdateOriginalFields []*schemapb.FieldData
 	partialUpdateReadTs         uint64
+	fieldPartialUpdatePlans     map[string]*fieldPartialUpdatePlan
 
 	storageCost segcore.StorageCost
 }
@@ -305,10 +306,30 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	it.storageCost.ScannedRemoteBytes += storageCost.ScannedRemoteBytes
 	it.storageCost.ScannedTotalBytes += storageCost.ScannedTotalBytes
 	if len(resp.GetFieldsData()) == 0 {
-		return merr.WrapErrParameterInvalidMsg("retrieve by primary key failed, no data found")
+		err := merr.WrapErrParameterInvalidMsg("retrieve by primary key failed, no data found")
+		if hasPathReplacePlan(it.fieldPartialUpdatePlans) {
+			return categorizePathReplaceError(pathReplaceResultMissingPK, err)
+		}
+		return err
 	}
 
 	existFieldData := resp.GetFieldsData()
+	if hasPathReplacePlan(it.fieldPartialUpdatePlans) {
+		retrievedFields := make(map[string]struct{}, len(existFieldData))
+		for _, field := range existFieldData {
+			if _, duplicate := retrievedFields[field.GetFieldName()]; duplicate {
+				return merr.WrapErrServiceInternalMsg("retrieve by primary key returned duplicate field %q", field.GetFieldName())
+			}
+			retrievedFields[field.GetFieldName()] = struct{}{}
+		}
+		for fieldName, plan := range it.fieldPartialUpdatePlans {
+			if plan.isPathReplace() {
+				if _, ok := retrievedFields[fieldName]; !ok {
+					return merr.WrapErrServiceInternalMsg("retrieve by primary key omitted PATH_REPLACE field %q", fieldName)
+				}
+			}
+		}
+	}
 	pkFieldData, err := typeutil.GetPrimaryFieldData(existFieldData, primaryFieldSchema)
 	if err != nil {
 		log.Error(ctx, "get primary field data failed", mlog.Err(err))
@@ -322,6 +343,13 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	log.Info(ctx, "retrieveByPKs cost",
 		mlog.Int("resultNum", typeutil.GetSizeOfIDs(existIDs)),
 		mlog.Int64("latency", tr.ElapseSpan().Milliseconds()))
+	if hasPathReplacePlan(it.fieldPartialUpdatePlans) {
+		metrics.ProxyPathReplaceRetrievedRows.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			it.req.GetDbName(),
+			it.req.GetCollectionName(),
+		).Observe(float64(typeutil.GetSizeOfIDs(existIDs)))
+	}
 
 	// set field id for user passed field data, prepare for merge logic
 	if len(it.upsertMsg.InsertMsg.GetFieldsData()) == 0 {
@@ -339,6 +367,19 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		if structSchema := it.schema.SchemaHelper.GetStructArrayFieldFromName(fieldName); structSchema != nil {
 			fieldData.FieldId = structSchema.GetFieldID()
 			fieldData.FieldName = fieldName
+			if plan := it.fieldPartialUpdatePlans[fieldName]; plan.isPathReplace() {
+				for _, subField := range fieldData.GetStructArrays().GetFields() {
+					if !typeutil.ValidateAndNormalizeFieldDataValidData(subField) {
+						return merr.WrapErrParameterInvalidMsg("sub-field %q in struct %q has different legacy and field-specific valid_data", subField.GetFieldName(), fieldName)
+					}
+					subFieldSchema := findStructChildSchema(structSchema, subField.GetFieldName())
+					if subFieldSchema == nil {
+						return merr.WrapErrParameterInvalidMsg("child %q not found in struct field %q", subField.GetFieldName(), fieldName)
+					}
+					subField.FieldId = subFieldSchema.GetFieldID()
+				}
+				continue
+			}
 			if err := validateWholeStructFieldDataForPartialUpdate(it.schema.SchemaHelper, structSchema, fieldData, upsertIDSize); err != nil {
 				return err
 			}
@@ -433,8 +474,23 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	if it.req.GetPartialUpdate() && primaryFieldSchema.GetAutoID() && len(insertIdxInUpsert) > 0 {
 		return merr.WrapErrParameterInvalidMsg("partial update on an AutoID collection requires every primary key to exist")
 	}
+	if hasPathReplacePlan(it.fieldPartialUpdatePlans) && len(insertIdxInUpsert) > 0 {
+		return categorizePathReplaceError(pathReplaceResultMissingPK,
+			merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires every primary key in the request to exist"))
+	}
 
 	// 2. merge field data on update semantic
+	var pathReplaceMergeRecorder *timerecord.TimeRecorder
+	if hasPathReplacePlan(it.fieldPartialUpdatePlans) {
+		pathReplaceMergeRecorder = timerecord.NewTimeRecorder("Proxy-Upsert-PATH_REPLACE-merge")
+		defer func() {
+			metrics.ProxyPathReplaceMergeLatency.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10),
+				it.req.GetDbName(),
+				it.req.GetCollectionName(),
+			).Observe(float64(pathReplaceMergeRecorder.ElapseSpan().Milliseconds()))
+		}()
+	}
 	it.deletePKs = &schemapb.IDs{}
 	it.insertFieldData = typeutil.PrepareResultFieldData(existFieldData, int64(upsertIDSize))
 
@@ -442,18 +498,20 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		upsertFieldMap := lo.SliceToMap(it.upsertMsg.InsertMsg.GetFieldsData(), func(field *schemapb.FieldData) (int64, *schemapb.FieldData) {
 			return field.FieldId, field
 		})
-		// fieldOpMap resolves per-field FieldPartialUpdateOp directives
-		// attached to UpsertRequest.field_ops. Empty / missing entries
-		// fall back to REPLACE.
-		fieldOpMap := buildFieldOpMap(it.req)
-
 		// Build mapping from existing primary keys to their positions in query result
 		// This ensures we can correctly locate data even if query results are not in the same order as request
 		existIDsLen := typeutil.GetSizeOfIDs(existIDs)
 		existPKToIndex := make(map[interface{}]int, existIDsLen)
 		for i := 0; i < existIDsLen; i++ {
 			pk := typeutil.GetPK(existIDs, int64(i))
+			if _, duplicate := existPKToIndex[pk]; duplicate {
+				return merr.WrapErrServiceInternalMsg("retrieve by primary key returned duplicate primary key %v", pk)
+			}
 			existPKToIndex[pk] = i
+		}
+		if hasPathReplacePlan(it.fieldPartialUpdatePlans) && existIDsLen != upsertIDSize {
+			return merr.WrapErrServiceInternalMsg(
+				"retrieve by primary key returned %d rows for %d PATH_REPLACE entities", existIDsLen, upsertIDSize)
 		}
 
 		existIndices := make([]int64, len(updateIdxInUpsert))
@@ -462,7 +520,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 			oldPK := typeutil.GetPK(upsertIDs, int64(upsertIdx))
 			idx, ok := existPKToIndex[oldPK]
 			if !ok {
-				return merr.WrapErrParameterInvalidMsg("upsert pk %v not found in query result", oldPK)
+				return merr.WrapErrServiceInternalMsg("upsert pk %v disappeared from the retrieved primary-key map", oldPK)
 			}
 			existIndices[i] = int64(idx)
 		}
@@ -475,19 +533,34 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 			dstField := it.insertFieldData[fieldIdx]
 			upsertField := upsertFieldMap[existField.FieldId]
 
+			plan := it.fieldPartialUpdatePlans[existField.GetFieldName()]
 			op := schemapb.FieldPartialUpdateOp_REPLACE
-			if fieldOpMap != nil {
-				if resolved, ok := fieldOpMap[existField.GetFieldName()]; ok {
-					op = resolved
-				}
+			if plan != nil {
+				op = plan.op
+			}
+			if plan.isPathReplace() && upsertField == nil {
+				return merr.WrapErrServiceInternalMsg("PATH_REPLACE operand field %q disappeared after validation", existField.GetFieldName())
 			}
 
 			if it.schema.SchemaHelper.GetStructArrayFieldFromName(existField.GetFieldName()) != nil {
 				if upsertField != nil {
-					if op != schemapb.FieldPartialUpdateOp_REPLACE {
+					if plan.isPathReplace() {
+						if err := validateExistingStructPathRows(existField, plan, existIndices); err != nil {
+							return err
+						}
+						typeutil.AppendFieldDataByColumn(dstField, existField, existIndices)
+						dstIndices := make([]int64, len(updateIdxInUpsert))
+						for i := range dstIndices {
+							dstIndices[i] = int64(i)
+						}
+						if err := applyStructPathReplace(dstField, upsertField, plan, dstIndices, upsertRows); err != nil {
+							return err
+						}
+					} else if op != schemapb.FieldPartialUpdateOp_REPLACE {
 						return merr.WrapErrParameterInvalidMsg("op %s is not supported for struct field %q", op.String(), existField.GetFieldName())
+					} else {
+						typeutil.AppendFieldDataByColumn(dstField, upsertField, upsertRows)
 					}
-					typeutil.AppendFieldDataByColumn(dstField, upsertField, upsertRows)
 				} else {
 					typeutil.AppendFieldDataByColumn(dstField, existField, existIndices)
 				}
@@ -536,6 +609,11 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 					}
 					typeutil.AppendFieldDataByColumn(dstField, upsertField, validDataIndices, upsertRowIndices)
 				} else {
+					if plan.isPathReplace() {
+						if err := validateExistingArrayPathRows(existField, existSrcIndices, existIndices, plan); err != nil {
+							return err
+						}
+					}
 					typeutil.AppendFieldDataByColumn(dstField, existField, existSrcIndices)
 					dstIndices := make([]int64, len(updateIdxInUpsert))
 					for i := range dstIndices {
@@ -544,6 +622,13 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 					if op == schemapb.FieldPartialUpdateOp_REPLACE {
 						if err := typeutil.UpdateFieldDataByColumn(dstField, upsertField, dstIndices, upsertSrcIndices); err != nil {
 							return err
+						}
+					} else if plan.isPathReplace() {
+						if err := typeutil.UpdateArrayFieldByColumnWithPathReplace(
+							dstField, upsertField, dstIndices, upsertSrcIndices, plan.index,
+						); err != nil {
+							log.Warn(ctx, "failed to materialize PATH_REPLACE field", mlog.String("fieldName", fieldSchema.GetName()), mlog.Err(err))
+							return merr.WrapErrServiceInternalErr(err, "failed to materialize PATH_REPLACE field %q", fieldSchema.GetName())
 						}
 					} else {
 						maxCap := readMaxCapacity(fieldSchema)
@@ -1626,15 +1711,27 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	if err := validateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
 		return err
 	}
+	for _, parentCategory := range pathReplaceParentCategories(it.req, schema.CollectionSchema) {
+		metrics.ProxyPathReplaceRequests.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			it.req.GetDbName(),
+			it.req.GetCollectionName(),
+			parentCategory,
+		).Inc()
+	}
 
 	// Validate any FieldPartialUpdateOp directives attached to FieldData.
 	// A non-REPLACE op implicitly promotes the request to partial_update=true
 	// so users do not need to set both fields explicitly.
-	nonReplaceSeen, err := validateFieldPartialUpdateOps(it.req, schema.CollectionSchema)
+	partialUpdatePlans, nonReplaceSeen, err := resolveFieldPartialUpdateOps(it.req, schema.CollectionSchema)
 	if err != nil {
+		if hasPathReplaceOp(it.req) {
+			err = categorizePathReplaceError(pathReplaceResultInvalidOperand, err)
+		}
 		log.Warn(ctx, "validate field partial update ops failed", mlog.Err(err))
 		return err
 	}
+	it.fieldPartialUpdatePlans = partialUpdatePlans
 	if nonReplaceSeen && !it.req.GetPartialUpdate() {
 		it.req.PartialUpdate = true
 	}
