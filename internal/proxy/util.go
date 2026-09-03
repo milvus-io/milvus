@@ -2511,69 +2511,51 @@ func checkUpsertPrimaryFieldData(
 	allFields []*schemapb.FieldSchema,
 	schema *schemapb.CollectionSchema,
 	insertMsg *msgstream.InsertMsg,
-	preserveAutoIDPrimaryKey bool,
-) (*schemapb.IDs, *schemapb.IDs, error) {
+) (*schemapb.IDs, error) {
 	log := mlog.With(mlog.String("collectionName", insertMsg.CollectionName))
 	rowNums := uint32(insertMsg.NRows())
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
 	if insertMsg.NRows() <= 0 {
-		return nil, nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
+		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
 	}
 
 	if err := checkFieldsDataBySchema(ctx, allFields, schema, insertMsg, false); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
 		log.Error(ctx, "get primary field schema failed", mlog.FieldSchema(schema), mlog.Err(err))
-		return nil, nil, err
+		return nil, err
 	}
 	if primaryFieldSchema.GetNullable() {
-		return nil, nil, merr.WrapErrParameterInvalidMsg("primary field not support null")
+		return nil, merr.WrapErrParameterInvalidMsg("primary field not support null")
 	}
-	// get primaryFieldData whether autoID is true or not
+	// Upsert always requires the caller-supplied primary key. For an AutoID
+	// collection it is a lookup key; later classification decides whether the
+	// final Insert keeps it or uses an allocator-generated value.
 	var primaryFieldData *schemapb.FieldData
-	var newPrimaryFieldData *schemapb.FieldData
 
 	primaryFieldID := primaryFieldSchema.FieldID
 	primaryFieldName := primaryFieldSchema.Name
-	for i, field := range insertMsg.GetFieldsData() {
+	for _, field := range insertMsg.GetFieldsData() {
 		if field.FieldId == primaryFieldID || field.FieldName == primaryFieldName {
 			primaryFieldData = field
-			if primaryFieldSchema.AutoID && !preserveAutoIDPrimaryKey {
-				// Normal AutoID upsert deletes the supplied PK and inserts a new PK.
-				newPrimaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
-				if err != nil {
-					log.Info(ctx, "generate new primary field data failed when upsert", mlog.Err(err))
-					return nil, nil, err
-				}
-				insertMsg.FieldsData = append(insertMsg.GetFieldsData()[:i], insertMsg.GetFieldsData()[i+1:]...)
-				insertMsg.FieldsData = append(insertMsg.FieldsData, newPrimaryFieldData)
-			}
 			break
 		}
 	}
 	// must assign primary field data when upsert
 	if primaryFieldData == nil {
-		return nil, nil, merr.WrapErrParameterInvalidMsg("must assign pk when upsert, primary field: %v", primaryFieldName)
+		return nil, merr.WrapErrParameterInvalidMsg("must assign pk when upsert, primary field: %v", primaryFieldName)
 	}
 
-	// parse primaryFieldData to result.IDs, and as returned primary keys
+	// Parse the request field once and retain request order.
 	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
 	if err != nil {
 		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
-		return nil, nil, err
+		return nil, err
 	}
-	if !primaryFieldSchema.GetAutoID() || preserveAutoIDPrimaryKey {
-		return ids, ids, nil
-	}
-	newIDs, err := parsePrimaryFieldData2IDs(newPrimaryFieldData)
-	if err != nil {
-		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
-		return nil, nil, err
-	}
-	return newIDs, ids, nil
+	return ids, nil
 }
 
 func getPartitionKeyFieldData(fieldSchema *schemapb.FieldSchema, insertMsg *msgstream.InsertMsg) (*schemapb.FieldData, error) {

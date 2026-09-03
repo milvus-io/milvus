@@ -519,8 +519,10 @@ func NewColumnBasedInsertOption(collName string, columns ...column.Column) *colu
 
 type rowBasedDataOption struct {
 	*columnBasedDataOption
-	rows         []any
-	keepAutoIDPk bool // keep user passed auto id pk field
+	rows []any
+	// keepAutoIDPk controls Insert conversion. Upsert always retains an AutoID
+	// primary key because it is the lookup key.
+	keepAutoIDPk bool
 }
 
 func NewRowBasedInsertOption(collName string, rows ...any) *rowBasedDataOption {
@@ -583,7 +585,10 @@ func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb
 }
 
 func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb.UpsertRequest, error) {
-	columns, err := row.AnyToColumns(opt.rows, opt.keepAutoIDPk, coll.Schema)
+	// An AutoID primary key is a lookup key for Upsert. Unlike Insert, Upsert
+	// must always send it so the server can distinguish an update from a
+	// generated insert-on-not-found row.
+	columns, err := row.AnyToColumns(opt.rows, true, coll.Schema)
 	if err != nil {
 		return nil, err
 	}

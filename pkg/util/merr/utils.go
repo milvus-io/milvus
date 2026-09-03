@@ -183,10 +183,10 @@ func oldCode(code int32) commonpb.ErrorCode {
 	case ErrCollectionNotFound.code():
 		return commonpb.ErrorCode_CollectionNotExists
 
-	case ErrParameterInvalid.code(), ErrParameterMissing.code(), ErrParameterTooLarge.code():
+	case ErrParameterInvalid.code(), ErrParameterMissing.code(), ErrParameterTooLarge.code(), ErrAutoIDUpsertTargetNotFound.code():
 		// The legacy contract is that every parameter-class error surfaces as
-		// IllegalArgument, so the finer-grained 1101/1102 codes must not regress
-		// old SDKs (which still read the deprecated ErrorCode) to UnexpectedError.
+		// IllegalArgument. Keep old SDKs that still read the deprecated ErrorCode
+		// from interpreting newer typed codes as UnexpectedError.
 		return commonpb.ErrorCode_IllegalArgument
 
 	case ErrNodeNotMatch.code():
@@ -698,6 +698,14 @@ func WrapErrCollectionPartialUpdateConflictErr(err error, format string, args ..
 		return wrapMsg(ErrCollectionPartialUpdateConflict, format, args...)
 	}
 	return wrapInner(ErrCollectionPartialUpdateConflict, formatMsg(format, args...), err)
+}
+
+func WrapErrAutoIDUpsertTargetNotFound(notFoundCount int) error {
+	return wrapMsg(
+		ErrAutoIDUpsertTargetNotFound,
+		"autoID full upsert target not found because proxy.autoIDUpsertInsertOnNotFound=false; not_found_count=%d",
+		notFoundCount,
+	)
 }
 
 func WrapErrAliasNotFound(db any, alias any, msg ...string) error {
