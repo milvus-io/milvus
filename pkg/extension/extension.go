@@ -99,10 +99,6 @@ const (
 	// requests the coordinator receives.
 	CapResourceGroupInterceptor CapabilityID = "resource_group_interceptor"
 
-	// CapIndexDrain is the graceful drop of a vector index on a loaded
-	// collection.
-	CapIndexDrain CapabilityID = "index_drain"
-
 	// CapHook is milvus's own request hook, compiled into the binary rather
 	// than loaded from proxy.soPath.
 	CapHook CapabilityID = "hook"
@@ -122,7 +118,6 @@ type Capabilities struct {
 	RBACBootstrap     RBACBootstrapper
 	CoordinatorEngine CoordinatorEngine
 	ResourceGroups    ResourceGroupInterceptor
-	IndexDrain        IndexDrainer
 
 	// Hook is milvus's own request hook (milvus-proto go-api/v3/hook), the
 	// interface whose Mock, Before and After the proxy's unary interceptor
@@ -160,7 +155,6 @@ func (c Capabilities) entries() []capabilityEntry {
 		{CapRBACBootstrap, c.RBACBootstrap},
 		{CapCoordinatorEngine, c.CoordinatorEngine},
 		{CapResourceGroupInterceptor, c.ResourceGroups},
-		{CapIndexDrain, c.IndexDrain},
 		{CapHook, c.Hook},
 	}
 }

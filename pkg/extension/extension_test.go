@@ -22,8 +22,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -49,7 +49,6 @@ var allCapabilityIDs = []CapabilityID{
 	CapRBACBootstrap,
 	CapCoordinatorEngine,
 	CapResourceGroupInterceptor,
-	CapIndexDrain,
 	CapHook,
 }
 
@@ -61,7 +60,6 @@ func fullCapabilities() Capabilities {
 		RBACBootstrap:     &fakeBootstrapper{},
 		CoordinatorEngine: &fakeCoordinatorEngine{},
 		ResourceGroups:    stubResourceGroupInterceptor{},
-		IndexDrain:        stubIndexDrainer{},
 		Hook:              stubHook{},
 	}
 }
@@ -188,10 +186,10 @@ func TestSetProviderRefusesATypedNilCapability(t *testing.T) {
 	ResetForTest()
 	t.Cleanup(ResetForTest)
 
-	var nilDrainer *typedNilDrainer
-	err := SetProvider(fakeProvider{name: "typed-nil-form", caps: Capabilities{IndexDrain: nilDrainer}})
+	var nilEngine *typedNilEngine
+	err := SetProvider(fakeProvider{name: "typed-nil-form", caps: Capabilities{CoordinatorEngine: nilEngine}})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), string(CapIndexDrain))
+	assert.Contains(t, err.Error(), string(CapCoordinatorEngine))
 }
 
 // The provider itself can be a typed nil too - a nil *concreteProvider in the
@@ -210,16 +208,11 @@ func TestSetProviderRefusesATypedNilProvider(t *testing.T) {
 	assert.Nil(t, installed.Load(), "a failed install must leave no trace")
 }
 
-type typedNilDrainer struct{}
+type typedNilEngine struct{}
 
-func (*typedNilDrainer) AllowVectorIndexDropWhileLoaded(context.Context, int64, string) bool {
-	return false
-}
-func (*typedNilDrainer) BeginDropIndex(context.Context, *indexpb.DropIndexRequest) bool { return false }
-func (*typedNilDrainer) AfterDropIndex(context.Context, *indexpb.DropIndexRequest)      {}
-func (*typedNilDrainer) AbortDropIndex(context.Context, *indexpb.DropIndexRequest)      {}
-func (*typedNilDrainer) AfterCreateIndex(context.Context, *indexpb.CreateIndexRequest)  {}
-func (*typedNilDrainer) CollectionDraining(context.Context, int64) bool                 { return false }
+func (*typedNilEngine) RegisterOnCoordinator(grpc.ServiceRegistrar)                 {}
+func (*typedNilEngine) Start(context.Context, Coordinator, CoordinatorExtras) error { return nil }
+func (*typedNilEngine) Stop() error                                                 { return nil }
 
 // stubHook is a hook.Hook that answers nothing, which is all the registry
 // tests need: they only ever ask whether the field is filled in.
