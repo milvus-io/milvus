@@ -113,6 +113,21 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 			refreshProgress = 100
 		}
 
+		// A request that names a resource group asks for the progress of the
+		// replicas living there, not the collection-wide figure; -1 says the
+		// group holds no replica of this collection.
+		if rgName := req.GetResourceGroup(); rgName != "" {
+			scoped, err := utils.LoadPercentageByResourceGroup(ctx, s.meta, s.targetMgr, s.dist, collectionID, rgName)
+			if err != nil {
+				mlog.Warn(ctx, "show collection failed on the resource-group scoped progress",
+					mlog.Int64("collectionID", collectionID), mlog.String("resourceGroup", rgName), mlog.Err(err))
+				return &querypb.ShowCollectionsResponse{
+					Status: merr.Status(err),
+				}, nil
+			}
+			percentage = scoped
+		}
+
 		resp.CollectionIDs = append(resp.CollectionIDs, collectionID)
 		resp.InMemoryPercentages = append(resp.InMemoryPercentages, int64(percentage))
 		resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, s.checkAnyReplicaAvailable(collectionID))

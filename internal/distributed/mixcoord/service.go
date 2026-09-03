@@ -237,10 +237,6 @@ func (s *Server) startGrpcLoop() {
 	querypb.RegisterQueryCoordServer(s.grpcServer, s)
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
 	s.mixCoord.RegisterStreamingCoordGRPCService(s.grpcServer)
-	// The extension seam sits here, and only here, because gRPC forbids
-	// registering a service once Serve has begun: this is the last point at
-	// which an installed engine can add services of its own.
-	registerCoordinatorEngineGRPC(s.grpcServer)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(s.listener); err != nil {
 		s.grpcErrChan <- err

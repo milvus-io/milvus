@@ -61,9 +61,8 @@ type mixCoordImpl struct {
 	tikvCli *txnkv.Client
 	address string
 
-	proxyCreator       proxyutil.ProxyCreator
-	proxyWatcher       *proxyutil.ProxyWatcher
-	proxyClientManager proxyutil.ProxyClientManagerInterface
+	proxyCreator proxyutil.ProxyCreator
+	proxyWatcher *proxyutil.ProxyWatcher
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 	stateCode           atomic.Int32
@@ -181,10 +180,6 @@ func (s *mixCoordImpl) initInternal() error {
 		return err
 	}
 	s.fileResourceObserver.InitProxy(s.rootcoordServer.GetProxyClientManager())
-	// The same manager backs InvalidateShardLeaderCache: it is assigned here,
-	// on the init path, because rootcoord owns the process's only proxy client
-	// manager and it does not exist before rootcoord's Init.
-	s.proxyClientManager = s.rootcoordServer.GetProxyClientManager()
 
 	if err := s.rootcoordServer.Start(); err != nil {
 		mlog.Error(s.ctx, "rootCoord start failed", mlog.Err(err))
@@ -1064,45 +1059,6 @@ func (s *mixCoordImpl) ListResourceGroups(ctx context.Context, req *milvuspb.Lis
 
 func (s *mixCoordImpl) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
 	return s.queryCoordServer.DescribeResourceGroup(ctx, req)
-}
-
-// GetLoadPercentageByResourceGroup exposes querycoord's per-resource-group
-// load progress to in-process callers. It is not part of any coordinator
-// service interface: no proto RPC carries it, and adding it to types.MixCoord
-// would force every generated mock of that interface to change. Callers reach
-// it by type-asserting the concrete coordinator; see
-// internal/distributed/mixcoord/extension_seam.go.
-func (s *mixCoordImpl) GetLoadPercentageByResourceGroup(ctx context.Context, collectionID int64, rgName string) (int32, error) {
-	// Health-gated like every RPC: before activation querycoord's meta is not
-	// initialized and would answer -1, which a caller cannot tell apart from
-	// "this resource group holds no replica".
-	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return 0, err
-	}
-	return s.queryCoordServer.GetLoadPercentageByResourceGroup(ctx, collectionID, rgName)
-}
-
-// InvalidateShardLeaderCache drops one collection's cached shard leaders on
-// every proxy the coordinator knows. It is exposed to in-process callers on
-// the same terms as the two methods above: no proto RPC carries it, so callers
-// type-assert the concrete coordinator rather than growing types.MixCoord and
-// every generated mock of it.
-//
-// The proxy client manager is built by rootcoord during Init and shared with
-// this coordinator (initInternal wires it), and nothing outside the
-// coordinator process holds one - which is why the fan-out has to live here
-// rather than in the caller.
-func (s *mixCoordImpl) InvalidateShardLeaderCache(ctx context.Context, collectionID int64) error {
-	if s.proxyClientManager == nil {
-		// Not wired yet - initInternal has not run. Failing loudly matters
-		// more than usual here: a caller that just released a collection
-		// treats a nil error as "every proxy has been told", and a silently
-		// skipped fan-out leaves proxies routing to leaders that are gone.
-		return merr.WrapErrServiceUnavailable("proxy client manager not initialized; shard-leader cache not invalidated")
-	}
-	return s.proxyClientManager.InvalidateShardLeaderCache(ctx, &proxypb.InvalidateShardLeaderCacheRequest{
-		CollectionIDs: []int64{collectionID},
-	})
 }
 
 func (s *mixCoordImpl) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRequest) (*querypb.ListQueryNodeResponse, error) {
