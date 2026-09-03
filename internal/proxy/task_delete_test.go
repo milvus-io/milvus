@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -149,6 +150,10 @@ func TestDeleteTask_PreExecuteSkipsNamespaceValidationWhenUnset(t *testing.T) {
 }
 
 func TestDeleteTask_Execute(t *testing.T) {
+	// Execute reads the collection's routing table before it repacks; an empty
+	// info routes by the legacy modulo, which is all these cases need.
+	infoPatch := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{}, nil).Build()
+	defer infoPatch.UnPatch()
 	collectionName := "test_delete"
 	collectionID := int64(111)
 	partitionName := "default"
@@ -175,6 +180,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 		allocator.Close()
 
 		dt := deleteTask{
+			baseTask:     baseTask{metaCache: &MetaCache{}},
 			chMgr:        mockMgr,
 			collectionID: collectionID,
 			partitionID:  partitionID,
@@ -208,6 +214,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 		assert.NoError(t, err)
 
 		dt := deleteTask{
+			baseTask:     baseTask{metaCache: &MetaCache{}},
 			chMgr:        mockMgr,
 			collectionID: collectionID,
 			partitionID:  partitionID,
@@ -806,6 +813,10 @@ func TestDeleteRunner_Run(t *testing.T) {
 
 	metaCache := NewMockCache(t)
 	metaCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil).Maybe()
+	// Every produced delete task reads the collection's routing table before
+	// it repacks; an empty info routes by the legacy modulo, which is all these
+	// cases need.
+	metaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 
 	t.Run("simple delete task failed", func(t *testing.T) {
 		mockMgr := channelmgr.NewMockChannelsMgr(t)
@@ -1190,6 +1201,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 
 		mockCache := NewMockCache(t)
 		mockCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil).Maybe()
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 		expr := "non_pk in [2, 3]"
 		plan, err := planparserv2.CreateRetrievePlan(schema.SchemaHelper, expr, nil)
 		require.NoError(t, err)

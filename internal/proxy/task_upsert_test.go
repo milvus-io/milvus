@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -806,6 +807,7 @@ func setPartialUpdateCASTestChannels(task *upsertTask, vchannels []string) {
 
 func preparePartialUpdateCASTestGroups(t *testing.T, task *upsertTask) {
 	t.Helper()
+	patchRoutingInfoForTest(t)
 	require.NoError(t, task.preparePartialUpdateCASGroups(context.Background()))
 }
 
@@ -958,6 +960,7 @@ func partialUpdateCASTestTask(
 	finalInsertPKs []int64,
 	deletePKs []int64,
 ) (*upsertTask, []streamingmessage.MutableMessage, []streamingmessage.MutableMessage) {
+	patchRoutingInfoForTest(t)
 	task := createTestUpdateTask()
 	task.SetTs(12345)
 	task.req.PartialUpdate = partial
@@ -987,6 +990,7 @@ func partialUpdateCASRealPackTestTask(
 	finalInsertPKs []int64,
 	deletePKs []int64,
 ) *upsertTask {
+	patchRoutingInfoForTest(t)
 	require.Len(t, finalInsertPKs, len(originalPKs))
 	rowIDs := make([]int64, len(finalInsertPKs))
 	timestamps := make([]uint64, len(finalInsertPKs))
@@ -1483,11 +1487,7 @@ func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 		t.Run(map[bool]string{false: "primary key", true: "partition key"}[partitionKey], func(t *testing.T) {
 			collectionPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 			defer collectionPatch.UnPatch()
-			// Execute reads the collection's routing table before it repacks. The
-			// empty info routes by the legacy modulo, which is what this test is
-			// about: which repack function the partition key selects.
-			infoPatch := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{}, nil).Build()
-			defer infoPatch.UnPatch()
+			patchRoutingInfoForTest(t)
 
 			primaryPatch := mockey.Mock(repackInsertDataForStreamingService).
 				Return([]streamingmessage.MutableMessage{}, [][]int{}, nil).
@@ -1535,6 +1535,8 @@ func TestPackInsertMessageUsesPartitionKeyRouting(t *testing.T) {
 	task.partitionKeys = partialUpdateCASPKFieldData([]int64{10})
 	collectionPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
 	defer collectionPatch.UnPatch()
+	// packInsertMessage reads the collection's routing table; the empty info
+	patchRoutingInfoForTest(t)
 	partitionPatch := mockey.Mock(repackInsertDataWithPartitionKeyForStreamingService).
 		Return([]streamingmessage.MutableMessage{}, [][]int{}, nil).
 		Build()
@@ -1546,6 +1548,7 @@ func TestPackInsertMessageUsesPartitionKeyRouting(t *testing.T) {
 }
 
 func TestAppendUpsertAttemptMapsSchemaVersionMismatch(t *testing.T) {
+	patchRoutingInfoForTest(t)
 	task, insertMsgs, _ := partialUpdateCASTestTask(t, false, []int64{10}, []int64{10}, nil)
 	fakeWAL := newPartialUpdateCASTestWAL(t, 1)
 	fakeWAL.appendHook = func(context.Context, ...streamingmessage.MutableMessage) streaming.AppendResponses {
@@ -1610,6 +1613,7 @@ func partialUpdateCASStringTestTask(
 }
 
 func TestPartialUpdateAppendAcceptsBuilderCASMetadata(t *testing.T) {
+	patchRoutingInfoForTest(t)
 	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
 	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
 	oldWAL := streaming.WAL()
@@ -1640,6 +1644,7 @@ func TestPartialUpdateAppendAcceptsBuilderCASMetadata(t *testing.T) {
 }
 
 func TestPartialUpdateAppendPacksMessagesAndAttachesCASMetadata(t *testing.T) {
+	patchRoutingInfoForTest(t)
 	task := partialUpdateCASRealPackTestTask(t, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
 	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
 	oldWAL := streaming.WAL()
@@ -1664,6 +1669,7 @@ func TestPartialUpdateAppendPacksMessagesAndAttachesCASMetadata(t *testing.T) {
 }
 
 func TestPartialUpdateRetriesAfterCASConflict(t *testing.T) {
+	patchRoutingInfoForTest(t)
 	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
 	task.req.FieldOps[0].Op = schemapb.FieldPartialUpdateOp_REPLACE
 	task.node.(*Proxy).tsoAllocator = &timestampAllocator{
@@ -1900,6 +1906,7 @@ func TestPartialUpdateQueryAccumulatesStorageCost(t *testing.T) {
 }
 
 func TestPartialUpdateRetryRestoresOriginalFieldsBeforeQuery(t *testing.T) {
+	patchRoutingInfoForTest(t)
 	task := createTestUpdateTask()
 	task.req.PartialUpdate = true
 	task.result = &milvuspb.MutationResult{}
@@ -1941,6 +1948,7 @@ func TestPartialUpdateRetryRestoresOriginalFieldsBeforeQuery(t *testing.T) {
 }
 
 func TestPartialUpdateRetryRefreshesMutationResultCounts(t *testing.T) {
+	patchRoutingInfoForTest(t)
 	task := createTestUpdateTask()
 	task.req.PartialUpdate = true
 	task.result = &milvuspb.MutationResult{
@@ -1985,6 +1993,7 @@ func TestPartialUpdateRetryRefreshesMutationResultCounts(t *testing.T) {
 }
 
 func TestPartialUpdateRetryResolvesTermBeforeQuery(t *testing.T) {
+	patchRoutingInfoForTest(t)
 	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
 	task.result = &milvuspb.MutationResult{}
 	task.node.(*Proxy).tsoAllocator = &timestampAllocator{
@@ -2044,6 +2053,7 @@ func TestPartialUpdateRetryResolvesTermBeforeQuery(t *testing.T) {
 }
 
 func TestPartialUpdateAppendAcceptsBuilderCASMetadataForVarCharPK(t *testing.T) {
+	patchRoutingInfoForTest(t)
 	task, _, _ := partialUpdateCASStringTestTask(
 		t,
 		[]string{"pk10", "pk20", "pk30"},
@@ -2097,6 +2107,7 @@ func TestPartialUpdateAutoIDBuildsCASGroupsFromOriginalPKs(t *testing.T) {
 }
 
 func TestNonPartialUpsertDoesNotAttachCASMetadata(t *testing.T) {
+	patchRoutingInfoForTest(t)
 	task, insertMsgs, deleteMsgs := partialUpdateCASTestTask(t, false, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
 	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
 	oldWAL := streaming.WAL()
@@ -2121,6 +2132,7 @@ func TestNonPartialUpsertDoesNotAttachCASMetadata(t *testing.T) {
 }
 
 func TestPreparePartialUpdateCASGroupsResolveErrorStopsBeforeQuery(t *testing.T) {
+	patchRoutingInfoForTest(t)
 	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
 	task.partialUpdateReadTs = 123
 	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
@@ -2138,6 +2150,7 @@ func TestPreparePartialUpdateCASGroupsResolveErrorStopsBeforeQuery(t *testing.T)
 }
 
 func TestPreparePartialUpdateCASGroupsRejectsInvalidTerm(t *testing.T) {
+	patchRoutingInfoForTest(t)
 	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
 	fakeWAL := newPartialUpdateCASTestWAL(t, -1)
 	oldWAL := streaming.WAL()
@@ -2251,6 +2264,7 @@ func TestAttachPartialUpdateCASRejectsVChannelMismatch(t *testing.T) {
 }
 
 func TestPartialUpdateCASMetadataSizeIsBounded(t *testing.T) {
+	patchRoutingInfoForTest(t)
 	smallTask, _, _ := partialUpdateCASTestTask(t, true, []int64{10}, []int64{10}, nil)
 	setPartialUpdateCASTestChannels(smallTask, partialUpdateCASTestVChannels[:1])
 	smallGroups, err := smallTask.buildPartialUpdateCASGroups(context.Background())
@@ -5417,5 +5431,26 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 		// For non-nullable $meta, ValidData should remain empty (not auto-filled)
 		assert.Empty(t, typeutil.GetFieldDataValidData(metaField),
 			"non-nullable $meta should NOT have ValidData auto-filled")
+	})
+}
+
+// routingInfoPatched records which tests already have GetCollectionInfo mocked,
+// so a test that builds its task through two helpers -- or patches it itself --
+// does not trip mockey's re-mock panic.
+var routingInfoPatched sync.Map
+
+// patchRoutingInfoForTest mocks (*MetaCache).GetCollectionInfo to return an
+// empty collection info, once per test. Every insert/upsert/delete path now
+// reads the collection's routing table before it packs or routes, and an empty
+// info routes by the legacy modulo, which is what these tests assume.
+func patchRoutingInfoForTest(t *testing.T) {
+	t.Helper()
+	if _, loaded := routingInfoPatched.LoadOrStore(t.Name(), struct{}{}); loaded {
+		return
+	}
+	patch := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{}, nil).Build()
+	t.Cleanup(func() {
+		patch.UnPatch()
+		routingInfoPatched.Delete(t.Name())
 	})
 }
