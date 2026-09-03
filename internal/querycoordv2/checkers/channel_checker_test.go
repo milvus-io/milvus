@@ -18,6 +18,8 @@ package checkers
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -27,17 +29,24 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ChannelCheckerTestSuite struct {
@@ -362,4 +371,86 @@ func (suite *ChannelCheckerTestSuite) TestReleaseDirtyChannels() {
 
 func TestChannelCheckerSuite(t *testing.T) {
 	suite.Run(t, new(ChannelCheckerTestSuite))
+}
+
+// TestLoadChannelsSpreadAcrossSQNodes reproduces the case that a new replica gets
+// all its channels at once while none of the candidate streaming query nodes
+// hosts the channels' WAL (e.g. the replica lives in a resource group whose
+// streaming nodes own no pchannel). Every channel task generated in one check
+// round must not target the same node.
+func (suite *ChannelCheckerTestSuite) TestLoadChannelsSpreadAcrossSQNodes() {
+	streamingutil.SetStreamingServiceEnabled()
+	defer os.Unsetenv(streamingutil.MilvusStreamingServiceEnabled)
+
+	const channelNum = 12
+	sqNodes := []int64{1051, 1053, 1054, 1056, 1057, 1058}
+	walNode := int64(1007) // WAL owner, not a candidate of the replica
+
+	// feed pchannel -> WAL node assignments, otherwise GetWALLocated blocks forever
+	snmanager.ResetStreamingNodeManager()
+	b := mock_balancer.NewMockBalancer(suite.T())
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+		relations := make([]types.PChannelInfoAssigned, 0, channelNum)
+		for i := 0; i < channelNum; i++ {
+			relations = append(relations, types.PChannelInfoAssigned{
+				Channel: types.PChannelInfo{Name: fmt.Sprintf("pchannel%d", i), Term: 1},
+				Node:    types.StreamingNodeInfo{ServerID: walNode, Address: "localhost:1"},
+			})
+		}
+		cb(balancer.WatchChannelAssignmentsCallbackParam{
+			Version:            typeutil.VersionInt64Pair{Global: 1, Local: 1},
+			CChannelAssignment: &streamingpb.CChannelAssignment{Meta: &streamingpb.CChannelMeta{Pchannel: "pchannel0"}},
+			Relations:          relations,
+		})
+		<-ctx.Done()
+		return context.Cause(ctx)
+	}).Maybe()
+	// register the candidates (and the WAL owner) as streaming query nodes
+	streamingNodes := make(map[int64]*types.StreamingNodeInfoWithResourceGroup)
+	for _, node := range append([]int64{walNode}, sqNodes...) {
+		streamingNodes[node] = &types.StreamingNodeInfoWithResourceGroup{
+			StreamingNodeInfo: types.StreamingNodeInfo{ServerID: node, Address: "localhost:1"},
+		}
+	}
+	b.EXPECT().GetAllStreamingNodes(mock.Anything).Return(streamingNodes, nil).Maybe()
+	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).Return(streamingNodes, nil).Maybe()
+	b.EXPECT().Close().Return().Maybe()
+	balance.Register(b)
+
+	ctx := context.Background()
+	checker := suite.checker
+	checker.scheduler.(*task.MockScheduler).EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	suite.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.Put(ctx, meta.NewReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  1,
+		ResourceGroup: meta.DefaultResourceGroupName,
+		RwSqNodes:     sqNodes,
+	}))
+	suite.setNodeAvailable(sqNodes...)
+
+	channels := make([]*datapb.VchannelInfo, 0, channelNum)
+	for i := 0; i < channelNum; i++ {
+		channels = append(channels, &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  fmt.Sprintf("pchannel%d_1v0", i),
+		})
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(channels, nil, nil)
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
+
+	tasks := checker.Check(ctx)
+	suite.Len(tasks, channelNum)
+	perNode := make(map[int64]int)
+	for _, t := range tasks {
+		suite.Len(t.Actions(), 1)
+		action := t.Actions()[0].(*task.ChannelAction)
+		suite.Equal(task.ActionTypeGrow, action.Type())
+		perNode[action.Node()]++
+	}
+	suite.Len(perNode, len(sqNodes), "channels should be spread over all sq nodes, got %v", perNode)
+	for node, cnt := range perNode {
+		suite.Equal(channelNum/len(sqNodes), cnt, "node %d got %d channels, distribution %v", node, cnt, perNode)
+	}
 }
