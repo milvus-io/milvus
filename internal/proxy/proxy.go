@@ -172,6 +172,13 @@ func (node *Proxy) GetMetaCache() Cache {
 	return node.getMetaCache()
 }
 
+// IsDQLQueueFull reports whether the next DQL enqueue would be rejected with
+// TooManyRequests. The REST layer probes it (via interface assertion, like
+// GetMetaCache) to reject search/query before paying for body decoding.
+func (node *Proxy) IsDQLQueueFull() bool {
+	return node.sched != nil && node.sched.dqQueue.isFull()
+}
+
 // Register registers proxy at etcd
 func (node *Proxy) Register() error {
 	node.session.Register()
