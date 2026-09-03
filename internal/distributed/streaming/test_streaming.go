@@ -223,6 +223,10 @@ func (n *noopWALAccesser) ResolvePChannelInfo(ctx context.Context, vchannel stri
 }
 
 func (n *noopWALAccesser) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses {
+	return n.AppendMessagesWithOptions(ctx, msgs)
+}
+
+func (n *noopWALAccesser) AppendMessagesWithOptions(ctx context.Context, msgs []message.MutableMessage, opts ...AppendOption) AppendResponses {
 	if err := getExpectErr(); err != nil {
 		return AppendResponses{
 			Responses: []AppendResponse{
