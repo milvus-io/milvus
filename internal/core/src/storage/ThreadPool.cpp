@@ -16,10 +16,7 @@
 
 #include "ThreadPool.h"
 
-#include <gflags/gflags.h>
-
 #include <chrono>
-#include <mutex>
 
 #include "log/Log.h"
 
@@ -74,13 +71,7 @@ namespace {
 // WAIT_SECONDS(2). folly's CPUThreadPoolExecutor keeps idle threads alive for
 // its global "threadtimeout_ms" (default 60s). Restore the old 2s idle timeout
 // so idle workers are reclaimed promptly like before.
-void
-ConfigureFollyThreadTimeout() {
-    static std::once_flag flag;
-    std::call_once(flag, []() {
-        gflags::SetCommandLineOption("threadtimeout_ms", "2000");
-    });
-}
+constexpr std::chrono::milliseconds kIdleThreadTimeout{2000};
 
 }  // namespace
 
@@ -93,8 +84,6 @@ ThreadPool::ThreadPool(const float thread_core_coefficient, std::string name)
         << " with min worker num:" << 1
         << " and max worker num:" << max_threads;
 
-    ConfigureFollyThreadTimeout();
-
     // folly::CPUThreadPoolExecutor(std::pair{a, b}) uses `a` as maxThreads_
     // (via setNumThreads(a)) and `b` as minThreads_. Therefore an elastic pool
     // that scales between 1 and max_threads workers is {max_threads, 1}, NOT
@@ -102,6 +91,12 @@ ThreadPool::ThreadPool(const float thread_core_coefficient, std::string name)
     executor_ = std::make_unique<folly::CPUThreadPoolExecutor>(
         std::pair<size_t, size_t>{static_cast<size_t>(max_threads), 1},
         std::make_shared<folly::NamedThreadFactory>(name_));
+    // Reclaim idle workers after the same timeout the hand-rolled pool used
+    // (WAIT_SECONDS=2). Use the per-instance setter rather than the global
+    // folly "threadtimeout_ms" gflag: the flag is read once in the base
+    // constructor, so mutating it would silently change the idle timeout of
+    // every folly executor constructed afterwards, not just this pool.
+    executor_->setThreadDeathTimeout(kIdleThreadTimeout);
 }
 
 ThreadPool::~ThreadPool() {
