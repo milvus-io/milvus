@@ -7182,7 +7182,8 @@ ChunkedSegmentSealedImpl::InvalidateStaleStructArrayOffsets(
     const SchemaPtr& current_schema,
     const SchemaPtr& target_schema,
     RuntimeResourceState& runtime) {
-    if (runtime.struct_to_array_offsets.empty()) {
+    if (runtime.struct_to_array_offsets.empty() &&
+        runtime.array_offsets_map.empty()) {
         return;
     }
 
@@ -7212,6 +7213,18 @@ ChunkedSegmentSealedImpl::InvalidateStaleStructArrayOffsets(
          it != runtime.struct_to_array_offsets.end();) {
         if (surviving_structs.find(it->first) == surviving_structs.end()) {
             it = runtime.struct_to_array_offsets.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Remove aliases for child fields that no longer exist in the target
+    // schema. Otherwise their shared_ptrs keep retired StructArray offsets
+    // reachable through GetArrayOffsets().
+    for (auto it = runtime.array_offsets_map.begin();
+         it != runtime.array_offsets_map.end();) {
+        if (!target_schema->has_field(it->first)) {
+            it = runtime.array_offsets_map.erase(it);
         } else {
             ++it;
         }
