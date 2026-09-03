@@ -38,6 +38,9 @@ type fakeDataViewCatalog struct {
 	dropAllErr  error
 	saveCall    int
 	dropAllCall []int64
+	// dropHook, when set, runs at the top of DropDataView (under mu) - tests
+	// use it to block the GC drop sweep and observe the tombstone window.
+	dropHook func()
 }
 
 func (c *fakeDataViewCatalog) SaveDataView(_ context.Context, view *viewpb.DataViewOfCollection) error {
@@ -76,6 +79,9 @@ func (c *fakeDataViewCatalog) ListAllDataViews(_ context.Context) ([]*viewpb.Dat
 func (c *fakeDataViewCatalog) DropDataView(_ context.Context, collectionID int64, version *viewpb.DataVersion) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.dropHook != nil {
+		c.dropHook()
+	}
 	if c.dropErr != nil {
 		return c.dropErr
 	}
@@ -288,6 +294,48 @@ func TestManagerSegmentManifestVersions(t *testing.T) {
 	partition := ref.DataView().GetShards()[0].GetPartitions()[0]
 	require.Equal(t, []int64{10}, partition.GetSegmentIds())
 	require.Equal(t, []int64{4}, partition.GetSegmentManifestVersions())
+}
+
+func TestManagerFlushReplayStaleManifestVersionIsNoOp(t *testing.T) {
+	ctx := context.Background()
+	manager, catalog := newTestManager()
+	_, err := manager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+
+	// First flush publishes the Segment at manifest version 3.
+	flushAndCommit(t, manager, FlushDataViewEvent{
+		CollectionID: 1,
+		Segments:     []LoadableSegment{segmentWithManifestVersion(10, "ch-1", 100, 3)},
+	})
+	ref, err := manager.Latest(ctx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, ref)
+	require.Equal(t, []int64{3}, ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentManifestVersions())
+	ref.Deref()
+
+	// An L0 compact recompute advances the Segment's manifest version to 4.
+	v, err := manager.RecomputeNow(ctx, 1, projectSegments(segmentWithManifestVersion(10, "ch-1", 100, 4)))
+	require.NoError(t, err)
+	requireVersion(t, v, 2, 1)
+
+	before := catalog.saveCall
+	// A replayed flush (double flush / recovery re-flush) carries the manifest
+	// path known at its own flush time: version 3 < stored 4. It must be an
+	// idempotent no-op that preserves the stored version — not a permanent
+	// "Manifest version cannot regress" failure.
+	view, commit, abort, err := manager.PrepareFlush(ctx, FlushDataViewEvent{
+		CollectionID: 1,
+		Segments:     []LoadableSegment{segmentWithManifestVersion(10, "ch-1", 100, 3)},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, commit)
+	require.NotNil(t, abort)
+	// The replayed flush is a membership no-op: no snapshot is persisted and
+	// the stored (newer) manifest version is preserved.
+	require.Equal(t, before, catalog.saveCall)
+	require.Equal(t, []int64{4}, view.GetShards()[0].GetPartitions()[0].GetSegmentManifestVersions())
+	commit()
+	commit()
 }
 
 func TestManagerL0CompactAdvancesCompactVersion(t *testing.T) {
@@ -581,6 +629,60 @@ func TestManagerGCRespectsLatestRetainedAndRefs(t *testing.T) {
 	oldRef.Deref()
 	require.NoError(t, manager.GarbageCollect(ctx, 1, 1))
 	require.Len(t, catalog.views, 1)
+}
+
+func TestManagerGCTombstoneWindowRefusesGet(t *testing.T) {
+	ctx := context.Background()
+	manager, catalog := newTestManager()
+	_, err := manager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+	oldest := flushAndCommit(t, manager, FlushDataViewEvent{CollectionID: 1, Segments: []LoadableSegment{segment(1, "ch-1", 10)}})
+	_ = flushAndCommit(t, manager, FlushDataViewEvent{CollectionID: 1, Segments: []LoadableSegment{segment(2, "ch-1", 10)}})
+	_ = flushAndCommit(t, manager, FlushDataViewEvent{CollectionID: 1, Segments: []LoadableSegment{segment(3, "ch-1", 10)}})
+
+	// Block the GC drop sweep mid-flight: while the etcd key of a collectable
+	// version is being dropped (lock released), Get must refuse it instead of
+	// handing out a ref to a snapshot whose key is about to be gone.
+	dropStarted := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	catalog.dropHook = func() {
+		once.Do(func() { close(dropStarted) })
+		<-release
+	}
+	gcErr := make(chan error, 1)
+	go func() {
+		gcErr <- manager.GarbageCollect(ctx, 1, 1)
+	}()
+	<-dropStarted
+
+	ref, err := manager.Get(ctx, 1, oldest)
+	require.NoError(t, err)
+	require.Nil(t, ref)
+
+	close(release)
+	require.NoError(t, <-gcErr)
+	// Only the retained latest version survives the sweep.
+	require.Len(t, catalog.views, 1)
+}
+
+func TestManagerGCErrorKeepsCollectableVersionsServed(t *testing.T) {
+	ctx := context.Background()
+	manager, catalog := newTestManager()
+	_, err := manager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+	oldest := flushAndCommit(t, manager, FlushDataViewEvent{CollectionID: 1, Segments: []LoadableSegment{segment(1, "ch-1", 10)}})
+	_ = flushAndCommit(t, manager, FlushDataViewEvent{CollectionID: 1, Segments: []LoadableSegment{segment(2, "ch-1", 10)}})
+
+	// A failed drop must not leave the version permanently refused: its etcd
+	// key is still in place, so Get keeps serving it until a later GC retry.
+	catalog.dropErr = errors.New("drop failed")
+	require.Error(t, manager.GarbageCollect(ctx, 1, 1))
+	require.Len(t, catalog.views, 3)
+	ref, err := manager.Get(ctx, 1, oldest)
+	require.NoError(t, err)
+	require.NotNil(t, ref)
+	ref.Deref()
 }
 
 func TestManagerRecoveryAndDrop(t *testing.T) {

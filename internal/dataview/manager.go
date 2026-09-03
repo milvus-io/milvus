@@ -118,6 +118,11 @@ const (
 type versionEntry struct {
 	view *viewpb.DataViewOfCollection
 	refs *versionRefCounter
+	// isTombstone marks an entry whose etcd snapshot key is being dropped by
+	// GarbageCollect while the per-collection lock is released for the
+	// DropDataView round trips. Get refuses tombstoned entries so no ref can
+	// be acquired to a version whose snapshot key no longer exists.
+	isTombstone bool
 }
 
 type versionRefCounter struct {
@@ -530,6 +535,11 @@ func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64
 			continue
 		}
 		version := entry.view.GetDataVersion()
+		// Tombstone the entry while the lock is still held: the etcd drop
+		// happens below with the lock released, and the marker closes the
+		// window where a concurrent Get could otherwise acquire a ref to a
+		// version whose snapshot key is about to be gone.
+		entry.isTombstone = true
 		collectable = append(collectable, collectableVersion{
 			version: version,
 			key:     dataVersionKey(version),
@@ -537,8 +547,19 @@ func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64
 	}
 	state.mu.Unlock()
 
-	for _, candidate := range collectable {
+	for i, candidate := range collectable {
 		if err := m.catalog.DropDataView(ctx, collectionID, candidate.version); err != nil {
+			// The drop failed. Candidates up to i already lost their etcd key
+			// and stay tombstoned (refused by Get, reclaimed on a later GC
+			// retry by the cleanup loop); the remaining candidates kept their
+			// key, so clear their tombstones to serve them again.
+			state.mu.Lock()
+			for _, c := range collectable[i:] {
+				if entry := state.versions[c.key]; entry != nil {
+					entry.isTombstone = false
+				}
+			}
+			state.mu.Unlock()
 			return err
 		}
 	}
@@ -725,7 +746,7 @@ func (m *dataViewManager) getOrCreateState(collectionID int64) *collectionState 
 }
 
 func acquireRefLocked(state *collectionState, entry *versionEntry) DataViewRef {
-	if entry == nil {
+	if entry == nil || entry.isTombstone {
 		return nil
 	}
 	entry.refs.count++
@@ -810,12 +831,17 @@ func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) 
 			}
 			currentVersion := known.partition.SegmentManifestVersions[known.index]
 			if segment.ManifestVersion < currentVersion {
-				return merr.WrapErrDataIntegrityMsg(
-					"Segment %d Manifest version cannot regress from %d to %d",
-					segment.SegmentID,
-					currentVersion,
-					segment.ManifestVersion,
-				)
+				// A lower positive version on an already-published Segment is
+				// an idempotent replay, not a regression: the stored version
+				// was advanced after this flush was first prepared (e.g. an
+				// L0 compact manifest bump recompute), and the replayed
+				// SaveBinlogPaths (double flush or recovery re-flush) carries
+				// the manifest path known at its own flush time. Preserve the
+				// stored version so the replay is a membership no-op instead
+				// of failing the flush forever with "cannot regress" — the
+				// SegmentMeta side treats the replay as already-flushed and
+				// skips it the same way.
+				continue
 			}
 			if segment.ManifestVersion > currentVersion {
 				known.partition.SegmentManifestVersions[known.index] = segment.ManifestVersion
