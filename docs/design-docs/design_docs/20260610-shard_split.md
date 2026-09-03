@@ -102,6 +102,40 @@ collection, the primary key otherwise. It says nothing about placement —
 `hash(pk)` does **not** mean `hash(pk) % shardNum`, which stops holding the
 moment a collection is split.
 
+**Admission precondition for `hash($namespace_id)`.** The namespace routing
+key is only valid for a collection whose rows have ALWAYS been placed by it,
+and on master that is one build-time configuration, not every namespace
+collection. The proxy places a row by namespace only when
+`namespace.sharding.enabled=true` **and** `namespace.mode=partition_key`
+(`namespacePartitionKeyModeEnabled`, consulted by insert directly and by delete
+and upsert through `namespaceShardingChannelID`). `sharding.enabled` is written
+as `false` at create time unless the request sets it, and a `partition`-mode
+collection is always placed by `hash(pk)`. So the default namespace collection
+has every existing row spread over all shards by primary key. Back-filling
+`shard_by = hash($namespace_id)` onto such a collection at its first split would
+send a namespace's NEW rows to one shard while its existing rows stay
+everywhere, and a delete routed by the namespace hash would reach one shard and
+silently miss the rest; the zero-rewrite relabel argument above rests on the
+same premise. Both properties are immutable after creation
+(`ValidateNamespaceShardingEnabledNotAltered`, `validateNamespaceModeImmutable`),
+so "placement history equals the current rule" is decidable from the
+collection's own properties. The routing commit MUST check them before
+accepting a `hash($namespace_id)` back-fill; any other namespace collection
+splits under `hash(pk)` or is refused.
+
+**Representation cost.** A shard's residues are stored as an explicit list,
+and that list is `O(M)`, not `O(shards)`. Every shard starts with a single
+residue, so a collection's FIRST split always doubles the modulus, and each
+later doubling re-expresses every untouched shard's list at the new modulus --
+doubling its length. At the cap, `M = 2^15`, the lists total 32,768 `uint64`s
+carried in the collection meta and in every `DescribeCollectionResponse`,
+including the ones SDK users receive. Accepted because a residue list is the
+only shape that makes the tiling check a set operation, the cap bounds the
+worst case at a few hundred kilobytes, and a collection needs fifteen
+consecutive doublings of the same lineage to reach it; a compressed
+representation (ranges of residues) is a later optimization the wire format
+does not preclude.
+
 M is not the shard count. A never-split N-shard collection is M = N with one
 residue per shard, which is the legacy `hash % N` placement bit for bit —
 not a second code path, just a residue table built from the channel order.
