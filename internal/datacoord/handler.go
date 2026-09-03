@@ -1002,6 +1002,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 			JsonKeyIndexFiles: uncompressedJSONStats,
 			TextIndexFiles:    segInfo.GetTextStatsLogs(),
 			ManifestPath:      segInfo.GetManifestPath(),
+			ManifestHasIndex:  proto.Bool(segInfo.GetManifestHasIndex()),
 		}
 	})
 

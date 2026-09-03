@@ -1239,6 +1239,11 @@ message CopySegmentSource {
   // replacing collection/partition/segment IDs.
   string source_root_path = 14;
 
+  // Sticky source-segment marker. Presence matters: false proves that the
+  // copied manifest has no index entries, while absence means an older
+  // snapshot whose manifest must still be inspected conservatively.
+  optional bool manifest_has_index = 15;
+
   // Snapshot-declared row count, used when StorageV3 omits legacy PB binlogs.
   int64 num_of_rows = 16;
 }
@@ -1330,6 +1335,12 @@ message CopySegmentResult {
 
   // Transformed manifest path for target segment
   string manifest_path = 10;
+
+  // Present on workers that rewrote (or proved empty) the copied manifest's
+  // index section. The build IDs are the entries actually published there.
+  // Absence identifies an older worker and requires DataCoord read-back.
+  optional bool manifest_index_rewritten = 11;
+  repeated int64 manifest_index_build_ids = 12;
 }
 
 // CopySegmentTask represents a copy segment task that copies segment data and optionally indexes
@@ -1349,6 +1360,10 @@ message CopySegmentTask {
   repeated CopySegmentIDMapping id_mappings = 9;
   uint64 created_ts = 10;   // Unix timestamp in nanoseconds
   uint64 complete_ts = 11;  // Unix timestamp in nanoseconds
+
+  // Placement selected before dispatch. Presence distinguishes an explicit
+  // false value from an older persisted task that predates this field.
+  optional bool index_write_to_manifest = 12;
 }
 
 // CopySegmentJobState defines the state machine for copy segment jobs
@@ -1823,6 +1838,9 @@ message SegmentDescription {
   // Must be preserved across snapshot/restore so temporal protections
   // (GC, TTL, MVCC) are not lost on the restored segments.
   uint64 commit_timestamp = 18;
+  // Sticky source marker copied from SegmentInfo. Presence lets restore skip
+  // manifest index reads when false; old snapshots leave it absent.
+  optional bool manifest_has_index = 19;
 }
 
 message CollectionDescription {
