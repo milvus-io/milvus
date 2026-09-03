@@ -952,6 +952,7 @@ func (s *ServerSuite) TestBootstrapDataViews() {
 		InsertChannel: "ch-1",
 		State:         commonpb.SegmentState_Flushed,
 		Level:         datapb.SegmentLevel_L1,
+		Binlogs:       []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 	})))
 	// a growing Segment and a Flushed L0 Segment are not loadable seeds
 	s.Require().NoError(s.testServer.meta.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
@@ -974,13 +975,18 @@ func (s *ServerSuite) TestBootstrapDataViews() {
 	// RecoverManager performs the whole recovery pass at construction:
 	// persisted snapshots (none here) plus a reconciliation of every
 	// recoverable live Collection against the loadable SegmentMeta projection.
+	// The declared vchannel skeleton (collectionVChannels) seeds empty shards
+	// for channels without loadable segments.
 	recoverDataViews := func() {
 		catalog := datacoordkv.NewCatalog(NewMetaMemoryKV(), "", "")
 		collectionIDs := lo.Map(s.testServer.meta.GetCollections(), func(c *collectionInfo, _ int) int64 { return c.ID })
+		collectionVChannels := lo.SliceToMap(s.testServer.meta.GetCollections(), func(c *collectionInfo) (int64, []string) {
+			return c.ID, c.VChannelNames
+		})
 		var err error
 		s.testServer.dataViewManager, err = dataview.RecoverManager(ctx, catalog,
 			func(_ context.Context, _ int64) (bool, error) { return true, nil },
-			s.testServer.meta.loadableProjection, collectionIDs, nil)
+			s.testServer.meta.loadableProjection, collectionIDs, collectionVChannels)
 		s.Require().NoError(err)
 		s.testServer.meta.dataViewManager = s.testServer.dataViewManager
 	}

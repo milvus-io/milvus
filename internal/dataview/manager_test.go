@@ -1046,7 +1046,7 @@ func TestManagerAsyncRecomputeRetriesFailedProjection(t *testing.T) {
 }
 
 // TestManagerAsyncRecomputeWorkerStopsOnCancel verifies the worker exits when
-// the context it was constructed with is cancelled (RecoverManager bounds the
+// the context it was constructed with is canceled (RecoverManager bounds the
 // worker by the coordinator ctx).
 func TestManagerAsyncRecomputeWorkerStopsOnCancel(t *testing.T) {
 	ctx := context.Background()

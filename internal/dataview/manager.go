@@ -165,16 +165,16 @@ type dataViewRef struct {
 // manager only serves synchronous operations (PrepareFlush, RecomputeNow,
 // bootstrap); Recompute requests then return an error.
 func NewManager(catalog Catalog, project Projector) Manager {
-	return newManager(catalog, project, context.Background())
+	return newManager(context.Background(), catalog, project)
 }
 
-func newManager(catalog Catalog, project Projector, workerCtx context.Context) *dataViewManager {
+func newManager(ctx context.Context, catalog Catalog, project Projector) *dataViewManager {
 	m := &dataViewManager{
 		catalog:   catalog,
 		states:    make(map[int64]*collectionState),
 		dropped:   make(map[int64]struct{}),
 		projector: project,
-		workerCtx: workerCtx,
+		workerCtx: ctx,
 	}
 	m.queue = newDataViewRecomputeQueue(m)
 	m.startWorker()
@@ -182,7 +182,7 @@ func newManager(catalog Catalog, project Projector, workerCtx context.Context) *
 }
 
 // startWorker launches the async Recompute worker exactly once; it stops when
-// the manager's workerCtx is cancelled.
+// the manager's workerCtx is canceled.
 func (m *dataViewManager) startWorker() {
 	m.startOnce.Do(func() {
 		go m.queue.run(m.workerCtx)
@@ -228,7 +228,7 @@ func (m *dataViewManager) Recompute(ctx context.Context, collectionID int64) err
 //     through the declared vchannel skeleton (collectionVChannels), so empty
 //     channels and channels without loadable segments are present instead of
 //     waiting for the first loadable Segment;
-//   - the async Recompute worker is started, bounded by ctx (cancelling ctx
+//   - the async Recompute worker is started, bounded by ctx (canceling ctx
 //     stops the worker).
 func RecoverManager(
 	ctx context.Context,
@@ -283,7 +283,7 @@ func RecoverManager(
 		recoverCollection[collectionID] = recover
 	}
 
-	manager := newManager(catalog, project, ctx)
+	manager := newManager(ctx, catalog, project)
 	for _, collectionID := range collectionIDs {
 		if !recoverCollection[collectionID] {
 			continue
