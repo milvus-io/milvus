@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func hashRouting(buckets ...uint64) *schemapb.CollectionShardInfo_HashRouting {
@@ -198,6 +199,42 @@ func TestShardsFromMetaRejectsLengthMismatch(t *testing.T) {
 	_, err := ShardsFromMeta([]string{"a", "b"}, []*schemapb.CollectionShardInfo{{}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mismatches")
+}
+
+// No shard info at all is the never-split shape -- the proto says so, and it is
+// what every DescribeCollection response from today's rootcoord carries, since
+// nothing populates the field yet. It must build the legacy table, exactly as
+// Derive(0, channels, nil) does, not be refused as a length mismatch.
+func TestShardsFromMetaTreatsNoShardInfoAsNeverSplit(t *testing.T) {
+	channels := []string{"v0", "v1"}
+	shards, err := ShardsFromMeta(channels, nil)
+	require.NoError(t, err)
+	assert.Nil(t, shards)
+
+	shards, err = ShardsFromMeta(channels, []*schemapb.CollectionShardInfo{})
+	require.NoError(t, err)
+	assert.Nil(t, shards)
+
+	// and what it returns feeds Derive into the same table the legacy path builds.
+	table, err := Derive(0, channels, shards)
+	require.NoError(t, err)
+	assert.False(t, table.IsExplicit())
+	assert.Equal(t, 2, table.NumShards())
+}
+
+// A shard the table's own channel list does not carry is malformed meta, and it
+// has to be refused at derivation, non-retriably. Left in, it surfaces from
+// owner() as ErrCollectionRoutingStale -- retriable -- and every retry consumer
+// loops until its deadline on a condition no refresh can clear.
+func TestDeriveRefusesAShardOutsideTheChannelList(t *testing.T) {
+	_, err := Derive(2, []string{"v0", "v1"}, []Shard{
+		{Vchannel: "v0", Buckets: []uint64{0}},
+		{Vchannel: "v2", Buckets: []uint64{1}},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"v2"`)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	assert.False(t, merr.IsRetryableErr(err), "malformed meta must not be retried")
 }
 
 // A shard state a newer server knows and this build does not may own keys.
