@@ -208,6 +208,10 @@ message ShowCollectionsRequest {
     // Not useful for now
     int64 dbID = 2;
     repeated int64 collectionIDs = 3;
+    // When set, inMemory_percentages is the load progress of the replicas that
+    // live in this resource group only, -1 for a collection that has no replica
+    // there. Empty keeps the collection-wide figure.
+    string resource_group = 4;
 }
 
 message ShowCollectionsResponse {
