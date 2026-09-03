@@ -1800,6 +1800,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     IsSystemFieldReadyFromState(const PublishedSegmentState& state,
                                 const SegmentLoadInfo* load_info) const;
 
+    static void
+    InvalidateStaleStructArrayOffsets(const SchemaPtr& current_schema,
+                                      const SchemaPtr& target_schema,
+                                      RuntimeResourceState& runtime);
+
     void
     EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,
                                      int64_t row_count,
