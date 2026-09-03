@@ -139,6 +139,14 @@ func (s *RawDataV2Suite) runRawDataCampaign(c rawDataCampaign) {
 	collectionID := describe.GetCollectionID()
 	s.Require().Equal(strconv.FormatInt(s.ezID, 10), propertyValue(describe.GetProperties(), common.EncryptionEzIDKey))
 	s.Require().Equal(strconv.FormatInt(s.ezID, 10), propertyValue(describe.GetSchema().GetProperties(), common.EncryptionEzIDKey))
+	if c.index {
+		// Complete logical-index broadcasts before insert and flush start the
+		// segment lifecycle. A post-flush CreateIndex was observed remaining
+		// pending indefinitely while those workflows overlapped. The post-flush
+		// metadata assertion below still proves that these small segments have no
+		// physical vector index files.
+		s.createRawVectorIndexes(ctx, collectionName, c.schema)
+	}
 
 	insert, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName: s.dbName, CollectionName: collectionName, FieldsData: c.fields,
@@ -157,7 +165,6 @@ func (s *RawDataV2Suite) runRawDataCampaign(c rawDataCampaign) {
 	s.assertFlushProducedCurrentSegment(flushedIDs, segments)
 	s.inspectRawObjects(ctx, segments, collectionID)
 	if c.index {
-		s.createRawVectorIndexes(ctx, collectionName, c.schema)
 		s.assertNoPhysicalVectorIndex(ctx, segments, c.schema)
 	}
 
