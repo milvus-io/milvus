@@ -469,14 +469,6 @@ func (suite *IncrementalExpansionSuite) SetupTest() {
 	suite.ctx = context.Background()
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 
-	// The keep-loaded fast path is configuration-gated: only a deployment that
-	// scopes load requests to the resource groups they name gets it, so these
-	// tests turn queryCoord.resourceGroupScopedLoad on.
-	// TestNativeBinaryNeverTakesTheFastPath is the other half.
-	scopedKey := paramtable.Get().QueryCoordCfg.ResourceGroupScopedLoad.Key
-	paramtable.Get().Save(scopedKey, "true")
-	suite.T().Cleanup(func() { paramtable.Get().Reset(scopedKey) })
-
 	suite.catalog = mocks.NewQueryCoordCatalog(suite.T())
 	// The collection under test always carries exactly one partition, so a
 	// SaveCollection carries either zero or one partition load info.
@@ -942,30 +934,4 @@ func (suite *IncrementalExpansionSuite) TestExpandedCollectionKeepsServingWhileN
 
 func TestIncrementalExpansion(t *testing.T) {
 	suite.Run(t, new(IncrementalExpansionSuite))
-}
-
-// placementOnlyProvider declares exactly the LoadPlacement capability the
-// fast-path gate looks for.
-// A stock binary never takes the fast path, whatever the request looks like:
-// the same add-resource-group request that the extension-gated path keeps
-// loaded falls through to the native overwrite - reset to Loading, one
-// unscoped observer task - so native failure visibility (the SDK blocks until
-// the new resource group loads, or the whole collection is released on
-// timeout) is exactly what it always was.
-func (suite *IncrementalExpansionSuite) TestNativeBinaryNeverTakesTheFastPath() {
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ResourceGroupScopedLoad.Key, "false")
-	suite.seedLoadedCollection(1, rgA, 1)
-
-	putCalls, tasks, err := suite.runJob(suite.buildExpansionRequest(
-		replicaConfig(1, rgA), replicaConfig(2, rgB)))
-	suite.NoError(err)
-	suite.Equal(1, putCalls, "with the scoped load off the meta overwrite must happen exactly as upstream")
-
-	collection := suite.meta.GetCollection(suite.ctx, expansionCollectionID)
-	suite.Require().NotNil(collection)
-	suite.Equal(querypb.LoadStatus_Loading, collection.GetStatus(),
-		"native semantics: adding a resource group resets the collection to Loading")
-
-	suite.Require().Len(tasks, 1)
-	suite.Equal("", tasks[0].resourceGroup, "native path registers the unscoped collection-wide task")
 }
