@@ -45,11 +45,11 @@ import (
 // can satisfy — too few pchannels, say — which the reconciler would otherwise
 // retry for the life of the collection.
 
-// validateShardSplitMode rejects an unrecognised mode.
+// validateShardSplitMode rejects an unrecognized mode.
 //
 // Checked even when no shard count is being set, because the property stands on
 // its own: it decides whether the size trigger owns this collection, and a value
-// nothing recognises would read as the "auto" default — handing the trigger a
+// nothing recognizes would read as the "auto" default — handing the trigger a
 // collection the operator believes they took control of.
 func validateShardSplitMode(properties []*commonpb.KeyValuePair) error {
 	if _, _, err := common.ParseShardSplitMode(properties); err != nil {
@@ -64,7 +64,7 @@ func validateShardSplitMode(properties []*commonpb.KeyValuePair) error {
 func validateDesiredShardNum(coll *model.Collection, properties []*commonpb.KeyValuePair, deleteKeys []string) error {
 	if funcutil.SliceContain(deleteKeys, common.CollectionShardNum) {
 		// Deleting the property WITHDRAWS the request, and that is how a rehash is
-		// cancelled: datacoord stops retrying an intent it cannot satisfy, and
+		// canceled: datacoord stops retrying an intent it cannot satisfy, and
 		// retires the task if it has not fenced yet (a fenced one still runs to
 		// completion — an unfinished split cannot be unwound, only finished).
 		//
