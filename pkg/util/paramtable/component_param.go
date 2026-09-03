@@ -3119,7 +3119,6 @@ type queryCoordConfig struct {
 	BalanceCheckInterval       ParamItem `refreshable:"true"`
 	AutoBalanceInterval        ParamItem `refreshable:"true"`
 	IndexCheckInterval         ParamItem `refreshable:"true"`
-	ResourceGroupScopedLoad    ParamItem `refreshable:"true"`
 	ReloadSegmentOnIndexDrop   ParamItem `refreshable:"true"`
 	ChannelTaskTimeout         ParamItem `refreshable:"true"`
 	SegmentTaskTimeout         ParamItem `refreshable:"true"`
@@ -3474,16 +3473,6 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.IndexCheckInterval.Init(base.mgr)
-
-	p.ResourceGroupScopedLoad = ParamItem{
-		Key:     "queryCoord.resourceGroupScopedLoad",
-		Version: "3.0.0",
-		Doc: "when true, a load request that names resource groups changes only the placement in those groups: the other groups keep the replicas they hold, and a request that only adds groups keeps the collection loaded meanwhile. " +
-			"when false (native), a load request states the collection's whole placement, so an added group resets the collection to Loading until it is served there",
-		DefaultValue: "false",
-		Export:       true,
-	}
-	p.ResourceGroupScopedLoad.Init(base.mgr)
 
 	p.ReloadSegmentOnIndexDrop = ParamItem{
 		Key:     "queryCoord.reloadSegmentOnIndexDrop",

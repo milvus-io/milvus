@@ -595,7 +595,6 @@ func TestComponentParam(t *testing.T) {
 
 	t.Run("test queryCoordConfig", func(t *testing.T) {
 		Params := &params.QueryCoordCfg
-		assert.False(t, Params.ResourceGroupScopedLoad.GetAsBool(), "a load request states the whole placement by default")
 		assert.True(t, Params.ReloadSegmentOnIndexDrop.GetAsBool(), "a dropped index is reopened out of loaded segments by default")
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
 		t.Logf("queryCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
