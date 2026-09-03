@@ -33,6 +33,12 @@ not the switch's current value, so disabling publication redirects new results
 to etcd without hiding or leaking indexes written while it was enabled. An
 all-etcd cluster has no marked segments and performs no manifest index reads.
 
+Historical eligible artifacts may be moved from etcd-only to manifest-only
+placement by the optional
+[manifest index backfill](20260901-storagev3-manifest-index-backfill.md). It
+uses this same publication transaction to add the entry and retire the row;
+there is no dual-write interval or separate index-prune phase.
+
 Index workers keep their existing responsibility — build the index and upload
 its files — and keep their existing result contract. They do not open a
 manifest transaction and the worker result carries no manifest path.
@@ -284,6 +290,9 @@ when publication is enabled.
 - `CommitSegmentManifest` writes the segment pointer and deletes the completed
   `SegmentIndex` task row in one catalog transaction, and refuses a chunked
   fallback that could expose them separately.
+- Historical backfill uses that same atomic transition; after success the row
+  is absent from etcd, the record remains live in memory, and startup rebuilds
+  it from the marked manifest. There is no separate index prune task.
 - DataCoord read paths use `SegmentIndex` metadata with no manifest I/O at all,
   including for a segment with no records and for a finished record carrying no
   `index_file_keys`.

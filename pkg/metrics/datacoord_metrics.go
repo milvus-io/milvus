@@ -459,6 +459,29 @@ var (
 			Help:      "number of snapshot export jobs that reached a terminal state",
 		}, []string{statusLabelName})
 
+	// DataCoordManifestIndexBackfillPending is the number of historical
+	// finished StorageV3 SegmentIndex catalog rows still eligible to move into
+	// segment manifests. The scan recomputes it from in-memory durable-placement
+	// state on every tick.
+	DataCoordManifestIndexBackfillPending = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "manifest_index_backfill_pending_records",
+			Help:      "number of finished StorageV3 segment index catalog records waiting to move into segment manifests",
+		})
+
+	// DataCoordManifestIndexBackfillRecords counts individual record migration
+	// attempts. A persistently increasing failed label means the optional
+	// migration is not converging; stale and skipped are self-healing races.
+	DataCoordManifestIndexBackfillRecords = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "manifest_index_backfill_records_total",
+			Help:      "number of segment index catalog records handled by manifest backfill, by outcome",
+		}, []string{statusLabelName})
+
 	DataCoordSnapshotExportJobLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -510,6 +533,8 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordSnapshotExportActiveJobs)
 	registry.MustRegister(DataCoordSnapshotExportTerminalJobs)
 	registry.MustRegister(DataCoordSnapshotExportJobLatency)
+	registry.MustRegister(DataCoordManifestIndexBackfillPending)
+	registry.MustRegister(DataCoordManifestIndexBackfillRecords)
 	registerStreamingCoord(registry)
 }
 
