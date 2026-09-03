@@ -2067,10 +2067,15 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 // SegmentMeta op, so a visible DataView implies its SegmentMeta is committed.
 // dataView may be nil to commit SegmentMeta alone.
 // UpdateSegmentsInfoAndDataView returns whether the composite txn actually
-// ran. It short-circuits (false, nil) when no SegmentMeta mutation is pending
-// (e.g. a replayed flush of an already-flushed segment): no DataView version
-// reaches the catalog then, and the caller must abort any prepared in-memory
-// snapshot instead of committing a version that does not exist in etcd.
+// ran. The DataView snapshot is persisted even when the SegmentMeta update
+// short-circuits (updatePack == nil, e.g. a replayed flush of an
+// already-flushed segment): the flush must synchronously advance
+// streaming_version, and any failure to persist is surfaced as an error so
+// the SaveBinlogPaths caller retries until the version is durably published.
+// Only when both sides are empty (no SegmentMeta mutation and no DataView
+// snapshot) does it return (false, nil); the caller then aborts any prepared
+// in-memory snapshot instead of committing a version that does not exist in
+// etcd.
 func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection, operators ...UpdateOperator) (bool, error) {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
@@ -2079,28 +2084,29 @@ func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *view
 	if err != nil {
 		return false, err
 	}
-	if updatePack == nil {
+	if updatePack == nil && dataView == nil {
 		return false, nil
 	}
 
-	segments := lo.MapToSlice(updatePack.segments, func(_ int64, segment *SegmentInfo) *datapb.SegmentInfo { return segment.SegmentInfo })
-
-	actions := make([]metastore.UpdateAction, 0, len(segments)+1)
-	for _, segment := range segments {
-		// Pair each segment with its binlog increment (if any) so the legacy
-		// AlterSegments encoding persists record + binlog KVs together.
-		var binlogs []metastore.BinlogsIncrement
-		if inc, ok := updatePack.increments[segment.GetID()]; ok {
-			binlogs = []metastore.BinlogsIncrement{inc}
+	actions := make([]metastore.UpdateAction, 0, 1)
+	if updatePack != nil {
+		actions = make([]metastore.UpdateAction, 0, len(updatePack.segments)+1)
+		for _, segment := range updatePack.segments {
+			// Pair each segment with its binlog increment (if any) so the legacy
+			// AlterSegments encoding persists record + binlog KVs together.
+			var binlogs []metastore.BinlogsIncrement
+			if inc, ok := updatePack.increments[segment.GetID()]; ok {
+				binlogs = []metastore.BinlogsIncrement{inc}
+			}
+			actions = append(actions, metastore.UpdateAction{
+				Type: metastore.ActionUpdate,
+				Entry: metastore.SegmentEntry{
+					Segment:       segment.SegmentInfo,
+					Binlogs:       binlogs,
+					AlterEncoding: true,
+				},
+			})
 		}
-		actions = append(actions, metastore.UpdateAction{
-			Type: metastore.ActionUpdate,
-			Entry: metastore.SegmentEntry{
-				Segment:       segment,
-				Binlogs:       binlogs,
-				AlterEncoding: true,
-			},
-		})
 	}
 	if dataView != nil {
 		actions = append(actions, metastore.SaveDataView(dataView))
@@ -2111,10 +2117,12 @@ func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *view
 		return false, err
 	}
 	// Apply metric mutation after a successful meta update.
-	updatePack.metricMutation.commit()
-	// update memory status
-	for id, s := range updatePack.segments {
-		m.segments.SetSegment(id, s)
+	if updatePack != nil {
+		updatePack.metricMutation.commit()
+		// update memory status
+		for id, s := range updatePack.segments {
+			m.segments.SetSegment(id, s)
+		}
 	}
 	mlog.Info(ctx, "meta update: update flush segments info and DataView successfully")
 	return true, nil
@@ -2941,9 +2949,6 @@ func (m *meta) compactionMutationAppliedLocked(inputSegments []int64) bool {
 	for _, segmentID := range inputSegments {
 		segment := m.segments.GetSegment(segmentID)
 		if segment == nil || !segment.GetCompacted() {
-			return false
-		}
-		if _, ok := m.segments.GetCompactionTo(segmentID); !ok {
 			return false
 		}
 	}

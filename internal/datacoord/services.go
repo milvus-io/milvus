@@ -726,13 +726,19 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// Lock order is DataView Collection lock -> segMu (inside
 	// UpdateSegmentsInfoAndDataView); the queue worker's Recompute takes the
 	// same order (DataView lock -> segMu.RLock via loadableProjection), so no
-	// deadlock. On failure the lock is aborted and the StreamingNode retries.
-	// Publish the flush atomically only when the segment is loadable right
-	// away: with sort compaction enabled the same txn marks the segment
-	// invisible (it is replaced by its sorted output before becoming
-	// loadable), so publishing it here would flip membership on the next
-	// recompute - the sorted output publishes instead.
-	if s.dataViewManager != nil && req.GetFlushed() && req.GetSegLevel() != datapb.SegmentLevel_L0 && !enableSortCompaction() {
+	// deadlock. On failure the lock is aborted and the StreamingNode retries
+	// the whole SaveBinlogPaths until the DataView version is durably
+	// published (the syncmgr meta writer retries indefinitely).
+	//
+	// The flush always synchronously advances streaming_version, even when
+	// sort compaction marks the segment invisible in the same txn: the
+	// segment's data is complete and loadable, invisible only means its
+	// sorted output will replace it later (SortCompaction behaves exactly
+	// like a regular compaction: output segment replaces the input). The
+	// current invisible-while-published window is an acknowledged
+	// contradiction that StreamingNode-side sorting of flushed segments will
+	// eliminate in the future.
+	if s.dataViewManager != nil && req.GetFlushed() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
 		segment := s.meta.GetSegment(ctx, req.GetSegmentID())
 		// Skip zero-row segments: the same txn marks them Dropped via
 		// UpdateAsDroppedIfEmptyWhenFlushing, so publishing them here would
@@ -761,7 +767,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			// 0 marker - otherwise the next recompute rewrites the membership
 			// and burns another snapshot version.
 			manifestPath := req.GetManifestPath()
-			if manifestPath == "" {
+			if manifestPath == "" && segment != nil {
 				manifestPath = segment.GetManifestPath()
 			}
 			manifestVersion := int64(0)
@@ -792,16 +798,20 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 				return merr.Status(err), nil
 			}
 			if !committed {
-				// The composite txn short-circuited (no SegmentMeta mutation
-				// pending): no DataView version reached etcd, so discard the
-				// prepared in-memory snapshot too - committing it would serve
-				// a version that does not exist in the catalog. The segment
-				// meta may still hold the Flushed state from a previous
-				// partially-committed attempt (chunked over-limit fallback),
-				// so converge the DataView membership via a recompute instead
-				// of leaving the segment absent until an unrelated trigger.
+				// Nothing was persisted: no SegmentMeta mutation pending AND
+				// no DataView snapshot to publish (the Collection's DataViews
+				// were dropped while this flush was in flight). Discard the
+				// prepared in-memory snapshot - committing it would serve a
+				// version that does not exist in etcd. This is success, not
+				// an error: the flush path deliberately does no recompute
+				// here. When a DataView snapshot does need publishing,
+				// UpdateSegmentsInfoAndDataView persists it even if the
+				// SegmentMeta update short-circuits (replayed flush of an
+				// already-flushed segment), and any catalog failure surfaces
+				// as an error that the SaveBinlogPaths caller retries
+				// indefinitely until the streaming_version is durably
+				// published.
 				abortView()
-				s.meta.recomputeDataView(ctx, segment.GetCollectionID())
 			} else {
 				commitView()
 			}
