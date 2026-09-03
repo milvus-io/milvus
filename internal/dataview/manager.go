@@ -503,12 +503,20 @@ func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64
 	if state == nil {
 		return nil
 	}
-	state.mu.Lock()
-	defer state.mu.Unlock()
 	if retainLatest < 1 {
 		retainLatest = 1
 	}
 
+	// Snapshot the collectable versions under the per-collection lock, then
+	// drop their etcd keys outside it: holding state.mu across one serial
+	// DropDataView round trip per collected version would stall the single
+	// cluster-wide recompute worker (recomputeNow -> lockStateForMutation) and
+	// the flush path for the whole sweep.
+	type collectableVersion struct {
+		version *viewpb.DataVersion
+		key     string
+	}
+	state.mu.Lock()
 	entries := make([]*versionEntry, 0, len(state.versions))
 	for _, entry := range state.versions {
 		entries = append(entries, entry)
@@ -516,15 +524,37 @@ func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64
 	sort.Slice(entries, func(i, j int) bool {
 		return compareDataVersion(entries[i].view.GetDataVersion(), entries[j].view.GetDataVersion()) > 0
 	})
+	collectable := make([]collectableVersion, 0, len(entries))
 	for idx, entry := range entries {
 		if idx < retainLatest || entry == state.latest || entry.refs.count > 0 {
 			continue
 		}
 		version := entry.view.GetDataVersion()
-		if err := m.catalog.DropDataView(ctx, collectionID, version); err != nil {
+		collectable = append(collectable, collectableVersion{
+			version: version,
+			key:     dataVersionKey(version),
+		})
+	}
+	state.mu.Unlock()
+
+	for _, candidate := range collectable {
+		if err := m.catalog.DropDataView(ctx, collectionID, candidate.version); err != nil {
 			return err
 		}
-		delete(state.versions, dataVersionKey(version))
+	}
+
+	// Re-acquire the lock to remove the collected versions from the in-memory
+	// table, re-checking that nothing changed while the lock was released: a
+	// concurrent Get/Latest may have taken a ref, or a flush may have advanced
+	// state.latest onto an entry that was collectable a moment ago.
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	for _, candidate := range collectable {
+		entry := state.versions[candidate.key]
+		if entry == nil || entry == state.latest || entry.refs.count > 0 {
+			continue
+		}
+		delete(state.versions, candidate.key)
 	}
 	return nil
 }
