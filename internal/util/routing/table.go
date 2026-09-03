@@ -193,8 +193,22 @@ func Derive(modulus uint64, channels []string, shards []Shard, opts ...Option) (
 		return t, nil
 	}
 
+	// A shard the table's OWN channel list does not carry cannot be routed to
+	// by any caller of this table, and no meta refresh changes that. Left in,
+	// it would surface later from owner() as ErrCollectionRoutingStale --
+	// retriable -- so every retry consumer would loop until its deadline on a
+	// condition that is permanently malformed meta. Refuse it here, where the
+	// two cases are still distinguishable, and non-retriably.
+	known := make(map[string]struct{}, len(t.channels))
+	for _, ch := range t.channels {
+		known[ch] = struct{}{}
+	}
 	hashShards := make([]HashShard, 0, len(shards))
 	for _, s := range shards {
+		if _, ok := known[s.Vchannel]; !ok {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"routing shard %q is not in the collection's vchannel list", s.Vchannel)
+		}
 		hashShards = append(hashShards, HashShard(s))
 	}
 	residues, err := DeriveHash(modulus, hashShards)
@@ -285,6 +299,16 @@ func LegacyShards(vchannels []string) (uint64, []Shard, error) {
 // dropped: dropping it silently re-routes whatever it owned, and mapping it onto
 // the zero value would make a shard that takes no writes look like one that does.
 func ShardsFromMeta(vchannels []string, infos []*schemapb.CollectionShardInfo) ([]Shard, error) {
+	if len(infos) == 0 {
+		// Not a mismatch: this is the never-split shape. The proto documents an
+		// empty shard_infos as "the peer predates shard split", and today's
+		// rootcoord never populates it at all, so EVERY current
+		// DescribeCollection response looks like this. Derive already reads no
+		// shard info as the legacy assignment; answer the same way here rather
+		// than refusing, non-retriably, to build a table for every collection
+		// that has never been split.
+		return nil, nil
+	}
 	if len(infos) != len(vchannels) {
 		return nil, merr.WrapErrServiceInternalMsg("routing shard info count %d mismatches vchannel count %d",
 			len(infos), len(vchannels))

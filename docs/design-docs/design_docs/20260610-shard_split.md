@@ -155,8 +155,12 @@ same transaction:
   shard owns. A shard owns a *list*, not one value, because its share spans
   more residues as the modulus grows. Unset means the collection has never
   been split, or the shard is a fenced split source, whose predicate the
-  write switch strips. A state this build does not know may own keys, so it
-  fails that shard's keys rather than being dropped. (Defined in
+  write switch strips. A state this build does not know may own keys, so the
+  table is refused as a whole -- every write to the collection fails, not only
+  the keys of that shard -- rather than that shard being silently dropped. The
+  choice is deliberate: an unknown state is a newer server talking to an older
+  proxy, and routing around it would place rows by a rule this build cannot
+  see. It is also the rolling-upgrade cost to plan for. (Defined in
   milvus-proto #618; `model.ShardInfo` mirrors it.)
 - `DescribeCollectionResponse` gains `routing_modulus` — one number for the
   whole collection, `0` before its first split — and `shard_by`. The
