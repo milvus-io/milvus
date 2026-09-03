@@ -87,9 +87,6 @@ const (
 	// CapProxyExtension is the proxy-side behavior takeover.
 	CapProxyExtension CapabilityID = "proxy_extension"
 
-	// CapRBACBootstrap is account and role seeding at rootcoord startup.
-	CapRBACBootstrap CapabilityID = "rbac_bootstrap"
-
 	// CapCoordinatorEngine is control-plane machinery hosted in the
 	// coordinator process, with its own gRPC services on the coordinator's
 	// server.
@@ -115,7 +112,6 @@ const (
 // unrequirable.
 type Capabilities struct {
 	ProxyExt          ProxyExtension
-	RBACBootstrap     RBACBootstrapper
 	CoordinatorEngine CoordinatorEngine
 	ResourceGroups    ResourceGroupInterceptor
 
@@ -152,7 +148,6 @@ type capabilityEntry struct {
 func (c Capabilities) entries() []capabilityEntry {
 	return []capabilityEntry{
 		{CapProxyExtension, c.ProxyExt},
-		{CapRBACBootstrap, c.RBACBootstrap},
 		{CapCoordinatorEngine, c.CoordinatorEngine},
 		{CapResourceGroupInterceptor, c.ResourceGroups},
 		{CapHook, c.Hook},
