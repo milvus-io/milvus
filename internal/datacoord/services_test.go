@@ -292,12 +292,11 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 	})
 	require.NoError(s.T(), s.testServer.meta.AddSegment(ctx, segment))
 
-	// The flush atomic-publish path only runs with sort compaction disabled
-	// (services.go gating); keep the default "true" and the DataView branch is
-	// skipped entirely and the retry contract has no exercising test.
-	paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
-	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
-
+	// Flush always takes the atomic-publish path (no sort-compaction gating
+	// since the M1 fix): with the default EnableSortCompaction=true the same
+	// txn also marks the segment invisible, yet the DataView snapshot must
+	// still be published (streaming_version advances unconditionally). This
+	// test therefore runs under the default config.
 	catalog := datacoordkv.NewCatalog(NewMetaMemoryKV(), "", "")
 	manager := dataview.NewManager(catalog, nil)
 	_, err := manager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{
@@ -349,18 +348,35 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 	ref.Deref()
 	updateMock.UnPatch()
 
-	// On retry the composite write succeeds: SegmentMeta is committed and the
-	// DataView snapshot is published atomically.
+	// On retry the composite write succeeds: SegmentMeta is committed (and,
+	// under the default sort-compaction config, marked invisible) while the
+	// DataView snapshot is still published atomically - flush advances
+	// streaming_version regardless of the invisible marker.
 	resp, err = s.testServer.SaveBinlogPaths(ctx, req)
 	require.NoError(s.T(), err)
 	require.True(s.T(), merr.Ok(resp))
-	require.Equal(s.T(), commonpb.SegmentState_Flushed, s.testServer.meta.GetSegment(ctx, 10).GetState())
+	flushed := s.testServer.meta.GetSegment(ctx, 10)
+	require.Equal(s.T(), commonpb.SegmentState_Flushed, flushed.GetState())
+	require.True(s.T(), flushed.GetIsInvisible())
 	ref, err = manager.Latest(ctx, 100)
 	require.NoError(s.T(), err)
 	require.NotNil(s.T(), ref)
 	defer ref.Deref()
 	partition := ref.DataView().GetShards()[0].GetPartitions()[0]
 	require.Equal(s.T(), int64(10), partition.GetPartitionId())
+	require.Equal(s.T(), []int64{10}, partition.GetSegmentIds())
+
+	// A third identical flush (idempotent replay of an already-flushed
+	// segment): SegmentMeta short-circuits (updatePack == nil), but the
+	// DataView snapshot must still be persisted so the flush path never
+	// depends on an unrelated recompute for convergence.
+	resp, err = s.testServer.SaveBinlogPaths(ctx, req)
+	require.NoError(s.T(), err)
+	require.True(s.T(), merr.Ok(resp))
+	ref, err = manager.Latest(ctx, 100)
+	require.NoError(s.T(), err)
+	require.NotNil(s.T(), ref)
+	partition = ref.DataView().GetShards()[0].GetPartitions()[0]
 	require.Equal(s.T(), []int64{10}, partition.GetSegmentIds())
 }
 
