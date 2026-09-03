@@ -499,8 +499,9 @@ func (t *bumpSchemaVersionTask) commitBumpV3Materialization(ctx context.Context,
 	// pre-lock read here would only spuriously abort after a benign concurrent
 	// commit (e.g. a stats publication) advanced the pointer.
 	if err := manifestMeta.CommitSegmentManifest(ctx, SegmentManifestCommit{
-		SegmentID:     segmentID,
-		StorageConfig: compaction.CreateStorageConfig(),
+		SegmentID:      segmentID,
+		StorageConfig:  compaction.CreateStorageConfig(),
+		CompactionTask: t.GetTaskProto(),
 		Mutation: ManifestMutation{
 			Type: ManifestMutationCommitUpdates,
 			Updates: &packed.ManifestUpdates{
