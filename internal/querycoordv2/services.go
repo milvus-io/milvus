@@ -102,6 +102,21 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 				}, nil
 			}
 
+			if req.GetResourceGroup() != "" {
+				// Scoped to a resource group, a collection that is not loaded
+				// at all and has no failure recorded is a collection with no
+				// replica in that group: -1, the same answer a loaded
+				// collection gives for a group it has no replica in, so a
+				// caller polling one group's progress right after issuing a
+				// load is not told the load failed.
+				resp.CollectionIDs = append(resp.CollectionIDs, collectionID)
+				resp.InMemoryPercentages = append(resp.InMemoryPercentages, -1)
+				resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, false)
+				resp.RefreshProgress = append(resp.RefreshProgress, 0)
+				resp.LoadFields = append(resp.LoadFields, &schemapb.LongArray{})
+				continue
+			}
+
 			err = merr.WrapErrCollectionNotLoaded(collectionID)
 			mlog.Warn(context.TODO(), "show collection failed", mlog.Err(err))
 			return &querypb.ShowCollectionsResponse{

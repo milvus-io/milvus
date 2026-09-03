@@ -97,3 +97,28 @@ func TestShowLoadCollectionsScopedToAnUnknownResourceGroupIsRefused(t *testing.T
 	require.NoError(t, err)
 	assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrResourceGroupNotFound)
 }
+
+func TestShowLoadCollectionsScopedAnswersMinusOneForAnUnloadedCollection(t *testing.T) {
+	withFailedLoadCache(t)
+	f := newRGLoadPercentageFixture(t)
+	f.putResourceGroup(t, "rg-a")
+	const neverLoaded = int64(777)
+
+	resp, err := f.server().ShowLoadCollections(context.Background(), &querypb.ShowCollectionsRequest{
+		CollectionIDs: []int64{neverLoaded},
+	})
+	require.NoError(t, err)
+	assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCollectionNotLoaded,
+		"unscoped, an unloaded collection is refused exactly as before")
+
+	resp, err = f.server().ShowLoadCollections(context.Background(), &querypb.ShowCollectionsRequest{
+		CollectionIDs: []int64{neverLoaded},
+		ResourceGroup: "rg-a",
+	})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	require.Equal(t, []int64{neverLoaded}, resp.GetCollectionIDs())
+	assert.EqualValues(t, -1, resp.GetInMemoryPercentages()[0],
+		"scoped, an unloaded collection with no recorded failure holds no replica in the group: -1, not a refusal")
+	assert.False(t, resp.GetQueryServiceAvailable()[0])
+}
