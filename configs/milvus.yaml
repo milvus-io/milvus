@@ -884,16 +884,6 @@ dataCoord:
     # Layout 1 cannot be read by 2.6, so enabling it commits the upgrade and gives up the ability to roll back to 2.6. Existing index files keep the layout they were built with, so this switch only affects index files built from now on.
     # Layout 1 is additionally gated on no QueryNode still reporting an older release line, so setting this to 1 during a 2.6 -> 3.0 upgrade still builds layout 0 until every QueryNode is upgraded. That check reads the version each QueryNode publishes in its session, which is a per-release-line constant, so it separates 2.6.x from 3.0.x but does not differentiate binaries within the same release line.
     storePathVersion: 0
-    # Whether no QueryNode being online means the pool is scaled to zero rather than missing.
-    # Natively, no QueryNode session means no readers, and the index engine versions negotiated from those sessions fall to
-    # zero and the store-path gate to the legacy layout - the conservative reading when nodes are expected to exist and their
-    # absence is a degradation. A deployment that starts QueryNodes on demand inverts that: no session is the RESTING state,
-    # and most index builds happen in it. Version zero is then not conservative but wrong, because knowhere reads engine
-    # version 0 as "disk load only for DISKANN" and misroutes other disk indexes onto the in-memory path.
-    # With this set, an empty session set is answered from THIS process's own engine versions instead of from zero, on the
-    # assumption that a QueryNode started later runs the same image as the coordinator. Do not set it where the QueryNode
-    # pool can run an image older than the coordinator.
-    queryNodesScaleToZero: false
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.

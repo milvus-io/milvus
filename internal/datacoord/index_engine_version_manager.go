@@ -16,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // IndexEngineVersionManager manages the index engine versions reported by all QueryNodes in the cluster.
@@ -171,12 +170,6 @@ func (m *versionManagerImpl) GetClusterMinIndexStorePathVersion() indexpb.IndexS
 	defer m.mu.Unlock()
 
 	if len(m.sessionVersion) == 0 {
-		// An on-demand deployment builds most indexes with no query node
-		// running, and its pool never runs an image older than the
-		// coordinator, so empty reads as "all readers current" there.
-		if queryNodesScaleToZero() {
-			return indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
-		}
 		return indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
 	}
 	for _, version := range m.sessionVersion {
@@ -210,12 +203,12 @@ func (m *versionManagerImpl) GetCurrentIndexEngineVersion() int32 {
 
 func (m *versionManagerImpl) getCurrentVersion() int32 {
 	if len(m.versions) == 0 {
-		// Where query nodes start on demand, empty is the resting state and
-		// zero would misroute disk indexes.
-		if v, ok := scaleToZeroVectorEngineVersion(); ok {
-			return v
-		}
-		return 0
+		// With no QueryNode session, version 0 is read by knowhere as "only
+		// DISKANN loads off disk" and misroutes other disk indexes onto the
+		// in-memory path, so this answers the version compiled into the
+		// coordinator itself, on the assumption that a QueryNode started
+		// later runs the same image as the coordinator.
+		return segcore.GetIndexEngineInfo().CurrentIndexVersion
 	}
 
 	current := int32(math.MaxInt32)
@@ -257,10 +250,9 @@ func (m *versionManagerImpl) GetCurrentScalarIndexEngineVersion() int32 {
 
 func (m *versionManagerImpl) getCurrentScalarVersion() int32 {
 	if len(m.scalarIndexVersions) == 0 {
-		if v, ok := scaleToZeroScalarEngineVersion(); ok {
-			return v
-		}
-		return 0
+		// See getCurrentVersion: with no QueryNode session, this answers the
+		// scalar engine version compiled into the coordinator itself.
+		return common.CurrentScalarIndexEngineVersion
 	}
 
 	current := int32(math.MaxInt32)
@@ -415,47 +407,4 @@ func (m *versionManagerImpl) GetMinimalSessionVer() semver.Version {
 		}
 	}
 	return minVer
-}
-
-// The three helpers below answer what an EMPTY query-node session set means.
-//
-// Natively it means no readers: version negotiation has nobody to negotiate
-// with, so the engine-version answers fall to zero and the store-path gate to
-// the legacy layout - the conservative reading when nodes are expected to
-// exist and their absence is a degradation. A deployment that starts query
-// nodes on demand inverts that: empty is the RESTING state, and most
-// CreateIndex calls arrive in it. Version zero there is not conservative, it
-// is wrong - knowhere reads engine version 0 as "disk load only for DISKANN"
-// and misroutes other disk indexes onto the in-memory path, corrupting their
-// offsets.
-//
-// dataCoord.index.queryNodesScaleToZero is that deployment's statement. The
-// values are not configured: they come from this process's own engine
-// (segcore's knowhere for vectors, the compiled-in constant for scalars),
-// because the assumption the config makes is that a query node started later
-// runs the same image as the coordinator, so the versions this binary carries
-// are the versions the absent nodes would report.
-
-// queryNodesScaleToZero reports whether an empty query-node session set means
-// the pool is scaled to zero rather than missing.
-func queryNodesScaleToZero() bool {
-	return paramtable.Get().DataCoordCfg.IndexQueryNodesScaleToZero.GetAsBool()
-}
-
-// scaleToZeroVectorEngineVersion answers the vector engine version for an
-// empty session set, from this process's own knowhere.
-func scaleToZeroVectorEngineVersion() (int32, bool) {
-	if !queryNodesScaleToZero() {
-		return 0, false
-	}
-	return segcore.GetIndexEngineInfo().CurrentIndexVersion, true
-}
-
-// scaleToZeroScalarEngineVersion answers the scalar engine version for an
-// empty session set, from the compiled-in constant.
-func scaleToZeroScalarEngineVersion() (int32, bool) {
-	if !queryNodesScaleToZero() {
-		return 0, false
-	}
-	return common.CurrentScalarIndexEngineVersion, true
 }
