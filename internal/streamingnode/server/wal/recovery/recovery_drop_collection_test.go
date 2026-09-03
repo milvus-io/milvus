@@ -167,7 +167,8 @@ func TestGetSnapshot_FiltersOrphanedSegments(t *testing.T) {
 	// Growing segment with no vchannel at all (vchannel cleaned from etcd).
 	addGrowingSegment(rs, 3001, 102, 400, "v3")
 
-	snapshot := rs.getSnapshot()
+	snapshot, err := rs.getSnapshot(context.Background())
+	assert.NoError(t, err)
 
 	// Only the segment for the active vchannel should be in the snapshot.
 	assert.Len(t, snapshot.VChannels, 1)
@@ -196,7 +197,8 @@ func TestGetSnapshot_FiltersSegmentsWithDroppedPartition(t *testing.T) {
 	// Segment on a dropped partition (999 not in vchannel's partition list) — should be filtered.
 	addGrowingSegment(rs, 1003, 100, 999, "v1")
 
-	snapshot := rs.getSnapshot()
+	snapshot, err := rs.getSnapshot(context.Background())
+	assert.NoError(t, err)
 
 	assert.Len(t, snapshot.SegmentAssignments, 2)
 	assert.Contains(t, snapshot.SegmentAssignments, int64(1001))
@@ -332,7 +334,8 @@ func TestFullReplayScenario_DroppedCollectionReplay(t *testing.T) {
 	assert.False(t, rs.segments[1001].IsGrowing())
 
 	// Snapshot should be empty (no active vchannels, no growing segments).
-	snapshot := rs.getSnapshot()
+	snapshot, err := rs.getSnapshot(context.Background())
+	assert.NoError(t, err)
 	assert.Empty(t, snapshot.VChannels)
 	assert.Empty(t, snapshot.SegmentAssignments)
 }
@@ -358,7 +361,8 @@ func TestFullReplayScenario_PartialEtcdPersist(t *testing.T) {
 	assert.False(t, rs.segments[1002].IsGrowing())
 
 	// Snapshot should be clean.
-	snapshot := rs.getSnapshot()
+	snapshot, err := rs.getSnapshot(context.Background())
+	assert.NoError(t, err)
 	assert.Empty(t, snapshot.VChannels)
 	assert.Empty(t, snapshot.SegmentAssignments)
 }
