@@ -22,7 +22,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -210,9 +209,8 @@ func TestSetProviderRefusesATypedNilProvider(t *testing.T) {
 
 type typedNilEngine struct{}
 
-func (*typedNilEngine) RegisterOnCoordinator(grpc.ServiceRegistrar)                 {}
-func (*typedNilEngine) Start(context.Context, Coordinator, CoordinatorExtras) error { return nil }
-func (*typedNilEngine) Stop() error                                                 { return nil }
+func (*typedNilEngine) Start(context.Context, Coordinator) error { return nil }
+func (*typedNilEngine) Stop() error                              { return nil }
 
 // stubHook is a hook.Hook that answers nothing, which is all the registry
 // tests need: they only ever ask whether the field is filled in.
