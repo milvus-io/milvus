@@ -141,6 +141,15 @@ func (s *connectionManager) Get(ctx context.Context) *commonpb.ClientInfo {
 	return cli.ClientInfo
 }
 
+// Has reports whether a connection identifier is still registered. It goes
+// false once the connection is dropped, whether by the inactivity sweep or by
+// the over-capacity purge, so a holder of per-connection state can tell that
+// the connection is gone without waiting for an event the proxy never emits.
+func (s *connectionManager) Has(identifier int64) bool {
+	_, ok := s.clientInfos.Get(identifier)
+	return ok
+}
+
 func (s *connectionManager) Update(identifier int64) {
 	info, ok := s.clientInfos.Get(identifier)
 	if ok {

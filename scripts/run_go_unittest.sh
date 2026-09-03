@@ -161,6 +161,7 @@ go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/meta
 function test_cmd()
 {
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${ROOT_DIR}/cmd/tools/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${ROOT_DIR}/cmd/milvus/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_streaming()
