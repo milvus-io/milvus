@@ -109,17 +109,27 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 
 			replicas := c.meta.GetByCollection(ctx, cid)
 			hasTask := false
+			unplaced := false
 			for _, r := range replicas {
-				replicaTasks := c.checkReplica(ctx, r)
+				replicaTasks, replicaUnplaced := c.checkReplica(ctx, r)
 				if len(replicaTasks) > 0 {
 					hasTask = true
 					tasks = append(tasks, replicaTasks...)
 				}
+				if replicaUnplaced {
+					unplaced = true
+				}
 			}
 
 			// Only update version cache if no tasks were generated
-			// If tasks were generated, we need to re-check next time
-			if !hasTask {
+			// If tasks were generated, we need to re-check next time.
+			//
+			// A replica that wanted a delegator and had no node to put it on
+			// is not converged either, and must not be cached as such: a
+			// deployment that starts a replica's nodes on demand spawns the
+			// replica before they register, and their arrival moves neither
+			// version the cache keys on.
+			if !hasTask && !unplaced {
 				c.updateVersionCache(cid, currentTargetVersion, currentDistVersion)
 			}
 		}
@@ -186,11 +196,21 @@ func (c *ChannelChecker) cleanVersionCache(activeCollections []int64) {
 	}
 }
 
-func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica) []task.Task {
+// checkReplica returns the tasks this replica needs, and whether it wanted a
+// delegator placed but could not place one - the replica's read-write set was
+// empty at this tick, so the assignment produced nothing.
+//
+// The second result exists for the version cache in Check: "no task" normally
+// means converged, and caching it is what keeps the checker cheap. A replica
+// waiting for a node is the opposite of converged, and the node it waits for
+// joins the REPLICA, which moves neither the target version nor the channel
+// distribution version - so a cached entry would never be invalidated.
+func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica) ([]task.Task, bool) {
 	ret := make([]task.Task, 0)
 
 	lacks, redundancies := c.getDmChannelDiff(ctx, replica.GetCollectionID(), replica.GetID())
 	tasks := c.createChannelLoadTask(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, replica)
+	unplaced := len(lacks) > 0 && len(tasks) == 0
 	task.SetReason("lacks of channel", tasks...)
 	ret = append(ret, tasks...)
 
@@ -205,7 +225,7 @@ func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica
 
 	// All channel related tasks should be with high priority
 	task.SetPriority(task.TaskPriorityHigh, tasks...)
-	return ret
+	return ret, unplaced
 }
 
 // GetDmChannelDiff get channel diff between target and dist

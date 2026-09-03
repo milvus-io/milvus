@@ -623,6 +623,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
