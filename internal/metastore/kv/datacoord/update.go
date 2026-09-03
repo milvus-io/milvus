@@ -24,7 +24,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -61,15 +60,7 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 				e.SegmentIndex.BuildID,
 			)
 			switch action.Type {
-			case metastore.ActionUpdate:
-				value, err := proto.Marshal(model.MarshalSegmentIndexModel(e.SegmentIndex))
-				if err != nil {
-					return err
-				}
-				b.Save(key, string(value))
 			case metastore.ActionDelete:
-				// Same key as the ActionUpdate encoding above, so a removal
-				// stages against exactly the record an upsert would write.
 				// Remove, not CommitRemove: an action set containing a segment
 				// index entry never takes the ordered fallback path (see
 				// containsSegmentIndexUpdate below), so there is no visibility
@@ -172,11 +163,9 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 		}
 	}
 	if containsSegmentIndexUpdate(actions) {
-		// A segment index record and the segment manifest pointer that
-		// publishes (or retracts) its artifact must land together: a chunked
-		// fallback could leave a finished index whose artifact is not in the
-		// visible manifest revision, or a retracted artifact whose index
-		// record still claims it, or either reverse. Refuse the write instead.
+		// A segment index removal and the segment manifest pointer that
+		// publishes or retracts its artifact must land together. Refuse a
+		// chunked fallback that could expose only half of the transition.
 		return txn.CommitWithoutFallback(ctx, kc.MetaKv, b)
 	}
 	return txn.Commit(ctx, kc.MetaKv, b)

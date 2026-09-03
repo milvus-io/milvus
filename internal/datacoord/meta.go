@@ -364,74 +364,15 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	mt.externalCollectionRefreshMeta = ecrm
 	mt.snapshotMeta = spm
 
-	// indexMeta decides per segment whether an index record may be left out of
-	// etcd, which it can only answer once the segment list exists. Wiring it
-	// here rather than at construction is what keeps newIndexMeta and the
-	// segment reload running in parallel above.
-	mt.indexMeta.manifestBackedSegment = mt.isManifestBackedSegment
-	mt.indexMeta.onSegmentIndexRemoved = mt.refreshManifestIndexBackfillPending
-
-	// Unconditional and driven by the durable per-segment manifest_has_index
-	// marker, NOT by writeSegmentIndexToManifest: a record published to a
-	// manifest under either setting must stay visible after any flip of the
-	// switch, or flipping it would orphan those indexes and GC would delete
-	// their files. A cluster with no marked segments reads nothing here, so
-	// the default startup stays free of object-storage I/O.
+	// Recovery follows the durable storage location, not the current write
+	// mode. A segment marked manifest_has_index may contain records published
+	// while the switch was previously on, so it must still be loaded after the
+	// switch is turned off. Unmarked clusters perform no manifest reads.
 	if err := mt.reloadSegmentIndexesFromManifests(ctx); err != nil {
 		return nil, err
 	}
 
-	// After both halves of meta are loaded, so the hint reflects the final
-	// record set - including anything the manifest reload just installed.
-	mt.initManifestIndexBackfillPending(ctx)
-
 	return mt, nil
-}
-
-// isManifestBackedSegment reports whether a segment records its indexes in a
-// manifest, i.e. whether an index record left out of etcd is recoverable from
-// object storage. An unknown segment answers false so the durable write
-// happens: the only safe default is the one that keeps a copy.
-//
-// It takes segMu, so callers must not hold it. Every caller reaches it while
-// holding indexMeta.keyLock, which is why CommitSegmentManifest takes that key
-// lock before segMu rather than after - see its lock-order note.
-func (m *meta) isManifestBackedSegment(segmentID UniqueID) bool {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
-	segment := m.segments.GetSegment(segmentID)
-	if segment == nil {
-		return false
-	}
-	if segment.GetStorageVersion() < storage.StorageV3 {
-		return false
-	}
-	if !isSegmentHealthy(segment) {
-		// This predicate must stay at least as strong as the reload filter in
-		// reloadSegmentIndexesFromManifests, which skips unhealthy segments.
-		// A build that finishes after its segment was dropped is declined by
-		// publishIndexToManifest for exactly that reason and falls back to the
-		// legacy FinishTask path, so answering true here would withhold the
-		// etcd write for a record that no manifest holds and no reload can
-		// rebuild. The artifact's files would then be named by nothing after a
-		// restart: BUILD_ROOTED bytes are still reclaimed by the V0 orphan
-		// sweep, but a COLLECTION_ROOTED artifact leaks permanently, since
-		// recycleUnusedIndexFilesV1 is driven by metadata that no longer
-		// exists.
-		return false
-	}
-	if segment.GetManifestPath() == "" {
-		// The whole switch rests on "a visible V3 segment carries a manifest
-		// pointer". A violation does not corrupt anything here - answering
-		// false keeps the etcd write, which is the safe side - but it silently
-		// exempts the segment from the migration, so it must not pass quietly.
-		mlog.Error(m.ctx, "invariant violated: visible StorageV3 segment has no manifest path",
-			mlog.Int64("segmentID", segmentID),
-			mlog.Int64("collectionID", segment.GetCollectionID()),
-			mlog.Int64("storageVersion", segment.GetStorageVersion()))
-		return false
-	}
-	return true
 }
 
 // reloadFromKV loads meta from KV storage
@@ -1883,13 +1824,11 @@ func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
 	}
 }
 
-// UpdateManifestHasIndex sets the segment's sticky manifest_has_index marker,
-// for callers that adopt a manifest carrying index entries outside
-// CommitSegmentManifest (the copy sync path adopting a worker-republished
-// manifest). It must ride in the same UpdateSegmentsInfo transaction as the
-// UpdateManifest that publishes the pointer, so the marker can never lag the
-// entries it vouches for. Set-only and idempotent: there is no clearing
-// counterpart, a wrong false would make reload silently drop indexes.
+// UpdateManifestHasIndex sets the segment's sticky manifest_has_index marker
+// when a copy target adopts a worker-produced manifest containing target index
+// entries. It must be committed together with UpdateManifest so recovery can
+// never observe the pointer without the marker. There is intentionally no
+// clearing counterpart.
 func UpdateManifestHasIndex(segmentID int64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)

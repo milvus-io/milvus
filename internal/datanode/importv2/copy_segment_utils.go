@@ -491,7 +491,7 @@ func CopySegmentAndIndexFiles(
 			return nil, copiedFiles, merr.Wrap(err, "failed to transform manifest path")
 		}
 		targetManifestPath, err = republishCopiedManifestIndexes(
-			targetManifestPath, target, targetStorageConfig, indexInfos)
+			targetManifestPath, target, source.GetNumOfRows(), targetStorageConfig, indexInfos)
 		if err != nil {
 			return nil, copiedFiles, merr.Wrap(err, "failed to republish copied manifest indexes")
 		}
@@ -561,19 +561,13 @@ func CopySegmentAndIndexFiles(
 // this copy actually wrote, in one transaction on top of the copied manifest, so
 // the pointer DataCoord publishes is already correct and needs no second commit.
 //
-// The entries to drop are enumerated from the copied manifest ITSELF, never
-// from the CopySegmentTarget.inherited_index_ids list DataCoord shipped. The
-// manifest object was already byte-copied into the target bucket, so it is
-// readable with the target storage config even when the source sits in a
-// foreign bucket DataCoord cannot address - an external restore, which ships
-// no inherited IDs at all and whose stale entries a shipped-list-driven drop
-// would leave behind. The shipped list is advisory only: a mismatch with what
-// the manifest actually holds is logged as an inconsistency, never trusted as
-// the source of drops and never fatal. Only a manifest that genuinely holds no
-// entries, for a copy that recorded no artifacts, skips the transaction.
+// The entries to drop are enumerated from the copied manifest itself. The
+// manifest object is already in the target bucket, so this also works for an
+// external restore where DataCoord cannot read the source bucket.
 func republishCopiedManifestIndexes(
 	targetManifestPath string,
 	target *datapb.CopySegmentTarget,
+	numRows int64,
 	targetStorageConfig *indexpb.StorageConfig,
 	indexInfos map[int64]*datapb.VectorScalarIndexInfo,
 ) (string, error) {
@@ -594,22 +588,7 @@ func republishCopiedManifestIndexes(
 		// exclusively owned by this task, so no rebuild can race this drop.
 		drops = append(drops, packed.DropIndexEntry{IndexID: entry.IndexID})
 	}
-	if inherited := target.GetInheritedIndexIds(); !inheritedIndexSetMatches(existingIDs, inherited) {
-		// Expected for an external restore (DataCoord ships nothing); for a
-		// local source it flags drift between the manifest DataCoord read and
-		// the one this copy actually carried. Either way the manifest is the
-		// authority, so this is a consistency log, not a failure.
-		enumerated := make([]int64, 0, len(existingIDs))
-		for indexID := range existingIDs {
-			enumerated = append(enumerated, indexID)
-		}
-		mlog.Warn(context.TODO(), "copied manifest index entries differ from the inherited set DataCoord shipped; retracting what the manifest holds",
-			mlog.Int64("targetSegmentID", target.GetSegmentId()),
-			mlog.Int64s("manifestIndexIDs", enumerated),
-			mlog.Int64s("shippedInheritedIndexIDs", inherited))
-	}
-
-	adds, err := buildTargetManifestIndexes(targetManifestPath, target, indexInfos)
+	adds, err := buildTargetManifestIndexes(targetManifestPath, target, numRows, indexInfos)
 	if err != nil {
 		return "", err
 	}
@@ -634,19 +613,6 @@ func republishCopiedManifestIndexes(
 	return republished, nil
 }
 
-// inheritedIndexSetMatches reports whether the index-entry IDs DataCoord
-// shipped as inherited match the set the copied manifest actually holds.
-func inheritedIndexSetMatches(enumerated map[int64]struct{}, shipped []int64) bool {
-	shippedSet := make(map[int64]struct{}, len(shipped))
-	for _, indexID := range shipped {
-		if _, ok := enumerated[indexID]; !ok {
-			return false
-		}
-		shippedSet[indexID] = struct{}{}
-	}
-	return len(shippedSet) == len(enumerated)
-}
-
 // buildTargetManifestIndexes projects the index artifacts this copy wrote into
 // manifest entries for the target segment.
 //
@@ -659,6 +625,7 @@ func inheritedIndexSetMatches(enumerated map[int64]struct{}, shipped []int64) bo
 func buildTargetManifestIndexes(
 	targetManifestPath string,
 	target *datapb.CopySegmentTarget,
+	numRows int64,
 	indexInfos map[int64]*datapb.VectorScalarIndexInfo,
 ) ([]packed.ManifestIndexInfo, error) {
 	if len(indexInfos) == 0 {
@@ -668,7 +635,12 @@ func buildTargetManifestIndexes(
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to parse copied manifest path")
 	}
-	targetIndexes := target.GetTargetIndexes()
+	targetIndexes := make(map[string]*datapb.CopySegmentTargetIndex, len(target.GetTargetIndexes()))
+	for _, definition := range target.GetTargetIndexes() {
+		if definition != nil {
+			targetIndexes[definition.GetIndexName()] = definition
+		}
+	}
 
 	entries := make([]packed.ManifestIndexInfo, 0, len(indexInfos))
 	for _, info := range indexInfos {
@@ -720,7 +692,7 @@ func buildTargetManifestIndexes(
 			IndexID:                   definition.GetIndexId(),
 			BuildID:                   info.GetBuildId(),
 			IndexVersion:              info.GetVersion(),
-			NumRows:                   target.GetNumRows(),
+			NumRows:                   numRows,
 			SerializedSize:            info.GetIndexSize(),
 			MemSize:                   info.GetIndexSize(),
 			CurrentIndexVersion:       info.GetCurrentIndexVersion(),

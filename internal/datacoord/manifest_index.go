@@ -188,181 +188,14 @@ func manifestIndexParams(manifestIndex packed.ManifestIndexInfo) []*commonpb.Key
 	return params
 }
 
-// segmentIndexNeedsManifestBackfill reports whether one index record describes
-// a finished artifact that is not yet recorded in its segment's manifest, i.e.
-// whether it is work for the manifest index backfill.
+// reloadSegmentIndexesFromManifests rebuilds completed index records from
+// healthy StorageV3 manifests marked manifest_has_index. It runs independently
+// of the current write-mode switch: records published while the switch was on
+// must remain visible after it is turned off. Existing etcd rows win on buildID
+// conflicts, so active, failed, fake-finished, and record-resident results stay
+// authoritative.
 //
-// Only !ManifestPublished says "this needs backfilling". The other three terms
-// exclude records nothing can ever publish, which would otherwise hold their
-// segment pending forever and make pending == 0 - the signal that the migration
-// is complete - unreachable.
-//
-// The last term is the non-obvious one, because Finished does not imply "an
-// artifact exists". A segment below MinSegmentNumRowsToEnableIndex (or a
-// no-train index type) never has a job dispatched: DataCoord marks the record
-// Finished directly ("fake finished index success"), so no worker ran and no
-// files were uploaded. publishIndexToManifest applies this exact check before
-// deciding to publish at all, and the writer-side validator would reject an
-// entry with no file keys even if a backfill did attempt one.
-func segmentIndexNeedsManifestBackfill(segIdx *model.SegmentIndex) bool {
-	return segIdx != nil &&
-		// The one positive signal: no entry in the published revision yet.
-		!segIdx.ManifestPublished &&
-		// Being retired; GC removes it rather than publishing it.
-		!segIdx.IsDeleted &&
-		// Still building or failed: it has no result to record yet.
-		segIdx.IndexState == commonpb.IndexState_Finished &&
-		// Fake-finished: Finished, but no files were ever uploaded.
-		len(segIdx.IndexFileKeys) > 0
-}
-
-// manifestIndexBackfillEligible reports whether a segment's SHAPE is one the
-// backfill inspector can ever act on, mirroring its candidate filter (healthy,
-// StorageV3, not L0). It deliberately says nothing about the segment's index
-// records - that is the hint itself.
-//
-// Every writer of the hint applies it, so the hint never claims work that no
-// consumer will pick up. Without it an upgraded StorageV1/V2 cluster flags
-// every indexed segment - each one a ShadowClone, and all of them counted in
-// the boot log's segmentsPendingBackfill - for a backfill that skips them all,
-// making the "pending == 0 means migration complete" signal unreachable.
-//
-// The manifest-path leg of the inspector's filter is intentionally NOT applied:
-// an empty path on a visible V3 segment is an invariant violation the inspector
-// logs loudly, and silently dropping the hint here would hide it.
-func manifestIndexBackfillEligible(segment *SegmentInfo) bool {
-	return isSegmentHealthy(segment) &&
-		segment.GetStorageVersion() >= storage.StorageV3 &&
-		segment.GetLevel() != datapb.SegmentLevel_L0
-}
-
-// markManifestIndexBackfillPending sets the backfill hint on a segment. It is
-// called whenever a finished index record can have appeared without a manifest
-// entry: the legacy FinishTask path, which records a result the manifest commit
-// declined to publish, and a copy target that arrived without a manifest
-// pointer.
-//
-// Setting is intentionally unconditional and never checks the current value:
-// the hint is allowed to be pessimistic, and the recompute below is the only
-// thing that clears it.
-func (m *meta) markManifestIndexBackfillPending(segmentID UniqueID) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
-	segment := m.segments.GetSegment(segmentID)
-	if segment == nil || segment.NeedsManifestIndexBackfill() || !manifestIndexBackfillEligible(segment) {
-		return
-	}
-	// ShadowClone, not Clone: only the process-local hint changes, so copying the
-	// protobuf record would be pure cost. Publishing a new wrapper rather than
-	// writing the field in place is what keeps concurrent RLock readers race-free.
-	m.segments.SetSegment(segmentID, segment.ShadowClone(func(cloned *SegmentInfo) {
-		cloned.manifestIndexBackfillPending = true
-	}))
-}
-
-// refreshManifestIndexBackfillPending recomputes the hint for one segment from
-// its authoritative SegmentIndex records. It is the only path that may clear
-// the hint, so that a cleared value always reflects a real check rather than an
-// assumption about which writer ran last.
-func (m *meta) refreshManifestIndexBackfillPending(segmentID UniqueID) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
-	segment := m.segments.GetSegment(segmentID)
-	if segment == nil {
-		return
-	}
-	pending := manifestIndexBackfillEligible(segment) && m.segmentHasUnpublishedIndex(segmentID)
-	if pending == segment.NeedsManifestIndexBackfill() {
-		return
-	}
-	m.segments.SetSegment(segmentID, segment.ShadowClone(func(cloned *SegmentInfo) {
-		cloned.manifestIndexBackfillPending = pending
-	}))
-}
-
-// segmentHasUnpublishedIndex answers from indexMeta's in-memory records only.
-//
-// It reads GetAllSegmentIndexes, which takes no fieldIndexLock, and it
-// deliberately does NOT consult IsIndexExist to drop records whose index
-// definition is already gone. Doing so would take fieldIndexLock underneath
-// segMu, an order the existing code goes out of its way to avoid (see the
-// staging note about not stalling every segment reader behind a slow DDL). The
-// cost is that a segment carrying only dropped-definition records keeps the
-// hint set until GC removes them; the hint is a "recheck me" flag, and the
-// consumer applies the authoritative filter, so this is conservative in the
-// safe direction.
-func (m *meta) segmentHasUnpublishedIndex(segmentID UniqueID) bool {
-	if m.indexMeta == nil {
-		return false
-	}
-	for _, segIdx := range m.indexMeta.GetAllSegmentIndexes(segmentID) {
-		if segmentIndexNeedsManifestBackfill(segIdx) {
-			return true
-		}
-	}
-	return false
-}
-
-// initManifestIndexBackfillPending seeds the hint for every segment once meta
-// is fully loaded. Records that predate manifest index publication decode with
-// ManifestPublished false, so this single pass is what surfaces the entire
-// existing backlog after an upgrade.
-//
-// It runs over the index records rather than the segments: the backlog is
-// bounded by the number of indexed segments, not the cluster's segment count.
-func (m *meta) initManifestIndexBackfillPending(ctx context.Context) {
-	if m.indexMeta == nil {
-		return
-	}
-	candidates := make(map[UniqueID]struct{})
-	for _, segIdx := range m.indexMeta.GetAllSegIndexes() {
-		if segmentIndexNeedsManifestBackfill(segIdx) {
-			candidates[segIdx.SegmentID] = struct{}{}
-		}
-	}
-	pending := 0
-	m.segMu.Lock()
-	for segmentID := range candidates {
-		segment := m.segments.GetSegment(segmentID)
-		if segment == nil || segment.NeedsManifestIndexBackfill() || !manifestIndexBackfillEligible(segment) {
-			continue
-		}
-		m.segments.SetSegment(segmentID, segment.ShadowClone(func(cloned *SegmentInfo) {
-			cloned.manifestIndexBackfillPending = true
-		}))
-		pending++
-	}
-	m.segMu.Unlock()
-	mlog.Info(ctx, "seeded manifest index backfill hints",
-		mlog.Int("segmentsPendingBackfill", pending))
-}
-
-// reloadSegmentIndexesFromManifests rebuilds the manifest-resident half of
-// the finished-index records: every segment whose durable manifest_has_index
-// marker says its manifest has carried an index entry gets its manifest read
-// and the entries etcd does not already have installed.
-//
-// It runs unconditionally, gated per segment by the marker rather than by
-// dataCoord.index.writeSegmentIndexToManifest - recovery is driven by where
-// the records durably are, not by where the current configuration would put
-// them, which is what makes the switch safe to flip in both directions. The
-// marker is written in the same catalog transaction as the first index entry
-// and never cleared, so a false marker proves the manifest never carried an
-// entry (zero object reads on an all-etcd cluster) while a stale true costs
-// exactly one extra manifest read here.
-//
-// etcd wins on conflict, matching every other manifest-index consumer: a
-// buildID already loaded from the catalog is left untouched, so records
-// written to etcd are never overwritten by a manifest projection of the same
-// build. Only StorageV3 segments carry index entries; a StorageV1/V2
-// segment's records always stay in etcd, so nothing of theirs needs
-// recovering here.
-//
-// A marked manifest that cannot be read FAILS STARTUP. This is deliberately
-// the same fail-closed contract the etcd path has - a ListSegmentIndexes
-// error aborts newIndexMeta and therefore newMeta - and the marker is
-// precisely what scopes it: only segments proven to carry entries can abort
-// boot. Skipping an unreadable manifest would
+// A manifest that cannot be read fails startup. Skipping it would
 // leave meta silently incomplete, and a silently incomplete indexMeta is not
 // merely "that segment looks unindexed": garbage collection treats an absent
 // SegmentIndex as proof the artifact is garbage. recycleUnusedIndexFilesV0's
@@ -379,10 +212,8 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) error {
 			return false
 		}
 		if !segment.GetManifestHasIndex() {
-			// The sticky marker is written with the first index entry in the
-			// same catalog transaction, so false proves the manifest never
-			// carried one - no read needed, and no boot-time failure surface
-			// for a manifest that cannot contribute records anyway.
+			// False proves no index entry has ever been published for this
+			// segment. This keeps an all-etcd cluster free of manifest GETs.
 			return false
 		}
 		if segment.GetLevel() == datapb.SegmentLevel_L0 {
@@ -403,14 +234,6 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) error {
 				mlog.Int64("storageVersion", segment.GetStorageVersion()))
 			return false
 		}
-		// Deliberately NOT narrowed by which index definitions are still live.
-		// A manifest entry whose definition is already gone is precisely what
-		// GC still needs: recycleUnusedSegIndexes is driven entirely by
-		// SegmentIndex records (GetAllSegIndexes), so an entry with no record
-		// is never visited again. Skipping those segments would strand the
-		// manifest entry forever and, when the artifact deletion that preceded
-		// the retraction had failed, leak its bytes permanently for
-		// COLLECTION_ROOTED paths whose sweep is itself record-driven.
 		return true
 	}))
 	if len(segments) == 0 {
@@ -541,8 +364,5 @@ func segmentIndexFromManifest(segment *SegmentInfo, manifestIndex packed.Manifes
 		CurrentScalarIndexVersion: manifestIndex.CurrentScalarIndexVersion,
 		IndexType:                 manifestIndex.IndexType,
 		IndexStorePathVersion:     manifestIndex.IndexStorePathVersion,
-		// The entry was read out of the segment's published manifest revision,
-		// so it is published by construction - there is nothing left to backfill.
-		ManifestPublished: true,
 	}
 }

@@ -15,15 +15,19 @@ advances `SegmentInfo.manifest_path` and persists the index task metadata.
 
 Publication is opt-in and exclusive with the etcd `SegmentIndex` row, behind
 `dataCoord.index.writeSegmentIndexToManifest` (default off). Off is the pure
-legacy path: every record goes to etcd and no manifest index entry is produced
-at all. On records the index in the manifest and, rather than writing the
-`SegmentIndex` etcd row for the manifest-backed segment, deletes any row the
-same build left behind before the switch was turned on (in the transaction
-that publishes the entry - see the framework doc for why a plain skip would
-make an off-era in-flight row rebuild forever); the commit also sets the segment's
-sticky `manifest_has_index` marker in the same transaction, which is what
-drives recovery (see the framework doc's "Retiring the etcd SegmentIndex
-Record"). There is no dual-write mode.
+legacy path: every task state goes to etcd and no manifest index entry is
+produced. On changes only the terminal artifact placement: Unissued,
+InProgress, Failed, and fake-Finished records still persist to etcd; a Finished
+StorageV3 build with files is published to the manifest, and that publication
+deletes its etcd task row in the same catalog transaction. StorageV1/V2 always
+remain etcd-backed. There is no durable dual-write mode.
+
+The same switch may be changed in either direction. A sticky
+`SegmentInfo.manifest_has_index` marker records that a segment has ever carried
+manifest-resident index metadata. Startup recovery and GC follow this marker,
+not the switch's current value, so disabling publication redirects new results
+to etcd without hiding or leaking indexes written while it was enabled. An
+all-etcd cluster has no marked segments and performs no manifest index reads.
 
 Index workers keep their existing responsibility — build the index and upload
 its files — and keep their existing result contract. They do not open a
@@ -57,7 +61,7 @@ DataCoord projects the worker result onto the index task record
 meta.CommitSegmentManifest(segmentID)           <- per-segment commit lock
         |-- read the currently published manifest pointer
         |-- packed transaction: add the typed index entry
-        |-- catalog transaction: SegmentInfo.manifest_path + SegmentIndex
+        |-- catalog transaction: SegmentInfo.manifest_path + delete SegmentIndex
         `-- install both in memory
         |
         v
@@ -164,27 +168,25 @@ makes a copied segment commit at all, so the guard belongs here.
 The worker owns only physical facts (where the artifact landed, its build ID,
 sizes, engine versions). Identity does not survive the snapshot boundary —
 `RestoreIndexes()` allocates fresh index IDs and index name is the only stable
-key — so DataCoord resolves it when assembling the request and ships it in
-`CopySegmentTarget`: the target index definitions keyed by name, the target's
-row count, and the inherited entry IDs to retract.
+key — so DataCoord resolves it when assembling the request and ships target
+index definitions keyed by name. The worker obtains row count from the source
+description and enumerates inherited entries from the copied manifest itself;
+the request does not duplicate either value.
 
 The target-definition map is the switch's lever on this path. With manifest
 publication off DataCoord ships an empty map, so the worker retracts the
 inherited entries and writes no target entries - the copied records go to etcd
 like any legacy build. With it on the map flows and the worker republishes;
 DataCoord then verifies the read-back and hard-fails the task if a synced
-build has no entry (a DataNode predating republication), because the gated
-etcd write would otherwise leave that record memory-only and it would silently
-vanish on restart. A verified republication also sets the target segment's
-`manifest_has_index` marker in the same transaction as its pointer.
+artifact-bearing build has no entry (a DataNode predating republication),
+because such a record cannot be installed as manifest-resident and recovered
+on restart. A verified entry is installed in memory without creating a
+redundant etcd row; empty-artifact records still go to etcd.
 
-On the source side, DataCoord reads the source manifest's index entries once
-while assembling the request. That read supplies the retraction list, and, for
-a snapshot whose segments record indexes only in their manifests, also the
-artifact list to copy — filtered there to the index definitions the snapshot
-still carries. The retraction list is not filtered: an entry whose definition
-the snapshot no longer has is not copied, so leaving it behind would point the
-target at the source's files.
+On the source side, DataCoord reads a local source manifest while assembling
+the request only to supplement an older snapshot that lacks manifest-resident
+artifact metadata. Retraction is not sent separately: after copying, the worker
+enumerates and removes every inherited entry from the target manifest itself.
 
 ### Failure semantics
 
@@ -206,17 +208,18 @@ local `minor_version` is introduced: milvus-storage removed that field from its
 manifest model.
 
 DataCoord passes completed `SegmentIndex` metadata through QueryCoord to
-QueryNode without reading object storage, on every read path and without
-exception. `GetIndexInfos` and the snapshot-export projection carry no manifest
-fallback, because neither of the two states one could recover is reachable:
+QueryNode without reading object storage on every request path. `GetIndexInfos`
+and snapshot export carry no per-request manifest fallback because memory is
+made complete at startup and publication updates it atomically:
 
 - a segment with no `SegmentIndex` record has no index artifact. A manifest
   index entry is only ever published by `CommitSegmentManifest`, which installs
   the matching record in memory in the same commit, or by the copy worker, whose
   target records `syncVectorScalarIndexes` writes from the same worker result;
   GC retracts an entry and removes its record in one catalog transaction; and
-  reload rebuilds manifest-resident records from the manifests of segments
-  marked `manifest_has_index` at startup, before the server serves.
+  reload rebuilds manifest-resident records from every healthy non-L0
+  StorageV3 segment marked `manifest_has_index` before the server serves,
+  independently of the current write mode.
 - a finished record with no `index_file_keys` has no manifest entry either: the
   only build that records no files is a fake-finished one (a segment too small
   to train), which `publishIndexToManifest` skips.
@@ -226,12 +229,11 @@ QueryCoord's index checker every `checkIndexInterval` for exactly the segments
 that are missing an index, so a fallback read there is paid repeatedly by the
 segments it can never help.
 
-Segment index GC does read the manifest for a dropped StorageV3 segment that no
-longer has `SegmentIndex` rows - it must, since it is deciding whether artifacts
-may be deleted rather than which paths to serve - but only when the segment's
-`manifest_has_index` marker says the manifest can actually carry entries; an
-unmarked segment is recycled without a manifest read, so an all-etcd cluster
-has no `gcBlockedByManifest` failure surface. That read fails closed, with one
+Segment index GC reads the manifest for a dropped StorageV3 segment marked
+`manifest_has_index`, even if publication has since been disabled - it must,
+since it is deciding whether artifacts may be deleted rather than which paths
+to serve. Unmarked segments stay on the legacy etcd path and perform no
+manifest index reads. The marked read fails closed, with one
 exception: if the manifest file itself is no longer in object storage there is
 nothing left to protect, and blocking would strand the segment's metadata
 permanently, so the segment is recycled. The FFI reports every manifest read
@@ -242,21 +244,16 @@ A segment that is already dropped is skipped by both index paths, in each case
 because it will publish no further manifest revision: an index build that
 finishes against it records its result the legacy way, and GC deletes its
 artifacts without retracting the entry rather than retrying a commit that can
-never succeed. With the switch on, that legacy `FinishTask` fallback's etcd
-write is itself gated for a manifest-backed segment, so the fallback record -
-and every other publish decline (a dropped index definition, a fake-finished
-build) - is memory-only: it is lost on restart and either reissued by the
-inspector or retired with its segment. Under `storePathVersion: 0` the orphan
-sweep reclaims any files such a record left behind; under version 1 a small
-leak window exists until the segment itself is collected.
+never succeed. These fallback and decline states remain durable in etcd even
+when publication is enabled.
 
 ## Verification
 
 - StorageV3 manifest round-trip covers every typed index load field, properties,
   version increment, and republication under one index ID.
-- `CommitSegmentManifest` writes the segment record and the `SegmentIndex`
-  record in one catalog transaction, and refuses the write rather than falling
-  back to a chunked flush that could expose them separately.
+- `CommitSegmentManifest` writes the segment pointer and deletes the completed
+  `SegmentIndex` task row in one catalog transaction, and refuses a chunked
+  fallback that could expose them separately.
 - DataCoord read paths use `SegmentIndex` metadata with no manifest I/O at all,
   including for a segment with no records and for a finished record carrying no
   `index_file_keys`.

@@ -92,32 +92,3 @@ func TestSegmentIndex_Clone_PreservesPathVersion(t *testing.T) {
 	cloned.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, original.IndexStorePathVersion)
 }
-
-// The whole migration rests on records written before manifest publication
-// decoding as unpublished: that default is what makes the pre-existing etcd rows
-// identify themselves as the backlog to backfill.
-func TestSegmentIndex_ManifestPublished_LegacyRecordDecodesUnpublished(t *testing.T) {
-	restored := UnmarshalSegmentIndexModel(&indexpb.SegmentIndex{
-		CollectionID: 100,
-		BuildID:      1000,
-	})
-	assert.False(t, restored.ManifestPublished)
-	assert.False(t, (*SegmentIndex)(nil).GetManifestPublished())
-}
-
-// The flag has to survive every hop a record makes - marshal to etcd, decode
-// back, and the clone that every state transition goes through - or a published
-// entry would reappear as backfill work.
-func TestSegmentIndex_ManifestPublished_SurvivesRoundTripAndClone(t *testing.T) {
-	original := &SegmentIndex{
-		CollectionID:      100,
-		BuildID:           1000,
-		ManifestPublished: true,
-	}
-	pb := MarshalSegmentIndexModel(original)
-	assert.True(t, pb.GetManifestPublished())
-
-	restored := UnmarshalSegmentIndexModel(pb)
-	assert.True(t, restored.ManifestPublished)
-	assert.True(t, CloneSegmentIndex(original).GetManifestPublished())
-}

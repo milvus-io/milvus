@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -458,50 +457,9 @@ func TestCatalog_Update_AddPartitionStatsAndVersionEncodingMatchesLegacy(t *test
 	assert.Equal(t, "100", compositeSaves[buildCurrentPartitionStatsVersionPath(1, 2, "ch-1")])
 }
 
-// TestCatalog_Update_IndexAndManifestAreOneWrite proves a finished index
-// record and the segment manifest pointer that publishes its artifact reach
-// the store in a single guarded transaction.
-func TestCatalog_Update_IndexAndManifestAreOneWrite(t *testing.T) {
-	metakv := mocks.NewMetaKv(t)
-	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
-	var saved map[string]string
-	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(_ context.Context, kvs map[string]string, _ []string, _ ...predicates.Predicate) error {
-			saved = kvs
-			return nil
-		}).Once()
-
-	c := NewCatalog(metakv, "", "")
-	seg := &datapb.SegmentInfo{
-		ID: 1, CollectionID: 2, PartitionID: 3,
-		State:        commonpb.SegmentState_Flushed,
-		ManifestPath: `{"base_path":"a","ver":4}`,
-	}
-	segIdx := &model.SegmentIndex{
-		CollectionID: 2, PartitionID: 3, SegmentID: 1,
-		IndexID: 10, BuildID: 11,
-		IndexState:    commonpb.IndexState_Finished,
-		IndexFileKeys: []string{"0"},
-	}
-	err := c.Update(context.TODO(),
-		metastore.AlterSegment(seg),
-		metastore.UpdateSegmentIndex(segIdx))
-	assert.NoError(t, err)
-
-	// Both records in the same MultiSaveAndRemove call: one etcd txn.
-	indexKey := BuildSegmentIndexKey(2, 3, 1, 11)
-	assert.Contains(t, saved, indexKey)
-	assert.Contains(t, saved, buildSegmentPath(2, 3, 1))
-
-	persisted := &indexpb.SegmentIndex{}
-	assert.NoError(t, proto.Unmarshal([]byte(saved[indexKey]), persisted))
-	assert.Equal(t, commonpb.IndexState_Finished, persisted.GetState())
-	assert.Equal(t, []string{"0"}, persisted.GetIndexFileKeys())
-}
-
 // A bundle carrying a segment index must never take the chunked fallback:
-// exposing the index record without the manifest pointer (or the reverse)
-// leaves the index either unreadable or pointing at collected files.
+// exposing a new manifest pointer without retiring its old etcd record (or the
+// reverse) leaves two conflicting sources of truth.
 func TestCatalog_Update_IndexAndManifestRejectNonAtomicFallback(t *testing.T) {
 	metakv := mocks.NewMetaKv(t)
 	metakv.EXPECT().MaxTxnOps().Return(1).Maybe()
@@ -513,7 +471,7 @@ func TestCatalog_Update_IndexAndManifestRejectNonAtomicFallback(t *testing.T) {
 			ID: 1, CollectionID: 2, PartitionID: 3,
 			State: commonpb.SegmentState_Flushed,
 		}),
-		metastore.UpdateSegmentIndex(&model.SegmentIndex{
+		metastore.DropSegmentIndex(&model.SegmentIndex{
 			CollectionID: 2, PartitionID: 3, SegmentID: 1, IndexID: 10, BuildID: 11,
 		}))
 	assert.Error(t, err)
@@ -525,23 +483,18 @@ func TestCatalog_Update_SegmentIndexRejectsNilAndUnsupportedType(t *testing.T) {
 	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
 	c := NewCatalog(metakv, "", "")
 
-	err := c.Update(context.TODO(), metastore.UpdateSegmentIndex(nil))
+	err := c.Update(context.TODO(), metastore.DropSegmentIndex(nil))
 	assert.Error(t, err)
 
-	err = c.Update(context.TODO(), metastore.DropSegmentIndex(nil))
-	assert.Error(t, err)
-
-	// ActionAdd has no segment index encoding: a record is either upserted
-	// whole (ActionUpdate) or removed (ActionDelete).
+	// Only deletion is supported for segment-index entries.
 	err = c.Update(context.TODO(), metastore.UpdateAction{
-		Type:  metastore.ActionAdd,
+		Type:  metastore.ActionUpdate,
 		Entry: metastore.SegmentIndexEntry{SegmentIndex: &model.SegmentIndex{BuildID: 1}},
 	})
 	assert.Error(t, err)
 }
 
-// The GC counterpart of TestCatalog_Update_IndexAndManifestAreOneWrite: the
-// revision that retracts an index artifact and the removal of the record
+// The revision that retracts an index artifact and the removal of the record
 // claiming it must land in the same etcd txn, so no reader can see a
 // SegmentIndex whose artifact the visible manifest no longer carries.
 func TestCatalog_Update_IndexRemovalAndManifestAreOneWrite(t *testing.T) {

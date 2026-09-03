@@ -3030,6 +3030,7 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_EdgeCases(t *testing.T) {
 // gone there is nothing left to protect and the segment must be recyclable,
 // otherwise its metadata is stranded forever.
 func TestGarbageCollector_getDroppedSegmentIndexFiles_ManifestUnreadable(t *testing.T) {
+	withSegmentIndexManifestWrites(t, true)
 	newV3GC := func(t *testing.T) (*garbageCollector, int64) {
 		t.Helper()
 		m, err := newMemoryMeta(t)
@@ -5092,6 +5093,7 @@ func TestGarbageCollector_removeDroppedSegmentFiles_JSONStatsV2(t *testing.T) {
 // recycleUnusedSegIndexes act on it.
 func setupV3SegIndexGC(t *testing.T) (*meta, string, string) {
 	t.Helper()
+	withSegmentIndexManifestWrites(t, true)
 	const (
 		collID  = UniqueID(100)
 		partID  = UniqueID(10)
@@ -5160,6 +5162,7 @@ func mockV3ManifestIndexEntry(t *testing.T, newManifest string) {
 // GC of the only thing that can re-drive a failed deletion.
 func TestGarbageCollector_recycleUnusedSegIndexes_V3DeletesFilesBeforeMeta(t *testing.T) {
 	m, newManifest, manifestFile := setupV3SegIndexGC(t)
+	withSegmentIndexManifestWrites(t, false)
 	mockV3ManifestIndexEntry(t, newManifest)
 
 	// removeObjectFiles fans the deletions out over a conc.Pool, so this
@@ -5240,7 +5243,8 @@ func TestGarbageCollector_recycleUnusedSegIndexes_NonManifestKeepsLegacyOrder(t 
 
 // The manifest fallback in getDroppedSegmentIndexFiles is NOT redundant with
 // the SegmentIndex records, because "in-memory records and manifest agree" does
-// not hold for a dropped segment once the etcd write switch is off.
+// not hold for a dropped segment after manifest publication retires its etcd
+// record.
 //
 // reloadSegmentIndexesFromManifests filters on isSegmentHealthy, so a segment
 // already Dropped at restart is never rebuilt from its manifest - deliberately,
@@ -5302,12 +5306,13 @@ func TestGarbageCollector_DroppedSegmentIndexFilesComeFromManifestAfterReload(t 
 }
 
 // After a DataCoord restart a dropped StorageV3 segment can hold both kinds of
-// index metadata at once: a manifest-only entry (published while the etcd
-// write switch was off, never rebuilt because the reload skips unhealthy
+// index metadata at once: a manifest-only entry (published while manifest
+// writes were on, never rebuilt because the reload skips unhealthy
 // segments) and a record-only one (finished after the drop, so no manifest
 // revision carries it). The delete list must be the union of both sides, or
 // whichever side loses the early return leaks its artifact.
 func TestGarbageCollector_getDroppedSegmentIndexFiles_UnionsRecordsAndManifest(t *testing.T) {
+	withSegmentIndexManifestWrites(t, true)
 	const (
 		collID    = int64(100)
 		partID    = int64(10)
@@ -5374,6 +5379,7 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_UnionsRecordsAndManifest(t
 // gcBlockedBySnapshot takes the "protected by snapshot" message path in
 // recycleDroppedSegment.
 func TestGarbageCollector_getDroppedSegmentIndexFiles_InvalidManifestEntryBlocks(t *testing.T) {
+	withSegmentIndexManifestWrites(t, true)
 	const segmentID = int64(3301)
 	basePath := "/tmp/test-gc-dropped-invalid/insert_log/100/10/3301"
 	m, err := newMemoryMeta(t)
@@ -5419,11 +5425,10 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_InvalidManifestEntryBlocks
 	assert.NotNil(t, m.GetSegment(context.TODO(), segmentID))
 }
 
-// A dropped V3 segment whose marker is false never carried a manifest index
-// entry, so its recycling must not depend on the manifest being readable at
-// all: the etcd-record side of the sweep covers its index files, and an
-// all-etcd cluster gets no gcBlockedByManifest failure surface.
-func TestGarbageCollector_getDroppedSegmentIndexFiles_SkipsUnmarkedManifest(t *testing.T) {
+// An unmarked segment has never carried a manifest index entry. Recovery and
+// GC skip it even though they are independent of the current write mode.
+func TestGarbageCollector_getDroppedSegmentIndexFiles_SkipsUnmarkedManifestWhenDisabled(t *testing.T) {
+	withSegmentIndexManifestWrites(t, false)
 	const segmentID = int64(3401)
 	basePath := "/tmp/test-gc-dropped-unmarked/insert_log/100/10/3401"
 	m, err := newMemoryMeta(t)
@@ -5436,7 +5441,6 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_SkipsUnmarkedManifest(t *t
 		NumOfRows:      100,
 		StorageVersion: storage.StorageV3,
 		ManifestPath:   packed.MarshalManifestPath(basePath, 1),
-		// ManifestHasIndex deliberately unset.
 	})))
 
 	// Every read fails; not blocking proves no read was attempted.

@@ -6140,16 +6140,10 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Doc:          "The goroutine pool size for committing L0 compaction manifest updates inside DataCoord meta update.",
 		Export:       false,
 		Formatter: func(v string) string {
-			size := getAsInt(v)
-			if size < 1 {
+			if getAsInt(v) < 1 {
 				return "1"
 			}
-			// The pool backend stores capacity as int32; a larger value wraps
-			// negative and the first Submit blocks forever.
-			if size > math.MaxInt32 {
-				return strconv.Itoa(math.MaxInt32)
-			}
-			return strconv.Itoa(size)
+			return v
 		},
 	}
 	p.L0ManifestUpdatePoolSize.Init(base.mgr)
@@ -6501,11 +6495,8 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Key:          "dataCoord.index.writeSegmentIndexToManifest",
 		Version:      "3.0.0",
 		DefaultValue: "false",
-		Doc: `Whether a finished index build on a StorageV3 segment is recorded in the segment manifest instead of etcd. The two stores are exclusive, never dual-written: off (the default) is the legacy behavior - every SegmentIndex record goes to etcd and no manifest index entry is ever produced; on publishes the record into the segment manifest and, instead of writing the SegmentIndex row, deletes any row the same build left in etcd before the switch was turned on - in the same transaction that publishes the entry - so a build that straddles the flip cannot leave a stale in-progress row for reload to resurrect and re-dispatch after every restart.
-It applies per segment, not globally: only a StorageV3 segment with a manifest can record its indexes there, so a StorageV1/V2 segment keeps persisting its index records to etcd regardless of this setting - skipping that write would destroy the only copy rather than defer to another one.
-A SegmentIndex is also the build task record - its state machine, assigned node and failure reason have no manifest home - so with the switch on, an in-flight or failed build on a manifest-backed segment is lost across a restart and is simply reissued. Removals are never skipped, so an index collected by GC cannot come back.
-The switch can be flipped in either direction. Each commit that publishes an index entry also marks the segment (manifestHasIndex) in the same transaction, and reload is driven by that durable marker, not by this setting: it always loads every etcd record first, then reads the manifest of each marked segment and adds the entries etcd does not already have. Records written under either setting therefore stay visible after any flip.
-What is one-way is the binary version, not the config: while this stays false no manifest index entry exists and downgrading the DataCoord binary is free, but once it has been on and a build completed, rolling back to a binary without marker-driven reload makes those manifest-only indexes invisible and garbage collection then deletes their files.
+		Doc: `Whether completed StorageV3 index artifacts are published in segment manifests. Off (the default) keeps the legacy path: every SegmentIndex task record stays in etcd and no manifest index entry is produced. On still persists Unissued, InProgress, Failed, fake-finished, and other task states in etcd; only a successful build with artifact files is published to the manifest, and that commit atomically deletes the corresponding Finished etcd row. StorageV1/V2 always use etcd.
+The setting may be switched in either direction. Turning it off changes where new completions are written; records already published to manifests remain recoverable through the segment's sticky manifest_has_index marker.
 The value must be exactly true or false. A value that does not parse as a boolean, such as yes, is silently read as false, i.e. the legacy etcd behavior.`,
 		Export: true,
 	}
@@ -6527,7 +6518,7 @@ The value must be exactly true or false. A value that does not parse as a boolea
 			}
 			return strconv.Itoa(concurrency)
 		},
-		Doc: `Concurrency of the startup scan that rebuilds SegmentIndex records from the manifests of segments marked manifestHasIndex. The scan runs unconditionally - a cluster with no marked segments reads nothing - so this only matters once dataCoord.index.writeSegmentIndexToManifest has published entries.
+		Doc: `Concurrency of the startup scan that rebuilds completed SegmentIndex records from healthy StorageV3 manifests marked manifest_has_index. The scan follows existing data independently of the current write-mode switch; unmarked segments require no manifest read.
 This is object-storage IO, not metastore IO, which is why it is not metastore.readConcurrency: that setting is shared with the querycoord and rootcoord catalogs and defaults to 32, so one manifest read per segment would serialize a large cluster's boot into hours - and the scan is fail-closed inside newMeta, so that time is downtime.
 Each slot holds one cgo call into the manifest reader for the duration of an object-storage GET, which pins an OS thread. Raising it trades threads and object-storage request rate for boot time; lower it if the object store throttles.`,
 		Export: true,

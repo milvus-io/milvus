@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -35,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -93,12 +96,9 @@ type SegmentCatalogMutation struct {
 	// so the persisted value cannot be built from a stale read.
 	SegmentIndex *SegmentIndexMutation
 
-	// setManifestHasIndex is filled by the commit framework, never by callers
-	// (both entry points overwrite it): it records that the revision this
-	// commit publishes carries at least one index entry, and
-	// applySegmentCatalogTypedFields folds it into the sticky
-	// SegmentInfo.manifest_has_index marker in the same catalog transaction,
-	// which is what lets reload trust a false marker as proof of no entry.
+	// setManifestHasIndex is framework-owned. Structured mutations that add an
+	// index entry set the segment's sticky recovery marker in the same catalog
+	// transaction as the new manifest pointer.
 	setManifestHasIndex bool
 }
 
@@ -107,8 +107,8 @@ type SegmentCatalogMutation struct {
 type SegmentIndexMutationType int
 
 const (
-	// SegmentIndexUpsert persists the record projected from a worker result,
-	// publishing an artifact the manifest revision adds.
+	// SegmentIndexUpsert projects a worker result into memory and retires the
+	// etcd task row while the manifest revision publishes its artifact.
 	SegmentIndexUpsert SegmentIndexMutationType = iota + 1
 	// SegmentIndexRemove deletes the record, retiring an artifact the manifest
 	// revision retracts.
@@ -160,10 +160,7 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	if err := validateExpectedManifestUsage(commit); err != nil {
 		return err
 	}
-	// Framework-owned, overwritten regardless of what the caller set: the
-	// marker must reflect the revision actually being published.
 	commit.CatalogMutation.setManifestHasIndex = manifestMutationAddsIndexEntry(commit.Mutation)
-
 	// KeyLock.Lock is synchronous: a caller blocks here only when another
 	// transaction for this segment is in flight. There is no asynchronous
 	// queue or goroutine. Different segment IDs can perform manifest I/O
@@ -177,12 +174,28 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	if indexMutation := commit.CatalogMutation.SegmentIndex; indexMutation != nil && indexMutation.BuildID == 0 {
 		return merr.WrapErrServiceInternalMsg("segment index mutation requires a build ID")
 	}
+	if indexMutation := commit.CatalogMutation.SegmentIndex; indexMutation != nil &&
+		indexMutation.Type == SegmentIndexUpsert && !commitPublishesIndexEntry(commit, indexMutation.BuildID) {
+		return merr.WrapErrServiceInternalMsg(
+			"segment index upsert requires a matching manifest entry, segmentID=%d buildID=%d",
+			commit.SegmentID, indexMutation.BuildID)
+	}
 	defer func() {
 		mlog.Debug(ctx, "segment manifest commit completed",
 			mlog.Int64("segmentID", commit.SegmentID),
 			mlog.Duration("lockWait", lockWait),
 			mlog.Duration("lockHold", time.Since(holdStart)))
 	}()
+
+	// A SegmentIndex mutation contributes data to the manifest itself. Hold its
+	// build lock from the authoritative task projection through object-storage
+	// publication and the catalog transaction, so a concurrent reset or version
+	// update cannot make the manifest entry disagree with the in-memory record.
+	var stagedIndex *stagedSegmentIndexMutation
+	if indexMutation := commit.CatalogMutation.SegmentIndex; indexMutation != nil {
+		m.indexMeta.keyLock.Lock(indexMutation.BuildID)
+		defer m.indexMeta.keyLock.Unlock(indexMutation.BuildID)
+	}
 
 	// Snapshot the manifest input, then release segMu before object-storage I/O.
 	m.segMu.RLock()
@@ -226,23 +239,37 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		return staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, segment.GetManifestPath())
 	}
 
+	if indexMutation := commit.CatalogMutation.SegmentIndex; indexMutation != nil {
+		staged, err := m.indexMeta.stageSegmentIndexMutation(*indexMutation)
+		if err != nil {
+			if errors.Is(err, errSegmentIndexRecordGone) {
+				mlog.Warn(ctx, "index task no longer exists, discarding manifest commit",
+					mlog.Int64("buildID", indexMutation.BuildID),
+					mlog.Int64("segmentID", commit.SegmentID))
+				return nil
+			}
+			return err
+		}
+		stagedIndex = staged
+		if indexMutation.Type == SegmentIndexUpsert {
+			for _, manifestIndex := range commit.Mutation.Updates.Indexes {
+				if manifestIndex.BuildID != indexMutation.BuildID {
+					continue
+				}
+				if err := validateManifestIndexPublishable(commit.SegmentID, manifestIndex); err != nil {
+					return err
+				}
+				if err := validateManifestIndexTaskProjection(m, segment, manifestIndex, staged.record); err != nil {
+					return err
+				}
+				break
+			}
+		}
+	}
+
 	manifestPath, err := commitManifestMutation(segment.GetManifestPath(), commit)
 	if err != nil {
 		return err
-	}
-
-	// The per-buildID key lock is taken HERE, immediately before segMu and
-	// held through publication. Every other SegmentIndex writer
-	// (AddSegmentIndex, FinishTask, UpdateIndexState, ...) takes keyLock first
-	// and only then reads segment state under segMu, so acquiring it after
-	// segMu - as staging used to - inverts that order and deadlocks against a
-	// concurrent transition of the same build. Taking it here rather than at
-	// the top of the function keeps it off the manifest I/O above, which is a
-	// seconds-long object-storage transaction; the snapshot RLock is already
-	// released by then, so nothing is held across it and the order still holds.
-	if indexMutation := commit.CatalogMutation.SegmentIndex; indexMutation != nil {
-		m.indexMeta.keyLock.Lock(indexMutation.BuildID)
-		defer m.indexMeta.keyLock.Unlock(indexMutation.BuildID)
 	}
 
 	// Re-enter segMu only for the final full-record publication. Ordinary
@@ -336,33 +363,9 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		// retracts its artifact are staged into one catalog transaction, so an
 		// index can never be visible against a revision that does not carry it,
 		// nor claimed by a record after the revision dropped it.
-		var stagedIndex *stagedSegmentIndexMutation
-		if indexMutation := commit.CatalogMutation.SegmentIndex; indexMutation != nil {
-			// This commit has already established the segment is StorageV3 and is
-			// advancing its manifest pointer, so its indexes are manifest-backed by
-			// construction. Passing that in rather than re-deriving it through
-			// meta matters: the resolver takes segMu, which this critical section
-			// already holds for writing.
-			// The buildID key lock was taken above, before segMu.
-			staged, err := m.indexMeta.stageSegmentIndexMutation(*indexMutation, true,
-				commitPublishesIndexEntry(commit, indexMutation.BuildID))
-			if err != nil {
-				if errors.Is(err, errSegmentIndexRecordGone) {
-					// The task can be dropped while its worker result is in flight.
-					// Abandon the commit: the prepared revision stays unreferenced and
-					// is invisible, whereas publishing it would strand an index entry
-					// that no SegmentIndex record can ever drive GC for.
-					mlog.Warn(ctx, "index task no longer exists, discarding prepared manifest",
-						mlog.Int64("buildID", indexMutation.BuildID),
-						mlog.Int64("segmentID", commit.SegmentID),
-						mlog.String("manifestPath", manifestPath))
-					return nil
-				}
-				return err
-			}
-			stagedIndex = staged
-			if staged.action != nil {
-				actions = append(actions, *staged.action)
+		if stagedIndex != nil {
+			if stagedIndex.action != nil {
+				actions = append(actions, *stagedIndex.action)
 			}
 		}
 
@@ -391,15 +394,6 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	return nil
 }
 
-// commitPublishesIndexEntry reports whether the revision this commit creates
-// carries an index entry for buildID, which is what lets the staged
-// SegmentIndex record be marked ManifestPublished.
-//
-// It reads the mutation rather than trusting the mutation type, because
-// "upsert a SegmentIndex" and "publish that index in the manifest" are separate
-// facts. A Noop mutation publishes a revision this framework did not build and
-// therefore cannot vouch for at all - validateExpectedManifestUsage already
-// refuses to pair one with an upsert, and this returns false for it either way.
 func commitPublishesIndexEntry(commit SegmentManifestCommit, buildID int64) bool {
 	if commit.Mutation.Type != ManifestMutationCommitUpdates || commit.Mutation.Updates == nil {
 		return false
@@ -412,15 +406,44 @@ func commitPublishesIndexEntry(commit SegmentManifestCommit, buildID int64) bool
 	return false
 }
 
-// manifestMutationAddsIndexEntry reports whether the revision this mutation
-// publishes carries an index entry, which is what makes the commit set the
-// segment's sticky manifest_has_index marker. Like commitPublishesIndexEntry
-// it reads the mutation, not the caller's intent, and a Noop publishes a
-// revision this framework did not build and cannot vouch for, so it never
-// sets the marker.
 func manifestMutationAddsIndexEntry(mutation ManifestMutation) bool {
 	return mutation.Type == ManifestMutationCommitUpdates &&
 		mutation.Updates != nil && len(mutation.Updates.Indexes) > 0
+}
+
+// validateManifestIndexTaskProjection checks the task-owned fields without
+// rereading the collection's index definition. The caller already built and
+// validated that immutable definition snapshot; only the SegmentIndex task can
+// race between that build and this commit, and keyLock now holds it stable.
+func validateManifestIndexTaskProjection(m *meta, segment *SegmentInfo, entry packed.ManifestIndexInfo, segIdx *model.SegmentIndex) error {
+	basePath, _, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
+	if err != nil {
+		return merr.Wrap(err, "parse segment manifest path for index publication")
+	}
+	indexPrefix := metautil.NewIndexPathBuilder(
+		m.chunkManager.RootPath(),
+		segIdx.IndexStorePathVersion,
+		segIdx.CollectionID,
+		segIdx.PartitionID,
+		segIdx.SegmentID,
+		segIdx.BuildID,
+		segIdx.IndexVersion,
+	).BuildPrefix()
+	expectedPath, err := packed.ManifestIndexRelativePath(basePath, indexPrefix)
+	if err != nil {
+		return err
+	}
+	if entry.IndexID != segIdx.IndexID || entry.BuildID != segIdx.BuildID ||
+		entry.IndexVersion != segIdx.IndexVersion || entry.NumRows != segIdx.NumRows ||
+		entry.SerializedSize != int64(segIdx.IndexSerializedSize) || entry.MemSize != int64(segIdx.IndexMemSize) ||
+		entry.CurrentIndexVersion != segIdx.CurrentIndexVersion ||
+		entry.CurrentScalarIndexVersion != segIdx.CurrentScalarIndexVersion ||
+		entry.IndexStorePathVersion != segIdx.IndexStorePathVersion || entry.Path != expectedPath ||
+		!slices.Equal(entry.IndexFileKeys, segIdx.IndexFileKeys) {
+		return merr.WrapErrServiceInternalMsg(
+			"segment index changed before manifest commit, segmentID=%d buildID=%d", segIdx.SegmentID, segIdx.BuildID)
+	}
+	return nil
 }
 
 // getSegmentManifestLocks also supports focused unit tests that construct a
@@ -593,9 +616,8 @@ func applySegmentCatalogTypedFields(segment *SegmentInfo, mutation SegmentCatalo
 		segment.IsImporting = *mutation.IsImporting
 	}
 	if mutation.setManifestHasIndex {
-		// Sticky, set-only: retraction never clears it. A wrong false would
-		// make reload skip a manifest that still carries entries and silently
-		// drop indexes; a stale true only costs one extra manifest read.
+		// Sticky, set-only: a stale true costs one manifest read, while a
+		// false value could hide manifest-resident indexes after a mode flip.
 		segment.ManifestHasIndex = true
 	}
 }
@@ -680,8 +702,7 @@ var segmentManifestLockEscalationThreshold = 30 * time.Second
 // manifest pointer (which would require its own per-segment manifest lock).
 func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentManifestCommit, extraOperators ...UpdateOperator) error {
 	idSet := make(map[int64]struct{}, len(commits))
-	for i := range commits {
-		commit := commits[i]
+	for _, commit := range commits {
 		if commit.SegmentID == 0 {
 			return merr.WrapErrServiceInternalMsg("segment manifest commit requires a segment ID")
 		}
@@ -700,12 +721,16 @@ func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentMani
 			// or leaving a record claiming a retracted one.
 			return merr.WrapErrServiceInternalMsg("batch segment manifest commit cannot mutate a segment index, segmentID=%d", commit.SegmentID)
 		}
+		if manifestMutationAddsIndexEntry(commit.Mutation) {
+			// The same restriction applies to the manifest half by itself. The
+			// batch path cannot publish the matching SegmentIndex action, so it
+			// must not create an index entry that is invisible until restart.
+			return merr.WrapErrServiceInternalMsg("batch segment manifest commit cannot publish a segment index, segmentID=%d", commit.SegmentID)
+		}
 		if _, dup := idSet[commit.SegmentID]; dup {
 			return merr.WrapErrServiceInternalMsg("duplicate segment ID %d in batch manifest commit", commit.SegmentID)
 		}
 		idSet[commit.SegmentID] = struct{}{}
-		// Framework-owned, same rule as the single-segment path.
-		commits[i].CatalogMutation.setManifestHasIndex = manifestMutationAddsIndexEntry(commit.Mutation)
 	}
 
 	if len(commits) == 0 {

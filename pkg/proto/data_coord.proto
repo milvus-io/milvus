@@ -481,12 +481,10 @@ message SegmentInfo {
   uint64 create_ts = 39;
 
   // manifest_has_index records that this segment's manifest has carried at
-  // least one index entry (written in the same commit as the entry). It is
-  // sticky - set-only, never cleared by retraction - so reload can decide
-  // which manifests to read without depending on configuration: a false
-  // marker proves no entry was ever published, a stale true only costs one
-  // extra manifest read at startup. Clearing it wrongly would silently drop
-  // indexes, so no writer clears it.
+  // least one index entry. It is sticky and written atomically with the first
+  // such manifest pointer, so recovery and GC can find manifest-resident
+  // indexes independently of the current write-mode switch. A stale true only
+  // costs one manifest read; clearing it could hide live index metadata.
   bool manifest_has_index = 40;
 }
 
@@ -1256,27 +1254,7 @@ message CopySegmentTarget {
   // derive them from the source snapshot; index name is the only key preserved
   // across the snapshot boundary (field ID cannot be used because one JSON field
   // may carry several indexes on different paths).
-  map<string, CopySegmentTargetIndex> target_indexes = 6;
-  // Authoritative row count from the pre-registered target segment. StorageV3
-  // bundles omit legacy PB insert binlogs, so it cannot be derived from the
-  // copied files.
-  int64 num_rows = 7;
-  // Index IDs recorded in the SOURCE manifest. The target manifest is copied
-  // byte-for-byte, so it inherits these entries, and every one of them encodes
-  // the source collection/partition/segment/build IDs in its stored path. The
-  // worker retracts exactly these before recording the target's own entries.
-  repeated int64 inherited_index_ids = 8;
-}
-
-// CopySegmentTargetIndex carries the target-collection metadata a copied index
-// artifact must be recorded under. The worker owns the physical facts (paths,
-// build ID, sizes); DataCoord owns the identity and index definition below.
-message CopySegmentTargetIndex {
-  int64 index_id = 1;                  // target collection's index ID
-  int64 field_id = 2;                  // target collection's field ID
-  string column_name = 3;              // target collection's schema field name
-  string index_type = 4;
-  map<string, string> properties = 5;  // type params merged with index params
+  repeated CopySegmentTargetIndex target_indexes = 6;
 }
 
 message CopySegmentRequest {
@@ -2132,4 +2110,18 @@ message GetExportSnapshotStateRequest {
 message GetExportSnapshotStateResponse {
   common.Status status = 1;
   ExportSnapshotJobInfo info = 2;
+}
+
+// CopySegmentTargetIndex carries the target-collection metadata a copied index
+// artifact must be recorded under. The worker owns the physical facts (paths,
+// build ID, sizes); DataCoord owns the identity and index definition below.
+// Keep this message at the end so adding it does not renumber descriptors for
+// the many existing messages below CopySegmentTarget.
+message CopySegmentTargetIndex {
+  string index_name = 1;               // stable key across the snapshot boundary
+  int64 index_id = 2;                  // target collection's index ID
+  int64 field_id = 3;                  // target collection's field ID
+  string column_name = 4;              // target collection's schema field name
+  string index_type = 5;
+  map<string, string> properties = 6;  // type params merged with index params
 }

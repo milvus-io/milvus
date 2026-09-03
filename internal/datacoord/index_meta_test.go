@@ -2690,123 +2690,31 @@ func TestIndexMeta_GetDeletedIndexesWithV1Path(t *testing.T) {
 	assert.Equal(t, int64(2000), result[0].BuildID)
 }
 
-// The switch controls where durable state lives, not what DataCoord observes.
-// With manifest writes on, no SegmentIndex on a manifest-backed segment ever
-// reaches the catalog - the mock fails the test on any unexpected call - while
-// DataCoord's own in-memory view advances exactly as before, which is what
-// keeps every consumer working within a process lifetime.
-func TestSegmentIndexEtcdWritesGatedByParam(t *testing.T) {
-	withSegmentIndexManifestWrites(t, true)
-
-	catalog := catalogmocks.NewDataCoordCatalog(t)
-	m := &indexMeta{
-		ctx:              context.TODO(),
-		catalog:          catalog,
-		indexes:          map[UniqueID]map[UniqueID]*model.Index{},
-		keyLock:          lock.NewKeyLock[UniqueID](),
-		segmentBuildInfo: newSegmentIndexBuildInfo(),
-		segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
-		// 6001 is manifest-backed; 6002 is not.
-		manifestBackedSegment: func(segmentID UniqueID) bool { return segmentID == 6001 },
-	}
-
-	// CreateSegmentIndex is not expected: the write must be skipped entirely.
-	require.NoError(t, m.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
-		CollectionID: 100, PartitionID: 10, SegmentID: 6001,
-		IndexID: 600, BuildID: 6100,
-	}))
-	segIdx, ok := m.segmentBuildInfo.Get(6100)
-	require.True(t, ok, "memory state must advance even with etcd writes off")
-	assert.Equal(t, commonpb.IndexState_Unissued, segIdx.IndexState)
-
-	// AlterSegmentIndexes is not expected either, but a state transition on a
-	// gated record retires any etcd row its buildID may have from before the
-	// switch flipped on (a no-op delete when, as here, none was written).
-	catalog.EXPECT().DropSegmentIndex(mock.Anything, int64(100), int64(10), int64(6001), int64(6100)).
-		Return(nil).Once()
-	require.NoError(t, m.BuildIndex(6100))
-	segIdx, ok = m.segmentBuildInfo.Get(6100)
-	require.True(t, ok)
-	assert.Equal(t, commonpb.IndexState_InProgress, segIdx.IndexState)
-
-	// Removal is deliberately NOT gated: a record written while the switch was
-	// on must still be deleted, or reload would resurrect a collected index.
-	catalog.EXPECT().DropSegmentIndex(mock.Anything, int64(100), int64(10), int64(6001), int64(6100)).
-		Return(nil).Once()
-	require.NoError(t, m.RemoveSegmentIndex(context.TODO(), 6100))
-	_, ok = m.segmentBuildInfo.Get(6100)
-	assert.False(t, ok)
-
-	// A segment that is not manifest-backed keeps persisting even with the
-	// switch off: nothing else records its index, so skipping the write would
-	// destroy the only copy rather than defer to another one.
-	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
-	require.NoError(t, m.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
-		CollectionID: 100, PartitionID: 10, SegmentID: 6002,
-		IndexID: 600, BuildID: 6300,
-	}))
-	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
-	require.NoError(t, m.BuildIndex(6300))
-}
-
-// A batch can mix a manifest-backed segment with one that is not; only the
-// former may be dropped from the catalog write - retiring any pre-switch etcd
-// row it may have - and the in-memory update must still cover both.
-func TestSegmentIndexEtcdWritesGatedPerRecord(t *testing.T) {
-	withSegmentIndexManifestWrites(t, true)
-
-	catalog := catalogmocks.NewDataCoordCatalog(t)
-	var persisted []*model.SegmentIndex
-	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).
-		RunAndReturn(func(_ context.Context, segIdxes []*model.SegmentIndex) error {
-			persisted = segIdxes
-			return nil
-		}).Once()
-	catalog.EXPECT().DropSegmentIndex(mock.Anything, int64(100), int64(10), int64(7001), int64(7100)).
-		Return(nil).Once()
-
-	m := &indexMeta{
-		ctx:                   context.TODO(),
-		catalog:               catalog,
-		indexes:               map[UniqueID]map[UniqueID]*model.Index{},
-		keyLock:               lock.NewKeyLock[UniqueID](),
-		segmentBuildInfo:      newSegmentIndexBuildInfo(),
-		segmentIndexes:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
-		manifestBackedSegment: func(segmentID UniqueID) bool { return segmentID == 7001 },
-	}
-
-	v3 := &model.SegmentIndex{CollectionID: 100, PartitionID: 10, SegmentID: 7001, IndexID: 700, BuildID: 7100}
-	v2 := &model.SegmentIndex{CollectionID: 100, PartitionID: 10, SegmentID: 7002, IndexID: 700, BuildID: 7200}
-	require.NoError(t, m.alterSegmentIndexes([]*model.SegmentIndex{v3, v2}))
-
-	require.Len(t, persisted, 1)
-	assert.EqualValues(t, 7200, persisted[0].BuildID, "only the non-manifest-backed record is persisted")
-	_, ok := m.segmentBuildInfo.Get(7100)
-	assert.True(t, ok, "memory covers both regardless")
-	_, ok = m.segmentBuildInfo.Get(7200)
-	assert.True(t, ok)
-}
-
-// Default-off must keep the pre-existing behavior: every transition persists
-// to etcd and no manifest entry is produced.
-func TestSegmentIndexEtcdWritesEnabledByDefault(t *testing.T) {
+// The feature switch controls completed-artifact publication only. Task
+// lifecycle states remain durable in etcd in both modes.
+func TestSegmentIndexTaskStatesAlwaysPersistToEtcd(t *testing.T) {
 	assert.False(t, paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
 
-	withSegmentIndexManifestWrites(t, false)
-	catalog := catalogmocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
-	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
-	m := &indexMeta{
-		ctx:              context.TODO(),
-		catalog:          catalog,
-		indexes:          map[UniqueID]map[UniqueID]*model.Index{},
-		keyLock:          lock.NewKeyLock[UniqueID](),
-		segmentBuildInfo: newSegmentIndexBuildInfo(),
-		segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("manifest=%t", enabled), func(t *testing.T) {
+			withSegmentIndexManifestWrites(t, enabled)
+			catalog := catalogmocks.NewDataCoordCatalog(t)
+			catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
+			catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Times(2)
+			m := &indexMeta{
+				ctx:              context.TODO(),
+				catalog:          catalog,
+				indexes:          map[UniqueID]map[UniqueID]*model.Index{},
+				keyLock:          lock.NewKeyLock[UniqueID](),
+				segmentBuildInfo: newSegmentIndexBuildInfo(),
+				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+			}
+			require.NoError(t, m.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+				CollectionID: 100, PartitionID: 10, SegmentID: 6002,
+				IndexID: 600, BuildID: 6200,
+			}))
+			require.NoError(t, m.BuildIndex(6200))
+			require.NoError(t, m.UpdateIndexState(6200, commonpb.IndexState_Failed, "failed"))
+		})
 	}
-	require.NoError(t, m.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
-		CollectionID: 100, PartitionID: 10, SegmentID: 6002,
-		IndexID: 600, BuildID: 6200,
-	}))
-	require.NoError(t, m.BuildIndex(6200))
 }

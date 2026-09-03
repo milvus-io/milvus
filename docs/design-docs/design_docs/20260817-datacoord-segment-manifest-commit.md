@@ -292,95 +292,47 @@ costs a retry rather than an unreclaimable leak.
 
 ## Retiring the etcd SegmentIndex Record
 
-The end state of this migration is that a manifest is the only durable record
-of a finished index artifact. `dataCoord.index.writeSegmentIndexToManifest`
-(default off) is the seam to that end state. The two stores are **exclusive,
-never dual-written**: off is the pure legacy path - every `SegmentIndex`
-record goes to etcd and no manifest index entry is produced at all
-(`publishIndexToManifest` declines before touching a manifest, and the copy
-path ships the worker no target index definitions, so it retracts inherited
-entries and writes none); on publishes the record into the segment manifest
-and gates the `SegmentIndex` catalog writes, while leaving DataCoord's
-in-memory index state untouched. Where durable state lives is what the switch
-controls; what DataCoord itself observes is not.
+The manifest becomes the only durable record of a completed StorageV3 index
+artifact, but `SegmentIndex` remains the durable build-task record until that
+point. `dataCoord.index.writeSegmentIndexToManifest` (default off) controls
+only the terminal artifact placement:
 
-Gating is not uniformly a skip, because a build can straddle the off-to-on
-flip: a build started while the switch was off leaves an in-progress etcd row,
-and after the flip that row's build completes into the manifest instead. If
-the gate merely skipped the etcd write, the stale row would survive forever -
-boot-time etcd-wins dedup would resurrect its non-terminal state over the
-manifest's finished entry and the inspector would re-dispatch the same buildID
-after every restart, with no GC path for the row. So each gated site does what
-its situation requires: `CreateSegmentIndex` is skipped outright (every caller
-allocates a fresh buildID, so no row can pre-exist); a gated record in
-`AlterSegmentIndexes` instead gets its row deleted via `DropSegmentIndex` (a
-no-op when none was written); and the upsert action staged into a manifest
-commit becomes a `DropSegmentIndex` action in the very transaction that
-publishes the entry, so the row can never outlive the record superseding it.
+- Off: every state, including Finished, persists to etcd and no manifest index
+  entry is created.
+- On: Unissued, InProgress, Failed, deleted, and fake-Finished records still
+  persist to etcd. A Finished StorageV3 build with actual files is added to the
+  manifest; the same catalog transaction advances `manifest_path` and deletes
+  its etcd task row. StorageV1/V2 always stay on the etcd path.
 
-The suppression is decided **per segment, not globally**: it requires both the
-switch to be on and the segment to be manifest-backed (StorageV3 with a
-manifest path). A StorageV1/V2 segment records its indexes nowhere else, so
-skipping its write would destroy the only copy rather than defer to another
-one, and it keeps persisting regardless of the switch. `indexMeta` answers that
-question through `manifestBackedSegment`, wired by `newMeta` once the segment
-list exists; a batch that mixes both kinds persists only the records that need
-it. Removals are likewise never skipped: the switch stops DataCoord adding
-`SegmentIndex` rows to etcd, it never stops it removing them, or a row written
-while records still went to etcd would be resurrected by reload after GC had
-already collected it.
+This makes publication the sole retirement point instead of spreading an etcd
+write gate through `CreateSegmentIndex`, `AlterSegmentIndexes`, and every state
+transition. It also handles an in-flight build across false-to-true activation:
+the row created before activation is deleted atomically when its artifact is
+published, so restart cannot resurrect an old InProgress state over a Finished
+manifest entry.
 
-**The sticky segment marker is what makes the switch safe to flip in both
-directions.** `SegmentInfo.manifest_has_index` (field 40) records that a
-segment's manifest has carried at least one index entry. It is written in the
-same catalog transaction as the entry itself, through exactly three channels:
-the single-segment `CommitSegmentManifest` and the batch
-`CommitSegmentManifests` fill a framework-owned
-`SegmentCatalogMutation.setManifestHasIndex` from the mutation's actual
-`Updates.Indexes` (a Noop mutation never sets it - the framework cannot vouch
-for a revision it did not build), and the copy sync path - the one publication
-that adopts a worker-built manifest outside the framework - appends the
-`UpdateManifestHasIndex` operator in the same `UpdateSegmentsInfo` transaction
-as the pointer, after the read-back proves the manifest carries entries. The
-marker is set-only: retraction never clears it, because a wrong false silently
-drops indexes at the next reload while a stale true costs exactly one extra
-manifest read at boot.
+Reload follows durable placement rather than the switch's current value. It
+first loads etcd task records, then reads each healthy, non-L0 StorageV3
+segment whose sticky `manifest_has_index` marker says a manifest entry has been
+published. Entries whose build IDs are absent from etcd are projected into
+in-memory `SegmentIndex` records; etcd wins conflicts, preserving task states
+and record-resident results. A marked manifest that cannot be read fails
+startup: silently omitting its entries could make GC classify live index files
+as orphaned. Startup logs scanned, read, and recovered counts. The
+object-storage fan-out is bounded by
+`dataCoord.index.segmentIndexManifestLoadConcurrency`.
 
-Reload closes the loop, and is **driven by the marker, not by the switch**.
-`meta.reloadSegmentIndexesFromManifests` runs unconditionally at every boot: it
-loads every etcd record first (that path never changed), then reads the
-manifest of each healthy, non-L0, marked StorageV3 segment and projects the
-entries etcd does not already have into `SegmentIndex` records, with etcd
-winning on buildID conflict - the same precedence every other manifest-index
-consumer uses. Recovery is decided by where the records durably are, never by
-where the current configuration would put them. Flipping the switch in either
-direction therefore strands nothing: records published while it was on stay
-visible after it goes off, and existing etcd rows stay authoritative when it
-comes on. A cluster whose segments carry no marker reads nothing, so the
-default startup performs zero object-storage reads.
+The switch may be changed in either direction. Turning it off sends new
+completions to etcd but does not move or hide records already resident in
+manifests; their sticky marker keeps reload and GC on those manifests. Turning
+it on again resumes manifest publication. No inverse feature switch and no
+eager manifest-to-etcd backfill are required, so mixed historical placement is
+supported without dual-writing an individual result.
 
-**A marked manifest that cannot be read fails startup.** This is the same
-fail-closed contract the etcd path has - a `ListSegmentIndexes` error aborts
-`newIndexMeta` and therefore `newMeta` - and the marker is exactly what scopes
-it: only a segment proven to carry entries can abort boot. Skipping an
-unreadable marked manifest would leave `indexMeta` silently incomplete, and an
-incomplete `indexMeta` is not merely "that segment looks unindexed": GC reads
-an absent `SegmentIndex` as proof the artifact is garbage.
-`recycleUnusedIndexFilesV0`'s `CheckCleanSegmentIndex` miss path removes the
-entire buildID prefix with no time tolerance, and the default
-`storePathVersion: 0` places index files under exactly the `index_files/`
-prefix it walks - so one transient object-store error would delete live index
-files the manifest still references. Failing to start is recoverable; that is
-not. Startup logs scanned / read / recovered counts, because otherwise a
-partial reload is indistinguishable from a cluster that has no indexes.
-
-GC applies the same marker discipline: `resolveManifestIndexRetraction` skips
-the manifest read when neither the segment marker nor the record's
-`ManifestPublished` flag claims an entry (nothing to retract, so the record is
-simply removed), and `getManifestIndexFiles` skips unmarked segments entirely,
-so a dropped V3 segment on an all-etcd cluster can never have its recycling
-blocked by an unreadable manifest that cannot name index files anyway - the
-record-driven side of the sweep covers the same files independently.
+GC also follows durable placement rather than the current mode. It reads a
+StorageV3 manifest only when `manifest_has_index` is set, including after the
+write switch is turned off; unmarked segments remain on the etcd-only path with
+no manifest read.
 
 The candidate set is deliberately NOT narrowed by which index definitions are
 still live. Skipping a segment whose definitions all have records would strand
@@ -388,8 +340,8 @@ precisely the entry the system still needs: a manifest entry whose definition is
 already dropped has no `SegmentIndex` record by construction, and GC is entirely
 record-driven (`GetAllSegIndexes`, `GetDeletedIndexesWithV1Path`), so an entry
 with no record is never visited again and its bytes leak for the
-COLLECTION_ROOTED layout. The filter is therefore only: healthy, non-L0,
-StorageV3, marked.
+COLLECTION_ROOTED layout. The reload filter is therefore: healthy, non-L0,
+StorageV3, non-empty manifest path, and sticky `manifest_has_index`.
 
 Every entry read is validated with the same predicate the other manifest
 consumers use (`manifestIndexFilePathInfo`) before it becomes a record, because
@@ -397,8 +349,10 @@ the reload is the one path that promotes a manifest entry into a record whose
 file keys later reach `removeObjectFiles`. A malformed entry fails startup for
 the same reason an unreadable manifest does.
 
-The cost is one object read per *marked* segment at startup. That fan-out is
-pooled at `dataCoord.index.segmentIndexManifestLoadConcurrency` (default 4096)
+The cost is one object read per marked healthy non-L0 StorageV3 segment at
+startup. An all-etcd cluster has no marked segments and performs no manifest
+GETs. The remaining fan-out is pooled at
+`dataCoord.index.segmentIndexManifestLoadConcurrency` (default 4096)
 rather than `metastore.readConcurrency`: the latter is shared with the
 querycoord and rootcoord catalogs and defaults to 32, which is a sane etcd
 fan-out and a badly wrong one for object-storage GETs. At 32 in flight a
@@ -408,49 +362,31 @@ Each slot holds a cgo call for the duration of one GET and so pins an OS thread,
 which is the ceiling the knob trades against; a throttling object store is the
 reason to lower it.
 
-**Lock order.** Gating the etcd write requires knowing whether a segment is
-manifest-backed, which resolves through `meta` under `segMu`. Every
-`SegmentIndex` writer reaches that gate while holding `indexMeta.keyLock`, so
-the global order is `segmentManifestLocks -> indexMeta.keyLock -> segMu`.
+**Lock order.** The global order is
+`segmentManifestLocks -> indexMeta.keyLock -> segMu`.
 `CommitSegmentManifest` therefore acquires the build's key lock before its
 first `segMu` acquisition and holds it through publication; acquiring it during
 staging, after `segMu`, inverts the order and deadlocks against a concurrent
 transition of the same build. `TestCommitSegmentManifestTakesKeyLockBeforeSegMu`
 pins this: parked on the key lock, the commit must hold no `segMu`.
 
-Three limits are inherent rather than incidental, and are why the switch is
+Two limits are inherent rather than incidental, and are why the switch is
 off-by-default rather than removed:
 
 - Only StorageV3 segments record indexes in a manifest, which is why the switch
   cannot apply to StorageV1/V2 segments at all - the etcd record stays their
   sole copy, and retiring it needs a different mechanism.
-- A `SegmentIndex` is also the build *task* record. Its state machine, assigned
-  node, failure reason and timestamps have no manifest home, so with the switch
-  on, an in-flight or failed build on a manifest-backed segment is memory-only:
-  it is lost across a restart and simply reissued. A recovered record is
-  `Finished` by construction. The cost is concrete: a deterministically failing
-  build re-runs in full after every restart, and its `FailReason` is never
-  visible to an operator who did not read the logs before the restart. A
-  fake-finished build (too small to train) is likewise not persisted, though
-  rebuilding it is free. The same applies to the publish declines in
-  `publishIndexToManifest` (dropped index definition, unhealthy segment): the
-  legacy `FinishTask` fallback's etcd write is gated too, so those records are
-  memory-only and die with their segment or get reissued.
-- **The one-way boundary is the binary version, not the config.** While the
-  switch stays false no manifest index entry exists anywhere and downgrading
-  the DataCoord binary is free. Once it has been on and a build completed,
-  rolling back to a binary without marker-driven reload makes the
-  manifest-only records invisible, and `recycleUnusedIndexFilesV0`'s miss path
-  then deletes their index files as orphans (no time tolerance; under the
-  default `storePathVersion: 0` that prefix is exactly where live index files
-  land). The boundary is documented, not enforced.
+- A `SegmentIndex` is also the build task record. Because task-only states have
+  no manifest representation, they continue to persist in etcd. A recovered
+  manifest record is `Finished` by construction.
+- Mode changes affect new terminal results only. Historical etcd and manifest
+  records may coexist; the sticky per-segment marker makes both recoverable.
 
 A version-skew guard protects the one cross-binary interaction: with the
 switch on, a copy executed by a DataNode that predates manifest index
-republication returns a manifest whose index section was never rewritten. The
-synced records would be memory-only (their etcd write is gated) and silently
-vanish on restart, so `syncVectorScalarIndexes` hard-fails the copy task with
-an upgrade hint instead of installing them.
+republication returns a manifest whose index section was never rewritten.
+`syncVectorScalarIndexes` hard-fails the copy task with an upgrade hint instead
+of installing an artifact-bearing record that cannot be recovered on restart.
 
 One invariant carries the whole scheme: **a visible StorageV3 segment always
 has a non-empty `ManifestPath`.** It holds by construction - `AllocSegment`
@@ -458,9 +394,9 @@ mints the pointer in the same `SegmentInfo` literal that sets `StorageVersion`,
 and flush, compaction, import and copy all publish `ManifestPath` atomically
 with the segment record; there is no in-place V1/V2 to V3 conversion. Nothing
 validated it, however, and a violation is silent: the segment would answer "not
-manifest-backed", keep writing to etcd, and quietly exempt itself from the
-migration. Both the gate and the reload filter now log an error when they see
-a visible V3 segment with an empty pointer.
+manifest-backed" and keep writing to etcd. Publication therefore declines to
+the safe etcd path, while recovery logs a durable-marker invariant error if a
+segment marked `manifest_has_index` has no pointer.
 
 The consumers that decide *whether a segment is indexed* -
 `indexMeta.GetSegmentIndexes` / `GetIndexedSegments`, read by the index
@@ -476,9 +412,9 @@ reload, by GC when it retracts one, and by the copy worker.
 
 | Current owner/path | Framework migration |
 |---|---|
-| `task_index.go` / DataNode index task | Return index artifact metadata.  `meta.CommitSegmentManifest(AddIndexes)` creates the revision and, via a `SegmentIndexUpsert` catalog mutation, atomically completes `SegmentIndex`. |
+| `task_index.go` / DataNode index task | Return index artifact metadata. `meta.CommitSegmentManifest(AddIndexes)` creates the revision and, via a `SegmentIndexUpsert` catalog mutation, atomically installs the Finished record in memory and deletes its etcd task row. |
 | `garbage_collector.go` | Delete the objects first, then use `DropIndexes` with a `SegmentIndexRemove` catalog mutation so the retracting revision's pointer and the `SegmentIndex` removal land in one catalog transaction - the same bytes-first ordering as the legacy path (see Failure and Recovery Semantics). A StorageV2 segment, a dropped segment, or a manifest that never carried the entry follows the same file deletion with a bare `RemoveSegmentIndex` instead of a manifest commit. |
-| `copy_segment_task.go`, `import_task_import.go` / restore | A copy or import target is a fresh, exclusively owned segment whose worker returns a complete manifest pointer, so DataCoord publishes that first pointer inline via `UpdateManifest`. No `CommitSegmentManifest` serialization is needed for a segment no other writer touches. Index entries are part of "complete": the copied manifest inherits the source's entries, whose stored paths point outside the segment base and therefore encode the source IDs, so the copy worker retracts them and records the target's own entries in the same transaction. DataCoord supplies the identity it owns (reallocated index IDs, the inherited entry IDs to retract) in the copy request rather than creating a revision of its own. |
+| `copy_segment_task.go`, `import_task_import.go` / restore | A copy or import target is a fresh, exclusively owned segment whose worker returns a complete manifest pointer, so DataCoord publishes that first pointer inline via `UpdateManifest`. No `CommitSegmentManifest` serialization is needed for a segment no other writer touches. Index entries are part of "complete": the copied manifest inherits the source's entries, whose stored paths point outside the segment base and therefore encode the source IDs, so the copy worker enumerates and retracts them from the copied manifest itself and records the target's own entries in the same transaction. DataCoord supplies the reallocated target index definitions keyed by name. |
 | `task_stats.go` | Text, JSON, and sort stats all use `AddStats`; remove the bare sort `UpdateManifest` path. |
 | flush / `SaveBinlogPaths` | No migration. Publishes inline via `UpdateManifest`. A growing or L0 segment is flushed by its single WAL owner and advanced sequentially, so its manifest write has no concurrent writer and needs no `CommitSegmentManifest` serialization even though the manifest advances from `ManifestEarliest`. |
 | compaction | Generate output files in DataNode, return output manifest entries, then publish each output segment through the framework. |
