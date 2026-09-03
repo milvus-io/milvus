@@ -338,10 +338,6 @@ func (node *Proxy) Start() error {
 		cb()
 	}
 
-	// node.ctx is canceled by Stop, which is what stops whatever the
-	// extension started here.
-	startProxyExtension(node.ctx)
-
 	hookutil.GetExtension().Report(map[string]any{
 		hookutil.OpTypeKey: hookutil.OpTypeNodeID,
 		hookutil.NodeIDKey: paramtable.GetNodeID(),

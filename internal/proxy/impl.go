@@ -2869,21 +2869,6 @@ func GetCollectionRateSubLabel(req any) string {
 
 // Search searches the most similar records of requests.
 func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-	// The cleaned parameters replace the request's own, here at the entry, so
-	// that every attempt the retry below makes sends the same stripped request.
-	ctx, request.SearchParams = rewriteRequestParams(ctx, request.GetSearchParams())
-
-	// Ahead of the retry loop, so one readiness answer covers every attempt
-	// node.search makes, and so the resource group it named is on the context
-	// every attempt runs under.
-	ctx, placement, readyErr := ensureQueryReady(ctx, node, request.GetDbName(), request.GetCollectionName())
-	defer placement.Release()
-	if readyErr != nil {
-		return &milvuspb.SearchResults{
-			Status: merr.Status(readyErr),
-		}, nil
-	}
-
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -3188,22 +3173,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 }
 
 func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
-	// A hybrid search carries the reserved parameter on its rank params; see
-	// the note in Search on why this runs outside the retry.
-	// RankParams only, not the sub-requests' SearchParams: a form's routing
-	// parameter names the cluster for the whole hybrid search, and the
-	// top-level params are where clients put it (the fork this generalizes
-	// read exactly this field). Sub-request params are left untouched.
-	ctx, request.RankParams = rewriteRequestParams(ctx, request.GetRankParams())
-
-	ctx, placement, readyErr := ensureQueryReady(ctx, node, request.GetDbName(), request.GetCollectionName())
-	defer placement.Release()
-	if readyErr != nil {
-		return &milvuspb.SearchResults{
-			Status: merr.Status(readyErr),
-		}, nil
-	}
-
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -3923,25 +3892,6 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 // Query get the records by primary keys.
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
-	// Ahead of the task, which captures ctx: the task and everything it starts
-	// must run under the context the rewrite returned.
-	ctx, request.QueryParams = rewriteRequestParams(ctx, request.GetQueryParams())
-
-	// The gate sits on the RPC entry rather than on node.query, which the
-	// search pipeline's requery operator re-enters with the ids a search has
-	// already returned. That sub-query runs inside a request which has already
-	// passed the gate and is still holding its placement, so gating it again
-	// would ask a second time for readiness the caller already holds - and on a
-	// form where readiness takes a lock or a pin, the outer request is exactly
-	// what the inner one would be waiting on.
-	ctx, placement, readyErr := ensureQueryReady(ctx, node, request.GetDbName(), request.GetCollectionName())
-	defer placement.Release()
-	if readyErr != nil {
-		return &milvuspb.QueryResults{
-			Status: merr.Status(readyErr),
-		}, nil
-	}
-
 	qt := &queryTask{
 		baseTask: baseTask{
 			metaCache: node.getMetaCache(),
@@ -6499,16 +6449,6 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 		GoVersion:  os.Getenv(metricsinfo.MilvusUsedGoVersion),
 		DeployMode: os.Getenv(metricsinfo.DeployModeEnvKey),
 		Reserved:   make(map[string]string),
-	}
-
-	// Bind the connection before it is registered: an extension that refuses
-	// the client's declaration must not leave a registered connection behind
-	// that nothing will ever bind or collect.
-	if err := onConnect(ctx, int64(ts), request.GetClientInfo()); err != nil {
-		logger.Info(ctx, "connect failed, extension refused the connection", mlog.Err(err))
-		return &milvuspb.ConnectResponse{
-			Status: merr.Status(err),
-		}, nil
 	}
 
 	connection.GetManager().Register(ctx, int64(ts), request.GetClientInfo())

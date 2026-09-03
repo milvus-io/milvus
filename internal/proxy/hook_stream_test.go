@@ -25,61 +25,12 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
-
-type testProvider struct{ caps extension.Capabilities }
-
-func (testProvider) Name() string                           { return "test" }
-func (testProvider) Requires() []extension.CapabilityID     { return nil }
-func (p testProvider) Capabilities() extension.Capabilities { return p.caps }
-
-func newAdmissionTestCreateCollectionTask(t *testing.T, cache Cache, collectionName string) *createCollectionTask {
-	t.Helper()
-	fieldName2Type := map[string]schemapb.DataType{
-		"int64": schemapb.DataType_Int64,
-		"fvec":  schemapb.DataType_FloatVector,
-	}
-	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64", false)
-	marshaledSchema, err := proto.Marshal(schema)
-	assert.NoError(t, err)
-
-	ctx := context.Background()
-	return &createCollectionTask{
-		baseTask:  baseTask{metaCache: cache},
-		Condition: NewTaskCondition(ctx),
-		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
-			Base:           &commonpb.MsgBase{},
-			CollectionName: collectionName,
-			Schema:         marshaledSchema,
-			ShardsNum:      1,
-		},
-		ctx:      ctx,
-		mixCoord: mocks.NewMockMixCoordClient(t),
-	}
-}
-
-func newAdmissionTestCreateDatabaseTask(t *testing.T, cache Cache, dbName string) *createDatabaseTask {
-	t.Helper()
-	ctx := context.Background()
-	return &createDatabaseTask{
-		baseTask:  baseTask{metaCache: cache},
-		Condition: NewTaskCondition(ctx),
-		CreateDatabaseRequest: &milvuspb.CreateDatabaseRequest{
-			DbName: dbName,
-		},
-		ctx:      ctx,
-		mixCoord: mocks.NewMockMixCoordClient(t),
-	}
-}
 
 type fakeReplicateStream struct {
 	grpc.ServerStream

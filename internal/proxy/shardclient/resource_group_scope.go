@@ -14,29 +14,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package extension
+package shardclient
 
 import (
 	"context"
-	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 )
 
-func TestNoopRewriteRequestParamsReturnsItsArgumentsUntouched(t *testing.T) {
-	params := []*commonpb.KeyValuePair{
-		{Key: "metric_type", Value: "L2"},
-		{Key: "x-form-reserved", Value: "in07-a"},
+// A request scoped to a resource group (extension.WithQueryResourceGroup on
+// its context) is routed to the shard leaders whose replica lives in that
+// group and nowhere else. A request nothing scoped keeps an empty
+// ResourceGroup and is routed across every replica, as always.
+
+func scopedCollectionWorkload(ctx context.Context, workload CollectionWorkLoad) CollectionWorkLoad {
+	if workload.ResourceGroup == "" {
+		workload.ResourceGroup = extension.QueryResourceGroupFromContext(ctx)
 	}
-	ctx := context.Background()
+	return workload
+}
 
-	gotCtx, cleaned := NoopProxyExtension{}.RewriteRequestParams(ctx, params)
-
-	assert.True(t, ctx == gotCtx, "the native default must hand back the caller's own context, not a derived one")
-	require.Len(t, cleaned, 2)
-	assert.True(t, &params[0] == &cleaned[0],
-		"the native default must hand back the caller's own slice, reserved-looking entry included: it has no protocol of its own to strip")
+func scopedChannelWorkload(ctx context.Context, workload ChannelWorkload) ChannelWorkload {
+	if workload.ResourceGroup == "" {
+		workload.ResourceGroup = extension.QueryResourceGroupFromContext(ctx)
+	}
+	return workload
 }

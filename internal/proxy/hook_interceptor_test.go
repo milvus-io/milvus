@@ -230,3 +230,53 @@ func TestABeforeRefusalIsNotRetriableAtTheTransport(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
 	assert.False(t, merr.IsMilvusError(err))
 }
+
+// refusingHook refuses from Before and, for the methods it knows, answers with
+// a response that carries the refusal in its Status.
+type refusingHook struct {
+	hookutil.DefaultHook
+	err error
+}
+
+func (h refusingHook) Before(ctx context.Context, _ interface{}, _ string) (context.Context, error) {
+	return ctx, h.err
+}
+
+func (h refusingHook) RefusalResponse(fullMethod string, err error) (any, bool) {
+	if fullMethod != milvuspb.MilvusService_Search_FullMethodName {
+		return nil, false
+	}
+	return &milvuspb.SearchResults{Status: merr.Status(err)}, true
+}
+
+// A hook that can shape the response gets its refusal to the client as a
+// Milvus Status - classified, with its reason - and a nil transport error; a
+// method it cannot shape falls back to the InvalidArgument path above.
+func TestABeforeRefusalTravelsInTheResponseWhenTheHookShapesIt(t *testing.T) {
+	hookutil.InitOnceHook()
+	want := merr.WrapErrServiceUnavailable("cluster not ready")
+	hookutil.SetTestHook(refusingHook{err: want})
+	defer hookutil.SetTestHook(hookutil.DefaultHook{})
+
+	handlerRan := false
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		handlerRan = true
+		return nil, nil
+	}
+
+	resp, err := UnaryServerHookInterceptor()(context.Background(), &milvuspb.SearchRequest{},
+		&grpc.UnaryServerInfo{FullMethod: milvuspb.MilvusService_Search_FullMethodName}, handler)
+	require.NoError(t, err, "a shaped refusal is a response, not a transport error")
+	assert.False(t, handlerRan, "a refused request must not reach the handler")
+	results, ok := resp.(*milvuspb.SearchResults)
+	require.True(t, ok)
+	assert.ErrorIs(t, merr.Error(results.GetStatus()), merr.ErrServiceUnavailable,
+		"the client must be able to classify the refusal from the Status")
+
+	_, err = UnaryServerHookInterceptor()(context.Background(), &req{},
+		&grpc.UnaryServerInfo{FullMethod: "insert"}, handler)
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err),
+		"a method the hook cannot shape keeps the transport-level refusal")
+	assert.False(t, handlerRan)
+}

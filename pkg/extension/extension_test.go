@@ -36,15 +36,17 @@ func (f fakeProvider) Name() string               { return f.name }
 func (f fakeProvider) Requires() []CapabilityID   { return f.requires }
 func (f fakeProvider) Capabilities() Capabilities { return f.caps }
 
-// stubProxyExtension is a placeholder used to check the capability field is stored.
-type stubProxyExtension struct{ NoopProxyExtension }
+// stubEngine is a placeholder used to check a capability field is stored.
+type stubEngine struct{}
+
+func (stubEngine) Start(context.Context, Coordinator) error { return nil }
+func (stubEngine) Stop() error                              { return nil }
 
 // allCapabilityIDs is the list the registry tests walk. It is written out by
 // hand rather than derived from entries() so that a capability added to the
 // struct and to entries() but not to this list - or the other way round -
 // fails a test instead of going unnoticed.
 var allCapabilityIDs = []CapabilityID{
-	CapProxyExtension,
 	CapCoordinatorEngine,
 	CapHook,
 }
@@ -53,7 +55,6 @@ var allCapabilityIDs = []CapabilityID{
 // so a test can ask "is every id requirable when supplied".
 func fullCapabilities() Capabilities {
 	return Capabilities{
-		ProxyExt:          stubProxyExtension{},
 		CoordinatorEngine: &fakeCoordinatorEngine{},
 		Hook:              stubHook{},
 	}
@@ -61,7 +62,7 @@ func fullCapabilities() Capabilities {
 
 func TestCapsIsZeroWithoutProvider(t *testing.T) {
 	ResetForTest()
-	assert.Nil(t, Caps().ProxyExt)
+	assert.Nil(t, Caps().CoordinatorEngine)
 	assert.Same(t, zeroCaps, Caps(), "the no-provider path must hand out the shared zero table, not allocate")
 }
 
@@ -69,13 +70,13 @@ func TestSetProviderInstallsCapabilities(t *testing.T) {
 	ResetForTest()
 	defer ResetForTest()
 
-	ext := stubProxyExtension{}
+	ext := stubEngine{}
 	err := SetProvider(fakeProvider{
 		name: "testprovider",
-		caps: Capabilities{ProxyExt: ext},
+		caps: Capabilities{CoordinatorEngine: ext},
 	})
 	assert.NoError(t, err)
-	assert.Equal(t, ext, Caps().ProxyExt)
+	assert.Equal(t, ext, Caps().CoordinatorEngine)
 }
 
 func TestSetProviderRejectsNil(t *testing.T) {
@@ -91,12 +92,12 @@ func TestSetProviderRejectsMissingRequiredCapability(t *testing.T) {
 
 	err := SetProvider(fakeProvider{
 		name:     "testprovider",
-		requires: []CapabilityID{CapProxyExtension},
+		requires: []CapabilityID{CapCoordinatorEngine},
 		caps:     Capabilities{},
 	})
-	assert.ErrorContains(t, err, string(CapProxyExtension))
+	assert.ErrorContains(t, err, string(CapCoordinatorEngine))
 	assert.ErrorContains(t, err, "did not supply")
-	assert.Nil(t, Caps().ProxyExt, "a failed install must leave no trace")
+	assert.Nil(t, Caps().CoordinatorEngine, "a failed install must leave no trace")
 }
 
 // A mistyped requirement is a different mistake from a missing capability and
@@ -150,12 +151,12 @@ func TestSetProviderRejectsDoubleInstall(t *testing.T) {
 	ResetForTest()
 	defer ResetForTest()
 
-	first := fakeProvider{name: "first", caps: Capabilities{ProxyExt: stubProxyExtension{}}}
+	first := fakeProvider{name: "first", caps: Capabilities{CoordinatorEngine: stubEngine{}}}
 	assert.NoError(t, SetProvider(first))
 	err := SetProvider(fakeProvider{name: "second"})
 	assert.ErrorContains(t, err, "first", "the error should name the provider already installed")
 	assert.ErrorContains(t, err, "second", "and the one it refused")
-	assert.Equal(t, stubProxyExtension{}, Caps().ProxyExt, "the first installation must stay in force")
+	assert.Equal(t, stubEngine{}, Caps().CoordinatorEngine, "the first installation must stay in force")
 }
 
 // Under the test tag the slot can be cleared between a failed CAS and the
