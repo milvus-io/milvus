@@ -27,46 +27,41 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// This file is the proxy's seam for the internal-surfaces capability: WHERE
-// the extra listeners a form declares are opened, and with which chains. The
-// declaration - and the isolation argument that makes an unauthenticated
-// MilvusService acceptable - lives with the capability in pkg/extension.
-//
-// With no capability installed neither function opens anything, and the
-// binary serves exactly the listeners it always did.
+// The internal domain is a second pair of gRPC and REST listeners that serve
+// the same proxy without authentication. It exists for a control plane that
+// reaches the proxy over an isolated network and must not depend on the
+// credentials it is itself managing. Both ports come from configuration
+// (proxy.internalDomain.grpcPort / httpPort) and default to 0, closed, so a
+// stock deployment serves exactly the listeners it always did. Requests that
+// arrive here carry the extension.WithInternalDomain mark on their context,
+// which is how a hook tells the two surfaces apart.
 
-// internalDomainListeners resolves the listeners a form declared, or the zero
-// value with no capability installed - which leaves both ports closed.
-func internalDomainListeners() extension.InternalListeners {
-	surfaces := extension.Caps().InternalSurfaces
-	if surfaces == nil {
-		return extension.InternalListeners{}
-	}
-	return surfaces.InternalDomainListeners()
+// internalDomainListeners is the configured (grpcPort, httpPort) pair; 0 keeps
+// that listener closed.
+func internalDomainListeners() (grpcPort, httpPort int) {
+	cfg := &paramtable.Get().ProxyCfg
+	return cfg.InternalDomainGrpcPort.GetAsInt(), cfg.InternalDomainHTTPPort.GetAsInt()
 }
 
-// listenInternal opens one internal-domain listener on the declared bind
-// address. An empty BindAddress binds every interface, which is what the fork
-// this replaces did and what a deployment whose isolation is the pod network
-// wants; a form that reaches its instance on one interface names it and the
-// unauthenticated surface is then not reachable on the others.
-func listenInternal(bindAddress string, port int) (net.Listener, error) {
-	return net.Listen("tcp", fmt.Sprintf("%s:%d", bindAddress, port))
+// listenInternal opens one internal-domain listener on every interface,
+// which is the posture the isolated pod network gives it.
+func listenInternal(port int) (net.Listener, error) {
+	return net.Listen("tcp", fmt.Sprintf(":%d", port))
 }
 
-// startInternalDomainServers opens the declared internal-domain listeners.
+// startInternalDomainServers opens the configured internal-domain listeners.
 // Called from start(), after the proxy component is serving; errors abort
-// start-up, because a form that declared the surfaces cannot be operated
-// without them.
+// start-up, because a deployment that configured the surfaces cannot be
+// operated without them.
 func (s *Server) startInternalDomainServers() error {
-	listeners := internalDomainListeners()
-	if listeners.GRPCPort != 0 {
-		if err := s.startInternalDomainGrpc(listeners.BindAddress, listeners.GRPCPort); err != nil {
+	grpcPort, httpPort := internalDomainListeners()
+	if grpcPort != 0 {
+		if err := s.startInternalDomainGrpc(grpcPort); err != nil {
 			return merr.WrapErrServiceInternalErr(err, "start the internal-domain grpc listener")
 		}
 	}
-	if listeners.RESTPort != 0 {
-		if err := s.startInternalDomainRest(listeners.BindAddress, listeners.RESTPort); err != nil {
+	if httpPort != 0 {
+		if err := s.startInternalDomainRest(httpPort); err != nil {
 			return merr.WrapErrServiceInternalErr(err, "start the internal-domain rest listener")
 		}
 	}
@@ -74,13 +69,13 @@ func (s *Server) startInternalDomainServers() error {
 }
 
 // startInternalDomainGrpc serves the full MilvusService with no
-// authentication or privilege interceptors, for the control plane the
-// capability documents. The chain keeps the request-shaping interceptors -
+// authentication or privilege interceptors, for a control plane on an
+// isolated network. The chain keeps the request-shaping interceptors -
 // tracing, cluster and server-id validation, access log, database context,
 // the hook, connection keep-alive - and deliberately omits Auth, Privilege
 // and the rate limiter: control-plane operations are neither end-user
 // credentials nor end-user traffic.
-func (s *Server) startInternalDomainGrpc(bindAddress string, port int) error {
+func (s *Server) startInternalDomainGrpc(port int) error {
 	Params := &paramtable.Get().ProxyGrpcServerCfg
 	// All interfaces, exactly like the external listeners: netutil's OptIP is
 	// the ANNOUNCED address, not a bind address - every proxy listener binds
@@ -88,7 +83,7 @@ func (s *Server) startInternalDomainGrpc(bindAddress string, port int) error {
 	// authenticated one, and both are confined by the same network boundary
 	// (which in this deployment is the pod network policy, not the bind).
 	// Narrowing the bind is a change to make for all of them together.
-	listener, err := listenInternal(bindAddress, port)
+	listener, err := listenInternal(port)
 	if err != nil {
 		return err
 	}
@@ -179,9 +174,9 @@ func (s markedServerStream) Context() context.Context { return s.ctx }
 // authorization forced off, plus /metrics for the deployment's scraper. No
 // authentication middleware: same posture, same isolation argument, as the
 // gRPC listener above.
-func (s *Server) startInternalDomainRest(bindAddress string, port int) error {
+func (s *Server) startInternalDomainRest(port int) error {
 	// Same all-interfaces bind as the gRPC listener above; see there.
-	listener, err := listenInternal(bindAddress, port)
+	listener, err := listenInternal(port)
 	if err != nil {
 		return err
 	}

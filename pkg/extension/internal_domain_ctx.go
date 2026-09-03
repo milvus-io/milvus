@@ -25,8 +25,8 @@ import "context"
 type internalDomainKey struct{}
 
 // WithInternalDomain stamps ctx as originating on an internal-domain
-// listener. Only the listeners a form's InternalSurfaces capability opened
-// should stamp it: the mark is how a handler-level seam tells the control
+// listener. Only the proxy.internalDomain.* listeners should stamp it: the
+// mark is how a handler-level seam tells the control
 // plane's call, arriving on the trusted internal port, from a tenant's call
 // arriving on the external one - the handler itself is shared and cannot see
 // which listener accepted the connection.
