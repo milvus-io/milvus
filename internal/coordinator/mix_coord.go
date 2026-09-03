@@ -912,6 +912,10 @@ func (s *mixCoordImpl) GetDataCoordTopology(ctx context.Context, req *milvuspb.G
 	return s.datacoordServer.GetDataCoordTopology(ctx, req)
 }
 
+func (s *mixCoordImpl) GetConnectedDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) ([]metricsinfo.DataNodeInfos, error) {
+	return s.datacoordServer.GetConnectedDataNodeMetrics(ctx, req)
+}
+
 func (s *mixCoordImpl) GetQueryCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.QueryCoordTopology, error) {
 	return s.queryCoordServer.GetQueryCoordTopology(ctx, req)
 }
