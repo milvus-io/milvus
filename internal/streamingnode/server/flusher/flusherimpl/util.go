@@ -21,19 +21,30 @@ var defaultCollectionNotFoundTolerance = 10
 
 // getRecoveryInfos gets the recovery info of the vchannels from datacoord
 func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []string) (map[string]*datapb.GetChannelRecoveryInfoResponse, message.MessageID, error) {
-	futures := make([]*conc.Future[interface{}], 0, len(vchannel))
+	// The vchannel travels WITH its future rather than being recovered by index
+	// from the input slice: the two are the same length by construction, but
+	// nothing in the loop below says so, and an index into a slice the loop does
+	// not range over is both a static-analysis finding and one refactor away
+	// from being wrong.
+	type pending struct {
+		vchannel string
+		future   *conc.Future[interface{}]
+	}
+	futures := make([]pending, 0, len(vchannel))
 	for _, v := range vchannel {
 		v := v
-		future := GetExecPool().Submit(func() (interface{}, error) {
-			return impl.getRecoveryInfo(ctx, v)
+		futures = append(futures, pending{
+			vchannel: v,
+			future: GetExecPool().Submit(func() (interface{}, error) {
+				return impl.getRecoveryInfo(ctx, v)
+			}),
 		})
-		futures = append(futures, future)
 	}
 	recoveryInfos := make(map[string]*datapb.GetChannelRecoveryInfoResponse, len(futures))
-	for i, future := range futures {
-		resp, err := future.Await()
+	for _, p := range futures {
+		resp, err := p.future.Await()
 		if err == nil {
-			recoveryInfos[vchannel[i]] = resp.(*datapb.GetChannelRecoveryInfoResponse)
+			recoveryInfos[p.vchannel] = resp.(*datapb.GetChannelRecoveryInfoResponse)
 			continue
 		}
 		if errors.Is(err, errChannelLifetimeUnrecoverable) {
@@ -49,10 +60,10 @@ func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []str
 			// be noticed rather than at the level of an expected event.
 			impl.logger.Error(ctx, "datacoord has no recovery info for a vchannel in the recovery snapshot; "+
 				"if this vchannel is not dropped its writes will not be flushed until the next restart",
-				mlog.FieldVChannel(vchannel[i]))
+				mlog.FieldVChannel(p.vchannel))
 			continue
 		}
-		return nil, nil, errors.Wrapf(err, "when get recovery info of vchannel %s", vchannel[i])
+		return nil, nil, errors.Wrapf(err, "when get recovery info of vchannel %s", p.vchannel)
 	}
 
 	var checkpoint message.MessageID
@@ -62,7 +73,11 @@ func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []str
 		// for exactly one backend, so test the condition the dispatcher tests
 		// rather than trusting datacoord to have filled it in.
 		if !msgdispatcher.SeekablePosition(info.GetInfo().GetSeekPosition()) {
-			return nil, nil, errors.Errorf("vchannel %s has an unseekable recovery position", v)
+			// System, not transient: datacoord answered with a position whose
+			// msg id is empty on a backend where that is not legal. Retrying
+			// asks the same question and gets the same answer.
+			return nil, nil, merr.WrapErrServiceInternalMsg(
+				"vchannel %s has an unseekable recovery position", v)
 		}
 		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytesWithWALName(walName, info.GetInfo().GetSeekPosition().GetMsgID())
 		if checkpoint == nil || messageID.LT(checkpoint) {

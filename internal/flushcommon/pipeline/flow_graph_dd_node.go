@@ -301,7 +301,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			)
 			logger.Info(msgCtx, "receive split shard message")
 			if err := ddn.msgHandler.HandleSplitShard(msgCtx, splitShardMsg.SplitShardMessage); err != nil {
-				// Louder than the neighbouring flush branches on purpose. A
+				// Louder than the neighboring flush branches on purpose. A
 				// failed seal also skips the channel flush that follows it, so
 				// the source channel checkpoint never passes T_switch and the
 				// split's redistribution drain waits on it forever -- with this
