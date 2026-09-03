@@ -137,6 +137,13 @@ func (suite *ServerSuite) SetupTest() {
 	err = suite.server.Start()
 	suite.NoError(err)
 
+	// DDL callbacks are registered by mixCoord.enableExternalAccess in
+	// production, which the unit test ServerSuite bypasses; register them here
+	// so LoadCollection/alter-load-config broadcasts can find their ack
+	// callbacks (same as ServiceSuite.SetupTest).
+	registry.ResetRegistration()
+	RegisterDDLCallbacks(suite.server)
+
 	for i := range suite.nodes {
 		suite.nodes[i] = mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, int64(i))
 		err := suite.nodes[i].Start()

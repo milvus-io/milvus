@@ -37,6 +37,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+type collectionDataViewDropper interface {
+	DropCollectionDataView(ctx context.Context, collectionID int64) error
+}
+
 func (c *Core) broadcastDropCollectionV1(ctx context.Context, req *milvuspb.DropCollectionRequest) error {
 	broadcaster, err := c.startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
@@ -125,9 +129,20 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 					mlog.Int64("collectionID", collectionID), mlog.Err(err))
 			}
 
-			// 3. drop the collection meta itself.
+			// 3. persist the CollectionMeta tombstone before deleting its DataViews.
+			// Recovery uses this state to distinguish stale DataViews from live ones.
 			if err := c.meta.DropCollection(ctx, collectionID, result.TimeTick); err != nil {
 				return merr.Wrap(err, "failed to drop collection")
+			}
+
+			// 4. delete all persisted DataView versions. The ack callback retries this
+			// step, and recovery also removes any versions left behind after a crash.
+			dropper, ok := c.mixCoord.(collectionDataViewDropper)
+			if !ok {
+				mlog.Warn(ctx, "MixCoord does not support DataView collection deletion",
+					mlog.FieldCollectionID(collectionID))
+			} else if err := dropper.DropCollectionDataView(ctx, collectionID); err != nil {
+				return merr.Wrap(err, "failed to drop collection data view")
 			}
 			continue
 		}

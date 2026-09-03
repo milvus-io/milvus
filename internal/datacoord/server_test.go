@@ -2458,6 +2458,9 @@ func newTestServer(t *testing.T, opts ...Option) *Server {
 	svr := CreateServer(context.TODO(), factory)
 	svr.SetEtcdClient(etcdCli)
 	svr.SetTiKVClient(globalTestTikv)
+	svr.SetDataViewCollectionRecoveryValidator(func(context.Context, int64) (bool, error) {
+		return true, nil
+	})
 
 	dm := mocks.NewMockDataNodeClient(t)
 	dm.EXPECT().Close().Return(nil).Maybe()

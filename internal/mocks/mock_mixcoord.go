@@ -8244,17 +8244,17 @@ func (_c *MixCoord_MarkSegmentsDropped_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
-// NotifyDropPartition provides a mock function with given fields: ctx, channel, partitionIDs
-func (_m *MixCoord) NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error {
-	ret := _m.Called(ctx, channel, partitionIDs)
+// NotifyDropPartition provides a mock function with given fields: ctx, channel, collectionID, partitionIDs
+func (_m *MixCoord) NotifyDropPartition(ctx context.Context, channel string, collectionID int64, partitionIDs []int64) error {
+	ret := _m.Called(ctx, channel, collectionID, partitionIDs)
 
 	if len(ret) == 0 {
 		panic("no return value specified for NotifyDropPartition")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, []int64) error); ok {
-		r0 = rf(ctx, channel, partitionIDs)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64, []int64) error); ok {
+		r0 = rf(ctx, channel, collectionID, partitionIDs)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -8270,14 +8270,15 @@ type MixCoord_NotifyDropPartition_Call struct {
 // NotifyDropPartition is a helper method to define mock.On call
 //   - ctx context.Context
 //   - channel string
+//   - collectionID int64
 //   - partitionIDs []int64
-func (_e *MixCoord_Expecter) NotifyDropPartition(ctx interface{}, channel interface{}, partitionIDs interface{}) *MixCoord_NotifyDropPartition_Call {
-	return &MixCoord_NotifyDropPartition_Call{Call: _e.mock.On("NotifyDropPartition", ctx, channel, partitionIDs)}
+func (_e *MixCoord_Expecter) NotifyDropPartition(ctx interface{}, channel interface{}, collectionID interface{}, partitionIDs interface{}) *MixCoord_NotifyDropPartition_Call {
+	return &MixCoord_NotifyDropPartition_Call{Call: _e.mock.On("NotifyDropPartition", ctx, channel, collectionID, partitionIDs)}
 }
 
-func (_c *MixCoord_NotifyDropPartition_Call) Run(run func(ctx context.Context, channel string, partitionIDs []int64)) *MixCoord_NotifyDropPartition_Call {
+func (_c *MixCoord_NotifyDropPartition_Call) Run(run func(ctx context.Context, channel string, collectionID int64, partitionIDs []int64)) *MixCoord_NotifyDropPartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].([]int64))
+		run(args[0].(context.Context), args[1].(string), args[2].(int64), args[3].([]int64))
 	})
 	return _c
 }
@@ -8287,7 +8288,7 @@ func (_c *MixCoord_NotifyDropPartition_Call) Return(_a0 error) *MixCoord_NotifyD
 	return _c
 }
 
-func (_c *MixCoord_NotifyDropPartition_Call) RunAndReturn(run func(context.Context, string, []int64) error) *MixCoord_NotifyDropPartition_Call {
+func (_c *MixCoord_NotifyDropPartition_Call) RunAndReturn(run func(context.Context, string, int64, []int64) error) *MixCoord_NotifyDropPartition_Call {
 	_c.Call.Return(run)
 	return _c
 }
