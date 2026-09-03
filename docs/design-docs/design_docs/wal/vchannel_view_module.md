@@ -78,9 +78,12 @@ Rules include:
 
 `ConsumeDirtySnapshots` aggregates immutable snapshots from:
 
-- VChannelView;
-- dirty SegmentViews;
-- TransformLog.
+- VChannelView (its snapshot carries `transform_materialized_time_tick`, so
+  the TransformLog frontier persists with it);
+- dirty SegmentViews.
+
+The TransformLog itself has no independent snapshot: its only persistent state
+is the materialization frontier, which rides in the VChannelMeta.
 
 Every snapshot has one `checkpoint_time_tick` and an exact `MarkPersisted`
 callback. The callback advances only through the captured snapshot and cannot
