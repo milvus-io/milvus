@@ -31,28 +31,16 @@ import (
 
 // hookProvider is a form that supplies nothing but a hook, which is the
 // smallest thing a distribution can do to take over the request path.
-type hookProvider struct {
-	hook hook.Hook
-}
-
-func (hookProvider) Name() string                 { return "test" }
-func (hookProvider) Requires() []ext.CapabilityID { return nil }
-func (p hookProvider) Capabilities() ext.Capabilities {
-	return ext.Capabilities{Hook: p.hook}
-}
-
-func installHookProvider(t *testing.T, h hook.Hook) {
+func installHook(t *testing.T, h hook.Hook) {
 	t.Helper()
 	ext.ResetForTest()
 	t.Cleanup(ext.ResetForTest)
-	require.NoError(t, ext.SetProvider(hookProvider{hook: h}))
+	ext.SetHook(h)
 }
 
-// A form's hook becomes the hook the proxy's interceptor consults, without a
-// plug-in file existing anywhere.
-func TestInitHookUsesTheProvidersHook(t *testing.T) {
+func TestInitHookUsesTheCompiledInHook(t *testing.T) {
 	paramtable.Init()
-	installHookProvider(t, MockAPIHook{User: "root"})
+	installHook(t, MockAPIHook{User: "root"})
 
 	require.NoError(t, initHook())
 
@@ -63,7 +51,7 @@ func TestInitHookUsesTheProvidersHook(t *testing.T) {
 
 // With no provider - a stock binary - nothing changes: the default hook, and
 // then whatever proxy.soPath says.
-func TestInitHookWithoutAProviderIsUnchanged(t *testing.T) {
+func TestInitHookWithoutACompiledInHookIsUnchanged(t *testing.T) {
 	paramtable.Init()
 	ext.ResetForTest()
 	t.Cleanup(ext.ResetForTest)
@@ -75,9 +63,9 @@ func TestInitHookWithoutAProviderIsUnchanged(t *testing.T) {
 
 // A provider that fills in no hook is a form that does not want the request
 // path, and it must not displace a plug-in or the default.
-func TestInitHookIgnoresAProviderWithoutAHook(t *testing.T) {
+func TestInitHookIgnoresANilHook(t *testing.T) {
 	paramtable.Init()
-	installHookProvider(t, nil)
+	installHook(t, nil)
 
 	require.NoError(t, initHook())
 	_, ok := GetHook().(DefaultHook)
@@ -86,9 +74,9 @@ func TestInitHookIgnoresAProviderWithoutAHook(t *testing.T) {
 
 // Two authorities for the same question is a deployment mistake, and it is
 // reported rather than silently resolved by start-up order.
-func TestInitHookRefusesAProviderHookBesideAPlugin(t *testing.T) {
+func TestInitHookRefusesACompiledInHookBesideAPlugin(t *testing.T) {
 	paramtable.Init()
-	installHookProvider(t, MockAPIHook{User: "root"})
+	installHook(t, MockAPIHook{User: "root"})
 	p := paramtable.Get()
 	require.NoError(t, p.Save(p.ProxyCfg.SoPath.Key, "/tmp/some-hook.so"))
 	t.Cleanup(func() { p.Reset(p.ProxyCfg.SoPath.Key) })
