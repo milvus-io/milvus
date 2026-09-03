@@ -35,20 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// setResourceGroupScopedLoad turns the scoped-load configuration on or off for
-// the test and restores the default afterwards.
-func setResourceGroupScopedLoad(t *testing.T, on bool) {
-	t.Helper()
-	paramtable.Init()
-	key := paramtable.Get().QueryCoordCfg.ResourceGroupScopedLoad.Key
-	if on {
-		paramtable.Get().Save(key, "true")
-	} else {
-		paramtable.Get().Save(key, "false")
-	}
-	t.Cleanup(func() { paramtable.Get().Reset(key) })
-}
-
 func loadedIn(collectionID int64, resourceGroups ...string) job.CurrentLoadConfig {
 	replicas := make(map[int64]*meta.Replica, len(resourceGroups))
 	for i, rgName := range resourceGroups {
@@ -62,26 +48,8 @@ func loadedIn(collectionID int64, resourceGroups ...string) job.CurrentLoadConfi
 	return job.CurrentLoadConfig{Replicas: replicas}
 }
 
-func TestCompletePlacementIsOffByDefault(t *testing.T) {
-	paramtable.Init()
-	assert.False(t, paramtable.Get().QueryCoordCfg.ResourceGroupScopedLoad.GetAsBool())
-	expected := map[string]int{"rg_1": 1}
-	got := completePlacementForOutOfScopeResourceGroups(
-		context.Background(), 7, []string{"rg_1"}, expected, loadedIn(7, "rg_0"))
-	assert.Equal(t, map[string]int{"rg_1": 1}, got,
-		"a sibling resource group's replica must not be carried over natively")
-}
-
-func TestCompletePlacementWhenConfiguredOff(t *testing.T) {
-	setResourceGroupScopedLoad(t, false)
-	expected := map[string]int{"rg_1": 1}
-	got := completePlacementForOutOfScopeResourceGroups(
-		context.Background(), 7, []string{"rg_1"}, expected, loadedIn(7, "rg_0"))
-	assert.Equal(t, map[string]int{"rg_1": 1}, got)
-}
-
 func TestCompletePlacementKeepsOutOfScopeResourceGroups(t *testing.T) {
-	setResourceGroupScopedLoad(t, true)
+	paramtable.Init()
 	expected := map[string]int{"rg_1": 1}
 	got := completePlacementForOutOfScopeResourceGroups(
 		context.Background(), 7, []string{"rg_1"}, expected, loadedIn(7, "rg_0"))
@@ -92,7 +60,7 @@ func TestCompletePlacementKeepsOutOfScopeResourceGroups(t *testing.T) {
 }
 
 func TestCompletePlacementDoesNotOverrideNamedResourceGroups(t *testing.T) {
-	setResourceGroupScopedLoad(t, true)
+	paramtable.Init()
 	current := loadedIn(7, "rg_0", "rg_1")
 	got := completePlacementForOutOfScopeResourceGroups(
 		context.Background(), 7, []string{"rg_1"}, map[string]int{"rg_1": 2}, current)
@@ -100,7 +68,7 @@ func TestCompletePlacementDoesNotOverrideNamedResourceGroups(t *testing.T) {
 }
 
 func TestCompletePlacementOnFirstLoadIsUnchanged(t *testing.T) {
-	setResourceGroupScopedLoad(t, true)
+	paramtable.Init()
 	expected := map[string]int{"rg_0": 1}
 	got := completePlacementForOutOfScopeResourceGroups(
 		context.Background(), 7, []string{"rg_0"}, expected, job.CurrentLoadConfig{})
@@ -108,14 +76,14 @@ func TestCompletePlacementOnFirstLoadIsUnchanged(t *testing.T) {
 }
 
 func TestCompletePlacementWhenRequestNamesEveryLoadedResourceGroup(t *testing.T) {
-	setResourceGroupScopedLoad(t, true)
+	paramtable.Init()
 	got := completePlacementForOutOfScopeResourceGroups(
 		context.Background(), 7, []string{"rg_0"}, map[string]int{"rg_0": 1}, loadedIn(7, "rg_0"))
 	assert.Equal(t, map[string]int{"rg_0": 1}, got)
 }
 
 func TestCompletePlacementKeepsEverySibling(t *testing.T) {
-	setResourceGroupScopedLoad(t, true)
+	paramtable.Init()
 	got := completePlacementForOutOfScopeResourceGroups(
 		context.Background(), 7, []string{"rg_2"}, map[string]int{"rg_2": 1},
 		loadedIn(7, "rg_0", "rg_1"))
@@ -123,7 +91,7 @@ func TestCompletePlacementKeepsEverySibling(t *testing.T) {
 }
 
 func TestCompletePlacementKeepsSiblingReplicaCount(t *testing.T) {
-	setResourceGroupScopedLoad(t, true)
+	paramtable.Init()
 	got := completePlacementForOutOfScopeResourceGroups(
 		context.Background(), 7, []string{"rg_1"}, map[string]int{"rg_1": 1},
 		loadedIn(7, "rg_0", "rg_0"))
@@ -139,7 +107,7 @@ func (stubBroadcaster) Broadcast(context.Context, message.BroadcastMutableMessag
 func (stubBroadcaster) Close() {}
 
 func TestLoadCollectionBroadcastAppliesTheCompletedPlacement(t *testing.T) {
-	setResourceGroupScopedLoad(t, true)
+	paramtable.Init()
 	const collectionID = int64(7)
 	broker := meta.NewMockBroker(t)
 	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
