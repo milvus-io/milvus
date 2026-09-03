@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
@@ -177,6 +178,12 @@ func (s *VectorIndexV2Suite) TestVectorIndexData() {
 	release, err := s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{DbName: s.dbName, CollectionName: collection})
 	s.Require().NoError(merr.CheckRPCCall(release, err))
 	s.CheckCollectionCacheReleased(collectionID)
+	// Refresh the authoritative set after release so a compaction replacement
+	// cannot enter the cold-load proof without object inspection.
+	segments = s.vectorSealedSegments(collection)
+	s.assertVectorOnlyColumnGroup(segments)
+	sets = s.locateVectorIndex(ctx, segments, indexID)
+	s.inspectVectorIndexObjects(ctx, sets)
 	load, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName: s.dbName, CollectionName: collection, ReplicaNumber: 1,
 		LoadFields: []string{fixturePrimaryKey, fixtureVectorName},
@@ -254,12 +261,8 @@ func (s *VectorIndexV2Suite) assertVectorOnlyColumnGroup(segments []*datapb.Segm
 }
 
 func (s *VectorIndexV2Suite) assertLoadedVectorIndexes(ctx context.Context, sets []inspector.VectorIndexSet) {
-	expected := make(map[int64]inspector.VectorIndexSet, len(sets))
-	for _, set := range sets {
-		expected[set.SegmentID] = set
-	}
 	s.Require().Eventually(func() bool {
-		seen := make(map[int64]int)
+		var loadedSegments []*metricsinfo.Segment
 		for _, process := range s.Cluster.GetAllQueryNodes() {
 			client := process.MustGetClient(ctx)
 			request, err := metricsinfo.ConstructGetMetricsRequest(map[string]interface{}{
@@ -277,39 +280,89 @@ func (s *VectorIndexV2Suite) assertLoadedVectorIndexes(ctx context.Context, sets
 			if err := json.Unmarshal([]byte(response.GetResponse()), &segments); err != nil {
 				return false
 			}
-			for _, segment := range segments {
-				if segment.CollectionID == sets[0].CollectionID && segment.State != "Sealed" {
-					return false
-				}
-				want, ok := expected[segment.SegmentID]
-				if !ok {
-					continue
-				}
-				if segment.CollectionID != want.CollectionID || segment.PartitionID != want.PartitionID || segment.State != "Sealed" {
-					return false
-				}
-				matches := 0
-				for _, field := range segment.IndexedFields {
-					if field.IndexFieldID == want.FieldID && field.IndexID == want.IndexID {
-						matches++
-						if field.BuildID != want.BuildID || !field.IsLoaded || !field.HasRawData {
-							return false
-						}
-					}
-				}
-				if matches != 1 {
-					return false
-				}
-				seen[segment.SegmentID]++
-			}
+			loadedSegments = append(loadedSegments, segments...)
 		}
-		for segmentID := range expected {
-			if seen[segmentID] != 1 {
-				return false
-			}
-		}
-		return true
+		return loadedVectorIndexesMatch(loadedSegments, sets)
 	}, 3*time.Minute, 500*time.Millisecond)
+}
+
+func loadedVectorIndexesMatch(segments []*metricsinfo.Segment, sets []inspector.VectorIndexSet) bool {
+	if len(sets) == 0 {
+		return false
+	}
+	expected := make(map[int64]inspector.VectorIndexSet, len(sets))
+	for _, set := range sets {
+		expected[set.SegmentID] = set
+	}
+	seen := make(map[int64]int)
+	for _, segment := range segments {
+		if segment.CollectionID != sets[0].CollectionID {
+			continue
+		}
+		if segment.State != "Sealed" {
+			return false
+		}
+		want, ok := expected[segment.SegmentID]
+		if !ok {
+			return false
+		}
+		if segment.CollectionID != want.CollectionID || segment.PartitionID != want.PartitionID || segment.State != "Sealed" {
+			return false
+		}
+		matches := 0
+		for _, field := range segment.IndexedFields {
+			if field.IndexFieldID == want.FieldID && field.IndexID == want.IndexID {
+				matches++
+				if field.BuildID != want.BuildID || !field.IsLoaded || !field.HasRawData {
+					return false
+				}
+			}
+		}
+		if matches != 1 {
+			return false
+		}
+		seen[segment.SegmentID]++
+	}
+	for segmentID := range expected {
+		if seen[segmentID] != 1 {
+			return false
+		}
+	}
+	return true
+}
+
+func TestLoadedVectorIndexesRejectsUnexpectedSegment(t *testing.T) {
+	sets := []inspector.VectorIndexSet{{
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    3,
+		FieldID:      vectorIndexFieldID,
+		IndexID:      4,
+		BuildID:      5,
+	}}
+	segments := []*metricsinfo.Segment{
+		{
+			CollectionID: 1,
+			PartitionID:  2,
+			SegmentID:    3,
+			State:        "Sealed",
+			IndexedFields: []*metricsinfo.IndexedField{{
+				IndexFieldID: vectorIndexFieldID,
+				IndexID:      4,
+				BuildID:      5,
+				IsLoaded:     true,
+				HasRawData:   true,
+			}},
+		},
+		{
+			CollectionID: 1,
+			PartitionID:  2,
+			SegmentID:    6,
+			State:        "Sealed",
+		},
+	}
+
+	require.False(t, loadedVectorIndexesMatch(segments, sets))
 }
 
 func (s *VectorIndexV2Suite) assertVectorLoadedFields(ctx context.Context, collectionID int64) {
