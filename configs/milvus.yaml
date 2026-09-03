@@ -912,16 +912,6 @@ dataCoord:
     # Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Each read blocks a native thread. Values are clamped to [1, 256], and the process-wide limit is also capped by positive minio.maxConnections values. Zero leaves the storage default in effect. Restore assembly and verification share the same budget.
     # Startup processes fixed-size batches and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.
     segmentIndexManifestLoadConcurrency: 64
-    # Whether no QueryNode being online means the pool is scaled to zero rather than missing.
-    # Natively, no QueryNode session means no readers, and the index engine versions negotiated from those sessions fall to
-    # zero and the store-path gate to the legacy layout - the conservative reading when nodes are expected to exist and their
-    # absence is a degradation. A deployment that starts QueryNodes on demand inverts that: no session is the RESTING state,
-    # and most index builds happen in it. Version zero is then not conservative but wrong, because knowhere reads engine
-    # version 0 as "disk load only for DISKANN" and misroutes other disk indexes onto the in-memory path.
-    # With this set, an empty session set is answered from THIS process's own engine versions instead of from zero, on the
-    # assumption that a QueryNode started later runs the same image as the coordinator. Do not set it where the QueryNode
-    # pool can run an image older than the coordinator.
-    queryNodesScaleToZero: false
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.
