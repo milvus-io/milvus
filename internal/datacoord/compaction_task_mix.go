@@ -229,11 +229,9 @@ func (t *mixCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult)
 	if err != nil {
 		return err
 	}
-	// SegmentMeta is committed; commit its metrics once. A retried completion
-	// returns the already-committed outputs with an empty mutation.
-	metricMutation.commit()
 	// Apply metrics after successful meta update.
 	newSegmentIDs := lo.Map(newSegments, func(s *SegmentInfo, _ int) UniqueID { return s.GetID() })
+	metricMutation.commit()
 	for _, newSegID := range newSegmentIDs {
 		select {
 		case getBuildIndexChSingleton() <- newSegID:
