@@ -7,6 +7,7 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -832,4 +833,65 @@ func Test_IndexEngineVersionManager_SessionVersionCleanupOnStartup(t *testing.T)
 	vm := m.(*versionManagerImpl)
 	_, exists := vm.sessionVersion[2]
 	assert.False(t, exists, "offline node should be removed from sessionVersion map")
+}
+
+// With the config off - a stock binary - an empty session set keeps its
+// native reading: version zero, and the legacy store-path layout.
+func TestEmptySessionSetStaysNativeWithoutScaleToZero(t *testing.T) {
+	m := newIndexEngineVersionManager()
+	assert.Equal(t, int32(0), m.GetCurrentIndexEngineVersion())
+	assert.Equal(t, int32(0), m.GetCurrentScalarIndexEngineVersion())
+
+	paramtable.Get().Save(Params.DataCoordCfg.IndexStorePathVersion.Key, "1")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexStorePathVersion.Key)
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+		m.GetClusterMinIndexStorePathVersion())
+}
+
+// With the config on, an empty session set is the resting state and the
+// versions come from this process's own engine - the same values the absent
+// query nodes, running this same image, would have reported. Version zero
+// here is what misroutes disk indexes in knowhere, so the assertion pins
+// non-zero as well as source equality.
+func TestEmptySessionSetComesFromThisBinaryUnderScaleToZero(t *testing.T) {
+	paramtable.Get().Save(Params.DataCoordCfg.IndexQueryNodesScaleToZero.Key, "true")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexQueryNodesScaleToZero.Key)
+
+	m := newIndexEngineVersionManager()
+
+	vec := m.GetCurrentIndexEngineVersion()
+	assert.Equal(t, segcore.GetIndexEngineInfo().CurrentIndexVersion, vec,
+		"the fallback must be this binary's own knowhere version")
+	assert.NotZero(t, vec, "version zero is the misrouting answer the fallback exists to avoid")
+	assert.Equal(t, common.CurrentScalarIndexEngineVersion, m.GetCurrentScalarIndexEngineVersion())
+
+	// Minimal versions keep their native zero: they are compatibility floors,
+	// and an empty set genuinely imposes none.
+	assert.Equal(t, int32(0), m.GetMinimalIndexEngineVersion())
+
+	// The store-path gate flips with them: no reader is on an older layout
+	// because there is no reader, and one started later runs this image.
+	paramtable.Get().Save(Params.DataCoordCfg.IndexStorePathVersion.Key, "1")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexStorePathVersion.Key)
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		m.GetClusterMinIndexStorePathVersion())
+}
+
+// A query node that IS reporting always wins over the config: the fallback is
+// about an empty set, never about overriding a session that exists.
+func TestAReportingQueryNodeWinsOverScaleToZero(t *testing.T) {
+	paramtable.Get().Save(Params.DataCoordCfg.IndexQueryNodesScaleToZero.Key, "true")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexQueryNodesScaleToZero.Key)
+
+	m := newIndexEngineVersionManager()
+	m.Startup(map[string]*sessionutil.Session{
+		"qn1": {SessionRaw: sessionutil.SessionRaw{
+			ServerID:                 1,
+			IndexEngineVersion:       sessionutil.IndexEngineVersion{MinimalIndexVersion: 0, CurrentIndexVersion: 1},
+			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 0, CurrentIndexVersion: 1},
+		}},
+	})
+
+	assert.Equal(t, int32(1), m.GetCurrentIndexEngineVersion())
+	assert.Equal(t, int32(1), m.GetCurrentScalarIndexEngineVersion())
 }

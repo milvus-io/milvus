@@ -85,6 +85,17 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 	var tasks []task.Task
 
 	for _, collectionID := range collectionIDs {
+		// Extension seam, see extension_seam.go: a collection mid-drain after
+		// an allowed vector-index drop is left untouched. Its segments serve
+		// in-flight queries on an index that is already deleted in metadata;
+		// a segment update issued now would reopen the segment against the
+		// current index set and tear that index out from under them. The
+		// suppression is deliberately collection-wide, because the update
+		// operates at segment granularity: any one missing index reopens the
+		// whole segment. With no extension installed this answers false.
+		if collectionInDropIndexDrain(ctx, collectionID) {
+			continue
+		}
 		indexInfos, err := c.broker.ListIndexes(ctx, collectionID)
 		if err != nil {
 			mlog.Warn(ctx, "failed to list indexes", mlog.Int64("collection", collectionID), mlog.Err(err))
