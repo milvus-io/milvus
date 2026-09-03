@@ -951,7 +951,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.ErrorContains(conc.AwaitAll(futures...), "mock growing source flush error")
 		firstTask := <-done
 
-		s.EqualValues(1, errorHandlerCalls.Load())
+		s.EqualValues(0, errorHandlerCalls.Load())
 		progress, ok := l0wb.growingSourceProgress[int64(1010)]
 		s.True(ok)
 		s.EqualValues(1, progress.failureCount)
@@ -967,7 +967,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.Require().Len(futures, 1)
 		s.NoError(conc.AwaitAll(futures...))
 		secondTask := <-done
-		s.EqualValues(1, errorHandlerCalls.Load())
+		s.EqualValues(0, errorHandlerCalls.Load())
 		s.EqualValues(10, secondTask.BatchRows())
 		segment, ok = metacache.GetSegmentByID(1010)
 		s.True(ok)
@@ -1099,7 +1099,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.ErrorContains(conc.AwaitAll(futures...), "row count mismatch")
 		<-done
 
-		s.EqualValues(1, errorHandlerCalls.Load())
+		s.EqualValues(0, errorHandlerCalls.Load())
 		progress, ok := l0wb.growingSourceProgress[int64(1011)]
 		s.True(ok)
 		s.EqualValues(1, progress.failureCount)

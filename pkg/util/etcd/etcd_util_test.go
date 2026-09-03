@@ -40,6 +40,7 @@ func TestIsRetriableWatchErr(t *testing.T) {
 	}{
 		{"nil", nil, false},
 		{"compacted", rpctypes.ErrCompacted, true},
+		{"leader changed", rpctypes.ErrLeaderChanged, true},
 		{"invalid auth token", rpctypes.ErrInvalidAuthToken, true},
 		{"user empty", rpctypes.ErrUserEmpty, true},
 		{"auth old revision", rpctypes.ErrAuthOldRevision, true},
@@ -47,6 +48,7 @@ func TestIsRetriableWatchErr(t *testing.T) {
 		// sentinel is deliberately NOT retriable: we match sentinels only.
 		{"unmapped raw grpc unauthenticated", status.Error(codes.Unauthenticated, "some unmapped error"), false},
 		{"wrapped invalid auth token", errors.Wrap(rpctypes.ErrInvalidAuthToken, "watch failed"), true},
+		{"wrapped leader changed", errors.Wrap(rpctypes.ErrLeaderChanged, "watch failed"), true},
 		{"permission denied", rpctypes.ErrPermissionDenied, false},
 		{"lease not found", rpctypes.ErrLeaseNotFound, false},
 		{"generic error", errors.New("some other error"), false},
@@ -54,6 +56,38 @@ func TestIsRetriableWatchErr(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			assert.Equal(t, c.want, IsRetriableWatchErr(c.err))
+		})
+	}
+}
+
+func TestIsRetriableEtcdRequestErr(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"watch leader changed", rpctypes.ErrLeaderChanged, true},
+		{"request timeout", context.DeadlineExceeded, true},
+		{"wrapped request timeout", errors.Wrap(context.DeadlineExceeded, "list sessions"), true},
+		{"etcd no leader", rpctypes.ErrNoLeader, true},
+		{"etcd request timeout", rpctypes.ErrTimeout, true},
+		{"etcd leader failure timeout", rpctypes.ErrTimeoutDueToLeaderFail, true},
+		{"etcd connection lost timeout", rpctypes.ErrTimeoutDueToConnectionLost, true},
+		{"etcd applied index timeout", rpctypes.ErrTimeoutWaitAppliedIndex, true},
+		{"etcd too many requests", rpctypes.ErrTooManyRequests, true},
+		{"wrapped etcd request timeout", errors.Wrap(rpctypes.ErrTimeout, "list sessions"), true},
+		{"grpc unavailable", status.Error(codes.Unavailable, "etcd unavailable"), true},
+		{"wrapped grpc unavailable", errors.Wrap(status.Error(codes.Unavailable, "etcd unavailable"), "list sessions"), true},
+		{"grpc deadline exceeded", status.Error(codes.DeadlineExceeded, "request timeout"), true},
+		{"grpc resource exhausted", status.Error(codes.ResourceExhausted, "too many requests"), true},
+		{"parent canceled", context.Canceled, false},
+		{"permission denied", rpctypes.ErrPermissionDenied, false},
+		{"generic error", errors.New("bad session payload"), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, IsRetriableEtcdRequestErr(c.err))
 		})
 	}
 }
