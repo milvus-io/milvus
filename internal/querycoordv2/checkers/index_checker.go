@@ -85,17 +85,6 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 	var tasks []task.Task
 
 	for _, collectionID := range collectionIDs {
-		// Extension seam, see extension_seam.go: a collection mid-drain after
-		// an allowed vector-index drop is left untouched. Its segments serve
-		// in-flight queries on an index that is already deleted in metadata;
-		// a segment update issued now would reopen the segment against the
-		// current index set and tear that index out from under them. The
-		// suppression is deliberately collection-wide, because the update
-		// operates at segment granularity: any one missing index reopens the
-		// whole segment. With no extension installed this answers false.
-		if collectionInDropIndexDrain(ctx, collectionID) {
-			continue
-		}
 		indexInfos, err := c.broker.ListIndexes(ctx, collectionID)
 		if err != nil {
 			mlog.Warn(ctx, "failed to list indexes", mlog.Int64("collection", collectionID), mlog.Err(err))
@@ -139,6 +128,7 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	idSegmentsStats := make(map[int64]*meta.Segment)
 	targetsStats := make(map[int64][]int64) // segmentID => FieldID
 	segmentsToUpdate := make(map[int64]*meta.Segment)
+	reloadOnIndexDrop := paramtable.Get().QueryCoordCfg.ReloadSegmentOnIndexDrop.GetAsBool()
 	for _, segment := range segments {
 		// skip update index in read only node
 		if roNodeSet.Contain(segment.Node) {
@@ -154,9 +144,15 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 			idSegmentsStats[segment.GetID()] = segment
 		}
 
-		redundantIndices := c.checkRedundantIndices(segment, indexInfos)
-		if len(redundantIndices) > 0 {
-			segmentsToUpdate[segment.GetID()] = segment
+		// A dropped index is redundant on the segments that still hold it.
+		// Reopening them tears the index out from under the queries in
+		// flight; a deployment that releases the collection itself after a
+		// drop turns that off (queryCoord.reloadSegmentOnIndexDrop).
+		if reloadOnIndexDrop {
+			redundantIndices := c.checkRedundantIndices(segment, indexInfos)
+			if len(redundantIndices) > 0 {
+				segmentsToUpdate[segment.GetID()] = segment
+			}
 		}
 	}
 

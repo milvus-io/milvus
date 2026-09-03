@@ -3158,6 +3158,7 @@ type queryCoordConfig struct {
 	AutoBalanceInterval        ParamItem `refreshable:"true"`
 	IndexCheckInterval         ParamItem `refreshable:"true"`
 	ResourceGroupScopedLoad    ParamItem `refreshable:"true"`
+	ReloadSegmentOnIndexDrop   ParamItem `refreshable:"true"`
 	ChannelTaskTimeout         ParamItem `refreshable:"true"`
 	SegmentTaskTimeout         ParamItem `refreshable:"true"`
 	DistPullInterval           ParamItem `refreshable:"false"`
@@ -3521,6 +3522,16 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.ResourceGroupScopedLoad.Init(base.mgr)
+
+	p.ReloadSegmentOnIndexDrop = ParamItem{
+		Key:     "queryCoord.reloadSegmentOnIndexDrop",
+		Version: "3.0.0",
+		Doc: "when an index is dropped from a loaded collection, the index checker reopens the loaded segments without it. " +
+			"false keeps the loaded segments as they are, so queries in flight keep the index they started with until the collection is released or reloaded; a deployment that releases the collection itself after a drop sets this",
+		DefaultValue: "true",
+		Export:       true,
+	}
+	p.ReloadSegmentOnIndexDrop.Init(base.mgr)
 
 	p.ChannelTaskTimeout = ParamItem{
 		Key:          "queryCoord.channelTaskTimeout",
@@ -5767,11 +5778,12 @@ type dataCoordConfig struct {
 	SyncSegmentsInterval    ParamItem `refreshable:"false"`
 
 	// Index related configuration
-	IndexMemSizeEstimateMultiplier      ParamItem `refreshable:"true"`
-	IndexStorePathVersion               ParamItem `refreshable:"true"`
-	IndexQueryNodesScaleToZero          ParamItem `refreshable:"true"`
-	HybridIndexLowCardinalityIndexType  ParamItem `refreshable:"true"`
-	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
+	IndexMemSizeEstimateMultiplier              ParamItem `refreshable:"true"`
+	IndexStorePathVersion                       ParamItem `refreshable:"true"`
+	IndexQueryNodesScaleToZero                  ParamItem `refreshable:"true"`
+	IndexAllowVectorIndexDropOnLoadedCollection ParamItem `refreshable:"true"`
+	HybridIndexLowCardinalityIndexType          ParamItem `refreshable:"true"`
+	HybridIndexHighCardinalityIndexType         ParamItem `refreshable:"true"`
 
 	// Clustering Compaction
 	ClusteringCompactionEnable                 ParamItem `refreshable:"true"`
@@ -6555,6 +6567,16 @@ pool can run an image older than the coordinator.`,
 		Export: true,
 	}
 	p.IndexQueryNodesScaleToZero.Init(base.mgr)
+
+	p.IndexAllowVectorIndexDropOnLoadedCollection = ParamItem{
+		Key:     "dataCoord.index.allowVectorIndexDropOnLoadedCollection",
+		Version: "3.0.0",
+		Doc: "Natively a vector index cannot be dropped while its collection is loaded, because the loaded segments would be reopened without it under the queries in flight. " +
+			"A deployment that drains and releases the collection itself after the drop (and refuses new queries meanwhile) sets this to true to let the drop through; the admission decision then lives with that deployment.",
+		DefaultValue: "false",
+		Export:       true,
+	}
+	p.IndexAllowVectorIndexDropOnLoadedCollection.Init(base.mgr)
 
 	p.HybridIndexLowCardinalityIndexType = ParamItem{
 		Key:          "dataCoord.index.hybridIndex.lowCardinalityIndexType",

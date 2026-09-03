@@ -603,6 +603,8 @@ func TestComponentParam(t *testing.T) {
 
 	t.Run("test queryCoordConfig", func(t *testing.T) {
 		Params := &params.QueryCoordCfg
+		assert.False(t, Params.ResourceGroupScopedLoad.GetAsBool(), "a load request states the whole placement by default")
+		assert.True(t, Params.ReloadSegmentOnIndexDrop.GetAsBool(), "a dropped index is reopened out of loaded segments by default")
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
 		t.Logf("queryCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
 
@@ -859,6 +861,7 @@ func TestComponentParam(t *testing.T) {
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
 		Params := &params.DataCoordCfg
+		assert.False(t, Params.IndexAllowVectorIndexDropOnLoadedCollection.GetAsBool(), "a loaded collection keeps its vector index by default")
 		assert.Equal(t, 24*60*60*time.Second, Params.SegmentMaxLifetime.GetAsDuration(time.Second))
 		assert.True(t, Params.EnableGarbageCollection.GetAsBool())
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
