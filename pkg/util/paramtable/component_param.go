@@ -7461,12 +7461,13 @@ type dataNodeConfig struct {
 	ImportWriteRetryMaxInterval     ParamItem `refreshable:"true"`
 
 	// Compaction
-	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
-	L0CompactionMaxBatchSize ParamItem `refreshable:"true"`
+	L0BatchMemoryRatio           ParamItem `refreshable:"true"`
+	L0CompactionMaxBatchSize     ParamItem `refreshable:"true"`
 	UseMergeSort                 ParamItem `refreshable:"true"`
 	MaxSegmentMergeSort          ParamItem `refreshable:"true"`
 	MaxCompactionConcurrency     ParamItem `refreshable:"true"`
 	CompactionSortReadBufferSize ParamItem `refreshable:"true"`
+	CompactionSortReadPrefetch   ParamItem `refreshable:"true"`
 	LOBHoleRatioThreshold        ParamItem `refreshable:"true"`
 
 	// TEXT column compaction configurations
@@ -7976,6 +7977,18 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export:       true,
 	}
 	p.CompactionSortReadBufferSize.Init(base.mgr)
+
+	p.CompactionSortReadPrefetch = ParamItem{
+		Key:     "dataNode.compaction.sortReadPrefetch",
+		Version: "3.0.1",
+		Doc: "Whether a sort compaction opens the next input chunk while it is still consuming the current one. " +
+			"A sort reads its input segment as a chain of per-binlog chunks opened strictly one after another, so " +
+			"without this the object-storage round trip for every chunk sits on the critical path. Chunk order is " +
+			"unchanged; one extra chunk is in flight, which the sort would buffer anyway.",
+		DefaultValue: "true",
+		Export:       true,
+	}
+	p.CompactionSortReadPrefetch.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataNode.gracefulStopTimeout",

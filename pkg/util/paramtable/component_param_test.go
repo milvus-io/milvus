@@ -904,6 +904,10 @@ func TestComponentParam(t *testing.T) {
 		// compaction
 		assert.Equal(t, 10, Params.MaxCompactionConcurrency.GetAsInt())
 		assert.Equal(t, int64(2)<<30, Params.CompactionSortReadBufferSize.GetAsSize())
+		assert.True(t, Params.CompactionSortReadPrefetch.GetAsBool())
+		params.Save("dataNode.compaction.sortReadPrefetch", "false")
+		assert.False(t, Params.CompactionSortReadPrefetch.GetAsBool())
+		params.Reset("dataNode.compaction.sortReadPrefetch")
 
 		assert.Equal(t, 4, Params.MaxVecIndexBuildConcurrency.GetAsInt())
 

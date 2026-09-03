@@ -504,3 +504,36 @@ func TestSortCompactionTaskBasic(t *testing.T) {
 	assert.Equal(t, int64(123), task.GetPlanID())
 	assert.Equal(t, datapb.CompactionType_SortCompaction, task.GetCompactionType())
 }
+
+// prefetchFlagsSeen runs one sort compaction and returns every value the sort
+// handed to storage.WithReadPrefetch, so the test can pin that the reader is
+// opened with exactly what dataNode.compaction.sortReadPrefetch says.
+func (s *SortCompactionTaskSuite) prefetchFlagsSeen() []bool {
+	var seen []bool
+	var origin func(bool) storage.RwOption
+	mocker := mockey.Mock(storage.WithReadPrefetch).To(func(prefetch bool) storage.RwOption {
+		seen = append(seen, prefetch)
+		return origin(prefetch)
+	}).Origin(&origin).Build()
+	defer mocker.UnPatch()
+
+	s.prepareSortCompactionTask()
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.Equal(datapb.CompactionTaskState_completed, result.GetState())
+	return seen
+}
+
+func (s *SortCompactionTaskSuite) TestSortCompactionReadPrefetchOnByDefault() {
+	s.Equal([]bool{true}, s.prefetchFlagsSeen(),
+		"the input reader must be opened with prefetch on, once, under the default config")
+}
+
+func (s *SortCompactionTaskSuite) TestSortCompactionReadPrefetchFollowsConfig() {
+	key := paramtable.Get().DataNodeCfg.CompactionSortReadPrefetch.Key
+	paramtable.Get().Save(key, "false")
+	defer paramtable.Get().Reset(key)
+
+	s.Equal([]bool{false}, s.prefetchFlagsSeen(),
+		"turning dataNode.compaction.sortReadPrefetch off must reach the reader")
+}
