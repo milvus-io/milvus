@@ -300,6 +300,18 @@ func TestServiceParam(t *testing.T) {
 			bt.Save(SParams.PulsarCfg.Address.Key, "")
 			assert.Equal(t, SParams.PulsarCfg.WebAddress.GetValue(), "")
 		}
+
+		{
+			// a multi-host service url derives the web address from the first host
+			bt.Save(SParams.PulsarCfg.Address.Key, "pulsar://broker-0.example.com:6650,broker-1.example.com:6650")
+			assert.Equal(t, "http://broker-0.example.com:"+SParams.PulsarCfg.WebPort.GetValue(), SParams.PulsarCfg.WebAddress.GetValue())
+		}
+
+		{
+			// an explicitly configured web address is honored as is
+			bt.Save(SParams.PulsarCfg.WebAddress.Key, "http://pulsar-web.example.com:8080")
+			assert.Equal(t, "http://pulsar-web.example.com:8080", SParams.PulsarCfg.WebAddress.GetValue())
+		}
 	})
 
 	t.Run("test pulsar auth config", func(t *testing.T) {
