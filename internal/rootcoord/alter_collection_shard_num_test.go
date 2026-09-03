@@ -85,7 +85,7 @@ func TestValidateDesiredShardNumIgnoresUnrelatedProperties(t *testing.T) {
 func TestValidateDesiredShardNumAcceptsAWithdrawal(t *testing.T) {
 	manualMode(t)
 	// Deleting the property withdraws the request. It is how a rehash is
-	// cancelled, so it must not be refused for any of the reasons a SET is.
+	// canceled, so it must not be refused for any of the reasons a SET is.
 	assert.NoError(t, validateDesiredShardNum(hashCollection(3),
 		nil, []string{common.CollectionShardNum}))
 
@@ -321,7 +321,7 @@ func TestValidateDesiredShardNumIsIdempotent(t *testing.T) {
 //
 // ParseShardSplitMode exists so a typo cannot silently mean "auto", but the
 // check used to hang off AlterCollection only -- so a collection could be
-// CREATED with an unrecognised mode, which then read back as the auto default
+// CREATED with an unrecognized mode, which then read back as the auto default
 // and handed the size trigger a collection the operator believed they had taken
 // manual control of. Nothing would ever report it.
 func TestCreateCollectionRejectsShardSplitProperties(t *testing.T) {
@@ -348,7 +348,7 @@ func TestCreateCollectionRejectsShardSplitProperties(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 	require.Contains(t, err.Error(), common.CollectionShardNum)
 
-	// A recognised mode is not what these two reject; that it passes the property
+	// A recognized mode is not what these two reject; that it passes the property
 	// checks and reaches the capacity ones is covered by TestValidateShardSplitMode
 	// and by the create-collection suite.
 }

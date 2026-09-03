@@ -75,7 +75,7 @@ func (c *Core) broadcastCommitShardSplitRouting(ctx context.Context, req *rootco
 	// underneath the target vchannels it just created. Taking the same exclusive
 	// key again from inside that span would block on the caller and deadlock:
 	// the broadcaster's locker is one process-wide instance, and its acquire does
-	// not honour a context.
+	// not honor a context.
 	//
 	// The routing commit is therefore protected by its caller, not by itself.
 	// Reaching it from anywhere else would be a bug, and an unlocked one.
@@ -188,7 +188,7 @@ func routingCommitAlreadyApplied(coll *model.Collection, req *rootcoordpb.Commit
 // BACKWARDS.
 //
 // The commit takes no collection lock (see above) and relies on its caller
-// serialising it. That assumption is not enforceable from here, and this RPC is
+// serializing it. That assumption is not enforceable from here, and this RPC is
 // on the wire, so the one failure it must not have is a lost update: a retry of
 // the write-switch commit arriving after the adoption commit would otherwise
 // un-adopt the split, putting the released source back to fenced and the adopted
