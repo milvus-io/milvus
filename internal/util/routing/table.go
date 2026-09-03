@@ -18,6 +18,9 @@
 //
 // A row is placed by one number, its routing value: the hash of whatever the
 // collection's shard_by expression names — its primary key, or its namespace id.
+// The namespace id is only a valid key for a collection whose rows have ALWAYS
+// been placed by it (namespace.sharding.enabled=true in partition_key mode);
+// the routing commit is where that is checked, not here.
 // The value is then taken modulo the collection's routing modulus, and the shard
 // owning that residue owns the row.
 //
@@ -185,6 +188,15 @@ func Derive(modulus uint64, channels []string, shards []Shard, opts ...Option) (
 				"collection reports no routing modulus but only %d of %d vchannels own keys",
 				len(shards), len(channels))
 		}
+		// Same length is not the same set. A shard list that names a vchannel
+		// the collection does not carry is malformed on this branch exactly as
+		// on the explicit one; deriving from the channel list alone would just
+		// hide it.
+		if len(shards) != 0 {
+			if err := refuseShardsOutside(channels, shards); err != nil {
+				return nil, err
+			}
+		}
 		residues, err := deriveCompat(channels)
 		if err != nil {
 			return nil, err
@@ -199,16 +211,11 @@ func Derive(modulus uint64, channels []string, shards []Shard, opts ...Option) (
 	// retriable -- so every retry consumer would loop until its deadline on a
 	// condition that is permanently malformed meta. Refuse it here, where the
 	// two cases are still distinguishable, and non-retriably.
-	known := make(map[string]struct{}, len(t.channels))
-	for _, ch := range t.channels {
-		known[ch] = struct{}{}
+	if err := refuseShardsOutside(t.channels, shards); err != nil {
+		return nil, err
 	}
 	hashShards := make([]HashShard, 0, len(shards))
 	for _, s := range shards {
-		if _, ok := known[s.Vchannel]; !ok {
-			return nil, merr.WrapErrServiceInternalMsg(
-				"routing shard %q is not in the collection's vchannel list", s.Vchannel)
-		}
 		hashShards = append(hashShards, HashShard(s))
 	}
 	residues, err := DeriveHash(modulus, hashShards)
@@ -284,6 +291,24 @@ func LegacyShards(vchannels []string) (uint64, []Shard, error) {
 		shards = append(shards, Shard{Vchannel: vchannel, Buckets: []uint64{uint64(i)}})
 	}
 	return uint64(len(vchannels)), shards, nil
+}
+
+// refuseShardsOutside rejects, non-retriably, a shard whose vchannel the
+// collection does not carry. No caller of the resulting table could route to
+// it, and no meta refresh changes that, so it must not become the retriable
+// ErrCollectionRoutingStale that owner() would otherwise report on every key.
+func refuseShardsOutside(channels []string, shards []Shard) error {
+	known := make(map[string]struct{}, len(channels))
+	for _, ch := range channels {
+		known[ch] = struct{}{}
+	}
+	for _, s := range shards {
+		if _, ok := known[s.Vchannel]; !ok {
+			return merr.WrapErrServiceInternalMsg(
+				"routing shard %q is not in the collection's vchannel list", s.Vchannel)
+		}
+	}
+	return nil
 }
 
 // ShardsFromMeta converts the per-shard routing meta of a DescribeCollection
