@@ -875,7 +875,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			droppedCompactTo[to.GetID()] = to
 		}
 	}
-	indexedSegments := FilterInIndexedSegments(ctx, gc.handler, gc.meta, false, lo.Values(droppedCompactTo)...)
+	indexedSegments := FilterInIndexedSegments(ctx, gc.handler, gc.meta, true, lo.Values(droppedCompactTo)...)
 	if ctx.Err() != nil {
 		return
 	}

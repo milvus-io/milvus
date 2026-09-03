@@ -2490,6 +2490,84 @@ func TestGarbageCollector(t *testing.T) {
 	suite.Run(t, new(GarbageCollectorSuite))
 }
 
+func TestGarbageCollector_recycleDroppedSegments_NoIndexCollection(t *testing.T) {
+	const (
+		collectionID    = int64(100)
+		indexID         = int64(200)
+		parentSegmentID = int64(1000)
+		childSegmentID  = int64(1001)
+		channelName     = "no-index-channel"
+	)
+
+	tests := []struct {
+		name    string
+		indexes map[UniqueID]map[UniqueID]*model.Index
+	}{
+		{
+			name:    "without index definitions",
+			indexes: make(map[UniqueID]map[UniqueID]*model.Index),
+		},
+		{
+			name: "with deleted index definition",
+			indexes: map[UniqueID]map[UniqueID]*model.Index{
+				collectionID: {
+					indexID: {
+						CollectionID: collectionID,
+						IndexID:      indexID,
+						IsDeleted:    true,
+					},
+				},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			catalog := catalogmocks.NewDataCoordCatalog(t)
+			catalog.EXPECT().ChannelExists(mock.Anything, channelName).Return(false).Once()
+
+			meta := &meta{
+				catalog:    catalog,
+				segments:   NewSegmentsInfo(),
+				channelCPs: newChannelCps(),
+				indexMeta: &indexMeta{
+					indexes: test.indexes,
+				},
+			}
+			meta.segments.SetSegment(parentSegmentID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:            parentSegmentID,
+				CollectionID:  collectionID,
+				InsertChannel: channelName,
+				State:         commonpb.SegmentState_Dropped,
+				DroppedAt:     uint64(time.Now().Add(-time.Hour).UnixNano()),
+			}})
+			meta.segments.SetSegment(childSegmentID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:             childSegmentID,
+				CollectionID:   collectionID,
+				InsertChannel:  channelName,
+				State:          commonpb.SegmentState_Flushed,
+				CompactionFrom: []int64{parentSegmentID},
+			}})
+
+			handler := NewNMockHandler(t)
+			handler.EXPECT().ListLoadedSegments(mock.Anything).Return(nil, nil).Once()
+
+			recycled := make([]int64, 0, 1)
+			mockRecycle := mockey.Mock((*garbageCollector).recycleDroppedSegment).
+				To(func(_ *garbageCollector, _ context.Context, segmentID int64, _ *SegmentInfo) {
+					recycled = append(recycled, segmentID)
+				}).Build()
+			defer mockRecycle.UnPatch()
+
+			gc := newGarbageCollector(meta, handler, GcOption{dropTolerance: 0})
+			gc.recycleDroppedSegments(context.Background(), nil)
+
+			require.Equal(t, []int64{parentSegmentID}, recycled)
+			handler.AssertNotCalled(t, "GetCollection", mock.Anything, mock.Anything)
+		})
+	}
+}
+
 // TestGarbageCollector_recycleDroppedSegments_SnapshotReference tests that segments referenced by snapshots are not garbage collected
 func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T) {
 	// Setup
