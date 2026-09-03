@@ -553,6 +553,7 @@ queryCoord:
   checkBalanceInterval: 300
   autoBalanceInterval: 3000 # the interval for triggerauto balance
   checkIndexInterval: 10000
+  resourceGroupScopedLoad: false # when true, a load request that names resource groups changes only the placement in those groups: the other groups keep the replicas they hold, and a request that only adds groups keeps the collection loaded meanwhile. when false (native), a load request states the collection's whole placement, so an added group resets the collection to Loading until it is served there
   channelTaskTimeout: 120000 # 2 minutes
   segmentTaskTimeout: 300000 # 5 minutes
   distPullInterval: 500

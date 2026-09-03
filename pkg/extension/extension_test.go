@@ -50,7 +50,6 @@ var allCapabilityIDs = []CapabilityID{
 	CapCoordinatorEngine,
 	CapResourceGroupInterceptor,
 	CapIndexDrain,
-	CapLoadPlacementScope,
 	CapHook,
 }
 
@@ -63,7 +62,6 @@ func fullCapabilities() Capabilities {
 		CoordinatorEngine: &fakeCoordinatorEngine{},
 		ResourceGroups:    stubResourceGroupInterceptor{},
 		IndexDrain:        stubIndexDrainer{},
-		LoadPlacement:     stubLoadPlacementScope{},
 		Hook:              stubHook{},
 	}
 }
