@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/routing"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -194,6 +195,10 @@ func routingCommitAlreadyApplied(coll *model.Collection, req *rootcoordpb.Commit
 // targets back to not-yet-serviceable. Checking the transition against the meta
 // makes a late duplicate a rejected DDL instead of a silent regression, without
 // needing the lock.
+// namespaceShardBy is the shard_by expression the split coordinator emits for a
+// collection it routes by namespace. Kept in step with datacoord's shardByOf.
+const namespaceShardBy = "hash(" + common.NamespaceFieldName + ")"
+
 func checkRoutingCommitAgainstMeta(coll *model.Collection, req *rootcoordpb.CommitShardSplitRoutingRequest) error {
 	// Routing is not revocable. Once a collection has been split, its shards own
 	// residues and only the modulus says what those residues mean; a commit that
@@ -205,6 +210,36 @@ func checkRoutingCommitAgainstMeta(coll *model.Collection, req *rootcoordpb.Comm
 		return merr.WrapErrParameterInvalidMsg(
 			"commit shard split routing failed, collection %q routes at modulus %d and a commit cannot take it back to none",
 			req.GetCollectionName(), coll.RoutingModulus)
+	}
+
+	// The namespace routing key is valid only for a collection whose rows have
+	// ALWAYS been placed by it, and that is one configuration, not every
+	// namespace collection: the proxy places by namespace only when
+	// namespace.sharding.enabled=true AND namespace.mode=partition_key, and
+	// sharding.enabled is written as false at create time unless the request
+	// set it. A default namespace collection therefore has every row spread
+	// over all shards by primary key, and back-filling hash($namespace_id) onto
+	// it would send a namespace's NEW rows to one shard while its existing rows
+	// stay everywhere -- a delete routed by the namespace hash then reaches one
+	// shard and silently misses the rest. Both properties are immutable after
+	// creation, so placement history is decidable from the collection's own
+	// properties, and this is the last point before the key is persisted.
+	//
+	// System, not input, and not retriable: the request comes from the split
+	// coordinator, a plan that names this key for this collection is a
+	// planning bug, and asking again gets the same answer.
+	if req.GetShardBy() == namespaceShardBy {
+		enabled, err := common.IsNamespaceShardingEnabled(coll.Properties...)
+		if err != nil {
+			return merr.WrapErrServiceInternalErr(err, "commit shard split routing failed, collection %q has a malformed %s",
+				req.GetCollectionName(), common.NamespaceShardingEnabledKey)
+		}
+		if !enabled || !common.IsNamespaceModePartitionKey(coll.Properties...) {
+			return merr.WrapErrServiceInternalMsg(
+				"commit shard split routing failed, collection %q cannot route by %s: its rows are placed by primary key "+
+					"(namespace.sharding.enabled=%t, namespace.mode=%s), so it must split under hash(pk) or not at all",
+				req.GetCollectionName(), namespaceShardBy, enabled, common.GetNamespaceMode(coll.Properties...))
+		}
 	}
 
 	for i, vchannel := range req.GetVirtualChannelNames() {

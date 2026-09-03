@@ -19,6 +19,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -334,4 +336,54 @@ func TestCheckRoutingCommitAgainstMeta(t *testing.T) {
 	// A collection that has never been split may of course start at zero.
 	fresh := &model.Collection{Name: "c", VirtualChannelNames: []string{"v0"}}
 	require.NoError(t, checkRoutingCommitAgainstMeta(fresh, revoke))
+}
+
+// The namespace routing key is valid only for a collection whose rows have
+// ALWAYS been placed by it -- namespace.sharding.enabled=true in partition_key
+// mode -- and that is decidable from the collection's own properties because
+// both are immutable after creation. A default namespace collection is placed by
+// primary key, and back-filling hash($namespace_id) onto it would send a
+// namespace's new rows to one shard while its existing rows stay everywhere.
+func TestCheckRoutingCommitAgainstMetaRefusesTheNamespaceKeyForAPrimaryKeyPlacedCollection(t *testing.T) {
+	commit := func(shardBy string) *rootcoordpb.CommitShardSplitRoutingRequest {
+		return &rootcoordpb.CommitShardSplitRoutingRequest{
+			CollectionName:      "c",
+			VirtualChannelNames: []string{"v0", "v1", "v2"},
+			RoutingModulus:      2,
+			ShardBy:             shardBy,
+			ShardInfos: []*schemapb.CollectionShardInfo{
+				pbShard(schemapb.ShardState_ShardSplitting),
+				pbShard(schemapb.ShardState_ShardCreating, 0),
+				pbShard(schemapb.ShardState_ShardCreating, 1),
+			},
+		}
+	}
+	collWith := func(props ...*commonpb.KeyValuePair) *model.Collection {
+		return &model.Collection{Name: "c", VirtualChannelNames: []string{"v0"}, Properties: props}
+	}
+	kv := func(k, v string) *commonpb.KeyValuePair { return &commonpb.KeyValuePair{Key: k, Value: v} }
+
+	// The default namespace collection: sharding.enabled written as false at
+	// create time. Its rows are placed by primary key.
+	err := checkRoutingCommitAgainstMeta(collWith(kv(common.NamespaceShardingEnabledKey, "false"), kv(common.NamespaceModeKey, common.NamespaceModePartitionKey)), commit(namespaceShardBy))
+	require.ErrorIs(t, err, merr.ErrServiceInternal, "a planning bug, not user input")
+	require.False(t, merr.IsRetryableErr(err), "asking again gets the same answer")
+	assert.Contains(t, err.Error(), "placed by primary key")
+
+	// sharding on, but partition mode: still placed by primary key.
+	err = checkRoutingCommitAgainstMeta(collWith(kv(common.NamespaceShardingEnabledKey, "true"), kv(common.NamespaceModeKey, common.NamespaceModePartition)), commit(namespaceShardBy))
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+
+	// The property absent altogether reads as false, the create-time default.
+	err = checkRoutingCommitAgainstMeta(collWith(kv(common.NamespaceModeKey, common.NamespaceModePartitionKey)), commit(namespaceShardBy))
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+
+	// The one configuration the key is valid for.
+	require.NoError(t, checkRoutingCommitAgainstMeta(
+		collWith(kv(common.NamespaceShardingEnabledKey, "true"), kv(common.NamespaceModeKey, common.NamespaceModePartitionKey)),
+		commit(namespaceShardBy)))
+
+	// A primary-key routed split of the same default collection is untouched by
+	// the gate: that is the key its rows were placed by.
+	require.NoError(t, checkRoutingCommitAgainstMeta(collWith(kv(common.NamespaceShardingEnabledKey, "false")), commit("hash(pk)")))
 }
