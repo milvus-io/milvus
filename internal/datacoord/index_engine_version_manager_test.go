@@ -17,8 +17,9 @@ import (
 func Test_IndexEngineVersionManager_GetMergedIndexVersion(t *testing.T) {
 	m := newIndexEngineVersionManager()
 
-	// empty
-	assert.Zero(t, m.GetCurrentIndexEngineVersion())
+	// empty: no QueryNode session, so this answers the coordinator's own
+	// compiled-in knowhere version instead of zero.
+	assert.Equal(t, segcore.GetIndexEngineInfo().CurrentIndexVersion, m.GetCurrentIndexEngineVersion())
 
 	// startup
 	m.Startup(map[string]*sessionutil.Session{
@@ -141,8 +142,9 @@ func Test_IndexEngineVersionManager_IndexStorePathVersionConfigGate(t *testing.T
 func Test_IndexEngineVersionManager_GetMergedScalarIndexVersion(t *testing.T) {
 	m := newIndexEngineVersionManager()
 
-	// empty
-	assert.Zero(t, m.GetCurrentScalarIndexEngineVersion())
+	// empty: no QueryNode session, so this answers the coordinator's own
+	// compiled-in scalar engine version instead of zero.
+	assert.Equal(t, common.CurrentScalarIndexEngineVersion, m.GetCurrentScalarIndexEngineVersion())
 
 	// startup
 	m.Startup(map[string]*sessionutil.Session{
@@ -353,8 +355,11 @@ func Test_IndexEngineVersionManager_StartupWithEmptySession(t *testing.T) {
 	// Second startup with no nodes (all offline)
 	m.Startup(map[string]*sessionutil.Session{})
 
-	// Should return default values when no nodes are online
-	assert.Equal(t, int32(0), m.GetCurrentIndexEngineVersion())
+	// With no QueryNode session, the current version falls back to the
+	// coordinator's own compiled-in version rather than zero; the minimal
+	// version is a compatibility floor that an empty set genuinely imposes
+	// none of, so it stays zero.
+	assert.Equal(t, segcore.GetIndexEngineInfo().CurrentIndexVersion, m.GetCurrentIndexEngineVersion())
 	assert.Equal(t, int32(0), m.GetMinimalIndexEngineVersion())
 
 	vm := m.(*versionManagerImpl)
@@ -835,28 +840,14 @@ func Test_IndexEngineVersionManager_SessionVersionCleanupOnStartup(t *testing.T)
 	assert.False(t, exists, "offline node should be removed from sessionVersion map")
 }
 
-// With the config off - a stock binary - an empty session set keeps its
-// native reading: version zero, and the legacy store-path layout.
-func TestEmptySessionSetStaysNativeWithoutScaleToZero(t *testing.T) {
-	m := newIndexEngineVersionManager()
-	assert.Equal(t, int32(0), m.GetCurrentIndexEngineVersion())
-	assert.Equal(t, int32(0), m.GetCurrentScalarIndexEngineVersion())
-
-	paramtable.Get().Save(Params.DataCoordCfg.IndexStorePathVersion.Key, "1")
-	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexStorePathVersion.Key)
-	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
-		m.GetClusterMinIndexStorePathVersion())
-}
-
-// With the config on, an empty session set is the resting state and the
-// versions come from this process's own engine - the same values the absent
-// query nodes, running this same image, would have reported. Version zero
-// here is what misroutes disk indexes in knowhere, so the assertion pins
-// non-zero as well as source equality.
-func TestEmptySessionSetComesFromThisBinaryUnderScaleToZero(t *testing.T) {
-	paramtable.Get().Save(Params.DataCoordCfg.IndexQueryNodesScaleToZero.Key, "true")
-	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexQueryNodesScaleToZero.Key)
-
+// An empty session set is the resting state and the versions come from this
+// process's own engine - the same values the absent query nodes, running this
+// same image, would have reported. Version zero here is what misroutes disk
+// indexes in knowhere, so the assertion pins non-zero as well as source
+// equality. The store-path gate keeps its native reading regardless: no
+// session means no evidence any reader is on an older layout, but the
+// coordinator's own engine version is not that evidence either.
+func TestEmptySessionSetComesFromThisBinary(t *testing.T) {
 	m := newIndexEngineVersionManager()
 
 	vec := m.GetCurrentIndexEngineVersion()
@@ -869,20 +860,16 @@ func TestEmptySessionSetComesFromThisBinaryUnderScaleToZero(t *testing.T) {
 	// and an empty set genuinely imposes none.
 	assert.Equal(t, int32(0), m.GetMinimalIndexEngineVersion())
 
-	// The store-path gate flips with them: no reader is on an older layout
-	// because there is no reader, and one started later runs this image.
 	paramtable.Get().Save(Params.DataCoordCfg.IndexStorePathVersion.Key, "1")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexStorePathVersion.Key)
-	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
 		m.GetClusterMinIndexStorePathVersion())
 }
 
-// A query node that IS reporting always wins over the config: the fallback is
-// about an empty set, never about overriding a session that exists.
-func TestAReportingQueryNodeWinsOverScaleToZero(t *testing.T) {
-	paramtable.Get().Save(Params.DataCoordCfg.IndexQueryNodesScaleToZero.Key, "true")
-	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexQueryNodesScaleToZero.Key)
-
+// A query node that IS reporting always wins over the no-session fallback:
+// the fallback is about an empty set, never about overriding a session that
+// exists.
+func TestAReportingQueryNodeWinsOverTheFallback(t *testing.T) {
 	m := newIndexEngineVersionManager()
 	m.Startup(map[string]*sessionutil.Session{
 		"qn1": {SessionRaw: sessionutil.SessionRaw{
