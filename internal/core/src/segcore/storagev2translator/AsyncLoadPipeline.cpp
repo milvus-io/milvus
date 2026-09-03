@@ -29,12 +29,10 @@
 #include "common/Utils.h"
 #include "folly/coro/AsyncScope.h"
 #include "folly/coro/WithCancellation.h"
-#include "folly/executors/CPUThreadPoolExecutor.h"
-#include "folly/executors/ExecutorWithPriority.h"
-#include "folly/executors/thread_factory/NamedThreadFactory.h"
 #include "log/Log.h"
 #include "milvus-storage/common/extend_status.h"
 #include "segcore/Utils.h"
+#include "segcore/storagev2translator/AsyncLoadExecutor.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/ThreadPool.h"
 #include "storage/TransientMemoryBudget.h"
@@ -100,35 +98,6 @@ class WindowFailureState {
     std::exception_ptr first_failure_;
     folly::CancellationSource cancellation_source_;
 };
-
-class PriorityThreadPoolExecutor final : public folly::CPUThreadPoolExecutor {
- public:
-    PriorityThreadPoolExecutor()
-        : folly::CPUThreadPoolExecutor(
-              std::max(1, milvus::CPU_NUM),
-              folly::CPUThreadPoolExecutor::makeDefaultPriorityQueue(2),
-              std::make_shared<folly::NamedThreadFactory>(
-                  "MILVUS_ASYNC_LOAD_")) {
-    }
-};
-
-// Maps load priority to the executor's two priority queues.
-[[nodiscard]] constexpr int8_t
-ExecutorPriority(const milvus::proto::common::LoadPriority priority) noexcept {
-    return priority == milvus::proto::common::LoadPriority::LOW
-               ? folly::Executor::LO_PRI
-               : folly::Executor::HI_PRI;
-}
-
-// Applies a priority wrapper only when the executor exposes multiple queues.
-[[nodiscard]] folly::Executor::KeepAlive<>
-WithExecutorPriority(folly::Executor::KeepAlive<> executor,
-                     const int8_t priority) {
-    if (executor->getNumPriorities() <= 1) {
-        return executor;
-    }
-    return folly::ExecutorWithPriority::create(std::move(executor), priority);
-}
 
 // Maps load priority to the transient-memory admission class.
 [[nodiscard]] constexpr storage::TransientBudgetPriority
@@ -230,7 +199,7 @@ LoadWindowAsync(const int64_t segment_id,
                 storage::TransientBudgetLease lease,
                 std::function<folly::Executor::KeepAlive<>()>
                     finalization_executor_provider,
-                const int8_t executor_priority,
+                const milvus::proto::common::LoadPriority load_priority,
                 folly::CancellationToken cancellation_token,
                 std::shared_ptr<WindowFailureState> failure_state,
                 std::optional<WindowLoadResult>& result_slot) {
@@ -265,8 +234,8 @@ LoadWindowAsync(const int64_t segment_id,
         }
 
         result_slot = co_await folly::coro::co_withExecutor(
-            WithExecutorPriority(std::move(finalization_executor),
-                                 executor_priority),
+            ResolveAsyncLoadExecutor(std::move(finalization_executor),
+                                     load_priority),
             FinalizeWindowAsync(segment_id,
                                 cancellation_token,
                                 std::move(window),
@@ -291,10 +260,10 @@ LoadCellsAsyncImpl(
     CellFinalizeFunc finalize_cell,
     const int64_t segment_id,
     const std::optional<size_t> read_window_bytes,
-    folly::Executor::KeepAlive<> executor_keep_alive,
+    folly::Executor::KeepAlive<> work_executor,
     std::function<folly::Executor::KeepAlive<>()>
         finalization_executor_provider,
-    const int8_t executor_priority,
+    const milvus::proto::common::LoadPriority load_priority,
     const storage::TransientBudgetPriority budget_priority,
     folly::CancellationToken context_cancellation_token) {
     const auto caller_cancellation_token =
@@ -338,8 +307,6 @@ LoadCellsAsyncImpl(
         priority_name);
     const std::shared_ptr<const CellFinalizeFunc> shared_finalizer =
         std::make_shared<CellFinalizeFunc>(std::move(finalize_cell));
-    const auto work_executor =
-        WithExecutorPriority(std::move(executor_keep_alive), executor_priority);
     const auto window_failure_state = std::make_shared<WindowFailureState>();
     const auto window_cancellation_token = folly::cancellation_token_merge(
         cancellation_token, window_failure_state->GetCancellationToken());
@@ -392,7 +359,7 @@ LoadCellsAsyncImpl(
                                     shared_finalizer,
                                     std::move(lease),
                                     finalization_executor_provider,
-                                    executor_priority,
+                                    load_priority,
                                     window_cancellation_token,
                                     window_failure_state,
                                     window_results[i]))));
@@ -429,13 +396,6 @@ LoadCellsAsyncImpl(
         results.push_back(std::move(*ordered[i]));
     }
     co_return results;
-}
-
-// Returns the process-lifetime executor used when no caller executor is set.
-[[nodiscard]] folly::Executor&
-GetAsyncLoadExecutor() {
-    static PriorityThreadPoolExecutor executor;
-    return executor;
 }
 
 std::vector<AsyncReadWindow>
@@ -531,13 +491,10 @@ LoadCellsAsync(const milvus::OpContext* ctx,
                std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
                CellFinalizeFunc finalize_cell,
                AsyncLoadPipelineOptions options) {
-    auto executor_keep_alive = std::move(options.executor);
-    if (!executor_keep_alive) {
-        executor_keep_alive = folly::getKeepAliveToken(GetAsyncLoadExecutor());
-    }
+    auto executor_keep_alive = ResolveAsyncLoadExecutor(
+        std::move(options.executor), options.load_priority);
     auto finalization_executor_provider =
         std::move(options.finalization_executor_provider);
-    const auto executor_priority = ExecutorPriority(options.load_priority);
     const auto budget_priority = BudgetPriority(options.load_priority);
     const auto context_cancellation_token =
         ctx ? ctx->cancellation_token : folly::CancellationToken{};
@@ -549,7 +506,7 @@ LoadCellsAsync(const milvus::OpContext* ctx,
                               options.read_window_bytes,
                               std::move(executor_keep_alive),
                               std::move(finalization_executor_provider),
-                              executor_priority,
+                              options.load_priority,
                               budget_priority,
                               context_cancellation_token);
 }

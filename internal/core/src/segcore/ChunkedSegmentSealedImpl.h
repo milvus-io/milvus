@@ -1982,6 +1982,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool is_replace = false,
         RuntimeResourceState* runtime = nullptr);
 
+    // Loads one staged manifest projection. A non-null pre-opened reader marks
+    // the async path; null preserves synchronous reader opening on the worker.
     void
     LoadColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
@@ -1994,7 +1996,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         milvus::OpContext* op_ctx,
         bool is_replace,
         StagedStateCommitter& committer,
-        storagev2translator::ColumnSizeEstimateResult column_size_estimate);
+        storagev2translator::ColumnSizeEstimateResult column_size_estimate,
+        std::shared_ptr<milvus_storage::api::ChunkReader>
+            preopened_chunk_reader);
 
     void
     LoadColumnGroup(

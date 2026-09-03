@@ -24,6 +24,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -48,6 +49,7 @@
 #include "gtest/gtest.h"
 #include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/reader.h"
+#include "segcore/storagev2translator/AsyncChunkReader.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/FileWriter.h"
@@ -265,6 +267,10 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
         : executor_(executor) {
     }
 
+    FakeChunkReader(RecordingManualExecutor* executor, const int64_t identifier)
+        : executor_(executor), identifier_(identifier) {
+    }
+
     size_t
     total_number_of_chunks() const override {
         return 32;
@@ -402,6 +408,11 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
         return parallelism_.load();
     }
 
+    std::optional<int64_t>
+    Identifier() const {
+        return identifier_;
+    }
+
     std::vector<std::vector<int64_t>>
     RequestedIndices() const {
         return requested_indices_;
@@ -424,6 +435,7 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
     }
 
     RecordingManualExecutor* executor_;
+    std::optional<int64_t> identifier_;
     arrow::Status status_;
     std::atomic<size_t> async_calls_{0};
     std::atomic<bool> called_on_executor_{false};
@@ -436,6 +448,172 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
     std::vector<std::vector<int64_t>> requested_indices_;
     std::function<void()> on_async_call_;
     std::shared_ptr<folly::Promise<ChunkReadResult>> deferred_read_;
+};
+
+using ChunkReaderOpenResult =
+    arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>;
+
+class FakeReader final : public milvus_storage::api::Reader {
+ public:
+    explicit FakeReader(RecordingManualExecutor* executor)
+        : executor_(executor) {
+    }
+
+    std::shared_ptr<milvus_storage::api::ColumnGroups>
+    get_column_groups() const override {
+        return std::make_shared<milvus_storage::api::ColumnGroups>();
+    }
+
+    arrow::Result<std::shared_ptr<arrow::RecordBatchReader>>
+    get_record_batch_reader(const std::string& /*predicate*/) const override {
+        return arrow::Status::NotImplemented("unused in async-open tests");
+    }
+
+    ChunkReaderOpenResult
+    get_chunk_reader(int64_t column_group_index,
+                     const std::shared_ptr<std::vector<std::string>>&
+                     /*needed_columns*/) const override {
+        sync_calls_.fetch_add(1);
+        return std::make_unique<FakeChunkReader>(executor_, column_group_index);
+    }
+
+    folly::SemiFuture<ChunkReaderOpenResult>
+    get_chunk_reader_async(const int64_t column_group_index,
+                           const std::shared_ptr<std::vector<std::string>>&
+                               needed_columns) const override {
+        auto pending =
+            std::make_shared<PendingOpen>(column_group_index, needed_columns);
+        auto future = pending->promise.getSemiFuture();
+        {
+            std::lock_guard lock(mutex_);
+            called_on_executor_.push_back(executor_ && executor_->IsRunning());
+            priorities_.push_back(executor_ ? executor_->CurrentPriority()
+                                            : folly::Executor::MID_PRI);
+            pending_opens_.push_back(std::move(pending));
+        }
+        return future;
+    }
+
+    arrow::Result<std::shared_ptr<arrow::Table>>
+    take(const std::vector<int64_t>& /*row_indices*/,
+         size_t /*parallelism*/,
+         const std::shared_ptr<std::vector<std::string>>&
+         /*needed_columns*/) override {
+        return arrow::Status::NotImplemented("unused in async-open tests");
+    }
+
+    void
+    set_keyretriever(const std::function<std::string(const std::string&)>&
+                     /*callback*/) override {
+    }
+
+    void
+    Complete(const size_t request_index) {
+        const auto pending = Pending(request_index);
+        pending->promise.setValue(std::make_unique<FakeChunkReader>(
+            executor_, pending->column_group_index));
+    }
+
+    void
+    Fail(const size_t request_index, arrow::Status status) {
+        Pending(request_index)->promise.setValue(std::move(status));
+    }
+
+    size_t
+    AsyncCalls() const {
+        std::lock_guard lock(mutex_);
+        return pending_opens_.size();
+    }
+
+    size_t
+    SyncCalls() const {
+        return sync_calls_.load();
+    }
+
+    std::vector<bool>
+    CalledOnExecutor() const {
+        std::lock_guard lock(mutex_);
+        return called_on_executor_;
+    }
+
+    std::vector<int8_t>
+    Priorities() const {
+        std::lock_guard lock(mutex_);
+        return priorities_;
+    }
+
+ private:
+    struct PendingOpen {
+        PendingOpen(const int64_t column_group_index,
+                    std::shared_ptr<std::vector<std::string>> needed_columns)
+            : column_group_index(column_group_index),
+              needed_columns(std::move(needed_columns)) {
+        }
+
+        int64_t column_group_index;
+        std::shared_ptr<std::vector<std::string>> needed_columns;
+        folly::Promise<ChunkReaderOpenResult> promise;
+    };
+
+    std::shared_ptr<PendingOpen>
+    Pending(const size_t request_index) const {
+        std::lock_guard lock(mutex_);
+        return pending_opens_.at(request_index);
+    }
+
+    RecordingManualExecutor* executor_;
+    mutable std::mutex mutex_;
+    mutable std::atomic<size_t> sync_calls_{0};
+    mutable std::vector<std::shared_ptr<PendingOpen>> pending_opens_;
+    mutable std::vector<bool> called_on_executor_;
+    mutable std::vector<int8_t> priorities_;
+};
+
+class SyncFallbackReader final : public milvus_storage::api::Reader {
+ public:
+    explicit SyncFallbackReader(RecordingManualExecutor* executor)
+        : executor_(executor) {
+    }
+
+    std::shared_ptr<milvus_storage::api::ColumnGroups>
+    get_column_groups() const override {
+        return std::make_shared<milvus_storage::api::ColumnGroups>();
+    }
+
+    arrow::Result<std::shared_ptr<arrow::RecordBatchReader>>
+    get_record_batch_reader(const std::string& /*predicate*/) const override {
+        return arrow::Status::NotImplemented("unused in async-open tests");
+    }
+
+    ChunkReaderOpenResult
+    get_chunk_reader(const int64_t column_group_index,
+                     const std::shared_ptr<std::vector<std::string>>&
+                     /*needed_columns*/) const override {
+        called_on_executor_.store(executor_ && executor_->IsRunning());
+        return std::make_unique<FakeChunkReader>(executor_, column_group_index);
+    }
+
+    arrow::Result<std::shared_ptr<arrow::Table>>
+    take(const std::vector<int64_t>& /*row_indices*/,
+         size_t /*parallelism*/,
+         const std::shared_ptr<std::vector<std::string>>&
+         /*needed_columns*/) override {
+        return arrow::Status::NotImplemented("unused in async-open tests");
+    }
+
+    void
+    set_keyretriever(const std::function<std::string(const std::string&)>&
+                     /*callback*/) override {
+    }
+
+    bool
+    CalledOnExecutor() const {
+        return called_on_executor_.load();
+    }
+
+ private:
+    RecordingManualExecutor* executor_;
+    mutable std::atomic<bool> called_on_executor_{false};
 };
 
 class AsyncLoadPipelineTest : public ::testing::Test {
@@ -459,6 +637,13 @@ class AsyncLoadPipelineTest : public ::testing::Test {
                 .executor = folly::getKeepAliveToken(executor_)};
     }
 
+    AsyncChunkReaderOpenOptions
+    OpenOptions(milvus::proto::common::LoadPriority priority =
+                    milvus::proto::common::LoadPriority::HIGH) {
+        return {.load_priority = priority,
+                .executor = folly::getKeepAliveToken(executor_)};
+    }
+
     CellFinalizeFunc
     Finalizer(std::vector<int64_t>* finalized = nullptr) {
         return [this, finalized](
@@ -473,8 +658,9 @@ class AsyncLoadPipelineTest : public ::testing::Test {
         };
     }
 
-    folly::Future<std::vector<AsyncCellResult>>
-    Start(folly::coro::Task<std::vector<AsyncCellResult>> task) {
+    template <typename T>
+    folly::Future<T>
+    Start(folly::coro::Task<T> task) {
         auto future =
             std::move(task).semi().via(folly::getKeepAliveToken(&executor_));
         executor_.drain();
@@ -500,6 +686,133 @@ class AsyncLoadPipelineTest : public ::testing::Test {
         storage::TransientMemoryBudget::GetLoadTransientBudget();
     RecordingManualExecutor executor_;
 };
+
+TEST_F(AsyncLoadPipelineTest,
+       OpensChunkReadersConcurrentlyAndPreservesRequestOrder) {
+    auto reader = std::make_shared<FakeReader>(&executor_);
+    std::vector<ChunkReaderOpenSpec> specs{
+        {.column_group_index = 7,
+         .needed_columns =
+             std::make_shared<std::vector<std::string>>(1, "first")},
+        {.column_group_index = 3,
+         .needed_columns =
+             std::make_shared<std::vector<std::string>>(1, "second")},
+    };
+
+    auto future = Start(OpenChunkReadersAsync(
+        nullptr, kTestSegmentId, reader, std::move(specs), OpenOptions()));
+
+    EXPECT_EQ(reader->SyncCalls(), 0);
+    EXPECT_EQ(reader->AsyncCalls(), 2);
+    EXPECT_FALSE(future.isReady());
+    EXPECT_EQ(reader->CalledOnExecutor(), (std::vector<bool>{true, true}));
+    EXPECT_EQ(reader->Priorities(),
+              (std::vector<int8_t>{folly::Executor::HI_PRI,
+                                   folly::Executor::HI_PRI}));
+
+    reader->Complete(1);
+    executor_.drain();
+    EXPECT_FALSE(future.isReady());
+
+    reader->Complete(0);
+    const auto opened = Get(std::move(future));
+    ASSERT_EQ(opened.size(), 2);
+    ASSERT_NE(dynamic_cast<FakeChunkReader*>(opened[0].get()), nullptr);
+    ASSERT_NE(dynamic_cast<FakeChunkReader*>(opened[1].get()), nullptr);
+    EXPECT_EQ(dynamic_cast<FakeChunkReader*>(opened[0].get())->Identifier(),
+              std::optional<int64_t>{7});
+    EXPECT_EQ(dynamic_cast<FakeChunkReader*>(opened[1].get())->Identifier(),
+              std::optional<int64_t>{3});
+}
+
+TEST_F(AsyncLoadPipelineTest, RunsSynchronousFallbackFactoryOnExecutor) {
+    auto reader = std::make_shared<SyncFallbackReader>(&executor_);
+    std::vector<ChunkReaderOpenSpec> specs{{.column_group_index = 5}};
+
+    const auto opened = Run(OpenChunkReadersAsync(
+        nullptr, kTestSegmentId, reader, std::move(specs), OpenOptions()));
+
+    ASSERT_EQ(opened.size(), 1);
+    EXPECT_TRUE(reader->CalledOnExecutor());
+}
+
+TEST_F(AsyncLoadPipelineTest, MapsChunkReaderOpenStorageErrors) {
+    const std::vector<std::pair<arrow::Status, ErrorCode>> cases{
+        {milvus_storage::MakeExtendError(
+             milvus_storage::ExtendStatusCode::StorageTransientThrottling,
+             "throttled"),
+         ErrorCode::StorageTransientError},
+        {arrow::Status::Invalid("corrupt metadata"),
+         ErrorCode::DataFormatBroken},
+        {arrow::Status::OutOfMemory("allocation failed"),
+         ErrorCode::MemAllocateFailed},
+    };
+
+    for (const auto& [status, expected_error_code] : cases) {
+        SCOPED_TRACE(status.ToString());
+        auto reader = std::make_shared<FakeReader>(&executor_);
+        std::vector<ChunkReaderOpenSpec> specs{{.column_group_index = 9}};
+        auto future = Start(OpenChunkReadersAsync(
+            nullptr, kTestSegmentId, reader, std::move(specs), OpenOptions()));
+        ASSERT_EQ(reader->AsyncCalls(), 1);
+
+        reader->Fail(0, status);
+        try {
+            Get(std::move(future));
+            FAIL() << "expected storage error";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), expected_error_code);
+        }
+        EXPECT_EQ(reader->SyncCalls(), 0);
+    }
+}
+
+TEST_F(AsyncLoadPipelineTest,
+       CapturesChunkReaderOpenCancellationBeforeTaskStarts) {
+    folly::CancellationSource source;
+    OpContext ctx(source.getToken());
+    auto reader = std::make_shared<FakeReader>(&executor_);
+    std::vector<ChunkReaderOpenSpec> specs{{.column_group_index = 2}};
+    auto task = OpenChunkReadersAsync(
+        &ctx, kTestSegmentId, reader, std::move(specs), OpenOptions());
+
+    ctx.cancellation_token = {};
+    source.requestCancellation();
+
+    try {
+        Run(std::move(task));
+        FAIL() << "expected cancellation";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_EQ(reader->AsyncCalls(), 0);
+    EXPECT_EQ(reader->SyncCalls(), 0);
+}
+
+TEST_F(AsyncLoadPipelineTest,
+       DrainsPendingChunkReaderOpensBeforeReportingCancellation) {
+    folly::CancellationSource source;
+    OpContext ctx(source.getToken());
+    auto reader = std::make_shared<FakeReader>(&executor_);
+    std::vector<ChunkReaderOpenSpec> specs{{.column_group_index = 2},
+                                           {.column_group_index = 4}};
+    auto future = Start(OpenChunkReadersAsync(
+        &ctx, kTestSegmentId, reader, std::move(specs), OpenOptions()));
+    ASSERT_EQ(reader->AsyncCalls(), 2);
+
+    source.requestCancellation();
+    reader->Complete(0);
+    executor_.drain();
+    EXPECT_FALSE(future.isReady());
+
+    reader->Complete(1);
+    try {
+        Get(std::move(future));
+        FAIL() << "expected cancellation";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+}
 
 TEST_F(AsyncLoadPipelineTest, BuildsContiguousReadWindows) {
     std::vector<CellSpec> cells{

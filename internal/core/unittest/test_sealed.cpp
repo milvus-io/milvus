@@ -4983,7 +4983,12 @@ TEST(SealedSegmentCowState,
               "disable");
 
     auto column_groups = MakeWarmupTestColumnGroups();
-    auto reader = std::make_shared<WarmupTestReader>(column_groups);
+    auto reader = std::make_shared<WarmupTestReader>(
+        column_groups,
+        /*allow_sync_open=*/true,
+        milvus_storage::MakeExtendError(
+            milvus_storage::ExtendStatusCode::StorageTransientTimeout,
+            "async chunk reader open must not be used"));
     auto column = sealed->TestStageLoadColumnGroupWithReader(
         column_groups,
         std::make_shared<milvus_storage::api::Properties>(),
@@ -5001,7 +5006,7 @@ TEST(SealedSegmentCowState,
 }
 
 TEST(SealedSegmentCowState,
-     StagedStorageV2ColumnGroupKeepsSyncReaderWhenAsyncEnabled) {
+     StagedStorageV2ColumnGroupUsesAsyncReaderWhenAsyncEnabled) {
     auto async_load_guard = SetStorageV2AsyncLoadForTest(true);
     auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
     const FieldId vec(kWarmupVectorFieldId);
@@ -5016,12 +5021,9 @@ TEST(SealedSegmentCowState,
     SegmentLoadInfo segment_load_info(load_proto, schema);
 
     auto column_groups = MakeWarmupTestColumnGroups();
-    auto reader = std::make_shared<WarmupTestReader>(
-        column_groups,
-        /*allow_sync_open=*/true,
-        milvus_storage::MakeExtendError(
-            milvus_storage::ExtendStatusCode::StorageTransientTimeout,
-            "async open must not be used"));
+    auto reader = std::make_shared<WarmupTestReader>(column_groups,
+                                                     /*allow_sync_open=*/false,
+                                                     arrow::Status::OK());
     auto column = sealed->TestStageLoadColumnGroupWithReader(
         column_groups,
         std::make_shared<milvus_storage::api::Properties>(),
