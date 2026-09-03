@@ -43,11 +43,9 @@ import (
 // element in place, which on os.Args was invisible and on an exported API
 // would hand the caller back a shortened vector with a cleared tail.
 //
-// A distribution installs its extension provider and anything else that must
-// precede component start-up before calling Main; nothing runs earlier than
-// the first line here except package initialization, which is also why the
-// primary configuration file name is a link-time or environment setting
-// (see paramtable.PrimaryConfigName) rather than a call.
+// A distribution installs its compiled-in hook and coordinator engine
+// (pkg/extension) before calling Main; nothing runs earlier than the first
+// line here except package initialization.
 func Main(args []string) {
 	args = slices.Clone(args)
 
