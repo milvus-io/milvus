@@ -109,6 +109,14 @@ func (t *QueryTask) SearchResult() *internalpb.SearchResults {
 
 // Execute the task, only call once.
 func (t *QueryTask) Execute() error {
+	return t.execute(nil)
+}
+
+func (t *QueryTask) ExecuteOnSegments(selected []segments.Segment) error {
+	return t.execute(selected)
+}
+
+func (t *QueryTask) execute(selected []segments.Segment) error {
 	if t.scheduleSpan != nil {
 		t.scheduleSpan.End()
 	}
@@ -120,8 +128,19 @@ func (t *QueryTask) Execute() error {
 	}
 	defer retrievePlan.Delete()
 
-	results, pinnedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
-	defer t.segmentManager.Segment.Unpin(pinnedSegments)
+	var (
+		results        []segments.RetrieveSegmentResult
+		pinnedSegments []segments.Segment
+	)
+	if selected != nil {
+		results, err = segments.RetrieveSealedSegments(t.ctx, retrievePlan, t.req, selected)
+		pinnedSegments = selected
+	} else {
+		results, pinnedSegments, err = segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
+	}
+	if selected == nil {
+		defer t.segmentManager.Segment.Unpin(pinnedSegments)
+	}
 	if err != nil {
 		return err
 	}
