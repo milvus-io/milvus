@@ -122,6 +122,10 @@ func (i *GrpcAccessInfo) MethodName() string {
 	return methodName
 }
 
+func (i *GrpcAccessInfo) MethodNameForFormatter() string {
+	return i.MethodName()
+}
+
 func (i *GrpcAccessInfo) Address() string {
 	ip, ok := peer.FromContext(i.ctx)
 	if !ok {
