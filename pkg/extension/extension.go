@@ -92,10 +92,6 @@ const (
 	// server.
 	CapCoordinatorEngine CapabilityID = "coordinator_engine"
 
-	// CapResourceGroupInterceptor is interception of the resource-group
-	// requests the coordinator receives.
-	CapResourceGroupInterceptor CapabilityID = "resource_group_interceptor"
-
 	// CapHook is milvus's own request hook, compiled into the binary rather
 	// than loaded from proxy.soPath.
 	CapHook CapabilityID = "hook"
@@ -113,7 +109,6 @@ const (
 type Capabilities struct {
 	ProxyExt          ProxyExtension
 	CoordinatorEngine CoordinatorEngine
-	ResourceGroups    ResourceGroupInterceptor
 
 	// Hook is milvus's own request hook (milvus-proto go-api/v3/hook), the
 	// interface whose Mock, Before and After the proxy's unary interceptor
@@ -149,7 +144,6 @@ func (c Capabilities) entries() []capabilityEntry {
 	return []capabilityEntry{
 		{CapProxyExtension, c.ProxyExt},
 		{CapCoordinatorEngine, c.CoordinatorEngine},
-		{CapResourceGroupInterceptor, c.ResourceGroups},
 		{CapHook, c.Hook},
 	}
 }
